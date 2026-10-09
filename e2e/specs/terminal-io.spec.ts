@@ -907,6 +907,69 @@ test.describe('Terminal I/O', () => {
   });
   }
 
+  test('reading history does not resize the session or repaint it into its own scrollback (#1503)', async ({ page }, testInfo) => {
+    // The capsule reserves a band at the bottom of the well in `following` and
+    // releases it in `history`, and that band used to be part of the geometry
+    // the PTY was sized from — so scrolling into history moved the shared tmux
+    // window (measured 32 ↔ 35 rows) and an inline TUI repainted into the very
+    // history the user was reading.
+    //
+    // Reading is not a container resize, so nothing about the session may
+    // change: the same fixture as the #1490 case makes that measurable — it
+    // prints nothing but its block, so a repaint is the only way a line can
+    // appear.
+    test.skip(!process.env.CI, 'local only — runs in CI workflow only');
+    const SESSION_NAME = `e2e-scroll-${testInfo.retry}`;
+    await createSession(page, SESSION_NAME);
+    await attachToSession(page, SESSION_NAME, 'Relay');
+    await waitForInteractiveShell(page);
+
+    await submitTerminalCommand(page, repaintFixtureInstaller());
+    await submitTerminalCommand(page, 'bash inline-repaint.sh');
+
+    await expect
+      .poll(async () => readPane(SESSION_NAME).markers, { timeout: 20_000 })
+      .toBeGreaterThanOrEqual(20);
+
+    // Settle first: the attach's own resize is legitimate, and only the scroll
+    // below is under test.
+    let before = readPane(SESSION_NAME);
+    await expect
+      .poll(async () => {
+        const now = readPane(SESSION_NAME);
+        const settled = now.sha === before.sha && now.markers >= 20;
+        before = now;
+        return settled;
+      }, { timeout: 20_000 })
+      .toBe(true);
+    const gridBefore = await readGrid(page);
+
+    // Into history and back — the interaction the issue reports, performed the
+    // way a user performs it.
+    await wheelOverTerminal(page, -300);
+    await expect
+      .poll(async () => readScrollMode(page), { timeout: 10_000 })
+      .toBe('history');
+    const gridInHistory = await readGrid(page);
+    await wheelOverTerminal(page, 3_000);
+    await expect
+      .poll(async () => readScrollMode(page), { timeout: 10_000 })
+      .toBe('following');
+    await page.waitForTimeout(1_000);
+
+    // The session is untouched — same capture, same line count.
+    const after = readPane(SESSION_NAME);
+    expect(after.sha).toBe(before.sha);
+    expect(after.markers).toBe(before.markers);
+
+    // And the client's own grid did not move either: the band is a display
+    // clearance, so the size the user types at is the size they browse at.
+    // (Sizing to the well instead would draw rows the padding clips, so this
+    // is also the assertion that the grid still fits the visible box.)
+    expect(gridInHistory).toStrictEqual(gridBefore);
+    expect(await readGrid(page)).toStrictEqual(gridBefore);
+  });
+
   test('a restored session still takes input after the reload (#1429)', async ({ page }, testInfo) => {
     // #1429's reported flow: create, use, leave (reload), restore, type.
     //
