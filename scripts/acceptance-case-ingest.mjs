@@ -121,10 +121,17 @@ export function sourceRunIdentity(event, repository) {
   if (run.repository?.full_name !== repository || run.head_repository?.full_name !== repository) {
     throw new Error('source workflow repository mismatch');
   }
-  if (run.path && !String(run.path).includes('/.github/workflows/acceptance-cases.yml')) {
+  const branch = singleLine(run.head_branch, 'workflow_run.head_branch');
+  // GitHub's workflow_run.path uses a repository-relative workflow path.
+  // Some metadata variants qualify it with repo and ref. Accept precisely
+  // these forms, never a suffix/substring match of attacker-controlled text.
+  const definition = singleLine(run.path, 'workflow_run.path');
+  const [workflowPath, workflowRef, ...extra] = definition.split('@');
+  const canonicalPath = '.github/workflows/acceptance-cases.yml';
+  if (extra.length || ![canonicalPath, repository + '/' + canonicalPath].includes(workflowPath) ||
+      (workflowRef && workflowRef !== 'refs/heads/' + branch)) {
     throw new Error('unexpected source workflow definition path');
   }
-  const branch = singleLine(run.head_branch, 'workflow_run.head_branch');
   const sourceSha = sha(run.head_sha, 40, 'workflow_run.head_sha');
   const eventName = singleLine(run.event, 'workflow_run.event');
   if (!['push', 'workflow_dispatch'].includes(eventName)) {
@@ -391,6 +398,7 @@ async function selfTest() {
     repository: { full_name: 'BestNathan/nession' },
     head_repository: { full_name: 'BestNathan/nession' },
     head_branch: 'staging', head_sha: valid.target_sha, event: 'push',
+    path: '.github/workflows/acceptance-cases.yml',
     id: 100, run_attempt: 1, workflow_id: 9,
   }};
   // Exercise the actual attest path without credentials: a fetched source commit
@@ -445,6 +453,28 @@ async function selfTest() {
     },
   }), /truncated/);
   assert.equal(sourceRunIdentity(fixtureEvent, 'BestNathan/nession').head_sha, valid.target_sha);
+  for (const path of [
+    '.github/workflows/acceptance-cases.yml',
+    'BestNathan/nession/.github/workflows/acceptance-cases.yml',
+    '.github/workflows/acceptance-cases.yml@refs/heads/staging',
+    'BestNathan/nession/.github/workflows/acceptance-cases.yml@refs/heads/staging',
+  ]) {
+    assert.equal(sourceRunIdentity({ workflow_run: {
+      ...fixtureEvent.workflow_run, path,
+    } }, 'BestNathan/nession').run_id, valid.run_id);
+  }
+  for (const path of [
+    'other/.github/workflows/acceptance-cases.yml',
+    '.github/workflows/acceptance-cases.yml@refs/heads/main',
+    '.github/workflows/other.yml',
+    '.github/workflows/acceptance-cases.yml/../acceptance-cases.yml',
+    '.github/workflows/acceptance-cases.yml@refs/heads/staging@other',
+    undefined,
+  ]) {
+    assert.throws(() => sourceRunIdentity({ workflow_run: {
+      ...fixtureEvent.workflow_run, path,
+    } }, 'BestNathan/nession'), /workflow_run.path|unexpected source workflow definition path/);
+  }
   assert.throws(() => sourceRunIdentity({ workflow_run: { ...fixtureEvent.workflow_run, repository: {full_name: 'other/repo'} } }, 'BestNathan/nession'), /repository mismatch/);
   assert.equal(validateCaseRecord(valid).result, 'Pass');
   assert.equal(recordPath(valid), 'runs/2026-10-08/100-1/1474/SC-14.json');
