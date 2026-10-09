@@ -57,6 +57,16 @@ assert.throws(() => sourceIdentity({ workflow_run: { ...event.workflow_run, repo
 assert.throws(() => sourceIdentity({ workflow_run: { ...event.workflow_run, name: 'Untrusted workflow' } }, repo), /not a completed/);
 assert.throws(() => sourceIdentity({ workflow_run: { ...event.workflow_run, event: 'workflow_run' } }, repo), /unsupported/);
 assert.throws(() => sourceIdentity({ workflow_run: { ...event.workflow_run, head_branch: 'rogue' } }, repo), /invalid branch/);
+// ...and the valid counterexample beside it: every prefix the branch convention
+// creates is accepted, not only the ones this list happened to start with. A
+// rejection-only test cannot see this list being too narrow, which is exactly
+// how `chore/` came to fail the ingest on main (#1542).
+for (const branch of ['feat/x', 'fix/x', 'chore/x', 'docs/x', 'staging', 'main']) {
+  assert.equal(
+    sourceIdentity({ workflow_run: { ...event.workflow_run, head_branch: branch } }, repo).branch,
+    branch,
+  );
+}
 
 const request = async (path) => path.includes('/git/commits/')
   ? { tree: { sha: 'c'.repeat(40) } }
