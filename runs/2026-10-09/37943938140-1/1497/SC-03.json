@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "5fcc7cfe653ce4df68562574bd2511b7d2c281a64ec7287736be65a904fab43e",
+  "run_id": 37943938140,
+  "run_attempt": 1,
+  "issue": 1497,
+  "criterion": "SC-03",
+  "criterion_text": "Regression Playwright suites/snapshots/fixtures retain parity and real CI evidence.",
+  "stage": "staging",
+  "target_sha": "1e7b08f61e0204666891c7fdce34060966960769",
+  "contract_sha256": "eeba70d5342c0687cd0bc6d39c17e44ca03bb018d688de275c48e803ffe937fb",
+  "case_revision": "1e7b08f61e0204666891c7fdce34060966960769",
+  "case_tree_sha": "c0c1dc68e5e4a57018f8b467bb93d5cf94517f07",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-09T14:26:25.443Z",
+  "finished_at": "2026-10-09T14:26:31.191Z",
+  "duration_ms": 5748,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "Pinned 21-spec and 43-snapshot migration inventory and real isolated production Web verified at exact staging SHA.",
+      "evidence": [
+        {
+          "type": "regression",
+          "value": "21 migrated specs equal recorded migration source inventory 5b12f1051c6ae42e84dec2b609415f3131f1df46"
+        },
+        {
+          "type": "visual",
+          "value": "43 PNG Git blob SHA-1 values match migration-parity manifest; legacy specs absent"
+        },
+        {
+          "type": "workflow",
+          "value": "canonical e2e/run test --all and migrated snapshot upload configured"
+        },
+        {
+          "type": "runtime",
+          "value": "Web HTTP=200 at target_sha=1e7b08f61e0204666891c7fdce34060966960769"
+        }
+      ],
+      "duration_ms": 66,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 37943938140,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "1e7b08f61e0204666891c7fdce34060966960769",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/37943938140",
+    "record_path": "runs/2026-10-09/37943938140-1/1497/SC-03.json",
+    "source_result_sha256": "cd0102697f79e83bd8921ee9850451f232acc112aa5192d3db2551122af23549"
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "0fcf22c350d55812d7736186341acdd569c043d158136ccb69d356cef839da6f",
+  "run_id": 37943938140,
+  "run_attempt": 1,
+  "issue": 1497,
+  "criterion": "SC-04",
+  "criterion_text": "All Issue/SC Cases use canonical paths with trusted contract matching and independent SC outcome.",
+  "stage": "staging",
+  "target_sha": "1e7b08f61e0204666891c7fdce34060966960769",
+  "contract_sha256": "eeba70d5342c0687cd0bc6d39c17e44ca03bb018d688de275c48e803ffe937fb",
+  "case_revision": "1e7b08f61e0204666891c7fdce34060966960769",
+  "case_tree_sha": "5865ee69049ca09b2d4280a7ab3de69374e1270a",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-09T14:26:36.246Z",
+  "finished_at": "2026-10-09T14:26:42.207Z",
+  "duration_ms": 5961,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "All Issue/SC Cases discover from one canonical tree; trusted Case selector and staging target/contract are bound to a real running Web.",
+      "evidence": [
+        {
+          "type": "catalog",
+          "value": "canonical Case count=18 distinct Issue/SC pairs; 1497 staged cases=3; legacy tree absent"
+        },
+        {
+          "type": "git",
+          "value": "target_sha=1e7b08f61e0204666891c7fdce34060966960769 1497/SC-04 case_tree_sha=5865ee69049ca09b2d4280a7ab3de69374e1270a contract_sha256=eeba70d5342c0687cd0bc6d39c17e44ca03bb018d688de275c48e803ffe937fb"
+        },
+        {
+          "type": "trust",
+          "value": "main-owned selector requires stage coverage and trusted ingestion enforces source-bound records"
+        },
+        {
+          "type": "runtime",
+          "value": "staging Web HTTP=200 at exact target"
+        }
+      ],
+      "duration_ms": 75,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 37943938140,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "1e7b08f61e0204666891c7fdce34060966960769",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/37943938140",
+    "record_path": "runs/2026-10-09/37943938140-1/1497/SC-04.json",
+    "source_result_sha256": "45c0c27da7f9d9695d214f66ef1f897aafc6093a51d012a632aa8c7d5a92d50d"
+  }
+}
