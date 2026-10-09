@@ -1,97 +1,98 @@
 ---
 name: nession-acceptance
-description: Use when executing, reviewing, or integrating stage-specific acceptance for a Nession Requirement Issue.
+description: Use when executing, reviewing, or integrating stage-specific Acceptance for a Nession Requirement and updating criterion evidence.
 ---
 
 # Nession Acceptance
 
-Acceptance is an executable phase of the Requirement lifecycle. It does not replace the deterministic Requirement Acceptance gate.
+Acceptance is the executable phase that proves Requirement Success Criteria. It does not replace the deterministic Requirement Acceptance Gate.
+
+Issue structure belongs to `nession-writing-requirements`; Gate semantics belong to `nession-gates`; Agent execution telemetry belongs to `nession-agent-workflow-metrics`.
 
 ## Lifecycle
 
 ```text
-Issue Audit
+Requirement Success Criteria
   -> implementation
   -> stage-specific Acceptance
-  -> deterministic Issue updater
-  -> Requirement Acceptance gate / close guard
-  -> closure
+  -> evidence/update
+  -> deterministic requirement-acceptance Gate
+  -> merge/final closure
 ```
 
-The canonical Requirement contract remains the Success Criteria + Acceptance Report parsed by `scripts/requirement-acceptance.mjs`.
+## Run the correct stage
 
-## Run it
+Read the Requirement's current `Success Criteria` and `Acceptance Report`.
 
-Manual runs use **Actions -> Acceptance -> Run workflow** with:
+Evaluate only criteria whose declared stage matches the environment/boundary being accepted:
 
-- `issue_number`: the Requirement Issue;
-- `stage`: `pre-merge`, `staging`, or `post-merge`;
-- `target_ref`: the exact commit/ref being verified;
-- optional `deployment`: environment/deployment identity;
-- optional `deterministic_result_json`: structured evidence from a deterministic caller;
-- `provider`: Cursor by default, DeepSeek as the alternate Acceptance Agent provider.
+- `pre-merge`
+- `staging`
+- `post-merge`
 
-CI/CD callers should invoke `.github/workflows/acceptance.yml` through `workflow_call` and pass the intended stage explicitly. Do not infer the stage from a branch name.
+Do not mark a criterion Pass because implementation exists; execute/observe the criterion's actual proof.
+
+## Execute through the trusted workflow
+
+Acceptance execution is routed through `.github/workflows/acceptance.yml`.
+
+Manual execution uses **Actions -> Acceptance -> Run workflow** (`workflow_dispatch`) with:
+
+- `issue_number`;
+- explicit `stage` (`pre-merge`, `staging`, or `post-merge`);
+- exact `target_ref`;
+- optional `deployment`;
+- optional deterministic result or model provider.
+
+CI/CD callers invoke the same workflow through `workflow_call`. Never infer Acceptance stage from a branch name.
+
+### Trust boundary
+
+The workflow intentionally separates **verification** from **Issue mutation**:
+
+- the Acceptance harness/updater is checked out from trusted `main`;
+- target code is a separate read-only verification workspace;
+- the Acceptance Agent/execute job has read-only repository/Issue authority and must never edit the Issue, PR, repository, Success Criteria, IDs, wording, or stages;
+- when deterministic evidence is already available, supply it and skip the model;
+- the structured Acceptance Result is normalized/frozen before mutation;
+- **only the deterministic updater job has `issues: write`** and may project the frozen result into the Acceptance Report/check boxes.
+
+A Requirement-level `Pass` / `Pending` / `Fail` / `N/A` is acceptance data; it must not be conflated with workflow infrastructure success/failure.
+
+## Evidence
+
+Evidence must be concrete enough for another reviewer/validator to understand what was proven.
+
+Prefer:
+
+- exact Gate/test result;
+- observed UI/runtime behavior;
+- deployed revision + runtime observation;
+- linked artifact/log/screenshot when relevant.
+
+Avoid “looks good”, “implemented”, or a commit hash with no behavioral proof.
+
+## Results
+
+- `Pass` — criterion proven.
+- `Fail` — criterion disproven; record the failure and repair direction.
+- `Pending` — proof is not available at this stage yet.
+- `N/A` — criterion legitimately does not apply, with justification.
+
+Do not use Pending/N/A to bypass a reachable required proof.
 
 ## Contract boundaries
 
-1. Only criteria whose Acceptance Report stage matches the requested stage are evaluated.
-2. The Acceptance Agent is read-only. It must never edit the Issue, repository, PR, Success Criteria wording/IDs/stages, or substitute criteria.
-3. Prefer a deterministic caller result when tests/workflows already prove the criteria. Supplying `deterministic_result_json` skips the model.
-4. The trusted executor validates a complete structured result before any Issue mutation.
-5. Only the deterministic updater job has `issues: write`.
-6. `Pass` and justified `N/A` project to `[x]`; `Pending` and `Fail` project to `[ ]`.
-7. Requirement-level `Fail` or `Pending` is valid acceptance data and must not be turned into a workflow infrastructure failure.
-8. The updater preserves SC wording, IDs, stages, and unrelated Issue Markdown. Unknown, duplicate, missing, or wrong-stage IDs are rejected.
-9. Evidence written by the updater includes the Actions run id and target ref (plus deployment when supplied).
-10. Re-runs replace the matching report row; they do not append rows. A stale run is rejected when a newer automated run is already recorded.
-11. The existing `scripts/requirement-acceptance.mjs` merge/closure validator remains the final deterministic gate.
-
-## Structured result
-
-Before mutation, Acceptance freezes this repository-owned shape:
-
-```json
-{
-  "schema_version": 1,
-  "issue": 1360,
-  "stage": "staging",
-  "contract_sha256": "...",
-  "run_id": 123456,
-  "target_ref": "abc123",
-  "deployment": "staging",
-  "source": "agent-cursor",
-  "criteria": [
-    {
-      "criterion": "SC-01",
-      "result": "Pass",
-      "evidence": [
-        { "type": "workflow", "value": "run 123456" }
-      ],
-      "summary": "Verified."
-    }
-  ]
-}
-```
-
-Valid results are `Pass`, `Pending`, `Fail`, and `N/A`.
+- The Requirement Skill owns criterion wording and report structure.
+- Acceptance owns executing/interpreting stage evidence.
+- `scripts/requirement-acceptance.mjs` owns deterministic merge/closure eligibility.
+- Workflows route the validator; they do not duplicate its rules.
 
 ## Verification
 
-For tooling changes run:
+When acceptance tooling changes, run its self-tests and Gate suite. Any model-backed Acceptance invocation must also emit the canonical Agent Workflow Telemetry artifact; deterministic/no-criteria Acceptance does not invent an Agent run.
 
-```bash
-node scripts/requirement-acceptance.mjs self-test
-node scripts/acceptance-executor.mjs self-test
-node scripts/acceptance-agent.mjs self-test
-```
-
-The executor self-test includes both required end-to-end fixtures:
-
-- Pending -> structured Pass -> deterministic update -> checkbox/report synchronized -> existing merge gate passes.
-- Pending -> structured Fail -> deterministic update -> checkbox remains unchecked -> existing closure gate rejects acceptance.
-
-A successful Acceptance workflow only means the acceptance infrastructure executed and wrote a valid result. Whether the Requirement is merge-ready or closable remains a separate deterministic gate decision.
+When a criterion depends on deployment/runtime state, prove the exact revision/environment requested rather than an adjacent successful run.
 
 
 ## Source-aligned Acceptance Cases

@@ -1,0 +1,11 @@
+# quality-rust
+# Gate IDs only. Not wired into current hooks/workflows yet.
+rust-format
+rust-clippy
+rustc-wrapper
+worktree-target-seed
+build-cache-verifier
+tmux-socket-isolation
+protocol-integrity
+protocol-codegen-drift
+rust-coverage
