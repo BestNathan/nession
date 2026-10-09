@@ -24,6 +24,15 @@ export function smokeContext(sha) {
   };
 }
 
+export function providerSmokeTaskId(context, provider) {
+  if (!['cursor', 'deepseek'].includes(provider)) throw new Error('Unknown provider in smoke task identity');
+  if (!Number.isSafeInteger(context?.issue?.number) || context.issue.number <= 0 ||
+      !['pre-merge', 'staging', 'post-merge'].includes(context.stage)) {
+    throw new Error('Invalid smoke task issue/stage identity');
+  }
+  return 'provider-smoke-' + provider + '-issue-' + context.issue.number + '-' + context.stage;
+}
+
 export function verifySmoke({ context, result, telemetry, provider }) {
   if (!['cursor', 'deepseek'].includes(provider)) throw new Error('Unexpected smoke provider');
   assert.equal(context.criteria.length, 1);
@@ -39,6 +48,7 @@ export function verifySmoke({ context, result, telemetry, provider }) {
   assert.equal(telemetry.agent.prompt?.version, 'v1');
   assert.match(telemetry.agent.prompt?.sha256 || '', /^[0-9a-f]{64}$/, 'prompt sha256 must be valid');
   assert.equal(telemetry.task.target_ref, context.target_ref);
+  assert.equal(telemetry.task.id, providerSmokeTaskId(context, provider), 'smoke telemetry task identity must include Provider');
   return { provider, outcome: 'Pending', template: telemetry.agent.prompt.id, template_version: telemetry.agent.prompt.version, prompt_sha256: telemetry.agent.prompt.sha256 };
 }
 
@@ -47,11 +57,12 @@ export function selfTest() {
   const fixture = {
     context, provider: 'deepseek',
     result: { criteria: [{ criterion: EXPECTED, result: 'Pending', evidence: [], summary: 'No evidence supplied' }] },
-    telemetry: { schema_version: 1, task: { target_ref: context.target_ref }, agent: {
+    telemetry: { schema_version: 1, task: { target_ref: context.target_ref, id: providerSmokeTaskId(context, 'deepseek') }, agent: {
       provider: 'deepseek', status: 'finished', prompt: { id: 'acceptance', version: 'v1', sha256: 'c'.repeat(64) },
     } },
   };
   assert.equal(verifySmoke(fixture).outcome, 'Pending');
+  assert.notEqual(providerSmokeTaskId(context, 'cursor'), providerSmokeTaskId(context, 'deepseek'));
   assert.throws(() => smokeContext('not-a-commit'), /exact commit/);
   assert.throws(() => verifySmoke({ ...fixture, provider: 'unknown' }), /Unexpected smoke provider/);
   assert.throws(() => verifySmoke({ ...fixture, result: { criteria: [] } }), /exactly one/);
@@ -59,7 +70,8 @@ export function selfTest() {
   assert.throws(() => verifySmoke({ ...fixture, result: { criteria: [{ criterion: EXPECTED, result: 'Pass' }] } }), /fabricated evidence/);
   assert.throws(() => verifySmoke({ ...fixture, telemetry: { ...fixture.telemetry, agent: { ...fixture.telemetry.agent, provider: 'cursor' } } }), /provider/);
   assert.throws(() => verifySmoke({ ...fixture, telemetry: { ...fixture.telemetry, agent: { ...fixture.telemetry.agent, prompt: { id: 'acceptance', version: 'v1', sha256: 'invalid' } } } }), /sha256/);
-  console.log('AI Agent provider smoke self-test: 8 positive/negative cases passed');
+  assert.throws(() => verifySmoke({ ...fixture, telemetry: { ...fixture.telemetry, task: { ...fixture.telemetry.task, id: providerSmokeTaskId(context, 'cursor') } } }), /task identity/);
+  console.log('AI Agent provider smoke self-test: 10 positive/negative cases passed');
 }
 
 async function main() {

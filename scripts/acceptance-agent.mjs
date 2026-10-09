@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { buildAgentWorkflowTelemetry, writeAgentWorkflowTelemetry } from './agent-workflow-telemetry.mjs';
 import { renderAcceptancePrompt } from './lib/agent/tasks/acceptance.mjs';
+import { providerSmokeTaskId } from './lib/agent/provider-smoke.mjs';
 import { promptTelemetry } from './lib/agent/telemetry/prompt.mjs';
 import { runClaudeCli, normalizeClaudeUsage } from './lib/agent/providers/claude-code.mjs';
 import { runCursorSession, selectCursorModel } from './lib/agent/providers/cursor.mjs';
@@ -132,7 +133,9 @@ function telemetryInput(context, providerMeta, result, status = 'completed') {
     github_workflow: process.env.GITHUB_WORKFLOW || 'Acceptance',
     job: 'execute',
     task: {
-      id: 'issue-' + context.issue.number + '-' + context.stage,
+      id: process.env.NSESSION_AGENT_WORKFLOW_ID === 'agent-provider-smoke'
+        ? providerSmokeTaskId(context, providerMeta.provider)
+        : 'issue-' + context.issue.number + '-' + context.stage,
       type: 'acceptance',
       issue: context.issue.number,
       stage: context.stage,
