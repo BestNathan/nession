@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_scenario_observation",
+  "mode": "scenario",
+  "scenario": "terminal-attach-resume",
+  "target_sha": "4cf5abb1372e6f69c9bfc3da8bf1f24f1297fca4",
+  "scenario_revision": "4cf5abb1372e6f69c9bfc3da8bf1f24f1297fca4",
+  "run_id": 37941408710,
+  "run_attempt": 1,
+  "run_index": 1,
+  "status": "Completed",
+  "evaluation": null,
+  "started_at": "2026-10-09T14:07:42.983Z",
+  "finished_at": "2026-10-09T14:07:52.582Z",
+  "config_sha256": "02570e8ea79bef27b3596233d77e63cada084f43a56f2e11df811513f96f8826",
+  "config": {
+    "generated_lines": 240,
+    "samples_max": 12,
+    "transport": "Relay",
+    "reload": true
+  },
+  "observation_count": 3,
+  "observations": [
+    {
+      "at": "2026-10-09T14:07:51.746Z",
+      "browser": {
+        "mounted": true,
+        "marker_count": 241,
+        "viewport": {
+          "baseY": 210,
+          "viewportY": 210
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "af49e1cd872dbae176f1abc4f43753f1b272e56a70c9cac3e8f4d1c89079a8f3",
+        "bytes": 9572
+      },
+      "stage": "before-reload"
+    },
+    {
+      "at": "2026-10-09T14:07:52.002Z",
+      "browser": {
+        "mounted": true,
+        "marker_count": 0,
+        "viewport": {
+          "baseY": 0,
+          "viewportY": 0
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "af49e1cd872dbae176f1abc4f43753f1b272e56a70c9cac3e8f4d1c89079a8f3",
+        "bytes": 9572
+      },
+      "stage": "after-reload"
+    },
+    {
+      "at": "2026-10-09T14:07:52.516Z",
+      "browser": {
+        "mounted": true,
+        "marker_count": 241,
+        "viewport": {
+          "baseY": 210,
+          "viewportY": 210
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "af49e1cd872dbae176f1abc4f43753f1b272e56a70c9cac3e8f4d1c89079a8f3",
+        "bytes": 9572
+      },
+      "stage": "after-reload"
+    }
+  ],
+  "privacy": "whitelisted counters/timestamps/digests only; no terminal bytes",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 37941408710,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/1474-route-post-merge-cases-through-e2e-cli",
+    "target_sha": "4cf5abb1372e6f69c9bfc3da8bf1f24f1297fca4",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/37941408710",
+    "scenario_tree_sha": "96ae71e441342a6b448289c64cc8ca2ac8f00659",
+    "original_sha256": "3692d555c851c2877409ffa3c2d1efb8bf1f1dad8df621faedc651474606e1dc"
+  },
+  "evidence": {
+    "provider": "github-actions-artifact",
+    "artifact_name": "e2e-terminal-scenario-37941408710-1",
+    "sha256": "3692d555c851c2877409ffa3c2d1efb8bf1f1dad8df621faedc651474606e1dc",
+    "retention_days": 14,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/37941408710",
+    "durability": "time-limited; object archival not configured"
+  },
+  "execution_id": "fed7a1d3e74e5b64b4c7f9a839376de856caea7a6ae8d347192bbbb5877a87f9"
+}
