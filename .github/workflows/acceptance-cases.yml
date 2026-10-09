@@ -231,7 +231,7 @@ jobs:
       # transitively, even when their manifest type is not 'browser'. Ensure
       # Playwright is installed for every selected Case, not just browser types.
       - name: Install browser verifier runtime
-        if: steps.select.outputs.count != '0'
+        if: steps.select.outputs.needs_browser == 'true'
         run: |
           set -euo pipefail
           cd workspace/e2e
