@@ -139,7 +139,7 @@ export function parseAcceptanceReport(section) {
 }
 
 export function validateRequirementBody(body, { mode = 'closure' } = {}) {
-  if (!new Set(['merge', 'closure']).has(mode)) {
+  if (!new Set(['pre-merge', 'merge', 'closure']).has(mode)) {
     throw new Error(`unsupported acceptance validation mode: ${mode}`);
   }
 
@@ -165,6 +165,10 @@ export function validateRequirementBody(body, { mode = 'closure' } = {}) {
       continue;
     }
 
+    if (mode === 'pre-merge' && row.stage !== 'pre-merge') {
+      continue;
+    }
+
     const deferredPostMerge =
       mode === 'merge'
       && row.stage === 'post-merge'
@@ -187,7 +191,9 @@ export function validateRequirementBody(body, { mode = 'closure' } = {}) {
     if (!ACCEPTED_RESULTS.has(normalizedResult)) {
       const expectation = mode === 'merge'
         ? 'expected Pass or N/A before merge unless this is an explicit post-merge Pending criterion'
-        : 'expected Pass or N/A before closure';
+        : mode === 'pre-merge'
+          ? 'expected Pass or N/A before the pre-merge gate'
+          : 'expected Pass or N/A before closure';
       errors.push(`${criterion.id} result is ${row.result}; ${expectation}`);
     }
     if (PLACEHOLDER_EVIDENCE.has(row.evidence.trim().toLowerCase())) {
@@ -210,7 +216,12 @@ export function validateRequirementBody(body, { mode = 'closure' } = {}) {
 }
 
 function formatErrors(issueNumber, errors, context = 'acceptance') {
-  const label = context === 'merge' ? 'is not merge-ready' : 'acceptance is incomplete';
+  const label =
+    context === 'merge'
+      ? 'is not merge-ready'
+      : context === 'pre-merge'
+        ? 'has incomplete pre-merge acceptance'
+        : 'acceptance is incomplete';
   return [
     `Requirement #${issueNumber} ${label}:`,
     ...errors.map((error) => `- ${error}`),
@@ -274,6 +285,84 @@ function parseClosingIssueNumbers(body, owner, name) {
   return [...numbers];
 }
 
+function issueReferencePattern(owner, name) {
+  const escapedOwner = owner.replace(/[.*+?^$(){}|[\]\\]/g, '\\$&');
+  const escapedName = name.replace(/[.*+?^$(){}|[\]\\]/g, '\\$&');
+  return '(?:#(\\d+)|' + escapedOwner + '\\/' + escapedName + '#(\\d+)|https:\\/\\/github\\.com\\/' + escapedOwner + '\\/' + escapedName + '\\/issues\\/(\\d+))';
+}
+
+function collectIssueReferences(text, owner, name) {
+  const numbers = new Set();
+  const reference = new RegExp(issueReferencePattern(owner, name), 'gi');
+  for (const match of String(text ?? '').matchAll(reference)) {
+    const value = match[1] ?? match[2] ?? match[3];
+    if (value) numbers.add(Number(value));
+  }
+  return numbers;
+}
+
+function parseAssociatedIssueNumbers(body, owner, name) {
+  const text = String(body ?? '').replace(/<!--[^]*?-->/g, '');
+  const lines = text.replace(/\r\n?/g, '\n').split('\n');
+  const numbers = new Set();
+  let fence = null;
+
+  // Explicit implementation/association language seen in historical PRs.
+  // Dependency-only language (Depends on / Blocked by) is intentionally excluded:
+  // a dependency is not evidence that this PR implements that requirement.
+  const actionAssociation = /\b(?:implement(?:s|ed|ing)?|address(?:es|ed|ing)?)\b/i;
+  const leadingAssociation = /^\s*(?:[-*+]\s+)?(?:\x60+\s*)?(?:refs?|references?|related\s+to|relates\s+to|part\s+of|follow[- ]up\s+(?:to|from)|issues?)\b\s*:?[^\S\r\n]*/i;
+
+  for (const rawLine of lines) {
+    const fenceMatch = rawLine.match(/^\s*(\x60{3,}|~{3,})/);
+    if (fenceMatch) {
+      const marker = fenceMatch[1][0];
+      if (fence === marker) fence = null;
+      else if (fence == null) fence = marker;
+      continue;
+    }
+    if (fence || /^\s*>/.test(rawLine)) continue;
+
+    const leading = rawLine.match(leadingAssociation);
+    const action = rawLine.match(actionAssociation);
+    const associationStart = leading
+      ? (leading.index ?? 0) + leading[0].length
+      : action
+        ? (action.index ?? 0) + action[0].length
+        : -1;
+    if (associationStart < 0) continue;
+
+    for (const number of collectIssueReferences(rawLine.slice(associationStart), owner, name)) {
+      numbers.add(number);
+    }
+  }
+  return [...numbers];
+}
+
+function parseTitleIssueNumbers(title, owner, name) {
+  const numbers = new Set();
+  const text = String(title ?? '');
+
+  // Historical PR titles commonly carry their issue as "(#123)" or
+  // "(#123 SC-04)"; treat those as explicit implementation associations.
+  for (const match of text.matchAll(/\(([^)]*#\d+[^)]*)\)/g)) {
+    for (const number of collectIssueReferences(match[1], owner, name)) numbers.add(number);
+  }
+
+  // Also honor explicit action/association language in a title, e.g. "close #1455".
+  for (const number of parseClosingIssueNumbers(text, owner, name)) numbers.add(number);
+  for (const number of parseAssociatedIssueNumbers(text, owner, name)) numbers.add(number);
+
+  return [...numbers];
+}
+
+export function parsePreMergeIssueNumbers(body, owner, name, title = '') {
+  const numbers = new Set(parseClosingIssueNumbers(body, owner, name));
+  for (const number of parseAssociatedIssueNumbers(body, owner, name)) numbers.add(number);
+  for (const number of parseTitleIssueNumbers(title, owner, name)) numbers.add(number);
+  return [...numbers].sort((a, b) => a - b);
+}
+
 async function closingRequirementIssues({ owner, name, body, token }) {
   const issues = [];
   const numbers = parseClosingIssueNumbers(body, owner, name);
@@ -284,43 +373,110 @@ async function closingRequirementIssues({ owner, name, body, token }) {
   }
   return issues;
 }
-
-async function closePullRequest(owner, name, number, token) {
-  await githubRequest(`/repos/${owner}/${name}/pulls/${number}`, {
-    token,
-    method: 'PATCH',
-    body: { state: 'closed' },
-  });
+async function preMergeRequirementIssues({ owner, name, title = '', body, token }) {
+  const issues = [];
+  const numbers = parsePreMergeIssueNumbers(body, owner, name, title);
+  for (const number of numbers) {
+    const issue = await githubRequest(`/repos/${owner}/${name}/issues/${number}`, { token });
+    const labels = new Set((issue.labels ?? []).map((label) => typeof label === 'string' ? label : label.name));
+    if (labels.has('requirement') && String(issue.state).toLowerCase() === 'open') issues.push(issue);
+  }
+  return issues;
 }
 
-async function runPrGate() {
+async function requirementIssuesForRef({ owner, name, sha, token }) {
+  const targetSha = String(sha ?? '').trim();
+  if (!/^[0-9a-f]{40}$/i.test(targetSha)) {
+    throw new Error('exact 40-character target SHA is required');
+  }
+  const pulls = await githubRequest(
+    `/repos/${owner}/${name}/commits/${targetSha}/pulls?per_page=100`,
+    { token },
+  );
+  const numbers = new Set();
+  for (const pr of pulls ?? []) {
+    for (const number of parsePreMergeIssueNumbers(pr.body, owner, name, pr.title)) {
+      numbers.add(number);
+    }
+  }
+
+  const issues = [];
+  for (const number of [...numbers].sort((a, b) => a - b)) {
+    const issue = await githubRequest(`/repos/${owner}/${name}/issues/${number}`, { token });
+    const labels = new Set((issue.labels ?? []).map((label) => typeof label === 'string' ? label : label.name));
+    if (labels.has('requirement') && String(issue.state).toLowerCase() === 'open') {
+      issues.push(issue);
+    }
+  }
+  return issues;
+}
+
+async function discoverRefRequirements(shaArg) {
+  const [owner, name] = process.env.GITHUB_REPOSITORY.split('/');
+  if (!owner || !name) throw new Error('GITHUB_REPOSITORY is required');
+  const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+  const requirements = await requirementIssuesForRef({
+    owner,
+    name,
+    sha: shaArg,
+    token,
+  });
+  process.stdout.write(
+    JSON.stringify(requirements.map((issue) => String(issue.number))) + '\n',
+  );
+}
+
+async function discoverPreMergeRequirements() {
+  const event = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
+  const [owner, name] = process.env.GITHUB_REPOSITORY.split('/');
+  const pr = event.pull_request;
+  if (!owner || !name || !pr) throw new Error('pull_request event context is required');
+  const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+  const requirements = await preMergeRequirementIssues({ owner, name, title: pr.title, body: pr.body, token });
+  process.stdout.write(JSON.stringify(requirements.map((issue) => String(issue.number)).sort((a, b) => Number(a) - Number(b))) + '\n');
+}
+
+// Gate failure must block merge without taking ownership of the PR lifecycle.
+// Keeping a PR open permits the author to push a fix and rerun the required check.
+function enforcePrAcceptance({ mode, number, failures }) {
+  if (!failures.length) return;
+  const label = mode === 'pre-merge'
+    ? 'Pre-merge requirement acceptance gate failed'
+    : 'Requirement acceptance gate failed';
+  throw new Error(`${label} for PR #${number} (PR remains open; merge blocked):\n\n${failures.join('\n\n')}`);
+}
+
+async function runPrGate({ mode = 'merge', discovery = 'closing' } = {}) {
   const event = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
   const [owner, name] = process.env.GITHUB_REPOSITORY.split('/');
   const pr = event.pull_request;
   const number = pr?.number ?? event.number;
   if (!owner || !name || !number || !pr) throw new Error('pull_request event context is required');
   const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
-  const requirements = await closingRequirementIssues({ owner, name, body: pr.body, token });
+  const requirements = discovery === 'pre-merge'
+    ? await preMergeRequirementIssues({ owner, name, title: pr.title, body: pr.body, token })
+    : await closingRequirementIssues({ owner, name, body: pr.body, token });
   const failures = [];
   for (const issue of requirements) {
-    const result = validateRequirementBody(issue.body, { mode: 'merge' });
-    if (!result.ok) failures.push(formatErrors(issue.number, result.errors, 'merge'));
-    else if (result.deferredPostMergeCount > 0) {
+    const result = validateRequirementBody(issue.body, { mode });
+    if (!result.ok) failures.push(formatErrors(issue.number, result.errors, mode));
+    else if (mode === 'merge' && result.deferredPostMergeCount > 0) {
       console.log(`Requirement #${issue.number}: merge-ready with ${result.deferredPostMergeCount} deferred post-merge criterion/criteria.`);
     } else {
-      console.log(`Requirement #${issue.number}: ${result.criteriaCount} criteria accepted before merge.`);
+      console.log(
+        mode === 'pre-merge'
+          ? `Requirement #${issue.number}: pre-merge criteria accepted.`
+          : `Requirement #${issue.number}: ${result.criteriaCount} criteria accepted before merge.`,
+      );
     }
   }
-  if (failures.length) {
-    if (pr.state !== 'closed') {
-      await closePullRequest(owner, name, number, token);
-      console.error(`PR #${number} was closed because requirement acceptance is incomplete. Fix acceptance, then reopen the PR.`);
-    }
-    throw new Error(`Requirement acceptance gate failed:\n\n${failures.join('\n\n')}`);
-  }
-  console.log(`Requirement acceptance gate passed for PR #${number} (${requirements.length} requirement issue(s)).`);
+  enforcePrAcceptance({ mode, number, failures });
+  console.log(
+    mode === 'pre-merge'
+      ? `Pre-merge requirement acceptance gate passed for PR #${number} (${requirements.length} requirement issue(s)).`
+      : `Requirement acceptance gate passed for PR #${number} (${requirements.length} requirement issue(s)).`,
+  );
 }
-
 async function runIssueCloseGuard() {
   const event = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
   const issue = event.issue;
@@ -385,6 +541,12 @@ function postMergePendingBody(evidence = 'requires production deployment; verify
 function runSelfTest() {
   const cases = [
     ['valid accepted requirement', validBody(), 'closure', true, null],
+    ['pre-merge ignores later-stage pending criteria', validBody()
+      .replace('- [x] SC-02 behaves', '- [ ] SC-02 behaves')
+      .replace('| SC-02 | staging | N/A | superseded by #88 after requirement amendment |', '| SC-02 | staging | Pending | verify after staging deployment |'), 'pre-merge', true, null],
+    ['pre-merge still requires pre-merge criteria', validBody()
+      .replace('- [x] SC-01 works', '- [ ] SC-01 works')
+      .replace('| SC-01 | pre-merge | Pass | unit test: scripts/foo.test |', '| SC-01 | pre-merge | Pending | implementation not yet verified |'), 'pre-merge', false, 'SC-01 is not checked'],
     ['h2 success criteria remains supported', validBody().replace('### Success Criteria', '## Success Criteria'), 'closure', true, null],
     ['legacy three-column report remains supported', validLegacyBody(), 'closure', true, null],
     ['missing success criteria', '## Acceptance Report\n\n| Criterion | Stage | Result | Evidence |\n|---|---|---|---|', 'closure', false, 'missing Success Criteria section'],
@@ -417,19 +579,65 @@ function runSelfTest() {
     [12, 13, 14],
   );
   assert.deepEqual(
+    parsePreMergeIssueNumbers(
+      [
+        'Implements #30',
+        'Closes #31',
+        'Refs #32, #33',
+        'Refs: #34',
+        'References BestNathan/nession#35',
+        'Related to #36',
+        'Relates to #37',
+        'Addresses the remaining acceptance gap in #38',
+        'Follow-up to the review on #39',
+        'Part of #40',
+        'Issue #41 — implementation slice',
+        'Implements the first architecture slice of #42 / #43',
+        '\x60Refs #44\x60。',
+      ].join('\n'),
+      'BestNathan',
+      'nession',
+      'fix(test): historical title linkage (#45 SC-04)',
+    ),
+    [30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45],
+  );
+  assert.deepEqual(
+    parsePreMergeIssueNumbers(
+      'Depends on #50\nBlocked by #51\nMentions #52\n> Refs #53\n\x60\x60\x60md\nRefs #54\n\x60\x60\x60',
+      'BestNathan',
+      'nession',
+    ),
+    [],
+  );
+  assert.deepEqual(
     parseClosingIssueNumbers('`Closes #20`\n> Closes #21\n```md\nCloses #22\n```\n<!-- Closes #23 -->\nCloses #24', 'BestNathan', 'nession'),
     [24],
   );
 
-  console.log(`requirement-acceptance self-test: ${cases.length + 2} cases passed`);
+  assert.doesNotThrow(() => enforcePrAcceptance({ mode: 'pre-merge', number: 99, failures: [] }));
+  assert.throws(() => enforcePrAcceptance({ mode: 'pre-merge', number: 99,
+    failures: ['SC-01 remains Pending'] }), error =>
+      error.message.includes('Pre-merge requirement acceptance gate failed') &&
+      error.message.includes('PR remains open; merge blocked') &&
+      error.message.includes('SC-01 remains Pending'));
+  assert.throws(() => enforcePrAcceptance({ mode: 'merge', number: 99,
+    failures: ['SC-02 is Fail'] }), error =>
+      error.message.includes('Requirement acceptance gate failed') &&
+      error.message.includes('PR remains open; merge blocked') &&
+      error.message.includes('SC-02 is Fail'));
+
+  console.log(`requirement-acceptance self-test: ${cases.length + 3} cases passed`);
 }
 
 async function main() {
   const command = process.argv[2];
   if (command === 'self-test') return runSelfTest();
+  if (command === 'discover-pre-merge') return discoverPreMergeRequirements();
+  if (command === 'discover-ref') return discoverRefRequirements(process.argv[3]);
+  if (command === 'pre-merge-pr-gate') return runPrGate({ mode: 'pre-merge', discovery: 'pre-merge' });
   if (command === 'pr-gate') return runPrGate();
   if (command === 'issue-close-guard') return runIssueCloseGuard();
-  throw new Error('usage: node scripts/requirement-acceptance.mjs <self-test|pr-gate|issue-close-guard>');
+  throw new Error('usage: node scripts/requirement-acceptance.mjs <self-test|discover-pre-merge|discover-ref SHA|pre-merge-pr-gate|pr-gate|issue-close-guard>');
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
