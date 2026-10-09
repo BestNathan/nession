@@ -33,11 +33,11 @@ export function verifySmoke({ context, result, telemetry, provider }) {
   assert.equal(answer.criterion, EXPECTED, 'provider must not change criterion identity');
   assert.equal(answer.result, 'Pending', 'fabricated evidence must never become Pass/Fail/N/A');
   assert.equal(telemetry.schema_version, 1);
-  assert.equal(telemetry.agent.provider, provider);
+  assert.equal(telemetry.agent.provider, provider, 'telemetry provider must match selected provider');
   assert.equal(telemetry.agent.status, 'finished');
   assert.equal(telemetry.agent.prompt?.id, 'acceptance');
   assert.equal(telemetry.agent.prompt?.version, 'v1');
-  assert.match(telemetry.agent.prompt?.sha256 || '', /^[0-9a-f]{64}$/);
+  assert.match(telemetry.agent.prompt?.sha256 || '', /^[0-9a-f]{64}$/, 'prompt sha256 must be valid');
   assert.equal(telemetry.task.target_ref, context.target_ref);
   return { provider, outcome: 'Pending', template: telemetry.agent.prompt.id, template_version: telemetry.agent.prompt.version, prompt_sha256: telemetry.agent.prompt.sha256 };
 }
