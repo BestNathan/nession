@@ -244,9 +244,15 @@ jobs:
         run: |
           set -uo pipefail
           failed=0
-          while IFS=
+          while read -r issue criterion profile; do
+            output="${RUNNER_TEMP}/acceptance-case-results/${issue}-${criterion}.case.json"
+            # The trusted selector stays here; the canonical CLI owns dispatch.
+            args=(acceptance --issue-json "${RUNNER_TEMP}/acceptance-contracts/${issue}.json")
+            args+=(--issue "${issue}" --sc "${criterion}" --stage "${ACCEPTANCE_STAGE}")
+            args+=(--sha "${TARGET_SHA}" --profile "${profile}" --output "${output}")
+            node workspace/e2e/run "${args[@]}" || failed=1
+          done < <(jq -r '.[] | [.issue, .criterion, .runtime] | @tsv' "${RUNNER_TEMP}/selected-cases.json")
           exit "${failed}"
-
       - name: Enforce Case coverage without suppressing executed Case evidence
         if: always() && steps.select.outcome == 'success'
         run: |
