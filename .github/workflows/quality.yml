@@ -57,6 +57,7 @@ jobs:
           node scripts/trusted-case-discovery-selftest.mjs
           node scripts/e2e-run-ingest.mjs self-test
           node scripts/e2e-run-ingest-negative-selftest.mjs
+          node scripts/run-record-index-contract.mjs self-test
           node scripts/collect-repo-health.mjs --self-test
           node scripts/generate-repo-metrics.mjs --self-test
           node scripts/protocol-gate.mjs --json >/dev/null
