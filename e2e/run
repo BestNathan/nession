@@ -133,7 +133,12 @@ function tests(args) {
   }
   const suite = arg(args, 'suite');
   if (suite && !/^[a-z0-9-]+$/.test(suite)) throw new Error('unsafe suite selection');
-  return execute('npx', ['playwright', 'test', ...(suite ? [suite] : [])], at('e2e'));
+  const update = args.includes('--update-snapshots=all');
+  if (update && (suite !== 'fixture-visual' || args.includes('--all'))) {
+    throw new Error('visual baseline rewrite only allowed for explicit fixture-visual suite');
+  }
+  return execute('npx', ['playwright', 'test', ...(suite ? [suite] : []),
+    ...(update ? ['--update-snapshots=all'] : [])], at('e2e'));
 }
 function scenario(args) {
   const id = args[0];
@@ -141,7 +146,16 @@ function scenario(args) {
   const file = walk(at('e2e', 'scenarios'), 'scenario.yaml').find((name) =>
     fs.readFileSync(name, 'utf8').split('\n').some((line) => line.trim() === 'id: ' + id));
   if (!file) throw new Error('Scenario not found: ' + id + ' (no silent success)');
-  throw new Error('Scenario execution requires the #1498 scenario adapter; discovery alone is not a run');
+  if (process.env.CI !== 'true') throw new Error(
+    'full-stack Scenario execution is CI-only; local use: ./e2e/run --list');
+  const entry = path.join(path.dirname(file), 'reproduce.cjs');
+  if (!fs.existsSync(entry) || fs.lstatSync(entry).isSymbolicLink()) {
+    throw new Error('Scenario executable missing or symlinked: ' + entry);
+  }
+  return execute(process.execPath, [
+    entry, '--sha', required(args, 'sha'), '--output', required(args, 'output'),
+    '--repeat', arg(args, 'repeat') || '1',
+  ]);
 }
 async function main() {
   const [mode, ...args] = process.argv.slice(2);
@@ -149,7 +163,7 @@ async function main() {
   if (mode === '--validate') return await validate();
   if (mode === 'test') return exitByCode(tests(args));
   if (mode === 'acceptance') return exitByCode(acceptance(args));
-  if (mode === 'scenario') return scenario(args);
+  if (mode === 'scenario') return exitByCode(scenario(args));
   if (mode === 'compare') return compare(args);
   throw new Error('usage: ./e2e/run --list|--validate|test --all|acceptance --issue N --sc SC-NN --sha SHA --stage staging|scenario ID|compare LEFT RIGHT');
 }

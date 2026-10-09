@@ -51,7 +51,7 @@ for (const [relative, expectedSha] of Object.entries(migration.baseline_png_blob
 }
 
 assert.ok(catalog.cases.length > 0, 'Case catalog must discover source-aligned Cases');
-assert.equal(catalog.scenarios.length, 0, 'scenario execution is delivered in a later independent slice');
+assert.ok(catalog.scenarios.length > 0, 'scenario catalog must not silently disappear');
 
 const checked = call('--validate');
 assert.equal(checked.code, 0);
