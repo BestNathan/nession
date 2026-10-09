@@ -109,6 +109,9 @@ jobs:
             workspace/web/package-lock.json
             workspace/e2e/package-lock.json
 
+      - name: Verify Acceptance Case selection contract
+        run: node trusted/scripts/acceptance-case-selection-contract.mjs self-test
+
       - name: Fetch trusted Requirement contracts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -176,28 +179,18 @@ jobs:
             const context = trusted.buildAcceptanceContext(issue, stage, { targetRef: process.env.TARGET_SHA, runId: process.env.GITHUB_RUN_ID });
             for (const criterion of context.criteria) expected.push(issueNumber + '/' + criterion.criterion);
           }
-          const selectedKeys = selected.map((entry) => entry.issue + '/' + entry.criterion);
-          const unexpected = selectedKeys.filter((key) => !expected.includes(key));
-          const duplicates = selectedKeys.filter((key, index) => selectedKeys.indexOf(key) !== index);
-          if (unexpected.length || duplicates.length) throw new Error(
-            'Case selection includes wrong-stage/unknown or duplicate entries: ' + [...unexpected, ...duplicates].join(', '));
-          const selectionScope = requested ? expected.filter((key) => key === issueNumbers[0] + '/' + requested) : expected;
-          const missing = selectionScope.filter((key) => !selectedKeys.includes(key));
-          if (requested && (selected.length !== 1 || selected[0].criterion !== requested ||
-            issueNumbers.length !== 1 || missing.includes(issueNumbers[0] + '/' + requested))) {
-            throw new Error('manual Case selection missing or wrong stage/profile: ' + issueNumbers[0] + '/' + requested);
-          }
-          if (issueNumbers.length > 0 && selected.length === 0) {
-            throw new Error('no source-aligned Cases selected for associated Issues and stage ' + stage);
-          }
-          const coverage = { stage, expected, selected: selectedKeys, missing };
+          const { validateCaseSelection } = await import(pathToFileURL(
+            path.resolve('trusted/scripts/acceptance-case-selection-contract.mjs'),
+          ).href);
+          const coverage = validateCaseSelection({ stage, issueNumbers, expected, selected, requested });
           fs.writeFileSync(process.env.RUNNER_TEMP + '/case-coverage.json', JSON.stringify(coverage, null, 2));
-          if (missing.length) {
-            console.error('::warning::Missing stage-specific Case coverage: ' + missing.join(', '));
+          if (coverage.missing.length) {
+            console.error('::warning::Missing stage-specific Case coverage: ' + coverage.missing.join(', '));
           }
           NODE
           count="$(jq 'length' "${RUNNER_TEMP}/selected-cases.json")"
           needs_browser="$(jq 'any(.needs_browser == true)' "${RUNNER_TEMP}/selected-cases.json")"
+          selection_status="$(jq -r '.status' "${RUNNER_TEMP}/case-coverage.json")"
           cp "${RUNNER_TEMP}/selected-cases.json" "${RUNNER_TEMP}/acceptance-case-results/selection.json"
           echo "count=${count}" >> "${GITHUB_OUTPUT}"
           echo "needs_browser=${needs_browser}" >> "${GITHUB_OUTPUT}"
@@ -207,6 +200,7 @@ jobs:
             echo "- Target: \`${{ steps.target.outputs.target_sha }}\`"
             echo "- Stage: \`${{ steps.target.outputs.stage }}\`"
             echo "- Cases: ${count}"
+            echo "- Selection: ${selection_status} (not-applicable is not a Case Pass)"
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - uses: actions-rust-lang/setup-rust-toolchain@v1
