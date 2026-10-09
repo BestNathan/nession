@@ -20,6 +20,12 @@ export interface TerminalTransport {
 
   send(data: string): void;
   sendResize(cols: number, rows: number): void;
+  /**
+   * Record the size the session was told at attach — the size an attach states
+   * is the session's from that moment, so repeating it is not a resize (#1503
+   * follow-up). Optional: a transport that does not dedup simply sends.
+   */
+  noteAttachedSize?(cols: number, rows: number): void;
   /** Seed stream timeline after P2P attach (#1094). Optional on transports without seq. */
   seedStreamCursor?(streamEpoch: number | undefined, streamCursor: number | undefined): void;
   /**
