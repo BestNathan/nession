@@ -27,7 +27,7 @@ assert.equal(listed.code, 0);
 const catalog = JSON.parse(listed.stdout);
 assert.ok(catalog.browserTests > 0, 'regression catalog must never silently report 0 suites');
 assert.ok(catalog.cases.length > 0, 'Case catalog must discover source-aligned Cases');
-assert.equal(catalog.scenarios.length, 0, 'scenario execution is delivered in a later independent slice');
+assert.ok(catalog.scenarios.length > 0, 'scenario catalog must not silently disappear');
 
 const checked = call('--validate');
 assert.equal(checked.code, 0);
