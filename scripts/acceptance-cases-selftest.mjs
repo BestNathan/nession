@@ -166,6 +166,20 @@ ok(() => {
     'legacy Case tree must not survive canonical source migration');
   const discovered = discoverCases(canonicalRoot);
   assert.ok(discovered.length >= 12, 'canonical Case discovery must never silently be empty');
+  // Guard syntax of every in-tree JavaScript verifier before stage execution.
+  // A malformed new Case must fail the PR gate rather than fail only on push.
+  for (const item of discovered) {
+    for (const verifier of item.manifest.verifiers) {
+      if (!/\.(?:cjs|mjs|js)$/.test(verifier.entry)) continue;
+      const file = path.join(item.dir, verifier.entry);
+      const result = spawnSync(process.execPath, ['--check', file], {
+        cwd: repoRoot, encoding: 'utf8', timeout: 5000,
+      });
+      assert.equal(result.status, 0,
+        'Case verifier syntax invalid: ' + item.manifest.issue + '/' +
+        item.manifest.criterion + '/' + verifier.entry + ': ' + result.stderr);
+    }
+  }
 });
 ok(() => {
   const verifier = path.join(canonicalRoot, '1520', 'SC-04', 'verify.js');
