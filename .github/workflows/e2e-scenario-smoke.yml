@@ -48,24 +48,42 @@ jobs:
         run: |
           set -euo pipefail
           sha="$(git rev-parse HEAD)"
-          ./e2e/run scenario terminal-attach-resume --sha "${sha}" --repeat 1 --output "${RUNNER_TEMP}/nession-scenarios"
-      - name: Validate non-synthetic observation record
+          ./e2e/run scenario terminal-attach-resume --sha "${sha}" --repeat 2 --output "${RUNNER_TEMP}/nession-scenarios"
+      - name: Validate real repeated observations and compare without verdict
         run: |
           set -euo pipefail
           node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
           import fs from 'node:fs';
           import path from 'node:path';
+          import { execFileSync } from 'node:child_process';
           const dir = process.env.RUNNER_TEMP + '/nession-scenarios';
-          const paths = fs.readdirSync(dir).filter((file) => /^scenario-.*\.json$/.test(file));
-          if (paths.length !== 1) throw new Error('expected exactly one scenario run record');
-          const record = JSON.parse(fs.readFileSync(path.join(dir, paths[0]), 'utf8'));
-          if (record.status !== 'Completed' || record.evaluation !== null ||
-              record.observation_count < 2 ||
-              !record.observations.some((item) => item.stage === 'before-reload') ||
-              !record.observations.some((item) => item.stage === 'after-reload')) {
-            throw new Error('scenario has no actual before/after observations or incorrectly asserts Pass');
+          const names = fs.readdirSync(dir).filter(file => /^scenario-.*\.json$/.test(file));
+          if (names.length !== 2) throw new Error('expected exactly two independently executed Scenario records');
+          const runs = names.map(name => ({ name, data: JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8')) }))
+            .sort((a,b) => a.data.run_index - b.data.run_index);
+          assert.deepEqual(runs.map(r=>r.data.run_index), [1,2]);
+          const target = execFileSync('git', ['rev-parse','HEAD'], {encoding:'utf8'}).trim();
+          for (const {data} of runs) {
+            assert.equal(data.target_sha, target, 'record target differs from checked-out SHA');
+            assert.equal(data.status, 'Completed');
+            assert.equal(data.evaluation, null);
+            assert.ok(data.observation_count >= 2);
+            assert.ok(data.observations.some(o => o.stage === 'before-reload'));
+            assert.ok(data.observations.some(o => o.stage === 'after-reload'));
           }
-          console.log('Scenario observed real before/reload samples at SHA ' + record.target_sha);
+          const compare = execFileSync(process.execPath, [
+            './e2e/run', 'compare', ...runs.map(r => path.join(dir,r.name))
+          ], {encoding:'utf8'});
+          const result = JSON.parse(compare);
+          assert.equal(result.status, 'Completed');
+          assert.equal(result.evaluation, null, 'observations cannot claim Acceptance Pass');
+          assert.equal(result.config_comparable, true);
+          assert.match(result.limitations, /nondeterministic/);
+          assert.equal(result.left.sample_count, runs[0].data.observation_count);
+          assert.equal(result.right.sample_count, runs[1].data.observation_count);
+          fs.writeFileSync(path.join(dir,'comparison.json'), JSON.stringify(result,null,2)+'\n');
+          console.log('Two real exact-SHA repetitions compared without evaluative verdict');
           NODE
       - uses: actions/upload-artifact@v4
         if: always()
