@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 37914540029,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/1498-terminal-scenario-compare",
+    "target_sha": "ed945071ae9d138c7a1729fe761a497d52329b2f",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/37914540029",
+    "scenario_tree_sha": "96ae71e441342a6b448289c64cc8ca2ac8f00659",
+    "original_sha256": "aea3475949a2057a152fb7a2e5706b6994473cbb33a991b70d8b8122dd5d4fca"
+  },
+  "record": "runs/2026-10-09/37914540029-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "cc8a0236c8d64c3bd78e52c8aa6e32f9f29396488f4b818cce430e70a54e4ded"
+}
