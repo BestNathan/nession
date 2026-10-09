@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 37958078469,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/1499-unified-artifact-retention-evidence",
+    "target_sha": "ceb185787f1aea9e6e27c225bb7dabec85e3a9bc",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/37958078469",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "0d92c0016f547ba4e5a394847a5608aa8f1e3745fb929d051863b9f7c6377cc4"
+  },
+  "record": "runs/2026-10-09/37958078469-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "b3be180d54bffea269aa9f4f7f915573df7acd3648c89239965b75de190db74d"
+}
