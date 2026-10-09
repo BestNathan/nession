@@ -6,6 +6,8 @@ Nession uses Playwright for end-to-end testing of the web UI and its integration
 
 ## Test Structure
 
+The canonical Issue/SC verification tree is `e2e/acceptance/cases/<issue>/<SC>/`. It uses the shared Runner; verifier source is committed and immutable results live only on `acceptance-results`.
+
 ```
 e2e/
 ├── fixtures/              # Configuration for server and agent
@@ -17,7 +19,7 @@ e2e/
 │   ├── reset.ts           # resetAuth helper
 │   ├── fixtureVisual.ts   # Frozen-clock helpers for fixture visual baselines
 │   └── ui-assert/         # Reusable UI assertions (composer)
-├── specs/                 # Test specifications
+├── tests/browser/                 # Test specifications
 │   ├── login.spec.ts      # Authentication tests
 │   ├── session-lifecycle.spec.ts  # Session create/kill tests
 │   ├── terminal-io.spec.ts       # Terminal I/O tests (relay + P2P)
@@ -225,7 +227,7 @@ npx playwright test -g "session lifecycle"
 
 ## Adding New Tests
 
-1. Create a new file in `e2e/specs/`
+1. Create a new file in `e2e/tests/browser/`
 2. Import helpers from `e2e/helpers/`
 3. Use `waitForSessionFirst()` before interacting with the shell
 4. Use direct WebSocket URL: `ws://localhost:19090/ws`
@@ -275,7 +277,7 @@ The E2E workflow (`.github/workflows/e2e.yml`):
 
 ## Canonical visual regression (#561 / #548)
 
-Deterministic fixture routes (`/#/fixture`, `/#/fixture/workspace`, `/#/fixture/app`) have a focused screenshot gate in `specs/fixture-visual.spec.ts`. Functional checks in `fixture-*.spec.ts` run separately; visual tests compare full-page screenshots after assertions pass.
+Deterministic fixture routes (`/#/fixture`, `/#/fixture/workspace`, `/#/fixture/app`) have a focused screenshot gate in `tests/browser/fixture-visual.spec.ts`. Functional checks in `fixture-*.spec.ts` run separately; visual tests compare full-page screenshots after assertions pass.
 
 Playwright appends the platform suffix to every snapshot filename, so the
 committed files all end in `-linux` (baselines are generated on the Linux CI
@@ -291,7 +293,7 @@ runner):
 | App Sessions | 390×844 | `app-sessions-linux.png` |
 | App Workspace | 390×844 | `app-workspace-linux.png` |
 
-Snapshots live in `e2e/specs/__snapshots__/fixture-visual.spec.ts/` (committed to git).
+Snapshots live in `e2e/tests/browser/__snapshots__/fixture-visual.spec.ts/` (committed to git).
 
 ### Updating baselines
 

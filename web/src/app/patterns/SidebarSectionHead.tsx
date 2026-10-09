@@ -24,7 +24,7 @@ export function SidebarSectionHead({ label, action }: SidebarSectionHeadProps) {
   return (
     <div
       className={cn(
-        'flex shrink-0 items-center justify-between gap-[var(--shell-space-2)] whitespace-nowrap px-[var(--shell-space-2)] pt-[var(--shell-space-1)] pb-[var(--shell-section-head-pad-bottom)] text-muted-foreground',
+        'flex shrink-0 items-center justify-between gap-[var(--nession-shell-space-2)] whitespace-nowrap px-[var(--nession-shell-space-2)] pt-[var(--nession-shell-space-1)] pb-[var(--nession-shell-section-head-pad-bottom)] text-muted-foreground',
         chromeSansRole('secondary'),
       )}
     >
@@ -46,7 +46,7 @@ export function SidebarSectionSeparator() {
     <div
       data-testid="sidebar-section-separator"
       role="separator"
-      className="mx-[var(--shell-section-sep-margin)] my-[var(--shell-section-sep-margin)] h-px shrink-0 bg-border"
+      className="mx-[var(--nession-shell-section-sep-margin)] my-[var(--nession-shell-section-sep-margin)] h-px shrink-0 bg-border"
     />
   );
 }

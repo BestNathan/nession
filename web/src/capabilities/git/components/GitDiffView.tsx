@@ -1,5 +1,6 @@
 import { cn } from '@/shared/lib/utils';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
+import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import { classifyDiffLine, formatBytes } from '../state';
 import type { GitDiffResponse } from '../types';
 
@@ -82,7 +83,7 @@ export function GitDiffView({
       </div>
       <pre
         data-testid="git-diff-body"
-        className={cn('min-h-0 flex-1 overflow-auto whitespace-pre-wrap py-2 font-mono', chromeMonoRole('code'))}
+        className={cn('min-h-0 flex-1 overflow-auto whitespace-pre-wrap py-2 font-mono', chromeMonoRole('code'), workspaceScrollClearanceClass)}
       >
         {diff.text === '' ? (
           <span className="block px-4 text-muted-foreground">

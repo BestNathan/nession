@@ -63,7 +63,7 @@ export function AppFilesDirectoryPane({
       )}
       {handoffError ? (
         <p
-          className={cn('px-[var(--shell-space-3)] py-2 text-destructive', bodyAppClass)}
+          className={cn('px-[var(--nession-shell-space-3)] py-2 text-destructive', bodyAppClass)}
           data-testid="files-app-handoff-error"
         >
           {handoffError}

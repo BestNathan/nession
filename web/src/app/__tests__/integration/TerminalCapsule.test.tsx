@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { Bot } from 'lucide-react';
 import { TerminalCapsule } from '@/product/terminal/capsule/TerminalCapsule';
 import type { CapsuleCapabilityProjection } from '@/product/terminal/capsule/types';
 
@@ -26,7 +27,6 @@ function projection(
   return {
     id: 'terminal-keys',
     title: 'Terminal Keys',
-    depth: 'signal',
     body: () => <p data-testid="projection-body">keys</p>,
     onDismiss: vi.fn(),
     ...overrides,
@@ -58,7 +58,7 @@ describe('TerminalCapsule', () => {
         experience="app"
         sendText={vi.fn()}
         capabilityDisclosure={{
-          entries: [{ id: 'claude-code', title: 'Claude Code', state: 'active' }],
+          entries: [{ id: 'claude-code', title: 'Claude Code', state: 'active', icon: Bot }],
           onSelect: vi.fn(),
         }}
       />,
@@ -168,7 +168,7 @@ describe('TerminalCapsule', () => {
  * learns a capability id. Each direction is asserted for a projection that
  * claims the keyboard *and* for one that does not: an implementation that
  * always blurred, or always dismissed, would satisfy the first case of each
- * pair and silently break `git commit` while Git's Signal is up.
+ * pair and silently break `git commit` while Git's Peek is up.
  */
 describe('capsule input focus', () => {
   it('dismisses the keyboard when a projection that claims it appears', () => {
@@ -192,7 +192,7 @@ describe('capsule input focus', () => {
   });
 
   it('leaves the composer focused for a projection that is read while typing', () => {
-    // Git's shape: a Signal is not a reason to take the keyboard away from a
+    // Git's shape: a Peek is not a reason to take the keyboard away from a
     // `git commit` in progress.
     const { rerender } = render(<TerminalCapsule experience="app" sendText={vi.fn()} />);
     const field = screen.getByTestId('capsule-ghost-input');

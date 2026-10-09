@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { cn } from '@/shared/lib/utils';
 import type { FileOps } from '@/capabilities/files';
-import { claudeCodeView, isClaudeCodeCommand } from '@/capabilities/claude-code';
+import { resolveConversationIdentity } from '@/app/conversationIdentities';
 import type { CapabilityFacts, CapabilityId } from '@/product/capability';
 import type { DomainState } from '@/product/session/model/domainState';
 import type { Agent, Session } from '@/types';
@@ -53,9 +53,10 @@ interface PushedDepth {
  * The Workspace page and its one navigation bar (#1051).
  *
  * The chrome owner for whatever depth the Workspace is at. It renders the App's
- * page header, hands the capability's view a `WorkspaceDepthControl` to declare a
- * pushed depth through, and tells the dock whether it is still at the depth that
- * may show it.
+ * page header and hands the capability's view a `WorkspaceDepthControl` to
+ * declare a pushed depth through — which is what its Back names. It no longer
+ * gates the dock on the depth: the capsule is present at every depth (owner
+ * decision 2026-10-03; `WorkspaceShell`'s `showDock` carries the argument).
  *
  * The push is stamped with the capability that registered it rather than cleared
  * by an effect when `tool` changes. Switching capability unmounts the view that
@@ -146,26 +147,24 @@ export function WorkspacePanel({
 
   // The Web's Workspace → Terminal route (#1204): one circular destination
   // action beside the capability dock — surface navigation, not a capability,
-  // so it stays when a pushed detail depth hides the dock. The App leaves
-  // through `AppPageHeader`'s Back and gets no second leave affordance.
+  // so it is never a dock entry and never displaced by the dock's content. The
+  // App leaves through `AppPageHeader`'s Back and gets no second leave.
   //
   // SC-25 (#1347): while the pane is running a conversational capability, the
   // Terminal-return circle projects that capability's glyph — "your
-  // conversation is over there". Claude Code is the only conversational
-  // capability today, and the command matcher stays owned by its slice. The
-  // glyph is a badge inside the same button, so the destination is untouched
-  // (SC-26).
-  const ConversationGlyph = claudeCodeView.icon;
-  const conversationActive = Boolean(
-    selectedSession.foreground_command &&
-      isClaudeCodeCommand(selectedSession.foreground_command),
-  );
+  // conversation is over there". Which capabilities are conversational and
+  // when one is live is contribution knowledge: the registry is asked, no
+  // capability is named here, and a second one (Codex, OpenCode) projects its
+  // identity without this file changing. The glyph replaces the circle's
+  // inner Terminal icon, so the destination is untouched (SC-26).
+  const conversation = resolveConversationIdentity(facts);
+  const ConversationGlyph = conversation?.glyph;
   const surfaceAction =
     experience === 'web' ? (
       <SurfaceDestinationAction
         destination="terminal"
         onOpen={() => onSurfaceChange('terminal')}
-        glyph={conversationActive ? <ConversationGlyph aria-hidden /> : undefined}
+        glyph={ConversationGlyph ? <ConversationGlyph aria-hidden /> : undefined}
       />
     ) : undefined;
 
@@ -192,7 +191,6 @@ export function WorkspacePanel({
         ctx={ctx}
         activeCapabilityId={tool}
         depth={depth}
-        pushed={push !== null}
         surfaceAction={surfaceAction}
       />
     </div>

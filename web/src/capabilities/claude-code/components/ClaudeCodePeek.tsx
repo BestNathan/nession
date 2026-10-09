@@ -19,13 +19,13 @@ import { chromeSansRole } from '@/shared/typography/chromeRoles';
 const RECENT_LIMIT = 3;
 
 /**
- * Claude Code at the second depth.
+ * Claude Code beside the capsule.
  *
- * The Signal says what is true in one line; this says what there is to *do*
- * about it, which is the difference `#1046` draws between a Signal and a Peek
- * and the reason the capability was Signal-only until the conversation existed.
- * Before it, the honest answer to "what is behind this?" was the config browser
- * — a list the Workspace already drew better. Now it is the work itself.
+ * The line under the state says what is true; this says what there is to *do*
+ * about it — the difference `#1046` drew between a Signal and a Peek, and the
+ * reason the capability was Signal-only until the conversation existed. Before
+ * it, the honest answer to "what is behind this?" was the config browser — a
+ * list the Workspace already drew better. Now it is the work itself.
  *
  * Three states, because the provider has three answers and they are not
  * interchangeable:
@@ -83,7 +83,7 @@ export function ClaudeCodePeek({
                   // host's footer and into the capability that made the row.
                   onClick={() => onOpenWorkspace?.(candidate.id)}
                   className={cn(
-                    'w-full truncate rounded text-left text-muted-foreground',
+                    'w-full truncate rounded-[var(--nession-radius-control)] text-left text-muted-foreground',
                     chromeSansRole('caption'),
                     'transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                   )}
@@ -103,12 +103,11 @@ export function ClaudeCodePeek({
         </p>
       )}
 
-      {/* Local action on the left, deepening on the right, because they are
-          different kinds of thing: one keeps you in the Terminal and the other
-          leaves it. `#1120` asks for exactly that distinction, and putting them
-          in one row is what makes it visible rather than documented. */}
-      <div className="flex items-center justify-between gap-2">
-        {conversation.bound ? (
+      {/* The local action — it keeps you in the Terminal. The one that
+          leaves it is the Workspace destination, and that is the host's to
+          draw (#1347 SC-21), not this body's. */}
+      {conversation.bound ? (
+        <div className="flex items-center gap-2">
           <button
             type="button"
             data-testid="claude-code-peek-view-conversation"
@@ -122,22 +121,8 @@ export function ClaudeCodePeek({
           >
             View conversation
           </button>
-        ) : (
-          // Keeps the Workspace action on the right whether or not there is a
-          // local one — a row that reflows by state reads as two layouts.
-          <span />
-        )}
-        {onOpenWorkspace ? (
-          <button
-            type="button"
-            data-testid="capsule-capability-open-workspace"
-            onClick={() => onOpenWorkspace()}
-            className={capsulePeekActionClass}
-          >
-            Open in Workspace →
-          </button>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
     </div>
   );
 }

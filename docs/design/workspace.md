@@ -103,7 +103,7 @@ Session and Workspace expose different **disclosure depths** of the same capabil
 The canonical model is defined in [capability-emergence.md](capability-emergence.md):
 
 ```text
-Dormant -> Signal -> Peek -> Workspace
+Dormant -> Peek -> Workspace
 ```
 
 ### Session / Terminal
@@ -112,8 +112,7 @@ The Session layer is about **what is happening now**.
 
 A capability may contribute:
 
-- a compact **Signal**: the minimum current state that explains why the capability matters;
-- an explicit **Peek**: a small Session-scoped summary that helps the user decide whether to go deeper.
+- an explicit **Peek**: a small Session-scoped summary that helps the user decide whether to go deeper. It draws the minimum current state that explains why the capability matters — branch, worktree, change count — as its first lines, where the removed Signal depth used to carry just that.
 
 The Terminal projection must stay intentionally incomplete. It may summarize state, but it should not reproduce a full capability client.
 
@@ -125,7 +124,7 @@ The Workspace layer is about **what belongs to or is relevant to this work**.
 
 It is the high-density capability surface and may expose broader state, resources, configuration, history, and multi-step workflows even when that capability is not the foreground application at this exact moment.
 
-Opening Workspace from a Signal/Peek must preserve the exact context that caused the capability to emerge: Session, location, repository/worktree, selected resource, and focus where applicable.
+Opening Workspace from a Peek must preserve the exact context that caused the capability to emerge: Session, location, repository/worktree, selected resource, and focus where applicable.
 
 This distinction allows Workspace to be rich without making the Session noisy.
 

@@ -46,9 +46,6 @@ export const addressesAtom = atom<ProbedAddress[]>((get) =>
 
 export const hasActiveSessionAtom = atom((get) => get(sessionIdAtom) !== '');
 
-/** Session ID parsed from the URL pathname, for deep-link restore. */
-export const sessionIdFromUrlAtom = atom<string | null>(null);
-
 // ── Action atoms ─────────────────────────────────────────────────
 
 export const attachToSessionAtom = atom(

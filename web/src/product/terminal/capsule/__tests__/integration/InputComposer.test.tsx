@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { Bot } from 'lucide-react';
 import { TerminalCapsule } from '@/product/terminal/capsule/TerminalCapsule';
 
 vi.mock('@/product/terminal/hooks/useCommandHistory', () => ({
@@ -17,7 +18,7 @@ vi.mock('@/product/terminal/hooks/useCommandHistory', () => ({
 
 /** A capability that earned disclosure, so the leading `+` renders. */
 const disclosure = {
-  entries: [{ id: 'claude-code', title: 'Claude Code', state: 'active' as const }],
+  entries: [{ id: 'claude-code', title: 'Claude Code', state: 'active' as const, icon: Bot }],
   onSelect: vi.fn(),
 };
 

@@ -11,7 +11,13 @@
     },
     "overflow": {
       "type": "string",
-      "enum": ["clip", "menu", "sheet", "scroll", "wrap"],
+      "enum": [
+        "clip",
+        "menu",
+        "sheet",
+        "scroll",
+        "wrap"
+      ],
       "description": "Strategy when content exceeds the pattern bounds. clip = truncate/hide; menu/sheet = collapse into a popover/sheet; scroll = the region scrolls; wrap = wrapping is the overflow strategy."
     },
     "visibility": {
@@ -19,11 +25,22 @@
       "properties": {
         "mode": {
           "type": "string",
-          "enum": ["always", "collapse-to-menu", "collapse-to-drawer", "hidden"]
+          "enum": [
+            "always",
+            "collapse-to-menu",
+            "collapse-to-drawer",
+            "hidden"
+          ]
         },
         "breakpoint": {
           "type": "string",
-          "enum": ["sm", "md", "lg", "xl", "2xl"],
+          "enum": [
+            "sm",
+            "md",
+            "lg",
+            "xl",
+            "2xl"
+          ],
           "description": "Optional Tailwind-scale breakpoint below which the mode applies. Per-experience differences belong in the web/app block itself."
         }
       },
@@ -37,21 +54,46 @@
           "type": "boolean",
           "description": "false = forced single line (an unintended wrap is a violation); true = wrapping allowed."
         },
-        "heightToken": { "$ref": "#/$defs/tokenRef", "description": "Resolved value must be px-measurable (px/rem/number)." },
-        "minHeightToken": { "$ref": "#/$defs/tokenRef" },
-        "overflow": { "$ref": "#/$defs/overflow" },
+        "heightToken": {
+          "$ref": "#/$defs/tokenRef",
+          "description": "Resolved value must be px-measurable (px/rem/number)."
+        },
+        "minHeightToken": {
+          "$ref": "#/$defs/tokenRef"
+        },
+        "maxHeightToken": {
+          "$ref": "#/$defs/tokenRef",
+          "description": "Ceiling for a surface that takes its content's natural height and clamps only here (pattern.context-capsule). Distinct from heightToken, which pins the box: a max-height surface is asserted to be AT MOST this and, when its content is shorter, strictly less — otherwise the assertion cannot tell a ceiling from a height and the field would be a rename rather than a change. Resolved value must be px-measurable."
+        },
+        "overflow": {
+          "$ref": "#/$defs/overflow"
+        },
         "alignY": {
           "type": "string",
-          "enum": ["top", "middle", "bottom"],
+          "enum": [
+            "top",
+            "middle",
+            "bottom"
+          ],
           "description": "Cross-axis alignment intent for assertions."
         },
         "justify": {
           "type": "string",
-          "enum": ["start", "center", "end", "space-between", "space-around"],
+          "enum": [
+            "start",
+            "center",
+            "end",
+            "space-between",
+            "space-around"
+          ],
           "description": "Row-axis distribution intent for assertions."
         },
-        "minWidthToken": { "$ref": "#/$defs/tokenRef" },
-        "maxWidthToken": { "$ref": "#/$defs/tokenRef" },
+        "minWidthToken": {
+          "$ref": "#/$defs/tokenRef"
+        },
+        "maxWidthToken": {
+          "$ref": "#/$defs/tokenRef"
+        },
         "padXToken": {
           "$ref": "#/$defs/tokenRef",
           "description": "Horizontal padding. Resolved value must be px-measurable. Asserted so 'exact spacing' (terminal-capsule.md §Visual contract) is checkable rather than an adjective."
@@ -66,80 +108,157 @@
         },
         "scrollOwner": {
           "oneOf": [
-            { "type": "boolean", "description": "true = the pattern element itself scrolls." },
-            { "type": "string", "minLength": 1, "description": "Name of a descendant region that owns scrolling (e.g. \"nav-list\")." }
+            {
+              "type": "boolean",
+              "description": "true = the pattern element itself scrolls."
+            },
+            {
+              "type": "string",
+              "minLength": 1,
+              "description": "Name of a descendant region that owns scrolling (e.g. \"nav-list\")."
+            }
           ]
         },
-        "touchTargetToken": { "$ref": "#/$defs/tokenRef", "description": "Minimum hit area, App density (e.g. experience.app.touchTarget.min)." },
+        "touchTargetToken": {
+          "$ref": "#/$defs/tokenRef",
+          "description": "Minimum hit area, App density (e.g. experience.app.touchTarget.min)."
+        },
         "visualSizeToken": {
           "$ref": "#/$defs/tokenRef",
           "description": "The affordance a control paints, as opposed to the box that receives the tap (#1034). Resolved value must be px-measurable, and it is the only field here that measures something *inside* the band: on App control.sm and control.md are both 44px, so heightToken alone cannot tell a control whose painting grew back to the band from one holding a smaller circle. The drawn-affordance check in design-gate.mjs fails a resolved value that is not strictly below the band."
         },
-        "visibility": { "$ref": "#/$defs/visibility" }
+        "rowHeightToken": {
+          "$ref": "#/$defs/tokenRef",
+          "description": "Height of one row *inside* the block, for a surface whose rows are not the block's own band (pattern.context-capsule: a sensed row carries two lines of text, so it is taller than any control band and is deliberately not held to one). Resolved value must be px-measurable. The distinction from heightToken and visualSizeToken is the axis it measures: heightToken is the block, visualSizeToken is what a control paints inside it, this is the row a list repeats."
+        },
+        "visibility": {
+          "$ref": "#/$defs/visibility"
+        }
       },
       "additionalProperties": false
     },
     "sharedHeader": {
       "type": "object",
       "properties": {
-        "$description": { "type": "string" },
-        "web": { "$ref": "#/$defs/experienceBlock" },
-        "app": { "$ref": "#/$defs/experienceBlock" }
+        "$description": {
+          "type": "string"
+        },
+        "web": {
+          "$ref": "#/$defs/experienceBlock"
+        },
+        "app": {
+          "$ref": "#/$defs/experienceBlock"
+        }
       },
       "additionalProperties": false
     },
     "viewportEntry": {
       "type": "object",
       "properties": {
-        "id": { "type": "string", "pattern": "^(web|app)\\.[a-z][a-z0-9-]*$" },
-        "experience": { "type": "string", "enum": ["web", "app"] },
-        "role": { "type": "string" },
-        "width": { "type": "integer", "exclusiveMinimum": 0 },
-        "height": { "type": "integer", "exclusiveMinimum": 0 }
+        "id": {
+          "type": "string",
+          "pattern": "^(web|app)\\.[a-z][a-z0-9-]*$"
+        },
+        "experience": {
+          "type": "string",
+          "enum": [
+            "web",
+            "app"
+          ]
+        },
+        "role": {
+          "type": "string"
+        },
+        "width": {
+          "type": "integer",
+          "exclusiveMinimum": 0
+        },
+        "height": {
+          "type": "integer",
+          "exclusiveMinimum": 0
+        }
       },
-      "required": ["id", "experience", "role", "width", "height"],
+      "required": [
+        "id",
+        "experience",
+        "role",
+        "width",
+        "height"
+      ],
       "additionalProperties": false
     }
   },
   "anyOf": [
     {
       "title": "global rules (design/contracts/global.json)",
-      "allOf": [{ "$ref": "#/$defs/sharedHeader" }]
+      "allOf": [
+        {
+          "$ref": "#/$defs/sharedHeader"
+        }
+      ]
     },
     {
       "title": "category rules (design/contracts/categories/*.json)",
-      "allOf": [{ "$ref": "#/$defs/sharedHeader" }],
+      "allOf": [
+        {
+          "$ref": "#/$defs/sharedHeader"
+        }
+      ],
       "properties": {
-        "id": { "type": "string", "pattern": "^category\\.[a-z][a-z0-9-]*$" },
+        "id": {
+          "type": "string",
+          "pattern": "^category\\.[a-z][a-z0-9-]*$"
+        },
         "extends": {
           "type": "array",
-          "items": { "type": "string", "pattern": "^category\\.[a-z][a-z0-9-]*$" }
+          "items": {
+            "type": "string",
+            "pattern": "^category\\.[a-z][a-z0-9-]*$"
+          }
         }
       },
-      "required": ["id"]
+      "required": [
+        "id"
+      ]
     },
     {
       "title": "viewport matrix (design/contracts/viewports.json)",
       "type": "object",
       "properties": {
-        "$description": { "type": "string" },
+        "$description": {
+          "type": "string"
+        },
         "viewports": {
           "type": "array",
           "minItems": 1,
-          "items": { "$ref": "#/$defs/viewportEntry" }
+          "items": {
+            "$ref": "#/$defs/viewportEntry"
+          }
         }
       },
-      "required": ["viewports"],
+      "required": [
+        "viewports"
+      ],
       "additionalProperties": false
     },
     {
       "title": "pattern rules (design/contracts/patterns/*.json)",
-      "allOf": [{ "$ref": "#/$defs/sharedHeader" }],
+      "allOf": [
+        {
+          "$ref": "#/$defs/sharedHeader"
+        }
+      ],
       "properties": {
-        "id": { "type": "string", "pattern": "^pattern\\.[a-z][a-z0-9-]*$" },
+        "id": {
+          "type": "string",
+          "pattern": "^pattern\\.[a-z][a-z0-9-]*$"
+        },
         "extends": {
           "type": "array",
-          "items": { "type": "string", "pattern": "^category\\.[a-z][a-z0-9-]*$" },
+          "items": {
+            "type": "string",
+            "pattern": "^category\\.[a-z][a-z0-9-]*$"
+          },
           "description": "Categories merge in listed order (ancestors first); pattern fields override same-named category fields."
         },
         "patternRef": {
@@ -148,7 +267,10 @@
           "description": "Path to the human-readable #470 pattern prose that owns semantics."
         }
       },
-      "required": ["id", "patternRef"]
+      "required": [
+        "id",
+        "patternRef"
+      ]
     }
   ]
 }

@@ -29,8 +29,13 @@ export {
 } from './discovery';
 export {
   resolveCapabilityProjection,
-  type CapabilityProjection,
-  type DisclosureDepth,
   type EmergenceInput,
 } from './emergence';
 export { MAX_OBSERVED_COMMANDS, observeSessionCommand } from './facts';
+
+export {
+  CAPABILITY_COMPACT_TITLE_MAX_GRAPHEMES,
+  countCapabilityTitleGraphemes,
+  resolveCapabilityCompactTitle,
+  validateCapabilityIdentity,
+} from './identity';

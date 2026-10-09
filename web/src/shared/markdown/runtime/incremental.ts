@@ -26,6 +26,13 @@
  * reference-style links and footnotes document-wide at parse time, so a
  * reference whose definition lands on the other side of the freeze boundary
  * renders literally until the settled full parse self-heals it.
+ *
+ * Upstream: https://github.com/deepseek-ai/deepseek-harness
+ * Baseline: 21638c56315ae6a2b552d6091945d3144c9af32e
+ * Source: packages/client/ui-primitives/src/markdown/incremental.ts
+ * License: MIT (see THIRD_PARTY_NOTICES.md)
+ * Adaptation: Adopted; the only changes are Nession's brace style and import
+ * extensions. The freeze/frontier design and its bounds are upstream's.
  */
 
 import type { Code, Root, RootContent } from 'mdast'

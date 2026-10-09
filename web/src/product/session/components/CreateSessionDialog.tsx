@@ -60,7 +60,7 @@ function AgentSelect({
         <SelectTrigger id="agent" className="w-full">
           <span className={selectedAgent ? '' : 'text-muted-foreground'}>{displayText}</span>
         </SelectTrigger>
-        <SelectContent className="min-w-[var(--radix-select-trigger-width)]">
+        <SelectContent>
           {agents.map((agent) => (
             <SelectItem key={agent.agent_id} value={agent.agent_id}>
               {agentDisplayName(agent)}

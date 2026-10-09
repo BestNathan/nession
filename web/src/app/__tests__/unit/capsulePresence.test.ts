@@ -1,14 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { CapabilityId, CapabilitySnapshot, CapabilityState } from '@/product/capability';
+import type { CapabilityId } from '@/product/capability';
 import type { Session } from '@/types';
-import { CAPSULE_PROJECTION_IDS, projectionBindingFor } from '../../capsuleProjections';
+import { projectionBindingFor } from '../../capsuleProjections';
 import { resolveCapsuleCapabilities, type CapsuleCapabilityInput } from '../../capsulePresence';
-
-function snapshot(id: CapabilityId, state: CapabilityState): CapabilitySnapshot {
-  return { id, title: id, scope: {}, state };
-}
-
-void snapshot;
 
 function input(overrides: Partial<CapsuleCapabilityInput> = {}): CapsuleCapabilityInput {
   return {
@@ -35,8 +29,8 @@ describe('capsule capability presence', () => {
   //
   // Capsule eligibility is a statement about the **Terminal**: the entry lists
   // what can be peeked at from where the user already is. Having a Workspace
-  // view is not enough, and neither is a Signal — the entry is not a shortcut
-  // into the Workspace, and it is not a list of everything that exists.
+  // view is not enough — the entry is not a shortcut into the Workspace, and it
+  // is not a list of everything that exists.
 
   it('lists a capability that contributes a Peek', () => {
     // Git is the reference: a changed-file summary is worth a Terminal depth,
@@ -45,7 +39,7 @@ describe('capsule capability presence', () => {
   });
 
   it('does not list a Workspace-only capability', () => {
-    // Files has a Workspace view and no Terminal depth. Selecting it from the
+    // Files has a Workspace view and no Terminal projection. Selecting it from the
     // capsule used to switch surface, which is what #1046 removes — and the
     // removal is at the source, so it is not offered at all rather than offered
     // and ignored.
@@ -55,25 +49,19 @@ describe('capsule capability presence', () => {
     expect(ids).not.toContain('env');
   });
 
-  it('lists Claude Code now that it contributes a real Peek, and still withholds a Signal', () => {
+  it('lists Claude Code now that it contributes a real Peek (#1120)', () => {
     // This asserted the opposite until #1120, and said how it would end: "It
     // returns to the entry when the plugin contributes a real Peek." The plugin
-    // now does, so the instance changed.
+    // now does, so the instance changed. The rule it used to be checked against
+    // — a `'signal'` binding earns no discovery — went with the depth axis:
+    // `CAPSULE_PROJECTION_IDS` is one list now, so there is no second answer
+    // left for a loop to compare it against.
     expect(entryIds({ facts: { sessionForegroundCommand: 'claude.exe' } })).toContain(
       'claude-code',
     );
-
-    // The **rule** is what outlives the instance: a binding that declares
-    // 'signal' is withheld, whatever any particular binding happens to declare
-    // today. Written as a loop over the projections rather than as one more
-    // hard-coded id, because after #1120 no binding declares 'signal' at all —
-    // so a test naming one would have nothing left to name.
-    for (const id of CAPSULE_PROJECTION_IDS) {
-      expect(entryIds().includes(id)).toBe(projectionBindingFor(id)?.entry !== 'signal');
-    }
   });
 
-  it('keeps the built-in Terminal-local accessory listed', () => {
+  it('keeps the built-in Terminal-local Peek listed', () => {
     // The other side of the rule, and the reason eligibility is a declared role
     // rather than "has a Peek contribution" alone: Terminal Keys is not a
     // Workspace capability and has no Workspace view to be confused with. The
@@ -96,12 +84,13 @@ describe('capsule capability presence', () => {
   });
 
   it('resolves a capability state independently of the entry list', () => {
-    // The projection reads lifecycle from `snapshots`, not from the entry list,
-    // and #1046 does not change that: it still emerges by observation when its
-    // state warrants it. The entry half of this assertion is gone because its
-    // subject is: after #1120 all three projections are listed, so there is no
-    // unlisted capability left to make the point through. What the capsule
-    // actually reads is the snapshot, which is where it belongs anyway.
+    // The projection reads lifecycle from `snapshots`, not from the entry list.
+    // It used to emerge by observation when its state warranted it; that is
+    // gone with the depth axis — nothing opens on its own any more, the user's
+    // choice does. The entry half of this assertion is gone because its subject
+    // is: after #1120 all three projections are listed, so there is no unlisted
+    // capability left to make the point through. What the capsule actually
+    // reads is the snapshot, which is where it belongs anyway.
     const facts = { sessionForegroundCommand: 'claude.exe' };
     const resolution = resolveCapsuleCapabilities(input({ facts }));
 
@@ -119,13 +108,38 @@ describe('capsule capability presence', () => {
     expect(resolution.titleFor('nobody-registered-this')).toBe('nobody-registered-this');
   });
 
-  it('exposes the resolved snapshots the projection reads', () => {
-    // The projection is resolved from the same answer as the discovery list, so
-    // a capability cannot be active for one and absent for the other.
-    const resolution = resolveCapsuleCapabilities(
-      input({ facts: { sessionForegroundCommand: 'claude.exe' } }),
-    );
+  it('offers only capabilities the capsule can actually draw', () => {
+    // The coherence both halves of the capsule depend on, checked across the
+    // two answers rather than inside either: everything the discovery list
+    // offers must resolve to a projection binding, or selecting it would land
+    // on nothing. Where the deleted `entry` loop compared the entry against the
+    // depth a binding declared, this compares it against the binding itself.
+    const resolution = resolveCapsuleCapabilities(input());
 
-    expect(resolution.snapshots.find((s) => s.id === 'claude-code')?.state).toBe('active');
+    expect(resolution.entries.length).toBeGreaterThan(0);
+    for (const entry of resolution.entries) {
+      expect(projectionBindingFor(entry.id)).toBeDefined();
+    }
+  });
+
+  it('gives every entry the capability icon', () => {
+    // The row held a 16px column open for a glyph that entries never carried:
+    // they were built as `{ id, title, state }` while `CapsuleCapabilityEntry`
+    // declared `icon?`, so every row on the deployed build drew an empty icon
+    // column (measured on staging 2026-10-04).
+    //
+    // Checked against the binding rather than for mere presence: "some icon"
+    // is not the claim — the row draws the glyph the capability declared for
+    // this surface, and a second lookup here would be free to disagree with it.
+    // Mutation: build one entry with another binding's glyph — the `entry.icon`
+    // comparison must fail. (Deleting the `projectionIconFor` lookup instead
+    // only breaks the type check, which is not what this assertion watches.)
+    const resolution = resolveCapsuleCapabilities(input());
+
+    expect(resolution.entries.length).toBeGreaterThan(0);
+    for (const entry of resolution.entries) {
+      expect(entry.icon).toBeDefined();
+      expect(entry.icon).toBe(projectionBindingFor(entry.id)?.icon);
+    }
   });
 });

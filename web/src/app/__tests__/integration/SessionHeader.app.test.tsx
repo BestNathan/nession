@@ -15,7 +15,7 @@ const healthy: DomainState = {
  * because `--typography-title-size` is emitted only under
  * `[data-experience="app"]` (`nession/no-cross-experience-token`).
  */
-const AppTitleRoleClass = 'text-[length:var(--typography-title-size)]';
+const AppTitleRoleClass = 'text-[length:var(--nession-typography-title-size)]';
 
 const base = {
   sessionName: 'fix-terminal-reconnect',
@@ -100,7 +100,7 @@ describe('SessionHeader app branch', () => {
       />,
     );
     const status = screen.getByTestId('session-header-status');
-    expect(status.className).toContain('text-[length:var(--typography-metadata-size)]');
+    expect(status.className).toContain('text-[length:var(--nession-typography-metadata-size)]');
     expect(status.className).not.toMatch(/(^|\s)text-xs(\s|$)/);
   });
 

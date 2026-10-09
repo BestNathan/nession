@@ -21,10 +21,10 @@ unavailable -> available -> relevant -> active
 Disclosure depth answers how much of that capability Nession is currently showing:
 
 ```text
-Dormant -> Signal -> Peek -> Workspace
+Dormant -> Peek -> Workspace
 ```
 
-A capability may be `active` while still showing only a `Signal`, or it may be merely `relevant` but opened explicitly into a `Peek`. Do not collapse lifecycle state and presentation depth into one enum.
+A capability may be `active` while nothing of it is shown, or it may be merely `relevant` but opened explicitly into a `Peek`. Do not collapse lifecycle state and presentation depth into one enum.
 
 ## Disclosure levels
 
@@ -34,27 +34,13 @@ No Session-level UI is shown.
 
 The capability may still be available in Workspace or discoverable through an explicit capability entry, but it does not occupy the Terminal.
 
-### L1 — Signal
-
-A compact, mostly read-only indication that answers:
-
-> **What about this capability matters right now?**
-
-A Signal should normally contain only the smallest identifying state needed to understand why the capability has emerged.
-
-Examples:
-
-- Git: branch, worktree identity, dirty/change count, ahead/behind.
-- Claude Code: active/running state, current task summary.
-- Workspace context: current logical workspace/location identity when that distinction matters.
-
-A Signal is not a toolbar and is not a list of actions.
-
-### L2 — Peek
+### L1 — Peek
 
 A small Session-scoped contextual surface that answers:
 
 > **What is happening here, and do I want to go deeper?**
+
+**Nothing emerges on its own (owner decision, 2026-10-04).** There used to be a shallower depth beside the Peek — a *Signal*: a mostly read-only projection carrying the smallest identifying state, which Nession was meant to materialize by observation. It could not be **selected into** — choosing a capability opens its Peek, not a Signal — and it survived only as the residue on the way back out of a Peek, which the owner asked to remove. A capability now appears when the **user chooses it**, at its Peek. The smallest identifying state the Signal used to carry — Git's branch · worktree · change count, Claude Code's active/running state — is the first thing the Peek draws, not a separate level. Sensing is expressed by the Work Ring and by a sensed row leading the Context Capsule; it is never expressed by a projection opening by itself.
 
 Peek may contain a concise summary and one or two contextual interactions, but it must remain subordinate to the Terminal.
 
@@ -67,7 +53,7 @@ Typical constraints:
 - provide an explicit path into Workspace when deeper inspection is useful;
 - preserve the Session, Workspace, location, and selected item when transitioning deeper.
 
-### L3 — Workspace
+### L2 — Workspace
 
 Workspace is the capability's full contextual surface.
 
@@ -97,7 +83,16 @@ The resting capsule must not grow one persistent chip per active capability.
 
 The `+` affordance is the explicit entry for **peeking** at a capability from the Terminal. It is **not a launcher**: selecting an item never changes surface, and a capability whose only depth is a Workspace view is not listed at all (#1046 — see *What may appear* below). That supersedes the earlier reading of this sentence, which made `+` a fallback for *invoking* capabilities. `+` is still **not the only place capability state may ever be shown**.
 
-Once a capability has been selected, triggered, or has earned contextual presence, Nession may materialize a temporary Signal or Peek adjacent to the capsule while keeping the resting capsule itself unchanged.
+Once the user has chosen a capability, Nession may materialize a temporary Peek adjacent to the capsule while keeping the resting capsule itself unchanged. The choice is the trigger — `+` is its explicit entry, and a sensed row is another way to the same choice.
+
+> **An observation is expressed once (owner decision, 2026-10-03; #1347 SC-34).**
+> The 2026-10-03 review measured one fact — "the pane is running Claude Code" —
+> arriving three times: an auto-materialized Signal from the observed-command
+> path, the Work Ring from the work sense, and the Context Capsule. A sensed
+> observation now has exactly **one** ambient representation: the Work Ring.
+> The observed-command path stands down for a capability whose sensed work is
+> `working`, and the user's own step — tapping `+`, choosing a sensed row — is
+> what opens a Peek. `earned contextual presence` alone opens nothing.
 
 This refines the 2026-09-16 #748 decision:
 
@@ -130,17 +125,27 @@ Examples may include:
 
 > **A capability is eligible for the capsule entry only if it contributes a useful Terminal-local Peek. Availability in Workspace is not enough.**
 
-Eligibility is declared by the capability, beside the body that does the peeking, as one of three roles:
+Eligibility is declared by the capability, beside the body that does the peeking, and there is **one role**:
 
 | role | listed | why |
 |---|---|---|
 | **Peek** | yes | it can be reached from where the user already is |
-| **Accessory** | yes | a built-in Terminal-local accessory; it has no Workspace view to be confused with, and it keeps the entry from being empty on a node whose only Peek-capable capability is unavailable |
-| **Signal** | no | it emerges by observation when Nession resolves it as relevant, but explicit discovery is not offered for a depth with nothing behind it |
+
+A capability is listed when it contributes a Peek. There is no second, unlisted role any more: the Signal depth it belonged to is gone (2026-10-04), so nothing emerges by observation and nothing is offered for discovery that has nothing behind it.
+
+> **The Accessory role retired on 2026-10-03 (#1347 SC-38).** It existed for
+> Terminal Keys — a built-in with no Workspace view — and its distinguishing
+> property ("no Workspace projection") is already expressed by the capability
+> simply having no Workspace view binding. What the separate family cost was a
+> second selection path, a second state story, and no way to be *sensed*, at
+> exactly the moment the Context Capsule was being built to speak one
+> protocol for every capability. Terminal Keys is a **Peek**: it is sensed by
+> context on App (SC-37), and it opens at Peek from the ordinary list exactly as
+> it does from a sensed row — one step, the same as any other capability.
 
 The examples above are therefore a list of **capabilities**, not of entry items. Git, Terminal Keys and Claude Code are all listed.
 
-**Claude Code is the one that moved, and it is worth keeping the reason.** It was Signal-only and unlisted — not because a Signal is worth less, but because the entry offers what can be *reached* from where the user already is, and at the time there was nothing behind it. `#1046` said what would return it: a real Peek. `#1120` gave it one, once the conversation capability made a second depth worth opening rather than a summary of a list the Workspace already drew better. So the entry did not change its rule; the capability changed its answer to it.
+**Claude Code is the one that moved, and it is worth keeping the reason.** It was Signal-only and unlisted — not because a Signal was worth less, but because the entry offers what can be *reached* from where the user already is, and at the time there was nothing behind it. `#1046` said what would return it: a real Peek. `#1120` gave it one, once the conversation capability made a second depth worth opening rather than a summary of a list the Workspace already drew better. So the entry did not change its rule; the capability changed its answer to it.
 
 There is no path from selecting an entry to changing surface. Not "the control is hidden" — the entry cannot offer a capability that has no Terminal depth, so the branch does not exist.
 
@@ -152,7 +157,7 @@ Conceptually, a capability contributes one semantic capability and multiple proj
 
 ```ts
 type CapabilitySurface = "terminal" | "workspace"
-type DisclosureDepth = "signal" | "peek" | "workspace"
+type DisclosureDepth = "peek" | "workspace"
 
 interface CapabilityProjection {
   capabilityId: string
@@ -231,7 +236,7 @@ $ cargo test
 
 ### 2. Capability entry
 
-The user taps `+`, or Git becomes a highly relevant capability.
+The user taps `+` and chooses Git. Git may already lead the list when the work sense has something to say about it, but the choice is the user's either way.
 
 ```text
 Nession capabilities
@@ -244,21 +249,9 @@ Terminal Keys
 
 Selecting Git does not open a full Git client inside the Terminal.
 
-### 3. Git Signal
+### 3. Git Peek
 
-Nession exposes a small current-state projection:
-
-```text
-Git
-feature/capsule · worktree: capsule
-3 changed · ↑2 ↓0
-```
-
-This answers the immediate question without stealing the work surface.
-
-### 4. Git Peek
-
-The user taps the Signal or explicitly asks for more.
+Choosing Git opens its Peek. The smallest identifying state — branch, worktree, change count — is the first thing it draws, answering the immediate question without stealing the work surface.
 
 ```text
 ┌─ Git ────────────────────────────────┐
@@ -279,7 +272,7 @@ The user taps the Signal or explicitly asks for more.
 
 Peek may show a short changed-file summary because those files explain the current state. It should not render a full diff, commit graph, branch manager, or history browser.
 
-### 5. Git Workspace
+### 4. Git Workspace
 
 `Open Workspace` deepens into the same capability with preserved context.
 
@@ -319,21 +312,21 @@ The exact Git information architecture may evolve independently, but the Termina
 The semantic progression is shared:
 
 ```text
-Dormant -> Signal -> Peek -> Workspace
+Dormant -> Peek -> Workspace
 ```
 
 Presentation differs by experience.
 
 ### App
 
-- Signal/Peek should remain compact and thumb-friendly.
+- Peek should remain compact and thumb-friendly.
 - Peek may use a floating glass surface above the capsule.
 - `Open Workspace` should enter the App's Workspace side of the `Sessions ← Terminal → Workspace` spatial model.
 - Back/dismiss returns to the same Session and Terminal position.
 
 ### Web
 
-- Signal/Peek may use slightly higher information density.
+- Peek may use slightly higher information density.
 - A Peek may show several changed files where App shows only counts.
 - `Open Workspace` switches the current-work surface into Workspace while preserving Session identity.
 - The full Git capability may use a master/detail layout inside Workspace.
@@ -348,7 +341,7 @@ Terminal Keys is a Terminal-local capability.
 
 ```text
 Terminal Keys
-  terminal: interactive accessory
+  terminal: context-sensed Peek (App/touch)
   workspace: none
 ```
 
@@ -375,13 +368,13 @@ Opening Terminal Keys does not replace the intent composer and does not imply a 
 - Navigating from Git Peek to a generic Workspace homepage and losing repo/worktree/file context.
 - Giving Web and App different lifecycle or disclosure semantics.
 - Automatically opening Workspace merely because a capability becomes relevant.
-- Treating Signal or Peek as permanent chrome.
+- Treating Peek as permanent chrome.
 
 ## Design review checklist
 
 For every capability integration, ask:
 
-- What is the smallest useful Signal?
+- What is the smallest identifying state the Peek must show?
 - What additional information makes a useful Peek?
 - What information/actions are explicitly too rich for Terminal and therefore belong in Workspace?
 - What exact context is preserved when deepening?

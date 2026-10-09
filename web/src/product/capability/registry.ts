@@ -4,6 +4,7 @@ import type {
   CapabilityId,
   CapabilitySnapshot,
 } from './model';
+import { validateCapabilityIdentity } from './identity';
 
 export interface CapabilityResolutionDiagnostic {
   capabilityId: CapabilityId;
@@ -29,6 +30,7 @@ export class CapabilityRegistry {
       );
     }
 
+    validateCapabilityIdentity(definition);
     this.definitions.set(definition.id, definition);
 
     return () => {
@@ -62,6 +64,9 @@ export class CapabilityRegistry {
         snapshots.push({
           id: definition.id,
           title: definition.title,
+          ...(definition.shortTitle === undefined
+            ? {}
+            : { shortTitle: definition.shortTitle }),
           ...resolved,
         });
       } catch (error) {

@@ -4,7 +4,6 @@ import { sessionsApi } from '@/product/session';
 import type { AgentProbe } from '@/product/agent/state';
 import { loadAttachPrefs } from '@/platform/attach/attachPrefs';
 import { detectWebGLSupport } from '@/platform/terminal-runtime/Renderer';
-import { orderByLatency, testAddresses } from '@/shared/lib/addressSelection';
 import {
   validateProfile,
   type PersistedAttachChoice,
@@ -36,11 +35,25 @@ async function fetchAttachInfo(
     : sessionsApi.requestAttach(session.session_id, requestedMode, relayUrl);
 }
 
-/** Candidate URL ordering: probe cache first, live test as cold-cache fallback. */
-async function resolveOrdering(
+/**
+ * Candidate URL ordering (#1430): the probe cache when it exists, otherwise the
+ * advertisement's own order — never a wait for the browser's measurement.
+ *
+ * The agent priority-sorts its advertised addresses (`crates/nession-common/
+ * src/address.rs`: de-duplicate, then a stable sort by priority), so on a cold
+ * cache the first entry is the right first attempt. Measuring the others is
+ * still worth doing and still happens — `useAgentProbe` owns it from the
+ * attach reply's credential and caches it for the next attach — but gating the
+ * first attempt on it put the slowest candidate, up to the 3s handshake
+ * deadline, inside the create → attach critical path.
+ *
+ * Latencies are the cache's when there is one and empty otherwise; the dialog
+ * column that displays them has its own measurement path.
+ */
+function resolveOrdering(
   info: AttachInfo,
   probe: AgentProbe | undefined,
-): Promise<{ orderedUrls: string[]; latencies: AddressLatency[] }> {
+): { orderedUrls: string[]; latencies: AddressLatency[] } {
   const cachedUrls = probe?.orderedUrls ?? [];
   const cachedLatencies = probe?.latencies ?? [];
   if (cachedUrls.length > 0 || info.mode !== 'p2p') {
@@ -50,11 +63,10 @@ async function resolveOrdering(
   if (candidates.length === 0) {
     return { orderedUrls: info.agent_address ? [info.agent_address] : [], latencies: cachedLatencies };
   }
-  // With the reply's own credential: since #1013 the agent refuses a bare
-  // upgrade, so a probe without one measures nothing and reports it as
-  // "unreachable" (#1091).
-  const measured = await testAddresses(candidates, { credential: info.connection_token });
-  return { orderedUrls: orderByLatency(measured), latencies: measured };
+  return {
+    orderedUrls: candidates.map((candidate) => candidate.url),
+    latencies: cachedLatencies,
+  };
 }
 
 function buildChoice(
@@ -88,7 +100,7 @@ export async function resolveTargetChoice(
 ): Promise<AttachChoice> {
   const info = attachInfo ?? (await fetchAttachInfo(session, choice));
   const probe = probeResults.get(session.agent_id);
-  const { orderedUrls, latencies } = await resolveOrdering(info, probe);
+  const { orderedUrls, latencies } = resolveOrdering(info, probe);
   return buildChoice(choice, info, orderedUrls, latencies);
 }
 

@@ -82,6 +82,22 @@ test('terminal-capsule: chrome + control merge; app sheet overflow wins', () => 
 // height token alone cannot express it — control.sm and control.md are 44px
 // there, so a control that grew its painting back to the band would be
 // pixel-identical to one that kept the smaller circle.
+test('CSS-valued contract tokens use the canonical --nession-* namespace', () => {
+  const merged = mergeContracts(REAL, TOKENS);
+  for (const id of [
+    'pattern.context-capsule',
+    'pattern.terminal-capsule',
+    'pattern.workspace-navigation',
+  ]) {
+    for (const experience of ['web', 'app']) {
+      const css = merged[id][experience].radiusTokenCss;
+      assert.ok(css, `${id}.${experience}.radiusTokenCss is missing`);
+      assert.match(css, /var\(--nession-/);
+      assert.doesNotMatch(css, /var\(--(?!nession-)/);
+    }
+  }
+});
+
 test('terminal-capsule: the drawn affordance resolves below the App hit target', () => {
   const merged = mergeContracts(REAL, TOKENS)['pattern.terminal-capsule'];
   assert.equal(merged.web.visualSizeToken, 'experience.web.control.visualSize');
@@ -112,14 +128,22 @@ test('workspace-navigation: self-scrolling overflow both experiences, no pinned 
   assert.equal(merged.web.overflow, 'scroll');
   assert.equal(merged.web.justify, 'start');
   assert.equal(merged.web.heightToken, undefined, 'strip height is layout-derived, not token-pinned');
-  assert.equal(merged.web.wrap, false, 'single-line entries via category.chrome');
+  // Labeled slots: a long name wraps to two lines inside its fixed-width slot,
+  // so the pattern overrides the chrome category's single-line default and the
+  // single-line guarantee lives on the slot's line clamp (owner follow-up,
+  // 2026-10-03). The row itself stays one horizontal row of slots.
+  assert.equal(merged.web.wrap, true, 'labeled slots may wrap inside the slot');
   assert.equal(merged.app.overflow, 'scroll');
   assert.equal(merged.app.justify, 'start');
   assert.equal(merged.app.heightToken, undefined);
-  // The App band floats over the terminal, so it declares its own floor (#730)
-  // and overrides the 44px that category.chrome applies to chrome bands.
-  assert.equal(merged.app.touchTargetToken, 'experience.app.touchTarget.compact');
-  assert.equal(merged.app.touchTargetTokenPx, 28);
+  assert.equal(merged.app.wrap, true);
+  // Owner decision 2026-10-03 (#1347 SC-08 / SC-29): on App this band is one
+  // state of the same Capsule as the Conversation form, so its entries carry
+  // the standard App control band (`control.md` hit target, `control.visualSize`
+  // affordance) and the pattern declares no floor of its own. The compact
+  // override it used to carry (#730) retired with the two tokens that fed it.
+  assert.equal(merged.app.touchTargetToken, 'experience.app.touchTarget.min');
+  assert.equal(merged.app.touchTargetTokenPx, 44);
 });
 
 test('a pattern may declare its own touch floor without changing the category', () => {
@@ -128,12 +152,41 @@ test('a pattern may declare its own touch floor without changing the category', 
   // The override is local: patterns that declare nothing keep the chrome default.
   assert.equal(merged['pattern.session-header'].app.touchTargetToken, 'experience.app.touchTarget.min');
   assert.equal(merged['pattern.session-header'].app.touchTargetTokenPx, 44);
-  assert.equal(merged['pattern.workspace-navigation'].app.touchTargetTokenPx, 28);
+  assert.equal(merged['pattern.workspace-navigation'].app.touchTargetTokenPx, 44);
+
+  // No real contract overrides the floor anymore — workspace-navigation was the
+  // only one, and the 2026-10-03 Capsule-family decision retired it. The
+  // mechanism is still part of the merge, so it is asserted with a fixture:
+  // session-header's app block is re-pointed at a token with a *different*
+  // resolved size (32 ≠ 44), which only passes if the merge honors the local
+  // declaration rather than the category default.
+  const header = REAL.patterns['session-header.json'];
+  const fixture = {
+    ...REAL,
+    patterns: {
+      ...REAL.patterns,
+      'session-header.json': {
+        ...header,
+        app: { ...header.app, touchTargetToken: 'experience.web.control.md' },
+      },
+    },
+  };
+  const overridden = mergeContracts(fixture, TOKENS)['pattern.session-header'];
+  assert.equal(overridden.app.touchTargetToken, 'experience.web.control.md');
+  assert.equal(overridden.app.touchTargetTokenPx, 32);
+  assert.equal(
+    mergeContracts(REAL, TOKENS)['pattern.session-header'].app.touchTargetTokenPx,
+    44,
+    'the real contract still resolves to the chrome floor — the fixture replaced, never added',
+  );
 });
 
 test('every merged pattern keeps provenance and experience blocks', () => {
   const merged = mergeContracts(REAL, TOKENS);
-  assert.equal(Object.keys(merged).length, 6);
+  // The count is read from the sources rather than written here: the set of
+  // patterns *is* the files in `design/contracts/patterns/`, and a literal made
+  // every new pattern edit a test whose subject is provenance.
+  assert.equal(Object.keys(merged).length, Object.keys(REAL.patterns).length);
   for (const pattern of Object.values(merged)) {
     assert.match(pattern.id, /^pattern\./);
     assert.match(pattern.patternRef, /^docs\/design\/design-system\/patterns\/.*\.md$/);
@@ -271,11 +324,14 @@ test('file/id mismatch fails', () => {
 
 // ── real-directory smoke ────────────────────────────────────────────────────
 
-test('committed sources validate clean and merge to 6 patterns', () => {
+test('committed sources validate clean and merge to every declared pattern', () => {
   const { errors, index } = validateTree(REAL, TOKENS);
   assert.deepEqual(errors, []);
   assert.ok(index.has('experience.app.touchTarget.min'));
-  assert.equal(Object.keys(mergeContracts(REAL, TOKENS)).length, 6);
+  assert.equal(
+    Object.keys(mergeContracts(REAL, TOKENS)).length,
+    Object.keys(REAL.patterns).length,
+  );
 });
 
 test('real viewport matrix carries the canonical web/app rows', () => {

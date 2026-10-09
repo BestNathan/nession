@@ -7,11 +7,17 @@ import type { AIConversationItem } from '../../model/conversation'
 import { assistantMessage, toolItem, transcript, unknownItem, userMessage } from '../fixtures/items'
 
 function snapshot(overrides: Partial<AIConversationSnapshot> = {}): AIConversationSnapshot {
+  const openId = overrides.openId ?? 'c1'
   return {
     listState: 'ready',
     conversations: [],
     bindingId: 'c1',
-    openId: 'c1',
+    openId,
+    // The runtime derives this from its own identity, the context key and
+    // the open id. A fixture has only the last, and a key that follows
+    // `openId` is enough to make a conversation switch look like one —
+    // which is the only thing this fixture needs it to do.
+    conversationKey: openId === null ? null : `fixture:${openId}`,
     state: 'ready',
     conversation: null,
     activity: 'inactive',

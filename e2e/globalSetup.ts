@@ -1,93 +1,49 @@
-import { mkdirSync, rmSync, existsSync, writeFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import path from 'node:path';
 
-import { E2E_RUN_DIR, E2E_TMUX_DIR, E2E_TMUX_SOCKET } from './runtime';
+const { startFullStackRuntime } = require('./runner/runtime/full-stack.js');
+import {
+  E2E_AGENT_PORT,
+  E2E_RUN_DIR,
+  E2E_SERVER_PORT,
+  E2E_STALLED_PROBE_PORT,
+  E2E_TMUX_SOCKET,
+  E2E_WEB_PORT,
+  E2E_WEB_URL,
+} from './runtime';
 
 /**
- * E2E global setup — runs once BEFORE the webServer processes spawn.
+ * Regression E2E is a consumer of the shared full-stack Runtime Harness.
  *
- * Prepares two directories with deliberately different lifetimes (see
- * ./runtime.ts): the fixed NESSION_HOME, wiped so each run starts from empty
- * state, and this run's own tmux socket directory, which is never wiped
- * up-front.
- *
- * ── No pre-run tmux sweep ──────────────────────────────────────────────
- * Earlier versions ran `TMUX_TMPDIR=… tmux kill-server` here before starting.
- * That is gone, deliberately. `TMUX_TMPDIR` does not isolate anything once
- * `$TMUX` is set, so the command landed on the developer's default socket and
- * killed their real tmux server, sessions and all (#574). The socket path is now
- * unique per run, so there is no prior server of *this* run's to clean up.
- *
- * The cost is that a run killed hard (Ctrl-C / SIGKILL — the teardown below
- * is skipped, leaving no owner for the tmux server) never cleans up: its
- * socket, tmux server and directory survive — and because each run picks a
- * new path, those orphans accumulate without bound instead of being
- * overwritten. Reclaim them with scripts/sweep-test-sessions.sh (list /
- * --kill), which recognizes this directory pattern as an owned run
- * directory and verifies the socket before killing it.
- *
- * ── Why not override HOME too? ─────────────────────────────────────────
- * `cargo run` invokes rustup, which reads `$HOME/.rustup` and `$HOME/.cargo`.
- * Setting HOME to the isolated dir made rustup try to download the toolchain
- * into /tmp/nession-e2e/.rustup and fail with "No such file or directory". The
- * agent's working dir is set via `default_working_dir` in its fixture config
- * instead.
+ * Playwright no longer owns Server / Agent / tmux / Web provisioning. Its
+ * global setup asks the same harness used by Acceptance to provision the real
+ * stack, and returns the harness teardown. That keeps regression E2E lifecycle
+ * independent from Acceptance lifecycle while sharing the low-level runtime.
  */
 export default async function setup(): Promise<() => Promise<void>> {
-  // ── NESSION_HOME: wipe, then recreate empty ─────────────────────────────
-  // Holds only on-disk state (SQLite db, logs, env files) and the agent's
-  // working dir — no tmux socket lives here, which is what makes wiping safe.
-  rmSync(E2E_RUN_DIR, { recursive: true, force: true });
-  mkdirSync(E2E_RUN_DIR, { recursive: true });
+  const runtime = await startFullStackRuntime({
+    repoRoot: path.resolve(__dirname, '..'),
+    targetSha: process.env.NESSION_TARGET_SHA,
+    profile: 'e2e-regression',
+    home: E2E_RUN_DIR,
+    tmuxSocket: E2E_TMUX_SOCKET,
+    serverPort: E2E_SERVER_PORT,
+    agentPort: E2E_AGENT_PORT,
+    stalledProbePort: E2E_STALLED_PROBE_PORT,
+    webPort: E2E_WEB_PORT,
+    // Preserve the old regression-run artifact/debug lifetime: the next run
+    // wipes NESSION_HOME before provisioning, while teardown always removes
+    // processes and this run's isolated tmux server/socket.
+    cleanupHome: false,
+  });
 
-  // ── This run's tmux socket directory ────────────────────────────────────
-  // tmux does not create the socket's parent directory (measured: it fails with
-  // "error creating <path> (No such file or directory)"), so create it here.
-  mkdirSync(E2E_TMUX_DIR, { recursive: true, mode: 0o700 });
-  // Owner marker for scripts/sweep-test-sessions.sh — this runner's PID.
-  // Written before any webServer (and therefore any tmux server on this
-  // socket) exists, so a surviving directory whose owner PID is dead is
-  // unambiguously an orphan. The lock dies with the directory: teardown
-  // removes the whole dir, and so does the sweep when it reclaims.
-  writeFileSync(`${E2E_TMUX_DIR}/owner.pid`, String(process.pid));
+  if (runtime.base_url !== E2E_WEB_URL) {
+    await runtime.stop();
+    throw new Error(
+      `E2E runtime URL mismatch: harness returned ${runtime.base_url}, expected ${E2E_WEB_URL}`,
+    );
+  }
 
   return async () => {
-    // ── Kill this run's tmux server ────────────────────────────────────
-    // Targeted by absolute socket path, and only after the server on it
-    // confirms that same path — so this can never reach another server.
-    if (existsSync(E2E_TMUX_SOCKET)) {
-      try {
-        const reported = execFileSync(
-          'tmux',
-          ['-S', E2E_TMUX_SOCKET, 'display-message', '-p', '#{socket_path}'],
-          { encoding: 'utf8' },
-        ).trim();
-        if (reported === E2E_TMUX_SOCKET) {
-          execFileSync('tmux', ['-S', E2E_TMUX_SOCKET, 'kill-server'], {
-            stdio: 'ignore',
-          });
-        } else {
-          console.warn(
-            `[e2e teardown] refusing kill-server: socket reported ${reported}, expected ${E2E_TMUX_SOCKET}`,
-          );
-        }
-      } catch {
-        // No server on the socket — it already exited (tmux's exit-empty
-        // closes the server once the last session goes).
-      }
-    }
-
-    // ── Kill Rust processes that survived the webServer shutdown ────────
-    // Pattern targets only the E2E binary paths; it cannot match
-    // ~/.local/bin/nession or any other installed binary.
-    for (const bin of ['nession-server', 'nession-agent']) {
-      try {
-        execFileSync('pkill', ['-f', `target/debug/${bin}`], { stdio: 'ignore' });
-      } catch {
-        // no matching process — fine
-      }
-    }
-
-    rmSync(E2E_TMUX_DIR, { recursive: true, force: true });
+    await runtime.stop();
   };
 }

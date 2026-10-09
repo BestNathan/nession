@@ -39,7 +39,7 @@ function fadeMask(up: boolean, down: boolean): string | undefined {
   if (!up && !down) {
     return undefined
   }
-  const fade = 'var(--conversation-group-fade)'
+  const fade = 'var(--nession-conversation-group-fade)'
   const top = up ? `transparent 0, #000 ${fade}` : `#000 0`
   const bottom = down ? `#000 calc(100% - ${fade}), transparent 100%` : `#000 100%`
   return `linear-gradient(to bottom, ${top}, ${bottom})`
@@ -65,7 +65,7 @@ export function ToolGroup({
       <summary
         className={cn(
           'flex cursor-pointer items-center gap-2 py-1',
-          'text-[var(--conversation-tool-foreground)]',
+          'text-[var(--nession-conversation-tool-foreground)]',
           chromeSansRole('metadata'),
         )}
       >
@@ -78,13 +78,13 @@ export function ToolGroup({
         </span>
         {summary.running > 0 ? (
           <span className="flex shrink-0 items-center" data-testid="conversation-tool-group-running">
-            <Loader aria-hidden className="h-3.5 w-3.5 animate-spin" />
+            <Loader aria-hidden className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />
             <span className="sr-only">{summary.running} still running</span>
           </span>
         ) : null}
         {summary.failed > 0 ? (
           <span
-            className="flex shrink-0 items-center gap-1 text-[var(--conversation-tool-error)]"
+            className="flex shrink-0 items-center gap-1 text-[var(--nession-conversation-tool-error)]"
             data-testid="conversation-tool-group-failed"
           >
             <AlertCircle aria-hidden className="h-3.5 w-3.5" />
@@ -99,11 +99,11 @@ export function ToolGroup({
         // the wheel scrolls this body until its edge, then chains to the
         // transcript, with nothing listening for the boundary.
         className="overflow-y-auto overscroll-y-auto"
-        style={{ maxHeight: 'var(--conversation-group-max-height)' }}
+        style={{ maxHeight: 'var(--nession-conversation-group-max-height)' }}
       >
         <div
           className="flex flex-col pe-1"
-          style={{ gap: 'var(--conversation-row-gap)', maskImage: fadeMask(edges.up, edges.down) }}
+          style={{ gap: 'var(--nession-conversation-row-gap)', maskImage: fadeMask(edges.up, edges.down) }}
         >
           {items.map((item) => (
             <ToolActivity key={item.id} item={item} />

@@ -93,3 +93,18 @@ Do not use Pending/N/A to bypass a reachable required proof.
 When acceptance tooling changes, run its self-tests and Gate suite. Any model-backed Acceptance invocation must also emit the canonical Agent Workflow Telemetry artifact; deterministic/no-criteria Acceptance does not invent an Agent run.
 
 When a criterion depends on deployment/runtime state, prove the exact revision/environment requested rather than an adjacent successful run.
+
+
+## Source-aligned Acceptance Cases
+
+Use a source-aligned Case when one Success Criterion needs executable evidence tied to an exact product SHA. The canonical shape is `e2e/acceptance/cases/<issue>/<SC>/`: **one Case per Issue/SC**, one independently reported result, optional multiple verifier steps.
+
+Choose the Case stage from the Issue Acceptance Report. Use `browser` for UI/browser-observable behavior, `protocol` for wire/WebSocket behavior, and `runtime` for orchestration/process/config/file evidence. All verifier types may share the same `full-stack-local` Runtime Harness; protocol/runtime verification must not launch Playwright unless a browser verifier is declared.
+
+A Case Pass requires concrete evidence from every declared verifier. Skip/absence is Pending. Results pin exact target SHA, Case revision/tree SHA and SC contract digest. Compact immutable records are ingested into the append-only `acceptance-results` orphan branch; large traces/screenshots/logs remain workflow artifacts.
+
+Automatic Case execution maps staging push → `staging` and main push → `post-merge` using exact SHA Requirement association discovery. Manual replay must select Issue, SC, exact 40-character SHA, stage and runtime profile.
+
+Security boundary: target Case code is read-only (`contents: read`, `issues: read`). It must never mutate an Issue, push result branches, or receive production secrets. Only trusted `main` ingestion/updater code may write `acceptance-results` and project an eligible result into the Issue, after current-SHA, association and contract-digest checks.
+
+For the full creation, stage selection, verifier choice, evidence quality, archive/promotion and future remote-profile rules, read `docs/architecture/acceptance-cases.md`.

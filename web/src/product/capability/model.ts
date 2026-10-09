@@ -38,17 +38,34 @@ export interface CapabilityFacts {
 
 export interface CapabilityContext extends CapabilityScope {
   surface?: CapabilitySurface;
+  /**
+   * Which experience is asking (#1347 SC-37).
+   *
+   * Some capabilities are context-sensed rather than work-sensed: Terminal Keys
+   * exists because a touch device with an active Terminal has no physical keys
+   * — a fact about the *device*, not about the session's pane. That is why it
+   * arrives here, beside `surface`, rather than through `facts`: facts are
+   * observations of the session, and this one observes the surface the user is
+   * holding.
+   */
+  experience?: 'web' | 'app';
   facts?: CapabilityFacts;
 }
 
 export interface CapabilitySnapshot {
   id: CapabilityId;
+  /** Full human-readable capability identity. */
   title: string;
+  /** Capability-owned compact identity for constrained navigation surfaces. */
+  shortTitle?: string;
   scope: CapabilityScope;
   state: CapabilityState;
 }
 
-export type CapabilitySnapshotData = Omit<CapabilitySnapshot, 'id' | 'title'>;
+export type CapabilitySnapshotData = Omit<
+  CapabilitySnapshot,
+  'id' | 'title' | 'shortTitle'
+>;
 
 /**
  * A provider describes capability semantics and state. It does not own global
@@ -56,6 +73,14 @@ export type CapabilitySnapshotData = Omit<CapabilitySnapshot, 'id' | 'title'>;
  */
 export interface CapabilityDefinition {
   id: CapabilityId;
+  /** Full human-readable capability identity. */
   title: string;
+  /**
+   * Capability-owned compact identity.
+   *
+   * Required by the registry when `title` exceeds the compact-name limit.
+   * Nession never manufactures an abbreviation from the full title.
+   */
+  shortTitle?: string;
   resolve(context: CapabilityContext): CapabilitySnapshotData;
 }

@@ -1,13 +1,14 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import noPrimitiveTokens from './rules/no-primitive-tokens.js';
 import noCrossExperienceToken from './rules/no-cross-experience-token.js';
 import noCapsuleMagicMetrics from './rules/no-capsule-magic-metrics.js';
 import noSfOverlayVars from './rules/no-sf-overlay-vars.js';
 import noReverseImports from './rules/no-reverse-imports.js';
 import noUiProductImports from './rules/no-ui-product-imports.js';
 import noDeepCapabilityImports from './rules/no-deep-capability-imports.js';
+import noCapabilityPortals from './rules/no-capability-portals.js';
+import visualVocabulary from './rules/visual-vocabulary.js';
 
 const metadataPath = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -21,13 +22,14 @@ const plugin = {
     version: '1.0.0',
   },
   rules: {
-    'no-primitive-tokens': noPrimitiveTokens(lintMetadata),
     'no-cross-experience-token': noCrossExperienceToken(lintMetadata),
     'no-capsule-magic-metrics': noCapsuleMagicMetrics(),
     'no-sf-overlay-vars': noSfOverlayVars(),
     'no-reverse-imports': noReverseImports,
     'no-ui-product-imports': noUiProductImports,
     'no-deep-capability-imports': noDeepCapabilityImports,
+    'no-capability-portals': noCapabilityPortals,
+    'visual-vocabulary': visualVocabulary(lintMetadata),
   },
 };
 

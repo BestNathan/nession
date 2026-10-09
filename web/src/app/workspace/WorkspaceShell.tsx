@@ -1,11 +1,14 @@
+import { useRef } from 'react';
+import {
+  capsuleExchangeStyle,
+  useCapsuleExchange,
+} from '@/platform/motion/capsuleExchange';
 import { resolveCapabilityPresences, type CapabilityId } from '@/product/capability';
 import { cn } from '@/shared/lib/utils';
+import { useWorkspaceCapsuleClearance } from '@/app/workspace/hooks/useWorkspaceCapsuleClearance';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { resolveWorkspaceCapabilities } from '@/app/workspace/capabilities';
-import {
-  buildWorkspacePresentationModel,
-  type WorkspacePresentationItem,
-} from '@/app/workspace/presentation';
+import { buildWorkspacePresentationModel } from '@/app/workspace/presentation';
 import { WORKSPACE_VIEW_BINDINGS } from '@/app/workspace/viewBindings';
 import type {
   WorkspaceContext,
@@ -13,10 +16,13 @@ import type {
   WorkspaceViewBinding,
 } from '@/app/workspace/workspaceContext';
 import { CapabilityCapsule } from '@/app/workspace/CapabilityCapsule';
-import { capsuleZoneClass } from '@/product/terminal/capsule/CapsuleZone';
+import { capsuleZoneAppClass, capsuleZoneClass } from '@/product/terminal/capsule/CapsuleZone';
 
 const workspaceViewBindings = new Map<string, WorkspaceViewBinding>(
   WORKSPACE_VIEW_BINDINGS.map((view) => [view.id, view]),
+);
+const workspaceViewBoundCapabilityIds = new Set<CapabilityId>(
+  WORKSPACE_VIEW_BINDINGS.map((view) => view.id),
 );
 
 export interface WorkspaceShellProps {
@@ -33,16 +39,11 @@ export interface WorkspaceShellProps {
    */
   depth?: WorkspaceDepthControl;
   /**
-   * Whether the open view has pushed a depth over its capability root. Gates
-   * the dock, which belongs to the root — see `showDock` below.
-   */
-  pushed?: boolean;
-  /**
    * The Web's "Open Terminal" destination action (#1204), composed beside the
-   * capability dock. It is *surface* navigation, not a capability: it stays
-   * when `pushed` hides the dock, and it never becomes a dock entry. Rendered
-   * for the Web experience only — the App leaves a Workspace depth through its
-   * page header's Back.
+   * capability dock. It is *surface* navigation, not a capability: it never
+   * becomes a dock entry, and it sits beside the dock at every depth (owner
+   * decision 2026-10-03 — see `showDock`). Rendered for the Web experience
+   * only — the App leaves a Workspace depth through its page header's Back.
    */
   surfaceAction?: React.ReactNode;
 }
@@ -55,10 +56,6 @@ export interface WorkspaceShellProps {
  * `undefined` at the point an App view is rendered.
  */
 const NO_DEPTH_CONTROL: WorkspaceDepthControl = { setPush: () => undefined };
-
-function bindingFor(item: WorkspacePresentationItem): WorkspaceViewBinding | undefined {
-  return workspaceViewBindings.get(item.snapshot.id);
-}
 
 /**
  * Surface navigation (#1204): the destination action's own `nav`, adjacent to
@@ -92,7 +89,7 @@ function UnavailableCapability({ title }: { title: string }) {
       <div className="max-w-sm space-y-1.5">
         <p className={cn('text-foreground', chromeSansRole('primary'))}>{title} is not available here</p>
         <p className={cn('text-muted-foreground', chromeSansRole('metadata'))}>
-          Choose another capability from More. Nession will keep this view stable instead of switching automatically.
+          Choose another capability from the Capability Capsule. Nession will keep this view stable instead of switching automatically.
         </p>
       </div>
     </div>
@@ -100,17 +97,30 @@ function UnavailableCapability({ title }: { title: string }) {
 }
 
 /**
- * Workspace framework: semantic capabilities resolve first, then a bounded
- * Nession-owned presentation model decides what earns direct presence and what
- * stays progressively discoverable through More.
+ * Workspace framework: semantic capabilities resolve first, then one
+ * Nession-owned presentation model yields the lifecycle-visible, view-bound
+ * registration-ordered row. Overflow belongs to the row itself, not to a
+ * second direct/More disclosure owner.
  */
 export function WorkspaceShell({
   ctx,
   activeCapabilityId,
   depth = NO_DEPTH_CONTROL,
-  pushed = false,
   surfaceAction,
 }: WorkspaceShellProps) {
+  // SC-12: the shell is the Workspace's occlusion owner — see the hook for why
+  // it measures the tool bar rather than the Terminal's composer.
+  const shellRef = useRef<HTMLDivElement>(null);
+  useWorkspaceCapsuleClearance(shellRef);
+
+  // The App's capsule handoff, incoming half: while the swipe carries this
+  // layer in, the Capability Form arrives slightly behind the finger's pace
+  // and settles into the slot the Conversation form is leaving. X-only and
+  // endpoint-inert, so a settled Workspace carries no style and
+  // `useWorkspaceCapsuleClearance`'s vertical measurement is untouched.
+  const exchange = useCapsuleExchange();
+  const exchangeStyle = capsuleExchangeStyle(exchange, 'arriving');
+
   const resolution = resolveWorkspaceCapabilities(ctx);
   const presences = resolveCapabilityPresences(resolution.snapshots, {
     surface: 'workspace',
@@ -119,6 +129,7 @@ export function WorkspaceShell({
     snapshots: resolution.snapshots,
     presences,
     openedCapabilityId: activeCapabilityId,
+    viewBoundCapabilityIds: workspaceViewBoundCapabilityIds,
   });
 
   const openedPresence = presentation.opened?.presence;
@@ -136,27 +147,42 @@ export function WorkspaceShell({
     resolution.snapshots.find((snapshot) => snapshot.id === activeCapabilityId)?.title ??
     activeCapabilityId;
 
-  const directItems = [...presentation.primary, ...presentation.contextual].filter(bindingFor);
-  const discoverableItems = presentation.discoverable.filter(bindingFor);
-  // Capabilities the reader cannot act with here keep a slot too, rendered inert
-  // rather than dropped — membership that changes as the work changes is how a
-  // reader loses track of what the Workspace holds.
-  const unavailableItems = presentation.unavailable.filter(bindingFor);
-  // Capsule V2 (#1347): Workspace capsule shows ALL capabilities (scrollable).
-  // This is the reciprocal of Terminal, which shows only the active capability.
-  const allCapsuleItems = [...directItems, ...discoverableItems, ...unavailableItems];
+  // Capsule V2 (#1347): Workspace capsule shows every capability that has
+  // earned visible Workspace presence. `unavailable` resolves to hidden and
+  // therefore owns no navigation slot (#1455); the opened unavailable view may
+  // still remain as explanatory content without advertising dead chrome.
+  //
+  // The row renders **registration order**, and the open capability is only
+  // *marked* by its entry surface, never moved. The owner's follow-up settled
+  // this: activation is not placement, so the entry under the thumb stays where
+  // it was and a row does not reshuffle itself as the work changes. The
+  // presentation model is now the single membership/order owner: it already
+  // removed hidden and unbound capabilities and preserved registry order.
+  const allCapsuleItems = presentation.items;
   const hasNavigation = allCapsuleItems.length > 0;
-  // `#1051`: the dock is the *capability root's* switcher. A pushed detail has
-  // its own page and its own Back, so a global capability switcher over it would
-  // be a second navigation owner answering to a depth it does not belong to.
-  const showDock = hasNavigation && !pushed;
-  // `#1204`: the surface-leave action answers to a different axis than the
-  // dock — a pushed depth hides *capability* navigation, never the route back
-  // to the peer surface. Web only; the App's leave is its page header's Back.
+  // Owner decision 2026-10-03, superseding `#1051`'s dock half: **the capsule
+  // is present at every Workspace depth.** The old rule hid it over a pushed
+  // detail on the reasoning that a switcher there would be "a second
+  // navigation owner"; measured on the App Files flow, the cost of that was a
+  // capsule you lose the moment you open a file, and a Workspace whose
+  // capability context vanishes exactly when you are deepest in a capability.
+  // What `#1051` still owns is the *leave*: a pushed depth's own Back is its
+  // one route out, and the shell's swipe stands down for it (`shellMayPage`
+  // in `AppLayers` / `useSwipePager`). Leaving is one owner per depth; being
+  // able to switch capabilities is not leaving.
+  //
+  // The dock's clearance follows from this: the pushed depth's scrollers must
+  // clear it exactly as the root's do (`--nession-local-workspace-content-bottom-inset`,
+  // published from this bar's own geometry — see `useWorkspaceCapsuleClearance`).
+  const showDock = hasNavigation;
+  // `#1204`: the surface-leave action never becomes a dock entry, and it stays
+  // beside the dock at every depth. Web only; the App's leave is its page
+  // header's Back.
   const showSurfaceAction = ctx.experience === 'web' && surfaceAction !== undefined;
 
   return (
     <div
+      ref={shellRef}
       data-testid="workspace-shell"
       data-capability-diagnostics={resolution.diagnostics.length}
       /* The Workspace region's ground is the canvas, not a tint of it.
@@ -170,7 +196,13 @@ export function WorkspaceShell({
          declared and consumed by nothing until here. */
       className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-workspace-background"
     >
-      <div data-testid="workspace-tool-content" className="min-h-0 flex-1 overflow-hidden">
+      {/* `flex flex-col` so the region constrains its single view instead of
+          letting it size to its content: a view built as `flex-1 min-h-0`
+          (AgentDetail, GitWorkspace) is a flex item here, and without the
+          container a tall view overflowed the region — clipped by
+          `overflow-hidden`, with no scroll to reach its end, which is the
+          thing SC-12 assumes can always happen. */}
+      <div data-testid="workspace-tool-content" className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {ctx.experience === 'app' ? (
           ActiveAppLayout ? (
             <ActiveAppLayout ctx={ctx} depth={depth} />
@@ -193,7 +225,15 @@ export function WorkspaceShell({
         <div
           data-testid="workspace-tool-bar"
           data-navigation-mode="contextual"
-          className={cn(capsuleZoneClass, 'gap-[length:var(--shell-space-2)]')}
+          data-capsule-exchange={exchangeStyle ? 'arriving' : undefined}
+          style={exchangeStyle}
+          className={cn(
+            // #1347 SC-08 / SC-29: on App the zone sits where the Conversation
+            // capsule does (the App dock placement); on Web it keeps the shared
+            // zone's own bottom offset.
+            ctx.experience === 'app' ? capsuleZoneAppClass : capsuleZoneClass,
+            'gap-[length:var(--nession-shell-space-2)]',
+          )}
         >
           {showSurfaceAction ? <SurfaceNavigation>{surfaceAction}</SurfaceNavigation> : null}
           {showDock ? (
@@ -201,6 +241,7 @@ export function WorkspaceShell({
               items={allCapsuleItems}
               activeCapabilityId={activeCapabilityId}
               onSelect={ctx.onToolChange}
+              experience={ctx.experience}
             />
           ) : null}
         </div>

@@ -15,7 +15,7 @@ import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
  * ## Identity versus inventory
  *
  * The header already says *which checkout this Session is in*, and the Terminal
- * Signal says it before that. This answers a question neither can: *what other
+ * Peek says it before that. This answers a question neither can: *what other
  * places does this repository have*. The Session's own entry is therefore
  * marked, so the two agree instead of competing — and the row is not a control,
  * because moving the Session to another checkout is a Session action and this
@@ -104,7 +104,7 @@ function WorktreeRow({ worktree, ctx }: { worktree: GitWorktree; ctx: WorkspaceC
       data-current={worktree.current ? 'true' : undefined}
       title={worktree.path}
       className={cn(
-        'flex flex-col gap-0.5 rounded-[var(--radius-surface)] px-2 py-1.5',
+        'flex flex-col gap-0.5 rounded-[var(--nession-radius-surface)] px-2 py-1.5',
         worktree.current && 'bg-accent text-accent-foreground',
       )}
     >

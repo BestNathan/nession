@@ -2,7 +2,11 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } fro
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { loadTokens, resolveRef } from './generate-tokens.mjs';
+import {
+  loadTokens,
+  namespaceTokenValue,
+  resolveRef,
+} from './generate-tokens.mjs';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const DESIGN_DIR = join(SCRIPT_DIR, '..');
@@ -16,6 +20,12 @@ const BLOCK_FIELDS = {
   wrap: 'boolean',
   heightToken: 'token',
   minHeightToken: 'token',
+  // A ceiling, not a box: the surface takes its content's natural height and
+  // clamps only here (`pattern.context-capsule`). It belongs in this vocabulary
+  // beside heightToken/minHeightToken because the three are one family — what
+  // the block always is, what it is at least, what it is at most — and the
+  // absence of this member was the only gap in it.
+  maxHeightToken: 'token',
   overflow: 'enum:clip,menu,sheet,scroll,wrap',
   alignY: 'enum:top,middle,bottom',
   justify: 'enum:start,center,end,space-between,space-around',
@@ -40,17 +50,24 @@ const BLOCK_FIELDS = {
   // a 36px drawn circle apart from the 44px box holding it, which on App the
   // height token alone cannot do (control.sm == control.md == 44px).
   visualSizeToken: 'token',
+  // The other measurable *inside* the block, and the one a list repeats:
+  // `context-capsule`'s rows carry two lines (title + reason) and are taller
+  // than any control band on purpose, so `heightToken` (the surface) and
+  // `visualSizeToken` (what a control paints) both name the wrong thing.
+  rowHeightToken: 'token',
   visibility: 'visibility',
 };
 
 const TOKEN_TARGET_FIELDS = new Set([
   'heightToken',
   'minHeightToken',
+  'maxHeightToken',
   'touchTargetToken',
   'minWidthToken',
   'maxWidthToken',
   'padXToken',
   'visualSizeToken',
+  'rowHeightToken',
 ]);
 
 /** Fields emitted as a resolved CSS expression (`<field>Css`), not as px. */
@@ -143,7 +160,9 @@ function cssForTokenId(index, tokens, id) {
     return { known: true, css: null };
   }
   if (typeof value === 'number') return { known: true, css: String(value) };
-  if (typeof value === 'string' && value.trim() !== '') return { known: true, css: value };
+  if (typeof value === 'string' && value.trim() !== '') {
+    return { known: true, css: namespaceTokenValue(value) };
+  }
   return { known: true, css: null };
 }
 

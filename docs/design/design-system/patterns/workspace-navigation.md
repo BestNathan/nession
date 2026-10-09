@@ -14,26 +14,18 @@ This pattern previously required that direct chrome be **bounded to the contextu
 
 **#1347 (Capsule V2) supersedes both.** The Workspace capsule now carries the capability list — every capability that has a Workspace view — as one bounded, internally-scrolling horizontal row, and the `+`/menu disclosure is gone from Workspace. The contract's `overflow` moved from `menu` to `scroll` in the same change; the design-source test that pinned it moved with it.
 
-### Membership does not vary with the work (2026-10-02, owner decision)
+### Membership follows lifecycle visibility (#1455)
 
-This is a **second and separate reversal** — not part of #1347's — and it is recorded on its own because it replaces a rule this document carried for longer than Capsule V2 has existed.
+Capability registration does not buy permanent navigation chrome.
 
-An `unavailable` capability (presence `hidden`) used to be **dropped**. The old rule was *"unavailable capabilities render no dead slot"*, and the anti-pattern list called a disabled entry chrome *"advertising something that cannot be opened"*. It now **keeps its slot, drawn inert** on `disabled-foreground` — the role the design system defines for a control the user cannot act with, held to the 3:1 that keeps it from disappearing rather than to AA.
+The Workspace Capsule contains capabilities that:
 
-What changed the answer: Capsule V2 put the whole capability list in one row, so dropping a capability now means the row's **membership** changes as the work changes — an entry that vanishes and reappears is how a reader loses track of what the Workspace holds. The row now says "this exists, and you cannot use it here" rather than staying silent.
+1. contribute a Workspace view; and
+2. currently have visible lifecycle presence.
 
-**What it costs, plainly.** The retired rule was not empty: a Session with no files now shows a permanently inert Files entry. The mitigation is that it is inert and legible as such — not a live control that fails, not a silent absence — and it still carries `data-capability-state="unavailable"` for anything that needs to reason about it.
+An `unavailable` capability resolves to hidden presence and **does not reserve a disabled slot**. If that capability was already open when it becomes unavailable, its explanatory content may remain stable until the user chooses another capability, but the navigation row does not advertise dead chrome.
 
-What the supersession keeps, and what carries the old rules' weight instead:
-
-| Old rule | What holds it now |
-|---|---|
-| Direct chrome is bounded | The **capsule** is bounded: it must stay inside the tool bar while its content scrolls. The bound is on the row's width, not on the entry count. |
-| Registration never implies permanent navigation | A capability with no Workspace view contributes **no slot**. Visibility follows the view binding, not the registry. |
-| Unavailable capabilities render no dead slot | **Reversed on 2026-10-02 — see the section above.** The capability keeps its slot and is drawn inert. What survives from the old rule is its reason: the entry is *not* a live control that fails, and it is not silent either. |
-| Not a second application shell | Unchanged — the capsule is a bottom-zone control, not a sidebar and not a band above the capability. |
-
-The tradeoff, stated plainly: a Workspace with many capabilities now shows many icons in one row, and that row scrolls. The earlier design preferred a small visible set. That preference is **no longer a rule of this pattern** — the anti-patterns below were narrowed to match, and what remains forbidden is a row that *grows the shell* rather than a row that holds many entries.
+The capsule itself remains bounded. Adding more eligible capabilities increases only the row's horizontal scroll extent; it never widens the shell, creates a second row, or changes the Capsule's outer height.
 
 ## Purpose
 
@@ -43,7 +35,7 @@ Navigation should be generated from Workspace context and capability state rathe
 
 Must not:
 
-- render a slot for a capability that has no Workspace view — there is nothing to open and nothing to explain. (An `unavailable` capability *does* keep a slot and is drawn inert — see the membership note above; the difference is that it has a view to be unavailable *in*.)
+- render a slot for a capability that has no Workspace view or whose lifecycle presence is hidden/unavailable — dead navigation chrome advertises something the user cannot open;
 - let the row grow the shell: the capsule's width is bounded and its content scrolls, so registering another capability never widens the chrome and never wraps the row onto a second line;
 - force Files master/detail chrome onto unrelated capabilities;
 - allow an extension to define global Workspace navigation independently of Nession;
@@ -63,12 +55,12 @@ Navigation consequences:
 
 | State | Navigation behavior |
 |-------|---------------------|
-| `unavailable` | **Its slot, drawn inert and disabled.** Resolves to `hidden` presence; the surface renders it on `disabled-foreground` rather than dropping it — see the membership note above. Reached some other way it still lands on the capability's own not-available state. |
-| `available` | Its slot, carrying `available` |
-| `relevant` | The same slot, carrying `relevant` — state is data on the entry, not a promotion into or out of the row |
-| `active` | Selected state (dot) and scrolled into view; may also have Session-level presence |
+| `unavailable` | No Workspace navigation slot; already-open explanatory content may remain stable. |
+| `available` | A quiet entry surface carrying `available`. |
+| `relevant` | The same entry geometry carrying `relevant`; relevance does not invent another selected treatment. |
+| `active` | The same entry becomes selected through its Nession-owned entry surface and is scrolled into view. No dot/badge/underline. |
 
-For every state that has a slot, state is published on the entry (`data-capability-state`, `data-capability-presence`), so a capability's condition stays legible without the row changing size or membership as the work changes — `unavailable` included, since it keeps its slot drawn inert rather than being removed (see the membership note above). A capability does not become primary navigation merely because it is active. Current work remains primary.
+For every visible state, state is published on the entry (`data-capability-state`, `data-capability-presence`). Selection is navigation identity, not a work signal: active/inactive/hover may change semantic foreground/background only, while geometry and typography remain invariant. A capability does not become primary navigation merely because it is active. Current work remains primary.
 
 ## Presentation model
 
@@ -79,7 +71,7 @@ Nession owns how the currently useful Workspace set is presented. Acceptable pat
 - the capability capsule itself — the current Workspace answer (see the supersession note above);
 - search / command palette;
 - native navigation stack on App;
-- focused entry from a Terminal capability Signal/Peek, preserving capability context;
+- focused entry from a Terminal capability Peek, preserving capability context;
 - location/resource-driven navigation when the Workspace contains multiple physical contexts.
 
 The implementation may combine these patterns. No one widget is the product model.
@@ -92,6 +84,7 @@ Conceptually, a capability contributes semantic data:
 interface WorkspaceCapability {
   id: string
   title: string
+  shortTitle?: string
   state: (context: CapabilityContext) => CapabilityState
 }
 ```
@@ -100,6 +93,13 @@ The exact API is implementation-specific. What a capability contributes is its
 semantic identity and state — a summary, an action list, or a self-declared view
 descriptor is not part of the contract, because each of those is a placement
 decision wearing a semantic name.
+
+`title` is the full human-readable identity. Compact navigation surfaces resolve
+`shortTitle ?? title`. If the full title exceeds **8 user-visible grapheme
+clusters**, the capability must declare an explicit `shortTitle` no longer than
+8 graphemes. Nession does not manufacture an abbreviation by slicing the full
+name. Context Capsule, Peek, Workspace headings and accessibility continue to use
+the full title where the surface has room for it.
 
 Important boundary:
 
@@ -124,7 +124,7 @@ Workspace
 
 A Workspace with only Files should not look like a five-tool product with four missing buttons. A Workspace with Git and an active coding agent may surface those because the work context justifies them.
 
-When Workspace is entered from a Terminal Signal/Peek, navigation should open directly at the corresponding capability and focus, not at a generic Workspace home. For example, selecting `TerminalCapsule.tsx` from a Git Peek should open Git → Changes → that file's diff with the same repo/worktree/session context. See [../../capability-emergence.md](../../capability-emergence.md).
+When Workspace is entered from a Terminal Peek, navigation should open directly at the corresponding capability and focus, not at a generic Workspace home. For example, selecting `TerminalCapsule.tsx` from a Git Peek should open Git → Changes → that file's diff with the same repo/worktree/session context. See [../../capability-emergence.md](../../capability-emergence.md).
 
 ## Web
 
@@ -144,42 +144,60 @@ App should prefer native spatial and push/pop interaction:
 - system/back navigation returns through capability detail before leaving Workspace;
 - nested navigation must not fight the top-level `Sessions ← Terminal → Workspace` spatial model.
 
-### The dock is the root's, not the stack's (`#1051`)
+### The capsule is present at every depth (owner decision, 2026-10-03 — supersedes `#1051`'s dock rule)
 
-The capability switcher is the **capability root's** control. It is present where
-switching between peer Workspace capabilities is conceptually valid — at the root — and
-it is absent once the user pushes into capability-owned detail.
+**Supersession.** `#1051` said the switcher was the capability *root's* control: visible
+at the root, absent over a pushed detail, on the reasoning that a peer-capability
+switcher over a detail would be a second navigation owner beside that depth's Back.
+
+The owner overturned the dock half of that on 2026-10-03, having used it: in the App
+Files flow the capsule disappeared the moment a file was opened, so the Workspace lost
+its capability context exactly when the user was deepest in a capability. The rule is
+now:
 
 ```text
-Files root       -> dock visible
-open App.tsx     -> dock hidden; the page belongs to Files' own navigation stack
+Files root       -> capsule visible
+open App.tsx     -> capsule visible; the detail's Back is still its only leave
 ```
 
-The reason is the one-navigation-bar rule
-([interaction/app.md](../../interaction/app.md#one-navigation-bar-per-depth)): a pushed
-detail has its own header and its own Back, so a peer-capability switcher floating over
-it would be a second navigation owner answering to a depth it has no place at. It would
-also put "switch capability" and "leave this file" within one thumb reach of each other
-while meaning opposite things.
+What survives from `#1051` is the **leave** rule, which was always the load-bearing
+half: a pushed depth's own Back is that depth's one route out, and the shell's swipe
+stands down while it is offered (`shellMayPage`). *Leaving* is one owner per depth;
+*switching capabilities* is not leaving, and the capsule is a bottom-zone control, not
+a bar for the depth.
 
-Two consequences for the rest of the App:
+Two consequences, replacing the old pair:
 
-- The bottom clearance the dock needs is the **root's** clearance. A pushed detail must
-  not reserve permanent padding for a dock that is not there.
+- The bottom clearance the capsule needs is **every depth's** clearance. A pushed
+  detail's scrollers reserve the same trailing padding the root's do — the workspace
+  publishes one measured inset (`--nession-workspace-content-bottom-inset`, from the bar's own
+  geometry) and every Workspace scroller spends it, so the last line of a file, the
+  last turn of a transcript and the last search hit can all be scrolled above the
+  capsule.
 - The Workspace capsule has **no `+`** (#1347): its targets are the capability list
   itself, and they are built from capability snapshots, so the row cannot become a
   resource-creation affordance. (The Conversation capsule on Terminal keeps its `+`
   as work disclosure — that is `terminal-capsule.md`'s control, a different owner.)
 
-This narrows the open question recorded below (where the band floats) without settling
-it: the band is root-only on whichever page owns it.
-
 ### Web: the capability capsule
 
-Capability navigation on Web is a **capsule** of rounded icon targets in the bottom
-Capsule Zone, with a dot marking the open one. It carries every capability that has a
-Workspace view and is not `unavailable` (#1347). The capsule's width is bounded and the
-row scrolls internally, so the shell does not grow when an extension registers.
+Capability navigation on Web is a **capsule** of fixed-width labeled slots in the
+bottom Capsule Zone. The open capability is identified by the selected **entry
+surface itself** — there is no detached dot, badge or underline (#1458). It carries
+every capability that has a Workspace view **and visible lifecycle presence**;
+`unavailable` is hidden and reserves no disabled slot (#1455).
+
+The capsule's width is bounded and the row scrolls internally, so the shell does
+not grow when an extension registers. The entry itself is exactly the canonical
+`control.md` band. Because Web has the denser 32px band, icon + label are laid
+out horizontally and the label is constrained to one line inside its slot. The
+visual label uses the capability-owned compact identity (`shortTitle ?? title`);
+the complete `title` remains the button's accessible name/title. Truncation is a
+defensive viewport guard, not the naming strategy. Content adapts to the band;
+the outer Capsule does not grow.
+
+The glyph is drawn bare (`icon-md`): the painted circle belongs to icon buttons,
+while a labeled capability entry's affordance is its icon-plus-name pair.
 
 **No shell band above the capability area.** `workspace.md` is explicit that a
 capability's own layout belongs to the capability — Files' master/detail *"belongs
@@ -188,49 +206,70 @@ this document forbids at the top. Context is carried by the tree's root row
 instead: the tree starts at `nession`, so the root row states what the user is
 looking at without a chrome band restating it.
 
-### Open inconsistency: where the App band actually floats
+### The App Capsule family (owner decision, 2026-10-03)
 
-This document (and #748 §6) describes the App band as a pill floating **over the
-terminal**. In the implementation the band is rendered by `WorkspaceShell`, which
-mounts on the Workspace page — so on App it floats over the *Workspace*, not the
-terminal.
+On App there is **one Capsule with two states**, and the state decides only what
+is inside it:
 
-That matters beyond wording: #748 §7 asks for the band to hide when the capsule
-expands, and the capsule lives on the Terminal page. If the two are never on
-screen together, the rule has nothing to govern, and if the band is meant to
-float over the terminal, it is in the wrong container.
+```text
+Terminal page   -> Conversation Form   [ + | Ask Nession… | Send ]
+Workspace root  -> Capability Form     [ Files | Git | Claude | … ]
+```
 
-Recorded rather than resolved — moving the band changes which page owns it and
-what the App's two-layer stack means, and that is a product call, not a
-consequence of the wording.
+Surface navigation stays with the App's spatial model (swipe) plus the existing
+shell/header fallback — the Capsule Zone adds **no** Terminal/Workspace
+destination circles, unlike Web's reciprocal pair, and that difference is
+experience presentation, not a divergence in the Capsule's identity.
 
-### Touch floor (recorded decision, #730, extended by #748)
+What the two states **share** is the outer geometry: the floating surface and
+elevation, the semantic capsule radius (`--nession-radius-capsule`), the App dock's
+bottom and safe-area-aware placement, the shell's inner padding rhythm — and,
+after the owner correction of 2026-10-03, the band itself. The labeled entries
+take `control.md` directly, the same 44px row the composer uses, so both states
+measure **56px** on App; the shape claim, semantic radius, placement and height
+are compared relationally (SC-30). The correction is a correction: the first
+labeled build let entries carry their own vertical mass and the form grew to
+82px, which read as a different object sitting in the same slot ("太高了").
 
-The App band is a compact pill floating over the terminal, and it declares its own
-touch floor — `experience.app.touchTarget.compact` (28px) — instead of the 44px
-that `category.chrome` applies to chrome bands. The reasoning: chrome yields
-before the work surface, the pill already floats *over* the terminal rather than
-taking a row from it, and these entries are secondary controls reached
-deliberately rather than in a hurry.
+What they **do not** share is content — a composer on one, the labeled
+capability slots on the other. App keeps icon-over-label composition inside the
+44px band and consumes the same capability-owned compact identity as Web. The
+visual compact title is capped by contract at 8 grapheme clusters; the full title
+remains accessible. Truncation remains only a defensive containment fallback and
+never grants permission to resize the Capsule. A relational long-label fixture
+protects that final guard.
 
-This is a floor, not a waiver: the contract states the size the pill is allowed to
-be, the executable assertion enforces it at every App viewport, and shrinking it
-further fails CI. What it does not claim is comfort — 28px is below the platform
-guideline, and that cost is accepted in exchange for the terminal keeping its
-space. If the pill ever gains a touch-first role, the token moves back to `min`
-and the implementation has to grow with it.
+Two questions the previous revision left open, now settled by the same decision:
 
-**#748 extended the App band to two layers.** The band carries capability entries
-*and* the TerminalCapsule; **when the capsule expands, the band hides.** Hiding —
-not shifting, not shrinking — is what "yielding" means here: a partially visible
-band competes with the expanded capsule for the same thumb reach and reads as two
-half-controls rather than one. The 28px floor governs the capability layer; the
-capsule keeps its own sizing from `terminal-capsule.md`.
+- **Where the band floats.** The band was described as floating "over the
+  terminal", but it is rendered by `WorkspaceShell` and mounts on the Workspace
+  page. It floats over whichever surface owns it — the Conversation Form over
+  the Terminal, the Capability Form over the Workspace. They are the same
+  Capsule at the same place on both pages, which is what makes a surface switch
+  read as one object rather than two components.
+- **The touch floor.** The App capability band used to declare its own compact
+  floor — `experience.app.touchTarget.compact` (28px, #730), with
+  `dockTarget` as its twin — on the reasoning that it was a legacy dock
+  borrowing space from the terminal. Once the two states are one Capsule, that
+  exception has no owner: the entries take the standard App control band like
+  every other Capsule control, `control.md` (44px) hit target with the
+  `control.visualSize` (36px) circle drawn inside it (#1034). The
+  `touchTarget.compact` / `dockTarget` vocabulary **retired with the decision**
+  rather than being protected; the pattern declares no override, so the
+  viewport matrix enforces `category.chrome`'s
+  `experience.app.touchTarget.min` (44px) on every App viewport.
+
+`#748`'s yielding rule survives in the shape the one-Capsule model gives it: the
+Capability Form does not shrink or shift for a pushed depth — it stays, at the
+same band, over the detail (owner decision 2026-10-03, "the capsule is present
+at every depth"); the depth's own content is what moves, clearing the capsule
+with its trailing scroll padding. The Conversation Form keeps its own sizing
+from `terminal-capsule.md`.
 
 The narrowest supported App viewport is `app.narrow-phone` (375×812, from
-`design/contracts/viewports.json`). The two-layer stack is verified there, because
-that is where it has the least room and where a band that merely shrinks would
-first become unusable.
+`design/contracts/viewports.json`), and the family is verified there: both
+states at the canonical App viewports, plus the relational assertion that
+compares them as one Capsule rather than verifying each alone (#1347 SC-30).
 
 ## Files and other capability-specific layouts
 
@@ -240,6 +279,54 @@ Claude Code may use state/history/configuration views. Git may use repository st
 
 WorkspaceNavigation coordinates access; it does not force these capabilities into the same content layout.
 
+## Visual grammar ownership (#1451)
+
+Workspace navigation is the second product family, after Capsule, to make the
+repository-wide visual invariant stack executable.
+
+Its ownership chain is:
+
+```text
+--nession-* vocabulary
+        ↓
+shared primitives / Capsule geometry
+        ↓
+workspaceNavigationStyles
+        ↓
+CapabilityCapsule composition
+        ↓
+capability identity + state
+```
+
+Nession owns the Workspace navigation surface, entry geometry, radius,
+typography treatment, disabled/active affordance, indicator and motion. A
+capability contributes identity/state and its Workspace body; it does not
+redefine the global switcher's chrome.
+
+Selection is explicitly a **state change inside one visual grammar**, not a new
+recipe. The browser matrix measures one entry before and after it becomes active
+and requires width, height, radius, padding and label typography to remain
+identical. State may change semantic color/presence only.
+
+The canonical recipe owner is:
+
+```text
+web/src/product/workspace/patterns/workspaceNavigationStyles.ts
+```
+
+Consumers must not reproduce its radius/type/motion decisions inline. New visual
+behavior belongs there as an explicit semantic variant when it represents a real
+Workspace-navigation distinction.
+
+All direct custom-property consumption uses the repository namespace:
+
+```text
+--nession-*
+```
+
+Framework utilities such as `text-foreground` remain legal only because the
+generated theme bridge resolves them back to that vocabulary.
+
 ## Visual contract
 
 - Navigation chrome is secondary to active Workspace content and substantially secondary to Terminal when the user returns to the Session.
@@ -247,18 +334,21 @@ WorkspaceNavigation coordinates access; it does not force these capabilities int
 - Whitespace and hierarchy are preferred over card/tab proliferation.
 - Per-capability branding must not fragment Nession's visual language.
 - Active/relevant state may affect presence, but routine availability should remain quiet.
+- Active selection is a restrained semantic entry surface; it is not a dot, badge, underline, work signal or plugin-branded accent.
+- Compact capability labels are capability-owned semantic identities, not host-generated truncations.
 
 ## Anti-patterns
 
 - A capability strip that **grows the shell** — widening with the registry, or wrapping
   onto a second line. The failure is the growing row, not the number of entries in a
   bounded, scrolling one.
-- A slot for a capability that has no Workspace view — nothing to open, nothing to explain.
-  (An inert entry for an `unavailable` capability is *not* this: it has a view, it says so,
-  and it is why this anti-pattern was narrowed on 2026-10-02.)
-- A disabled entry drawn as a live one — an inert control must read as inert. Its
-  treatment is `disabled-foreground` and `disabled`, never a normal entry that silently
-  does nothing when pressed.
+- A slot for a capability that has no Workspace view.
+- A disabled permanent entry for an unavailable capability. `unavailable` is
+  hidden presence; explanatory content may remain open, but dead navigation
+  chrome must not advertise it.
+- A detached selected dot/badge/underline that makes navigation identity look like
+  notification, pagination or work state.
+- Automatically slicing a long capability title to invent a compact identity.
 - One extension = one global tab.
 - A Workspace home page that is mostly a grid of feature launch cards.
 - A full-height secondary sidebar that exists only to list capabilities.
@@ -280,12 +370,16 @@ Existing components should migrate incrementally. Do not remove reliable capabil
 
 ## Acceptance for future implementation work
 
-- [ ] A capability with no Workspace view contributes no slot; an `unavailable` one keeps its slot, drawn inert and disabled.
+- [ ] A capability with no Workspace view contributes no slot; an `unavailable` capability also contributes no navigation slot, even if its already-open content remains as explanatory context.
 - [ ] Capability state and presence are legible from the entry without changing the row's membership.
 - [ ] Workspace root communicates context, not a global feature catalog.
 - [ ] Extensions cannot independently fragment the global navigation model.
 - [ ] Web/App may present the same capability differently while preserving semantic state.
-- [ ] The App band meets its declared compact touch floor (`experience.app.touchTarget.compact`), enforced by the viewport matrix.
-- [ ] The capsule appears only at capability-root depth, and is absent over capability-owned detail.
+- [ ] The App entries meet the chrome touch floor (`experience.app.touchTarget.min`, 44px) — the pattern declares no compact override since the 2026-10-03 Capsule-family decision — enforced by the viewport matrix.
+- [ ] The App Capability Form and Conversation Form share one outer geometry — radius, shape claim, dock placement **and the 56px band** (both consume the same `control.md` row) — asserted relationally rather than each alone (#1347 SC-30 / #1455).
+- [ ] The capability capsule's row owns its horizontal drags: panning it never pages the shell, and only the shell's own edge bands remain a navigation start over it.
+- [ ] The capsule is present at every Workspace depth, pushed detail included, and each depth's scrollers can bring their last line above it (owner decision 2026-10-03, superseding `#1051`'s dock rule).
 - [ ] Files-specific layout remains local to Files.
 - [ ] The capsule stays inside the tool bar at every viewport, and its row scrolls internally.
+- [ ] Web flat Conversation Form and Web Capability Form have the same outer height; capability identity/state, long labels, and capability count cannot change the Capability Form's outer height or vertical anchor.
+- [ ] Long capability names adapt inside the fixed band and retain their complete accessible name.

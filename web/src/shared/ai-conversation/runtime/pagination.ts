@@ -48,16 +48,27 @@ export interface ConversationPositions {
   cursor: string | null
   /** Whether the reader has paged back at least once. */
   paged: boolean
+  /**
+   * Safe lower bound for unmodelled records in the loaded window.
+   *
+   * A provider reports only a page-local count and pages are explicitly allowed
+   * to overlap, so an exact union is unknowable without identities for skipped
+   * records. The maximum count observed across loaded pages is the strongest
+   * overlap-safe statement the runtime can make: at least this many records
+   * were omitted somewhere in the window.
+   */
+  skipped: number
 }
 
 export function emptyPositions(): ConversationPositions {
-  return { items: [], cursor: null, paged: false }
+  return { items: [], cursor: null, paged: false, skipped: 0 }
 }
 
 /** The two fields a page contributes to the window. */
 interface PageSlice {
   items?: AIConversationItem[] | null
   nextCursor?: string | null
+  skipped?: number
 }
 
 /**
@@ -76,6 +87,7 @@ export function withNewest(
     items: merging(current.items, page.items ?? []),
     cursor: current.paged ? current.cursor : (page.nextCursor ?? null),
     paged: current.paged,
+    skipped: Math.max(current.skipped, page.skipped ?? 0),
   }
 }
 
@@ -93,17 +105,30 @@ export function withOlderPage(
   page: PageSlice,
 ): ConversationPositions {
   const held = new Set(current.items.map((item) => item.id))
-  const arriving = (page.items ?? []).filter((item) => !held.has(item.id))
+  const pageItems = page.items ?? []
+  const arriving = pageItems.filter((item) => !held.has(item.id))
+  const overlapping = pageItems.filter((item) => held.has(item.id))
+
+  // The older page owns the newer value for any id it restates, exactly as a
+  // newest refresh does. Only its *placement* differs: genuinely older ids go
+  // in front, while overlaps keep the position already visible to the reader.
+  const reconciledHeld = merging(current.items, overlapping)
   return {
-    items: [...arriving, ...current.items],
+    items: [...arriving, ...reconciledHeld],
     cursor: page.nextCursor ?? null,
     paged: true,
+    skipped: Math.max(current.skipped, page.skipped ?? 0),
   }
 }
 
 /** Everything to render, oldest first. */
 export function itemsOf(positions: ConversationPositions): AIConversationItem[] {
   return positions.items
+}
+
+/** Safe lower bound for provider-reported omissions in the loaded window. */
+export function skippedOf(positions: ConversationPositions): number {
+  return positions.skipped
 }
 
 /** Whether a page of older items can still be fetched. */

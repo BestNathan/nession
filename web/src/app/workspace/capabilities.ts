@@ -8,12 +8,14 @@ import {
 } from '@/product/capability';
 import {
   CLAUDE_CODE_ID,
+  CLAUDE_CODE_SHORT_TITLE,
   CLAUDE_CODE_TITLE,
   resolveClaudeCodeState,
 } from '@/capabilities/claude-code';
 import { GIT_ID, GIT_TITLE, resolveGitState } from '@/capabilities/git';
 import {
   TERMINAL_KEYS_ID,
+  TERMINAL_KEYS_SHORT_TITLE,
   TERMINAL_KEYS_TITLE,
   resolveTerminalKeysState,
 } from '@/product/terminal/terminalKeys';
@@ -24,6 +26,10 @@ export function workspaceCapabilityContext(ctx: WorkspaceContext): CapabilityCon
     sessionId: ctx.session?.session_id,
     locationId: ctx.agent?.agent_id ?? ctx.session?.agent_id,
     surface: 'workspace',
+    // Context sense reads the device (#1347 SC-37): Terminal Keys exists where
+    // there is no physical keyboard, and only the composer knows which
+    // experience is asking.
+    experience: ctx.experience,
     facts: ctx.facts,
   };
 }
@@ -51,6 +57,7 @@ function resolveScope(
 interface WorkspaceCapabilityProvider {
   id: CapabilityId;
   title: string;
+  shortTitle?: string;
   /** Whether the environment can offer this capability at all. */
   available: (ctx: WorkspaceContext) => boolean;
 }
@@ -63,7 +70,7 @@ const WORKSPACE_CAPABILITY_PROVIDERS: readonly WorkspaceCapabilityProvider[] = [
   { id: 'files', title: 'Files', available: (ctx) => ctx.fileOps !== null },
   { id: 'session', title: 'Session', available: () => true },
   { id: 'agent', title: 'Agent', available: () => true },
-  { id: 'env', title: 'Environment', available: () => true },
+  { id: 'env', title: 'Environment', shortTitle: 'Env', available: () => true },
 ];
 
 function providerFor(
@@ -73,6 +80,7 @@ function providerFor(
   return {
     id: provider.id,
     title: provider.title,
+    ...(provider.shortTitle === undefined ? {} : { shortTitle: provider.shortTitle }),
     resolve: (context) => ({
       scope: resolveScope(context, workspaceContext),
       state: provider.available(workspaceContext) ? 'available' : 'unavailable',
@@ -94,6 +102,7 @@ function claudeCodeProvider(workspaceContext: WorkspaceContext): CapabilityDefin
   return {
     id: CLAUDE_CODE_ID,
     title: CLAUDE_CODE_TITLE,
+    shortTitle: CLAUDE_CODE_SHORT_TITLE,
     resolve: (context) => ({
       scope: resolveScope(context, workspaceContext),
       state: resolveClaudeCodeState(context.facts, context.sessionId),
@@ -132,9 +141,13 @@ function terminalKeysProvider(workspaceContext: WorkspaceContext): CapabilityDef
   return {
     id: TERMINAL_KEYS_ID,
     title: TERMINAL_KEYS_TITLE,
+    shortTitle: TERMINAL_KEYS_SHORT_TITLE,
     resolve: (context) => ({
       scope: resolveScope(context, workspaceContext),
-      state: resolveTerminalKeysState(context.sessionId),
+      // The whole context, not just the id: the keys are context-sensed, and
+      // "there is a touch device with a Terminal" is not a fact about the
+      // Session (SC-37).
+      state: resolveTerminalKeysState(context),
     }),
   };
 }

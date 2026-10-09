@@ -934,8 +934,30 @@ async fn a_recorded_resize_reaches_the_client_at_its_stream_position() {
             }
             _ => {}
         }
-        if acked && broadcast.is_some() && !delivered.is_empty() {
-            break;
+        // The resize ACK/broadcast can reach this reader before earlier
+        // asynchronous terminal output. Do not assert on that partial receive
+        // window: a valid late frame would otherwise look like a missing
+        // stream position ([1, 3] before position 2 arrives).
+        //
+        // This does not waive stream gaps. The same bounded deadline applies,
+        // and the strict no-gap assertion below still fails if a position
+        // never arrives.
+        if acked {
+            if let Some(resize_seq) = broadcast
+                .as_ref()
+                .and_then(|frame| frame.get("payload"))
+                .and_then(|payload| payload.get("stream_seq"))
+                .and_then(serde_json::Value::as_u64)
+            {
+                if !delivered.is_empty() {
+                    let mut received = delivered.clone();
+                    received.push(resize_seq);
+                    received.sort_unstable();
+                    if received.windows(2).all(|pair| pair[1] == pair[0] + 1) {
+                        break;
+                    }
+                }
+            }
         }
     }
 

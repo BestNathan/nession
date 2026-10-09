@@ -1,11 +1,16 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
 } from 'react';
 import { AppPopupPortal } from './AppPopupPortal';
+import {
+  CapsuleExchangeContext,
+  type CapsuleExchange,
+} from '@/platform/motion/capsuleExchange';
 import {
   indexFromLayer,
   layerFromIndex,
@@ -135,6 +140,19 @@ export function AppLayers({
   const { sessionsX, workspaceX, showSessions, showWorkspace } =
     layerGeometry(layer, dragOffset, width);
 
+  // The capsule handoff fraction: how far the drag has carried the Workspace
+  // slab over the Terminal, 0 (Terminal owns the slot) to 1 (Workspace does).
+  // Derived from the slab's own position so the capsules and the slabs cannot
+  // disagree about where the finger is; `null` without a Workspace layer, and
+  // the consumers treat the endpoints as "no exchange" so a resting surface
+  // carries no inline style at all.
+  const capsuleExchange = useMemo<CapsuleExchange | null>(() => {
+    if (workspace === null) {
+      return null;
+    }
+    return { progress: Math.min(1, Math.max(0, 1 - workspaceX / width)) };
+  }, [workspace, workspaceX, width]);
+
   return (
     <div
       ref={rootRef}
@@ -152,6 +170,7 @@ export function AppLayers({
           — the scope this element opens, which a popup on `<body>` would
           otherwise leave (#1066). */}
       <AppPopupPortal>
+        <CapsuleExchangeContext.Provider value={capsuleExchange}>
         <div
           data-testid="app-layer-terminal"
           className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
@@ -178,6 +197,7 @@ export function AppLayers({
             {workspace}
           </div>
         )}
+        </CapsuleExchangeContext.Provider>
       </AppPopupPortal>
     </div>
   );

@@ -109,7 +109,7 @@ export function ExplorerNodeRenderer({
           onClick={() => onActivate()}
           title={decorations.tooltip}
           className={cn(
-            'flex w-full items-center gap-[var(--shell-space-1)] rounded-[var(--workspace-tree-row-radius)] px-[var(--shell-space-2)] py-[var(--workspace-tree-row-pad-y)] transition-colors text-left cursor-default hover:bg-muted/60',
+            'flex w-full items-center gap-[var(--nession-shell-space-1)] rounded-[var(--nession-workspace-tree-row-radius)] px-[var(--nession-shell-space-2)] py-[var(--nession-workspace-tree-row-pad-y)] transition-colors text-left cursor-default hover:bg-muted/60',
             chromeMonoRole('secondary'),
             decorations.className,
           )}
@@ -122,12 +122,12 @@ export function ExplorerNodeRenderer({
             </span>
           ))}
           {decorations.badge !== undefined && (
-            <span className={cn('mr-1 flex-shrink-0 rounded bg-muted px-1 text-muted-foreground', chromeSansRole('caption'))}>
+            <span className={cn('mr-1 flex-shrink-0 rounded-[var(--nession-radius-control)] bg-muted px-1 text-muted-foreground', chromeSansRole('caption'))}>
               {decorations.badge}
             </span>
           )}
           {isBinary && node.kind === 'file' && (
-            <span className={cn('mr-1 flex-shrink-0 rounded bg-muted px-1 text-muted-foreground', chromeSansRole('caption'))}>
+            <span className={cn('mr-1 flex-shrink-0 rounded-[var(--nession-radius-control)] bg-muted px-1 text-muted-foreground', chromeSansRole('caption'))}>
               BIN
             </span>
           )}

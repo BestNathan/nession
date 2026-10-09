@@ -92,9 +92,12 @@ Geometry rules (#1204 §1, §3):
   adds no terminal row loss, and no second hook may shrink the terminal for it.
 - **Workspace:** the circle shares the dock's bottom-center floating group as a
   separate `nav` (surface navigation) adjacent to — never merged into — the
-  capability `nav`. When a pushed detail depth hides the capability dock, the
-  circle stays at the same bottom position; it never moves to a top-right
-  overlay, and a full-surface modal/sheet may still capture it.
+  capability `nav`, and centered against it. The dock's height follows its
+  labeled slots (icon over name, #1347), so the circle centers rather than
+  matches extent — a taller labeled dock must not stretch the action, and a
+  shorter one must not shrink it. When a pushed detail depth hides the
+  capability dock, the circle stays at the same bottom position; it never moves
+  to a top-right overlay, and a full-surface modal/sheet may still capture it.
 - **Pointer ownership:** no transparent full-surface wrapper. Only the button's
   own hit target consumes pointer events; everything outside the real bottom
   controls stays interactive.
@@ -114,7 +117,7 @@ The affordance does not encode Agent connectivity, Session lifecycle, attachment
 Capabilities do not become surface-navigation entries, and surface actions do
 not become capabilities.
 
-A capability may be discovered through the Session capsule's `+` expansion and may expose a temporary Signal/Peek near the Terminal before deepening into Workspace. The surface affordance remains about **work versus contextual depth**, not about choosing tools. See [../../capability-emergence.md](../../capability-emergence.md).
+A capability may be discovered through the Session capsule's `+` expansion and may expose a temporary Peek near the Terminal before deepening into Workspace. The surface affordance remains about **work versus contextual depth**, not about choosing tools. See [../../capability-emergence.md](../../capability-emergence.md).
 
 See [workspace-navigation.md](workspace-navigation.md) and [terminal-capsule.md](terminal-capsule.md).
 

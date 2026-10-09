@@ -15,8 +15,12 @@ function snapshot(id: string, state: CapabilitySnapshot['state']): CapabilitySna
   };
 }
 
+function boundIds(snapshots: readonly CapabilitySnapshot[]): Set<string> {
+  return new Set(snapshots.map((item) => item.id));
+}
+
 describe('buildWorkspacePresentationModel', () => {
-  it('keeps unavailable capabilities out of direct and discoverable presence, carried as inert entries', () => {
+  it('keeps unavailable capabilities out of Workspace navigation presence', () => {
     const snapshots = [
       snapshot('files', 'unavailable'),
       snapshot('session', 'available'),
@@ -27,17 +31,15 @@ describe('buildWorkspacePresentationModel', () => {
       snapshots,
       presences,
       openedCapabilityId: 'session',
+      viewBoundCapabilityIds: boundIds(snapshots),
     });
 
-    expect(model.primary.map((item) => item.snapshot.id)).toEqual(['session']);
-    expect(model.discoverable.map((item) => item.snapshot.id)).toEqual([]);
+    expect(model.items.map((item) => item.snapshot.id)).toEqual(['session']);
     expect(model.opened?.snapshot.id).toBe('session');
-    // Carried, not dropped: a surface renders these inert rather than letting
-    // the row's membership change under the reader.
-    expect(model.unavailable.map((item) => item.snapshot.id)).toEqual(['files']);
+    expect('unavailable' in model).toBe(false);
   });
 
-  it('keeps the opened capability direct and bounds additional contextual presence', () => {
+  it('returns every lifecycle-visible view-bound capability in registration order without a cap', () => {
     const snapshots = [
       snapshot('files', 'available'),
       snapshot('git', 'relevant'),
@@ -50,12 +52,12 @@ describe('buildWorkspacePresentationModel', () => {
       snapshots,
       presences,
       openedCapabilityId: 'files',
-      directLimit: 2,
+      viewBoundCapabilityIds: boundIds(snapshots),
     });
 
-    expect(model.primary.map((item) => item.snapshot.id)).toEqual(['files']);
-    expect(model.contextual.map((item) => item.snapshot.id)).toEqual(['git']);
-    expect(model.discoverable.map((item) => item.snapshot.id)).toEqual([
+    expect(model.items.map((item) => item.snapshot.id)).toEqual([
+      'files',
+      'git',
       'docker',
       'kubernetes',
     ]);
@@ -72,25 +74,20 @@ describe('buildWorkspacePresentationModel', () => {
       snapshots,
       presences,
       openedCapabilityId: 'files',
+      viewBoundCapabilityIds: boundIds(snapshots),
     });
 
     expect(model.opened?.snapshot.id).toBe('files');
     expect(model.opened?.presence.level).toBe('hidden');
-    expect(model.primary).toEqual([]);
-    expect(model.discoverable.map((item) => item.snapshot.id)).toEqual(['session']);
-    // It is explanatory context *and* an inert entry — the surface shows which
-    // capability the reader is stuck on without letting it rank as chrome.
-    expect(model.unavailable.map((item) => item.snapshot.id)).toEqual(['files']);
+    expect(model.items.map((item) => item.snapshot.id)).toEqual(['session']);
+    expect('unavailable' in model).toBe(false);
   });
 
-  it('ranks a stronger presence ahead of registration order', () => {
+  it('does not re-rank stronger lifecycle presence ahead of registry order', () => {
     const snapshots = [
       snapshot('git', 'relevant'),
       snapshot('docker', 'available'),
     ];
-    // Presence levels are inputs here: this pins the Workspace *ordering* rule
-    // (a stronger level outranks registration order), not how a state maps to a
-    // level — that mapping is the presence policy's, tested in presence.test.ts.
     const presences: CapabilityPresence[] = [
       { capabilityId: 'git', surface: 'workspace', level: 'contextual' },
       { capabilityId: 'docker', surface: 'workspace', level: 'prominent' },
@@ -99,10 +96,26 @@ describe('buildWorkspacePresentationModel', () => {
     const model = buildWorkspacePresentationModel({
       snapshots,
       presences,
-      directLimit: 1,
+      viewBoundCapabilityIds: boundIds(snapshots),
     });
 
-    expect(model.contextual.map((item) => item.snapshot.id)).toEqual(['docker']);
-    expect(model.discoverable.map((item) => item.snapshot.id)).toEqual(['git']);
+    expect(model.items.map((item) => item.snapshot.id)).toEqual(['git', 'docker']);
+  });
+
+  it('filters lifecycle-visible capabilities that have no Workspace view binding', () => {
+    const snapshots = [
+      snapshot('files', 'available'),
+      snapshot('terminal-keys', 'active'),
+      snapshot('git', 'available'),
+    ];
+    const presences = resolveCapabilityPresences(snapshots, { surface: 'workspace' });
+
+    const model = buildWorkspacePresentationModel({
+      snapshots,
+      presences,
+      viewBoundCapabilityIds: new Set(['files', 'git']),
+    });
+
+    expect(model.items.map((item) => item.snapshot.id)).toEqual(['files', 'git']);
   });
 });

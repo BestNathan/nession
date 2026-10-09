@@ -65,16 +65,40 @@ describe('parser', () => {
       expect(result.children.some((c: RootContent) => c.type === 'math')).toBe(true)
     })
 
-    it('currently parses single $ as math (known gap - will be disabled in Phase 2)', () => {
-      // The vendored DeepSeek parser supports single $ for inline math via math() extension.
-      // Requirement #1184 specifies single $ should NOT be math to avoid false positives
-      // like $HOME, $PATH, $100. This will be addressed in Phase 2 by configuring the
-      // parser to only support \(\) for inline and \[\] / $$ for display math.
-      const result = parseGfmWithMath('The cost is $100 and $HOME is set.')
+    it.each([
+      'Set $HOME and $PATH before running the build.',
+      'echo "$VAR" prints the value of VAR.',
+      'The cost is $100 and the other is $200.',
+      'US$ 500 was spent, and it arrived in ~10ms.',
+    ])('keeps single dollars as text, never maths: %s', (source) => {
+      // #1184 decision 1: the Chat profile turns single-dollar text math off,
+      // so coding-agent prose stays prose. A regression here re-swallows the
+      // corpus between the two delimiters as a formula.
+      const result = parseGfmWithMath(source)
       const paragraph = result.children[0] as Paragraph
-      // Check if any inline child is inlineMath (math nodes can't appear in paragraphs)
-      const hasMath = paragraph.children.some((c) => c.type === 'inlineMath')
-      expect(hasMath).toBe(true) // Currently true, will be false after Phase 2
+      expect(paragraph.children.some((c) => c.type === 'inlineMath')).toBe(false)
+    })
+
+    it('keeps the $$ display delimiter working in text', () => {
+      // Only the *single*-dollar form is off; $$ is the approved display
+      // delimiter and must survive the option.
+      const result = parseGfmWithMath('The identity $$x^2 + y^2 = z^2$$ holds.')
+      const paragraph = result.children[0] as Paragraph
+      expect(paragraph.children.some((c) => c.type === 'inlineMath')).toBe(true)
+    })
+
+    it('does not read dollar-side maths out of a currency range with a bare dollar', () => {
+      const result = parseGfmWithMath('It costs $5.')
+      const paragraph = result.children[0] as Paragraph
+      expect(paragraph.children.some((c) => c.type === 'inlineMath')).toBe(false)
+    })
+  })
+
+  describe('parseGfm (streaming grammar)', () => {
+    it('never emits math nodes, so incomplete TeX stays literal mid-stream', () => {
+      const result = parseGfm('The formula \\(E=mc^2\\) and $HOME stay literal.')
+      const paragraph = result.children[0] as Paragraph
+      expect(paragraph.children.some((c) => c.type === 'inlineMath')).toBe(false)
     })
   })
 })

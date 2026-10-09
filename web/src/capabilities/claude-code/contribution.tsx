@@ -20,11 +20,14 @@ import { Bot } from 'lucide-react';
 import type { CapabilityFacts, CapabilityState } from '@/product/capability';
 import type { WorkspaceViewBinding } from '@/app/workspace/workspaceContext';
 import type { CapsuleProjectionBinding } from '@/app/capsuleProjections';
+import type { CapabilityWorkBinding } from '@/app/workSignals';
+import type { CapabilityConversationBinding } from '@/app/conversationIdentities';
 import { ClaudeCodeWorkspace } from './components/ClaudeCodeWorkspace';
 import { ClaudeCodeProjection } from './components/ClaudeCodeProjection';
 
 export const CLAUDE_CODE_ID = 'claude-code';
 export const CLAUDE_CODE_TITLE = 'Claude Code';
+export const CLAUDE_CODE_SHORT_TITLE = 'Claude';
 
 /**
  * Commands that mean "Claude Code is running here".
@@ -89,9 +92,8 @@ export const claudeCodeView: WorkspaceViewBinding = {
 /**
  * How Claude Code says something in the Terminal.
  *
- * **Both depths.** It is the capability whose state comes from observation, so
- * it is the one that emerges on its own — a pane running `claude.exe` gets the
- * Signal without anyone choosing it, which is Q1's second input made real.
+ * It is the capability whose state comes from observation: a pane running
+ * `claude.exe` reports `active`, which is Q1's second input made real.
  *
  * It **is** offered for selection, which it was not before `#1120`. The
  * argument for withholding it was that its richer surface is the Workspace
@@ -103,15 +105,67 @@ export const claudeCodeView: WorkspaceViewBinding = {
  */
 export const claudeCodeProjection: CapsuleProjectionBinding = {
   id: CLAUDE_CODE_ID,
-  entry: 'peek',
-  body: ({ agentId, sessionId, depth, state, openWorkspace, openDetail }) => (
+  // The Terminal row's glyph, referenced from the view's own icon rather than
+  // restated: one value, so the two surfaces cannot drift into two pictures of
+  // the same capability — see `CapsuleProjectionBinding.icon`.
+  icon: claudeCodeView.icon,
+  body: ({ agentId, sessionId, state, openWorkspace, openDetail }) => (
     <ClaudeCodeProjection
       agentId={agentId}
       sessionId={sessionId}
-      depth={depth}
       state={state}
       onOpenWorkspace={openWorkspace}
       openDetail={openDetail}
     />
   ),
+};
+
+/**
+ * What "Claude Code is working" means, contributed to the capsule's work
+ * resolver (#1347 SC-14/19).
+ *
+ * Passive sensing: the agent already reports the pane's foreground command
+ * with every session update, so a pane running Claude Code *is* the work
+ * signal — no explicit API call. The matcher is the same one
+ * `resolveClaudeCodeState` uses, and the summary text is this capability's
+ * sentence to write; the shell aggregates without knowing either.
+ */
+export const claudeCodeWork: CapabilityWorkBinding = {
+  id: CLAUDE_CODE_ID,
+  sense: (facts) => {
+    const command = facts?.sessionForegroundCommand;
+    if (!command || !isClaudeCodeCommand(command)) {
+      return null;
+    }
+    return {
+      capabilityId: CLAUDE_CODE_ID,
+      status: 'working',
+      // The disclosure row already says "Claude Code" — the reason line is
+      // the capability's answer to *why it is here*, not the title again
+      // (owner's copy in the 2026-10-03 interaction diagram).
+      summary: 'Working in this session',
+    };
+  },
+};
+
+/**
+ * This capability's conversational identity, projected into the Workspace's
+ * Terminal-return circle while the conversation is live (#1347 SC-25).
+ *
+ * The matcher is the same one the presence state and the work signal use —
+ * one definition of "Claude is running", so the ring, the chip and the
+ * destination glyph can never disagree about the same pane. The glyph is the
+ * view's own icon — the Terminal projection references the same symbol rather
+ * than declaring a second one — so there is one icon per capability, drawn in
+ * place of the circle's Terminal icon (*replace inner glyph*, never a badge).
+ */
+export const claudeCodeConversation: CapabilityConversationBinding = {
+  id: CLAUDE_CODE_ID,
+  sense: (facts) => {
+    const command = facts?.sessionForegroundCommand;
+    if (!command || !isClaudeCodeCommand(command)) {
+      return null;
+    }
+    return { capabilityId: CLAUDE_CODE_ID, glyph: claudeCodeView.icon };
+  },
 };

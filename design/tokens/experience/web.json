@@ -4,46 +4,92 @@
     "$description": "Chrome typography roles (#1216). A role names the text's job and owns the coherent size / weight / leading treatment for that job at Web density. Family (product sans vs technical mono) stays with the text's meaning at the call site — a path is mono at the code role's metrics, not mono because the role is smaller. Workload renderers (xterm, CodeMirror, Markdown document prose) stay on their own surfaces.",
     "title": {
       "$description": "The surface's own name when Web chrome renders a page header or pushed detail title.",
-      "size": { "value": "16px" },
-      "weight": { "ref": "domain.typography.role.title.weight" },
-      "lineHeight": { "value": "1.25" }
+      "size": {
+        "value": "16px"
+      },
+      "weight": {
+        "ref": "domain.typography.role.title.weight"
+      },
+      "lineHeight": {
+        "value": "1.25"
+      }
     },
     "primary": {
       "$description": "Work / local primary — highest within its region. Session name, active file, focused input.",
-      "size": { "value": "14px" },
-      "weight": { "ref": "domain.typography.role.primary.weight" },
-      "lineHeight": { "value": "1.3" }
+      "size": {
+        "value": "14px"
+      },
+      "weight": {
+        "ref": "domain.typography.role.primary.weight"
+      },
+      "lineHeight": {
+        "value": "1.3"
+      }
     },
     "body": {
       "$description": "Ordinary readable product text and controls — button labels, menu items, filters.",
-      "size": { "value": "13px" },
-      "weight": { "ref": "domain.typography.role.body.weight" },
-      "lineHeight": { "value": "1.35" }
+      "size": {
+        "value": "13px"
+      },
+      "weight": {
+        "ref": "domain.typography.role.body.weight"
+      },
+      "lineHeight": {
+        "value": "1.35"
+      }
     },
     "secondary": {
       "$description": "Supporting but fully readable. Section headings, tree rows, infrastructure rows.",
-      "size": { "value": "12.5px" },
-      "weight": { "ref": "domain.typography.role.secondary.weight" },
-      "lineHeight": { "value": "1.3" }
+      "size": {
+        "value": "12.5px"
+      },
+      "weight": {
+        "ref": "domain.typography.role.secondary.weight"
+      },
+      "lineHeight": {
+        "value": "1.3"
+      }
     },
     "metadata": {
       "$description": "Quiet factual context. Agent/location, recency, status details — never outweighs the thing it describes.",
-      "size": { "value": "11.5px" },
-      "weight": { "ref": "domain.typography.role.metadata.weight" },
-      "lineHeight": { "value": "1.3" }
+      "size": {
+        "value": "11.5px"
+      },
+      "weight": {
+        "ref": "domain.typography.role.metadata.weight"
+      },
+      "lineHeight": {
+        "value": "1.3"
+      }
     },
     "caption": {
       "$description": "Lowest deliberate readable hierarchy — keyboard hints, tiny helper copy, sidebar service state.",
-      "size": { "value": "11px" },
-      "weight": { "ref": "domain.typography.role.caption.weight" },
-      "lineHeight": { "value": "1.3" }
+      "size": {
+        "value": "11px"
+      },
+      "weight": {
+        "ref": "domain.typography.role.caption.weight"
+      },
+      "lineHeight": {
+        "value": "1.3"
+      }
     },
     "code": {
       "$description": "Chrome-side technical identity — paths, commands, env keys. Not xterm/CodeMirror workload glyphs.",
-      "size": { "value": "12.5px" },
-      "weight": { "ref": "domain.typography.role.code.weight" },
-      "lineHeight": { "value": "1.35" }
+      "size": {
+        "value": "12.5px"
+      },
+      "weight": {
+        "ref": "domain.typography.role.code.weight"
+      },
+      "lineHeight": {
+        "value": "1.35"
+      }
     }
+  },
+  "typographyLabelTracking": {
+    "$description": "Letter spacing for uppercase quiet chrome labels. Centralized so section labels do not invent tracking per feature (#1451).",
+    "value": "0.025em"
   },
   "control": {
     "sm": {
@@ -241,6 +287,14 @@
     "captionFontSize": {
       "ref": "primitive.typography.size"
     },
+    "capabilitySlotWidth": {
+      "$description": "Fixed slot for one capability entry in the Workspace capsule. Capability identity is constrained inside this slot: the shipped compact-label recipe is one line, with truncation only as a defensive containment fallback. Slot content never owns or grows the Capsule's outer height (#1455 / #1458).",
+      "value": "72px"
+    },
+    "capabilityLabelFontSize": {
+      "$description": "Capability entry compact-label size inside the fixed control.md band. The label stays one line in the shipped recipe; its full capability title remains available through accessible name/title.",
+      "value": "12px"
+    },
     "quickKeyFontSize": {
       "ref": "primitive.typography.size"
     },
@@ -338,15 +392,12 @@
     "projectionGap": {
       "value": "0.5rem"
     },
-    "projectionRadius": {
-      "value": "0.75rem"
-    },
     "projectionMaxHeight": {
       "$description": "Ceiling for an emerged projection (#826 Q5). It is a small surface floating over the work, so it stops well short of the terminal and scrolls its own overflow rather than taking the viewport's.",
       "value": "18rem"
     },
     "projectionFontSize": {
-      "$description": "One step below the capsule's own scale. A Signal is the smallest identifying state, not the composer's text, so it must not arrive at the field's size.",
+      "$description": "One step below the capsule's own scale. The Peek draws the smallest identifying state, not the composer's text, so it must not arrive at the field's size.",
       "value": "0.75rem"
     },
     "projectionLineHeight": {
@@ -366,6 +417,25 @@
       "value": "0.75rem"
     }
   },
+  "contextCapsule": {
+    "$owner": "pattern.context-capsule",
+    "marginBottom": {
+      "$description": "The inter-Capsule gap: the deliberate space between the upper Context Capsule and the resting Conversation Capsule below it (#1347 SC-43). The same value as projectionMarginBottom so a list-to-Peek swap does not jump the gap, but a separate leaf because the two pairs may diverge — a Peek is read while typing, the list is a place you stop.",
+      "value": "0.5rem"
+    },
+    "maxHeight": {
+      "$description": "Ceiling for the upper Context Capsule (#1347 SC-44). The surface takes its content's natural height and only clamps here, so a short list is short instead of reserving room for rows that do not exist; content beyond the ceiling scrolls inside it. A ceiling rather than a height because the flat list renders every capability, so quiet, working and context-only differ in row ORDER and never in row COUNT — the pair still does not resize as senses come and go, which is the stability a fixed height was protecting, but it now comes from the list's own invariant rather than from a box. Equal to this experience's projectionMaxHeight, so deepening the list into a Peek can reach the same ceiling, and the region above this dock has already been proven to hold that much.",
+      "value": "18rem"
+    },
+    "rowHeight": {
+      "$description": "One capability row in the Context Capsule: capability icon, title, and one line of reason for a sensed capability (#1347 SC-19/SC-42). 44px on both experiences — two lines of text need at least 40, and on App this is exactly the touch floor, so a row is a legal App target by construction.",
+      "value": "2.75rem"
+    },
+    "markerSize": {
+      "$description": "The presence mark beside an ordinary row's title: a capability the session actually needs. The same 5px as the shell's status dot on purpose — both are 'a quiet mark beside text' rather than a badge — but a separate leaf, because that one answers service health while this answers capability presence, and the design system's rule is that an equal resolved value does not make two names interchangeable.",
+      "value": "5px"
+    }
+  },
   "motion": {
     "terminalCapsule": {
       "value": "280ms cubic-bezier(0.22, 1, 0.36, 1)"
@@ -376,10 +446,6 @@
     "shellEase": {
       "value": "cubic-bezier(0.2, 0, 0, 1)"
     }
-  },
-  "dockTarget": {
-    "$description": "Web dock targets: pointer input, so the control-md band applies.",
-    "value": "32px"
   },
   "conversation": {
     "$owner": "pattern.conversation",

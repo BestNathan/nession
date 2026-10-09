@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { WorkspaceShell } from '@/app/workspace/WorkspaceShell';
 import { SurfaceDestinationAction } from '@/product/workspace/patterns/SurfaceDestinationAction';
+import { CapsuleExchangeContext } from '@/platform/motion/capsuleExchange';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 
 // The Web experience's Files layout is stubbed rather than the whole binding:
@@ -36,13 +37,13 @@ function workspaceContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceC
 }
 
 describe('WorkspaceShell contextual capability presentation', () => {
-  it('renders all capabilities in the scrollable capsule', () => {
+  it('renders all lifecycle-eligible capabilities in the scrollable capsule', () => {
     const ctx = workspaceContext();
     render(<WorkspaceShell ctx={ctx} activeCapabilityId="files" />);
 
     expect(screen.getByTestId('mock-files-web')).toBeInTheDocument();
-    // Capsule V2 (#1347): Workspace capsule shows ALL capabilities (scrollable).
-    // This is the reciprocal of Terminal, which shows only the active capability.
+    // Capsule V2 (#1347): the Workspace Capsule is scrollable, but only
+    // lifecycle-eligible capabilities earn a slot (#1455).
     expect(screen.getByTestId('workspace-tool-files')).toBeInTheDocument();
     expect(screen.getByTestId('workspace-tool-session')).toBeInTheDocument();
     expect(screen.getByTestId('workspace-tool-agent')).toBeInTheDocument();
@@ -58,23 +59,79 @@ describe('WorkspaceShell contextual capability presentation', () => {
     );
   });
 
+  it('renders entries in registration order, marking the active one in place', () => {
+    // Owner follow-up (2026-10-03): activation is not placement. The opened
+    // capability keeps its registration position and is only marked — the row
+    // does not reshuffle itself under the reader's thumb as the work changes.
+    const ctx = workspaceContext();
+    render(<WorkspaceShell ctx={ctx} activeCapabilityId="env" />);
+
+    const slots = [
+      ...screen
+        .getByTestId('workspace-capability-scroll')
+        .querySelectorAll('button[data-testid^="workspace-tool-"]'),
+    ].map((entry) => entry.getAttribute('data-testid'));
+
+    expect(slots).toEqual([
+      'workspace-tool-files',
+      'workspace-tool-session',
+      'workspace-tool-agent',
+      'workspace-tool-env',
+      'workspace-tool-claude-code',
+      'workspace-tool-git',
+    ]);
+    const env = screen.getByTestId('workspace-tool-env');
+    expect(env).toHaveAttribute('data-capability-active', 'true');
+    expect(env).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('uses compact visual labels while preserving full accessible capability names', () => {
+    const ctx = workspaceContext();
+    render(<WorkspaceShell ctx={ctx} activeCapabilityId="files" />);
+
+    expect(screen.getByTestId('workspace-tool-files-label')).toHaveTextContent('Files');
+
+    const claude = screen.getByTestId('workspace-tool-claude-code');
+    expect(screen.getByTestId('workspace-tool-claude-code-label')).toHaveTextContent('Claude');
+    expect(claude).toHaveAttribute('aria-label', 'Claude Code');
+    expect(claude).toHaveAttribute('title', 'Claude Code');
+
+    const env = screen.getByTestId('workspace-tool-env');
+    expect(screen.getByTestId('workspace-tool-env-label')).toHaveTextContent('Env');
+    expect(env).toHaveAttribute('aria-label', 'Environment');
+  });
+
+  it('arrives with the capsule exchange while a swipe carries the layer in', () => {
+    // The incoming half of the App handoff (see `capsuleExchange`): mid-swipe
+    // the bar trails the finger's pace and fades in; at rest there is no
+    // exchange and the bar carries no inline style at all.
+    const ctx = workspaceContext();
+    const { rerender } = render(<WorkspaceShell ctx={ctx} activeCapabilityId="files" />);
+    expect(screen.getByTestId('workspace-tool-bar').getAttribute('style')).toBeNull();
+
+    rerender(
+      <CapsuleExchangeContext.Provider value={{ progress: 0.5 }}>
+        <WorkspaceShell ctx={ctx} activeCapabilityId="files" />
+      </CapsuleExchangeContext.Provider>,
+    );
+    const bar = screen.getByTestId('workspace-tool-bar');
+    expect(bar).toHaveAttribute('data-capsule-exchange', 'arriving');
+    expect(bar.style.transform).toBe('translateX(14px)');
+    expect(bar.style.opacity).toBe('0.5');
+    expect(bar.style.pointerEvents).toBe('none');
+  });
+
   // Capsule V2 (#1347): discoverable capabilities are no longer shown in Workspace.
   // They are accessed through Work Overview in Terminal form. Removed tests that
   // validated the disclosure menu behavior.
 
-  it('keeps an unavailable capability in the row, greyed rather than dropped', () => {
+  it('does not reserve a navigation slot for an unavailable capability', () => {
     const ctx = workspaceContext({ fileOps: null });
 
     render(<WorkspaceShell ctx={ctx} activeCapabilityId="session" />);
 
-    // Membership must not change under the reader as the work changes, so the
-    // entry stays and is drawn inert instead. `disabled-foreground` is the role
-    // the design system defines for a control the user cannot act with — held
-    // to the 3:1 that keeps it from disappearing, not to AA.
-    const files = screen.getByTestId('workspace-tool-files');
-    expect(files).toHaveAttribute('data-capability-state', 'unavailable');
-    expect(files).toBeDisabled();
-    expect(files.className).toContain('text-disabled-foreground');
+    expect(screen.queryByTestId('workspace-tool-files')).not.toBeInTheDocument();
+    expect(screen.getByTestId('workspace-tool-session')).toBeInTheDocument();
   });
 
   it('keeps an unavailable opened capability stable instead of switching arbitrarily', () => {
@@ -86,12 +143,9 @@ describe('WorkspaceShell contextual capability presentation', () => {
     expect(screen.getByTestId('workspace-capability-unavailable')).toHaveTextContent(
       'Files is not available here',
     );
-    // The row still carries it, inert — the view refused to switch, and the
-    // reader can see which capability they are sitting on and why.
-    expect(screen.getByTestId('workspace-tool-files')).toHaveAttribute(
-      'data-capability-state',
-      'unavailable',
-    );
+    // The explanatory view remains stable, but unavailable state does not buy
+    // permanent chrome.
+    expect(screen.queryByTestId('workspace-tool-files')).not.toBeInTheDocument();
   });
 
   // Capsule V2 (#1347): Claude Code discoverability through disclosure menu removed.
@@ -124,18 +178,17 @@ describe('WorkspaceShell surface navigation (#1204)', () => {
     ).toBeTruthy();
   });
 
-  it('keeps the surface action when a pushed depth hides the capability dock', () => {
+  it('keeps both the surface action and the capsule — the shell has no depth gate', () => {
+    // Owner decision 2026-10-03, superseding #1051's dock rule: the capsule is
+    // present at every Workspace depth, so the shell takes no `pushed` prop and
+    // there is no state in which this row renders without it. The surface
+    // action sits beside it, unchanged.
     const ctx = workspaceContext();
-    render(
-      <WorkspaceShell
-        ctx={ctx}
-        activeCapabilityId="files"
-        pushed
-        surfaceAction={openTerminal}
-      />,
-    );
+    render(<WorkspaceShell ctx={ctx} activeCapabilityId="files" surfaceAction={openTerminal} />);
 
-    expect(screen.queryByRole('navigation', { name: 'Workspace capabilities' })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('navigation', { name: 'Workspace capabilities' }),
+    ).toBeInTheDocument();
     expect(screen.getByTestId('surface-action-open-terminal')).toBeInTheDocument();
   });
 

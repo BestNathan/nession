@@ -27,6 +27,7 @@ function snapshot(items: AIConversationSnapshot['items']): AIConversationSnapsho
     conversations: [],
     bindingId: 'c1',
     openId: 'c1',
+    conversationKey: 'fixture:c1',
     state: 'ready',
     conversation: null,
     activity: 'inactive',

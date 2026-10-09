@@ -46,7 +46,7 @@ export function resolveGitState(sessionId: string | undefined): CapabilityState 
  * drift apart, and an assertion that they are the same is then a fact about the
  * code rather than a coincidence of two look-alikes.
  *
- * #826 owns the App realization of capability surfaces (push/pop, Signal/Peek).
+ * #826 owns the App realization of capability surfaces (push/pop, Peek).
  * Until that lands this is the shared view at both widths, which is why it
  * stacks rather than assuming a desktop pane.
  */
@@ -66,17 +66,19 @@ export const gitView: WorkspaceViewBinding = {
  */
 export const gitProjection: CapsuleProjectionBinding = {
   id: GIT_ID,
+  // The Terminal row's glyph, taken from the view's own icon rather than
+  // restated: it is one value, so the two surfaces cannot drift into two
+  // pictures of the same capability. The binding is still where this surface
+  // declares its glyph — Terminal Keys is the case that declares its own,
+  // having no view to reference.
+  icon: gitView.icon,
   // A changed-file summary is what sits between "3 changed" and a full diff,
   // so Git has a Peek of its own.
-  // A Peek, and that is what earns the entry (#1046).
-  entry: 'peek',
-  body: ({ agentId, sessionId, depth, onFocusChange, openWorkspace }) => (
+  body: ({ agentId, sessionId, onFocusChange }) => (
     <GitProjection
       agentId={agentId}
       sessionId={sessionId}
-      depth={depth}
       onFocusChange={onFocusChange}
-      onOpenWorkspace={openWorkspace}
     />
   ),
 };

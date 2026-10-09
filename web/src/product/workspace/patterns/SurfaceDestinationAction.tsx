@@ -1,7 +1,10 @@
 import type { ReactNode } from 'react';
 import { LayoutPanelTop, SquareTerminal } from 'lucide-react';
 
-import { surfaceDestinationActionBandClass } from '@/product/workspace/patterns/surfaceDestinationStyles';
+import {
+  surfaceDestinationActionBandClass,
+  surfaceDestinationActionClass,
+} from '@/product/workspace/patterns/surfaceDestinationStyles';
 import { cn } from '@/shared/lib/utils';
 
 export type Surface = 'terminal' | 'workspace';
@@ -19,9 +22,11 @@ export interface SurfaceDestinationActionProps {
    * Workspace's Terminal-return action, the conversational capability that is
    * active over there.
    *
-   * Decorative only (SC-26): it is drawn as a badge inside the same button,
-   * so it cannot change where the action goes, what it is called, or how big
-   * it is — `aria-label`, activation and geometry all stay the destination's.
+   * The contract is *replace inner glyph*: while one is supplied it is drawn
+   * **in place of** the destination icon, at the same size — never beside it
+   * as a badge. Decorative only (SC-26): it cannot change where the action
+   * goes, what it is called, or how big it is — `aria-label`, activation and
+   * geometry all stay the destination's.
    */
   glyph?: ReactNode;
 }
@@ -70,22 +75,25 @@ export function SurfaceDestinationAction({
       data-morph-id="surface-action"
       onClick={() => onOpen()}
       className={cn(
-        'pointer-events-auto relative flex shrink-0 items-center justify-center rounded-full bg-[color:var(--terminal-capsule-surface)] text-muted-foreground shadow-[var(--elevation-floating)] backdrop-blur-md transition-colors duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)] hover:text-foreground focus-visible:text-foreground motion-reduce:transition-none',
+        surfaceDestinationActionClass,
         surfaceDestinationActionBandClass,
       )}
     >
-      <Icon className="size-[length:var(--icon-md)]" aria-hidden />
       {glyph ? (
-        /* The badge is absolutely positioned: it projects into the circle
-           without changing the circle's size, hit area or label (SC-26). */
+        /* Replace inner glyph (#1347 SC-25): the projected identity is drawn
+           in place of the destination icon, at the icon's own size — so the
+           circle's geometry, hit area and label are byte-identical either way
+           (SC-26). */
         <span
           aria-hidden
           data-testid="surface-action-glyph"
-          className="absolute -right-0.5 -top-0.5 flex size-3 items-center justify-center rounded-full bg-[color:var(--terminal-capsule-surface)] text-muted-foreground shadow-[var(--elevation-floating)] [&_svg]:size-2"
+          className="flex items-center justify-center [&_svg]:size-[length:var(--nession-icon-md)]"
         >
           {glyph}
         </span>
-      ) : null}
+      ) : (
+        <Icon className="size-[length:var(--nession-icon-md)]" aria-hidden />
+      )}
     </button>
   );
 }

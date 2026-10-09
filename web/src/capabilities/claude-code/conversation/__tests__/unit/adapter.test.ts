@@ -125,10 +125,11 @@ describe('Claude Code adapter', () => {
   it('names the Session as the conversation space', () => {
     const adapter = createClaudeCodeAdapter(apiWith(conversationsResponse()))
     expect(adapter.contextKey(context)).toBe('agent-1:session-1')
+    expect(adapter.requestKey?.(context)).toBe('agent-1:session-1')
     expect(adapter.identity.label).toBe('Claude')
   })
 
-  it('asks for the whole directory and reports the binding', async () => {
+  it('maps one directory page, its cursor, and the exact binding', async () => {
     const api = apiWith(
       conversationsResponse({
         items: [
@@ -136,6 +137,8 @@ describe('Claude Code adapter', () => {
           { id: 'c2', cwd: '/w', title: 'Two', preview: null, updated_at: null },
         ],
         binding: { conversation_id: 'c2', activity: 'active' },
+        has_more: true,
+        next_cursor: 'listing-a:200',
       }),
     )
     const adapter = createClaudeCodeAdapter(api)
@@ -148,10 +151,51 @@ describe('Claude Code adapter', () => {
       limit: 200,
     })
     expect(result.bindingId).toBe('c2')
+    expect(result.nextCursor).toBe('listing-a:200')
+    expect(result.listingId).toBe('listing-a')
     // The binding's activity is a fact about the binding, relative to this
     // Session. The wire says nothing about the others, so they say `unknown`
     // rather than borrowing the binding's answer.
     expect(result.conversations.map((c) => c.activity)).toEqual(['unknown', 'active'])
+  })
+
+  it('rejects a list page that says more exists without a continuation cursor', async () => {
+    const api = apiWith(conversationsResponse({ has_more: true, next_cursor: null }))
+    const adapter = createClaudeCodeAdapter(api)
+
+    await expect(adapter.list(context)).rejects.toThrow(
+      'Claude conversation list said more pages exist without a cursor',
+    )
+  })
+
+  it('passes the shared list cursor back to the provider', async () => {
+    const api = apiWith(conversationsResponse())
+    const adapter = createClaudeCodeAdapter(api)
+
+    await adapter.list(context, 'listing-a:200')
+
+    expect(api.claudeCodeConversations).toHaveBeenCalledWith({
+      agent_id: 'agent-1',
+      session_id: 'session-1',
+      limit: 200,
+      cursor: 'listing-a:200',
+    })
+  })
+
+  it('maps a stale provider listing to a canonical restart', async () => {
+    const api = apiWith(
+      conversationsResponse({
+        state: 'error',
+        error: 'listing_changed',
+        has_more: false,
+      }),
+    )
+    const adapter = createClaudeCodeAdapter(api)
+
+    const result = await adapter.list(context, 'listing-a:200')
+
+    expect(result.restart).toBe(true)
+    expect(result.state).toBe('error')
   })
 
   it('reads a page and maps the cursor through', async () => {

@@ -5,6 +5,11 @@ const ALLOWLIST = new Set([
   'src/product/terminal/capsule/components/ComposerMeasureMirror.tsx',
 ]);
 
+const CHROME_HOST_SUFFIXES = [
+  'src/product/terminal/capsule/components/ContextCapsule.tsx',
+  'src/product/terminal/capsule/components/PeekHost.tsx',
+];
+
 const METRIC_PREFIX =
   '(?:h|w|size|gap|p|px|py|pt|pb|pl|pr|m|mx|my|mr|ml|mb|mt|min-h|min-w|max-h|max-w)';
 
@@ -12,7 +17,7 @@ const RULES = [
   {
     id: 'tailwind-text-scale',
     re: /\btext-(?:xs|sm|base|lg|xl|2xl|3xl|\[[0-9])/,
-    message: 'Use terminal-capsule font tokens via capsuleStyles (text-[length:var(--terminal-capsule-font-size)]).',
+    message: 'Use terminal-capsule font tokens via capsuleStyles (text-[length:var(--nession-terminal-capsule-font-size)]).',
   },
   {
     id: 'tailwind-metric-scale',
@@ -32,16 +37,16 @@ const RULES = [
   {
     id: 'numeric-arbitrary',
     re: /\[(?!length:var\()[0-9]+(?:\.\d+)?(?:px|rem|vh|vw|%)\]/,
-    message: 'Arbitrary numeric dimensions forbidden — use length:var(--terminal-capsule-*|--control-*|--icon-*).',
+    message: 'Arbitrary numeric dimensions forbidden — use length:var(--nession-terminal-capsule-*|--nession-control-*|--nession-icon-*).',
   },
   {
     id: 'font-via-line-height',
-    re: /text-\[length:var\(--terminal-capsule-line-height\)\]/,
-    message: 'Font size must use --terminal-capsule-font-size, not --terminal-capsule-line-height.',
+    re: /text-\[length:var\(--nession-terminal-capsule-line-height\)\]/,
+    message: 'Font size must use --nession-terminal-capsule-font-size, not --nession-terminal-capsule-line-height.',
   },
 ];
 
-function reportClassViolations(context, node, classString) {
+function reportClassViolations(context, node, classString, enforceChromeOwner = false) {
   if (typeof classString !== 'string') {
     return;
   }
@@ -54,6 +59,34 @@ function reportClassViolations(context, node, classString) {
       });
     }
   }
+
+  if (!enforceChromeOwner) {
+    return;
+  }
+
+  const classes = classString.split(/\s+/).filter(Boolean);
+  const forbidden = classes.find((name) =>
+    name.startsWith('rounded') ||
+    name.startsWith('bg-') ||
+    name.startsWith('shadow-') ||
+    name === 'border' ||
+    name.startsWith('border-') ||
+    name.startsWith('text-[') ||
+    name === 'font-medium' ||
+    name === 'font-semibold' ||
+    name === 'font-bold'
+  );
+  if (forbidden) {
+    context.report({
+      node,
+      messageId: 'violation',
+      data: {
+        message:
+          'Context/Peek host chrome is Nession-owned. Put radius/material/elevation/typography in capsuleStyles and consume the canonical upper-Capsule recipe.',
+        ruleId: 'upper-capsule-visual-owner',
+      },
+    });
+  }
 }
 
 function isCapsuleFile(filename) {
@@ -63,6 +96,11 @@ function isCapsuleFile(filename) {
     !normalized.includes('/__tests__/') &&
     !/\.(test|spec)\.[jt]sx?$/.test(normalized)
   );
+}
+
+function isChromeHost(filename) {
+  const normalized = filename.replace(/\\/g, '/');
+  return CHROME_HOST_SUFFIXES.some((suffix) => normalized.endsWith(suffix));
 }
 
 function isAllowlisted(filename) {
@@ -86,7 +124,7 @@ export default function noCapsuleMagicMetrics() {
       messages: {
         violation: '{{message}}\n\nnession/no-capsule-magic-metrics ({{ruleId}})',
         sideOffset:
-          'Popover sideOffset must read --terminal-capsule-popover-side-offset via readPopoverSideOffset(), not a numeric literal.',
+          'Popover sideOffset must read --nession-terminal-capsule-popover-side-offset via readPopoverSideOffset(), not a numeric literal.',
       },
     },
     create(context) {
@@ -95,13 +133,20 @@ export default function noCapsuleMagicMetrics() {
         return {};
       }
 
+      const enforceChromeOwner = isChromeHost(filename);
+
       return {
         Literal(node) {
-          reportClassViolations(context, node, node.value);
+          reportClassViolations(context, node, node.value, enforceChromeOwner);
         },
         TemplateLiteral(node) {
           for (const quasi of node.quasis) {
-            reportClassViolations(context, quasi, quasi.value.cooked ?? quasi.value.raw);
+            reportClassViolations(
+              context,
+              quasi,
+              quasi.value.cooked ?? quasi.value.raw,
+              enforceChromeOwner,
+            );
           }
         },
         JSXAttribute(node) {

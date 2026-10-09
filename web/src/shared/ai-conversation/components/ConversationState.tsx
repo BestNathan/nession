@@ -32,7 +32,7 @@ export function LoadingOlder() {
         chromeSansRole('metadata'),
       )}
     >
-      <Loader aria-hidden className="h-3.5 w-3.5 animate-spin" />
+      <Loader aria-hidden className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />
       Loading earlier messages…
     </p>
   )
@@ -157,7 +157,7 @@ export function SkippedRecords({ count }: { count: number }) {
       className={cn('flex items-center gap-2 text-muted-foreground', chromeSansRole('caption'))}
     >
       <AlertCircle aria-hidden className="h-3.5 w-3.5 shrink-0" />
-      {count === 1 ? '1 record was not shown.' : `${count} records were not shown.`}
+      {count === 1 ? 'At least 1 record was not shown.' : `At least ${count} records were not shown.`}
     </p>
   )
 }

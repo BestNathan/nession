@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { GitBranch, RefreshCw } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
+import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
@@ -236,7 +237,7 @@ function GitHeader({
  * The header's second line.
  *
  * Names the work tree as well as the branch: the same repository checked out
- * twice is two different places to be, and the Signal already says which one
+ * twice is two different places to be, and the Peek already says which one
  * (`capability-emergence.md` lists worktree identity as part of the model).
  */
 function headerSummary(
@@ -322,7 +323,7 @@ function GitBody({
   // resolves against that row, which is the thing being sized.
   return (
     <div className="flex min-h-0 flex-1 flex-col lg:grid lg:grid-cols-[minmax(12rem,20rem)_minmax(0,1fr)]">
-      <aside className="max-h-[50%] min-h-0 shrink-0 overflow-y-auto border-b lg:max-h-none lg:shrink lg:border-b-0 lg:border-r">
+      <aside className={cn('max-h-[50%] min-h-0 shrink-0 overflow-y-auto border-b lg:max-h-none lg:shrink lg:border-b-0 lg:border-r', workspaceScrollClearanceClass)}>
         <GitChangeList rows={rows} selectedPath={diff.selectedPath} onSelect={onSelect} />
       </aside>
       <main className="flex min-h-0 flex-1 flex-col lg:flex-none">

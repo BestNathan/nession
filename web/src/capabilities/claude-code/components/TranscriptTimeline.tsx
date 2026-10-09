@@ -11,6 +11,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { cn } from '@/shared/lib/utils';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 import { formatClockTime } from '@/shared/lib/format';
+import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import type { ClaudeCodeTranscriptEntry } from '../types';
 
 /**
@@ -157,7 +158,7 @@ function Row({ entry }: { entry: Entry }) {
   const head = (
     <div className="flex min-w-0 items-center gap-2">
       <IconOf entry={entry} />
-      <span className={cn('shrink-0 font-medium', chromeSansRole('secondary'))}>
+      <span className={cn('shrink-0', chromeSansRole('secondary'))}>
         {labelOf(entry)}
       </span>
       {summary ? (
@@ -205,7 +206,7 @@ function Row({ entry }: { entry: Entry }) {
                 // min-content, so the token wraps and the box stays in its
                 // pane. Not `break-all`, which would also fix the sizing but
                 // breaks ordinary prose mid-word; this body is often reasoning.
-                'mt-2 max-h-64 overflow-auto whitespace-pre-wrap wrap-anywhere rounded border border-border/50 bg-muted/40 p-2',
+                'mt-2 max-h-64 overflow-auto whitespace-pre-wrap wrap-anywhere rounded-[var(--nession-radius-surface)] border border-border/50 bg-muted/40 p-2',
                 chromeMonoRole('metadata'),
               )}
               data-testid="transcript-detail"
@@ -236,7 +237,7 @@ export function TranscriptTimeline({
 }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="transcript-timeline">
-      <div className="min-h-0 flex-1 overflow-y-auto" data-testid="transcript-timeline-scroll">
+      <div className={cn('min-h-0 flex-1 overflow-y-auto', workspaceScrollClearanceClass)} data-testid="transcript-timeline-scroll">
         {items.length === 0 ? (
           <p className={cn('px-3 py-6 text-muted-foreground', chromeSansRole('secondary'))} data-testid="transcript-empty">
             {emptyLine}

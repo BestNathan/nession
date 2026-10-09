@@ -8,8 +8,8 @@
  * marker in its binding name; one that only applies on Web carries `Web` (or is
  * the unmarked sibling of an App-marked pair):
  *
- *   capsuleShellWebOuterClass      → var(--terminal-capsule-shell-margin-x)   (web-only)
- *   capsuleShellAppOuterClass      → var(--terminal-capsule-shell-inset)      (app-only)
+ *   capsuleShellWebOuterClass      → var(--nession-terminal-capsule-shell-margin-x)   (web-only)
+ *   capsuleShellAppOuterClass      → var(--nession-terminal-capsule-shell-inset)      (app-only)
  *
  * This is not decoration. The two experiences are asymmetric: `emitAppExperienceRemap`
  * writes every app leaf into `[data-experience="app"]`, while web leaves go to
@@ -21,13 +21,16 @@
  * renders on Web is a runtime property of the component tree, but the binding
  * name is the author's own statement of it.
  */
+import { cn } from '@/shared/lib/utils';
+import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
+import type { CapsuleExperience, ComposerLayout } from '@/product/terminal/capsule/types';
 
 /** Shared by textarea + ghost overlay so glyphs stay locked. */
 export const capsuleFieldTypeClass =
-  'font-sans text-[length:var(--terminal-capsule-font-size)] leading-[length:var(--terminal-capsule-text-line-height)] antialiased';
+  'font-sans text-[length:var(--nession-terminal-capsule-font-size)] leading-[length:var(--nession-terminal-capsule-text-line-height)] antialiased';
 
 export const capsuleFieldPadClass =
-  'px-[length:var(--terminal-capsule-field-inset-x)] py-[length:var(--terminal-capsule-field-inset-y)]';
+  'px-[length:var(--nession-terminal-capsule-field-inset-x)] py-[length:var(--nession-terminal-capsule-field-inset-y)]';
 
 /**
  * Every capsule control's **hit target** — one size, no primary/secondary split.
@@ -65,7 +68,7 @@ export const capsuleFieldPadClass =
  * token and put the drawn affordance under the hit target's guarantee.
  */
 export const capsuleIconButtonClass =
-  "h-[length:var(--control-md)] w-[length:var(--control-md)] shrink-0 touch-manipulation [&_svg:not([class*='size-'])]:size-[length:var(--icon-md)]";
+  "h-[length:var(--nession-control-md)] w-[length:var(--nession-control-md)] shrink-0 touch-manipulation [&_svg:not([class*='size-'])]:size-[length:var(--nession-icon-md)]";
 
 /**
  * The **drawn affordance** inside a capsule control — the circle a caller paints.
@@ -79,40 +82,132 @@ export const capsuleIconButtonClass =
  * on if they ever gain one — a state painted on the control would fill the hit
  * target and undo the split.
  *
- * `size-[length:var(--control-visual-size)]` is the only metric here, and it is
+ * `size-[length:var(--nession-control-visual-size)]` is the only metric here, and it is
  * the token the contract names (`visualSizeToken`), which is what lets
- * `design-gate.mjs` fail if the two drift apart. `var(--control-visual-size)`
+ * `design-gate.mjs` fail if the two drift apart. `var(--nession-control-visual-size)`
  * resolves on both experiences: the leaf is declared in `experience.web` as well
  * as `experience.app`, so `:root` defines it and `[data-experience="app"]`
  * remaps it.
  */
 export const capsuleIconVisualClass =
-  'flex size-[length:var(--control-visual-size)] shrink-0 items-center justify-center rounded-full';
+  'flex size-[length:var(--nession-control-visual-size)] shrink-0 items-center justify-center rounded-full';
 
 export const capsuleControlRowClass =
-  'relative z-[1] flex h-[length:var(--control-md)] shrink-0 items-center gap-[length:var(--terminal-capsule-control-gap)]';
+  'relative z-[1] flex h-[length:var(--nession-control-md)] shrink-0 items-center gap-[length:var(--nession-terminal-capsule-control-gap)]';
 
 /** Floating control surface — the shared elevation, no border (visual-language.md
  *  "several floating surfaces ... must read as one group", terminal-capsule.md
  *  § Surface treatment). Every Nession-owned floating surface uses this token;
  *  a surface that needs its own shadow is evidence it should not be floating. */
-export const capsuleFloatingSurfaceClass =
-  'bg-[color:var(--terminal-capsule-surface)] text-foreground shadow-[var(--elevation-floating)] backdrop-blur-md';
+export const capsuleFloatingMaterialClass =
+  'bg-[color:var(--nession-terminal-capsule-surface)] shadow-[var(--nession-elevation-floating)] backdrop-blur-md';
+
+export const capsuleFloatingSurfaceClass = cn(
+  capsuleFloatingMaterialClass,
+  'text-foreground',
+);
 
 export const capsuleShellSurfaceClass = capsuleFloatingSurfaceClass;
 
+/** Quiet but perceivable ambient working state around the + affordance. */
+export const capsuleWorkRingClass = 'text-muted-foreground';
+
+/**
+ * Canonical visual grammar for the dock's one upper Capsule slot (#1446).
+ *
+ * Context and Peek are two contents of the same product region. Their content
+ * density may differ, but the outer object does not: one material, one capsule
+ * radius, one elevation language, and one width supplied by CapsuleShell.
+ *
+ * Keep surface decisions here. Consumers may add content/layout classes, but
+ * must not fork radius/material/elevation/host typography locally.
+ */
+export const capsuleUpperSurfaceClass = cn(
+  'pointer-events-auto flex w-full flex-col rounded-[var(--nession-radius-capsule)]',
+  capsuleFloatingSurfaceClass,
+);
+
+/** One gap for every content that occupies the upper slot. */
+export const capsuleUpperDockClass =
+  'mb-[length:var(--nession-context-capsule-margin-bottom)]';
+
+/** Nession-owned upper-surface header anatomy. */
+export const capsuleUpperHeaderClass =
+  'flex items-center justify-between gap-[length:var(--nession-terminal-capsule-projection-item-gap)]';
+
+/** The upper surface's own name: chrome typography, never composer typography. */
+export const capsuleUpperTitleClass = cn(
+  'min-w-0 flex-1 truncate text-left text-foreground',
+  chromeSansRole('body'),
+);
+
+/** 44px App hit target with the visual affordance painted on the inner node. */
+export const capsuleUpperCloseButtonClass = cn(
+  capsuleIconButtonClass,
+  'flex items-center justify-center text-muted-foreground transition-colors hover:text-foreground',
+);
+
+/** Product-owned styling for the child detail launched from a Peek body. */
+export const capsuleDetailDialogClass =
+  'flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden rounded-[var(--nession-radius-capsule)] sm:max-w-lg';
+
 export const capsuleShellInnerPadClass =
-  'px-[length:var(--terminal-capsule-shell-pad-x)] py-[length:var(--terminal-capsule-shell-pad-y)]';
+  'px-[length:var(--nession-terminal-capsule-shell-pad-x)] py-[length:var(--nession-terminal-capsule-shell-pad-y)]';
 
 /** Stacked / multi-row shell corners */
-export const capsuleShellCapsuleRadiusClass = 'rounded-[var(--radius-capsule)]';
+export const capsuleShellCapsuleRadiusClass = 'rounded-[var(--nession-radius-capsule)]';
 
 /** Single-row web pill ends */
-export const capsuleShellPillRadiusClass = 'rounded-[var(--terminal-capsule-shell-pill-radius)]';
+export const capsuleShellPillRadiusClass = 'rounded-[var(--nession-terminal-capsule-shell-pill-radius)]';
 
-/** Inner (interactive) shell: full-width, clips children to the capsule corners. */
-export const capsuleShellInnerClass =
-  'pointer-events-auto w-full overflow-hidden';
+/**
+ * The one derivation of a Capsule's outer geometry (#1347 SC-29/SC-30).
+ *
+ * The Conversation Form and the Capability Form are one object in two states,
+ * and the relational assertion that keeps them so compares their *rendered*
+ * geometry — so their class lists have to come from one place. They were written
+ * twice, which is how the Capability Form kept a 9999px pill and the retired
+ * 28px dock band for as long as it did: each site was self-consistent, and only
+ * a comparison *between* them could see the drift.
+ *
+ * Shared: the control band's vertical mass, the surface treatment, the radius
+ * family (the shape picks which), the inner padding rhythm, the hit area, and
+ * the clipping that keeps a scrolling child inside the corners.
+ *
+ * Not shared: **width**. The Terminal shell is stretched by its dock; the
+ * Workspace nav shares a row with the Web surface action and sizes to its own
+ * content inside the bar. That is a fact about each one's parent rather than
+ * about the Capsule, so it stays a parameter — and it is why the relational
+ * assertion compares where each one *lands* (its insets) instead of the width
+ * either one declares.
+ */
+export interface CapsuleOuterGeometry {
+  shape: 'capsule' | 'pill';
+  shellClass: string;
+}
+
+export function capsuleOuterGeometry(
+  experience: CapsuleExperience,
+  layout: ComposerLayout = 'flat',
+  width: 'stretch' | 'intrinsic' = 'stretch',
+): CapsuleOuterGeometry {
+  const shape: CapsuleOuterGeometry['shape'] =
+    experience === 'app' || layout !== 'flat' ? 'capsule' : 'pill';
+
+  return {
+    shape,
+    // Plain strings, one axis each, so the whole object reads at once. They
+    // cannot collide: the shape picks exactly one radius, and the width is
+    // exactly one of the two.
+    shellClass: [
+      'pointer-events-auto flex min-h-[length:var(--nession-control-md)] items-center overflow-hidden',
+      width === 'stretch' ? 'w-full' : 'max-w-full',
+      capsuleShellSurfaceClass,
+      shape === 'pill' ? capsuleShellPillRadiusClass : capsuleShellCapsuleRadiusClass,
+      capsuleShellInnerPadClass,
+    ].join(' '),
+  };
+}
 
 /**
  * Web outer frame — margins, then a bound, then centred.
@@ -128,102 +223,221 @@ export const capsuleShellInnerClass =
  * here, so the code was the convergence debt.
  */
 export const capsuleShellWebOuterClass =
-  'inset-x-[length:var(--terminal-capsule-shell-margin-x)] max-w-[length:var(--terminal-capsule-shell-max-width)] mx-auto flex flex-col items-stretch pointer-events-none';
+  'inset-x-[length:var(--nession-terminal-capsule-shell-margin-x)] max-w-[length:var(--nession-terminal-capsule-shell-max-width)] mx-auto flex flex-col items-stretch pointer-events-none';
 
 export const capsuleShellAppOuterClass =
-  'inset-x-[length:var(--terminal-capsule-shell-inset)] flex justify-center pointer-events-none';
+  'inset-x-[length:var(--nession-terminal-capsule-shell-inset)] flex justify-center pointer-events-none';
 
 export const capsuleShellDockBottomClass =
-  'bottom-[max(var(--terminal-capsule-shell-margin-bottom),env(safe-area-inset-bottom))]';
+  'bottom-[max(var(--nession-terminal-capsule-shell-margin-bottom),env(safe-area-inset-bottom))]';
 
 export const capsuleShellAppDockBottomClass =
-  'bottom-[max(var(--terminal-capsule-shell-inset),var(--terminal-capsule-shell-safe-area))]';
-
-export const capsuleComposerGridGapClass = 'gap-[length:var(--terminal-capsule-row-gap)]';
-
-export const capsuleComposerRowGapYClass = 'gap-y-[length:var(--terminal-capsule-toolbar-row-gap)]';
-
-export const capsuleShellContentGapClass = 'gap-[length:var(--terminal-capsule-shell-content-gap)]';
-
-export const capsulePopoverPanelClass =
-  'z-[length:var(--terminal-capsule-popover-zindex)] max-h-[length:var(--terminal-capsule-popover-max-height)] w-[length:var(--terminal-capsule-popover-width)] max-w-[calc(100vw-var(--terminal-capsule-popover-viewport-inset))] overflow-hidden border-border bg-popover p-0 text-popover-foreground shadow-md';
-
-export const capsulePopoverHeaderClass =
-  'gap-[length:var(--terminal-capsule-popover-gap)] border-b border-border/60 p-[length:var(--terminal-capsule-popover-pad)]';
-
-export const capsulePopoverScrollClass =
-  'max-h-[length:var(--terminal-capsule-popover-list-max-height)] overflow-y-auto p-[length:var(--terminal-capsule-popover-inner-pad)]';
-
-export const capsulePopoverBodyClass =
-  'flex max-h-[length:var(--terminal-capsule-popover-body-max-height)] flex-col overflow-hidden';
-
-export const capsulePopoverItemClass =
-  'flex h-[length:var(--control-md)] w-full items-center gap-[length:var(--terminal-capsule-popover-gap)] px-[length:var(--terminal-capsule-popover-item-pad-x)] text-left text-[length:var(--terminal-capsule-font-size)] transition-colors hover:bg-accent/40 disabled:opacity-50';
-
-export const capsuleCaptionTextClass = 'text-[length:var(--terminal-capsule-caption-font-size)]';
-
-export const capsulePopoverSearchClass =
-  'h-[length:var(--control-md)] text-[length:var(--terminal-capsule-font-size)]';
-
-export const capsuleEmptyStatePadClass =
-  'px-[length:var(--terminal-capsule-phys-key-pad-x)] py-[length:var(--terminal-capsule-dialog-gap)] text-[length:var(--terminal-capsule-font-size)]';
-
-export const capsuleHistoryItemClass =
-  'flex w-full items-center justify-between gap-[length:var(--terminal-capsule-popover-gap)] rounded px-[length:var(--terminal-capsule-phys-key-pad-x)] py-[length:var(--terminal-capsule-phys-key-pad-x)] text-left text-[length:var(--terminal-capsule-font-size)] hover:bg-accent/40';
-
-export const capsulePhysKeyButtonClass =
-  'h-[length:var(--terminal-capsule-phys-key-height)] min-w-[5ch] shrink-0 whitespace-nowrap px-0 font-mono text-[length:var(--terminal-capsule-phys-key-font-size)]';
-
-export const capsuleArrowKeyAppButtonClass =
-  'h-[length:var(--terminal-capsule-phys-key-height)] w-[var(--terminal-capsule-phys-key-arrow-width)] min-w-0 shrink-0 px-0 font-mono text-[length:var(--terminal-capsule-phys-key-font-size)]';
-
-export const capsulePhysKeyIconClass = 'size-[length:var(--terminal-capsule-phys-key-icon-size)]';
-
-export const capsulePhysKeyRowClass =
-  'flex flex-row items-center gap-[length:var(--terminal-capsule-phys-key-grid-gap)] border-b border-border/60 px-[length:var(--terminal-capsule-phys-key-pad-x)] py-[length:var(--terminal-capsule-phys-key-pad-y)]';
-
-export const capsulePhysKeyGridGapClass = 'gap-[length:var(--terminal-capsule-phys-key-grid-gap)]';
-
-export const capsuleChainBarClass =
-  'flex items-center gap-[length:var(--terminal-capsule-popover-gap)] border-b border-border/60 bg-primary/10 px-[length:var(--terminal-capsule-phys-key-pad-x)] py-[length:var(--terminal-capsule-popover-inner-pad)] text-[length:var(--terminal-capsule-font-size)]';
-
-export const capsuleMiniButtonClass =
-  'h-[length:var(--terminal-capsule-mini-control-height)] text-[length:var(--terminal-capsule-caption-font-size)]';
-
-export const capsuleChipRowClass = 'flex flex-wrap gap-[length:var(--terminal-capsule-chip-gap)]';
-
-export const capsuleLabelTextClass =
-  'shrink-0 text-[length:var(--terminal-capsule-font-size)] text-muted-foreground';
-
-export const capsuleInlineFieldRowClass =
-  'flex items-center gap-[length:var(--terminal-capsule-popover-gap)]';
+  'bottom-[max(var(--nession-terminal-capsule-shell-inset),var(--nession-terminal-capsule-shell-safe-area))]';
 
 /**
- * An emerged capability projection — the Signal and Peek frame (`#826`).
+ * The upper Context Capsule (#1347 SC-41–44) — the second surface in the dock,
+ * above the shell.
  *
- * Its own token group rather than borrowed popover values: a projection is a
- * smaller, less permanent surface than a popover, and pointing at the popover's
- * geometry would have made the two move together for no reason. The typography
- * is a step below the capsule's own scale, because a Signal that arrived at the
- * composer's text size would read as a second composer.
- *
- * **The radius is part of that group now (#1110).** It was the one value here
- * still borrowed — `var(--radius-lg)`, which resolves to `var(--radius)`, a
- * generic shadcn-scale value that everything from a menu to a card also uses.
- * So the corner was the only part of the surface not owned by the surface, and
- * `terminalCapsule.projectionRadius` — declared in both experience token files
- * for exactly this frame — was read by nothing.
- *
- * This moves the frame from 10px to 12px. That is the point rather than a side
- * effect: the declaration and the rendering disagreed, and the declaration is
- * the one that was written down on purpose.
+ * Its gap is a margin rather than a positioned offset, which is what makes "the
+ * lower Capsule does not move" structural: the dock is a bottom-anchored
+ * `flex flex-col`, so growing upward cannot move what is below it, and the gap
+ * is the one token between them.
  */
-export const capsuleProjectionClass =
-  'pointer-events-auto flex flex-col gap-[length:var(--terminal-capsule-projection-gap)] rounded-[var(--terminal-capsule-projection-radius)] border border-border/60 bg-background/95 p-[length:var(--terminal-capsule-projection-pad)] shadow-[var(--elevation-floating)] backdrop-blur';
+export const contextCapsuleDockClass = capsuleUpperDockClass;
 
-/** Above the capsule, never over it: the resting capsule's box does not move. */
-export const capsuleProjectionDockClass =
-  'mb-[length:var(--terminal-capsule-projection-margin-bottom)]';
+/**
+ * The surface itself: the shell's own treatment (one Capsule language), a height
+ * CEILING rather than a height, and clipping so the scrolling row inside cannot
+ * paint past the corners.
+ *
+ * It takes its content's height and clamps only at the ceiling, so a list of
+ * three capabilities is three rows tall instead of reserving the rows it does
+ * not have. SC-44 still holds, but no longer by construction: the flat list
+ * renders every capability, so the three sense states differ in row *order* and
+ * never in row *count* — which is why the pair does not resize as senses come
+ * and go. That invariant is asserted rather than assumed (the contract's
+ * `maxHeightToken` plus the equal-height comparison across states).
+ *
+ * The radius is `semantic.radius-capsule` on both experiences rather than the
+ * Web shell's pill: a pill radius is what a 32px one-row box wears, and this is
+ * a multi-row surface. It is also what `pattern.context-capsule` pins.
+ */
+export const contextCapsuleSurfaceClass = cn(
+  capsuleUpperSurfaceClass,
+  'max-h-[length:var(--nession-context-capsule-max-height)] overflow-hidden',
+  // The surface carries the padding, not the rows: `pattern.context-capsule`
+  // pins `padXToken` here, and it is what insets a row's hover and focus ring
+  // from the Capsule's own edge instead of painting them against it.
+  'px-[length:var(--nession-terminal-capsule-shell-pad-x)] py-[length:var(--nession-terminal-capsule-shell-pad-y)]',
+);
+
+/** The list owns its scroll and hands every other gesture back (SC-42). */
+export const contextCapsuleScrollClass = 'min-h-0 flex-1 overflow-y-auto overscroll-contain';
+
+/**
+ * One row: a whole-row control, two lines tall by design (title + reason), with
+ * the icon slot reserved whether or not a glyph arrived so the titles stay
+ * aligned down the list.
+ *
+ * `min-h` is a floor, so the band is only uniform if both lines fit inside it —
+ * that is a rule about the pair, not about the box. It once needed a
+ * capsule-local leading to hold: with only a font-size set, both lines inherited
+ * the document's 1.5, and at the capsule's own 1rem text the pair measured 48px
+ * against the 44px band, so a sensed row stood 4px prouder than an ordinary one
+ * and the list's rhythm changed with the sense state. The pair fits now because
+ * of the role *sizes*: 14 + 11.5 at the same inherited 1.5 is 38.25px (Web 36px),
+ * already inside the band, and the role leadings only tighten that to 34.55px /
+ * 31.85px. The leading is still what retires `rowLineHeight` — the roles supply
+ * one, so a capsule-local one would be a second answer to a question already
+ * answered — but the band does not depend on it.
+ */
+export const contextCapsuleRowClass = [
+  'flex w-full min-h-[length:var(--nession-context-capsule-row-height)] items-center gap-[length:var(--nession-terminal-capsule-control-gap)]',
+  'rounded-[var(--nession-radius-control)] text-left transition-colors',
+  // `ring-inset`, because a row is full-bleed inside a scrolling container: an
+  // outset ring is clipped on every side but the last row's, which drew a stray
+  // underline under the first row when focus moved into the list (caught in the
+  // screenshot, invisible to every assertion about the row's box).
+  'hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
+].join(' ');
+
+/** The icon column, present even when empty so titles share one edge. */
+export const contextCapsuleIconSlotClass = 'flex size-[length:var(--nession-icon-md)] shrink-0 items-center justify-center';
+
+/**
+ * The presence mark's column, and the mark inside it.
+ *
+ * The column is always present so titles share one edge whether or not a dot is
+ * drawn; the mark is drawn only for a capability the session actually needs
+ * (`relevant` / `active`), which is the same rule the Capability Form's entries
+ * follow.
+ */
+export const contextCapsuleMarkerSlotClass =
+  'flex size-[length:var(--nession-context-capsule-marker-size)] shrink-0 justify-center';
+
+export const contextCapsuleMarkerClass =
+  'size-[length:var(--nession-context-capsule-marker-size)] rounded-full bg-foreground';
+
+/**
+ * The row's two lines, set in the design language's roles rather than the
+ * capsule's own font size.
+ *
+ * Both classes used to name `--nession-terminal-capsule-font-size` /
+ * `--nession-terminal-capsule-caption-font-size`, and **both of those leaves ref the
+ * one `primitive.typography.size`** — so on both experiences they emitted the
+ * same 16px, the title and the reason were separated by colour alone, and the
+ * list carried no typographic hierarchy at all (measured line by line on
+ * staging 2026-10-04: all four rows' initial cap height was 12px). The design
+ * language keeps a ramp for exactly this job, and the row was using none of it.
+ *
+ * `body` is the role written for it — the role's note on Web names "button
+ * labels, menu items, filters" — and the reason takes `caption`. The roles
+ * supply the leading too, which is what retires `contextCapsule.rowLineHeight`:
+ * the pair was already inside the band on the role sizes (14 + 11.5 at the
+ * inherited 1.5 is 38.25px on App, 36px on Web), so what a capsule-local leading
+ * would duplicate is the roles' own answer, not the fit — the role leadings only
+ * tighten the pair to 34.55px / 31.85px.
+ */
+export const contextCapsuleTitleClass = cn('truncate text-foreground', chromeSansRole('body'));
+
+export const contextCapsuleReasonClass = cn(
+  'truncate text-muted-foreground',
+  chromeSansRole('caption'),
+);
+
+export const capsuleComposerGridGapClass = 'gap-[length:var(--nession-terminal-capsule-row-gap)]';
+
+export const capsuleComposerRowGapYClass = 'gap-y-[length:var(--nession-terminal-capsule-toolbar-row-gap)]';
+
+export const capsuleShellContentGapClass = 'gap-[length:var(--nession-terminal-capsule-shell-content-gap)]';
+
+export const capsulePopoverPanelClass =
+  'z-[length:var(--nession-terminal-capsule-popover-zindex)] max-h-[length:var(--nession-terminal-capsule-popover-max-height)] w-[length:var(--nession-terminal-capsule-popover-width)] max-w-[calc(100vw-var(--nession-terminal-capsule-popover-viewport-inset))] overflow-hidden border-border bg-popover p-0 text-popover-foreground shadow-[var(--nession-elevation-floating)]';
+
+export const capsulePopoverHeaderClass =
+  'gap-[length:var(--nession-terminal-capsule-popover-gap)] border-b border-border/60 p-[length:var(--nession-terminal-capsule-popover-pad)]';
+
+export const capsulePopoverScrollClass =
+  'max-h-[length:var(--nession-terminal-capsule-popover-list-max-height)] overflow-y-auto p-[length:var(--nession-terminal-capsule-popover-inner-pad)]';
+
+export const capsulePopoverBodyClass =
+  'flex max-h-[length:var(--nession-terminal-capsule-popover-body-max-height)] flex-col overflow-hidden';
+
+export const capsulePopoverItemClass = cn(
+  'flex h-[length:var(--nession-control-md)] w-full items-center gap-[length:var(--nession-terminal-capsule-popover-gap)] px-[length:var(--nession-terminal-capsule-popover-item-pad-x)] text-left transition-colors hover:bg-accent/40 disabled:opacity-50',
+  chromeSansRole('body'),
+);
+
+export const capsuleCaptionTextClass = chromeSansRole('caption');
+
+export const capsulePopoverSearchClass = cn(
+  'h-[length:var(--nession-control-md)]',
+  chromeSansRole('body'),
+);
+
+export const capsuleEmptyStatePadClass = cn(
+  'px-[length:var(--nession-terminal-capsule-phys-key-pad-x)] py-[length:var(--nession-terminal-capsule-dialog-gap)]',
+  chromeSansRole('body'),
+);
+
+export const capsuleHistoryItemClass =
+  'flex w-full items-center justify-between gap-[length:var(--nession-terminal-capsule-popover-gap)] rounded-[var(--nession-radius-control)] px-[length:var(--nession-terminal-capsule-phys-key-pad-x)] py-[length:var(--nession-terminal-capsule-phys-key-pad-x)] text-left hover:bg-accent/40';
+
+export const capsuleHistoryTitleClass = chromeSansRole('body');
+
+export const capsuleHistoryCommandClass = cn(
+  'min-w-0 truncate',
+  chromeMonoRole('code'),
+);
+
+export const capsulePhysKeyButtonClass =
+  'h-[length:var(--nession-terminal-capsule-phys-key-height)] min-w-[5ch] shrink-0 whitespace-nowrap px-0 font-mono text-[length:var(--nession-terminal-capsule-phys-key-font-size)] leading-[length:var(--nession-terminal-capsule-phys-key-font-size)]';
+
+export const capsuleArrowKeyAppButtonClass =
+  'h-[length:var(--nession-terminal-capsule-phys-key-height)] w-[var(--nession-terminal-capsule-phys-key-arrow-width)] min-w-0 shrink-0 px-0 font-mono text-[length:var(--nession-terminal-capsule-phys-key-font-size)] leading-[length:var(--nession-terminal-capsule-phys-key-font-size)]';
+
+export const capsulePhysKeyIconClass = 'size-[length:var(--nession-terminal-capsule-phys-key-icon-size)]';
+
+export const capsulePhysKeyRowClass =
+  'flex flex-row items-center gap-[length:var(--nession-terminal-capsule-phys-key-grid-gap)] border-b border-border/60 px-[length:var(--nession-terminal-capsule-phys-key-pad-x)] py-[length:var(--nession-terminal-capsule-phys-key-pad-y)]';
+
+export const capsulePhysKeyGridGapClass = 'gap-[length:var(--nession-terminal-capsule-phys-key-grid-gap)]';
+
+export const capsuleChainBarClass =
+  'flex items-center gap-[length:var(--nession-terminal-capsule-popover-gap)] border-b border-border/60 bg-primary/10 px-[length:var(--nession-terminal-capsule-phys-key-pad-x)] py-[length:var(--nession-terminal-capsule-popover-inner-pad)] text-[length:var(--nession-terminal-capsule-font-size)]';
+
+export const capsuleMiniButtonClass =
+  'h-[length:var(--nession-terminal-capsule-mini-control-height)] text-[length:var(--nession-terminal-capsule-caption-font-size)]';
+
+export const capsuleChipRowClass = 'flex flex-wrap gap-[length:var(--nession-terminal-capsule-chip-gap)]';
+
+export const capsuleLabelTextClass =
+  'shrink-0 text-[length:var(--nession-terminal-capsule-font-size)] text-muted-foreground';
+
+export const capsuleInlineFieldRowClass =
+  'flex items-center gap-[length:var(--nession-terminal-capsule-popover-gap)]';
+
+/**
+ * An emerged capability projection — the Peek content in the Upper Capsule
+ * slot (#826, #1446).
+ *
+ * The projection-specific tokens below now own only what is genuinely
+ * content/density-specific: gap, padding and the height ceiling. The outer
+ * visual object is not a projection family anymore. Context and Peek replace
+ * each other in one product slot, so material, radius, elevation and dock gap
+ * come from `capsuleUpperSurfaceClass` / `capsuleUpperDockClass`.
+ *
+ * Host typography follows the same rule. The title/actions use canonical chrome
+ * roles, while capability bodies choose the roles their own content needs. The
+ * composer's writing size is therefore not inherited as Peek chrome.
+ */
+export const capsuleProjectionClass = cn(
+  capsuleUpperSurfaceClass,
+  'gap-[length:var(--nession-terminal-capsule-projection-gap)] p-[length:var(--nession-terminal-capsule-projection-pad)]',
+);
+
+/** Above the capsule, never over it: every upper-slot content uses one gap. */
+export const capsuleProjectionDockClass = capsuleUpperDockClass;
 
 /**
  * The ceiling, and it scrolls its own overflow (#826 Q5).
@@ -232,14 +446,11 @@ export const capsuleProjectionDockClass =
  * the terminal and never becomes the thing that owns the scroll.
  */
 export const capsuleProjectionScrollClass =
-  'max-h-[length:var(--terminal-capsule-projection-max-height)] overflow-y-auto';
-
-export const capsuleProjectionTextClass =
-  'font-sans text-[length:var(--terminal-capsule-projection-font-size)] leading-[length:var(--terminal-capsule-projection-line-height)]';
+  'max-h-[length:var(--nession-terminal-capsule-projection-max-height)] overflow-y-auto';
 
 export const capsuleProjectionItemClass =
-  'flex w-full items-center gap-[length:var(--terminal-capsule-projection-item-gap)] rounded px-[length:var(--terminal-capsule-projection-item-pad-x)] py-[length:var(--terminal-capsule-projection-item-pad-y)] text-left transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+  'flex w-full items-center gap-[length:var(--nession-terminal-capsule-projection-item-gap)] rounded-[var(--nession-radius-control)] px-[length:var(--nession-terminal-capsule-projection-item-pad-x)] py-[length:var(--nession-terminal-capsule-projection-item-pad-y)] text-left transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
 /** The change letter's column, fixed so the filenames beside it share an edge. */
 export const capsuleProjectionMarkClass =
-  'w-[length:var(--terminal-capsule-projection-mark-width)] shrink-0 font-mono';
+  'w-[length:var(--nession-terminal-capsule-projection-mark-width)] shrink-0 font-mono';

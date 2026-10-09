@@ -1,0 +1,272 @@
+import { useEffect, useMemo, useRef, type RefObject } from 'react';
+import { cn } from '@/shared/lib/utils';
+import {
+  contextCapsuleDockClass,
+  contextCapsuleIconSlotClass,
+  contextCapsuleMarkerClass,
+  contextCapsuleMarkerSlotClass,
+  contextCapsuleReasonClass,
+  contextCapsuleRowClass,
+  contextCapsuleScrollClass,
+  contextCapsuleSurfaceClass,
+  contextCapsuleTitleClass,
+} from '@/product/terminal/capsule/capsuleStyles';
+import { CONTEXT_CAPSULE_ID } from '@/product/terminal/capsule/contextCapsuleId';
+import { resolveContextRows, sensedWorkItems, type ContextRow } from '@/product/terminal/capsule/contextRows';
+import type { CapsuleCapabilityDisclosure } from '@/product/terminal/capsule/types';
+import type { ResolvedWorkContext } from '@/product/terminal/capsule/workAwareness';
+
+export interface ContextCapsuleProps {
+  disclosure: CapsuleCapabilityDisclosure;
+  workContext?: ResolvedWorkContext;
+  /** Close the surface. The lower Capsule is not this component's to move. */
+  onDismiss: () => void;
+  /** Record explicit Context -> Peek deepening so the new upper layer may own focus. */
+  onDeepen: (capabilityId: string) => void;
+  /** The `+` that opened this surface — where focus goes when it closes. */
+  triggerRef: React.RefObject<HTMLButtonElement | null>;
+}
+
+/**
+ * The upper Context Capsule (#1347 SC-41–44).
+ *
+ * A sibling of the Conversation Capsule inside the same dock — never a popup,
+ * never a replacement. The owner's correction is the whole design: tapping `+`
+ * leaves the lower Capsule visible, unchanged and spatially stable, and adds
+ * this surface above it, one inter-Capsule gap away.
+ *
+ * What it renders is **one flat list**: the capabilities sensed right now first
+ * (work-sensed, then context-sensed), the ordinary catalog in the same list
+ * below them. There is no second step — no `All capabilities`, no submenu — so
+ * a capability is never more than one row away, and `resolveContextRows` is what
+ * keeps a sensed capability from also appearing in the catalog half.
+ *
+ * Its height is content-driven up to the Capsule-owned max-height ceiling.
+ * Sense changes only reorder/relabel the same one-row-per-capability list, so
+ * work/no-work/context-only keep one shell and one row band without inventing
+ * a fixed-height box. Overflow scrolls inside it and no other gesture belongs
+ * to it.
+ *
+ * The trigger (`+`) is not here: it lives in the composer row and points at this
+ * surface with `aria-controls`.
+ */
+export function ContextCapsule({
+  disclosure,
+  workContext,
+  onDismiss,
+  onDeepen,
+  triggerRef,
+}: ContextCapsuleProps) {
+  const rows = useMemo(
+    () =>
+      resolveContextRows(
+        sensedWorkItems(workContext, disclosure.entries),
+        disclosure.sensedContext ?? [],
+        disclosure.entries,
+      ),
+    [disclosure.entries, disclosure.sensedContext, workContext],
+  );
+
+  const surfaceRef = useRef<HTMLDivElement>(null);
+  const firstRowRef = useRef<HTMLButtonElement>(null);
+  const restoreTriggerOnUnmountRef = useRef(true);
+
+  // Focus enters the surface when it opens. This is what the menu primitive did
+  // before the list became a Capsule, and on App it matters more rather than
+  // less: the field the user was typing in must not hold the IME open over the
+  // surface they just asked for.
+  useEffect(() => {
+    firstRowRef.current?.focus();
+  }, []);
+
+  // Dismissal returns focus to the control that opened this surface. Deepening
+  // is deliberately different: Context -> Peek is one upper-layer transition,
+  // so focus belongs to the newly mounted Peek rather than the lower `+`.
+  //
+  // The cleanup is guarded for a second reason too: if the user has moved focus
+  // elsewhere before an external close, do not steal it back.
+  useEffect(
+    () => () => {
+      if (!restoreTriggerOnUnmountRef.current) {
+        return;
+      }
+      const active = document.activeElement;
+      const stranded = active === null || active === document.body || surfaceRef.current?.contains(active);
+      if (stranded) {
+        triggerRef.current?.focus({ preventScroll: true });
+      }
+    },
+    [surfaceRef, triggerRef],
+  );
+
+  useDismissOnEscapeAndOutside(surfaceRef, onDismiss);
+
+  // SC-36 / SC-44: sensing changes the rows in this same surface. Losing the
+  // final WorkSignal must not close a disclosure the user explicitly opened;
+  // it simply falls back to the ordinary capability list while the Work Ring
+  // disappears independently in the lower Capsule.
+
+  const select = (row: ContextRow) => {
+    // Every row opens its capability at Peek depth — the detail (#1347 SC-20).
+    // Sensed and ordinary rows behave alike: picking something in this list is
+    // asking to look at it, and the Peek is where the way on to the Workspace
+    // lives. The surface closes because the Peek takes this same slot.
+    restoreTriggerOnUnmountRef.current = false;
+    onDeepen(row.capabilityId);
+    disclosure.onSelect(row.capabilityId);
+    onDismiss();
+  };
+
+  return (
+    <div
+      ref={surfaceRef}
+      /* Named as the Context Disclosure rather than as a menu: it is the surface
+         SC-18 names, and eight specs already select it. The id is the same
+         string, shared so the trigger's `aria-controls` cannot drift from it. */
+      id={CONTEXT_CAPSULE_ID}
+      data-testid={CONTEXT_CAPSULE_ID}
+      data-capsule-part="context"
+      data-shell-shape="capsule"
+      role="group"
+      aria-label="Capabilities"
+      className={cn(contextCapsuleDockClass, contextCapsuleSurfaceClass)}
+    >
+      <div className={contextCapsuleScrollClass} data-testid="capsule-context-scroll">
+        {rows.map((row, index) => (
+          <ContextRowButton
+            key={row.capabilityId}
+            ref={index === 0 ? firstRowRef : undefined}
+            row={row}
+            onSelect={() => select(row)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * One row, and the whole row is the control.
+ *
+ * A real `<button>`, not a `role="menuitem"`: an ARIA menu without roving
+ * tabindex is worse than no menu at all, and every row here is naturally
+ * tabbable in the order it is read.
+ */
+function ContextRowButton({
+  ref,
+  row,
+  onSelect,
+}: {
+  ref?: React.Ref<HTMLButtonElement>;
+  row: ContextRow;
+  onSelect: () => void;
+}) {
+  const Icon = row.icon;
+  // Only a capability the session actually needs is marked, and only an
+  // ordinary row can be: a sensed row's presence is the reason line's job.
+  const perceived =
+    row.kind === 'ordinary' && (row.state === 'relevant' || row.state === 'active');
+
+  return (
+    <button
+      ref={ref}
+      type="button"
+      /* The sensed rows keep `capsule-context-item-…`, the ordinary ones
+         `capsule-capability-picker-…`: those two names are how the specs say
+         which half of the list they mean, and they are the only thing that
+         distinguishes the halves now that both are rows in one surface. */
+      data-testid={
+        row.kind === 'ordinary'
+          ? `capsule-capability-picker-${row.capabilityId}`
+          : `capsule-context-item-${row.capabilityId}`
+      }
+      data-context-row={row.kind}
+      data-capability-state={row.state}
+      onClick={onSelect}
+      className={contextCapsuleRowClass}
+    >
+      {/* The presence mark's column, on every row. It used to be rendered
+          only for ordinary rows, which pushed their titles 6px right of a
+          sensed row's (measured on staging: x=44 against x=50) — two
+          different left edges in one list. The column is always present so
+          the icon and title columns start at the same offset whether or not
+          a dot is drawn. */}
+      <span aria-hidden data-testid="capsule-row-marker" className={contextCapsuleMarkerSlotClass}>
+        {perceived ? <span className={contextCapsuleMarkerClass} /> : null}
+      </span>
+      <span className={contextCapsuleIconSlotClass} aria-hidden>
+        {Icon ? <Icon className="size-[length:var(--nession-icon-md)]" /> : null}
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col">
+        {/* No muted state, because this list has none to draw: the entries come
+            from `disclosure.discoverable`, and `resolveCapabilityPresences` maps
+            `unavailable` to `hidden` (`product/capability/presence.ts`), which
+            `resolveCapabilityDisclosure` keeps out of that bucket. A capability
+            the registry calls unavailable is not listed here at all.
+
+            So every title renders at full strength, and the mark is what tells
+            a needed capability from a merely listed one — presence is drawn,
+            not coloured. */}
+        {/* The title carries its own hook because the row button cannot stand in
+            for it: the button is `w-full`, so every row's box starts at the same
+            edge whatever the marker column does — the ragged edge this list had
+            was here, in the first column of text, and only a hook on the title
+            can measure it (`ui-contract-matrix.spec.ts`). */}
+        <span data-testid="capsule-row-title" className={contextCapsuleTitleClass}>{row.title}</span>
+        {row.reason === undefined ? null : (
+          <span className={contextCapsuleReasonClass}>{row.reason}</span>
+        )}
+      </span>
+      {/* No drill-in chevron. It is the strongest "this is a dropdown menu"
+          tell on a surface SC-42 says must not read as one, and it is not
+          even honest: picking a row deepens it in place rather than
+          navigating anywhere. */}
+    </button>
+  );
+}
+
+/**
+ * Dismissal for an in-flow surface: Escape, or a pointer that lands outside.
+ *
+ * The surface is not a popup, so nothing gives this for free — and the escape
+ * key has a second job here that a menu never had to think about: the Terminal
+ * below is listening for it. `stopPropagation` is what keeps dismissing the
+ * list from also sending an escape to whatever is running in the session.
+ */
+function useDismissOnEscapeAndOutside(
+  surfaceRef: RefObject<HTMLElement | null>,
+  onDismiss: () => void,
+): void {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') {
+        return;
+      }
+      event.stopPropagation();
+      onDismiss();
+    };
+
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        return;
+      }
+      if (surfaceRef.current?.contains(target)) {
+        return;
+      }
+      // The trigger's own click toggles the surface; dismissing here as well
+      // would close it twice and reopen it once.
+      if (target instanceof Element && target.closest('[data-testid="capsule-capability-more"]')) {
+        return;
+      }
+      onDismiss();
+    };
+
+    document.addEventListener('keydown', onKeyDown, true);
+    document.addEventListener('pointerdown', onPointerDown, true);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown, true);
+      document.removeEventListener('pointerdown', onPointerDown, true);
+    };
+  }, [onDismiss, surfaceRef]);
+}

@@ -66,6 +66,11 @@ Three properties matter more than the field lists:
 - **Absent means the provider did not say.** Do not infer `status`, `activity`
   or an outcome you were not told; `unknown` is a real state and is drawn as
   one.
+- **Skipped completeness is a lower bound, not an invented exact union.** A
+  provider reports `skipped` per page and pages may overlap, so the runtime
+  keeps the maximum count observed across the loaded window and surfaces it as
+  “At least N records not shown”. Exact union cardinality would require stable
+  identities for skipped records, which the canonical contract does not have.
 
 ## Onboarding a new provider
 
@@ -98,24 +103,44 @@ export const myProviderConversationAdapter: AIConversationAdapter<MyContext> = {
   id: 'my-provider',
   identity: { label: 'My Provider' },
   contextKey: (context) => `${context.a}:${context.b}`,
-  async list(context) { /* → AIConversationListResult */ },
+  requestKey: (context) => context.leaseId,
+  async list(context, cursor) { /* → result + nextCursor/listingId/restart */ },
   async read(context, conversationId, cursor) { /* → AIConversationPage */ },
   refresh: { kind: 'poll', intervalMs: 3000 },
 }
 ```
 
-Four decisions, all yours: how to list, how to read a page, what makes two
-contexts the same conversation space, and how you learn that something changed
-(`poll`, `push`, or `manual`).
+Six decisions, all yours: how to list one directory page, how to read one
+timeline page, what makes two contexts the same conversation space, what makes
+old in-flight work still authoritative, what makes one list continuation a
+coherent snapshot, and how you learn that something changed (`poll`, `push`,
+or `manual`). The runtime owns transcript paging/reconciliation and a bounded
+complete-list aggregation; a surface never needs a provider-specific "load page
+2" branch.
 
-Two obligations:
+Provider obligations:
 
+- **`nextCursor` is opaque and `listingId` names one coherent directory
+  snapshot.** If a continuation is no longer valid because the directory
+  re-sorted/rebound, return `restart: true`; never apply an old offset to a new
+  ordering. The runtime restarts at most twice and follows at most 32 pages for
+  one logical list read. Crossing either bound is a list error that preserves a
+  previously readable directory instead of looping forever.
 - **`bindingId` is an exact id** the provider named, or `null`. Never a guess
-  from a timestamp or a list of one — a reader who sees a conversation open
-  must be seeing one the provider said was *theirs*.
+  from a timestamp or a list of one. Every page of one `listingId` must report
+  the same binding.
 - **`contextKey` is equal exactly when two contexts mean the same conversation
-  space.** It is how the runtime tags a selection and discards a stale
-  response, and it is the one thing only you can answer.
+  space.** It scopes selection and visible conversation identity.
+- **`requestKey` changes when work issued under the old Context must no longer
+  publish.** Providers whose request authority is exactly `contextKey` may omit
+  it. If a token/lease/client can rotate while the space stays equal, implement
+  it explicitly; object identity is not a request-generation contract.
+- **A push policy also supplies `sourceKey(context, conversationId)`.** It is
+  equal exactly while the concrete subscription can be reused. Source
+  replacement is claimed before `subscribe()` may synchronously signal, and
+  the runtime performs a catch-up newest read to close the unsubscribe/subscribe
+  delivery gap.
+
 
 Export the adapter as a module-level constant: the hook treats it as the
 provider's identity, so building a new one per render would be asserting that
@@ -152,7 +177,8 @@ User and assistant message rendering · tool rows and their grouping · the
 process summary line · disclosure behaviour and focus handling · bounded group
 scrolling and edge fades · tail-follow, prepend anchors and jump-to-bottom ·
 loading, empty, unavailable, not-found, failure and partial-tail states ·
-Markdown (through the shared `ChatMarkdown`).
+list and transcript pagination · stale-list preservation · loaded-window
+unsupported-record reporting · Markdown (through the shared `ChatMarkdown`).
 
 If one of these does not fit your provider, that is a conversation about the
 **shared** model or the shared component — not a reason to fork one.
@@ -164,3 +190,22 @@ If one of these does not fit your provider, that is a conversation about the
   unproven interaction semantics are not to be unified early.
 - **`AIConversationContent` has only `text` and `unknown`.** Images, files and
   citations are added when a provider demonstrates the need, not in advance.
+
+
+## Staging browser acceptance matrix
+
+The provider-agnostic conversation staging contract is exercised by
+`e2e/specs/conversation-acceptance.spec.ts`. This is the canonical browser
+evidence for #1363; visual fixture snapshots are supplemental and must not be
+used as a substitute for these interaction assertions.
+
+| Criterion | Executable staging evidence |
+| --- | --- |
+| SC-14 | Wide Web, narrow Web, and App/touch run the shared renderer and verify typography/density, Process/Tool disclosure, nested scroll isolation, copy reachability, and focus behavior. |
+| SC-17 | Wide Web verifies bounded user bubble, assistant reading column, lower-emphasis process typography, shared spacing tokens, and settled progressive disclosure. |
+| SC-18 | Wide/narrow/touch exercise a 24-activity Tool Group, semantic compact summary, nested disclosure, bounded inner scrolling, pointer focus reveal, and no-hover/touch actions. |
+| SC-19 | Wide/narrow/touch run the same working → streaming → settled fixture and assert stable Tool Group, assistant answer, and action-row DOM identity, in-place tool status changes, stable row count, and stable action geometry. |
+| SC-20 | Wide/narrow/touch verify tail-follow, reader override through a real input gesture, jump-to-bottom re-engagement, load-older anchor preservation, nested group scroll isolation, and focus-preserving settle/collapse behavior. |
+
+Acceptance must pair these source-level assertions with a completed successful
+E2E workflow whose `head_sha` exactly matches the staging target SHA.

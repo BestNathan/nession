@@ -2,6 +2,7 @@ import { ArrowLeft } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { formatClockTime } from '@/shared/lib/format';
+import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import { TranscriptTimeline } from './TranscriptTimeline';
 import type { ClaudeCodeTranscriptItem } from '../types';
 import type { TranscriptItemsState } from '../hooks/useTranscriptItems';
@@ -53,7 +54,7 @@ function TranscriptList({
           No transcripts at this working directory.
         </p>
       ) : null}
-      <ul className="min-h-0 flex-1 overflow-y-auto" data-testid="transcript-list-scroll">
+      <ul className={cn('min-h-0 flex-1 overflow-y-auto', workspaceScrollClearanceClass)} data-testid="transcript-list-scroll">
         {list.transcripts.map((transcript: ClaudeCodeTranscriptItem) => (
           <li key={transcript.id}>
             <button
@@ -63,7 +64,7 @@ function TranscriptList({
               data-testid="transcript-open"
             >
               <div className="flex items-center gap-2">
-                <span className={cn('truncate font-medium', chromeSansRole('secondary'))}>
+                <span className={cn('truncate', chromeSansRole('secondary'))}>
                   {labelOf(transcript)}
                 </span>
                 {transcript.kind === 'sidechain' ? (

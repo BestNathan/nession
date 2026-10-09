@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { CapsuleHistoryPopover } from '@/product/terminal/capsule/CapsuleHistoryPopover';
 import { CapsuleInputActionButtons } from '@/product/terminal/capsule/CapsuleInputActionButtons';
 import {
@@ -7,13 +6,13 @@ import {
 } from '@/product/terminal/capsule/capsuleStyles';
 import { CapsuleIconVisual } from '@/product/terminal/capsule/CapsuleIconVisual';
 import { Plus } from 'lucide-react';
-import { CapabilityDisclosureMenu } from '@/product/capability/components/CapabilityDisclosureMenu';
-import { WorkOverview } from '@/product/terminal/capsule/WorkOverview';
 import { cn } from '@/shared/lib/utils';
 import type {
   CapsuleCapabilityDisclosure,
 } from '@/product/terminal/capsule/types';
 import { WorkRing } from '@/product/terminal/capsule/WorkRing';
+import { useCapsuleContext } from '@/product/terminal/capsule/state/useCapsuleContext';
+import { CONTEXT_CAPSULE_ID } from '@/product/terminal/capsule/contextCapsuleId';
 import type { ResolvedWorkContext } from '@/product/terminal/capsule/workAwareness';
 
 interface CapsuleInputTrailingActionsProps {
@@ -38,76 +37,36 @@ interface CapsuleInputTrailingActionsProps {
  * and the list opens as a popover, so the band stays a single line however many
  * capabilities exist and whatever states they are in.
  *
- * **Capsule V2 (#1347):** When working, the `+` button shows a partial work ring
- * and clicking it opens the Work Overview modal (SC-18) instead of the capability
- * disclosure menu. The Work Overview uses structured plugin data and Nession-owned
- * rendering (SC-19). Selecting a capability opens its Peek (SC-20).
+ * **Capsule V2 (#1347, 2026-10-04 review):** this button is a plain toggle onto
+ * the upper Context Capsule, which is a sibling surface above this one rather
+ * than a menu anchored to `+` (SC-41). It carries `aria-expanded` and
+ * `aria-controls`, and nothing else about it changes: the resting capsule stays
+ * identical across lifecycle states, the Work Ring is the whole ambient
+ * representation (SC-34), and opening the surface is always the user's own tap.
  */
-function CapsuleCapabilityMore({ disclosure, workContext }: {
-  disclosure: CapsuleCapabilityDisclosure;
-  workContext?: ResolvedWorkContext;
-}) {
-  const [workOverviewOpen, setWorkOverviewOpen] = useState(false);
+function CapsuleCapabilityMore({ workContext }: { workContext?: ResolvedWorkContext }) {
   const isWorking = workContext?.status === 'working';
-
-  // When working, clicking + opens Work Overview (SC-18); otherwise opens
-  // the capability disclosure menu.
-  const handleTriggerClick = () => {
-    if (isWorking && workContext) {
-      setWorkOverviewOpen(true);
-    }
-  };
+  const { contextOpen, setContextOpen, contextTriggerRef } = useCapsuleContext();
 
   return (
-    <>
-      {isWorking ? (
-        <button
-          type="button"
-          aria-label="View active work"
-          data-testid="capsule-capability-more"
-          onClick={handleTriggerClick}
-          className={cn(
-            capsuleIconButtonClass,
-            'relative inline-flex items-center justify-center bg-transparent hover:bg-transparent',
-          )}
-        >
-          <CapsuleIconVisual>
-            <Plus className="size-[length:var(--icon-md)]" />
-          </CapsuleIconVisual>
-          <WorkRing working={isWorking} />
-        </button>
-      ) : (
-        <CapabilityDisclosureMenu
-          entries={disclosure.entries}
-          onSelect={disclosure.onSelect}
-          label="Capabilities"
-          testIdPrefix="capsule-capability-picker"
-          trigger={
-            <button
-              type="button"
-              aria-label="More capabilities"
-              data-testid="capsule-capability-more"
-              className={cn(
-                capsuleIconButtonClass,
-                'relative inline-flex items-center justify-center bg-transparent hover:bg-transparent',
-              )}
-            >
-              <CapsuleIconVisual>
-                <Plus className="size-[length:var(--icon-md)]" />
-              </CapsuleIconVisual>
-            </button>
-          }
-        />
+    <button
+      ref={contextTriggerRef}
+      type="button"
+      aria-label="More capabilities"
+      aria-expanded={contextOpen}
+      aria-controls={CONTEXT_CAPSULE_ID}
+      data-testid="capsule-capability-more"
+      onClick={() => setContextOpen(!contextOpen)}
+      className={cn(
+        capsuleIconButtonClass,
+        'relative inline-flex items-center justify-center bg-transparent hover:bg-transparent',
       )}
-      {workContext && (
-        <WorkOverview
-          open={workOverviewOpen}
-          onOpenChange={setWorkOverviewOpen}
-          workContext={workContext}
-          onSelectCapability={disclosure.onSelectAtPeek ?? disclosure.onSelect}
-        />
-      )}
-    </>
+    >
+      <CapsuleIconVisual>
+        <Plus className="size-[length:var(--nession-icon-md)]" />
+      </CapsuleIconVisual>
+      <WorkRing working={isWorking} />
+    </button>
   );
 }
 
@@ -133,7 +92,7 @@ export function CapsuleInputLeading({
   }
   return (
     <div data-testid="capsule-input-leading" className={capsuleControlRowClass}>
-      <CapsuleCapabilityMore disclosure={capabilityDisclosure} workContext={workContext} />
+      <CapsuleCapabilityMore workContext={workContext} />
     </div>
   );
 }
@@ -160,7 +119,7 @@ export function CapsuleInputTrailingActions({
           onOpenChange={onHistoryOpenChange}
           disabled={disabled}
           onSelect={onSelectHistory}
-          triggerClassName="rounded-[var(--radius-control)]"
+          triggerClassName="rounded-[var(--nession-radius-control)]"
         />
       ) : null}
       <CapsuleInputActionButtons

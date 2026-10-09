@@ -6,14 +6,21 @@
  * refresh, reconciliation — is the runtime's, and everything a surface *draws*
  * comes from the snapshot this returns.
  *
- * ## Why the context is keyed, not compared
+ * ## Why the key does not stand in for the context
  *
  * A surface builds its context inline (`{ agentId, sessionId }`), so the object
- * is new on every render and an effect depending on it would run forever. The
- * adapter's `contextKey` is the stable answer to "is this the same conversation
- * space", so the effect depends on *that*, and the latest context object is
- * held in a ref for the call itself. This is the same reason the runtime asks
- * the adapter for a key rather than comparing contexts itself.
+ * is new on every render — and the effect that hands it to the runtime runs
+ * every render for that reason. It used to depend on `adapter.contextKey`
+ * instead, to keep a per-render object out of a dependency list, and that
+ * quietly made the key stand in for the value: a provider whose context carries
+ * a token, a lease or a client handle may change one without moving the
+ * conversation space, and the runtime went on asking with the context it had
+ * replaced (`#1363` round 4).
+ *
+ * Keying is still how the runtime decides *identity* — a new key resets the
+ * conversation space and a same-key value does not — but that decision belongs
+ * to `setContext`, which sees both, rather than to a dependency list that can
+ * only see one.
  *
  * ## Why disposal is safe to be StrictMode-double-invoked
  *
@@ -23,7 +30,7 @@
  * `setContext` re-arms.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { AIConversationAdapter } from '../adapter/types'
 import { ConversationRuntime, type AIConversationSnapshot } from './ConversationRuntime'
 import { useConversationSnapshot } from './useConversationSnapshot'
@@ -39,23 +46,53 @@ export interface AIConversationHandle {
 }
 
 /**
- * `adapter` is expected to be stable — a module-level constant, or built once
- * by the caller. It is read on the first render only, so a new adapter object
- * per render is harmless to correctness but would be a new provider identity,
- * which is not a thing a re-render should be able to change.
+ * `adapter` identifies the provider, and a different adapter is a *different
+ * provider*: the runtime is replaced and the previous one disposed. That is what
+ * makes a provider switch real rather than decorative (`#1363` round 3) — and it
+ * raises the cost of an unstable one, because a new adapter object on every
+ * render would be a new runtime on every render. Build it once: a module-level
+ * constant, or a `useMemo`.
  */
 export function useAIConversation<Context>(
   adapter: AIConversationAdapter<Context>,
   context: Context | null,
 ): AIConversationHandle {
-  const [runtime] = useState(() => new ConversationRuntime(adapter))
-  const contextRef = useRef(context)
-  contextRef.current = context
-  const key = context === null ? null : adapter.contextKey(context)
+  // The runtime is owned by the *provider*, not by this component: a runtime
+  // built for one adapter cannot answer for another, and `useState`'s
+  // initialiser runs exactly once — so a changed adapter used to be ignored
+  // outright, and the hook went on answering the first provider forever.
+  //
+  // Replaced rather than mutated, and that is the half that makes the swap safe:
+  // the old runtime is *disposed*, `wanted()` refuses everything once `disposed`
+  // is set, and the generation counters belong to one runtime alone — so a
+  // response A is still holding cannot land in B even if it resolves after the
+  // switch.
+  const [entry, setEntry] = useState(() => ({
+    adapter,
+    runtime: new ConversationRuntime(adapter),
+  }))
+  // Adjusting state during render, which React documents for a prop whose
+  // identity changed. It re-renders before committing, so the new provider is
+  // never drawn with the old runtime's snapshot — and the discarded pass runs no
+  // effects, which is where subscriptions live.
+  if (entry.adapter !== adapter) {
+    setEntry({ adapter, runtime: new ConversationRuntime(adapter) })
+  }
+  const { runtime } = entry
 
+  // Depending on the *value*, not on the key derived from it.
+  //
+  // A surface builds its context inline, so this effect runs on every render
+  // where the object is new — which it always is. That is affordable now
+  // because `setContext` answers a same-key value by replacing what the next
+  // adapter call receives and nothing else, so the common case is one
+  // assignment. Depending on the key instead was the defect: a provider whose
+  // context carries a token, a lease or a client handle can change one without
+  // moving the conversation space, and the runtime went on polling with the
+  // context it had replaced (`#1363` round 4).
   useEffect(() => {
-    runtime.setContext(contextRef.current)
-  }, [runtime, key])
+    runtime.setContext(context)
+  }, [runtime, context])
 
   useEffect(() => () => runtime.dispose(), [runtime])
 

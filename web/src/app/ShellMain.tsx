@@ -87,6 +87,13 @@ export interface ShellMainProps {
  */
 export interface TerminalChrome {
   capsuleCapabilities?: CapsuleCapabilityContribution;
+  /**
+   * The resolved work context (#1347 SC-14/SC-35), resolved here because the
+   * capsule's sensed-first disclosure is shell state — a supplied terminal
+   * draws the same `+` the product does only if it is handed it, on the same
+   * line as `capsuleCapabilities` and `surfaceAction`.
+   */
+  workContext?: ResolvedWorkContext;
   capsuleProjection?: CapsuleCapabilityProjection;
   /**
    * The Web's "Open Workspace" destination action beside the capsule (#1204) —
@@ -197,6 +204,7 @@ function ShellTerminal({
         capsuleCapabilities,
         capsuleProjection,
         surfaceAction,
+        workContext,
       }) ?? (
         <TerminalRegion
           hidden={surface !== 'terminal' || !selectedSession}
@@ -257,7 +265,7 @@ export function ShellMain({
     onSurfaceChange: () => onSurfaceChange('workspace'),
     onOpenWorkspace: openWorkspaceFromCapsule,
   });
-  const workContext = useWorkSignals(selectedSession ?? undefined);
+  const workContext = useWorkSignals(facts);
   const surfaceAction = hasSession && experience === 'web' ? <WebOpenWorkspaceAction onSurfaceChange={onSurfaceChange} /> : undefined;
   const capsuleZoneRef = useRef<HTMLDivElement>(null);
   useCapsuleMorph(surface, capsuleZoneRef);

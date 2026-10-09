@@ -51,6 +51,7 @@
 use anyhow::{Context, Result};
 use std::collections::VecDeque;
 use std::process::Stdio;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout};
@@ -83,6 +84,21 @@ const WELCOME_TIMEOUT: Duration = Duration::from_secs(5);
 /// wedged server into a hung attach.
 const CAPTURE_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// The size tmux last *reported* for this session's window, shared between the
+/// reader task — where the report arrives, as `%layout-change` — and the
+/// backend, which decides from it whether a resize is worth issuing.
+///
+/// `None` means "not known": no report has arrived yet, or the reader has
+/// ended. Both are treated the same way — a resize is issued rather than
+/// suppressed — because a suppressed resize leaves the pane at a size the
+/// client is not looking at, and that is worse than a redundant one.
+///
+/// It is deliberately **not** "the size this backend last asked for": the
+/// window is shared (`window-size latest`), so a peer moving it makes the last
+/// request stale, and a guard reading its own request would then skip the
+/// resize that puts the pane back where the asking client can see it.
+type ObservedWindowSize = Arc<Mutex<Option<(u16, u16)>>>;
+
 /// tmux control mode session — **one per nession session**, shared by every
 /// attached web client. The agent's session map is keyed by session name, so a
 /// second client attaching joins the existing backend as a subscriber instead
@@ -96,6 +112,8 @@ pub struct ControlModeSession {
     child: Child,
     stdin: ChildStdin,
     viewport: (u16, u16),
+    /// What tmux last said the window's size is — see [`ObservedWindowSize`].
+    observed: ObservedWindowSize,
     /// The tmux this client is attached to — held rather than resolved per
     /// call because [`Drop`] cannot reach the process, and a client attached
     /// to one addressing must be detached from the same one (#991 step 6).
@@ -174,10 +192,17 @@ impl ControlModeSession {
         let (decision_tx, decision_rx) = watch::channel(BarrierDecision::Pending);
         let (welcome_tx, welcome_rx) = oneshot::channel();
         let (capture_tx, capture_rx) = oneshot::channel();
+        // Seeded with the size `resize_window` just set: that call returned
+        // `Ok`, so the window is at it — and tmux does not re-report a size it
+        // never saw change, so waiting for a `%layout-change` to confirm what
+        // we just did would leave the first re-assertion of that size looking
+        // like news.
+        let observed: ObservedWindowSize = Arc::new(Mutex::new(Some((width, height))));
         tokio::spawn(read_output_loop(
             stdout,
             output_tx,
             resize_tx,
+            Arc::clone(&observed),
             BarrierChannels {
                 decision_rx,
                 welcome_tx: Some(welcome_tx),
@@ -244,6 +269,7 @@ impl ControlModeSession {
             child,
             stdin,
             viewport: (width, height),
+            observed,
             tmux: tmux.clone(),
         };
 
@@ -287,7 +313,26 @@ impl ControlModeSession {
     /// every client on the session, so this moves the pane for all of them and
     /// the most recent caller wins.  The module docs carry the decision and why
     /// `refresh-client -C` is deliberately not used.
+    ///
+    /// **Idempotent for the size the window is already at** (#1490). Unlike
+    /// `attach`'s one-shot `resize-window` — argv, no client yet, no redraw —
+    /// this path is a live control client's and it writes two commands:
+    /// `resize-window` on an unchanged size still reflows the pane, and the
+    /// `refresh-client` after it repaints **every client of the session**. So a
+    /// request that moves nothing still costs a full redraw of a window several
+    /// clients may be looking at, and a re-attach asks for the size the pane is
+    /// already at — once per reload.
+    ///
+    /// The comparison is against the size tmux reported, not the one this
+    /// backend last asked for — see [`ObservedWindowSize`].
     pub async fn resize(&mut self, width: u16, height: u16) -> Result<()> {
+        if self.window_is_at(width, height) {
+            // The viewport is still this client's stated size: nothing was
+            // written, and a later real resize compares against tmux's report
+            // again rather than against this.
+            self.viewport = (width, height);
+            return Ok(());
+        }
         self.viewport = (width, height);
         let cmd = format!(
             "resize-window -t {} -x {} -y {}\nrefresh-client\n",
@@ -295,7 +340,25 @@ impl ControlModeSession {
         );
         self.stdin.write_all(cmd.as_bytes()).await?;
         self.stdin.flush().await?;
+        // tmux confirms it with a `%layout-change` carrying this same size; in
+        // the window before that arrives, a repeat of this request is a repeat
+        // of something already done. A write that failed returned above, so
+        // this is only ever set for a command tmux received.
+        if let Ok(mut size) = self.observed.lock() {
+            *size = Some((width, height));
+        }
         Ok(())
+    }
+
+    /// Whether tmux's last report of this window's size is the one asked for.
+    ///
+    /// A poisoned lock is "not known", which issues the resize: this guard
+    /// exists to skip work, never to skip the size a client is looking at.
+    fn window_is_at(&self, width: u16, height: u16) -> bool {
+        self.observed
+            .lock()
+            .map(|size| *size == Some((width, height)))
+            .unwrap_or(false)
     }
 
     /// Current viewport (width, height).
@@ -713,12 +776,13 @@ async fn read_output_loop(
     stdout: ChildStdout,
     output_tx: mpsc::Sender<Vec<u8>>,
     resize_tx: mpsc::Sender<(u16, u16)>,
+    observed: ObservedWindowSize,
     mut barrier: BarrierChannels,
 ) {
     let mut router = ControlRouter::new();
     let mut reader = BufReader::new(stdout);
     let mut line = String::new();
-    loop {
+    'reader: loop {
         line.clear();
         let effects = tokio::select! {
             read = reader.read_line(&mut line) => {
@@ -751,10 +815,21 @@ async fn read_output_loop(
                 Effect::Live(bytes) => {
                     if output_tx.send(bytes).await.is_err() {
                         // Receiver dropped - session is being torn down.
-                        return;
+                        break 'reader;
                     }
                 }
                 Effect::Resize(cols, rows) => {
+                    // tmux is the authority on this window's size, and this is
+                    // where it speaks: the backend's resize guard decides from
+                    // this value whether a request would move anything
+                    // (`ControlModeSession::resize`).
+                    //
+                    // Scoped so the guard is not held across the send below —
+                    // a lock across an await in this loop would stall every
+                    // reader behind whoever is asking about the size.
+                    if let Ok(mut size) = observed.lock() {
+                        *size = Some((cols, rows));
+                    }
                     // Best-effort, and **not a tmux result at all**: this is
                     // an internal `mpsc` send to the caller's resize
                     // receiver, whose only failure is "the receiver is
@@ -775,10 +850,15 @@ async fn read_output_loop(
                         let _ = tx.send(capture);
                     }
                 }
-                Effect::Exit => return,
+                Effect::Exit => break 'reader,
                 Effect::Note(note) => warn!("control-mode reader: {note}"),
             }
         }
+    }
+    // Nothing is updating this any more, so it stops being a fact a resize can
+    // be suppressed with: from here a requested size is issued, not compared.
+    if let Ok(mut size) = observed.lock() {
+        *size = None;
     }
 }
 
@@ -910,6 +990,134 @@ mod tests {
             started.elapsed() < WELCOME_TIMEOUT,
             "a dead child must not wait out the welcome timeout: {:?}",
             started.elapsed()
+        );
+    }
+
+    /// A fake whose control client appends everything written to its control
+    /// channel — the only place `resize` and the capture reach tmux — so a
+    /// test can assert on the commands rather than on the argv of a spawn.
+    #[cfg(unix)]
+    fn recording_fake(
+        dir: &std::path::Path,
+        log: &std::path::Path,
+        preamble: &str,
+    ) -> crate::test_support::FakeTmux {
+        crate::test_support::FakeTmux::new(
+            dir,
+            &format!(
+                "case \"$1\" in \
+                 attach|-C) {preamble}while IFS= read -r line; do printf '%s\\n' \"$line\" >> \"{log}\"; done; exit 0;; \
+                 *) exit 0;; esac",
+                log = log.display(),
+            ),
+        )
+    }
+
+    /// Wait for the fake's control-channel log, which the child writes as it
+    /// reads: EOF (the session's stdin closing) is what ends it.
+    #[cfg(unix)]
+    async fn control_channel_log(path: &std::path::Path) -> String {
+        for _ in 0..100 {
+            if let Ok(text) = std::fs::read_to_string(path) {
+                if !text.is_empty() {
+                    return text;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        std::fs::read_to_string(path).unwrap_or_default()
+    }
+
+    /// A resize to the size the window already has writes nothing: the two
+    /// commands it would otherwise send reflow the pane and repaint **every**
+    /// client of the session, for a size that is already on screen (#1490).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_resize_to_the_size_the_window_already_has_writes_nothing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let log = dir.path().join("control-stdin.log");
+        let fake = recording_fake(dir.path(), &log, "");
+
+        let (mut session, _rx, _resize_rx, _capture) =
+            ControlModeSession::attach(&fake.dep(), "nession-fake-sess", 80, 24, None)
+                .await
+                .expect("the injected binary accepts the attach");
+
+        // What a re-attach asks for: the size the window is already at, set by
+        // the attach's own `resize-window`.
+        session
+            .resize(80, 24)
+            .await
+            .expect("an idempotent resize succeeds");
+        // A different size still moves it.
+        session
+            .resize(100, 30)
+            .await
+            .expect("a real resize is written");
+        // ...and having just been asked for, that is where the window is now.
+        session
+            .resize(100, 30)
+            .await
+            .expect("a repeat writes nothing");
+        assert_eq!(session.viewport(), (100, 30));
+        drop(session);
+
+        let written = control_channel_log(&log).await;
+        assert_eq!(
+            written.matches("resize-window").count(),
+            1,
+            "one size change, one resize-window: {written:?}"
+        );
+        assert!(
+            written.contains("resize-window -t nession-fake-sess -x 100 -y 30\n"),
+            "the size that did change is the one written: {written:?}"
+        );
+        assert_eq!(
+            written.matches("refresh-client").count(),
+            1,
+            "and exactly one repaint, for that one change: {written:?}"
+        );
+    }
+
+    /// The guard reads what tmux reported, not what this backend last asked
+    /// for. A peer reflowing the shared window makes the last request stale,
+    /// and a client asking for that size must get it back rather than be told
+    /// the window is already there.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_peer_moving_the_window_makes_the_next_request_a_real_resize() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let log = dir.path().join("control-stdin.log");
+        let fake = recording_fake(
+            dir.path(),
+            &log,
+            "printf '%s\\n' '%layout-change @0 a87d,100x30,0,0,0'; ",
+        );
+
+        let (mut session, _rx, _resize_rx, _capture) =
+            ControlModeSession::attach(&fake.dep(), "nession-fake-sess", 80, 24, None)
+                .await
+                .expect("the injected binary accepts the attach");
+
+        let mut took_the_report = false;
+        for _ in 0..100 {
+            if session.window_is_at(100, 30) {
+                took_the_report = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(took_the_report, "the reader records the size tmux reports");
+
+        // 80x24 is what this client last asked for — and the window is at the
+        // peer's size, so the request is a real resize and must be written.
+        session.resize(80, 24).await.expect("the resize is written");
+        drop(session);
+
+        let written = control_channel_log(&log).await;
+        assert!(
+            written.contains("resize-window -t nession-fake-sess -x 80 -y 24\n"),
+            "a stale last request must not suppress the resize: {written:?}"
         );
     }
 

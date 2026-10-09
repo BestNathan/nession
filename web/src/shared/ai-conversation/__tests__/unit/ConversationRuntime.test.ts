@@ -8,6 +8,29 @@ import {
 } from '../fixtures/syntheticAdapter'
 import { assistantMessage, toolItem, transcript, userMessage } from '../fixtures/items'
 
+/**
+ * A provider whose context carries a fact the key does not.
+ *
+ * The contract's `contextKey` says two contexts are the same conversation space;
+ * it does not say the objects are equal. A token, a lease or a client handle is
+ * a request fact that can change without redefining the space, and a provider
+ * that reports a constant key is how the difference becomes observable — with
+ * Claude's `{agentId, sessionId}` every field is in the key, so Claude cannot
+ * show this at all (`#1363` round 4).
+ */
+function sameKeySetup(overrides: Partial<SyntheticAdapterOptions> = {}) {
+  const adapter = new SyntheticAdapter({
+    conversations: [{ id: 'c1', title: 'First', activity: 'active', items: transcript(6) }],
+    bindingId: 'c1',
+    pageSize: 3,
+    refresh: { kind: 'manual' },
+    key: 'space-1',
+    ...overrides,
+  })
+  const runtime = new ConversationRuntime<string>(adapter)
+  return { adapter, runtime }
+}
+
 /** A provider with one bound conversation of six items, three per page. */
 function setup(overrides: Partial<SyntheticAdapterOptions> = {}) {
   const adapter = new SyntheticAdapter({
@@ -93,6 +116,66 @@ describe('ConversationRuntime — opening', () => {
     // The choice was tagged with the context it was made in, so it is simply
     // not a choice here — one fewer transition to get wrong than clearing it.
     expect(runtime.getSnapshot().openId).toBe('c1')
+  })
+})
+
+describe('ConversationRuntime — a context whose value moves without its key', () => {
+  it('replaces what later reads are asked with, without resetting the space', async () => {
+    const { runtime, adapter } = sameKeySetup({
+      // The concrete Context value changes, but this provider says both values
+      // are the same request authority. No automatic reload is warranted.
+      requestKey: () => 'authority-1',
+    })
+    runtime.setContext('token-a')
+    await flush()
+    expect(ids(runtime)).toEqual(['m3', 'm4', 'm5'])
+
+    const lists = () => adapter.calls.filter((call) => call.kind === 'list').length
+    const before = lists()
+
+    // The same space, a new request fact. This is not a new conversation space,
+    // so nothing the reader can see may move.
+    runtime.setContext('token-b')
+    await flush()
+    expect(runtime.getSnapshot().openId).toBe('c1')
+    expect(ids(runtime)).toEqual(['m3', 'm4', 'm5'])
+    // Not even a re-list: a key that did not change is not a reason to read the
+    // directory again, and pretending otherwise would refetch on every render.
+    expect(lists()).toBe(before)
+
+    // But every *later* call carries the newer context. This is the half that
+    // was broken: `this.context` is what the adapter is handed, and it was only
+    // ever replaced by a key change, so a provider could poll forever with the
+    // context it had already replaced.
+    runtime.reload()
+    await flush()
+    const reads = adapter.calls.filter((call) => call.kind === 'read')
+    expect(reads[reads.length - 1]?.context).toBe('token-b')
+  })
+
+  it('still resets the whole space when the key does move', async () => {
+    // The other half of the distinction, asserted here so the branch above
+    // cannot be "fix" by never resetting: a different key must still drop the
+    // selection, the items and both cursors.
+    const adapter = new SyntheticAdapter({
+      conversations: [
+        { id: 'c1', items: transcript(2, 'a') },
+        { id: 'c2', items: transcript(2, 'b') },
+      ],
+      bindingFor: (context) => (context === 'space-1' ? 'c1' : 'c2'),
+      pageSize: 3,
+      refresh: { kind: 'manual' },
+    })
+    const runtime = new ConversationRuntime<string>(adapter)
+    // No `key` override, so the context *is* the key — the ordinary provider.
+    runtime.setContext('space-1')
+    await flush()
+    expect(ids(runtime)).toEqual(['a0', 'a1'])
+
+    runtime.setContext('space-2')
+    await flush()
+    expect(runtime.getSnapshot().openId).toBe('c2')
+    expect(ids(runtime)).toEqual(['b0', 'b1'])
   })
 })
 
@@ -238,6 +321,151 @@ describe('ConversationRuntime — paging', () => {
     expect(ids(runtime)).toEqual(['m0', 'm1', 'm2', 'm3', 'm4', 'm5'])
     expect(runtime.getSnapshot().loadingOlder).toBe(false)
   })
+
+  it('keeps the cursor and the window when a page answers not-ready', async () => {
+    // A thrown read is not the same as a read that answered. The throw is
+    // covered above; this is the *answer*, which is a statement about the
+    // conversation rather than about the transport — and until now the runtime
+    // never looked at it, so `error` / `not_found` / `unavailable` all arrived
+    // as a page with no items and no cursor, which is exactly the shape of
+    // "this was the end of the history".
+    const { runtime, adapter } = setup()
+    runtime.setContext('a:s1')
+    await flush()
+    expect(ids(runtime)).toEqual(['m3', 'm4', 'm5'])
+    expect(runtime.getSnapshot().hasMore).toBe(true)
+
+    const older = () => adapter.calls.filter((call) => call.kind === 'read' && call.cursor)
+    const asked = older().length
+    adapter.forcedOlder = { state: 'error', error: 'cursor page could not be read' }
+
+    expect(runtime.loadOlder()).toBe(true)
+    await flush()
+
+    const failed = runtime.getSnapshot()
+    // The window is untouched, and the failure is visible rather than being
+    // reported as the end of history.
+    expect(ids(runtime)).toEqual(['m3', 'm4', 'm5'])
+    expect(failed.hasMore).toBe(true)
+    expect(failed.olderError).toBe('cursor page could not be read')
+    expect(failed.loadingOlder).toBe(false)
+    expect(failed.threadError).toBeNull()
+
+    // Retry asks for the same cursor. `hasMore` is only honest if the cursor it
+    // promises is still the one behind the window.
+    adapter.forcedOlder = null
+    expect(runtime.loadOlder()).toBe(true)
+    await flush()
+
+    expect(older()).toHaveLength(asked + 2)
+    expect(older()[asked]?.cursor).toBe(older()[asked + 1]?.cursor)
+    expect(ids(runtime)).toEqual(['m0', 'm1', 'm2', 'm3', 'm4', 'm5'])
+    expect(runtime.getSnapshot().olderError).toBeNull()
+    expect(runtime.getSnapshot().hasMore).toBe(false)
+  })
+
+  it('names a non-ready cursor page in the provider’s words when it has any', async () => {
+    // `applyNewest` prefers the provider's message for the newest page; the
+    // cursor path had no opinion at all because it had no branch. The fallbacks
+    // are per state, because "the conversation is gone" and "the provider
+    // cannot say right now" are the same *handling* but not the same sentence.
+    const { runtime, adapter } = setup()
+    runtime.setContext('a:s1')
+    await flush()
+
+    adapter.forcedOlder = { state: 'unavailable' }
+    runtime.loadOlder()
+    await flush()
+    expect(runtime.getSnapshot().olderError).toBe('Older messages cannot be read right now')
+
+    adapter.forcedOlder = { state: 'not_found' }
+    runtime.loadOlder()
+    await flush()
+    expect(runtime.getSnapshot().olderError).toBe('This conversation is no longer there')
+    // Still retryable: neither answer is the end of the history.
+    expect(runtime.getSnapshot().hasMore).toBe(true)
+  })
+})
+
+describe('ConversationRuntime — a provider slower than the poll', () => {
+  it('coalesces the ticks instead of letting each one supersede the last', async () => {
+    // The liveness bug the generation guard became. With a read slower than the
+    // interval, every tick bumped the generation and superseded the answer the
+    // previous tick was still waiting on, so no answer could ever land and an
+    // active conversation froze on its first page while requests continued
+    // forever. The guard is right for genuinely superseded work; it is not a
+    // cancellation policy, and a timer must not be able to invalidate every
+    // answer before it arrives.
+    const { runtime, adapter, clock } = setup()
+    runtime.setContext('a:s1')
+    await flush()
+    expect(ids(runtime)).toEqual(['m3', 'm4', 'm5'])
+
+    const reads = () => adapter.calls.filter((call) => call.kind === 'read').length
+    const before = reads()
+
+    // Every read this burst starts is held, because that is what "slower than
+    // the interval" means: holding only the first would let the later ticks
+    // answer themselves, and the old code would have looked healthy.
+    const held = [adapter.hold('read'), adapter.hold('read'), adapter.hold('read'), adapter.hold('read')]
+    for (let tick = 0; tick < 4; tick += 1) {
+      clock.tick()
+      await flush()
+    }
+
+    // One read out, four ticks elapsed. The count is the assertion: fanning out
+    // one request per tick is the defect, and it is invisible in the snapshot
+    // until the answers start landing.
+    expect(reads() - before).toBe(1)
+
+    // The provider moves on while the read is out. The answer already in flight
+    // was computed before this, so it cannot describe it — which is exactly why
+    // the follow-up exists, and why "drop the notifications while a read is
+    // out" would be wrong: the change would be lost rather than coalesced.
+    adapter.replaceItems('c1', transcript(9))
+    for (const release of held) {
+      release()
+    }
+    await flush()
+
+    // The new data reached the snapshot — the liveness half — and the three
+    // ticks that joined the read cost exactly one more request.
+    //
+    // This is the assertion the old code cannot satisfy: all four of its reads
+    // were issued before the change, so its last-applied page is the six-item
+    // one and the change is simply never seen. The older window is kept, which
+    // is what a newest page arriving does.
+    expect(ids(runtime)).toEqual(['m3', 'm4', 'm5', 'm6', 'm7', 'm8'])
+    expect(reads() - before).toBe(2)
+  })
+
+  it('hands the slot to a reader’s reload instead of coalescing into it', async () => {
+    // The dividing line, asserted rather than left to the comment: a tick is
+    // passive and waits its turn, a reload is the reader asking *now*. Joining
+    // the poll's read would answer them with a request that started before they
+    // asked — and then one more — which is later than they meant.
+    const { runtime, adapter, clock } = setup()
+    runtime.setContext('a:s1')
+    await flush()
+
+    const releasePoll = adapter.hold('read')
+    clock.tick()
+    await flush()
+
+    adapter.replaceItems('c1', transcript(9))
+    runtime.reload()
+    await flush()
+
+    // The reload's own read answered, so the newer transcript is on screen
+    // before the slow tick has said anything at all.
+    expect(ids(runtime)).toEqual(['m3', 'm4', 'm5', 'm6', 'm7', 'm8'])
+
+    // And the superseded answer lands into nothing: a read that lost its claim
+    // cannot roll the window back to the state it was asked about.
+    releasePoll()
+    await flush()
+    expect(ids(runtime)).toEqual(['m3', 'm4', 'm5', 'm6', 'm7', 'm8'])
+  })
 })
 
 describe('ConversationRuntime — refresh policy', () => {
@@ -286,6 +514,7 @@ describe('ConversationRuntime — refresh policy', () => {
     const { runtime, adapter } = setup({
       refresh: {
         kind: 'push',
+        sourceKey: (context, conversationId) => `${context}:${conversationId}`,
         subscribe: (_context, _conversationId, onChange) => {
           push.notify = onChange
           return unsubscribe
@@ -319,6 +548,7 @@ describe('ConversationRuntime — refresh policy', () => {
       bindingId: 'c1',
       refresh: {
         kind: 'push',
+        sourceKey: (context, conversationId) => `${context}:${conversationId}`,
         subscribe: (context, conversationId, onChange) => {
           targets.push({ context, conversationId, notify: onChange })
           return () => disposed.push(conversationId)
@@ -364,6 +594,48 @@ describe('ConversationRuntime — refresh policy', () => {
 
     expect(clock.armed()).toBe(0)
     expect(adapter.calls.filter((call) => call.kind === 'read').length).toBe(readsBefore)
+  })
+
+  it('does not start a second page while one is already on its way', async () => {
+    // #1363 round 3. The cursor does not move until the page lands, so a second
+    // call would re-read the *same* one and then invalidate the first through
+    // the generation counter — a wasted round trip that flickers the loader.
+    const { runtime, adapter } = setup()
+    runtime.setContext('a:s1')
+    await flush()
+
+    // Both answer `true`: a page is coming, which is what the scroll
+    // controller's anchor decision asks. Only one of them starts it.
+    expect(runtime.loadOlder()).toBe(true)
+    expect(runtime.loadOlder()).toBe(true)
+    await flush()
+
+    const cursorReads = adapter.calls.filter(
+      (call) => call.kind === 'read' && call.cursor !== undefined,
+    )
+    expect(cursorReads).toHaveLength(1)
+  })
+
+  it('asks for the next page again once the last one has landed', async () => {
+    // The guard must not latch: a reader who keeps pulling gets page after page.
+    // Nine items at three per page, because the default six is only *two* pages
+    // and a second pull would have nothing to ask for — which is what this
+    // asserted the first time, wrongly.
+    const { runtime, adapter } = setup({
+      conversations: [{ id: 'c1', title: 'First', activity: 'active', items: transcript(9) }],
+    })
+    runtime.setContext('a:s1')
+    await flush()
+
+    runtime.loadOlder()
+    await flush()
+    runtime.loadOlder()
+    await flush()
+
+    const cursorReads = adapter.calls.filter(
+      (call) => call.kind === 'read' && call.cursor !== undefined,
+    )
+    expect(cursorReads.length).toBeGreaterThan(1)
   })
 
   it('re-asks both halves only when the reader reloads', async () => {
@@ -549,5 +821,315 @@ describe('ConversationRuntime — state the surface draws', () => {
     // Fully re-armed, refresh included: this conversation is active, so the
     // re-armed runtime polls it just as a fresh one would.
     expect(clock.armed()).toBe(1)
+  })
+})
+
+
+describe('ConversationRuntime — round 6 contract boundaries', () => {
+  it.each(['unavailable', 'error'] as const)(
+    'keeps an auto-bound readable thread when the list answers %s',
+    async (state) => {
+      const { runtime, adapter } = setup()
+      runtime.setContext('a:s1')
+      await flush()
+      const before = ids(runtime)
+
+      adapter.forcedListState = state
+      runtime.reload()
+      await flush()
+
+      const snapshot = runtime.getSnapshot()
+      expect(snapshot.listState).toBe(state)
+      expect(snapshot.openId).toBe('c1')
+      expect(ids(runtime)).toEqual(before)
+      expect(snapshot.conversations).toHaveLength(1)
+    },
+  )
+
+  it('walks the canonical list cursor until the whole directory is loaded', async () => {
+    const conversations = Array.from({ length: 5 }, (_, index) => ({
+      id: `c${index}`,
+      title: `Conversation ${index}`,
+      items: transcript(1, `c${index}-`),
+    }))
+    const { runtime, adapter } = setup({
+      conversations,
+      bindingId: 'c0',
+      listPageSize: 2,
+      refresh: { kind: 'manual' },
+    })
+
+    runtime.setContext('a:s1')
+    await flush()
+
+    expect(runtime.getSnapshot().conversations.map((item) => item.id)).toEqual([
+      'c0',
+      'c1',
+      'c2',
+      'c3',
+      'c4',
+    ])
+    expect(
+      adapter.calls.filter((call) => call.kind === 'list').map((call) => call.cursor),
+    ).toEqual([undefined, '2', '4'])
+  })
+
+  it('re-arms a push source only when its stable source identity changes', async () => {
+    const subscriptions: string[] = []
+    const unsubscribed: string[] = []
+    const { runtime } = sameKeySetup({
+      refresh: {
+        kind: 'push',
+        sourceKey: (context, conversationId) => `${context}:${conversationId}`,
+        subscribe: (context) => {
+          subscriptions.push(context)
+          return () => unsubscribed.push(context)
+        },
+      },
+    })
+
+    runtime.setContext('lease-a')
+    await flush()
+    runtime.setContext('lease-a')
+    runtime.setContext('lease-b')
+    await flush()
+
+    // Equal source identity is a no-op even when setContext is called again;
+    // changing the provider-owned source identity tears down exactly once.
+    expect(subscriptions).toEqual(['lease-a', 'lease-b'])
+    expect(unsubscribed).toEqual(['lease-a'])
+  })
+
+  it('genuinely re-arms after dispose when the context key is unchanged', async () => {
+    const { runtime, adapter, clock } = setup()
+    runtime.setContext('a:s1')
+    await flush()
+    expect(clock.armed()).toBe(1)
+
+    const listBefore = adapter.calls.filter((call) => call.kind === 'list').length
+    const readBefore = adapter.calls.filter((call) => call.kind === 'read').length
+    runtime.dispose()
+    expect(clock.armed()).toBe(0)
+
+    runtime.setContext('a:s1')
+    await flush()
+
+    expect(adapter.calls.filter((call) => call.kind === 'list')).toHaveLength(listBefore + 1)
+    expect(adapter.calls.filter((call) => call.kind === 'read')).toHaveLength(readBefore + 1)
+    expect(clock.armed()).toBe(1)
+  })
+
+  it('drops a queued passive refresh after the answer semantically stops refresh', async () => {
+    const { runtime, adapter, clock } = setup()
+    runtime.setContext('a:s1')
+    await flush()
+
+    const readsBefore = adapter.calls.filter((call) => call.kind === 'read').length
+    const release = adapter.hold('read')
+    adapter.setActivity('c1', 'inactive')
+
+    clock.tick()
+    clock.tick()
+    release()
+    await flush()
+
+    expect(adapter.calls.filter((call) => call.kind === 'read')).toHaveLength(readsBefore + 1)
+    expect(runtime.getSnapshot().activity).toBe('inactive')
+    expect(clock.armed()).toBe(0)
+  })
+
+  it('does not expose ready-page metadata after a non-ready newest answer', async () => {
+    const { runtime, adapter } = setup({ partialTail: true, skipped: 3 })
+    runtime.setContext('a:s1')
+    await flush()
+    expect(runtime.getSnapshot()).toMatchObject({ partialTail: true, skipped: 3 })
+
+    adapter.forcedReadState = 'unavailable'
+    runtime.reload()
+    await flush()
+
+    expect(runtime.getSnapshot()).toMatchObject({
+      state: 'unavailable',
+      partialTail: false,
+      skipped: 0,
+    })
+  })
+
+  it('accumulates skipped records reported by an older page into the loaded window', async () => {
+    const { runtime } = setup({
+      refresh: { kind: 'manual' },
+      skippedFor: (cursor) => (cursor === undefined ? 0 : 3),
+    })
+    runtime.setContext('a:s1')
+    await flush()
+    expect(runtime.getSnapshot().skipped).toBe(0)
+
+    runtime.loadOlder()
+    await flush()
+
+    expect(runtime.getSnapshot().skipped).toBe(3)
+  })
+})
+
+
+describe('ConversationRuntime — round 7 authority and list snapshot boundaries', () => {
+  it('invalidates an in-flight read when request authority rotates inside one space', async () => {
+    const { runtime, adapter } = sameKeySetup({
+      requestKey: (context) => context,
+    })
+    runtime.setContext('lease-a')
+    await flush()
+    expect(runtime.getSnapshot().state).toBe('ready')
+
+    // Capture an answer under A that would semantically stop the readable
+    // thread if it were still allowed to publish.
+    const releaseOld = adapter.hold('read')
+    adapter.forcedReadState = 'unavailable'
+    runtime.reload()
+    await flush()
+
+    // B is the same conversation space but a new request authority. Its fresh
+    // read is allowed to land before A is released.
+    adapter.forcedReadState = null
+    runtime.setContext('lease-b')
+    await flush()
+    expect(runtime.getSnapshot().state).toBe('ready')
+    const reads = adapter.calls.filter((call) => call.kind === 'read')
+    expect(reads[reads.length - 1]?.context).toBe('lease-b')
+
+    releaseOld()
+    await flush()
+
+    // A's late non-ready answer cannot tear down B's readable state.
+    expect(runtime.getSnapshot().state).toBe('ready')
+    expect(ids(runtime)).toEqual(['m3', 'm4', 'm5'])
+  })
+
+  it('closes the gap when a push source is replaced without replaying old events', async () => {
+    const callbacks = new Map<string, () => void>()
+    const { runtime, adapter } = sameKeySetup({
+      // Isolate source rotation from request rotation: reads remain authorized,
+      // only the concrete push source changes.
+      requestKey: () => 'authority-1',
+      refresh: {
+        kind: 'push',
+        sourceKey: (context, conversationId) => `${context}:${conversationId}`,
+        subscribe: (context, _conversationId, onChange) => {
+          callbacks.set(context, onChange)
+          return () => undefined
+        },
+      },
+    })
+
+    runtime.setContext('lease-a')
+    await flush()
+    expect(callbacks.has('lease-a')).toBe(true)
+
+    adapter.replaceItems('c1', [
+      ...transcript(6),
+      assistantMessage('m6', 'arrived during source handoff', 'streaming'),
+    ])
+
+    // B emits nothing. The runtime itself must issue one catch-up newest read
+    // after replacing A, otherwise m6 is invisible until some future event.
+    runtime.setContext('lease-b')
+    await flush()
+
+    expect(callbacks.has('lease-b')).toBe(true)
+    expect(ids(runtime)).toContain('m6')
+  })
+
+  it('accepts a synchronous new-source signal and rejects a late old-source signal', async () => {
+    const callbacks = new Map<string, () => void>()
+    const { runtime, adapter } = sameKeySetup({
+      requestKey: () => 'authority-1',
+      refresh: {
+        kind: 'push',
+        sourceKey: (context, conversationId) => `${context}:${conversationId}`,
+        subscribe: (context, _conversationId, onChange) => {
+          callbacks.set(context, onChange)
+          if (context === 'lease-b') {
+            // Some push APIs synchronously report current state from subscribe.
+            // The target must already be claimed when this fires.
+            onChange()
+          }
+          return () => undefined
+        },
+      },
+    })
+
+    runtime.setContext('lease-a')
+    await flush()
+    adapter.replaceItems('c1', [
+      ...transcript(6),
+      assistantMessage('m6', 'synchronous source signal', 'streaming'),
+    ])
+
+    runtime.setContext('lease-b')
+    await flush()
+    expect(ids(runtime)).toContain('m6')
+
+    const readsAfterB = adapter.calls.filter((call) => call.kind === 'read').length
+    callbacks.get('lease-a')?.()
+    await flush()
+    expect(adapter.calls.filter((call) => call.kind === 'read')).toHaveLength(readsAfterB)
+  })
+
+  it('restarts a complete-list read when a continuation snapshot went stale', async () => {
+    let restarted = false
+    const conversations = Array.from({ length: 5 }, (_, index) => ({
+      id: `c${index}`,
+      title: `Conversation ${index}`,
+      items: transcript(1, `c${index}-`),
+    }))
+    const { runtime, adapter } = setup({
+      conversations,
+      bindingId: 'c0',
+      listPageSize: 2,
+      refresh: { kind: 'manual' },
+      restartListFor: (_context, cursor) => {
+        if (cursor === '2' && !restarted) {
+          restarted = true
+          return true
+        }
+        return false
+      },
+    })
+
+    runtime.setContext('a:s1')
+    await flush()
+
+    expect(runtime.getSnapshot().conversations.map((item) => item.id)).toEqual([
+      'c0',
+      'c1',
+      'c2',
+      'c3',
+      'c4',
+    ])
+    expect(runtime.getSnapshot().listError).toBeNull()
+    expect(
+      adapter.calls.filter((call) => call.kind === 'list').map((call) => call.cursor),
+    ).toEqual([undefined, '2', undefined, '2', '4'])
+  })
+
+  it('bounds eager complete-list work even when a provider keeps returning cursors', async () => {
+    const conversations = Array.from({ length: 40 }, (_, index) => ({
+      id: `c${index}`,
+      items: transcript(1, `c${index}-`),
+    }))
+    const { runtime, adapter } = setup({
+      conversations,
+      bindingId: null,
+      listPageSize: 1,
+      refresh: { kind: 'manual' },
+    })
+
+    runtime.setContext('a:s1')
+    await flush()
+
+    const listCalls = adapter.calls.filter((call) => call.kind === 'list')
+    expect(listCalls).toHaveLength(32)
+    expect(runtime.getSnapshot().listError).toContain('bounded 32-page budget')
+    expect(runtime.getSnapshot().conversations).toEqual([])
   })
 })

@@ -281,10 +281,383 @@ const ITEMS: MessageItemV1[] = [
   },
 ];
 
+/**
+ * A Turn whose work has all finished and whose last word is the assistant's.
+ *
+ * `ITEMS` cannot be this, and after `#1409` that is not a detail: the answer is
+ * the last assistant message **that no work follows**, and four items follow
+ * `i5` — so the transcript above is a Turn that is still *working*, whatever
+ * the clock says. That is exactly right for the open process, and exactly wrong
+ * for the fold: a fold this fixture never performs cannot be told apart from a
+ * fold that is broken, and the App walk in `e2e/specs/fixture-visual.spec.ts`
+ * spent its life asserting the second while driving the first.
+ *
+ * So the two phases are two corpora. This one settles every tool and puts the
+ * answer after them, which is the only shape `#1363` SC-17/18 folds.
+ */
+const SETTLED_ITEMS: MessageItemV1[] = [
+  {
+    id: 's1',
+    kind: 'message',
+    role: 'user',
+    timestamp: '2026-09-01T12:10:00Z',
+    content: [
+      {
+        type: 'text',
+        text: 'Which test covers the ownership handoff, and did it pass?',
+      },
+    ],
+  },
+  {
+    id: 's2',
+    kind: 'tool',
+    timestamp: '2026-09-01T12:11:00Z',
+    tool: {
+      call_id: 'call-settled-1',
+      name: 'Read',
+      status: 'success',
+      summary: 'crates/nession-agent/src/tmux/cmd.rs',
+      output: {
+        text: 'pub fn output_blocking(&self, args: &[&str]) -> Result<Output> {',
+        kind: 'text',
+        truncated: false,
+      },
+    },
+  },
+  {
+    id: 's3',
+    kind: 'tool',
+    timestamp: '2026-09-01T12:12:00Z',
+    tool: {
+      call_id: 'call-settled-2',
+      name: 'Bash',
+      status: 'success',
+      summary: 'cargo test -p nession-agent -- ownership',
+      output: {
+        text: 'running 3 tests\ntest ownership::observer_keeps_the_keyboard ... ok\ntest result: ok. 3 passed; 0 failed',
+        kind: 'text',
+        truncated: true,
+      },
+    },
+  },
+  {
+    id: 's4',
+    kind: 'message',
+    role: 'assistant',
+    timestamp: '2026-09-01T12:13:00Z',
+    content: [
+      {
+        type: 'text',
+        text: '`ownership::observer_keeps_the_keyboard` covers it, and it passed.',
+      },
+    ],
+  },
+];
+
+
+/**
+ * Browser acceptance corpus for #1363 SC-19/20.
+ *
+ * The same ids move through three provider reads:
+ *
+ * 0. work only — two tool calls are running and there is no answer;
+ * 1. streaming — one tool settles, the second keeps running, and a stable
+ *    assistant row arrives while the page reports a partial tail;
+ * 2. settled — the second tool and the same assistant row finish, and activity
+ *    becomes inactive so the real Claude polling adapter stops asking.
+ *
+ * The history is intentionally long enough to overflow a Web viewport. That
+ * lets Playwright prove tail-follow and reader override against the same
+ * runtime transition that proves row/group identity.
+ */
+const STREAM_HISTORY: MessageItemV1[] = Array.from(
+  { length: 7 },
+  (_, index): MessageItemV1[] => {
+    const minute = String(index * 2).padStart(2, '0');
+    const answerMinute = String(index * 2 + 1).padStart(2, '0');
+    return [
+      {
+        id: `stream-history-user-${index}`,
+        kind: 'message',
+        role: 'user',
+        timestamp: `2026-09-01T10:${minute}:00Z`,
+        content: [
+          {
+            type: 'text',
+            text: `History turn ${index + 1}: keep this transcript long enough to exercise reader-owned scrolling.`,
+          },
+        ],
+      },
+      {
+        id: `stream-history-answer-${index}`,
+        kind: 'message',
+        role: 'assistant',
+        timestamp: `2026-09-01T10:${answerMinute}:00Z`,
+        content: [
+          {
+            type: 'text',
+            text: `History answer ${index + 1}. The content is settled and only exists to make the live tail scroll inside a real transcript.`,
+          },
+        ],
+      },
+    ];
+  },
+).flat();
+
+function streamingItems(phase: number): MessageItemV1[] {
+  const toolOneSettled = phase >= 1;
+  const toolTwoSettled = phase >= 2;
+  const current: MessageItemV1[] = [
+    {
+      id: 'stream-user',
+      kind: 'message',
+      role: 'user',
+      timestamp: '2026-09-01T12:20:00Z',
+      content: [
+        {
+          type: 'text',
+          text: 'Keep the live answer pinned while the two tool results arrive, unless I scroll away to read history.',
+        },
+      ],
+    },
+    {
+      id: 'stream-tool-read',
+      kind: 'tool',
+      timestamp: '2026-09-01T12:20:10Z',
+      tool: {
+        call_id: 'stream-call-read',
+        name: 'Read',
+        status: toolOneSettled ? 'success' : 'running',
+        summary: 'web/src/shared/ai-conversation/runtime/ConversationRuntime.ts',
+        input: {
+          text: '{"file_path":"web/src/shared/ai-conversation/runtime/ConversationRuntime.ts"}',
+          kind: 'json',
+          truncated: false,
+        },
+        ...(toolOneSettled
+          ? {
+              output: {
+                text: 'private applyNewest(page: AIConversationPage) { /* stable ids reconcile here */ }',
+                kind: 'text' as const,
+                truncated: false,
+              },
+            }
+          : {}),
+      },
+    },
+    {
+      id: 'stream-tool-test',
+      kind: 'tool',
+      timestamp: '2026-09-01T12:20:20Z',
+      tool: {
+        call_id: 'stream-call-test',
+        name: 'Bash',
+        status: toolTwoSettled ? 'success' : 'running',
+        summary: 'npm run test -- conversation',
+        ...(toolTwoSettled
+          ? {
+              output: {
+                text: 'conversation acceptance tests passed',
+                kind: 'text' as const,
+                truncated: false,
+              },
+            }
+          : {}),
+      },
+    },
+  ];
+
+  if (phase >= 1) {
+    current.push({
+      id: 'stream-answer',
+      kind: 'message',
+      role: 'assistant',
+      timestamp: '2026-09-01T12:20:30Z',
+      content: [
+        {
+          type: 'text',
+          text:
+            phase >= 2
+              ? 'The ownership handoff stays stable while the final tool result settles.'
+              : 'The ownership handoff stays stable while',
+        },
+      ],
+    });
+  }
+
+  return [...STREAM_HISTORY, ...current];
+}
+
+/**
+ * A settled turn with enough adjacent tool calls to make the inner group a real
+ * scroll owner. A short group can prove disclosure but cannot prove the body is
+ * bounded or that scrolling it leaves the transcript alone (SC-18/20).
+ */
+const TOOL_SCROLL_ITEMS: MessageItemV1[] = [
+  {
+    id: 'tool-scroll-user',
+    kind: 'message',
+    role: 'user',
+    timestamp: '2026-09-01T12:30:00Z',
+    content: [
+      {
+        type: 'text',
+        text: 'Inspect every ownership call without letting the process block drown the final answer or the conversation controls.',
+      },
+    ],
+  },
+  ...Array.from(
+    { length: 24 },
+    (_, index): MessageItemV1 => ({
+      id: `tool-scroll-${index}`,
+      kind: 'tool',
+      timestamp: `2026-09-01T12:30:${String(index + 1).padStart(2, '0')}Z`,
+      tool: {
+        call_id: `tool-scroll-call-${index}`,
+        name: index % 3 === 0 ? 'Read' : index % 3 === 1 ? 'Grep' : 'Bash',
+        status: 'success',
+        summary: `acceptance activity ${index + 1} of 24`,
+        output: {
+          text: `stable acceptance output ${index + 1}`,
+          kind: 'text',
+          truncated: false,
+        },
+      },
+    }),
+  ),
+  {
+    id: 'tool-scroll-answer',
+    kind: 'message',
+    role: 'assistant',
+    timestamp: '2026-09-01T12:31:00Z',
+    content: [
+      {
+        type: 'text',
+        text: 'All 24 activities remain inspectable inside the bounded process group; the answer remains the primary reading surface.',
+      },
+    ],
+  },
+];
+
 /** The item a `messages` answer carries whole — no client join by id (#1222). */
 function itemOf(conversationId: string): ConversationItemV1 | undefined {
-  return CONVERSATIONS.find((c) => c.id === conversationId);
+  return [...CONVERSATIONS, RICH_CONVERSATION].find((c) => c.id === conversationId);
 }
+
+/** The conversation the `rich` scenario is bound to (#1184's Chat dialect). */
+const RICH_ID = 'a9b8c7d6-9999-4aaa-8bbb-ccccddddeeee';
+
+const RICH_CONVERSATION: ConversationItemV1 = {
+  id: RICH_ID,
+  cwd: '/Users/dev/code/nession-capsule',
+  updated_at: '2026-09-01T11:52:00Z',
+  title: 'Chat Markdown dialect',
+  preview: 'The corpus the Chat profile has to keep readable',
+};
+
+/**
+ * The `rich` scenario's page: the #1184 acceptance corpus as one assistant
+ * turn, plus a user turn that carries Markdown of its own.
+ *
+ * It exists because the dialect's guarantees are *negative* — `$HOME` is not
+ * math, `60~70%` is not strikethrough, `<tool_call>` is not a tool call — and
+ * a negative is exactly what a prose fixture cannot reach: the canonical
+ * conversation contains none of these shapes, so a regression that swallowed
+ * `$HOME` into KaTeX would leave every existing golden identical. The
+ * requirement lists this corpus by name (#1184 Testing), and a state with no
+ * route is a state with no gate.
+ *
+ * The definitions deliberately sit at the *end* of the message: the settled
+ * full parse must resolve a reference and a footnote the streaming prefix
+ * would have rendered literally, which is the behaviour SC-14 is about.
+ */
+const RICH_ITEMS: MessageItemV1[] = [
+  {
+    id: 'rich-1',
+    kind: 'message',
+    role: 'user',
+    timestamp: '2026-09-01T11:50:00Z',
+    content: [
+      {
+        type: 'text',
+        text: '这个 **PeekHost.tsx** 的 ownership 是怎么决定的？顺便看看 `$HOME` 下面的配置。',
+      },
+    ],
+  },
+  {
+    id: 'rich-2',
+    kind: 'message',
+    role: 'assistant',
+    timestamp: '2026-09-01T11:52:00Z',
+    content: [
+      {
+        type: 'text',
+        text: [
+          '## Ownership, and the things that look like formulas',
+          '',
+          'The controller is whoever attached last, and the config it reads is whatever',
+          '`$HOME` resolved to at launch — `$PATH` and `$SHELL` ride along. A run costs',
+          '$100 in the worst case and finishes in ~10ms, and 60~70% of that is the render;',
+          'the rest is the tmux round trip.',
+          '',
+          '中文**重点。**下一句继续，强调在这里收尾。',
+          '',
+          'Inline math stays explicit: \\(E = mc^2\\), and display math is its own block:',
+          '',
+          '\\[',
+          '\\int_0^1 x^2 \\, dx = \\frac{1}{3}',
+          '\\]',
+          '',
+          'The tag below is literal text in a conversation, not a tool call:',
+          '',
+          '<tool_call>{"name": "Read", "path": "~/.claude/CLAUDE.md"}</tool_call>',
+          '',
+          'The handler everyone reaches for:',
+          '',
+          '```rust',
+          'impl ConnectionManager {',
+          '    fn attach(&mut self, client: ClientId) -> Epoch {',
+          '        self.epoch.bump();',
+          '        self.owner = Some(client);',
+          '        self.epoch',
+          '    }',
+          '',
+          '    fn observer(&self, client: ClientId) -> bool {',
+          '        self.observer == Some(client)',
+          '    }',
+          '}',
+          '```',
+          '',
+          // Aligned on purpose: the column markers are what the renderer used
+          // to drop, and a golden of a default-aligned table cannot show it.
+          '| Path | Arbitrated? | Tested? |',
+          '| :--- | :---: | ---: |',
+          '| attach | yes | yes |',
+          '| observer | no | **no** |',
+          '',
+          'A tight list stays one line per item:',
+          '',
+          '- `attach` bumps the epoch',
+          '- `observer` must not',
+          '',
+          'and a loose one keeps each item its own paragraph:',
+          '',
+          '- The first item is its own paragraph.',
+          '',
+          '- The second one too.',
+          '',
+          'The observer path is the untested one. See the [stream replay notes][notes]',
+          'and the footnote for the measured shape.[^observer] The local path',
+          '[PeekHost.tsx](web/src/product/terminal/capsule/PeekHost.tsx) stays text until a',
+          'resolver vouches for it.',
+          '',
+          '[notes]: https://example.com/nession',
+          '[^observer]: Only the attach path is covered by the ownership suite.',
+        ].join('\n'),
+      },
+    ],
+  },
+];
 
 /**
  * The page *behind* `ITEMS` — what the `paged` scenario answers to a request
@@ -363,6 +736,17 @@ function conversationsFor(scenario: string): ConversationsResponse | undefined {
         items: CONVERSATIONS,
         has_more: false,
       };
+    case 'rich':
+      // The #1184 corpus, bound on purpose: the Peek's "View conversation"
+      // action only renders in the bound state, and that overlay is one of
+      // the two surfaces the requirement's acceptance names.
+      return {
+        state: 'ready',
+        cwd: RICH_CONVERSATION.cwd ?? '/Users/dev/code/nession-capsule',
+        items: [RICH_CONVERSATION],
+        binding: { conversation_id: RICH_ID, activity: 'inactive' },
+        has_more: false,
+      };
     case 'none':
       // Read, and empty. There is no `not_found` on this unit: an empty list
       // is a complete answer rather than an error.
@@ -389,6 +773,40 @@ function conversationsFor(scenario: string): ConversationsResponse | undefined {
       // could not be read at all, against one that was read and held no
       // conversations. `#1128` names both, and the view renders them apart.
       return { state: 'unavailable', items: [], has_more: false };
+    case 'thread-unavailable':
+      // The list reads fine and the *thread* cannot be. Kept as its own
+      // scenario because `unavailable` above means the folder could not be
+      // listed at all — a different screen, and until now the only one a
+      // browser could reach. `#1397` gave the thread its own arm precisely
+      // because "cannot say" is not "there is nothing"; the round-2 review
+      // named the absence of a path driving that arm as a gap.
+      return {
+        state: 'ready',
+        cwd: '/Users/dev/code/nession-capsule',
+        items: CONVERSATIONS,
+        binding: { conversation_id: BOUND_ID, activity: 'active' },
+        has_more: false,
+      };
+    // Two scenarios share this answer, and each differs somewhere else:
+    // `list-stale` fails a *later* list read (see `threadOpened`), and
+    // `settled` binds the same conversation to a finished Turn (see
+    // `SETTLED_ITEMS`). The directory is `ready`'s in both cases — a finished
+    // Turn is a property of the thread, not of the list.
+    //
+    // The comment is above the labels rather than inside the first one: a case
+    // that holds only a comment is not empty to `no-fallthrough`, and this is a
+    // fall-through on purpose.
+    case 'streaming':
+    case 'tool-scroll':
+    case 'list-stale':
+    case 'settled':
+      return {
+        state: 'ready',
+        cwd: '/Users/dev/code/nession-capsule',
+        items: CONVERSATIONS,
+        binding: { conversation_id: BOUND_ID, activity: 'active' },
+        has_more: false,
+      };
     case 'paged':
       // `ready`, plus a messages unit that admits an older page exists. See
       // `messagesFor`: the paging lives entirely on the messages answer — the
@@ -407,6 +825,46 @@ function conversationsFor(scenario: string): ConversationsResponse | undefined {
 }
 
 /**
+ * The page shape the single-phase scenarios answer with: live, one page, and
+ * nothing behind it.
+ *
+ * Extracted so a scenario that differs only in *which* transcript it carries
+ * says only that — `ready` and `settled` are one envelope around two corpora,
+ * and spelling it twice is how the two would drift.
+ */
+function activePage(conversation: ConversationItemV1, items: MessageItemV1[]): MessagesResponse {
+  return {
+    state: 'ready',
+    conversation,
+    activity: 'active',
+    items,
+    has_more: false,
+    partial_tail: false,
+    skipped: 0,
+  };
+}
+
+function acceptancePageFor(
+  scenario: string,
+  conversation: ConversationItemV1,
+  streamingPhase: number,
+): MessagesResponse | null {
+  if (scenario === 'streaming') {
+    const phase = Math.max(0, Math.min(streamingPhase, 2));
+    return {
+      state: 'ready',
+      conversation,
+      activity: phase >= 2 ? 'inactive' : 'active',
+      items: streamingItems(phase),
+      has_more: false,
+      partial_tail: phase === 1,
+      skipped: 0,
+    };
+  }
+  return scenario === 'tool-scroll' ? activePage(conversation, TOOL_SCROLL_ITEMS) : null;
+}
+
+/**
  * What the `messages` unit answers for a named scenario and an explicit id.
  *
  * The id is the only selection mechanism — an unknown one answers `not_found`
@@ -417,6 +875,7 @@ function messagesFor(
   scenario: string,
   conversationId: string,
   cursor?: string,
+  streamingPhase = 0,
 ): MessagesResponse | undefined {
   const named = itemOf(conversationId);
   if (conversationsFor(scenario) === undefined) {
@@ -431,17 +890,44 @@ function messagesFor(
       skipped: 0,
     };
   }
+  if (scenario === 'rich' && named.id !== RICH_ID) {
+    // The canonical conversations are not part of this scenario's directory —
+    // answering one with the corpus would be the substitution `#1222` forbids.
+    return {
+      state: 'not_found',
+      items: [],
+      has_more: false,
+      partial_tail: false,
+      skipped: 0,
+    };
+  }
+
+  const acceptancePage = acceptancePageFor(scenario, named, streamingPhase);
+  if (acceptancePage !== null) {
+    return acceptancePage;
+  }
+
   switch (scenario) {
-    case 'ready':
+    case 'list-stale':
+    case 'thread-unavailable':
+      // The read the list above promised and could not make. `items: []` here
+      // is the provider being honest, not a conversation that is empty — and
+      // the surface must not turn one into the other, which is the whole point
+      // of the state.
+      //
+      // `list-stale` shares the answer, and not for atmosphere: the only
+      // control in this surface that reloads *both* halves is the Retry a
+      // non-ready thread offers, so without it the list refresh above could
+      // never be asked for. See `threadOpened`.
       return {
-        state: 'ready',
-        conversation: named,
-        activity: 'active',
-        items: ITEMS,
+        state: 'unavailable',
+        items: [],
         has_more: false,
         partial_tail: false,
         skipped: 0,
       };
+    case 'ready':
+      return activePage(named, ITEMS);
     case 'paged': {
       // The only scenario with history behind the newest page. The cursor is
       // the paging contract: the newest page hands out `PAGED_CURSOR`, and
@@ -487,6 +973,10 @@ function messagesFor(
       }
       return undefined;
     }
+    case 'settled':
+      // The other phase: everything settled and the answer last, which is the
+      // Turn SC-17/18 folds. `ready` ends in running work and cannot.
+      return activePage(named, SETTLED_ITEMS);
     case 'inactive':
       // The same transcript as `ready`, and that is the point: a fixture that
       // gave this state no items would leave a reader unable to tell the two
@@ -511,6 +1001,19 @@ function messagesFor(
         conversation: named,
         activity: 'unknown',
         items: ITEMS,
+        has_more: false,
+        partial_tail: false,
+        skipped: 0,
+      };
+    case 'rich':
+      // Settled and inactive: the corpus is the *settled* full parse's job
+      // (SC-14 — references and footnotes resolve there), and `inactive` keeps
+      // `partial_tail` from turning the last item into a streaming one.
+      return {
+        state: 'ready',
+        conversation: named,
+        activity: 'inactive',
+        items: RICH_ITEMS,
         has_more: false,
         partial_tail: false,
         skipped: 0,
@@ -584,6 +1087,29 @@ function listFor(scope: ConfigScope): ListResponse {
 export function fixtureConversationSurface(search: string): PluginSurface {
   const scenario = new URLSearchParams(search).get('conversation') ?? 'ready';
 
+  /**
+   * Whether the reader has opened a conversation yet.
+   *
+   * `list-stale` answers the directory normally until the thread has been read,
+   * and fails every list read after that. The trigger is the reader's own
+   * action rather than a count of list reads, and it has to be: this app reads
+   * the list twice on mount in development (StrictMode double-invokes the
+   * effect, and only in development), so "fail after the first list read" would
+   * answer the same scenario differently in the two environments the fixture
+   * runs in — rows in the production build the E2E uses, an error screen in the
+   * dev server a human uses.
+   *
+   * It is also the state worth reaching, in the review's own words: the list
+   * loaded, the reader opened a thread, and the *refresh* is what failed. A
+   * scenario that failed the first read would be a different screen — the one
+   * `ListStateGuard` already draws.
+   */
+  let threadOpened = false;
+  // Only the streaming acceptance scenario is read-count driven. Production
+  // fixture E2E uses the Vite preview build (no StrictMode double effect), and
+  // the Claude adapter's real 3s poll advances these phases exactly once each.
+  let streamingReads = 0;
+
   // The same directory the git surface publishes, built from the same
   // `manifestsOf`, so this route cannot present a capability directory the app
   // would not — resolution happens against it before a request is sent.
@@ -597,6 +1123,9 @@ export function fixtureConversationSurface(search: string): PluginSurface {
       // The ids are the contracts', not literals: a renamed wire would then
       // fail here rather than silently answering nothing.
       if (type === PROTOCOL) {
+        if (scenario === 'list-stale' && threadOpened) {
+          return Promise.reject(new Error('the conversations could not be listed'));
+        }
         const response = conversationsFor(scenario);
         if (response === undefined) {
           return Promise.reject(
@@ -607,6 +1136,7 @@ export function fixtureConversationSurface(search: string): PluginSurface {
         return Promise.resolve(response as T);
       }
       if (type === MESSAGES_PROTOCOL) {
+        threadOpened = true;
         const conversationId = payload.conversation_id;
         if (typeof conversationId !== 'string') {
           return Promise.reject(
@@ -619,7 +1149,11 @@ export function fixtureConversationSurface(search: string): PluginSurface {
             new Error('fixture messages request with a non-string cursor — the contract sends a string'),
           );
         }
-        const response = messagesFor(scenario, conversationId, cursor);
+        const streamingPhase =
+          scenario === 'streaming' && cursor === undefined
+            ? Math.min(streamingReads++, 2)
+            : 0;
+        const response = messagesFor(scenario, conversationId, cursor, streamingPhase);
         if (response === undefined) {
           // Either the scenario is unmodelled at all, or the scenario is
           // `paged` and the cursor is not the one its newest page handed out.

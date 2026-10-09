@@ -8,9 +8,9 @@ It is designed to let the user express intent without turning the Terminal into 
 
 > **Decision update (2026-09-19): #748 still governs the resting capsule, but no longer defines the whole capability surface.**
 > The resting capsule remains identical across capability states: no permanent capability chips or one-button-per-extension chrome.
-> The `+` expansion remains the explicit Nession capability entry. However, once a capability is selected, triggered, or earns
-> contextual presence, Nession may materialize a temporary **Signal** or **Peek** adjacent to the capsule. Rich/full capability
-> state then deepens into Workspace.
+> The `+` expansion remains the explicit Nession capability entry. However, once the user chooses a capability, Nession may
+> materialize a temporary **Peek** adjacent to the capsule. (The shallower **Signal** depth this sentence originally named was
+> removed on 2026-10-04: nothing emerges by observation.) Rich/full capability state then deepens into Workspace.
 >
 > The stable rule is:
 >
@@ -28,7 +28,7 @@ The capsule provides one quiet place for high-level interaction with the current
 - direct terminal input where appropriate;
 - commands and shortcuts;
 - explicit `+` expansion as the Nession capability entry;
-- lightweight capability Signal/Peek surfaces that may emerge after selection or contextual relevance;
+- lightweight capability Peek surfaces that the user's own choice opens;
 - context-preserving deepening from Terminal into Workspace for full capability state.
 
 The capsule is **not** a permanent toolbar or a feature catalog. A registered capability does not receive a button simply because it exists.
@@ -39,7 +39,7 @@ The capsule implements three root Principles directly:
 
 1. **Show only what matters now.** The resting state stays minimal — and identical across capability states.
 2. **Let capabilities emerge from context.** Relevant/active capabilities may be discovered through `+`, then project only the amount of state justified by the current work.
-3. **Prefer progressive disclosure.** The first layer shows intent; Signal and Peek remain lightweight; full capability interaction belongs in Workspace.
+3. **Prefer progressive disclosure.** The first layer shows intent; the Peek remains lightweight; full capability interaction belongs in Workspace.
 
 ## Anatomy
 
@@ -60,10 +60,9 @@ The exact ordering is experience-specific. The semantic regions are:
 | Capsule shell | Quiet floating surface anchored to the current Session |
 | Primary input | Conversational / intent input; the main interaction |
 | `+` / expansion affordance | Explicit entry to Nession capabilities. It keeps the resting capsule stable while allowing the reachable/relevant capability set to grow without one permanent button per extension |
-| Capability Signal | Minimal current-state projection that explains why a capability matters now; temporary and subordinate to Terminal |
-| Capability Peek | Small Session-scoped summary opened from a Signal or capability entry; intentionally incomplete and usually offers a path into Workspace |
+| Capability Peek | Small Session-scoped summary opened by choosing a capability; it draws the smallest identifying state first, stays intentionally incomplete and usually offers a path into Workspace. The Signal depth that used to sit shallower than it was removed on 2026-10-04 |
 | Primary action | Send / execute current intent |
-| Terminal-local accessory | Contextual Terminal-only interaction such as Terminal Keys; does not imply a Workspace view |
+| Terminal-local capability | Contextual Terminal-only interaction such as Terminal Keys; does not imply a Workspace view. (It is a Peek like any other since 2026-10-03 — the separate "accessory" family retired, `capability-emergence.md`.) |
 
 ## Contextual capability presence
 
@@ -76,7 +75,7 @@ unavailable -> available -> relevant -> active
 Lifecycle is separate from disclosure depth:
 
 ```text
-Dormant -> Signal -> Peek -> Workspace
+Dormant -> Peek -> Workspace
 ```
 
 See [capability-emergence.md](../../capability-emergence.md).
@@ -88,8 +87,7 @@ Typical progression:
 | Depth | TerminalCapsule behavior |
 |-------|--------------------------|
 | Dormant | No capability surface |
-| Signal | Small read-only/current-state projection adjacent to the capsule |
-| Peek | Compact Session-scoped summary with a clear path deeper |
+| Peek | Compact Session-scoped summary the user's choice opens, with a clear path deeper |
 | Workspace | Full capability surface; outside the capsule |
 
 The capsule should not render a row of installed extensions.
@@ -101,10 +99,7 @@ Git available
   -> neutral resting capsule
 
 user opens + and selects Git
-  -> compact Signal: feature/capsule · worktree capsule · 3 changed
-
-user asks for more
-  -> Peek: branch/worktree, staged/unstaged, ahead/behind, short changed-file summary
+  -> Peek: branch/worktree identity · staged/unstaged · ahead/behind · short changed-file summary
 
 Open Workspace
   -> full Git surface: diff, staging, commit history, branches, worktrees
@@ -118,19 +113,57 @@ The capsule participates in, but does not own, the complete capability UI.
 
 ```text
 resting capsule
-    ↓ + / context
+    ↓ + (its list leads with what context sensed)
 capability entry
-    ↓ select / contextual emergence
-Signal
-    ↓ ask for more
+    ↓ choose a row
 Peek
     ↓ Open Workspace
 full capability surface
 ```
 
-Signal/Peek should answer what matters **now**. Full history, management, configuration, large diffs, graphs, forms, and complex multi-step workflows belong in Workspace.
+The Peek should answer what matters **now**. Full history, management, configuration, large diffs, graphs, forms, and complex multi-step workflows belong in Workspace.
 
-A Terminal-local capability such as Terminal Keys may stop at an interactive accessory and have no Workspace projection.
+A Terminal-local capability such as Terminal Keys may stop at its Peek and have no Workspace projection. On App it is *context-sensed* — a touch device with a Terminal is what makes it relevant (SC-37) — and it is not work: it never lights the Work Ring.
+
+### The `+` opens the Context Capsule (owner decision, 2026-10-04)
+
+The `+` is one control with one surface, in every sense state (#1347 SC-18 /
+SC-33 / SC-35 / SC-41–44). Its own pattern is
+[context-capsule.md](context-capsule.md); what belongs here is how it sits on
+this one.
+
+```text
+              ┌─ Context Capsule (ceiling) ───────┐
+              │ sensed first, catalog below       │
+              │ — one list, one scroll            │
+              └───────────────────────────────────┘
+                            ↕ one token
+              ╭─ Conversation Capsule ────────────╮
+              │ [+]  input …                  ↑   │
+              ╰───────────────────────────────────╯
+```
+
+**Opening adds a surface; it does not change the capsule.** The lower Capsule
+stays visible, unchanged and spatially stable — the same box it had before the
+tap and after the close — and the upper one is a sibling above it, one token
+away. That is the correction the owner made on 2026-10-04, and it is why the
+surface is rendered inside the capsule's own dock rather than anchored to the
+`+`: a popup would leave the lower Capsule behind during the App's
+Conversation↔Capability exchange, and it could not be a sibling at all.
+
+The list is **one list**: what Nession currently senses, first (work-sensed, then
+context-sensed), each row carrying the capability's display identity and a
+reason line — never a raw capability id — and the ordinary catalog below them in
+the same scroll. There is no `All capabilities` step, and every row — sensed or
+ordinary — opens that capability at Peek, which takes this same upper slot, so
+selecting deepens the surface rather than stacking a third one.
+
+It is never a Dialog and never a menu: no backdrop, no centered modal geometry,
+no focus trap, no generic menu sizing. Its height is a ceiling that its content
+fills up to — the pair does not resize as senses come and go, because the one
+flat list gives every sense state the same rows — and overflow scrolls inside it.
+When the sense that opened the surface disappears, the surface dismisses itself;
+a Peek the user opened explicitly is theirs to close.
 
 ## Input modes
 
@@ -178,7 +211,7 @@ Web and App share the same semantic capsule model while presentation may differ.
 |--|-----|-----|
 | Placement | Floating over/inside Terminal well, usually centered with a bounded max width | Floating inset surface respecting safe area and thumb reach |
 | Primary interaction | Conversational / intent input | Conversational / intent input |
-| Secondary expansion | `+` as capability entry; compact Signal/Peek density | `+` as capability entry; touch-native Signal/Peek |
+| Secondary expansion | `+` as capability entry; compact Peek density | `+` as capability entry; touch-native Peek |
 | Capability presence | Same lifecycle/disclosure semantics | Same lifecycle/disclosure semantics |
 | Deeper capability UI | Workspace surface with preserved Session/resource context | Workspace spatial layer/push with preserved Session/resource context |
 
@@ -192,7 +225,7 @@ Derived from [`PRINCIPLE.md`](../../../../PRINCIPLE.md) and [visual-language.md]
 
 - The current work remains visually dominant.
 - The capsule is refined and clearly interactive, but it must not outshine Terminal output in the resting state.
-- Capability presence is intentionally lightweight. The resting capsule stays neutral; Signal/Peek may emerge temporarily after selection or contextual relevance.
+- Capability presence is intentionally lightweight. The resting capsule stays neutral; a Peek the user chose may sit temporarily above it.
 
 ### Quality through precision
 
@@ -211,7 +244,7 @@ Minimal does not mean bare or unfinished.
 
 - **Primary:** user's current intent/input.
 - **Secondary:** send/execute and the `+` capability entry.
-- **Tertiary:** temporary Signal/Peek projections and Terminal-local accessories.
+- **Tertiary:** the temporary Peek projection and Terminal-local accessories.
 
 ### Two axes on one control
 
@@ -242,6 +275,19 @@ so the split cannot converge back silently. Values live in
 
 - Floating-control elevation without decorative border stacks.
 - Capsule radius from semantic design tokens.
+- The dock has **one upper visual family**. Context and Peek replace each other
+  in the same upper slot and therefore use one Nession-owned surface recipe:
+  material, radius, elevation/blur, horizontal bounds and inter-Capsule gap do
+  not change when the content deepens.
+- On Web, that upper slot aligns with the Conversation Capsule shell itself. The
+  reciprocal Workspace destination circle is a separate dock column and does
+  not widen the upper Capsule.
+- Peek capabilities own the body they contribute, not the host chrome around
+  it. Header/title/dismiss/Workspace destination and standard host actions
+  remain Nession-owned.
+- Writing typography and chrome typography are different roles: the composer
+  may keep the input size required for writing/mobile input, while Context/Peek
+  host chrome consumes semantic typography roles rather than the composer font.
 - Avoid nested cards inside the capsule.
 - Motion communicates state changes; it does not celebrate routine actions.
 
@@ -267,7 +313,7 @@ The capsule and Workspace are complementary:
 
 A capability may therefore be discoverable in Workspace before it earns Session-level presence.
 
-When Terminal presence is earned, Nession should deepen through Signal → Peek → Workspace while preserving context.
+When Terminal presence is earned, Nession should deepen through Peek → Workspace while preserving context.
 
 See [workspace.md](../../workspace.md) and [capability-emergence.md](../../capability-emergence.md).
 

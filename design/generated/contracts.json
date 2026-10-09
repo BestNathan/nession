@@ -52,6 +52,45 @@
     }
   ],
   "patterns": {
+    "pattern.context-capsule": {
+      "id": "pattern.context-capsule",
+      "patternRef": "docs/design/design-system/patterns/context-capsule.md",
+      "extends": [
+        "category.chrome"
+      ],
+      "web": {
+        "overflow": "scroll",
+        "wrap": true,
+        "alignY": "middle",
+        "justify": "start",
+        "radiusToken": "semantic.radius-capsule",
+        "maxHeightToken": "experience.web.contextCapsule.maxHeight",
+        "rowHeightToken": "experience.web.contextCapsule.rowHeight",
+        "padXToken": "experience.web.terminalCapsule.shellPadX",
+        "scrollOwner": true,
+        "maxHeightTokenPx": 288,
+        "padXTokenPx": 12,
+        "rowHeightTokenPx": 44,
+        "radiusTokenCss": "calc(var(--nession-radius) * 2.2)"
+      },
+      "app": {
+        "overflow": "scroll",
+        "wrap": true,
+        "alignY": "middle",
+        "touchTargetToken": "experience.app.touchTarget.min",
+        "justify": "start",
+        "radiusToken": "semantic.radius-capsule",
+        "maxHeightToken": "experience.app.contextCapsule.maxHeight",
+        "rowHeightToken": "experience.app.contextCapsule.rowHeight",
+        "padXToken": "experience.app.terminalCapsule.shellPadX",
+        "scrollOwner": true,
+        "maxHeightTokenPx": 256,
+        "touchTargetTokenPx": 44,
+        "padXTokenPx": 10,
+        "rowHeightTokenPx": 44,
+        "radiusTokenCss": "calc(var(--nession-radius) * 2.2)"
+      }
+    },
     "pattern.popup-menu": {
       "id": "pattern.popup-menu",
       "patternRef": "docs/design/design-system/patterns/popup-menu.md",
@@ -144,7 +183,7 @@
         "maxWidthTokenPx": 672,
         "padXTokenPx": 12,
         "visualSizeTokenPx": 32,
-        "radiusTokenCss": "calc(var(--radius) * 2.2)",
+        "radiusTokenCss": "calc(var(--nession-radius) * 2.2)",
         "pillRadiusTokenCss": "9999px"
       },
       "app": {
@@ -162,7 +201,7 @@
         "touchTargetTokenPx": 44,
         "padXTokenPx": 10,
         "visualSizeTokenPx": 36,
-        "radiusTokenCss": "calc(var(--radius) * 2.2)",
+        "radiusTokenCss": "calc(var(--nession-radius) * 2.2)",
         "pillRadiusTokenCss": "9999px"
       }
     },
@@ -174,17 +213,31 @@
       ],
       "web": {
         "overflow": "scroll",
-        "wrap": false,
+        "wrap": true,
         "alignY": "middle",
-        "justify": "start"
+        "justify": "start",
+        "radiusToken": "semantic.radius-capsule",
+        "pillRadiusToken": "experience.web.terminalCapsule.shellPillRadius",
+        "minHeightToken": "experience.web.control.md",
+        "padXToken": "experience.web.terminalCapsule.shellPadX",
+        "minHeightTokenPx": 32,
+        "padXTokenPx": 12,
+        "radiusTokenCss": "calc(var(--nession-radius) * 2.2)",
+        "pillRadiusTokenCss": "9999px"
       },
       "app": {
         "overflow": "scroll",
-        "wrap": false,
+        "wrap": true,
         "alignY": "middle",
-        "touchTargetToken": "experience.app.touchTarget.compact",
+        "touchTargetToken": "experience.app.touchTarget.min",
         "justify": "start",
-        "touchTargetTokenPx": 28
+        "radiusToken": "semantic.radius-capsule",
+        "minHeightToken": "experience.app.control.md",
+        "padXToken": "experience.app.terminalCapsule.shellPadX",
+        "minHeightTokenPx": 44,
+        "touchTargetTokenPx": 44,
+        "padXTokenPx": 10,
+        "radiusTokenCss": "calc(var(--nession-radius) * 2.2)"
       }
     }
   }

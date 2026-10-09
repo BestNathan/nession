@@ -4,49 +4,95 @@
     "$description": "The App's own chrome type scale (#1073). The Web group's four roles are the shared vocabulary; this group is the App's *density* for them plus the two levels a phone needs and a desktop does not. The values are deliberately not refs to `experience.web.typography`: a phone is held closer and read at arm's length in short bursts, and the Web scale (12.5/11/10/12) is a desktop density that reached the App by inheritance rather than by decision — `experience.web.typography` is emitted at `:root`, so every shared shell/workspace variable the App consumed resolved to Web's numbers (#1073 \"Current mobile type inventory\"). The two groups therefore share *roles* while each states its own size, which is the model `visual-language.md` already states for Experience tokens generally. A role still owns SIZE only — family and weight stay orthogonal, so a mono path is a path at the path's size rather than a smaller string. Work surfaces are out of scope by construction: xterm reads `experience.app.terminal` and CodeMirror reads `workspace.editorFontSize`, and neither is a chrome role.\n\nThe settled ramp is 17 / 16 / 14 / 13 / 12 / 13. Each value was chosen by looking at the canonical App screens at 375x812 and 390x844 (`/#/fixture/app`) and is recorded on the role it belongs to; the ramp #1073 proposed is a range and two of its values moved once a screen was in front of them. `title` and `body` are the two roles Web has no leaf for, so they are emitted only under `[data-experience=\"app\"]`; a binding that consumes them must say which experience it belongs to (`nession/no-cross-experience-token`), which is what `web/src/app/experiences/app/appTypography.ts` exists to do.",
     "title": {
       "$description": "The page's own name: the active Session in the App header, the Workspace capability in its tool header, and a pushed detail's title. Settled at 17 by looking at the canonical App screens, not from the ramp in #1073: at the inherited `text-base` (16px) the title was the *same* size as the capsule's text field on the Terminal screen, so the page's name and the box the user types into were indistinguishable in the one place the title has the screen to itself; 17 restores a step. One step rather than several, because the title shares a 390px column with the rows below it — a 20px title would buy the page nothing and cost the Session list a line.",
-      "size": { "value": "17px" },
-      "weight": { "ref": "domain.typography.role.title.weight" },
-      "lineHeight": { "value": "1.2" }
+      "size": {
+        "value": "17px"
+      },
+      "weight": {
+        "ref": "domain.typography.role.title.weight"
+      },
+      "lineHeight": {
+        "value": "1.2"
+      }
     },
     "primary": {
       "$description": "Work / navigation primary — the row the surface exists for: a Session name, a file name. Settled at 16 by looking: the App's own search field is pinned at 16px, because a smaller font in a focused input makes iOS Safari zoom the page and that is a platform behaviour this scale cannot design around. Web's 12.5px therefore did not just make the rows small, it made the field that *filters* the list 28% larger than the list — the inversion #1073 records as \"the search field visually dominates the Session names\". A primary role below the input floor reproduces that no matter how it is tuned, so the role sits at the floor instead: the content is never out-ranked by the control that acts on it. Verified at 375 and 390 that six Session rows and the chrome above them still fit without scrolling.",
-      "size": { "value": "16px" },
-      "weight": { "ref": "domain.typography.role.primary.weight" },
-      "lineHeight": { "value": "1.25" }
+      "size": {
+        "value": "16px"
+      },
+      "weight": {
+        "ref": "domain.typography.role.primary.weight"
+      },
+      "lineHeight": {
+        "value": "1.25"
+      }
     },
     "body": {
       "$description": "Controls and ordinary actions: New Session, Filters, the status chips, the sort row, the file-viewer's Edit/Save/View actions. A control's size follows its *job*, not the primitive it happens to be built from, and the App rendered every one of these at `Button size=\"sm\"`'s `text-xs` (12px) — smaller than the search placeholder above them and smaller than the metadata under the rows they act on, which is fine print. 14 rather than 15: at 15 a control and a Session row are within a pixel and the actions start reading as content, which is the axis the two roles exist to keep apart. Web keeps its 12px: a pointer has no reading-distance problem and the same `Button size=\"sm\"` is correct there.",
-      "size": { "value": "14px" },
-      "weight": { "ref": "domain.typography.role.body.weight" },
-      "lineHeight": { "value": "1.4" }
+      "size": {
+        "value": "14px"
+      },
+      "weight": {
+        "ref": "domain.typography.role.body.weight"
+      },
+      "lineHeight": {
+        "value": "1.4"
+      }
     },
     "secondary": {
       "$description": "Supporting but fully readable: a node row under a section label, and the tree/list text on the Files surface. Distinct from `primary` because the App demotes infrastructure context — the Agents disclosure is one muted row until asked for, and its rows must not read as work items (the same decision `SessionList` records for filing Sessions flat). Settled at 13 by looking at the disclosure open at 375: node rows at the inherited 11.5px were the same size as the \"Agents\" label above them, so a section and its rows read as one list instead of two levels.",
-      "size": { "value": "13px" },
-      "weight": { "ref": "domain.typography.role.secondary.weight" },
-      "lineHeight": { "value": "1.3" }
+      "size": {
+        "value": "13px"
+      },
+      "weight": {
+        "ref": "domain.typography.role.secondary.weight"
+      },
+      "lineHeight": {
+        "value": "1.3"
+      }
     },
     "metadata": {
       "$description": "Quiet: agent/location, recency, counts, section labels, the file-list metadata line. Settled at 12 by looking, and 12 is a floor rather than a preference: at Web's 10px the Session row's `codex · devbox-01 · 24d ago` was the hardest line on the Sessions screen to read at 375, and it is the line that tells two similarly-named Sessions apart — \"metadata never outweighs the thing it describes\" is a relationship between the two, not a licence to drop below what a phone can read at arm's length.",
-      "size": { "value": "12px" },
-      "weight": { "ref": "domain.typography.role.metadata.weight" },
-      "lineHeight": { "value": "1.25" }
+      "size": {
+        "value": "12px"
+      },
+      "weight": {
+        "ref": "domain.typography.role.metadata.weight"
+      },
+      "lineHeight": {
+        "value": "1.25"
+      }
     },
     "caption": {
       "$description": "Lowest deliberate readable hierarchy on App — sidebar service state and similar quiet infrastructure copy (#1216).",
-      "size": { "value": "11.5px" },
-      "weight": { "ref": "domain.typography.role.caption.weight" },
-      "lineHeight": { "value": "1.3" }
+      "size": {
+        "value": "11.5px"
+      },
+      "weight": {
+        "ref": "domain.typography.role.caption.weight"
+      },
+      "lineHeight": {
+        "value": "1.3"
+      }
     },
     "code": {
       "$description": "Chrome-side technical identity: the path above the tree, and the file header above the editor (the pushed detail's own title is the `title` role, also in mono). Mono does not imply smaller — the family says \"this is a path\", the size says \"this is a header\", and the two are independent (#1073 criterion 6). Settled at 13 by looking at the pushed file detail at 375: the viewer's path header at Web's 11.5px was smaller than the file-list metadata on the screen it was pushed from, so the header naming the open file was the quietest text about it. Not the code surface itself: CodeMirror and xterm keep their own metrics, and on the App the pushed detail's code stays at CodeMirror's 12px.",
-      "size": { "value": "13px" },
-      "weight": { "ref": "domain.typography.role.code.weight" },
-      "lineHeight": { "value": "1.35" }
+      "size": {
+        "value": "13px"
+      },
+      "weight": {
+        "ref": "domain.typography.role.code.weight"
+      },
+      "lineHeight": {
+        "value": "1.35"
+      }
     }
   },
+  "typographyLabelTracking": {
+    "$description": "Letter spacing for uppercase quiet chrome labels. Centralized so section labels do not invent tracking per feature (#1451).",
+    "value": "0.025em"
+  },
   "control": {
-    "$description": "sm == md on purpose: app has a touch-target floor (touchTarget.min, 44px), so no control *hit target* may sit below it. Web keeps a real 28/32/36 scale because a pointer has no minimum hit area. Do not 'restore' a smaller app sm \u2014 that reintroduces sub-44px tap targets. `visualSize` is the one legitimate sub-44px dimension in this group and the only exception to the floor: it is not a hit target, it is the affordance painted *inside* one (#1034), so it must stay strictly below `md`.",
+    "$description": "sm == md on purpose: app has a touch-target floor (touchTarget.min, 44px), so no control *hit target* may sit below it. Web keeps a real 28/32/36 scale because a pointer has no minimum hit area. Do not 'restore' a smaller app sm — that reintroduces sub-44px tap targets. `visualSize` is the one legitimate sub-44px dimension in this group and the only exception to the floor: it is not a hit target, it is the affordance painted *inside* one (#1034), so it must stay strictly below `md`.",
     "sm": {
       "value": "44px"
     },
@@ -57,7 +103,7 @@
       "value": "52px"
     },
     "visualSize": {
-      "$description": "The affordance actually painted inside a control \u2014 the circle a capsule icon action draws \u2014 as opposed to the box that receives the tap. A control keeps its `control.md` hit target (44px) and draws this smaller circle inside it (#1034), so a row of secondary actions stops reading as a row of primary buttons. The inequality is the point: 36 < 44 on App, and a value that reached or passed the hit target would be the silent revert the design gate fails. Declared in both experiences because one class serves both \u2014 an App-only leaf would resolve to nothing at `:root`.",
+      "$description": "The affordance actually painted inside a control — the circle a capsule icon action draws — as opposed to the box that receives the tap. A control keeps its `control.md` hit target (44px) and draws this smaller circle inside it (#1034), so a row of secondary actions stops reading as a row of primary buttons. The inequality is the point: 36 < 44 on App, and a value that reached or passed the hit target would be the silent revert the design gate fails. Declared in both experiences because one class serves both — an App-only leaf would resolve to nothing at `:root`.",
       "value": "36px"
     }
   },
@@ -88,9 +134,6 @@
   "touchTarget": {
     "min": {
       "value": 44
-    },
-    "compact": {
-      "value": 28
     }
   },
   "shell": {
@@ -195,6 +238,14 @@
     "captionFontSize": {
       "ref": "primitive.typography.size"
     },
+    "capabilitySlotWidth": {
+      "$description": "Fixed slot for one capability entry in the Workspace capsule. Capability identity is constrained inside this slot: the shipped compact-label recipe is one line, with truncation only as a defensive containment fallback. Slot content never owns or grows the Capsule's outer height (#1455 / #1458).",
+      "value": "72px"
+    },
+    "capabilityLabelFontSize": {
+      "$description": "Capability entry compact-label size inside the fixed control.md band. The label stays one line in the shipped recipe; its full capability title remains available through accessible name/title.",
+      "value": "12px"
+    },
     "popoverWidth": {
       "value": "22rem"
     },
@@ -295,15 +346,12 @@
     "projectionGap": {
       "value": "0.5rem"
     },
-    "projectionRadius": {
-      "value": "0.75rem"
-    },
     "projectionMaxHeight": {
       "$description": "Ceiling for an emerged projection (#826 Q5). Lower than Web's: the App capsule sits closer to the bottom edge and its projection has less room above it for the same content.",
       "value": "16rem"
     },
     "projectionFontSize": {
-      "$description": "One step below the capsule's own scale. A Signal is the smallest identifying state, not the composer's text, so it must not arrive at the field's size.",
+      "$description": "One step below the capsule's own scale. The Peek draws the smallest identifying state, not the composer's text, so it must not arrive at the field's size.",
       "value": "0.75rem"
     },
     "projectionLineHeight": {
@@ -323,14 +371,29 @@
       "value": "0.75rem"
     }
   },
+  "contextCapsule": {
+    "$owner": "pattern.context-capsule",
+    "marginBottom": {
+      "$description": "The inter-Capsule gap: the deliberate space between the upper Context Capsule and the resting Conversation Capsule below it (#1347 SC-43). The same value as projectionMarginBottom so a list-to-Peek swap does not jump the gap, but a separate leaf because the two pairs may diverge — a Peek is read while typing, the list is a place you stop.",
+      "value": "0.5rem"
+    },
+    "maxHeight": {
+      "$description": "Ceiling for the upper Context Capsule (#1347 SC-44). The surface takes its content's natural height and only clamps here, so a short list is short instead of reserving room for rows that do not exist; content beyond the ceiling scrolls inside it. A ceiling rather than a height because the flat list renders every capability, so quiet, working and context-only differ in row ORDER and never in row COUNT — the pair still does not resize as senses come and go, which is the stability a fixed height was protecting, but it now comes from the list's own invariant rather than from a box. Lower than Web's for the same reason the projection's ceiling is: the App capsule sits closer to the bottom edge and has less room above it.",
+      "value": "16rem"
+    },
+    "rowHeight": {
+      "$description": "One capability row in the Context Capsule: capability icon, title, and one line of reason for a sensed capability (#1347 SC-19/SC-42). 44px on both experiences — two lines of text need at least 40, and on App this is exactly the touch floor, so a row is a legal App target by construction.",
+      "value": "2.75rem"
+    },
+    "markerSize": {
+      "$description": "The presence mark beside an ordinary row's title: a capability the session actually needs. The same 5px as the shell's status dot on purpose — both are 'a quiet mark beside text' rather than a badge — but a separate leaf, because that one answers service health while this answers capability presence, and the design system's rule is that an equal resolved value does not make two names interchangeable.",
+      "value": "5px"
+    }
+  },
   "motion": {
     "terminalCapsule": {
       "value": "280ms cubic-bezier(0.22, 1, 0.36, 1)"
     }
-  },
-  "dockTarget": {
-    "$description": "App dock targets: the workspace-navigation band declares touchTarget.compact (#730) instead of the 44px chrome floor, because it floats over the terminal rather than taking a row from it. control-md is 44px on app by design, so this cannot borrow it.",
-    "value": "28px"
   },
   "conversation": {
     "$owner": "pattern.conversation",

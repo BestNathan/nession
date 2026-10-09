@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { Bot, Folder } from 'lucide-react';
 import { TerminalCapsule } from '@/product/terminal/capsule/TerminalCapsule';
 
 describe('capsule capability presence', () => {
@@ -23,7 +24,7 @@ describe('capsule capability presence', () => {
         experience="web"
         sendText={vi.fn()}
         capabilityDisclosure={{
-          entries: [{ id: 'claude-code', title: 'Claude Code', state: 'active' }],
+          entries: [{ id: 'claude-code', title: 'Claude Code', state: 'active', icon: Bot }],
           onSelect: vi.fn(),
         }}
       />,
@@ -43,7 +44,7 @@ describe('capsule capability disclosure', () => {
     expect(screen.queryByTestId('capsule-capability-more')).not.toBeInTheDocument();
   });
 
-  it('marks a perceived capability inside `+` and activates the one chosen', async () => {
+  it('marks a perceived capability in the list and activates the one chosen', async () => {
     const onSelect = vi.fn();
     render(
       <TerminalCapsule
@@ -51,8 +52,8 @@ describe('capsule capability disclosure', () => {
         sendText={vi.fn()}
         capabilityDisclosure={{
           entries: [
-            { id: 'claude-code', title: 'Claude Code', state: 'active' },
-            { id: 'env', title: 'Environment Files', state: 'available' },
+            { id: 'claude-code', title: 'Claude Code', state: 'active', icon: Bot },
+            { id: 'env', title: 'Environment Files', state: 'available', icon: Folder },
           ],
           onSelect,
         }}
@@ -65,14 +66,12 @@ describe('capsule capability disclosure', () => {
     // one place a capability's state is allowed to show.
     const active = await screen.findByTestId('capsule-capability-picker-claude-code');
     expect(active).toHaveAttribute('data-capability-state', 'active');
-    const available = await screen.findByTestId('capsule-capability-picker-env');
+    const available = screen.getByTestId('capsule-capability-picker-env');
     expect(available).toHaveAttribute('data-capability-state', 'available');
 
-    // Base UI holds the popup inert until its open transition settles.
-    await waitFor(() => {
-      expect(available).not.toHaveStyle({ pointerEvents: 'none' });
-    });
-
+    // The list is no longer a portalled menu, so there is no open transition to
+    // wait out before the row accepts a click — that wait existed because the
+    // popup primitive held its content inert, and this surface never does.
     await userEvent.click(available);
     expect(onSelect).toHaveBeenCalledWith('env');
   });

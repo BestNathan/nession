@@ -29,6 +29,7 @@ import {
   MessageScrollerViewport,
 } from '@/components/ui/message-scroller'
 import { cn } from '@/shared/lib/utils'
+import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance'
 import { formatWorkDuration } from '@/shared/lib/format'
 import { chromeSansRole } from '@/shared/typography/chromeRoles'
 import type { AIConversationSnapshot } from '../runtime/ConversationRuntime'
@@ -40,6 +41,7 @@ import {
 } from '../model/grouping'
 import {
   carryTurnKeys,
+  isWorking,
   rememberTurns,
   turnMembership,
   turnsOf,
@@ -52,6 +54,7 @@ import { TurnActions } from './TurnActions'
 import { TurnProcess } from './TurnProcess'
 import { ConversationMessage } from './ConversationMessage'
 import { ReasoningActivity } from './ReasoningActivity'
+import { StatusNotice } from './StatusNotice'
 import { ToolActivity, UnknownActivity } from './ToolActivity'
 import { ToolGroup } from './ToolGroup'
 import {
@@ -170,10 +173,15 @@ function TranscriptContent({
    * believed; the page's mid-record flag is the fallback, and it only speaks for
    * the turn the page ended in.
    */
+  // `isWorking` is the model's phase (see `turns.ts`), and the page adds the one
+  // signal the model cannot know: a read that ended mid-record says the last
+  // turn is still being written, whatever its items claim.
+  //
+  // Work still running outranks an answer. A tool the assistant started and has
+  // not finished means the turn is not settled, whatever it said before
+  // starting it — folding here would close the only thing still moving.
   const workingOf = (turn: ConversationTurn): boolean =>
-    turn.answer === null ||
-    turn.answer.status === 'streaming' ||
-    (turn.key === lastKey && snapshot.partialTail)
+    isWorking(turn) || (turn.key === lastKey && snapshot.partialTail)
 
   const [overrides, setOverrides] = useState(() => new Map<string, boolean>())
   const isOpen = (turn: ConversationTurn) => overrides.get(turn.key) ?? workingOf(turn)
@@ -241,6 +249,7 @@ function TranscriptContent({
         lastId={lastId}
         plan={plan}
         isTurnOpen={isOpen}
+        isTurnWorking={workingOf}
         onToggleTurn={toggle}
         onReload={onReload}
       />
@@ -262,6 +271,7 @@ function ConversationBody({
   lastId,
   plan,
   isTurnOpen,
+  isTurnWorking,
   onToggleTurn,
   onReload,
 }: {
@@ -275,6 +285,8 @@ function ConversationBody({
     actions: ConversationTurn | null
   }[]
   isTurnOpen: (turn: ConversationTurn) => boolean
+  /** The same phase the fold uses — an action is for a turn that has settled. */
+  isTurnWorking: (turn: ConversationTurn) => boolean
   onToggleTurn: (key: string) => void
   onReload?: () => void
 }) {
@@ -346,6 +358,8 @@ function ConversationBody({
               <ToolActivity item={row.item} />
             ) : row.item.kind === 'reasoning' ? (
               <ReasoningActivity item={row.item} />
+            ) : row.item.kind === 'status' ? (
+              <StatusNotice item={row.item} />
             ) : row.item.kind === 'message' ? (
               <ConversationMessage
                 item={row.item}
@@ -356,9 +370,23 @@ function ConversationBody({
               <UnknownActivity />
             )}
           </MessageScrollerItem>
+          {/* The slot is reserved as soon as there is an answer row, and the
+              action inside it waits for the turn to settle.
+              *
+              * Splitting those two is what makes the fix for `#1363` round 4
+              * safe rather than a new geometry bug: the row keeps its height
+              * either way, which is the rule the component's own doc states —
+              * "nothing that appears on hover, on focus, or as a result of
+              * streaming may move the content below it". Waiting instead for
+              * the phase to settle *by not rendering the row* would appear
+              * exactly as a result of streaming, and move everything under it. */}
           {actions === null ? null : (
             <MessageScrollerItem messageId={`${actions.key}·actions`}>
-              <TurnActions text={answerText(actions)} label="answer" />
+              <TurnActions
+                text={answerText(actions)}
+                label="answer"
+                settled={!isTurnWorking(actions)}
+              />
             </MessageScrollerItem>
           )}
         </Fragment>
@@ -390,10 +418,47 @@ export function ConversationTranscript({
   onReload?: () => void
 }) {
   const loadOlder = useCallback(() => onLoadOlder(), [onLoadOlder])
+  // Scoped to the conversation, not merely to this component — and to the
+  // **whole scroller**, not only the transcript inside it.
+  //
+  // Everything this subtree holds is keyed by item, turn and group ids, and
+  // those are unique only *within* a conversation: without the key, two threads
+  // that reuse an id inherit each other's expansion and focus (`#1363` round 3).
+  // The scroll owner is the same fact one level up. `MessageScrollerProvider`
+  // owns opening position, tail-follow, prepend anchoring and the jump-to-bottom
+  // control, so a reader who scrolled away from the live edge in one
+  // conversation carried that released follow into the next one — and
+  // `defaultScrollPosition="end"`, which is applied at the *provider's*
+  // lifecycle, was never given a conversation to apply to (`#1363` round 4).
+  //
+  // A `key` rather than a reset-on-change effect, because an effect runs *after*
+  // the render that already drew the new conversation with the old state; with
+  // `key` the state never exists in a render it does not belong to.
+  //
+  // Prepends and refreshes do not change the key, which is exactly the
+  // distinction the review drew: preserving state across a prepend and dropping
+  // it across a switch are requirements pulling opposite ways, so the boundary
+  // has to be the conversation and nothing coarser.
+  //
+  // The key is the runtime's `conversationKey` rather than `openId`, because an
+  // id is not an identity across providers or contexts.
+  const conversationKey = snapshot.conversationKey ?? 'no-conversation'
   return (
-    <MessageScrollerProvider autoScroll defaultScrollPosition="end">
+    <MessageScrollerProvider key={conversationKey} autoScroll defaultScrollPosition="end">
       <MessageScroller>
-        <MessageScrollerViewport preserveScrollOnPrepend>
+        {/*
+          The viewport spends the Workspace's capsule clearance. A transcript in
+          the Terminal resolves that var to nothing — it is published on the
+          Workspace shell, and the overlay is not under it — so this is the
+          Workspace transcript's clearance and costs the Terminal none
+          (`workspaceScrollClearanceClass` falls back to 0px). Without it the
+          last turn sits under the capsule at every Workspace depth, which the
+          App measured on 2026-10-03.
+        */}
+        <MessageScrollerViewport
+          preserveScrollOnPrepend
+          className={workspaceScrollClearanceClass}
+        >
           <TranscriptContent
             snapshot={snapshot}
             providerLabel={providerLabel}

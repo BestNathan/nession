@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import {
   Dialog,
@@ -6,13 +6,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { cn } from '@/shared/lib/utils';
+import { capsulePeekActionClass } from '@/shared/lib/peekActionClass';
+import { CapsuleIconVisual } from '@/product/terminal/capsule/CapsuleIconVisual';
 import {
-  capsuleIconButtonClass,
+  capsuleDetailDialogClass,
   capsuleProjectionClass,
   capsuleProjectionDockClass,
   capsuleProjectionScrollClass,
-  capsuleProjectionTextClass,
+  capsuleUpperCloseButtonClass,
+  capsuleUpperHeaderClass,
+  capsuleUpperTitleClass,
 } from '@/product/terminal/capsule/capsuleStyles';
 import type {
   CapsuleCapabilityProjection,
@@ -23,11 +26,16 @@ import type {
  * The surface a capability's Terminal content is drawn on (#1046).
  *
  * This is the **host**, and it owns only what is Nession's: the surface and its
- * bounds, the dismissal, the step from Signal to Peek, and the accessibility
- * baseline. It does not own the path into the Workspace — that was a generic
- * footer here, and it is now an action supplied to the body
- * (`actions.openWorkspace`), because whether a capability has somewhere deeper
- * to go and what that looks like is the capability's answer, not the host's.
+ * bounds, the dismissal, the accessibility baseline — and the Workspace
+ * destination. `#1347` SC-21 is explicit: "Peek header and Workspace
+ * destination are Nession-owned", and re-review #2 on it settled that `#1046`'s
+ * body-owns-the-action model is superseded on this point. Whether the
+ * destination exists is the app layer's answer (the Workspace view registry),
+ * and its presentation — one action, here — is drawn by this host. What stays
+ * with the body is *content*
+ * navigation: a row that opens the item it names
+ * (`actions.openWorkspace(resourceId)`), which is the body's scrollable
+ * content using the host's routing, not a second destination action.
  *
  * The name says which half it is. It was `CapabilityProjection`, which read as
  * "the projection of a capability" — the whole thing — while it has only ever
@@ -36,16 +44,15 @@ import type {
  * Nothing here touches the resting capsule: this renders *above* it, as a
  * sibling, so the capsule's own geometry is byte-identical whether a projection
  * is present or not (#748, still valid per `capability-emergence.md`).
- *
- * Depth is a parameter, not internal state. Which depth is showing was decided
- * before this mounted (Q1–Q3), so a component that could also change it would
- * be a second, weaker copy of that decision.
  */
 export function PeekHost({
   projection,
   sendText,
   sendPhysKey,
   disabled,
+  triggerRef,
+  focusFromContext,
+  onFocusFromContextHandled,
 }: {
   projection: CapsuleCapabilityProjection;
   /** How a capability's body reaches the terminal — the capsule owns this. */
@@ -55,26 +62,41 @@ export function PeekHost({
     semanticKey?: import('@/platform/terminal-runtime/interaction/TerminalInteractionController').TerminalSemanticKey;
   }) => void;
   disabled: boolean;
+  /** Stable lower-Capsule trigger that owns focus when this upper layer closes. */
+  triggerRef: React.RefObject<HTMLButtonElement | null>;
+  /** Only explicit Context-row deepening should move focus out of the composer. */
+  focusFromContext: boolean;
+  /** Clears the one-shot Context focus intent after the host consumes it. */
+  onFocusFromContextHandled: () => void;
 }) {
   const [focus, setFocus] = useState<string | undefined>(undefined);
+  const surfaceRef = useRef<HTMLDivElement>(null);
   // The approved child overlay (#1120). Held here rather than by the capability
   // so that placement, dismissal and the accessible name stay the host's — a
   // capability supplies content and nothing else, exactly as it does for the
   // body itself.
   const [detail, setDetail] = useState<CapsuleDetail | null>(null);
-  const { depth, title, onDeeper, onDismiss, onOpenWorkspace } = projection;
-  const isPeek = depth === 'peek';
-  const hasDeeper = Boolean(onDeeper);
+  const { title, onDismiss, onOpenWorkspace } = projection;
+
+  usePeekFocusLifecycle({
+    focusFromContext,
+    onFocusFromContextHandled,
+    projectionId: projection.id,
+    surfaceRef,
+    triggerRef,
+  });
 
   return (
     <div
+      ref={surfaceRef}
+      tabIndex={-1}
+      role="region"
+      aria-label={`${title} Peek`}
       data-testid="capsule-capability-projection"
       data-capability={projection.id}
-      data-depth={projection.depth}
-      className={cn(
+      className={[
         capsuleProjectionClass,
         capsuleProjectionDockClass,
-        capsuleProjectionTextClass,
         capsuleProjectionScrollClass,
         // The containment boundary (#1347 SC-27): paint containment clips the
         // body to this box and makes it the containing block and stacking
@@ -85,37 +107,28 @@ export function PeekHost({
         // host" enforced rather than intended. The host's own overlay is
         // unaffected: the Dialog portals to the body, outside this subtree.
         'contain-paint',
-      )}
+      ].join(' ')}
     >
-      <div className="flex items-center justify-between gap-[length:var(--terminal-capsule-projection-item-gap)]">
-        <button
-          type="button"
+      <div className={capsuleUpperHeaderClass}>
+        {/* The title names the projection. It is not a control: there is only
+            one depth, so there is nothing behind it to open — it used to be the
+            Signal's way in. */}
+        <h2
           data-testid="capsule-capability-title"
-          // At Signal depth the title is the way in; at Peek it is already as
-          // deep as the Terminal goes, and a capability with no Peek has
-          // nothing behind it to open.
-          onClick={isPeek || !hasDeeper ? undefined : () => onDeeper?.()}
-          disabled={isPeek || !hasDeeper}
-          className={cn(
-            'min-w-0 flex-1 truncate text-left font-semibold text-foreground',
-            !isPeek &&
-              hasDeeper &&
-              'rounded transition-colors hover:text-foreground/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-          )}
+          className={capsuleUpperTitleClass}
         >
           {title}
-        </button>
+        </h2>
         <button
           type="button"
           data-testid="capsule-capability-dismiss"
           aria-label={`Dismiss ${title}`}
           onClick={() => onDismiss()}
-          className={cn(
-            capsuleIconButtonClass,
-            'text-muted-foreground transition-colors hover:text-foreground',
-          )}
+          className={capsuleUpperCloseButtonClass}
         >
-          <X aria-hidden />
+          <CapsuleIconVisual>
+            <X />
+          </CapsuleIconVisual>
         </button>
       </div>
 
@@ -129,6 +142,26 @@ export function PeekHost({
         openDetail: setDetail,
         disabled,
       })}
+
+      {/*
+        The Workspace destination (#1347 SC-21). Nession-owned: presence comes
+        from the app layer's Workspace view registry (a capability without one
+        — Terminal Keys — supplies no `onOpenWorkspace` and gets no action),
+        placement and presentation are this host's, and the handoff carries
+        the item the body reported, exactly like the body's own content rows.
+      */}
+      {onOpenWorkspace ? (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            data-testid="capsule-capability-open-workspace"
+            onClick={() => onOpenWorkspace(focus)}
+            className={capsulePeekActionClass}
+          >
+            Open in Workspace →
+          </button>
+        </div>
+      ) : null}
 
       {/*
         The child overlay, drawn by base-ui's Dialog so that focus trapping,
@@ -157,9 +190,16 @@ export function PeekHost({
 
             The content still scrolls itself rather than the Terminal: the
             dialog is portalled and bounded, so nothing behind it moves. */}
+        {/* The radius is overridden here rather than in `components/ui/dialog`:
+            that file is the shared primitive, and its generic default is right
+            for a dialog in general — teaching it the capsule would be the
+            primitive learning product semantics. This surface is the capsule's
+            own, and it wears the capsule's corner: the same one the Peek behind
+            it and the resting Capsule below it wear, so opening a child overlay
+            does not change the shape of the thing it came out of. */}
         <DialogContent
           data-testid="capsule-capability-detail"
-          className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden sm:max-w-lg"
+          className={capsuleDetailDialogClass}
         >
           <DialogHeader>
             <DialogTitle>{detail?.title ?? ''}</DialogTitle>
@@ -170,3 +210,42 @@ export function PeekHost({
     </div>
   );
 }
+function usePeekFocusLifecycle({
+  focusFromContext,
+  onFocusFromContextHandled,
+  projectionId,
+  surfaceRef,
+  triggerRef,
+}: {
+  focusFromContext: boolean;
+  onFocusFromContextHandled: () => void;
+  projectionId: string;
+  surfaceRef: React.RefObject<HTMLDivElement | null>;
+  triggerRef: React.RefObject<HTMLButtonElement | null>;
+}) {
+  const returnFocusToTriggerRef = useRef(false);
+
+  useEffect(() => {
+    if (!focusFromContext) {
+      return;
+    }
+    returnFocusToTriggerRef.current = true;
+    surfaceRef.current?.focus({ preventScroll: true });
+    onFocusFromContextHandled();
+  }, [focusFromContext, onFocusFromContextHandled, projectionId, surfaceRef]);
+
+  useEffect(
+    () => () => {
+      if (!returnFocusToTriggerRef.current) {
+        return;
+      }
+      const active = document.activeElement;
+      const stranded = active === null || active === document.body || surfaceRef.current?.contains(active);
+      if (stranded) {
+        triggerRef.current?.focus({ preventScroll: true });
+      }
+    },
+    [surfaceRef, triggerRef],
+  );
+}
+

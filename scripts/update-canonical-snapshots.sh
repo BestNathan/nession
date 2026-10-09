@@ -22,5 +22,5 @@ npm ci
 npx playwright install chromium --with-deps
 CI=true npx playwright test fixture-visual --update-snapshots=all
 
-echo "→ Snapshots written to e2e/specs/__snapshots__/fixture-visual.spec.ts/"
+echo "→ Snapshots written to e2e/tests/browser/__snapshots__/fixture-visual.spec.ts/"
 echo "  Review diffs, commit, and open a PR to staging."

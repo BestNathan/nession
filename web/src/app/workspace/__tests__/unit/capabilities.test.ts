@@ -75,6 +75,22 @@ describe('workspace capability providers', () => {
     expect(snapshotFor('session', ctx)?.state).toBe('available');
   });
 
+  it('keeps full and compact capability identities separate', () => {
+    expect(snapshotFor('env', workspaceContext())).toMatchObject({
+      title: 'Environment',
+      shortTitle: 'Env',
+    });
+    expect(snapshotFor('claude-code', workspaceContext())).toMatchObject({
+      title: 'Claude Code',
+      shortTitle: 'Claude',
+    });
+    expect(snapshotFor('terminal-keys', workspaceContext())).toMatchObject({
+      title: 'Terminal Keys',
+      shortTitle: 'Keys',
+    });
+    expect(snapshotFor('files', workspaceContext())?.shortTitle).toBeUndefined();
+  });
+
   it('resolves the whole workspace without diagnostics', () => {
     expect(resolveWorkspaceCapabilities(workspaceContext()).diagnostics).toEqual([]);
   });

@@ -30,8 +30,11 @@ jobs:
     runs-on: ubuntu-latest
     # PLAYWRIGHT_BROWSERS_PATH applies to BOTH install and test — keeps them
     # pointed at the same directory (and the same one the cache restores to).
+    # NESSION_TARGET_SHA binds the shared Runtime Harness to the exact checkout
+    # that this workflow is verifying.
     env:
       PLAYWRIGHT_BROWSERS_PATH: ~/.cache/ms-playwright
+      NESSION_TARGET_SHA: ${{ github.sha }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -96,16 +99,16 @@ jobs:
             # stale through the contextual-bar change (#714). The ratio is far
             # tighter since #1038, which narrows this window but does not close
             # it: any drift under the current value is still skipped in silence.
-            npx playwright test fixture-visual --update-snapshots=all
+            ./run test --suite fixture-visual --update-snapshots=all
           else
-            npx playwright test
+            ./run test --all
           fi
 
       - uses: actions/upload-artifact@v4
         if: github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots == true
         with:
           name: canonical-visual-baselines
-          path: e2e/specs/__snapshots__/
+          path: e2e/tests/browser/__snapshots__/
           retention-days: 7
 
       # ── Report ────────────────────────────────────────────────────────
@@ -122,5 +125,5 @@ jobs:
           name: visual-snapshot-diffs
           path: |
             e2e/test-results/
-            e2e/specs/__snapshots__/
+            e2e/tests/browser/__snapshots__/
           retention-days: 14

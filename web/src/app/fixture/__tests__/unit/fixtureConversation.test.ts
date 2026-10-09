@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { fixtureConversationSurface } from '@/app/fixture/fixtureConversation';
 import { FIXTURE_AGENTS } from '@/app/fixture/fixtureData';
+import { toItem } from '@/capabilities/claude-code/conversation/normalizers';
+import { runningWork, turnsOf } from '@/shared/ai-conversation/model/turns';
 import type { ConversationsResponse } from '@/generated/protocol/claude-code/conversations/v1';
 import type { MessagesResponse } from '@/generated/protocol/claude-code/messages/v1';
 
@@ -150,6 +152,58 @@ describe('fixture conversation surface', () => {
     expect(prose.some((text) => text.includes('```'))).toBe(true);
   });
 
+  it('models the #1184 Chat dialect corpus, so a golden can reach it', async () => {
+    // Each fragment is a *negative* guarantee of the Chat profile — a `$HOME`
+    // that must stay prose, a raw tag that must stay literal — and the
+    // canonical conversation contains none of them. A fixture that quietly
+    // lost one would leave every existing golden byte-identical, which is the
+    // #714 failure shape: the gate keeps passing while the feature is gone.
+    const rich = fixtureConversationSurface('?conversation=rich');
+    const list = await rich.request<ConversationsResponse>('claude-code.conversations', {});
+    const boundId = list.binding?.conversation_id as string;
+    expect(boundId).toBeDefined();
+
+    const response = await rich.request<MessagesResponse>('claude-code.messages', {
+      conversation_id: boundId,
+    });
+    expect(response.state).toBe('ready');
+    // Settled: SC-14's references and footnotes resolve in the full parse, and
+    // a streaming tail would leave them literal in the golden instead.
+    expect(response.partial_tail).toBe(false);
+
+    const text = (response.items ?? [])
+      .flatMap((item) => (item.kind === 'message' ? item.content : []))
+      .flatMap((part) => (part.type === 'text' ? [part.text] : []))
+      .join('\n');
+    for (const fragment of [
+      '$HOME',
+      '$100',
+      '~/.claude',
+      '60~70%',
+      '中文**重点。**下一句',
+      '\\(E = mc^2\\)',
+      '\\int_0^1',
+      '<tool_call>',
+      '| observer |',
+      '| :--- | :---: | ---: |',
+      '- The first item is its own paragraph.',
+      '[stream replay notes][notes]',
+      '[^observer]',
+      '[notes]: https://example.com/nession',
+      '[PeekHost.tsx](web/src/product/terminal/capsule/PeekHost.tsx)',
+    ]) {
+      expect(text, `the rich corpus should carry ${fragment}`).toContain(fragment);
+    }
+
+    // And the corpus is not the canonical page under another name: the
+    // scenario answers its own conversation, and the canonical ids are
+    // `not_found` under it rather than substituted (#1222's rule).
+    const other = await rich.request<MessagesResponse>('claude-code.messages', {
+      conversation_id: 'c0a1b2c3-1111-4222-8333-444455556666',
+    });
+    expect(other.state).toBe('not_found');
+  });
+
   it('models the unbound and no-conversation states, not just the happy one', async () => {
     // Unbound is the state `#1005` forbids guessing in — a list and no binding,
     // which is *not* a state of its own anymore (#1222) — and an empty list is
@@ -224,6 +278,122 @@ describe('fixture conversation surface', () => {
       }),
     ).rejects.toThrow(/no page handed out/);
   });
+
+
+  it('models working, streaming and settled reads with stable ids', async () => {
+    const live = fixtureConversationSurface('?conversation=streaming');
+    const list = await live.request<ConversationsResponse>('claude-code.conversations', {});
+    const boundId = list.binding?.conversation_id as string;
+
+    const work = await live.request<MessagesResponse>('claude-code.messages', {
+      conversation_id: boundId,
+    });
+    const stream = await live.request<MessagesResponse>('claude-code.messages', {
+      conversation_id: boundId,
+    });
+    const settled = await live.request<MessagesResponse>('claude-code.messages', {
+      conversation_id: boundId,
+    });
+
+    expect(work.activity).toBe('active');
+    expect(work.partial_tail).toBe(false);
+    const workAssistants = (work.items ?? []).filter(
+      (item) => item.kind === 'message' && item.role === 'assistant',
+    );
+    expect(workAssistants[workAssistants.length - 1]?.id).not.toBe('stream-answer');
+
+    expect(stream.activity).toBe('active');
+    expect(stream.partial_tail).toBe(true);
+    expect(settled.activity).toBe('inactive');
+    expect(settled.partial_tail).toBe(false);
+
+    const streamIds = (stream.items ?? []).map((item) => item.id);
+    const settledIds = (settled.items ?? []).map((item) => item.id);
+    expect(settledIds).toEqual(streamIds);
+
+    const statusOf = (page: MessagesResponse, id: string) => {
+      const item = (page.items ?? []).find((candidate) => candidate.id === id);
+      return item?.kind === 'tool' ? item.tool.status : undefined;
+    };
+
+    expect(statusOf(work, 'stream-tool-read')).toBe('running');
+    expect(statusOf(stream, 'stream-tool-read')).toBe('success');
+    expect(statusOf(stream, 'stream-tool-test')).toBe('running');
+    expect(statusOf(settled, 'stream-tool-test')).toBe('success');
+
+    const answerText = (page: MessagesResponse) => {
+      const answer = (page.items ?? []).find((item) => item.id === 'stream-answer');
+      return answer?.kind === 'message' && answer.content[0]?.type === 'text'
+        ? answer.content[0].text
+        : null;
+    };
+    expect(answerText(stream)).toBe('The ownership handoff stays stable while');
+    expect(answerText(settled)).toContain('final tool result settles');
+  });
+
+  it('models a list refresh that fails only after a thread was opened', async () => {
+    // The state `ListStateGuard` cannot draw: rows on screen and a refresh that
+    // did not arrive. The trigger is the reader's own action, and this pins
+    // that — a read *count* would answer the same scenario differently in the
+    // two environments the fixture runs in, because the dev server's StrictMode
+    // reads the list twice on mount and the production build the E2E serves
+    // reads it once.
+    const stale = fixtureConversationSurface('?conversation=list-stale');
+
+    const first = await stale.request<ConversationsResponse>('claude-code.conversations', {});
+    const items = first.items ?? [];
+    expect(items.length).toBeGreaterThan(1);
+
+    // Opening a thread is what makes the list stale.
+    const boundId = first.binding?.conversation_id as string;
+    await stale.request<MessagesResponse>('claude-code.messages', { conversation_id: boundId });
+
+    await expect(
+      stale.request<ConversationsResponse>('claude-code.conversations', {}),
+    ).rejects.toThrow(/could not be listed/);
+  });
+
+  it('carries both phases of a Turn, so a fold gate can tell them apart', async () => {
+    // #1363 round 4: the App walk asserted "a finished turn folds" against a
+    // transcript whose Turn never finishes, so the assertion was describing a
+    // phase the fixture could not reach. The fixture now carries both, and this
+    // is where that is checked *without* a browser — the e2e that drives them
+    // is CI-only, so a scenario that quietly stopped being settled would go
+    // unnoticed until a runner said so.
+    //
+    // Read through the real model rather than by inspecting `times`/`status`
+    // fields: the question is whether `turnsOf` calls this turn settled, and
+    // the only honest way to ask is to ask it.
+    //
+    // The items go through the adapter on the way, because the two shapes are
+    // not the same one: the wire carries a tool's status under `tool.status`
+    // and the model carries it on the item. Skipping `toItem` made this test
+    // fail once already — `runningWork` read `undefined` off every tool and
+    // reported a running Turn as settled.
+    const itemsOf = async (scenario: string) => {
+      const target = fixtureConversationSurface(`?conversation=${scenario}`);
+      const list = await target.request<ConversationsResponse>('claude-code.conversations', {});
+      const boundId = list.binding?.conversation_id as string;
+      const page = await target.request<MessagesResponse>('claude-code.messages', {
+        conversation_id: boundId,
+      });
+      return (page.items ?? []).map(toItem);
+    };
+
+    const settled = turnsOf(await itemsOf('settled'));
+    expect(settled).toHaveLength(1);
+    // An answer at all is what "settled" means: `answer` is the last assistant
+    // message no work follows, so a null one is a Turn still in progress.
+    expect(settled[0]?.answer).not.toBeNull();
+    expect(runningWork(settled[0]!)).toBe(false);
+    // And it has work to fold — a corpus with no process rows would satisfy
+    // every assertion above while giving the fold control nothing to hide.
+    expect(settled[0]?.process.length).toBeGreaterThan(0);
+
+    const working = turnsOf(await itemsOf('ready'));
+    expect(working).toHaveLength(1);
+    expect(working[0]?.answer).toBeNull();
+    expect(runningWork(working[0]!)).toBe(true);  });
 
   it('answers not_found for a conversation id it does not know', async () => {
     // The unit's only selection mechanism is the explicit id, and an unknown

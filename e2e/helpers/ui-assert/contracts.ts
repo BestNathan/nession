@@ -21,6 +21,14 @@ export interface ContractBlock {
   heightTokenPx?: number;
   minHeightToken?: string;
   minHeightTokenPx?: number;
+  /**
+   * A ceiling, not a box (`pattern.context-capsule`). Asserted as "at most", so
+   * a surface that has lost its `max-h-` to a `h-` still passes when its content
+   * is taller than the ceiling — which is exactly why the pattern's assertion
+   * also checks that a short list comes in *under* it.
+   */
+  maxHeightToken?: string;
+  maxHeightTokenPx?: number;
   overflow?: 'clip' | 'menu' | 'sheet' | 'scroll' | 'wrap';
   alignY?: 'top' | 'middle' | 'bottom';
   justify?: 'start' | 'center' | 'end' | 'space-between' | 'space-around';
@@ -52,6 +60,14 @@ export interface ContractBlock {
    */
   visualSizeToken?: string;
   visualSizeTokenPx?: number;
+  /**
+   * Height of a row a *list* repeats, where that row is deliberately not the
+   * block's own band — `context-capsule`'s sensed rows carry a title and a line
+   * of reason. Resolved to px like `heightToken`; asserted per row, since the
+   * surface's own height says nothing about the rows inside it.
+   */
+  rowHeightToken?: string;
+  rowHeightTokenPx?: number;
   visibility?: { mode: string; breakpoint?: string };
 }
 

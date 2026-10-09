@@ -20,7 +20,7 @@ test('no-capsule-magic-metrics flags tailwind numeric classes in capsule path', 
   ruleTester.run('no-capsule-magic-metrics', nessionPlugin.rules['no-capsule-magic-metrics'], {
     valid: [
       {
-        code: 'export function Ok() { return <div className="text-[length:var(--terminal-capsule-font-size)]" />; }',
+        code: 'export function Ok() { return <div className="text-[length:var(--nession-terminal-capsule-font-size)]" />; }',
         filename: '/proj/web/src/product/terminal/capsule/Ok.tsx',
       },
       {
@@ -44,7 +44,7 @@ test('no-capsule-magic-metrics flags tailwind numeric classes in capsule path', 
         // #801 Phase 6-style token rename, at which point the pattern pointed at
         // a name nothing emits any more — a branch that could never fire, with
         // nothing to notice. Exercised here so it cannot go quiet again.
-        code: 'export function Probe() { return <div className="text-[length:var(--terminal-capsule-line-height)]" />; }',
+        code: 'export function Probe() { return <div className="text-[length:var(--nession-terminal-capsule-line-height)]" />; }',
         filename: '/proj/web/src/product/terminal/capsule/Probe.tsx',
         errors: [{ messageId: 'violation' }],
       },
@@ -58,6 +58,31 @@ test('no-capsule-magic-metrics flags tailwind numeric classes in capsule path', 
 // protecting nothing. This asserts each concrete token the rule names still
 // exists in the generated CSS, so the next token rename fails loudly here
 // instead of silently disarming the capsule gate.
+test('upper Capsule hosts cannot invent their own visual chrome', () => {
+  ruleTester.run('upper-capsule-visual-owner', nessionPlugin.rules['no-capsule-magic-metrics'], {
+    valid: [
+      {
+        code: 'export function PeekHost() { return <div className="flex min-w-0" />; }',
+        filename: '/proj/web/src/product/terminal/capsule/components/PeekHost.tsx',
+      },
+    ],
+    invalid: [
+      {
+        code:
+          'export function PeekHost() { return <div className="rounded-lg bg-popover shadow-md text-[length:var(--nession-terminal-capsule-projection-font-size)]" />; }',
+        filename: '/proj/web/src/product/terminal/capsule/components/PeekHost.tsx',
+        errors: [{ messageId: 'violation' }],
+      },
+      {
+        code:
+          'export function ContextCapsule() { return <div className="border border-border font-semibold" />; }',
+        filename: '/proj/web/src/product/terminal/capsule/components/ContextCapsule.tsx',
+        errors: [{ messageId: 'violation' }],
+      },
+    ],
+  });
+});
+
 test('every token the rule names still exists in the generated CSS', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const ruleSource = readFileSync(join(here, '../rules/no-capsule-magic-metrics.js'), 'utf8');

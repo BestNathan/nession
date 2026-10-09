@@ -55,8 +55,12 @@ export interface SyntheticAdapterOptions {
    * is what lets a test tell one context's answer from another's.
    */
   bindingFor?: (context: string) => string | null
-  /** Items per page, for the pagination tests. */
+  /** Items per transcript page, for the pagination tests. */
   pageSize?: number
+  /** Conversations per list page. Omitted means the directory fits in one page. */
+  listPageSize?: number
+  /** Let a cursor page restate this many items already held, to exercise overlap. */
+  olderOverlap?: number
   refresh?: AIRefreshPolicy<string>
   /** Force the list's answer, whatever the data says. */
   listState?: AIConversationListResult['state']
@@ -68,8 +72,18 @@ export interface SyntheticAdapterOptions {
   partialTail?: boolean
   /** Records the adapter could not model, so the surface can say so. */
   skipped?: number
+  /** Per-page skipped count when a test needs newest and older pages to differ. */
+  skippedFor?: (cursor?: string) => number
   /** Context key this adapter reports. Defaults to the context string itself. */
   key?: string
+  /** Request-authority key. Defaults to the concrete context string. */
+  requestKey?: (context: string) => string
+  /** Stable id for one paged directory snapshot. */
+  listingId?: string
+  /** Override the listing id per request when a test needs a generation change. */
+  listingIdFor?: (context: string, cursor?: string) => string
+  /** Mark a continuation as stale so the runtime must restart page one. */
+  restartListFor?: (context: string, cursor?: string) => boolean
 }
 
 export interface RecordedCall {
@@ -111,6 +125,9 @@ export class SyntheticAdapter implements AIConversationAdapter<string> {
    */
   failList = false
 
+  /** Force the list state from here on, after an initially readable directory. */
+  forcedListState: AIConversationListResult['state'] | null = null
+
   /**
    * Force the state every read answers with from here on.
    *
@@ -131,6 +148,21 @@ export class SyntheticAdapter implements AIConversationAdapter<string> {
    */
   failRead = false
 
+  /**
+   * Force every *cursor* read to answer non-`ready`, carrying this message.
+   *
+   * The sibling of `failOlder`, and the distinction is the whole point: a
+   * thrown read says nothing about the conversation, while a non-ready *answer*
+   * says something about it — `error`, `not_found`, `unavailable`. Only the
+   * thrown half had a fixture, so a runtime that folded a semantic failure into
+   * "end of history" had nothing in this file that could tell it apart.
+   *
+   * Cursor-scoped rather than reusing `forcedReadState` because the failure has
+   * to arrive on a transcript that was *readable* first: a provider that never
+   * answered the newest page never had a window to lose.
+   */
+  forcedOlder: { state: AIConversationPage['state']; error?: string } | null = null
+
   private readonly options: SyntheticAdapterOptions
   private readonly gates: Gate[] = []
 
@@ -140,6 +172,10 @@ export class SyntheticAdapter implements AIConversationAdapter<string> {
 
   contextKey(context: string): string {
     return this.options.key ?? context
+  }
+
+  requestKey(context: string): string {
+    return this.options.requestKey?.(context) ?? context
   }
 
   get refresh(): AIRefreshPolicy<string> {
@@ -177,15 +213,48 @@ export class SyntheticAdapter implements AIConversationAdapter<string> {
     }
   }
 
-  async list(context: string): Promise<AIConversationListResult> {
-    this.calls.push({ kind: 'list', context })
-    await this.waitFor('list', undefined)
+  setActivity(conversationId: string, activity: AIConversationActivity): void {
+    const conversation = this.options.conversations.find((c) => c.id === conversationId)
+    if (conversation) {
+      conversation.activity = activity
+    }
+  }
+
+  async list(context: string, cursor?: string): Promise<AIConversationListResult> {
+    this.calls.push({ kind: 'list', context, cursor })
+    await this.waitFor('list', cursor)
     if (this.failList) {
       throw new Error('the list could not be read')
     }
+
+    if (this.options.restartListFor?.(context, cursor)) {
+      return {
+        state: 'error',
+        conversations: [],
+        bindingId: null,
+        nextCursor: null,
+        restart: true,
+        error: 'the listing changed',
+      }
+    }
+
+    const state = this.forcedListState ?? this.options.listState ?? 'ready'
+    if (state !== 'ready') {
+      return {
+        state,
+        conversations: [],
+        bindingId: null,
+        nextCursor: null,
+        ...(state === 'error' ? { error: 'the list could not be read' } : {}),
+      }
+    }
+
+    const size = this.options.listPageSize ?? this.options.conversations.length
+    const start = cursor === undefined ? 0 : Number(cursor)
+    const end = Math.min(this.options.conversations.length, start + size)
     return {
-      state: this.options.listState ?? 'ready',
-      conversations: this.options.conversations.map((c) => ({
+      state,
+      conversations: this.options.conversations.slice(start, end).map((c) => ({
         id: c.id,
         title: c.title ?? null,
         preview: c.preview ?? null,
@@ -194,6 +263,11 @@ export class SyntheticAdapter implements AIConversationAdapter<string> {
       bindingId: this.options.bindingFor
         ? this.options.bindingFor(context)
         : (this.options.bindingId ?? null),
+      nextCursor: end < this.options.conversations.length ? String(end) : null,
+      listingId:
+        this.options.listingIdFor?.(context, cursor) ??
+        this.options.listingId ??
+        `synthetic:${this.contextKey(context)}`,
     }
   }
 
@@ -212,11 +286,15 @@ export class SyntheticAdapter implements AIConversationAdapter<string> {
     // the gate would make two overlapping requests return the same page, and a
     // test could then never tell which of them the runtime applied.
     const conversation = this.options.conversations.find((c) => c.id === conversationId)
+    const forcedOlder = cursor === undefined ? null : this.forcedOlder
     const state =
-      this.forcedReadState ?? this.options.readState ?? (conversation ? 'ready' : 'not_found')
+      forcedOlder?.state ??
+      this.forcedReadState ??
+      this.options.readState ??
+      (conversation ? 'ready' : 'not_found')
     if (state !== 'ready' || !conversation) {
       await this.waitFor('read', cursor)
-      return { state, items: [], partialTail: false, skipped: 0 }
+      return { state, items: [], partialTail: false, skipped: 0, error: forcedOlder?.error }
     }
     const page = this.pageOf(conversation, cursor)
     await this.waitFor('read', cursor)
@@ -235,7 +313,7 @@ export class SyntheticAdapter implements AIConversationAdapter<string> {
       items: page.items,
       nextCursor: page.nextCursor,
       partialTail: this.options.partialTail ?? false,
-      skipped: this.options.skipped ?? 0,
+      skipped: this.options.skippedFor?.(cursor) ?? this.options.skipped ?? 0,
     }
   }
 
@@ -251,8 +329,12 @@ export class SyntheticAdapter implements AIConversationAdapter<string> {
     cursor?: string,
   ): { items: AIConversationItem[]; nextCursor: string | null } {
     const size = this.options.pageSize ?? conversation.items.length
-    const end = cursor === undefined ? conversation.items.length : Number(cursor)
-    const start = Math.max(0, end - size)
+    const requestedEnd = cursor === undefined ? conversation.items.length : Number(cursor)
+    const end =
+      cursor === undefined
+        ? requestedEnd
+        : Math.min(conversation.items.length, requestedEnd + (this.options.olderOverlap ?? 0))
+    const start = Math.max(0, requestedEnd - size)
     const items = conversation.items.slice(start, end)
     return { items, nextCursor: start > 0 ? String(start) : null }
   }

@@ -43,6 +43,7 @@ const dashboard = vi.hoisted(() => ({
     sessionToKill: null as Session | null,
     setSessionToKill: vi.fn(),
     handleSessionCreated: vi.fn(),
+    insertSession: vi.fn(),
     handleSessionKilled: vi.fn(),
   },
 }));
@@ -118,6 +119,9 @@ vi.mock('@/product/session/components/AttachDialog', () => ({
     isOpen && session ? (
       <div data-testid="attach-dialog">
         <span data-testid="attach-dialog-intent">{intent}</span>
+        {/* The session the flow selected, so a case can assert *which* row
+            became current rather than only that something did. */}
+        <span data-testid="attach-dialog-session">{session.session_id}</span>
         <button
           type="button"
           data-testid="attach-confirm"
@@ -251,9 +255,9 @@ describe('Shell', () => {
     // that has one and the padding stays on the design system's scale where it
     // does not.
     expect(footer.className).toMatch(
-      /pb-\[max\(var\(--shell-foot-pad-y\),env\(safe-area-inset-bottom\)\)\]/,
+      /pb-\[max\(var\(--nession-shell-foot-pad-y\),env\(safe-area-inset-bottom\)\)\]/,
     );
-    expect(footer.className).toMatch(/shell-space|var\(--shell-space/);
+    expect(footer.className).toMatch(/shell-space|var\(--nession-shell-space/);
   });
 
   it('lists sessions in the sidebar column, without an Agent card grid', () => {
@@ -573,31 +577,26 @@ describe('Shell', () => {
     expect(screen.queryByTestId('back-to-list')).not.toBeInTheDocument();
   });
 
-  it('makes the created Session current from the id the dialog returned (#1082)', async () => {
-    const created: Session = {
-      session_id: 'a1:created',
-      agent_id: 'a1',
-      session_name: 'Fresh work',
-      status: 'active',
-      window_count: 1,
-      attached_clients: 0,
-      last_activity: new Date().toISOString(),
-    };
+  it('makes the created Session current from the id the dialog returned (#1082, #1430)', async () => {
+    const inserted: Session[] = [];
     dashboard.current = {
       ...dashboard.current,
       agents: [{ ...agent, status: 'online' }],
       sessions: [],
       filteredSessions: [],
       showCreateModal: true,
-      // Creating refreshes the lists, and the new Session arrives with the
-      // refresh — a separate request the dialog's response does not wait for.
-      handleSessionCreated: vi.fn(() => {
+      // Faithful to the real `useSessionData.insertSession`: the ACK's row
+      // enters the projection immediately (#1430). The list refresh beside it
+      // is what reconciles with the server's own.
+      insertSession: vi.fn((session: Session) => {
+        inserted.push(session);
         dashboard.current = {
           ...dashboard.current,
-          sessions: [created],
-          filteredSessions: [created],
+          sessions: [session],
+          filteredSessions: [session],
         };
       }),
+      handleSessionCreated: vi.fn(),
     };
     mobileNav.isWide = false;
     renderShell();
@@ -606,13 +605,15 @@ describe('Shell', () => {
     await userEvent.click(screen.getByTestId('create-session-submit'));
 
     // Creation is an entry into the work, not a refresh that leaves the user on
-    // the same empty home: the id is matched against the refreshed list and the
-    // ordinary selection path runs — attach, detail, Terminal root.
+    // the same empty home: the dialog's own id becomes current in the same
+    // tick and the ordinary selection path runs — attach, detail, Terminal
+    // root. Since #1430 that no longer waits for the refresh beside it.
+    expect(inserted.map((s) => s.session_id)).toEqual(['a1:created']);
     expect(mobileNav.openDetail).toHaveBeenCalled();
     expect(screen.queryByTestId('app-home')).not.toBeInTheDocument();
   });
 
-  it('does not select a same-named Session while the created one is missing (#1082)', async () => {
+  it('selects the created id before any list carries it, never a same-named row (#1082, #1430)', async () => {
     const impostor: Session = {
       session_id: 'a1:other',
       agent_id: 'a1',
@@ -622,13 +623,16 @@ describe('Shell', () => {
       attached_clients: 0,
       last_activity: new Date().toISOString(),
     };
+    const inserted: Session[] = [];
     dashboard.current = {
       ...dashboard.current,
       agents: [{ ...agent, status: 'online' }],
       sessions: [impostor],
       filteredSessions: [impostor],
       showCreateModal: true,
-      // The refresh has not landed yet, so the created id is simply absent.
+      // Recorded, not inserted: the list still lacks the created id, which is
+      // exactly the state #1430 decided must not gate selection.
+      insertSession: vi.fn((session: Session) => { inserted.push(session); }),
       handleSessionCreated: vi.fn(),
     };
     mobileNav.isWide = false;
@@ -636,11 +640,16 @@ describe('Shell', () => {
 
     await userEvent.click(screen.getByTestId('create-session-submit'));
 
-    // The list holds a Session with the *same name* — the guess a name-based
-    // implementation would make. Selecting it would attach the user to a
-    // different piece of work than the one they just created.
-    expect(mobileNav.openDetail).not.toHaveBeenCalled();
-    expect(screen.getByTestId('app-home')).toBeInTheDocument();
+    // #1430: the ACK is authoritative, so selection starts immediately rather
+    // than waiting for the projection to echo the id. #1082's condition still
+    // holds — the row that became current is the created *id*, never the
+    // same-named row the list happens to carry.
+    expect(inserted.map((s) => s.session_id)).toEqual(['a1:created']);
+    expect(mobileNav.openDetail).toHaveBeenCalled();
+    await waitFor(() => {
+      expect(screen.getByTestId('attach-dialog-session')).toHaveTextContent('a1:created');
+    });
+    expect(screen.getByTestId('attach-dialog-session')).not.toHaveTextContent('a1:other');
   });
 
   it('does not mount the App layer composition on desktop after selecting a session', async () => {

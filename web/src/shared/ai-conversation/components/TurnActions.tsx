@@ -14,6 +14,15 @@
  * pointer — and in a transcript "below it" is everywhere the reader is about to
  * look, so the movement would land on the thing they were reading.
  *
+ * ## Reserved before it is available
+ *
+ * The row is drawn as soon as there is an answer to sit under; the action
+ * inside it waits until the turn has settled. Both halves carry weight: the
+ * reserved row is what keeps the rule above, and withholding the action is what
+ * keeps the footer from announcing completion while the turn's own process is
+ * still open (`#1363` round 4). A reader never sees the row appear — only the
+ * button, inside space that was already there.
+ *
  * ## Revealed where there is a pointer, unconditional where there is not
  *
  * The Web/App table asks for actions "revealed on hover/focus" on Web and
@@ -45,7 +54,26 @@ import { Button } from '@/components/ui/button'
 import { copyToClipboard } from '@/shared/lib/clipboard'
 import { cn } from '@/shared/lib/utils'
 
-export function TurnActions({ text, label }: { text: string; label: string }) {
+export function TurnActions({
+  text,
+  label,
+  settled,
+}: {
+  text: string
+  label: string
+  /**
+   * Whether the turn this footer belongs to has finished.
+   *
+   * The row is drawn either way — it is the reserved space the geometry rule
+   * needs — but the action is not: a Copy button under an answer the assistant
+   * is still writing, or under a turn whose tools are still running, offers the
+   * reader a finished thing to take away and tells them, on a touch device
+   * where the row is unconditional, that the turn is over. `conversation.md`
+   * closes a turn with its actions; an action that appears before the turn
+   * closes is a claim about a phase (`#1363` round 4).
+   */
+  settled: boolean
+}) {
   const copy = () => {
     copyToClipboard(text).then(
       () => {
@@ -61,28 +89,45 @@ export function TurnActions({ text, label }: { text: string; label: string }) {
     <div
       data-testid="conversation-turn-actions"
       className={cn(
-        'group/actions flex items-center',
+        'flex items-center',
         // Lit by default; hidden only where the device can hover, and only until
         // it does — or until something inside takes focus.
+        //
+        // `hover:` rather than `group-hover/…`, and that is the whole of the
+        // change `#1363` round 3 asked for. The group this used to name was
+        // declared on *this* element and consumed on this element, so it
+        // compiled to `X:hover X` — identical behaviour under a selector that
+        // claimed an ancestor which does not exist.
+        //
+        // There is no ancestor to name. The action row is a **sibling** of the
+        // answer's row (both are `MessageScrollerItem`s inside one fragment that
+        // has no element of its own), so a group on the content row cannot reach
+        // it, `peer` would match every *later* action row through the
+        // general-sibling combinator, and wrapping the two would re-parent rows —
+        // which `conversation.md` forbids by name, because re-parenting is what
+        // remounts them. The reserved row is the hit target: it holds its height
+        // whether or not it is lit, and it sits directly under the answer.
         'opacity-100',
         'pointer-fine:opacity-0',
-        'pointer-fine:group-hover/actions:opacity-100',
+        'pointer-fine:hover:opacity-100',
         'pointer-fine:focus-within:opacity-100',
-        'transition-opacity duration-[var(--motion-shell-duration)] ease-[var(--motion-shell-ease)]',
+        'transition-opacity duration-[var(--nession-motion-shell-duration)] ease-[var(--nession-motion-shell-ease)]',
       )}
-      style={{ height: 'var(--conversation-fold-control-height)' }}
+      style={{ height: 'var(--nession-conversation-fold-control-height)' }}
     >
-      <Button
-        variant="ghost"
-        size="xs"
-        type="button"
-        aria-label={`Copy ${label.toLowerCase()}`}
-        onClick={() => copy()}
-        className="gap-1.5"
-      >
-        <Copy aria-hidden className="h-3.5 w-3.5" />
-        Copy
-      </Button>
+      {settled ? (
+        <Button
+          variant="ghost"
+          size="xs"
+          type="button"
+          aria-label={`Copy ${label.toLowerCase()}`}
+          onClick={() => copy()}
+          className="gap-1.5"
+        >
+          <Copy aria-hidden className="h-3.5 w-3.5" />
+          Copy
+        </Button>
+      ) : null}
     </div>
   )
 }

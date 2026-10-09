@@ -1,13 +1,13 @@
 import { cn } from '@/shared/lib/utils';
 import {
+  capsuleExchangeStyle,
+  useCapsuleExchange,
+} from '@/platform/motion/capsuleExchange';
+import {
+  capsuleOuterGeometry,
   capsuleShellAppDockBottomClass,
   capsuleShellAppOuterClass,
-  capsuleShellCapsuleRadiusClass,
   capsuleShellDockBottomClass,
-  capsuleShellInnerClass,
-  capsuleShellInnerPadClass,
-  capsuleShellPillRadiusClass,
-  capsuleShellSurfaceClass,
   capsuleShellWebOuterClass,
 } from '@/product/terminal/capsule/capsuleStyles';
 import type {
@@ -25,7 +25,7 @@ interface CapsuleShellProps {
   contentRef?: React.Ref<HTMLDivElement>;
   measureMirror?: React.ReactNode;
   /**
-   * Something emerging above the capsule — a capability Signal or Peek.
+   * Something emerging above the capsule — a capability's Peek.
    *
    * A slot rather than a capability concept: the shell renders what it is
    * given and knows nothing about what it means. It sits outside the shell
@@ -61,7 +61,18 @@ export function CapsuleShell({
   children,
 }: CapsuleShellProps) {
   const isApp = experience === 'app';
-  const usePillShape = !isApp && layout === 'flat';
+  // One derivation for both Capsule states (#1347 SC-29/SC-30) — see
+  // `capsuleOuterGeometry`, which also states why width is not part of it.
+  const geometry = capsuleOuterGeometry(experience, layout);
+
+  // The App's capsule handoff (see `capsuleExchange`): while a swipe carries
+  // the Workspace over the Terminal, the Conversation form steps aside and
+  // fades with the finger. The whole dock moves as one object — shell,
+  // projection and adjacent action together — and X-only transforms leave
+  // `useCapsuleDockClearance`'s vertical measurement untouched. On Web there
+  // is no exchange and the endpoints apply no style at all.
+  const exchange = useCapsuleExchange();
+  const exchangeStyle = capsuleExchangeStyle(exchange, 'yielding');
 
   const shell = (
     <div
@@ -73,16 +84,10 @@ export function CapsuleShell({
          intra-capsule composer FLIP. */
       data-morph-id="capsule-shell"
       className={cn(
-        'flex min-h-[length:var(--control-md)] items-center',
-        capsuleShellInnerClass,
-        // In the adjacent row the shell shares the dock's width with the
-        // action: `flex-1` (basis 0%) supersedes the `w-full` inside
-        // `capsuleShellInnerClass` for a flex item, so the capsule yields the
-        // action's width rather than overflowing the group (#1204 §8).
-        adjacentAction && 'min-w-0 flex-1',
-        capsuleShellSurfaceClass,
-        usePillShape ? capsuleShellPillRadiusClass : capsuleShellCapsuleRadiusClass,
-        capsuleShellInnerPadClass,
+        geometry.shellClass,
+        // In the adjacent layout the grid owns the width split; the shell fills
+        // column 1 and only needs min-width zero so its content may shrink.
+        adjacentAction && 'min-w-0',
       )}
     >
       <div
@@ -103,24 +108,43 @@ export function CapsuleShell({
       data-disabled={disabled ? 'true' : undefined}
       data-layout={layout}
       data-dock-height={dockHeightFromLayout(layout)}
-      data-shell-shape={usePillShape ? 'pill' : 'capsule'}
+      data-shell-shape={geometry.shape}
+      data-capsule-exchange={exchangeStyle ? 'yielding' : undefined}
+      style={exchangeStyle}
       className={cn(
         'absolute z-30 flex flex-col',
         isApp ? capsuleShellAppOuterClass : capsuleShellWebOuterClass,
         isApp ? capsuleShellAppDockBottomClass : capsuleShellDockBottomClass,
       )}
     >
-      {projection}
       {adjacentAction ? (
-        /* `items-end` pins the action to the shell's bottom edge, so a composer
-           growing upward never lifts the action above the shell's top — the
-           shell-only occlusion measurement stays exact (#1204 §1). */
-        <div className="flex items-end gap-[length:var(--shell-space-2)]">
-          {shell}
-          {adjacentAction}
+        /*
+         * One two-column grid owns both rows. The shell and every upper-slot
+         * surface occupy column 1; the destination action owns column 2 only on
+         * the lower row. That is the relationship #1446 needs: Context → Peek
+         * may change content/height, but neither can suddenly widen across the
+         * destination circle and read like a different panel.
+         *
+         * `items-end` still pins the action to the shell's bottom edge, so a
+         * composer growing upward never lifts it above the shell's top and the
+         * shell-only occlusion measurement stays exact (#1204 §1).
+         */
+        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-x-[length:var(--nession-shell-space-2)]">
+          {projection ? (
+            <div className="col-start-1 row-start-1 min-w-0">{projection}</div>
+          ) : null}
+          <div className={cn('col-start-1 min-w-0', projection ? 'row-start-2' : 'row-start-1')}>
+            {shell}
+          </div>
+          <div className={cn('col-start-2', projection ? 'row-start-2' : 'row-start-1')}>
+            {adjacentAction}
+          </div>
         </div>
       ) : (
-        shell
+        <>
+          {projection}
+          {shell}
+        </>
       )}
       {measureMirror}
     </div>

@@ -22,15 +22,47 @@ it — and re-parenting is what would remount them.
 user message                     ← opens the turn
 turn process control             ← one line: "Worked" / "Worked for 12s"
   ├─ tool activity rows          ┐
-  ├─ reasoning / status rows     ├─ the process window
+  ├─ reasoning rows              ├─ the process window
   └─ …                           ┘
 assistant answer                 ← the turn's main content
 turn actions                     ← copy, and whatever the surface adds
+
+status notice                    ← wherever it happened; never folds
 ```
 
 Rows that are **not** the assistant's work — the user's own message, a status
-notice, the turn's terminal state — never fold into the process. A user's
-message disappearing into the assistant's work would invert whose turn it is.
+notice, an unmodelled record, the turn's terminal state — never fold into the
+process. A user's message disappearing into the assistant's work would invert
+whose turn it is.
+
+An **unmodelled record** is the other case the list has to name, because it is
+the only one where the answer is "we do not know" rather than "no". A record the
+provider did not model cannot be evidence of work any more than it is evidence
+of anything else, so folding it under a control reading "Worked" would classify
+it by the one thing the model refuses to guess. It keeps its place in the
+transcript and is drawn as what it is. That reading also fixes the fold's
+accounting: an item that is not work is not minutes worked either, so a notice
+or an unmodelled record arriving long after the answer does not stretch the
+number in the control above it.
+
+The anatomy's last line is a claim about phase, and it is worth stating because
+the layout makes it easy to forget: an action closes a turn, so there is no
+action until the turn has closed. A Copy button under an answer the assistant is
+still writing — or under a turn whose tools are still running — offers the reader
+a finished thing to take away, and on a device with no hover to disclose it, says
+the turn is over. The **row** is reserved from the moment there is an answer to
+sit under; only the action inside it waits. Reserving the space and withholding
+the control are two different decisions, and the geometry rule is the reason
+they have to be made separately.
+
+A **status notice** is the case worth naming, because this document used to both
+draw status among the process window's rows and say, one line below, that it
+never folds. It does not fold (#1363). A notice is *about* the conversation
+rather than produced by the assistant working on it — an interrupted turn, a host
+that went away — so a reader who folds the work away is asking to see the answer,
+not asking to lose the reason there isn't one. The model holds the same reading:
+a status item is a sibling of the content kinds, not of the work, and it carries
+no severity vocabulary until a provider needs one.
 
 ## Hierarchy
 

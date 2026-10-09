@@ -37,6 +37,7 @@ export const typography = {
     lineHeight: "1.35",
   },
 } as const;
+export const typographyLabelTracking = "0.025em" as const;
 export const control = {
   sm: 44,
   md: 44,
@@ -57,7 +58,6 @@ export const panel = {
 } as const;
 export const touchTarget = {
   min: 44,
-  compact: 28,
 } as const;
 export const shell = {
   iconButtonSize: 44,
@@ -92,6 +92,8 @@ export const terminalCapsule = {
   shellPillRadius: 9999,
   terminalClearanceGap: "0.375rem",
   captionFontSize: "1rem",
+  capabilitySlotWidth: 72,
+  capabilityLabelFontSize: 12,
   popoverWidth: "22rem",
   popoverViewportInset: "1rem",
   popoverMaxHeight: "45vh",
@@ -125,7 +127,6 @@ export const terminalCapsule = {
   projectionMarginBottom: "0.5rem",
   projectionPad: "0.75rem",
   projectionGap: "0.5rem",
-  projectionRadius: "0.75rem",
   projectionMaxHeight: "16rem",
   projectionFontSize: "0.75rem",
   projectionLineHeight: "1rem",
@@ -134,10 +135,15 @@ export const terminalCapsule = {
   projectionItemPadY: "0.125rem",
   projectionMarkWidth: "0.75rem",
 } as const;
+export const contextCapsule = {
+  marginBottom: "0.5rem",
+  maxHeight: "16rem",
+  rowHeight: "2.75rem",
+  markerSize: 5,
+} as const;
 export const motion = {
   terminalCapsule: "280ms cubic-bezier(0.22, 1, 0.36, 1)",
 } as const;
-export const dockTarget = 28 as const;
 export const conversation = {
   bubbleMaxWidth: "82%",
   groupMaxHeight: "min(320px, 42vh)",

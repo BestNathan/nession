@@ -38,7 +38,7 @@ export interface SessionHeaderProps {
  * makes that impossible rather than merely unlikely.
  */
 export const appHeaderBandClass =
-  'flex shrink-0 items-center gap-2 px-[var(--shell-space-3)] pt-[max(var(--shell-space-2),env(safe-area-inset-top))]';
+  'flex shrink-0 items-center gap-2 px-[var(--nession-shell-space-3)] pt-[max(var(--nession-shell-space-2),env(safe-area-inset-top))]';
 
 /**
  * The Sessions affordance the App header carries.

@@ -25,13 +25,13 @@ describe('App typography role classes', () => {
   it('binds each role to its typography custom properties', () => {
     for (const [role, className] of ROLES) {
       expect(className, `${role} missing size binding`).toContain(
-        `var(--typography-${role}-size)`,
+        `var(--nession-typography-${role}-size)`,
       );
       expect(className, `${role} missing weight binding`).toContain(
-        `var(--typography-${role}-weight)`,
+        `var(--nession-typography-${role}-weight)`,
       );
       expect(className, `${role} missing line-height binding`).toContain(
-        `var(--typography-${role}-line-height)`,
+        `var(--nession-typography-${role}-line-height)`,
       );
     }
   });

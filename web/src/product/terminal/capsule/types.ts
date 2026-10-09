@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import type { LucideIcon } from 'lucide-react';
 import type { CapabilityDisclosureEntry, CapabilityId } from '@/product/capability';
 
 export type CapsuleExperience = 'web' | 'app';
@@ -49,16 +50,56 @@ export {
  * The capsule reports presence; opening a capability stays the app's business,
  * so the app supplies both the entries and what selecting one does.
  */
-export interface CapsuleCapabilityDisclosure {
-  entries: readonly CapabilityDisclosureEntry[];
-  onSelect: (id: CapabilityId) => void;
+/**
+ * One capability row's display identity in the Context Capsule (#1347 SC-19).
+ *
+ * The registry's entry plus the glyph the **app layer** resolved from the
+ * capability's Terminal projection binding (`app/capsuleProjections`) — the
+ * glyph cannot be looked up here, because which glyph speaks for a capability
+ * is app-layer knowledge and product code does not reach into it.
+ *
+ * Required, not optional: an entry only exists when the capability has a
+ * Terminal projection (`capsulePresence` filters on exactly that), and every
+ * binding declares a glyph — so "no glyph to contribute" is not a state this
+ * list can be in. While the field was optional, a producer that forgot it
+ * compiled anyway and its row drew the empty icon column the glyph exists to
+ * fill (measured on staging 2026-10-04).
+ */
+export type CapsuleCapabilityEntry = CapabilityDisclosureEntry & { icon: LucideIcon };
+
+/**
+ * One sensed capability, as the Context Capsule renders it (#1347 SC-19).
+ *
+ * Built by the composition that knows both halves — the sense (a work signal, a
+ * context signal) and the capability's display identity — because neither the
+ * sensing layer nor the capability owns both. `title` and `icon` are the
+ * capability's *display* identity, never its raw id as product copy; `reason` is
+ * the one line saying why it is here.
+ */
+export interface SensedCapabilityItem {
+  capabilityId: CapabilityId;
+  title: string;
   /**
-   * Select at Peek depth (#1347 SC-20), supplied when the caller can open a
-   * projection directly. The Work Overview prefers it over `onSelect`, which
-   * opens the Signal depth instead. Optional so a disclosure built where no
-   * projection path exists stays valid.
+   * Required for the same reason `CapsuleCapabilityEntry.icon` is: a sensed
+   * row is drawn by the same component as an ordinary one, with the same
+   * reserved glyph column, so an item that arrives without its glyph is an
+   * empty column — which is exactly what happened to the context-sensed half
+   * while this was optional.
    */
-  onSelectAtPeek?: (id: CapabilityId) => void;
+  icon: LucideIcon;
+  reason: string;
+}
+
+export interface CapsuleCapabilityDisclosure {
+  entries: readonly CapsuleCapabilityEntry[];
+  /**
+   * Context-sensed capabilities, already resolved to display items (#1347
+   * SC-37/40). The composer of this object knows the surface's experience and
+   * the session; the capsule merges these with the work-sensed items and shows
+   * one sensed section — it never learns *why* an item is there.
+   */
+  sensedContext?: readonly SensedCapabilityItem[];
+  onSelect: (id: CapabilityId) => void;
 }
 
 export interface CapsuleCapabilityPresence {
@@ -72,21 +113,19 @@ export interface CapsuleCapabilityPresence {
  * A capability emerging beside the capsule (`docs/design/capability-emergence.md`).
  *
  * The capsule draws the frame and the capability supplies the body, so the
- * capability states what it is and Nession decides that it appears at all, at
- * which depth, and where. `depth` is an input rather than capsule state: the
- * decision was `resolveCapabilityProjection`'s, and a component free to change
- * it would be a second copy of that rule.
+ * capability states what it is and Nession decides that it appears at all and
+ * where. There is one of these per emergence and one form for it to take: the
+ * resolver decides *which* capability shows, and nothing else.
  */
 export interface CapsuleCapabilityProjection {
   id: CapabilityId;
   title: string;
-  depth: 'signal' | 'peek';
   /**
-   * The capability's own content for this depth.
+   * The capability's own content.
    *
    * A render prop rather than an element because the frame owns the selection
-   * the body produces: Peek lets the user pick a changed file, and that pick is
-   * what the frame's Workspace handoff carries.
+   * the body produces: the Peek lets the user pick a changed file, and that
+   * pick is what the frame's Workspace handoff carries.
    */
   body: (
     focus: string | undefined,
@@ -118,16 +157,6 @@ export interface CapsuleCapabilityProjection {
       disabled: boolean;
     },
   ) => ReactNode;
-  /**
-   * Signal → Peek. Absent for a capability with nothing to add at Peek.
-   *
-   * The second implementation settled this. Git has two Terminal depths and
-   * deepens by tapping its title; a capability whose Signal already says
-   * everything the Terminal can say has no Peek to open, and offering one would
-   * open an empty surface. The frame drops the step and reaches the Workspace
-   * from the Signal instead.
-   */
-  onDeeper?: () => void;
   onDismiss: () => void;
   /** Present when the capability has somewhere deeper to go. */
   onOpenWorkspace?: (resourceId?: string) => void;
@@ -136,8 +165,8 @@ export interface CapsuleCapabilityProjection {
    *
    * Read back from the capability's own binding, not derived here: the capsule
    * has no capability ids and must not grow any, so a projection that needs the
-   * keys (Terminal Keys) and one that is read while typing (Git's Signal and
-   * Peek) are told apart by the capability declaring which it is.
+   * keys (Terminal Keys) and one that is read while typing (Git's) are told
+   * apart by the capability declaring which it is.
    *
    * Absent means the composer keeps input focus — a capability that has not
    * asked for the keyboard never has it taken away.

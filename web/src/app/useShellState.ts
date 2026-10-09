@@ -17,7 +17,26 @@ import type { Surface } from '@/app/patterns/SessionHeader';
 import type { CapabilityId } from '@/product/capability';
 import type { Session } from '@/types';
 import { useOpenWorktreeSession } from '@/app/useOpenWorktreeSession';
-import { useAwaitCreatedSession } from '@/app/useAwaitCreatedSession';
+import { sessionFromCreateAck } from '@/product/session/model/sessionFromCreateAck';
+
+/**
+ * Make the Session a create ACK names current (#1430), without waiting for the
+ * sessions projection to echo the id back — `sessionFromCreateAck` carries the
+ * why. The optimistic insert is what `selectedSession` resolves against until
+ * the server's own row arrives with the same id.
+ */
+function createdSessionSelection(
+  sessionId: string | undefined,
+  insertSession: (session: Session) => void,
+  select: (session: Session) => void,
+): void {
+  if (!sessionId) {
+    return;
+  }
+  const created = sessionFromCreateAck(sessionId);
+  insertSession(created);
+  select(created);
+}
 
 export function useShellState() {
   const data = useDashboard();
@@ -106,7 +125,12 @@ export function useShellState() {
     toast.success('Attach settings saved — applies to the next attach');
   }, [cancelAttach]);
 
-  const { awaitSession } = useAwaitCreatedSession(sessions, handleSelect);
+  /** Create ACK → current Session, without a wait on the sessions projection. */
+  const selectCreatedSession = useCallback(
+    (sessionId: string | undefined) =>
+      createdSessionSelection(sessionId, data.insertSession, handleSelect),
+    [data, handleSelect],
+  );
 
   const { isRestoringDeepLink } = useDeepLink({
     sessions,
@@ -136,8 +160,8 @@ export function useShellState() {
     saveAttachSettings,
     onKilled,
     handleSelect,
+    selectCreatedSession,
     handleOpenWorktreeSession,
-    awaitSession,
     setSurface,
     setTool,
     isRestoringDeepLink,

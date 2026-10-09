@@ -33,11 +33,21 @@ describe('SurfaceDestinationAction (#1204)', () => {
     expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
   });
 
+  it('consumes the Capsule-family floating material while keeping circle geometry', () => {
+    render(<SurfaceDestinationAction destination="workspace" onOpen={vi.fn()} />);
+
+    const action = screen.getByTestId('surface-action-open-workspace');
+    expect(action.className).toContain('var(--nession-terminal-capsule-surface)');
+    expect(action.className).toContain('var(--nession-elevation-floating)');
+    expect(action.className).toContain('backdrop-blur-md');
+    expect(action.className).toContain('rounded-full');
+  });
+
   it('matches the capsule/dock chrome band, not the bare control target (#1204)', () => {
     render(<SurfaceDestinationAction destination="workspace" onOpen={vi.fn()} />);
 
     const action = screen.getByTestId('surface-action-open-workspace');
-    expect(action.className).toMatch(/calc\(var\(--control-md\)\+2\*var\(--terminal-capsule-shell-pad-y\)\)/);
+    expect(action.className).toMatch(/calc\(var\(--nession-control-md\)\+2\*var\(--nession-terminal-capsule-shell-pad-y\)\)/);
   });
 
   it('restores pointer hit-testing inside a pointer-events-none dock region', () => {
@@ -65,7 +75,7 @@ describe('SurfaceDestinationAction (#1204)', () => {
     expect(onOpen).toHaveBeenCalledTimes(1);
   });
 
-  it('projects a capability glyph as a badge when one is supplied (#1347 SC-25)', () => {
+  it('replaces its inner glyph with a projected capability identity (#1347 SC-25)', () => {
     render(
       <SurfaceDestinationAction
         destination="terminal"
@@ -74,18 +84,25 @@ describe('SurfaceDestinationAction (#1204)', () => {
       />,
     );
 
-    const badge = screen.getByTestId('surface-action-glyph');
-    expect(badge).toBeInTheDocument();
+    const projected = screen.getByTestId('surface-action-glyph');
+    expect(projected).toBeInTheDocument();
     expect(screen.getByTestId('glyph-icon')).toBeInTheDocument();
-    // Decorative: the badge is hidden from assistive technology, so the
+    // Replace inner glyph, never a badge: the projection is the only icon in
+    // the circle — the destination's own icon is not drawn alongside it.
+    expect(projected.parentElement?.querySelectorAll('svg')).toHaveLength(1);
+    // Decorative: the projection is hidden from assistive technology, so the
     // action's accessible name stays the destination's.
-    expect(badge).toHaveAttribute('aria-hidden', 'true');
+    expect(projected).toHaveAttribute('aria-hidden', 'true');
   });
 
-  it('renders no badge without a glyph', () => {
+  it('renders its own destination icon when no glyph is projected', () => {
     render(<SurfaceDestinationAction destination="terminal" onOpen={vi.fn()} />);
 
     expect(screen.queryByTestId('surface-action-glyph')).not.toBeInTheDocument();
+    // The default icon is the only icon in the circle.
+    expect(
+      screen.getByTestId('surface-action-open-terminal').querySelectorAll('svg'),
+    ).toHaveLength(1);
   });
 
   it('a projected glyph cannot alter the destination (#1347 SC-26)', async () => {

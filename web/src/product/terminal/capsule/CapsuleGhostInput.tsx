@@ -62,7 +62,7 @@ export function CapsuleGhostInput({
   const showGhost = hasGhost && !composing;
   const minHeight = metrics?.controlHeight ?? 32;
   const maxHeight = metrics ? maxFieldHeightPx(metrics) : undefined;
-  const heightEase = 'var(--motion-terminal-capsule)';
+  const heightEase = 'var(--nession-motion-terminal-capsule)';
 
   useLayoutEffect(() => {
     const el = textareaRef.current;

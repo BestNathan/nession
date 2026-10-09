@@ -549,18 +549,31 @@ where
                 session_id,
                 session_name,
                 client_id,
+                browser_client_id,
                 env_snapshots,
                 cols,
                 rows,
                 size_known,
                 needs_bootstrap,
             } => {
+                let mut dispatch = RelayDispatch {
+                    handler: &handler,
+                    lanes: &mut lanes,
+                    command_broker: &command_broker,
+                    sender: &sender,
+                };
                 let outcome = relay_bidirectional_via_channel(
                     &mut read,
                     sender.clone(),
+                    &mut dispatch,
                     RelayRequest {
                         agent_ws_urls: &agent_ws_urls,
                         session_name: &session_name,
+                        // The browser's own id wherever it has one: the Agent's
+                        // control bookkeeping names clients, and the client is
+                        // the only party that can recognise its own name
+                        // (#1429).
+                        client_id: browser_client_id.as_deref().unwrap_or(&client_id),
                         env_snapshots: &env_snapshots,
                         cols,
                         rows,
@@ -733,6 +746,12 @@ struct RelayRequest<'a> {
     agent_ws_urls: &'a [String],
     /// Short session name, as the agent knows it.
     session_name: &'a str,
+    /// The identity this relay presents to the Agent (#1429): the browser's
+    /// stable client id when it sent one, and the Server's per-attach id
+    /// otherwise. It is written as `client.auth` on the relay's own connection
+    /// before the attach, so every id the Agent publishes for this session is
+    /// one the browser can recognise — see `relay_bidirectional_via_channel`.
+    client_id: &'a str,
     /// Resolved env snapshots to inject via the attach.
     env_snapshots: &'a [EnvSnapshot],
     /// Terminal columns for the initial tmux resize.
@@ -750,6 +769,73 @@ struct RelayRequest<'a> {
     needs_bootstrap: Option<bool>,
 }
 
+/// Read from the agent until the reply carrying `request_id` arrives, sending
+/// every other frame on to the client.
+///
+/// The frames in between are the Agent talking to the **client** — a scrollback
+/// prefill, an initial `terminal.resize` — and they must ride the same terminal
+/// lane they would have without the relay in the path. This used to read
+/// exactly **one** frame and treat whatever came back as the answer, which held
+/// only while the Agent stayed silent between a request and its reply; under
+/// control mode it does not, and a relayed attach silently lost its bootstrap
+/// (measured in the #321 S3 e2e run). A frame that cannot be read at all is
+/// forwarded rather than guessed at: an unknown wire is ignored everywhere else
+/// in this tree, and here "ignored" and "dropped on the floor" would be the same
+/// thing.
+///
+/// Generic over the read half so a test can drive it without a socket, the same
+/// shape [`forward_client_to_agent`] has. The caller owns the deadline.
+async fn await_agent_reply<RS>(
+    agent_read: &mut RS,
+    sender: &crate::server::outbound::WsMessageSender,
+    request_id: &str,
+    waiting_for: &str,
+) -> Result<serde_json::Value, String>
+where
+    RS: futures_util::Stream<
+            Item = Result<
+                tokio_tungstenite::tungstenite::Message,
+                tokio_tungstenite::tungstenite::Error,
+            >,
+        > + Unpin,
+{
+    use futures_util::StreamExt;
+
+    loop {
+        let Some(frame) = agent_read.next().await else {
+            return Err(format!(
+                "Agent closed the connection before answering {waiting_for}"
+            ));
+        };
+        let msg = match frame {
+            Ok(msg) => msg,
+            Err(e) => {
+                return Err(format!(
+                    "Agent connection error while waiting for {waiting_for}: {e}"
+                ));
+            }
+        };
+        let parsed = msg
+            .to_text()
+            .ok()
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok());
+        if let Some(value) = parsed {
+            if value.get("id").and_then(|v| v.as_str()) == Some(request_id) {
+                return Ok(value);
+            }
+        }
+        match sender.send_terminal(msg).await {
+            Ok(()) => {}
+            Err(crate::server::outbound::OutboundError::Stalled) => {
+                return Err(format!(
+                    "Client stalled while the agent was answering {waiting_for}"
+                ));
+            }
+            Err(e) => return Err(format!("Failed to forward agent message: {e}")),
+        }
+    }
+}
+
 /// Relay mode using the connection's queued outbound path for client writes.
 /// Used when the write sink is managed by a relay task.
 ///
@@ -759,6 +845,7 @@ struct RelayRequest<'a> {
 async fn relay_bidirectional_via_channel<RS>(
     client_read: &mut RS,
     sender: crate::server::outbound::WsMessageSender,
+    dispatch: &mut RelayDispatch<'_>,
     request: RelayRequest<'_>,
 ) -> anyhow::Result<RelayEnd>
 where
@@ -775,6 +862,7 @@ where
     let RelayRequest {
         agent_ws_urls,
         session_name,
+        client_id,
         env_snapshots,
         cols,
         rows,
@@ -828,6 +916,60 @@ where
     };
 
     let (mut agent_write, mut agent_read) = agent_ws.split();
+
+    // ── Step 0: Bind this relay's identity on the Agent connection (#1429) ──
+    //
+    // The Agent roles and authorizes attach, control changes and input by the
+    // connection's `client_id`, and everything it publishes about control names
+    // that id back to the client (`agent.terminal.control.changed`, the acquire
+    // reply). The browser decides its own role by comparing those names against
+    // its stable id — so a relay that presents no identity leaves the Agent
+    // naming every relayed browser, and the Server itself, `unknown-client`, and
+    // every one of those comparisons false.
+    //
+    // Sent, and waited for, *before* the attach on the same socket: the Agent
+    // serves `client.auth` inline after draining everything read before it, so
+    // ordering on this one socket is what makes the attach that follows be
+    // served by this identity rather than by whatever the connection was. The
+    // wait is what turns a refusal into a failed relay instead of a session
+    // that quietly belongs to nobody.
+    //
+    // The token is left empty on purpose: the Agent ignores it (it shares one
+    // payload type with the Server), and this socket's credential was the
+    // Agent's own connection token, presented at the upgrade.
+    let auth_id = uuid::Uuid::new_v4().to_string();
+    let auth_msg = serde_json::json!({
+        "msg_type": "client.auth",
+        "id": auth_id.clone(),
+        "timestamp": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+        "payload": { "auth_token": "", "client_id": client_id },
+    });
+    agent_write
+        .send(tokio_tungstenite::tungstenite::Message::Text(
+            auth_msg.to_string(),
+        ))
+        .await?;
+    let auth_response = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        await_agent_reply(&mut agent_read, &sender, &auth_id, "the client auth"),
+    )
+    .await;
+    match auth_response {
+        Ok(Ok(_)) => {}
+        Ok(Err(reason)) => {
+            error!("{reason}");
+            return Err(anyhow::anyhow!("{reason}"));
+        }
+        Err(_) => {
+            error!("Timeout waiting for the agent's client.auth response (10s)");
+            return Err(anyhow::anyhow!(
+                "Timeout waiting for agent to bind the relay's identity for session '{session_name}'",
+            ));
+        }
+    }
 
     // ── Step 1: Send agent.attach to the agent ──
     // The Agent answers this one, so the wire carries the Agent's prefix even
@@ -900,40 +1042,10 @@ where
     //
     // A frame that is not ours is the agent talking to the **client**; it rides
     // the same terminal lane it would have without the relay in the path.
-    let attach_response = tokio::time::timeout(std::time::Duration::from_secs(10), async {
-        loop {
-            let Some(frame) = agent_read.next().await else {
-                return Err("Agent closed connection before accepting attach".to_string());
-            };
-            let msg = match frame {
-                Ok(msg) => msg,
-                Err(e) => return Err(format!("Agent connection error during attach: {e}")),
-            };
-            let parsed = msg
-                .to_text()
-                .ok()
-                .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok());
-            match parsed {
-                Some(value)
-                    if value.get("id").and_then(|v| v.as_str()) == Some(attach_id.as_str()) =>
-                {
-                    return Ok(value);
-                }
-                // Not the reply — including a frame that could not be read at
-                // all, which is forwarded rather than guessed at. An unknown
-                // wire is ignored everywhere else in this tree; here "ignored"
-                // and "dropped on the floor" are the same thing, so it goes on.
-                _ => {}
-            }
-            match sender.send_terminal(msg).await {
-                Ok(()) => {}
-                Err(crate::server::outbound::OutboundError::Stalled) => {
-                    return Err("Client stalled while the agent was still attaching".to_string());
-                }
-                Err(e) => return Err(format!("Failed to forward agent message: {e}")),
-            }
-        }
-    })
+    let attach_response = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        await_agent_reply(&mut agent_read, &sender, &attach_id, "the attach"),
+    )
     .await;
     let attach_response = match attach_response {
         Ok(Ok(parsed)) => parsed,
@@ -997,8 +1109,13 @@ where
 
     // ── Step 2: Bidirectional forwarding ──
 
-    let client_to_agent =
-        forward_client_to_agent(client_read, &mut agent_write, session_name, INPUT_THROTTLE);
+    let client_to_agent = forward_client_to_agent(
+        client_read,
+        &mut agent_write,
+        session_name,
+        INPUT_THROTTLE,
+        Some(dispatch),
+    );
 
     // Forward agent -> client, through the terminal lane of the outbound queue.
     //
@@ -1118,6 +1235,11 @@ enum ClientFrame {
     TerminalInput,
     /// `server.session.relay.end` — control: ends the relay, never forwarded.
     RelayEnd,
+    /// A wire the **Server** serves — the connection's own work, asked while it
+    /// happens to be attached: attach settings, `server.session.create`,
+    /// `server.info`, `server.env.list`. Answered here by the Server, never
+    /// forwarded (#1504).
+    ServerUnit,
     /// Everything else, forwarded unchanged and in arrival order.
     Other,
 }
@@ -1151,8 +1273,76 @@ fn classify_client_frame(msg: &Message) -> ClientFrame {
     match envelope.msg_type {
         Some(TERMINAL_INPUT_WIRE) => ClientFrame::TerminalInput,
         Some(RELAY_END_WIRE) => ClientFrame::RelayEnd,
+        // The split is the protocol's own rule, not a convention invented here:
+        // a wire's first segment names the runtime that **answers** it
+        // (`docs/architecture/protocol.md`), so `server.` is the wire saying
+        // the Server serves it. The relay used to send everything that was not
+        // terminal input onward — which asks the Agent for an answer it has no
+        // unit for, and its reply was `unknown message type` for every
+        // server-scoped request a client made while attached (#1504).
+        Some(wire) if wire.starts_with("server.") => ClientFrame::ServerUnit,
         _ => ClientFrame::Other,
     }
+}
+
+/// Answer one Server-served unit while a relay holds this connection (#1504).
+///
+/// The read half belongs to the relay for as long as it runs, so nothing else
+/// can dispatch the frames it reads — and the connection's owner is still using
+/// it: attach settings, session create and `server.info` are all asked *while*
+/// attached. This runs them through the same lane discipline the connection's
+/// ordinary loop applies ([`ExecutionPolicy`]), so a relay is not a window in
+/// which one mutation may jump another mutation of the same session.
+///
+/// [`answer`] is the shared unit runner, and it already refuses what cannot
+/// happen from here: a unit answering with a connection transition (a second
+/// relay, a close) is reported rather than obeyed, because a lane runs against
+/// a snapshot of the connection.
+///
+/// Returns false only if the frame cannot be decoded — which
+/// [`classify_client_frame`] has already ruled out for the frames that reach
+/// this, so the caller's fallback is a formality rather than a path.
+async fn answer_server_unit(
+    handler: &ConnectionHandler,
+    lanes: &mut Lanes,
+    command_broker: &CommandBroker,
+    sender: &WsMessageSender,
+    text: &str,
+) -> bool {
+    let Ok(msg) = serde_json::from_str::<ProtocolMessage<serde_json::Value>>(text) else {
+        return false;
+    };
+    // Claimed once, up front, exactly as the ordinary loop claims for both lane
+    // arms before its task is scheduled. It is a no-op for a browser client —
+    // the claim is about an *agent's* control channel — which is every
+    // connection that reaches a relay.
+    claim_agent_channel(handler, command_broker, sender).await;
+    match policy_for_wire(&msg.msg_type, &msg.payload) {
+        ExecutionPolicy::Query => {
+            lanes
+                .query(answer(handler.clone(), msg, sender.clone(), "a query"))
+                .await;
+        }
+        ExecutionPolicy::Key(key) => {
+            lanes
+                .key(
+                    key,
+                    Box::pin(answer(handler.clone(), msg, sender.clone(), "a mutation")),
+                )
+                .await;
+        }
+        // The barrier an ordered unit waits behind is what makes it
+        // deterministic on a connection that is no longer serial, so it is
+        // applied here for the same reason it is applied out there.
+        ExecutionPolicy::Ordered => {
+            lanes.drain().await;
+            answer(handler.clone(), msg, sender.clone(), "an ordered unit").await;
+        }
+        ExecutionPolicy::Inline => {
+            answer(handler.clone(), msg, sender.clone(), "an inline unit").await;
+        }
+    }
+    true
 }
 
 /// Where one terminal-input frame says its bytes sit in the session's input
@@ -1406,11 +1596,30 @@ enum ClientToAgent {
 /// window past any scheduling stall, so "the drain loop ran" is a property of
 /// the test rather than of the machine. Production has one value, in
 /// [`INPUT_THROTTLE`].
+/// What the relay needs to serve the connection's own Server-scoped units while
+/// it holds the read half (#1504).
+///
+/// Borrowed rather than cloned because these are the connection's dispatcher,
+/// its lanes and its reply path — the same objects the ordinary loop uses, so a
+/// relay is not a second answer to "who may dispatch on this connection".
+struct RelayDispatch<'a> {
+    handler: &'a ConnectionHandler,
+    lanes: &'a mut Lanes,
+    command_broker: &'a CommandBroker,
+    sender: &'a WsMessageSender,
+}
+
+/// `dispatch` is `None` only in the throttle's unit tests, which drive this
+/// pump over frames that carry no Server units — a real relay always has one.
+/// A Server unit that arrived without a dispatcher is reported and dropped:
+/// forwarding it is the defect this parameter exists to remove (#1504), so the
+/// unreachable branch errs on the side of not answering the wrong runtime.
 async fn forward_client_to_agent<RS, AS>(
     client_read: &mut RS,
     agent_write: &mut AS,
     session_name: &str,
     input_throttle: std::time::Duration,
+    mut dispatch: Option<&mut RelayDispatch<'_>>,
 ) -> ClientToAgent
 where
     RS: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
@@ -1442,6 +1651,22 @@ where
             ClientFrame::RelayEnd => {
                 info!("Client requested relay end for session '{}'", session_name);
                 return ClientToAgent::ClientRequested;
+            }
+            // The connection's own unit, asked while it is attached: answered
+            // here, and deliberately **not** written to the agent — that is the
+            // whole of #1504.
+            ClientFrame::ServerUnit => {
+                if let (Some(dispatch), Ok(text)) = (dispatch.as_deref_mut(), msg.to_text()) {
+                    answer_server_unit(
+                        dispatch.handler,
+                        dispatch.lanes,
+                        dispatch.command_broker,
+                        dispatch.sender,
+                        text,
+                    )
+                    .await;
+                }
+                continue;
             }
             ClientFrame::Other => {
                 if let Err(e) = agent_write.send(msg).await {
@@ -1496,6 +1721,25 @@ where
                     // window when it asked to stop (#962).
                     ClientFrame::RelayEnd => {
                         end_requested = true;
+                        break;
+                    }
+                    // A Server unit, read inside the window: the same ordering
+                    // rule as `Other` — nothing the client wrote earlier may be
+                    // overtaken by it — but its destination is the Server.
+                    ClientFrame::ServerUnit => {
+                        if !flush_burst(agent_write, &mut burst).await {
+                            break 'forward;
+                        }
+                        if let (Some(dispatch), Ok(text)) = (dispatch.as_deref_mut(), m.to_text()) {
+                            answer_server_unit(
+                                dispatch.handler,
+                                dispatch.lanes,
+                                dispatch.command_broker,
+                                dispatch.sender,
+                                text,
+                            )
+                            .await;
+                        }
                         break;
                     }
                     // Not coalescable, and sent *after* the frame being held:
@@ -1690,8 +1934,14 @@ mod tests {
         let mut client_read = futures_util::stream::iter(items);
         let mut agent_write = RecordingSink::default();
 
-        let outcome =
-            forward_client_to_agent(&mut client_read, &mut agent_write, "sess", WIDE_WINDOW).await;
+        let outcome = forward_client_to_agent(
+            &mut client_read,
+            &mut agent_write,
+            "sess",
+            WIDE_WINDOW,
+            None,
+        )
+        .await;
 
         (agent_write.sent, outcome)
     }
@@ -1988,8 +2238,15 @@ mod tests {
     /// command line quoting it — ended the user's relay and was dropped.
     #[tokio::test]
     async fn a_payload_mentioning_relay_end_is_forwarded_not_obeyed() {
-        let innocent =
-            frame_with_payload("server.info", "info-1", json!({ "note": RELAY_END_WIRE }));
+        // Carried on a wire the relay forwards, because that is where the
+        // substring defence has to hold: the claim is about the *payload* not
+        // deciding anything. (`server.info` would be a Server unit now and is
+        // dispatched rather than forwarded — see #1504.)
+        let innocent = frame_with_payload(
+            "agent.terminal.resize",
+            "info-1",
+            json!({ "note": RELAY_END_WIRE }),
+        );
 
         // The frame has to carry the literal text for this test to mean
         // anything. serde escapes the quotes, so assert on the wire form the
@@ -2019,8 +2276,15 @@ mod tests {
     /// Silent data loss on frames that have nothing to do with a terminal.
     #[tokio::test]
     async fn a_payload_mentioning_terminal_input_is_not_coalesced() {
-        let each =
-            |id: &str| frame_with_payload("server.info", id, json!({ "note": "terminal.input" }));
+        // Same carrier choice as the relay.end case above: a wire the relay
+        // forwards, so what is under test is the payload's irrelevance.
+        let each = |id: &str| {
+            frame_with_payload(
+                "agent.terminal.resize",
+                id,
+                json!({ "note": "terminal.input" }),
+            )
+        };
         let (a, b, c) = (each("info-1"), each("info-2"), each("info-3"));
 
         let text = a.to_text().unwrap_or_default().to_string();
@@ -2058,7 +2322,7 @@ mod tests {
         for literal in ["terminal.input", RELAY_END_WIRE] {
             assert_eq!(
                 classify_client_frame(&frame_with_payload(
-                    "server.info",
+                    "agent.terminal.resize",
                     "x",
                     json!({ "note": literal })
                 )),
@@ -2066,6 +2330,23 @@ mod tests {
                 "a payload quoting {literal} is not {literal}"
             );
         }
+
+        // And the wire's first segment decides *whose* unit it is: the protocol
+        // names the answering runtime there, so this is the rule the relay
+        // splits on rather than a list it keeps (#1504). A payload cannot move
+        // a frame into or out of that class.
+        for payload in [json!({}), json!({ "note": "terminal.input" })] {
+            assert_eq!(
+                classify_client_frame(&frame_with_payload("server.info", "x", payload)),
+                ClientFrame::ServerUnit,
+                "a `server.` wire is the Server's unit whatever it carries"
+            );
+        }
+        assert_eq!(
+            classify_client_frame(&frame_with_payload("agent.terminal.resize", "x", json!({}))),
+            ClientFrame::Other,
+            "an agent wire still belongs to the agent"
+        );
 
         // The pre-rename spelling of terminal input is not terminal input. The
         // wire is the one the Agent answers, and accepting a second spelling

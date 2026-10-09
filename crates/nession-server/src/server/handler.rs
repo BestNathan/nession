@@ -60,6 +60,16 @@ pub enum HandlerAction {
         session_name: String,
         /// Unique client id assigned for this relay connection.
         client_id: String,
+        /// The stable identity the browser presented on `server.auth`, when it
+        /// presented one (#1429).
+        ///
+        /// The relay presents this to the Agent as the connection's identity,
+        /// so the ids the Agent publishes — the controller in
+        /// `agent.terminal.control.changed`, the one in the acquire reply —
+        /// are ids the browser can recognise as its own. Without it the Agent
+        /// knows every relayed browser, and the Server itself, by one shared
+        /// `unknown-client`.
+        browser_client_id: Option<String>,
         /// Resolved env snapshots to inject via agent.attach to the agent.
         env_snapshots: Vec<EnvSnapshot>,
         /// Terminal columns for the initial tmux resize (from browser viewport).
@@ -108,6 +118,15 @@ pub struct ConnectionHandler {
     attached_session_id: Option<String>,
     /// Unique client id for this relay attachment (for cleanup on disconnect).
     attached_client_id: Option<String>,
+    /// The stable identity this browser presented on `server.auth` (#1429).
+    ///
+    /// Kept because the relay is the transport that has to *say* who it is
+    /// acting for: the Agent knows one connection per relayed browser-session,
+    /// and everything it publishes about control names a client id the browser
+    /// is expected to compare against its own (`agentControlLease`). A relay
+    /// that does not carry this id leaves the Agent naming every browser, and
+    /// the Server itself, `unknown-client`.
+    browser_client_id: Option<String>,
     /// The P2P credential ledger, for minting on attach (#1013).
     p2p_broker: Arc<crate::broker::ConnectionBroker>,
 }
@@ -150,6 +169,7 @@ impl Clone for ConnectionHandler {
             client_sender: self.client_sender.clone(),
             attached_session_id: self.attached_session_id.clone(),
             attached_client_id: self.attached_client_id.clone(),
+            browser_client_id: self.browser_client_id.clone(),
         }
     }
 }
@@ -198,6 +218,7 @@ impl ConnectionHandler {
             client_sender: None,
             attached_session_id: None,
             attached_client_id: None,
+            browser_client_id: None,
         }
     }
 
@@ -832,6 +853,12 @@ impl ConnectionHandler {
 
         if auth_ok {
             self.authenticated_client = true;
+            // The browser's stable identity, kept for the relay to present to
+            // the Agent (#1429) — see `browser_client_id`. The Server still
+            // assigns no id of its own and reports none: this is the client's,
+            // echoed back only by the Agent, and only for the connection the
+            // relay opens on its behalf.
+            self.browser_client_id = payload.client_id;
             // Subscribe web client for real-time push (server.agents.changed, etc.)
             if let Some(ref sender) = self.client_sender {
                 self.web_client_registry.subscribe(sender.clone());
@@ -1830,6 +1857,7 @@ impl ConnectionHandler {
             session_id: session_id.to_string(),
             session_name,
             client_id,
+            browser_client_id: self.browser_client_id.clone(),
             env_snapshots: Vec::new(),
             cols,
             rows,
@@ -6066,6 +6094,7 @@ mod tests {
                 session_id: _,
                 session_name,
                 client_id: _,
+                browser_client_id: _,
                 env_snapshots,
                 cols: _,
                 rows: _,

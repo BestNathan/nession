@@ -78,6 +78,33 @@ export interface AIConversationListResult {
    * list rather than guessing.
    */
   bindingId: string | null
+  /**
+   * Pass back to `list` to continue the directory. `null` means complete.
+   *
+   * List pagination is part of the canonical contract rather than a provider
+   * ceiling: a provider whose API caps one response must not silently make the
+   * rest of the directory unreachable (#1363 round 6).
+   */
+  nextCursor: string | null
+  /**
+   * Stable identity of the directory snapshot this page belongs to.
+   *
+   * A paged provider must return the same non-null id for every page reached
+   * from one first-page read. The runtime uses it to reject a continuation that
+   * quietly crossed into a re-sorted/rebound directory (#1363 round 7).
+   * Single-page providers may leave it null/undefined because there is no
+   * continuation boundary to make inconsistent.
+   */
+  listingId?: string | null
+  /**
+   * The supplied cursor belonged to a directory snapshot that no longer exists.
+   *
+   * This is not a list failure: it asks the shared runtime to discard only the
+   * in-progress aggregation and restart from page one, under the same logical
+   * context. Providers use this instead of silently applying an offset cursor
+   * to a freshly re-sorted directory.
+   */
+  restart?: boolean
   error?: string | null
 }
 
@@ -140,6 +167,16 @@ export type AIRefreshPolicy<Context = AIConversationContext> =
        * subscribe globally and re-read indiscriminately — a filter wearing an
        * adapter's name, which is the shape #1363 SC-06 exists to rule out.
        */
+      /**
+       * Stable identity of the concrete refresh source.
+       *
+       * `contextKey` identifies the conversation *space*; it deliberately may
+       * stay equal while a token, client, lease, socket, or other source handle
+       * changes. A push subscription captures that handle, so the runtime needs
+       * one provider-owned key that changes exactly when the subscription must
+       * be re-established. Object identity is explicitly not that key.
+       */
+      sourceKey: (context: Context, conversationId: string) => string
       subscribe: (
         context: Context,
         conversationId: string,
@@ -178,7 +215,30 @@ export interface AIConversationAdapter<Context = AIConversationContext> {
    */
   contextKey(context: Context): string
 
-  list(context: Context): Promise<AIConversationListResult>
+  /**
+   * Identity of the request authority captured by list/read calls.
+   *
+   * Usually this is the same value as `contextKey`. A provider whose logical
+   * conversation space stays equal while a token, lease, client or other
+   * request-capable handle rotates must return a different key here. Changing
+   * it invalidates old in-flight list/read work without resetting the reader's
+   * selection or loaded window. Object identity is never used for this.
+   *
+   * Optional for providers whose request authority is exactly their
+   * `contextKey`; the runtime falls back to that key.
+   */
+  requestKey?(context: Context): string
+
+  /**
+   * Read one page of the conversation directory.
+   *
+   * Without a cursor this is the first page; with one it continues from a
+   * previous `nextCursor`. The shared runtime walks a coherent listing to
+   * completion under a hard page/restart budget. Paged providers therefore
+   * supply `listingId`, and stale continuation cursors return `restart: true`
+   * rather than being applied to a freshly re-sorted directory.
+   */
+  list(context: Context, cursor?: string): Promise<AIConversationListResult>
 
   /**
    * Read one page of a conversation.

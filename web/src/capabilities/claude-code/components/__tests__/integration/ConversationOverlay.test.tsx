@@ -23,6 +23,7 @@ const snapshot: AIConversationSnapshot = {
   conversations: [],
   bindingId: null,
   openId: 'claude-1',
+  conversationKey: 'fixture:claude-1',
   state: 'ready',
   conversation: { id: 'claude-1', activity: 'active' },
   activity: 'active',
@@ -92,5 +93,23 @@ describe('ConversationOverlay', () => {
     expect(screen.getByTestId('conversation-turn')).toHaveAttribute('data-role', 'assistant');
     expect(screen.getByRole('heading', { name: 'Heading' })).toBeInTheDocument();
     expect(screen.getByTestId('conversation-tool-name')).toHaveTextContent('Read');
+  });
+
+  it('hands the transcript the retry its degraded state offers', async () => {
+    // #1363 round 3. `ConversationUnavailable` renders a Retry, and the runtime
+    // stops refreshing on a non-ready answer — so a surface that does not pass
+    // this prop leaves the reader a control that reloads the page and nothing
+    // else. The Workspace passed it; the Peek did not, and nothing said so.
+    //
+    // Asserted on the *composition* for the same reason the test above is: the
+    // rendered markers cannot tell "the overlay wired the command" from "the
+    // transcript happened to draw a button".
+    const { ConversationTranscript } = await import('@/shared/ai-conversation');
+
+    render(<ConversationOverlay agentId="a" sessionId="a:s" />);
+
+    const calls = vi.mocked(ConversationTranscript).mock.calls;
+    const props = calls[calls.length - 1]?.[0];
+    expect(props?.onReload).toBeTypeOf('function');
   });
 });

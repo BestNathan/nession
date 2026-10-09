@@ -1,8 +1,9 @@
 import type { AttachInfo } from '@/types';
-import type { AddressPlan } from '@/shared/hooks/useAddressPlan';
 import type { RelayServerTransport } from '@/platform/attach/relayServerConnection';
 import { buildAgentWsUrl, WebSocketService } from '@/platform/socket';
-import type { ConnectionState } from '@/platform/socket/types';
+import type { ConnectionState, HandshakeSurface } from '@/platform/socket/types';
+import { getOrCreateClientId } from '@/platform/socket/clientId';
+import { WIRE as CLIENT_AUTH_WIRE, type AuthResponsePayload } from '@/generated/protocol/core/client-auth/v1';
 import { AddressAttachPolicy } from '@/platform/attach/AddressAttachPolicy';
 import { AttachStateMachine, type AttachPhase, type AttachTransitionResult } from '@/platform/attach/AttachStateMachine';
 import { SessionAttachController } from '@/platform/attach/SessionAttachController';
@@ -41,7 +42,8 @@ export interface SessionRuntimeConfig {
    * snapshot.
    */
   forcedRelay: boolean;
-  addressPlan: AddressPlan;
+  /** Ordered candidate URLs, best-first (#1430: resolved synchronously). */
+  addressUrls: string[];
   /** User-initiated route identity (manual switch); resets candidate index when changed. */
   routeIntentEpoch: number;
   /**
@@ -107,7 +109,6 @@ export interface RuntimeMirrorSnapshot {
 export interface SessionRuntimeSnapshot extends RuntimeMirrorSnapshot {
   sessionId: string;
   activeUrl: string | null;
-  waitingForAddressPlan: boolean;
   /**
    * The EFFECTIVE relay mode: static intent OR the runtime's own fallback
    * (#1309 SC-02). This is the only place the fallback is published — React
@@ -147,7 +148,6 @@ function isSameSnapshot(a: SessionRuntimeSnapshot, b: SessionRuntimeSnapshot): b
     && a.connectionState === b.connectionState
     && a.agentTerminalApi === b.agentTerminalApi
     && a.activeUrl === b.activeUrl
-    && a.waitingForAddressPlan === b.waitingForAddressPlan
     && a.forcedRelay === b.forcedRelay
     && a.transportReady === b.transportReady
     && a.lastResize?.cols === b.lastResize?.cols
@@ -173,6 +173,44 @@ const P2P_PROBE_INTERVAL_MS = 15_000;
  */
 const P2P_PROBE_TIMEOUT_MS = 5_000;
 
+/**
+ * The identity handshake this socket presents before anything else is served
+ * (#1429).
+ *
+ * The Agent roles and authorizes every attach, control change and input by the
+ * connection's `client_id`, and `client.auth` is the only thing that sets it:
+ * an unauthenticated connection is `unknown-client`, a principal that is *not*
+ * the browser's stable id. The two sides then disagree about who controls the
+ * session — the Web compares the control reply against its own id while the
+ * Agent compares the caller's — so input is either withheld locally as an
+ * observer or refused agent-side. The Server connection has always sent this
+ * (`useAppConnection`); this socket did not.
+ *
+ * Run as the service's handshake, so it is a readiness gate (no frame can be
+ * requested before it succeeds) and it repeats on every physical socket, which
+ * is what a reconnect needs. The Agent serves it inline after draining the
+ * lanes it was read behind, so the frames that follow are served by the
+ * identity it establishes.
+ *
+ * `auth_token` belongs to the Server's half of this handshake and is ignored by
+ * the Agent, which shares the one payload type on purpose — and this socket has
+ * no Server token to present anyway: its credential was the per-attach one,
+ * already proven at the upgrade (#1013). Putting that credential in this field
+ * is exactly the conflation the type documents against.
+ */
+function p2pClientAuthHandshake(surface: HandshakeSurface): Promise<void> {
+  return surface
+    .request<AuthResponsePayload>(CLIENT_AUTH_WIRE, {
+      auth_token: '',
+      client_id: getOrCreateClientId(),
+    })
+    .then((res) => {
+      if (res.status !== 'success') {
+        throw new Error(res.message || 'P2P client authentication failed');
+      }
+    });
+}
+
 export class SessionRuntime {
   readonly sessionId: string;
   readonly attachState: AttachStateMachine;
@@ -186,6 +224,16 @@ export class SessionRuntime {
   private routeIntentEpoch: number;
   private transportGeneration = 0;
   private lastResize: { cols: number; rows: number } | null = null;
+  /**
+   * The size the in-flight attach carried, held from the moment it is sent.
+   *
+   * Not `lastResize`: that is the *latest* viewport, which may have moved while
+   * the attach was in flight — and in that case the newer size is exactly the
+   * one the flush must still send. The attach states this pair and the agent
+   * applies it, so it is the pair the transport may treat as already known
+   * (#1503 follow-up); read once by {@link applyAttachSeedToLiveTransport}.
+   */
+  private attachedSize: { cols: number; rows: number } | null = null;
   private transportReady = false;
   /**
    * Runtime-owned dynamic relay fallback: every P2P candidate failed, so the
@@ -271,7 +319,7 @@ export class SessionRuntime {
       orderedUrls: config.orderedUrls,
       manualOverride: config.manualOverride,
       forcedRelay: config.forcedRelay,
-      addressPlan: config.addressPlan,
+      addressUrls: config.addressUrls,
       addressIndex: 0,
     });
     // transportReady and lastResize are NOT config: they are facts about the
@@ -380,10 +428,6 @@ export class SessionRuntime {
     return this.addressPolicy.activeUrl;
   }
 
-  get waitingForAddressPlan(): boolean {
-    return this.addressPolicy.isP2P && !this.config.addressPlan.ready;
-  }
-
   /** Bumps on internal candidate rotation; distinct from routeIntentEpoch. */
   get currentTransportGeneration(): number {
     return this.transportGeneration;
@@ -469,8 +513,8 @@ export class SessionRuntime {
       next.routeIntentEpoch !== undefined
       && next.routeIntentEpoch !== this.routeIntentEpoch;
     const planUrlsChanged =
-      next.addressPlan !== undefined
-      && next.addressPlan.urls.join('|') !== this.config.addressPlan.urls.join('|');
+      next.addressUrls !== undefined
+      && next.addressUrls.join('|') !== this.config.addressUrls.join('|');
     this.config = { ...this.config, ...next };
     if (next.routeIntentEpoch !== undefined) {
       this.routeIntentEpoch = next.routeIntentEpoch;
@@ -488,7 +532,7 @@ export class SessionRuntime {
       orderedUrls: this.config.orderedUrls,
       manualOverride: this.config.manualOverride,
       forcedRelay: this.effectiveForcedRelay,
-      addressPlan: this.config.addressPlan,
+      addressUrls: this.config.addressUrls,
       addressIndex: this.addressPolicy.currentIndex,
     });
 
@@ -553,14 +597,18 @@ export class SessionRuntime {
     if (!this.attachController.canStartAttach(this.transportReady, true, false, 'p2p')) {
       return;
     }
+    // Held for the attach's own lifetime: this is what the payload states, and
+    // `lastResize` may move past it before the reply lands.
+    const attachSize = this.lastResize;
     this.attachController.startP2PAttach({
       sessionName: this.config.sessionName,
       agentApi: this.agentTerminalApi,
       manualRoute: this.config.manualOverride !== null,
-      lastResize: this.lastResize,
+      lastResize: attachSize,
       needsBootstrap: this.needsBootstrap(),
       transportGeneration: this.transportGeneration,
       onAttachOk: (result) => {
+        this.attachedSize = attachSize;
         this.p2pAttachSeed = {
           streamEpoch: result.streamEpoch,
           streamCursor: result.streamCursor,
@@ -659,6 +707,13 @@ export class SessionRuntime {
         controlGeneration: seed.controlGeneration,
       });
     }
+    // Before the flush, so a coalesced size that only repeats what the attach
+    // already stated does not go back out as a change (#1503 follow-up).
+    const attached = this.attachedSize;
+    this.attachedSize = null;
+    if (attached) {
+      transport.noteAttachedSize?.(attached.cols, attached.rows);
+    }
     transport.flushAllOutbound();
     if (seed) {
       transport.seedStreamCursor?.(seed.streamEpoch, seed.streamCursor);
@@ -724,7 +779,6 @@ export class SessionRuntime {
       ...this.getMirrorSnapshot(),
       sessionId: this.sessionId,
       activeUrl: this.activeUrl,
-      waitingForAddressPlan: this.waitingForAddressPlan,
       forcedRelay: this.effectiveForcedRelay,
       transportReady: this.transportReady,
       lastResize: this.lastResize,
@@ -1091,6 +1145,9 @@ export class SessionRuntime {
       // or force relay; keeping those open would stall the recovery they
       // already have (#1263).
       persistentReconnect: this.addressPolicy.isManualRoute,
+      // Bind the browser's stable identity before any frame this socket
+      // depends on is served (#1429) — see `p2pClientAuthHandshake`.
+      handshake: p2pClientAuthHandshake,
     });
     this.agentWs = ws;
     this.filesApi = files;

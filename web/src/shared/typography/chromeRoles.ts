@@ -12,33 +12,33 @@ export type ChromeTypographyRole =
 
 /** Literal class fragments so design inventory can resolve token consumers. */
 const ROLE_SIZE_CLASS: Record<ChromeTypographyRole, string> = {
-  title: 'text-[length:var(--typography-title-size)]',
-  primary: 'text-[length:var(--typography-primary-size)]',
-  body: 'text-[length:var(--typography-body-size)]',
-  secondary: 'text-[length:var(--typography-secondary-size)]',
-  metadata: 'text-[length:var(--typography-metadata-size)]',
-  caption: 'text-[length:var(--typography-caption-size)]',
-  code: 'text-[length:var(--typography-code-size)]',
+  title: 'text-[length:var(--nession-typography-title-size)]',
+  primary: 'text-[length:var(--nession-typography-primary-size)]',
+  body: 'text-[length:var(--nession-typography-body-size)]',
+  secondary: 'text-[length:var(--nession-typography-secondary-size)]',
+  metadata: 'text-[length:var(--nession-typography-metadata-size)]',
+  caption: 'text-[length:var(--nession-typography-caption-size)]',
+  code: 'text-[length:var(--nession-typography-code-size)]',
 };
 
 const ROLE_WEIGHT_CLASS: Record<ChromeTypographyRole, string> = {
-  title: 'font-[number:var(--typography-title-weight)]',
-  primary: 'font-[number:var(--typography-primary-weight)]',
-  body: 'font-[number:var(--typography-body-weight)]',
-  secondary: 'font-[number:var(--typography-secondary-weight)]',
-  metadata: 'font-[number:var(--typography-metadata-weight)]',
-  caption: 'font-[number:var(--typography-caption-weight)]',
-  code: 'font-[number:var(--typography-code-weight)]',
+  title: 'font-[number:var(--nession-typography-title-weight)]',
+  primary: 'font-[number:var(--nession-typography-primary-weight)]',
+  body: 'font-[number:var(--nession-typography-body-weight)]',
+  secondary: 'font-[number:var(--nession-typography-secondary-weight)]',
+  metadata: 'font-[number:var(--nession-typography-metadata-weight)]',
+  caption: 'font-[number:var(--nession-typography-caption-weight)]',
+  code: 'font-[number:var(--nession-typography-code-weight)]',
 };
 
 const ROLE_LINE_HEIGHT_CLASS: Record<ChromeTypographyRole, string> = {
-  title: 'leading-[var(--typography-title-line-height)]',
-  primary: 'leading-[var(--typography-primary-line-height)]',
-  body: 'leading-[var(--typography-body-line-height)]',
-  secondary: 'leading-[var(--typography-secondary-line-height)]',
-  metadata: 'leading-[var(--typography-metadata-line-height)]',
-  caption: 'leading-[var(--typography-caption-line-height)]',
-  code: 'leading-[var(--typography-code-line-height)]',
+  title: 'leading-[var(--nession-typography-title-line-height)]',
+  primary: 'leading-[var(--nession-typography-primary-line-height)]',
+  body: 'leading-[var(--nession-typography-body-line-height)]',
+  secondary: 'leading-[var(--nession-typography-secondary-line-height)]',
+  metadata: 'leading-[var(--nession-typography-metadata-line-height)]',
+  caption: 'leading-[var(--nession-typography-caption-line-height)]',
+  code: 'leading-[var(--nession-typography-code-line-height)]',
 };
 
 function roleMetricClasses(role: ChromeTypographyRole): string {
@@ -53,4 +53,23 @@ export function chromeSansRole(role: ChromeTypographyRole): string {
 /** Technical mono at the role's canonical size, weight, and leading. */
 export function chromeMonoRole(role: ChromeTypographyRole): string {
   return cn(roleMetricClasses(role), 'font-mono');
+}
+
+
+export type ChromeLabelRole = Extract<ChromeTypographyRole, 'metadata' | 'caption'>;
+
+/** Uppercase quiet label: canonical chrome metrics plus owned tracking. */
+export function chromeLabelRole(role: ChromeLabelRole = 'metadata'): string {
+  return cn(
+    chromeSansRole(role),
+    'uppercase tracking-[var(--nession-typography-label-tracking)]',
+  );
+}
+
+/** Technical uppercase label with the same owned tracking treatment. */
+export function chromeMonoLabelRole(role: ChromeLabelRole = 'metadata'): string {
+  return cn(
+    chromeMonoRole(role),
+    'uppercase tracking-[var(--nession-typography-label-tracking)]',
+  );
 }

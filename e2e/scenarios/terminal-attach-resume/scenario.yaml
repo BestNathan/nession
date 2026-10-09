@@ -1,0 +1,6 @@
+schema_version: 1
+id: terminal-attach-resume
+runtime: full-stack-local
+entry: reproduce.cjs
+mode: observe
+description: Real browser xterm attach, burst history, reload and progressive resume sampling.

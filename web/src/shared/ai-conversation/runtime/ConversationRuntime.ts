@@ -38,7 +38,7 @@
  * unable to carry the previous Session's selection.
  */
 
-import type { AIConversationAdapter, AIConversationPage } from '../adapter/types'
+import type { AIConversationAdapter, AIConversationListResult, AIConversationPage } from '../adapter/types'
 import type {
   AIConversationActivity,
   AIConversationItem,
@@ -50,6 +50,7 @@ import {
   emptyPositions,
   hasOlder,
   itemsOf,
+  skippedOf,
   withNewest,
   withOlderPage,
   type ConversationPositions,
@@ -80,6 +81,23 @@ export interface AIConversationSnapshot {
    */
   openId: string | null
   /**
+   * The open conversation as one value a surface can key a subtree by.
+   *
+   * `openId` alone is not an identity. The adapter contract scopes a
+   * conversation to a provider *and* a context, so two providers may both have
+   * a conversation called `c1`, and the same provider may have a `c1` in two
+   * contexts. A React `key` built from the id alone would then tell a surface
+   * that two different conversations are the same one — and the state keyed
+   * below it (scroll position, disclosure, focus) would cross between them
+   * (`#1363` round 4).
+   *
+   * Composed here because the runtime is the only thing that holds all three
+   * parts: the adapter it was built for, the context key, and the selection.
+   * `null` when nothing is open — a surface still has to name that state, and
+   * `'no-conversation'` is a different value from any real one.
+   */
+  conversationKey: string | null
+  /**
    * The provider's own word for what it could answer about the open
    * conversation.
    *
@@ -100,7 +118,7 @@ export interface AIConversationSnapshot {
   hasMore: boolean
   /** The transcript ended mid-record — normal for one being appended to. */
   partialTail: boolean
-  /** Records the adapter could not model, so the surface can say so. */
+  /** Safe lower bound for records omitted somewhere in the loaded window. */
   skipped: number
   /**
    * Whether the *list* is being read.
@@ -143,6 +161,123 @@ const DEFAULT_SCHEDULER: ConversationScheduler = {
   clearInterval: (handle) => clearInterval(handle as ReturnType<typeof setInterval>),
 }
 
+/**
+ * A complete-list fetch is deliberately bounded.
+ *
+ * The contract still gives surfaces a complete directory, but it no longer
+ * means "follow cursors forever". Thirty-two provider pages are enough for
+ * thousands of Claude conversations at its 200-row ceiling while keeping one
+ * logical refresh finite even if a provider keeps inventing cursors.
+ */
+const LIST_PAGE_BUDGET = 32
+/** A moving directory may be retried, but not allowed to livelock forever. */
+const LIST_RESTART_BUDGET = 2
+
+/**
+ * Mutable state for one bounded, coherent directory aggregation.
+ *
+ * Keeping cursor/snapshot validation here makes `fetchList` orchestration
+ * readable and, more importantly, gives every invariant one owner.
+ */
+class ListAggregation {
+  readonly conversations: AIConversationSummary[] = []
+  private readonly seenConversations = new Set<string>()
+  private readonly seenCursors = new Set<string>()
+  private listingId: string | null = null
+  private bindingSeen = false
+  private pages = 0
+  private restarts = 0
+  bindingId: string | null = null
+
+  beginPage(): void {
+    this.pages += 1
+    if (this.pages > LIST_PAGE_BUDGET) {
+      throw new Error(
+        `Conversation list exceeded the bounded ${LIST_PAGE_BUDGET}-page budget`,
+      )
+    }
+  }
+
+  restart(cursor: string | undefined): void {
+    if (cursor === undefined) {
+      throw new Error('Conversation list asked to restart its first page')
+    }
+    this.restarts += 1
+    if (this.restarts > LIST_RESTART_BUDGET) {
+      throw new Error(
+        `Conversation list changed more than ${LIST_RESTART_BUDGET} times while loading`,
+      )
+    }
+    this.conversations.length = 0
+    this.seenConversations.clear()
+    this.seenCursors.clear()
+    this.listingId = null
+    this.bindingSeen = false
+    this.bindingId = null
+  }
+
+  acceptReadyPage(
+    result: AIConversationListResult,
+    cursor: string | undefined,
+  ): string | null {
+    this.acceptListingIdentity(result, cursor)
+    this.acceptBinding(result.bindingId)
+    this.acceptConversations(result.conversations)
+
+    const next = result.nextCursor
+    if (next === null) {
+      return null
+    }
+    if (this.seenCursors.has(next)) {
+      throw new Error('Conversation list returned a repeated cursor')
+    }
+    this.seenCursors.add(next)
+    return next
+  }
+
+  private acceptListingIdentity(
+    result: AIConversationListResult,
+    cursor: string | undefined,
+  ): void {
+    const pageListingId = result.listingId ?? null
+    const paged = cursor !== undefined || result.nextCursor !== null
+    if (paged && pageListingId === null) {
+      throw new Error('Paged conversation list omitted its stable listing id')
+    }
+    if (pageListingId === null) {
+      return
+    }
+    if (this.listingId === null) {
+      this.listingId = pageListingId
+      return
+    }
+    if (this.listingId !== pageListingId) {
+      throw new Error('Conversation list crossed listing generations')
+    }
+  }
+
+  private acceptBinding(bindingId: string | null): void {
+    if (!this.bindingSeen) {
+      this.bindingId = bindingId
+      this.bindingSeen = true
+      return
+    }
+    if (this.bindingId !== bindingId) {
+      throw new Error('Conversation binding changed inside one listing snapshot')
+    }
+  }
+
+  private acceptConversations(conversations: AIConversationSummary[]): void {
+    for (const conversation of conversations) {
+      if (this.seenConversations.has(conversation.id)) {
+        continue
+      }
+      this.seenConversations.add(conversation.id)
+      this.conversations.push(conversation)
+    }
+  }
+}
+
 interface ListState {
   state: AIConversationListState | null
   conversations: AIConversationSummary[]
@@ -156,7 +291,6 @@ interface ThreadState {
   conversation: AIConversationSummary | null
   activity: AIConversationActivity | null
   partialTail: boolean
-  skipped: number
   loading: boolean
   loadingOlder: boolean
   olderError: string | null
@@ -176,7 +310,6 @@ const EMPTY_THREAD: ThreadState = {
   conversation: null,
   activity: null,
   partialTail: false,
-  skipped: 0,
   loading: true,
   loadingOlder: false,
   olderError: null,
@@ -188,6 +321,7 @@ const EMPTY_SNAPSHOT: AIConversationSnapshot = {
   conversations: [],
   bindingId: null,
   openId: null,
+  conversationKey: null,
   state: null,
   conversation: null,
   activity: null,
@@ -203,18 +337,67 @@ const EMPTY_SNAPSHOT: AIConversationSnapshot = {
   threadError: null,
 }
 
+/**
+ * Distinguishes one runtime from another, for as long as the page lives.
+ *
+ * A provider is identified by the *runtime*, not by its adapter object: the
+ * hook builds a runtime per adapter and swaps them, so the same component can
+ * be pointed at two providers in its lifetime. Two providers that share a
+ * context key and an `openId` are still two different conversations, and
+ * without this the key below could not tell them apart.
+ */
+let runtimeIdentities = 0
+
+function nextRuntimeIdentity(): number {
+  runtimeIdentities += 1
+  return runtimeIdentities
+}
+
 function message(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
+}
+
+/**
+ * What to tell the reader about a cursor page the provider would not send.
+ *
+ * The provider's own words win whenever it has any, exactly as `applyNewest`
+ * prefers `page.error`. The fallbacks are per state because the states are not
+ * interchangeable to the person reading them: "the conversation is gone" and
+ * "the provider could not say right now" are the same *handling* here — keep
+ * the cursor, offer Retry — but not the same sentence.
+ */
+function olderPageMessage(page: AIConversationPage): string {
+  if (page.error) {
+    return page.error
+  }
+  switch (page.state) {
+    case 'not_found':
+      return 'This conversation is no longer there'
+    case 'unavailable':
+      return 'Older messages cannot be read right now'
+    default:
+      return 'Unable to load older messages'
+  }
 }
 
 export class ConversationRuntime<Context> {
   private readonly adapter: AIConversationAdapter<Context>
   private readonly scheduler: ConversationScheduler
+  /** This runtime's part of a conversation's identity — see `conversationKey`. */
+  private readonly identity = nextRuntimeIdentity()
   private readonly listeners = new Set<() => void>()
   private snapshot: AIConversationSnapshot = EMPTY_SNAPSHOT
 
   private context: Context | null = null
   private contextKey: string | null = null
+  /**
+   * Which concrete request authority current list/read work belongs to.
+   *
+   * Equal context keys mean "same conversation space"; equal request keys mean
+   * "work issued under the old Context may still publish". They are different
+   * questions when a token/lease/client rotates in place (#1363 round 7).
+   */
+  private requestKey: string | null = null
   private chosen: { key: string; id: string } | null = null
   /** What the thread currently holds — the id the loaded items belong to. */
   private loadedId: string | null = null
@@ -234,6 +417,33 @@ export class ConversationRuntime<Context> {
   private listGeneration = 0
   private newestGeneration = 0
   private olderGeneration = 0
+
+  /**
+   * The newest read holding the single-flight slot, by generation.
+   *
+   * Passive refresh is the *repeat* path, and repetition is what turned the
+   * generation guard from a staleness rule into a liveness bug: a provider
+   * slower than the poll interval is asked again before it answers, so every
+   * answer is superseded before it can land and an active conversation freezes
+   * on its first page while requests continue forever (`#1363` round 4). One
+   * read at a time, plus at most one remembered follow-up, is what lets a slow
+   * answer land instead of never landing.
+   *
+   * Kept as the generation rather than a boolean because the slot is released
+   * by a *target* change without waiting for the read that held it — and that
+   * read's settlement must not clear the claim its successor now owns.
+   */
+  private newestInFlight: number | null = null
+  /**
+   * A refresh asked for while a read was already out.
+   *
+   * A bit, not a queue: a refresh re-reads the newest page, so any number of
+   * requests arriving while one is out are answered by a single later read —
+   * the data it will see already includes what the intermediate answers would
+   * have said. Dropping them instead would lose a change that arrived *after*
+   * the in-flight read took its snapshot, which is the push case.
+   */
+  private newestPending = false
   private timer: unknown = null
   private unsubscribePush: (() => void) | null = null
   /**
@@ -246,7 +456,11 @@ export class ConversationRuntime<Context> {
    * notices — the subscription knows what it was for, and an event from one that
    * no longer matches is not evidence about what is open now.
    */
-  private refreshArmedFor: { key: string; conversationId: string } | null = null
+  private refreshArmedFor: {
+    key: string
+    conversationId: string
+    sourceKey: string | null
+  } | null = null
   private disposed = false
 
   constructor(
@@ -273,18 +487,59 @@ export class ConversationRuntime<Context> {
    * Point the runtime at a context — a Session, a directory, whatever the
    * provider's requests are scoped by. `null` clears it.
    *
-   * A different context is a different conversation space: nothing about the
-   * old one survives, not the items, not either cursor, not the binding.
+   * A **different key** is a different conversation space: nothing about the
+   * old one survives, not the items, not either cursor, not the binding. The
+   * **same key with a different value** is the same space with new request
+   * facts, and only the facts are replaced — see the branch below for why the
+   * two cannot be the same statement.
    */
   setContext(context: Context | null): void {
-    // Re-arms a disposed runtime. `dispose` means "stop everything now", not
-    // "this instance is finished with": React's StrictMode mounts, unmounts and
-    // mounts again, so a hook that disposes in its cleanup would hand a dead
-    // runtime to the second mount. Pointing a runtime at a context is exactly
-    // the statement that it should be working again.
+    // `dispose` stops work but does not make the instance one-shot: React
+    // StrictMode can dispose and point the same runtime at the same context
+    // again. Remember that distinction before clearing the flag, because a
+    // same-key remount must genuinely re-arm reads and refresh.
+    const wasDisposed = this.disposed
     this.disposed = false
+    const key = context === null ? null : this.adapter.contextKey(context)
+    const requestKey =
+      context === null ? null : (this.adapter.requestKey?.(context) ?? key)
+
+    if (key !== null && key === this.contextKey) {
+      const requestChanged = requestKey !== this.requestKey
+      this.context = context
+      this.requestKey = requestKey
+
+      if (wasDisposed || requestChanged) {
+        // Keep the visible space/window, but revoke every request issued under
+        // the old authority. A late A response is not allowed to publish merely
+        // because A and B point at the same conversation space.
+        this.listGeneration += 1
+        this.newestGeneration += 1
+        this.olderGeneration += 1
+        this.newestInFlight = null
+        this.newestPending = false
+
+        void this.fetchList(key, ++this.listGeneration)
+        if (this.loadedId !== null) {
+          this.reloadNewest()
+        }
+
+        // A push source may rotate with the same logical space as well. Its own
+        // sourceKey decides whether it needs a new subscription; startRefresh
+        // closes that handoff with a catch-up read.
+        this.syncRefresh()
+      } else {
+        // Same space and same request authority. A push source may still have a
+        // provider-specific identity (for example a reconnecting stream), so
+        // only the source contract decides whether re-arming is necessary.
+        this.syncRefresh()
+      }
+      return
+    }
+
     this.context = context
-    this.contextKey = context === null ? null : this.adapter.contextKey(context)
+    this.contextKey = key
+    this.requestKey = requestKey
     this.newestGeneration += 1
     this.olderGeneration += 1
     this.positions = emptyPositions()
@@ -293,10 +548,9 @@ export class ConversationRuntime<Context> {
     this.loadedId = null
     this.stopRefresh()
     this.emit()
-    if (context === null) {
+    if (key === null) {
       return
     }
-    const key = this.contextKey as string
     const generation = ++this.listGeneration
     void this.fetchList(key, generation)
   }
@@ -340,6 +594,22 @@ export class ConversationRuntime<Context> {
     if (this.disposed || key === null || cursor === null || this.context === null) {
       return false
     }
+    // A page already on its way answers this call too. Two things make that the
+    // right reading rather than a swallow:
+    //
+    // - the caller's question is "will more history arrive?", not "did this call
+    //   start it" — `true` is what keeps the scroll controller's pending anchor,
+    //   so returning `false` would disarm a fetch that is genuinely coming;
+    // - the cursor does not move until the page lands, so a second fetch would
+    //   re-read the *same* one and then invalidate the first through the
+    //   generation counter — a wasted round trip that also flickers the loader.
+    //
+    // `loadingOlder` is set before `fetchOlder`'s first `await`, so it is already
+    // true by the time this returns and the guard cannot miss a racing call.
+    // `#1363` round 3.
+    if (this.thread.loadingOlder) {
+      return true
+    }
     const id = ++this.olderGeneration
     void this.fetchOlder(key, cursor, id)
     return true
@@ -348,13 +618,30 @@ export class ConversationRuntime<Context> {
   /** Stop every timer and subscription, and refuse further work. */
   dispose(): void {
     this.disposed = true
+    this.listGeneration += 1
     this.newestGeneration += 1
     this.olderGeneration += 1
+    this.newestInFlight = null
+    this.newestPending = false
     this.stopRefresh()
     this.listeners.clear()
   }
 
   // ── internals ────────────────────────────────────────────────────────────
+
+  /**
+   * The open conversation as one key, or `null` when nothing is open.
+   *
+   * Three parts, because two of them are not enough to be an identity: the
+   * runtime (which provider), the context key (which conversation *space*),
+   * and the id. See `AIConversationSnapshot.conversationKey`.
+   */
+  private conversationKey(openId: string | null): string | null {
+    if (openId === null || this.contextKey === null) {
+      return null
+    }
+    return `${this.identity}\u0000${this.contextKey}\u0000${openId}`
+  }
 
   /** The selection if it belongs to this context, else the provider's binding. */
   private openId(): string | null {
@@ -373,6 +660,13 @@ export class ConversationRuntime<Context> {
     this.loadedId = openId
     this.newestGeneration += 1
     this.olderGeneration += 1
+    // The read that held the slot was reading the conversation this just moved
+    // away from, so it no longer holds anything: releasing it here is what lets
+    // the new target's first read start now rather than queue behind an answer
+    // nobody wants. Its own settlement checks the generation and leaves this
+    // claim alone.
+    this.newestInFlight = null
+    this.newestPending = false
     this.positions = emptyPositions()
     this.thread = EMPTY_THREAD
     this.stopRefresh()
@@ -382,11 +676,7 @@ export class ConversationRuntime<Context> {
     // A failure a reader should act on arrives through a load they asked for;
     // the first read is one they asked for by opening the surface, so it
     // reports. The poll is the path that swallows (see `poll`).
-    const key = this.contextKey as string
-    const generation = this.newestGeneration
-    void this.fetchNewest(openId, key, generation).catch(() =>
-      this.failNewest(key, generation),
-    )
+    this.requestNewest(true)
   }
 
   private async fetchList(key: string, generation: number): Promise<void> {
@@ -394,20 +684,50 @@ export class ConversationRuntime<Context> {
     if (context === null) {
       return
     }
+
     try {
-      const result = await this.adapter.list(context)
-      if (!this.wanted(key, generation, this.listGeneration)) {
-        return
+      const aggregation = new ListAggregation()
+      let cursor: string | undefined
+
+      for (;;) {
+        aggregation.beginPage()
+        const result = await this.adapter.list(context, cursor)
+        if (!this.wanted(key, generation, this.listGeneration)) {
+          return
+        }
+
+        // A continuation token describes one snapshot, not "start at this
+        // numeric offset in whatever order exists now". A provider that sees
+        // its snapshot disappear asks for a bounded restart instead of silently
+        // crossing generations.
+        if (result.restart) {
+          aggregation.restart(cursor)
+          cursor = undefined
+          continue
+        }
+
+        // A semantic non-ready answer describes the directory request, not the
+        // validity of facts already loaded from it. Preserve those facts — in
+        // particular the exact binding that keeps an auto-bound readable thread
+        // open — and expose only the changed directory state.
+        if (result.state !== 'ready') {
+          this.applyListUnavailable(result)
+          return
+        }
+
+        const next = aggregation.acceptReadyPage(result, cursor)
+        if (next === null) {
+          break
+        }
+        cursor = next
       }
+
       this.list = {
-        state: result.state,
-        conversations: result.conversations,
-        bindingId: result.bindingId,
+        state: 'ready',
+        conversations: aggregation.conversations,
+        bindingId: aggregation.bindingId,
         loading: false,
-        error:
-          result.state === 'error'
-            ? (result.error ?? 'The conversations could not be listed')
-            : null,
+        error: null,
       }
       this.syncThread()
       this.emit()
@@ -422,6 +742,20 @@ export class ConversationRuntime<Context> {
       }
       this.emit()
     }
+  }
+
+  private applyListUnavailable(result: AIConversationListResult): void {
+    this.list = {
+      ...this.list,
+      state: result.state,
+      loading: false,
+      error:
+        result.state === 'error'
+          ? (result.error ?? 'The conversations could not be listed')
+          : null,
+    }
+    this.syncThread()
+    this.emit()
   }
 
   private async fetchNewest(
@@ -447,6 +781,27 @@ export class ConversationRuntime<Context> {
     try {
       const page = await this.adapter.read(context, conversationId, cursor)
       if (!this.wanted(key, generation, this.olderGeneration)) {
+        return
+      }
+      // A cursor read has its own state, and "not ready" is not "no more
+      // history".
+      //
+      // `withOlderPage` reads a missing `nextCursor` as the end of the window,
+      // and a provider answering `error`, `not_found` or `unavailable` said
+      // nothing of the kind — its `nextCursor` is absent because it has no page
+      // to describe, not because there is no page. Feeding it through would
+      // consume the cursor, clear `hasMore`, and report a silent end of history
+      // to a reader whose history simply failed to load (#1363 round 4). So the
+      // window and both cursors stay exactly as they were and only the reason is
+      // recorded: every one of these is retryable, and Retry re-reads *this*
+      // cursor because nothing moved it.
+      if (page.state !== 'ready') {
+        this.thread = {
+          ...this.thread,
+          loadingOlder: false,
+          olderError: olderPageMessage(page),
+        }
+        this.emit()
         return
       }
       this.positions = withOlderPage(this.positions, page)
@@ -482,6 +837,7 @@ export class ConversationRuntime<Context> {
         state: page.state,
         conversation: page.conversation ?? null,
         activity: page.activity ?? null,
+        partialTail: false,
         loading: false,
         error:
           page.state === 'error'
@@ -506,7 +862,6 @@ export class ConversationRuntime<Context> {
       conversation: page.conversation ?? null,
       activity: page.activity ?? null,
       partialTail: page.partialTail,
-      skipped: page.skipped,
       loading: false,
       error: null,
     }
@@ -514,15 +869,86 @@ export class ConversationRuntime<Context> {
     this.emit()
   }
 
-  /** Re-read the newest page of whatever is open. */
+  /**
+   * The reader asked for the newest page, so this read supersedes rather than
+   * joins.
+   *
+   * A tick is passive and coalesces (see `requestNewest`), but this one is not:
+   * handing the reader an answer to a read that started *before* they asked,
+   * then one more, is later than they meant. So the slot is handed over — the
+   * read already out keeps its generation and loses its claim, and its answer is
+   * discarded when it lands like any other superseded one.
+   *
+   * This is also the case the generation guard is still for. It was never wrong
+   * about staleness; it was wrong as a *cancellation policy* driven by a timer.
+   */
   private reloadNewest(): void {
+    this.newestInFlight = null
+    this.newestPending = false
+    this.requestNewest(true)
+  }
+
+  /**
+   * Ask for the newest page, at most one read at a time.
+   *
+   * The single-flight rule is what makes a provider slower than the poll
+   * interval *late* rather than permanently frozen: without it every tick
+   * supersedes the answer the previous tick is still waiting on, and no answer
+   * can ever land. A request that arrives while a read is out is remembered as
+   * one follow-up rather than started — a bit, because the follow-up re-reads
+   * the newest page and so already includes what the ones it replaced would
+   * have said.
+   */
+  private requestNewest(report: boolean): void {
+    if (this.newestInFlight !== null) {
+      this.newestPending = true
+      return
+    }
+    this.startNewest(report)
+  }
+
+  private startNewest(report: boolean): void {
     const key = this.contextKey
     const openId = this.loadedId
     if (key === null || openId === null || this.context === null) {
+      this.newestPending = false
       return
     }
-    const id = ++this.newestGeneration
-    void this.fetchNewest(openId, key, id).catch(() => this.failNewest(key, id))
+    const generation = ++this.newestGeneration
+    this.newestInFlight = generation
+    this.newestPending = false
+    void this.fetchNewest(openId, key, generation).then(
+      () => this.settleNewest(generation),
+      () => {
+        if (report) {
+          this.failNewest(key, generation)
+        }
+        this.settleNewest(generation)
+      },
+    )
+  }
+
+  /**
+   * The slot is free again; run the one follow-up if anything asked.
+   *
+   * Guarded on the generation because a target change — or a reader's reload —
+   * releases the slot without waiting for this read: by the time it settles,
+   * `newestInFlight` may name its successor, and clearing that would let a
+   * second read start alongside it.
+   */
+  private settleNewest(generation: number): void {
+    if (this.newestInFlight !== generation) {
+      return
+    }
+    this.newestInFlight = null
+    if (this.newestPending && this.refreshWanted()) {
+      // Passive: the only requests that join rather than hand the slot over are
+      // refresh signals. Re-check applicability at settlement time because the
+      // answer that just landed may itself have stopped refresh.
+      this.startNewest(false)
+    } else {
+      this.newestPending = false
+    }
   }
 
   private failNewest(key: string, generation: number): void {
@@ -550,9 +976,12 @@ export class ConversationRuntime<Context> {
    * `unknown` keeps it, because a live conversation frozen on screen is worse
    * than a re-read that changes nothing.
    */
+  private refreshWanted(): boolean {
+    return this.thread.state === 'ready' && this.thread.activity !== 'inactive'
+  }
+
   private syncRefresh(): void {
-    const wanted = this.thread.state === 'ready' && this.thread.activity !== 'inactive'
-    if (wanted) {
+    if (this.refreshWanted()) {
       this.startRefresh()
     } else {
       this.stopRefresh()
@@ -570,30 +999,81 @@ export class ConversationRuntime<Context> {
       this.stopRefresh()
       return
     }
-    // Already watching exactly this. Re-arming would close and reopen a stream
-    // on every poll of a conversation that has not moved.
+
+    const sourceKey =
+      policy.kind === 'push' ? policy.sourceKey(context, conversationId) : null
     if (
       this.refreshArmedFor?.key === key &&
-      this.refreshArmedFor.conversationId === conversationId
+      this.refreshArmedFor.conversationId === conversationId &&
+      this.refreshArmedFor.sourceKey === sourceKey
     ) {
       return
     }
+
+    // Only a replacement has a handoff gap to close. The initial subscription
+    // follows the newest page that just made the thread readable, so asking
+    // immediately again would only duplicate that first read.
+    const replacing = this.refreshArmedFor !== null
     this.stopRefresh()
+
+    // Claim the target before the provider can call us back. Some push APIs send
+    // a synchronous "current state changed" signal from subscribe(); assigning
+    // this afterwards used to make the guard discard that perfectly valid
+    // first signal.
+    this.refreshArmedFor = { key, conversationId, sourceKey }
 
     if (policy.kind === 'poll') {
       this.timer = this.scheduler.setInterval(() => this.poll(), policy.intervalMs)
-    } else {
-      this.unsubscribePush = policy.subscribe(context, conversationId, () => {
-        // The provider may emit once more before its unsubscribe lands. That
-        // event is about a conversation the reader has left, so it is not a
-        // reason to re-read the one they are in.
-        if (this.contextKey !== key || this.loadedId !== conversationId) {
+      return
+    }
+
+    let synchronousSignal = false
+    try {
+      const unsubscribe = policy.subscribe(context, conversationId, () => {
+        // Unsubscribe is not instantaneous for every source. A late event from
+        // an old lease/socket is stale even when the conversation-space key and
+        // conversation id are unchanged, so source identity participates in the
+        // callback guard too.
+        if (
+          this.contextKey !== key ||
+          this.loadedId !== conversationId ||
+          this.refreshArmedFor?.sourceKey !== sourceKey
+        ) {
           return
         }
+        synchronousSignal = true
         this.poll()
       })
+      // A synchronous callback may have caused a page to settle and stop
+      // refresh before subscribe() returned. Do not resurrect that source.
+      if (
+        this.refreshArmedFor?.key === key &&
+        this.refreshArmedFor.conversationId === conversationId &&
+        this.refreshArmedFor.sourceKey === sourceKey
+      ) {
+        this.unsubscribePush = unsubscribe
+      } else {
+        unsubscribe()
+        return
+      }
+    } catch {
+      if (
+        this.refreshArmedFor?.key === key &&
+        this.refreshArmedFor.conversationId === conversationId &&
+        this.refreshArmedFor.sourceKey === sourceKey
+      ) {
+        this.refreshArmedFor = null
+      }
+      this.unsubscribePush = null
+      return
     }
-    this.refreshArmedFor = { key, conversationId }
+
+    // A source replacement can miss a change between "A stopped" and "B is
+    // listening". Close that gap explicitly. If B synchronously told us it had
+    // a change, that signal already did the catch-up; otherwise request one now.
+    if (replacing && !synchronousSignal) {
+      this.poll()
+    }
   }
 
   private stopRefresh(): void {
@@ -616,13 +1096,7 @@ export class ConversationRuntime<Context> {
    * failure the reader should act on arrives through a load they asked for.
    */
   private poll(): void {
-    const key = this.contextKey
-    const openId = this.loadedId
-    if (key === null || openId === null || this.context === null) {
-      return
-    }
-    const id = ++this.newestGeneration
-    void this.fetchNewest(openId, key, id).catch(() => undefined)
+    this.requestNewest(false)
   }
 
   private emit(): void {
@@ -632,13 +1106,14 @@ export class ConversationRuntime<Context> {
       conversations: this.list.conversations,
       bindingId: this.list.bindingId,
       openId,
+      conversationKey: this.conversationKey(openId),
       state: this.thread.state,
       conversation: this.thread.conversation,
       activity: this.thread.activity,
       items: itemsOf(this.positions),
       hasMore: hasOlder(this.positions),
-      partialTail: this.thread.partialTail,
-      skipped: this.thread.skipped,
+      partialTail: this.thread.state === 'ready' ? this.thread.partialTail : false,
+      skipped: this.thread.state === 'ready' ? skippedOf(this.positions) : 0,
       listLoading: this.list.loading,
       threadLoading: openId !== null && this.thread.loading,
       loadingOlder: this.thread.loadingOlder,

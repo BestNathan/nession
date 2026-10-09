@@ -24,7 +24,7 @@ export function SessionDrawer({ open, onClose, sidebar }: SessionDrawerProps) {
       <aside
         data-testid="session-drawer-panel"
         className={cn(
-          'absolute inset-y-0 left-0 flex w-[min(20rem,90vw)] flex-col border-r border-border/60 bg-background shadow-xl',
+          'absolute inset-y-0 left-0 flex w-[min(20rem,90vw)] flex-col border-r border-border/60 bg-background shadow-[var(--nession-elevation-floating)]',
           'animate-in slide-in-from-left duration-200',
         )}
       >

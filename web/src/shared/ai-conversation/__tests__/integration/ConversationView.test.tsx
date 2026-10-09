@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { ConversationView } from '../../components/ConversationView'
@@ -12,11 +12,17 @@ function summary(overrides: Partial<AIConversationSummary> = {}): AIConversation
 }
 
 function snapshot(overrides: Partial<AIConversationSnapshot> = {}): AIConversationSnapshot {
+  const openId = overrides.openId ?? null
   return {
     listState: 'ready',
     conversations: [],
     bindingId: null,
-    openId: null,
+    openId,
+    // The runtime derives this from its own identity, the context key and
+    // the open id. A fixture has only the last, and a key that follows
+    // `openId` is enough to make a conversation switch look like one —
+    // which is the only thing this fixture needs it to do.
+    conversationKey: openId === null ? null : `fixture:${openId}`,
     state: null,
     conversation: null,
     activity: null,
@@ -254,7 +260,12 @@ describe('ConversationView', () => {
     expect(screen.getByTestId('conversation-error').textContent).toContain('the host refused')
   })
 
-  it('keeps the rows it has when a refresh fails', () => {
+  it('keeps the rows it has when a refresh fails, and says the refresh failed', () => {
+    // The second half is what `#1363` round 4 found missing. This test already
+    // proved the rows survive and that the *full-pane* error does not replace
+    // them — both right — and stopped there, so `listError` could be populated
+    // and drawn nowhere at all. A reader looking at a list that had just failed
+    // to refresh could not tell it from one that had refreshed and not moved.
     render(
       <ConversationView
         snapshot={snapshot({ listError: 'refresh failed', conversations: [summary()] })}
@@ -262,6 +273,7 @@ describe('ConversationView', () => {
         layout="master-detail"
         onSelect={() => undefined}
         onLoadOlder={onLoadOlder}
+        onReload={() => undefined}
       />,
     )
 
@@ -269,5 +281,75 @@ describe('ConversationView', () => {
     // refresh that failed.
     expect(screen.getByTestId('conversation-candidate-title')).toBeDefined()
     expect(screen.queryByTestId('conversation-error')).toBeNull()
+
+    // Bounded, in the list, and actionable — the shape older paging already
+    // uses for the same situation.
+    const notice = screen.getByTestId('conversation-list-error')
+    expect(notice.textContent).toContain('refresh failed')
+    expect(within(notice).getByRole('button', { name: 'Retry' })).toBeDefined()
+  })
+
+  it('shows the same stale-list warning after opening the pushed list', async () => {
+    render(
+      <ConversationView
+        snapshot={snapshot({
+          conversations: [summary()],
+          openId: 'c1',
+          state: 'ready',
+          items: transcript(1),
+          listError: 'refresh failed',
+        })}
+        providerLabel="Claude"
+        layout="push"
+        onSelect={() => undefined}
+        onLoadOlder={onLoadOlder}
+        onReload={() => undefined}
+      />,
+    )
+
+    await userEvent.click(screen.getByTestId('conversation-show-list'))
+
+    expect(screen.getByTestId('conversation-candidate-title')).toBeDefined()
+    const notice = screen.getByTestId('conversation-list-error')
+    expect(notice.textContent).toContain('refresh failed')
+    expect(within(notice).getByRole('button', { name: 'Retry' })).toBeDefined()
+  })
+
+  it('does not show ready-page metadata while the open thread is non-ready', () => {
+    render(
+      <ConversationView
+        snapshot={snapshot({
+          openId: 'c1',
+          state: 'unavailable',
+          conversation: summary(),
+          partialTail: true,
+          skipped: 3,
+        })}
+        providerLabel="Claude"
+        layout="push"
+        onSelect={() => undefined}
+        onLoadOlder={onLoadOlder}
+      />,
+    )
+
+    expect(screen.queryByTestId('conversation-partial')).toBeNull()
+    expect(screen.queryByTestId('conversation-skipped')).toBeNull()
+    expect(screen.getByTestId('conversation-unavailable')).toBeDefined()
+  })
+
+  it('says nothing about the list when nothing failed', () => {
+    // The complement, so the notice above is a state and not decoration: a
+    // reader never sees a warning about a refresh that worked.
+    render(
+      <ConversationView
+        snapshot={snapshot({ conversations: [summary()] })}
+        providerLabel="Claude"
+        layout="master-detail"
+        onSelect={() => undefined}
+        onLoadOlder={onLoadOlder}
+      />,
+    )
+
+    expect(screen.queryByTestId('conversation-list-error')).toBeNull()
   })
 })

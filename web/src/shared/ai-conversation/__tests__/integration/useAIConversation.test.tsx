@@ -1,8 +1,8 @@
 import { StrictMode } from 'react'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { useAIConversation } from '../../runtime/useAIConversation'
-import { SyntheticAdapter } from '../fixtures/syntheticAdapter'
+import { SyntheticAdapter, flush } from '../fixtures/syntheticAdapter'
 import { transcript } from '../fixtures/items'
 
 /** A surface in miniature: a context in, the snapshot's items out. */
@@ -22,6 +22,139 @@ const moduleAdapter = new SyntheticAdapter({
   conversations: [{ id: 'c1', title: 'One', activity: 'inactive', items: transcript(4) }],
   bindingId: 'c1',
   pageSize: 10,
+})
+
+/**
+ * Two providers, and a surface told which to draw.
+ *
+ * The bindings deliberately differ, so the assertion is about *which provider
+ * answered* rather than about whether anything rendered.
+ */
+function Switchable({
+  adapter,
+  context,
+}: {
+  adapter: SyntheticAdapter
+  context: string
+}) {
+  const { snapshot } = useAIConversation(adapter, context)
+  return <span data-testid="binding">{snapshot.bindingId ?? 'none'}</span>
+}
+
+/**
+ * A surface that can also ask again, so "what the *next* read carries" is
+ * observable rather than inferred.
+ */
+function Reloadable({ adapter, context }: { adapter: SyntheticAdapter; context: string }) {
+  const { snapshot, reload } = useAIConversation(adapter, context)
+  return (
+    <>
+      <ul data-testid="items">
+        {snapshot.items.map((item) => (
+          <li key={item.id}>{item.id}</li>
+        ))}
+      </ul>
+      <button type="button" onClick={() => reload()}>
+        reload
+      </button>
+    </>
+  )
+}
+
+describe('a context whose value moves without its key', () => {
+  // One space, two values. A provider that reports a constant key while the
+  // string handed to it changes is the whole case: `contextKey` says the two
+  // contexts mean the same conversation space, and they do — but the adapter is
+  // still asked *with* one of them, and it has to be the current one.
+  const movingValue = () =>
+    new SyntheticAdapter({
+      conversations: [{ id: 'c1', title: 'One', items: transcript(4) }],
+      bindingId: 'c1',
+      pageSize: 10,
+      key: 'one-space',
+      // This case is specifically "new Context value, same request authority".
+      // Token/lease rotation is the distinct round-7 case and advertises a
+      // changed requestKey so old in-flight work is revoked automatically.
+      requestKey: () => 'one-authority',
+      // Manual, so the only reads are ones this test asks for and can count.
+      refresh: { kind: 'manual' },
+    })
+
+  it('reaches the provider without resetting what the reader is looking at', async () => {
+    // #1363 round 4. The effect that hands the context over depended on
+    // `adapter.contextKey(context)` — the derived key — so a same-key change
+    // never ran it and the runtime kept the context it had replaced. The value
+    // still has to reach later reads even when the provider explicitly says the
+    // old and new Context values share one request authority.
+    const provider = movingValue()
+    const { rerender } = render(<Reloadable adapter={provider} context="token-a" />)
+    await waitFor(() => expect(screen.getAllByRole('listitem')).toHaveLength(4))
+
+    const reads = () => provider.calls.filter((call) => call.kind === 'read')
+    const before = reads().length
+
+    rerender(<Reloadable adapter={provider} context="token-b" />)
+    await flush()
+
+    // The half that a "just reset on any change" fix would get wrong: the same
+    // key is the same conversation space, so the reader's items survive, and no
+    // directory read is triggered by a value that redefines nothing.
+    expect(screen.getAllByRole('listitem')).toHaveLength(4)
+    expect(provider.calls.filter((call) => call.kind === 'list')).toHaveLength(1)
+
+    fireEvent.click(screen.getByRole('button', { name: 'reload' }))
+    await waitFor(() => expect(reads().length).toBeGreaterThan(before))
+
+    // The half that was broken: the read that follows the change carries it.
+    const made = reads()
+    expect(made[made.length - 1]?.context).toBe('token-b')
+  })
+})
+
+describe('switching providers', () => {
+  const providerA = () =>
+    new SyntheticAdapter({
+      conversations: [{ id: 'c1', title: 'One', activity: 'inactive', items: transcript(2) }],
+      bindingId: 'c1',
+      pageSize: 10,
+    })
+  const providerB = () =>
+    new SyntheticAdapter({
+      conversations: [{ id: 'c2', title: 'Two', activity: 'inactive', items: transcript(2) }],
+      bindingId: 'c2',
+      pageSize: 10,
+    })
+
+  it('answers from the provider it was given, not from the first one', async () => {
+    // #1363 round 3: `useState`'s initialiser runs once, so the runtime used to
+    // outlive the adapter it was built for and go on answering the first
+    // provider. A second provider could be registered and never drawn.
+    const { rerender } = render(<Switchable adapter={providerA()} context="a:s1" />)
+    await waitFor(() => expect(screen.getByTestId('binding').textContent).toBe('c1'))
+
+    rerender(<Switchable adapter={providerB()} context="a:s1" />)
+
+    await waitFor(() => expect(screen.getByTestId('binding').textContent).toBe('c2'))
+  })
+
+  it('cannot let the previous provider’s late answer land', async () => {
+    // The half that makes the swap safe rather than merely different. A's read
+    // is held open across the switch, so it is genuinely in flight when the
+    // runtime that asked for it is disposed.
+    const first = providerA()
+    const release = first.hold('list')
+
+    const { rerender } = render(<Switchable adapter={first} context="a:s1" />)
+    rerender(<Switchable adapter={providerB()} context="a:s1" />)
+    await waitFor(() => expect(screen.getByTestId('binding').textContent).toBe('c2'))
+
+    release()
+    await flush()
+
+    // Still B. A disposed runtime refuses everything through `wanted()`, and its
+    // generation counters belong to it alone.
+    expect(screen.getByTestId('binding').textContent).toBe('c2')
+  })
 })
 
 describe('useAIConversation', () => {

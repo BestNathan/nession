@@ -64,7 +64,7 @@ export function EnvDiff({ original, modified }: EnvDiffProps) {
   return (
     <div
       className={cn(
-        'max-h-48 overflow-y-auto divide-y divide-border rounded-[var(--radius-surface)] border font-mono',
+        'max-h-48 overflow-y-auto divide-y divide-border rounded-[var(--nession-radius-surface)] border font-mono',
         chromeMonoRole('code'),
       )}
     >

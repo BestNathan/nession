@@ -38,6 +38,8 @@ export interface DashboardState {
   setPreviewSession: (s: Session | null) => void;
   handleSessionKilled: () => void;
   handleSessionCreated: () => void;
+  /** Insert a Session whose identity the client already holds (#1430), ahead of any list. */
+  insertSession: (session: Session) => void;
   fetchSessions: (opts?: FetchSessionsOptions) => Promise<void>;
   /** Agents that failed to answer the last force refresh. */
   staleAgents: string[];
@@ -194,6 +196,7 @@ export function useDashboard(wsService?: WebSocketService): DashboardState {
     setPreviewSession,
     handleSessionKilled,
     handleSessionCreated,
+    insertSession: sessionData.insertSession,
     fetchSessions,
     staleAgents: sessionData.staleAgents,
     getHeartbeatHistory: agentData.getHeartbeatHistory,

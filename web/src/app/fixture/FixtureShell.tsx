@@ -11,6 +11,7 @@ import { gitApi } from '@/capabilities/git';
 import { mapDomainState } from '@/product/session/model/domainState';
 import { WorkspaceRegion } from '@/app/WorkspaceRegion';
 import { fixtureGitSurface } from './fixtureGit';
+import { fixturePaneCommand } from './fixturePaneCommand';
 
 /**
  * Canonical Active Terminal screen (#561 Phase 2A): the real
@@ -24,10 +25,17 @@ import { fixtureGitSurface } from './fixtureGit';
  * can reach (docs/design/migration.md).
  */
 export function FixtureShell() {
+  // FixtureShell is also mounted directly by component tests without a Router.
+  // Canonical browser routes use HashRouter (`/#/fixture?pane=...`), so read
+  // only the hash query here instead of coupling this deterministic fixture to
+  // router context.
+  const queryIndex = window.location.hash.indexOf('?');
+  const search = queryIndex >= 0 ? window.location.hash.slice(queryIndex) : '';
+
   // The same stub `FixtureApp` installs, for the same reason (#838): a
   // capability has to be *reachable* from a fixture to be captured, and the
   // App route had this while the Web route did not — so the Web screen could
-  // show the capability entry but not a Signal or a Peek behind it, which is
+  // show the capability entry but not a Peek behind it, which is
   // why `#1046`'s second depth had no Web baseline at all (#1102).
   //
   // Installed for the route's lifetime and released on unmount. Nothing
@@ -37,8 +45,16 @@ export function FixtureShell() {
   useEffect(() => gitApi.install(fixtureGitSurface('')), []);
 
   const selectedId = FIXTURE_SELECTED_ID;
-  const selectedSession =
+  const paneCommand = fixturePaneCommand(search);
+  const baseSelectedSession =
     FIXTURE_SESSIONS.find((s) => s.session_id === selectedId) ?? null;
+  // Keep Web and App fixture inputs symmetric: ?pane=... represents the
+  // foreground command reported by the agent. WorkspaceRegion then resolves
+  // work-awareness through the same production path on both experiences.
+  const selectedSession =
+    baseSelectedSession && paneCommand
+      ? { ...baseSelectedSession, foreground_command: paneCommand }
+      : baseSelectedSession;
   const selectedAgent = FIXTURE_AGENTS.find(
     (a) => a.agent_id === selectedSession?.agent_id,
   );

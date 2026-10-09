@@ -1,0 +1,76 @@
+name: E2E Scenario Smoke
+
+on:
+  pull_request:
+    branches: [staging]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-scenario-${{ github.event.pull_request.number || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  terminal-replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      RUSTC_WRAPPER: ""
+      CI: "true"
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.cache/ms-playwright
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with: { cache-workspaces: ".", cache-all-crates: "true" }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: e2e/package-lock.json
+      - run: sudo apt-get update && sudo apt-get install -y tmux
+      - uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('e2e/package-lock.json') }}
+      - run: cd e2e && npm ci && npx playwright install chromium --with-deps
+      - run: cd web && npm ci && npm run build
+      - run: cargo build -p nession-server -p nession-agent
+      - name: Run scenario contract self-test
+        run: |
+          node e2e/scenarios/terminal-attach-resume/reproduce.cjs --self-test
+          ./e2e/run --validate
+      - name: Run actual terminal replay scenario
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse HEAD)"
+          ./e2e/run scenario terminal-attach-resume --sha "${sha}" --repeat 1 --output "${RUNNER_TEMP}/nession-scenarios"
+      - name: Validate non-synthetic observation record
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          const dir = process.env.RUNNER_TEMP + '/nession-scenarios';
+          const paths = fs.readdirSync(dir).filter((file) => /^scenario-.*\.json$/.test(file));
+          if (paths.length !== 1) throw new Error('expected exactly one scenario run record');
+          const record = JSON.parse(fs.readFileSync(path.join(dir, paths[0]), 'utf8'));
+          if (record.status !== 'Completed' || record.evaluation !== null ||
+              record.observation_count < 2 ||
+              !record.observations.some((item) => item.stage === 'before-reload') ||
+              !record.observations.some((item) => item.stage === 'after-reload')) {
+            throw new Error('scenario has no actual before/after observations or incorrectly asserts Pass');
+          }
+          console.log('Scenario observed real before/reload samples at SHA ' + record.target_sha);
+          NODE
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-terminal-scenario-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/nession-scenarios/
+          if-no-files-found: warn
+          retention-days: 14

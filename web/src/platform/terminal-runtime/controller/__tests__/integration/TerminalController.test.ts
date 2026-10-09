@@ -373,7 +373,7 @@ describe('TerminalController', () => {
     controller.detach();
   });
 
-  it('reports hasSessionOutput only once output has arrived, bootstrap included', () => {
+  it('reports hasSessionOutput only once output has arrived, bootstrap included', async () => {
     const transport = makeTransport();
     const controller = new TerminalController(makeSession(), () => transport);
     controller.attach(host());
@@ -387,8 +387,75 @@ describe('TerminalController', () => {
     controller.write('local banner');
     expect(controller.hasSessionOutput).toBe(false);
 
+    // A snapshot is handed over, not held: the flag answers "does my Terminal
+    // hold the session's history", and xterm has not parsed this yet (#1491).
+    // Lifting it here is how an attach that arrives mid-parse decides it needs
+    // no snapshot — over a buffer that is still empty.
+    // Wait for the *specific bootstrap write* to finish, not a 50ms sleep:
+    // under concurrent CI load xterm can legitimately take longer to parse.
+    // Intercept the callback while still performing the real xterm write.
+    const terminal = controller.terminal!;
+    const originalWrite = terminal.write.bind(terminal);
+    let signalParsed: () => void = () => {};
+    const bootstrapParsed = new Promise<void>((resolve) => { signalParsed = resolve; });
+    const writeSpy = vi.spyOn(terminal, 'write').mockImplementation(
+      ((data: string | Uint8Array, callback?: () => void) => {
+        originalWrite(data, callback
+          ? () => {
+            callback();
+            signalParsed();
+          }
+          : undefined);
+      }) as never,
+    );
+
     transport.onOutput!(new Uint8Array([104, 105]), { requestedLines: 5000, truncated: false });
+    expect(controller.hasSessionOutput).toBe(false);
+
+    await bootstrapParsed;
     expect(controller.hasSessionOutput).toBe(true);
+    writeSpy.mockRestore();
+    controller.detach();
+  });
+
+  it('latches hasSessionOutput on arrival for live output, which has no completion (#1491)', () => {
+    const transport = makeTransport();
+    const controller = new TerminalController(makeSession(), () => transport);
+    controller.attach(host());
+
+    // No bootstrap marker: this is the session's stream. Waiting for a write
+    // callback here would report "no session output" for as long as the
+    // callback takes — and there is nothing for it to prove.
+    transport.onOutput!(new Uint8Array([104, 105]));
+    expect(controller.hasSessionOutput).toBe(true);
+    controller.detach();
+  });
+
+  it('ignores a superseded snapshot when it finally lands (#1491)', async () => {
+    const transport = makeTransport();
+    const controller = new TerminalController(makeSession(), () => transport);
+    controller.attach(host());
+
+    // Two snapshots in flight — a re-attach arriving while the first is still
+    // parsing, which is what a large history plus a rewire produces. The first
+    // callback describes a buffer the second one has since erased, so it must
+    // not lift the flag; only the newest snapshot speaks for the buffer.
+    const writes: Array<() => void> = [];
+    const writeSpy = vi.spyOn(controller.terminal!, 'write').mockImplementation(
+      ((_data: unknown, callback?: () => void) => { if (callback) { writes.push(callback); } }) as never,
+    );
+
+    transport.onOutput!(new Uint8Array([49]), { requestedLines: 5000, truncated: false });
+    transport.onOutput!(new Uint8Array([50]), { requestedLines: 5000, truncated: false });
+    expect(writes).toHaveLength(2);
+
+    writes[0]!();  // the superseded snapshot lands
+    expect(controller.hasSessionOutput).toBe(false);
+
+    writes[1]!();  // the one the buffer actually holds
+    expect(controller.hasSessionOutput).toBe(true);
+
+    writeSpy.mockRestore();
     controller.detach();
   });
 
@@ -498,6 +565,118 @@ describe('TerminalController', () => {
       // 1024/8=128, 600/16=37 (8×16 fallback cell size in jsdom).
       expect(transport.sendResize).toHaveBeenCalledWith(128, 37);
     } finally {
+      restore();
+    }
+  });
+
+  it('holds the first PTY size back until the cell box is final, then sends it once (#1490)', async () => {
+    // The defect: xterm measures one cell at open() and caches it, so a grid
+    // computed before the webfont lands is the *fallback's*. That grid was
+    // published and sent, and the font-load correction then sent a second
+    // size — two real resizes of the shared tmux window per page reload, each
+    // repainting an inline-drawing application into its scrollback. The local
+    // grid keeps following the container in the first frame; only the half
+    // that leaves the client waits.
+    const restore = installCapturingResizeObserver();
+    const hadFonts = Object.prototype.hasOwnProperty.call(document, 'fonts');
+    const fontsStub = {
+      status: 'loading' as FontFaceSet['status'],
+      ready: Promise.resolve(),
+      // TerminalInstance warms the terminal face at construction; the stub
+      // only has to not throw there.
+      load: () => Promise.resolve([]),
+    };
+    let resolveReady: () => void = () => {};
+    fontsStub.ready = new Promise<void>((resolve) => { resolveReady = resolve; });
+    Object.defineProperty(document, 'fonts', { configurable: true, value: fontsStub });
+    try {
+      const transport = makeTransport();
+      const controller = new TerminalController(makeSession(), () => transport);
+      controller.attach(host());
+      await flush(); // RAF fires → observe() captures the callback
+
+      const entry = { contentRect: { width: 1024, height: 600 } } as unknown as ResizeObserverEntry;
+      capturedCallback!([entry], capturedObserver!);
+
+      // The local grid follows at once, from the cell box xterm has now
+      // (8×16 fallback cells in jsdom): 1024/8=128, 600/16=37.
+      expect(controller.terminal!.cols).toBe(128);
+      expect(controller.terminal!.rows).toBe(37);
+      // Nothing left the client — this grid is a size the pane never had.
+      expect(transport.sendResize).not.toHaveBeenCalled();
+
+      // The webfont lands: `TerminalInstance`'s font-load correction reports
+      // the grid through onCellSizeChange → remeasure.
+      fontsStub.status = 'loaded';
+      resolveReady();
+      await flush();
+
+      // Exactly one size left the client, and it is the one recomputed at
+      // settle time. The numbers match the pre-font grid here only because
+      // jsdom has no real font metrics; that the *recomputed* size wins over
+      // the `grid` this fire captured is what the browser measurement shows
+      // (one SIGWINCH per reload instead of two — #1490).
+      expect(transport.sendResize).toHaveBeenCalledTimes(1);
+      expect(transport.sendResize).toHaveBeenCalledWith(128, 37);
+      controller.dispose();
+    } finally {
+      if (!hadFonts) { delete (document as { fonts?: unknown }).fonts; }
+      restore();
+    }
+  });
+
+  it('sizes the grid and the session to the well minus the capsule band, in both modes (#1503)', async () => {
+    // The well applies the capsule's clearance as `padding-bottom` on the
+    // element this controller observes, and `contentRect` excludes padding — so
+    // the scroll mode used to *be* the grid size, and every entry into history
+    // moved the shared tmux window (measured: 32 ↔ 35 rows, 60 px ÷ 20 px
+    // cells) and made an inline TUI repaint into the history being read.
+    const restore = installCapturingResizeObserver();
+    try {
+      const transport = makeTransport();
+      const controller = new TerminalController(makeSession(), () => transport);
+      const el = host();
+      controller.attach(el);
+      await flush(); // RAF fires → observe() captures the callback
+
+      // Following: the capsule's band (60 px — 3 rows at these 16 px cells) is
+      // reserved as padding, so the content box is 60 px shorter. The band's
+      // own size is the variable the padding derives from, which is what lets
+      // the two modes agree.
+      el.style.setProperty('--nession-local-terminal-capsule-occlusion', '60px');
+      el.style.paddingBottom = '60px';
+      const withBand = { contentRect: { width: 1024, height: 540 } } as unknown as ResizeObserverEntry;
+      capturedCallback!([withBand], capturedObserver!);
+
+      // The grid — and the session — take the well *minus* the band: 600/16
+      // rows. Sizing to the well instead would draw rows the padding clips.
+      expect(controller.terminal!.rows).toBe(33);
+      expect(transport.sendResize).toHaveBeenLastCalledWith(128, 33);
+
+      vi.useFakeTimers();
+      // History: the band is released, the content box grows by the same 60 px.
+      el.style.paddingBottom = '0px';
+      const released = { contentRect: { width: 1024, height: 600 } } as unknown as ResizeObserverEntry;
+      capturedCallback!([released], capturedObserver!);
+      // The grid does not grow into the freed band — the band comes off in both
+      // modes, so the size the user types at is the size they keep.
+      expect(controller.terminal!.rows).toBe(33);
+      vi.advanceTimersByTime(200);
+
+      // The invariant: the reported size never moved. Every size this client
+      // *asks* to send is the same one — the local grid changing is drawing, and
+      // the session was never told about it.
+      const sent = (transport.sendResize.mock.calls as Array<[number, number]>)
+        .map(([cols, rows]) => `${cols}x${rows}`);
+      expect([...new Set(sent)]).toEqual(['128x33']);
+      // What this mock cannot show is how many of those reach the wire: the
+      // transport is the layer that knows what the session already has, and it
+      // drops the repeats — see 'does not send a resize that repeats the size
+      // already on the wire (#1503)' and 'treats the size an attach stated as
+      // already known' in the ConnectionManager suite, which assert the count.
+      vi.useRealTimers();
+    } finally {
+      vi.useRealTimers();
       restore();
     }
   });
@@ -665,16 +844,20 @@ describe('TerminalController', () => {
       cell.width = 10;
       cell.height = 20;
 
-      const resizeSpy = vi.spyOn(controller, 'resize');
-
       // Trigger the post-zoom remeasure — the same path onCellSizeChange wires.
       const rc = (controller as unknown as { resizeController: { remeasure(): void } }).resizeController;
       rc.remeasure();
 
       // 1024/10=102, 600/20=30 — strictly smaller than the pre-zoom 128×37,
       // proving remeasure read the live cell size, not the stale 8×16 stash.
-      expect(resizeSpy).toHaveBeenCalledTimes(1);
-      expect(resizeSpy).toHaveBeenCalledWith(102, 30);
+      //
+      // Asserted as two facts rather than one spied call: the local grid
+      // follows the cell box and the *reported* size follows it minus the
+      // container's own inset (`reportedGrid`). They coincide here only
+      // because jsdom computes no padding.
+      expect(controller.terminal!.cols).toBe(102);
+      expect(controller.terminal!.rows).toBe(30);
+      expect(transport.sendResize).toHaveBeenLastCalledWith(102, 30);
     } finally {
       restore();
     }
@@ -698,19 +881,19 @@ describe('TerminalController', () => {
       // Clear so the assertions below only see the zoom-triggered resize.
       transport.sendResize.mockClear();
 
-      const resizeSpy = vi.spyOn(controller, 'resize');
-
       // zoomIn() → FontSizeManager.setSize → term.refresh + onCellSizeChange
-      // → resizeController.remeasure() → controller.resize() → sendResize().
+      // → resizeController.remeasure() → local grid + reported size.
       controller.fontSizeManager!.zoomIn();
 
-      expect(resizeSpy).toHaveBeenCalledTimes(1);
-      const [cols, rows] = resizeSpy.mock.calls[0] as [number, number];
+      // The full wiring, read from what the transport received rather than
+      // from an internal call: the recomputed size reaches the transport, and
+      // the local grid agrees with it (no capsule inset in jsdom).
+      expect(transport.sendResize).toHaveBeenCalledTimes(1);
+      const [cols, rows] = transport.sendResize.mock.calls[0] as [number, number];
       expect(cols).toBeGreaterThan(0);
       expect(rows).toBeGreaterThan(0);
-      // The recomputed size propagates to the transport (full wiring).
-      expect(transport.sendResize).toHaveBeenCalledWith(cols, rows);
-      resizeSpy.mockRestore();
+      expect(controller.terminal!.cols).toBe(cols);
+      expect(controller.terminal!.rows).toBe(rows);
     } finally {
       restore();
     }

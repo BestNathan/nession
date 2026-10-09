@@ -251,7 +251,7 @@ export function SessionItem({
          forbids stacking background + border + shadow + accent for one
          selection — the accent bar that used to sit here was the second cue. */
       className={cn(
-        'group relative flex items-start gap-[var(--shell-space-2)] rounded-[var(--shell-session-row-radius)] px-[var(--shell-space-2)] py-[var(--shell-session-row-pad-y)] transition-colors',
+        'group relative flex items-start gap-[var(--nession-shell-space-2)] rounded-[var(--nession-shell-session-row-radius)] px-[var(--nession-shell-space-2)] py-[var(--nession-shell-session-row-pad-y)] transition-colors',
         selected ? 'bg-muted' : 'hover:bg-muted/60',
       )}
     >
@@ -269,7 +269,7 @@ export function SessionItem({
            controls is what found this (`expectTouchTargetsWithin`); the drawn
            pixels are unchanged, because the row's height was never this
            button's. */
-        className="flex min-h-[length:var(--control-sm)] min-w-0 flex-1 flex-col text-left"
+        className="flex min-h-[length:var(--nession-control-sm)] min-w-0 flex-1 flex-col text-left"
         onClick={() => onSelect(session)}
       >
         {/* Both lines truncate rather than wrap. At the mockup's 246px the meta
@@ -280,7 +280,7 @@ export function SessionItem({
           className={cn(
             'truncate',
             chromeSansRole('primary'),
-            selected ? 'text-foreground' : 'text-[color:var(--text-secondary)]',
+            selected ? 'text-foreground' : 'text-[color:var(--nession-text-secondary)]',
           )}
         >
           {session.session_name}
