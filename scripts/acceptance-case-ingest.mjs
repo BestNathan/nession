@@ -64,8 +64,6 @@ export function validateCaseRecord(raw) {
   const executionId = sha(raw.execution_id, 64, 'execution_id');
   const runId = positiveInt(raw.run_id, 'run_id');
   const runAttempt = positiveInt(raw.run_attempt, 'run_attempt');
-  // Existing immutable records predate the envelope and remain readable.
-  // New records must have a *source-bound*, explicitly finite evidence locator.
   if (raw.evidence !== undefined) {
     validateArtifactEvidence(raw.evidence, {
       mode: 'acceptance', run_id: runId, run_attempt: runAttempt,
@@ -247,6 +245,41 @@ export function enrichCaseRecord(record, { workflowUrl, recordPath: durablePath,
       mode: 'acceptance', run_id: item.run_id, run_attempt: item.run_attempt,
       source_record_sha256: sourceResultSha256, workflow_url: workflowUrl,
     }),
+  };
+}
+
+/**
+ * Canonical SHA index compatible with Scenario's indexes/by-sha tree.
+ * This is trusted-only: a source Case cannot choose a path or forge metadata.
+ */
+export function caseIndexPath(record) {
+  const item = validateCaseRecord(record);
+  return 'indexes/by-sha/' + item.target_sha + '/acceptance/' +
+    item.run_id + '-' + item.run_attempt + '-' + item.issue + '-' + item.criterion + '.json';
+}
+export function caseIndexRecord(record) {
+  const item = validateCaseRecord(record);
+  const source = item.provenance?.verified_source;
+  if (!source || typeof source !== 'object') {
+    throw new Error('Case index requires authenticated source workflow identity');
+  }
+  assertSourceBoundRecord(item, source);
+  const durable = recordPath(item);
+  if (item.provenance.record_path !== durable) {
+    throw new Error('Case index record path differs from immutable persisted record');
+  }
+  return {
+    schema_version: 1,
+    mode: 'acceptance',
+    source,
+    record: durable,
+    execution_id: item.execution_id,
+    target_sha: item.target_sha,
+    issue: item.issue,
+    criterion: item.criterion,
+    stage: item.stage,
+    case_tree_sha: item.case_tree_sha,
+    contract_sha256: item.contract_sha256,
   };
 }
 
@@ -511,6 +544,25 @@ async function selfTest() {
     ...enriched.evidence, retention_days: 3650 } }), /artifact evidence/);
   assert.throws(() => validateCaseRecord({ ...enriched, evidence: {
     ...enriched.evidence, sha256: '0'.repeat(64) } }), /artifact evidence/);
+  const sourceEnriched = enrichCaseRecord(valid, {
+    workflowUrl: 'https://github.com/BestNathan/nession/actions/runs/100',
+    recordPath: recordPath(valid), source,
+  });
+  const sourceIndex = caseIndexRecord(sourceEnriched);
+  assert.equal(sourceIndex.schema_version, 1);
+  assert.equal(sourceIndex.mode, 'acceptance');
+  assert.equal(sourceIndex.source.head_sha, valid.target_sha);
+  assert.equal(sourceIndex.execution_id, valid.execution_id);
+  assert.equal(sourceIndex.record, recordPath(valid));
+  assert.equal(caseIndexPath(sourceEnriched),
+    'indexes/by-sha/' + valid.target_sha + '/acceptance/100-1-1474-SC-14.json');
+  assert.throws(() => caseIndexRecord(valid), /authenticated source/);
+  assert.throws(() => caseIndexRecord({...sourceEnriched,
+    provenance: {...sourceEnriched.provenance, verified_source: {...source, run_id: 999}}}),
+    /run identity/);
+  assert.throws(() => caseIndexRecord({...sourceEnriched,
+    provenance: {...sourceEnriched.provenance, record_path: 'runs/forged.json'}}),
+    /record path differs/);
   console.log('acceptance Case ingest self-test: provenance and record validation passed');
 }
 
@@ -524,6 +576,15 @@ async function main() {
   }
   if (command === 'record-path') {
     process.stdout.write(recordPath(JSON.parse(fs.readFileSync(process.argv[3], 'utf8'))) + '\n');
+    return;
+  }
+  if (command === 'index') {
+    const record = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
+    const output = process.argv[4];
+    if (!output) throw new Error('index RECORD OUTPUT required');
+    const entry = caseIndexRecord(record);
+    fs.writeFileSync(output, JSON.stringify(entry, null, 2) + '\n');
+    process.stdout.write(caseIndexPath(record) + '\n');
     return;
   }
   if (command === 'attest') {
@@ -561,7 +622,7 @@ async function main() {
     process.stdout.write(JSON.stringify(result) + '\n');
     return;
   }
-  throw new Error('usage: node scripts/acceptance-case-ingest.mjs <self-test|validate FILE|attest FILE EVENT|record-path FILE|enrich IN OUT WORKFLOW_URL RECORD_PATH EVENT|apply FILE>');
+  throw new Error('usage: node scripts/acceptance-case-ingest.mjs <self-test|validate FILE|attest FILE EVENT|record-path FILE|index RECORD OUTPUT|enrich IN OUT WORKFLOW_URL RECORD_PATH EVENT|apply FILE>');
 }
 
 if (import.meta.url === 'file://' + process.argv[1]) {
