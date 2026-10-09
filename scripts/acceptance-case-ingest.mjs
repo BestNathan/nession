@@ -182,10 +182,18 @@ async function attestCaseRecord(record, { event, repository, token, request = gi
   const commit = await request('/repos/' + owner + '/' + repo + '/git/commits/' + item.target_sha, { token });
   const tree = await request('/repos/' + owner + '/' + repo + '/git/trees/' + commit.tree.sha + '?recursive=1', { token });
   if (tree.truncated) throw new Error('source tree listing is truncated; cannot attest Case tree');
-  const casePath = 'acceptance/cases/' + item.issue + '/' + item.criterion;
-  const actual = tree.tree?.find((entry) => entry.path === casePath && entry.type === 'tree');
-  if (!actual || actual.sha !== item.case_tree_sha) {
-    throw new Error('Case Git tree does not match authenticated source SHA: ' + casePath);
+  // A source SHA may contain precisely one authoritative Case tree during
+  // the canonical migration. Dual paths are ambiguous, not a fallback signal.
+  // Never execute the target's Case discovery module in the trusted ingester.
+  const caseSuffix = item.issue + '/' + item.criterion;
+  const casePaths = [
+    'e2e/acceptance/cases/' + caseSuffix,
+    'acceptance/cases/' + caseSuffix,
+  ];
+  const actual = (tree.tree ?? []).filter((entry) =>
+    entry.type === 'tree' && casePaths.includes(entry.path));
+  if (actual.length !== 1 || actual[0].sha !== item.case_tree_sha) {
+    throw new Error('Case Git tree does not match uniquely authenticated source SHA: ' + casePaths.join(' or '));
   }
   return { item, source };
 }
@@ -399,6 +407,24 @@ async function selfTest() {
   const attestation = { event: fixtureEvent, repository: 'BestNathan/nession',
     token: 'self-test', request: attestationRequest };
   assert.equal((await attestCaseRecord(valid, attestation)).item.case_tree_sha, valid.case_tree_sha);
+  const replaceSourceTrees = (transform) => async (apiPath) => {
+    const response = await attestationRequest(apiPath);
+    if (response.tree && Array.isArray(response.tree)) return { ...response, tree: transform(response.tree) };
+    return response;
+  };
+  // Canonical path is accepted only when the same source commit Git tree
+  // authenticates its blob. No target-supplied manifest or alias is trusted.
+  await attestCaseRecord(valid, { ...attestation,
+    request: replaceSourceTrees((entries) => entries.map((entry) => ({
+      ...entry, path: 'e2e/acceptance/cases/1474/SC-14',
+    }))) });
+  await assert.rejects(() => attestCaseRecord(valid, { ...attestation,
+    request: replaceSourceTrees((entries) => [...entries,
+      { ...entries[0], path: 'e2e/acceptance/cases/1474/SC-14' }]) }),
+  /uniquely authenticated/);
+  await assert.rejects(() => attestCaseRecord(valid, { ...attestation,
+    request: replaceSourceTrees(() => []) }),
+  /uniquely authenticated/);
   await assert.rejects(() => attestCaseRecord({ ...valid, execution_id: 'a'.repeat(64) }, attestation), /execution_id/);
   await assert.rejects(() => attestCaseRecord(valid, {
     ...attestation,
