@@ -675,6 +675,8 @@ export class ResizeController {
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private isFirstFire = true;
   private lastContainer = { width: 0, height: 0 };
+  /** The element being observed — held for {@link reportedGrid}. */
+  private container: HTMLElement | null = null;
   private lastCell = { width: 8, height: 16 };
 
   constructor(controller: TerminalController) {
@@ -684,6 +686,10 @@ export class ResizeController {
   observe(container: HTMLElement, cellWidth: number, cellHeight: number): void {
     if (cellWidth <= 0 || cellHeight <= 0) { return; }
     this.dispose();
+    // Held for {@link reportedGrid}: the inset is applied to this element's
+    // padding, so reading it back is what tells the reported size what the
+    // content box left out.
+    this.container = container;
     this.isFirstFire = true;
     this.lastCell = { width: cellWidth, height: cellHeight };
     this.lastContainer = { width: 0, height: 0 };
@@ -697,7 +703,10 @@ export class ResizeController {
         // against the padded box the grid draws wider than the well that holds
         // it — #1092, in the fixture. Use the live cell size (refreshed by
         // remeasure() on font-size zoom), not the stale observe()-time params.
-        const grid = gridFor(size, this.lastCell);
+        // One geometry for both halves — see {@link reportedGrid}: the capsule
+        // band is excluded from the grid *and* from what the session is told,
+        // so neither the drawing nor the tty follows the scroll mode.
+        const grid = this.reportedGrid();
         if (grid === null) { continue; }
 
         // Local grid first, on EVERY fire — the container has already changed
@@ -714,7 +723,7 @@ export class ResizeController {
           // still provisional, because then it is a size the pane never had:
           // see {@link metricsAreProvisional}, which is also where the report
           // that *does* land comes from.
-          if (!this.metricsAreProvisional()) { this.remeasure(); }
+          if (!this.metricsAreProvisional()) { this.reportSize(); }
           continue;
         }
 
@@ -723,16 +732,67 @@ export class ResizeController {
         // Publish to the atom the state machine reads on (re)attach so
         // client.attach / beginRelay carry the current viewport size. Covers
         // both the immediate first fire and the debounced subsequent fires.
-        this.controller.publishViewportResize(grid.cols, grid.rows);
-
-        // PTY notification debounced, so a drag sends one final size.
-        if (this.debounceTimer) { clearTimeout(this.debounceTimer); }
-        this.debounceTimer = setTimeout(() => {
-          this.controller.sendResize(grid.cols, grid.rows);
-        }, 200);
+        const reported = this.reportedGrid();
+        if (reported !== null) {
+          this.controller.publishViewportResize(reported.cols, reported.rows);
+          // PTY notification debounced, so a drag sends one final size.
+          if (this.debounceTimer) { clearTimeout(this.debounceTimer); }
+          this.debounceTimer = setTimeout(() => {
+            this.controller.sendResize(reported.cols, reported.rows);
+          }, 200);
+        }
       }
     });
     this.observer.observe(container);
+  }
+
+  /**
+   * The size this client reports to the PTY and to the attach atom — the
+   * container's geometry **without the capsule's dock inset**.
+   *
+   * The terminal well applies the capsule's clearance as `padding-bottom` on
+   * the very element this controller observes, and `contentRect` excludes
+   * padding — so the scroll mode becomes the grid size: following reserved the
+   * capsule's band, history released it, and the 60 px between them is 3 rows
+   * at our 20 px cell. Both are honest measurements of the content box, which
+   * is why nothing downstream could tell them apart (#1503).
+   *
+   * That inset is a *display* clearance for chrome that is drawn over the
+   * well, and `terminal-surface.md` §Resize gives the rule: a **container**
+   * resize updates the local grid and the remote PTY. This container never
+   * resized — the capsule docked and undocked — so the PTY keeps the size the
+   * user types at, and browsing history changes only what is drawn.
+   *
+   * The geometry is the well **minus the capsule's band**, in both modes, and
+   * both halves use it. Sizing to the well instead — the obvious first reading
+   * of "exclude the inset" — was measured on this change and is wrong: 35 rows
+   * of 20 px drawn into a 646 px box, with the cursor in the rows the padding
+   * clips. The grid has to fit what is visible, and reserving the band is what
+   * makes it visible; so the band comes off the height whichever mode is on,
+   * and the three rows history mode frees are blank space where the capsule
+   * was rather than content behind a clip.
+   */
+  private reportedGrid(): { cols: number; rows: number } | null {
+    const container = this.container;
+    if (container === null) { return null; }
+    // Both numbers come from the stylesheet rather than from asking the capsule
+    // which mode it is in: the band the capsule needs, and how much of it this
+    // mode currently reserves as padding. Following reserves it (so the content
+    // box is already short by exactly that much); history releases it (so the
+    // content box is the whole well). Subtracting the band from both gives one
+    // geometry, and it is the one that fits what is *visible* — which is the
+    // point: the grid must never draw rows the well is not showing.
+    const style = getComputedStyle(container);
+    const number = (value: string): number => {
+      const parsed = Number.parseFloat(value);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+    };
+    const reserved = number(style.paddingBottom);
+    const band = number(style.getPropertyValue('--nession-local-terminal-capsule-occlusion'));
+    return gridFor(
+      { width: this.lastContainer.width, height: this.lastContainer.height + reserved - band },
+      this.lastCell,
+    );
   }
 
   /**
@@ -778,17 +838,34 @@ export class ResizeController {
     const cell = this.controller.cellDimensions;
     if (cell.width <= 0 || cell.height <= 0) { return; }
     this.lastCell = cell;
-    const grid = gridFor({ width, height }, cell);
+    // The cell box changed (they all do after a zoom), so lastContainer's own
+    // geometry is unchanged — the same read `reportedGrid` makes.
+    const grid = this.reportedGrid();
     if (grid === null) { return; }
+    // One geometry for the grid and for what the session is told — the capsule
+    // band is excluded from both (#1503).
+    this.controller.resizeLocal(grid.cols, grid.rows);
+    this.reportSize();
+  }
+
+  /**
+   * Publish and send the reported size now — the immediate half of a report,
+   * used where waiting is wrong (the first size, a font-size zoom) rather than
+   * the debounced drag path.
+   */
+  private reportSize(): void {
+    const reported = this.reportedGrid();
+    if (reported === null) { return; }
     // Keep the atom fresh after a font-size zoom so a (re)attach uses the
     // recomputed cell count, not the stale pre-zoom size.
-    this.controller.publishViewportResize(grid.cols, grid.rows);
-    this.controller.resize(grid.cols, grid.rows);
+    this.controller.publishViewportResize(reported.cols, reported.rows);
+    this.controller.sendResize(reported.cols, reported.rows);
   }
 
   dispose(): void {
     this.observer?.disconnect();
     this.observer = null;
+    this.container = null;
     if (this.debounceTimer) { clearTimeout(this.debounceTimer); }
     this.debounceTimer = null;
   }
