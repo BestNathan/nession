@@ -5,10 +5,9 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { auditIssue } from './issue-contract.mjs';
-import { fetchGitHubIssue as fetchIssue, createIssueReadTool } from './lib/agent/tools/gh/issue/read.mjs';
-import { createIssueUpdateTool, candidateIssue, issueLabelNames as labelNames } from './lib/agent/tools/gh/issue/update.mjs';
-import { createIssueCommentTool } from './lib/agent/tools/gh/issue/comment.mjs';
-import { renderIssueAuditPrompt } from './lib/agent/tasks/issue-audit.mjs';
+import { fetchGitHubIssue as fetchIssue } from './lib/agent/tools/gh/issue/read.mjs';
+import { candidateIssue, issueLabelNames as labelNames } from './lib/agent/tools/gh/issue/update.mjs';
+import { renderIssueAuditPrompt, issueAuditTools } from './lib/agent/tasks/issue-audit.mjs';
 import { promptTelemetry } from './lib/agent/telemetry/prompt.mjs';
 import { loadCursorSdk, runCursorSession, normalizeCursorSdkModule, selectCursorModel as modelSelectionFromCatalog, normalizeCursorUsage, normalizeCursorCost } from './lib/agent/providers/cursor.mjs';
 import { buildAgentWorkflowTelemetry, writeAgentWorkflowTelemetry } from './agent-workflow-telemetry.mjs';
@@ -102,14 +101,6 @@ async function loadCursorSdkForAudit() {
 
 function promptFor(issue, audit) {
   return renderIssueAuditPrompt(issue, audit, 'cursor').text;
-}
-
-function createCustomTools(issue) {
-  return {
-    read_target_issue: createIssueReadTool(issue),
-    update_target_issue: createIssueUpdateTool(issue),
-    comment_target_issue: createIssueCommentTool(issue),
-  };
 }
 
 function normalizeUsage(usage) {
@@ -219,7 +210,7 @@ async function runCursorAgent(issue, outDir) {
     workspace: process.cwd(),
     storePath: path.join(outDir, 'cursor-store'),
     tools: ['read', 'grep', 'glob', 'ls', 'mcp'],
-    customTools: createCustomTools(issue),
+    customTools: issueAuditTools(issue),
     prompt: promptFor(issue, auditIssue(issue)),
   });
   const normalized = {

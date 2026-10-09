@@ -36,9 +36,13 @@ export function normalizeClaudeUsage(envelope) {
   };
 }
 
+export function buildClaudeCliArgs({ prompt, model, maxTurns, allowedTools, disallowedTools }) {
+  return ['-p', prompt, '--output-format', 'json', '--max-turns', String(maxTurns), '--model', model,
+    '--allowedTools', allowedTools, '--disallowedTools', disallowedTools];
+}
+
 export function runClaudeCli({ prompt, model, maxTurns, allowedTools, disallowedTools, cwd, env }) {
-  const proc = spawnSync('claude', ['-p', prompt, '--output-format', 'json', '--max-turns', String(maxTurns), '--model', model,
-    '--allowedTools', allowedTools, '--disallowedTools', disallowedTools], {
+  const proc = spawnSync('claude', buildClaudeCliArgs({ prompt, model, maxTurns, allowedTools, disallowedTools }), {
     cwd, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024,
     env: { ...process.env, ...env, DISABLE_AUTOUPDATER: '1', ANTHROPIC_MODEL: model, ANTHROPIC_DEFAULT_SONNET_MODEL: model },
   });

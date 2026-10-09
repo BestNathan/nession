@@ -1,4 +1,5 @@
 import { renderAgentPrompt } from '../prompt/index.mjs';
+import { createIssueReadTool } from '../tools/gh/issue/read.mjs';
 import { createIssueUpdateTool } from '../tools/gh/issue/update.mjs';
 import { createIssueCommentTool } from '../tools/gh/issue/comment.mjs';
 
@@ -56,4 +57,13 @@ export async function applyIssueAuditProposal(issue, envelope, repository = proc
   if (proposal.comment != null) {
     await createIssueCommentTool(issue, repository).execute({ body: proposal.comment });
   }
+}
+
+
+export function issueAuditTools(issue, repository = process.env.GITHUB_REPOSITORY) {
+  return {
+    read_target_issue: createIssueReadTool(issue, repository),
+    update_target_issue: createIssueUpdateTool(issue, repository),
+    comment_target_issue: createIssueCommentTool(issue, repository),
+  };
 }

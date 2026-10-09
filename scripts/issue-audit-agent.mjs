@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { auditIssue } from './issue-contract.mjs';
 import { fetchGitHubIssue as fetchIssue } from './lib/agent/tools/gh/issue/read.mjs';
-import { parseClaudeJson, normalizeClaudeUsage, runClaudeCli } from './lib/agent/providers/claude-code.mjs';
+import { normalizeClaudeUsage, runClaudeCli, buildClaudeCliArgs } from './lib/agent/providers/claude-code.mjs';
 import { renderIssueAuditPrompt, applyIssueAuditProposal } from './lib/agent/tasks/issue-audit.mjs';
 import { promptTelemetry } from './lib/agent/telemetry/prompt.mjs';
 import { buildAgentWorkflowTelemetry, writeAgentWorkflowTelemetry } from './agent-workflow-telemetry.mjs';
@@ -149,17 +149,6 @@ function claudeRequestModel() {
   return process.env.ISSUE_AUDIT_CLAUDE_MODEL || 'claude-sonnet-5';
 }
 
-function buildClaudeArgs(issue, audit, allowed, disallowed) {
-  return [
-    '-p', promptFor(issue, audit),
-    '--output-format', 'json',
-    '--max-turns', process.env.ISSUE_AUDIT_MAX_TURNS || '20',
-    '--model', claudeRequestModel(),
-    '--allowedTools', allowed,
-    '--disallowedTools', disallowed,
-  ];
-}
-
 function runAgent(issue) {
   ensureProviderConfig();
   const allowed = 'Read,Glob,Grep';
@@ -195,9 +184,10 @@ async function selfTest() {
   process.env.GITHUB_REPOSITORY ||= 'BestNathan/nession';
   const previous = process.env.ISSUE_AUDIT_CLAUDE_MODEL;
   process.env.ISSUE_AUDIT_CLAUDE_MODEL = 'claude-sonnet-5';
-  const args = buildClaudeArgs({ number: 1, labels: [], body: '', url: 'https://example.test/1' }, { errors: [] }, 'Read', 'Edit');
+  const args = buildClaudeCliArgs({ prompt: promptFor({ number: 1, labels: [], body: '', url: 'https://example.test/1' }, { errors: [] }), model: claudeRequestModel(), maxTurns: 20, allowedTools: 'Read,Glob,Grep', disallowedTools: 'Bash' });
   assert.equal(args[args.indexOf('--model') + 1], 'claude-sonnet-5');
   assert.match(args[1], /By turn 8, stop investigating/);
+  assert.equal(args[args.indexOf('--disallowedTools') + 1], 'Bash');
   if (previous == null) delete process.env.ISSUE_AUDIT_CLAUDE_MODEL;
   else process.env.ISSUE_AUDIT_CLAUDE_MODEL = previous;
   if (oldRepo == null) delete process.env.GITHUB_REPOSITORY;

@@ -1,7 +1,7 @@
 import './tools/gh/issue/selftest.mjs';
 import assert from 'node:assert/strict';
 import { renderAgentPrompt } from './prompt/index.mjs';
-import { renderIssueAuditPrompt, applyIssueAuditProposal } from './tasks/issue-audit.mjs';
+import { renderIssueAuditPrompt, applyIssueAuditProposal, issueAuditTools } from './tasks/issue-audit.mjs';
 import { renderAcceptancePrompt } from './tasks/acceptance.mjs';
 import { candidateIssue, createIssueUpdateTool } from './tools/gh/issue/update.mjs';
 import { createIssueCommentTool } from './tools/gh/issue/comment.mjs';
@@ -41,6 +41,7 @@ const candidate = candidateIssue(issue, 'Bug: fixed', 'body', ['bug', 'ci']);
 assert.deepEqual(candidate.labels.map((value) => value.name).sort(), ['bug', 'ci', 'in-progress']);
 assert.deepEqual(issue.labels.map((value) => value.name), ['bug', 'web', 'in-progress']);
 
+assert.deepEqual(Object.keys(issueAuditTools(issue, 'example/repo')).sort(), ['comment_target_issue', 'read_target_issue', 'update_target_issue']);
 const update = createIssueUpdateTool(issue, 'example/repo');
 const comment = createIssueCommentTool(issue, 'example/repo');
 const read = createIssueReadTool(issue, 'example/repo');
