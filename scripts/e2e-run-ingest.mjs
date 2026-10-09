@@ -91,6 +91,14 @@ export function validateScenario(raw, source) {
   if (raw.config.generated_lines > 500 || raw.config.samples_max > 24 ||
       raw.config.transport !== 'Relay' || raw.config.reload !== true)
     throw new Error('unbounded or unsupported Scenario configuration');
+  const configHash = hash(JSON.stringify({
+    lines: raw.config.generated_lines, samples: raw.config.samples_max,
+    transport: raw.config.transport, reload: raw.config.reload,
+  }, null, 2) + '\n');
+  if (raw.config_sha256 !== configHash)
+    throw new Error('Scenario input digest mismatch');
+  if (raw.observations.length === 0 && raw.status === 'Completed')
+    throw new Error('no observed evidence for Completed Scenario');
   if (!Array.isArray(raw.observations) || raw.observations.length > 24)
     throw new Error('observation count/storage bound exceeded');
   if (raw.observations.length !== raw.observation_count)
@@ -110,6 +118,21 @@ export function validateScenario(raw, source) {
     privacy: 'whitelisted counters/timestamps/digests only; no terminal bytes',
   };
 }
+// A retry may only reuse a deterministic path if its exact bytes match.
+// This check is used by trusted ingestion AND the negative-test suite.
+export function assertImmutableCollision(existing, proposed) {
+  if (existing === null) return 'append';
+  if (!Buffer.isBuffer(existing) || !Buffer.isBuffer(proposed))
+    throw new Error('immutable record collision check requires bytes');
+  if (!existing.equals(proposed)) throw new Error('Immutable record collision: divergent bytes');
+  return 'idempotent';
+}
+export function checkExistingFile(existingPath, candidatePath) {
+  const proposed = fs.readFileSync(candidatePath);
+  const existing = fs.existsSync(existingPath) ? fs.readFileSync(existingPath) : null;
+  return assertImmutableCollision(existing, proposed);
+}
+
 export function recordPaths(record) {
   const date = record.finished_at.slice(0, 10);
   const prefix = 'runs/' + date + '/' + record.run_id + '-' + record.run_attempt +
@@ -161,10 +184,18 @@ function selfTest() {
     target_sha: source.target_sha, scenario_revision: source.target_sha,
     run_id: 12, run_attempt: 1, run_index: 1,
     started_at: '2026-10-09T00:00:00.000Z', finished_at: '2026-10-09T00:01:00.000Z',
-    status: 'Completed', config_sha256: 'c'.repeat(64), config: { generated_lines: 240, samples_max: 12, transport: 'Relay', reload: true },
+    status: 'Completed', config_sha256: hash(JSON.stringify({ lines: 240, samples: 12, transport: 'Relay', reload: true }, null, 2) + '\n'), config: { generated_lines: 240, samples_max: 12, transport: 'Relay', reload: true },
     observations: [observation('before-reload'), observation('after-reload')], observation_count: 2 };
   assert.equal(validateScenario(valid, source).status, 'Completed');
   assert.throws(() => validateScenario({ ...valid, run_id: 99 }, source), /identity/);
+  assert.throws(() => validateScenario({ ...valid, run_attempt: 2 }, source), /identity/);
+  assert.throws(() => validateScenario({ ...valid, target_sha: 'b'.repeat(40) }, source), /identity/);
+  assert.throws(() => validateScenario({ ...valid, config_sha256: 'c'.repeat(64) }, source), /input digest/);
+  assert.throws(() => validateScenario({ ...valid, evaluation: 'Pass' }, source), /non-observational/);
+  const b = Buffer.from('same record');
+  assert.equal(assertImmutableCollision(null, b), 'append');
+  assert.equal(assertImmutableCollision(b, Buffer.from(b)), 'idempotent');
+  assert.throws(() => assertImmutableCollision(b, Buffer.from('tampered')), /divergent bytes/);
   assert.throws(() => validateScenario({ ...valid, observations: [] }, source), /count mismatch/);
   assert.throws(() => validateScenario({ ...valid, observations:
     [{ ...observation('before-reload'), terminal_output: 'secret' }, observation('after-reload')] }, source), /forbidden/);
@@ -176,6 +207,10 @@ function selfTest() {
     repository: { full_name: 'BestNathan/nession' },
     head_repository: { full_name: 'BestNathan/nession' } } };
   assert.equal(sourceIdentity(event, 'BestNathan/nession').run_id, 12);
+  assert.throws(() => sourceIdentity({ workflow_run: { ...event.workflow_run,
+    event: 'workflow_run' } }, 'BestNathan/nession'), /unsupported/);
+  assert.throws(() => sourceIdentity({ workflow_run: { ...event.workflow_run,
+    head_branch: 'other-repo' } }, 'BestNathan/nession'), /invalid branch/);
   assert.throws(() => sourceIdentity({ workflow_run: { ...event.workflow_run,
     head_repository: { full_name: 'other/repo' } } }, 'BestNathan/nession'), /repository mismatch/);
   return { valid, event };
@@ -198,6 +233,11 @@ async function selfTestAttestation() {
 async function main() {
   const [cmd, input, eventFile, output, indexFile] = process.argv.slice(2);
   if (cmd === 'self-test') return selfTestAttestation();
+  if (cmd === 'check-collision') {
+    if (!input || !eventFile) throw new Error('check-collision EXISTING CANDIDATE required');
+    console.log(checkExistingFile(input, eventFile));
+    return;
+  }
   if (!['attest', 'enrich'].includes(cmd) || !input || !eventFile)
     throw new Error('usage: e2e-run-ingest.mjs self-test|attest INPUT EVENT|enrich INPUT EVENT OUT INDEX');
   const raw = JSON.parse(fs.readFileSync(input, 'utf8'));
