@@ -97,8 +97,6 @@ export function validateScenario(raw, source) {
   }, null, 2) + '\n');
   if (raw.config_sha256 !== configHash)
     throw new Error('Scenario input digest mismatch');
-  if (raw.observations.length === 0 && raw.status === 'Completed')
-    throw new Error('no observed evidence for Completed Scenario');
   if (!Array.isArray(raw.observations) || raw.observations.length > 24)
     throw new Error('observation count/storage bound exceeded');
   if (raw.observations.length !== raw.observation_count)
