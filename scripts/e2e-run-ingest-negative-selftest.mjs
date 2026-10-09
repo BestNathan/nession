@@ -23,6 +23,7 @@ const event = { workflow_run: {
   id: 12, run_attempt: 1, head_sha: sha,
   repository: { full_name: 'BestNathan/nession' },
   head_repository: { full_name: 'BestNathan/nession' },
+  path: '.github/workflows/e2e-scenario-smoke.yml',
 }};
 const raw = {
   schema_version: 1, kind: 'e2e_scenario_observation',
@@ -34,6 +35,11 @@ const raw = {
 };
 const repo = 'BestNathan/nession';
 const source = sourceIdentity(event, repo);
+for (const path of [undefined, '', 'other/.github/workflows/e2e-scenario-smoke.yml',
+  '.github/workflows/e2e-scenario-smoke.yml.evil', '.github/workflows/other.yml']) {
+  assert.throws(() => sourceIdentity({ workflow_run: { ...event.workflow_run, path } }, repo),
+    /unexpected source workflow path/);
+}
 assert.equal(validateScenario(raw, source).status, 'Completed');
 const fail = (change, pattern = /identity|digest|non-observational|forbidden|observation/) =>
   assert.throws(() => validateScenario(change, source), pattern);

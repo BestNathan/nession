@@ -645,11 +645,16 @@ describe('TerminalController', () => {
       vi.advanceTimersByTime(200);
 
       // The invariant: the reported size never moved. Every size this client
-      // sent is the same one — the local grid changing is drawing, and the
-      // session was never told about it.
+      // *asks* to send is the same one — the local grid changing is drawing, and
+      // the session was never told about it.
       const sent = (transport.sendResize.mock.calls as Array<[number, number]>)
         .map(([cols, rows]) => `${cols}x${rows}`);
       expect([...new Set(sent)]).toEqual(['128x33']);
+      // What this mock cannot show is how many of those reach the wire: the
+      // transport is the layer that knows what the session already has, and it
+      // drops the repeats — see 'does not send a resize that repeats the size
+      // already on the wire (#1503)' and 'treats the size an attach stated as
+      // already known' in the ConnectionManager suite, which assert the count.
       vi.useRealTimers();
     } finally {
       vi.useRealTimers();

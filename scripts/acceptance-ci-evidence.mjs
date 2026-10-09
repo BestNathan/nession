@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 
 const MAX_RUNS_PER_SHA = 20;
 const MAX_ASSOCIATED_PULLS = 5;
@@ -37,7 +37,7 @@ function compactRuns(runs, expectedSha) {
     .slice(0, MAX_RUNS_PER_SHA);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map() }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [] }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -62,6 +62,7 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     target_sha: sha,
     direct_runs: compactRuns(directRuns, sha),
     pull_requests: associated,
+    source_ancestry: sourceAncestry,
   };
 }
 
@@ -88,6 +89,43 @@ async function workflowRunsForSha(repo, sha) {
   return payload.workflow_runs ?? [];
 }
 
+// Exact ancestor SHAs may be declared only in the Issue Success Criteria.
+// Never scan mutable report text, chat comments or PR descriptions for proof targets.
+export function requestedAncestorsFromIssue(body) {
+  const section = String(body || '').match(/###? Success Criteria\s*\n([\s\S]*?)(?=\n## Acceptance Report|$)/)?.[1] || '';
+  const hashes = [];
+  for (const line of section.split('\n')) {
+    if (!/^- \[[ x]\] SC-\d+\b/i.test(line) || !/\bancestors?\b/i.test(line)) continue;
+    for (const match of line.matchAll(/\b[0-9a-f]{40}\b/g)) hashes.push(match[0]);
+  }
+  const unique = [...new Set(hashes)];
+  if (unique.length > 8) throw new Error('excessive ancestor proof targets in Issue criteria');
+  return unique;
+}
+
+// Read-only, fail-closed Git object proof. A detached checkout is valid;
+// only the actual merge-base exit status and exact input SHA establish ancestry.
+export function checkGitAncestor(workspace, targetSha, requiredSha, runner = spawnSync) {
+  if (!/^[0-9a-f]{40}$/.test(targetSha) || !/^[0-9a-f]{40}$/.test(requiredSha))
+    throw new Error('ancestry proof requires exact 40-character SHAs');
+  const result = runner('git', ['-C', workspace, 'merge-base', '--is-ancestor', requiredSha, targetSha], {
+    encoding: 'utf8',
+  });
+  return {
+    target_sha: targetSha, ancestor_sha: requiredSha, verified_by: 'git merge-base --is-ancestor',
+    is_ancestor: !result.error && result.status === 0,
+    status: result.error ? 'error' : result.status === 0 ? 'verified' :
+      result.status === 1 ? 'not-ancestor' : 'unknown-object-or-error',
+  };
+}
+async function collectSourceAncestry(repo, workspace, targetSha) {
+  const issueNumber = String(process.env.ISSUE_NUMBER || '').trim();
+  if (!/^\d+$/.test(issueNumber)) return [];
+  const issue = await githubGet('/repos/' + repo + '/issues/' + issueNumber);
+  const wanted = requestedAncestorsFromIssue(issue.body);
+  return wanted.map((sha) => checkGitAncestor(workspace, targetSha, sha));
+}
+
 async function collectCommand(workspace, outFile) {
   const repo = requireText(process.env.GITHUB_REPOSITORY, 'GITHUB_REPOSITORY');
   const sha = execFileSync('git', ['-C', workspace, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
@@ -101,7 +139,8 @@ async function collectCommand(workspace, outFile) {
       pullRunsBySha.set(headSha, await workflowRunsForSha(repo, headSha));
     }
   }
-  const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls, pullRunsBySha });
+  const sourceAncestry = await collectSourceAncestry(repo, workspace, sha);
+  const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls, pullRunsBySha, sourceAncestry });
   fs.writeFileSync(outFile, JSON.stringify(evidence, null, 2) + '\n');
   console.log(
     'collected acceptance CI evidence for ' + sha +
@@ -136,7 +175,31 @@ function selfTest() {
   assert.deepEqual(evidence.direct_runs.map((run) => run.id), [2]);
   assert.deepEqual(evidence.pull_requests[0].runs.map((run) => run.id), [4]);
   assert.throws(() => normalizeCiEvidence({ targetSha: '' }), /targetSha is required/);
-  console.log('acceptance-ci-evidence self-test: 5 cases passed');
+  // Real criteria select only pinned source SHA ancestors; unrelated report
+  // logs cannot inject extra proof targets.
+  const left = 'a'.repeat(40), right = 'b'.repeat(40), head = 'c'.repeat(40);
+  assert.deepEqual(requestedAncestorsFromIssue(
+    '### Success Criteria\n- [ ] SC-01 Exact ' + left + ' and ' + right +
+    ' are ancestors of the merge commit.\n## Acceptance Report\n' +
+    '- [ ] SC-99 fake ' + head + ' ancestors'), [left, right]);
+  assert.deepEqual(requestedAncestorsFromIssue('### Success Criteria\n- [ ] SC-02 No Git ancestry claim.'), []);
+  assert.equal(checkGitAncestor('/tmp', head, left,
+    () => ({status: 0})).is_ancestor, true);
+  assert.equal(checkGitAncestor('/tmp', head, left,
+    () => ({status: 1})).is_ancestor, false);
+  assert.equal(checkGitAncestor('/tmp', head, left,
+    () => ({status: 128})).status, 'unknown-object-or-error');
+  assert.equal(checkGitAncestor('/tmp', head, left,
+    () => ({error: new Error('git unavailable'), status: null})).is_ancestor, false);
+  assert.throws(() => checkGitAncestor('/tmp', 'not-a-sha', left), /40-character SHAs/);
+  assert.throws(() => requestedAncestorsFromIssue('### Success Criteria\n- [ ] SC-01 ' +
+    Array.from({length: 9}, (_, i) => String(i).repeat(40)).join(' ') +
+    ' are ancestors'), /excessive/);
+  assert.deepEqual(normalizeCiEvidence({targetSha:head, sourceAncestry:[
+    checkGitAncestor('/tmp', head, left, () => ({status:0})),
+  ]}).source_ancestry.map(x => x.is_ancestor), [true]);
+
+  console.log('acceptance-ci-evidence self-test: collector, bounded criteria and positive/negative Git ancestry passed');
 }
 
 async function main() {
