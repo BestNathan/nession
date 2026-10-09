@@ -62,6 +62,8 @@ function invokeScenario(repeat){
         assert.match(o.backend.sha256,/^[a-f0-9]{64}$/);
       }
     }
+    // The Case owns the scratch evidence; never persist it in the product tree.
+    process.once('exit',()=>fs.rmSync(dir,{recursive:true,force:true}));
     return {target,runtime,records,dir};
   }catch(e){fs.rmSync(dir,{recursive:true,force:true});throw e;}
 }
