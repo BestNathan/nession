@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 37889787260,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/1498-terminal-replay-scenario",
+    "target_sha": "ea1847605702510902927d48b3bce014653b9dcb",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/37889787260",
+    "scenario_tree_sha": "96ae71e441342a6b448289c64cc8ca2ac8f00659",
+    "original_sha256": "363f37cf7911ccaa173df3d0ea01cb70b4096a9ffa203a3302cd5bf5f167dc56"
+  },
+  "record": "runs/2026-10-09/37889787260-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "bca9a1cf867e5168cd5029a68cf40a4c298bf9eed4de82e1f5cb4fb4050e1eb9"
+}
