@@ -69,6 +69,9 @@ async function validate() {
       }
     }
   }
+  // Canonical validation also tests the shared Runtime's pure config/ownership invariants.
+  // Keep the stdout schema one JSON object; the child self-test output is captured.
+  execFileSync(process.execPath, [at('e2e', 'runner', 'runtime', 'full-stack.js'), 'self-test'], { cwd: root, encoding: 'utf8' });
   console.log(JSON.stringify({ status: 'Validated', case_count: cases.length,
     layout: state.caseLayout, scenario_count: state.scenarios.length }));
 }
