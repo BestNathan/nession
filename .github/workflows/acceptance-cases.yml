@@ -227,8 +227,11 @@ jobs:
           cd ..
           cargo build -p nession-server -p nession-agent
 
+      # Runtime/Protocol verifiers may invoke a real Browser/Terminal Scenario
+      # transitively, even when their manifest type is not 'browser'. Ensure
+      # Playwright is installed for every selected Case, not just browser types.
       - name: Install browser verifier runtime
-        if: steps.select.outputs.needs_browser == 'true'
+        if: steps.select.outputs.count != '0'
         run: |
           set -euo pipefail
           cd workspace/e2e
