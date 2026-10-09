@@ -6,6 +6,7 @@ import path from 'node:path';
 import { buildAgentWorkflowTelemetry, writeAgentWorkflowTelemetry } from './agent-workflow-telemetry.mjs';
 import { renderAcceptancePrompt } from './lib/agent/tasks/acceptance.mjs';
 import { promptTelemetry } from './lib/agent/telemetry/prompt.mjs';
+import { providerScopedRunName } from './lib/agent/telemetry/run-name.mjs';
 import { runClaudeCli, normalizeClaudeUsage } from './lib/agent/providers/claude-code.mjs';
 import { runCursorSession, selectCursorModel } from './lib/agent/providers/cursor.mjs';
 
@@ -130,6 +131,13 @@ function telemetryInput(context, providerMeta, result, status = 'completed') {
   return {
     workflow_id: process.env.NSESSION_AGENT_WORKFLOW_ID || 'requirement-acceptance',
     github_workflow: process.env.GITHUB_WORKFLOW || 'Acceptance',
+    unique_run_name: providerScopedRunName({
+      workflowId: process.env.NSESSION_AGENT_WORKFLOW_ID || 'requirement-acceptance',
+      runId: process.env.GITHUB_RUN_ID,
+      runAttempt: process.env.GITHUB_RUN_ATTEMPT,
+      taskId: 'issue-' + context.issue.number + '-' + context.stage,
+      provider: providerMeta.provider,
+    }),
     job: 'execute',
     task: {
       id: 'issue-' + context.issue.number + '-' + context.stage,
