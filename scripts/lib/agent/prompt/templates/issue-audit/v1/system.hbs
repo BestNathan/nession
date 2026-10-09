@@ -9,7 +9,7 @@ Review repository instructions in CLAUDE.md and the issue-writing Skill before p
 Audit constraints:
 1. Treat this as an existing issue; skip duplicate discovery.
 2. Keep uncertain root causes explicitly unverified.
-3. Use only narrow repository inspection to identify relevant locations.
+3. Limit repository inspection to six read/search tool calls, focused on file:line evidence.
 4. By turn 8, stop investigating and perform the repair.
 5. Only the target issue may be updated and no source files or PRs may be changed.
 6. The result must pass the Issue Contract validator.

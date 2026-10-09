@@ -27,7 +27,12 @@ export function createIssueUpdateTool(issue, repository = process.env.GITHUB_REP
       required: ['title', 'body', 'labels'],
       additionalProperties: false,
     },
-    async execute({ title, body, labels }) {
+    async execute(input) {
+      if (!input || typeof input !== 'object' || Array.isArray(input) ||
+          Object.keys(input).some((key) => !['title', 'body', 'labels'].includes(key))) {
+        throw new Error('Unauthorized Issue update tool arguments');
+      }
+      const { title, body, labels } = input;
       if (typeof title !== 'string' || !title.trim() || typeof body !== 'string' || !body.trim()) {
         throw new Error('Issue title and body must be non-empty strings');
       }

@@ -10,7 +10,10 @@ export function createIssueCommentTool(issue, repository = process.env.GITHUB_RE
       required: ['body'],
       additionalProperties: false,
     },
-    async execute({ body }) {
+    async execute(input) {
+      if (!input || typeof input !== 'object' || Array.isArray(input) ||
+          Object.keys(input).some((key) => key !== 'body')) throw new Error('Unauthorized Issue comment tool arguments');
+      const { body } = input;
       if (typeof body !== 'string' || !body.trim() || body.length > 8000) {
         throw new Error('Comment must be non-empty and at most 8000 characters');
       }

@@ -15,7 +15,10 @@ export function createIssueReadTool(issue, repository = process.env.GITHUB_REPOS
   return {
     description: 'Read the current fixed target Issue; this tool cannot select another Issue.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-    async execute() {
+    async execute(input = {}) {
+      if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).length) {
+        throw new Error('Unauthorized Issue read tool arguments');
+      }
       const current = fetchGitHubIssue(issue.number, repository);
       return JSON.stringify(current);
     },

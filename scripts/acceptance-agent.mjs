@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { buildAgentWorkflowTelemetry, writeAgentWorkflowTelemetry } from './agent-workflow-telemetry.mjs';
 import { renderAcceptancePrompt } from './lib/agent/tasks/acceptance.mjs';
+import { promptTelemetry } from './lib/agent/telemetry/prompt.mjs';
 import { runClaudeCli, normalizeClaudeUsage } from './lib/agent/providers/claude-code.mjs';
 import { loadCursorSdk, selectCursorModel, normalizeCursorUsage, normalizeCursorCost } from './lib/agent/providers/cursor.mjs';
 
@@ -173,6 +174,7 @@ function telemetryInput(context, providerMeta, result, status = 'completed') {
     },
     agent: {
       provider: providerMeta.provider,
+      prompt: promptTelemetry(renderAcceptancePrompt(context)),
       model: providerMeta.model,
       run_id: providerMeta.run_id,
       request_id: providerMeta.request_id,

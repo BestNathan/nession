@@ -6,7 +6,8 @@ import path from 'node:path';
 import { auditIssue } from './issue-contract.mjs';
 import { fetchGitHubIssue as fetchIssue } from './lib/agent/tools/gh/issue/read.mjs';
 import { parseClaudeJson, normalizeClaudeUsage, runClaudeCli } from './lib/agent/providers/claude-code.mjs';
-import { renderIssueAuditPrompt } from './lib/agent/tasks/issue-audit.mjs';
+import { renderIssueAuditPrompt, applyIssueAuditProposal } from './lib/agent/tasks/issue-audit.mjs';
+import { promptTelemetry } from './lib/agent/telemetry/prompt.mjs';
 import { buildAgentWorkflowTelemetry, writeAgentWorkflowTelemetry } from './agent-workflow-telemetry.mjs';
 
 function envNumber(name) {
@@ -109,6 +110,7 @@ function writeRecord(outDir, record) {
         },
         agent: {
           provider: agent.provider || 'deepseek',
+          prompt: promptTelemetry(renderIssueAuditPrompt({ number: record.issue.number, url: '', labels: [], body: '' }, { errors: [] }, 'deepseek')),
           model: {
             id: agent.model ?? null,
             request_model: agent.claude_request_model ?? null,
@@ -160,16 +162,8 @@ function buildClaudeArgs(issue, audit, allowed, disallowed) {
 
 function runAgent(issue) {
   ensureProviderConfig();
-  const allowed = [
-    'Read', 'Glob', 'Grep',
-    `Bash(gh issue edit ${issue.number}:*)`,
-    `Bash(gh issue comment ${issue.number}:*)`,
-  ].join(',');
-  const disallowed = [
-    'Edit', 'Write', 'NotebookEdit', 'WebFetch', 'WebSearch', 'mcp__playwright__*',
-    'Bash(git:*)', 'Bash(gh pr:*)', 'Bash(gh api:*)',
-    'Bash(rm:*)', 'Bash(curl:*)', 'Bash(wget:*)',
-  ].join(',');
+  const allowed = 'Read,Glob,Grep';
+  const disallowed = 'Edit,Write,NotebookEdit,Bash,WebFetch,WebSearch,mcp__playwright__*';
   const audit = auditIssue(issue);
   const requestModel = claudeRequestModel();
   const { proc: result, parsed: envelope } = runClaudeCli({
@@ -207,7 +201,7 @@ function selfTest() {
   console.log('issue-audit-agent self-test: 4 cases passed');
 }
 
-function main() {
+async function main() {
   if (process.argv[2] === 'self-test') return selfTest();
   const issueNumber = Number(process.argv[2]);
   const outDir = process.argv[3] || process.env.RUNNER_TEMP || '.issue-audit';
@@ -234,11 +228,12 @@ function main() {
   const agentStartedAt = new Date();
   try {
     claude = runAgent(issue);
+    await applyIssueAuditProposal(issue, claude);
   } catch (error) {
     const afterIssue = fetchIssue(issueNumber);
     const after = auditIssue(afterIssue);
     const message = error instanceof Error ? error.message : String(error);
-    const failed = error && typeof error === 'object' ? error.claudeResult ?? null : null;
+    const failed = claude ?? (error && typeof error === 'object' ? error.claudeResult ?? null : null);
     const usage = failed ? extractUsage(failed) : { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0 };
     const estimated = estimateCost(usage);
     writeRecord(outDir, {
@@ -303,7 +298,7 @@ function main() {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  try { main(); } catch (error) {
+  try { await main(); } catch (error) {
     console.error(error instanceof Error ? error.stack ?? error.message : error);
     process.exitCode = 1;
   }

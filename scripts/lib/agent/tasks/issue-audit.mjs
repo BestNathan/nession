@@ -1,4 +1,6 @@
 import { renderAgentPrompt } from '../prompt/index.mjs';
+import { createIssueUpdateTool } from '../tools/gh/issue/update.mjs';
+import { createIssueCommentTool } from '../tools/gh/issue/comment.mjs';
 
 const ACTIONS = {
   cursor: [
@@ -7,9 +9,9 @@ const ACTIONS = {
     'The tools are bound to issue #{number}; a different issue cannot be modified.',
   ].join('\n'),
   deepseek: [
-    'Use only permitted tools. You may edit/comment only issue #{number}.',
-    'Use gh issue edit {number} to normalize its title/body and kind/area labels.',
-    'Do not invoke gh against any other Issue.',
+    'Do not call shell or GitHub mutation tools. Return a JSON repair proposal only.',
+    'Output JSON with title, body, labels, and an optional investigation-trail comment.',
+    'The trusted harness applies it only to issue #{number} after deterministic validation.',
   ].join('\n'),
 };
 
@@ -32,4 +34,26 @@ export function renderIssueAuditPrompt(issue, audit, provider, repository = proc
       actionInstructions: ACTIONS[provider].replaceAll('{number}', String(issue.number)),
     },
   });
+}
+
+export async function applyIssueAuditProposal(issue, envelope, repository = process.env.GITHUB_REPOSITORY) {
+  const raw = envelope?.result;
+  if (typeof raw !== 'string' || !raw.trim()) {
+    throw new Error('Issue Audit model did not return a JSON repair proposal');
+  }
+  let proposal;
+  try { proposal = JSON.parse(raw.trim()); }
+  catch { throw new Error('Issue Audit repair proposal is not valid JSON'); }
+  if (!proposal || typeof proposal !== 'object' || Array.isArray(proposal)) {
+    throw new Error('Issue Audit repair proposal must be an object');
+  }
+  if (Object.keys(proposal).some((key) => !['title', 'body', 'labels', 'comment'].includes(key))) {
+    throw new Error('Issue Audit proposal contains unauthorized fields');
+  }
+  await createIssueUpdateTool(issue, repository).execute({
+    title: proposal.title, body: proposal.body, labels: proposal.labels,
+  });
+  if (proposal.comment != null) {
+    await createIssueCommentTool(issue, repository).execute({ body: proposal.comment });
+  }
 }

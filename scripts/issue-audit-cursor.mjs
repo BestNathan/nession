@@ -9,6 +9,7 @@ import { fetchGitHubIssue as fetchIssue, createIssueReadTool } from './lib/agent
 import { createIssueUpdateTool, candidateIssue, issueLabelNames as labelNames } from './lib/agent/tools/gh/issue/update.mjs';
 import { createIssueCommentTool } from './lib/agent/tools/gh/issue/comment.mjs';
 import { renderIssueAuditPrompt } from './lib/agent/tasks/issue-audit.mjs';
+import { promptTelemetry } from './lib/agent/telemetry/prompt.mjs';
 import { loadCursorSdk, normalizeCursorSdkModule, selectCursorModel as modelSelectionFromCatalog, normalizeCursorUsage, normalizeCursorCost } from './lib/agent/providers/cursor.mjs';
 import { buildAgentWorkflowTelemetry, writeAgentWorkflowTelemetry } from './agent-workflow-telemetry.mjs';
 
@@ -177,6 +178,7 @@ function writeRecord(outDir, record) {
         },
         agent: {
           provider: agent.provider || 'cursor',
+          prompt: promptTelemetry(renderIssueAuditPrompt({ number: record.issue.number, url: '', labels: [], body: '' }, { errors: [] }, 'cursor')),
           model: agent.model ?? null,
           run_id: agent.run_id ?? agent.agent_id ?? null,
           request_id: agent.request_id ?? null,

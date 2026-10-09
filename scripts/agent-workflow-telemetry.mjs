@@ -120,6 +120,7 @@ export function buildAgentWorkflowTelemetry(input) {
       run_id: input.agent?.run_id ?? null,
       request_id: input.agent?.request_id ?? null,
       status: String(input.agent?.status ?? 'unknown'),
+      prompt: input.agent?.prompt ?? null,
     },
     execution: {
       turns: nullableInteger(input.execution?.turns),
@@ -165,6 +166,13 @@ export function validateAgentWorkflowTelemetry(record) {
   }
   stableId(record?.task?.id, 'task.id');
   stableId(record?.task?.type, 'task.type');
+  if (record.agent.prompt != null) {
+    const prompt = record.agent.prompt;
+    if (!/^[a-z][a-z0-9-]*$/.test(prompt.id) || !/^v[1-9][0-9]*$/.test(prompt.version) ||
+        !/^[0-9a-f]{64}$/.test(prompt.sha256)) {
+      fail('invalid agent prompt template identity/hash');
+    }
+  }
   iso(record?.timing?.started_at);
   if (record?.timing?.finished_at != null) iso(record.timing.finished_at);
   if (typeof record?.execution?.tools?.observed !== 'boolean') {
