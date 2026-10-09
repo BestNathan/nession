@@ -1,10 +1,10 @@
 const fs = require('node:fs');
 const { test, expect } = require('@playwright/test');
-const { verifyTerminalClearance } = require('../../../shared/terminal-clearance-browser.js');
+const { verifyTerminalClearance } = require('../../../../../acceptance/shared/terminal-clearance-browser.js');
 
 test.use({ viewport: { width: 1440, height: 900 } });
 
-test('SC-08: exact-SHA Terminal/Capsule occlusion contract (#1347 SC-12)', async ({ page }, testInfo) => {
+test('SC-06: exact-SHA Terminal/Capsule occlusion contract (#1347 SC-12)', async ({ page }, testInfo) => {
   const runtime = JSON.parse(fs.readFileSync(process.env.NESSION_ACCEPTANCE_RUNTIME_FILE, 'utf8'));
   const sha = process.env.NESSION_ACCEPTANCE_TARGET_SHA;
   const evidence = await verifyTerminalClearance(page, expect, runtime, sha);

@@ -1,4 +1,4 @@
-const { verifyInfrastructureCriterion } = require('../../../shared/infrastructure-contract.js');
+const { verifyInfrastructureCriterion } = require('../../../../../acceptance/shared/infrastructure-contract.js');
 
 try {
   process.stdout.write(JSON.stringify(verifyInfrastructureCriterion('SC-17')) + '\n');

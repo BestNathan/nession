@@ -7,7 +7,7 @@ Acceptance Cases are executable, source-aligned proofs for individual Requiremen
 The canonical layout is:
 
 ```text
-acceptance/cases/<issue>/<SC>/
+e2e/acceptance/cases/<issue>/<SC>/
   case.yaml
   verify.js | verify.spec.js | ...
 ```
