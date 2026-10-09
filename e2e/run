@@ -172,7 +172,7 @@ function acceptance(args) {
   }
   try {
     return execute(process.execPath, [
-      at('acceptance', 'run-case.mjs'), '--repo-root', root, '--issue-json', issueFile,
+      at('e2e', 'acceptance', 'evaluator', 'run-case.mjs'), '--repo-root', root, '--issue-json', issueFile,
       '--issue', String(issue), '--criterion', criterion, '--target-sha', sha,
       '--stage', stage, '--run-id', process.env.GITHUB_RUN_ID ?? '1',
       '--run-attempt', process.env.GITHUB_RUN_ATTEMPT ?? '1',
