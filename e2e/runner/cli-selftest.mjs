@@ -52,13 +52,16 @@ for (const [relative, expectedSha] of Object.entries(migration.baseline_png_blob
 
 assert.ok(catalog.cases.length > 0, 'Case catalog must discover source-aligned Cases');
 assert.ok(catalog.scenarios.length > 0, 'scenario catalog must not silently disappear');
- 
+
 // CI must preserve a single command surface after the Case source-tree migration.
 // The trusted Case selector/updater stay in the workflow, but actual execution
 // must flow through ./e2e/run rather than a second legacy entrypoint.
 const caseWorkflow = fs.readFileSync(
   path.join(repo, '.github', 'workflows', 'acceptance-cases.yml'), 'utf8');
-assert.match(caseWorkflow, /node workspace\/e2e\/run acceptance/);
+assert.match(caseWorkflow, /args=\(acceptance --issue-json/);
+assert.match(caseWorkflow, /node workspace\/e2e\/run "\$\{args\[@\]\}"/);
+assert.match(caseWorkflow, /while read -r issue criterion profile; do/);
+assert.match(caseWorkflow, /done < <\(jq -r/);
 assert.doesNotMatch(caseWorkflow, /node workspace\/acceptance\/run-case\.mjs/);
 assert.match(caseWorkflow, /--profile "\$\{profile\}"/);
 assert.match(caseWorkflow, /--sha "\$\{TARGET_SHA\}"/);
