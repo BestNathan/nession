@@ -56,7 +56,24 @@ fail({ ...raw, observations: [observation('before-reload'), { ...observation('af
 assert.throws(() => sourceIdentity({ workflow_run: { ...event.workflow_run, repository: { full_name: 'attacker/repo' } } }, repo), /repository mismatch/);
 assert.throws(() => sourceIdentity({ workflow_run: { ...event.workflow_run, name: 'Untrusted workflow' } }, repo), /not a completed/);
 assert.throws(() => sourceIdentity({ workflow_run: { ...event.workflow_run, event: 'workflow_run' } }, repo), /unsupported/);
-assert.throws(() => sourceIdentity({ workflow_run: { ...event.workflow_run, head_branch: 'rogue' } }, repo), /invalid branch/);
+// Eligibility is repository ownership, not a branch name: the source workflow
+// admits any PR head branch and any dispatched ref, so every branch of this
+// repository is attestable and the violation fixture is a malformed branch.
+// The earlier name lists went red twice on the repository's own branches —
+// `chore/*` (#1542), then `test/*` — because no list can express that surface.
+for (const branch of [undefined, '', 'staging\nevil']) {
+  assert.throws(() => sourceIdentity({ workflow_run: { ...event.workflow_run, head_branch: branch } }, repo), /invalid branch/);
+}
+// ...and the valid counterexample beside it: every family the repository
+// actually uses is accepted, including the ones no list had guessed yet.
+for (const branch of ['feat/x', 'fix/x', 'chore/x', 'docs/x',
+  'test/1516-canonical-case-ingest-proof', 'refactor/one-set-environment',
+  'diag/terminal-io-p2p-freeze', 'staging', 'main']) {
+  assert.equal(
+    sourceIdentity({ workflow_run: { ...event.workflow_run, head_branch: branch } }, repo).branch,
+    branch,
+  );
+}
 
 const request = async (path) => path.includes('/git/commits/')
   ? { tree: { sha: 'c'.repeat(40) } }
