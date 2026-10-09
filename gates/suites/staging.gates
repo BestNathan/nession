@@ -1,0 +1,15 @@
+# staging
+# Gate IDs only. Not wired into current hooks/workflows yet.
+rust-format
+rust-clippy
+rustc-wrapper
+worktree-target-seed
+build-cache-verifier
+tmux-socket-isolation
+protocol-integrity
+protocol-codegen-drift
+rust-coverage
+web-eslint
+web-typecheck
+web-test-unit
+web-test-integration

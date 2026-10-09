@@ -18,7 +18,7 @@ on:
   push:
     branches: [staging]
   pull_request:
-    branches: [staging]
+    branches: [staging, main]
 
 # One run per branch/PR. Superseded runs are useless, so cancel them.
 concurrency:
@@ -89,6 +89,7 @@ jobs:
         env:
           CI: true
         run: |
+          cd e2e
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.update_visual_snapshots }}" = "true" ]; then
             # `=all` is required, not optional. A bare `--update-snapshots` means
             # mode "changed", which still compares through maxDiffPixelRatio and

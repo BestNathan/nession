@@ -7,6 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { auditIssue } from './issue-contract.mjs';
+import { buildAgentWorkflowTelemetry, writeAgentWorkflowTelemetry } from './agent-workflow-telemetry.mjs';
 
 const CONTRACT_LABELS = new Set([
   'bug', 'requirement',
@@ -42,6 +43,72 @@ function requestedModel() {
   };
 }
 
+function cursorSdkPlatformPackage(platform = process.platform, arch = process.arch) {
+  return `@cursor/sdk-${platform}-${arch}`;
+}
+
+function cursorRipgrepBinary(platform = process.platform) {
+  return platform === 'win32' ? 'rg.exe' : 'rg';
+}
+
+function executablePath(file) {
+  try {
+    fs.accessSync(file, fs.constants.X_OK);
+    return path.resolve(file);
+  } catch {
+    return null;
+  }
+}
+
+function resolveExecutableOnPath(binary, searchPath = process.env.PATH || '') {
+  for (const directory of searchPath.split(path.delimiter).filter(Boolean)) {
+    const resolved = executablePath(path.join(directory, binary));
+    if (resolved) return resolved;
+  }
+  return null;
+}
+
+function resolveBundledCursorRipgrepPath(root = process.env.CURSOR_SDK_ROOT) {
+  if (!root) return null;
+  const requireFromRoot = createRequire(path.join(root, 'package.json'));
+  const sdkEntry = requireFromRoot.resolve('@cursor/sdk');
+  const packageName = cursorSdkPlatformPackage();
+  let manifest;
+  try {
+    manifest = requireFromRoot.resolve(`${packageName}/package.json`, {
+      paths: [path.dirname(sdkEntry)],
+    });
+  } catch {
+    return null;
+  }
+  return executablePath(path.join(path.dirname(manifest), 'bin', cursorRipgrepBinary()));
+}
+
+function ensureCursorRipgrepPath() {
+  const configured = process.env.CURSOR_RIPGREP_PATH;
+  if (configured) {
+    if (!path.isAbsolute(configured)) {
+      throw new Error(`CURSOR_RIPGREP_PATH must be absolute: ${configured}\nFix: unset it to use the bundled Cursor SDK ripgrep, or set it to an absolute rg executable path.`);
+    }
+    const resolved = executablePath(configured);
+    if (!resolved) {
+      throw new Error(`CURSOR_RIPGREP_PATH is not executable: ${configured}\nFix: unset it to use the bundled Cursor SDK ripgrep, or point it at an executable rg binary.`);
+    }
+    return resolved;
+  }
+
+  const bundled = resolveBundledCursorRipgrepPath();
+  const fromPath = resolveExecutableOnPath(cursorRipgrepBinary());
+  const resolved = bundled || fromPath;
+  if (!resolved) {
+    const packageName = cursorSdkPlatformPackage();
+    throw new Error(`Cursor SDK ripgrep bootstrap failed: no executable rg was found in ${packageName} or PATH.\nFix: reinstall @cursor/sdk under CURSOR_SDK_ROOT so its platform package is present, or set CURSOR_RIPGREP_PATH to an absolute rg executable path.`);
+  }
+
+  process.env.CURSOR_RIPGREP_PATH = resolved;
+  return resolved;
+}
+
 function normalizeCursorSdkModule(loaded) {
   if (loaded?.Cursor && loaded?.Agent) return loaded;
   if (loaded?.default?.Cursor && loaded?.default?.Agent) return loaded.default;
@@ -49,6 +116,7 @@ function normalizeCursorSdkModule(loaded) {
 }
 
 async function loadCursorSdk() {
+  ensureCursorRipgrepPath();
   const root = process.env.CURSOR_SDK_ROOT;
   const requireFromRoot = createRequire(path.join(root, 'package.json'));
   const entry = requireFromRoot.resolve('@cursor/sdk');
@@ -219,8 +287,49 @@ function appendSummary(record) {
 
 function writeRecord(outDir, record) {
   fs.mkdirSync(outDir, { recursive: true });
-  const file = path.join(outDir, `issue-${record.issue.number}-usage.json`);
-  fs.writeFileSync(file, `${JSON.stringify(record, null, 2)}\n`);
+  const file = path.join(outDir, 'issue-' + record.issue.number + '-usage.json');
+  fs.writeFileSync(file, JSON.stringify(record, null, 2) + '\n');
+  if (record.agent?.invoked) {
+    const agent = record.agent;
+    writeAgentWorkflowTelemetry(
+      path.join(outDir, 'agent-telemetry.json'),
+      buildAgentWorkflowTelemetry({
+        workflow_id: 'issue-audit',
+        github_workflow: process.env.GITHUB_WORKFLOW || 'Issue Audit Agent',
+        job: 'agent',
+        task: {
+          id: 'issue-' + record.issue.number,
+          type: 'issue-audit',
+          issue: record.issue.number,
+        },
+        agent: {
+          provider: agent.provider || 'cursor',
+          model: agent.model ?? null,
+          run_id: agent.run_id ?? agent.agent_id ?? null,
+          request_id: agent.request_id ?? null,
+          status: agent.status ?? (record.result === 'agent-error' ? 'error' : 'finished'),
+        },
+        execution: {
+          turns: agent.turns ?? null,
+          model_requests: agent.turns ?? null,
+          tool_calls: agent.tool_calls ?? null,
+          tools_observed: Array.isArray(agent.tool_calls),
+        },
+        tokens: agent.usage ?? {},
+        cost: {
+          raw_usd: agent.raw_cost_usd ?? null,
+          charged_usd: agent.charged_cost_usd ?? null,
+          estimated_usd: null,
+        },
+        timing: {
+          started_at: agent.started_at ?? new Date().toISOString(),
+          finished_at: agent.finished_at ?? new Date().toISOString(),
+          agent_duration_ms: agent.duration_ms ?? null,
+        },
+        result: { status: record.result },
+      }),
+    );
+  }
   appendSummary(record);
   return file;
 }
@@ -248,6 +357,7 @@ async function runCursorAgent(issue, outDir) {
     },
   });
 
+  const startedAt = new Date();
   try {
     const run = await agent.send(promptFor(issue, audit));
     let turns = 0;
@@ -274,7 +384,9 @@ async function runCursorAgent(issue, outDir) {
       available_tools: availableTools,
       tool_calls: toolCalls,
       final_text: typeof result.result === 'string' ? result.result.slice(0, 4000) : null,
-      duration_ms: result.durationMs ?? run.durationMs ?? null,
+      started_at: startedAt.toISOString(),
+      finished_at: new Date().toISOString(),
+      duration_ms: result.durationMs ?? run.durationMs ?? (Date.now() - startedAt.getTime()),
       usage,
       raw_cost_usd: cost.raw_cost_usd,
       charged_cost_usd: cost.charged_cost_usd,
@@ -294,6 +406,10 @@ async function runCursorAgent(issue, outDir) {
 }
 
 function selfTest() {
+  assert.equal(cursorSdkPlatformPackage('linux', 'x64'), '@cursor/sdk-linux-x64');
+  assert.equal(cursorSdkPlatformPackage('darwin', 'arm64'), '@cursor/sdk-darwin-arm64');
+  assert.equal(cursorRipgrepBinary('win32'), 'rg.exe');
+  assert.equal(cursorRipgrepBinary('linux'), 'rg');
   assert.equal(normalizeCursorSdkModule({ Cursor: {}, Agent: {} }).Cursor != null, true);
   assert.equal(normalizeCursorSdkModule({ default: { Cursor: {}, Agent: {} } }).Agent != null, true);
   const restrictedTools = ['read', 'grep', 'glob', 'ls', 'mcp'];
@@ -311,7 +427,7 @@ function selfTest() {
   const candidate = candidateIssue({ labels: [{ name: 'in-progress' }] }, 'Bug: example', 'body', ['bug', 'web']);
   assert.equal(candidate.title, 'Bug: example');
   assert.deepEqual(labelNames(candidate).sort(), ['bug', 'in-progress', 'web']);
-  console.log('issue-audit-cursor self-test: 10 cases passed');
+  console.log('issue-audit-cursor self-test: 14 cases passed');
 }
 
 async function main() {

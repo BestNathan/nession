@@ -24,9 +24,8 @@ on:
           - cursor
           - deepseek
       target_ref:
-        description: Commit/ref/deployment source being accepted
-        required: false
-        default: main
+        description: Exact commit/ref/deployment source being accepted
+        required: true
         type: string
       deployment:
         description: Optional environment/deployment identity
@@ -66,6 +65,9 @@ on:
 permissions:
   contents: read
 
+env:
+  NSESSION_AGENT_WORKFLOW_ID: requirement-acceptance
+
 concurrency:
   group: acceptance-${{ inputs.issue_number }}-${{ inputs.stage }}
   cancel-in-progress: false
@@ -77,8 +79,10 @@ jobs:
     timeout-minutes: 30
     environment: ${{ inputs.provider == 'deepseek' && 'deepseek' || 'cursor' }}
     permissions:
+      actions: read
       contents: read
       issues: read
+      pull-requests: read
     outputs:
       criteria_count: ${{ steps.prepare.outputs.criteria_count }}
       source: ${{ steps.source.outputs.source }}
@@ -118,6 +122,10 @@ jobs:
           ref: ${{ inputs.target_ref }}
           path: workspace
           persist-credentials: false
+          # Source ancestry evidence must include parents and reachable history;
+          # depth-1 leaves only the commit SHA in .git/shallow and makes
+          # exact-source merge/parent proofs incorrectly Pending.
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -129,6 +137,7 @@ jobs:
           node scripts/requirement-acceptance.mjs self-test
           node scripts/acceptance-executor.mjs self-test
           node scripts/acceptance-agent.mjs self-test
+          node scripts/acceptance-ci-evidence.mjs self-test
 
       - name: Validate invocation
         run: |
@@ -146,6 +155,17 @@ jobs:
             *) echo "Unsupported Acceptance provider: ${ACCEPTANCE_PROVIDER}" >&2; exit 1 ;;
           esac
 
+      - name: Collect trusted GitHub Actions evidence
+        working-directory: trusted
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          node scripts/acceptance-ci-evidence.mjs collect \
+            "${GITHUB_WORKSPACE}/workspace" \
+            "${RUNNER_TEMP}/acceptance-ci-evidence.json"
+
       - name: Prepare stage-specific immutable acceptance context
         id: prepare
         working-directory: trusted
@@ -155,7 +175,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          node scripts/acceptance-executor.mjs prepare             "${ISSUE_NUMBER}" "${ACCEPTANCE_STAGE}" "${TARGET_REF}"             "${RUNNER_TEMP}/acceptance-context.json" "${DEPLOYMENT}"
+          node scripts/acceptance-executor.mjs prepare             "${ISSUE_NUMBER}" "${ACCEPTANCE_STAGE}" "${TARGET_REF}"             "${RUNNER_TEMP}/acceptance-context.json" "${DEPLOYMENT}"             "${RUNNER_TEMP}/acceptance-ci-evidence.json"
           count="$(jq '.criteria | length' "${RUNNER_TEMP}/acceptance-context.json")"
           echo "criteria_count=${count}" >> "${GITHUB_OUTPUT}"
           echo "has_criteria=$([[ "${count}" -gt 0 ]] && echo true || echo false)" >> "${GITHUB_OUTPUT}"
@@ -217,7 +237,16 @@ jobs:
         working-directory: trusted
         run: |
           set -euo pipefail
-          node scripts/acceptance-agent.mjs             "${RUNNER_TEMP}/acceptance-context.json" "${ACCEPTANCE_PROVIDER}"             "${GITHUB_WORKSPACE}/workspace" "${RUNNER_TEMP}/acceptance-raw.json"
+          node scripts/acceptance-agent.mjs             "${RUNNER_TEMP}/acceptance-context.json"             "${ACCEPTANCE_PROVIDER}"             "${GITHUB_WORKSPACE}/workspace"             "${RUNNER_TEMP}/acceptance-raw.json"             "${RUNNER_TEMP}/agent-telemetry.json"
+
+      - name: Upload canonical Agent telemetry
+        if: always() && inputs.deterministic_result_json == '' && steps.prepare.outputs.has_criteria == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-telemetry-requirement-acceptance-${{ inputs.issue_number }}-${{ inputs.stage }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/agent-telemetry.json
+          if-no-files-found: warn
+          retention-days: 30
 
       - name: Select structured-result source
         id: source
@@ -261,6 +290,9 @@ jobs:
   update-issue:
     name: Deterministic Issue updater
     needs: execute
+    # No eligible SCs in this stage is explicit no-op, not an Acceptance Pass.
+    # Never hand an empty result to the Issue projector. Other stages remain Pending.
+    if: needs.execute.result == 'success' && needs.execute.outputs.criteria_count != '0'
     runs-on: ubuntu-latest
     permissions:
       contents: read

@@ -606,6 +606,57 @@ describe('TerminalController', () => {
     }
   });
 
+  it('sizes the grid and the session to the well minus the capsule band, in both modes (#1503)', async () => {
+    // The well applies the capsule's clearance as `padding-bottom` on the
+    // element this controller observes, and `contentRect` excludes padding — so
+    // the scroll mode used to *be* the grid size, and every entry into history
+    // moved the shared tmux window (measured: 32 ↔ 35 rows, 60 px ÷ 20 px
+    // cells) and made an inline TUI repaint into the history being read.
+    const restore = installCapturingResizeObserver();
+    try {
+      const transport = makeTransport();
+      const controller = new TerminalController(makeSession(), () => transport);
+      const el = host();
+      controller.attach(el);
+      await flush(); // RAF fires → observe() captures the callback
+
+      // Following: the capsule's band (60 px — 3 rows at these 16 px cells) is
+      // reserved as padding, so the content box is 60 px shorter. The band's
+      // own size is the variable the padding derives from, which is what lets
+      // the two modes agree.
+      el.style.setProperty('--nession-local-terminal-capsule-occlusion', '60px');
+      el.style.paddingBottom = '60px';
+      const withBand = { contentRect: { width: 1024, height: 540 } } as unknown as ResizeObserverEntry;
+      capturedCallback!([withBand], capturedObserver!);
+
+      // The grid — and the session — take the well *minus* the band: 600/16
+      // rows. Sizing to the well instead would draw rows the padding clips.
+      expect(controller.terminal!.rows).toBe(33);
+      expect(transport.sendResize).toHaveBeenLastCalledWith(128, 33);
+
+      vi.useFakeTimers();
+      // History: the band is released, the content box grows by the same 60 px.
+      el.style.paddingBottom = '0px';
+      const released = { contentRect: { width: 1024, height: 600 } } as unknown as ResizeObserverEntry;
+      capturedCallback!([released], capturedObserver!);
+      // The grid does not grow into the freed band — the band comes off in both
+      // modes, so the size the user types at is the size they keep.
+      expect(controller.terminal!.rows).toBe(33);
+      vi.advanceTimersByTime(200);
+
+      // The invariant: the reported size never moved. Every size this client
+      // sent is the same one — the local grid changing is drawing, and the
+      // session was never told about it.
+      const sent = (transport.sendResize.mock.calls as Array<[number, number]>)
+        .map(([cols, rows]) => `${cols}x${rows}`);
+      expect([...new Set(sent)]).toEqual(['128x33']);
+      vi.useRealTimers();
+    } finally {
+      vi.useRealTimers();
+      restore();
+    }
+  });
+
   it('installs local capsule scrolling only for the local-buffer policy', async () => {
     const restore = installCapturingResizeObserver();
     const bindSpy = vi.spyOn(CapsuleOcclusionScroll.prototype, 'bind');
@@ -769,16 +820,20 @@ describe('TerminalController', () => {
       cell.width = 10;
       cell.height = 20;
 
-      const resizeSpy = vi.spyOn(controller, 'resize');
-
       // Trigger the post-zoom remeasure — the same path onCellSizeChange wires.
       const rc = (controller as unknown as { resizeController: { remeasure(): void } }).resizeController;
       rc.remeasure();
 
       // 1024/10=102, 600/20=30 — strictly smaller than the pre-zoom 128×37,
       // proving remeasure read the live cell size, not the stale 8×16 stash.
-      expect(resizeSpy).toHaveBeenCalledTimes(1);
-      expect(resizeSpy).toHaveBeenCalledWith(102, 30);
+      //
+      // Asserted as two facts rather than one spied call: the local grid
+      // follows the cell box and the *reported* size follows it minus the
+      // container's own inset (`reportedGrid`). They coincide here only
+      // because jsdom computes no padding.
+      expect(controller.terminal!.cols).toBe(102);
+      expect(controller.terminal!.rows).toBe(30);
+      expect(transport.sendResize).toHaveBeenLastCalledWith(102, 30);
     } finally {
       restore();
     }
@@ -802,19 +857,19 @@ describe('TerminalController', () => {
       // Clear so the assertions below only see the zoom-triggered resize.
       transport.sendResize.mockClear();
 
-      const resizeSpy = vi.spyOn(controller, 'resize');
-
       // zoomIn() → FontSizeManager.setSize → term.refresh + onCellSizeChange
-      // → resizeController.remeasure() → controller.resize() → sendResize().
+      // → resizeController.remeasure() → local grid + reported size.
       controller.fontSizeManager!.zoomIn();
 
-      expect(resizeSpy).toHaveBeenCalledTimes(1);
-      const [cols, rows] = resizeSpy.mock.calls[0] as [number, number];
+      // The full wiring, read from what the transport received rather than
+      // from an internal call: the recomputed size reaches the transport, and
+      // the local grid agrees with it (no capsule inset in jsdom).
+      expect(transport.sendResize).toHaveBeenCalledTimes(1);
+      const [cols, rows] = transport.sendResize.mock.calls[0] as [number, number];
       expect(cols).toBeGreaterThan(0);
       expect(rows).toBeGreaterThan(0);
-      // The recomputed size propagates to the transport (full wiring).
-      expect(transport.sendResize).toHaveBeenCalledWith(cols, rows);
-      resizeSpy.mockRestore();
+      expect(controller.terminal!.cols).toBe(cols);
+      expect(controller.terminal!.rows).toBe(rows);
     } finally {
       restore();
     }
