@@ -526,6 +526,79 @@ describe('ConnectionManager', () => {
       manager.dispose();
     });
 
+    it('does not send a resize that repeats the size already on the wire (#1503)', () => {
+      // The ResizeObserver fires for container changes whose reported grid is
+      // unchanged — a capsule dock, a scroll-mode change — and each of those
+      // became a round trip the agent could only no-op (#1490).
+      const { api } = makeAgentApi();
+      const manager = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'sess-1', agentApi: api, ...attached,
+      });
+      manager.sendResize(120, 40);
+      manager.sendResize(120, 40);
+      expect(api.sendResize).toHaveBeenCalledTimes(1);
+
+      manager.sendResize(100, 30);
+      expect(api.sendResize).toHaveBeenCalledTimes(2);
+
+      // It is the *newest* size that is suppressed, and an older one coming
+      // back is a real resize again.
+      manager.sendResize(100, 30);
+      expect(api.sendResize).toHaveBeenCalledTimes(2);
+      manager.sendResize(120, 40);
+      expect(api.sendResize).toHaveBeenCalledTimes(3);
+      manager.dispose();
+    });
+
+    it('treats the size an attach stated as already known (#1503)', () => {
+      // The coalesced size that follows an attach is the one the attach itself
+      // carried, so flushing it would describe where the session already is.
+      const { api } = makeAgentApi();
+      let isAttached = false;
+      const cm = new ConnectionManager({
+        mode: 'p2p',
+        sessionName: 'test',
+        sessionId: 'a:test',
+        agentApi: api,
+        isAttached: () => isAttached,
+      });
+
+      cm.sendResize(120, 40);
+      cm.noteAttachedSize(120, 40);
+      isAttached = true;
+      cm.flushAllOutbound();
+      expect(api.sendResize).not.toHaveBeenCalled();
+
+      // A viewport that moved while the attach was in flight is *not* what the
+      // attach stated, so the flush still sends it.
+      isAttached = false;
+      cm.sendResize(100, 30);
+      cm.noteAttachedSize(120, 40);
+      isAttached = true;
+      cm.flushAllOutbound();
+      expect(api.sendResize).toHaveBeenCalledTimes(1);
+      expect(api.sendResize).toHaveBeenLastCalledWith('test', 100, 30);
+      cm.dispose();
+    });
+
+    it('records only a resize that left the client, so a throw keeps it pending', () => {
+      const { api } = makeAgentApi();
+      (api.sendResize as ReturnType<typeof vi.fn>)
+        .mockImplementationOnce(() => { throw new Error('reconnecting'); });
+      const manager = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'sess-1', agentApi: api, ...attached,
+      });
+
+      // The first attempt throws, so nothing left the client and the size is not
+      // recorded: the next one sends it. That send *is* recorded, so the third —
+      // the same pair again — is the repeat the dedup exists for.
+      manager.sendResize(120, 40);
+      manager.sendResize(120, 40);
+      manager.sendResize(120, 40);
+      expect(api.sendResize).toHaveBeenCalledTimes(2);
+      manager.dispose();
+    });
+
     it('buffers sendResize until attached and coalesces to the latest size', () => {
       const { api } = makeAgentApi();
       let isAttached = false;
