@@ -52,6 +52,7 @@ jobs:
           ./gates/run agent-workflow-telemetry
           node scripts/requirement-acceptance.mjs self-test
           node scripts/acceptance-case-ingest.mjs self-test
+          node scripts/run-record-artifact-evidence.mjs self-test
           node scripts/acceptance-ci-evidence.mjs self-test
           node scripts/trusted-case-discovery-selftest.mjs
           node scripts/e2e-run-ingest.mjs self-test
