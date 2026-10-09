@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import { pathToFileURL } from 'node:url';
 
 const hash = (value) => crypto.createHash('sha256').update(value).digest('hex');
 const hex = (value, size, label) => {
@@ -249,4 +250,7 @@ async function main() {
     mode: 'scenario', source: result.record.source,
     record: result.paths.record, execution_id: result.record.execution_id }, null, 2) + '\n');
 }
-main().catch(error => { console.error(error.stack || error.message); process.exitCode = 1; });
+// Importing the deterministic validators for security tests must not run the CLI.
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  main().catch(error => { console.error(error.stack || error.message); process.exitCode = 1; });
+}
