@@ -59,6 +59,7 @@ jobs:
           node scripts/issue-audit-agent.mjs self-test
           node scripts/issue-audit-cursor.mjs self-test
           node scripts/requirement-acceptance.mjs self-test
+          node scripts/acceptance-ci-evidence.mjs self-test
           node scripts/acceptance-case-ingest.mjs self-test
       - run: cd web && npm ci
       - run: just design-check full
