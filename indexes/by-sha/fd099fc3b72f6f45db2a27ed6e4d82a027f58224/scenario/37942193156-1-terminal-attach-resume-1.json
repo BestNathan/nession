@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 37942193156,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/1474-route-post-merge-cases-through-e2e-cli",
+    "target_sha": "fd099fc3b72f6f45db2a27ed6e4d82a027f58224",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/37942193156",
+    "scenario_tree_sha": "96ae71e441342a6b448289c64cc8ca2ac8f00659",
+    "original_sha256": "053c41a1b1abead747575a5487c615daeda769b114cc7e4c5fc957fdb1cb3dfe"
+  },
+  "record": "runs/2026-10-09/37942193156-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "5f672860dc2c48656c2f687b5c33094622f945ad2c07160688ac8bcb9f02d1ed"
+}
