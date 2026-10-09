@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "faf12783462a6a88ca56c8676f64fad68ab0e4f5de4df9ac7b7e64a119d691c3",
+  "run_id": 37949450344,
+  "run_attempt": 1,
+  "issue": 1498,
+  "criterion": "SC-01",
+  "criterion_text": "A real full-stack reproduction scenario completes, preserving source SHA and inputs without a fabricated Pass.",
+  "stage": "staging",
+  "target_sha": "6aac790170966b2e244f82357d837c0044ee8a66",
+  "contract_sha256": "cf51139b85e1c4f2f0171584b3ff4c3248fbb22f0f7317383dd7d1d6be85d9eb",
+  "case_revision": "6aac790170966b2e244f82357d837c0044ee8a66",
+  "case_tree_sha": "971f4f0324041cf82f4b741777137e7230d77edd",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Fail",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-09T15:10:24.358Z",
+  "finished_at": "2026-10-09T15:10:30.386Z",
+  "duration_ms": 6027,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Fail",
+      "summary": "real Scenario failed: Scenario Error: Cannot find module '@playwright/test'\nRequire stack:\n- /home/runner/work/nession/nession/workspace/e2e/scenarios/terminal-attach-resume/reproduce.cjs\n\n\n2 !== 0",
+      "evidence": [
+        {
+          "type": "scenario",
+          "value": "real staging Scenario Case evidence incomplete"
+        }
+      ],
+      "duration_ms": 113,
+      "exit_code": 1,
+      "stderr": "real Scenario failed: Scenario Error: Cannot find module '@playwright/test'\nRequire stack:\n- /home/runner/work/nession/nession/workspace/e2e/scenarios/terminal-attach-resume/reproduce.cjs\n\n\n2 !== 0"
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 37949450344,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "6aac790170966b2e244f82357d837c0044ee8a66",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/37949450344",
+    "record_path": "runs/2026-10-09/37949450344-1/1498/SC-01.json",
+    "source_result_sha256": "0de9816ffecb1f9ec5a71dff3efa52b40cb1badd3a1cc7025dfb7ea5f5c58ff9"
+  }
+}
