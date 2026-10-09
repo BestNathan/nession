@@ -128,7 +128,7 @@ function telemetryInput(context, providerMeta, result, status = 'completed') {
     if (Object.hasOwn(counts, criterion.result)) counts[criterion.result] += 1;
   }
   return {
-    workflow_id: 'requirement-acceptance',
+    workflow_id: process.env.NSESSION_AGENT_WORKFLOW_ID || 'requirement-acceptance',
     github_workflow: process.env.GITHUB_WORKFLOW || 'Acceptance',
     job: 'execute',
     task: {
