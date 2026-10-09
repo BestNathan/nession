@@ -146,6 +146,18 @@ try {
   fs.rmSync(root, { recursive: true, force: true });
 }
 
+// Canonical Driver self-tests must keep their actual relocation in the gate.
+ok(() => {
+  assert.equal(fs.existsSync(path.join(process.cwd(), 'acceptance', 'verifiers')), false,
+    'old verifier driver directory must not survive canonical migration');
+  const moved = path.join(process.cwd(), 'e2e', 'runner', 'drivers', 'browser-report.mjs');
+  const run = spawnSync(process.execPath, [moved, 'self-test'], {
+    cwd: process.cwd(), encoding: 'utf8', timeout: 5000,
+  });
+  assert.equal(run.status, 0, 'relocated Driver contract failed: ' + run.stderr);
+  assert.match(run.stdout, /11 positive\/negative fixtures passed/);
+});
+
 // Real source Case discovery is part of the mandatory canonical contract.
 const repoRoot = path.resolve(process.cwd());
 const canonicalRoot = path.join(repoRoot, 'e2e', 'acceptance', 'cases');

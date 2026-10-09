@@ -53,6 +53,50 @@ for (const [relative, expectedSha] of Object.entries(migration.baseline_png_blob
 assert.ok(catalog.cases.length > 0, 'Case catalog must discover source-aligned Cases');
 assert.ok(catalog.scenarios.length > 0, 'scenario catalog must not silently disappear');
 
+// CI must preserve a single command surface after the Case source-tree migration.
+// The trusted Case selector/updater stay in the workflow, but actual execution
+// must flow through ./e2e/run rather than a second legacy entrypoint.
+const caseWorkflow = fs.readFileSync(
+  path.join(repo, '.github', 'workflows', 'acceptance-cases.yml'), 'utf8');
+assert.match(caseWorkflow, /args=\(acceptance --issue-json/);
+assert.match(caseWorkflow, /node workspace\/e2e\/run "\$\{args\[@\]\}"/);
+assert.match(caseWorkflow, /while read -r issue criterion profile; do/);
+assert.match(caseWorkflow, /done < <\(jq -r/);
+assert.doesNotMatch(caseWorkflow, /node workspace\/acceptance\/run-case\.mjs/);
+assert.equal(fs.existsSync(path.join(repo, 'acceptance', 'run-case.mjs')), false,
+  'legacy public Case runner must be retired');
+assert.equal(fs.existsSync(path.join(repo, 'acceptance', 'runtime', 'full-stack.js')), false,
+  'legacy Runtime alias must be retired');
+assert.equal(fs.existsSync(path.join(repo,'acceptance','verifiers')),false,
+  'legacy verifier driver path must be retired');
+assert.ok(fs.existsSync(path.join(repo,'e2e','runner','drivers','index.mjs')));
+assert.ok(fs.existsSync(path.join(repo,'e2e','runner','drivers','playwright.config.cjs')));
+const driverGate=fs.readFileSync(path.join(repo,'.github','workflows','quality.yml'),'utf8');
+assert.match(driverGate,/node e2e\/runner\/drivers\/browser-report\.mjs self-test/);
+assert.equal(fs.existsSync(path.join(repo, 'e2e', 'acceptance', 'evaluator', 'run-case.mjs')), true,
+  'canonical internal Case evaluator must exist');
+const gateRecipes = fs.readFileSync(path.join(repo, 'justfile'), 'utf8');
+assert.match(gateRecipes, /check-acceptance-runtime:[\s\S]*?\.\/e2e\/run --validate/);
+assert.doesNotMatch(gateRecipes, /acceptance\/runtime\/full-stack\.js/);
+const acceptanceSkill = fs.readFileSync(path.join(repo, '.claude', 'skills',
+  'nession-acceptance', 'SKILL.md'), 'utf8');
+assert.match(acceptanceSkill, /\.\/e2e\/run acceptance/);
+const acceptanceArchitecture = fs.readFileSync(path.join(repo, 'docs', 'architecture',
+  'acceptance-cases.md'), 'utf8');
+assert.match(acceptanceArchitecture, /e2e\/runner\/runtime\/full-stack\.js/);
+assert.match(caseWorkflow, /--profile "\$\{profile\}"/);
+assert.match(caseWorkflow, /--sha "\$\{TARGET_SHA\}"/);
+const regressionWorkflow = fs.readFileSync(
+  path.join(repo, '.github', 'workflows', 'e2e.yml'), 'utf8');
+assert.match(regressionWorkflow, /\.\/run test --all/);
+const caseSmokeWorkflow = fs.readFileSync(
+  path.join(repo, '.github', 'workflows', 'acceptance-case-smoke.yml'), 'utf8');
+assert.match(caseSmokeWorkflow, /\.\/e2e\/run acceptance/);
+const scenarioSmokeWorkflow = fs.readFileSync(
+  path.join(repo, '.github', 'workflows', 'e2e-scenario-smoke.yml'), 'utf8');
+assert.match(scenarioSmokeWorkflow, /\.\/e2e\/run scenario/);
+
+
 const checked = call('--validate');
 assert.equal(checked.code, 0);
 assert.ok(JSON.parse(checked.stdout).case_count > 0);

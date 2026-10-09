@@ -8,6 +8,8 @@ Nession uses Playwright for end-to-end testing of the web UI and its integration
 
 The canonical Issue/SC verification tree is `e2e/acceptance/cases/<issue>/<SC>/`. It uses the shared Runner; verifier source is committed and immutable results live only on `acceptance-results`.
 
+The `Acceptance Cases` push/dispatch workflow performs **trusted** Issue contract discovery and stage coverage selection first, then executes each selected Case with `node workspace/e2e/run acceptance --issue-json ... --issue N --sc SC-NN --sha SHA --stage STAGE --profile full-stack-local --output FILE`. This is the same canonical CLI as the Regression and Scenario suites. Its source Case verifier still executes as an internal implementation behind the CLI, **not** as an independent workflow entrypoint. The exact checked-out SHA and supported runtime profile are validated again by the CLI; source code does not receive Issue write permissions. Results remain subject to trusted ingestion and deterministic acceptance updates.
+
 ```
 e2e/
 ├── fixtures/              # Configuration for server and agent
