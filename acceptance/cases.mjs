@@ -187,7 +187,7 @@ export function discoverCases(casesRoot) {
     for (const criterionName of fs.readdirSync(issueDir).sort()) {
       const caseDir = path.join(issueDir, criterionName);
       if (fs.lstatSync(caseDir).isSymbolicLink() || !fs.lstatSync(caseDir).isDirectory()) {
-        throw new Error('Issue case registry contains non-directory: ' + issueName + '/' + criterionName);
+        throw new Error('Issue case registry contains non-directory or symlink: ' + issueName + '/' + criterionName);
       }
       if (!/^SC-\d{2,}$/.test(criterionName)) {
         throw new Error('invalid SC directory in case registry: ' + issueName + '/' + criterionName);
