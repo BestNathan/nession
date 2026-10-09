@@ -122,63 +122,210 @@ jobs:
           
           NODE
 
-  pre1522:
+  project:
     needs: verify
-    uses: ./.github/workflows/acceptance.yml
-    with:
-      issue_number: '1522'
-      stage: pre-merge
-      provider: cursor
-      target_ref: '5cf11aa6663efa4a4b2be55c3fbca9661b6dc9e8'
-      deterministic_result_json: '{"criteria":[{"criterion":"SC-01","result":"Pass","summary":"Trusted target checkout pins ref and fetches full history without credentials; real two-source merge lineage verified.","evidence":[{"type":"workflow","value":"PR #1521 merged; .github/workflows/acceptance.yml: checkout workspace fetch-depth=0 persist-credentials=false"},{"type":"git","value":"GitHub compare: 3f04cbc0... and 5b12f105... are ancestors of 5cf11aa6663efa4a4b2be55c3fbca9661b6dc9e8; verified in #1520 run 37923901176"}]},{"criterion":"SC-02","result":"Pass","summary":"Fix head completed exact-SHA Quality and E2E and trusted Acceptance regression tests.","evidence":[{"type":"workflow","value":"Quality Gate https://github.com/BestNathan/nession/actions/runs/37882303541 success at 1f4ca18fade033f6a401eb0be1707c0e1814c508"},{"type":"workflow","value":"E2E https://github.com/BestNathan/nession/actions/runs/37882303617 success at 1f4ca18fade033f6a401eb0be1707c0e1814c508"}]}]}'
-    secrets: inherit
+    runs-on: ubuntu-latest
+    timeout-minutes: 110
+    permissions:
+      contents: read
+      actions: write
+      issues: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
 
-  pre1523:
-    needs: verify
-    uses: ./.github/workflows/acceptance.yml
-    with:
-      issue_number: '1523'
-      stage: pre-merge
-      provider: cursor
-      target_ref: '07623da69d1863c5de7ff3fe97c76d35a207142d'
-      deterministic_result_json: '{"criteria":[{"criterion":"SC-01","result":"Pass","summary":"Both failing modes throw and block merge without any GitHub close PATCH.","evidence":[{"type":"source","value":"scripts/requirement-acceptance.mjs: runPrGate -> enforcePrAcceptance; closePullRequest removed"},{"type":"test","value":"requirement-acceptance.mjs self-test: both pre-merge Pending and merge Fail throw without lifecycle mutation"}]},{"criterion":"SC-02","result":"Pass","summary":"Success/failure self-tests and exact-head Quality/E2E succeed.","evidence":[{"type":"workflow","value":"Quality Gate https://github.com/BestNathan/nession/actions/runs/37882779119 success at 07623da69d1863c5de7ff3fe97c76d35a207142d"},{"type":"workflow","value":"E2E https://github.com/BestNathan/nession/actions/runs/37882778776 success at 07623da69d1863c5de7ff3fe97c76d35a207142d"}]}]}'
-    secrets: inherit
+      - name: Dispatch and validate pre1522
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: '1522'
+          ACCEPTANCE_STAGE: 'pre-merge'
+          TARGET_REF: '5cf11aa6663efa4a4b2be55c3fbca9661b6dc9e8'
+          RESULT_JSON: '{"criteria":[{"criterion":"SC-01","result":"Pass","summary":"Trusted target checkout pins ref and fetches full history without credentials; real two-source merge lineage verified.","evidence":[{"type":"workflow","value":"PR #1521 merged; .github/workflows/acceptance.yml: checkout workspace fetch-depth=0 persist-credentials=false"},{"type":"git","value":"GitHub compare: 3f04cbc0... and 5b12f105... are ancestors of 5cf11aa6663efa4a4b2be55c3fbca9661b6dc9e8; verified in #1520 run 37923901176"}]},{"criterion":"SC-02","result":"Pass","summary":"Fix head completed exact-SHA Quality and E2E and trusted Acceptance regression tests.","evidence":[{"type":"workflow","value":"Quality Gate https://github.com/BestNathan/nession/actions/runs/37882303541 success at 1f4ca18fade033f6a401eb0be1707c0e1814c508"},{"type":"workflow","value":"E2E https://github.com/BestNathan/nession/actions/runs/37882303617 success at 1f4ca18fade033f6a401eb0be1707c0e1814c508"}]}]}'
+        run: |
+          set -euo pipefail
+          gh workflow run acceptance.yml --ref main \
+            -f "issue_number=${ISSUE_NUMBER}" -f "stage=${ACCEPTANCE_STAGE}" \
+            -f "provider=cursor" -f "target_ref=${TARGET_REF}" \
+            -f "deterministic_result_json=${RESULT_JSON}"
 
-  stage1523:
-    needs: [verify, pre1523]
-    uses: ./.github/workflows/acceptance.yml
-    with:
-      issue_number: '1523'
-      stage: staging
-      provider: cursor
-      target_ref: 'ce7d2c1febb6579cc118b01eb86a67008351a3e5'
-      deterministic_result_json: '{"criteria":[{"criterion":"SC-03","result":"Pass","summary":"A real failing Requirement Acceptance check left the PR open until normal merge.","evidence":[{"type":"workflow","value":"PR #1519 failed Requirement Acceptance https://github.com/BestNathan/nession/actions/runs/37883658127 at ce7d2c1febb6579cc118b01eb86a67008351a3e5"},{"type":"event","value":"PR #1519 reopened 2026-10-09T04:23:10Z, gate failure ended 04:39:08Z, no close until normal merge 05:39:29Z"}]}]}'
-    secrets: inherit
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import {execFileSync} from 'node:child_process';
+          import {extractSection, parseSuccessCriteria, parseAcceptanceReport} from './scripts/requirement-acceptance.mjs';
+          const number = Number(process.env.ISSUE_NUMBER), stage = process.env.ACCEPTANCE_STAGE;
+          const target = process.env.TARGET_REF;
+          for (let attempt = 0; attempt < 120; attempt++) {
+            const issue = JSON.parse(execFileSync('gh', ['issue','view',String(number),
+              '--repo','BestNathan/nession','--json','body'], {encoding:'utf8'}));
+            const sc = parseSuccessCriteria(extractSection(issue.body, 'Success Criteria')).criteria;
+            const rows = [...parseAcceptanceReport(extractSection(issue.body, 'Acceptance Report')).rows.values()]
+              .filter(x => x.stage === stage);
+            assert(rows.length, 'no criteria for Issue ' + number + ' stage ' + stage);
+            if (rows.every(row => row.result.toLowerCase() === 'pass' && sc.get(row.id)?.checked &&
+              row.evidence.includes('ref ' + target + ';'))) {
+              console.log('Verified trusted Issue projection for #' + number + ' stage ' + stage);
+              process.exit(0);
+            }
+            await new Promise(resolve=>setTimeout(resolve, 10000));
+          }
+          throw new Error('Timeout awaiting projected acceptance for Issue ' + number + ' stage ' + stage);
+          NODE
 
-  pre1527:
-    needs: verify
-    uses: ./.github/workflows/acceptance.yml
-    with:
-      issue_number: '1527'
-      stage: pre-merge
-      provider: cursor
-      target_ref: 'a9f83bfb177570e8940e906179660f575d6811ed'
-      deterministic_result_json: '{"criteria":[{"criterion":"SC-01","result":"Pass","summary":"Main-owned bounded collector verifies full SHA ancestry using git merge-base exit status; errors are not Pass.","evidence":[{"type":"source","value":"scripts/acceptance-ci-evidence.mjs: requestedAncestorsFromIssue max 8; checkGitAncestor uses git merge-base --is-ancestor"},{"type":"workflow","value":"PR #1528 merged; source_ancestry evidence available to immutable Acceptance context"}]},{"criterion":"SC-02","result":"Pass","summary":"Collector positive, negative, invalid and missing-object self-tests with exact-head Quality/E2E succeeded.","evidence":[{"type":"test","value":"scripts/acceptance-ci-evidence.mjs self-test covers valid/invalid SHA, nonancestor, missing Git, bound 8"},{"type":"workflow","value":"Quality https://github.com/BestNathan/nession/actions/runs/37886965284 and E2E https://github.com/BestNathan/nession/actions/runs/37886965266 succeeded at a9f83bfb177570e8940e906179660f575d6811ed"}]}]}'
-    secrets: inherit
+      - name: Dispatch and validate pre1523
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: '1523'
+          ACCEPTANCE_STAGE: 'pre-merge'
+          TARGET_REF: '07623da69d1863c5de7ff3fe97c76d35a207142d'
+          RESULT_JSON: '{"criteria":[{"criterion":"SC-01","result":"Pass","summary":"Both failing modes throw and block merge without any GitHub close PATCH.","evidence":[{"type":"source","value":"scripts/requirement-acceptance.mjs: runPrGate -> enforcePrAcceptance; closePullRequest removed"},{"type":"test","value":"requirement-acceptance.mjs self-test: both pre-merge Pending and merge Fail throw without lifecycle mutation"}]},{"criterion":"SC-02","result":"Pass","summary":"Success/failure self-tests and exact-head Quality/E2E succeed.","evidence":[{"type":"workflow","value":"Quality Gate https://github.com/BestNathan/nession/actions/runs/37882779119 success at 07623da69d1863c5de7ff3fe97c76d35a207142d"},{"type":"workflow","value":"E2E https://github.com/BestNathan/nession/actions/runs/37882778776 success at 07623da69d1863c5de7ff3fe97c76d35a207142d"}]}]}'
+        run: |
+          set -euo pipefail
+          gh workflow run acceptance.yml --ref main \
+            -f "issue_number=${ISSUE_NUMBER}" -f "stage=${ACCEPTANCE_STAGE}" \
+            -f "provider=cursor" -f "target_ref=${TARGET_REF}" \
+            -f "deterministic_result_json=${RESULT_JSON}"
 
-  stage1527:
-    needs: [verify, pre1527]
-    uses: ./.github/workflows/acceptance.yml
-    with:
-      issue_number: '1527'
-      stage: staging
-      provider: cursor
-      target_ref: '5cf11aa6663efa4a4b2be55c3fbca9661b6dc9e8'
-      deterministic_result_json: '{"criteria":[{"criterion":"SC-03","result":"Pass","summary":"Real #1520 Acceptance recorded two trusted verified ancestry sources and completed successfully without bypassing gates.","evidence":[{"type":"workflow","value":"Acceptance https://github.com/BestNathan/nession/actions/runs/37923901176 completed success for 5cf11aa6663efa4a4b2be55c3fbca9661b6dc9e8"},{"type":"issue","value":"#1520 SC-01 pre-merge Pass with ci_evidence.source_ancestry: original main and staging exact SHAs is_ancestor=true status=verified"}]}]}'
-    secrets: inherit
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import {execFileSync} from 'node:child_process';
+          import {extractSection, parseSuccessCriteria, parseAcceptanceReport} from './scripts/requirement-acceptance.mjs';
+          const number = Number(process.env.ISSUE_NUMBER), stage = process.env.ACCEPTANCE_STAGE;
+          const target = process.env.TARGET_REF;
+          for (let attempt = 0; attempt < 120; attempt++) {
+            const issue = JSON.parse(execFileSync('gh', ['issue','view',String(number),
+              '--repo','BestNathan/nession','--json','body'], {encoding:'utf8'}));
+            const sc = parseSuccessCriteria(extractSection(issue.body, 'Success Criteria')).criteria;
+            const rows = [...parseAcceptanceReport(extractSection(issue.body, 'Acceptance Report')).rows.values()]
+              .filter(x => x.stage === stage);
+            assert(rows.length, 'no criteria for Issue ' + number + ' stage ' + stage);
+            if (rows.every(row => row.result.toLowerCase() === 'pass' && sc.get(row.id)?.checked &&
+              row.evidence.includes('ref ' + target + ';'))) {
+              console.log('Verified trusted Issue projection for #' + number + ' stage ' + stage);
+              process.exit(0);
+            }
+            await new Promise(resolve=>setTimeout(resolve, 10000));
+          }
+          throw new Error('Timeout awaiting projected acceptance for Issue ' + number + ' stage ' + stage);
+          NODE
+
+      - name: Dispatch and validate stage1523
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: '1523'
+          ACCEPTANCE_STAGE: 'staging'
+          TARGET_REF: 'ce7d2c1febb6579cc118b01eb86a67008351a3e5'
+          RESULT_JSON: '{"criteria":[{"criterion":"SC-03","result":"Pass","summary":"A real failing Requirement Acceptance check left the PR open until normal merge.","evidence":[{"type":"workflow","value":"PR #1519 failed Requirement Acceptance https://github.com/BestNathan/nession/actions/runs/37883658127 at ce7d2c1febb6579cc118b01eb86a67008351a3e5"},{"type":"event","value":"PR #1519 reopened 2026-10-09T04:23:10Z, gate failure ended 04:39:08Z, no close until normal merge 05:39:29Z"}]}]}'
+        run: |
+          set -euo pipefail
+          gh workflow run acceptance.yml --ref main \
+            -f "issue_number=${ISSUE_NUMBER}" -f "stage=${ACCEPTANCE_STAGE}" \
+            -f "provider=cursor" -f "target_ref=${TARGET_REF}" \
+            -f "deterministic_result_json=${RESULT_JSON}"
+
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import {execFileSync} from 'node:child_process';
+          import {extractSection, parseSuccessCriteria, parseAcceptanceReport} from './scripts/requirement-acceptance.mjs';
+          const number = Number(process.env.ISSUE_NUMBER), stage = process.env.ACCEPTANCE_STAGE;
+          const target = process.env.TARGET_REF;
+          for (let attempt = 0; attempt < 120; attempt++) {
+            const issue = JSON.parse(execFileSync('gh', ['issue','view',String(number),
+              '--repo','BestNathan/nession','--json','body'], {encoding:'utf8'}));
+            const sc = parseSuccessCriteria(extractSection(issue.body, 'Success Criteria')).criteria;
+            const rows = [...parseAcceptanceReport(extractSection(issue.body, 'Acceptance Report')).rows.values()]
+              .filter(x => x.stage === stage);
+            assert(rows.length, 'no criteria for Issue ' + number + ' stage ' + stage);
+            if (rows.every(row => row.result.toLowerCase() === 'pass' && sc.get(row.id)?.checked &&
+              row.evidence.includes('ref ' + target + ';'))) {
+              console.log('Verified trusted Issue projection for #' + number + ' stage ' + stage);
+              process.exit(0);
+            }
+            await new Promise(resolve=>setTimeout(resolve, 10000));
+          }
+          throw new Error('Timeout awaiting projected acceptance for Issue ' + number + ' stage ' + stage);
+          NODE
+
+      - name: Dispatch and validate pre1527
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: '1527'
+          ACCEPTANCE_STAGE: 'pre-merge'
+          TARGET_REF: 'a9f83bfb177570e8940e906179660f575d6811ed'
+          RESULT_JSON: '{"criteria":[{"criterion":"SC-01","result":"Pass","summary":"Main-owned bounded collector verifies full SHA ancestry using git merge-base exit status; errors are not Pass.","evidence":[{"type":"source","value":"scripts/acceptance-ci-evidence.mjs: requestedAncestorsFromIssue max 8; checkGitAncestor uses git merge-base --is-ancestor"},{"type":"workflow","value":"PR #1528 merged; source_ancestry evidence available to immutable Acceptance context"}]},{"criterion":"SC-02","result":"Pass","summary":"Collector positive, negative, invalid and missing-object self-tests with exact-head Quality/E2E succeeded.","evidence":[{"type":"test","value":"scripts/acceptance-ci-evidence.mjs self-test covers valid/invalid SHA, nonancestor, missing Git, bound 8"},{"type":"workflow","value":"Quality https://github.com/BestNathan/nession/actions/runs/37886965284 and E2E https://github.com/BestNathan/nession/actions/runs/37886965266 succeeded at a9f83bfb177570e8940e906179660f575d6811ed"}]}]}'
+        run: |
+          set -euo pipefail
+          gh workflow run acceptance.yml --ref main \
+            -f "issue_number=${ISSUE_NUMBER}" -f "stage=${ACCEPTANCE_STAGE}" \
+            -f "provider=cursor" -f "target_ref=${TARGET_REF}" \
+            -f "deterministic_result_json=${RESULT_JSON}"
+
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import {execFileSync} from 'node:child_process';
+          import {extractSection, parseSuccessCriteria, parseAcceptanceReport} from './scripts/requirement-acceptance.mjs';
+          const number = Number(process.env.ISSUE_NUMBER), stage = process.env.ACCEPTANCE_STAGE;
+          const target = process.env.TARGET_REF;
+          for (let attempt = 0; attempt < 120; attempt++) {
+            const issue = JSON.parse(execFileSync('gh', ['issue','view',String(number),
+              '--repo','BestNathan/nession','--json','body'], {encoding:'utf8'}));
+            const sc = parseSuccessCriteria(extractSection(issue.body, 'Success Criteria')).criteria;
+            const rows = [...parseAcceptanceReport(extractSection(issue.body, 'Acceptance Report')).rows.values()]
+              .filter(x => x.stage === stage);
+            assert(rows.length, 'no criteria for Issue ' + number + ' stage ' + stage);
+            if (rows.every(row => row.result.toLowerCase() === 'pass' && sc.get(row.id)?.checked &&
+              row.evidence.includes('ref ' + target + ';'))) {
+              console.log('Verified trusted Issue projection for #' + number + ' stage ' + stage);
+              process.exit(0);
+            }
+            await new Promise(resolve=>setTimeout(resolve, 10000));
+          }
+          throw new Error('Timeout awaiting projected acceptance for Issue ' + number + ' stage ' + stage);
+          NODE
+
+      - name: Dispatch and validate stage1527
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: '1527'
+          ACCEPTANCE_STAGE: 'staging'
+          TARGET_REF: '5cf11aa6663efa4a4b2be55c3fbca9661b6dc9e8'
+          RESULT_JSON: '{"criteria":[{"criterion":"SC-03","result":"Pass","summary":"Real #1520 Acceptance recorded two trusted verified ancestry sources and completed successfully without bypassing gates.","evidence":[{"type":"workflow","value":"Acceptance https://github.com/BestNathan/nession/actions/runs/37923901176 completed success for 5cf11aa6663efa4a4b2be55c3fbca9661b6dc9e8"},{"type":"issue","value":"#1520 SC-01 pre-merge Pass with ci_evidence.source_ancestry: original main and staging exact SHAs is_ancestor=true status=verified"}]}]}'
+        run: |
+          set -euo pipefail
+          gh workflow run acceptance.yml --ref main \
+            -f "issue_number=${ISSUE_NUMBER}" -f "stage=${ACCEPTANCE_STAGE}" \
+            -f "provider=cursor" -f "target_ref=${TARGET_REF}" \
+            -f "deterministic_result_json=${RESULT_JSON}"
+
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import {execFileSync} from 'node:child_process';
+          import {extractSection, parseSuccessCriteria, parseAcceptanceReport} from './scripts/requirement-acceptance.mjs';
+          const number = Number(process.env.ISSUE_NUMBER), stage = process.env.ACCEPTANCE_STAGE;
+          const target = process.env.TARGET_REF;
+          for (let attempt = 0; attempt < 120; attempt++) {
+            const issue = JSON.parse(execFileSync('gh', ['issue','view',String(number),
+              '--repo','BestNathan/nession','--json','body'], {encoding:'utf8'}));
+            const sc = parseSuccessCriteria(extractSection(issue.body, 'Success Criteria')).criteria;
+            const rows = [...parseAcceptanceReport(extractSection(issue.body, 'Acceptance Report')).rows.values()]
+              .filter(x => x.stage === stage);
+            assert(rows.length, 'no criteria for Issue ' + number + ' stage ' + stage);
+            if (rows.every(row => row.result.toLowerCase() === 'pass' && sc.get(row.id)?.checked &&
+              row.evidence.includes('ref ' + target + ';'))) {
+              console.log('Verified trusted Issue projection for #' + number + ' stage ' + stage);
+              process.exit(0);
+            }
+            await new Promise(resolve=>setTimeout(resolve, 10000));
+          }
+          throw new Error('Timeout awaiting projected acceptance for Issue ' + number + ' stage ' + stage);
+          NODE
 
   close_accepted_issues:
-    needs: [pre1522, pre1523, stage1523, pre1527, stage1527]
+    needs: [verify, project]
     runs-on: ubuntu-latest
     permissions:
       contents: read
