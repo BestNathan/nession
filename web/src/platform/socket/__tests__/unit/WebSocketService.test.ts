@@ -324,11 +324,15 @@ describe('WebSocketService', () => {
     connectAndLose();
 
     // Held at the budget rather than climbing, and — the point of the test —
-    // still `reconnecting`, not settled on `disconnected`. That state is what
-    // keeps the route from being declared exhausted while it is still being
-    // attempted.
+    // still attempting. The *state*, though, is `disconnected`: a spent budget
+    // on a route with nothing to rotate to is a verdict the caller has to be
+    // able to read (its address policy turns it into `transport-exhausted`, and
+    // the attach machine renders that), so it is reported once even though the
+    // tail below keeps probing. Reporting it as `reconnecting` for as long as
+    // the retries run is what left a client whose pinned route cannot complete a
+    // handshake spinning over an empty terminal indefinitely.
     expect(service.reconnectAttempts).toBe(2);
-    expect(service.connectionState).toBe('reconnecting');
+    expect(service.connectionState).toBe('disconnected');
 
     // Another attempt is made rather than the transport settling. Asserted on
     // the socket the service built, not on the handshake: the handshake only
@@ -337,11 +341,73 @@ describe('WebSocketService', () => {
     await flushTimers(20_000);
     expect(MockWebSocket.instances).toHaveLength(4);
 
-    // And it continues: the tail is a cadence, not one last try.
+    // And it continues: the tail is a cadence, not one last try. Note what
+    // carries the verdict — the retry below re-enters `connect()` and the state
+    // reads `connecting` again while it tries, which is why the report is a
+    // transition (`disconnected`, once) rather than a state held open. The case
+    // after this one counts it; this one pins the cadence.
     connectAndLose();
-    expect(service.connectionState).toBe('reconnecting');
     await flushTimers(20_000);
     expect(MockWebSocket.instances).toHaveLength(5);
+  });
+
+  it('leaves a reported exhaustion behind when the pinned route comes back (#1263)', async () => {
+    // The other half of the case above. The report is a verdict about a moment
+    // rather than a latch: a route that heals has to say so, and one that fails
+    // again after healing has to be able to report again — otherwise the second
+    // outage is as silent as the first.
+    const gate = controlledHandshake();
+    const service = new WebSocketService('ws://server/ws', [], {
+      handshake: gate.handshake,
+      maxReconnectAttempts: 2,
+      reconnectBaseDelay: 5,
+      persistentReconnect: true,
+    });
+    const states: string[] = [];
+    service.onConnectionStateChange((state) => states.push(state));
+    void service.connect().catch(() => {});
+
+    const newest = (): MockWebSocket =>
+      MockWebSocket.instances[MockWebSocket.instances.length - 1];
+    /** Open the newest socket, then drop it while its handshake is pending. */
+    const loseNewest = (): void => {
+      newest().open();
+      newest().serverClose();
+    };
+
+    loseNewest();
+    await flushTimers(50);
+    loseNewest();
+    await flushTimers(50);
+    loseNewest();
+
+    expect(service.reconnectAttempts).toBe(2);
+    expect(service.connectionState).toBe('disconnected');
+    expect(states.filter((state) => state === 'disconnected')).toHaveLength(1);
+
+    // The tail is still a cadence, and its retries do not re-report.
+    await flushTimers(20_000);
+    expect(MockWebSocket.instances).toHaveLength(4);
+    expect(states.filter((state) => state === 'disconnected')).toHaveLength(1);
+
+    // The route answers: the socket opens and its handshake completes.
+    const healed = newest();
+    healed.open();
+    gate.resolve();
+    await drainMicrotasks();
+    expect(service.connectionState).toBe('connected');
+    expect(service.reconnectAttempts).toBe(0);
+
+    // A later outage starts a new episode: two fast losses, and the third
+    // reports again rather than inheriting the previous silence.
+    healed.serverClose();
+    await flushTimers(50);
+    loseNewest();
+    await flushTimers(50);
+    loseNewest();
+
+    expect(service.connectionState).toBe('disconnected');
+    expect(states.filter((state) => state === 'disconnected')).toHaveLength(2);
   });
 
   it('settles on disconnected past the budget without persistentReconnect', async () => {

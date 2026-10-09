@@ -117,17 +117,29 @@ export class AttachStateMachine {
     }
   }
 
+  /**
+   * `failed` is not a one-way door, and a transport that connects is proof that
+   * the failure it records is over: a pinned route that was reported exhausted
+   * and then came back shows the recovery instead of an "Attach failed" the
+   * connection has already outlived. `canStartAttach` has always accepted
+   * `failed`, so the attach that follows lands in `attached` as usual.
+   */
   private onP2PConnected(): void {
     if (this.options.transportFirst) {
       return;
     }
-    if (this.phase === 'connecting' || this.phase === 'reconnecting') {
+    if (this.phase === 'connecting' || this.phase === 'reconnecting' || this.phase === 'failed') {
       this.phase = 'connected';
     }
   }
 
   private onTransportReady(): void {
-    if (this.phase === 'connecting' || this.phase === 'reconnecting' || this.phase === 'connected') {
+    if (
+      this.phase === 'connecting'
+      || this.phase === 'reconnecting'
+      || this.phase === 'connected'
+      || this.phase === 'failed'
+    ) {
       if (!this.options.transportFirst && this.phase !== 'connected') {
         this.phase = 'connected';
       }

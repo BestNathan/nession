@@ -73,6 +73,12 @@ export class WebSocketService implements PluginSurface {
   private ws: WebSocket | null = null;
   private generation = 0;
   private reconnectAttempt = 0;
+  /**
+   * Whether the spent-budget verdict has been reported for the current loss
+   * episode. Cleared by every connection that gets established, so a route that
+   * comes back and fails again reports once more rather than never.
+   */
+  private reportedRouteExhaustion = false;
   private state: ConnectionState = 'disconnected';
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private connectPromise: Promise<void> | null = null;
@@ -358,6 +364,7 @@ export class WebSocketService implements PluginSurface {
         // Nothing gates readiness, so the socket *is* the connection: open is
         // established, and only here may the reconnect budget reset.
         this.reconnectAttempt = 0;
+        this.reportedRouteExhaustion = false;
         this.setState('connected');
         this.connectPromise = null;
         this.rejectConnect = null;
@@ -397,6 +404,9 @@ export class WebSocketService implements PluginSurface {
         // let a socket that opened but never authenticated re-arm itself on
         // every retry, so the budget never ran out (#692).
         this.reconnectAttempt = 0;
+        // The route is back, so the reported exhaustion is spent too: a later
+        // loss may report again.
+        this.reportedRouteExhaustion = false;
         this.connectPromise = null;
         this.rejectConnect = null;
         this.setState('connected');
@@ -489,25 +499,49 @@ export class WebSocketService implements PluginSurface {
     this.router.failPending(error);
     const maxAttempts = this.options.maxReconnectAttempts ?? DEFAULT_MAX_RECONNECT_ATTEMPTS;
     const spent = this.reconnectAttempt >= maxAttempts;
+    const persistent = this.options.persistentReconnect === true;
 
-    if (spent && this.options.persistentReconnect !== true) {
+    if (spent && !persistent) {
       console.error('Max reconnection attempts reached');
       this.setState('disconnected');
       this.rejectWaiters(new Error('Connection lost'));
       return;
     }
 
+    // A pinned route has nothing to rotate to, so a spent budget cannot *end*
+    // the attempt: the tail below keeps probing, because the route may simply
+    // be away. What it must not do is hide the verdict. Reported as
+    // `reconnecting` for as long as the retries run, the caller's address
+    // policy never reaches its no-candidate branch, the attach state machine
+    // never reaches `failed`, and a client whose pinned route cannot complete a
+    // WebSocket handshake shows a spinner over an empty terminal for as long as
+    // it is left open — measured on staging as one attempt every 30 s for hours,
+    // with nothing on screen saying so.
+    //
+    // So the exhaustion is *reported* — once per loss episode, so the tail does
+    // not re-fire it — while the retries continue underneath. That is what the
+    // caller reads as "this route is spent": `disconnected` is the state its
+    // policy turns into `transport-exhausted`, and for a pinned route the state
+    // machine already renders and recovers from it (`canStartAttach` accepts
+    // `failed`, so the next successful handshake re-attaches on its own).
+    // #1263 chose silence because `failed` was a one-way door then; it is not
+    // one now, which is what makes reporting this safe.
+    if (spent && !this.reportedRouteExhaustion) {
+      this.reportedRouteExhaustion = true;
+      this.setState('disconnected');
+    }
+
     // `reconnectAttempt` stops climbing once the budget is spent, so the fast
     // phase stays bounded and the long tail runs on one flat delay — the fast
     // attempts are for an endpoint that blipped, this is for a peer that is
-    // restarting or away. The state deliberately stays `reconnecting` in the
-    // tail rather than reporting a loss: `disconnected` is what tells the
-    // address policy to rotate or exhaust, and this path exists precisely
-    // because there is nothing to rotate to (#1263).
+    // restarting or away.
     if (!spent) {
       this.reconnectAttempt += 1;
+      // Only the fast phase is "reconnecting" once the verdict above is on
+      // record: re-asserting it here would overwrite the report in the same
+      // tick, which is the silence this exists to end (#1263).
+      this.setState('reconnecting');
     }
-    this.setState('reconnecting');
     const baseDelay = this.options.reconnectBaseDelay ?? DEFAULT_RECONNECT_BASE_DELAY;
     const delay = spent
       ? PERSISTENT_RECONNECT_DELAY_MS
