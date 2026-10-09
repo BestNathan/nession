@@ -10,6 +10,7 @@ import {
   normalizeAcceptanceCaseResult,
 } from './acceptance-executor.mjs';
 import { parsePreMergeIssueNumbers } from './requirement-acceptance.mjs';
+import { artifactEvidence, validateArtifactEvidence } from './run-record-artifact-evidence.mjs';
 
 const RESULTS = new Set(['Pass', 'Fail', 'Pending', 'Error']);
 const STAGES = new Set(['pre-merge', 'staging', 'post-merge']);
@@ -63,6 +64,15 @@ export function validateCaseRecord(raw) {
   const executionId = sha(raw.execution_id, 64, 'execution_id');
   const runId = positiveInt(raw.run_id, 'run_id');
   const runAttempt = positiveInt(raw.run_attempt, 'run_attempt');
+  // Existing immutable records predate the envelope and remain readable.
+  // New records must have a *source-bound*, explicitly finite evidence locator.
+  if (raw.evidence !== undefined) {
+    validateArtifactEvidence(raw.evidence, {
+      mode: 'acceptance', run_id: runId, run_attempt: runAttempt,
+      source_record_sha256: raw.provenance?.source_result_sha256,
+      workflow_url: raw.provenance?.workflow_url,
+    });
+  }
   const result = String(raw.result ?? '');
   if (!RESULTS.has(result)) throw new Error('invalid Case result: ' + result);
   if (!Array.isArray(raw.verifiers) || raw.verifiers.length === 0) {
@@ -233,6 +243,10 @@ export function enrichCaseRecord(record, { workflowUrl, recordPath: durablePath,
       record_path: singleLine(durablePath, 'record_path'),
       source_result_sha256: sourceResultSha256,
     },
+    evidence: artifactEvidence({
+      mode: 'acceptance', run_id: item.run_id, run_attempt: item.run_attempt,
+      source_record_sha256: sourceResultSha256, workflow_url: workflowUrl,
+    }),
   };
 }
 
@@ -489,6 +503,14 @@ async function selfTest() {
     recordPath: recordPath(valid),
   });
   assert.match(enriched.provenance.source_result_sha256, /^[0-9a-f]{64}$/);
+  assert.equal(enriched.evidence.artifact_name, 'acceptance-case-results-100-1');
+  assert.equal(enriched.evidence.retention_days, 90);
+  assert.equal(enriched.evidence.digest_scope, 'validated-source-record-json');
+  assert.match(enriched.evidence.durability, /time-limited/);
+  assert.throws(() => validateCaseRecord({ ...enriched, evidence: {
+    ...enriched.evidence, retention_days: 3650 } }), /artifact evidence/);
+  assert.throws(() => validateCaseRecord({ ...enriched, evidence: {
+    ...enriched.evidence, sha256: '0'.repeat(64) } }), /artifact evidence/);
   console.log('acceptance Case ingest self-test: provenance and record validation passed');
 }
 
