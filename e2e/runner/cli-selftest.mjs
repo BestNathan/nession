@@ -73,15 +73,39 @@ const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'nession-run-cli-selftest-'))
 try {
   const left = path.join(temp, 'left.json');
   const right = path.join(temp, 'right.json');
-  fs.writeFileSync(left, JSON.stringify({ kind: 'e2e_scenario_observation',
-    target_sha: 'a'.repeat(40), result: 'Completed' }));
-  fs.writeFileSync(right, JSON.stringify({ kind: 'e2e_scenario_observation',
-    target_sha: 'b'.repeat(40), result: 'Completed' }));
+  const fixture = (target, restored) => ({
+    schema_version: 1, kind: 'e2e_scenario_observation', scenario: 'terminal-attach-resume',
+    target_sha: target.repeat(40), config_sha256: 'c'.repeat(64),
+    status: 'Completed', evaluation: null, observation_count: 3,
+    observations: [
+      { at: '2026-10-09T00:00:00.000Z', stage: 'before-reload',
+        browser: { marker_count: 1, mounted: true }, backend: { marker_count: 240 } },
+      { at: '2026-10-09T00:00:01.000Z', stage: 'after-reload',
+        browser: { marker_count: 20, mounted: true }, backend: { marker_count: 240 } },
+      { at: '2026-10-09T00:00:02.000Z', stage: 'after-reload',
+        browser: { marker_count: restored, mounted: true }, backend: { marker_count: 240 } },
+    ],
+  });
+  fs.writeFileSync(left, JSON.stringify(fixture('a', 100)));
+  fs.writeFileSync(right, JSON.stringify(fixture('b', 240)));
   const compared = call('compare', left, right);
   assert.equal(compared.code, 0);
   const delta = JSON.parse(compared.stdout);
   assert.equal(delta.evaluation, null);
   assert.equal(delta.differences.some((item) => item.field === 'target_sha'), true);
+  assert.equal(delta.scenario, 'terminal-attach-resume');
+  assert.equal(delta.config_comparable, true);
+  assert.equal(delta.left.timeline.length, 3);
+  assert.equal(delta.observed_delta.final_browser_marker_count, 140);
+  assert.match(delta.limitations, /not synchronized/);
+  const corrupt = fixture('a', 240);
+  corrupt.observations[1].browser.marker_count = -1;
+  fs.writeFileSync(right, JSON.stringify(corrupt));
+  expectError('compare', left, right);
+  corrupt.observations[1].browser.marker_count = 20;
+  corrupt.observation_count = 4;
+  fs.writeFileSync(right, JSON.stringify(corrupt));
+  expectError('compare', left, right);
 } finally {
   fs.rmSync(temp, { recursive: true, force: true });
 }
