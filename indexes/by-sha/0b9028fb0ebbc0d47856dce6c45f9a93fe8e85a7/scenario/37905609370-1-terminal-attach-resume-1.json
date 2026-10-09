@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 37905609370,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/1512-staging-canonical-browser-case",
+    "target_sha": "0b9028fb0ebbc0d47856dce6c45f9a93fe8e85a7",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/37905609370",
+    "scenario_tree_sha": "96ae71e441342a6b448289c64cc8ca2ac8f00659",
+    "original_sha256": "31c917241cda49fc06844d0496960d81fffde2b7ae8cd5f6255ddfce516ffbe1"
+  },
+  "record": "runs/2026-10-09/37905609370-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "9a1dac2df6d2edd20ce0ab2229e776b7a6a12273da6d2259270413ca2b7a2cae"
+}
