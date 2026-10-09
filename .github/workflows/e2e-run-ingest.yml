@@ -62,7 +62,7 @@ jobs:
               source="$scratch/index.json"
               if [[ "$dest" == "$record" ]]; then source="$scratch/record.json"; fi
               if [[ -e "results-repo/$dest" ]]; then
-                cmp -s "$source" "results-repo/$dest" || { echo "::error::Immutable collision: $dest" >&2; exit 1; }
+                node trusted/scripts/e2e-run-ingest.mjs check-collision "results-repo/$dest" "$source"
               else
                 mkdir -p "results-repo/$(dirname "$dest")"
                 cp "$source" "results-repo/$dest"
