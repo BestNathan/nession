@@ -1,0 +1,4 @@
+# e2e
+# Gate IDs only. Not wired into current hooks/workflows yet.
+design-system-browser
+e2e-playwright

@@ -1,0 +1,7 @@
+# requirement-acceptance-pr
+# Gate IDs only. Not wired into current hooks/workflows yet.
+requirement-acceptance-selftest
+acceptance-executor-selftest
+acceptance-agent-selftest
+requirement-acceptance-pre-merge
+requirement-acceptance-pr

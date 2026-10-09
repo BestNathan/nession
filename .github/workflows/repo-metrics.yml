@@ -12,8 +12,8 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: repo-metrics
-  cancel-in-progress: true
+  group: metrics-writer
+  cancel-in-progress: false
 
 jobs:
   rust-health:
@@ -110,6 +110,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - name: Checkout durable metrics history
+        uses: actions/checkout@v4
+        with:
+          ref: metrics
+          path: metrics-store
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           pattern: '*-health'
@@ -119,6 +125,8 @@ jobs:
         run: |
           node scripts/collect-repo-health.mjs --self-test
           node scripts/generate-repo-metrics.mjs --self-test
+          node scripts/agent-workflow-telemetry.mjs self-test
+          node scripts/agent-workflow-telemetry-contract.mjs self-test
           node scripts/protocol-gate.mjs
       - name: Generate repository metrics
         env:
@@ -127,28 +135,49 @@ jobs:
           REPO_METRICS_HEALTH_DIR: ${{ runner.temp }}/repo-health
           METRICS_OUTPUT_DIR: ${{ runner.temp }}/repo-metrics
         run: node scripts/generate-repo-metrics.mjs
-      - name: Publish orphan metrics branch
+      - name: Generate Agent workflow metrics
+        env:
+          METRICS_NOW: ''
+        run: |
+          node scripts/agent-workflow-telemetry.mjs aggregate             "${GITHUB_WORKSPACE}/metrics-store/raw/workflows"             "${RUNNER_TEMP}/agent-metrics"
+
+      - name: Publish durable metrics branch
         env:
           OUT_DIR: ${{ runner.temp }}/repo-metrics
+          AGENT_OUT_DIR: ${{ runner.temp }}/agent-metrics
         run: |
           set -euo pipefail
           for file in metrics.json repo-metrics-light.svg repo-metrics-dark.svg; do
             if [[ ! -s "${OUT_DIR}/${file}" ]]; then
               echo "✗ generated metric artifact is missing or empty: ${file}"
-              echo "  Fix: inspect the Repository Metrics collector/generator steps and re-run this workflow."
+              exit 1
+            fi
+          done
+          for file in agent-metrics.json agent-metrics-light.svg agent-metrics-dark.svg; do
+            if [[ ! -s "${AGENT_OUT_DIR}/${file}" ]]; then
+              echo "✗ generated Agent metric artifact is missing or empty: ${file}"
               exit 1
             fi
           done
 
+          cd "${GITHUB_WORKSPACE}/metrics-store"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git switch --orphan metrics
-          git rm -rf . >/dev/null 2>&1 || true
 
           cp "${OUT_DIR}/metrics.json" .
           cp "${OUT_DIR}/repo-metrics-light.svg" .
           cp "${OUT_DIR}/repo-metrics-dark.svg" .
+          cp "${AGENT_OUT_DIR}/agent-metrics.json" .
+          cp "${AGENT_OUT_DIR}/agent-metrics-light.svg" .
+          cp "${AGENT_OUT_DIR}/agent-metrics-dark.svg" .
 
-          git add metrics.json repo-metrics-light.svg repo-metrics-dark.svg
-          git commit -m "metrics: update repository telemetry"
-          git push --force origin HEAD:metrics
+          git add metrics.json repo-metrics-light.svg repo-metrics-dark.svg             agent-metrics.json agent-metrics-light.svg agent-metrics-dark.svg
+
+          if git diff --cached --quiet; then
+            echo "Metrics projections are unchanged."
+            exit 0
+          fi
+
+          git commit -m "metrics: update repository telemetry projections"
+          git push origin HEAD:metrics
+
