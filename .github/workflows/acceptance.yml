@@ -122,6 +122,10 @@ jobs:
           ref: ${{ inputs.target_ref }}
           path: workspace
           persist-credentials: false
+          # Source ancestry evidence must include parents and reachable history;
+          # depth-1 leaves only the commit SHA in .git/shallow and makes
+          # exact-source merge/parent proofs incorrectly Pending.
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:

@@ -426,14 +426,6 @@ async function discoverRefRequirements(shaArg) {
   );
 }
 
-async function closePullRequest(owner, name, number, token) {
-  await githubRequest(`/repos/${owner}/${name}/pulls/${number}`, {
-    token,
-    method: 'PATCH',
-    body: { state: 'closed' },
-  });
-}
-
 async function discoverPreMergeRequirements() {
   const event = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
   const [owner, name] = process.env.GITHUB_REPOSITORY.split('/');
@@ -442,6 +434,16 @@ async function discoverPreMergeRequirements() {
   const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
   const requirements = await preMergeRequirementIssues({ owner, name, title: pr.title, body: pr.body, token });
   process.stdout.write(JSON.stringify(requirements.map((issue) => String(issue.number)).sort((a, b) => Number(a) - Number(b))) + '\n');
+}
+
+// Gate failure must block merge without taking ownership of the PR lifecycle.
+// Keeping a PR open permits the author to push a fix and rerun the required check.
+function enforcePrAcceptance({ mode, number, failures }) {
+  if (!failures.length) return;
+  const label = mode === 'pre-merge'
+    ? 'Pre-merge requirement acceptance gate failed'
+    : 'Requirement acceptance gate failed';
+  throw new Error(`${label} for PR #${number} (PR remains open; merge blocked):\n\n${failures.join('\n\n')}`);
 }
 
 async function runPrGate({ mode = 'merge', discovery = 'closing' } = {}) {
@@ -468,21 +470,7 @@ async function runPrGate({ mode = 'merge', discovery = 'closing' } = {}) {
       );
     }
   }
-  if (failures.length) {
-    if (pr.state !== 'closed') {
-      await closePullRequest(owner, name, number, token);
-      console.error(
-        mode === 'pre-merge'
-          ? `PR #${number} was closed because pre-merge requirement acceptance is incomplete. Fix acceptance, then reopen the PR.`
-          : `PR #${number} was closed because requirement acceptance is incomplete. Fix acceptance, then reopen the PR.`,
-      );
-    }
-    throw new Error(
-      mode === 'pre-merge'
-        ? `Pre-merge requirement acceptance gate failed:\n\n${failures.join('\n\n')}`
-        : `Requirement acceptance gate failed:\n\n${failures.join('\n\n')}`,
-    );
-  }
+  enforcePrAcceptance({ mode, number, failures });
   console.log(
     mode === 'pre-merge'
       ? `Pre-merge requirement acceptance gate passed for PR #${number} (${requirements.length} requirement issue(s)).`
@@ -625,6 +613,18 @@ function runSelfTest() {
     parseClosingIssueNumbers('`Closes #20`\n> Closes #21\n```md\nCloses #22\n```\n<!-- Closes #23 -->\nCloses #24', 'BestNathan', 'nession'),
     [24],
   );
+
+  assert.doesNotThrow(() => enforcePrAcceptance({ mode: 'pre-merge', number: 99, failures: [] }));
+  assert.throws(() => enforcePrAcceptance({ mode: 'pre-merge', number: 99,
+    failures: ['SC-01 remains Pending'] }), error =>
+      error.message.includes('Pre-merge requirement acceptance gate failed') &&
+      error.message.includes('PR remains open; merge blocked') &&
+      error.message.includes('SC-01 remains Pending'));
+  assert.throws(() => enforcePrAcceptance({ mode: 'merge', number: 99,
+    failures: ['SC-02 is Fail'] }), error =>
+      error.message.includes('Requirement acceptance gate failed') &&
+      error.message.includes('PR remains open; merge blocked') &&
+      error.message.includes('SC-02 is Fail'));
 
   console.log(`requirement-acceptance self-test: ${cases.length + 3} cases passed`);
 }
