@@ -126,6 +126,7 @@ jobs:
           ISSUE_NUMBERS: ${{ steps.target.outputs.issues }}
           ACCEPTANCE_STAGE: ${{ steps.target.outputs.stage }}
           MANUAL_CRITERION: ${{ steps.target.outputs.manual_criterion }}
+          TARGET_SHA: ${{ steps.target.outputs.target_sha }}
           RUNTIME_PROFILE: ${{ steps.target.outputs.runtime_profile }}
         run: |
           set -euo pipefail
@@ -172,7 +173,7 @@ jobs:
           const expected = [];
           for (const issueNumber of issueNumbers) {
             const issue = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + '/acceptance-contracts/' + issueNumber + '.json', 'utf8'));
-            const context = trusted.buildAcceptanceContext(issue, stage, { runId: process.env.GITHUB_RUN_ID });
+            const context = trusted.buildAcceptanceContext(issue, stage, { targetRef: process.env.TARGET_SHA, runId: process.env.GITHUB_RUN_ID });
             for (const criterion of context.criteria) expected.push(issueNumber + '/' + criterion.criterion);
           }
           const selectedKeys = selected.map((entry) => entry.issue + '/' + entry.criterion);
