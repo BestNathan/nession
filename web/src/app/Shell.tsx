@@ -11,9 +11,10 @@ import { chromeSansRole } from '@/shared/typography/chromeRoles';
 
 export interface ShellProps {
   connectionStatus: ConnectionState;
+  onRetry?: () => void;
 }
 
-export function Shell({ connectionStatus }: ShellProps) {
+export function Shell({ connectionStatus, onRetry }: ShellProps) {
   const state = useShellState();
   const { data } = state;
 
@@ -78,6 +79,12 @@ export function Shell({ connectionStatus }: ShellProps) {
               </TooltipTrigger>
               <TooltipContent side="bottom">Dismiss</TooltipContent>
             </Tooltip>
+          </div>
+        ) : null}
+        {connectionStatus === 'disconnected' && onRetry ? (
+          <div role="status" className="flex shrink-0 items-center justify-center gap-2 px-3 py-1 text-muted-foreground">
+            <span className={chromeSansRole('secondary')}>Connection unavailable</span>
+            <Button type="button" size="sm" variant="ghost" onClick={onRetry}>Retry</Button>
           </div>
         ) : null}
         {state.isRestoringDeepLink ? (

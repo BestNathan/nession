@@ -53,21 +53,58 @@ async function verifyTerminalClearance(page, expect, runtime, targetSha) {
     const host = document.querySelector('[data-terminal-capsule-host]');
     const viewport = document.querySelector('[data-terminal-viewport]');
     const shell = document.querySelector('[data-testid="capsule-shell"]');
-    if (!(host instanceof HTMLElement) || !(viewport instanceof HTMLElement) || !(shell instanceof HTMLElement)) return null;
+    const screen = viewport?.querySelector('.xterm-screen');
+    const element = viewport?.querySelector('.xterm');
+    const term = element?.parentElement?.xtermInstance;
+    if (!(host instanceof HTMLElement) || !(viewport instanceof HTMLElement) ||
+        !(shell instanceof HTMLElement) || !(screen instanceof HTMLElement) || !term) return null;
     const inset = Number.parseFloat(getComputedStyle(viewport).paddingBottom);
     const occlusion = Number.parseFloat(getComputedStyle(host).getPropertyValue('--nession-local-terminal-capsule-occlusion')) || 0;
+    const viewportBox = viewport.getBoundingClientRect();
+    const shellBox = shell.getBoundingClientRect();
+    const gridBox = screen.getBoundingClientRect();
+    const buffer = term.buffer.active;
+    const cellHeight = gridBox.height / term.rows;
+    const cursorBottom = gridBox.top + (buffer.cursorY + 1) * cellHeight;
+    const contentLine = buffer.getLine(buffer.baseY + buffer.cursorY)?.translateToString()?.trim() || '';
     return {
       inset, occlusion,
-      contentBottom: viewport.getBoundingClientRect().bottom - inset,
-      shellTop: shell.getBoundingClientRect().top,
+      contentBottom: viewportBox.bottom - inset,
+      shellTop: shellBox.top,
+      // Measure actual rendered xterm cell geometry, not only a declared CSS inset.
+      gridBottom: gridBox.bottom,
+      cursorBottom,
+      cellHeight,
+      rows: term.rows,
+      cursorRow: buffer.cursorY,
+      cursorLineNonEmpty: contentLine.length > 0,
+      viewportY: buffer.viewportY,
+      baseY: buffer.baseY,
+      bufferType: buffer.type,
       mode: host.getAttribute('data-terminal-scroll-mode'),
-      viewportHeight: viewport.getBoundingClientRect().height,
+      viewportHeight: viewportBox.height,
     };
   });
   const valid = (g) => g && g.mode === 'following' && g.occlusion > 0 &&
-    g.inset > 0 && g.contentBottom <= g.shellTop + 1;
-  await expect.poll(async () => valid(await geometry()), { timeout: 20000 }).toBe(true);
-  const web = await geometry();
+    g.inset > 0 && g.rows > 0 && g.cellHeight > 0 && g.cursorLineNonEmpty &&
+    g.viewportY === g.baseY &&
+    g.contentBottom <= g.shellTop + 1 &&
+    g.gridBottom <= g.shellTop + 1 &&
+    g.cursorBottom <= g.shellTop + 1;
+  // Capture the *same* geometry snapshot that satisfied the assertion. A
+  // second evaluate after an expect.poll success can see the next layout
+  // frame (or a transient empty cursor line) and report a false SC-08 failure.
+  const captureFollow = async (timeout = 20000) => {
+    let verified = null;
+    await expect.poll(async () => {
+      const sample = await geometry();
+      if (!valid(sample)) return false;
+      verified = sample;
+      return true;
+    }, { timeout }).toBe(true);
+    return verified;
+  };
+  const web = await captureFollow();
 
   const screen = await page.locator('.xterm-screen').boundingBox();
   if (!screen) throw new Error('xterm screen has no measurable box');
@@ -75,18 +112,33 @@ async function verifyTerminalClearance(page, expect, runtime, targetSha) {
   await page.mouse.wheel(0, -500);
   await expect.poll(async () => (await geometry())?.mode, { timeout: 10000 }).toBe('history');
   await expect.poll(async () => (await geometry())?.inset, { timeout: 10000 }).toBe(0);
+  await expect.poll(async () => {
+    const g = await geometry();
+    return g && g.viewportY < g.baseY;
+  }, { timeout: 10000 }).toBe(true);
   const history = await geometry();
 
   await page.mouse.wheel(0, 5000);
-  await expect.poll(async () => valid(await geometry()), { timeout: 15000 }).toBe(true);
-  const restored = await geometry();
+  const restored = await captureFollow(15000);
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect.poll(async () => valid(await geometry()), { timeout: 20000 }).toBe(true);
-  const app = await geometry();
+  const app = await captureFollow();
 
-  return { target_sha: targetSha, case_issue: 1482, revalidates: '#1347 SC-12',
-    web, history, restored, app, evidence_kind: 'computed-css-and-browser-geometry' };
+  // Exercise a second App size: a change in safe area/capsule position must not
+  // leave the terminal with a stale clearance, even after history was visited.
+  await page.setViewportSize({ width: 375, height: 667 });
+  const compactApp = await captureFollow();
+
+  // Return to Web and verify the follow-mode clearance survives responsive
+  // layout transitions. Alternate-screen TUI control is tested by terminal E2E.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const webRestored = await captureFollow();
+
+  return {
+    target_sha: targetSha, case_issue: 1482, revalidates: '#1347 SC-12',
+    web, history, restored, app, compactApp, webRestored,
+    evidence_kind: 'computed-css-and-rendered-xterm-cell-geometry',
+  };
 }
 
 module.exports = { verifyTerminalClearance };

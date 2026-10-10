@@ -155,7 +155,8 @@ ok(() => {
     cwd: process.cwd(), encoding: 'utf8', timeout: 5000,
   });
   assert.equal(run.status, 0, 'relocated Driver contract failed: ' + run.stderr);
-  assert.match(run.stdout, /11 positive\/negative fixtures passed/);
+  // Keep the canonical Driver gate aligned with its expanded negative fixtures.
+  assert.match(run.stdout, /14 positive\/negative fixtures passed/);
 });
 
 // Real source Case discovery is part of the mandatory canonical contract.

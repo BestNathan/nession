@@ -177,3 +177,44 @@ test('runtime-local producer resolves a shared exported CSS variable constant', 
   ];
   assert.deepEqual(scanLocalVariableContracts(files), []);
 });
+
+test('runtime-local contract rejects unregistered producer even when its consumer matches', () => {
+  const name = '--nession-local-terminal-content-botton-inset';
+  const files = [
+    { file: 'web/src/product/terminal/producer.ts',
+      source: "host.style.setProperty('" + name + "', '40px');" },
+    { file: 'web/src/product/terminal/consumer.tsx',
+      source: "const value = 'var(" + name + ", 0px)';" },
+  ];
+  const failures = scanLocalVariableContracts(files, {
+    '--nession-local-terminal-content-bottom-inset': ['web/src/product/terminal/producer.ts'],
+  });
+  assert.ok(failures.some(v => v.kind === 'unregistered-local-producer' && v.actual === name));
+});
+
+test('runtime-local contract rejects consumers outside the registered inheritance surface', () => {
+  const name = '--nession-local-terminal-content-bottom-inset';
+  const files = [
+    { file: 'web/src/platform/terminal-runtime/capsule/occlusionScroll.ts',
+      source: "host.style.setProperty('" + name + "', '64px')" },
+    { file: 'web/src/capabilities/unrelated/Probe.tsx',
+      source: "const pad = 'var(" + name + ", 0px)'" },
+  ];
+  const failures = scanLocalVariableContracts(
+    files,
+    { [name]: ['web/src/platform/terminal-runtime/capsule/occlusionScroll.ts'] },
+    { [name]: ['web/src/product/terminal/', 'web/src/platform/terminal-runtime/'] },
+  );
+  assert.ok(failures.some(v => v.kind === 'out-of-scope-local-consumer' && v.actual === name));
+});
+
+test('runtime-local lifecycle cannot remove a name outside the registry', () => {
+  const files = [{
+    file: 'web/src/unknown.ts',
+    source: "host.style.removeProperty('--nession-local-never-registered');",
+  }];
+  const failures = scanLocalVariableContracts(files, {
+    '--nession-local-terminal-content-bottom-inset': ['web/src/index.css'],
+  });
+  assert.ok(failures.some(v => v.kind === 'unregistered-local-lifecycle'));
+});

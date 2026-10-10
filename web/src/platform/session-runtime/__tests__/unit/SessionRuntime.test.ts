@@ -1131,6 +1131,29 @@ describe('SessionRuntime', () => {
       rt.dispose();
     });
 
+    it('foreground probes an attached healthy P2P peer without waiting for the interval (#1213)', async () => {
+      const rt = new SessionRuntime(makeConfig());
+      rt.setTransportReady(true);
+      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      await openWs();
+      await flushMicrotasks();
+      answerAttach();
+      await flushMicrotasks();
+      expect(rt.attachState.phase).toBe('attached');
+      const socketsBefore = wsInstances.length;
+      const pingsBefore = countPings();
+
+      rt.resumeOnForeground();
+      rt.resumeOnForeground();
+      await flushMicrotasks();
+      expect(countPings()).toBe(pingsBefore + 1);
+      answerPings();
+      await flushMicrotasks();
+      expect(wsInstances.length).toBe(socketsBefore);
+      expect(rt.connectionState).toBe('connected');
+      rt.dispose();
+    });
+
     it('questions the link as soon as input is sent (#1264)', async () => {
       const rt = new SessionRuntime(makeConfig());
       rt.setTransportReady(true);
