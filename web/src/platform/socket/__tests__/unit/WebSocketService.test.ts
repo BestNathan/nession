@@ -785,6 +785,71 @@ describe('WebSocketService', () => {
     expect(MockWebSocket.instances).toHaveLength(1);
   });
 
+  it('keeps automatic recovery alive when a retry socket fails with onerror (#1213 SC-15)', async () => {
+    const service = new WebSocketService('ws://server/ws', [], {
+      maxReconnectAttempts: 3,
+      reconnectBaseDelay: 5,
+    });
+    const initial = service.connect();
+    const oldSocket = MockWebSocket.instances[0];
+    oldSocket.open();
+    await initial;
+
+    oldSocket.serverClose();
+    expect(service.connectionState).toBe('reconnecting');
+    expect(service.reconnectAttempts).toBe(1);
+    await flushTimers(5);
+    expect(MockWebSocket.instances).toHaveLength(2);
+
+    // Chromium emits onerror during failed offline reconnect attempts. This
+    // differs from the original dial: recovery must continue automatically
+    // rather than stopping on "disconnected" with no remaining retry timer.
+    const offlineRetry = MockWebSocket.instances[1];
+    offlineRetry.error();
+    offlineRetry.serverClose(); // close after error may not count the loss twice
+    expect(service.connectionState).toBe('reconnecting');
+    expect(service.reconnectAttempts).toBe(2);
+
+    await flushTimers(10);
+    expect(MockWebSocket.instances).toHaveLength(3);
+    const healed = MockWebSocket.instances[2];
+    healed.open();
+    await drainMicrotasks();
+
+    expect(service.connectionState).toBe('connected');
+    expect(service.reconnectAttempts).toBe(0);
+    await flushTimers(100);
+    expect(MockWebSocket.instances).toHaveLength(3);
+    service.dispose();
+  });
+
+  it('bounds retries after successive onerror reconnect failures (#1213 SC-14)', async () => {
+    const service = new WebSocketService('ws://server/ws', [], {
+      maxReconnectAttempts: 2,
+      reconnectBaseDelay: 5,
+    });
+    const initial = service.connect();
+    MockWebSocket.instances[0].open();
+    await initial;
+    MockWebSocket.instances[0].serverClose();
+    await flushTimers(5);
+
+    const firstRetry = MockWebSocket.instances[1];
+    firstRetry.error();
+    firstRetry.serverClose();
+    expect(service.reconnectAttempts).toBe(2);
+    await flushTimers(10);
+
+    const secondRetry = MockWebSocket.instances[2];
+    secondRetry.error();
+    secondRetry.serverClose();
+    expect(service.connectionState).toBe('disconnected');
+    expect(service.reconnectAttempts).toBe(2);
+    await flushTimers(100);
+    expect(MockWebSocket.instances).toHaveLength(3);
+    service.dispose();
+  });
+
   it('envelopes send() frames with a unique id, timestamp and msg_type', async () => {
     const service = new WebSocketService('ws://server/ws');
     const connected = service.connect();
