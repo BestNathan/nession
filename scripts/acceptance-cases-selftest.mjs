@@ -196,6 +196,45 @@ ok(() => {
   assert.equal(result.status, 0, 'staging merge parent parser self-test failed: ' + result.stderr);
   assert.match(result.stdout, /raw-object proof self-test passed/);
 });
+// SC-11 must use the canonical CLI and reject an omitted exact source SHA.
+ok(() => {
+  const env = {
+    ...process.env,
+    NESSION_ACCEPTANCE_TRUSTED_ROOT: repoRoot,
+    NESSION_ACCEPTANCE_TARGET_SHA: 'a'.repeat(40),
+  };
+  const command = "const x=require('./acceptance/shared/infrastructure-contract.js');" +
+    "console.log(JSON.stringify(x.verifyInfrastructureCriterion('SC-11')))";
+  const positive = spawnSync(process.execPath, ['-e', command], {
+    cwd: repoRoot, env, encoding: 'utf8', timeout: 5000,
+  });
+  assert.equal(positive.status, 0, 'SC-11 must accept canonical dispatch: ' + positive.stderr);
+  assert.equal(JSON.parse(positive.stdout).status, 'pass');
+  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'nession-sc11-negative-'));
+  try {
+    const folder = path.join(fixture, '.github', 'workflows');
+    fs.mkdirSync(folder, { recursive: true });
+    const original = fs.readFileSync(path.join(repoRoot, '.github',
+      'workflows', 'acceptance-cases.yml'), 'utf8');
+    const dollar = String.fromCharCode(36);
+    const exact = ['args+=(--sha "', dollar, '{TARGET_SHA}" --profile "',
+      dollar, '{profile}" --output "', dollar, '{output}")'].join('');
+    const missing = ['args+=(--profile "', dollar, '{profile}" --output "',
+      dollar, '{output}")'].join('');
+    assert.ok(original.includes(exact), 'canonical SHA assertion fixture absent');
+    fs.writeFileSync(path.join(folder, 'acceptance-cases.yml'),
+      original.replace(exact, missing));
+    const negative = spawnSync(process.execPath, ['-e', command], {
+      cwd: repoRoot, env: { ...env, NESSION_ACCEPTANCE_TRUSTED_ROOT: fixture },
+      encoding: 'utf8', timeout: 5000,
+    });
+    assert.notEqual(negative.status, 0, 'missing SHA must be rejected');
+    assert.match(negative.stderr, /manual and automatic paths share exact SHA and runtime profile/);
+  } finally {
+    fs.rmSync(fixture, { recursive: true, force: true });
+  }
+});
+
 // Canonical manifest type=browser is the trusted dependency declaration.
 // A runtime Case invoking the Terminal Scenario transitively must list a real
 // Browser verifier, so the main-owned Case selector provisions Playwright.
