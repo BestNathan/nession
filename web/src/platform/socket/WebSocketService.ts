@@ -437,8 +437,12 @@ export class WebSocketService implements PluginSurface {
         // ran the loss path — retrying there is legitimate, and overriding it
         // would strand the retry timer behind a 'disconnected' state.
         if (this.ws === ws && ws.readyState === WebSocket.OPEN) {
-          this.teardownSocket();
-          this.failConnection();
+          this.options.onHandshakeRejected?.(error instanceof Error ? error : new Error(String(error)));
+          // The owner may dispose the service on explicit auth rejection.
+          if (this.ws === ws && ws.readyState === WebSocket.OPEN) {
+            this.teardownSocket();
+            this.failConnection();
+          }
         }
       });
     };

@@ -93,8 +93,22 @@ export function useAppConnection() {
       // stop before the new one opens — two transports would race the state.
       serviceRef.current?.dispose();
       const clientId = getOrCreateClientId();
+      let authenticatedOnce = false;
       service = new WebSocketService(serverUrl, SERVER_PLUGINS, {
         maxReconnectAttempts: 5,
+        onHandshakeRejected: (error) => {
+          // A post-resume *explicit refusal* is different from network loss.
+          // The service could recover transparently before this refusal;
+          // once rejected, preserve the error's auth meaning and exit to Login.
+          if (!authenticatedOnce || !(error instanceof AuthenticationRejectedError)
+            || serviceRef.current !== service) { return; }
+          serviceRef.current = null;
+          service?.dispose();
+          setWsService(null);
+          clearToken();
+          setWasEverAuthed(false);
+          setConnectionStatus('disconnected');
+        },
         handshake: (surface) => surface
           .request<AuthResponse>(AUTH_WIRE, { auth_token: authToken, client_id: clientId })
           .then((res) => {
@@ -112,6 +126,7 @@ export function useAppConnection() {
       // ever drive this hook to 'connected' again (#697).
       service.onConnectionStateChange((status) => {
         if (status === 'connected') {
+          authenticatedOnce = true;
           setWasEverAuthed(true);
         }
         setConnectionStatus(status);

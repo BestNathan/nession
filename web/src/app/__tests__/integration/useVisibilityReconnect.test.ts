@@ -13,7 +13,7 @@ let visibility: 'visible' | 'hidden' = 'visible';
 async function connectedService() {
   const service = new WebSocketService('ws://example.test');
   const opened = service.connect();
-  const socket = MockWebSocket.instances.at(-1)!;
+  const socket = MockWebSocket.instances[MockWebSocket.instances.length - 1];
   socket.open();
   await opened;
   return { service, socket };
