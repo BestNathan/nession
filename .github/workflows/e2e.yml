@@ -85,15 +85,15 @@ jobs:
       - name: Run canonical browser design gate
         env:
           CI: true
-        run: just design-check browser
+        run: ./gates/run design-system-browser
 
       # ── Run E2E ───────────────────────────────────────────────────────
       - name: Run E2E tests
         env:
           CI: true
         run: |
-          cd e2e
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.update_visual_snapshots }}" = "true" ]; then
+            cd e2e
             # `=all` is required, not optional. A bare `--update-snapshots` means
             # mode "changed", which still compares through maxDiffPixelRatio and
             # only rewrites snapshots that FAIL tolerance — a chrome change small
@@ -104,7 +104,7 @@ jobs:
             # it: any drift under the current value is still skipped in silence.
             ./run test --suite fixture-visual --update-snapshots=all
           else
-            ./run test --all
+            ./gates/run e2e-playwright
           fi
 
       - uses: actions/upload-artifact@v4

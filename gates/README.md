@@ -49,3 +49,10 @@ Suite files contain Gate IDs only: no commands, repair prose, changed-file rules
 ## Rollout boundary
 
 Hooks route changed-file Gate ID sets into `gates/run`. The canonical Rust CI quality recipe `just check` runs the `quality-rust` suite, including its original Acceptance runtime and Cases checks. Workflow-specific setup/deployment and remaining tooling self-tests are separate migration work; they must not be removed until parity is proven. Use `just gate <id>`, `just gates <suite>`, or `./gates/run <ids...>`.
+
+## Browser regression routing
+
+In normal E2E CI, `e2e-playwright` wraps the canonical `e2e/run test --all`
+runner. Explicit snapshot regeneration is a mutable developer/workflow operation
+and is intentionally not treated as a passing Gate. Browser dependency setup
+and Rust/Web builds remain workflow-owned prerequisites.

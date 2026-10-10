@@ -57,7 +57,8 @@ jobs:
           key: cargo-llvm-cov-v1
       - run: which cargo-llvm-cov || cargo install cargo-llvm-cov
       - run: rustup component add llvm-tools-preview
-      - run: just check
+      - name: Verify Rust and Acceptance Gates
+        run: ./gates/run --suite quality-rust
 
   web-check:
     runs-on: ubuntu-latest
@@ -70,8 +71,8 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - uses: extractions/setup-just@v2
       - run: cd web && npm ci
-      - run: just web-lint
-      - run: just web-test
+      - name: Verify Web lint, types and tests
+        run: ./gates/run web-eslint web-typecheck web-test-unit web-test-integration
 
   # ═══════════════════════════════════════════════════════════════════
   # Phase 2 — Versions (gate for all downstream jobs)

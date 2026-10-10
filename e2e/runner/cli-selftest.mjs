@@ -95,7 +95,10 @@ assert.match(caseWorkflow, /--profile "\$\{profile\}"/);
 assert.match(caseWorkflow, /--sha "\$\{TARGET_SHA\}"/);
 const regressionWorkflow = fs.readFileSync(
   path.join(repo, '.github', 'workflows', 'e2e.yml'), 'utf8');
-assert.match(regressionWorkflow, /\.\/run test --all/);
+assert.match(regressionWorkflow, /\.\/gates\/run e2e-playwright/);
+const regressionGate = fs.readFileSync(path.join(repo, 'gates', 'checks', 'e2e-playwright.sh'), 'utf8');
+assert.match(regressionGate, /GATE_COMMAND='cd e2e && CI=true \.\/run test --all'/);
+assert.match(regressionGate, /gate_run_invariant bash -c 'cd e2e && CI=true \.\/run test --all'/);
 const caseSmokeWorkflow = fs.readFileSync(
   path.join(repo, '.github', 'workflows', 'acceptance-case-smoke.yml'), 'utf8');
 assert.match(caseSmokeWorkflow, /\.\/e2e\/run acceptance/);
