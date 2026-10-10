@@ -8,6 +8,7 @@ rust-test-unit
 test-isolation
 tmux-socket-isolation
 protocol-integrity
+server-handler-locality
 design-system-fast
 web-eslint
 web-typecheck
