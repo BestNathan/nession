@@ -93,16 +93,23 @@ test('SC-17: headless Chrome mobile emulation preserves Session/Terminal across 
   // Foreground after a silent half-open path: suppress only the old Server
   // socket's typed probe reply; it remains OPEN until the coordinator replaces
   // it. Duplicate events must not unmount xterm or create a reconnect storm.
-  const stale = await page.evaluate(() => {
+  const stale = await page.evaluate(serverPort => {
     const state = window.__mobile1213;
-    const ws = [...state.sockets].reverse().find(s => s.url.includes('/ws') && s.readyState === WebSocket.OPEN);
-    if (!ws) throw new Error('no OPEN server WS to simulate stale connection');
+    // Server and Agent P2P both expose /ws. Scope this probe to the exact
+    // Server port; choosing "last /ws" may silently select an Agent P2P
+    // socket that never receives server.info and make the Case vacuous.
+    const isServer = socket => {
+      try { return new URL(socket.url).port === String(serverPort); }
+      catch { return false; }
+    };
+    const ws = [...state.sockets].reverse().find(s => isServer(s) && s.readyState === WebSocket.OPEN);
+    if (!ws) throw new Error('no OPEN Server WS to simulate stale connection');
     state.blockedSocket = ws;
     state.block = true;
-    return state.sockets.filter(s => s.url.includes('/ws')).length;
-  });
+    return state.sockets.filter(isServer).length;
+  }, runtime.server_port);
   const replacement = page.waitForEvent('websocket', {
-    predicate: ws => ws.url().includes('/ws'),
+    predicate: ws => new URL(ws.url()).port === String(runtime.server_port),
     timeout: 20_000,
   });
   await page.evaluate(() => {
@@ -117,10 +124,14 @@ test('SC-17: headless Chrome mobile emulation preserves Session/Terminal across 
   await expect.poll(() => page.evaluate(() => window.__mobile1213.drops), { timeout: 15_000 })
     .toBeGreaterThan(0);
   await page.evaluate(() => { window.__mobile1213.block = false; });
-  await expect.poll(() => page.evaluate(oldCount =>
-    window.__mobile1213.sockets.filter(s => s.url.includes('/ws')).length > oldCount &&
-    window.__mobile1213.sockets.some(s => s.url.includes('/ws') && s !== window.__mobile1213.blockedSocket && s.readyState === WebSocket.OPEN),
-  stale), { timeout: 30_000 }).toBe(true);
+  await expect.poll(() => page.evaluate(({ oldCount, serverPort }) => {
+    const serverSockets = window.__mobile1213.sockets.filter(s => {
+      try { return new URL(s.url).port === String(serverPort); }
+      catch { return false; }
+    });
+    return serverSockets.length > oldCount &&
+      serverSockets.some(s => s !== window.__mobile1213.blockedSocket && s.readyState === WebSocket.OPEN);
+  }, { oldCount: stale, serverPort: runtime.server_port }), { timeout: 30_000 }).toBe(true);
   await assertTerminalContinuous(page, expect, 'MOBILE-BEFORE', 'MOBILE-AFTERPROBE');
 
   // Real Chromium network offline/online emulation while hidden, not just a
