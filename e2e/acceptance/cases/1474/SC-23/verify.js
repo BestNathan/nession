@@ -21,7 +21,7 @@ try{
  assert.throws(()=>optInCollector({enabled:true}).protocol({operation:'malicious',success:true,elapsed_ms:1}),/unsupported/);
  assert.throws(()=>optInCollector({enabled:true}).artifact({artifact_id:'x',sha256:r.config_sha256,retention_days:999}));
  assert.ok(r.observations.every(o=>Number.isFinite(Date.parse(o.at))));
- result('Real browser+tmux observations and opt-in Protocol/Process/Browser/Terminal/Artifact projection enforce bounds and nested secret omission',[
+ result('Real browser and terminal observations plus opt-in typed collector projection enforce bounds and nested secret omission',[
  {type:'collector',value:'five timestamped typed events; real Process RSS='+proc.rss_bytes},
  {type:'runtime',value:'source='+run.target+' observations='+r.observation_count+' backend SHA-256 present'},
  {type:'security',value:'default-disabled; invalid operation, excessive retention and event budget rejected; no URLs or raw content'}]);
