@@ -57,9 +57,7 @@ jobs:
       - name: Verify deterministic Agent contracts
         run: |
           set -euo pipefail
-          node scripts/lib/agent/provider-smoke.mjs self-test
-          node scripts/acceptance-agent.mjs self-test
-          node scripts/agent-workflow-telemetry.mjs self-test
+          ./gates/run agent-provider-contract acceptance-agent-selftest agent-workflow-telemetry
       - name: Check selected provider environment
         env:
           PROVIDER: ${{ matrix.provider }}
