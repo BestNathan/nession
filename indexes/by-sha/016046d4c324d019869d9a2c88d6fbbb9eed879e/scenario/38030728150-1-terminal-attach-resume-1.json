@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 38030728150,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix-1213-mobile-resume",
+    "target_sha": "016046d4c324d019869d9a2c88d6fbbb9eed879e",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/38030728150",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "a4bdd29a6c8050dd4105a95ff3ac26d68ba420f239558a8cafbea38c9da2b042"
+  },
+  "record": "runs/2026-10-10/38030728150-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "c08be1ab116aee6df9a7d75a446f14a215b27db7e621a5d6fe38f3bff0428631"
+}
