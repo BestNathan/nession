@@ -223,12 +223,37 @@ export function scanVisualUtilitySource(
 export const LOCAL_CSS_VARIABLE_OWNERS = Object.freeze({
   '--nession-local-terminal-capsule-occlusion': ['web/src/product/terminal/capsule/hooks/useCapsuleDockClearance.ts'],
   '--nession-local-terminal-content-bottom-inset': ['web/src/index.css', 'web/src/platform/terminal-runtime/capsule/occlusionScroll.ts'],
+  '--nession-local-workspace-content-bottom-inset': ['web/src/app/workspace/hooks/useWorkspaceCapsuleClearance.ts'],
 });
 
-export function scanLocalVariableContracts(files, owners = {}) {
+/**
+ * Static ownership of the surface that consumes each dynamic variable.
+ * These prefixes intentionally approximate the React/CSS boundary; browser
+ * acceptance remains responsible for computed inheritance and visual bounds.
+ */
+export const LOCAL_CSS_VARIABLE_SURFACES = Object.freeze({
+  '--nession-local-terminal-capsule-occlusion': [
+    'web/src/index.css', 'web/src/product/terminal/', 'web/src/platform/terminal-runtime/',
+  ],
+  '--nession-local-terminal-content-bottom-inset': [
+    'web/src/index.css', 'web/src/product/terminal/', 'web/src/platform/terminal-runtime/',
+  ],
+  '--nession-local-workspace-content-bottom-inset': [
+    'web/src/shared/lib/workspaceScrollClearance.ts',
+    'web/src/app/workspace/', 'web/src/app/experiences/', 'web/src/capabilities/',
+  ],
+});
+
+export function scanLocalVariableContracts(files, owners = {}, surfaces = {}) {
   const producers = new Map();
   const consumers = [];
   const constantBindings = new Map();
+  const dynamicProducers = new Map();
+  const removedVariables = [];
+  const addDynamicProducer = (name, file, index, source) => {
+    if (!dynamicProducers.has(name)) dynamicProducers.set(name, []);
+    dynamicProducers.get(name).push({ file, line: lineNumber(source, index) });
+  };
   // A runtime owner may use a shared exported CSS variable name constant.
   for (const { source } of files) {
     const code = maskComments(source);
@@ -247,22 +272,57 @@ export function scanLocalVariableContracts(files, owners = {}) {
     }
     for (const match of code.matchAll(/\.setProperty\(\s*['"\x60](--nession-local-[A-Za-z0-9_-]+)['"\x60]/g)) {
       addProducer(match[1], file);
+      addDynamicProducer(match[1], file, match.index, source);
     }
     for (const match of code.matchAll(/\.setProperty\(\s*([A-Za-z_$][\w$]*)\s*,/g)) {
       const name = constantBindings.get(match[1]);
-      if (name) addProducer(name, file);
+      if (name) {
+        addProducer(name, file);
+        addDynamicProducer(name, file, match.index, source);
+      }
+    }
+    for (const match of code.matchAll(/\.(?:removeProperty|getPropertyValue)\(\s*['"`](--nession-local-[A-Za-z0-9_-]+)['"`]/g)) {
+      removedVariables.push({ file, line: lineNumber(source, match.index), name: match[1] });
+    }
+    for (const match of code.matchAll(/\.removeProperty\(\s*([A-Za-z_$][\w$]*)\s*\)/g)) {
+      const name = constantBindings.get(match[1]);
+      if (name) removedVariables.push({ file, line: lineNumber(source, match.index), name });
     }
     for (const match of code.matchAll(/var\(\s*(--nession-local-[A-Za-z0-9_-]+)/g)) {
       consumers.push({ file, line: lineNumber(source, match.index), name: match[1] });
     }
   }
-  const violations = consumers.filter(({ name }) => !producers.has(name)).map(({ file, line, name }) => ({
+  const violations = [...consumers, ...removedVariables].filter(({ name }) => !producers.has(name)).map(({ file, line, name }) => ({
     file,
     line,
     kind: 'undefined-local-variable',
     actual: `var(${name})`,
     repair: `declare ${name} in CSS/inline styles or produce it with style.setProperty`,
   }));
+  // Unlike CSS-only declarations, runtime setProperty/removeProperty names must
+  // be declared in the owner registry, even if the same typo appears on both
+  // the producer and consumer sides. An unused producer is still a contract.
+  if (Object.keys(owners).length) {
+    for (const [name, locations] of dynamicProducers) {
+      if (Object.hasOwn(owners, name)) continue;
+      for (const { file, line } of locations) {
+        violations.push({ file, line, kind: 'unregistered-local-producer', actual: name,
+          repair: 'register the dynamic CSS property and its owner in LOCAL_CSS_VARIABLE_OWNERS' });
+      }
+    }
+    for (const { file, line, name } of removedVariables) {
+      if (Object.hasOwn(owners, name)) continue;
+      violations.push({ file, line, kind: 'unregistered-local-lifecycle', actual: name,
+        repair: 'register lifecycle ownership in LOCAL_CSS_VARIABLE_OWNERS' });
+    }
+  }
+  for (const { file, line, name } of consumers) {
+    const allowed = surfaces[name];
+    if (allowed && !allowed.some(prefix => file === prefix || file.startsWith(prefix))) {
+      violations.push({ file, line, kind: 'out-of-scope-local-consumer', actual: name,
+        repair: 'move the consumer into the registered CSS-inheritance surface, or register and validate a new surface' });
+    }
+  }
   for (const [name, allowed] of Object.entries(owners)) {
     const actual = producers.get(name) ?? [];
     if (!actual.some(file => allowed.includes(file))) {
@@ -324,7 +384,7 @@ export function scanRepository(root = ROOT) {
       }
     }
   }
-  violations.push(...scanLocalVariableContracts(sources, LOCAL_CSS_VARIABLE_OWNERS));
+  violations.push(...scanLocalVariableContracts(sources, LOCAL_CSS_VARIABLE_OWNERS, LOCAL_CSS_VARIABLE_SURFACES));
   return violations;
 }
 
