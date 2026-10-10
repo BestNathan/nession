@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "cbe1874a892cc7af62ad49526862c1fe5020863fd6f9848bf0273b3e31fb2ddd",
+  "run_id": 38044925508,
+  "run_attempt": 1,
+  "issue": 1213,
+  "criterion": "SC-10",
+  "criterion_text": "#1094 可用时，terminal 从 last applied cursor resume；gap 明确处理。",
+  "stage": "post-merge",
+  "target_sha": "727b612d608c7430e649f45704d0e79229ff547e",
+  "contract_sha256": "7d73c82c60675274f8a35cc978919512140b0daaec6c31ab79f254cb099b416d",
+  "case_revision": "727b612d608c7430e649f45704d0e79229ff547e",
+  "case_tree_sha": "0408c935faf12ef55e48ced9b3970d5729049fd1",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Fail",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-10T10:29:43.074Z",
+  "finished_at": "2026-10-10T10:30:32.010Z",
+  "duration_ms": 48935,
+  "verifiers": [
+    {
+      "type": "browser",
+      "entry": "verify.spec.js",
+      "result": "Fail",
+      "summary": "Playwright assertions failed at verify.spec.js:140:31",
+      "evidence": [],
+      "execution": {
+        "discovered": 1,
+        "passed": 0,
+        "failed": 1,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 74
+      },
+      "duration_ms": 43014,
+      "exit_code": 1
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 38044925508,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "727b612d608c7430e649f45704d0e79229ff547e",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/38044925508",
+    "record_path": "runs/2026-10-10/38044925508-1/1213/SC-10.json",
+    "source_result_sha256": "57dce2db059af31d350e594e6bb6f5827892a72835a61c7ff800ac655aed3d23"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-38044925508-1",
+    "sha256": "57dce2db059af31d350e594e6bb6f5827892a72835a61c7ff800ac655aed3d23",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/38044925508",
+    "durability": "time-limited; object archival not configured"
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "96108acb6f67ab7f7d583f39a97813da9e8fb8f21b7ea04cefb39c7e9dc7bc72",
+  "run_id": 38044925508,
+  "run_attempt": 1,
+  "issue": 1213,
+  "criterion": "SC-11",
+  "criterion_text": "#1095 可用时，reconnect 不会静默抢回 Controller。",
+  "stage": "post-merge",
+  "target_sha": "727b612d608c7430e649f45704d0e79229ff547e",
+  "contract_sha256": "7d73c82c60675274f8a35cc978919512140b0daaec6c31ab79f254cb099b416d",
+  "case_revision": "727b612d608c7430e649f45704d0e79229ff547e",
+  "case_tree_sha": "3e56c17002c15faa4caac24a573823edd93befc4",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Fail",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-10T10:30:37.085Z",
+  "finished_at": "2026-10-10T10:31:09.973Z",
+  "duration_ms": 32888,
+  "verifiers": [
+    {
+      "type": "browser",
+      "entry": "verify.spec.js",
+      "result": "Fail",
+      "summary": "Playwright assertions failed at verify.spec.js:45:29",
+      "evidence": [],
+      "execution": {
+        "discovered": 1,
+        "passed": 0,
+        "failed": 1,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 27
+      },
+      "duration_ms": 26964,
+      "exit_code": 1
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 38044925508,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "727b612d608c7430e649f45704d0e79229ff547e",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/38044925508",
+    "record_path": "runs/2026-10-10/38044925508-1/1213/SC-11.json",
+    "source_result_sha256": "ae681456ff164da4ad4035129c24b86d5476a5e8d62baaf18ec12b9794472f7f"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-38044925508-1",
+    "sha256": "ae681456ff164da4ad4035129c24b86d5476a5e8d62baaf18ec12b9794472f7f",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/38044925508",
+    "durability": "time-limited; object archival not configured"
+  }
+}
