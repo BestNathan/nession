@@ -3894,6 +3894,88 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn two_p2p_sockets_share_controller_lease_and_stream_epoch() {
+        let (addr, handle, credentials) = start_test_server_on(0).await;
+        let tmux = SessionManager::new();
+        let session = TestSession::new("shared-p2p-lease");
+        let name = session.name().to_string();
+        tmux.kill_session(&name).await.ok();
+        tmux.create_session(&name, 80, 24, "/tmp", &[])
+            .await
+            .expect("real tmux Session");
+
+        let (mut a_sink, mut a_stream) = connect_client_for(&credentials, addr, &name).await;
+        let (mut b_sink, mut b_stream) = connect_client_for(&credentials, addr, &name).await;
+        for (id, sink, stream) in [
+            ("browser-a", &mut a_sink, &mut a_stream),
+            ("browser-b", &mut b_sink, &mut b_stream),
+        ] {
+            let auth = new_message(
+                msg_types::CLIENT_AUTH,
+                ClientAuthPayload {
+                    auth_token: "test-token".to_string(),
+                    client_id: Some(id.to_string()),
+                },
+            );
+            let reply: Message<AuthResponsePayload> =
+                send_and_receive(sink, stream, &auth).await;
+            assert_eq!(reply.payload.client_id.as_deref(), Some(id));
+        }
+
+        let attach = || ClientAttachPayload {
+            session_name: name.clone(),
+            width: 80,
+            height: 24,
+            size_known: None,
+            env_snapshots: Vec::new(),
+            needs_bootstrap: Some(false),
+        };
+        let first: Message<ClientAttachResponse> = send_and_receive(
+            &mut a_sink,
+            &mut a_stream,
+            &new_message(msg_types::CLIENT_ATTACH, attach()),
+        )
+        .await;
+        assert_eq!(first.payload.control_role.as_deref(), Some("controller"));
+        let second: Message<ClientAttachResponse> = send_and_receive(
+            &mut b_sink,
+            &mut b_stream,
+            &new_message(msg_types::CLIENT_ATTACH, attach()),
+        )
+        .await;
+        assert_eq!(second.payload.control_role.as_deref(), Some("observer"));
+        assert_eq!(first.payload.control_generation, second.payload.control_generation);
+        assert_eq!(first.payload.stream_epoch, second.payload.stream_epoch);
+
+        let takeover: Message<TerminalControlAcquireResponse> = send_and_receive(
+            &mut b_sink,
+            &mut b_stream,
+            &new_message(
+                msg_types::TERMINAL_CONTROL_ACQUIRE,
+                TerminalControlAcquirePayload { session_name: name.clone() },
+            ),
+        )
+        .await;
+        assert_eq!(takeover.payload.role, "controller");
+        assert!(takeover.payload.generation > second.payload.control_generation.unwrap_or(0));
+        // Reattach on A's physical socket must observe the *shared* B lease,
+        // not recreate the detached controller after another browser acquired.
+        let reattached_a: Message<ClientAttachResponse> = send_and_receive(
+            &mut a_sink,
+            &mut a_stream,
+            &new_message(msg_types::CLIENT_ATTACH, attach()),
+        )
+        .await;
+        assert_eq!(reattached_a.payload.control_role.as_deref(), Some("observer"));
+        assert_eq!(reattached_a.payload.control_generation, Some(takeover.payload.generation));
+
+        a_sink.close().await.ok();
+        b_sink.close().await.ok();
+        tmux.kill_session(&name).await.ok();
+        handle.shutdown().await.ok();
+    }
+
+    #[tokio::test]
     async fn test_terminal_io_flow() {
         let (addr, handle, credentials) = start_test_server_on(18084).await;
 
