@@ -82,7 +82,7 @@ function fail(error){
 }
 const SOURCES={
   scenario:{path:'runs/2026-10-09/37961137780-1/scenario/terminal-attach-resume-1.json',
-    blob:'d4663d074452c89e10bd4185322e08d9265978ca',runId:37961137780,mode:'scenario'},
+    blob:'d4663d074452f89e10bd4185322e08d9265978ca',runId:37961137780,mode:'scenario'},
   acceptance:{path:'runs/2026-10-09/37960891443-1/1498/SC-01.json',
     blob:'e109c2fb652eef5523393d0ad7f4dbd5e13ac32e',runId:37960891443,mode:'acceptance'},
 };
