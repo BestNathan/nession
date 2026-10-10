@@ -4,11 +4,13 @@
 // Main-owned privileged ingestion. Never execute, import, source, or eval Task code.
 // The upstream workflow and artifact are untrusted observations; authenticated
 // source SHA and snapshot are recomputed from a separate exact-SHA checkout.
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-const { execFileSync } = require('node:child_process');
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const SHA = /^[0-9a-f]{40}$/;
 const ID = /^[a-z0-9][a-z0-9-]{2,63}$/;
