@@ -1211,7 +1211,7 @@ describe('SessionRuntime', () => {
       rt.dispose();
     });
 
-    it('asks for the history again after a transport loss, though the Terminal holds output', async () => {
+    it('prefers retained P2P replay after transport loss when Terminal has output (#1213 SC-10)', async () => {
       const rt = new SessionRuntime(makeConfig({
         hasSessionOutput: () => true,
       }));
@@ -1231,18 +1231,18 @@ describe('SessionRuntime', () => {
       await vi.advanceTimersByTimeAsync(60_000);
       await flushMicrotasks();
 
-      // The replacement socket opens and the runtime re-attaches. This is the
-      // assertion the bug was: `hasSessionOutput()` still returns `true`, and
-      // asking only that question is what left the hole in place. The buffer is
-      // not empty, it is *incomplete*, and only tmux's snapshot can repair it —
-      // the stream resume comes back with zero events, because the agent
-      // records only while someone is attached.
+      // The shared Session-scoped Agent stream (#1619) can keep recording
+      // while another P2P observer remains connected. Reconnecting with a
+      // nonempty local buffer must first replay from its applied cursor, not
+      // immediately replace the buffer with a tmux snapshot. A confirmed
+      // retention miss still calls noteStreamTruncated and requests bootstrap
+      // on the following attach.
       await openWs();
       await flushMicrotasks();
 
       const flags = clientAttachBootstrapFlags();
       expect(flags.length).toBeGreaterThan(1);
-      expect(flags[flags.length - 1]).toBe(true);
+      expect(flags[flags.length - 1]).toBe(false);
 
       rt.dispose();
     });
