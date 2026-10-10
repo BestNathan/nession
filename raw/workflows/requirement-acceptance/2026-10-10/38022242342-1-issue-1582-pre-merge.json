@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "kind": "agent_workflow_run",
+  "identity": {
+    "workflow_id": "requirement-acceptance",
+    "github_workflow": "Requirement Acceptance",
+    "github_run_id": 38022242342,
+    "github_run_attempt": 1,
+    "job": "execute",
+    "repository": "BestNathan/nession",
+    "event": "pull_request_target",
+    "unique_run_name": "38022242342-1-issue-1582-pre-merge"
+  },
+  "task": {
+    "id": "issue-1582-pre-merge",
+    "type": "acceptance",
+    "issue": 1582,
+    "stage": "pre-merge",
+    "target_ref": "94957571cb36f55451fb820da1bcb518ae37366c",
+    "deployment": null
+  },
+  "agent": {
+    "provider": "cursor",
+    "model": {
+      "id": "composer-2.5",
+      "fast": true,
+      "params": [
+        {
+          "id": "fast",
+          "value": "true"
+        }
+      ]
+    },
+    "run_id": "run-3c3cb5b5-3639-442d-b297-eb57ff0875d3",
+    "request_id": "5619c834-0ba8-49cb-be1d-eaedcf5b85aa",
+    "status": "finished",
+    "prompt": {
+      "id": "acceptance",
+      "version": "v1",
+      "sha256": "28f5f7611810cbbe517276b992f554b36dde2f08e5418ad9bae98183b604d500"
+    }
+  },
+  "execution": {
+    "turns": 1,
+    "model_requests": 1,
+    "tools": {
+      "observed": true,
+      "total": 32,
+      "unique": 3,
+      "by_name": {
+        "glob": 7,
+        "grep": 1,
+        "read": 24
+      }
+    }
+  },
+  "tokens": {
+    "input": 212801,
+    "output": 5056,
+    "cache_read": 161952,
+    "cache_write": 0,
+    "reasoning": null,
+    "total": 379809
+  },
+  "cost": {
+    "raw_usd": null,
+    "charged_usd": null,
+    "estimated_usd": null
+  },
+  "timing": {
+    "started_at": "2026-10-10T04:08:28.959Z",
+    "finished_at": "2026-10-10T04:09:05.736Z",
+    "agent_duration_ms": 36530,
+    "workflow_duration_ms": null
+  },
+  "result": {
+    "status": "completed",
+    "pass": 4,
+    "pending": 0,
+    "fail": 0,
+    "na": 0
+  }
+}
