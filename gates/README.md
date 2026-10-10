@@ -1,6 +1,6 @@
 # Repository Gates
 
-> **Parallel implementation only — no existing execution surface has been switched.**
+> **Incremental adoption.** Selected Gates are already called from hooks/CI, but suite files have not replaced the existing routers. Check real hook/workflow invocations before asserting CI coverage.
 
 `gates/` is the repository Gate system. Gate IDs are stable kebab-case APIs; a Gate behaves like a test: green is terse, red is exhaustive.
 
@@ -40,8 +40,8 @@ Known prerequisites use `gate_require_command`, `gate_require_path`, or `gate_re
 
 ## Suites
 
-Suite files contain Gate IDs only: no commands, repair prose, changed-file rules, secrets, or setup. Current files model logical execution surfaces for future cutover. Existing changed-file routers may still add conditional self-test IDs explicitly.
+Suite files contain Gate IDs only: no commands, repair prose, changed-file rules, secrets, or setup. They model future cutover surfaces; existing hooks/workflows still route most checks themselves and may invoke individual Gates. Manually running a suite does not mean CI consumes it.
 
 ## Rollout boundary
 
-Legacy repository checks have not been wholesale cut over to Gate suites yet; existing mechanisms remain authoritative for those checks until parity is proven. New deterministic invariants may adopt `gates/run` directly. `instruction-contract` is the first such live Gate: instruction changes run it in pre-commit and Quality Gate while the broader legacy migration remains incremental.
+Legacy checks have not been wholesale cut over to Gate suites. Existing routers remain authoritative until parity is proven. `instruction-contract` is live in pre-commit and Quality Gate; `gate-runtime-contract` and `agent-workflow-telemetry` are also called directly from Quality Gate. Consult `.githooks/` and `.github/workflows/` for actual enforcement.
