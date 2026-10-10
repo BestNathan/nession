@@ -249,16 +249,11 @@ export class SessionRuntime {
    * The transport dropped while this runtime was attached, so the Terminal's
    * buffer may have a hole and must not be trusted as complete.
    *
-   * Output produced during the outage is not merely undelivered — it was never
-   * *recorded*: the agent's stream log is written by the broadcast task it
-   * spawns for a session's first subscriber, and the pane reader it consumes
-   * comes from the backend created by that attach. A detached client therefore
-   * leaves nothing behind to resume from, which is why
-   * `agent.terminal.stream.resume` comes back with zero events after a
-   * reconnect and why this cannot be repaired by replaying the stream.
-   *
-   * Set where `TRANSPORT_LOST` is dispatched; cleared by the next successful
-   * attach.
+   * A transport outage alone is NOT proof of missing P2P output: the Agent
+   * holds a Session-scoped stream while another subscriber remains (#1619).
+   * Replay from the consumer's committed cursor first. A confirmed truncated
+   * replay triggers this flag and requests capture-pane on the next attach.
+   * Relay (which has no stream cursor) still marks an outage here.
    */
   private historyMayHaveGap = false;
   /**
@@ -273,6 +268,7 @@ export class SessionRuntime {
   private p2pAttachSeed: {
     streamEpoch?: number;
     streamCursor?: number;
+    preserveAppliedCursor?: boolean;
     inputEpoch?: number;
     inputAppliedThrough?: number;
     controlGeneration?: number;
@@ -600,18 +596,25 @@ export class SessionRuntime {
     // Held for the attach's own lifetime: this is what the payload states, and
     // `lastResize` may move past it before the reply lands.
     const attachSize = this.lastResize;
+    // If this client retained its Terminal buffer, the attach is a stream
+    // continuation, not a fresh snapshot. The old *applied* cursor, rather
+    // than the Agent's latest cursor, is the safe replay position (#1213).
+    const needsBootstrap = this.needsBootstrap();
+    const preserveAppliedCursor = !needsBootstrap
+      && this.p2pAttachSeed?.streamEpoch !== undefined;
     this.attachController.startP2PAttach({
       sessionName: this.config.sessionName,
       agentApi: this.agentTerminalApi,
       manualRoute: this.config.manualOverride !== null,
       lastResize: attachSize,
-      needsBootstrap: this.needsBootstrap(),
+      needsBootstrap,
       transportGeneration: this.transportGeneration,
       onAttachOk: (result) => {
         this.attachedSize = attachSize;
         this.p2pAttachSeed = {
           streamEpoch: result.streamEpoch,
           streamCursor: result.streamCursor,
+          preserveAppliedCursor,
           inputEpoch: result.inputEpoch,
           inputAppliedThrough: result.inputAppliedThrough,
           controlGeneration: result.controlGeneration,
@@ -716,7 +719,9 @@ export class SessionRuntime {
     }
     transport.flushAllOutbound();
     if (seed) {
-      transport.seedStreamCursor?.(seed.streamEpoch, seed.streamCursor);
+      transport.seedStreamCursor?.(seed.streamEpoch, seed.streamCursor, {
+        preserveAppliedCursor: seed.preserveAppliedCursor,
+      });
     }
   }
 
@@ -991,9 +996,12 @@ export class SessionRuntime {
       // disconnect). The phase guard keeps this inert before the relay is live.
       if (state !== 'connected') {
         if (this.attachState.phase === 'attached') {
-          // Attached when it dropped: the buffer is now suspect, so the next
-          // attach must ask for a bootstrap even though it is not empty.
-          this.historyMayHaveGap = true;
+          // With a shared Agent Session stream (#1619), output stays in
+          // retention while another P2P peer is attached. Do not preemptively
+          // replace a nonempty Terminal with capture-pane: reattach and
+          // attempt replay from the last applied cursor first. A proven
+          // retention miss still sets historyMayHaveGap via the reconciler.
+          // Existing confirmed gaps remain flagged across this loss.
           const result = this.attachController.dispatch({ type: 'TRANSPORT_LOST' });
           this.emitRuntimeEvent({ type: 'route-intent-changed', phase: result.phase });
         }
