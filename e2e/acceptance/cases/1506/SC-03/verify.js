@@ -11,7 +11,7 @@ async function main(){
   assert.match(regression,/runner\/runtime\/full-stack\.js/);
   assert.match(evaluator,/runner\/runtime\/full-stack\.js/);
   const lifecycle=fs.readFileSync(path.join(repo,'e2e/runner/runtime/full-stack.js'),'utf8');
-  assert.match(lifecycle,/stop:|async stop|stop\(\)/);
+  assert.match(lifecycle,/const stop = async/);
   const e2e=await artifact(ci['E2E Tests'],'playwright-report');
   const smoke=await artifact(ci['Acceptance Case Smoke'],'acceptance-case-smoke-1474');
   report('Shared Runner owns real Server, Agent, tmux and Web lifecycle with successful exact-head Quality/E2E/Case Smoke and isolated staging Case execution.',[
