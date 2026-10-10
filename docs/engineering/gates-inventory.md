@@ -54,3 +54,12 @@ Dependency/browser/tool installation, Docker/native build/package/publish/deploy
 | Probabilistic test concurrency, build-cache status, metrics publication | Diagnostic | Nonblocking; do not silently promote to Gate |
 
 **Parity caveat:** no all-workflow cutover is claimed here. Preserve every historical blocking self-test until it has a named Gate and positive/negative evidence. Any modified detection adapter requires catalog contract and its domain self-test, not just a green linter.
+
+## E2E normal-mode cutover
+
+The `.github/workflows/e2e.yml` normal browser regression now invokes
+`./gates/run e2e-playwright`, whose exact implementation remains the canonical
+`cd e2e && CI=true ./run test --all` CLI command. The explicit
+`workflow_dispatch` visual-snapshot rewrite command remains a **maintenance
+operation**, not a quality Gate: it mutates baselines and is never a passing
+replacement for normal browser regression evidence.
