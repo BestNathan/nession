@@ -56,3 +56,7 @@ In normal E2E CI, `e2e-playwright` wraps the canonical `e2e/run test --all`
 runner. Explicit snapshot regeneration is a mutable developer/workflow operation
 and is intentionally not treated as a passing Gate. Browser dependency setup
 and Rust/Web builds remain workflow-owned prerequisites.
+
+## Release version contract
+
+`release-version-consistency` is the single Gate owner for Rust/Web version equality. Staging and Release version jobs call it before producing/publishing version-derived artifacts; version-forward decisions, tagging and GitOps remain workflow operations. `release-version-consistency-selftest` checks matching versions, mismatched versions and unreadable inputs in an isolated fixture, and runs in the PR quality Rust suite.

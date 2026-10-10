@@ -86,6 +86,11 @@ jobs:
       short_sha: ${{ steps.versions.outputs.short_sha }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify unified release version invariant
+        run: ./gates/run release-version-consistency
 
       - id: versions
         run: |
