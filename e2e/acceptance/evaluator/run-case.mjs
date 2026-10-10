@@ -170,6 +170,7 @@ async function main() {
         baseURL: runtime.base_url,
         targetSha,
         contractSha256: acceptanceContext.contract_sha256,
+        issueNumber,
         criterion,
       }));
     }
