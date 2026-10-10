@@ -70,6 +70,7 @@ jobs:
           node scripts/issue-contract.mjs self-test
           node scripts/task-runner.mjs self-test
           node scripts/task-result-ingest.mjs self-test
+          node e2e/runner/collectors/opt-in-observations.cjs self-test
           node e2e/runner/drivers/browser-report.mjs self-test
           node e2e/runner/runtime/full-stack.js self-test
           node e2e/runner/cli-selftest.mjs

@@ -345,3 +345,7 @@ If tests are flaky due to timing:
 - [Playwright Test API](https://playwright.dev/docs/api/class-test)
 - [Nession Architecture](../../CLAUDE.md#architecture)
 - [CI/CD Workflow](../../CLAUDE.md#cicd-github-actions)
+
+### Opt-in observational collectors
+
+`e2e/runner/collectors/opt-in-observations.cjs` provides a **default-disabled** collector for allowlisted Protocol operations, bounded Process metrics **of the collector worker itself**, Browser/Terminal counters, and opaque external artifact references. This does **not** confer permissions to inspect application pods or arbitrary host processes. `optInCollector({ enabled: true, maximum: 24 })` must be explicitly supplied by a trusted consumer; it returns a finite timestamped field projection with `evaluation: null`, not an Acceptance verdict. Raw frames, terminal text, URLs, session names, environment variables, cookies, process argument vectors and Authorization headers are never part of the projection. Artifact metadata states finite retention (up to 90 days), never indefinite archival. The mandatory `Quality Gate` runs both real-process measurement and negative input/privacy fixtures. Live Server/Agent process observation or private-cluster telemetry requires separate least-privilege infrastructure and stage-specific Case evidence.
