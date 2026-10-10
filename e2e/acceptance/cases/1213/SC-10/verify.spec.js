@@ -142,7 +142,7 @@ test('SC-10: real P2P cursor resume and explicit truncated retention window', as
     const evidence = {
       issue: 1213, criterion: 'SC-10', target_sha: sha, contract_sha256: contract,
       real_stack: true, mode: 'P2P', selected_session: name,
-      producer: '6500 paced tmux writes while consumer offline',
+      producer: '6500 paced PTY writes while consumer offline',
       separate_observer_kept_agent_stream_alive: true,
       first_available_beyond_old_cursor: true, complete_false_verified: true,
       original_xterm_preserved: true, resume_request_observed: true,
