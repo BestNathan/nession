@@ -298,10 +298,10 @@ async fn wait_for_discovered_session(
             .await
             {
                 Ok(Ok(reply)) => {
-                    agent_registration = match reply
+                    let agents_list = reply
                         .pointer("/payload/agents")
-                        .and_then(serde_json::Value::as_array)
-                    {
+                        .and_then(serde_json::Value::as_array);
+                    agent_registration = match agents_list {
                         Some(agents) => agents
                             .iter()
                             .find(|agent| {
@@ -379,7 +379,9 @@ async fn wait_for_discovered_session(
                 } else {
                     last_error = format!(
                         "session.list reply missing sessions array: status={:?}",
-                        reply.pointer("/payload/status").and_then(serde_json::Value::as_str)
+                        reply
+                            .pointer("/payload/status")
+                            .and_then(serde_json::Value::as_str)
                     );
                 }
             }
@@ -408,7 +410,9 @@ async fn session_discovery_missing_id_fails_with_bounded_diagnostics() {
     );
     let reply = send_and_recv(&mut sink, &mut stream, &auth).await.unwrap();
     assert_eq!(
-        reply.pointer("/payload/status").and_then(serde_json::Value::as_str),
+        reply
+            .pointer("/payload/status")
+            .and_then(serde_json::Value::as_str),
         Some("success")
     );
 
