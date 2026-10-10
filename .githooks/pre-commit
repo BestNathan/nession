@@ -29,6 +29,9 @@ fi
 if matches_staged '^(scripts/protocol-gate|gates/checks/protocol-integrity)'; then
   GATE_IDS+=(protocol-integrity-selftest)
 fi
+if matches_staged '^(crates/nession-server/src/server/|scripts/server-handler-|gates/checks/server-handler-)'; then
+  GATE_IDS+=(server-handler-locality server-handler-locality-selftest server-handler-concurrency-selftest)
+fi
 if matches_staged '^(design/|docs/design/|web/src/|web/eslint-plugin-nession/|scripts/check-design-tokens|\.claude/skills/nession-web-design/|justfile$|gates/checks/design-system-)'; then
   GATE_IDS+=(design-system-fast)
 fi
