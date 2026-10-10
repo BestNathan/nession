@@ -1098,9 +1098,16 @@ export class SessionRuntime {
           && this.attachState.phase === 'attached'
         ) {
           this.attachedTransportGeneration = null;
-          // Attached when it dropped: the buffer is now suspect, so the next
-          // attach must ask for a bootstrap even though it is not empty.
-          this.historyMayHaveGap = true;
+          // A transport loss is not evidence of a stream gap. When the
+          // Session-scoped Agent stream has an epoch/cursor, replay can cover
+          // output that was produced while this browser was disconnected
+          // (#1619, #1213 SC-10). Keep the last applied cursor and defer the
+          // bootstrap decision until resume actually reports truncation.
+          // Older Agents cannot resume, so their existing bootstrap fallback
+          // remains mandatory. A previously confirmed gap stays flagged.
+          if (this.p2pAttachSeed?.streamEpoch === undefined) {
+            this.historyMayHaveGap = true;
+          }
           const result = this.attachController.dispatch({ type: 'TRANSPORT_LOST' });
           this.emitRuntimeEvent({ type: 'route-intent-changed', phase: result.phase });
         } else if (next === 'disconnected') {
