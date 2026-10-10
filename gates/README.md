@@ -50,12 +50,21 @@ Suite files contain Gate IDs only: no commands, repair prose, changed-file rules
 
 Hooks route changed-file Gate ID sets into `gates/run`. The canonical Rust CI quality recipe `just check` runs the `quality-rust` suite, including its original Acceptance runtime and Cases checks. Workflow-specific setup/deployment and remaining tooling self-tests are separate migration work; they must not be removed until parity is proven. Use `just gate <id>`, `just gates <suite>`, or `./gates/run <ids...>`.
 
+The Server Handler locality Gate (`server-handler-locality`) is included in the
+`quality-rust` and aggregate `quality` suites. Its isolated self-test and
+concurrency stress test are exposed by `just check-protocol` after the
+protocol-integrity Gate. See #1258 for the handler locality contract.
+
 ## Browser regression routing
 
 In normal E2E CI, `e2e-playwright` wraps the canonical `e2e/run test --all`
 runner. Explicit snapshot regeneration is a mutable developer/workflow operation
 and is intentionally not treated as a passing Gate. Browser dependency setup
 and Rust/Web builds remain workflow-owned prerequisites.
+
+## Hook routing contract
+
+`gate-router-contract` runs deterministic pre-commit and pre-push scenarios with mocked Git diffs and the Gate runner. It asserts rule-owner changes select their Gate and regression fixtures, including mutation tests proving missing self-test routes are caught. Failed `git diff` broadens pre-push selection instead of returning a successful skip. Hook/Gate changes trigger `gate-runtime-contract` and `gate-router-contract`; Quality CI runs both through `quality-tooling`.
 
 ## Release version contract
 

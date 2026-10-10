@@ -35,12 +35,17 @@ while read -r local_ref local_sha _remote_ref remote_sha; do
   fi
 
   # Preserve the existing routing buckets and add Gate/self-test owner paths.
-  changed="$(git diff --name-only "$remote_sha" "$local_sha" 2>/dev/null || true)"
+  if ! changed="$(git diff --name-only "$remote_sha" "$local_sha" 2>/dev/null)"; then
+    echo "→ pre-push: git diff failed; running full source Gate profile" >&2
+    HAS_RUST=1; HAS_WEB=1; HAS_DESIGN=1; HAS_PROTOCOL=1
+    HAS_GATE=1; HAS_TMUX=1; HAS_TEST_ISOLATION=1; HAS_INSTRUCTIONS=1
+    continue
+  fi
   if grep -Eq '\.rs$|^Cargo\.(toml|lock)$|^rust-toolchain\.toml$|^\.cargo/|^gates/checks/rust-' <<< "$changed"; then HAS_RUST=1; fi
   if grep -Eq '^web/.*\.(ts|tsx|js|css)$|^gates/checks/web-' <<< "$changed"; then HAS_WEB=1; fi
   if grep -Eq '^(design/|docs/design/|web/eslint-plugin-nession/|scripts/check-design-tokens|\.claude/skills/nession-web-design/|justfile$|gates/checks/design-system-)' <<< "$changed"; then HAS_DESIGN=1; fi
   if grep -Eq '^(crates/nession-protocol/|crates/[^/]+/src/protocol/|crates/nession-protocol-codegen/|web/src/generated/protocol/|scripts/protocol-gate|gates/checks/protocol-)' <<< "$changed"; then HAS_PROTOCOL=1; fi
-  if grep -Eq '^(gates/|\.githooks/(pre-commit|pre-push)$|justfile$)' <<< "$changed"; then HAS_GATE=1; fi
+  if grep -Eq '^(gates/|\.githooks/(pre-commit|pre-push)$|justfile$|scripts/gate-router-selftest\.mjs$)' <<< "$changed"; then HAS_GATE=1; fi
   if grep -Eq '^(scripts/check-tmux-socket|gates/checks/tmux-socket-isolation)' <<< "$changed"; then HAS_TMUX=1; fi
   if grep -Eq '^(scripts/check-test-isolation|gates/checks/test-isolation)' <<< "$changed"; then HAS_TEST_ISOLATION=1; fi
   if grep -Eq '(^|/)(AGENTS|CLAUDE)\.md$|^\.agents/|^\.claude/skills/|^scripts/instruction-contract|^gates/checks/instruction-contract\.sh$' <<< "$changed"; then HAS_INSTRUCTIONS=1; fi
@@ -60,7 +65,7 @@ if [ "$HAS_WEB" -eq 1 ]; then
   GATE_IDS+=(web-test-unit web-test-integration web-coverage)
 fi
 if [ "$HAS_GATE" -eq 1 ]; then
-  GATE_IDS+=(gate-runtime-contract)
+  GATE_IDS+=(gate-runtime-contract gate-router-contract)
 fi
 if [ "$HAS_PROTOCOL" -eq 1 ]; then
   GATE_IDS+=(protocol-integrity-selftest)

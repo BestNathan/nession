@@ -1,65 +1,46 @@
-# Sessions feature — ownership
+# Session capability — ownership
 
-The sessions feature owns the nession session **wire capability** (SessionsPlugin,
-`sessionsApi`) and the **session list / details UI** (the sidebar list of the
-app shell, plus the shared CRUD/attach dialogs). It also owns the
-**domain-state model** (`mapDomainState`) that derives the per-session
-`agent · session · attachment` channel view used across the session workspace,
-and the **filter vocabulary** (`StatusFilter`/`SortField`/`SortDirection`,
-declared in `types.ts`) shared with app-layer composers.
+The Session product module owns session wire operations
+(`SessionsPlugin`, `sessionsApi`), list / dialog / details UI,
+Session-domain status derivation and attachment identity. It does **not**
+own terminal or attach execution: those runtimes live under
+`platform/{session-runtime,attach,terminal-runtime}/`.
+The retired Dashboard-specific list and preview surfaces were deleted
+under #655.
 
-It **does** own the attachment's model — `state/` holds which Session is
-attached, the choice it was attached with, its route, and the attach dialog.
-That was written as a disclaimer while those atoms lived in `atoms/` as shared
-state; #801 Phase 5 moved them here, because a Session atom belongs to the
-Session owner. It still does **not** own the attach/terminal *runtime* — that is
-`platform/{session-runtime,attach,terminal-runtime}/`. The Dashboard
-predecessor shell (with its own `components/SessionList` + `SessionsSection`
-rows and preview dialogs) was deleted in Phase 5 (#655).
+## Current module map
 
-## Module map
-
-| Module | Responsibility |
+| Path | Responsibility |
 |---|---|
-| `SessionsPlugin.ts`, `types.ts`, `index.ts` | Session RPC capability (`client.session.create/kill/list/…`) installed per WebSocketService; `sessionsApi` module singleton with generation-tagged install/teardown |
-| `model/domainState.ts` | Pure model: `mapDomainState` + `AgentChannel`/`SessionChannel`/`AttachmentChannel` channel types (input: session + agent + attachment identity) |
-| `components/SessionList.tsx` + `SessionItem.tsx` | Sidebar list rows (select-to-attach + hover-kill; per-row `DomainState` derivation). The legacy Dashboard `components/SessionList` copy was deleted with its shell (#655) — name collision resolved by deletion, not coexistence |
-| `components/ConnectionStatus.tsx` | Compact 3-channel (`agent·session·attachment`) render of `DomainState`; consumed by the session header/details and by `features/agents` AgentDetail |
-| `components/SessionDetails.tsx` | Session workspace-tool detail page (metadata + ConnectionStatus) |
-| `components/CreateSessionDialog.tsx`, `KillConfirmDialog.tsx`, `AttachDialog.tsx`, `SearchBar.tsx` | Shared dialogs/list chrome; call `sessionsApi`; env-file picker UI comes from `@/capabilities/env/components/EnvFileMultiSelect` (sessions → env direction); AttachDialog holds the mode/address picker for terminal attach |
-| `hooks/useSessionData.ts` | Per-mount session list state + `fetchSessions({force})` via `sessionsApi` |
-| `hooks/useDebouncedInput.ts` | Generic debounce used by `SearchBar` |
+| `SessionsPlugin.ts`, `types.ts`, `index.ts` | Session wire capability, types and `sessionsApi` binding |
+| `model/domainState.ts` | Pure `mapDomainState` for Agent / Session / attachment channels |
+| `model/sessionChrome.ts`, `sessionFromCreateAck.ts` | Session UI chrome projection and create acknowledgment mapping |
+| `patterns/SessionList.tsx`, `patterns/SessionItem.tsx` | Session sidebar rows and interaction |
+| `patterns/ConnectionStatus.tsx` | Shared three-channel status presentation |
+| `components/SessionDetails.tsx` | Workspace Session details |
+| `components/{CreateSessionDialog,KillConfirmDialog,AttachDialog,SearchBar}.tsx` | Session CRUD / attach dialogs and list search |
+| `hooks/useSessionData.ts`, `hooks/useDebouncedInput.ts` | Per-mount list state and search debounce |
+| `state/session.ts`, `state/route.ts` | Attachment identity, route and dialog/session state |
 
 ## State ownership
 
-Rules follow #649: transient render state stays in the component; state shared
-across a capability lives in feature/model; transport/connection lifecycle
-belongs to core runtime; layout/selection state belongs to app/workbench.
+- List/loading/error state stays per `useSessionData` mount and is composed
+  by `app/useDashboard.ts`, not another global session-list atom.
+- Filter/sort/search and modal composition belong to app-layer hooks
+  (`app/useDashboardFilter.ts`, `app/useDashboardModals.ts`).
+- `app/useRealtimeUpdates.ts` owns the bridge for both Agents and Sessions
+  push updates and reconnect refetch.
+- Session attachment identity/route state belongs to
+  `product/session/state/`; transport generation, WebSocket attachment and
+  terminal rendering/replay are separate `platform/` concerns.
+- `model/domainState.ts` derives the `agent · session · attachment`
+  presentation; `@/product/agent` consumes its public types and
+  `patterns/ConnectionStatus.tsx` rather than duplicating channel semantics.
+- `SessionsPlugin` installs a generation-aware WebSocketService binding.
 
-| State | Owner today | Lifetime / scope |
-|---|---|---|
-| Session list + loading/error | `features/sessions/hooks/useSessionData` per mount | Composed by `app/useDashboard` (the one app-layer composer; the shell mounts one list copy). Deliberately **no** list atom |
-| Push updates (`server.sessions.changed`) + refetch on reconnect | `app/useRealtimeUpdates` | Registers `sessionsApi.onSessionsChanged(setSessions)` keyed on `wsService` identity — one subscription bridge for agents+sessions; not moved into the feature while it fuses both domains |
-| Filter/sort/search state | `app/useDashboardFilter` | Per mount; types (`StatusFilter`/`SortField`/`SortDirection`) declared in `features/sessions/types.ts` and consumed by `SearchBar` + sidebar chrome `SessionListHeader` |
-| Dialog targets (create/kill/attach) | `app/useDashboardModals` | Per mount; wired by `SessionFirstShell` through `SessionFirstDialogs` |
-| Wire registration | `SessionsPlugin` instance (module singleton `sessionsApi`) | One binding per WebSocketService lifetime; `WebSocketService.use()` re-installs after reconnect with generation-tagged teardown (`SessionsPlugin.ts`) |
-| Attach identity (session id/name, attach choice, route, dialog session) | `product/session/state/` | The Session's own model — moved out of `atoms/` in #801 Phase 5. Route derivation lives in `state/route.ts`; the transport atoms it reads are `platform/attach/state` |
-| Per-row `DomainState` | `model/domainState` `mapDomainState` | Pure function of (session, agent, attachment) inputs; no stored state |
-
-## Cross-feature dependency
-
-`features/agents` imports `model/domainState` (types) and
-`components/ConnectionStatus` for its in-workspace agent surfaces — the
-channel vocabulary is session-workspace state, so sessions owns it. This
-mirrors the `capabilities/files → platform/explorer` direction (owner of the
-contract stays in one feature; the peer imports its public surface).
-
-## Consumers
-
-The app shell (`app/` — `SessionFirstSidebar`, `SessionListHeader`,
-`SessionFirstDialogs`, `useSessionFirstShellState`) composes the feature
-through `@/features/sessions/...` subpaths; `app/useDashboard` +
-`app/useRealtimeUpdates` re-export data through the feature hooks. The former
-Dashboard-only consumers (`DashboardDialogs`, `TerminalWorkspace`,
-`SessionPreviewDialog`, legacy list chrome) were deleted with the Dashboard
-shell in #655.
+The live shell composes these modules through `@/product/session/...` and
+`app/`. Earlier `@/features/sessions` and
+`components/SessionList.tsx` / `components/ConnectionStatus.tsx` paths
+are obsolete; the corresponding live components now reside in `patterns/`.
+Keep the API and runtime ownership split explicit when adding new
+Session capabilities.

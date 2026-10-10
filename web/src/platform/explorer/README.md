@@ -1,12 +1,15 @@
 # Explorer Extension API
 
-The Explorer is an extensible file-tree framework. Extensions register decoration
+The Explorer is an extensible, virtualized file-tree framework backed by
+`react-arborist` (`Explorer.tsx`, `adapters/arboristAdapter.ts`, and
+`renderers/ExplorerArboristNode.tsx`). Extensions register decoration
 providers, context-menu contributions, and other hooks on a **per-Explorer
-registry**.
+registry**; async node loading/selection remains in `ExplorerStore`.
 
 ## Lifecycle and scoping
 
-Every `Explorer` mount owns one `ExplorerRegistry` instance (`useState`), so
+Every `Explorer` mount owns one `ExplorerRegistry` instance (via
+`hooks/useExplorerRegistry.ts` / `useState`), so
 extensions are scoped to one tree instance and can never leak across sessions,
 workspaces or test cases. The registry dies with the mount; there is no module
 global and nothing to reset between tests. `Explorer` registers the built-in
@@ -14,13 +17,15 @@ core extension plus the `extensions` prop on mount and unregisters them on
 unmount or when the prop changes.
 
 A register/unregister bumps the registry version and notifies subscribers.
-`Explorer` subscribes via `useSyncExternalStore`, so replacing `extensions`
+`useExplorerRegistry` subscribes via `useSyncExternalStore`, so replacing `extensions`
 (prop identity) — or a future store-driven provider re-registering — re-resolves
 decorations and context menus **incrementally, without remounting the tree**.
 
 ## Quick start
 
-Pass extensions through `Explorer` props; lifetime is managed by `Explorer`:
+Pass extensions through `Explorer` props; lifetime is managed by `Explorer`.
+The Git status lookup below is **illustrative application code**, not an
+exported `platform/explorer` API:
 
 ```tsx
 import {
@@ -115,4 +120,5 @@ registry instance, and unregisters both on unmount.
 
 Unit tests construct `new ExplorerRegistry()` per test — no global reset
 needed. See `testing/mockExtension.tsx` for a minimal decoration + context-menu
-example.
+example. `hooks/useExplorerStore.ts` creates a per-provider `ExplorerStore`;
+it is recreated when the provider identity changes.
