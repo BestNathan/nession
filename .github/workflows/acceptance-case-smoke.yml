@@ -6,7 +6,7 @@ permissions:
 
 on:
   pull_request:
-    branches: [staging]
+    branches: [staging, main]
   workflow_dispatch:
 
 concurrency:
@@ -22,6 +22,10 @@ jobs:
       PLAYWRIGHT_BROWSERS_PATH: ~/.cache/ms-playwright
     steps:
       - uses: actions/checkout@v4
+        with:
+          # PR checks must verify actual source SHA, not GitHub's synthetic merge ref.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with: { cache-workspaces: ".", cache-all-crates: "true" }
