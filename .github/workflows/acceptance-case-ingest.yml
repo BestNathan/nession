@@ -33,9 +33,7 @@ jobs:
       - name: Self-test trusted ingestion
         working-directory: trusted
         run: |
-          node scripts/requirement-acceptance.mjs self-test
-          node scripts/acceptance-executor.mjs self-test
-          node scripts/acceptance-case-ingest.mjs self-test
+          ./gates/run requirement-acceptance-selftest acceptance-executor-selftest acceptance-case-ingest-selftest
 
       - name: Download source Case results
         uses: actions/download-artifact@v4

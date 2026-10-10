@@ -32,3 +32,4 @@ test-isolation-selftest
 tmux-socket-isolation-selftest
 server-handler-locality-selftest
 server-handler-concurrency-selftest
+agent-provider-contract

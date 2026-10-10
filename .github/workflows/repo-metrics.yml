@@ -123,11 +123,7 @@ jobs:
           merge-multiple: true
       - name: Verify metric tooling
         run: |
-          node scripts/collect-repo-health.mjs --self-test
-          node scripts/generate-repo-metrics.mjs --self-test
-          node scripts/agent-workflow-telemetry.mjs self-test
-          node scripts/agent-workflow-telemetry-contract.mjs self-test
-          node scripts/protocol-gate.mjs
+          ./gates/run repo-health-selftest repo-metrics-selftest agent-workflow-telemetry protocol-integrity
       - name: Generate repository metrics
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

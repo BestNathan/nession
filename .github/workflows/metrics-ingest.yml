@@ -42,8 +42,7 @@ jobs:
       - name: Verify telemetry tooling
         working-directory: trusted
         run: |
-          node scripts/agent-workflow-telemetry.mjs self-test
-          node scripts/agent-workflow-telemetry-contract.mjs self-test
+          ./gates/run agent-workflow-telemetry
 
       - name: Resolve source run
         id: source

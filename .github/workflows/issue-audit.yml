@@ -88,7 +88,7 @@ jobs:
           echo "provider=${provider}" >> "${GITHUB_OUTPUT}"
 
       - name: Self-test Issue Contract
-        run: node scripts/issue-contract.mjs self-test
+        run: ./gates/run issue-contract-selftest
 
       - name: Audit deterministic Issue Contract
         id: contract
@@ -184,9 +184,7 @@ jobs:
 
       - name: Self-test audit tooling
         run: |
-          node scripts/issue-contract.mjs self-test
-          node scripts/issue-audit-agent.mjs self-test
-          node scripts/issue-audit-cursor.mjs self-test
+          ./gates/run issue-contract-selftest issue-audit-agent-selftest issue-audit-cursor-selftest
 
       - name: Verify selected provider configuration
         env:
