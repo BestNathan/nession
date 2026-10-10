@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "09924240e66177bfc6eed98e0dde9bb19fe78aa9665a9542bb69b2bba84a502f",
+  "run_id": 38054688498,
+  "run_attempt": 1,
+  "issue": 1258,
+  "criterion": "SC-13",
+  "criterion_text": "(post-merge): The before/after experiment and measured observations are recorded in the Narness agent-native repository architecture research topic.",
+  "stage": "post-merge",
+  "target_sha": "66e6816d618aadb65c49d3d21a7b80999d06250f",
+  "contract_sha256": "f9d99bcb768c07afe810ced25a68446df68cbe315892f3c3f6334883bd6f8668",
+  "case_revision": "66e6816d618aadb65c49d3d21a7b80999d06250f",
+  "case_tree_sha": "2511b90822c05c5f0866d2d75061d175f9cf2d07",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-10T13:12:29.190Z",
+  "finished_at": "2026-10-10T13:12:35.922Z",
+  "duration_ms": 6731,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "Narness main holds reproducible exact-SHA paired Nession source retrieval experiment, checked raw checksum and successful measured run; no AI-agent productivity claim.",
+      "evidence": [
+        {
+          "type": "research",
+          "value": "narness_merge=b76d92b38516b44e47b37ba39fbb32ccd419c1f5 main_ancestry=identical"
+        },
+        {
+          "type": "workflow",
+          "value": "Narness run=38051474658 conclusion=success"
+        },
+        {
+          "type": "measurement",
+          "value": "4 Units implementation bytes A=1313540 C=29416 conservative C=386714"
+        },
+        {
+          "type": "checksum",
+          "value": "observations_json_sha256=5cc36bb2ced14062c17df985ad996bc0c8a9014f30680c831ceb76021e1195ed"
+        },
+        {
+          "type": "runtime",
+          "value": "exact main source sha=66e6816d618aadb65c49d3d21a7b80999d06250f"
+        }
+      ],
+      "duration_ms": 813,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 38054688498,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "66e6816d618aadb65c49d3d21a7b80999d06250f",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/38054688498",
+    "record_path": "runs/2026-10-10/38054688498-1/1258/SC-13.json",
+    "source_result_sha256": "9c18ef61c08d7b5ce5133bdef581cb1ef1d6cdb2f9a270b27c136d3ec0ccc136"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-38054688498-1",
+    "sha256": "9c18ef61c08d7b5ce5133bdef581cb1ef1d6cdb2f9a270b27c136d3ec0ccc136",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/38054688498",
+    "durability": "time-limited; object archival not configured"
+  }
+}
