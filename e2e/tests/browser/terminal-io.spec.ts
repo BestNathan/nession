@@ -666,6 +666,85 @@ test.describe('Terminal I/O', () => {
     }).toPass({ timeout: 15_000 });
   });
 
+  test('foreground stale-open Server socket resumes without remounting Terminal (#1213 SC-08/15)', async ({ page }, testInfo) => {
+    test.skip(!process.env.CI, 'real stack available in CI only');
+
+    const sessionName = `e2e-foreground-1213-${testInfo.retry}-${Date.now()}`;
+    await createSession(page, sessionName);
+    await attachToSession(page, sessionName, 'Relay');
+    await waitForInteractiveShell(page);
+
+    // The Shell is already interactive. Mark the actual xterm DOM node: a
+    // recreated Terminal can render the same text but cannot preserve this
+    // node-local identity. The test must fail on any Shell/Terminal remount.
+    await page.locator('.xterm').evaluate((node) => {
+      node.setAttribute('data-e2e-1213-terminal-instance', 'original');
+    });
+    await submitTerminalCommand(page, "printf 'BEFORE-%s\\n' 1213");
+    await expect.poll(async () => countInBuffer(page, 'BEFORE-1213')).toBe(1);
+
+    // Create the half-open shape deterministically: WebSocket.readyState stays
+    // OPEN, but the foreground server.info request is never delivered. This
+    // deliberately exercises the *bounded probe* rather than depending on
+    // whether Chrome happens to emit an onclose during network emulation.
+    await page.evaluate(() => {
+      const originalSend = WebSocket.prototype.send;
+      WebSocket.prototype.send = function (data) {
+        if (typeof data === 'string') {
+          try {
+            if ((JSON.parse(data) as { msg_type?: string }).msg_type === 'server.info') {
+              return;
+            }
+          } catch {
+            // Non-JSON frames still pass through unchanged.
+          }
+        }
+        return originalSend.call(this, data);
+      };
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => 'hidden',
+      });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+
+    // Register the observer BEFORE the foreground event so a reconnect cannot
+    // race the test subscription. A new physical /ws socket is the witness:
+    // simply seeing the old terminal remain visible would be a false pass.
+    const newSocket = page.waitForEvent('websocket', {
+      predicate: (ws) => ws.url().includes('/ws'),
+      timeout: 15_000,
+    });
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => 'visible',
+      });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+
+    await expect(page.getByTestId('shell')).toBeVisible();
+    await newSocket;
+    await expect(page.getByTestId('shell')).toBeVisible();
+    await expect(page.getByTestId('terminal-connecting')).toBeHidden({ timeout: 30_000 });
+    await expect(page.locator('.xterm')).toHaveAttribute('data-e2e-1213-terminal-instance', 'original');
+
+    // Same selected Session and same terminal must still accept PTY input.
+    await submitTerminalCommand(page, "printf 'AFTER-%s\\n' 1213");
+    await expect.poll(async () => countInBuffer(page, 'AFTER-1213'), { timeout: 20_000 }).toBe(1);
+    expect(await countInBuffer(page, 'BEFORE-1213')).toBe(1);
+    await testInfo.attach('foreground-resume-1213.json', {
+      body: Buffer.from(JSON.stringify({
+        scenario: 'foreground-stale-open-server',
+        transport: 'relay',
+        terminalMountPreserved: true,
+        newPhysicalSocketObserved: true,
+        outputAfterReconnect: 'AFTER-1213',
+      })),
+      contentType: 'application/json',
+    });
+  });
+
   test('a curses TUI renders and gives the shell back (#1096)', async ({ page }, testInfo) => {
     // Criterion 15's curses smoke. Nothing here is Nession-specific, and that
     // is the point: `less` reads keys in raw mode, paints its own screen from
