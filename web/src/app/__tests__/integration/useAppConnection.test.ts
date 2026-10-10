@@ -139,6 +139,19 @@ describe('useAppConnection', () => {
     expect(socket.close).toHaveBeenCalled();
   });
 
+  it('keeps a valid stored token after a network connect failure', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('stored-token');
+    const { result } = renderHook(() => useAppConnection());
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+
+    await act(async () => {
+      MockWebSocket.instances[0].error();
+    });
+
+    await waitFor(() => expect(result.current.connectionStatus).toBe('disconnected'));
+    expect(vi.mocked(auth.clearToken)).not.toHaveBeenCalled();
+  });
+
   it('clears auth state when the auto-connect handshake fails', async () => {
     vi.mocked(auth.getToken).mockReturnValue('bad-token');
 
