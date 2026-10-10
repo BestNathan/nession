@@ -28,6 +28,12 @@ function failedAssertionLocation(tests) {
               (Number.isSafeInteger(loc.column) ? ':' + loc.column : '');
           }
         }
+        // Playwright JSON frequently omits error.location but includes the
+        // assertion frame in error.stack. Preserve only an allowlisted test
+        // basename + numeric position; never copy raw stack or error prose.
+        const frame = /(?:^|[/\\])([\w.-]{1,100}\.(?:spec|test)\.[cm]?[jt]s):([1-9]\d{0,5}):([1-9]\d{0,5})/m
+          .exec(String(error?.stack ?? error?.message ?? ''));
+        if (frame) return frame[1] + ':' + frame[2] + ':' + frame[3];
       }
     }
   }
@@ -168,6 +174,12 @@ function selfTest() {
   const failure = classifyBrowserReport(report([withLocation], 0, 0, 1), 1, proof(1, 1, 0, 1));
   assert.equal(failure.summary, 'Playwright assertions failed at verify.spec.js:42:9');
   assert.equal(JSON.stringify(failure).includes('sensitive'), false);
+  const fromStackTest = { results: [{ errors: [{
+    stack: 'Error: sensitive page contents\n    at testFn (/runner/private/path/verify.spec.js:88:27)',
+  }] }], status: 'unexpected' };
+  const fromStack = classifyBrowserReport(report([fromStackTest], 0, 0, 1), 1, proof(1, 1, 0, 1));
+  assert.equal(fromStack.summary, 'Playwright assertions failed at verify.spec.js:88:27');
+  assert.equal(JSON.stringify(fromStack).includes('sensitive'), false);
   assert.equal(classifyBrowserReport(null, 0).result, 'Error');
   assert.equal(classifyBrowserReport(report([test()], 1), 0).result, 'Error');
   assert.equal(classifyBrowserReport(report([test()], 1), 1, proof(1, 1)).result, 'Fail');
