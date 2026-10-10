@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "trust": "untrusted-task-observation",
+  "provenance": "github-workflow-run-and-independent-exact-source",
+  "task_id": "1582-smoke",
+  "source_sha": "61c3fae9c55d0eba9974526c90d481450e77e1a3",
+  "source_digest": "dda87534cc984540ed0b4e0ab1578e59389d01805687899ba395d600e4479553",
+  "entry": "smoke.mjs",
+  "workflow": {
+    "id": 38025416466,
+    "attempt": 1,
+    "url": "https://github.com/BestNathan/nession/actions/runs/38025416466",
+    "event": "push",
+    "branch": "task/1582-smoke",
+    "conclusion": "success"
+  },
+  "execution": {
+    "status": "Success",
+    "exit_code": 0,
+    "started_at": "2026-10-10T04:49:56.689Z",
+    "finished_at": "2026-10-10T04:49:56.711Z",
+    "result": {
+      "check": "task-smoke-v1",
+      "observed": true,
+      "marker": "separate-task-results",
+      "task_id": "1582-smoke",
+      "source_sha": "61c3fae9c55d0eba9974526c90d481450e77e1a3"
+    }
+  },
+  "cleanup_on_success": true,
+  "acceptance_result": null,
+  "source_snapshot_path": "sources/61c3fae9c55d0eba9974526c90d481450e77e1a3/1582-smoke.json"
+}
