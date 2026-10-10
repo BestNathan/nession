@@ -1002,6 +1002,12 @@ export class SessionRuntime {
           // attempt replay from the last applied cursor first. A proven
           // retention miss still sets historyMayHaveGap via the reconciler.
           // Existing confirmed gaps remain flagged across this loss.
+          // Legacy Agents without stream epoch/cursor cannot replay anything:
+          // keep the historical snapshot fallback rather than treating a
+          // transport that cannot resume as if it retained a cursor.
+          if (this.p2pAttachSeed?.streamEpoch === undefined) {
+            this.historyMayHaveGap = true;
+          }
           const result = this.attachController.dispatch({ type: 'TRANSPORT_LOST' });
           this.emitRuntimeEvent({ type: 'route-intent-changed', phase: result.phase });
         }
