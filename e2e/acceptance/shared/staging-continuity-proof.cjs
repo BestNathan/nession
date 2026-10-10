@@ -20,9 +20,15 @@ async function liveContext(){
   assert.match(target,/^[a-f0-9]{40}$/);
   assert.equal(execFileSync('git',['rev-parse','HEAD'],{cwd:repo,encoding:'utf8'}).trim(),target);
   assert.equal(process.env.GITHUB_REF_NAME,'staging','this verifier requires a real staging merged SHA');
-  const parents=execFileSync('git',['rev-list','--parents','-n','1',target],{cwd:repo,encoding:'utf8'}).trim().split(' ');
-  assert.equal(parents.length,3,'staging source must be a normal two-parent PR merge commit');
-  const sourceHead=parents[2];
+  // actions/checkout defaults to fetch-depth=1: local rev-list omits parents
+  // when HEAD is marked shallow. Resolve the immutable commit object from the
+  // authenticated GitHub Git API instead of trusting shallow local ancestry.
+  const commit=await get('/git/commits/'+target);
+  assert.equal(commit.sha,target,'GitHub merge object is not the checked-out target');
+  assert.equal(commit.parents?.length,2,
+    'staging source must be a normal two-parent PR merge commit');
+  const sourceHead=commit.parents[1].sha;
+  assert.match(commit.parents[0].sha,/^[a-f0-9]{40}$/,'invalid staging base parent');
   assert.match(sourceHead,/^[a-f0-9]{40}$/);
   const runtime=runtimeFromEnv();
   assert.equal(runtime.target_sha,target);
