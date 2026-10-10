@@ -56,4 +56,4 @@ jobs:
           ./gates/run --suite quality-tooling
       - run: cd web && npm ci
       - name: Verify Web and design Gates
-        run: ./gates/run design-system-full web-eslint web-typecheck web-test-unit web-test-integration design-token-boundary-selftest
+        run: ./gates/run design-system-full web-eslint web-typecheck web-test-unit web-test-integration design-token-boundary-selftest pre-push-diff-base-selftest acceptance-executor-selftest acceptance-agent-selftest
