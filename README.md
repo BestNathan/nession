@@ -72,8 +72,8 @@ curl -fsSL https://github.com/BestNathan/nession/releases/latest/download/instal
 Options:
 
 ```bash
-# specific version, custom dir, subset of binaries
-./scripts/install.sh --version 0.3.8 --dir ~/.local/bin --bins nession
+# custom install directory and subset of binaries (add --version for a pinned release)
+./scripts/install.sh --dir ~/.local/bin --bins nession
 
 #   -v, --version <ver>   version to install (default: latest)
 #   -d, --dir <path>      install dir (default: /usr/local/bin → ~/.local/bin fallback)
@@ -115,7 +115,7 @@ tls_key_path = ""
 auth_token = "your-secret-token"
 heartbeat_interval_secs = 10
 heartbeat_timeout_secs = 30
-# db_path defaults to ~/.nession/server/nession.db
+# db_path defaults to ~/.nession/server/server.db (or under NESSION_HOME)
 ```
 
 ### 2. Start an agent (needs tmux)
@@ -165,7 +165,7 @@ nession sessions kill   --session-id <agent_id>:<session_name> [--force]
 
 ```bash
 cd web
-npm install
+npm ci
 npm run dev        # Vite dev server on http://localhost:13000, proxies /ws → :19090
 ```
 
@@ -194,17 +194,23 @@ states exactly what it does and does not give you.
 
 ```
 nession/
-├── crates/                 # Rust workspace (5 crates)
-│   ├── nession-common/     # shared protocol, config, paths, errors
-│   ├── nession-server/     # broker, registry, SQLite persistence, WS server + TLS
-│   ├── nession-agent/      # per-node agent: tmux management, server connection, P2P server
-│   ├── nession-cli/        # CLI: attach, list, create/kill, lifecycle
-│   └── nession-claude-code/# Claude Code config browser extension
+├── crates/                 # Rust workspace (10 crates; see Cargo.toml)
+│   ├── nession-common/     # shared configuration, paths and utilities
+│   ├── nession-protocol/   # versioned wire contracts
+│   ├── nession-protocol-codegen/ # TypeScript / JSON Schema generation
+│   ├── nession-runtime/    # reusable runtime primitives
+│   ├── nession-client/     # reusable client library
+│   ├── nession-server/     # broker, registry, SQLite, WebSocket + TLS
+│   ├── nession-agent/      # per-node tmux, server and P2P lifecycle
+│   ├── nession-cli/        # interactive CLI and process lifecycle
+│   ├── nession-git/        # Git capability / protocol
+│   └── nession-claude-code/ # Claude Code capability / protocol
 ├── web/                    # React + Vite + TypeScript + shadcn/ui + xterm.js
 ├── deploy/                 # docker-compose + entrypoints + nginx template
 ├── design/                 # design tokens + executable UI contracts (`design/generated/` is codegen output)
-├── e2e/                    # Playwright specs + canonical visual baselines
-├── scripts/                # gates, coverage, gitops writer, install.sh
+├── e2e/                    # shared Runner, Cases, Scenarios, Playwright regressions
+├── gates/                  # invariant checks and suite catalog
+├── scripts/                # tooling, acceptance, metrics, gitops writer, install.sh
 ├── Dockerfile.*            # server/agent/ui build variants
 └── Cargo.toml              # workspace root (version lives here, and in web/package.json)
 ```
@@ -258,22 +264,17 @@ Published multi-arch images (on version bumps via CI):
 
 ## Kubernetes
 
-Kustomize overlays under `k8s/`:
+The Kubernetes Kustomize base, environment overlays and ArgoCD desired state
+are maintained on the [`gitops` branch](https://github.com/BestNathan/nession/tree/gitops),
+**not** at `k8s/` in `main` or `staging`. Check out that branch and follow
+its current overlay paths before applying manifests.
 
-```bash
-kubectl apply -k k8s/overlays/production     # or overlays/staging
-```
-
-| Service        | Port  | Purpose                          |
-|----------------|-------|----------------------------------|
-| nession-server | 19090 | WebSocket (agents + clients)     |
-| nession-agent  | 19090 | WebSocket (P2P terminal)         |
-| nession-ui     | 80    | nginx serving `web/dist/`        |
-
-`10080` is the container's **nginx**, not a Rust listener: neither binary opens
-an HTTP port. nginx serves `/health` and the UI and proxies `/ws` to 19090.
-
-CI publishes multi-arch images and updates the production overlay's image tags automatically on every version change (see `.github/workflows/release.yml`).
+The deployment nginx listener serves the UI and `/health` endpoint
+(container port `10080`), proxying `/ws` to the configured Rust WebSocket
+listener. Rust listener ports and external service ports are configuration,
+not fixed Kubernetes constants. CI publishes multi-arch images and promotes
+versioned image tags through the gitops workflow on version changes
+(see `.github/workflows/release.yml`).
 
 ---
 
