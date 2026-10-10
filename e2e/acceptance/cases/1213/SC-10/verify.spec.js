@@ -79,10 +79,15 @@ test('SC-10: real P2P cursor resume and explicit truncated retention window', as
           if (ws.readyState === WebSocket.OPEN) ws.close(4000, 'SC10 consumer suspended');
         }
       });
-      // Real tmux sends output while the disconnected consumer cannot read.
-      // 6500 paced writes push the Agent's 4096-event retention window beyond
-      // an old cursor; the second live P2P peer observes the producer.
-      const producer = 'for i in $(seq 1 6500); do printf "SC10-SEQ-%05d\\n" "$i"; sleep 0.002; done; printf "SC10-TAIL-%s\\n" 1213';
+      // The previous shell loop forked 6500 *separate* sleep processes. On
+      // CI that took long enough to exhaust the disconnected client's P2P
+      // reconnect budget and auto-fall back to Relay. A later Relay bootstrap
+      // correctly restored terminal output but naturally sent no P2P
+      // agent.terminal.stream.resume; the Case then failed for the wrong
+      // reason. Keep the same 6500 real, paced PTY writes (beyond the 4096
+      // retained event window) but use a single unbuffered Python process,
+      // so the P2P retry budget is not spent on shell process launches.
+      const producer = 'python3 -u -c \\'import time; [(print("SC10-SEQ-%05d" % i), time.sleep(0.002)) for i in range(1,6501)]; print("SC10-TAIL-%s" % 1213)\\'';
       execFileSync('tmux', ['-S', runtime.tmux_socket, 'send-keys', '-t', name, producer, 'Enter'], {
         timeout: 10000,
       });
@@ -129,6 +134,15 @@ test('SC-10: real P2P cursor resume and explicit truncated retention window', as
       document.dispatchEvent(new Event('visibilitychange'));
     });
     await expect(page.getByTestId('shell')).toBeVisible({ timeout: 20000 });
+    // The replay contract is P2P-only, so never accept terminal history
+    // arriving over a Relay fallback as a P2P resume success.
+    await expect.poll(() => page.evaluate(agentPort =>
+      window.__sc10.sockets.some(socket => {
+        try {
+          return new URL(socket.url).port === String(agentPort) &&
+            socket.readyState === WebSocket.OPEN;
+        } catch { return false; }
+      }), runtime.agent_port), { timeout: 30000 }).toBe(true);
     await expect(page.locator('.xterm')).toHaveAttribute('data-sc10-terminal-instance', 'before', {
       timeout: 30000,
     });
