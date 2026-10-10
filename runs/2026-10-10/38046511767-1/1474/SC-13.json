@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "2a0c82c61a0f24e384c932809b7a0372dff6b97c3d988606f8efe7935cb3c418",
+  "run_id": 38046511767,
+  "run_attempt": 1,
+  "issue": 1474,
+  "criterion": "SC-13",
+  "criterion_text": "Existing trusted Acceptance updater and Requirement gate consume results without giving verifier scripts Issue write privileges; stale SHA/contract results cannot replace newer eligible conclusions.",
+  "stage": "staging",
+  "target_sha": "ca8fb990668e1138b6f25d19800f7ea5acfc37a5",
+  "contract_sha256": "b07c06889b642821066631a90eedcdfb38679cfbda8944383c1dda1d986f9c95",
+  "case_revision": "ca8fb990668e1138b6f25d19800f7ea5acfc37a5",
+  "case_tree_sha": "78398bcd29c5577a42b1bb3e135c6abca69e7944",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-10T10:56:56.847Z",
+  "finished_at": "2026-10-10T10:57:02.780Z",
+  "duration_ms": 5933,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "Untrusted Case execution is read-only; trusted ingestion alone writes durable records and Issue projections with stale SHA/contract defenses.",
+      "evidence": [
+        {
+          "type": "security",
+          "value": "Case workflow permissions=contents:read,issues:read"
+        },
+        {
+          "type": "security",
+          "value": "trusted ingest validates current SHA, association, contract digest and selected SC before Issue write"
+        }
+      ],
+      "duration_ms": 28,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 38046511767,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "ca8fb990668e1138b6f25d19800f7ea5acfc37a5",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/38046511767",
+    "record_path": "runs/2026-10-10/38046511767-1/1474/SC-13.json",
+    "source_result_sha256": "59e846372a6069a344ce892108b7b884a2176560e280ce2582e3f3c970d1295b"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-38046511767-1",
+    "sha256": "59e846372a6069a344ce892108b7b884a2176560e280ce2582e3f3c970d1295b",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/38046511767",
+    "durability": "time-limited; object archival not configured"
+  }
+}

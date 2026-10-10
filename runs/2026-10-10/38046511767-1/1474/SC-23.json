@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "456c10e36b0f6f2d698879057d1b26a27ffd6334eeed21c1318c21c3a9bfcacd",
+  "run_id": 38046511767,
+  "run_attempt": 1,
+  "issue": 1474,
+  "criterion": "SC-23",
+  "criterion_text": "Opt-in Browser/Terminal/Protocol/Process collectors emit bounded timestamped events, metrics and artifact pointers with redaction and documented privacy/retention controls.",
+  "stage": "staging",
+  "target_sha": "ca8fb990668e1138b6f25d19800f7ea5acfc37a5",
+  "contract_sha256": "b07c06889b642821066631a90eedcdfb38679cfbda8944383c1dda1d986f9c95",
+  "case_revision": "ca8fb990668e1138b6f25d19800f7ea5acfc37a5",
+  "case_tree_sha": "0b379c6036bef4cad21a2fc89112bd8734a6d2ba",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-10T10:58:18.354Z",
+  "finished_at": "2026-10-10T10:58:38.615Z",
+  "duration_ms": 20261,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "Real browser and terminal observations plus opt-in typed collector projection enforce bounds and nested secret omission",
+      "evidence": [
+        {
+          "type": "collector",
+          "value": "five timestamped typed events; real Process RSS=54431744"
+        },
+        {
+          "type": "runtime",
+          "value": "source=ca8fb990668e1138b6f25d19800f7ea5acfc37a5 observations=2 backend SHA-256 present"
+        },
+        {
+          "type": "security",
+          "value": "default-disabled; invalid operation, excessive retention and event budget rejected; no URLs or raw content"
+        }
+      ],
+      "duration_ms": 14366,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 38046511767,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "ca8fb990668e1138b6f25d19800f7ea5acfc37a5",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/38046511767",
+    "record_path": "runs/2026-10-10/38046511767-1/1474/SC-23.json",
+    "source_result_sha256": "a99ef5235a860e94a02948155a4dcc6ed979d6199cbf898c5d1eef98b7ae4683"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-38046511767-1",
+    "sha256": "a99ef5235a860e94a02948155a4dcc6ed979d6199cbf898c5d1eef98b7ae4683",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/38046511767",
+    "durability": "time-limited; object archival not configured"
+  }
+}

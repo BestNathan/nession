@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "30db207624b5fe5da05569b953be359e206645c1f9cf20aa6ce7f11682f98598",
+  "run_id": 38046511767,
+  "run_attempt": 1,
+  "issue": 1474,
+  "criterion": "SC-11",
+  "criterion_text": "A manual run can select a specific Issue/SC, SHA, stage and runtime profile and produces reproducible evidence.",
+  "stage": "staging",
+  "target_sha": "ca8fb990668e1138b6f25d19800f7ea5acfc37a5",
+  "contract_sha256": "b07c06889b642821066631a90eedcdfb38679cfbda8944383c1dda1d986f9c95",
+  "case_revision": "ca8fb990668e1138b6f25d19800f7ea5acfc37a5",
+  "case_tree_sha": "cfd1715ef843094187badbb4b17f6226ba175b64",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-10T10:56:34.856Z",
+  "finished_at": "2026-10-10T10:56:40.783Z",
+  "duration_ms": 5926,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "Manual dispatch selects Issue, SC, exact SHA, stage and runtime profile through the same deterministic Case runner.",
+      "evidence": [
+        {
+          "type": "contract",
+          "value": "workflow_dispatch inputs=issue_number,criterion,target_sha,stage,runtime_profile"
+        },
+        {
+          "type": "contract",
+          "value": "target_sha validated as exact 40-character commit SHA"
+        }
+      ],
+      "duration_ms": 33,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 38046511767,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "ca8fb990668e1138b6f25d19800f7ea5acfc37a5",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/38046511767",
+    "record_path": "runs/2026-10-10/38046511767-1/1474/SC-11.json",
+    "source_result_sha256": "72204d5fe7531bc8a1558f7372d441dc7798935e1c9bf16a26f86d2b07fb5634"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-38046511767-1",
+    "sha256": "72204d5fe7531bc8a1558f7372d441dc7798935e1c9bf16a26f86d2b07fb5634",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/38046511767",
+    "durability": "time-limited; object archival not configured"
+  }
+}

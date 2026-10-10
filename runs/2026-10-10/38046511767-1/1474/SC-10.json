@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "927672561add50c5a7f1b76b33e0a9538ad311f87dddf0641c62bcbf262fee4d",
+  "run_id": 38046511767,
+  "run_attempt": 1,
+  "issue": 1474,
+  "criterion": "SC-10",
+  "criterion_text": "Post-merge main-SHA acceptance uses the same runner and applies results only to post-merge SCs, without asserting that main merge equals production deployment.",
+  "stage": "staging",
+  "target_sha": "ca8fb990668e1138b6f25d19800f7ea5acfc37a5",
+  "contract_sha256": "b07c06889b642821066631a90eedcdfb38679cfbda8944383c1dda1d986f9c95",
+  "case_revision": "ca8fb990668e1138b6f25d19800f7ea5acfc37a5",
+  "case_tree_sha": "af016fcca5966fd75cada2c90e9b9a31f8bbee75",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-10T10:56:23.860Z",
+  "finished_at": "2026-10-10T10:56:29.791Z",
+  "duration_ms": 5931,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "The same trusted runner maps main push to post-merge and projects only current-main, stage-matching results.",
+      "evidence": [
+        {
+          "type": "contract",
+          "value": "main push -> stage=post-merge using Acceptance Cases runner"
+        },
+        {
+          "type": "security",
+          "value": "projection checks current main SHA and never equates merge with production deployment"
+        }
+      ],
+      "duration_ms": 30,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 38046511767,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "ca8fb990668e1138b6f25d19800f7ea5acfc37a5",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/38046511767",
+    "record_path": "runs/2026-10-10/38046511767-1/1474/SC-10.json",
+    "source_result_sha256": "aa81cbdee50a964b84213815a51a49d6e69e9cbd76523cdefff1661491574baa"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-38046511767-1",
+    "sha256": "aa81cbdee50a964b84213815a51a49d6e69e9cbd76523cdefff1661491574baa",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/38046511767",
+    "durability": "time-limited; object archival not configured"
+  }
+}

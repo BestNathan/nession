@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "8a02c6a19a2d124ef4f1d325b065105cf1f98c9c5ed0d64ad8622c9e517f3cf7",
+  "run_id": 38046511767,
+  "run_attempt": 1,
+  "issue": 1474,
+  "criterion": "SC-28",
+  "criterion_text": "Trusted Run ingestion cryptographically binds source workflow/run attempt/event/SHA and Case/Scenario tree and rejects forged/cross-run records before orphan persistence or Issue projection.",
+  "stage": "staging",
+  "target_sha": "ca8fb990668e1138b6f25d19800f7ea5acfc37a5",
+  "contract_sha256": "b07c06889b642821066631a90eedcdfb38679cfbda8944383c1dda1d986f9c95",
+  "case_revision": "ca8fb990668e1138b6f25d19800f7ea5acfc37a5",
+  "case_tree_sha": "bbed62f6e9ac974afd867c1398ddd2d19cddb56a",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-10T11:00:07.968Z",
+  "finished_at": "2026-10-10T11:00:14.499Z",
+  "duration_ms": 6531,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "Trusted ingestion binds source GitHub workflow/run/attempt/SHA and immutable source tree, rejects replay/tampering and stores only source-attested orphan evidence",
+      "evidence": [
+        {
+          "type": "source",
+          "value": "authentic Scenario=37961137780 SHA=75d52881f7ab54e28a18d1947ee5d6a0818dd101 Git blob=d4663d074452f89e10bd4185322e08d9265978ca"
+        },
+        {
+          "type": "source",
+          "value": "authentic Case=37960891443 SHA=dc5b7a9c329ddadd72657e0ad750b81f512f3060 Git blob=e109c2fb652eef5523393d0ad7f4dbd5e13ac32e"
+        },
+        {
+          "type": "negative",
+          "value": "four main-owned ingest/index self-test suites passed: trusted Scenario orphan ingest self-test: identity, bou; acceptance Case ingest self-test: provenance and record; trusted E2E Test Run Ingest: immutable SHA/tree, GitHub; shared Run index v1: acceptance/scenario/test/benchmark"
+        },
+        {
+          "type": "boundary",
+          "value": "source verifier cannot edit Issues; only trusted ingest/updater projects authenticated results"
+        }
+      ],
+      "duration_ms": 627,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 38046511767,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "ca8fb990668e1138b6f25d19800f7ea5acfc37a5",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/38046511767",
+    "record_path": "runs/2026-10-10/38046511767-1/1474/SC-28.json",
+    "source_result_sha256": "e9b19be48307dc7ebf53b5798ef0f4aeba3b623e257c12f869798162bff5caee"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-38046511767-1",
+    "sha256": "e9b19be48307dc7ebf53b5798ef0f4aeba3b623e257c12f869798162bff5caee",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/38046511767",
+    "durability": "time-limited; object archival not configured"
+  }
+}

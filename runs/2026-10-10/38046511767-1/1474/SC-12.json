@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "6461f57e8774279b46ddabfbe5eb6f2a9d9c83e57dff5bbb7da83a18d99d2940",
+  "run_id": 38046511767,
+  "run_attempt": 1,
+  "issue": 1474,
+  "criterion": "SC-12",
+  "criterion_text": "Run records are immutable and independently durable, with safe concurrent ingestion, detailed provenance and large evidence stored out of the product tree.",
+  "stage": "staging",
+  "target_sha": "ca8fb990668e1138b6f25d19800f7ea5acfc37a5",
+  "contract_sha256": "b07c06889b642821066631a90eedcdfb38679cfbda8944383c1dda1d986f9c95",
+  "case_revision": "ca8fb990668e1138b6f25d19800f7ea5acfc37a5",
+  "case_tree_sha": "cd305f35355d02ee3d42793454fb5823b7cc2de3",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-10T10:56:45.855Z",
+  "finished_at": "2026-10-10T10:56:51.778Z",
+  "duration_ms": 5923,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "Compact Case records are serialized into an append-only orphan branch with checksummed provenance; large artifacts stay outside product Git.",
+      "evidence": [
+        {
+          "type": "record",
+          "value": "durable_branch=acceptance-results mode=orphan append-only serialized-ingest"
+        },
+        {
+          "type": "artifact",
+          "value": "large browser traces/screenshots/logs remain GitHub Actions artifacts"
+        }
+      ],
+      "duration_ms": 29,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 38046511767,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "ca8fb990668e1138b6f25d19800f7ea5acfc37a5",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/38046511767",
+    "record_path": "runs/2026-10-10/38046511767-1/1474/SC-12.json",
+    "source_result_sha256": "3117fb7352fb8bd771efce69dbc619ce5f8f81c42253bdfca0eb6529b875cf74"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-38046511767-1",
+    "sha256": "3117fb7352fb8bd771efce69dbc619ce5f8f81c42253bdfca0eb6529b875cf74",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/38046511767",
+    "durability": "time-limited; object archival not configured"
+  }
+}

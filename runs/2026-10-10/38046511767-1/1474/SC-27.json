@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "6a5022a5e3f3a2a7a62b37be2b5886813f30631b0c77c1875573802de4f0c353",
+  "run_id": 38046511767,
+  "run_attempt": 1,
+  "issue": 1474,
+  "criterion": "SC-27",
+  "criterion_text": "Execution facts and evaluation are separate, and zero-test/all-skipped/absence-of-Case or missing evidence cannot produce an accepted Pass.",
+  "stage": "staging",
+  "target_sha": "ca8fb990668e1138b6f25d19800f7ea5acfc37a5",
+  "contract_sha256": "b07c06889b642821066631a90eedcdfb38679cfbda8944383c1dda1d986f9c95",
+  "case_revision": "ca8fb990668e1138b6f25d19800f7ea5acfc37a5",
+  "case_tree_sha": "0cf3866e7912b968f2e89d84c9eb30630f9da4e9",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-10T10:59:56.506Z",
+  "finished_at": "2026-10-10T11:00:02.896Z",
+  "duration_ms": 6390,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "Zero/skipped/missing verifier evidence never maps to Pass and real Scenario execution remains observational",
+      "evidence": [
+        {
+          "type": "classifier",
+          "value": "empty/discovery-missing/zero assertion rejected; aggregation distinguishes Pending/Fail/Error"
+        },
+        {
+          "type": "selftest",
+          "value": "Playwright assertion-proof negative cases executed from shared Runner Drivers"
+        },
+        {
+          "type": "separation",
+          "value": "authenticated orphan Scenario run=37961137780 has evaluation=null despite Completed execution"
+        }
+      ],
+      "duration_ms": 489,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 38046511767,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "ca8fb990668e1138b6f25d19800f7ea5acfc37a5",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/38046511767",
+    "record_path": "runs/2026-10-10/38046511767-1/1474/SC-27.json",
+    "source_result_sha256": "6c9bc1463466cf0805d8851b2b95120acc9cad5cee38c567e0843a9109d29da6"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-38046511767-1",
+    "sha256": "6c9bc1463466cf0805d8851b2b95120acc9cad5cee38c567e0843a9109d29da6",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/38046511767",
+    "durability": "time-limited; object archival not configured"
+  }
+}

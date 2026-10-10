@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "4d856842dc67e0edccbaef7a767b0cfe979b318d08343ef76460caaba4e2b655",
+  "run_id": 38046511767,
+  "run_attempt": 1,
+  "issue": 1474,
+  "criterion": "SC-25",
+  "criterion_text": "Scenario execution supports repeated runs and cross-SHA/Run comparison with source input/seed/environment identity and explicit clock/nondeterminism limitations.",
+  "stage": "staging",
+  "target_sha": "ca8fb990668e1138b6f25d19800f7ea5acfc37a5",
+  "contract_sha256": "b07c06889b642821066631a90eedcdfb38679cfbda8944383c1dda1d986f9c95",
+  "case_revision": "ca8fb990668e1138b6f25d19800f7ea5acfc37a5",
+  "case_tree_sha": "064378ef4c9c0d3dcbe5da06e99808ada5caaa12",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-10T10:58:55.257Z",
+  "finished_at": "2026-10-10T10:59:25.812Z",
+  "duration_ms": 30555,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "Two real repeated runs compared with authenticated different-SHA orphan evidence and explicit clock nondeterminism limitations",
+      "evidence": [
+        {
+          "type": "repeat",
+          "value": "source=ca8fb990668e1138b6f25d19800f7ea5acfc37a5 runs=2 samples=3,3"
+        },
+        {
+          "type": "historical",
+          "value": "source=75d52881f7ab54e28a18d1947ee5d6a0818dd101 run=37961137780 immutable git blob=d4663d074452f89e10bd4185322e08d9265978ca"
+        },
+        {
+          "type": "uncertainty",
+          "value": "unsynchronized clocks and nondeterministic scheduling; comparison evaluation=null"
+        }
+      ],
+      "duration_ms": 24661,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 38046511767,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "ca8fb990668e1138b6f25d19800f7ea5acfc37a5",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/38046511767",
+    "record_path": "runs/2026-10-10/38046511767-1/1474/SC-25.json",
+    "source_result_sha256": "0fd206128b002426500259a8d9ec3d4ab27acfae55545a004eb40479b57beb02"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-38046511767-1",
+    "sha256": "0fd206128b002426500259a8d9ec3d4ab27acfae55545a004eb40479b57beb02",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/38046511767",
+    "durability": "time-limited; object archival not configured"
+  }
+}

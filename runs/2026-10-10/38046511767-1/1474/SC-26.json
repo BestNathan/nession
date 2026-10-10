@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "627291ac237c51cc0f1f81844017b05c694728e6c4020ffa737f6c406c328d18",
+  "run_id": 38046511767,
+  "run_attempt": 1,
+  "issue": 1474,
+  "criterion": "SC-26",
+  "criterion_text": "One real Terminal replay/resume or attach/reconnect reproduction Scenario emits complete measurements/timeline and can be reused by a Regression Test or Issue/SC Acceptance Case.",
+  "stage": "staging",
+  "target_sha": "ca8fb990668e1138b6f25d19800f7ea5acfc37a5",
+  "contract_sha256": "b07c06889b642821066631a90eedcdfb38679cfbda8944383c1dda1d986f9c95",
+  "case_revision": "ca8fb990668e1138b6f25d19800f7ea5acfc37a5",
+  "case_tree_sha": "8c7e312c5924ec0436ece5b852423d907dc66a74",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-10T10:59:30.885Z",
+  "finished_at": "2026-10-10T10:59:51.433Z",
+  "duration_ms": 20548,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "Real Terminal resume Case consumed the same canonical Scenario used by an independently accepted Issue/SC consumer",
+      "evidence": [
+        {
+          "type": "timeline",
+          "value": "SHA=ca8fb990668e1138b6f25d19800f7ea5acfc37a5 before/after samples=3 recovered=241"
+        },
+        {
+          "type": "reuse",
+          "value": "source-aligned 1498/SC-04 directly invokes same canonical terminal-attach-resume Scenario"
+        },
+        {
+          "type": "evidence",
+          "value": "tmux/backend hashes with browser marker recovery and no fabricated Scenario verdict"
+        }
+      ],
+      "duration_ms": 14659,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 38046511767,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "ca8fb990668e1138b6f25d19800f7ea5acfc37a5",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/38046511767",
+    "record_path": "runs/2026-10-10/38046511767-1/1474/SC-26.json",
+    "source_result_sha256": "434e1c9dc7d7b22ed70b3f79b91419d0425994d80dfb123346fab76c32bb898b"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-38046511767-1",
+    "sha256": "434e1c9dc7d7b22ed70b3f79b91419d0425994d80dfb123346fab76c32bb898b",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/38046511767",
+    "durability": "time-limited; object archival not configured"
+  }
+}
