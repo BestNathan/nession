@@ -472,10 +472,20 @@ export class WebSocketService implements PluginSurface {
         this.connectPromise = null;
         this.rejectConnect = null;
         reject(error);
-        this.teardownSocket();
-        this.router.failPending(error);
-        this.rejectWaiters(error);
-        this.setState('disconnected');
+        // An initial dial error is terminal until the user explicitly retries.
+        // An error on an *already scheduled reconnect*, however, is another
+        // failed transport attempt. Without the same loss path as onclose, an
+        // offline browser's onerror can silently cancel the entire backoff
+        // chain before the network returns (#1213 SC-15).
+        const retrying = this.reconnectAttempt > 0;
+        this.teardownSocket(); // also detaches onclose: never double-count loss
+        if (retrying) {
+          this.handleSocketLoss();
+        } else {
+          this.router.failPending(error);
+          this.rejectWaiters(error);
+          this.setState('disconnected');
+        }
       } else {
         this.options.onError?.(error);
       }
