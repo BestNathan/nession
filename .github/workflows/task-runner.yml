@@ -1,0 +1,69 @@
+name: Ephemeral Task Runner
+
+# This workflow is a read-only execution sandbox for untrusted task/* source.
+# Trusted source/run verification and task-results writes live in task-result-ingest.yml.
+on:
+  push:
+    branches:
+      - 'task/**'
+    paths:
+      - '.task/**'
+  workflow_dispatch:
+    inputs:
+      task_id:
+        description: Registered Task ID (must equal task.json id)
+        required: true
+        type: string
+      source_sha:
+        description: Exact 40-character Task source commit SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ephemeral-task-${{ github.event_name == 'push' && github.sha || inputs.source_sha }}
+  cancel-in-progress: false
+
+jobs:
+  execute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SOURCE_SHA: ${{ github.event_name == 'push' && github.sha || inputs.source_sha }}
+      REQUESTED_ID: ${{ github.event_name == 'push' && github.ref_name || inputs.task_id }}
+    steps:
+      - name: Checkout trusted main Task runner
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: trusted
+          persist-credentials: false
+      - name: Checkout exact untrusted Task source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          path: workspace
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify runner contract
+        run: node trusted/scripts/task-runner.mjs self-test
+      - name: Run one manifest-selected Task
+        env:
+          TASK_OUTPUT: ${{ runner.temp }}/task-execution
+        run: |
+          set -euo pipefail
+          task_id="${REQUESTED_ID#task/}"
+          node trusted/scripts/task-runner.mjs execute \
+            "${GITHUB_WORKSPACE}/workspace" "${SOURCE_SHA}" "${task_id}" "${TASK_OUTPUT}"
+      - name: Upload untrusted Task observation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: task-execution-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/task-execution/record.json
+          if-no-files-found: error
+          retention-days: 14

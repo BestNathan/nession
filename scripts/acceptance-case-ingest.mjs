@@ -11,6 +11,7 @@ import {
 } from './acceptance-executor.mjs';
 import { parsePreMergeIssueNumbers } from './requirement-acceptance.mjs';
 import { artifactEvidence, validateArtifactEvidence } from './run-record-artifact-evidence.mjs';
+import { makeRunIndex } from './run-record-index-contract.mjs';
 
 const RESULTS = new Set(['Pass', 'Fail', 'Pending', 'Error']);
 const STAGES = new Set(['pre-merge', 'staging', 'post-merge']);
@@ -268,7 +269,7 @@ export function caseIndexRecord(record) {
   if (item.provenance.record_path !== durable) {
     throw new Error('Case index record path differs from immutable persisted record');
   }
-  return {
+  return makeRunIndex({
     schema_version: 1,
     mode: 'acceptance',
     source,
@@ -280,7 +281,7 @@ export function caseIndexRecord(record) {
     stage: item.stage,
     case_tree_sha: item.case_tree_sha,
     contract_sha256: item.contract_sha256,
-  };
+  });
 }
 
 function sleep(ms) {
