@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "d7a259006532d5818b1a47b096bf4629af7e1962a49b41baa9b416c289ffae99",
+  "run_id": 38044944359,
+  "run_attempt": 1,
+  "issue": 1474,
+  "criterion": "SC-11",
+  "criterion_text": "A manual run can select a specific Issue/SC, SHA, stage and runtime profile and produces reproducible evidence.",
+  "stage": "staging",
+  "target_sha": "6b7dcff69275b1e69ad6f8484240a41436db4cc5",
+  "contract_sha256": "b07c06889b642821066631a90eedcdfb38679cfbda8944383c1dda1d986f9c95",
+  "case_revision": "6b7dcff69275b1e69ad6f8484240a41436db4cc5",
+  "case_tree_sha": "cfd1715ef843094187badbb4b17f6226ba175b64",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Fail",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-10T10:29:38.150Z",
+  "finished_at": "2026-10-10T10:29:44.069Z",
+  "duration_ms": 5919,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Fail",
+      "summary": "missing contract: manual and automatic paths share exact runner",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "SC-11 executable contract verification failed"
+        }
+      ],
+      "duration_ms": 27,
+      "exit_code": 1,
+      "stderr": "missing contract: manual and automatic paths share exact runner"
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 38044944359,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "6b7dcff69275b1e69ad6f8484240a41436db4cc5",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/38044944359",
+    "record_path": "runs/2026-10-10/38044944359-1/1474/SC-11.json",
+    "source_result_sha256": "cf2f55dd6bc2f1c57ed0d891dbbb5a7ecbda792316fa19c88ab2d6938c0b72ec"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-38044944359-1",
+    "sha256": "cf2f55dd6bc2f1c57ed0d891dbbb5a7ecbda792316fa19c88ab2d6938c0b72ec",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/38044944359",
+    "durability": "time-limited; object archival not configured"
+  }
+}

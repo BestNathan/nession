@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "8cda2aea9125f30ab6e2bfa7251ff69577fcf456e9d75f1f86103b8835525d3f",
+  "run_id": 38044944359,
+  "run_attempt": 1,
+  "issue": 1474,
+  "criterion": "SC-22",
+  "criterion_text": "A standalone Scenario manifest and scripted actions reproduce an actual Nession flow without an Acceptance verdict, recording target SHA, parameters and fixtures.",
+  "stage": "staging",
+  "target_sha": "6b7dcff69275b1e69ad6f8484240a41436db4cc5",
+  "contract_sha256": "b07c06889b642821066631a90eedcdfb38679cfbda8944383c1dda1d986f9c95",
+  "case_revision": "6b7dcff69275b1e69ad6f8484240a41436db4cc5",
+  "case_tree_sha": "a304a0f576d3a64d12cea1f3e21cd10754e95c48",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-10T10:30:56.730Z",
+  "finished_at": "2026-10-10T10:31:17.338Z",
+  "duration_ms": 20608,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "Standalone manifest-driven real Server/Agent/tmux/browser terminal attach and reload captured exact source SHA and bounded inputs without an Acceptance verdict",
+      "evidence": [
+        {
+          "type": "scenario",
+          "value": "target=6b7dcff69275b1e69ad6f8484240a41436db4cc5 config_sha256=02570e8ea79bef27b3596233d77e63cada084f43a56f2e11df811513f96f8826 samples=3"
+        },
+        {
+          "type": "runtime",
+          "value": "real full-stack-local terminal replay completed in observe mode"
+        },
+        {
+          "type": "separation",
+          "value": "Scenario evaluation=null; independent Issue/SC Case performs assessment"
+        }
+      ],
+      "duration_ms": 14715,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 38044944359,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "6b7dcff69275b1e69ad6f8484240a41436db4cc5",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/38044944359",
+    "record_path": "runs/2026-10-10/38044944359-1/1474/SC-22.json",
+    "source_result_sha256": "66eb5e23f6dff4bb13ae57440db3cff3690496669d8b387cdf075e655a9b93f4"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-38044944359-1",
+    "sha256": "66eb5e23f6dff4bb13ae57440db3cff3690496669d8b387cdf075e655a9b93f4",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/38044944359",
+    "durability": "time-limited; object archival not configured"
+  }
+}

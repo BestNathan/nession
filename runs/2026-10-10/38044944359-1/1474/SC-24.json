@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "b9a4d10191262f59de325aa2d5ad94fa811c81131e49ddced706a24395cc573d",
+  "run_id": 38044944359,
+  "run_attempt": 1,
+  "issue": 1474,
+  "criterion": "SC-24",
+  "criterion_text": "Test/Acceptance/Scenario Run Records and indexes persist only in one trusted append-only orphan results branch; products branches contain no execution data, and large evidence is externalized with checksums.",
+  "stage": "staging",
+  "target_sha": "6b7dcff69275b1e69ad6f8484240a41436db4cc5",
+  "contract_sha256": "b07c06889b642821066631a90eedcdfb38679cfbda8944383c1dda1d986f9c95",
+  "case_revision": "6b7dcff69275b1e69ad6f8484240a41436db4cc5",
+  "case_tree_sha": "fdebef897fbbee82634e2f03471663e75b40fe2d",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-10T10:31:48.001Z",
+  "finished_at": "2026-10-10T10:31:54.560Z",
+  "duration_ms": 6559,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "Test, Acceptance and Scenario all have authentic immutable Git orphan records with mode indexes, bounded evidence and checksum provenance",
+      "evidence": [
+        {
+          "type": "test",
+          "value": "run=38043043207 SHA=31777c2c9be95c783f5dda58d88d466991d4d0e9 Git blob=59e8b2634323dee1a7f009c8fd8c5ffa83c35e03"
+        },
+        {
+          "type": "case",
+          "value": "run=37960891443 immutable Case source SHA=dc5b7a9c329ddadd72657e0ad750b81f512f3060"
+        },
+        {
+          "type": "scenario",
+          "value": "run=37961137780 immutable Scenario SHA=75d52881f7ab54e28a18d1947ee5d6a0818dd101"
+        },
+        {
+          "type": "retention",
+          "value": "compact results on acceptance-results; time-limited large evidence held only in external Actions artifacts"
+        }
+      ],
+      "duration_ms": 667,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 38044944359,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "6b7dcff69275b1e69ad6f8484240a41436db4cc5",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/38044944359",
+    "record_path": "runs/2026-10-10/38044944359-1/1474/SC-24.json",
+    "source_result_sha256": "edc7134709ec6b4d2ce7c4d8133cb51c3ae2f4ad158ee08fe258872f24b5504a"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-38044944359-1",
+    "sha256": "edc7134709ec6b4d2ce7c4d8133cb51c3ae2f4ad158ee08fe258872f24b5504a",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/38044944359",
+    "durability": "time-limited; object archival not configured"
+  }
+}
