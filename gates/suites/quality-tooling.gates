@@ -33,3 +33,4 @@ tmux-socket-isolation-selftest
 server-handler-locality-selftest
 server-handler-concurrency-selftest
 agent-provider-contract
+gate-consumer-parity
