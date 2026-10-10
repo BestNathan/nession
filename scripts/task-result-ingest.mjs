@@ -57,6 +57,7 @@ function verify(event, record, snapshot) {
   if (!manifestFile) invalid('Task source snapshot has no manifest');
   const manifest = JSON.parse(Buffer.from(manifestFile.base64, 'base64').toString('utf8'));
   if (manifest.entry !== record.entry || manifest.id !== record.task_id) invalid('entry differs from trusted source');
+  if (manifest.cleanup_on_success !== undefined && typeof manifest.cleanup_on_success !== 'boolean') invalid('invalid cleanup policy');
   if (run.conclusion !== (record.status === 'Success' ? 'success' : 'failure')) {
     invalid('Task status must agree with the completed upstream workflow');
   }
@@ -70,6 +71,7 @@ function verify(event, record, snapshot) {
       event: run.event, branch: run.head_branch, conclusion: run.conclusion },
     execution: { status: record.status, exit_code: record.exit_code,
       started_at: record.started_at, finished_at: record.finished_at, result: record.result },
+    cleanup_on_success: manifest.cleanup_on_success === true,
     acceptance_result: null,
   };
 }
@@ -132,6 +134,7 @@ function selfTest() {
         id: 'test-task', entry: 'run.mjs' })).toString('base64') },
   ] };
   assert.equal(verify(fake, record, snap).acceptance_result, null);
+  assert.equal(verify(fake, record, snap).cleanup_on_success, false);
   assert.throws(() => verify(fake, { ...record, source_sha: 'c'.repeat(40) }, snap), /mismatch/);
   assert.throws(() => verify(fake, { ...record, status: 'Failed' }, snap), /status/);
   assert.throws(() => verify({ ...fake, workflow_run: { ...fake.workflow_run,
