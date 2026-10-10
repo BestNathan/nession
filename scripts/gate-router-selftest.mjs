@@ -113,7 +113,7 @@ for (const hook of ['pre-commit', 'pre-push']) {
     const mutation = '  GATE_IDS+=(protocol-integrity-selftest)';
     assert.ok(original.includes(mutation), 'mutation target absent: ' + hook);
     fs.writeFileSync(file, original.replace(mutation,
-      '  # negative fixture: protocol self-test route removed'));
+      '  : # negative fixture: protocol self-test route removed'));
     const selected = execute(dir, hook, 'scripts/protocol-gate.mjs');
     assert.throws(() => requireIds(selected, ['protocol-integrity-selftest'], hook + ' mutation'),
       /missing Gate protocol-integrity-selftest/);
