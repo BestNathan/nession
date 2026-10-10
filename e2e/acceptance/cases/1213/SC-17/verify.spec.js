@@ -47,12 +47,17 @@ test('SC-17: headless Chrome mobile emulation preserves Session/Terminal across 
   });
 
   const { name } = await createAndAttach(page, expect, runtime, 'case-1213-mobile');
-  await command(page, "printf 'MOBILE-BEFORE-%s\\n' 1213");
-  await expect.poll(() => countInBuffer(page, 'MOBILE-BEFORE-1213'), { timeout: 20_000 }).toBe(1);
 
   // The actual acceptance lifecycle takes place with a narrow mobile layout
-  // and touch-enabled Chromium (not an iOS/WebKit implementation).
+  // and touch-enabled Chromium (not an iOS/WebKit implementation). Transition
+  // viewport before establishing the identity marker so a legitimate responsive
+  // layout change cannot masquerade as a lifecycle-driven Terminal remount.
   await page.setViewportSize({ width: 412, height: 915 });
+  await expect(page.locator('.xterm')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId('terminal-connecting')).toBeHidden({ timeout: 30_000 });
+  await page.locator('.xterm').evaluate(el => el.setAttribute('data-1213-case-instance', 'original'));
+  await command(page, "printf 'MOBILE-BEFORE-%s\\n' 1213");
+  await expect.poll(() => countInBuffer(page, 'MOBILE-BEFORE-1213'), { timeout: 20_000 }).toBe(1);
   const device = await page.evaluate(() => ({
     width: window.innerWidth,
     touch: navigator.maxTouchPoints,
