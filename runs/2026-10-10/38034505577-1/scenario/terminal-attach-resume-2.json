@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_scenario_observation",
+  "mode": "scenario",
+  "scenario": "terminal-attach-resume",
+  "target_sha": "8cca82df34d3364551412314a4fa03a6155faaba",
+  "scenario_revision": "8cca82df34d3364551412314a4fa03a6155faaba",
+  "run_id": 38034505577,
+  "run_attempt": 1,
+  "run_index": 2,
+  "status": "Completed",
+  "evaluation": null,
+  "started_at": "2026-10-10T07:30:46.671Z",
+  "finished_at": "2026-10-10T07:30:56.736Z",
+  "config_sha256": "02570e8ea79bef27b3596233d77e63cada084f43a56f2e11df811513f96f8826",
+  "config": {
+    "generated_lines": 240,
+    "samples_max": 12,
+    "transport": "Relay",
+    "reload": true
+  },
+  "observation_count": 3,
+  "observations": [
+    {
+      "at": "2026-10-10T07:30:55.754Z",
+      "stage": "before-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 241,
+        "viewport": {
+          "baseY": 210,
+          "viewportY": 210
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "538aaf949719dcca106df74a7cc3aeb2c031be9abc8ee6c7d3820e0f86c582ac",
+        "bytes": 9572
+      }
+    },
+    {
+      "at": "2026-10-10T07:30:56.071Z",
+      "stage": "after-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 0,
+        "viewport": {
+          "baseY": 0,
+          "viewportY": 0
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "538aaf949719dcca106df74a7cc3aeb2c031be9abc8ee6c7d3820e0f86c582ac",
+        "bytes": 9572
+      }
+    },
+    {
+      "at": "2026-10-10T07:30:56.645Z",
+      "stage": "after-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 241,
+        "viewport": {
+          "baseY": 210,
+          "viewportY": 210
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "538aaf949719dcca106df74a7cc3aeb2c031be9abc8ee6c7d3820e0f86c582ac",
+        "bytes": 9572
+      }
+    }
+  ],
+  "privacy": "whitelisted counters/timestamps/digests only; no terminal bytes",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 38034505577,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "test/1474-dependent-staging-ci-proof-cases",
+    "target_sha": "8cca82df34d3364551412314a4fa03a6155faaba",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/38034505577",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "69ec7a92916748efed657f2c1ba5d34eb4fb6efdd06e949a8d09bb5938fcfeae"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "scenario",
+    "provider": "github-actions-artifact",
+    "artifact_name": "e2e-terminal-scenario-38034505577-1",
+    "sha256": "69ec7a92916748efed657f2c1ba5d34eb4fb6efdd06e949a8d09bb5938fcfeae",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 14,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/38034505577",
+    "durability": "time-limited; object archival not configured"
+  },
+  "execution_id": "ee9f5841aa73e5a339c5d6f06b0a22d2fa535e0b23d018ce75c9d0dd41da7320"
+}
