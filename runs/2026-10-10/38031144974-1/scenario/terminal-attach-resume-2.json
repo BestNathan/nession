@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_scenario_observation",
+  "mode": "scenario",
+  "scenario": "terminal-attach-resume",
+  "target_sha": "7d7b464d8363fb816ccb0bf7a3c8d4ce0b3f5568",
+  "scenario_revision": "7d7b464d8363fb816ccb0bf7a3c8d4ce0b3f5568",
+  "run_id": 38031144974,
+  "run_attempt": 1,
+  "run_index": 2,
+  "status": "Completed",
+  "evaluation": null,
+  "started_at": "2026-10-10T06:33:02.952Z",
+  "finished_at": "2026-10-10T06:33:12.409Z",
+  "config_sha256": "02570e8ea79bef27b3596233d77e63cada084f43a56f2e11df811513f96f8826",
+  "config": {
+    "generated_lines": 240,
+    "samples_max": 12,
+    "transport": "Relay",
+    "reload": true
+  },
+  "observation_count": 3,
+  "observations": [
+    {
+      "at": "2026-10-10T06:33:11.725Z",
+      "stage": "before-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 241,
+        "viewport": {
+          "baseY": 210,
+          "viewportY": 210
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "9f44ef8adca6ab58cdd7b721778e79a4c11197ecb2a37d3c112c5e14f50e2d32",
+        "bytes": 9572
+      }
+    },
+    {
+      "at": "2026-10-10T06:33:11.882Z",
+      "stage": "after-reload",
+      "browser": {
+        "mounted": false,
+        "marker_count": 0,
+        "viewport": null
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "9f44ef8adca6ab58cdd7b721778e79a4c11197ecb2a37d3c112c5e14f50e2d32",
+        "bytes": 9572
+      }
+    },
+    {
+      "at": "2026-10-10T06:33:12.340Z",
+      "stage": "after-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 241,
+        "viewport": {
+          "baseY": 210,
+          "viewportY": 210
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "9f44ef8adca6ab58cdd7b721778e79a4c11197ecb2a37d3c112c5e14f50e2d32",
+        "bytes": 9572
+      }
+    }
+  ],
+  "privacy": "whitelisted counters/timestamps/digests only; no terminal bytes",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 38031144974,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/1482-terminal-acceptance-contract-closeout",
+    "target_sha": "7d7b464d8363fb816ccb0bf7a3c8d4ce0b3f5568",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/38031144974",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "4a32d77592613dcffdd673c5473a94f395c5416e2e4d60ca6884e878f99f4e5e"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "scenario",
+    "provider": "github-actions-artifact",
+    "artifact_name": "e2e-terminal-scenario-38031144974-1",
+    "sha256": "4a32d77592613dcffdd673c5473a94f395c5416e2e4d60ca6884e878f99f4e5e",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 14,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/38031144974",
+    "durability": "time-limited; object archival not configured"
+  },
+  "execution_id": "9357b2976488dc2ba6933cf1bfb51c2031d19bc31e670f3dbdb5fe5f389e4f2e"
+}
