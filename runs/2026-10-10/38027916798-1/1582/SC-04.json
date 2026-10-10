@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "ebcba4a685fd1d5f7b47b3c0181cd893a89c2dc6ed581941a1e7f7ad83d8365e",
+  "run_id": 38027916798,
+  "run_attempt": 1,
+  "issue": 1582,
+  "criterion": "SC-04",
+  "criterion_text": "A trusted main-owned ingest stores validated append-only records and reproducible task-source snapshots on isolated `task-results` orphan branch; retries idempotent and conflicts rejected; no mutation of `acceptance-results` or Issue Acceptance.",
+  "stage": "post-merge",
+  "target_sha": "af12d5fd6ad4ed48c6d0f9ba731641021bdc81d9",
+  "contract_sha256": "54386fdace5053f7ddbd15148b1826b6f6a2124395609ca599047b555a50e5c9",
+  "case_revision": "af12d5fd6ad4ed48c6d0f9ba731641021bdc81d9",
+  "case_tree_sha": "c853fc09efcbd1c0b157e79ebe99c4e1a203af85",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-10T05:35:54.330Z",
+  "finished_at": "2026-10-10T05:36:01.151Z",
+  "duration_ms": 6821,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "Post-merge main SHA ran a real full-stack service; two real Task executions have separately authenticated, SHA-pinned immutable records, indexed source snapshots and read-only Acceptance boundary, with idempotency and collision tests.",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "main exact_sha=af12d5fd6ad4ed48c6d0f9ba731641021bdc81d9 isolated full-stack HTTP 200"
+        },
+        {
+          "type": "record",
+          "value": "run=38024769923 exact_task_sha=adfeefb13a2b1f64f8f6df19a9f5ef1899c4885c source_sha256=9e93379a018a3597545f5cb9806b6c0f745e7b4de361d73effb59ea0a41f8e8c durable=runs/1582-smoke/38024769923-1/record.json"
+        },
+        {
+          "type": "record",
+          "value": "run=38025416466 exact_task_sha=61c3fae9c55d0eba9974526c90d481450e77e1a3 source_sha256=dda87534cc984540ed0b4e0ab1578e59389d01805687899ba395d600e4479553 durable=runs/1582-smoke/38025416466-1/record.json"
+        },
+        {
+          "type": "store",
+          "value": "task-results commit=e713093ead0459bcc46645426a056ff46915ee4b != acceptance-results commit=77679a3278c1340a32d91962f5c4d551f65dda28; two source snapshots and SHA indexes verified"
+        },
+        {
+          "type": "negative-tests",
+          "value": "task-runner + task-result-ingest self-tests: malformed identity, immutable collision, idempotent retry, unsafe path and source-boundary checks passed"
+        },
+        {
+          "type": "security",
+          "value": "trusted main-only ingestion; no Issue write permission and no acceptance-results ref writes"
+        }
+      ],
+      "duration_ms": 903,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 38027916798,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "af12d5fd6ad4ed48c6d0f9ba731641021bdc81d9",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/38027916798",
+    "record_path": "runs/2026-10-10/38027916798-1/1582/SC-04.json",
+    "source_result_sha256": "faa08abd8f105d8da0b108414a00c4f74ff55777b5806d67e9f1cbf3467aad48"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-38027916798-1",
+    "sha256": "faa08abd8f105d8da0b108414a00c4f74ff55777b5806d67e9f1cbf3467aad48",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/38027916798",
+    "durability": "time-limited; object archival not configured"
+  }
+}
