@@ -5096,11 +5096,13 @@ mod tests {
         // directly would leave the arm's own wiring — which is where the guard
         // is taken — unpinned.
         let dispatch = tokio::spawn(async move {
+            let peer_token = Arc::new(());
             let ctx = P2pRequest {
                 id: "resize-1",
                 tmux: &tmux,
                 sessions: &sessions,
                 client_id: &client,
+                peer_token: &peer_token,
                 outbound: &outbound,
                 default_working_dir: "/tmp",
                 file_ops: &file_ops,
