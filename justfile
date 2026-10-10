@@ -2,50 +2,59 @@
 # Do not export RUSTC_WRAPPER here: direct cargo and just must behave identically,
 # while GitHub Actions explicitly resets the wrapper to keep its rust-cache path.
 
+# ── Canonical Gate interface ────────────────────────────────────────────────
+gate id:
+    ./gates/run "{{id}}"
+
+gates suite:
+    ./gates/run --suite "{{suite}}"
+
 # ── Rust ────────────────────────────────────────────────────────────────────
 
 # Format check (fast, safe to run on every commit)
 fmt:
-    cargo fmt --all -- --check
+    ./gates/run rust-format
 
 # Clippy strict mode — must pass with 0 warnings.
 # --all-targets so test code is linted too; without it #[cfg(test)] modules and
 # tests/ are skipped entirely.
 lint:
-    cargo clippy --workspace --all-targets -- -D warnings
+    ./gates/run rust-clippy
 
 # Unit tests only (pre-commit)
 test-unit:
-    ./scripts/filtered-test.sh --lib
+    ./gates/run rust-test-unit
 
 # Integration tests only (pre-push)
 test-integration:
-    ./scripts/filtered-test.sh --test integration
+    ./gates/run rust-test-integration
 
 # Full test suite (unit + integration)
-test: test-unit test-integration
+test:
+    ./gates/run rust-test-unit rust-test-integration
 
 # Per-crate coverage check against thresholds
 coverage:
-    ./scripts/check-coverage.sh
+    ./gates/run rust-coverage
 
 # Fast pre-commit checks (fmt + clippy)
-quick: fmt lint
+quick:
+    ./gates/run rust-format rust-clippy
 
 # Prove the repository rustc wrapper selects sccache only for local builds and
 # always falls back safely when sccache is unavailable or CI disables it.
 check-rustc-wrapper:
-    bash ./scripts/rustc-wrapper-selftest.sh
+    ./gates/run rustc-wrapper
 
 # Prove worktree warm seeding never aliases/overwrites a target and removes
 # workspace-member outputs before publishing the private destination.
 check-worktree-target-seed:
-    bash ./scripts/seed-worktree-target-selftest.sh
+    ./gates/run worktree-target-seed
 
 # Prove the build-cache diagnostic still detects a shared or aliased worktree
 # target rather than always reporting success.
 check-build-cache-verify:
-    bash ./scripts/build-cache-verify-selftest.sh
+    ./gates/run build-cache-verifier
 
 # Best-effort warm-start for a newly-created worktree. On APFS/reflink-capable
 # filesystems this clone-shares dependency artifacts while keeping a private
@@ -67,7 +76,8 @@ build-cache-verify:
 
 # Full CI checks (fmt + lint + runtime/tmux/protocol gates + codegen drift +
 # coverage — coverage runs all tests)
-check: fmt lint check-rustc-wrapper check-worktree-target-seed check-build-cache-verify check-acceptance-runtime check-acceptance-cases check-tmux-socket check-protocol check-codegen coverage check-instructions
+check:
+    ./gates/run --suite quality-rust
 
 # Canonical instruction contract is owned by the main Gate catalog.
 check-instructions:
@@ -76,14 +86,12 @@ check-instructions:
 # Prove the shared Acceptance full-stack harness keeps its config/target contract
 # deterministic without launching the runtime.
 check-acceptance-runtime:
-    ./e2e/run --validate
+    ./gates/run acceptance-runtime-contract
 
 # Validate source-aligned Case discovery/schema, trusted contract matching and
 # deterministic Pass/Fail/Pending/Error aggregation without provisioning.
 check-acceptance-cases:
-    node scripts/acceptance-cases-selftest.mjs
-    node scripts/acceptance-executor.mjs self-test
-    node scripts/acceptance-case-ingest.mjs self-test
+    ./gates/run acceptance-cases-contract
 
 # ── Protocol codegen (#678 Phase 5) ─────────────────────────────────────────
 
@@ -129,7 +137,7 @@ check-acceptance-cases:
 # the spelling every reply carried. One wire per operation removed it (#953): a
 # reply carries its request's own name and is correlated by `id`.
 check-protocol:
-    node scripts/protocol-gate.mjs
+    ./gates/run protocol-integrity
     ./gates/run server-handler-locality
     node scripts/server-handler-locality.mjs --self-test
     node scripts/server-handler-concurrency-selftest.mjs
@@ -141,7 +149,7 @@ protocol-list:
 # Prove the gate still catches what it exists for: each rule is injected into a
 # fixture tree and has to fail with that rule named.
 protocol-check-selftest:
-    ./scripts/protocol-gate-selftest.sh
+    ./gates/run protocol-integrity-selftest
 
 # Regenerate the Web's TypeScript bindings from the Rust contracts.
 # Committed output: run this and commit the result whenever a contract changes.
@@ -156,7 +164,7 @@ codegen:
 # report the same thing on every subsequent run until someone rebuilt it by
 # hand. A scratch directory leaves the working tree untouched either way.
 check-codegen:
-    ./scripts/check-codegen-drift.sh
+    ./gates/run protocol-codegen-drift
 
 # Every protocol in the tree, as one JSON Schema document on stdout:
 #
@@ -207,7 +215,7 @@ design-inventory-check:
 # lists are owned only by design/scripts/design-gate.mjs; hooks/CI must not copy
 # those rules locally.
 design-check profile="full":
-    node design/scripts/design-gate.mjs --profile {{profile}}
+    ./gates/run "design-system-{{profile}}"
 
 check-design-tokens:
     ./scripts/check-design-tokens.sh
@@ -220,23 +228,23 @@ check-design-tokens-selftest:
 # Lint + type-check. Design source/generated integrity belongs to design-check;
 # this target remains ordinary Web engineering quality.
 web-lint:
-    cd web && npx eslint . --report-unused-disable-directives --max-warnings 0
-    cd web && npx tsc --noEmit
+    ./gates/run web-eslint web-typecheck
 
 # All web tests (unit + integration)
-web-test: web-test-unit web-test-integration
+web-test:
+    ./gates/run web-test-unit web-test-integration
 
 # Unit tests only (pure logic, node environment)
 web-test-unit:
-    ./scripts/filtered-web-test.sh --project unit
+    ./gates/run web-test-unit
 
 # Integration tests only (jsdom environment)
 web-test-integration:
-    ./scripts/filtered-web-test.sh --project integration
+    ./gates/run web-test-integration
 
 # Coverage check (pre-push, >= 80% threshold)
 web-coverage:
-    ./scripts/filtered-web-test.sh --coverage
+    ./gates/run web-coverage
 
 # Workspace policy (root = main mirror; dev in worktrees)
 check-workspace:
@@ -244,11 +252,11 @@ check-workspace:
 
 # Static test-isolation check (runs in pre-commit; ~1.5s)
 check-test-isolation:
-    ./scripts/check-test-isolation.sh
+    ./gates/run test-isolation
 
 # Prove the isolation checker still detects each violation it claims to
 check-test-isolation-selftest:
-    ./scripts/check-test-isolation-selftest.sh
+    ./gates/run test-isolation-selftest
 
 # Shell regression tests for pre-push diff-base resolution
 check-git-diff-base:
@@ -261,15 +269,15 @@ check-test-concurrency:
 # Requirement acceptance validator self-test (#1237).
 # The workflow invokes the same script; rules live in one place.
 requirement-acceptance-selftest:
-    node scripts/requirement-acceptance.mjs self-test
+    ./gates/run requirement-acceptance-selftest
 
 # Static check: every tmux spawn carries an explicit -S socket (runs in pre-commit)
 check-tmux-socket:
-    ./scripts/check-tmux-socket.sh
+    ./gates/run tmux-socket-isolation
 
 # Prove the tmux-socket checker still detects each spawn form it claims to
 check-tmux-socket-selftest:
-    ./scripts/check-tmux-socket-selftest.sh
+    ./gates/run tmux-socket-isolation-selftest
 
 
 # ── Full pre-push ───────────────────────────────────────────────────────────
@@ -278,7 +286,8 @@ check-tmux-socket-selftest:
 # `web-test-unit`.
 unit: test-unit
 
-pre-push: test coverage web-test web-coverage
+pre-push:
+    ./gates/run rust-test-unit rust-test-integration rust-coverage web-test-unit web-test-integration web-coverage
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 

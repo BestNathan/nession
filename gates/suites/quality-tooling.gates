@@ -1,0 +1,27 @@
+# Original quality.yml tooling assertions, each as one canonical Gate ID.
+instruction-contract
+gate-runtime-contract
+agent-workflow-telemetry
+requirement-acceptance-selftest
+acceptance-case-ingest-selftest
+run-record-artifact-evidence-selftest
+run-record-index-contract-selftest
+acceptance-ci-evidence-selftest
+trusted-case-discovery-selftest
+e2e-run-ingest-selftest
+e2e-test-run-ingest-selftest
+e2e-run-ingest-negative-selftest
+repo-health-selftest
+repo-metrics-selftest
+protocol-json-contract
+issue-contract-selftest
+task-runner-selftest
+task-result-ingest-selftest
+e2e-observation-collector-selftest
+e2e-browser-report-selftest
+e2e-full-stack-runtime-selftest
+e2e-cli-selftest
+terminal-attach-resume-selftest
+e2e-cli-discovery
+issue-audit-agent-selftest
+issue-audit-cursor-selftest

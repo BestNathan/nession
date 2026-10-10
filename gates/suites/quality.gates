@@ -1,5 +1,5 @@
 # quality
-# Gate IDs only. Not wired into current hooks/workflows yet.
+# Aggregate quality profile. CI may run targeted segments on separate runners.
 instruction-contract
 rust-format
 rust-clippy
@@ -22,3 +22,5 @@ web-eslint
 web-typecheck
 web-test-unit
 web-test-integration
+acceptance-runtime-contract
+acceptance-cases-contract

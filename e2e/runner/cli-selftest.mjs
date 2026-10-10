@@ -72,11 +72,18 @@ assert.equal(fs.existsSync(path.join(repo,'acceptance','verifiers')),false,
 assert.ok(fs.existsSync(path.join(repo,'e2e','runner','drivers','index.mjs')));
 assert.ok(fs.existsSync(path.join(repo,'e2e','runner','drivers','playwright.config.cjs')));
 const driverGate=fs.readFileSync(path.join(repo,'.github','workflows','quality.yml'),'utf8');
-assert.match(driverGate,/node e2e\/runner\/drivers\/browser-report\.mjs self-test/);
+assert.match(driverGate, /\.\/gates\/run --suite quality-tooling/);
+const toolingSuite = fs.readFileSync(path.join(repo, 'gates', 'suites', 'quality-tooling.gates'), 'utf8');
+assert.match(toolingSuite, /^e2e-browser-report-selftest$/m);
+const browserReportGate = fs.readFileSync(path.join(repo, 'gates', 'checks', 'e2e-browser-report-selftest.sh'), 'utf8');
+assert.match(browserReportGate, /GATE_COMMAND='node e2e\/runner\/drivers\/browser-report\.mjs self-test'/);
 assert.equal(fs.existsSync(path.join(repo, 'e2e', 'acceptance', 'evaluator', 'run-case.mjs')), true,
   'canonical internal Case evaluator must exist');
 const gateRecipes = fs.readFileSync(path.join(repo, 'justfile'), 'utf8');
-assert.match(gateRecipes, /check-acceptance-runtime:[\s\S]*?\.\/e2e\/run --validate/);
+assert.match(gateRecipes, /check-acceptance-runtime:[\s\S]*?\.\/gates\/run acceptance-runtime-contract/);
+const runtimeGate = fs.readFileSync(path.join(repo, 'gates', 'checks', 'acceptance-runtime-contract.sh'), 'utf8');
+assert.match(runtimeGate, /GATE_COMMAND='\.\/e2e\/run --validate'/);
+assert.match(runtimeGate, /gate_run_invariant \.\/e2e\/run --validate/);
 assert.doesNotMatch(gateRecipes, /acceptance\/runtime\/full-stack\.js/);
 const acceptanceSkill = fs.readFileSync(path.join(repo, '.claude', 'skills',
   'nession-acceptance', 'SKILL.md'), 'utf8');
@@ -88,7 +95,10 @@ assert.match(caseWorkflow, /--profile "\$\{profile\}"/);
 assert.match(caseWorkflow, /--sha "\$\{TARGET_SHA\}"/);
 const regressionWorkflow = fs.readFileSync(
   path.join(repo, '.github', 'workflows', 'e2e.yml'), 'utf8');
-assert.match(regressionWorkflow, /\.\/run test --all/);
+assert.match(regressionWorkflow, /\.\/gates\/run e2e-playwright/);
+const regressionGate = fs.readFileSync(path.join(repo, 'gates', 'checks', 'e2e-playwright.sh'), 'utf8');
+assert.match(regressionGate, /GATE_COMMAND='cd e2e && CI=true \.\/run test --all'/);
+assert.match(regressionGate, /gate_run_invariant bash -c 'cd e2e && CI=true \.\/run test --all'/);
 const caseSmokeWorkflow = fs.readFileSync(
   path.join(repo, '.github', 'workflows', 'acceptance-case-smoke.yml'), 'utf8');
 assert.match(caseSmokeWorkflow, /\.\/e2e\/run acceptance/);

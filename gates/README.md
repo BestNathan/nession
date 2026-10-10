@@ -1,6 +1,6 @@
 # Repository Gates
 
-> **Incremental adoption.** Selected Gates are already called from hooks/CI, but suite files have not replaced the existing routers. Check real hook/workflow invocations before asserting CI coverage.
+> **Incremental cutover** — Git hooks and the `just check`/developer quality aliases route through Gate IDs; workflow-specific setup/deployment and remaining self-test routing are tracked under #1242.
 
 `gates/` is the repository Gate system. Gate IDs are stable kebab-case APIs; a Gate behaves like a test: green is terse, red is exhaustive.
 
@@ -34,14 +34,30 @@ Successful command output is buffered/discarded and prints one line. FAIL/ERROR 
 
 Every `checks/<id>.sh` declares `GATE_ID`, `GATE_NAME`, `GATE_COMMAND`, `GATE_SUCCESS`, `GATE_FAILURE`, `GATE_REPAIR`, `GATE_OWNER`, and `gate_check`. Filename stem and `GATE_ID` must match exactly.
 
-Known prerequisites use `gate_require_command`, `gate_require_path`, or `gate_require_env`. Missing tooling/context is ERROR, never a green skip.
+Known prerequisites use `gate_require_command`, `gate_require_path`, or `gate_require_env`. Missing tooling/context is ERROR, never a green skip. For the shared `gate_run_invariant`
+helper, exit 1 (and cargo test's exit 101) means an invariant FAIL; other
+nonzero statuses mean ERROR/unproven. Adapters whose command has different
+exit semantics must classify explicitly; they must not blindly map all
+nonzero subprocess statuses to an invariant failure.
 
 `./gates/run --validate` verifies executability, filename/ID identity, required metadata, suite syntax and suite references. The runner avoids Bash 4-only features so it works with macOS Bash 3.2.
 
 ## Suites
 
-Suite files contain Gate IDs only: no commands, repair prose, changed-file rules, secrets, or setup. They model future cutover surfaces; existing hooks/workflows still route most checks themselves and may invoke individual Gates. Manually running a suite does not mean CI consumes it.
+Suite files contain Gate IDs only: no commands, repair prose, changed-file rules, secrets, or setup. Current files model logical execution surfaces for future cutover. Existing changed-file routers may still add conditional self-test IDs explicitly.
 
 ## Rollout boundary
 
-Legacy checks have not been wholesale cut over to Gate suites. Existing routers remain authoritative until parity is proven. `instruction-contract` is live in pre-commit and Quality Gate; `gate-runtime-contract` and `agent-workflow-telemetry` are also called directly from Quality Gate. Consult `.githooks/` and `.github/workflows/` for actual enforcement.
+Hooks route changed-file Gate ID sets into `gates/run`. The canonical Rust CI quality recipe `just check` runs the `quality-rust` suite, including its original Acceptance runtime and Cases checks. Workflow-specific setup/deployment and remaining tooling self-tests are separate migration work; they must not be removed until parity is proven. Use `just gate <id>`, `just gates <suite>`, or `./gates/run <ids...>`.
+
+The Server Handler locality Gate (`server-handler-locality`) is included in the
+`quality-rust` and aggregate `quality` suites. Its isolated self-test and
+concurrency stress test are exposed by `just check-protocol` after the
+protocol-integrity Gate. See #1258 for the handler locality contract.
+
+## Browser regression routing
+
+In normal E2E CI, `e2e-playwright` wraps the canonical `e2e/run test --all`
+runner. Explicit snapshot regeneration is a mutable developer/workflow operation
+and is intentionally not treated as a passing Gate. Browser dependency setup
+and Rust/Web builds remain workflow-owned prerequisites.

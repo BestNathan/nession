@@ -94,6 +94,9 @@ assert_contains "$TMP_DIR/error.out" '! gamma'
 assert_contains "$TMP_DIR/error.out" '2 gates: 1 passed, 0 failed, 1 errors'
 assert_contains "$TMP_DIR/error.out" '[ERROR] gamma'
 
+capture 2 "$TMP_DIR/invalid-suite.out" "$TMP_DIR/repo/gates/run" --suite '../bad'
+assert_contains "$TMP_DIR/invalid-suite.out" '[ERROR] invalid suite name: ../bad'
+
 capture 2 "$TMP_DIR/unknown.out" "$TMP_DIR/repo/gates/run" missing
 assert_contains "$TMP_DIR/unknown.out" '[ERROR] unknown gate: missing'
 
