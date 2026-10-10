@@ -666,6 +666,155 @@ test.describe('Terminal I/O', () => {
     }).toPass({ timeout: 15_000 });
   });
 
+  test('foreground stale-open Server socket resumes without remounting Terminal (#1213 SC-08/15)', async ({ page }, testInfo) => {
+    test.skip(!process.env.CI, 'real stack available in CI only');
+
+    const sessionName = `e2e-foreground-1213-${testInfo.retry}-${Date.now()}`;
+    await createSession(page, sessionName);
+    await attachToSession(page, sessionName, 'Relay');
+    await waitForInteractiveShell(page);
+
+    // The Shell is already interactive. Mark the actual xterm DOM node: a
+    // recreated Terminal can render the same text but cannot preserve this
+    // node-local identity. The test must fail on any Shell/Terminal remount.
+    await page.locator('.xterm').evaluate((node) => {
+      node.setAttribute('data-e2e-1213-terminal-instance', 'original');
+    });
+    await submitTerminalCommand(page, "printf 'BEFORE-%s\\n' 1213");
+    await expect.poll(async () => countInBuffer(page, 'BEFORE-1213')).toBe(1);
+
+    // Create the half-open shape deterministically: WebSocket.readyState stays
+    // OPEN, but the foreground server.info request is never delivered. This
+    // deliberately exercises the *bounded probe* rather than depending on
+    // whether Chrome happens to emit an onclose during network emulation.
+    await page.evaluate(() => {
+      const originalSend = WebSocket.prototype.send;
+      WebSocket.prototype.send = function (data) {
+        if (typeof data === 'string') {
+          try {
+            if ((JSON.parse(data) as { msg_type?: string }).msg_type === 'server.info') {
+              return;
+            }
+          } catch {
+            // Non-JSON frames still pass through unchanged.
+          }
+        }
+        return originalSend.call(this, data);
+      };
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => 'hidden',
+      });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+
+    // Register the observer BEFORE the foreground event so a reconnect cannot
+    // race the test subscription. A new physical /ws socket is the witness:
+    // simply seeing the old terminal remain visible would be a false pass.
+    const newSocket = page.waitForEvent('websocket', {
+      predicate: (ws) => ws.url().includes('/ws'),
+      timeout: 15_000,
+    });
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => 'visible',
+      });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+
+    await expect(page.getByTestId('shell')).toBeVisible();
+    await newSocket;
+    await expect(page.getByTestId('shell')).toBeVisible();
+    await expect(page.getByTestId('terminal-connecting')).toBeHidden({ timeout: 30_000 });
+    await expect(page.locator('.xterm')).toHaveAttribute('data-e2e-1213-terminal-instance', 'original');
+
+    // Same selected Session and same terminal must still accept PTY input.
+    await submitTerminalCommand(page, "printf 'AFTER-%s\\n' 1213");
+    await expect.poll(async () => countInBuffer(page, 'AFTER-1213'), { timeout: 20_000 }).toBe(1);
+    expect(await countInBuffer(page, 'BEFORE-1213')).toBe(1);
+    await testInfo.attach('foreground-resume-1213.json', {
+      body: Buffer.from(JSON.stringify({
+        scenario: 'foreground-stale-open-server',
+        transport: 'relay',
+        terminalMountPreserved: true,
+        newPhysicalSocketObserved: true,
+        outputAfterReconnect: 'AFTER-1213',
+      })),
+      contentType: 'application/json',
+    });
+  });
+
+  test('desktop reconnect after real network loss preserves Terminal without visibility events (#1213 SC-15)', async ({ page, context }, testInfo) => {
+    test.skip(!process.env.CI, 'real Server/Agent/tmux stack runs in CI only');
+
+    // Install socket bookkeeping before the page starts, not after its initial
+    // handshake. The second navigation is intentional: otherwise the first
+    // live socket predates this observer, making the test a false positive.
+    await page.addInitScript(() => {
+      const NativeWebSocket = window.WebSocket;
+      const tracked = window as typeof window & { __e2e1213Sockets?: WebSocket[] };
+      tracked.__e2e1213Sockets = [];
+      window.WebSocket = new Proxy(NativeWebSocket, {
+        construct(Target, args) {
+          const socket = Reflect.construct(Target, args) as WebSocket;
+          tracked.__e2e1213Sockets?.push(socket);
+          return socket;
+        },
+      });
+    });
+    await page.reload();
+    await waitForShell(page);
+
+    const sessionName = `e2e-desktop-1213-${testInfo.retry}-${Date.now()}`;
+    await createSession(page, sessionName);
+    await attachToSession(page, sessionName, 'Relay');
+    await waitForInteractiveShell(page);
+    await page.locator('.xterm').evaluate((node) => {
+      node.setAttribute('data-e2e-1213-desktop-instance', 'original');
+    });
+    await submitTerminalCommand(page, "printf 'DESKTOP-BEFORE-%s\\n' 1213");
+    await expect.poll(async () => countInBuffer(page, 'DESKTOP-BEFORE-1213')).toBe(1);
+
+    const baselineSockets = await page.evaluate(() =>
+      (window as typeof window & { __e2e1213Sockets?: WebSocket[] }).__e2e1213Sockets?.length ?? 0,
+    );
+    expect(baselineSockets).toBeGreaterThan(0);
+
+    try {
+      // No visibilitychange/pageshow dispatch occurs in this test. Forcing
+      // loss of the actual socket (not a mocked service) with the network
+      // offline reproduces ordinary desktop transport disconnection.
+      await context.setOffline(true);
+      await page.evaluate(() => {
+        const sockets = (window as typeof window & { __e2e1213Sockets?: WebSocket[] }).__e2e1213Sockets ?? [];
+        for (const ws of sockets) {
+          if (ws.readyState === WebSocket.OPEN && ws.url.includes('/ws')) {
+            ws.close(4000, 'desktop network disconnected');
+          }
+        }
+      });
+      await expect(page.getByTestId('shell')).toBeVisible();
+      await expect(page.locator('.xterm')).toHaveAttribute('data-e2e-1213-desktop-instance', 'original');
+      await page.waitForTimeout(1_500);
+    } finally {
+      await context.setOffline(false);
+    }
+
+    // Recovery is entirely automatic — there is no foreground hint, manual
+    // Retry, page reload or fresh attach. Assert a new authenticated socket
+    // and prove it can drive a real PTY command on the same mounted xterm.
+    await expect.poll(async () => page.evaluate(() => {
+      const sockets = (window as typeof window & { __e2e1213Sockets?: WebSocket[] }).__e2e1213Sockets ?? [];
+      return sockets.filter(ws => ws.url.includes('/ws') && ws.readyState === WebSocket.OPEN).length;
+    }), { timeout: 30_000 }).toBeGreaterThan(0);
+    await expect(page.getByTestId('terminal-connecting')).toBeHidden({ timeout: 30_000 });
+    await expect(page.locator('.xterm')).toHaveAttribute('data-e2e-1213-desktop-instance', 'original');
+    await submitTerminalCommand(page, "printf 'DESKTOP-AFTER-%s\\n' 1213");
+    await expect.poll(async () => countInBuffer(page, 'DESKTOP-AFTER-1213'), { timeout: 20_000 }).toBe(1);
+    expect(await countInBuffer(page, 'DESKTOP-BEFORE-1213')).toBe(1);
+  });
+
   test('a curses TUI renders and gives the shell back (#1096)', async ({ page }, testInfo) => {
     // Criterion 15's curses smoke. Nothing here is Nession-specific, and that
     // is the point: `less` reads keys in raw mode, paints its own screen from
