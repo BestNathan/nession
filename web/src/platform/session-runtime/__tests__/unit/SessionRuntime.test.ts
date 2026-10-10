@@ -1307,7 +1307,7 @@ describe('SessionRuntime', () => {
       answerPending('agent.attach', 'ok', { stream_epoch: 1, stream_cursor: 2 });
       await flushMicrotasks();
       expect(rt.attachState.phase).toBe('attached');
-      expect(lastTransport().seedStreamCursor).toHaveBeenCalledWith(1, 2);
+      expect(lastTransport().seedStreamCursor).toHaveBeenCalledWith(1, 2, { preserveAppliedCursor: false });
       rt.dispose();
     });
 
@@ -1435,7 +1435,7 @@ describe('SessionRuntime', () => {
         appliedThrough: 11,
         controlGeneration: 2,
       });
-      expect(transport.seedStreamCursor).toHaveBeenCalledWith(7, 42);
+      expect(transport.seedStreamCursor).toHaveBeenCalledWith(7, 42, { preserveAppliedCursor: false });
       expect(transport.flushAllOutbound).toHaveBeenCalledTimes(1);
       // In the order the handoff requires: the input cursor is reconciled
       // BEFORE the flush (the flush is numbered against it), the stream cursor
@@ -1460,7 +1460,7 @@ describe('SessionRuntime', () => {
       await flushMicrotasks();
       expect(rt.attachState.phase).toBe('attached');
       // Sanity: the P2P binding took the seed this test is about to strand.
-      expect(lastTransport().seedStreamCursor).toHaveBeenCalledWith(7, 42);
+      expect(lastTransport().seedStreamCursor).toHaveBeenCalledWith(7, 42, { preserveAppliedCursor: false });
 
       // The controller's half of a swap: rebuild the binding on the new
       // identity. Subscribed now so it sees every swap below.
