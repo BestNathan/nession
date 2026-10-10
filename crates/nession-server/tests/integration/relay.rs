@@ -284,7 +284,7 @@ async fn wait_for_discovered_session(
         attempts += 1;
         // Capture real registration status, not merely the session list's empty
         // result. A non-forced session list cannot report an absent/offline agent.
-        if attempts == 1 || attempts % 5 == 0 {
+        if attempts == 1 || attempts.is_multiple_of(5) {
             let registration_request = msg(
                 "server.agent.list",
                 &format!("discovery-agents-{attempts}"),
@@ -298,19 +298,21 @@ async fn wait_for_discovered_session(
             .await
             {
                 Ok(Ok(reply)) => {
-                    agent_registration = match reply["payload"]["agents"].as_array() {
+                    agent_registration = match reply.pointer("/payload/agents").and_then(serde_json::Value::as_array) {
                         Some(agents) => agents
                             .iter()
-                            .find(|agent| agent["agent_id"].as_str() == Some(agent_id))
-                            .map(|agent| format!(
-                                "status={}, session_count={}, active_sessions={}, heartbeat={}",
-                                agent["status"],
-                                agent["session_count"],
-                                agent["active_sessions"],
-                                agent["last_heartbeat"],
-                            ))
+                            .find(|agent| agent.get("agent_id").and_then(serde_json::Value::as_str) == Some(agent_id))
+                            .map(|agent| {
+                                format!(
+                                    "status={}, session_count={}, active_sessions={}, heartbeat={}",
+                                    agent.get("status").unwrap_or(&serde_json::Value::Null),
+                                    agent.get("session_count").unwrap_or(&serde_json::Value::Null),
+                                    agent.get("active_sessions").unwrap_or(&serde_json::Value::Null),
+                                    agent.get("last_heartbeat").unwrap_or(&serde_json::Value::Null),
+                                )
+                            })
                             .unwrap_or_else(|| "not registered".to_string()),
-                        None => format!("invalid agent list reply: {}", reply["payload"]),
+                        None => format!("invalid agent list reply: {}", reply.get("payload").unwrap_or(&serde_json::Value::Null)),
                     };
                 }
                 Ok(Err(error)) => agent_registration = format!("query failed: {error}"),
@@ -334,12 +336,12 @@ async fn wait_for_discovered_session(
         .await
         {
             Ok(Ok(reply)) => {
-                if let Some(sessions) = reply["payload"]["sessions"].as_array() {
+                if let Some(sessions) = reply.pointer("/payload/sessions").and_then(serde_json::Value::as_array) {
                     observed = sessions
                         .iter()
-                        .filter_map(|s| s["session_id"].as_str().map(str::to_string))
+                        .filter_map(|s| s.get("session_id").and_then(serde_json::Value::as_str).map(str::to_string))
                         .collect();
-                    stale_agents = reply["payload"]["stale_agents"]
+                    stale_agents = reply.pointer("/payload/stale_agents")
                         .as_array()
                         .map(|agents| {
                             agents
@@ -358,7 +360,7 @@ async fn wait_for_discovered_session(
                 } else {
                     last_error = format!(
                         "session.list reply missing sessions array: status={:?}",
-                        reply["payload"]["status"].as_str()
+                        reply.pointer("/payload/status").and_then(serde_json::Value::as_str)
                     );
                 }
             }
@@ -401,8 +403,14 @@ async fn session_discovery_missing_id_fails_with_bounded_diagnostics() {
     .unwrap_err()
     .to_string();
     assert!(started.elapsed() < Duration::from_secs(4));
-    assert!(error.contains("session discovery deadline exceeded"), "{error}");
-    assert!(error.contains("agent-that-never-registers:missing-session"), "{error}");
+    assert!(
+        error.contains("session discovery deadline exceeded"),
+        "{error}"
+    );
+    assert!(
+        error.contains("agent-that-never-registers:missing-session"),
+        "{error}"
+    );
     assert!(error.contains("observed_sessions=[]"), "{error}");
     assert!(error.contains("last_response="), "{error}");
     // A saturated CI runner may exhaust the short negative budget while
