@@ -57,6 +57,7 @@ jobs:
           node scripts/acceptance-ci-evidence.mjs self-test
           node scripts/trusted-case-discovery-selftest.mjs
           node scripts/e2e-run-ingest.mjs self-test
+          node scripts/e2e-test-run-ingest.mjs self-test
           node scripts/e2e-run-ingest-negative-selftest.mjs
           node scripts/collect-repo-health.mjs --self-test
           node scripts/generate-repo-metrics.mjs --self-test
