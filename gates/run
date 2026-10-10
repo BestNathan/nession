@@ -132,6 +132,7 @@ case "$1" in
   --suite)
     [ "$#" -eq 2 ] || { usage >&2; exit 2; }
     suite_name="$2"
+    valid_id "$suite_name" || { printf '[ERROR] invalid suite name: %s\n' "$suite_name" >&2; exit 2; }
     suite_tmp="$(mktemp "${TMPDIR:-/tmp}/nession-suite-${suite_name}.XXXXXX")"
     if ! load_suite "$suite_name" >"$suite_tmp"; then rm -f "$suite_tmp"; exit 2; fi
     requested=()
