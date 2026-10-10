@@ -1,351 +1,142 @@
-# E2E Testing Guide
+# E2E, Scenarios and Issue/SC Acceptance
 
-## Overview
+Nession verifies real runtime behavior with a **shared full-stack Runtime
+Harness**. It provisions the Server, Agent, isolated tmux and Web stack.
+Playwright is one consumer of that runtime for browser regressions; it is
+not the owner of Server/Agent lifecycle.
 
-Nession uses Playwright for end-to-end testing of the web UI and its integration with the server and agent components. E2E tests run in CI on every PR to staging and can be triggered manually.
+## Repository layout
 
-## Test Structure
-
-The canonical Issue/SC verification tree is `e2e/acceptance/cases/<issue>/<SC>/`. It uses the shared Runner; verifier source is committed and immutable results live only on `acceptance-results`.
-
-A runtime verifier that *transitively* executes Playwright (for example through a real Terminal Scenario) must also declare a **real `type: browser` verifier** in its Case manifest. This uses the current trusted main-owned schema to provision browser dependencies only for eligible Cases; do not add unrecognized manifest flags or install Playwright for every protocol-only Case.
-
-The `Acceptance Cases` push/dispatch workflow performs **trusted** Issue contract discovery and stage coverage selection first, then executes each selected Case with `node workspace/e2e/run acceptance --issue-json ... --issue N --sc SC-NN --sha SHA --stage STAGE --profile full-stack-local --output FILE`. This is the same canonical CLI as the Regression and Scenario suites. Its source Case verifier still executes as an internal implementation behind the CLI, **not** as an independent workflow entrypoint. The exact checked-out SHA and supported runtime profile are validated again by the CLI; source code does not receive Issue write permissions. Results remain subject to trusted ingestion and deterministic acceptance updates.
-
-```
+```text
 e2e/
-├── fixtures/              # Configuration for server and agent
-│   ├── server/
-│   │   └── config.toml    # Server config with isolated paths
-│   └── agent-config.e2e.toml  # Agent config with isolated working dir
-├── helpers/               # Test utilities
-│   ├── sessionFirst.ts    # waitForSessionFirst helper (shell ready signal)
-│   ├── reset.ts           # resetAuth helper
-│   ├── fixtureVisual.ts   # Frozen-clock helpers for fixture visual baselines
-│   └── ui-assert/         # Reusable UI assertions (composer)
-├── tests/browser/                 # Test specifications
-│   ├── login.spec.ts      # Authentication tests
-│   ├── session-lifecycle.spec.ts  # Session create/kill tests
-│   ├── terminal-io.spec.ts       # Terminal I/O tests (relay + P2P)
-│   └── fixture-*.spec.ts  # Deterministic /fixture routes (functional + visual)
-├── runtime.ts             # Per-run paths (unique tmux socket)
-├── globalSetup.ts         # Pre-test setup + teardown
-└── playwright.config.ts   # Playwright configuration
+├── run                          # canonical CLI (list, validate, runners)
+├── runner/
+│   ├── runtime/full-stack.js    # full-stack provision / cleanup
+│   ├── drivers/                 # browser and verifier adapters
+│   └── collectors/              # opt-in, bounded observations
+├── acceptance/cases/<issue>/<SC>/ # Case manifests and source verifiers
+├── scenarios/                   # scenario.yaml + reproduction scripts
+├── tests/browser/               # Playwright regression / visual specs
+├── tests/browser/__snapshots__/ # committed Linux fixture baselines
+├── fixtures/                    # server/agent and terminal fixtures
+├── helpers/                     # browser assertions and fixture helpers
+├── runtime.ts                   # regression-only paths, ports and socket
+├── globalSetup.ts               # calls the shared Runtime Harness
+└── playwright.config.ts
 ```
 
-## Running E2E Tests
+Inspect the canonical catalog and validate manifests without running the stack:
 
-> **⛔ Do not run the suite locally.** `npx playwright test` and the `cargo run`
-> stack it starts are forbidden on a dev machine (root `CLAUDE.md` § Quality
-> Gates) — the suite drives real tmux sockets and leaves orphans behind. Local
-> UI work is verified with `cd web && npm run dev` plus the Playwright MCP
-> browser tools; for spec syntax, `npx playwright test --list` is allowed and
-> runs nothing. Every spec is gated with
-> `test.skip(!process.env.CI, 'local only — runs in CI workflow only')`.
->
-> Registration below is for reference — the suite executes in the `e2e.yml`
-> workflow, which is also where baselines are regenerated.
+```bash
+./e2e/run --list
+./e2e/run --validate
+```
 
-### Locally (syntax only)
+The `Acceptance Cases` workflow discovers Issue contracts and selects Cases
+by stage, then invokes `e2e/run acceptance` against an exact checkout SHA.
+The trusted workflow executes a selected Case through the canonical CLI,
+using `--issue-json`, `--issue`, `--sc`, `--sha`, `--stage`, `--profile`
+and `--output` (see `.github/workflows/acceptance-cases.yml`).
+A Case that **transitively** drives Playwright must declare a real
+`type: browser` verifier in its manifest; do not invent schema flags or
+install browser dependencies for protocol-only Cases. Source verifiers are
+internal execution steps, not independent privileged workflow entrypoints.
+Results require **trusted ingestion** before they can update an Issue's SC;
+immutable evidence is stored on `acceptance-results`, not on the source branch.
+
+## Execution policy
+
+**Do not run the full E2E suite on a development machine.** It starts real
+Rust processes and tmux servers, with possible orphan cleanup risks.
+Do not run `npx playwright test`, `npm test`, headed tests, local snapshot
+regeneration or `CI=true` to bypass the rule. Some specs have CI-specific
+skip guards, but not every test does; the policy applies to the entire suite.
+
+Local, non-executing discovery is allowed:
 
 ```bash
 cd e2e
-npm install
-npx playwright test --list    # lists specs; runs nothing
+npm ci
+npx playwright test --list
 ```
 
-**Note:** CI's e2e job requires:
-- Rust toolchain (for `cargo run`)
-- tmux installed
-- Node.js 20+
+For interaction work use a controlled dev UI and browser tooling, then submit
+a focused Regression, Scenario or Acceptance Case for CI verification.
 
-### In CI
+The [E2E Tests workflow](../.github/workflows/e2e.yml) runs on pushes to
+`staging`, PRs targeting **`staging` or `main`**, and manual dispatch.
+It installs tmux and Chromium, uses Node.js **24**, builds Server, Agent and
+Web, invokes the canonical browser design gate and runs Playwright.
+The job timeout is **20 minutes**; CI retries tests twice, as configured in
+`e2e/playwright.config.ts`. The workflow checks out and passes the exact
+target SHA to the Runtime Harness.
 
-E2E tests automatically run on:
-- Push to `staging` branch
-- Pull requests targeting `staging`
-- Manual trigger via GitHub Actions UI
+## Shared runtime and isolation
 
-The workflow:
-1. Builds Rust binaries (`cargo build`)
-2. Builds web UI (`npm run build`)
-3. Installs Playwright browsers
-4. Runs E2E tests with isolated tmux socket
+`e2e/globalSetup.ts` delegates to
+`e2e/runner/runtime/full-stack.js` and returns its cleanup callback.
+The regression profile in `e2e/runtime.ts` uses loopback ports
+19090 (Server), 19091 (Agent), 19092 (stalled-probe fixture), 4173
+(Web preview), and `NESSION_HOME=/tmp/nession-e2e`.
+Other Case profiles can allocate their own home, ports and socket;
+fixtures are rendered as runtime-specific config.
 
-## Test Isolation
+Each run carries its own `NESSION_TMUX_SOCKET` and executes tmux with
+`-S <socket>`, never the user's default server. The regression socket is
+`/tmp/nession-e2e-tmux-<hex>/tmux.sock`. **Do not use `TMUX_TMPDIR` as a
+substitute**: tmux can ignore it inside an existing tmux session (#574).
+`scripts/check-tmux-socket.sh` guards the invariant.
 
-E2E tests use several isolation mechanisms to prevent interference with the host system:
-
-### tmux Socket Isolation
-
-Each run gets its own tmux socket, which the Rust processes address as an explicit
-`tmux -S <path>`. The run's sessions therefore live on a tmux server of their own:
-invisible to `tmux ls`, and impossible to kill together with the developer's real
-sessions.
-
-```typescript
-// e2e/runtime.ts generates this once per run and publishes it via process.env
-env: {
-  NESSION_TMUX_SOCKET: '/tmp/nession-e2e-tmux-<8 hex>/tmux.sock',
-  NESSION_HOME: '/tmp/nession-e2e',
-}
-```
-
-**`TMUX_TMPDIR` is not used, and must not be reintroduced.** tmux ignores it whenever
-`$TMUX` is set — i.e. whenever anything runs from inside a tmux session — and silently
-uses the default socket instead. An earlier version of `globalSetup.ts` ran
-`TMUX_TMPDIR=… tmux kill-server` before each run believing it was isolated; it was
-landing on the developer's real socket and destroyed a live session (#574). `-S` is
-immune to `$TMUX` (measured). `scripts/check-tmux-socket.sh` fails the commit if
-either pattern comes back.
-
-#### Orphans after a hard kill
-
-There is no pre-run sweep any more, by design. A run killed hard (Ctrl-C / SIGKILL —
-the teardown below never runs, so nothing releases the socket) leaves its socket,
-tmux server and directory behind — and because every run picks a new path, those
-orphans accumulate rather than being overwritten. Reclaim them with the shared
-tool, which recognizes `/tmp/nession-e2e-tmux-*` as an owned run directory and
-verifies the socket before killing it:
+Hard-killed runs can leave isolated sockets or tmux servers. Inspect and
+reclaim only verified, owned test directories:
 
 ```bash
-./scripts/sweep-test-sessions.sh            # list orphans, kill nothing
-./scripts/sweep-test-sessions.sh --kill     # reclaim them
+./scripts/sweep-test-sessions.sh
+./scripts/sweep-test-sessions.sh --kill
 ```
 
-### Database Isolation
+## Regression and visual checks
 
-Server uses an isolated database path:
+Regression specs under `e2e/tests/browser/` cover login, Session lifecycle,
+terminal I/O/attach/replay and UI/capability contracts. The current
+shell-ready helper is **`e2e/helpers/shell.ts` → `waitForShell`**;
+the old `sessionFirst.ts` / `waitForSessionFirst` helper was removed.
+Some browser regression flows use a direct `server_url` query parameter
+(`ws://localhost:19090/ws`) rather than Vite's preview proxy.
+Terminal output assertions inspect the xterm buffer through the mounted
+`xtermInstance`, since Canvas/WebGL glyphs are not DOM text.
 
-```toml
-# e2e/fixtures/server/config.toml
-db_path = "/tmp/nession-e2e/nession.db"
-```
-
-### Working Directory Isolation
-
-Agent uses an isolated working directory:
-
-```toml
-# e2e/fixtures/agent-config.e2e.toml
-default_working_dir = "/tmp/nession-e2e"
-```
-
-## Test Suites
-
-### Login Tests (`login.spec.ts`)
-
-Tests authentication flows:
-- Auto-connect via URL token parameter
-- Form-based login (currently skipped due to timing issues)
-
-**Direct WebSocket URL:** Tests use `?server_url=ws://localhost:19090/ws` to bypass vite preview's flaky WebSocket proxy.
-
-### Session Lifecycle Tests (`session-lifecycle.spec.ts`)
-
-Tests the complete session lifecycle:
-1. Wait for agent to register (Create button enabled)
-2. Create a new session via UI
-3. Verify session appears in the list
-4. Kill the session via UI
-5. Verify session disappears from the list
-
-**Timeout:** Agent registration wait time is 60 seconds to accommodate slow CI environments.
-
-### Terminal I/O Tests (`terminal-io.spec.ts`)
-
-Tests terminal input/output in both relay and P2P modes:
-1. Create a session
-2. Attach to the session in specified mode (Relay or P2P)
-3. Type a command (`echo nession-e2e-ok`)
-4. Verify the output appears in the terminal buffer
-
-**Terminal Buffer Reading:** Tests access the xterm.js buffer via the `xtermInstance` property exposed on the container element, since canvas/webgl renderers don't put text in the DOM.
-
-## Common Issues and Solutions
-
-### Agent Disconnected Error
-
-**Symptom:** Create Session dialog shows "Agent disconnected" error.
-
-**Root Cause:** Agent's WebSocket connection to server drops during session creation.
-
-**Solution (implemented):**
-1. Increased session create/kill timeout from 10s to 30s
-2. Elevated `unregister_agent` log level from debug to info
-3. HeartbeatLoop now checks connection state before sending
-4. Reduced first heartbeat delay from 10s to 1s
-
-**See:** PR #317 for implementation details.
-
-### Slow Shell Load
-
-**Symptom:** `waitForSessionFirst` times out waiting for the session-first shell.
-
-**Root Cause:** Slow CI environment causes agent registration to take longer than expected.
-
-**Solution:** `helpers/sessionFirst.ts` waits 90 seconds for the
-`[data-testid="session-first-shell"]` element (the shell only renders after
-login, so its presence covers the handshake + initial fetch).
-
-### WebSocket Proxy Issues
-
-**Symptom:** Tests fail with WebSocket connection errors.
-
-**Root Cause:** vite preview's WebSocket proxy is unreliable in CI.
-
-**Solution:** Use direct WebSocket URL via `?server_url=` parameter instead of relying on the proxy.
-
-## Debugging Failed Tests
-
-### View Playwright Report
-
-After a CI run, download the `playwright-report` artifact:
+On failure use CI logs and published artifacts. Where `playwright-report`
+is available:
 
 ```bash
 gh run download <run-id> --name playwright-report
 npx playwright show-report playwright-report
 ```
 
-### Check Server/Agent Logs
+Canonical visual snapshots are defined by
+`e2e/tests/browser/fixture-visual.spec.ts` and committed PNGs in
+`e2e/tests/browser/__snapshots__/fixture-visual.spec.ts/`.
+Their names include `-linux`; rely on the spec and files for the complete
+current set rather than a duplicated filename table. The fixture clock is
+frozen by `e2e/helpers/fixtureVisual.ts`.
 
-In CI, server and agent logs are captured in the workflow output. Look for:
-- `[WebServer]` prefix for server logs
-- Agent registration messages
-- Heartbeat logs
-- Session creation/kill events
+For intentional visual changes, **manually dispatch** the E2E workflow with
+`update_visual_snapshots` enabled, download/review its snapshot artifact
+and commit approved differences. The workflow uses
+`--update-snapshots=all`; an unqualified update may silently leave
+small-but-real drift below the comparison tolerance.
 
-### Local Debugging
+## Observation is not acceptance
 
-Run tests with headed browser:
+`e2e/runner/collectors/opt-in-observations.cjs` is **default-disabled**.
+A trusted consumer may explicitly opt into allowlisted Protocol observations,
+bounded Browser/Terminal counts, collector-worker Process metrics and opaque
+artifact references. It does not authorize host-wide process inspection,
+private-cluster telemetry or access to credentials. Observations carry
+`evaluation: null`, **not** an Acceptance verdict; retention metadata is
+finite (up to 90 days). Raw terminal text, WebSocket frames, URLs, cookies,
+headers, environment variables and process arguments must not be collected.
 
-```bash
-npx playwright test --headed
-```
-
-Run specific test:
-
-```bash
-npx playwright test -g "session lifecycle"
-```
-
-## Adding New Tests
-
-1. Create a new file in `e2e/tests/browser/`
-2. Import helpers from `e2e/helpers/`
-3. Use `waitForSessionFirst()` before interacting with the shell
-4. Use direct WebSocket URL: `ws://localhost:19090/ws`
-5. Add unique session names to avoid conflicts
-6. Use Playwright's auto-retrying assertions (`expect().toBeVisible()`, etc.)
-
-Example:
-
-```typescript
-import { test, expect } from '@playwright/test';
-import { waitForSessionFirst } from '../helpers/sessionFirst';
-
-test.describe('My Feature', () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto('/?token=e2e-test-token&server_url=' + 
-      encodeURIComponent('ws://localhost:19090/ws'));
-    await waitForSessionFirst(page);
-  });
-
-  test('does something', async ({ page }) => {
-    // Test implementation
-  });
-});
-```
-
-## CI Configuration
-
-The E2E workflow (`.github/workflows/e2e.yml`):
-
-- **Triggers:** `workflow_dispatch`, `push` to staging, `pull_request` to staging
-- **Runs on:** `ubuntu-latest`
-- **Steps:**
-  1. Checkout code
-  2. Install tmux
-  3. Setup Rust toolchain
-  4. Build Rust binaries
-  5. Setup Node.js
-  6. Install web dependencies
-  7. Build web UI
-  8. Install Playwright browsers
-  9. Run E2E tests
-  10. Upload Playwright report artifact
-
-**Timeout:** 30 minutes per job.
-
-**Retry Policy:** Tests retry 2 times in CI (configured in `playwright.config.ts`).
-
-## Canonical visual regression (#561 / #548)
-
-Deterministic fixture routes (`/#/fixture`, `/#/fixture/workspace`, `/#/fixture/app`) have a focused screenshot gate in `tests/browser/fixture-visual.spec.ts`. Functional checks in `fixture-*.spec.ts` run separately; visual tests compare full-page screenshots after assertions pass.
-
-Playwright appends the platform suffix to every snapshot filename, so the
-committed files all end in `-linux` (baselines are generated on the Linux CI
-runner):
-
-| Baseline | Viewport | Snapshot name |
-|----------|----------|---------------|
-| Web Active Terminal | 1440×900 | `web-active-terminal-linux.png` |
-| Web Workspace | 1440×900 | `web-workspace-linux.png` |
-| Web compact Terminal | 1024×768 | `web-compact-terminal-linux.png` |
-| Web compact Workspace | 1024×768 | `web-compact-workspace-linux.png` |
-| App Terminal | 390×844 | `app-terminal-linux.png` |
-| App Sessions | 390×844 | `app-sessions-linux.png` |
-| App Workspace | 390×844 | `app-workspace-linux.png` |
-
-Snapshots live in `e2e/tests/browser/__snapshots__/fixture-visual.spec.ts/` (committed to git).
-
-### Updating baselines
-
-After an **intentional** visual change to a canonical screen:
-
-```bash
-./scripts/update-canonical-snapshots.sh
-# or manually:
-cd e2e && CI=true npx playwright test fixture-visual --update-snapshots=all
-```
-
-`=all` is required: a bare `--update-snapshots` means mode `changed`, which still
-compares through `maxDiffPixelRatio` and rewrites only what fails tolerance — drift
-smaller than the ratio is skipped silently.
-
-Review the diff, commit updated PNGs, and note the visual change in the PR. CI uploads `visual-snapshot-diffs` artifacts on failure.
-
-Relative-time labels use a frozen clock (`e2e/helpers/fixtureVisual.ts`) during visual tests only.
-
-## Maintenance
-
-### Updating Dependencies
-
-```bash
-cd e2e
-npm update @playwright/test
-npx playwright install
-```
-
-### Adding shadcn Components
-
-If tests need to interact with new shadcn components, ensure they have proper ARIA attributes for Playwright locators.
-
-### Performance Tuning
-
-If tests are flaky due to timing:
-1. Increase timeouts in `playwright.config.ts`
-2. Use `expect().toPass()` for async conditions
-3. Add explicit waits for critical UI elements
-4. Consider using `page.waitForLoadState('networkidle')` for complex interactions
-
-## References
-
-- [Playwright Documentation](https://playwright.dev/)
-- [Playwright Test API](https://playwright.dev/docs/api/class-test)
-- [Nession Architecture](../../CLAUDE.md#architecture)
-- [CI/CD Workflow](../../CLAUDE.md#cicd-github-actions)
-
-### Opt-in observational collectors
-
-`e2e/runner/collectors/opt-in-observations.cjs` provides a **default-disabled** collector for allowlisted Protocol operations, bounded Process metrics **of the collector worker itself**, Browser/Terminal counters, and opaque external artifact references. This does **not** confer permissions to inspect application pods or arbitrary host processes. `optInCollector({ enabled: true, maximum: 24 })` must be explicitly supplied by a trusted consumer; it returns a finite timestamped field projection with `evaluation: null`, not an Acceptance verdict. Raw frames, terminal text, URLs, session names, environment variables, cookies, process argument vectors and Authorization headers are never part of the projection. Artifact metadata states finite retention (up to 90 days), never indefinite archival. The mandatory `Quality Gate` runs both real-process measurement and negative input/privacy fixtures. Live Server/Agent process observation or private-cluster telemetry requires separate least-privilege infrastructure and stage-specific Case evidence.
+See [root contributor rules](../CLAUDE.md) and
+[Terminal requirements](../docs/design/terminal/README.md).

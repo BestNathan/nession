@@ -1,59 +1,39 @@
-# Agents feature — ownership
+# Agent capability — ownership
 
-The agents feature owns the nession agent **wire capability** (AgentsPlugin,
-`agentsApi`) and the **agent UI** — the session-workspace agent page, the
-header chip, and the agent data hooks. The Dashboard-shell registry UI
-(cards grid `AgentCard`/`AgentSection`, detail Sheet `AgentDetailPanel`,
-`DeleteAgentConfirmDialog`, `useAgentRename`) was deleted with the Dashboard
-shell in #655 — the v2 IA treats Agent as metadata + a Workspace tool, not a
-nav parent. The `Agent` type stays in the shared barrel (`@/types`); the
-feature adds no parallel model.
+The agent product module owns the agent wire capability (`AgentsPlugin`,
+`agentsApi`), read-only Agent workspace surfaces, agent data hooks and
+browser-measured address latency. Agent is **context in a Session workspace**,
+not a permanent navigation parent; the retired Dashboard Agent registry
+was deleted under #655. The shared `Agent` type remains in `@/types`.
 
-It **does** own the browser-latency probe (`state/probe.ts`). That was written
-as a disclaimer while the probe lived in `atoms/` as shared state; #801 Phase 5
-moved it here, because the subject of a probe is an agent's addresses. The
-transport-side atoms it used to be grouped with (p2p status, route epoch,
-transport generation) went to `platform/attach/state` instead — they read
-nothing from above `platform`, which the probe does (`agentIdAtom`).
+## Current module map
 
-## Module map
-
-| Module | Responsibility |
+| Path | Responsibility |
 |---|---|
-| `AgentsPlugin.ts`, `types.ts`, `index.ts` | Agent RPC capability (`client.agents.list/rename/delete` + `server.agents.changed` push) installed per WebSocketService; `agentsApi` module singleton with generation-tagged install/teardown |
-| `components/AgentDetail.tsx` | Session-workspace agent tool page (read-only info + extension slot `agent-detail` via `@/extensions/registry`) |
-| `components/AgentContext.tsx` | Agent chip in the session header (channel-colored label + offline copy) |
-| `hooks/useAgentData.ts` | Per-mount agent list state, fetch, heartbeat-history Map (capped at 5), dedupe (`agentsEqual`, last_heartbeat excluded) |
+| `AgentsPlugin.ts`, `types.ts`, `index.ts` | Agent protocol capability, module-level `agentsApi` binding per WebSocketService lifetime |
+| `patterns/AgentDetail.tsx` | Workspace Agent details and extension contribution slot |
+| `patterns/AgentContext.tsx` | Session-header Agent context / status |
+| `hooks/useAgentData.ts` | Per-mount list, refresh, dedupe and bounded heartbeat history |
+| `hooks/useAgentProbe.ts` | Credentialed, attach-context address probes |
+| `state/probe.ts` | Agent-keyed cached browser probe results |
 
-## State ownership
+## State and dependencies
 
-Rules follow #649: transient render state stays in the component; state shared
-across a capability lives in feature/model; transport/connection lifecycle
-belongs to core runtime; layout/selection state belongs to app/workbench.
+- Agent list/loading/error state lives in `useAgentData` and is composed by
+  `app/useDashboard.ts`; there is no separate global list atom.
+- Realtime push and reconnect refetch are composed by
+  `app/useRealtimeUpdates.ts`, since they span Agent and Session domains.
+- P2P probe results live under `product/agent/state/probe.ts`;
+  transport/route generation belongs to `platform/attach/state/`.
+  After #1013 probes **require a credential from an attach reply**, not an
+  unauthenticated periodic poll. `useAgentProbe` is driven by those inputs.
+- Agent / Session / attachment channel vocabulary is defined in the Session
+  domain (`@/product/session/model/domainState`). Agent patterns may consume
+  that public Session model instead of defining a duplicate status contract.
+- `AgentsPlugin` uses generation-aware binding/teardown on reconnect.
 
-| State | Owner today | Lifetime / scope |
-|---|---|---|
-| Agent list + loading/error + heartbeat history | `features/agents/hooks/useAgentData` per mount | Composed by `app/useDashboard`. Deliberately **no** list atom |
-| Push updates (`server.agents.changed`) + refetch on reconnect | `app/useRealtimeUpdates` | One bridge for agents+sessions subscriptions keyed on `wsService` identity; kept app-layer while it fuses both domains |
-| Probe results / latencies | `product/agent/state/probe.ts` | Written by `product/agent/hooks/useAgentProbe.ts`, read by the P2P attach domain for route choice. Keyed by `agent_id`, so it is the Agent's state — moved out of `atoms/` in #801 Phase 5. Measured where an attach reply is in hand: since #1013 the agent refuses an uncredentialed upgrade, so an app-level poll could no longer measure anything (#1091) |
-| Wire registration | `AgentsPlugin` instance (module singleton `agentsApi`) | One binding per WebSocketService lifetime; re-install after reconnect with generation-tagged teardown (`AgentsPlugin.ts`) |
-
-## Cross-feature dependency
-
-`AgentDetail`/`AgentContext` render the session-workspace channel status
-(`agent · session · attachment`) and read their state through the **sessions
-feature** public surface (`features/sessions/model/domainState` types +
-`components/ConnectionStatus`) — the channel vocabulary is session-workspace
-state, so sessions owns it. Mirrors the `capabilities/files → platform/explorer`
-direction. The agent channel derivation itself (`agent.status` +
-staleness → channel) stays in `domainState`; moving it here would invert the
-dependency for session list rows.
-
-## Consumers
-
-The app shell (`app/patterns/SessionHeader` chip, `app/workspace/tools/agent.tsx`)
-imports the feature components through `@/features/agents/...` subpaths.
-`app/useDashboard` re-exports data through the feature hooks. The Dashboard
-registry UI that previously consumed this feature was deleted with its shell
-in #655. Tests mock `@/features/agents` — the alias is the feature's own
-public entry and stays stable.
+The live shell imports Agent patterns from `@/product/agent/...`.
+The old `@/features/agents` path and `components/AgentDetail.tsx` /
+`components/AgentContext.tsx` locations are **not** current APIs. Keep the
+public capability boundary under `product/agent` and avoid adding a parallel
+agent feature tree.
