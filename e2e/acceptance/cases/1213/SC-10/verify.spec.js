@@ -125,7 +125,10 @@ test('SC-10: real P2P cursor resume and explicit truncated retention window', as
     // cursor. Asking the Agent from after_seq=0 must explicitly say the
     // retained window is incomplete. No unnecessary prolonged-offline Relay
     // fallback is allowed to pass as P2P recovery.
-    const producer = 'for i in $(seq 1 6500); do printf "SC10-SEQ-%05d\\n" "$i"; sleep 0.002; done; printf "SC10-TAIL-%s\\n" 1213';
+    // One unbuffered producer emits the same 6500 paced PTY writes without
+    // spawning 6500 child sleep processes; the full-stack retention and cursor
+    // assertions below are unchanged (#1213 SC-10).
+    const producer = `python3 -u -c 'import time; [(print("SC10-SEQ-%05d" % i), time.sleep(0.002)) for i in range(1,6501)]; print("SC10-TAIL-%s" % 1213)'`;
     execFileSync('tmux', ['-S', runtime.tmux_socket, 'send-keys', '-t', name, producer, 'Enter'], {
       timeout: 10000,
     });

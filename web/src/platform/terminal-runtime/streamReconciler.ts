@@ -217,14 +217,37 @@ export class StreamReconciler {
    * (#1148). Across an epoch change the two sequences are not comparable, so
    * the seed wins there.
    */
-  seed(epoch: number | undefined, cursor: number | undefined): void {
+  seed(
+    epoch: number | undefined,
+    cursor: number | undefined,
+    options: { preserveAppliedCursor?: boolean } = {},
+  ): void {
     if (this.disposed || epoch === undefined) {
       return;
     }
+    // A normal attach's bootstrap is a checkpoint: its snapshot covers the
+    // agent's stated cursor, so advancing is correct. A reconnect that kept
+    // the existing xterm deliberately did NOT request a new bootstrap. In
+    // that case the only proven position is the last frame we actually
+    // applied, not the agent's now-newer position. Fast-forwarding the
+    // frontier here silently drops all replayable output missed while the
+    // socket was gone (#1213 SC-10).
+    const continuing = options.preserveAppliedCursor === true
+      && epoch === this.epoch && this.frontier !== null;
+    const lostEpoch = options.preserveAppliedCursor === true
+      && this.epoch !== null && epoch !== this.epoch;
     if (epoch !== this.epoch) {
       this.reset(epoch);
+      if (lostEpoch) {
+        // Same-session recovery got a different stream epoch: the old
+        // consumer buffer is not provably contiguous with this new stream.
+        // Explicitly flag the gap for the next snapshot repair, rather than
+        // trusting a fresh cursor as proof that output was not missed.
+        this.sink.onStreamTruncated();
+      }
     }
-    if (cursor !== undefined && (this.frontier === null || cursor > this.frontier)) {
+    if (!continuing && cursor !== undefined &&
+        (this.frontier === null || cursor > this.frontier)) {
       this.frontier = cursor;
     }
     this.wantHistory = true;

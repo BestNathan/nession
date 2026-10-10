@@ -27,7 +27,11 @@ export interface TerminalTransport {
    */
   noteAttachedSize?(cols: number, rows: number): void;
   /** Seed stream timeline after P2P attach (#1094). Optional on transports without seq. */
-  seedStreamCursor?(streamEpoch: number | undefined, streamCursor: number | undefined): void;
+  seedStreamCursor?(
+    streamEpoch: number | undefined,
+    streamCursor: number | undefined,
+    options?: { preserveAppliedCursor?: boolean },
+  ): void;
   /**
    * Reconcile the input cursor against the attach reply (#1307).
    *
