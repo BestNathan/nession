@@ -1586,33 +1586,17 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
                 };
 
-                if matches!(ctx.attach_mode, AttachMode::Plain) {
-                    // ---- Plain PTY path (session-shared) ----
-                    let session_name = payload.session_name.clone();
-
-                    // Apply env snapshots before PTY creation. Required: the
-                    // client asked for these variables, and an attach that
-                    // proceeds without them answers `ok` for a session that
-                    // does not have the environment it was told to have.
-                    if let Err(e) =
-                        apply_env_snapshots(ctx.tmux, &session_name, &payload.env_snapshots).await
-                    {
-                        warn!("env set-environment failed for session {session_name}: {e:#}");
-                        return ctx.err("env_apply_failed", &format!("{e:#}"));
-                    }
-
-                    // Whether this connection is the session's first subscriber
-                    // is asked and answered under one lock; the PTY itself is
-                    // attached with none held. The gap between the two is not a
-                    // race this arm has to close, and that is a property of the
-                    // lane rather than of this code: `agent.attach`,
-                    // `agent.detach`, `agent.terminal.input` and
-                    // `agent.terminal.resize` all carry the session's own
-                    // resource key, so no two of them run at once for one
-                    // session name.
+                // All P2P sockets of this Agent share a Session-scoped lease,
+                // event ring and bounded output fan-out (both tmux backends).
+                let session_name = payload.session_name.clone();
                     let already_attached = sessions_lock(ctx.sessions).contains_key(&session_name);
 
                     if already_attached {
+                        if let Err(e) = apply_env_snapshots(
+                            ctx.tmux, &session_name, &payload.env_snapshots,
+                        ).await {
+                            return ctx.err("env_apply_failed", &format!("{e:#}"));
+                        }
                         // Session already exists: add a new subscriber.
                         let client_id = connection_client_id(ctx.client_id).await;
                         let (tx, rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
@@ -1703,6 +1687,28 @@ p2p_routes! { ctx, msg_type, payload_value;
                             .unwrap_or_default();
                     }
 
+                if matches!(ctx.attach_mode, AttachMode::Plain) {
+                    // ---- Plain PTY path (session-shared) ----
+                    // Apply env snapshots before PTY creation. Required: the
+                    // client asked for these variables, and an attach that
+                    // proceeds without them answers `ok` for a session that
+                    // does not have the environment it was told to have.
+                    if let Err(e) =
+                        apply_env_snapshots(ctx.tmux, &session_name, &payload.env_snapshots).await
+                    {
+                        warn!("env set-environment failed for session {session_name}: {e:#}");
+                        return ctx.err("env_apply_failed", &format!("{e:#}"));
+                    }
+
+                    // Whether this connection is the session's first subscriber
+                    // is asked and answered under one lock; the PTY itself is
+                    // attached with none held. The gap between the two is not a
+                    // race this arm has to close, and that is a property of the
+                    // lane rather than of this code: `agent.attach`,
+                    // `agent.detach`, `agent.terminal.input` and
+                    // `agent.terminal.resize` all carry the session's own
+                    // resource key, so no two of them run at once for one
+                    // session name.
                     // Session doesn't exist yet: create PtySession + first subscriber.
                     // The backend is handed this manager's tmux addressing rather
                     // than resolving the process-wide one, so a substituted
@@ -1889,18 +1895,18 @@ p2p_routes! { ctx, msg_type, payload_value;
                             control.ensure_controller(&client_id);
                             let stream = session_terminal::SessionStreamState::new();
                             let input = session_terminal::SessionInputState::new();
+                            let (tx, rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
+                            let detached_for_not_draining = Arc::new(AtomicBool::new(false));
                             let attached = AttachedSession {
                                 backend: Arc::new(Mutex::new(Box::new(session))),
                                 peers: vec![SessionPeer {
                                     client_id: client_id.clone(),
                                     peer_token: Arc::clone(ctx.peer_token),
                                     outbound: ctx.outbound.clone(),
-                                    output_tx: None,
-                                    // Control-mode output goes straight to the
-                                    // connection's outbound, so nothing reads
-                                    // this flag here — a peer with no channel
-                                    // is never fanned out to.
-                                    detached_for_not_draining: Arc::new(AtomicBool::new(false)),
+                                    output_tx: Some(tx),
+                                    detached_for_not_draining: Arc::clone(
+                                        &detached_for_not_draining,
+                                    ),
                                 }],
                                 control,
                                 stream,
@@ -1936,11 +1942,14 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 );
                             }
 
-                            // Spawn a background task that consumes the output
-                            // channel from the control-mode subprocess and
-                            // forwards bytes to the client as `terminal.output`
-                            // messages.
-                            let outbound_clone = ctx.outbound.clone();
+                            // Control-mode output is a Session stream, never
+                            // the possession of the socket that first attached.
+                            spawn_output_forwarder(
+                                rx,
+                                ctx.outbound.clone(),
+                                session_name.clone(),
+                                detached_for_not_draining,
+                            );
                             let session_name_clone = session_name.clone();
                             let sessions_for_output = Arc::clone(ctx.sessions);
                             tokio::spawn(async move {
@@ -1948,49 +1957,16 @@ p2p_routes! { ctx, msg_type, payload_value;
                                     use base64::Engine;
                                     let encoded =
                                         base64::engine::general_purpose::STANDARD.encode(&bytes);
-                                    let (stream_epoch, stream_seq) = {
-                                        let mut guard = sessions_lock(&sessions_for_output);
-                                        guard
-                                            .get_mut(&session_name_clone)
-                                            .map(|s| {
-                                                s.stream.record_output(
-                                                    &session_name_clone,
-                                                    encoded.clone(),
-                                                )
-                                            })
-                                            .unwrap_or((1, 0))
-                                    };
-                                    let output = TerminalOutputPayload {
-                                        session_name: session_name_clone.clone(),
-                                        data: encoded,
-                                        stream_epoch: Some(stream_epoch),
-                                        stream_seq: Some(stream_seq),
-                                    // Live output; the prefill above is what
-                                    // becomes the bootstrap in S4b (#321).
-                                    bootstrap: None,
-                                    };
-                                    let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
-                                    if let Ok(json) = serde_json::to_string(&msg) {
-                                        // Same terminal lane as the subscriber
-                                        // forwarders, and the same verdict: a
-                                        // control-mode client that has stopped
-                                        // draining loses the connection rather
-                                        // than pinning the tmux reader.
-                                        match outbound_clone
-                                            .send_terminal(WsMessage::Text(json))
-                                            .await
-                                        {
-                                            Ok(()) => {}
-                                            Err(OutboundError::Stalled) => {
-                                                outbound_clone.close();
-                                                return;
-                                            }
-                                            Err(_) => return,
-                                        }
+                                    let mut guard = sessions_lock(&sessions_for_output);
+                                    if let Some(session) = guard.get_mut(&session_name_clone) {
+                                        let (epoch, seq) = session
+                                            .stream
+                                            .record_output(&session_name_clone, encoded);
+                                        fan_out_peers(&mut session.peers, (bytes, epoch, seq));
+                                    } else {
+                                        break;
                                     }
                                 }
-                                // Channel closed — tmux subprocess exited or
-                                // session was closed by the detach handler.
                             });
 
                             // Spawn a second task that forwards the window's
@@ -2010,7 +1986,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                             // central connection that falls behind costs a stale
                             // intermediate size rather than a queue that grows
                             // without bound. See `crate::server::resize`.
-                            let outbound_resize = ctx.outbound.clone();
+                            let sessions_for_resize = Arc::clone(ctx.sessions);
                             let session_name_resize = session_name.clone();
                             let resize_reporter = ctx.resize.clone();
                             let agent_id_resize = ctx.agent_id.to_string();
@@ -2051,15 +2027,19 @@ p2p_routes! { ctx, msg_type, payload_value;
                                     let full_id =
                                         format!("{agent_id_resize}:{session_name_resize}");
                                     resize_reporter.publish(&full_id, cols, rows);
-                                    if !send_terminal_resize_msg(
-                                        &outbound_resize,
-                                        &session_name_resize,
-                                        cols,
-                                        rows,
-                                    )
-                                    .await
-                                    {
+                                    let peers = sessions_lock(&sessions_for_resize)
+                                        .get(&session_name_resize)
+                                        .map(|s| {
+                                            s.peers.iter().map(|p| p.outbound.clone()).collect::<Vec<_>>()
+                                        })
+                                        .unwrap_or_default();
+                                    if peers.is_empty() {
                                         break;
+                                    }
+                                    for outbound in peers {
+                                        let _ = send_terminal_resize_msg(
+                                            &outbound, &session_name_resize, cols, rows,
+                                        ).await;
                                     }
                                 }
                             });
@@ -3024,15 +3004,7 @@ impl AgentServer {
         let (outbound, outbound_rx) = P2pOutbound::new();
         let writer = tokio::spawn(outbound::run_writer(ws_sink, outbound_rx, outbound.clone()));
 
-        // Plain PTY sessions support shared output fan-out across peers.
-        // Control-mode currently routes output directly to its connection,
-        // not through a shared fan-out, so preserve its existing per-socket
-        // backend ownership rather than sharing a map it cannot broadcast.
-        let sessions = if matches!(&attach_mode, AttachMode::Plain) {
-            sessions
-        } else {
-            Arc::new(SessionMapLock::new(SessionMap::new()))
-        };
+        // Both attach modes share the Agent-owned Session map.
         // Per-connection client ID (set during CLIENT_AUTH handshake)
         let client_id: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
 
