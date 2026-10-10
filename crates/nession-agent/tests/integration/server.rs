@@ -3177,7 +3177,9 @@ async fn integration_second_dial_observes_shared_session_lease() {
         reply.payload.control_generation,
         Some(session.control_generation)
     );
-    assert_eq!(reply.payload.stream_epoch, Some(session.epoch));
+    // `SequencedSession::epoch` is the *input* epoch, not stream_epoch.
+    // Comparing those independent namespaces would reject valid streams.
+    // The two-socket Agent test checks stream epochs against each other.
     session.handle.shutdown().await.ok();
 }
 
