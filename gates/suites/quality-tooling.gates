@@ -25,3 +25,8 @@ terminal-attach-resume-selftest
 e2e-cli-discovery
 issue-audit-agent-selftest
 issue-audit-cursor-selftest
+gate-router-contract
+# Deterministic known-violation fixtures for the custom blocking detectors.
+protocol-integrity-selftest
+test-isolation-selftest
+tmux-socket-isolation-selftest

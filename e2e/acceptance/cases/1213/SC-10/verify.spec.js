@@ -70,83 +70,110 @@ test('SC-10: real P2P cursor resume and explicit truncated retention window', as
       timeout: 12000,
     }).toBeGreaterThan(0);
 
+    // First witness: reconnect within the P2P retry budget. A long offline
+    // period intentionally chooses Relay, which is correct product fallback,
+    // but is not evidence of a *P2P stream.resume*. Keep this interruption
+    // short and use real tmux output missed by the disconnected client.
+    const oldP2PSockets = await page.evaluate(port =>
+      window.__sc10.sockets.filter(s => new URL(s.url).port === String(port)).length,
+    runtime.agent_port);
     try {
       await context.setOffline(true);
       await page.evaluate(() => {
         Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
         document.dispatchEvent(new Event('visibilitychange'));
         for (const ws of window.__sc10.sockets) {
-          if (ws.readyState === WebSocket.OPEN) ws.close(4000, 'SC10 consumer suspended');
+          if (ws.readyState === WebSocket.OPEN) ws.close(4000, 'SC10 brief P2P interruption');
         }
       });
-      // Real tmux sends output while the disconnected consumer cannot read.
-      // 6500 paced writes push the Agent's 4096-event retention window beyond
-      // an old cursor; the second live P2P peer observes the producer.
-      const producer = 'for i in $(seq 1 6500); do printf "SC10-SEQ-%05d\\n" "$i"; sleep 0.002; done; printf "SC10-TAIL-%s\\n" 1213';
-      execFileSync('tmux', ['-S', runtime.tmux_socket, 'send-keys', '-t', name, producer, 'Enter'], {
-        timeout: 10000,
-      });
-      await expect.poll(() => countInBuffer(peer, 'SC10-TAIL-1213'), { timeout: 65000 }).toBe(1);
-
-      // Request a genuinely old stream cursor from the live Agent. We assert
-      // its explicit truncation contract rather than inventing a gap or
-      // pretending a capture-pane snapshot is a complete replay.
-      const reply = await peer.evaluate(async ({ sessionName, agentPort }) => {
-        const epoch = window.__sc10.epochs.at(-1);
-        if (!Number.isSafeInteger(epoch)) throw new Error('missing real stream epoch');
-        const ws = window.__sc10.sockets.find(s =>
-          new URL(s.url).port === String(agentPort) && s.readyState === WebSocket.OPEN);
-        if (!ws) throw new Error('real Agent P2P socket not available');
-        return new Promise((resolve, reject) => {
-          const id = 'sc10-gap-' + Date.now();
-          const timeout = setTimeout(() => reject(new Error('retention probe timed out')), 8000);
-          const listener = event => {
-            if (typeof event.data !== 'string') return;
-            try {
-              const message = JSON.parse(event.data);
-              if (message.id !== id) return;
-              ws.removeEventListener('message', listener);
-              clearTimeout(timeout);
-              resolve(message.payload);
-            } catch { /* ignore other messages */ }
-          };
-          ws.addEventListener('message', listener);
-          ws.send(JSON.stringify({
-            id, msg_type: 'agent.terminal.stream.resume', timestamp: Date.now(),
-            payload: { session_name: sessionName, stream_epoch: epoch, after_seq: 0 },
-          }));
-        });
-      }, { sessionName: name, agentPort: runtime.agent_port });
-      expect(reply.epoch_match).toBe(true);
-      expect(reply.complete).toBe(false);
-      expect(reply.first_available_seq).toBeGreaterThan(1);
+      execFileSync('tmux', ['-S', runtime.tmux_socket, 'send-keys', '-t', name,
+        'for i in $(seq 1 40); do printf "SC10-LIVE-%03d\\n" "$i"; sleep 0.005; done; printf "SC10-RECONNECTED-%s\\n" 1213',
+        'Enter'], { timeout: 10000 });
+      await page.waitForTimeout(350);
     } finally {
       await context.setOffline(false);
     }
-
     await page.evaluate(() => {
       Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
       document.dispatchEvent(new Event('visibilitychange'));
     });
-    await expect(page.getByTestId('shell')).toBeVisible({ timeout: 20000 });
-    await expect(page.locator('.xterm')).toHaveAttribute('data-sc10-terminal-instance', 'before', {
-      timeout: 30000,
+
+    await expect.poll(() => page.evaluate(({ port, previous }) => {
+      const p2p = window.__sc10.sockets.filter(ws => new URL(ws.url).port === String(port));
+      return p2p.length > previous && p2p.some(ws => ws.readyState === WebSocket.OPEN);
+    }, { port: runtime.agent_port, previous: oldP2PSockets }), {
+      timeout: 25000,
+    }).toBe(true);
+    await expect.poll(() => countInBuffer(peer, 'SC10-RECONNECTED-1213'), { timeout: 20000 }).toBe(1);
+    await expect.poll(() => countInBuffer(page, 'SC10-RECONNECTED-1213'), { timeout: 30000 }).toBe(1);
+    await expect(page.getByTestId('shell')).toBeVisible();
+    await expect(page.locator('.xterm')).toHaveAttribute('data-sc10-terminal-instance', 'before');
+    // Use a normal polling assertion for the requirement: a new, actual
+    // request from A's WebSocket, not a replay from the independent peer.
+    await expect.poll(() => page.evaluate(() => window.__sc10.resumes.length), {
+      timeout: 20000,
+    }).toBeGreaterThan(before.requests);
+    const resumed = await page.evaluate(() => window.__sc10.resumes.slice(before.requests));
+    expect(resumed.some(r =>
+      r.epoch !== undefined &&
+      Number.isSafeInteger(r.after) &&
+      r.after <= before.cursor
+    )).toBe(true);
+
+    // Second witness: with both real P2P sockets online, keep the shared
+    // Agent stream's producer alive long enough to evict a genuinely old
+    // cursor. Asking the Agent from after_seq=0 must explicitly say the
+    // retained window is incomplete. No unnecessary prolonged-offline Relay
+    // fallback is allowed to pass as P2P recovery.
+    // One unbuffered producer emits the same 6500 paced PTY writes without
+    // spawning 6500 child sleep processes; the full-stack retention and cursor
+    // assertions below are unchanged (#1213 SC-10).
+    const producer = `python3 -u -c 'import time; [(print("SC10-SEQ-%05d" % i), time.sleep(0.002)) for i in range(1,6501)]; print("SC10-TAIL-%s" % 1213)'`;
+    execFileSync('tmux', ['-S', runtime.tmux_socket, 'send-keys', '-t', name, producer, 'Enter'], {
+      timeout: 10000,
     });
+    await expect.poll(() => countInBuffer(peer, 'SC10-TAIL-1213'), { timeout: 65000 }).toBe(1);
+    const reply = await peer.evaluate(async ({ sessionName, agentPort }) => {
+      const epoch = window.__sc10.epochs.at(-1);
+      if (!Number.isSafeInteger(epoch)) throw new Error('missing real stream epoch');
+      const ws = window.__sc10.sockets.find(s =>
+        new URL(s.url).port === String(agentPort) && s.readyState === WebSocket.OPEN);
+      if (!ws) throw new Error('real Agent P2P socket not available');
+      return new Promise((resolve, reject) => {
+        const id = 'sc10-gap-' + Date.now();
+        const timeout = setTimeout(() => reject(new Error('retention probe timed out')), 8000);
+        const listener = event => {
+          if (typeof event.data !== 'string') return;
+          try {
+            const message = JSON.parse(event.data);
+            if (message.id !== id) return;
+            ws.removeEventListener('message', listener);
+            clearTimeout(timeout);
+            resolve(message.payload);
+          } catch { /* ignore unrelated messages */ }
+        };
+        ws.addEventListener('message', listener);
+        ws.send(JSON.stringify({
+          id, msg_type: 'agent.terminal.stream.resume', timestamp: Date.now(),
+          payload: { session_name: sessionName, stream_epoch: epoch, after_seq: 0 },
+        }));
+      });
+    }, { sessionName: name, agentPort: runtime.agent_port });
+    expect(reply.epoch_match).toBe(true);
+    expect(reply.complete).toBe(false);
+    expect(reply.first_available_seq).toBeGreaterThan(1);
+    await expect(page.locator('.xterm')).toHaveAttribute('data-sc10-terminal-instance', 'before');
     await expect.poll(() => countInBuffer(page, 'SC10-TAIL-1213'), { timeout: 30000 }).toBe(1);
-    const observed = await page.evaluate(() => ({
-      requests: window.__sc10.resumes.length,
-      resumed: window.__sc10.resumes.slice(-4),
-    }));
-    expect(observed.requests).toBeGreaterThan(before.requests);
-    expect(observed.resumed.some(r => r.epoch !== undefined && Number.isSafeInteger(r.after))).toBe(true);
     const evidence = {
       issue: 1213, criterion: 'SC-10', target_sha: sha, contract_sha256: contract,
       real_stack: true, mode: 'P2P', selected_session: name,
-      producer: '6500 paced PTY writes while consumer offline',
+      producer: 'brief P2P outage then 6500 paced PTY writes with independent live observer',
       separate_observer_kept_agent_stream_alive: true,
       first_available_beyond_old_cursor: true, complete_false_verified: true,
       original_xterm_preserved: true, resume_request_observed: true,
       resumed_terminal_tail_output_once: true,
+      p2p_retry_window_stayed_online: true,
+      replay_from_pre_disconnect_cursor_verified: true,
     };
     await info.attach('sc-10-retained-gap-evidence.json', {
       body: Buffer.from(JSON.stringify(evidence)), contentType: 'application/json',
