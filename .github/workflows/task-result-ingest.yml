@@ -98,3 +98,32 @@ jobs:
             git -C task-store push origin HEAD:refs/heads/task-results
           fi
           echo 'Task result verified and archived on task-results (not acceptance-results).' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove archived disposable Task branch (opt-in, SHA lease)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          id="$(jq -er '.task_id' incoming/record.json)"
+          sha="$(jq -er '.source_sha' incoming/record.json)"
+          run_id="${{ github.event.workflow_run.id }}"
+          attempt="${{ github.event.workflow_run.run_attempt }}"
+          archived="task-store/runs/${id}/${run_id}-${attempt}/record.json"
+          # Read only the independently verified and already committed result.
+          if ! jq -e '.cleanup_on_success == true and .execution.status == "Success"' "$archived" >/dev/null; then
+            echo "Task branch retained: cleanup not requested or execution failed" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          ref="refs/heads/task/${id}"
+          remote_sha="$(git -C task-store ls-remote origin "$ref" | awk '{print $1}')"
+          if [[ -z "$remote_sha" ]]; then
+            echo "Task branch already absent" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [[ "$remote_sha" != "$sha" ]]; then
+            echo "Task branch advanced since source SHA; retaining newer work" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # Server-side expected ref SHA prevents deleting a concurrently updated branch.
+          git -C task-store push --force-with-lease="${ref}:${sha}" origin ":${ref}"
+          echo "Deleted archived ephemeral ${ref} at exact SHA ${sha}" >> "$GITHUB_STEP_SUMMARY"

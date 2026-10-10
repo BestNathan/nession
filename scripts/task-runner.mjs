@@ -52,7 +52,7 @@ function inspect(repo, expectedId) {
   if (!manifestEntry || manifestEntry.bytes.length > 16384) die('missing/big task.json');
   const manifest = JSON.parse(manifestEntry.bytes.toString('utf8'));
   if (!manifest || Array.isArray(manifest) || typeof manifest !== 'object') die('invalid manifest');
-  const allowed = new Set(['schema_version', 'id', 'runtime', 'entry', 'timeout_minutes', 'args']);
+  const allowed = new Set(['schema_version', 'id', 'runtime', 'entry', 'timeout_minutes', 'args', 'cleanup_on_success']);
   if (Object.keys(manifest).some((key) => !allowed.has(key))) die('unexpected manifest property');
   if (manifest.schema_version !== 1 || !ID.test(manifest.id || '') ||
       manifest.runtime !== 'node24' || !Number.isInteger(manifest.timeout_minutes) ||
@@ -62,6 +62,7 @@ function inspect(repo, expectedId) {
   if (!parts.length || parts.some((part) => !ENTRY_SEGMENT.test(part) || part === '.' || part === '..') ||
       !/\.(?:mjs|cjs|js)$/.test(manifest.entry)) die('invalid script entry');
   if (!files.some((f) => f.name === manifest.entry)) die('script entry missing from Task source');
+  if (manifest.cleanup_on_success !== undefined && typeof manifest.cleanup_on_success !== 'boolean') die('invalid cleanup policy');
   if (manifest.args === null || Array.isArray(manifest.args) || typeof manifest.args !== 'object' ||
       JSON.stringify(manifest.args).length > 8192) die('invalid Task args');
   const hash = crypto.createHash('sha256');
@@ -150,6 +151,8 @@ function selfTest() {
       fs.writeFileSync(path.join(root, '.task/task.json'), JSON.stringify({ ...valid, runtime }));
       assert.throws(() => inspect(root, 'task-test'), /unsupported Task manifest/);
     }
+    fs.writeFileSync(path.join(root, '.task/task.json'), JSON.stringify({...valid, cleanup_on_success: 'unsafe'}));
+    assert.throws(() => inspect(root, 'task-test'), /invalid cleanup policy/);
     fs.writeFileSync(path.join(root, '.task/task.json'), JSON.stringify(valid));
     fs.symlinkSync(path.join(root, '.task/execute.mjs'), path.join(root, '.task/bad.mjs'));
     assert.throws(() => inspect(root, 'task-test'), /symlink forbidden/);

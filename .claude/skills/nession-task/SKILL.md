@@ -36,6 +36,7 @@ Create `.task/task.json`:
   "runtime": "node24",
   "entry": "replay.mjs",
   "timeout_minutes": 20,
+  "cleanup_on_success": true,
   "args": { "issue": 1522 }
 }
 ```
@@ -93,7 +94,9 @@ task-results:
 
 Check the downstream ingestion run **and actual `task-results` record** before calling archival complete. The source snapshot preserves `.task/` file bytes after branch deletion. Uploaded logs/artifacts have independent retention and are not automatically authoritative.
 
-Only after ingestion succeeded and no further replay is needed:
+After verified ingestion, setting `cleanup_on_success: true` instructs the **trusted ingestion workflow** to delete the exact archived task branch using a server-side SHA lease; failures or newer pushes retain the branch. Omit it (or set false) when you want to inspect/replay the branch manually.
+
+If cleanup was not requested, only after ingestion succeeded and no further replay is needed:
 
 ```bash
 git push origin --delete task/bug-1522-replay
@@ -102,7 +105,7 @@ git worktree remove .claude/worktrees/task-bug-1522-replay
 git worktree prune
 ```
 
-Never auto-delete a branch before the trusted evidence store is confirmed. If archiving failed, keep the branch and repair ingestion rather than declaring the task complete.
+Never auto-delete a branch before the trusted evidence store is confirmed. The cleanup flag belongs to the **verified source Manifest**, not to an untrusted artifact. If archiving failed, keep the branch and repair ingestion rather than declaring the task complete.
 
 ## Boundaries and stop conditions
 
