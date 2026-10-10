@@ -109,8 +109,10 @@ function verify(load) {
   for (const [file, commands] of required) {
     const content = load(file);
     if (content == null) { problems.push(file + ': missing workflow/recipe'); continue; }
+    const commandsInLines = new Set(content.split(/\r?\n/).map(line =>
+      line.trim().replace(/^run:\s*/, '')));
     for (const command of commands) {
-      if (!content.includes(command)) problems.push(file + ': missing canonical consumer ' + command);
+      if (!commandsInLines.has(command)) problems.push(file + ': missing canonical consumer ' + command);
     }
     if (file.startsWith('.github/workflows/') && legacy.test(content)) {
       problems.push(file + ': legacy raw Node/Bash self-test command remains outside the Gate runner');
