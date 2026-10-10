@@ -3024,7 +3024,15 @@ impl AgentServer {
         let (outbound, outbound_rx) = P2pOutbound::new();
         let writer = tokio::spawn(outbound::run_writer(ws_sink, outbound_rx, outbound.clone()));
 
-        // Session state outlives this socket and is shared by all P2P peers.
+        // Plain PTY sessions support shared output fan-out across peers.
+        // Control-mode currently routes output directly to its connection,
+        // not through a shared fan-out, so preserve its existing per-socket
+        // backend ownership rather than sharing a map it cannot broadcast.
+        let sessions = if matches!(&attach_mode, AttachMode::Plain) {
+            sessions
+        } else {
+            Arc::new(SessionMapLock::new(SessionMap::new()))
+        };
         // Per-connection client ID (set during CLIENT_AUTH handshake)
         let client_id: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
 
