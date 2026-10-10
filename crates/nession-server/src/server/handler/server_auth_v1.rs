@@ -1,7 +1,10 @@
 //! One versioned Server Protocol Unit.
 //! Route identity, version and execution policy are owned by routes.rs.
 
-use super::{info, ConnectionHandler, ProtocolMessage, HandlerAction, ClientAuthPayload, auth_reply, AuthResponsePayload};
+use super::{
+    auth_reply, info, AuthResponsePayload, ClientAuthPayload, ConnectionHandler, HandlerAction,
+    ProtocolMessage,
+};
 
 impl ConnectionHandler {
     pub(super) async fn handle_client_auth(

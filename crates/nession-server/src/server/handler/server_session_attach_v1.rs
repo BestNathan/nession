@@ -1,7 +1,10 @@
 //! One versioned Server Protocol Unit.
 //! Route identity, version and execution policy are owned by routes.rs.
 
-use super::{json, info, warn, ConnectionHandler, ProtocolMessage, HandlerAction, Message, current_timestamp, AgentStatus, CredentialScope, P2pGrantPayload, EnvSnapshot, AddressStatus};
+use super::{
+    current_timestamp, info, json, warn, AddressStatus, AgentStatus, ConnectionHandler,
+    CredentialScope, EnvSnapshot, HandlerAction, Message, P2pGrantPayload, ProtocolMessage,
+};
 
 impl ConnectionHandler {
     /// Handle `server.session.attach` - returns P2P agent address or enters relay mode.

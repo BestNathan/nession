@@ -1,7 +1,10 @@
 //! One versioned Server Protocol Unit.
 //! Route identity, version and execution policy are owned by routes.rs.
 
-use super::{json, ConnectionHandler, ProtocolMessage, HandlerAction, env_get_reply, ClientEnvGetResponsePayload, ClientEnvGetPayload, EnvSource};
+use super::{
+    env_get_reply, json, ClientEnvGetPayload, ClientEnvGetResponsePayload, ConnectionHandler,
+    EnvSource, HandlerAction, ProtocolMessage,
+};
 
 impl ConnectionHandler {
     /// Handle `server.env.get` — read one env file's content and report which

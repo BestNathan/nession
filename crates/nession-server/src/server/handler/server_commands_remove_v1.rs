@@ -1,7 +1,7 @@
 //! One versioned Server Protocol Unit.
 //! Route identity, version and execution policy are owned by routes.rs.
 
-use super::{json, ConnectionHandler, ProtocolMessage, HandlerAction, reply_json};
+use super::{json, reply_json, ConnectionHandler, HandlerAction, ProtocolMessage};
 
 impl ConnectionHandler {
     pub(super) async fn handle_client_commands_remove(
