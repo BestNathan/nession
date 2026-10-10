@@ -196,6 +196,345 @@ ok(() => {
   assert.equal(result.status, 0, 'staging merge parent parser self-test failed: ' + result.stderr);
   assert.match(result.stdout, /raw-object proof self-test passed/);
 });
+// SC-11 follows canonical --sha dispatch; test the executable contract,
+// including fail-closed behavior when the source SHA binding is removed.
+ok(() => {
+  const env = {
+    ...process.env,
+    NESSION_ACCEPTANCE_TRUSTED_ROOT: repoRoot,
+    NESSION_ACCEPTANCE_TARGET_SHA: 'a'.repeat(40),
+  };
+  const command = "const x=require('./acceptance/shared/infrastructure-contract.js');" +
+    "console.log(JSON.stringify(x.verifyInfrastructureCriterion('SC-11')))";
+  const positive = spawnSync(process.execPath, ['-e', command], {
+    cwd: repoRoot, env, encoding: 'utf8', timeout: 5000,
+  });
+  assert.equal(positive.status, 0, 'SC-11 canonical dispatch must pass: ' + positive.stderr);
+  assert.equal(JSON.parse(positive.stdout).status, 'pass');
+
+  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'nession-sc11-negative-'));
+  try {
+    const base = path.join(fixture, '.github', 'workflows');
+    fs.mkdirSync(base, { recursive: true });
+    const original = fs.readFileSync(path.join(repoRoot, '.github', 'workflows',
+      'acceptance-cases.yml'), 'utf8');
+    const bound = 'args+=(--sha "
+// A runtime Case invoking the Terminal Scenario transitively must list a real
+// Browser verifier, so the main-owned Case selector provisions Playwright.
+ok(() => {
+  const workflow = fs.readFileSync(path.join(repoRoot, '.github', 'workflows',
+    'acceptance-cases.yml'), 'utf8');
+  assert.match(workflow,
+    /- name: Install browser verifier runtime\s+if: steps\.select\.outputs\.needs_browser == 'true'/);
+  assert.match(workflow,
+    /- name: Install browser verifier runtime[\s\S]*?cd workspace\/e2e\s+npm ci\s+npx playwright install chromium --with-deps/);
+  assert.match(workflow, /needs_browser: verifiers\.some\(\(item\) => item\.type === 'browser'\)/);
+  for (const n of ['01','02','03','04']) {
+    const caseDir = path.join(canonicalRoot, '1498', 'SC-' + n);
+    const item = discoverCases(canonicalRoot).find(x =>
+      x.manifest.issue === 1498 && x.manifest.criterion === 'SC-' + n);
+    assert.ok(item, 'missing staged Scenario Case SC-' + n);
+    assert.ok(item.manifest.verifiers.some(v => v.type === 'browser'),
+      'SC-' + n + ' must declare real Playwright dependency');
+    assert.ok(fs.existsSync(path.join(caseDir, 'verify.spec.js')));
+  }
+});
+
+// The PR's check-run head SHA must also be the SHA actually checked out
+// when a protocol/browser Case produces provenance. GitHub's default PR
+// merge-ref checkout has a different SHA and cannot prove that invariant.
+ok(() => {
+  const smoke = fs.readFileSync(path.join(repoRoot, '.github', 'workflows',
+    'acceptance-case-smoke.yml'), 'utf8');
+  assert.ok(smoke.includes('branches: [staging, main]'),
+    'main-target promotions must run real source Case Smoke');
+  assert.ok(smoke.includes('ref: ${{ github.event.pull_request.head.sha || github.sha }}'),
+    'Case Smoke must execute exact source head, not synthetic PR merge SHA');
+  assert.match(smoke, /persist-credentials: false/,
+    'untrusted verifier code must not inherit checkout write credentials');
+});
+
+// Exact PR-head checks must not execute GitHub's synthetic merge checkout.
+ok(() => {
+  const expected='ref: ${{ github.event.pull_request.head.sha || github.sha }}';
+  for(const [workflow,count] of [['quality.yml',2],['e2e.yml',1],['e2e-scenario-smoke.yml',1]]){
+    const source=fs.readFileSync(path.join(repoRoot,'.github','workflows',workflow),'utf8');
+    assert.equal(source.split(expected).length-1,count,workflow+' must checkout exact PR head');
+    assert.ok(source.split('persist-credentials: false').length-1>=count,workflow+' cannot retain write credentials');
+  }
+  const e2e=fs.readFileSync(path.join(repoRoot,'.github','workflows','e2e.yml'),'utf8');
+  assert.ok(e2e.includes('NESSION_TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}'));
+});
+
+ok(() => {
+  const helper = path.join(repoRoot, 'e2e', 'acceptance', 'shared',
+    'staging-continuity-proof.cjs');
+  const result = spawnSync(process.execPath, [helper, 'self-test'], {
+    cwd: repoRoot, encoding: 'utf8', timeout: 5000,
+  });
+  assert.equal(result.status, 0,
+    'GitHub merge-parent shallow-checkout proof failed: ' + result.stderr);
+  assert.match(result.stdout, /6 positive\/negative fixtures passed/);
+});
+
+console.log('acceptance Case self-test: ' + cases + ' cases passed');
+ + '{TARGET_SHA}" --profile "
+// A runtime Case invoking the Terminal Scenario transitively must list a real
+// Browser verifier, so the main-owned Case selector provisions Playwright.
+ok(() => {
+  const workflow = fs.readFileSync(path.join(repoRoot, '.github', 'workflows',
+    'acceptance-cases.yml'), 'utf8');
+  assert.match(workflow,
+    /- name: Install browser verifier runtime\s+if: steps\.select\.outputs\.needs_browser == 'true'/);
+  assert.match(workflow,
+    /- name: Install browser verifier runtime[\s\S]*?cd workspace\/e2e\s+npm ci\s+npx playwright install chromium --with-deps/);
+  assert.match(workflow, /needs_browser: verifiers\.some\(\(item\) => item\.type === 'browser'\)/);
+  for (const n of ['01','02','03','04']) {
+    const caseDir = path.join(canonicalRoot, '1498', 'SC-' + n);
+    const item = discoverCases(canonicalRoot).find(x =>
+      x.manifest.issue === 1498 && x.manifest.criterion === 'SC-' + n);
+    assert.ok(item, 'missing staged Scenario Case SC-' + n);
+    assert.ok(item.manifest.verifiers.some(v => v.type === 'browser'),
+      'SC-' + n + ' must declare real Playwright dependency');
+    assert.ok(fs.existsSync(path.join(caseDir, 'verify.spec.js')));
+  }
+});
+
+// The PR's check-run head SHA must also be the SHA actually checked out
+// when a protocol/browser Case produces provenance. GitHub's default PR
+// merge-ref checkout has a different SHA and cannot prove that invariant.
+ok(() => {
+  const smoke = fs.readFileSync(path.join(repoRoot, '.github', 'workflows',
+    'acceptance-case-smoke.yml'), 'utf8');
+  assert.ok(smoke.includes('branches: [staging, main]'),
+    'main-target promotions must run real source Case Smoke');
+  assert.ok(smoke.includes('ref: ${{ github.event.pull_request.head.sha || github.sha }}'),
+    'Case Smoke must execute exact source head, not synthetic PR merge SHA');
+  assert.match(smoke, /persist-credentials: false/,
+    'untrusted verifier code must not inherit checkout write credentials');
+});
+
+// Exact PR-head checks must not execute GitHub's synthetic merge checkout.
+ok(() => {
+  const expected='ref: ${{ github.event.pull_request.head.sha || github.sha }}';
+  for(const [workflow,count] of [['quality.yml',2],['e2e.yml',1],['e2e-scenario-smoke.yml',1]]){
+    const source=fs.readFileSync(path.join(repoRoot,'.github','workflows',workflow),'utf8');
+    assert.equal(source.split(expected).length-1,count,workflow+' must checkout exact PR head');
+    assert.ok(source.split('persist-credentials: false').length-1>=count,workflow+' cannot retain write credentials');
+  }
+  const e2e=fs.readFileSync(path.join(repoRoot,'.github','workflows','e2e.yml'),'utf8');
+  assert.ok(e2e.includes('NESSION_TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}'));
+});
+
+ok(() => {
+  const helper = path.join(repoRoot, 'e2e', 'acceptance', 'shared',
+    'staging-continuity-proof.cjs');
+  const result = spawnSync(process.execPath, [helper, 'self-test'], {
+    cwd: repoRoot, encoding: 'utf8', timeout: 5000,
+  });
+  assert.equal(result.status, 0,
+    'GitHub merge-parent shallow-checkout proof failed: ' + result.stderr);
+  assert.match(result.stdout, /6 positive\/negative fixtures passed/);
+});
+
+console.log('acceptance Case self-test: ' + cases + ' cases passed');
+ +
+      '{profile}" --output "
+// A runtime Case invoking the Terminal Scenario transitively must list a real
+// Browser verifier, so the main-owned Case selector provisions Playwright.
+ok(() => {
+  const workflow = fs.readFileSync(path.join(repoRoot, '.github', 'workflows',
+    'acceptance-cases.yml'), 'utf8');
+  assert.match(workflow,
+    /- name: Install browser verifier runtime\s+if: steps\.select\.outputs\.needs_browser == 'true'/);
+  assert.match(workflow,
+    /- name: Install browser verifier runtime[\s\S]*?cd workspace\/e2e\s+npm ci\s+npx playwright install chromium --with-deps/);
+  assert.match(workflow, /needs_browser: verifiers\.some\(\(item\) => item\.type === 'browser'\)/);
+  for (const n of ['01','02','03','04']) {
+    const caseDir = path.join(canonicalRoot, '1498', 'SC-' + n);
+    const item = discoverCases(canonicalRoot).find(x =>
+      x.manifest.issue === 1498 && x.manifest.criterion === 'SC-' + n);
+    assert.ok(item, 'missing staged Scenario Case SC-' + n);
+    assert.ok(item.manifest.verifiers.some(v => v.type === 'browser'),
+      'SC-' + n + ' must declare real Playwright dependency');
+    assert.ok(fs.existsSync(path.join(caseDir, 'verify.spec.js')));
+  }
+});
+
+// The PR's check-run head SHA must also be the SHA actually checked out
+// when a protocol/browser Case produces provenance. GitHub's default PR
+// merge-ref checkout has a different SHA and cannot prove that invariant.
+ok(() => {
+  const smoke = fs.readFileSync(path.join(repoRoot, '.github', 'workflows',
+    'acceptance-case-smoke.yml'), 'utf8');
+  assert.ok(smoke.includes('branches: [staging, main]'),
+    'main-target promotions must run real source Case Smoke');
+  assert.ok(smoke.includes('ref: ${{ github.event.pull_request.head.sha || github.sha }}'),
+    'Case Smoke must execute exact source head, not synthetic PR merge SHA');
+  assert.match(smoke, /persist-credentials: false/,
+    'untrusted verifier code must not inherit checkout write credentials');
+});
+
+// Exact PR-head checks must not execute GitHub's synthetic merge checkout.
+ok(() => {
+  const expected='ref: ${{ github.event.pull_request.head.sha || github.sha }}';
+  for(const [workflow,count] of [['quality.yml',2],['e2e.yml',1],['e2e-scenario-smoke.yml',1]]){
+    const source=fs.readFileSync(path.join(repoRoot,'.github','workflows',workflow),'utf8');
+    assert.equal(source.split(expected).length-1,count,workflow+' must checkout exact PR head');
+    assert.ok(source.split('persist-credentials: false').length-1>=count,workflow+' cannot retain write credentials');
+  }
+  const e2e=fs.readFileSync(path.join(repoRoot,'.github','workflows','e2e.yml'),'utf8');
+  assert.ok(e2e.includes('NESSION_TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}'));
+});
+
+ok(() => {
+  const helper = path.join(repoRoot, 'e2e', 'acceptance', 'shared',
+    'staging-continuity-proof.cjs');
+  const result = spawnSync(process.execPath, [helper, 'self-test'], {
+    cwd: repoRoot, encoding: 'utf8', timeout: 5000,
+  });
+  assert.equal(result.status, 0,
+    'GitHub merge-parent shallow-checkout proof failed: ' + result.stderr);
+  assert.match(result.stdout, /6 positive\/negative fixtures passed/);
+});
+
+console.log('acceptance Case self-test: ' + cases + ' cases passed');
+ + '{output}")';
+    assert.ok(original.includes(bound), 'expected canonical SHA binding absent in source');
+    fs.writeFileSync(path.join(base, 'acceptance-cases.yml'),
+      original.replace(bound, 'args+=(--profile "
+// A runtime Case invoking the Terminal Scenario transitively must list a real
+// Browser verifier, so the main-owned Case selector provisions Playwright.
+ok(() => {
+  const workflow = fs.readFileSync(path.join(repoRoot, '.github', 'workflows',
+    'acceptance-cases.yml'), 'utf8');
+  assert.match(workflow,
+    /- name: Install browser verifier runtime\s+if: steps\.select\.outputs\.needs_browser == 'true'/);
+  assert.match(workflow,
+    /- name: Install browser verifier runtime[\s\S]*?cd workspace\/e2e\s+npm ci\s+npx playwright install chromium --with-deps/);
+  assert.match(workflow, /needs_browser: verifiers\.some\(\(item\) => item\.type === 'browser'\)/);
+  for (const n of ['01','02','03','04']) {
+    const caseDir = path.join(canonicalRoot, '1498', 'SC-' + n);
+    const item = discoverCases(canonicalRoot).find(x =>
+      x.manifest.issue === 1498 && x.manifest.criterion === 'SC-' + n);
+    assert.ok(item, 'missing staged Scenario Case SC-' + n);
+    assert.ok(item.manifest.verifiers.some(v => v.type === 'browser'),
+      'SC-' + n + ' must declare real Playwright dependency');
+    assert.ok(fs.existsSync(path.join(caseDir, 'verify.spec.js')));
+  }
+});
+
+// The PR's check-run head SHA must also be the SHA actually checked out
+// when a protocol/browser Case produces provenance. GitHub's default PR
+// merge-ref checkout has a different SHA and cannot prove that invariant.
+ok(() => {
+  const smoke = fs.readFileSync(path.join(repoRoot, '.github', 'workflows',
+    'acceptance-case-smoke.yml'), 'utf8');
+  assert.ok(smoke.includes('branches: [staging, main]'),
+    'main-target promotions must run real source Case Smoke');
+  assert.ok(smoke.includes('ref: ${{ github.event.pull_request.head.sha || github.sha }}'),
+    'Case Smoke must execute exact source head, not synthetic PR merge SHA');
+  assert.match(smoke, /persist-credentials: false/,
+    'untrusted verifier code must not inherit checkout write credentials');
+});
+
+// Exact PR-head checks must not execute GitHub's synthetic merge checkout.
+ok(() => {
+  const expected='ref: ${{ github.event.pull_request.head.sha || github.sha }}';
+  for(const [workflow,count] of [['quality.yml',2],['e2e.yml',1],['e2e-scenario-smoke.yml',1]]){
+    const source=fs.readFileSync(path.join(repoRoot,'.github','workflows',workflow),'utf8');
+    assert.equal(source.split(expected).length-1,count,workflow+' must checkout exact PR head');
+    assert.ok(source.split('persist-credentials: false').length-1>=count,workflow+' cannot retain write credentials');
+  }
+  const e2e=fs.readFileSync(path.join(repoRoot,'.github','workflows','e2e.yml'),'utf8');
+  assert.ok(e2e.includes('NESSION_TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}'));
+});
+
+ok(() => {
+  const helper = path.join(repoRoot, 'e2e', 'acceptance', 'shared',
+    'staging-continuity-proof.cjs');
+  const result = spawnSync(process.execPath, [helper, 'self-test'], {
+    cwd: repoRoot, encoding: 'utf8', timeout: 5000,
+  });
+  assert.equal(result.status, 0,
+    'GitHub merge-parent shallow-checkout proof failed: ' + result.stderr);
+  assert.match(result.stdout, /6 positive\/negative fixtures passed/);
+});
+
+console.log('acceptance Case self-test: ' + cases + ' cases passed');
+ + '{profile}" --output "
+// A runtime Case invoking the Terminal Scenario transitively must list a real
+// Browser verifier, so the main-owned Case selector provisions Playwright.
+ok(() => {
+  const workflow = fs.readFileSync(path.join(repoRoot, '.github', 'workflows',
+    'acceptance-cases.yml'), 'utf8');
+  assert.match(workflow,
+    /- name: Install browser verifier runtime\s+if: steps\.select\.outputs\.needs_browser == 'true'/);
+  assert.match(workflow,
+    /- name: Install browser verifier runtime[\s\S]*?cd workspace\/e2e\s+npm ci\s+npx playwright install chromium --with-deps/);
+  assert.match(workflow, /needs_browser: verifiers\.some\(\(item\) => item\.type === 'browser'\)/);
+  for (const n of ['01','02','03','04']) {
+    const caseDir = path.join(canonicalRoot, '1498', 'SC-' + n);
+    const item = discoverCases(canonicalRoot).find(x =>
+      x.manifest.issue === 1498 && x.manifest.criterion === 'SC-' + n);
+    assert.ok(item, 'missing staged Scenario Case SC-' + n);
+    assert.ok(item.manifest.verifiers.some(v => v.type === 'browser'),
+      'SC-' + n + ' must declare real Playwright dependency');
+    assert.ok(fs.existsSync(path.join(caseDir, 'verify.spec.js')));
+  }
+});
+
+// The PR's check-run head SHA must also be the SHA actually checked out
+// when a protocol/browser Case produces provenance. GitHub's default PR
+// merge-ref checkout has a different SHA and cannot prove that invariant.
+ok(() => {
+  const smoke = fs.readFileSync(path.join(repoRoot, '.github', 'workflows',
+    'acceptance-case-smoke.yml'), 'utf8');
+  assert.ok(smoke.includes('branches: [staging, main]'),
+    'main-target promotions must run real source Case Smoke');
+  assert.ok(smoke.includes('ref: ${{ github.event.pull_request.head.sha || github.sha }}'),
+    'Case Smoke must execute exact source head, not synthetic PR merge SHA');
+  assert.match(smoke, /persist-credentials: false/,
+    'untrusted verifier code must not inherit checkout write credentials');
+});
+
+// Exact PR-head checks must not execute GitHub's synthetic merge checkout.
+ok(() => {
+  const expected='ref: ${{ github.event.pull_request.head.sha || github.sha }}';
+  for(const [workflow,count] of [['quality.yml',2],['e2e.yml',1],['e2e-scenario-smoke.yml',1]]){
+    const source=fs.readFileSync(path.join(repoRoot,'.github','workflows',workflow),'utf8');
+    assert.equal(source.split(expected).length-1,count,workflow+' must checkout exact PR head');
+    assert.ok(source.split('persist-credentials: false').length-1>=count,workflow+' cannot retain write credentials');
+  }
+  const e2e=fs.readFileSync(path.join(repoRoot,'.github','workflows','e2e.yml'),'utf8');
+  assert.ok(e2e.includes('NESSION_TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}'));
+});
+
+ok(() => {
+  const helper = path.join(repoRoot, 'e2e', 'acceptance', 'shared',
+    'staging-continuity-proof.cjs');
+  const result = spawnSync(process.execPath, [helper, 'self-test'], {
+    cwd: repoRoot, encoding: 'utf8', timeout: 5000,
+  });
+  assert.equal(result.status, 0,
+    'GitHub merge-parent shallow-checkout proof failed: ' + result.stderr);
+  assert.match(result.stdout, /6 positive\/negative fixtures passed/);
+});
+
+console.log('acceptance Case self-test: ' + cases + ' cases passed');
+ + '{output}")'));
+    const negative = spawnSync(process.execPath, ['-e', command], {
+      cwd: repoRoot, env: { ...env, NESSION_ACCEPTANCE_TRUSTED_ROOT: fixture },
+      encoding: 'utf8', timeout: 5000,
+    });
+    assert.notEqual(negative.status, 0, 'forged/unpinned Case dispatch must fail closed');
+    assert.match(negative.stderr,
+      /missing contract: manual and automatic paths share exact SHA and runtime profile/);
+  } finally {
+    fs.rmSync(fixture, { recursive: true, force: true });
+  }
+});
+
 // Canonical manifest type=browser is the trusted dependency declaration.
 // A runtime Case invoking the Terminal Scenario transitively must list a real
 // Browser verifier, so the main-owned Case selector provisions Playwright.
