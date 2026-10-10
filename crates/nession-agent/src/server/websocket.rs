@@ -75,6 +75,7 @@ type OutputChunk = (Vec<u8>, u64, u64);
 #[derive(Clone)]
 struct SessionPeer {
     client_id: String,
+    peer_token: Arc<()>,
     outbound: P2pOutbound,
     /// PTY multi-client fan-out; `None` for control-mode (direct outbound).
     output_tx: Option<mpsc::Sender<OutputChunk>>,
@@ -349,10 +350,10 @@ fn spawn_output_forwarder(
     });
 }
 
-/// Per-connection map of attached sessions, keyed by session name.
+/// Agent-wide map of attached P2P sessions, keyed by session name.
 type SessionMap = std::collections::HashMap<String, AttachedSession>;
 
-/// The connection's map of attached sessions, and the reason it is a **std**
+/// The agent's map of attached sessions, and the reason it is a **std**
 /// mutex rather than a `tokio` one (`#961-D`).
 ///
 /// `#961` asks for a stronger thing than "the map lock is usually short": it
@@ -375,7 +376,7 @@ type SessionMap = std::collections::HashMap<String, AttachedSession>;
 /// all.
 type SessionMapLock = std::sync::Mutex<SessionMap>;
 
-/// Take the connection's session map.
+/// Take the agent's shared session map.
 ///
 /// Poisoning is ignored, as in `server::resize`: every section under this lock
 /// is a map operation that cannot leave the map half-written, so a panic
@@ -896,6 +897,8 @@ pub struct AgentServerContext {
 
 pub struct AgentServer {
     tmux_manager: SessionManager,
+    /// Agent-wide P2P lease, retained terminal history and peer fan-out.
+    sessions: Arc<SessionMapLock>,
     file_ops: Arc<FileOps>,
     /// The one mutation lane every peer-to-peer connection of this agent
     /// dispatches into. Built here because the resources its keys name — one
@@ -1053,6 +1056,7 @@ pub(crate) struct P2pRequest<'a> {
     tmux: &'a Arc<SessionManager>,
     sessions: &'a Arc<SessionMapLock>,
     client_id: &'a Arc<Mutex<Option<String>>>,
+    peer_token: &'a Arc<()>,
     outbound: &'a P2pOutbound,
     default_working_dir: &'a str,
     file_ops: &'a Arc<FileOps>,
@@ -1097,6 +1101,7 @@ struct Connection {
     tmux: Arc<SessionManager>,
     sessions: Arc<SessionMapLock>,
     client_id: Arc<Mutex<Option<String>>>,
+    peer_token: Arc<()>,
     outbound: P2pOutbound,
     default_working_dir: String,
     file_ops: Arc<FileOps>,
@@ -1287,6 +1292,7 @@ impl Frame {
             tmux: &connection.tmux,
             sessions: &connection.sessions,
             client_id: &connection.client_id,
+            peer_token: &connection.peer_token,
             outbound: &connection.outbound,
             default_working_dir: &connection.default_working_dir,
             file_ops: &connection.file_ops,
@@ -1630,6 +1636,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                             // (#321 SC4).
                             shared.peers.push(SessionPeer {
                                 client_id: client_id.clone(),
+                                peer_token: Arc::clone(ctx.peer_token),
                                 outbound: ctx.outbound.clone(),
                                 output_tx: if wants_bootstrap {
                                     None
@@ -1720,6 +1727,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 backend: Arc::new(Mutex::new(Box::new(pty_session))),
                                 peers: vec![SessionPeer {
                                     client_id: client_id.clone(),
+                                    peer_token: Arc::clone(ctx.peer_token),
                                     outbound: ctx.outbound.clone(),
                                     output_tx: Some(tx),
                                     detached_for_not_draining: Arc::clone(
@@ -1885,6 +1893,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 backend: Arc::new(Mutex::new(Box::new(session))),
                                 peers: vec![SessionPeer {
                                     client_id: client_id.clone(),
+                                    peer_token: Arc::clone(ctx.peer_token),
                                     outbound: ctx.outbound.clone(),
                                     output_tx: None,
                                     // Control-mode output goes straight to the
@@ -2805,6 +2814,7 @@ impl AgentServer {
 
         Ok(Self {
             tmux_manager,
+            sessions: Arc::new(SessionMapLock::new(SessionMap::new())),
             file_ops,
             mutations: context.mutations,
             shutdown_tx,
@@ -2842,6 +2852,7 @@ impl AgentServer {
         };
 
         let tmux_manager = Arc::new(self.tmux_manager);
+        let sessions = Arc::clone(&self.sessions);
         let file_ops = Arc::clone(&self.file_ops);
         let mutations = Arc::clone(&self.mutations);
         let tls_acceptor = self.tls_acceptor;
@@ -2866,6 +2877,7 @@ impl AgentServer {
                         match accept_result {
                             Ok((stream, addr)) => {
                                 let tmux = Arc::clone(&tmux_manager);
+                                let shared_sessions = Arc::clone(&sessions);
                                 let fops = Arc::clone(&file_ops);
                                 let lanes = Arc::clone(&mutations);
                                 let tls = tls_acceptor.clone();
@@ -2879,7 +2891,7 @@ impl AgentServer {
                                     if let Err(e) =
                                         Self::handle_connection(
                                             stream, addr, tmux, tls, wd, fops, lanes, &la, &aid,
-                                            am, rtx, creds,
+                                            am, rtx, creds, shared_sessions,
                                         )
                                         .await
                                     {
@@ -2923,6 +2935,7 @@ impl AgentServer {
         attach_mode: AttachMode,
         resize: ResizeReporter,
         credentials: Arc<P2pCredentials>,
+        sessions: Arc<SessionMapLock>,
     ) -> Result<()> {
         // Box the underlying stream so that TLS and plain connections
         // share a single WebSocket stream type.
@@ -3011,9 +3024,7 @@ impl AgentServer {
         let (outbound, outbound_rx) = P2pOutbound::new();
         let writer = tokio::spawn(outbound::run_writer(ws_sink, outbound_rx, outbound.clone()));
 
-        // Per-client attached PTY sessions keyed by session name.
-        let sessions: Arc<SessionMapLock> =
-            Arc::new(SessionMapLock::new(std::collections::HashMap::new()));
+        // Session state outlives this socket and is shared by all P2P peers.
         // Per-connection client ID (set during CLIENT_AUTH handshake)
         let client_id: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
 
@@ -3024,6 +3035,7 @@ impl AgentServer {
             tmux: tmux_manager,
             sessions,
             client_id,
+            peer_token: Arc::new(()),
             outbound,
             default_working_dir,
             file_ops,
@@ -3192,19 +3204,40 @@ impl AgentServer {
             connection.outbound.snapshot()
         );
 
-        // Close any tmux sessions that were attached through this
-        // connection so that the underlying tmux attach children are
-        // terminated promptly. Closing also drops the subscriber senders,
-        // stopping each session's broadcast task.
-        //
-        // The map is drained under its lock and the backends are closed outside
-        // it. It used to close them *inside*, so a `close` that takes
-        // milliseconds — it terminates a tmux child — held the connection's
-        // index of sessions for its whole duration (`#961-D`).
-        let drained: Vec<(String, AttachedSession)> = {
-            let mut sessions_guard = sessions_lock(&connection.sessions);
-            sessions_guard.drain().collect()
+        // Retire only this physical connection's peers, not other browser
+        // clients of the same Session. Pointer identity avoids an old socket
+        // deleting its successor when both use the same stable client_id.
+        let (drained, changes) = {
+            let mut guard = sessions_lock(&connection.sessions);
+            let mut changes = Vec::new();
+            let mut empty = Vec::new();
+            for (name, session) in guard.iter_mut() {
+                let before = session.control.controller_client_id.clone();
+                session.peers.retain(|p| !Arc::ptr_eq(&p.peer_token, &connection.peer_token));
+                if let Some(holder) = before.as_ref() {
+                    if !session.peers.iter().any(|p| &p.client_id == holder) {
+                        session.control.release_if_holder(holder);
+                    }
+                }
+                if before != session.control.controller_client_id && !session.peers.is_empty() {
+                    changes.push((session.peers.clone(), TerminalControlChangedPayload {
+                        session_name: name.clone(),
+                        generation: session.control.generation,
+                        controller_client_id: session.control.controller_client_id.clone(),
+                    }));
+                }
+                if session.peers.is_empty() {
+                    empty.push(name.clone());
+                }
+            }
+            let drained = empty.into_iter().filter_map(|name| {
+                guard.remove(&name).map(|session| (name, session))
+            }).collect::<Vec<_>>();
+            (drained, changes)
         };
+        for (peers, changed) in changes {
+            notify_control_changed(&peers, changed).await;
+        }
         for (name, session) in drained {
             if let Err(e) = session.backend.lock().await.close().await {
                 warn!("Error closing session {}: {:#}", name, e);
@@ -3608,6 +3641,7 @@ mod tests {
         let (peer_outbound, _) = P2pOutbound::new();
         let mut peers = vec![SessionPeer {
             client_id: "test-client".to_string(),
+            peer_token: Arc::new(()),
             outbound: peer_outbound,
             output_tx: Some(tx.clone()),
             detached_for_not_draining: Arc::clone(&detached_for_not_draining),
