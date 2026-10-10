@@ -1,6 +1,6 @@
 # Repository Gates
 
-> **Parallel implementation only — no existing execution surface has been switched.**
+> **Incremental cutover** — Git hooks and the `just check`/developer quality aliases route through Gate IDs; workflow-specific setup/deployment and remaining self-test routing are tracked under #1242.
 
 `gates/` is the repository Gate system. Gate IDs are stable kebab-case APIs; a Gate behaves like a test: green is terse, red is exhaustive.
 
@@ -48,4 +48,4 @@ Suite files contain Gate IDs only: no commands, repair prose, changed-file rules
 
 ## Rollout boundary
 
-Legacy repository checks have not been wholesale cut over to Gate suites yet; existing mechanisms remain authoritative for those checks until parity is proven. New deterministic invariants may adopt `gates/run` directly. `instruction-contract` is the first such live Gate: instruction changes run it in pre-commit and Quality Gate while the broader legacy migration remains incremental.
+Hooks route changed-file Gate ID sets into `gates/run`. The canonical Rust CI quality recipe `just check` runs the `quality-rust` suite, including its original Acceptance runtime and Cases checks. Workflow-specific setup/deployment and remaining tooling self-tests are separate migration work; they must not be removed until parity is proven. Use `just gate <id>`, `just gates <suite>`, or `./gates/run <ids...>`.
