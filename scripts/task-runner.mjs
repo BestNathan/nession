@@ -3,12 +3,12 @@
 
 // Trusted main-owned one-off Task contract. Task code is untrusted; this process
 // must run with read-only GitHub permissions and without project secrets.
-const assert = require('node:assert/strict');
-const crypto = require('node:crypto');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-const { execFileSync, spawnSync } = require('node:child_process');
+import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { execFileSync, spawnSync } from 'node:child_process';
 
 const SHA = /^[0-9a-f]{40}$/;
 const ID = /^[a-z0-9][a-z0-9-]{2,63}$/;
