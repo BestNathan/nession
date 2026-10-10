@@ -302,24 +302,23 @@ async fn wait_for_discovered_session(
                         .pointer("/payload/agents")
                         .and_then(serde_json::Value::as_array);
                     if let Some(agents) = agents_list {
-                        agent_registration = agents
-                            .iter()
-                            .find(|agent| {
-                                agent.get("agent_id").and_then(serde_json::Value::as_str)
-                                    == Some(agent_id)
-                            })
-                            .map(|agent| {
-                                format!(
-                                    "status={}, session_count={}, active_sessions={}, heartbeat={}",
-                                    agent.get("status").unwrap_or(&serde_json::Value::Null),
-                                    agent.get("session_count").unwrap_or(&serde_json::Value::Null),
-                                    agent
-                                        .get("active_sessions")
-                                        .unwrap_or(&serde_json::Value::Null),
-                                    agent.get("last_heartbeat").unwrap_or(&serde_json::Value::Null),
-                                )
-                            })
-                            .unwrap_or_else(|| "not registered".to_string());
+                        let registered_agent = agents.iter().find(|agent| {
+                            agent.get("agent_id").and_then(serde_json::Value::as_str)
+                                == Some(agent_id)
+                        });
+                        if let Some(agent) = registered_agent {
+                            agent_registration = format!(
+                                "status={}, session_count={}, active_sessions={}, heartbeat={}",
+                                agent.get("status").unwrap_or(&serde_json::Value::Null),
+                                agent.get("session_count").unwrap_or(&serde_json::Value::Null),
+                                agent
+                                    .get("active_sessions")
+                                    .unwrap_or(&serde_json::Value::Null),
+                                agent.get("last_heartbeat").unwrap_or(&serde_json::Value::Null),
+                            );
+                        } else {
+                            agent_registration = "not registered".to_string();
+                        }
                     } else {
                         agent_registration = format!(
                             "invalid agent list reply: {}",
