@@ -317,6 +317,11 @@ async fn wait_for_discovered_session(
                 Err(_) => agent_registration = "query timed out".to_string(),
             }
         }
+        // The agent lookup may have consumed the remaining budget.
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            continue;
+        }
         let request = msg(
             "server.session.list",
             &format!("discovery-{attempts}"),
