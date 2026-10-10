@@ -1070,7 +1070,7 @@ fn parse_agent_sessions(
         .unwrap_or_default()
 }
 
-pub(crate) use routes::{server_descriptors, unit_policy, SERVER_WIRES};
+pub(crate) use routes::{dispatch_server, server_descriptors, unit_policy, SERVER_WIRES};
 #[cfg(test)]
 use routes::{env_file_key, session_by_id, session_by_parts};
 
