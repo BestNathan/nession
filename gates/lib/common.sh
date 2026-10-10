@@ -92,11 +92,26 @@ gate_require_env() {
   fi
 }
 
+# Exit 1 is the conventional invariant-failed result. Cargo tests use 101 for
+# failed assertions. Other statuses (including 2, 126 and 127) mean the
+# command could not prove its invariant and must not be reported as a FAIL.
+# Adapters with different documented exit semantics must classify explicitly.
 gate_run_invariant() {
+  local status=0
   if "$@"; then
     return 0
+  else
+    status=$?
   fi
-  gate_invariant_failure "$GATE_FAILURE" "$GATE_REPAIR"
+  case "$status" in
+    1|101)
+      gate_invariant_failure "$GATE_FAILURE" "$GATE_REPAIR"
+      ;;
+    *)
+      gate_runtime_error "gate command exited with status ${status}; the invariant could not be proven" \
+        "repair the command/tooling failure shown in output, then rerun the exact gate"
+      ;;
+  esac
 }
 
 _gate_print_detail() {

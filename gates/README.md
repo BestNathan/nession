@@ -34,7 +34,11 @@ Successful command output is buffered/discarded and prints one line. FAIL/ERROR 
 
 Every `checks/<id>.sh` declares `GATE_ID`, `GATE_NAME`, `GATE_COMMAND`, `GATE_SUCCESS`, `GATE_FAILURE`, `GATE_REPAIR`, `GATE_OWNER`, and `gate_check`. Filename stem and `GATE_ID` must match exactly.
 
-Known prerequisites use `gate_require_command`, `gate_require_path`, or `gate_require_env`. Missing tooling/context is ERROR, never a green skip.
+Known prerequisites use `gate_require_command`, `gate_require_path`, or `gate_require_env`. Missing tooling/context is ERROR, never a green skip. For the shared `gate_run_invariant`
+helper, exit 1 (and cargo test's exit 101) means an invariant FAIL; other
+nonzero statuses mean ERROR/unproven. Adapters whose command has different
+exit semantics must classify explicitly; they must not blindly map all
+nonzero subprocess statuses to an invariant failure.
 
 `./gates/run --validate` verifies executability, filename/ID identity, required metadata, suite syntax and suite references. The runner avoids Bash 4-only features so it works with macOS Bash 3.2.
 
