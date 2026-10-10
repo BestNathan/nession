@@ -1,7 +1,10 @@
 //! One versioned Server Protocol Unit.
 //! Route identity, version and execution policy are owned by routes.rs.
 
-use super::{info, json, ConnectionHandler, ProtocolMessage, HandlerAction, session_kill_reply, WebSessionKillResponse, ClientSessionKillPayload, AgentStatus, Duration};
+use super::{
+    info, json, session_kill_reply, AgentStatus, ClientSessionKillPayload, ConnectionHandler,
+    Duration, HandlerAction, ProtocolMessage, WebSessionKillResponse,
+};
 
 impl ConnectionHandler {
     /// Handle `server.session.kill` — kill a session on its agent.

@@ -1,7 +1,11 @@
 //! One versioned Server Protocol Unit.
 //! Route identity, version and execution policy are owned by routes.rs.
 
-use super::{info, json, ConnectionHandler, ProtocolMessage, HandlerAction, relay_begin_reply, SessionRefusal, ClientRelayBeginPayload, AgentStatus, AddressStatus, CredentialScope, P2pGrantPayload, Message, current_timestamp, agent_url_with_credential};
+use super::{
+    agent_url_with_credential, current_timestamp, info, json, relay_begin_reply, AddressStatus,
+    AgentStatus, ClientRelayBeginPayload, ConnectionHandler, CredentialScope, HandlerAction,
+    Message, P2pGrantPayload, ProtocolMessage, SessionRefusal,
+};
 
 impl ConnectionHandler {
     /// Handle `server.session.relay.begin` — Phase 2 of relay attach.

@@ -1,7 +1,10 @@
 //! One versioned Server Protocol Unit.
 //! Route identity, version and execution policy are owned by routes.rs.
 
-use super::{json, ConnectionHandler, ProtocolMessage, HandlerAction, session_env_reply, ClientSessionEnvResponsePayload, ClientSessionEnvUnsetPayload, reply_json};
+use super::{
+    json, reply_json, session_env_reply, ClientSessionEnvResponsePayload,
+    ClientSessionEnvUnsetPayload, ConnectionHandler, HandlerAction, ProtocolMessage,
+};
 
 impl ConnectionHandler {
     /// Handle `server.session.env.unset` — remove attach-time env files from a

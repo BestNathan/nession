@@ -1,7 +1,11 @@
 //! One versioned Server Protocol Unit.
 //! Route identity, version and execution policy are owned by routes.rs.
 
-use super::{info, json, ConnectionHandler, ProtocolMessage, HandlerAction, ClientSessionCreateResponsePayload, session_create_reply, ClientSessionCreatePayload, AgentStatus, Duration};
+use super::{
+    info, json, session_create_reply, AgentStatus, ClientSessionCreatePayload,
+    ClientSessionCreateResponsePayload, ConnectionHandler, Duration, HandlerAction,
+    ProtocolMessage,
+};
 
 impl ConnectionHandler {
     /// Handle `server.session.create` — create a new session on a target agent.

@@ -1,7 +1,10 @@
 //! One versioned Server Protocol Unit.
 //! Route identity, version and execution policy are owned by routes.rs.
 
-use super::{json, ConnectionHandler, ProtocolMessage, HandlerAction, session_env_query_reply, SessionEnvQueryResponse, ClientSessionEnvQueryPayload};
+use super::{
+    json, session_env_query_reply, ClientSessionEnvQueryPayload, ConnectionHandler, HandlerAction,
+    ProtocolMessage, SessionEnvQueryResponse,
+};
 
 impl ConnectionHandler {
     /// Handle `server.session.env.query` — ask the agent which env files are
