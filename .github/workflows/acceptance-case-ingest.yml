@@ -93,7 +93,7 @@ jobs:
           EOF
           fi
 
-      - name: Append compact immutable records
+      - name: Append compact immutable records and SHA indexes
         if: steps.records.outputs.count != '0'
         env:
           SOURCE_WORKFLOW_URL: ${{ github.event.workflow_run.html_url }}
@@ -102,21 +102,48 @@ jobs:
           set -euo pipefail
           while IFS=$'\t' read -r source durable_path; do
             destination="results-repo/${durable_path}"
-            if [[ -e "${destination}" ]]; then
-              echo "immutable acceptance record already exists: ${durable_path}" >&2
-              exit 1
-            fi
             mkdir -p "$(dirname "${destination}")"
+            candidate="$(mktemp)"
             node trusted/scripts/acceptance-case-ingest.mjs enrich \
-              "${source}" "${destination}" "${SOURCE_WORKFLOW_URL}" "${durable_path}" "${GITHUB_EVENT_PATH}"
-            node trusted/scripts/acceptance-case-ingest.mjs validate "${destination}" >/dev/null
+              "${source}" "${candidate}" "${SOURCE_WORKFLOW_URL}" "${durable_path}" "${GITHUB_EVENT_PATH}"
+            node trusted/scripts/acceptance-case-ingest.mjs validate "${candidate}" >/dev/null
+            if [[ -e "${destination}" ]]; then
+              cmp -s "${destination}" "${candidate}" || {
+                echo "::error::Immutable Case collision with divergent bytes: ${durable_path}" >&2
+                exit 1
+              }
+              rm -f "${candidate}"
+            else
+              mv "${candidate}" "${destination}"
+            fi
+            index_candidate="$(mktemp)"
+            index_path="$(node trusted/scripts/acceptance-case-ingest.mjs index "${destination}" "${index_candidate}")"
+            [[ "${index_path}" =~ ^indexes/by-sha/[a-f0-9]{40}/acceptance/[0-9]+-[0-9]+-[0-9]+-SC-[0-9]+\.json$ ]] || {
+              echo "::error::Unsafe Case index path" >&2
+              exit 1
+            }
+            index_destination="results-repo/${index_path}"
+            mkdir -p "$(dirname "${index_destination}")"
+            if [[ -e "${index_destination}" ]]; then
+              cmp -s "${index_destination}" "${index_candidate}" || {
+                echo "::error::Immutable Case SHA index collision: ${index_path}" >&2
+                exit 1
+              }
+              rm -f "${index_candidate}"
+            else
+              mv "${index_candidate}" "${index_destination}"
+            fi
             printf '%s\n' "${durable_path}" >> "${RUNNER_TEMP}/persisted-records.txt"
           done < "${RUNNER_TEMP}/records-to-ingest.tsv"
 
-          git -C results-repo add README.md runs/
-          git -C results-repo commit -m "acceptance: ingest run ${{ github.event.workflow_run.id }} attempt ${{ github.event.workflow_run.run_attempt }}"
-          git -C results-repo push origin acceptance-results
-
+          git -C results-repo add -A -- runs indexes
+          if [[ -f results-repo/README.md ]]; then git -C results-repo add README.md; fi
+          if git -C results-repo diff --cached --quiet; then
+            echo "Idempotent Case ingestion retry: identical durable record and index bytes"
+          else
+            git -C results-repo commit -m "acceptance: ingest run ${{ github.event.workflow_run.id }} attempt ${{ github.event.workflow_run.run_attempt }}"
+            git -C results-repo push origin acceptance-results
+          fi
       - name: Project only currently eligible results
         if: steps.records.outputs.count != '0'
         env:

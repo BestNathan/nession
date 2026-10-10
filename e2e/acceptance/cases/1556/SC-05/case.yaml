@@ -1,0 +1,9 @@
+schema_version: 1
+issue: 1556
+criterion: SC-05
+stage: staging
+runtime: full-stack-local
+verifiers:
+  - type: runtime
+    entry: verify.js
+result_policy: all-pass

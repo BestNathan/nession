@@ -52,6 +52,7 @@ jobs:
           ./gates/run agent-workflow-telemetry
           node scripts/requirement-acceptance.mjs self-test
           node scripts/acceptance-case-ingest.mjs self-test
+          node scripts/run-record-artifact-evidence.mjs self-test
           node scripts/acceptance-ci-evidence.mjs self-test
           node scripts/trusted-case-discovery-selftest.mjs
           node scripts/e2e-run-ingest.mjs self-test
@@ -62,7 +63,7 @@ jobs:
           node scripts/issue-contract.mjs self-test
           node scripts/task-runner.mjs self-test
           node scripts/task-result-ingest.mjs self-test
-          node acceptance/verifiers/browser-report.mjs self-test
+          node e2e/runner/drivers/browser-report.mjs self-test
           node e2e/runner/runtime/full-stack.js self-test
           node e2e/runner/cli-selftest.mjs
           node e2e/scenarios/terminal-attach-resume/reproduce.cjs --self-test

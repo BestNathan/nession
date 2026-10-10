@@ -221,6 +221,9 @@ jobs:
           cd ..
           cargo build -p nession-server -p nession-agent
 
+      # Runtime/Protocol verifiers may invoke a real Browser/Terminal Scenario
+      # transitively. Each such Case must explicitly declare a Browser verifier;
+      # only the trusted selector may request browser runtime installation.
       - name: Install browser verifier runtime
         if: steps.select.outputs.needs_browser == 'true'
         run: |
@@ -238,21 +241,15 @@ jobs:
         run: |
           set -uo pipefail
           failed=0
-          while IFS=$'\t' read -r issue criterion; do
+          while read -r issue criterion profile; do
             output="${RUNNER_TEMP}/acceptance-case-results/${issue}-${criterion}.case.json"
-            node workspace/acceptance/run-case.mjs \
-              --repo-root workspace \
-              --issue-json "${RUNNER_TEMP}/acceptance-contracts/${issue}.json" \
-              --issue "${issue}" \
-              --criterion "${criterion}" \
-              --stage "${ACCEPTANCE_STAGE}" \
-              --target-sha "${TARGET_SHA}" \
-              --run-id "${GITHUB_RUN_ID}" \
-              --run-attempt "${GITHUB_RUN_ATTEMPT}" \
-              --output "${output}" || failed=1
-          done < <(jq -r '.[] | [.issue, .criterion] | @tsv' "${RUNNER_TEMP}/selected-cases.json")
+            # The trusted selector stays here; the canonical CLI owns dispatch.
+            args=(acceptance --issue-json "${RUNNER_TEMP}/acceptance-contracts/${issue}.json")
+            args+=(--issue "${issue}" --sc "${criterion}" --stage "${ACCEPTANCE_STAGE}")
+            args+=(--sha "${TARGET_SHA}" --profile "${profile}" --output "${output}")
+            node workspace/e2e/run "${args[@]}" || failed=1
+          done < <(jq -r '.[] | [.issue, .criterion, .runtime] | @tsv' "${RUNNER_TEMP}/selected-cases.json")
           exit "${failed}"
-
       - name: Enforce Case coverage without suppressing executed Case evidence
         if: always() && steps.select.outcome == 'success'
         run: |
@@ -280,7 +277,7 @@ jobs:
         with:
           name: acceptance-case-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            workspace/acceptance/verifiers/test-results/
+            workspace/e2e/runner/drivers/test-results/
             workspace/e2e/test-results/
           if-no-files-found: warn
           retention-days: 90

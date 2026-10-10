@@ -146,6 +146,18 @@ try {
   fs.rmSync(root, { recursive: true, force: true });
 }
 
+// Canonical Driver self-tests must keep their actual relocation in the gate.
+ok(() => {
+  assert.equal(fs.existsSync(path.join(process.cwd(), 'acceptance', 'verifiers')), false,
+    'old verifier driver directory must not survive canonical migration');
+  const moved = path.join(process.cwd(), 'e2e', 'runner', 'drivers', 'browser-report.mjs');
+  const run = spawnSync(process.execPath, [moved, 'self-test'], {
+    cwd: process.cwd(), encoding: 'utf8', timeout: 5000,
+  });
+  assert.equal(run.status, 0, 'relocated Driver contract failed: ' + run.stderr);
+  assert.match(run.stdout, /11 positive\/negative fixtures passed/);
+});
+
 // Real source Case discovery is part of the mandatory canonical contract.
 const repoRoot = path.resolve(process.cwd());
 const canonicalRoot = path.join(repoRoot, 'e2e', 'acceptance', 'cases');
@@ -154,6 +166,26 @@ ok(() => {
     'legacy Case tree must not survive canonical source migration');
   const discovered = discoverCases(canonicalRoot);
   assert.ok(discovered.length >= 12, 'canonical Case discovery must never silently be empty');
+  const sharedScenario = path.join(repoRoot,'e2e','acceptance','shared','terminal-scenario-evidence.cjs');
+  const sharedResult = spawnSync(process.execPath,['--check',sharedScenario],{
+    cwd:repoRoot,encoding:'utf8',timeout:5000,
+  });
+  assert.equal(sharedResult.status,0,
+    'shared Terminal Scenario Case helper syntax invalid: '+sharedResult.stderr);
+  // Guard syntax of every in-tree JavaScript verifier before stage execution.
+  // A malformed new Case must fail the PR gate rather than fail only on push.
+  for (const item of discovered) {
+    for (const verifier of item.manifest.verifiers) {
+      if (!/\.(?:cjs|mjs|js)$/.test(verifier.entry)) continue;
+      const file = path.join(item.dir, verifier.entry);
+      const result = spawnSync(process.execPath, ['--check', file], {
+        cwd: repoRoot, encoding: 'utf8', timeout: 5000,
+      });
+      assert.equal(result.status, 0,
+        'Case verifier syntax invalid: ' + item.manifest.issue + '/' +
+        item.manifest.criterion + '/' + verifier.entry + ': ' + result.stderr);
+    }
+  }
 });
 ok(() => {
   const verifier = path.join(canonicalRoot, '1520', 'SC-04', 'verify.js');
@@ -163,4 +195,40 @@ ok(() => {
   assert.equal(result.status, 0, 'staging merge parent parser self-test failed: ' + result.stderr);
   assert.match(result.stdout, /raw-object proof self-test passed/);
 });
+// Canonical manifest type=browser is the trusted dependency declaration.
+// A runtime Case invoking the Terminal Scenario transitively must list a real
+// Browser verifier, so the main-owned Case selector provisions Playwright.
+ok(() => {
+  const workflow = fs.readFileSync(path.join(repoRoot, '.github', 'workflows',
+    'acceptance-cases.yml'), 'utf8');
+  assert.match(workflow,
+    /- name: Install browser verifier runtime\s+if: steps\.select\.outputs\.needs_browser == 'true'/);
+  assert.match(workflow,
+    /- name: Install browser verifier runtime[\s\S]*?cd workspace\/e2e\s+npm ci\s+npx playwright install chromium --with-deps/);
+  assert.match(workflow, /needs_browser: verifiers\.some\(\(item\) => item\.type === 'browser'\)/);
+  for (const n of ['01','02','03','04']) {
+    const caseDir = path.join(canonicalRoot, '1498', 'SC-' + n);
+    const item = discoverCases(canonicalRoot).find(x =>
+      x.manifest.issue === 1498 && x.manifest.criterion === 'SC-' + n);
+    assert.ok(item, 'missing staged Scenario Case SC-' + n);
+    assert.ok(item.manifest.verifiers.some(v => v.type === 'browser'),
+      'SC-' + n + ' must declare real Playwright dependency');
+    assert.ok(fs.existsSync(path.join(caseDir, 'verify.spec.js')));
+  }
+});
+
+// The PR's check-run head SHA must also be the SHA actually checked out
+// when a protocol/browser Case produces provenance. GitHub's default PR
+// merge-ref checkout has a different SHA and cannot prove that invariant.
+ok(() => {
+  const smoke = fs.readFileSync(path.join(repoRoot, '.github', 'workflows',
+    'acceptance-case-smoke.yml'), 'utf8');
+  assert.ok(smoke.includes('branches: [staging, main]'),
+    'main-target promotions must run real source Case Smoke');
+  assert.ok(smoke.includes('ref: ${{ github.event.pull_request.head.sha || github.sha }}'),
+    'Case Smoke must execute exact source head, not synthetic PR merge SHA');
+  assert.match(smoke, /persist-credentials: false/,
+    'untrusted verifier code must not inherit checkout write credentials');
+});
+
 console.log('acceptance Case self-test: ' + cases + ' cases passed');
