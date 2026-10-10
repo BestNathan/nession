@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_scenario_observation",
+  "mode": "scenario",
+  "scenario": "terminal-attach-resume",
+  "target_sha": "7bee7fdeff62434c28107667472132f456f383e6",
+  "scenario_revision": "7bee7fdeff62434c28107667472132f456f383e6",
+  "run_id": 38020681044,
+  "run_attempt": 1,
+  "run_index": 1,
+  "status": "Completed",
+  "evaluation": null,
+  "started_at": "2026-10-10T03:31:55.918Z",
+  "finished_at": "2026-10-10T03:32:06.849Z",
+  "config_sha256": "02570e8ea79bef27b3596233d77e63cada084f43a56f2e11df811513f96f8826",
+  "config": {
+    "generated_lines": 240,
+    "samples_max": 12,
+    "transport": "Relay",
+    "reload": true
+  },
+  "observation_count": 3,
+  "observations": [
+    {
+      "at": "2026-10-10T03:32:06.153Z",
+      "stage": "before-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 241,
+        "viewport": {
+          "baseY": 210,
+          "viewportY": 210
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "05fcceaa4b395029740a3aac35913038ec8c7ad81f570b4f49ca5a38b4b64127",
+        "bytes": 9572
+      }
+    },
+    {
+      "at": "2026-10-10T03:32:06.322Z",
+      "stage": "after-reload",
+      "browser": {
+        "mounted": false,
+        "marker_count": 0,
+        "viewport": null
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "05fcceaa4b395029740a3aac35913038ec8c7ad81f570b4f49ca5a38b4b64127",
+        "bytes": 9572
+      }
+    },
+    {
+      "at": "2026-10-10T03:32:06.781Z",
+      "stage": "after-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 241,
+        "viewport": {
+          "baseY": 210,
+          "viewportY": 210
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "05fcceaa4b395029740a3aac35913038ec8c7ad81f570b4f49ca5a38b4b64127",
+        "bytes": 9572
+      }
+    }
+  ],
+  "privacy": "whitelisted counters/timestamps/digests only; no terminal bytes",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 38020681044,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/1556-staging-acceptance-cases",
+    "target_sha": "7bee7fdeff62434c28107667472132f456f383e6",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/38020681044",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "0ba41eab7e18d0c1fd3f1d7c14ba2b01d44cef322dd59ea4d1f83dc805aecbcc"
+  },
+  "evidence": {
+    "provider": "github-actions-artifact",
+    "artifact_name": "e2e-terminal-scenario-38020681044-1",
+    "sha256": "0ba41eab7e18d0c1fd3f1d7c14ba2b01d44cef322dd59ea4d1f83dc805aecbcc",
+    "retention_days": 14,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/38020681044",
+    "durability": "time-limited; object archival not configured"
+  },
+  "execution_id": "32b3d1a19f6d86f49ef9b7831ffded4a24196844cc8b7fbb7a1b37e290de31c5"
+}

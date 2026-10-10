@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 38020681044,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/1556-staging-acceptance-cases",
+    "target_sha": "7bee7fdeff62434c28107667472132f456f383e6",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/38020681044",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "0ba41eab7e18d0c1fd3f1d7c14ba2b01d44cef322dd59ea4d1f83dc805aecbcc"
+  },
+  "record": "runs/2026-10-10/38020681044-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "32b3d1a19f6d86f49ef9b7831ffded4a24196844cc8b7fbb7a1b37e290de31c5"
+}
