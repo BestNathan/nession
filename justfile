@@ -137,10 +137,7 @@ check-acceptance-cases:
 # the spelling every reply carried. One wire per operation removed it (#953): a
 # reply carries its request's own name and is correlated by `id`.
 check-protocol:
-    ./gates/run protocol-integrity
-    ./gates/run server-handler-locality
-    node scripts/server-handler-locality.mjs --self-test
-    node scripts/server-handler-concurrency-selftest.mjs
+    ./gates/run protocol-integrity server-handler-locality server-handler-locality-selftest server-handler-concurrency-selftest
 
 # Every name a call site may use — units, wires, notifications and control.
 protocol-list:
