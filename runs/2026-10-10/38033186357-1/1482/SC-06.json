@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "62a75bf6958e1b8e30faa0618c2b88dcf01312c2bb900adc3a56e26dc6030553",
+  "run_id": 38033186357,
+  "run_attempt": 1,
+  "issue": 1482,
+  "criterion": "SC-06",
+  "criterion_text": ": Terminal uses the canonical inset variable and follow-mode E2E proves the last line is fully visible above Capsule; history/follow and layout transitions are covered.",
+  "stage": "staging",
+  "target_sha": "53ca6d4266188e2cd78a3446904f3171add4e854",
+  "contract_sha256": "12919e0980a6f1c7fd92c8133aa5bd28c94a04cb19ad5be84552998136e8952e",
+  "case_revision": "53ca6d4266188e2cd78a3446904f3171add4e854",
+  "case_tree_sha": "9b2eadfb792c6dab4490048c6e1f7cbc775e4e83",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-10T07:07:44.579Z",
+  "finished_at": "2026-10-10T07:07:56.549Z",
+  "duration_ms": 11970,
+  "verifiers": [
+    {
+      "type": "browser",
+      "entry": "verify.spec.js",
+      "result": "Pass",
+      "summary": "Playwright JSON confirms executed passing tests and assertions with no skips (2 recovered assertion retries)",
+      "evidence": [
+        {
+          "type": "browser",
+          "value": "Playwright discovered=1 passed=1 skipped=0 assertions=32"
+        },
+        {
+          "type": "browser-geometry",
+          "value": "sha=53ca6d4266188e2cd78a3446904f3171add4e854 web:inset=56.4,gridBottom=838.0,cursorBottom=838.0,capsuleTop=844.0; history:inset=0.0,gridBottom=838.0,cursorBottom=838.0,capsuleTop=844.0; restored:inset=56.4,gridBottom=838.0,cursorBottom=838.0,capsuleTop=844.0; app:inset=68.4,gridBottom=769.0,cursorBottom=85.0,capsuleTop=776.0; compactApp:inset=68.4,gridBottom=598.0,cursorBottom=85.0,capsuleTop=599.0; webRestored:inset=56.4,gridBottom=838.0,cursorBottom=38.0,capsuleTop=844.0"
+        }
+      ],
+      "execution": {
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 32
+      },
+      "duration_ms": 6053,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 38033186357,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "53ca6d4266188e2cd78a3446904f3171add4e854",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/38033186357",
+    "record_path": "runs/2026-10-10/38033186357-1/1482/SC-06.json",
+    "source_result_sha256": "3d540702d2b29fd7bc4b6f7dd9c7ef2b924c043a7515015dd67e560e2084eac0"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-38033186357-1",
+    "sha256": "3d540702d2b29fd7bc4b6f7dd9c7ef2b924c043a7515015dd67e560e2084eac0",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/38033186357",
+    "durability": "time-limited; object archival not configured"
+  }
+}
