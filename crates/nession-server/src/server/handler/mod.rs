@@ -441,9 +441,6 @@ impl ConnectionHandler {
         Ok(HandlerAction::Reply(None))
     }
 
-
-
-
     /// Push the current session list to every connected web client.
     ///
     /// Called after any mutation so browsers don't have to poll or wait for a
@@ -453,12 +450,6 @@ impl ConnectionHandler {
             .broadcast_sessions_changed(Arc::clone(&self.session_registry))
             .await;
     }
-
-
-
-
-
-
 
     /// Query online agents for their live tmux sessions and rebuild the
     /// registry from the answers. Scoped to `only_agent` when given.
@@ -526,16 +517,6 @@ impl ConnectionHandler {
 
         stale
     }
-
-
-
-
-
-
-
-
-
-
 
     // ========================================================================
     // Environment-variable file management
@@ -636,10 +617,6 @@ impl ConnectionHandler {
         }
     }
 
-
-
-
-
     /// Resolve a set of env-file references into snapshots, capturing content at
     /// this moment (snapshot semantics). Server files are read locally; agent
     /// files are fetched from the owning agent. Missing files produce an error.
@@ -727,15 +704,7 @@ impl ConnectionHandler {
         }
     }
 
-
-
-
-
     // ── Quick Commands (issue #95, part 3) ───────────────────────────
-
-
-
-
 }
 
 /// Build a `HandlerAction::Reply` with a standard protocol envelope.

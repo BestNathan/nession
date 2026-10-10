@@ -542,10 +542,9 @@ async fn a_rename_reply_carries_the_manifest_and_the_image_tag() {
         .unwrap();
     let payload = parse_reply(action)["payload"].clone();
 
-    let parsed: AgentRenameReply = serde_json::from_value(payload.clone())
-        .unwrap_or_else(|e| {
-            panic!("server.agent.rename replies {payload} but its contract does not accept it: {e}")
-        });
+    let parsed: AgentRenameReply = serde_json::from_value(payload.clone()).unwrap_or_else(|e| {
+        panic!("server.agent.rename replies {payload} but its contract does not accept it: {e}")
+    });
     let AgentRenameReply::Renamed(reply) = parsed else {
         panic!("a rename of a registered agent is not a refusal: {payload}");
     };
@@ -2233,9 +2232,7 @@ async fn env_delete_reply_and_request_are_what_their_contract_says() {
     let payload = parse_reply(action)["payload"].clone();
     let parsed: ClientEnvDeleteResponsePayload = serde_json::from_value(payload.clone())
         .unwrap_or_else(|e| {
-            panic!(
-                "server.env.delete replies {payload} but its contract does not accept it: {e}"
-            )
+            panic!("server.env.delete replies {payload} but its contract does not accept it: {e}")
         });
     assert!(!parsed.success);
     assert!(parsed.error.is_some(), "an unauthenticated delete says why");
@@ -2261,8 +2258,8 @@ async fn session_list_reply_is_what_its_contract_says_it_is() {
         .await
         .unwrap();
     let payload = parse_reply(action)["payload"].clone();
-    let parsed: ServerSessionListReply = serde_json::from_value(payload.clone())
-        .unwrap_or_else(|e| {
+    let parsed: ServerSessionListReply =
+        serde_json::from_value(payload.clone()).unwrap_or_else(|e| {
             panic!("server.session.list replies {payload} but its contract does not accept it: {e}")
         });
     assert!(
@@ -2277,8 +2274,8 @@ async fn session_list_reply_is_what_its_contract_says_it_is() {
         .await
         .unwrap();
     let payload = parse_reply(action)["payload"].clone();
-    let parsed: ServerSessionListReply = serde_json::from_value(payload.clone())
-        .unwrap_or_else(|e| {
+    let parsed: ServerSessionListReply =
+        serde_json::from_value(payload.clone()).unwrap_or_else(|e| {
             panic!("server.session.list replies {payload} but its contract does not accept it: {e}")
         });
     assert!(matches!(parsed, ServerSessionListReply::Listed(_)));
@@ -2298,8 +2295,8 @@ async fn session_kill_reply_is_what_its_contract_says_it_is() {
         .await
         .unwrap();
     let payload = parse_reply(action)["payload"].clone();
-    let parsed: WebSessionKillResponse = serde_json::from_value(payload.clone())
-        .unwrap_or_else(|e| {
+    let parsed: WebSessionKillResponse =
+        serde_json::from_value(payload.clone()).unwrap_or_else(|e| {
             panic!("server.session.kill replies {payload} but its contract does not accept it: {e}")
         });
     assert!(!parsed.success);
@@ -2940,10 +2937,8 @@ async fn agent_terminal_resize_broadcasts_to_attached_clients() {
     let msg1 = rx1.try_recv().unwrap();
     let msg2 = rx2.try_recv().unwrap();
 
-    let parsed1: serde_json::Value =
-        serde_json::from_str(msg1.message.to_text().unwrap()).unwrap();
-    let parsed2: serde_json::Value =
-        serde_json::from_str(msg2.message.to_text().unwrap()).unwrap();
+    let parsed1: serde_json::Value = serde_json::from_str(msg1.message.to_text().unwrap()).unwrap();
+    let parsed2: serde_json::Value = serde_json::from_str(msg2.message.to_text().unwrap()).unwrap();
 
     assert_eq!(parsed1["msg_type"], "terminal.resize");
     assert_eq!(parsed1["payload"]["session_id"], "a1:dev");

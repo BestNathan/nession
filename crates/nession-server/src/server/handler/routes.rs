@@ -131,4 +131,3 @@ server_routes!(handler, msg, payload;
     "server.commands.remove" => "server.commands.remove" => 1 => Inline => handler.handle_client_commands_remove(msg).await,
     "server.commands.update" => "server.commands.update" => 1 => Inline => handler.handle_client_commands_update(msg).await,
 );
-
