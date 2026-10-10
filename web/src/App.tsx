@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { createContext, useContext, useMemo, useRef } from 'react';
 import {
   createHashRouter,
   RouterProvider,
@@ -11,6 +11,7 @@ import { FixtureApp } from './app/fixture/FixtureApp';
 import { FixtureShell } from './app/fixture/FixtureShell';
 import { FixtureWorkspace } from './app/fixture/FixtureWorkspace';
 import { Shell } from './app/Shell';
+import type { WebSocketService, ConnectionState } from '@/platform/socket';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 
@@ -28,6 +29,25 @@ function ReconnectingShell() {
   );
 }
 
+interface LiveShellConnection {
+  wsService: WebSocketService | null;
+  connectionStatus: ConnectionState;
+  onRetry: () => void;
+}
+
+const LiveShellContext = createContext<LiveShellConnection | null>(null);
+
+/** Router elements are stable across transport changes; Shell owns the durable work surface. */
+function ConnectedShell() {
+  const connection = useContext(LiveShellContext);
+  if (!connection?.wsService) { return null; }
+  return (
+    <WebSocketContext.Provider value={connection.wsService}>
+      <Shell connectionStatus={connection.connectionStatus} onRetry={connection.onRetry} />
+    </WebSocketContext.Provider>
+  );
+}
+
 function App() {
   const {
     connectionStatus,
@@ -38,9 +58,15 @@ function App() {
     setServerUrl,
     handleConnect,
     handleDisconnect,
+    handleRetry,
     isAuthenticated,
     isRestoringSession,
   } = useAppConnection();
+
+  // A foreground reconnect never leaves this router or remounts the Terminal.
+  const enteredShell = useRef(false);
+  if (isAuthenticated) { enteredShell.current = true; }
+  if (!wsService) { enteredShell.current = false; }
 
   const loginRouter = useMemo(
     () => createHashRouter([
@@ -73,9 +99,7 @@ function App() {
       {
         path: '/',
         element: (
-          <WebSocketContext.Provider value={wsService!}>
-            <Shell connectionStatus={connectionStatus} />
-          </WebSocketContext.Provider>
+          <ConnectedShell />
         ),
         children: [
           { index: true, element: null },
@@ -84,14 +108,21 @@ function App() {
         ],
       },
     ]),
-    [connectionStatus, wsService],
+    [],
   );
 
-  if (isRestoringSession) {
+  // Only the very first auth/reload may show the boot placeholder. A Session
+  // that entered Shell must remain mounted during reconnect and exhaustion.
+  if (isRestoringSession && !enteredShell.current) {
     return <ReconnectingShell />;
   }
 
-  return <RouterProvider router={isAuthenticated ? appRouter : loginRouter} />;
+  const showShell = wsService !== null && (isAuthenticated || enteredShell.current);
+  return (
+    <LiveShellContext.Provider value={{ wsService, connectionStatus, onRetry: handleRetry }}>
+      <RouterProvider router={showShell ? appRouter : loginRouter} />
+    </LiveShellContext.Provider>
+  );
 }
 
 export default App;

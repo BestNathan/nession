@@ -14,6 +14,7 @@ import { terminalServerApi } from '@/product/terminal';
 import { getToken, setToken, clearToken, getRememberPreference } from './auth';
 import { getOrCreateClientId } from '../platform/socket/clientId';
 import { useVisibilityReconnect } from './useVisibilityReconnect';
+import { sessionRuntimeRegistry } from '@/platform/session-runtime/SessionRuntimeRegistry';
 
 const DEFAULT_SERVER_URL = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws`;
 
@@ -34,6 +35,13 @@ const SERVER_PLUGINS = [
   gitApi,
   terminalServerApi,
 ];
+
+class AuthenticationRejectedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AuthenticationRejectedError';
+  }
+}
 
 export function useAppConnection() {
   const params = new URLSearchParams(window.location.search);
@@ -91,7 +99,7 @@ export function useAppConnection() {
           .request<AuthResponse>(AUTH_WIRE, { auth_token: authToken, client_id: clientId })
           .then((res) => {
             if (res.status !== 'success') {
-              throw new Error(res.message || 'Authentication failed');
+              throw new AuthenticationRejectedError(res.message || 'Authentication failed');
             }
           }),
       });
@@ -120,7 +128,7 @@ export function useAppConnection() {
       // the error: auto-connect clears the token silently, manual connect
       // toasts and drops back to the disconnected (login) state.
       if (service === null || serviceRef.current === service) {
-        if (auto) {
+        if (auto && error instanceof AuthenticationRejectedError) {
           // Restoring a stored session: the credentials are what failed, so
           // drop them and fall back to the login page. This sits here, not in
           // the auto-connect effect's rejection handler, so it fires on
@@ -129,7 +137,7 @@ export function useAppConnection() {
           clearToken();
           setWasEverAuthed(false);
           setConnectionStatus('disconnected');
-        } else {
+        } else if (!auto) {
           toast.error(`Connection failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
           setConnectionStatus('disconnected');
         }
@@ -171,6 +179,15 @@ export function useAppConnection() {
 
   useVisibilityReconnect(wasEverAuthed, wsService);
 
+  const handleRetry = useCallback(() => {
+    // A full UI restart is never a recovery mechanism. Re-arm the existing
+    // transport and the session runtimes without changing their identities.
+    sessionRuntimeRegistry.resumeForeground();
+    void wsService?.reconnectNow().catch((error) => {
+      console.error('[connection] Retry failed:', error);
+    });
+  }, [wsService]);
+
   const handleDisconnect = useCallback(() => {
     if (serviceRef.current) {
       serviceRef.current.dispose();
@@ -198,6 +215,7 @@ export function useAppConnection() {
     setServerUrl,
     handleConnect,
     handleDisconnect,
+    handleRetry,
     isAuthenticated,
     isRestoringSession,
   };
