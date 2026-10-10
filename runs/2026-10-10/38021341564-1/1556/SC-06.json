@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "f4541e4a509feaf5ffb7a8c9cf2e78b948fa470ece0a45fdafb08855531d0d87",
+  "run_id": 38021341564,
+  "run_attempt": 1,
+  "issue": 1556,
+  "criterion": "SC-06",
+  "criterion_text": "Existing Issue Audit and Acceptance workflow input/output contracts, non-model/skip behavior, artifact consumption and telemetry schema remain compatible; run records additionally identify the Prompt version/hash without leaking secrets.",
+  "stage": "staging",
+  "target_sha": "b8b0a1fe9a4dd6b89b101a12fde836b2d236e285",
+  "contract_sha256": "211c75834c49b40f9d46d9a1851beac9a036660512b4a0a7ca8304049644c799",
+  "case_revision": "b8b0a1fe9a4dd6b89b101a12fde836b2d236e285",
+  "case_tree_sha": "6124fd4babfb5a3e1f1bc28e7530a90d9f93d6d4",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-10T03:43:05.162Z",
+  "finished_at": "2026-10-10T03:43:11.809Z",
+  "duration_ms": 6647,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "SC-06: exact staged source/runtime plus applicable deterministic and externally authenticated Provider evidence verified; main provider run is independent of staged SHA",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "staging exact_sha=b8b0a1fe9a4dd6b89b101a12fde836b2d236e285 full-stack profile=full-stack-local Web HTTP=200"
+        },
+        {
+          "type": "contract-test",
+          "value": "acceptance-agent self-test: 9 cases passed; agent-workflow-telemetry self-test: 6 cases passed; agent-workflow-telemetry-contract self-test: 9 cases passed"
+        },
+        {
+          "type": "durable-telemetry",
+          "value": "metrics orphan branch has two unique source-attested immutable records: 37966430313-1-issue-1556-staging-cursor.json, 37966430313-1-issue-1556-staging-deepseek.json; prompt_sha256=28f5f7611810cbbe517276b992f554b36dde2f08e5418ad9bae98183b604d500"
+        },
+        {
+          "type": "contract",
+          "value": "source-aligned 1556/SC-06 contract_sha256=211c75834c49b40f9d46d9a1851beac9a036660512b4a0a7ca8304049644c799"
+        }
+      ],
+      "duration_ms": 739,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 38021341564,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "b8b0a1fe9a4dd6b89b101a12fde836b2d236e285",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/38021341564",
+    "record_path": "runs/2026-10-10/38021341564-1/1556/SC-06.json",
+    "source_result_sha256": "1e7cb72bfc0861621423a6041376a492b96a9a1d88615b6265350348a13757a9"
+  }
+}

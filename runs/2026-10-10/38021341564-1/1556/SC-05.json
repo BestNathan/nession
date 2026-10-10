@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "26d98a917e831b2337a7ce2715c471096490cf435bf466e1f8537bf6d56beab3",
+  "run_id": 38021341564,
+  "run_attempt": 1,
+  "issue": 1556,
+  "criterion": "SC-05",
+  "criterion_text": "Issue Audit mutations from either provider pass the **same** deterministic Issue Contract validation and authorized-target boundary before writes, and are revalidated afterward. Negative tests prove invalid issue proposals, unauthorized writes and prompt-injected tool requests cannot bypass the boundary.",
+  "stage": "staging",
+  "target_sha": "b8b0a1fe9a4dd6b89b101a12fde836b2d236e285",
+  "contract_sha256": "211c75834c49b40f9d46d9a1851beac9a036660512b4a0a7ca8304049644c799",
+  "case_revision": "b8b0a1fe9a4dd6b89b101a12fde836b2d236e285",
+  "case_tree_sha": "9a0bb4ee024ba579f9bc86893203ac8494918288",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-10T03:42:53.463Z",
+  "finished_at": "2026-10-10T03:43:00.077Z",
+  "duration_ms": 6615,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "SC-05: exact staged source/runtime plus applicable deterministic and externally authenticated Provider evidence verified; main provider run is independent of staged SHA",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "staging exact_sha=b8b0a1fe9a4dd6b89b101a12fde836b2d236e285 full-stack profile=full-stack-local Web HTTP=200"
+        },
+        {
+          "type": "negative-test",
+          "value": "fixed target / malformed proposals / real mocked GH writes: agent library self-test: passed; issue-audit-agent self-test: 4 cases passed; issue-audit-cursor self-test: 14 cases passed"
+        },
+        {
+          "type": "trust-boundary",
+          "value": "both provider paths use createIssueUpdateTool; auditIssue before/after; unauthorized field checks and mock gh write tests executed"
+        },
+        {
+          "type": "contract",
+          "value": "source-aligned 1556/SC-05 contract_sha256=211c75834c49b40f9d46d9a1851beac9a036660512b4a0a7ca8304049644c799"
+        }
+      ],
+      "duration_ms": 705,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 38021341564,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "b8b0a1fe9a4dd6b89b101a12fde836b2d236e285",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/38021341564",
+    "record_path": "runs/2026-10-10/38021341564-1/1556/SC-05.json",
+    "source_result_sha256": "4ee3ac8dc986f8fd21f7723d6f08e3f0cd2730c5aba92184906016184d43a065"
+  }
+}

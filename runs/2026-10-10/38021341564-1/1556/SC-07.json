@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "59cb53f9618c80779b52bb857fb1843aaa51fd96bbc344017ed8af2c33cc2924",
+  "run_id": 38021341564,
+  "run_attempt": 1,
+  "issue": 1556,
+  "criterion": "SC-07",
+  "criterion_text": "Existing script self-tests, relevant repository Gates and provider-specific integration/smoke verification pass; evidence identifies the exact commit SHA and includes both valid and invalid cases.",
+  "stage": "staging",
+  "target_sha": "b8b0a1fe9a4dd6b89b101a12fde836b2d236e285",
+  "contract_sha256": "211c75834c49b40f9d46d9a1851beac9a036660512b4a0a7ca8304049644c799",
+  "case_revision": "b8b0a1fe9a4dd6b89b101a12fde836b2d236e285",
+  "case_tree_sha": "262ff24b24117e85b1bbf22dcb32094474a46289",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-10T03:43:16.889Z",
+  "finished_at": "2026-10-10T03:43:24.709Z",
+  "duration_ms": 7820,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "SC-07: exact staged source/runtime plus applicable deterministic and externally authenticated Provider evidence verified; main provider run is independent of staged SHA",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "staging exact_sha=b8b0a1fe9a4dd6b89b101a12fde836b2d236e285 full-stack profile=full-stack-local Web HTTP=200"
+        },
+        {
+          "type": "gate-test",
+          "value": "issue-audit-agent self-test: 4 cases passed; issue-audit-cursor self-test: 14 cases passed; acceptance-agent self-test: 9 cases passed"
+        },
+        {
+          "type": "negative-test",
+          "value": "fixed target / malformed proposals / real mocked GH writes: agent library self-test: passed; issue-audit-agent self-test: 4 cases passed; issue-audit-cursor self-test: 14 cases passed"
+        },
+        {
+          "type": "external-run",
+          "value": "trusted-main provider smoke run=37966430313 exact main SHA=9c8a98359b769b3abe985d595b1393fb4a5acd23 cursor=success deepseek=success"
+        },
+        {
+          "type": "durable-telemetry",
+          "value": "metrics orphan branch has two unique source-attested immutable records: 37966430313-1-issue-1556-staging-cursor.json, 37966430313-1-issue-1556-staging-deepseek.json; prompt_sha256=28f5f7611810cbbe517276b992f554b36dde2f08e5418ad9bae98183b604d500"
+        },
+        {
+          "type": "contract",
+          "value": "source-aligned 1556/SC-07 contract_sha256=211c75834c49b40f9d46d9a1851beac9a036660512b4a0a7ca8304049644c799"
+        }
+      ],
+      "duration_ms": 1914,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 38021341564,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "b8b0a1fe9a4dd6b89b101a12fde836b2d236e285",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/38021341564",
+    "record_path": "runs/2026-10-10/38021341564-1/1556/SC-07.json",
+    "source_result_sha256": "a410e656d535c2bf5130c9ebe7a9fe0b30ac08fd1d7b55b77ad9cd273d51ae9b"
+  }
+}
