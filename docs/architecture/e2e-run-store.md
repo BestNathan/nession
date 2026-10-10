@@ -29,7 +29,6 @@ The bounded receipt generator verifies run ID/attempt, full 64-character source 
 
 The executable contract is `scripts/run-record-artifact-evidence.mjs`, self-tested by the mandatory Quality Gate and used by the two main-owned ingestion programs. The source workflow retention durations must remain synchronized with these exact contract values.
 
-
 ## Test Run ingestion (main-owned)
 
 The `E2E Test Run Ingest` workflow is a **separate, main-owned, write-token-only** consumer of completed successful `E2E Tests` **push** runs on `staging` or `main`. It does not execute any source PR code and deliberately rejects `pull_request` or `workflow_dispatch` events because a synthetic merge checkout cannot independently prove the PR head. The trusted ingest script re-fetches GitHub's source workflow, run metadata, successful `e2e` Job, exact source commit tree (`e2e/tests/browser`), and the `playwright-report` artifact receipt. It rejects wrong workflow/repository/SHA/branch, failed/ambiguous Jobs, absent or expired artifacts, and invalid SHA-256 digests.
