@@ -25,3 +25,4 @@ terminal-attach-resume-selftest
 e2e-cli-discovery
 issue-audit-agent-selftest
 issue-audit-cursor-selftest
+gate-router-contract

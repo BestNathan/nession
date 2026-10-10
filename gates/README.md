@@ -56,3 +56,7 @@ In normal E2E CI, `e2e-playwright` wraps the canonical `e2e/run test --all`
 runner. Explicit snapshot regeneration is a mutable developer/workflow operation
 and is intentionally not treated as a passing Gate. Browser dependency setup
 and Rust/Web builds remain workflow-owned prerequisites.
+
+## Hook routing contract
+
+`gate-router-contract` runs deterministic pre-commit and pre-push scenarios with mocked Git diffs and the Gate runner. It asserts rule-owner changes select their Gate and regression fixtures, including mutation tests proving missing self-test routes are caught. Failed `git diff` broadens pre-push selection instead of returning a successful skip. Hook/Gate changes trigger `gate-runtime-contract` and `gate-router-contract`; Quality CI runs both through `quality-tooling`.

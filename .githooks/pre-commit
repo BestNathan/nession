@@ -39,8 +39,8 @@ if matches_staged '(^|/)(AGENTS|CLAUDE)\.md$|^\.agents/|^\.claude/skills/|^\.git
   GATE_IDS+=(instruction-contract)
 fi
 # A Gate's own change must at least prove its script/catalog/runtime contract.
-if matches_staged '^(gates/|\.githooks/(pre-commit|pre-push)$)'; then
-  GATE_IDS+=(gate-runtime-contract)
+if matches_staged '^(gates/|\.githooks/(pre-commit|pre-push)$|scripts/gate-router-selftest\.mjs$)'; then
+  GATE_IDS+=(gate-runtime-contract gate-router-contract)
 fi
 
 # Screenshot relocation is an existing non-Gate maintenance operation.
