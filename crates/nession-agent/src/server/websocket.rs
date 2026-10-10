@@ -3213,26 +3213,32 @@ impl AgentServer {
             let mut empty = Vec::new();
             for (name, session) in guard.iter_mut() {
                 let before = session.control.controller_client_id.clone();
-                session.peers.retain(|p| !Arc::ptr_eq(&p.peer_token, &connection.peer_token));
+                session
+                    .peers
+                    .retain(|p| !Arc::ptr_eq(&p.peer_token, &connection.peer_token));
                 if let Some(holder) = before.as_ref() {
                     if !session.peers.iter().any(|p| &p.client_id == holder) {
                         session.control.release_if_holder(holder);
                     }
                 }
                 if before != session.control.controller_client_id && !session.peers.is_empty() {
-                    changes.push((session.peers.clone(), TerminalControlChangedPayload {
-                        session_name: name.clone(),
-                        generation: session.control.generation,
-                        controller_client_id: session.control.controller_client_id.clone(),
-                    }));
+                    changes.push((
+                        session.peers.clone(),
+                        TerminalControlChangedPayload {
+                            session_name: name.clone(),
+                            generation: session.control.generation,
+                            controller_client_id: session.control.controller_client_id.clone(),
+                        },
+                    ));
                 }
                 if session.peers.is_empty() {
                     empty.push(name.clone());
                 }
             }
-            let drained = empty.into_iter().filter_map(|name| {
-                guard.remove(&name).map(|session| (name, session))
-            }).collect::<Vec<_>>();
+            let drained = empty
+                .into_iter()
+                .filter_map(|name| guard.remove(&name).map(|session| (name, session)))
+                .collect::<Vec<_>>();
             (drained, changes)
         };
         for (peers, changed) in changes {
