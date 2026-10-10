@@ -66,7 +66,7 @@ try {
   console.log(JSON.stringify({
     scenario: '1258-independent-versioned-handler-worktrees',
     result: 'PASS',
-    sourceSha: process.env.GITHUB_SHA ?? 'local',
+    sourceSha: git(ROOT, 'rev-parse', 'HEAD'),
     baselineFixtureCommit: baseline,
     agent: { branch: 'change-agent', files: pathsA, originalContentSha256: hash(original[0]) },
     env: { branch: 'change-env', files: pathsB, originalContentSha256: hash(original[1]) },
