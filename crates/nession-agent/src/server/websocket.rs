@@ -3917,8 +3917,7 @@ mod tests {
                     client_id: Some(id.to_string()),
                 },
             );
-            let reply: Message<AuthResponsePayload> =
-                send_and_receive(sink, stream, &auth).await;
+            let reply: Message<AuthResponsePayload> = send_and_receive(sink, stream, &auth).await;
             assert_eq!(reply.payload.client_id.as_deref(), Some(id));
         }
 
@@ -3944,7 +3943,10 @@ mod tests {
         )
         .await;
         assert_eq!(second.payload.control_role.as_deref(), Some("observer"));
-        assert_eq!(first.payload.control_generation, second.payload.control_generation);
+        assert_eq!(
+            first.payload.control_generation,
+            second.payload.control_generation
+        );
         assert_eq!(first.payload.stream_epoch, second.payload.stream_epoch);
 
         let takeover: Message<TerminalControlAcquireResponse> = send_and_receive(
@@ -3952,7 +3954,9 @@ mod tests {
             &mut b_stream,
             &new_message(
                 msg_types::TERMINAL_CONTROL_ACQUIRE,
-                TerminalControlAcquirePayload { session_name: name.clone() },
+                TerminalControlAcquirePayload {
+                    session_name: name.clone(),
+                },
             ),
         )
         .await;
@@ -3966,8 +3970,14 @@ mod tests {
             &new_message(msg_types::CLIENT_ATTACH, attach()),
         )
         .await;
-        assert_eq!(reattached_a.payload.control_role.as_deref(), Some("observer"));
-        assert_eq!(reattached_a.payload.control_generation, Some(takeover.payload.generation));
+        assert_eq!(
+            reattached_a.payload.control_role.as_deref(),
+            Some("observer")
+        );
+        assert_eq!(
+            reattached_a.payload.control_generation,
+            Some(takeover.payload.generation)
+        );
 
         a_sink.close().await.ok();
         b_sink.close().await.ok();
