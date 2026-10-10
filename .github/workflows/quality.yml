@@ -50,37 +50,11 @@ jobs:
           cache: 'npm'
           cache-dependency-path: web/package-lock.json
       - uses: extractions/setup-just@v2
-      - name: Verify instruction contract
-        run: ./gates/run instruction-contract
-      - name: Verify repository tooling
+      - name: Verify repository tooling Gates
         run: |
-          ./gates/run gate-runtime-contract
-          ./gates/run agent-workflow-telemetry
-          node scripts/requirement-acceptance.mjs self-test
-          node scripts/acceptance-case-ingest.mjs self-test
-          node scripts/run-record-artifact-evidence.mjs self-test
-          node scripts/run-record-index-contract.mjs self-test
-          node scripts/acceptance-ci-evidence.mjs self-test
-          node scripts/trusted-case-discovery-selftest.mjs
-          node scripts/e2e-run-ingest.mjs self-test
-          node scripts/e2e-test-run-ingest.mjs self-test
-          node scripts/e2e-run-ingest-negative-selftest.mjs
-          node scripts/collect-repo-health.mjs --self-test
-          node scripts/generate-repo-metrics.mjs --self-test
-          node scripts/protocol-gate.mjs --json >/dev/null
-          node scripts/issue-contract.mjs self-test
-          node scripts/task-runner.mjs self-test
-          node scripts/task-result-ingest.mjs self-test
-          node e2e/runner/collectors/opt-in-observations.cjs self-test
-          node e2e/runner/drivers/browser-report.mjs self-test
-          node e2e/runner/runtime/full-stack.js self-test
-          node e2e/runner/cli-selftest.mjs
-          node e2e/scenarios/terminal-attach-resume/reproduce.cjs --self-test
-          ./e2e/run --list
+          ./gates/run --suite quality-tooling
+          # Preserve the exact historical E2E CLI validation pending acceptance-runtime adapter cutover.
           ./e2e/run --validate
-          node scripts/issue-audit-agent.mjs self-test
-          node scripts/issue-audit-cursor.mjs self-test
       - run: cd web && npm ci
-      - run: just design-check full
-      - run: just web-lint
-      - run: just web-test
+      - name: Verify Web and design Gates
+        run: ./gates/run design-system-full web-eslint web-typecheck web-test-unit web-test-integration

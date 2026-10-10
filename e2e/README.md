@@ -63,7 +63,10 @@ a focused Regression, Scenario or Acceptance Case for CI verification.
 The [E2E Tests workflow](../.github/workflows/e2e.yml) runs on pushes to
 `staging`, PRs targeting **`staging` or `main`**, and manual dispatch.
 It installs tmux and Chromium, uses Node.js **24**, builds Server, Agent and
-Web, invokes the canonical browser design gate and runs Playwright.
+Web, invokes the canonical browser design gate, then uses
+`./gates/run e2e-playwright` to run the canonical E2E CLI and Playwright.
+Manual snapshot regeneration invokes `./e2e/run test --suite fixture-visual
+--update-snapshots=all` outside that Gate.
 The job timeout is **20 minutes**; CI retries tests twice, as configured in
 `e2e/playwright.config.ts`. The workflow checks out and passes the exact
 target SHA to the Runtime Harness.

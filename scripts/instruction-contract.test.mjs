@@ -151,3 +151,40 @@ test('rejects Skill names longer than Codex limit', () => {
     assert.ok(errors.some((x) => x.includes('Skill name exceeds Codex 64-character limit')));
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+test('accepts the Gate-ID array router with full staged change detection', () => {
+  const root = fixture();
+  try {
+    fs.writeFileSync(path.join(root, '.githooks', 'pre-commit'), [
+      '#!/usr/bin/env bash',
+      'set -euo pipefail',
+      'STAGED_ALL="$(git diff --cached --name-only)"',
+      'GATE_IDS=(dev-workspace-commit)',
+      'matches_staged() { grep -Eq "$1" <<< "$STAGED_ALL"; }',
+      "if matches_staged '(^|/)(AGENTS|CLAUDE)\\.md$|^\\.agents/|^\\.claude/skills/'; then",
+      '  GATE_IDS+=(instruction-contract)',
+      'fi',
+      'exec ./gates/run "${GATE_IDS[@]}"',
+      '',
+    ].join('\n'));
+    assert.deepEqual(validateInstructionTree(root).errors, []);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('rejects Gate-ID router that drops the instruction Gate', () => {
+  const root = fixture();
+  try {
+    fs.writeFileSync(path.join(root, '.githooks', 'pre-commit'), [
+      '#!/usr/bin/env bash',
+      'STAGED_ALL="$(git diff --cached --name-only)"',
+      'GATE_IDS=(dev-workspace-commit)',
+      'matches_staged() { grep -Eq "$1" <<< "$STAGED_ALL"; }',
+      "if matches_staged '(^|/)(AGENTS|CLAUDE)\\.md$|^\\.agents/|^\\.claude/skills/'; then",
+      '  :',
+      'fi',
+      'exec ./gates/run "${GATE_IDS[@]}"',
+      '',
+    ].join('\n'));
+    assert.ok(validateInstructionTree(root).errors.some((x) => x.includes('instruction changes must invoke instruction-contract')));
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});

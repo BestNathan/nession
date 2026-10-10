@@ -1,191 +1,57 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ── Colors ──────────────────────────────────────────────────────────────────
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
-
-# ── Workspace policy (root = main mirror; dev in worktrees) ─────────────────
-./scripts/check-dev-workspace.sh commit
-
-STAGED_RUST=$(git diff --cached --name-only --diff-filter=ACM | grep '\.rs$' || true)
-STAGED_TSX=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx)$' | grep '^web/' || true)
-STAGED_ALL=$(git diff --cached --name-only)
-STAGED_DESIGN=$(echo "$STAGED_ALL" | grep -E '^(design/|docs/design/|web/src/|web/eslint-plugin-nession/|scripts/check-design-tokens|\.claude/skills/nession-web-design/|justfile$)' || true)
-STAGED_INSTRUCTIONS=$(echo "$STAGED_ALL" | grep -E '(^|/)(AGENTS|CLAUDE)\.md$|^\.agents/|^\.claude/skills/|^\.githooks/pre-commit$|^\.github/workflows/quality\.yml$|^scripts/instruction-contract(\.test)?\.mjs$|^docs/engineering/instruction-(architecture|migration|scenarios)\.md$|^gates/checks/instruction-contract\.sh$|^gates/suites/(pre-commit|quality-web|quality)\.gates$' || true)
+# Changed-file routing only. Every blocking invariant and repair instruction is
+# owned by one Gate ID; aggregation and exit status belong to gates/run.
+STAGED_ALL="$(git diff --cached --name-only)"
+GATE_IDS=(dev-workspace-commit)
+matches_staged() { grep -Eq "$1" <<< "$STAGED_ALL"; }
 
 if [ -z "$STAGED_ALL" ]; then
-  exit 0
+  exec ./gates/run "${GATE_IDS[@]}"
 fi
 
-HAS_ERROR=0
-
-# ── Rust: quick (fmt + clippy) ──────────────────────────────────────────────
-if [ -n "$STAGED_RUST" ]; then
-  echo -e "${YELLOW}→ just quick${NC}"
-  if just quick; then
-    echo -e "${GREEN}✓ just quick${NC}"
-  else
-    echo -e "${RED}✗ just quick — fix errors above${NC}"
-    HAS_ERROR=1
-  fi
+if matches_staged '\.rs$'; then
+  GATE_IDS+=(rust-format rust-clippy rust-test-unit test-isolation)
+fi
+if matches_staged '(\.rs$|^scripts/|^e2e/|^deploy/|^justfile$|^gates/checks/tmux-socket-isolation)'; then
+  GATE_IDS+=(tmux-socket-isolation)
+fi
+if matches_staged '^(scripts/check-tmux-socket|gates/checks/tmux-socket-isolation)'; then
+  GATE_IDS+=(tmux-socket-isolation-selftest)
+fi
+if matches_staged '^(scripts/check-test-isolation|gates/checks/test-isolation)'; then
+  GATE_IDS+=(test-isolation test-isolation-selftest)
+fi
+if matches_staged '(\.rs$|^web/src/|^scripts/protocol-gate|^gates/checks/protocol-integrity)'; then
+  GATE_IDS+=(protocol-integrity)
+fi
+if matches_staged '^(scripts/protocol-gate|gates/checks/protocol-integrity)'; then
+  GATE_IDS+=(protocol-integrity-selftest)
+fi
+if matches_staged '^(design/|docs/design/|web/src/|web/eslint-plugin-nession/|scripts/check-design-tokens|\.claude/skills/nession-web-design/|justfile$|gates/checks/design-system-)'; then
+  GATE_IDS+=(design-system-fast)
+fi
+if matches_staged '^web/.*\.(ts|tsx)$|^gates/checks/web-(eslint|typecheck|test-unit)\.sh$'; then
+  GATE_IDS+=(web-eslint web-typecheck web-test-unit)
+fi
+if matches_staged '(^|/)(AGENTS|CLAUDE)\.md$|^\.agents/|^\.claude/skills/|^\.githooks/pre-commit$|^\.github/workflows/quality\.yml$|^scripts/instruction-contract(\.test)?\.mjs$|^docs/engineering/instruction-(architecture|migration|scenarios)\.md$|^gates/checks/instruction-contract\.sh$|^gates/suites/(pre-commit|quality-web|quality)\.gates$'; then
+  GATE_IDS+=(instruction-contract)
+fi
+# A Gate's own change must at least prove its script/catalog/runtime contract.
+if matches_staged '^(gates/|\.githooks/(pre-commit|pre-push)$)'; then
+  GATE_IDS+=(gate-runtime-contract)
 fi
 
-# ── Rust: unit tests ───────────────────────────────────────────────────────
-if [ -n "$STAGED_RUST" ]; then
-  echo -e "${YELLOW}→ just test-unit${NC}"
-  if just test-unit; then
-    echo -e "${GREEN}✓ just test-unit${NC}"
-  else
-    echo -e "${RED}✗ just test-unit — fix failures above${NC}"
-    HAS_ERROR=1
-  fi
-fi
-
-# ── Rust: test isolation (static, ~1.5s) ───────────────────────────────────
-# Catches a new test hardcoding a listen port, naming a fixed file in the
-# shared temp dir, or reaching into the real $HOME/.nession — all of which make
-# two concurrent test runs fight. Static on purpose: running the suite twice
-# (scripts/check-test-concurrency.sh) is probabilistic and load-sensitive, so it
-# stays a diagnostic rather than a gate.
-if [ -n "$STAGED_RUST" ]; then
-  echo -e "${YELLOW}→ check-test-isolation${NC}"
-  if ./scripts/check-test-isolation.sh; then
-    echo -e "${GREEN}✓ check-test-isolation${NC}"
-  else
-    echo -e "${RED}✗ check-test-isolation — see the fix line under each finding${NC}"
-    HAS_ERROR=1
-  fi
-fi
-
-# ── tmux socket isolation (static, ~1s) ────────────────────────────────────
-# Every tmux spawn must carry an explicit -S <socket>. A call that forgets it
-# does not fail — it silently uses tmux's default socket, where the user's own
-# sessions live, and killing nession's last session there takes their whole tmux
-# server down with it (#574/#575). Scans Rust, scripts/, e2e/, deploy/, justfile.
-STAGED_TMUX_SURFACE=$(git diff --cached --name-only --diff-filter=ACM | grep -E '(\.rs$|^scripts/|^e2e/|^deploy/|^justfile$)' || true)
-if [ -n "$STAGED_TMUX_SURFACE" ]; then
-  echo -e "${YELLOW}→ check-tmux-socket${NC}"
-  if ./scripts/check-tmux-socket.sh; then
-    echo -e "${GREEN}✓ check-tmux-socket${NC}"
-  else
-    echo -e "${RED}✗ check-tmux-socket — route the call through crate::tmux::cmd or pass -S${NC}"
-    HAS_ERROR=1
-  fi
-fi
-
-# A change to the checker itself must be proven still able to detect each form.
-STAGED_TMUX_CHECK=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^scripts/check-tmux-socket' || true)
-if [ -n "$STAGED_TMUX_CHECK" ]; then
-  echo -e "${YELLOW}→ check-tmux-socket-selftest${NC}"
-  if ./scripts/check-tmux-socket-selftest.sh; then
-    echo -e "${GREEN}✓ check-tmux-socket-selftest${NC}"
-  else
-    echo -e "${RED}✗ check-tmux-socket-selftest — the gate no longer catches what it claims${NC}"
-    HAS_ERROR=1
-  fi
-fi
-
-# ── Protocol gate (static, ~0.2s) ──────────────────────────────────────────
-# An unrecognised wire is ignored, not rejected: a sender naming one that no
-# runtime answers gets no error and no reply — it waits. That is what
-# `agent.env.resource` did until #913. Both directions are checked: a wire a
-# call site names must be one a runtime answers, and a protocol nothing calls
-# is reported too.
-STAGED_PROTOCOL=$(git diff --cached --name-only --diff-filter=ACM | grep -E '(\.rs$|^web/src/)' || true)
-if [ -n "$STAGED_PROTOCOL" ]; then
-  echo -e "${YELLOW}→ just check-protocol${NC}"
-  if just check-protocol; then
-    echo -e "${GREEN}✓ just check-protocol${NC}"
-  else
-    echo -e "${RED}✗ just check-protocol — nothing answers the wire named above${NC}"
-    HAS_ERROR=1
-  fi
-fi
-
-# A change to the gate itself must be proven still able to detect each rule,
-# including the shape it was written for.
-STAGED_PROTOCOL_CHECK=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^scripts/protocol-gate' || true)
-if [ -n "$STAGED_PROTOCOL_CHECK" ]; then
-  echo -e "${YELLOW}→ just protocol-check-selftest${NC}"
-  if just protocol-check-selftest; then
-    echo -e "${GREEN}✓ protocol-check-selftest${NC}"
-  else
-    echo -e "${RED}✗ protocol-check-selftest — the gate no longer catches what it claims${NC}"
-    HAS_ERROR=1
-  fi
-fi
-
-# ── Canonical design-system gate (fast profile) ────────────────────────────
-# #759 owns the rule list in design/scripts/design-gate.mjs. Hooks choose a
-# cost profile only; they must not duplicate capsule/token/shadcn rule lists.
-if [ -n "$STAGED_DESIGN" ]; then
-  echo -e "${YELLOW}→ just design-check fast${NC}"
-  if just design-check fast; then
-    echo -e "${GREEN}✓ just design-check fast${NC}"
-  else
-    echo -e "${RED}✗ just design-check fast — follow DESIGN_SYSTEM_VIOLATION owner/repair output${NC}"
-    HAS_ERROR=1
-  fi
-fi
-
-# ── Web: lint (eslint + tsc) ────────────────────────────────────────────────
-if [ -n "$STAGED_TSX" ]; then
-  echo -e "${YELLOW}→ just web-lint${NC}"
-  if just web-lint; then
-    echo -e "${GREEN}✓ just web-lint${NC}"
-  else
-    echo -e "${RED}✗ just web-lint${NC}"
-    HAS_ERROR=1
-  fi
-fi
-
-# ── Web: unit tests ────────────────────────────────────────────────────────
-if [ -n "$STAGED_TSX" ]; then
-  echo -e "${YELLOW}→ just web-test-unit${NC}"
-  if just web-test-unit; then
-    echo -e "${GREEN}✓ just web-test-unit${NC}"
-  else
-    echo -e "${RED}✗ just web-test-unit — fix failures above${NC}"
-    HAS_ERROR=1
-  fi
-fi
-
-# ── Repository instruction contract ────────────────────────────────────────
-if [ -n "$STAGED_INSTRUCTIONS" ]; then
-  echo -e "${YELLOW}→ instruction-contract${NC}"
-  if ./gates/run instruction-contract; then
-    echo -e "${GREEN}✓ instruction-contract${NC}"
-  else
-    echo -e "${RED}✗ instruction-contract — repair the canonical instruction owner/compatibility link${NC}"
-    HAS_ERROR=1
-  fi
-fi
-
-# ── Relocate stray root PNG screenshots ────────────────────────────────────
-# Playwright MCP saves a screenshot to the CWD when given a bare filename, so
-# screenshots can land in the repo root. Move them into the gitignored
-# .playwright-mcp/screenshots/ and unstage any that were accidentally staged —
-# friendlier than blocking the commit.
-STAGED_ROOT_PNGS=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^[^/]+\.png$' || true)
-
-if compgen -G "*.png" > /dev/null 2>&1; then
-  echo -e "${YELLOW}→ relocating stray root PNG screenshots${NC}"
+# Screenshot relocation is an existing non-Gate maintenance operation.
+# Keep it independent of the blocking check result.
+if compgen -G "*.png" >/dev/null 2>&1; then
   ./scripts/move-screenshots.sh
 fi
-
+STAGED_ROOT_PNGS="$(printf '%s\n' "$STAGED_ALL" | grep -E '^[^/]+\.png$' || true)"
 if [ -n "$STAGED_ROOT_PNGS" ]; then
   git reset -q HEAD -- $STAGED_ROOT_PNGS 2>/dev/null || true
-  echo -e "${YELLOW}→ unstaged root PNGs (moved to .playwright-mcp/screenshots/)${NC}"
+  echo "→ unstaged root PNGs (moved to .playwright-mcp/screenshots/)"
 fi
 
-# ── Result ──────────────────────────────────────────────────────────────────
-if [ $HAS_ERROR -eq 1 ]; then
-  echo -e "\n${RED}Commit blocked — fix issues above${NC}"
-  exit 1
-fi
-
-echo -e "\n${GREEN}All checks passed ✓${NC}"
-exit 0
+exec ./gates/run "${GATE_IDS[@]}"

@@ -1,6 +1,6 @@
 # Gate inventory — #1242
 
-Status: **complete parallel Gate catalog; no consumer cutover.**
+Status: **incremental verified cutover** — Hooks and Justfile quality routes use Gate IDs; CI setup/build/deploy and remaining workflow self-tests require separate parity work.
 
 ## Mapped blocking checks
 
@@ -35,3 +35,31 @@ Status: **complete parallel Gate catalog; no consumer cutover.**
 ## Explicit non-Gates
 
 Dependency/browser/tool installation, Docker/native build/package/publish/deploy operations, probabilistic test-concurrency diagnostics, and metrics publication remain operations/diagnostics. Existing hooks, justfile and workflows remain authoritative until cutover.
+
+## Consumer cutover and parity (PR for #1242)
+
+| Surface | Classification | Gate mapping / boundary |
+|---|---|---|
+| `.githooks/pre-commit` | Router | Changed-file buckets -> `gates/run <ids...>`; screenshot relocation remains a non-Gate maintenance operation |
+| `.githooks/pre-push` | Router | Git diff-base buckets -> `gates/run <ids...>`; missing diff base routes broad checks |
+| `just check` | Router | `gates/run --suite quality-rust`; includes original acceptance-runtime/acceptance-cases self-tests |
+| `just web-lint` | Router | `web-eslint` + `web-typecheck` (no combined shadow rule) |
+| `just test` / `just web-test` | Router | Separate unit/integration Gate IDs, aggregated by one runner |
+| `quality.yml` Rust check | Router | Uses `just check` -> `quality-rust` (CI setup remains an operation) |
+| `quality.yml` Web/tooling check | Router + uncutover self-tests | Explicit self-tests remain while corresponding Gate IDs and CI parity are audited |
+| E2E/staging/release workflows | Router + operations | Environment preparation, build/publish/deploy are non-Gates; quality check consumers will be migrated separately |
+| GitHub issue-close/acceptance | Router | Already uses distinct stage-specific `requirement-acceptance-*` Gate IDs in the workflow |
+| Domain validators / `scripts/check-*.sh` | Gate implementation | Remain single owners of rules; their `gates/checks/<id>.sh` files are interfaces, not duplicated rules |
+| Dependency installs, Docker image jobs, GitOps publish | Utility/operation | Not blocking repository invariants; keep out of Gate scripts |
+| Probabilistic test concurrency, build-cache status, metrics publication | Diagnostic | Nonblocking; do not silently promote to Gate |
+
+**Parity caveat:** no all-workflow cutover is claimed here. Preserve every historical blocking self-test until it has a named Gate and positive/negative evidence. Any modified detection adapter requires catalog contract and its domain self-test, not just a green linter.
+
+## E2E normal-mode cutover
+
+The `.github/workflows/e2e.yml` normal browser regression now invokes
+`./gates/run e2e-playwright`, whose exact implementation remains the canonical
+`cd e2e && CI=true ./run test --all` CLI command. The explicit
+`workflow_dispatch` visual-snapshot rewrite command remains a **maintenance
+operation**, not a quality Gate: it mutates baselines and is never a passing
+replacement for normal browser regression evidence.

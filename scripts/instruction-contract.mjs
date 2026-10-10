@@ -203,13 +203,24 @@ function validatePreCommitInstructionRouter(root, errors) {
   if (!fs.existsSync(file)) return;
 
   const text = fs.readFileSync(file, 'utf8');
-  if (!text.includes('STAGED_ALL=$(git diff --cached --name-only)')) {
+  // Accept the original single-Gate router and the canonical Gate-ID array
+  // router, but preserve the critical full staged-change and coverage checks.
+  const allStaged = text.includes('STAGED_ALL=$(git diff --cached --name-only)') ||
+    text.includes('STAGED_ALL="$(git diff --cached --name-only)"');
+  if (!allStaged) {
     errors.push(`${relativePath}: STAGED_ALL must include staged deletions, renames, and type changes (no ACM-only diff filter)`);
   }
-  if (!text.includes('STAGED_INSTRUCTIONS=')) {
+  const legacyRouter = text.includes('STAGED_INSTRUCTIONS=') &&
+    text.includes('./gates/run instruction-contract');
+  const gateIdRouter = text.includes('matches_staged') &&
+    text.includes('GATE_IDS+=(instruction-contract)') &&
+    text.includes('exec ./gates/run "${GATE_IDS[@]}"');
+  const hasInstructionBuckets = text.includes('(^|/)(AGENTS|CLAUDE)') &&
+    text.includes('^\\.agents/') && text.includes('^\\.claude/skills/');
+  if (!legacyRouter && (!gateIdRouter || !hasInstructionBuckets)) {
     errors.push(`${relativePath}: missing instruction-surface routing`);
   }
-  if (!text.includes('./gates/run instruction-contract')) {
+  if (!legacyRouter && !gateIdRouter) {
     errors.push(`${relativePath}: instruction changes must invoke instruction-contract`);
   }
 }

@@ -37,9 +37,13 @@ test('SC-11: background controller loses ownership to independent peer and stays
     const peer = await peerContext.newPage();
     await attachExisting(peer, expect, runtime, name, 'P2P');
     const observerB = peer.getByTestId('terminal-observer-bar');
-    if (await observerB.isVisible()) {
-      await observerB.getByRole('button', { name: 'Take control' }).click();
-    }
+    // P2P attach completion and React's terminal-control subscription are
+    // separate async boundaries. A one-shot isVisible() immediately after
+    // xterm appears may return false before the second client's Observer
+    // lease is rendered, silently skipping the intended takeover. Prove the
+    // Observer precondition and perform the explicit handoff unconditionally.
+    await expect(observerB).toBeVisible({ timeout: 20000 });
+    await observerB.getByRole('button', { name: 'Take control' }).click();
     await expect(observerB).toBeHidden({ timeout: 20000 });
     await expect(observerA).toBeVisible({ timeout: 20000 });
 

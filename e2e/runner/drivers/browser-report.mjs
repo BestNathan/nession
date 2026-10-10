@@ -10,6 +10,30 @@ function allTests(suites) {
   return result;
 }
 
+/**
+ * Preserve *where* a Case failed without writing terminal contents, page
+ * snapshots, URLs or credentials to the trusted run record. GitHub's
+ * per-Case Playwright JSON report includes the failed assertion location;
+ * the previous generic "assertions failed" message discarded it (#1213).
+ */
+function failedAssertionLocation(tests) {
+  for (const test of tests) {
+    for (const run of test.results ?? []) {
+      for (const error of [...(run.errors ?? []), ...(run.error ? [run.error] : [])]) {
+        const loc = error?.location;
+        if (loc && Number.isSafeInteger(loc.line)) {
+          const name = String(loc.file ?? '').replace(/\\/g, '/').split('/').at(-1);
+          if (/^[\w.-]{1,100}$/.test(name)) {
+            return name + ':' + loc.line +
+              (Number.isSafeInteger(loc.column) ? ':' + loc.column : '');
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
+
 function countAssertions(steps) {
   let count = 0;
   for (const step of steps ?? []) {
@@ -98,7 +122,10 @@ export function classifyBrowserReport(report, exitCode, proof) {
   // are diagnostic evidence, not a failed test verdict. The JSON reporter's
   // final unexpected count and the process exit remain authoritative.
   if (unexpected > 0 || (exitCode !== 0 && expected > 0)) {
-    return { result: 'Fail', summary: 'Playwright assertions failed', evidence: [], execution: facts };
+    const location = failedAssertionLocation(tests);
+    return { result: 'Fail',
+      summary: 'Playwright assertions failed' + (location ? ' at ' + location : ''),
+      evidence: [], execution: facts };
   }
   if (exitCode !== 0) {
     return { result: 'Error', summary: 'Playwright execution failed before a passing verdict', evidence: [], execution: facts };
@@ -136,6 +163,11 @@ function selfTest() {
   assert.equal(classifyBrowserReport(report([test(), test()], 1, 1), 0, proof(1, 1)).result, 'Pending');
   assert.equal(classifyBrowserReport(report([test([])], 1), 0, proof(1, 0)).result, 'Pending');
   assert.equal(classifyBrowserReport(report([test()], 0, 0, 1), 1, proof(1, 1, 0, 1)).result, 'Fail');
+  const withLocation = { results: [{ errors: [{ message: 'sensitive page contents',
+    location: { file: '/tmp/secret/verify.spec.js', line: 42, column: 9 } }] }], status: 'unexpected' };
+  const failure = classifyBrowserReport(report([withLocation], 0, 0, 1), 1, proof(1, 1, 0, 1));
+  assert.equal(failure.summary, 'Playwright assertions failed at verify.spec.js:42:9');
+  assert.equal(JSON.stringify(failure).includes('sensitive'), false);
   assert.equal(classifyBrowserReport(null, 0).result, 'Error');
   assert.equal(classifyBrowserReport(report([test()], 1), 0).result, 'Error');
   assert.equal(classifyBrowserReport(report([test()], 1), 1, proof(1, 1)).result, 'Fail');
