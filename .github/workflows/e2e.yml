@@ -85,7 +85,7 @@ jobs:
       - name: Run canonical browser design gate
         env:
           CI: true
-        run: just design-check browser
+        run: ./gates/run design-system-browser
 
       # ── Run E2E ───────────────────────────────────────────────────────
       - name: Run E2E tests
