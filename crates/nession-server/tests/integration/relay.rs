@@ -301,8 +301,8 @@ async fn wait_for_discovered_session(
                     let agents_list = reply
                         .pointer("/payload/agents")
                         .and_then(serde_json::Value::as_array);
-                    agent_registration = match agents_list {
-                        Some(agents) => agents
+                    if let Some(agents) = agents_list {
+                        agent_registration = agents
                             .iter()
                             .find(|agent| {
                                 agent.get("agent_id").and_then(serde_json::Value::as_str)
@@ -319,12 +319,13 @@ async fn wait_for_discovered_session(
                                     agent.get("last_heartbeat").unwrap_or(&serde_json::Value::Null),
                                 )
                             })
-                            .unwrap_or_else(|| "not registered".to_string()),
-                        None => format!(
+                            .unwrap_or_else(|| "not registered".to_string());
+                    } else {
+                        agent_registration = format!(
                             "invalid agent list reply: {}",
                             reply.get("payload").unwrap_or(&serde_json::Value::Null)
-                        ),
-                    };
+                        );
+                    }
                 }
                 Ok(Err(error)) => agent_registration = format!("query failed: {error}"),
                 Err(_) => agent_registration = "query timed out".to_string(),
