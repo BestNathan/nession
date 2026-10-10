@@ -65,3 +65,7 @@ and Rust/Web builds remain workflow-owned prerequisites.
 ## Hook routing contract
 
 `gate-router-contract` runs deterministic pre-commit and pre-push scenarios with mocked Git diffs and the Gate runner. It asserts rule-owner changes select their Gate and regression fixtures, including mutation tests proving missing self-test routes are caught. Failed `git diff` broadens pre-push selection instead of returning a successful skip. Hook/Gate changes trigger `gate-runtime-contract` and `gate-router-contract`; Quality CI runs both through `quality-tooling`.
+
+## Release version contract
+
+`release-version-consistency` is the single Gate owner for Rust/Web version equality. Staging and Release version jobs call it before producing/publishing version-derived artifacts; version-forward decisions, tagging and GitOps remain workflow operations. `release-version-consistency-selftest` checks matching versions, mismatched versions and unreadable inputs in an isolated fixture, and runs in the PR quality Rust suite.
