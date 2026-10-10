@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 38032833538,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/1482-acceptance-evidence-classifier",
+    "target_sha": "0d71fbb0aa6e44b5525ca7c7545173f7ab7414a4",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/38032833538",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "64451b1b829b7a6c0c764a99cdf2b5f2f097b4ffa97e630acb2a5ced66a227d4"
+  },
+  "record": "runs/2026-10-10/38032833538-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "28c960437d9775d500da22c959795b82fd7b38cd2db187aff50a3079a14a4940"
+}
