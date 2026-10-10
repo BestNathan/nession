@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "5fc8b706a17b12a329094596980d735ad085ad954e52c4b090d4140842bad6a0",
+  "run_id": 38030600084,
+  "run_attempt": 1,
+  "issue": 1499,
+  "criterion": "SC-01",
+  "criterion_text": "Authenticated workflow metadata and actual tree/digest are verified before append or projection.",
+  "stage": "staging",
+  "target_sha": "256d9c57bd8ef1828cbfb89ed36ca673309ef4a0",
+  "contract_sha256": "056fdc29ad3144d0b806fda89eb791b58ef0d9b0666d54a7426760ff1192498c",
+  "case_revision": "256d9c57bd8ef1828cbfb89ed36ca673309ef4a0",
+  "case_tree_sha": "ab4dbd8283c42caefad1e42f2035c72fd240f18f",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Fail",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-10T06:22:53.882Z",
+  "finished_at": "2026-10-10T06:23:09.881Z",
+  "duration_ms": 15999,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Fail",
+      "summary": "pinned durable Git blob changed\n+ actual - expected\n\n+ 'd4663d074452f89e10bd4185322e08d9265978ca'\n- 'd4663d074452c89e10bd4185322e08d9265978ca'",
+      "evidence": [
+        {
+          "type": "store",
+          "value": "immutable Git blob or GitHub source attestation failed"
+        }
+      ],
+      "duration_ms": 10087,
+      "exit_code": 1,
+      "stderr": "pinned durable Git blob changed\n+ actual - expected\n\n+ 'd4663d074452f89e10bd4185322e08d9265978ca'\n- 'd4663d074452c89e10bd4185322e08d9265978ca'"
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 38030600084,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "256d9c57bd8ef1828cbfb89ed36ca673309ef4a0",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/38030600084",
+    "record_path": "runs/2026-10-10/38030600084-1/1499/SC-01.json",
+    "source_result_sha256": "a60961f743db491664391c7adbd6ebd89540bd3a667d8d6338cf6bf1773616cb"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-38030600084-1",
+    "sha256": "a60961f743db491664391c7adbd6ebd89540bd3a667d8d6338cf6bf1773616cb",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/38030600084",
+    "durability": "time-limited; object archival not configured"
+  }
+}
