@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "4f85188b36dcd01dd12a8d5df7867840ba12f7b7590a481ce2a2d1e371b77992",
+  "run_id": 38037461339,
+  "run_attempt": 1,
+  "issue": 1506,
+  "criterion": "SC-03",
+  "criterion_text": "Real exact-head Quality Gate, E2E regression and Acceptance Case Smoke pass with full-stack setup and teardown on staging-compatible CI.",
+  "stage": "staging",
+  "target_sha": "2fdea6b7295ddef50871945b540b1741cf5a2ba8",
+  "contract_sha256": "692d3467bbd7d9e8b9c96577f5edcadb39ef9119dfd2a9a8f6c8af5c7e61f4b4",
+  "case_revision": "2fdea6b7295ddef50871945b540b1741cf5a2ba8",
+  "case_tree_sha": "770d3ecd43859655388de212cbd529165dbc345c",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-10T08:22:06.918Z",
+  "finished_at": "2026-10-10T08:22:23.093Z",
+  "duration_ms": 16175,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "Shared Runner owns real Server, Agent, isolated terminal-session lifecycle and Web with successful exact-head Quality/E2E/Case Smoke and isolated staging Case execution.",
+      "evidence": [
+        {
+          "type": "ownership",
+          "value": "globalSetup and Case evaluator both delegate to e2e/runner/runtime/full-stack.js"
+        },
+        {
+          "type": "runtime",
+          "value": "target=2fdea6b7295ddef50871945b540b1741cf5a2ba8 profile=full-stack-local, real Agent protocol and HTTP readiness"
+        },
+        {
+          "type": "ci",
+          "value": "Quality=38036613299 E2E=38036613358 CaseSmoke=38036613315"
+        },
+        {
+          "type": "artifacts",
+          "value": "playwright=2417442 case=2043"
+        }
+      ],
+      "duration_ms": 10271,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 38037461339,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "2fdea6b7295ddef50871945b540b1741cf5a2ba8",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/38037461339",
+    "record_path": "runs/2026-10-10/38037461339-1/1506/SC-03.json",
+    "source_result_sha256": "546087a093c8a7ae33a6fe59939ed955a1c82e984b368a01c8df393e4d5c8865"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-38037461339-1",
+    "sha256": "546087a093c8a7ae33a6fe59939ed955a1c82e984b368a01c8df393e4d5c8865",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/38037461339",
+    "durability": "time-limited; object archival not configured"
+  }
+}

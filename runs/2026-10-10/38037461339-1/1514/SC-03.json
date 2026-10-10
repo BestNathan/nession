@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "0b1f128252349a07ccf06bc3ca93c659a6c2679cc38ca38f13d537c93fa2b10b",
+  "run_id": 38037461339,
+  "run_attempt": 1,
+  "issue": 1514,
+  "criterion": "SC-03",
+  "criterion_text": "Actual staging Case ingestion after the canonical migration proves that trusted main ingester accepts the new source path.",
+  "stage": "staging",
+  "target_sha": "2fdea6b7295ddef50871945b540b1741cf5a2ba8",
+  "contract_sha256": "b9f2885fe82f79f174ab0d14c3fee134ada331c82003a6e7200545ea7949a600",
+  "case_revision": "2fdea6b7295ddef50871945b540b1741cf5a2ba8",
+  "case_tree_sha": "8325be9da8c84e01bfe084f30743b2bdeba52caf",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-10T08:22:28.171Z",
+  "finished_at": "2026-10-10T08:22:44.353Z",
+  "duration_ms": 16182,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "Authenticated successful staging Case ingestion verified the canonical source Case tree at its real Git SHA; no unsafe legacy fallback.",
+      "evidence": [
+        {
+          "type": "provenance",
+          "value": "source_run=37943938140 source_sha=1e7b08f61e0204666891c7fdce34060966960769 case_tree=5865ee69049ca09b2d4280a7ab3de69374e1270a"
+        },
+        {
+          "type": "orphan",
+          "value": "trusted_ingest=37944246514 record_git_blob=f2b35bdc60265444af315522cf07baccb6fae4c5"
+        },
+        {
+          "type": "ci",
+          "value": "Quality=38036613299 exact_source_head=054ff7b0a942b9f43dc2a35c031981f654048c51"
+        },
+        {
+          "type": "runtime",
+          "value": "live staged Server/Agent/Web at 2fdea6b7295ddef50871945b540b1741cf5a2ba8"
+        }
+      ],
+      "duration_ms": 10275,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 38037461339,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "2fdea6b7295ddef50871945b540b1741cf5a2ba8",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/38037461339",
+    "record_path": "runs/2026-10-10/38037461339-1/1514/SC-03.json",
+    "source_result_sha256": "948df6da5db1d817130672115f99bcf0e7639af8ba79931434cd31fa7bdba3d9"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-38037461339-1",
+    "sha256": "948df6da5db1d817130672115f99bcf0e7639af8ba79931434cd31fa7bdba3d9",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/38037461339",
+    "durability": "time-limited; object archival not configured"
+  }
+}

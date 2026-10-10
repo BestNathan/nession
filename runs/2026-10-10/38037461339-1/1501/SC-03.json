@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "38da5fbc3cc98e7a7d8839a6062f74997912fa752a62daf2fe196ccae2b2a2bc",
+  "run_id": 38037461339,
+  "run_attempt": 1,
+  "issue": 1501,
+  "criterion": "SC-03",
+  "criterion_text": "Quality Gate negative tests, E2E, and a real trusted successful source-ingestion run are evidenced.",
+  "stage": "staging",
+  "target_sha": "2fdea6b7295ddef50871945b540b1741cf5a2ba8",
+  "contract_sha256": "fe5a3b6155a367d8f94e716681843162b8303d56d1d17c7bc2956d01c8139429",
+  "case_revision": "2fdea6b7295ddef50871945b540b1741cf5a2ba8",
+  "case_tree_sha": "a5a67f1c5090033634f6d0b58f4d038406532e8b",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-10T08:21:24.323Z",
+  "finished_at": "2026-10-10T08:21:40.579Z",
+  "duration_ms": 16255,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "Real trusted staging Case ingestion has canonical source SHA/tree and contract binding; actual PR-head tests and runtime passed.",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "staging_sha=2fdea6b7295ddef50871945b540b1741cf5a2ba8 observed Server/Agent/Web"
+        },
+        {
+          "type": "ci",
+          "value": "Quality=38036613299 E2E=38036613358"
+        },
+        {
+          "type": "ingest",
+          "value": "trusted_workflow_run=37944246514 source_run=37943938140 orphan_blob=f2b35bdc60265444af315522cf07baccb6fae4c5"
+        },
+        {
+          "type": "contract",
+          "value": "source_case_tree_sha=5865ee69049ca09b2d4280a7ab3de69374e1270a contract_sha256=eeba70d5342c0687cd0bc6d39c17e44ca03bb018d688de275c48e803ffe937fb"
+        }
+      ],
+      "duration_ms": 10349,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 38037461339,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "2fdea6b7295ddef50871945b540b1741cf5a2ba8",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/38037461339",
+    "record_path": "runs/2026-10-10/38037461339-1/1501/SC-03.json",
+    "source_result_sha256": "fd5da96cc393b2966020cc186505fc9869b1cad568ed9b468fb8a2d5003cfce1"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-38037461339-1",
+    "sha256": "fd5da96cc393b2966020cc186505fc9869b1cad568ed9b468fb8a2d5003cfce1",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/38037461339",
+    "durability": "time-limited; object archival not configured"
+  }
+}

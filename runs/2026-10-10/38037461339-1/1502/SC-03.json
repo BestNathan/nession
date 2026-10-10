@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "9880e72c071e9428d48c2b3c69ac6c4298174ba223f8bd01645fc1e771ade16a",
+  "run_id": 38037461339,
+  "run_attempt": 1,
+  "issue": 1502,
+  "criterion": "SC-03",
+  "criterion_text": "Real Case Smoke, Quality, and E2E complete at exact PR SHA, including teardown and evidence artifacts.",
+  "stage": "staging",
+  "target_sha": "2fdea6b7295ddef50871945b540b1741cf5a2ba8",
+  "contract_sha256": "a5300e146c0b670590692fd5c97054b0338d345db8045f3255bb806e304b69b4",
+  "case_revision": "2fdea6b7295ddef50871945b540b1741cf5a2ba8",
+  "case_tree_sha": "ba1aa2deabd1f94a17eee5fbcc3a29896eb3ccc9",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-10T08:21:45.661Z",
+  "finished_at": "2026-10-10T08:22:01.834Z",
+  "duration_ms": 16173,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "Actual exact PR-head browser Case Smoke, Playwright report and negative assertion gate succeeded; real merged-SHA full stack is healthy.",
+      "evidence": [
+        {
+          "type": "ci",
+          "value": "Quality=38036613299 E2E=38036613358 Smoke=38036613315"
+        },
+        {
+          "type": "artifacts",
+          "value": "smoke=acceptance-case-smoke-1474 bytes=2043 playwright=playwright-report bytes=2417442"
+        },
+        {
+          "type": "assertion",
+          "value": "browser assertion reporter negative fixtures executed by Quality Gate"
+        },
+        {
+          "type": "runtime",
+          "value": "real isolated Server/Agent/Web staging_sha=2fdea6b7295ddef50871945b540b1741cf5a2ba8"
+        }
+      ],
+      "duration_ms": 10267,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 38037461339,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "2fdea6b7295ddef50871945b540b1741cf5a2ba8",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/38037461339",
+    "record_path": "runs/2026-10-10/38037461339-1/1502/SC-03.json",
+    "source_result_sha256": "6d1d92f5f973b8f3ebba779551a50b6774c30b49bf745f6fc13e8c59478cf9c5"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-38037461339-1",
+    "sha256": "6d1d92f5f973b8f3ebba779551a50b6774c30b49bf745f6fc13e8c59478cf9c5",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/38037461339",
+    "durability": "time-limited; object archival not configured"
+  }
+}
