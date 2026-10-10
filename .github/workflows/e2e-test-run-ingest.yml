@@ -1,0 +1,84 @@
+name: E2E Test Run Ingest
+
+# Privileged ingest lives on default/main; source Playwright code receives no
+# content write token. Only GitHub-attested successful push runs are eligible.
+on:
+  workflow_run:
+    workflows: ["E2E Tests"]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: acceptance-results-ingest
+  cancel-in-progress: false
+
+jobs:
+  ingest-test:
+    if: >-
+      ${{ github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.event == 'push' &&
+          (github.event.workflow_run.head_branch == 'main' ||
+           github.event.workflow_run.head_branch == 'staging') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout trusted main ingestion, never PR source
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: trusted
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate source and negative security contract
+        run: node trusted/scripts/e2e-test-run-ingest.mjs self-test
+      - name: Fetch authenticated E2E source run and immutable report receipt
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p scratch
+          node trusted/scripts/e2e-test-run-ingest.mjs create \
+            "$GITHUB_EVENT_PATH" scratch/test-record.json scratch/test-index.json scratch/paths.json
+      - name: Append Test Run Record and SHA index only to orphan branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir results-repo
+          git -C results-repo init
+          git -C results-repo config user.name "github-actions[bot]"
+          git -C results-repo config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C results-repo remote add origin "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git"
+          git -C results-repo fetch --depth=1 origin acceptance-results
+          git -C results-repo checkout -B acceptance-results FETCH_HEAD
+          record="$(jq -r .record scratch/paths.json)"
+          index="$(jq -r .index scratch/paths.json)"
+          for spec in "$record:scratch/test-record.json" "$index:scratch/test-index.json"; do
+            dest="${spec%%:*}"
+            source="${spec#*:}"
+            case "$dest" in
+              runs/*/test/playwright.json|indexes/by-sha/*/test/*-playwright.json) ;;
+              *) echo "::error::Unsafe orphan Test Run path" >&2; exit 1 ;;
+            esac
+            if [[ -e "results-repo/$dest" ]]; then
+              cmp -s "$source" "results-repo/$dest" || {
+                echo "::error::Divergent immutable Run Record collision" >&2; exit 1;
+              }
+            else
+              mkdir -p "results-repo/$(dirname "$dest")"
+              cp "$source" "results-repo/$dest"
+            fi
+          done
+          git -C results-repo add runs indexes
+          if ! git -C results-repo diff --cached --quiet; then
+            git -C results-repo commit -m "e2e: ingest trusted Test run ${{ github.event.workflow_run.id }} attempt ${{ github.event.workflow_run.run_attempt }}"
+            git -C results-repo push origin acceptance-results
+          else
+            echo "Identical immutable retry; no branch change" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "Test metadata ingested to acceptance-results with exact SHA and finite report-artifact digest" >> "$GITHUB_STEP_SUMMARY"
