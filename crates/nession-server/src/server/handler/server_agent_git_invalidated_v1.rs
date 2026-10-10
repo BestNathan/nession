@@ -1,7 +1,7 @@
 //! One versioned Server Protocol Unit.
 //! Route identity, version and execution policy are owned by routes.rs.
 
-use super::*;
+use super::{warn, ConnectionHandler, ProtocolMessage, HandlerAction};
 
 impl ConnectionHandler {
     /// Handle `agent.terminal.resize` — broadcast terminal resize to all

@@ -1,7 +1,7 @@
 //! One versioned Server Protocol Unit.
 //! Route identity, version and execution policy are owned by routes.rs.
 
-use super::*;
+use super::{info, ConnectionHandler, ProtocolMessage, HandlerAction, AgentRenameReply, AgentRenameFailure, agent_rename_reply, validate_display_name, AgentRenameResponse};
 
 impl ConnectionHandler {
     /// Handle `server.agent.rename` — update an agent's display name.

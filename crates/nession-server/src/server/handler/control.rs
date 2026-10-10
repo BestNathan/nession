@@ -1,7 +1,7 @@
 //! Control is not a Protocol Unit.
 //! Route identity, version and execution policy are owned by routes.rs.
 
-use super::*;
+use super::{warn, info, ConnectionHandler, ProtocolMessage, HandlerAction, Arc};
 
 impl ConnectionHandler {
     /// Handle `control.heartbeat`.
