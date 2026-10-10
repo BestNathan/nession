@@ -135,7 +135,10 @@ for (const [file, commands] of required) {
     const altered = new Map(source);
     const old = altered.get(file);
     assert.ok(old && old.includes(command), 'fixture command missing: ' + file);
-    altered.set(file, old.replace(command, './gates/run missing-contract-fixture'));
+    altered.set(file, old.split(/\r?\n/).map(line =>
+      line.trim().replace(/^run:\s*/, '') === command
+        ? line.replace(command, './gates/run missing-contract-fixture')
+        : line).join('\n'));
     const problems = verify(p => altered.get(p) ?? null);
     assert.ok(problems.some(p => p.includes(file + ': missing canonical consumer ' + command)),
       'removed consumer escaped contract: ' + file + ' ' + command);
