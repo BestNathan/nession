@@ -1,7 +1,7 @@
 //! One versioned Server Protocol Unit.
 //! Route identity, version and execution policy are owned by routes.rs.
 
-use super::*;
+use super::{ConnectionHandler, ProtocolMessage, HandlerAction, session_env_reply, ClientSessionEnvResponsePayload, ClientSessionEnvApplyPayload};
 
 impl ConnectionHandler {
     /// Handle `server.session.env.apply` — apply env files to a running session.
