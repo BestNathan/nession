@@ -87,7 +87,7 @@ test('SC-10: real P2P cursor resume and explicit truncated retention window', as
       // reason. Keep the same 6500 real, paced PTY writes (beyond the 4096
       // retained event window) but use a single unbuffered Python process,
       // so the P2P retry budget is not spent on shell process launches.
-      const producer = 'python3 -u -c \\'import time; [(print("SC10-SEQ-%05d" % i), time.sleep(0.002)) for i in range(1,6501)]; print("SC10-TAIL-%s" % 1213)\\'';
+      const producer = `python3 -u -c 'import time; [(print("SC10-SEQ-%05d" % i), time.sleep(0.002)) for i in range(1,6501)]; print("SC10-TAIL-%s" % 1213)'`;
       execFileSync('tmux', ['-S', runtime.tmux_socket, 'send-keys', '-t', name, producer, 'Enter'], {
         timeout: 10000,
       });
