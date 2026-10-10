@@ -134,10 +134,7 @@ jobs:
       - name: Self-test trusted Acceptance tooling
         working-directory: trusted
         run: |
-          node scripts/requirement-acceptance.mjs self-test
-          node scripts/acceptance-executor.mjs self-test
-          node scripts/acceptance-agent.mjs self-test
-          node scripts/acceptance-ci-evidence.mjs self-test
+          ./gates/run requirement-acceptance-selftest acceptance-executor-selftest acceptance-agent-selftest acceptance-ci-evidence-selftest
 
       - name: Validate invocation
         run: |
@@ -314,8 +311,7 @@ jobs:
 
       - name: Self-test deterministic updater
         run: |
-          node scripts/requirement-acceptance.mjs self-test
-          node scripts/acceptance-executor.mjs self-test
+          ./gates/run requirement-acceptance-selftest acceptance-executor-selftest
 
       - name: Download structured Acceptance Result
         uses: actions/download-artifact@v4

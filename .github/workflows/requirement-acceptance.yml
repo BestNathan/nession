@@ -48,9 +48,7 @@ jobs:
 
       - name: Self-test acceptance tooling
         run: |
-          node scripts/requirement-acceptance.mjs self-test
-          node scripts/acceptance-executor.mjs self-test
-          node scripts/acceptance-agent.mjs self-test
+          ./gates/run --suite acceptance-tooling
 
       - name: Pin PR head
         id: context
