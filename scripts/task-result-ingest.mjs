@@ -89,6 +89,13 @@ function ingest(eventPath, sourceRoot, incomingPath, resultsRoot) {
   const event = readJson(eventPath, 1024 * 1024);
   const record = readJson(incomingPath, 131072);
   if (!SHA.test(record.source_sha || '') || !ID.test(record.task_id || '')) invalid('invalid source selector');
+  // Refuse evidence from a Task branch which altered its inherited workflow.
+  // It is still untrusted observation; this binds the expected execution router.
+  const workflowRel = path.join('.github', 'workflows', 'task-runner.yml');
+  const trustedWorkflow = fs.readFileSync(path.resolve(__dirname, '..', workflowRel));
+  const sourceWorkflow = fs.readFileSync(path.resolve(sourceRoot, workflowRel));
+  if (!sourceWorkflow.equals(trustedWorkflow)) invalid('Task branch workflow differs from trusted main');
+
   const snapshot = JSON.parse(execFileSync(process.execPath, [
     path.join(__dirname, 'task-runner.mjs'), 'inspect', sourceRoot,
     record.source_sha, record.task_id,
