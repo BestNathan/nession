@@ -120,8 +120,8 @@ async function verifyTerminalClearance(page, expect, runtime, targetSha) {
   await expect.poll(async () => valid(await geometry()), { timeout: 20000 }).toBe(true);
   const compactApp = await geometry();
 
-  // Return to Web and explicitly prove that the terminal can switch back to
-  // the alternate-screen buffer without losing the live Capsule clearance.
+  // Return to Web and verify the follow-mode clearance survives responsive
+  // layout transitions. Alternate-screen TUI control is tested by terminal E2E.
   await page.setViewportSize({ width: 1440, height: 900 });
   await expect.poll(async () => valid(await geometry()), { timeout: 20000 }).toBe(true);
   const webRestored = await geometry();
