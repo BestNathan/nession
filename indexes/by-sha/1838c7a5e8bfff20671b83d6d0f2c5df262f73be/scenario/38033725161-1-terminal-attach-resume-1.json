@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 38033725161,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "test/1474-dependent-staging-ci-proof-cases",
+    "target_sha": "1838c7a5e8bfff20671b83d6d0f2c5df262f73be",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/38033725161",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "37f5cc7a26275c5be214701139c1536acab4ed0dfd354c41a8a2f04e7870a9dc"
+  },
+  "record": "runs/2026-10-10/38033725161-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "c7d9f3f3790d4f39a517f750c835a7aa0a44ad99840aabbdf7cb00406347acd3"
+}
