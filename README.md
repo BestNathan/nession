@@ -171,20 +171,19 @@ npm run dev        # Vite dev server on http://localhost:13000, proxies /ws → 
 
 Open http://localhost:13000, connect to the server, then browse agents and open terminals. For production, `npm run build` emits static assets to `web/dist/` (served by nginx in the Docker/K8s images).
 
-### Terminal Zoom Controls
+### Terminal presentation and scrollback
 
-The web terminal supports zoom controls for better readability on different devices:
+Terminal font metrics come from the Web/App Experience design tokens
+(`design/generated/terminal.ts`), not fixed device scaling percentages.
+The terminal engine includes a `FontSizeManager` with pixel-size bounds,
+but the current Session-first Terminal surface does **not** expose the
+older +/-/reset toolbar controls. Do not assume an interactive zoom UI exists
+solely because the lower-level engine supports font size changes.
 
-- **Auto-scaling:** Terminal automatically scales based on device type (mobile: 60%, tablet: 80%, desktop: 100%)
-- **Manual zoom:** Use the +/- buttons in the terminal toolbar to adjust zoom level (30%-300%)
-- **Reset:** Click the reset button to restore default zoom for your device
-- **Scrolling:** When terminal size exceeds viewport, use scrollbars or touch gestures to navigate
-
-Zoom level is session-specific and resets on page refresh. A Session's history is
-xterm's own scrollback — the wheel stays in the browser and never enters tmux
-copy mode — and attaching (or reloading) fills it from the Session, so the
-context is there the moment the terminal is. That holds on the default attach
-transport; `attach_mode = "plain"` is a fallback, and
+A Session's history is xterm's own scrollback — the wheel stays in the browser
+and never enters tmux copy mode — and attaching (or reloading) fills it from
+the Session, so context is available when the terminal mounts. That holds on
+the default attach transport; `attach_mode = "plain"` is a fallback, and
 [docs/design/terminal/scrollback-bootstrap.md](docs/design/terminal/scrollback-bootstrap.md)
 states exactly what it does and does not give you.
 
