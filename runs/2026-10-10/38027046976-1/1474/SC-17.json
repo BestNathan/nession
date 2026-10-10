@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "3f586389c23d4a20d74b62a1c725923b8653512728437475ac74eeec41f7af93",
+  "run_id": 38027046976,
+  "run_attempt": 1,
+  "issue": 1474,
+  "criterion": "SC-17",
+  "criterion_text": "Remote staging/production profile and VPN runner integration are separately specified with deployment identity, least privileges and safe cleanup; implementation deferred until infrastructure readiness.",
+  "stage": "post-merge",
+  "target_sha": "0ca419584050dc9148f26ab785722dedc4adb6e5",
+  "contract_sha256": "b07c06889b642821066631a90eedcdfb38679cfbda8944383c1dda1d986f9c95",
+  "case_revision": "0ca419584050dc9148f26ab785722dedc4adb6e5",
+  "case_tree_sha": "4a31cb425c459b3e56f9a0c769c28dbfbc5782fa",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-10T05:21:12.881Z",
+  "finished_at": "2026-10-10T05:21:19.027Z",
+  "duration_ms": 6146,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "Remote staging/production profiles are separately specified with VPN runner, deployment identity, least privilege and cleanup; implementation remains explicitly deferred.",
+      "evidence": [
+        {
+          "type": "docs",
+          "value": "remote-staging and remote-production profile contract specified; runtime enablement deferred"
+        },
+        {
+          "type": "workflow",
+          "value": "post-merge evidence target_sha=0ca419584050dc9148f26ab785722dedc4adb6e5 branch=main"
+        }
+      ],
+      "duration_ms": 32,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 38027046976,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "0ca419584050dc9148f26ab785722dedc4adb6e5",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/38027046976",
+    "record_path": "runs/2026-10-10/38027046976-1/1474/SC-17.json",
+    "source_result_sha256": "107eb4f1848ba169bc42d6f26547bf3f0b8a0fa9631d08bf3409a846c56eccb9"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-38027046976-1",
+    "sha256": "107eb4f1848ba169bc42d6f26547bf3f0b8a0fa9631d08bf3409a846c56eccb9",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/38027046976",
+    "durability": "time-limited; object archival not configured"
+  }
+}
