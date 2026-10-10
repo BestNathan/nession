@@ -98,10 +98,12 @@ test('SC-10: real P2P cursor resume and explicit truncated retention window', as
       document.dispatchEvent(new Event('visibilitychange'));
     });
 
-    await expect.poll(() => page.evaluate(port =>
-      window.__sc10.sockets.some((ws, i, sockets) =>
-        i > 0 && new URL(ws.url).port === String(port) && ws.readyState === WebSocket.OPEN),
-    runtime.agent_port), { timeout: 25000 }).toBe(true);
+    await expect.poll(() => page.evaluate(({ port, previous }) => {
+      const p2p = window.__sc10.sockets.filter(ws => new URL(ws.url).port === String(port));
+      return p2p.length > previous && p2p.some(ws => ws.readyState === WebSocket.OPEN);
+    }, { port: runtime.agent_port, previous: oldP2PSockets }), {
+      timeout: 25000,
+    }).toBe(true);
     await expect.poll(() => countInBuffer(peer, 'SC10-RECONNECTED-1213'), { timeout: 20000 }).toBe(1);
     await expect.poll(() => countInBuffer(page, 'SC10-RECONNECTED-1213'), { timeout: 30000 }).toBe(1);
     await expect(page.getByTestId('shell')).toBeVisible();
