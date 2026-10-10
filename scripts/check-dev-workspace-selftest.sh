@@ -21,7 +21,7 @@ CASES=0
 expect() {
   local status_wanted="$1" substring="$2" directory="$3" mode="$4" result=0
   (cd "$directory" && bash "$ROOT/scripts/check-dev-workspace.sh" "$mode") >"$TMP/out" 2>&1 || result=$?
-  if [ "$result" -ne "$status_wanted" ] || ! grep -Fq "$substring" "$TMP/out"; then
+  if [ "$result" -ne "$status_wanted" ] || { [ -n "$substring" ] && ! grep -Fq "$substring" "$TMP/out"; }; then
     echo "workspace selftest failed: expected status=$status_wanted /$substring/ at $directory mode=$mode; got status=$result" >&2
     cat "$TMP/out" >&2
     exit 1
