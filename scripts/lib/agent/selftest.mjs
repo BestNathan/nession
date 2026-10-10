@@ -1,6 +1,7 @@
 import './tools/gh/issue/selftest.mjs';
 import assert from 'node:assert/strict';
 import { renderAgentPrompt } from './prompt/index.mjs';
+import { selfTest as providerSmokeSelfTest } from './provider-smoke.mjs';
 import { renderIssueAuditPrompt, applyIssueAuditProposal, issueAuditTools } from './tasks/issue-audit.mjs';
 import { renderAcceptancePrompt } from './tasks/acceptance.mjs';
 import { candidateIssue, createIssueUpdateTool } from './tools/gh/issue/update.mjs';
@@ -101,4 +102,5 @@ assert.equal(executed.meta.usage.input, 5);
 assert.equal(executed.meta.cost.charged_usd, 0.5);
 assert.equal(executed.meta.tool_calls[0], 'read');
 assert.equal(disposed, true);
+providerSmokeSelfTest();
 console.log('agent library self-test: passed');
