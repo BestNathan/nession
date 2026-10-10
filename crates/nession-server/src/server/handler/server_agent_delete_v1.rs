@@ -1,7 +1,10 @@
 //! One versioned Server Protocol Unit.
 //! Route identity, version and execution policy are owned by routes.rs.
 
-use super::{json, info, ConnectionHandler, ProtocolMessage, HandlerAction, Message, current_timestamp, AgentStatus, Arc};
+use super::{
+    current_timestamp, info, json, AgentStatus, Arc, ConnectionHandler, HandlerAction, Message,
+    ProtocolMessage,
+};
 
 impl ConnectionHandler {
     /// Handle `server.agent.delete` — permanently remove an offline agent and its sessions.

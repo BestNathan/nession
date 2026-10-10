@@ -1,7 +1,10 @@
 //! One versioned Server Protocol Unit.
 //! Route identity, version and execution policy are owned by routes.rs.
 
-use super::{warn, info, ConnectionHandler, ProtocolMessage, HandlerAction, agent_list_reply, AgentListReply, AgentRefusal, WebAgentsListResponse};
+use super::{
+    agent_list_reply, info, warn, AgentListReply, AgentRefusal, ConnectionHandler, HandlerAction,
+    ProtocolMessage, WebAgentsListResponse,
+};
 
 impl ConnectionHandler {
     /// Handle `server.agent.list` - returns all registered agents.

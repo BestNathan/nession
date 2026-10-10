@@ -1,7 +1,7 @@
 //! One versioned Server Protocol Unit.
 //! Route identity, version and execution policy are owned by routes.rs.
 
-use super::{warn, info, ConnectionHandler, ProtocolMessage, HandlerAction};
+use super::{info, warn, ConnectionHandler, HandlerAction, ProtocolMessage};
 
 impl ConnectionHandler {
     /// Handle `server.agent.command-response` — resolve a pending command.

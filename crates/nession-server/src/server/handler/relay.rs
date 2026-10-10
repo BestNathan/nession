@@ -1,7 +1,10 @@
 //! Generic agent relay is runtime mechanism.
 //! Route identity, version and execution policy are owned by routes.rs.
 
-use super::{warn, json, ConnectionHandler, ProtocolMessage, HandlerAction, Message, current_timestamp, Value};
+use super::{
+    current_timestamp, json, warn, ConnectionHandler, HandlerAction, Message, ProtocolMessage,
+    Value,
+};
 
 impl ConnectionHandler {
     /// Relay a message to the agent it names.

@@ -1,7 +1,10 @@
 //! One versioned Server Protocol Unit.
 //! Route identity, version and execution policy are owned by routes.rs.
 
-use super::{info, json, ConnectionHandler, ProtocolMessage, HandlerAction, AgentRegisterPayload, Message, current_timestamp, AgentInfo, AgentStatus};
+use super::{
+    current_timestamp, info, json, AgentInfo, AgentRegisterPayload, AgentStatus, ConnectionHandler,
+    HandlerAction, Message, ProtocolMessage,
+};
 
 impl ConnectionHandler {
     pub(super) async fn handle_agent_register(
