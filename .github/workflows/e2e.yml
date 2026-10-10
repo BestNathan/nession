@@ -34,10 +34,13 @@ jobs:
     # that this workflow is verifying.
     env:
       PLAYWRIGHT_BROWSERS_PATH: ~/.cache/ms-playwright
-      NESSION_TARGET_SHA: ${{ github.sha }}
+      NESSION_TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       # ── Rust toolchain ────────────────────────────────────────────────
       - uses: actions-rust-lang/setup-rust-toolchain@v1

@@ -217,4 +217,16 @@ ok(() => {
   }
 });
 
+// Exact PR-head checks must not execute GitHub's synthetic merge checkout.
+ok(() => {
+  const expected='ref: ${{ github.event.pull_request.head.sha || github.sha }}';
+  for(const [workflow,count] of [['quality.yml',2],['e2e.yml',1],['e2e-scenario-smoke.yml',1]]){
+    const source=fs.readFileSync(path.join(repoRoot,'.github','workflows',workflow),'utf8');
+    assert.equal(source.split(expected).length-1,count,workflow+' must checkout exact PR head');
+    assert.ok(source.split('persist-credentials: false').length-1>=count,workflow+' cannot retain write credentials');
+  }
+  const e2e=fs.readFileSync(path.join(repoRoot,'.github','workflows','e2e.yml'),'utf8');
+  assert.ok(e2e.includes('NESSION_TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}'));
+});
+
 console.log('acceptance Case self-test: ' + cases + ' cases passed');
