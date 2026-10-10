@@ -5,6 +5,7 @@ rust-test-unit
 rust-test-integration
 rust-coverage
 protocol-integrity
+server-handler-locality
 protocol-codegen-drift
 design-system-full
 web-test-unit
