@@ -694,27 +694,11 @@ async fn unknown_msg_type_returns_empty_reply() {
 
 // ---- agent.register ----
 
-
-
-
-
-
 // ---- control.heartbeat ----
-
-
-
 
 // ---- agent.session.update ----
 
-
-
-
-
-
 // ---- server.auth ----
-
-
-
 
 // ---- unauthenticated client rejection ----
 
@@ -784,10 +768,7 @@ async fn unauthenticated_session_kill_rejected() {
 
 // ---- server.agent.list ----
 
-
-
 // ---- server.session.list ----
-
 
 // ---- server.session.list force refresh ----
 
@@ -831,8 +812,6 @@ async fn add_session(h: &mut ConnectionHandler, agent_id: &str, name: &str) {
     .unwrap();
 }
 
-
-
 /// Without `force`, no agent is contacted, so nothing is ever stale.
 #[tokio::test]
 async fn non_force_list_never_reports_stale() {
@@ -851,9 +830,6 @@ async fn non_force_list_never_reports_stale() {
         .unwrap()
         .is_empty());
 }
-
-
-
 
 // ---- parse_agent_sessions ----
 #[test]
@@ -917,29 +893,13 @@ fn parse_agent_sessions_tolerates_absent_optional_fields() {
 
 // ---- server.session.attach ----
 
-
-
-
-
-
 // ---- server.session.create ----
-
-
 
 // ---- server.session.kill ----
 
-
-
-
 // ---- server.agent.command-response ----
 
-
-
 // ---- env handlers (unauthenticated) ----
-
-
-
-
 
 #[tokio::test]
 async fn session_list_reply_is_what_its_contract_says_it_is() {
@@ -975,27 +935,9 @@ async fn session_list_reply_is_what_its_contract_says_it_is() {
     assert!(matches!(parsed, ServerSessionListReply::Listed(_)));
 }
 
-
-
-
-
 // ---- env handlers (authenticated, server files) ----
 
-
-
-
-
-
-
 // ---- session env handlers ----
-
-
-
-
-
-
-
-
 
 // ---- env payload contracts ----
 //
@@ -1031,23 +973,11 @@ fn a_payload_with_no_name_does_not_parse() {
 
 // ---- env write in-use lock ----
 
-
-
-
-
 // ---- agent.env.get without agent_id ----
-
-
-
 
 // ---- agent.terminal.resize ----
 
-
-
-
 // ---- agent.address_update ----
-
-
 
 // ---- agent identity is bound to the connection that registered it (#960) ----
 
@@ -1143,8 +1073,6 @@ async fn heartbeat_from_a_connection_that_never_registered_is_refused() {
         "an unregistered connection has no authority to write agent state"
     );
 }
-
-
 
 /// Advertised addresses decide where P2P clients dial, so a connection
 /// registered as `a1` must not be able to point `a2` somewhere else.
@@ -1641,10 +1569,6 @@ async fn terminal_resize_for_another_agents_session_is_refused() {
 }
 
 // ---- Quick Commands (issue #95, part 3) ----
-
-
-
-
 
 #[tokio::test]
 async fn commands_update() {
