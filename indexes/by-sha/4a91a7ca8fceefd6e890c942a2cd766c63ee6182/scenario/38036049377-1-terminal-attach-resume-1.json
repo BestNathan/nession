@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 38036049377,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/1474-stage-parent-proof-shallow-checkout",
+    "target_sha": "4a91a7ca8fceefd6e890c942a2cd766c63ee6182",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/38036049377",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "06f5af7a5d5221dde5153411f6bba479c57978a45f8a1b574041d3ed5cca9fde"
+  },
+  "record": "runs/2026-10-10/38036049377-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "c11a7f2fac46583be095db90ca3651e506c06e6376ebc997d6a8776855cfafff"
+}
