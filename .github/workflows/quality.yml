@@ -22,6 +22,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with: { cache-workspaces: ".", cache-all-crates: "true" }
       - uses: extractions/setup-just@v2
@@ -38,6 +41,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -53,9 +59,11 @@ jobs:
           node scripts/requirement-acceptance.mjs self-test
           node scripts/acceptance-case-ingest.mjs self-test
           node scripts/run-record-artifact-evidence.mjs self-test
+          node scripts/run-record-index-contract.mjs self-test
           node scripts/acceptance-ci-evidence.mjs self-test
           node scripts/trusted-case-discovery-selftest.mjs
           node scripts/e2e-run-ingest.mjs self-test
+          node scripts/e2e-test-run-ingest.mjs self-test
           node scripts/e2e-run-ingest-negative-selftest.mjs
           node scripts/collect-repo-health.mjs --self-test
           node scripts/generate-repo-metrics.mjs --self-test
@@ -63,6 +71,7 @@ jobs:
           node scripts/issue-contract.mjs self-test
           node scripts/task-runner.mjs self-test
           node scripts/task-result-ingest.mjs self-test
+          node e2e/runner/collectors/opt-in-observations.cjs self-test
           node e2e/runner/drivers/browser-report.mjs self-test
           node e2e/runner/runtime/full-stack.js self-test
           node e2e/runner/cli-selftest.mjs
