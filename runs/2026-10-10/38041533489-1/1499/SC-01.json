@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "53f2bb0d27625f1d3674c728d269074899a88c8e262bcf6e693067159aba73da",
+  "run_id": 38041533489,
+  "run_attempt": 1,
+  "issue": 1499,
+  "criterion": "SC-01",
+  "criterion_text": "Authenticated workflow metadata and actual tree/digest are verified before append or projection.",
+  "stage": "staging",
+  "target_sha": "5744960568a64d35d20a274f1b4591e0008f6f65",
+  "contract_sha256": "056fdc29ad3144d0b806fda89eb791b58ef0d9b0666d54a7426760ff1192498c",
+  "case_revision": "5744960568a64d35d20a274f1b4591e0008f6f65",
+  "case_tree_sha": "ab4dbd8283c42caefad1e42f2035c72fd240f18f",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-10T09:31:07.025Z",
+  "finished_at": "2026-10-10T09:31:23.023Z",
+  "duration_ms": 15998,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "Real source Case and Scenario orphan blobs independently bound to GitHub-owned run, SHA and immutable Git tree, with a live staging Agent.",
+      "evidence": [
+        {
+          "type": "source",
+          "value": "scenario run=37961137780 SHA=75d52881f7ab54e28a18d1947ee5d6a0818dd101 Git blob=d4663d074452f89e10bd4185322e08d9265978ca"
+        },
+        {
+          "type": "source",
+          "value": "Case run=37960891443 SHA=dc5b7a9c329ddadd72657e0ad750b81f512f3060 Git blob=e109c2fb652eef5523393d0ad7f4dbd5e13ac32e"
+        },
+        {
+          "type": "tree",
+          "value": "both source Git commit Case/Scenario trees matched immutable record digests"
+        },
+        {
+          "type": "negative",
+          "value": "rejected wrong run identity, short source SHA and invalid contract digest"
+        },
+        {
+          "type": "runtime",
+          "value": "real staging Server/Agent on target=5744960568a64d35d20a274f1b4591e0008f6f65"
+        }
+      ],
+      "duration_ms": 10089,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 38041533489,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "5744960568a64d35d20a274f1b4591e0008f6f65",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/38041533489",
+    "record_path": "runs/2026-10-10/38041533489-1/1499/SC-01.json",
+    "source_result_sha256": "04a66ae49efb4c85e9178b2e211764a7edfe5486ac2058e20fd93e89d2636e73"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-38041533489-1",
+    "sha256": "04a66ae49efb4c85e9178b2e211764a7edfe5486ac2058e20fd93e89d2636e73",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/38041533489",
+    "durability": "time-limited; object archival not configured"
+  }
+}

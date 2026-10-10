@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "1016ee63a6d65a67ce77b379d0a976bc77dd68d974725aabfc5efe2ada9909ed",
+  "run_id": 38041533489,
+  "run_attempt": 1,
+  "issue": 1499,
+  "criterion": "SC-02",
+  "criterion_text": "All Run modes share one versioned immutable orphan schema and indexes.",
+  "stage": "staging",
+  "target_sha": "5744960568a64d35d20a274f1b4591e0008f6f65",
+  "contract_sha256": "056fdc29ad3144d0b806fda89eb791b58ef0d9b0666d54a7426760ff1192498c",
+  "case_revision": "5744960568a64d35d20a274f1b4591e0008f6f65",
+  "case_tree_sha": "0345cc6a97ee2fb31a12c4b53652ae59d8b28818",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-10T09:31:28.107Z",
+  "finished_at": "2026-10-10T09:31:35.552Z",
+  "duration_ms": 7445,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "One immutable v1 orphan SHA-index envelope validates actual Scenario and main Case records; Test and Benchmark mode schemas also pass strict positive/negative fixtures.",
+      "evidence": [
+        {
+          "type": "scenario",
+          "value": "run=37961137780 immutable scenario index bound to source Git tree"
+        },
+        {
+          "type": "acceptance",
+          "value": "main_case_run=38027046976 accepted_main_sha=0ca419584050dc9148f26ab785722dedc4adb6e5 current_main_sha=c1b9cb73371d816f86295003a038dbbcac153403 orphan_index=38027046976-1-1499-SC-05.json"
+        },
+        {
+          "type": "schema",
+          "value": "v1 common source/run/attempt/SHA/record/execution contract for Test, Acceptance, Scenario, Benchmark (last two only where producers run)"
+        },
+        {
+          "type": "negative",
+          "value": "cross-run index paths, forged SHA, wrong stage and unsafe mode/suite rejected"
+        }
+      ],
+      "duration_ms": 1535,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 38041533489,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "5744960568a64d35d20a274f1b4591e0008f6f65",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/38041533489",
+    "record_path": "runs/2026-10-10/38041533489-1/1499/SC-02.json",
+    "source_result_sha256": "e0170d30f1c1cae848f472d994149e8894437d0b164c83fde5ccc38c53249d84"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-38041533489-1",
+    "sha256": "e0170d30f1c1cae848f472d994149e8894437d0b164c83fde5ccc38c53249d84",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/38041533489",
+    "durability": "time-limited; object archival not configured"
+  }
+}
