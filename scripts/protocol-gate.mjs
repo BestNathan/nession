@@ -75,7 +75,7 @@
 //   ./scripts/protocol-gate.mjs --list   # print the advertised set
 
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 
 const ROOT = process.cwd();
 const GENERATED = 'web/src/generated/protocol';
@@ -152,7 +152,14 @@ function dispatchFiles(dir, out = []) {
   for (const name of readdirSync(dir)) {
     const p = join(dir, name);
     if (statSync(p).isDirectory()) dispatchFiles(p, out);
-    else if (name.endsWith('.rs') && ROUTES.test(readFileSync(p, 'utf8'))) out.push(p);
+    else if (name.endsWith('.rs') && ROUTES.test(readFileSync(p, 'utf8'))) {
+      // Server routes moved to a child module; control dispatch remains in mod.rs.
+      // Rule 5 must inspect the real connection dispatcher, not routes.rs.
+      const dispatcher = relative(ROOT, p) ===
+        'crates/nession-server/src/server/handler/routes.rs'
+        ? join(dirname(p), 'mod.rs') : p;
+      out.push(dispatcher);
+    }
   }
   return out;
 }
