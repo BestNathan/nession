@@ -13,6 +13,10 @@ const {
   startFullStackRuntime, allocateLoopbackPort,
 } = require('../../runner/runtime/full-stack.js');
 
+const {
+  countMarkers, readTmux, sampleBrowser, redactObservation,
+} = require('../../runner/collectors/terminal-observation.cjs');
+
 const root = path.resolve(__dirname, '../../..');
 const sha = (text) => createHash('sha256').update(text).digest('hex');
 const toJson = (data) => JSON.stringify(data, null, 2) + '\n';
@@ -35,40 +39,6 @@ function commandFor(session) {
 function sessionSlug(name) {
   if (!/^[a-zA-Z0-9_-]+$/.test(name)) throw new Error('unsafe Session slug');
   return name;
-}
-function countMarkers(raw, marker) {
-  return (raw.match(new RegExp(marker + '[0-9]+', 'g')) || []).length;
-}
-function readTmux(socket, session, marker) {
-  const text = execFileSync('tmux', ['-S', socket, 'capture-pane', '-p',
-    '-S', '-400', '-t', '=' + session + ':'], { encoding: 'utf8', timeout: 8_000 });
-  return { marker_count: countMarkers(text, marker), sha256: sha(text), bytes: Buffer.byteLength(text) };
-}
-async function sampleBrowser(page, marker) {
-  return page.evaluate((prefix) => {
-    const host = document.querySelector('.xterm')?.parentElement;
-    const term = host && host.xtermInstance;
-    if (!term) return { mounted: false, marker_count: 0, viewport: null };
-    const buffer = term.buffer.active;
-    let markers = 0;
-    for (let line = 0; line < buffer.length; line += 1) {
-      const raw = buffer.getLine(line)?.translateToString() ?? '';
-      if (raw.includes(prefix)) markers += 1;
-    }
-    return { mounted: true, marker_count: markers, viewport: {
-      baseY: buffer.baseY, viewportY: buffer.viewportY,
-    }};
-  }, marker);
-}
-function redactObservation(data) {
-  // Only counters, timestamps, schema and digests are persisted. Raw terminal,
-  // URLs, tokens, WS frames and freeform page content never leave RAM.
-  return {
-    at: data.at,
-    browser: data.browser,
-    backend: data.backend,
-    stage: data.stage,
-  };
 }
 async function oneRun(runIndex, targetSha, output) {
   const { chromium, expect } = require('@playwright/test');
@@ -170,8 +140,16 @@ async function oneRun(runIndex, targetSha, output) {
 function selfTest() {
   assert.equal(countMarkers('a_1 a_2 a_1', 'a_'), 3);
   assert.throws(() => sessionSlug('unsafe/$x'), /unsafe/);
-  assert.equal(redactObservation({ at: 'x', browser: { marker_count: 1 }, backend: {},
-    stage: 'after', secret: 'TOKEN' }).secret, undefined);
+  const safe = redactObservation({ at: now(), stage: 'after-reload',
+    browser: { mounted: true, marker_count: 1, viewport: null, cookie: 'TOKEN' },
+    backend: { marker_count: 1, sha256: 'a'.repeat(64), bytes: 100, raw: 'PRIVATE' },
+    secret: 'TOKEN',
+  });
+  assert.equal(safe.secret, undefined);
+  assert.equal(safe.browser.cookie, undefined);
+  assert.equal(safe.backend.raw, undefined);
+  assert.throws(() => redactObservation({ ...safe, backend: { ...safe.backend, bytes: -1 } }),
+    /invalid or unbounded/);
   assert.equal(maxSamples < 16 && maxLines <= 500, true);
   console.log('terminal scenario observation self-test: 4 cases passed');
 }

@@ -76,7 +76,7 @@ check-instructions:
 # Prove the shared Acceptance full-stack harness keeps its config/target contract
 # deterministic without launching the runtime.
 check-acceptance-runtime:
-    node acceptance/runtime/full-stack.js self-test
+    ./e2e/run --validate
 
 # Validate source-aligned Case discovery/schema, trusted contract matching and
 # deterministic Pass/Fail/Pending/Error aggregation without provisioning.

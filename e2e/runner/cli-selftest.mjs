@@ -53,6 +53,50 @@ for (const [relative, expectedSha] of Object.entries(migration.baseline_png_blob
 assert.ok(catalog.cases.length > 0, 'Case catalog must discover source-aligned Cases');
 assert.ok(catalog.scenarios.length > 0, 'scenario catalog must not silently disappear');
 
+// CI must preserve a single command surface after the Case source-tree migration.
+// The trusted Case selector/updater stay in the workflow, but actual execution
+// must flow through ./e2e/run rather than a second legacy entrypoint.
+const caseWorkflow = fs.readFileSync(
+  path.join(repo, '.github', 'workflows', 'acceptance-cases.yml'), 'utf8');
+assert.match(caseWorkflow, /args=\(acceptance --issue-json/);
+assert.match(caseWorkflow, /node workspace\/e2e\/run "\$\{args\[@\]\}"/);
+assert.match(caseWorkflow, /while read -r issue criterion profile; do/);
+assert.match(caseWorkflow, /done < <\(jq -r/);
+assert.doesNotMatch(caseWorkflow, /node workspace\/acceptance\/run-case\.mjs/);
+assert.equal(fs.existsSync(path.join(repo, 'acceptance', 'run-case.mjs')), false,
+  'legacy public Case runner must be retired');
+assert.equal(fs.existsSync(path.join(repo, 'acceptance', 'runtime', 'full-stack.js')), false,
+  'legacy Runtime alias must be retired');
+assert.equal(fs.existsSync(path.join(repo,'acceptance','verifiers')),false,
+  'legacy verifier driver path must be retired');
+assert.ok(fs.existsSync(path.join(repo,'e2e','runner','drivers','index.mjs')));
+assert.ok(fs.existsSync(path.join(repo,'e2e','runner','drivers','playwright.config.cjs')));
+const driverGate=fs.readFileSync(path.join(repo,'.github','workflows','quality.yml'),'utf8');
+assert.match(driverGate,/node e2e\/runner\/drivers\/browser-report\.mjs self-test/);
+assert.equal(fs.existsSync(path.join(repo, 'e2e', 'acceptance', 'evaluator', 'run-case.mjs')), true,
+  'canonical internal Case evaluator must exist');
+const gateRecipes = fs.readFileSync(path.join(repo, 'justfile'), 'utf8');
+assert.match(gateRecipes, /check-acceptance-runtime:[\s\S]*?\.\/e2e\/run --validate/);
+assert.doesNotMatch(gateRecipes, /acceptance\/runtime\/full-stack\.js/);
+const acceptanceSkill = fs.readFileSync(path.join(repo, '.claude', 'skills',
+  'nession-acceptance', 'SKILL.md'), 'utf8');
+assert.match(acceptanceSkill, /\.\/e2e\/run acceptance/);
+const acceptanceArchitecture = fs.readFileSync(path.join(repo, 'docs', 'architecture',
+  'acceptance-cases.md'), 'utf8');
+assert.match(acceptanceArchitecture, /e2e\/runner\/runtime\/full-stack\.js/);
+assert.match(caseWorkflow, /--profile "\$\{profile\}"/);
+assert.match(caseWorkflow, /--sha "\$\{TARGET_SHA\}"/);
+const regressionWorkflow = fs.readFileSync(
+  path.join(repo, '.github', 'workflows', 'e2e.yml'), 'utf8');
+assert.match(regressionWorkflow, /\.\/run test --all/);
+const caseSmokeWorkflow = fs.readFileSync(
+  path.join(repo, '.github', 'workflows', 'acceptance-case-smoke.yml'), 'utf8');
+assert.match(caseSmokeWorkflow, /\.\/e2e\/run acceptance/);
+const scenarioSmokeWorkflow = fs.readFileSync(
+  path.join(repo, '.github', 'workflows', 'e2e-scenario-smoke.yml'), 'utf8');
+assert.match(scenarioSmokeWorkflow, /\.\/e2e\/run scenario/);
+
+
 const checked = call('--validate');
 assert.equal(checked.code, 0);
 assert.ok(JSON.parse(checked.stdout).case_count > 0);
@@ -98,6 +142,40 @@ try {
   assert.equal(delta.left.timeline.length, 3);
   assert.equal(delta.observed_delta.final_browser_marker_count, 140);
   assert.match(delta.limitations, /not synchronized/);
+  assert.equal(delta.source_comparison.same_target_sha, false);
+  assert.equal(delta.source_comparison.left.independently_authenticated, false);
+  assert.equal(delta.source_comparison.environment_identity, 'not-recorded');
+  assert.match(delta.limitations, /not independently authenticated/);
+  const sourceRecord = (target, runId) => ({
+    ...fixture(target, 240), run_id: runId, run_attempt: 1, run_index: 1,
+    source: { repository: 'BestNathan/nession', workflow_id: 378682095,
+      run_id: runId, run_attempt: 1, event: 'pull_request',
+      target_sha: target.repeat(40), scenario_tree_sha: 'a'.repeat(40),
+      original_sha256: 'd'.repeat(64) },
+  });
+  fs.writeFileSync(left, JSON.stringify(sourceRecord('a', 101)));
+  fs.writeFileSync(right, JSON.stringify(sourceRecord('b', 102)));
+  const cross = call('compare', left, right);
+  assert.equal(cross.code, 0);
+  const comparison = JSON.parse(cross.stdout);
+  assert.equal(comparison.source_comparison.left.source_fields,
+    'internally-consistent-but-unverified');
+  assert.equal(comparison.source_comparison.left.run_id, 101);
+  assert.equal(comparison.source_comparison.right.run_id, 102);
+  assert.equal(comparison.source_comparison.same_source_run, false);
+  assert.equal(comparison.source_comparison.same_target_sha, false);
+  assert.equal(comparison.source_comparison.left.independently_authenticated, false);
+  const spoof = sourceRecord('b', 102);
+  spoof.source.target_sha = 'a'.repeat(40);
+  fs.writeFileSync(right, JSON.stringify(spoof));
+  expectError('compare', left, right);
+  const crossRun = sourceRecord('b', 102);
+  crossRun.source.run_id = 999;
+  fs.writeFileSync(right, JSON.stringify(crossRun));
+  expectError('compare', left, right);
+  // Source identity fields may be consistent yet still not authenticated.
+  // This compares observations only; trusted ingestion must attest workflow_run.
+
   const corrupt = fixture('a', 240);
   corrupt.observations[1].browser.marker_count = -1;
   fs.writeFileSync(right, JSON.stringify(corrupt));

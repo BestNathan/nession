@@ -2,6 +2,7 @@
 // Main-only trusted ingestion of bounded E2E Scenario observations.
 // Never execute code from the source SHA or grant it write credentials.
 import assert from 'node:assert/strict';
+import { artifactEvidence, validateArtifactEvidence } from './run-record-artifact-evidence.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
@@ -187,10 +188,10 @@ export async function attest(raw, event, repo, token, request = githubJson) {
   const paths = recordPaths(record);
   const immutable = { ...record,
     source: { ...source, scenario_tree_sha: manifest.sha, original_sha256: sourceHash },
-    evidence: { provider: 'github-actions-artifact',
-      artifact_name: 'e2e-terminal-scenario-' + source.run_id + '-' + source.run_attempt,
-      sha256: sourceHash, retention_days: 14,
-      retrieval_url: source.source_url, durability: 'time-limited; object archival not configured' },
+    evidence: artifactEvidence({
+      mode: 'scenario', run_id: source.run_id, run_attempt: source.run_attempt,
+      source_record_sha256: sourceHash, workflow_url: source.source_url,
+    }),
     execution_id: hash(JSON.stringify({ source, scenario_tree_sha: manifest.sha,
       original_sha256: sourceHash, run_index: record.run_index })) ,
   };
@@ -266,6 +267,20 @@ async function selfTestAttestation() {
   };
   const first = await attest(valid, event, 'BestNathan/nession', 'test', request);
   assert.equal(first.record.source.scenario_tree_sha, 'd'.repeat(40));
+  assert.equal(first.record.evidence.retention_days, 14);
+  assert.equal(first.record.evidence.digest_scope, 'validated-source-record-json');
+  assert.equal(first.record.evidence.artifact_name, 'e2e-terminal-scenario-12-1');
+  validateArtifactEvidence(first.record.evidence, {
+    mode: 'scenario', run_id: first.record.run_id, run_attempt: first.record.run_attempt,
+    source_record_sha256: first.record.source.original_sha256,
+    workflow_url: first.record.source.source_url,
+  });
+  assert.throws(() => validateArtifactEvidence({ ...first.record.evidence,
+    retention_days: 90 }, {
+    mode: 'scenario', run_id: first.record.run_id, run_attempt: first.record.run_attempt,
+    source_record_sha256: first.record.source.original_sha256,
+    workflow_url: first.record.source.source_url,
+  }), /mismatch/);
   assert.ok(first.paths.record.startsWith('runs/2026-10-09/12-1/scenario/'));
   await assert.rejects(() => attest(valid, event, 'BestNathan/nession', 'test',
     async(route) => route.includes('/git/commits/') ? {tree:{sha:'b'.repeat(40)}} :
