@@ -25,7 +25,7 @@ function sourceDigest(snapshot) {
   let total = 0;
   for (const file of snapshot.files) {
     assert.match(file.path, /^[a-zA-Z0-9._/-]+$/, 'invalid source path');
-    assert.ok(!file.path.startsWith('/') && !file.path.split('/').includes('..'));
+    assert.ok(!file.path.startsWith('/') && !file.path.split('/').includes('..'), 'unsafe source path');
     assert.match(file.base64, /^[a-zA-Z0-9+/]*={0,2}$/, 'noncanonical source encoding');
     const bytes = Buffer.from(file.base64, 'base64');
     assert.equal(bytes.toString('base64'), file.base64, 'invalid base64');
