@@ -234,8 +234,17 @@ export class StreamReconciler {
     // socket was gone (#1213 SC-10).
     const continuing = options.preserveAppliedCursor === true
       && epoch === this.epoch && this.frontier !== null;
+    const lostEpoch = options.preserveAppliedCursor === true
+      && this.epoch !== null && epoch !== this.epoch;
     if (epoch !== this.epoch) {
       this.reset(epoch);
+      if (lostEpoch) {
+        // Same-session recovery got a different stream epoch: the old
+        // consumer buffer is not provably contiguous with this new stream.
+        // Explicitly flag the gap for the next snapshot repair, rather than
+        // trusting a fresh cursor as proof that output was not missed.
+        this.sink.onStreamTruncated();
+      }
     }
     if (!continuing && cursor !== undefined &&
         (this.frontier === null || cursor > this.frontier)) {
