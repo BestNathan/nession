@@ -43,6 +43,11 @@ class AuthenticationRejectedError extends Error {
   }
 }
 
+function retryCurrentTransport(service: WebSocketService | null): void {
+  sessionRuntimeRegistry.resumeForeground();
+  void service?.reconnectNow().catch((error) => console.error('[connection] Retry failed:', error));
+}
+
 export function useAppConnection() {
   const params = new URLSearchParams(window.location.search);
   // Whether to restore a session on load, frozen at the first render. Reading
@@ -194,14 +199,7 @@ export function useAppConnection() {
 
   useVisibilityReconnect(wasEverAuthed, wsService);
 
-  const handleRetry = useCallback(() => {
-    // A full UI restart is never a recovery mechanism. Re-arm the existing
-    // transport and the session runtimes without changing their identities.
-    sessionRuntimeRegistry.resumeForeground();
-    void wsService?.reconnectNow().catch((error) => {
-      console.error('[connection] Retry failed:', error);
-    });
-  }, [wsService]);
+  const handleRetry = useCallback(() => retryCurrentTransport(wsService), [wsService]);
 
   const handleDisconnect = useCallback(() => {
     if (serviceRef.current) {
