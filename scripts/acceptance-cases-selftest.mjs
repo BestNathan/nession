@@ -244,4 +244,15 @@ ok(() => {
   assert.ok(e2e.includes('NESSION_TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}'));
 });
 
+ok(() => {
+  const helper = path.join(repoRoot, 'e2e', 'acceptance', 'shared',
+    'staging-continuity-proof.cjs');
+  const result = spawnSync(process.execPath, [helper, 'self-test'], {
+    cwd: repoRoot, encoding: 'utf8', timeout: 5000,
+  });
+  assert.equal(result.status, 0,
+    'GitHub merge-parent shallow-checkout proof failed: ' + result.stderr);
+  assert.match(result.stdout, /6 positive\/negative fixtures passed/);
+});
+
 console.log('acceptance Case self-test: ' + cases + ' cases passed');
