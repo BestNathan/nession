@@ -102,7 +102,7 @@ const required = [
     ]
   ]
 ];
-const legacy = /(?:^|\\n)\\s*(?:run:\\s*)?(?:node|bash)\\s+(?:scripts|e2e)\\/[^\\n]*(?:\\s(?:self-test|--self-test))(?:\\s|$)/m;
+const legacy = /(?:^|\n)\s*(?:run:\s*)?(?:node|bash)\s+(?:scripts|e2e)\/[^\n]*(?:\s(?:self-test|--self-test))(?:\s|$)/m;
 
 function verify(load) {
   const problems = [];
@@ -142,7 +142,7 @@ for (const [file, commands] of required) {
 }
 const first = '.github/workflows/issue-audit.yml';
 const fixture = new Map(source);
-fixture.set(first, fixture.get(first) + '\\n      - run: node scripts/issue-contract.mjs self-test\\n');
+fixture.set(first, fixture.get(first) + '\n      - run: node scripts/issue-contract.mjs self-test\n');
 assert.ok(verify(p => fixture.get(p) ?? null).some(p => p.includes('legacy raw Node/Bash')),
   'raw self-test reintroduction escaped detection');
 cases++;
