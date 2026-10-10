@@ -20,6 +20,9 @@ fi
 if matches_staged '^(scripts/check-tmux-socket|gates/checks/tmux-socket-isolation)'; then
   GATE_IDS+=(tmux-socket-isolation-selftest)
 fi
+if matches_staged '^(scripts/check-dev-workspace(\.sh|-selftest\.sh)$|gates/checks/dev-workspace-)'; then
+  GATE_IDS+=(dev-workspace-selftest)
+fi
 if matches_staged '^(scripts/check-test-isolation|gates/checks/test-isolation)'; then
   GATE_IDS+=(test-isolation test-isolation-selftest)
 fi
