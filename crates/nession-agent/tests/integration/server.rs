@@ -3154,21 +3154,14 @@ async fn integration_an_unsequenced_sender_still_writes() {
     session.handle.shutdown().await.ok();
 }
 
-/// A second dial on one session gets its own lease, not the first client's.
+/// A second P2P browser is an Observer of the first browser's Agent-wide
+/// lease, not the Controller of another per-WebSocket SessionMap (#1213 SC-11).
 ///
-/// **Characterisation, not aspiration**, and it is pinned because it is
-/// surprising and because the shape of the SC-10 test below depends on it. The
-/// P2P session map is per-connection, so a second connection builds its own
-/// `AttachedSession` with its own `SessionControlState` — there is no second
-/// peer for the first client to be an observer *of*, and the reply says
-/// `controller`. #1095's observer role is therefore decided on the client on
-/// this path and nowhere else, which is why the client half of SC-10 is tested
-/// in the web suite.
-///
-/// If that map ever becomes shared, the premise the requirement's wording
-/// assumes comes back — and this is the test the change lands on.
+/// The first connection is already attached through SequencedSession::start.
+/// Its real tmux backend, control generation and stream epoch are shared by
+/// the second dial; two independent Controllers would break single-writer safety.
 #[tokio::test]
-async fn integration_a_second_dial_gets_its_own_lease() {
+async fn integration_second_dial_observes_shared_session_lease() {
     let session = SequencedSession::start("second-dial").await.unwrap();
     let (mut sink, mut stream) = session.dial().await.unwrap();
     let reply: nession_agent::server::websocket::Message<ClientAttachResponse> =
@@ -3177,10 +3170,14 @@ async fn integration_a_second_dial_gets_its_own_lease() {
             .unwrap();
     assert_eq!(
         reply.payload.control_role.as_deref(),
-        Some("controller"),
-        "a P2P attach builds its own lease, so the second dial is its own controller"
+        Some("observer"),
+        "a second physical P2P connection must not mint a second Controller"
     );
-
+    assert_eq!(
+        reply.payload.control_generation,
+        Some(session.control_generation)
+    );
+    assert_eq!(reply.payload.stream_epoch, Some(session.epoch));
     session.handle.shutdown().await.ok();
 }
 
@@ -3193,15 +3190,10 @@ async fn integration_a_second_dial_gets_its_own_lease() {
 /// transport replayed what it was holding — is refused rather than obeyed. It
 /// had no test at all before this one.
 ///
-/// **Why this shape, and not "a second client is an observer".** That is what
-/// the requirement's wording suggests, and it is not reachable here: the P2P
-/// session map is per-connection, so a second dial on the same session builds
-/// its own `AttachedSession` with its own `SessionControlState`, and its attach
-/// reply says `controller`. The observer the client-side machinery gates on
-/// (#1095) is decided on the client and nowhere else on this path — the web
-/// suite's SC-10 tests cover that half. What the agent can refuse, and what a
-/// stale client actually meets, is a generation it is no longer on.
-///
+/// The Agent-scoped SessionMap now makes every P2P connection share one
+/// ownership generation. This test proves a stale generation is refused by
+/// the Agent's authoritative input guard, not merely hidden in UI.
+
 /// The refusal is asserted **by name**. A silently dropped frame and a refused
 /// one look identical to the sender, and the difference is the whole of the
 /// client's recovery: `not_controller` is what tells it to stop retrying.
