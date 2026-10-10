@@ -8,6 +8,7 @@ worktree-target-seed
 build-cache-verifier
 tmux-socket-isolation
 protocol-integrity
+server-handler-locality
 protocol-codegen-drift
 rust-coverage
 repo-health-selftest

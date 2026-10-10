@@ -130,6 +130,9 @@ check-acceptance-cases:
 # reply carries its request's own name and is correlated by `id`.
 check-protocol:
     node scripts/protocol-gate.mjs
+    ./gates/run server-handler-locality
+    node scripts/server-handler-locality.mjs --self-test
+    node scripts/server-handler-concurrency-selftest.mjs
 
 # Every name a call site may use — units, wires, notifications and control.
 protocol-list:
