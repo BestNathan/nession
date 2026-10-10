@@ -1,0 +1,100 @@
+name: Task Result Ingest
+
+# Trusted default-branch handler; never execute the Task branch's code.
+on:
+  workflow_run:
+    workflows: ['Ephemeral Task Runner']
+    types: [completed]
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: task-results-ingest
+  cancel-in-progress: false
+
+jobs:
+  persist:
+    if: >-
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      (github.event.workflow_run.conclusion == 'success' ||
+       github.event.workflow_run.conclusion == 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout main-owned ingestion
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: trusted
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Self-test Task contract and ingest boundary
+        run: |
+          node trusted/scripts/task-runner.mjs self-test
+          node trusted/scripts/task-result-ingest.mjs self-test
+      - name: Download upstream untrusted observation
+        uses: actions/download-artifact@v4
+        with:
+          name: task-execution-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: incoming
+      - name: Validate pinned source selector
+        id: source
+        env:
+          UPSTREAM_SHA: ${{ github.event.workflow_run.head_sha }}
+          UPSTREAM_EVENT: ${{ github.event.workflow_run.event }}
+        run: |
+          set -euo pipefail
+          sha="$(jq -er '.source_sha' incoming/record.json)"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          if [[ "$UPSTREAM_EVENT" == "push" ]]; then
+            [[ "$sha" == "$UPSTREAM_SHA" ]] || { echo 'Source SHA mismatch' >&2; exit 2; }
+          elif [[ "$UPSTREAM_EVENT" != "workflow_dispatch" ]]; then
+            echo 'Unsupported dispatch origin' >&2; exit 2
+          fi
+          echo "source_sha=$sha" >> "$GITHUB_OUTPUT"
+      - name: Checkout exact Task source for independent inspection
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.source.outputs.source_sha }}
+          path: source
+          persist-credentials: false
+      - name: Initialize independent orphan result store
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p task-store
+          git -C task-store init -q
+          git -C task-store config user.name 'github-actions[bot]'
+          git -C task-store config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git -C task-store remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if git -C task-store ls-remote --exit-code origin refs/heads/task-results >/dev/null; then
+            git -C task-store fetch --depth=1 origin refs/heads/task-results
+            git -C task-store checkout -B task-results FETCH_HEAD
+          else
+            git -C task-store checkout --orphan task-results
+          fi
+      - name: Verify provenance and append canonical run/snapshot/index
+        run: |
+          set -euo pipefail
+          node trusted/scripts/task-result-ingest.mjs ingest \
+            "$GITHUB_EVENT_PATH" "${GITHUB_WORKSPACE}/source" \
+            "${GITHUB_WORKSPACE}/incoming/record.json" \
+            "${GITHUB_WORKSPACE}/task-store"
+      - name: Push append-only task-results updates
+        run: |
+          set -euo pipefail
+          git -C task-store add runs sources indexes
+          if git -C task-store diff --cached --quiet; then
+            echo 'Idempotent retry; archived content unchanged'
+          else
+            git -C task-store commit -m "task: ingest run ${{ github.event.workflow_run.id }} attempt ${{ github.event.workflow_run.run_attempt }}"
+            git -C task-store push origin HEAD:refs/heads/task-results
+          fi
+          echo 'Task result verified and archived on task-results (not acceptance-results).' >> "$GITHUB_STEP_SUMMARY"
