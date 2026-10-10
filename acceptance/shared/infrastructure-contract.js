@@ -78,12 +78,12 @@ function verifySc11() {
   must(workflow, /runtime_profile="\$\{INPUT_RUNTIME\}"/, 'manual runtime selection');
   // Both manual workflow_dispatch and automatic pushes flow through the same
   // canonical E2E CLI; legacy --target-sha is intentionally retired.
-  must(workflow, /args=\\(acceptance --issue-json/, 'shared canonical Case CLI argument array');
-  must(workflow, /args\\+=\\(--issue "\\$\\{issue\\}" --sc "\\$\\{criterion\\}" --stage "\\$\\{ACCEPTANCE_STAGE\\}"\\)/,
+  must(workflow, /args=\(acceptance --issue-json/, 'shared canonical Case CLI argument array');
+  must(workflow, /args\+=\(--issue "\${issue}" --sc "\${criterion}" --stage "\${ACCEPTANCE_STAGE}"\)/,
     'shared Issue/SC/stage selector');
-  must(workflow, /args\\+=\\(--sha "\\$\\{TARGET_SHA\\}" --profile "\\$\\{profile\\}" --output "\\$\\{output\\}"\\)/,
+  must(workflow, /args\+=\(--sha "\${TARGET_SHA}" --profile "\${profile}" --output "\${output}"\)/,
     'manual and automatic paths share exact SHA and runtime profile');
-  must(workflow, /node workspace\\/e2e\\/run "\\$\\{args\\[@\\]\\}"/,
+  must(workflow, /node workspace\/e2e\/run "\${args\[@\]}"/,
     'shared canonical Case runner entrypoint');
   return result(
     'Manual dispatch selects Issue, SC, exact SHA, stage and runtime profile through the same deterministic Case runner.',
