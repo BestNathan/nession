@@ -5189,6 +5189,7 @@ mod tests {
                 tmux: &tmux,
                 sessions: &sessions,
                 client_id: &client,
+                connection_id: &Arc::new(()),
                 outbound: &outbound,
                 default_working_dir: "/tmp",
                 file_ops: &file_ops,
