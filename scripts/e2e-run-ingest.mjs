@@ -3,6 +3,7 @@
 // Never execute code from the source SHA or grant it write credentials.
 import assert from 'node:assert/strict';
 import { artifactEvidence, validateArtifactEvidence } from './run-record-artifact-evidence.mjs';
+import { makeRunIndex } from './run-record-index-contract.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
@@ -304,9 +305,9 @@ async function main() {
   if (cmd === 'attest') return console.log(JSON.stringify(result.paths));
   if (!output || !indexFile) throw new Error('output and index path required');
   fs.writeFileSync(output, JSON.stringify(result.record, null, 2) + '\n');
-  fs.writeFileSync(indexFile, JSON.stringify({ schema_version: 1,
+  fs.writeFileSync(indexFile, JSON.stringify(makeRunIndex({ schema_version: 1,
     mode: 'scenario', source: result.record.source,
-    record: result.paths.record, execution_id: result.record.execution_id }, null, 2) + '\n');
+    record: result.paths.record, execution_id: result.record.execution_id }), null, 2) + '\n');
 }
 // Importing the deterministic validators for security tests must not run the CLI.
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {

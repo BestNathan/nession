@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // A real-provider, read-only Acceptance canary. No Issue/GitHub writes.
 import assert from 'node:assert/strict';
+import { providerScopedRunName } from './telemetry/run-name.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -39,6 +40,9 @@ export function verifySmoke({ context, result, telemetry, provider }) {
   assert.equal(telemetry.agent.prompt?.version, 'v1');
   assert.match(telemetry.agent.prompt?.sha256 || '', /^[0-9a-f]{64}$/, 'prompt sha256 must be valid');
   assert.equal(telemetry.task.target_ref, context.target_ref);
+  const expectedSuffix = '-issue-' + context.issue.number + '-' + context.stage + '-' + provider;
+  assert.ok(telemetry.identity?.unique_run_name?.endsWith(expectedSuffix),
+    'immutable telemetry run name must be scoped by Provider to prevent matrix collisions');
   return { provider, outcome: 'Pending', template: telemetry.agent.prompt.id, template_version: telemetry.agent.prompt.version, prompt_sha256: telemetry.agent.prompt.sha256 };
 }
 
@@ -47,7 +51,7 @@ export function selfTest() {
   const fixture = {
     context, provider: 'deepseek',
     result: { criteria: [{ criterion: EXPECTED, result: 'Pending', evidence: [], summary: 'No evidence supplied' }] },
-    telemetry: { schema_version: 1, task: { target_ref: context.target_ref }, agent: {
+    telemetry: { schema_version: 1, identity: { unique_run_name: '42-1-issue-1556-staging-deepseek' }, task: { target_ref: context.target_ref }, agent: {
       provider: 'deepseek', status: 'finished', prompt: { id: 'acceptance', version: 'v1', sha256: 'c'.repeat(64) },
     } },
   };
@@ -59,7 +63,30 @@ export function selfTest() {
   assert.throws(() => verifySmoke({ ...fixture, result: { criteria: [{ criterion: EXPECTED, result: 'Pass' }] } }), /fabricated evidence/);
   assert.throws(() => verifySmoke({ ...fixture, telemetry: { ...fixture.telemetry, agent: { ...fixture.telemetry.agent, provider: 'cursor' } } }), /provider/);
   assert.throws(() => verifySmoke({ ...fixture, telemetry: { ...fixture.telemetry, agent: { ...fixture.telemetry.agent, prompt: { id: 'acceptance', version: 'v1', sha256: 'invalid' } } } }), /sha256/);
-  console.log('AI Agent provider smoke self-test: 8 positive/negative cases passed');
+
+  const nameCursor = providerScopedRunName({
+    workflowId: 'agent-provider-smoke', runId: 42, runAttempt: 1,
+    taskId: 'issue-1556-staging', provider: 'cursor',
+  });
+  const nameDeepSeek = providerScopedRunName({
+    workflowId: 'agent-provider-smoke', runId: 42, runAttempt: 1,
+    taskId: 'issue-1556-staging', provider: 'deepseek',
+  });
+  assert.notEqual(nameCursor, nameDeepSeek, 'concurrent provider jobs must not have identical immutable paths');
+  assert.equal(providerScopedRunName({
+    workflowId: 'requirement-acceptance', runId: 42, runAttempt: 1,
+    taskId: 'issue-1556-staging', provider: 'cursor',
+  }), undefined, 'non-smoke workflows must keep their existing run naming');
+  assert.throws(() => providerScopedRunName({
+    workflowId: 'agent-provider-smoke', runId: 42, runAttempt: 1,
+    taskId: 'issue-1556-staging', provider: 'other',
+  }), /declared Provider/);
+  assert.throws(() => verifySmoke({
+    ...fixture, telemetry: {
+      ...fixture.telemetry, identity: { unique_run_name: nameCursor },
+    },
+  }), /matrix collisions/);
+  console.log('AI Agent provider smoke self-test: 12 positive/negative cases passed');
 }
 
 async function main() {

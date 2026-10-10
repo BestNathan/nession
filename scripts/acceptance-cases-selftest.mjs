@@ -217,4 +217,18 @@ ok(() => {
   }
 });
 
+// The PR's check-run head SHA must also be the SHA actually checked out
+// when a protocol/browser Case produces provenance. GitHub's default PR
+// merge-ref checkout has a different SHA and cannot prove that invariant.
+ok(() => {
+  const smoke = fs.readFileSync(path.join(repoRoot, '.github', 'workflows',
+    'acceptance-case-smoke.yml'), 'utf8');
+  assert.ok(smoke.includes('branches: [staging, main]'),
+    'main-target promotions must run real source Case Smoke');
+  assert.ok(smoke.includes('ref: ${{ github.event.pull_request.head.sha || github.sha }}'),
+    'Case Smoke must execute exact source head, not synthetic PR merge SHA');
+  assert.match(smoke, /persist-credentials: false/,
+    'untrusted verifier code must not inherit checkout write credentials');
+});
+
 console.log('acceptance Case self-test: ' + cases + ' cases passed');
