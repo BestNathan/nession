@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "7f9b3d8e807ceb59381e0ceea68c5b72288cedaa2150c419c0e1de6bc6c2b364",
+  "run_id": 38051081406,
+  "run_attempt": 1,
+  "issue": 1258,
+  "criterion": "SC-03",
+  "criterion_text": "(staging): Existing Server Protocol Unit behavior is preserved during the structural migration.",
+  "stage": "staging",
+  "target_sha": "696892d0cb003a507dde5f9b7087014db8f92e18",
+  "contract_sha256": "f9d99bcb768c07afe810ced25a68446df68cbe315892f3c3f6334883bd6f8668",
+  "case_revision": "696892d0cb003a507dde5f9b7087014db8f92e18",
+  "case_tree_sha": "783a070bbd25aaebf8cc0bcec4ac45afd279a1b8",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-10T12:14:15.558Z",
+  "finished_at": "2026-10-10T12:14:31.530Z",
+  "duration_ms": 15972,
+  "verifiers": [
+    {
+      "type": "protocol",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "Exact-SHA full-stack Server preserves auth, agent registration, info/manifest and session.list Unit behavior over real WebSocket.",
+      "evidence": [
+        {
+          "type": "protocol",
+          "value": "server.auth status=success over ws://127.0.0.1:44971/ws"
+        },
+        {
+          "type": "protocol",
+          "value": "server.agent.list contains agent_id=e2e-test-node status=online"
+        },
+        {
+          "type": "runtime",
+          "value": "target_sha=696892d0cb003a507dde5f9b7087014db8f92e18 profile=full-stack-local"
+        },
+        {
+          "type": "protocol",
+          "value": "server.info id=1258-info version=0.35.0 online_agent_count=1"
+        },
+        {
+          "type": "protocol",
+          "value": "server.info advertises server.session.relay.end@v1 and server.session.list"
+        },
+        {
+          "type": "protocol",
+          "value": "server.session.list id=1258-sessions sessions=0"
+        },
+        {
+          "type": "runtime",
+          "value": "checked-out exact staging SHA=696892d0cb003a507dde5f9b7087014db8f92e18"
+        }
+      ],
+      "duration_ms": 10084,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 38051081406,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "696892d0cb003a507dde5f9b7087014db8f92e18",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/38051081406",
+    "record_path": "runs/2026-10-10/38051081406-1/1258/SC-03.json",
+    "source_result_sha256": "412ba48100cd3d0b99f71bbe64310915df25c8d1e4e463d01669eb5e54c5c5fa"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-38051081406-1",
+    "sha256": "412ba48100cd3d0b99f71bbe64310915df25c8d1e4e463d01669eb5e54c5c5fa",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/38051081406",
+    "durability": "time-limited; object archival not configured"
+  }
+}
