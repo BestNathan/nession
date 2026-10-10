@@ -14,7 +14,7 @@ async function main(){
   assert.match(lifecycle,/const stop = async/);
   const e2e=await artifact(ci['E2E Tests'],'playwright-report');
   const smoke=await artifact(ci['Acceptance Case Smoke'],'acceptance-case-smoke-1474');
-  report('Shared Runner owns real Server, Agent, tmux and Web lifecycle with successful exact-head Quality/E2E/Case Smoke and isolated staging Case execution.',[
+  report('Shared Runner owns real Server, Agent, isolated terminal-session lifecycle and Web with successful exact-head Quality/E2E/Case Smoke and isolated staging Case execution.',[
     {type:'ownership',value:'globalSetup and Case evaluator both delegate to e2e/runner/runtime/full-stack.js'},
     {type:'runtime',value:'target='+ctx.target+' profile=full-stack-local, real Agent protocol and HTTP readiness'},
     {type:'ci',value:'Quality='+ci['Quality Gate'].id+' E2E='+ci['E2E Tests'].id+' CaseSmoke='+ci['Acceptance Case Smoke'].id},
