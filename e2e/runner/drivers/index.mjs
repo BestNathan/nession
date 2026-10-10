@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { classifyBrowserReport } from './browser-report.mjs';
+import { classifyBrowserReport, extractGeometryEvidence } from './browser-report.mjs';
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 
@@ -205,7 +205,18 @@ async function executeBrowserVerifier(verifier, context) {
   } finally {
     fs.rmSync(reportDir, { recursive: true, force: true });
   }
-  const verdict = classifyBrowserReport(report, processResult.code, proof);
+  let verdict = classifyBrowserReport(report, processResult.code, proof);
+  // #1482 SC-06/SC-08 must attach SHA-bound *measured* browser evidence.
+  // Never mark these Cases Pass on assertion counts alone.
+  if (verdict.result === 'Pass' && Number(context.issueNumber) === 1482 &&
+      ['SC-06', 'SC-08'].includes(context.criterion)) {
+    const measured = extractGeometryEvidence(report, processResult.stdout, context.targetSha);
+    verdict = measured
+      ? { ...verdict, evidence: [...verdict.evidence, measured] }
+      : { ...verdict, result: 'Error',
+          summary: 'Passing browser Case did not emit validated exact-SHA geometry evidence',
+          evidence: [], infrastructure_error: 'missing-geometry-evidence' };
+  }
   return {
     type: verifier.type,
     entry: verifier.entry,
