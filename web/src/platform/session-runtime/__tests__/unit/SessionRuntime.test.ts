@@ -1219,7 +1219,7 @@ describe('SessionRuntime', () => {
       rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
       await openWs();
       await flushMicrotasks();
-      answerAttach();
+      answerPending('agent.attach', 'ok', { stream_epoch: 1, stream_cursor: 2 });
       await flushMicrotasks();
 
       // Attached, Terminal non-empty, nothing lost: no history requested. The
