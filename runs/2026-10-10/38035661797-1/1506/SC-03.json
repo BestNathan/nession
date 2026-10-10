@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "ada332aad0f6112ddc384199e467199b91bf97df9d9fa5429d72a8639ea47daa",
+  "run_id": 38035661797,
+  "run_attempt": 1,
+  "issue": 1506,
+  "criterion": "SC-03",
+  "criterion_text": "Real exact-head Quality Gate, E2E regression and Acceptance Case Smoke pass with full-stack setup and teardown on staging-compatible CI.",
+  "stage": "staging",
+  "target_sha": "b58f01c482c7957b1a2a5c111e1fa381aa28a088",
+  "contract_sha256": "692d3467bbd7d9e8b9c96577f5edcadb39ef9119dfd2a9a8f6c8af5c7e61f4b4",
+  "case_revision": "b58f01c482c7957b1a2a5c111e1fa381aa28a088",
+  "case_tree_sha": "770d3ecd43859655388de212cbd529165dbc345c",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Fail",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-10T07:51:21.495Z",
+  "finished_at": "2026-10-10T07:51:27.464Z",
+  "duration_ms": 5970,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Fail",
+      "summary": "staging source must be a normal two-parent PR merge commit\n\n1 !== 3",
+      "evidence": [
+        {
+          "type": "failure",
+          "value": "real CI/runtime or authenticated orphan proof unavailable"
+        }
+      ],
+      "duration_ms": 56,
+      "exit_code": 1,
+      "stderr": "staging source must be a normal two-parent PR merge commit\n\n1 !== 3"
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 38035661797,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "b58f01c482c7957b1a2a5c111e1fa381aa28a088",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/38035661797",
+    "record_path": "runs/2026-10-10/38035661797-1/1506/SC-03.json",
+    "source_result_sha256": "ba30aa19eeda3e147d333b701a19c12b3088011b5b7f66066e2013f867b0ded5"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-38035661797-1",
+    "sha256": "ba30aa19eeda3e147d333b701a19c12b3088011b5b7f66066e2013f867b0ded5",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/38035661797",
+    "durability": "time-limited; object archival not configured"
+  }
+}
