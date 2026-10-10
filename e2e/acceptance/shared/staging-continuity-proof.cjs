@@ -15,6 +15,17 @@ async function get(endpoint){
   if(!r.ok)throw new Error('GitHub source lookup unavailable '+r.status+' '+endpoint);
   return r.json();
 }
+function verifiedMergeHead(commit,target){
+  assert.equal(commit.sha,target,'GitHub merge object is not the checked-out target');
+  assert.equal(commit.parents?.length,2,
+    'staging source must be a normal two-parent PR merge commit');
+  for(const parent of commit.parents){
+    assert.match(parent.sha,/^[a-f0-9]{40}$/,'invalid merge parent SHA');
+  }
+  assert.notEqual(commit.parents[0].sha,commit.parents[1].sha,
+    'duplicate merge parents cannot establish independent PR source');
+  return commit.parents[1].sha;
+}
 async function liveContext(){
   const target=process.env.NESSION_ACCEPTANCE_TARGET_SHA;
   assert.match(target,/^[a-f0-9]{40}$/);
@@ -24,11 +35,7 @@ async function liveContext(){
   // when HEAD is marked shallow. Resolve the immutable commit object from the
   // authenticated GitHub Git API instead of trusting shallow local ancestry.
   const commit=await get('/git/commits/'+target);
-  assert.equal(commit.sha,target,'GitHub merge object is not the checked-out target');
-  assert.equal(commit.parents?.length,2,
-    'staging source must be a normal two-parent PR merge commit');
-  const sourceHead=commit.parents[1].sha;
-  assert.match(commit.parents[0].sha,/^[a-f0-9]{40}$/,'invalid staging base parent');
+  const sourceHead=verifiedMergeHead(commit,target);
   assert.match(sourceHead,/^[a-f0-9]{40}$/);
   const runtime=runtimeFromEnv();
   assert.equal(runtime.target_sha,target);
@@ -104,4 +111,15 @@ function fail(e){
   console.log(JSON.stringify({status:'fail',summary:m,evidence:[{type:'failure',value:'real CI/runtime or authenticated orphan proof unavailable'}]}));
   process.exitCode=1;
 }
-module.exports={repo,get,liveContext,sourceChecks,artifact,canonicalIngest,report,fail};
+module.exports={repo,get,liveContext,verifiedMergeHead,sourceChecks,artifact,canonicalIngest,report,fail};
+if(process.argv[2]==='self-test'){
+  const a='a'.repeat(40),b='b'.repeat(40),target='c'.repeat(40);
+  assert.equal(verifiedMergeHead({sha:target,parents:[{sha:a},{sha:b}]},target),b);
+  assert.throws(()=>verifiedMergeHead({sha:target,parents:[]},target),/two-parent/);
+  assert.throws(()=>verifiedMergeHead({sha:target,parents:[{sha:a}]},target),/two-parent/);
+  assert.throws(()=>verifiedMergeHead({sha:'d'.repeat(40),parents:[{sha:a},{sha:b}]},target));
+  assert.throws(()=>verifiedMergeHead({sha:target,parents:[{sha:a},{sha:a}]},target),/duplicate/);
+  assert.throws(()=>verifiedMergeHead({sha:target,parents:[{sha:'shallow'},{sha:b}]},target),/parent SHA/);
+  console.log('staging Git API parent proof: 6 positive/negative fixtures passed');
+}
+
