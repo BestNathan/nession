@@ -3193,7 +3193,7 @@ async fn integration_second_dial_observes_shared_session_lease() {
 /// The Agent-scoped SessionMap now makes every P2P connection share one
 /// ownership generation. This test proves a stale generation is refused by
 /// the Agent's authoritative input guard, not merely hidden in UI.
-
+///
 /// The refusal is asserted **by name**. A silently dropped frame and a refused
 /// one look identical to the sender, and the difference is the whole of the
 /// client's recovery: `not_controller` is what tells it to stop retrying.
