@@ -204,6 +204,39 @@ describe('StreamReconciler', () => {
     expect(h.requests[0].afterSeq).toBe(2);
   });
 
+  it('reconnects from the last applied cursor rather than the Agent latest cursor (#1213 SC-10)', async () => {
+    const h = makeHarness();
+    live(h, 2, 'two');
+    // A separate P2P peer kept the stream running to 5 while this consumer
+    // was offline. There is NO replacement bootstrap, so 2 (not 5) is the
+    // highest frame actually present in xterm and must be replayed.
+    h.reconciler.seed(1, 5, { preserveAppliedCursor: true });
+    expect(h.requests).toHaveLength(1);
+    expect(h.requests[0].afterSeq).toBe(2);
+    h.requests[0].resolve(reply([3, 4, 5].map(seq => output(seq))));
+    await flushMicrotasks();
+    expect(h.out).toEqual(['two', 'replay-3', 'replay-4', 'replay-5']);
+    expect(h.truncated).toBe(0);
+  });
+
+  it('a real bootstrap still seeds from the snapshot cursor, not a stale local cursor', () => {
+    const h = makeHarness();
+    live(h, 2, 'two');
+    h.reconciler.seed(1, 5);
+    expect(h.requests).toHaveLength(1);
+    expect(h.requests[0].afterSeq).toBe(5);
+  });
+
+  it('flags a changed epoch as a real gap when reconnecting from old applied output', () => {
+    const h = makeHarness();
+    live(h, 2, 'two');
+    h.reconciler.seed(2, 1, { preserveAppliedCursor: true });
+    expect(h.truncated).toBe(1);
+    expect(h.requests).toHaveLength(1);
+    expect(h.requests[0].epoch).toBe(2);
+    expect(h.requests[0].afterSeq).toBe(1);
+  });
+
   it('asks from the stream start when a new epoch is adopted', async () => {
     const h = makeHarness();
     live(h, 5, 'five');
