@@ -121,6 +121,19 @@ export class WebSocketService implements PluginSurface {
     return this.reconnectAttempt;
   }
 
+  /** Identity of the physical socket, for bounded probes and stale callbacks. */
+  get physicalGeneration(): number {
+    return this.generation;
+  }
+
+  /** Resume now instead of waiting for a throttled background backoff timer. */
+  reconnectNow(): Promise<void> {
+    if (this.state !== 'connected') {
+      this.clearReconnectTimer();
+    }
+    return this.connect();
+  }
+
   /** True once {@link dispose} ran — the service can never connect again. */
   get isDisposed(): boolean {
     return this.disposed;
@@ -196,8 +209,9 @@ export class WebSocketService implements PluginSurface {
    * shortcut: reconnect budget, candidate rotation and force-relay all key off
    * the state transition this produces, so they apply unchanged.
    */
-  reportUnresponsive(): void {
-    if (this.disposed || this.userClosed) {
+  reportUnresponsive(expectedGeneration?: number): void {
+    if (this.disposed || this.userClosed || this.state !== 'connected'
+      || (expectedGeneration !== undefined && expectedGeneration !== this.generation)) {
       return;
     }
     // `teardownSocket()` detaches `onclose` before closing, so this cannot
@@ -423,8 +437,12 @@ export class WebSocketService implements PluginSurface {
         // ran the loss path — retrying there is legitimate, and overriding it
         // would strand the retry timer behind a 'disconnected' state.
         if (this.ws === ws && ws.readyState === WebSocket.OPEN) {
-          this.teardownSocket();
-          this.failConnection();
+          this.options.onHandshakeRejected?.(error instanceof Error ? error : new Error(String(error)));
+          // The owner may dispose the service on explicit auth rejection.
+          if (this.ws === ws && ws.readyState === WebSocket.OPEN) {
+            this.teardownSocket();
+            this.failConnection();
+          }
         }
       });
     };

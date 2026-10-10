@@ -900,6 +900,19 @@ export class SessionRuntime {
    * be the version that starts tearing down live-but-slow links, which is a
    * much worse trade than a slightly wider detection window.
    */
+  /** Foreground is a hint to advance the existing recovery path (#1213). */
+  resumeOnForeground(): void {
+    const transport = this.agentWs;
+    if (!transport) { return; }
+    if (transport.connectionState === 'connected') {
+      this.probeLivenessNow();
+    } else {
+      // connect() shares an in-flight attempt; reconnectNow() cancels only
+      // stale backoff, so duplicate pageshow/visibility events are harmless.
+      void transport.reconnectNow().catch(() => {});
+    }
+  }
+
   probeLivenessNow(): void {
     if (this.attachState.phase !== 'attached') {
       return;
