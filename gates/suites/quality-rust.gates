@@ -1,5 +1,5 @@
 # quality-rust
-# Gate IDs only. Not wired into current hooks/workflows yet.
+# Canonical Rust/acceptance portion of just check and PR quality.
 rust-format
 rust-clippy
 rustc-wrapper
@@ -9,3 +9,6 @@ tmux-socket-isolation
 protocol-integrity
 protocol-codegen-drift
 rust-coverage
+instruction-contract
+acceptance-runtime-contract
+acceptance-cases-contract

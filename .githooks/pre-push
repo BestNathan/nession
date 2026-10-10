@@ -1,212 +1,84 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ── Colors ──────────────────────────────────────────────────────────────────
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
+# Workspace policy remains mandatory even when the pushed diff is unrelated.
+./gates/run dev-workspace-push
 
-# ── Workspace policy (root = main mirror; dev in worktrees) ─────────────────
-./scripts/check-dev-workspace.sh push
-
-# ── Diff-base resolution (shared with scripts/test-pre-push-diff-base.sh) ───
 # shellcheck source=scripts/lib/git-diff-base.sh
 . ./scripts/lib/git-diff-base.sh
 
-# ── Determine what changed ──────────────────────────────────────────────────
 HAS_RUST=0
 HAS_WEB=0
 HAS_DESIGN=0
 HAS_PROTOCOL=0
+HAS_GATE=0
+HAS_TMUX=0
+HAS_TEST_ISOLATION=0
+HAS_INSTRUCTIONS=0
 
 while read -r local_ref local_sha _remote_ref remote_sha; do
   if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
-    # New branch — resolve the base that represents this branch's own delta.
-    # Diffing against main would re-inspect a parent branch's changes when
-    # this branch is stacked on another feature branch.
-    if resolved=$(resolve_diff_base "$local_ref" "$local_sha"); then
+    if resolved="$(resolve_diff_base "$local_ref" "$local_sha")"; then
       base_source="${resolved%% *}"
       remote_sha="${resolved#* }"
-      case "$base_source" in
-        creation_point)
-          echo -e "${GREEN}→ new branch: diff from creation point ${remote_sha:0:7}${NC}"
-          ;;
-        *)
-          echo -e "${YELLOW}→ new branch: reflog unavailable, diff from merge-base ${remote_sha:0:7}${NC}"
-          ;;
-      esac
+      if [ "$base_source" = creation_point ]; then
+        echo "→ new branch: diff from creation point ${remote_sha:0:7}"
+      else
+        echo "→ new branch: diff from merge-base ${remote_sha:0:7}"
+      fi
     else
-      echo -e "${YELLOW}→ new branch: no usable diff base, running full gate${NC}"
-      HAS_RUST=1
-      HAS_WEB=1
-      HAS_DESIGN=1
-      HAS_PROTOCOL=1
+      echo "→ new branch: no usable diff base; running full source Gate profile"
+      HAS_RUST=1; HAS_WEB=1; HAS_DESIGN=1; HAS_PROTOCOL=1
+      HAS_GATE=1; HAS_TMUX=1; HAS_TEST_ISOLATION=1; HAS_INSTRUCTIONS=1
       continue
     fi
   fi
 
-  changed=$(git diff --name-only "$remote_sha" "$local_sha" 2>/dev/null || true)
-
-  # Rust: .rs files, or build-manifest files that affect compilation
-  if echo "$changed" | grep -qE '\.rs$|^Cargo\.(toml|lock)$|^rust-toolchain\.toml$|^\.cargo/'; then
-    HAS_RUST=1
-  fi
-
-  # Web: .ts/.tsx/.js/.css under web/
-  if echo "$changed" | grep -qE '^web/.*\.(ts|tsx|js|css)$'; then
-    HAS_WEB=1
-  fi
-
-  # Design-system owners and enforcement infrastructure. The rule list itself
-  # lives only in design/scripts/design-gate.mjs; this is only change routing.
-  if echo "$changed" | grep -qE '^(design/|docs/design/|web/eslint-plugin-nession/|scripts/check-design-tokens|\.claude/skills/nession-web-design/|justfile$)'; then
-    HAS_DESIGN=1
-  fi
-
-  # Protocol owners and enforcement infrastructure (`#963`). Same rule as the
-  # design gate: this decides *when* to run the canonical checks, never what
-  # they are — the rules live in `scripts/protocol-gate.mjs` and
-  # `scripts/check-codegen-drift.sh`, and this must not restate either.
-  #
-  # It is a bucket of its own rather than folded into Rust because two of these
-  # paths are invisible to the other three:
-  #
-  #   * `scripts/protocol-gate*` is not `.rs`, not web, not design — so a
-  #     change to the gate itself used to run *nothing* before a push, which
-  #     is the worst place for that gap: the gate's own selftest is what
-  #     proves it still catches what it claims.
-  #   * `web/src/generated/protocol/**` is `.ts`, so it ran the web checks and
-  #     never the drift check — and generated bindings that drifted from the
-  #     contracts are exactly what the web checks cannot see.
-  if echo "$changed" | grep -qE '^(crates/nession-protocol/|crates/[^/]+/src/protocol/|crates/nession-protocol-codegen/|web/src/generated/protocol/|scripts/protocol-gate)'; then
-    HAS_PROTOCOL=1
-  fi
+  # Preserve the existing routing buckets and add Gate/self-test owner paths.
+  changed="$(git diff --name-only "$remote_sha" "$local_sha" 2>/dev/null || true)"
+  if grep -Eq '\.rs$|^Cargo\.(toml|lock)$|^rust-toolchain\.toml$|^\.cargo/|^gates/checks/rust-' <<< "$changed"; then HAS_RUST=1; fi
+  if grep -Eq '^web/.*\.(ts|tsx|js|css)$|^gates/checks/web-' <<< "$changed"; then HAS_WEB=1; fi
+  if grep -Eq '^(design/|docs/design/|web/eslint-plugin-nession/|scripts/check-design-tokens|\.claude/skills/nession-web-design/|justfile$|gates/checks/design-system-)' <<< "$changed"; then HAS_DESIGN=1; fi
+  if grep -Eq '^(crates/nession-protocol/|crates/[^/]+/src/protocol/|crates/nession-protocol-codegen/|web/src/generated/protocol/|scripts/protocol-gate|gates/checks/protocol-)' <<< "$changed"; then HAS_PROTOCOL=1; fi
+  if grep -Eq '^(gates/|\.githooks/(pre-commit|pre-push)$|justfile$)' <<< "$changed"; then HAS_GATE=1; fi
+  if grep -Eq '^(scripts/check-tmux-socket|gates/checks/tmux-socket-isolation)' <<< "$changed"; then HAS_TMUX=1; fi
+  if grep -Eq '^(scripts/check-test-isolation|gates/checks/test-isolation)' <<< "$changed"; then HAS_TEST_ISOLATION=1; fi
+  if grep -Eq '(^|/)(AGENTS|CLAUDE)\.md$|^\.agents/|^\.claude/skills/|^scripts/instruction-contract|^gates/checks/instruction-contract\.sh$' <<< "$changed"; then HAS_INSTRUCTIONS=1; fi
 done
 
-# ── Skip if nothing relevant changed ────────────────────────────────────────
-if [ $HAS_RUST -eq 0 ] && [ $HAS_WEB -eq 0 ] && [ $HAS_DESIGN -eq 0 ] && [ $HAS_PROTOCOL -eq 0 ]; then
-  echo -e "${GREEN}→ pre-push: no Rust/Web/design/protocol changes, skipping tests${NC}"
+GATE_IDS=()
+if [ "$HAS_RUST" -eq 1 ]; then
+  GATE_IDS+=(rust-test-unit rust-test-integration rust-coverage)
+fi
+if [ "$HAS_PROTOCOL" -eq 1 ]; then
+  GATE_IDS+=(protocol-integrity protocol-codegen-drift)
+fi
+if [ "$HAS_WEB" -eq 1 ] || [ "$HAS_DESIGN" -eq 1 ]; then
+  GATE_IDS+=(design-system-full)
+fi
+if [ "$HAS_WEB" -eq 1 ]; then
+  GATE_IDS+=(web-test-unit web-test-integration web-coverage)
+fi
+if [ "$HAS_GATE" -eq 1 ]; then
+  GATE_IDS+=(gate-runtime-contract)
+fi
+if [ "$HAS_PROTOCOL" -eq 1 ]; then
+  GATE_IDS+=(protocol-integrity-selftest)
+fi
+if [ "$HAS_TMUX" -eq 1 ]; then
+  GATE_IDS+=(tmux-socket-isolation tmux-socket-isolation-selftest)
+fi
+if [ "$HAS_TEST_ISOLATION" -eq 1 ]; then
+  GATE_IDS+=(test-isolation test-isolation-selftest)
+fi
+if [ "$HAS_INSTRUCTIONS" -eq 1 ]; then
+  GATE_IDS+=(instruction-contract)
+fi
+
+if [ "${#GATE_IDS[@]}" -eq 0 ]; then
+  echo "→ pre-push: no applicable Rust/Web/design/protocol/Gate changes"
   exit 0
 fi
 
-echo -e "${YELLOW}→ pre-push: running checks (Rust=$HAS_RUST Web=$HAS_WEB Design=$HAS_DESIGN Protocol=$HAS_PROTOCOL)${NC}"
-echo ""
-
-HAS_ERROR=0
-FAILED_CHECKS=()
-
-# ── Rust ────────────────────────────────────────────────────────────────────
-if [ $HAS_RUST -eq 1 ]; then
-  echo -e "${YELLOW}→ just test${NC}"
-  if just test; then
-    echo -e "${GREEN}✓ just test${NC}"
-  else
-    echo -e "${RED}✗ just test${NC}"
-    HAS_ERROR=1
-    FAILED_CHECKS+=("test  (unit tests)")
-  fi
-
-  echo ""
-
-  echo -e "${YELLOW}→ just coverage${NC}"
-  if just coverage; then
-    echo -e "${GREEN}✓ just coverage${NC}"
-  else
-    echo -e "${RED}✗ just coverage${NC}"
-    HAS_ERROR=1
-    FAILED_CHECKS+=("coverage (≥ 80% line coverage)")
-  fi
-fi
-
-# ── Protocol / generated bindings (`#963`) ──────────────────────────────────
-#
-# The canonical commands, unchanged — `just check-protocol` and
-# `just check-codegen` are the same two CI runs in `just check`, so a protocol
-# drift fails here rather than three minutes into a CI run. Before this, the
-# only pre-commit-side protocol check was `check-protocol` on staged `.rs` or
-# `web/src/` files, and `check-codegen` was not run by any hook at all.
-if [ $HAS_PROTOCOL -eq 1 ]; then
-  echo -e "${YELLOW}→ just check-protocol${NC}"
-  if just check-protocol; then
-    echo -e "${GREEN}✓ just check-protocol${NC}"
-  else
-    echo -e "${RED}✗ just check-protocol${NC}"
-    HAS_ERROR=1
-    FAILED_CHECKS+=("check-protocol (a wire nobody answers, or a unit nobody calls)")
-  fi
-
-  echo ""
-
-  echo -e "${YELLOW}→ just check-codegen${NC}"
-  if just check-codegen; then
-    echo -e "${GREEN}✓ just check-codegen${NC}"
-  else
-    echo -e "${RED}✗ just check-codegen${NC}"
-    HAS_ERROR=1
-    FAILED_CHECKS+=("check-codegen (generated bindings drifted from the contracts)")
-  fi
-fi
-
-# ── Canonical design-system gate ────────────────────────────────────────────
-if [ $HAS_WEB -eq 1 ] || [ $HAS_DESIGN -eq 1 ]; then
-  echo ""
-  echo -e "${YELLOW}→ just design-check full${NC}"
-  if just design-check full; then
-    echo -e "${GREEN}✓ just design-check full${NC}"
-  else
-    echo -e "${RED}✗ just design-check full${NC}"
-    HAS_ERROR=1
-    FAILED_CHECKS+=("design-check full (canonical design-system gate)")
-  fi
-fi
-
-# ── Web behavior / coverage ─────────────────────────────────────────────────
-if [ $HAS_WEB -eq 1 ]; then
-  echo ""
-
-  echo -e "${YELLOW}→ just web-test${NC}"
-  if just web-test; then
-    echo -e "${GREEN}✓ just web-test${NC}"
-  else
-    echo -e "${RED}✗ just web-test${NC}"
-    HAS_ERROR=1
-    FAILED_CHECKS+=("web-test (vitest)")
-  fi
-
-  echo ""
-
-  echo -e "${YELLOW}→ just web-coverage${NC}"
-  if just web-coverage; then
-    echo -e "${GREEN}✓ just web-coverage${NC}"
-  else
-    echo -e "${RED}✗ just web-coverage${NC}"
-    HAS_ERROR=1
-    FAILED_CHECKS+=("web-coverage (≥ 80% coverage)")
-  fi
-fi
-
-echo ""
-
-if [ $HAS_ERROR -eq 1 ]; then
-  echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-  echo -e "${RED}  Push blocked — ${#FAILED_CHECKS[@]} check(s) failed${NC}"
-  echo ""
-  echo -e "${YELLOW}  Failed checks:${NC}"
-  for check in "${FAILED_CHECKS[@]}"; do
-    echo -e "    - ${check}"
-  done
-  echo ""
-  echo -e "${YELLOW}  Quick fixes:${NC}"
-  echo -e "    Rust tests fail  → cargo test -p <crate> -- <test_name> --nocapture"
-  echo -e "    Coverage too low → cargo llvm-cov -p <crate> --html  (see uncovered lines)"
-  echo -e "    Web tests fail   → cd web && npx vitest run -t '<test-name>'"
-  echo -e "    Design gate fails → just design-check full  (follow owner/repair diagnostics)"
-  echo -e "    Missing deps     → cd web && npm install"
-  echo -e "    Missing tools    → cargo install cargo-llvm-cov; rustup component add llvm-tools-preview"
-  echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-  exit 1
-fi
-
-echo -e "${GREEN}All pre-push checks passed ✓${NC}"
-exit 0
+# gates/run owns aggregation, diagnostics, deduplication and fail-closed status.
+exec ./gates/run "${GATE_IDS[@]}"
