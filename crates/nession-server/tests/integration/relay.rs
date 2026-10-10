@@ -262,12 +262,14 @@ async fn wait_for_discovered_session(
     agent_id: &str,
     expected_session_id: &str,
     budget: Duration,
+    watcher_state: &str,
 ) -> anyhow::Result<()> {
     let deadline = tokio::time::Instant::now() + budget;
     let mut attempts = 0_u32;
     let mut observed: Vec<String> = Vec::new();
     let mut stale_agents: Vec<String> = Vec::new();
     let mut last_error = String::from("no discovery reply received");
+    let mut agent_registration = String::from("not queried");
 
     loop {
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
@@ -275,10 +277,46 @@ async fn wait_for_discovered_session(
             anyhow::bail!(
                 "session discovery deadline exceeded for {expected_session_id} \
                  (agent={agent_id}, attempts={attempts}, observed_sessions={observed:?}, \
-                 stale_agents={stale_agents:?}, last_response={last_error})"
+                 stale_agents={stale_agents:?}, agent_registration={agent_registration}, \
+                 watcher_state={watcher_state}, last_response={last_error})"
             );
         }
         attempts += 1;
+        // Capture real registration status, not merely the session list's empty
+        // result. A non-forced session list cannot report an absent/offline agent.
+        if attempts == 1 || attempts % 5 == 0 {
+            let registration_request = msg(
+                "server.agent.list",
+                &format!("discovery-agents-{attempts}"),
+                serde_json::json!({}),
+            );
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            match tokio::time::timeout(
+                remaining.min(Duration::from_secs(3)),
+                send_and_recv(sink, stream, &registration_request),
+            )
+            .await
+            {
+                Ok(Ok(reply)) => {
+                    agent_registration = match reply["payload"]["agents"].as_array() {
+                        Some(agents) => agents
+                            .iter()
+                            .find(|agent| agent["agent_id"].as_str() == Some(agent_id))
+                            .map(|agent| format!(
+                                "status={}, session_count={}, active_sessions={}, heartbeat={}",
+                                agent["status"],
+                                agent["session_count"],
+                                agent["active_sessions"],
+                                agent["last_heartbeat"],
+                            ))
+                            .unwrap_or_else(|| "not registered".to_string()),
+                        None => format!("invalid agent list reply: {}", reply["payload"]),
+                    };
+                }
+                Ok(Err(error)) => agent_registration = format!("query failed: {error}"),
+                Err(_) => agent_registration = "query timed out".to_string(),
+            }
+        }
         let request = msg(
             "server.session.list",
             &format!("discovery-{attempts}"),
@@ -352,6 +390,7 @@ async fn session_discovery_missing_id_fails_with_bounded_diagnostics() {
         "agent-that-never-registers",
         "agent-that-never-registers:missing-session",
         Duration::from_millis(450),
+        "not started (negative fixture)",
     )
     .await
     .unwrap_err()
@@ -361,6 +400,8 @@ async fn session_discovery_missing_id_fails_with_bounded_diagnostics() {
     assert!(error.contains("agent-that-never-registers:missing-session"), "{error}");
     assert!(error.contains("observed_sessions=[]"), "{error}");
     assert!(error.contains("last_response="), "{error}");
+    assert!(error.contains("agent_registration=not registered"), "{error}");
+    assert!(error.contains("watcher_state=not started"), "{error}");
     handle.abort();
 }
 
@@ -484,6 +525,7 @@ async fn relay_attach_and_terminal_io() {
         "relay-test-agent",
         &session_id,
         Duration::from_secs(20),
+        "started (1s session watcher polling)",
     )
     .await
     .expect("target tmux session must be visible in server discovery before relay attach");
@@ -660,6 +702,7 @@ async fn relay_carries_the_input_ack_to_the_browser() {
         "relay-ack-agent",
         &session_id,
         Duration::from_secs(20),
+        "started (1s session watcher polling)",
     )
     .await
     .expect("target tmux session must be visible in server discovery before relay attach");
@@ -875,6 +918,7 @@ async fn relay_binds_the_browser_identity_to_the_agent_connection() {
         "relay-identity-agent",
         &session_id,
         Duration::from_secs(20),
+        "started (1s session watcher polling)",
     )
     .await
     .expect("target tmux session must be visible in server discovery before relay attach");
