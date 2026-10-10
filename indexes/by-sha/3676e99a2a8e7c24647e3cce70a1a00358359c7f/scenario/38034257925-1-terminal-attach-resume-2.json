@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 38034257925,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/1474-bounded-protocol-process-collector",
+    "target_sha": "3676e99a2a8e7c24647e3cce70a1a00358359c7f",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/38034257925",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "4a095411eb394ab658d8016f59884910776d4418693ad246610f1a5477391f06"
+  },
+  "record": "runs/2026-10-10/38034257925-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "298bfc471ad8eee4f212cc87261bd47592c3e7dc64434fd6cbc094fd44d7ec3e"
+}
