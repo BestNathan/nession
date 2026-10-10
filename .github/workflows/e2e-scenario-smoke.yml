@@ -42,8 +42,7 @@ jobs:
       - run: cargo build -p nession-server -p nession-agent
       - name: Run scenario contract self-test
         run: |
-          node e2e/scenarios/terminal-attach-resume/reproduce.cjs --self-test
-          ./e2e/run --validate
+          ./gates/run terminal-attach-resume-selftest acceptance-runtime-contract
       - name: Run actual terminal replay scenario
         run: |
           set -euo pipefail
