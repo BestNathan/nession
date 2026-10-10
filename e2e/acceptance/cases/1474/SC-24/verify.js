@@ -5,9 +5,9 @@ const {pinnedRun,SOURCES,fetchJson,report,fail}=require('../../../shared/trusted
 const hash=buf=>crypto.createHash('sha256').update(buf).digest('hex');
 const gitBlob=buf=>crypto.createHash('sha1').update('blob '+buf.length+'\0').update(buf).digest('hex');
 async function latestTrustedTest(){
- const response=await fetchJson('/actions/workflows/e2e.yml/runs?event=push&branch=staging&per_page=30');
+ const response=await fetchJson('/actions/workflows/e2e.yml/runs?event=push&branch=staging&per_page=10');
  assert.ok(Array.isArray(response.workflow_runs));
- for(const run of response.workflow_runs){
+ for(const run of response.workflow_runs.slice(0,8)){
   if(run.event!=='push'||run.head_branch!=='staging'||run.conclusion!=='success'||run.status!=='completed')continue;
   const date=run.created_at.slice(0,10);
   const rel='runs/'+date+'/'+run.id+'-'+run.run_attempt+'/test/playwright.json';
