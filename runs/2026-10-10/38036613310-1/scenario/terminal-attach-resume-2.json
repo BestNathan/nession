@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_scenario_observation",
+  "mode": "scenario",
+  "scenario": "terminal-attach-resume",
+  "target_sha": "054ff7b0a942b9f43dc2a35c031981f654048c51",
+  "scenario_revision": "054ff7b0a942b9f43dc2a35c031981f654048c51",
+  "run_id": 38036613310,
+  "run_attempt": 1,
+  "run_index": 2,
+  "status": "Completed",
+  "evaluation": null,
+  "started_at": "2026-10-10T08:07:13.794Z",
+  "finished_at": "2026-10-10T08:07:23.279Z",
+  "config_sha256": "02570e8ea79bef27b3596233d77e63cada084f43a56f2e11df811513f96f8826",
+  "config": {
+    "generated_lines": 240,
+    "samples_max": 12,
+    "transport": "Relay",
+    "reload": true
+  },
+  "observation_count": 3,
+  "observations": [
+    {
+      "at": "2026-10-10T08:07:22.574Z",
+      "stage": "before-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 241,
+        "viewport": {
+          "baseY": 210,
+          "viewportY": 210
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "b04cd3239465da1cb9294b8a77cac54662b9ec987cd9a36aa175b2bfc036c878",
+        "bytes": 9572
+      }
+    },
+    {
+      "at": "2026-10-10T08:07:22.752Z",
+      "stage": "after-reload",
+      "browser": {
+        "mounted": false,
+        "marker_count": 0,
+        "viewport": null
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "b04cd3239465da1cb9294b8a77cac54662b9ec987cd9a36aa175b2bfc036c878",
+        "bytes": 9572
+      }
+    },
+    {
+      "at": "2026-10-10T08:07:23.210Z",
+      "stage": "after-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 241,
+        "viewport": {
+          "baseY": 210,
+          "viewportY": 210
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "b04cd3239465da1cb9294b8a77cac54662b9ec987cd9a36aa175b2bfc036c878",
+        "bytes": 9572
+      }
+    }
+  ],
+  "privacy": "whitelisted counters/timestamps/digests only; no terminal bytes",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 38036613310,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/1474-stage-parent-proof-shallow-checkout",
+    "target_sha": "054ff7b0a942b9f43dc2a35c031981f654048c51",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/38036613310",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "08d8e62e303657ff59f9b771621749d3d9f20b4ff868420ad0732b8f28da01b5"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "scenario",
+    "provider": "github-actions-artifact",
+    "artifact_name": "e2e-terminal-scenario-38036613310-1",
+    "sha256": "08d8e62e303657ff59f9b771621749d3d9f20b4ff868420ad0732b8f28da01b5",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 14,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/38036613310",
+    "durability": "time-limited; object archival not configured"
+  },
+  "execution_id": "20de31b63d01b13abc215129c57c40e5f5d17e9f4875257a846e2f5e0eec29ed"
+}
