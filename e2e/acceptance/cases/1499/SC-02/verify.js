@@ -22,9 +22,20 @@ async function main(){
     scenario.item.run_id+'-'+scenario.item.run_attempt+'-terminal-attach-resume-1.json');
   assert.equal(makeRunIndex(sIndex).mode,'scenario');
   assert.equal(sIndex.record,SOURCES.scenario.path);
+  // The accepted Case ran at a historical *immutable* main source SHA.
+  // A later main commit must not make valid orphan evidence disappear.
+  const acceptedMainRun=38027046976;
+  const acceptedRun=await fetchJson('/actions/runs/'+acceptedMainRun);
+  const mainSha=acceptedRun.head_sha;
+  assert.equal(mainSha,'0ca419584050dc9148f26ab785722dedc4adb6e5');
+  assert.equal(acceptedRun.head_branch,'main');
+  assert.equal(acceptedRun.conclusion,'success');
   const mainBranch=await fetchJson('/branches/main');
-  const mainSha=mainBranch.commit.sha;
-  assert.match(mainSha,/^[a-f0-9]{40}$/);
+  const currentMain=mainBranch.commit.sha;
+  const ancestry=await fetchJson('/compare/'+mainSha+'...'+currentMain);
+  assert.ok(['ahead','identical'].includes(ancestry.status),
+    'previously accepted main source is no longer in main ancestry');
+  assert.equal(ancestry.merge_base_commit.sha,mainSha);
   const caseEntries=await fetchJson('/contents/indexes/by-sha/'+mainSha+
     '/acceptance?ref=acceptance-results');
   assert.ok(Array.isArray(caseEntries)&&caseEntries.length>0,
@@ -38,12 +49,13 @@ async function main(){
   assert.equal(cIndex.criterion,'SC-05');
   const source=await fetchJson('/actions/runs/'+cIndex.source.run_id);
   assert.equal(source.head_sha,mainSha);
+  assert.equal(source.id,acceptedMainRun);
   assert.equal(source.conclusion,'success');
   assert.equal(source.workflow_id,cIndex.source.workflow_id);
   assert.equal(cIndex.source.head_branch,'main');
   report('One immutable v1 orphan SHA-index envelope validates actual Scenario and main Case records; Test and Benchmark mode schemas also pass strict positive/negative fixtures.',[
     {type:'scenario',value:'run='+scenario.run.id+' immutable scenario index bound to source Git tree'},
-    {type:'acceptance',value:'main_case_run='+source.id+' source_main_sha='+mainSha+' orphan_index='+candidate.name},
+    {type:'acceptance',value:'main_case_run='+source.id+' accepted_main_sha='+mainSha+' current_main_sha='+currentMain+' orphan_index='+candidate.name},
     {type:'schema',value:'v1 common source/run/attempt/SHA/record/execution contract for Test, Acceptance, Scenario, Benchmark (last two only where producers run)'},
     {type:'negative',value:'cross-run index paths, forged SHA, wrong stage and unsafe mode/suite rejected'},
   ]);
