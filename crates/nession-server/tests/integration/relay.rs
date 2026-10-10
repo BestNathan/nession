@@ -241,6 +241,129 @@ async fn send_and_recv(
     }
 }
 
+/// Poll the *actual* Server session registry instead of assuming that a fixed
+/// sleep is enough for registration, the watcher and the async session update.
+///
+/// The only success condition is the complete, exact agent:session ID. On CI
+/// saturation, preserve the last discovery response so a failure distinguishes
+/// "no agent", "agent stale" and "other sessions appeared" (#1642).
+async fn wait_for_discovered_session(
+    sink: &mut futures_util::stream::SplitSink<
+        tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+        WsMessage,
+    >,
+    stream: &mut futures_util::stream::SplitStream<
+        tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+    >,
+    agent_id: &str,
+    expected_session_id: &str,
+    budget: Duration,
+) -> anyhow::Result<()> {
+    let deadline = tokio::time::Instant::now() + budget;
+    let mut attempts = 0_u32;
+    let mut observed: Vec<String> = Vec::new();
+    let mut stale_agents: Vec<String> = Vec::new();
+    let mut last_error = String::from("no discovery reply received");
+
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            anyhow::bail!(
+                "session discovery deadline exceeded for {expected_session_id} \
+                 (agent={agent_id}, attempts={attempts}, observed_sessions={observed:?}, \
+                 stale_agents={stale_agents:?}, last_response={last_error})"
+            );
+        }
+        attempts += 1;
+        let request = msg(
+            "server.session.list",
+            &format!("discovery-{attempts}"),
+            serde_json::json!({ "agent_id": agent_id }),
+        );
+        match tokio::time::timeout(
+            remaining.min(Duration::from_secs(3)),
+            send_and_recv(sink, stream, &request),
+        )
+        .await
+        {
+            Ok(Ok(reply)) => {
+                if let Some(sessions) = reply["payload"]["sessions"].as_array() {
+                    observed = sessions
+                        .iter()
+                        .filter_map(|s| s["session_id"].as_str().map(str::to_string))
+                        .collect();
+                    stale_agents = reply["payload"]["stale_agents"]
+                        .as_array()
+                        .map(|agents| {
+                            agents
+                                .iter()
+                                .filter_map(|id| id.as_str().map(str::to_string))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    if observed.iter().any(|id| id == expected_session_id) {
+                        return Ok(());
+                    }
+                    last_error = format!(
+                        "registry returned {} session(s), target not yet visible",
+                        observed.len()
+                    );
+                } else {
+                    last_error = format!(
+                        "session.list reply missing sessions array: status={:?}",
+                        reply["payload"]["status"].as_str()
+                    );
+                }
+            }
+            Ok(Err(error)) => last_error = error.to_string(),
+            Err(_) => last_error = "session.list response timed out".to_string(),
+        }
+
+        tokio::time::sleep(
+            deadline
+                .saturating_duration_since(tokio::time::Instant::now())
+                .min(Duration::from_millis(150)),
+        )
+        .await;
+    }
+}
+
+#[tokio::test]
+async fn session_discovery_missing_id_fails_with_bounded_diagnostics() {
+    let (server_addr, handle, _db_dir) = start_server("test-token").await.unwrap();
+    let (ws, _) = connect_async(format!("ws://{server_addr}")).await.unwrap();
+    let (mut sink, mut stream) = ws.split();
+    let auth = msg(
+        "server.auth",
+        "auth-discovery-negative",
+        serde_json::json!({ "auth_token": "test-token" }),
+    );
+    let reply = send_and_recv(&mut sink, &mut stream, &auth).await.unwrap();
+    assert_eq!(reply["payload"]["status"], "success");
+
+    let started = tokio::time::Instant::now();
+    let error = wait_for_discovered_session(
+        &mut sink,
+        &mut stream,
+        "agent-that-never-registers",
+        "agent-that-never-registers:missing-session",
+        Duration::from_millis(450),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(started.elapsed() < Duration::from_secs(4));
+    assert!(error.contains("session discovery deadline exceeded"), "{error}");
+    assert!(error.contains("agent-that-never-registers:missing-session"), "{error}");
+    assert!(error.contains("observed_sessions=[]"), "{error}");
+    assert!(error.contains("last_response="), "{error}");
+    handle.abort();
+}
+
 /// Read relay frames until one carries `want`, skipping everything else.
 ///
 /// Separate from [`send_and_recv`] because this one is looking for an
@@ -329,8 +452,7 @@ async fn relay_attach_and_terminal_io() {
         let _ = watcher.run().await;
     });
 
-    // Give heartbeat + session sync time to propagate.
-    tokio::time::sleep(Duration::from_millis(2000)).await;
+    // Readiness is checked against the exact registry identity after browser auth.
 
     // 4. Connect a "browser" client to the server.
     let url = format!("ws://{server_addr}");
@@ -356,6 +478,15 @@ async fn relay_attach_and_terminal_io() {
     // 6. Phase 1: query relay — returns addresses + session_name,
     //    but does NOT enter relay forwarding.
     let session_id = format!("relay-test-agent:{session_name}");
+    wait_for_discovered_session(
+        &mut sink,
+        &mut stream,
+        "relay-test-agent",
+        &session_id,
+        Duration::from_secs(20),
+    )
+    .await
+    .expect("target tmux session must be visible in server discovery before relay attach");
     let attach_req = msg(
         "server.session.attach",
         "attach-1",
@@ -507,7 +638,7 @@ async fn relay_carries_the_input_ack_to_the_browser() {
         let _ = watcher.run().await;
     });
 
-    tokio::time::sleep(Duration::from_millis(2000)).await;
+    // Agent registration and SessionWatcher readiness are checked below.
 
     let url = format!("ws://{server_addr}");
     let (ws, _) = connect_async(&url).await.expect("client connect");
@@ -523,6 +654,15 @@ async fn relay_carries_the_input_ack_to_the_browser() {
         .unwrap();
 
     let session_id = format!("relay-ack-agent:{session_name}");
+    wait_for_discovered_session(
+        &mut sink,
+        &mut stream,
+        "relay-ack-agent",
+        &session_id,
+        Duration::from_secs(20),
+    )
+    .await
+    .expect("target tmux session must be visible in server discovery before relay attach");
     let attach_req = msg(
         "server.session.attach",
         "attach-1",
@@ -703,7 +843,7 @@ async fn relay_binds_the_browser_identity_to_the_agent_connection() {
         let _ = watcher.run().await;
     });
 
-    tokio::time::sleep(Duration::from_millis(2000)).await;
+    // Agent registration and SessionWatcher readiness are checked below.
 
     let url = format!("ws://{server_addr}");
     let (ws, _) = connect_async(&url).await.expect("client connect");
@@ -729,6 +869,15 @@ async fn relay_binds_the_browser_identity_to_the_agent_connection() {
     );
 
     let session_id = format!("relay-identity-agent:{session_name}");
+    wait_for_discovered_session(
+        &mut sink,
+        &mut stream,
+        "relay-identity-agent",
+        &session_id,
+        Duration::from_secs(20),
+    )
+    .await
+    .expect("target tmux session must be visible in server discovery before relay attach");
     let attach_req = msg(
         "server.session.attach",
         "attach-1",
