@@ -85,6 +85,7 @@ Skills are task-local workflows. Load only what the task needs.
 | Agent workflow telemetry, persistence, aggregation | [nession-agent-workflow-metrics](.claude/skills/nession-agent-workflow-metrics/SKILL.md) |
 | requirement/bug issue authoring | [nession-writing-requirements](.claude/skills/nession-writing-requirements/SKILL.md) |
 | stage-specific acceptance | [nession-acceptance](.claude/skills/nession-acceptance/SKILL.md) |
+| one-time CI script/ephemeral Task execution | [nession-task](.claude/skills/nession-task/SKILL.md) |
 | Web UI/design-system work | [nession-web-design](.claude/skills/nession-web-design/SKILL.md) |
 | development environment/setup | [nession-env](.claude/skills/nession-env/SKILL.md) |
 
