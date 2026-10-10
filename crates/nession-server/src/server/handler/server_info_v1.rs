@@ -1,7 +1,7 @@
 //! One versioned Server Protocol Unit.
 //! Route identity, version and execution policy are owned by routes.rs.
 
-use super::*;
+use super::{json, ConnectionHandler, ProtocolMessage, HandlerAction, AgentStatus, Message, current_timestamp};
 
 impl ConnectionHandler {
     /// Handle `server.info` — return server version, uptime, and stats.

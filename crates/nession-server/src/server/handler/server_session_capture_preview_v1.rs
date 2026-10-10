@@ -1,7 +1,7 @@
 //! One versioned Server Protocol Unit.
 //! Route identity, version and execution policy are owned by routes.rs.
 
-use super::*;
+use super::{info, warn, json, ConnectionHandler, ProtocolMessage, HandlerAction, reply_json, ClientSessionCapturePreviewPayload, AgentStatus, Duration};
 
 impl ConnectionHandler {
     /// Handle `server.session.capture-preview` — capture tmux scrollback from
