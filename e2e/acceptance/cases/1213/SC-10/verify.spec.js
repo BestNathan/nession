@@ -51,11 +51,6 @@ test('SC-10: real P2P cursor resume and explicit truncated retention window', as
   const { name } = await createAndAttach(page, expect, runtime, 'case-1213-stream', 'P2P');
   await command(page, "printf 'SC10-START-%s\\n' 1213");
   await expect.poll(() => countInBuffer(page, 'SC10-START-1213'), { timeout: 20000 }).toBe(1);
-  const before = await page.evaluate(() => ({
-    requests: window.__sc10.resumes.length,
-    cursor: window.__sc10.outputCursors.at(-1) ?? null,
-  }));
-  expect(before.cursor).not.toBeNull();
   await page.locator('.xterm').evaluate(el => el.setAttribute('data-sc10-terminal-instance', 'before'));
 
   // A separate P2P peer keeps the Agent's attached stream active while A's
@@ -65,10 +60,29 @@ test('SC-10: real P2P cursor resume and explicit truncated retention window', as
     const peer = await peerContext.newPage();
     await installMonitor(peer);
     await attachExisting(peer, expect, runtime, name, 'P2P');
-    await expect.poll(() => countInBuffer(peer, 'SC10-START-1213'), { timeout: 20000 }).toBe(1);
     await expect.poll(async () => peer.evaluate(() => window.__sc10.epochs.length), {
       timeout: 12000,
     }).toBeGreaterThan(0);
+
+    // The peer does NOT have to re-display A's pre-attach history for the
+    // retention/replay invariant. What matters is that an independent P2P
+    // subscriber receives output produced *after* it joined and therefore
+    // keeps the Agent's Session-scoped producer alive across A's outage.
+    // The unique output marker cannot be satisfied by a typed command echo.
+    await command(page, "printf 'SC10-PEER-LIVE-%s\\n' 1213");
+    await expect.poll(() => countInBuffer(peer, 'SC10-PEER-LIVE-1213'), {
+      timeout: 20000,
+    }).toBe(1);
+    await expect.poll(() => countInBuffer(page, 'SC10-PEER-LIVE-1213'), {
+      timeout: 20000,
+    }).toBe(1);
+    // Capture A's *last applied* cursor immediately before disconnect. Any
+    // pre-peer snapshot would be stale after the new live-output assertion.
+    const before = await page.evaluate(() => ({
+      requests: window.__sc10.resumes.length,
+      cursor: window.__sc10.outputCursors.at(-1) ?? null,
+    }));
+    expect(before.cursor).not.toBeNull();
 
     // First witness: reconnect within the P2P retry budget. A long offline
     // period intentionally chooses Relay, which is correct product fallback,
