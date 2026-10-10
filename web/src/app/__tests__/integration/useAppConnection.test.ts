@@ -139,6 +139,19 @@ describe('useAppConnection', () => {
     expect(socket.close).toHaveBeenCalled();
   });
 
+  it('keeps a valid stored token after a network connect failure', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('stored-token');
+    const { result } = renderHook(() => useAppConnection());
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+
+    await act(async () => {
+      MockWebSocket.instances[0].error();
+    });
+
+    await waitFor(() => expect(result.current.connectionStatus).toBe('disconnected'));
+    expect(vi.mocked(auth.clearToken)).not.toHaveBeenCalled();
+  });
+
   it('clears auth state when the auto-connect handshake fails', async () => {
     vi.mocked(auth.getToken).mockReturnValue('bad-token');
 
@@ -179,6 +192,29 @@ describe('useAppConnection', () => {
     // a production one: it gates the visibility-reconnect path, so leaving it
     // set would send a doomed handshake on every tab focus.
     expect(vi.mocked(useVisibilityReconnect)).toHaveBeenLastCalledWith(false, result.current.wsService);
+  });
+
+  it('a fresh explicit auth refusal after reconnection returns to login', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('stored-token');
+    const { result } = renderHook(() => useAppConnection());
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await completeHandshake(MockWebSocket.instances[0]);
+    await waitFor(() => expect(result.current.isAuthenticated).toBe(true));
+
+    act(() => {
+      MockWebSocket.instances[0].serverClose();
+      // Resume on the same service, skipping the ordinary timer.
+      void result.current.wsService?.reconnectNow().catch(() => {});
+    });
+    expect(MockWebSocket.instances).toHaveLength(2);
+    await act(async () => { MockWebSocket.instances[1].open(); });
+    replyToAuth(MockWebSocket.instances[1], 'failed');
+
+    await waitFor(() => {
+      expect(result.current.wsService).toBeNull();
+      expect(result.current.isAuthenticated).toBe(false);
+    });
+    expect(vi.mocked(auth.clearToken)).toHaveBeenCalled();
   });
 
   it('manual connect with a failing handshake toasts and drops to disconnected', async () => {
