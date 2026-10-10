@@ -45,7 +45,7 @@ async function command(page, text) {
   }, text);
 }
 
-async function createAndAttach(page, expect, runtime, prefix) {
+async function createAndAttach(page, expect, runtime, prefix, mode = 'Relay') {
   const wsUrl = 'ws://127.0.0.1:' + runtime.server_port + '/ws';
   await page.goto('/?token=e2e-test-token&server_url=' + encodeURIComponent(wsUrl));
   await expect(page.getByTestId('shell')).toBeVisible({ timeout: 25000 });
@@ -65,7 +65,7 @@ async function createAndAttach(page, expect, runtime, prefix) {
   await row.getByRole('button').first().click();
   dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();
-  await dialog.getByRole('button', { name: /^Relay\b/ }).click();
+  await dialog.getByRole('button', { name: new RegExp('^' + mode + '\\b') }).click();
   const attach = dialog.getByRole('button', { name: 'Attach' });
   await expect(attach).toBeEnabled({ timeout: 15000 });
   await attach.click();
@@ -90,4 +90,24 @@ async function assertTerminalContinuous(page, expect, before, after) {
   expect(await countInBuffer(page, before + '-1213')).toBe(1);
 }
 
-module.exports = { verifiedRuntime, createAndAttach, command, countInBuffer, assertTerminalContinuous };
+
+async function attachExisting(page, expect, runtime, name, mode = 'P2P') {
+  const wsUrl = 'ws://127.0.0.1:' + runtime.server_port + '/ws';
+  await page.goto('/?token=e2e-test-token&server_url=' + encodeURIComponent(wsUrl));
+  await expect(page.getByTestId('shell')).toBeVisible({ timeout: 25000 });
+  const row = page.locator('[data-testid="session-item-row"]', { hasText: name });
+  await expect(row).toBeVisible({ timeout: 30000 });
+  await row.getByRole('button').first().click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: new RegExp('^' + mode + '\\b') }).click();
+  const attach = dialog.getByRole('button', { name: 'Attach' });
+  await expect(attach).toBeEnabled({ timeout: 15000 });
+  await attach.click();
+  await expect(dialog).not.toBeVisible({ timeout: 15000 });
+  await expect(page.locator('.xterm')).toBeVisible({ timeout: 30000 });
+  await expect(page.getByTestId('terminal-connecting')).toBeHidden({ timeout: 30000 });
+  await expect.poll(async () => /runner:\S*\$/m.test(await readBuffer(page)), { timeout: 30000 }).toBe(true);
+}
+
+module.exports = { verifiedRuntime, createAndAttach, attachExisting, command, countInBuffer, assertTerminalContinuous };
