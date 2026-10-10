@@ -102,7 +102,7 @@ const required = [
     ]
   ]
 ];
-const legacy = /(?:^|\n)\s*(?:run:\s*)?(?:node|bash)\s+(?:scripts|e2e)\/[^\n]*(?:\s(?:self-test|--self-test))(?:\s|$)/m;
+const legacy = /(?:^|\n)\s*(?:-\s*)?(?:run:\s*)?(?:node|bash)\s+(?:scripts|e2e)\/[^\n]*(?:\s(?:self-test|--self-test))(?:\s|$)/m;
 
 function verify(load) {
   const problems = [];
