@@ -80,7 +80,12 @@ function validateArchive({ record, snapshot, index, run }, expected) {
   assert.equal(config.id, record.task_id);
   assert.equal(config.entry, record.entry);
   assert.equal(config.schema_version, 1);
-  assert.equal(record.cleanup_on_success, config.cleanup_on_success === true,
+  // Historical records predate the optional cleanup policy: absence means false.
+  // A new record carrying the field must still use the declared boolean type.
+  if (record.cleanup_on_success !== undefined) {
+    assert.equal(typeof record.cleanup_on_success, 'boolean', 'invalid stored cleanup policy');
+  }
+  assert.equal(record.cleanup_on_success === true, config.cleanup_on_success === true,
     'trusted archive must retain optional cleanup policy without inventing it');
 
   assert.equal(index.task_id, record.task_id);
