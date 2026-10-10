@@ -88,4 +88,6 @@ export interface WebSocketServiceOptions {
    */
   persistentReconnect?: boolean;
   onError?: (error: Error) => void;
+  /** Called only when the live physical socket opens but its handshake rejects. */
+  onHandshakeRejected?: (error: Error) => void;
 }

@@ -75,6 +75,15 @@ export class SessionRuntimeRegistry {
     this.pendingDispose.set(sessionId, timer);
   }
 
+  /** Deliver a browser lifecycle hint to every leased Session authority. */
+  resumeForeground(): void {
+    for (const entry of this.entries.values()) {
+      if (entry.leases.size > 0) {
+        entry.runtime.resumeOnForeground();
+      }
+    }
+  }
+
   get(sessionId: string): SessionRuntime | null {
     return this.entries.get(sessionId)?.runtime ?? null;
   }

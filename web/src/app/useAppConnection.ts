@@ -14,6 +14,7 @@ import { terminalServerApi } from '@/product/terminal';
 import { getToken, setToken, clearToken, getRememberPreference } from './auth';
 import { getOrCreateClientId } from '../platform/socket/clientId';
 import { useVisibilityReconnect } from './useVisibilityReconnect';
+import { sessionRuntimeRegistry } from '@/platform/session-runtime/SessionRuntimeRegistry';
 
 const DEFAULT_SERVER_URL = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws`;
 
@@ -34,6 +35,18 @@ const SERVER_PLUGINS = [
   gitApi,
   terminalServerApi,
 ];
+
+class AuthenticationRejectedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AuthenticationRejectedError';
+  }
+}
+
+function retryCurrentTransport(service: WebSocketService | null): void {
+  sessionRuntimeRegistry.resumeForeground();
+  void service?.reconnectNow().catch((error) => console.error('[connection] Retry failed:', error));
+}
 
 export function useAppConnection() {
   const params = new URLSearchParams(window.location.search);
@@ -85,13 +98,27 @@ export function useAppConnection() {
       // stop before the new one opens — two transports would race the state.
       serviceRef.current?.dispose();
       const clientId = getOrCreateClientId();
+      let authenticatedOnce = false;
       service = new WebSocketService(serverUrl, SERVER_PLUGINS, {
         maxReconnectAttempts: 5,
+        onHandshakeRejected: (error) => {
+          // A post-resume *explicit refusal* is different from network loss.
+          // The service could recover transparently before this refusal;
+          // once rejected, preserve the error's auth meaning and exit to Login.
+          if (!authenticatedOnce || !(error instanceof AuthenticationRejectedError)
+            || serviceRef.current !== service) { return; }
+          serviceRef.current = null;
+          service?.dispose();
+          setWsService(null);
+          clearToken();
+          setWasEverAuthed(false);
+          setConnectionStatus('disconnected');
+        },
         handshake: (surface) => surface
           .request<AuthResponse>(AUTH_WIRE, { auth_token: authToken, client_id: clientId })
           .then((res) => {
             if (res.status !== 'success') {
-              throw new Error(res.message || 'Authentication failed');
+              throw new AuthenticationRejectedError(res.message || 'Authentication failed');
             }
           }),
       });
@@ -104,6 +131,7 @@ export function useAppConnection() {
       // ever drive this hook to 'connected' again (#697).
       service.onConnectionStateChange((status) => {
         if (status === 'connected') {
+          authenticatedOnce = true;
           setWasEverAuthed(true);
         }
         setConnectionStatus(status);
@@ -120,7 +148,7 @@ export function useAppConnection() {
       // the error: auto-connect clears the token silently, manual connect
       // toasts and drops back to the disconnected (login) state.
       if (service === null || serviceRef.current === service) {
-        if (auto) {
+        if (auto && error instanceof AuthenticationRejectedError) {
           // Restoring a stored session: the credentials are what failed, so
           // drop them and fall back to the login page. This sits here, not in
           // the auto-connect effect's rejection handler, so it fires on
@@ -129,7 +157,7 @@ export function useAppConnection() {
           clearToken();
           setWasEverAuthed(false);
           setConnectionStatus('disconnected');
-        } else {
+        } else if (!auto) {
           toast.error(`Connection failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
           setConnectionStatus('disconnected');
         }
@@ -171,6 +199,8 @@ export function useAppConnection() {
 
   useVisibilityReconnect(wasEverAuthed, wsService);
 
+  const handleRetry = useCallback(() => retryCurrentTransport(wsService), [wsService]);
+
   const handleDisconnect = useCallback(() => {
     if (serviceRef.current) {
       serviceRef.current.dispose();
@@ -198,6 +228,7 @@ export function useAppConnection() {
     setServerUrl,
     handleConnect,
     handleDisconnect,
+    handleRetry,
     isAuthenticated,
     isRestoringSession,
   };
