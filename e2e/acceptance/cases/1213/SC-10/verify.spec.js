@@ -127,7 +127,12 @@ test('SC-10: real P2P cursor resume and explicit truncated retention window', as
     await expect.poll(() => page.evaluate(() => window.__sc10.resumes.length), {
       timeout: 20000,
     }).toBeGreaterThan(before.requests);
-    const resumed = await page.evaluate(() => window.__sc10.resumes.slice(before.requests));
+    // Playwright page.evaluate executes in Chromium, not in the Node Case runner.
+    // Pass the snapshot count explicitly; closing over `before` throws a browser
+    // ReferenceError before any cursor-retention assertion can execute.
+    const resumed = await page.evaluate(
+      (requestCount) => window.__sc10.resumes.slice(requestCount), before.requests,
+    );
     expect(resumed.some(r =>
       r.epoch !== undefined &&
       Number.isSafeInteger(r.after) &&
