@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_scenario_observation",
+  "mode": "scenario",
+  "scenario": "terminal-attach-resume",
+  "target_sha": "9d64261cf20f041b94cb80a3b5936ddd7f0eb63d",
+  "scenario_revision": "9d64261cf20f041b94cb80a3b5936ddd7f0eb63d",
+  "run_id": 38049696267,
+  "run_attempt": 1,
+  "run_index": 1,
+  "status": "Completed",
+  "evaluation": null,
+  "started_at": "2026-10-10T11:51:30.530Z",
+  "finished_at": "2026-10-10T11:51:40.986Z",
+  "config_sha256": "02570e8ea79bef27b3596233d77e63cada084f43a56f2e11df811513f96f8826",
+  "config": {
+    "generated_lines": 240,
+    "samples_max": 12,
+    "transport": "Relay",
+    "reload": true
+  },
+  "observation_count": 3,
+  "observations": [
+    {
+      "at": "2026-10-10T11:51:40.290Z",
+      "stage": "before-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 241,
+        "viewport": {
+          "baseY": 210,
+          "viewportY": 210
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "b82fc86b1dfc69463f3e4b3bfc0b0e0c326070d3abc06706331845f1d293ba8d",
+        "bytes": 9572
+      }
+    },
+    {
+      "at": "2026-10-10T11:51:40.462Z",
+      "stage": "after-reload",
+      "browser": {
+        "mounted": false,
+        "marker_count": 0,
+        "viewport": null
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "b82fc86b1dfc69463f3e4b3bfc0b0e0c326070d3abc06706331845f1d293ba8d",
+        "bytes": 9572
+      }
+    },
+    {
+      "at": "2026-10-10T11:51:40.921Z",
+      "stage": "after-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 241,
+        "viewport": {
+          "baseY": 210,
+          "viewportY": 210
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "b82fc86b1dfc69463f3e4b3bfc0b0e0c326070d3abc06706331845f1d293ba8d",
+        "bytes": 9572
+      }
+    }
+  ],
+  "privacy": "whitelisted counters/timestamps/digests only; no terminal bytes",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 38049696267,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "docs/readme-drift-audit-20261010",
+    "target_sha": "9d64261cf20f041b94cb80a3b5936ddd7f0eb63d",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/38049696267",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "28e08fa773f88974d081c349bdd7116501439395a632ff167e34895c19cd1fe9"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "scenario",
+    "provider": "github-actions-artifact",
+    "artifact_name": "e2e-terminal-scenario-38049696267-1",
+    "sha256": "28e08fa773f88974d081c349bdd7116501439395a632ff167e34895c19cd1fe9",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 14,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/38049696267",
+    "durability": "time-limited; object archival not configured"
+  },
+  "execution_id": "ff14d92695503a706ac0b7bb0841518de36a665c6a6391de6e4f038f40eb5590"
+}
