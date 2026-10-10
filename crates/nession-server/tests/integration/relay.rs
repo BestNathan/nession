@@ -298,21 +298,32 @@ async fn wait_for_discovered_session(
             .await
             {
                 Ok(Ok(reply)) => {
-                    agent_registration = match reply.pointer("/payload/agents").and_then(serde_json::Value::as_array) {
+                    agent_registration = match reply
+                        .pointer("/payload/agents")
+                        .and_then(serde_json::Value::as_array)
+                    {
                         Some(agents) => agents
                             .iter()
-                            .find(|agent| agent.get("agent_id").and_then(serde_json::Value::as_str) == Some(agent_id))
+                            .find(|agent| {
+                                agent.get("agent_id").and_then(serde_json::Value::as_str)
+                                    == Some(agent_id)
+                            })
                             .map(|agent| {
                                 format!(
                                     "status={}, session_count={}, active_sessions={}, heartbeat={}",
                                     agent.get("status").unwrap_or(&serde_json::Value::Null),
                                     agent.get("session_count").unwrap_or(&serde_json::Value::Null),
-                                    agent.get("active_sessions").unwrap_or(&serde_json::Value::Null),
+                                    agent
+                                        .get("active_sessions")
+                                        .unwrap_or(&serde_json::Value::Null),
                                     agent.get("last_heartbeat").unwrap_or(&serde_json::Value::Null),
                                 )
                             })
                             .unwrap_or_else(|| "not registered".to_string()),
-                        None => format!("invalid agent list reply: {}", reply.get("payload").unwrap_or(&serde_json::Value::Null)),
+                        None => format!(
+                            "invalid agent list reply: {}",
+                            reply.get("payload").unwrap_or(&serde_json::Value::Null)
+                        ),
                     };
                 }
                 Ok(Err(error)) => agent_registration = format!("query failed: {error}"),
@@ -336,13 +347,21 @@ async fn wait_for_discovered_session(
         .await
         {
             Ok(Ok(reply)) => {
-                if let Some(sessions) = reply.pointer("/payload/sessions").and_then(serde_json::Value::as_array) {
+                if let Some(sessions) = reply
+                    .pointer("/payload/sessions")
+                    .and_then(serde_json::Value::as_array)
+                {
                     observed = sessions
                         .iter()
-                        .filter_map(|s| s.get("session_id").and_then(serde_json::Value::as_str).map(str::to_string))
+                        .filter_map(|s| {
+                            s.get("session_id")
+                                .and_then(serde_json::Value::as_str)
+                                .map(str::to_string)
+                        })
                         .collect();
-                    stale_agents = reply.pointer("/payload/stale_agents")
-                        .as_array()
+                    stale_agents = reply
+                        .pointer("/payload/stale_agents")
+                        .and_then(serde_json::Value::as_array)
                         .map(|agents| {
                             agents
                                 .iter()
@@ -388,7 +407,10 @@ async fn session_discovery_missing_id_fails_with_bounded_diagnostics() {
         serde_json::json!({ "auth_token": "test-token" }),
     );
     let reply = send_and_recv(&mut sink, &mut stream, &auth).await.unwrap();
-    assert_eq!(reply["payload"]["status"], "success");
+    assert_eq!(
+        reply.pointer("/payload/status").and_then(serde_json::Value::as_str),
+        Some("success")
+    );
 
     let started = tokio::time::Instant::now();
     let error = wait_for_discovered_session(
