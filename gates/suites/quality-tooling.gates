@@ -34,3 +34,5 @@ server-handler-locality-selftest
 server-handler-concurrency-selftest
 agent-provider-contract
 gate-consumer-parity
+dev-workspace-selftest
+detector-selftest-coverage

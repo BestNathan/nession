@@ -69,3 +69,7 @@ and Rust/Web builds remain workflow-owned prerequisites.
 ## Release version contract
 
 `release-version-consistency` is the single Gate owner for Rust/Web version equality. Staging and Release version jobs call it before producing/publishing version-derived artifacts; version-forward decisions, tagging and GitOps remain workflow operations. `release-version-consistency-selftest` checks matching versions, mismatched versions and unreadable inputs in an isolated fixture, and runs in the PR quality Rust suite.
+
+## Custom detector fixture coverage
+
+The `detector-selftest-coverage` Gate checks custom rule owners against the deterministic positive/negative fixtures selected by unconditional PR Quality. It mutates the actual Rust/Tooling suites and post-install Web Gate commands, ensuring that removing a self-test is detected. `dev-workspace-selftest` uses isolated real Git repositories and linked worktrees to prove root, linked-worktree, detached-head and strict-session behavior. The coverage map is not a second rules engine: original detector implementations remain authoritative. When adding a new custom detector, register its fixture and Quality routing in this check as well as the standard Gate catalog.

@@ -16,6 +16,7 @@ HAS_TMUX=0
 HAS_TEST_ISOLATION=0
 HAS_INSTRUCTIONS=0
 HAS_SERVER_HANDLER=0
+HAS_WORKSPACE_POLICY=0
 
 while read -r local_ref local_sha _remote_ref remote_sha; do
   if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
@@ -31,7 +32,7 @@ while read -r local_ref local_sha _remote_ref remote_sha; do
       echo "→ new branch: no usable diff base; running full source Gate profile"
       HAS_RUST=1; HAS_WEB=1; HAS_DESIGN=1; HAS_PROTOCOL=1
       HAS_GATE=1; HAS_TMUX=1; HAS_TEST_ISOLATION=1; HAS_INSTRUCTIONS=1
-      HAS_SERVER_HANDLER=1
+      HAS_SERVER_HANDLER=1; HAS_WORKSPACE_POLICY=1
       continue
     fi
   fi
@@ -41,7 +42,7 @@ while read -r local_ref local_sha _remote_ref remote_sha; do
     echo "→ pre-push: git diff failed; running full source Gate profile" >&2
     HAS_RUST=1; HAS_WEB=1; HAS_DESIGN=1; HAS_PROTOCOL=1
     HAS_GATE=1; HAS_TMUX=1; HAS_TEST_ISOLATION=1; HAS_INSTRUCTIONS=1
-    HAS_SERVER_HANDLER=1
+    HAS_SERVER_HANDLER=1; HAS_WORKSPACE_POLICY=1
     continue
   fi
   if grep -Eq '\.rs$|^Cargo\.(toml|lock)$|^rust-toolchain\.toml$|^\.cargo/|^gates/checks/rust-' <<< "$changed"; then HAS_RUST=1; fi
@@ -50,6 +51,7 @@ while read -r local_ref local_sha _remote_ref remote_sha; do
   if grep -Eq '^(crates/nession-protocol/|crates/[^/]+/src/protocol/|crates/nession-protocol-codegen/|web/src/generated/protocol/|scripts/protocol-gate|gates/checks/protocol-)' <<< "$changed"; then HAS_PROTOCOL=1; fi
   if grep -Eq '^(gates/|\.githooks/(pre-commit|pre-push)$|justfile$|scripts/gate-router-selftest\.mjs$)' <<< "$changed"; then HAS_GATE=1; fi
   if grep -Eq '^(scripts/check-tmux-socket|gates/checks/tmux-socket-isolation)' <<< "$changed"; then HAS_TMUX=1; fi
+  if grep -Eq '^(scripts/check-dev-workspace(\.sh|-selftest\.sh)$|gates/checks/dev-workspace-)' <<< "$changed"; then HAS_WORKSPACE_POLICY=1; fi
   if grep -Eq '^(scripts/check-test-isolation|gates/checks/test-isolation)' <<< "$changed"; then HAS_TEST_ISOLATION=1; fi
   if grep -Eq '^(crates/nession-server/src/server/|scripts/server-handler-|gates/checks/server-handler-)' <<< "$changed"; then HAS_SERVER_HANDLER=1; fi
   if grep -Eq '(^|/)(AGENTS|CLAUDE)\.md$|^\.agents/|^\.claude/skills/|^scripts/instruction-contract|^gates/checks/instruction-contract\.sh$' <<< "$changed"; then HAS_INSTRUCTIONS=1; fi
@@ -76,6 +78,9 @@ if [ "$HAS_PROTOCOL" -eq 1 ]; then
 fi
 if [ "$HAS_TMUX" -eq 1 ]; then
   GATE_IDS+=(tmux-socket-isolation tmux-socket-isolation-selftest)
+fi
+if [ "$HAS_WORKSPACE_POLICY" -eq 1 ]; then
+  GATE_IDS+=(dev-workspace-selftest)
 fi
 if [ "$HAS_TEST_ISOLATION" -eq 1 ]; then
   GATE_IDS+=(test-isolation test-isolation-selftest)
