@@ -6,6 +6,7 @@ on:
       - Acceptance
       - Requirement Acceptance
       - Issue Audit Agent
+      - AI Agent Provider Smoke
     types: [completed]
   workflow_dispatch:
     inputs:
