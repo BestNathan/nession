@@ -1,0 +1,8 @@
+{
+  "task_id": "1582-smoke",
+  "source_sha": "adfeefb13a2b1f64f8f6df19a9f5ef1899c4885c",
+  "run_id": 38024769923,
+  "run_attempt": 1,
+  "record_path": "runs/1582-smoke/38024769923-1/record.json",
+  "source_path": "sources/adfeefb13a2b1f64f8f6df19a9f5ef1899c4885c/1582-smoke.json"
+}
