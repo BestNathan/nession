@@ -49,7 +49,11 @@ export function classifyBrowserReport(report, exitCode, proof) {
   if (expected > proof.executed || expected !== proof.passed) {
     return { result: 'Error', summary: 'JSON and assertion reporter execution counts disagree', evidence: [], execution: facts };
   }
-  if (proof.failedAssertions > 0 || unexpected > 0 || (exitCode !== 0 && expected > 0)) {
+  // expect.poll/toPass can emit failing intermediate expect-step callbacks
+  // before their enclosing Playwright test eventually passes. Those retries
+  // are diagnostic evidence, not a failed test verdict. The JSON reporter's
+  // final unexpected count and the process exit remain authoritative.
+  if (unexpected > 0 || (exitCode !== 0 && expected > 0)) {
     return { result: 'Fail', summary: 'Playwright assertions failed', evidence: [], execution: facts };
   }
   if (exitCode !== 0) {
@@ -65,7 +69,8 @@ export function classifyBrowserReport(report, exitCode, proof) {
   }
   return {
     result: 'Pass',
-    summary: 'Playwright JSON confirms executed passing tests and assertions with no skips',
+    summary: 'Playwright JSON confirms executed passing tests and assertions with no skips' +
+      (proof.failedAssertions > 0 ? ' (' + proof.failedAssertions + ' recovered assertion retries)' : ''),
     evidence: [{ type: 'browser', value: 'Playwright discovered=' + tests.length +
       ' passed=' + expected + ' skipped=0 assertions=' + assertions }],
     execution: facts,
@@ -90,8 +95,10 @@ function selfTest() {
   assert.equal(classifyBrowserReport(null, 0).result, 'Error');
   assert.equal(classifyBrowserReport(report([test()], 1), 0).result, 'Error');
   assert.equal(classifyBrowserReport(report([test()], 1), 1, proof(1, 1)).result, 'Fail');
-  assert.equal(classifyBrowserReport(report([test()], 1), 0, proof(1, 1, 1, 1)).result, 'Fail');
+  // A transient failed poll step may recover; only the final test result fails a Case.
+  assert.equal(classifyBrowserReport(report([test()], 1), 0, proof(1, 1, 1, 1)).result, 'Pass');
+  assert.equal(classifyBrowserReport(report([test()], 0, 0, 1), 1, proof(1, 2, 0, 1)).result, 'Fail');
   assert.equal(classifyBrowserReport(report([test()], 1), 0, proof(1, 1, 0)).result, 'Error');
-  console.log('browser report contract: 11 positive/negative fixtures passed');
+  console.log('browser report contract: 12 positive/negative fixtures passed');
 }
 if (process.argv[1]?.endsWith('browser-report.mjs') && process.argv[2] === 'self-test') selfTest();
