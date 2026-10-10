@@ -72,7 +72,11 @@ assert.equal(fs.existsSync(path.join(repo,'acceptance','verifiers')),false,
 assert.ok(fs.existsSync(path.join(repo,'e2e','runner','drivers','index.mjs')));
 assert.ok(fs.existsSync(path.join(repo,'e2e','runner','drivers','playwright.config.cjs')));
 const driverGate=fs.readFileSync(path.join(repo,'.github','workflows','quality.yml'),'utf8');
-assert.match(driverGate,/node e2e\/runner\/drivers\/browser-report\.mjs self-test/);
+assert.match(driverGate, /\.\/gates\/run --suite quality-tooling/);
+const toolingSuite = fs.readFileSync(path.join(repo, 'gates', 'suites', 'quality-tooling.gates'), 'utf8');
+assert.match(toolingSuite, /^e2e-browser-report-selftest$/m);
+const browserReportGate = fs.readFileSync(path.join(repo, 'gates', 'checks', 'e2e-browser-report-selftest.sh'), 'utf8');
+assert.match(browserReportGate, /GATE_COMMAND='node e2e\/runner\/drivers\/browser-report\.mjs self-test'/);
 assert.equal(fs.existsSync(path.join(repo, 'e2e', 'acceptance', 'evaluator', 'run-case.mjs')), true,
   'canonical internal Case evaluator must exist');
 const gateRecipes = fs.readFileSync(path.join(repo, 'justfile'), 'utf8');
