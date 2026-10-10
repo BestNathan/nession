@@ -3214,21 +3214,21 @@ impl AgentServer {
             let mut removed = Vec::new();
             let mut changed = Vec::new();
             guard.retain(|name, session| {
-                let belongs = session.peers.iter().any(|peer| {
-                    Arc::ptr_eq(&peer.connection_id, &connection.connection_id)
-                });
+                let belongs = session
+                    .peers
+                    .iter()
+                    .any(|peer| Arc::ptr_eq(&peer.connection_id, &connection.connection_id));
                 if !belongs {
                     return true;
                 }
                 let prior_holder = session.control.controller_client_id.clone();
-                session.peers.retain(|peer| {
-                    !Arc::ptr_eq(&peer.connection_id, &connection.connection_id)
-                });
+                session
+                    .peers
+                    .retain(|peer| !Arc::ptr_eq(&peer.connection_id, &connection.connection_id));
                 if let Some(cid) = client_id.as_ref() {
                     session.control.release_if_holder(cid);
                 }
-                if prior_holder != session.control.controller_client_id
-                    && !session.peers.is_empty()
+                if prior_holder != session.control.controller_client_id && !session.peers.is_empty()
                 {
                     changed.push((
                         session.peers.clone(),
