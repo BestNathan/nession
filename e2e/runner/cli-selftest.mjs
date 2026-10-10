@@ -76,7 +76,10 @@ assert.match(driverGate,/node e2e\/runner\/drivers\/browser-report\.mjs self-tes
 assert.equal(fs.existsSync(path.join(repo, 'e2e', 'acceptance', 'evaluator', 'run-case.mjs')), true,
   'canonical internal Case evaluator must exist');
 const gateRecipes = fs.readFileSync(path.join(repo, 'justfile'), 'utf8');
-assert.match(gateRecipes, /check-acceptance-runtime:[\s\S]*?\.\/e2e\/run --validate/);
+assert.match(gateRecipes, /check-acceptance-runtime:[\s\S]*?\.\/gates\/run acceptance-runtime-contract/);
+const runtimeGate = fs.readFileSync(path.join(repo, 'gates', 'checks', 'acceptance-runtime-contract.sh'), 'utf8');
+assert.match(runtimeGate, /GATE_COMMAND='\.\/e2e\/run --validate'/);
+assert.match(runtimeGate, /gate_run_invariant \.\/e2e\/run --validate/);
 assert.doesNotMatch(gateRecipes, /acceptance\/runtime\/full-stack\.js/);
 const acceptanceSkill = fs.readFileSync(path.join(repo, '.claude', 'skills',
   'nession-acceptance', 'SKILL.md'), 'utf8');
