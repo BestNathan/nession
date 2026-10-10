@@ -91,8 +91,20 @@ async function verifyTerminalClearance(page, expect, runtime, targetSha) {
     g.contentBottom <= g.shellTop + 1 &&
     g.gridBottom <= g.shellTop + 1 &&
     g.cursorBottom <= g.shellTop + 1;
-  await expect.poll(async () => valid(await geometry()), { timeout: 20000 }).toBe(true);
-  const web = await geometry();
+  // Capture the *same* geometry snapshot that satisfied the assertion. A
+  // second evaluate after an expect.poll success can see the next layout
+  // frame (or a transient empty cursor line) and report a false SC-08 failure.
+  const captureFollow = async (timeout = 20000) => {
+    let verified = null;
+    await expect.poll(async () => {
+      const sample = await geometry();
+      if (!valid(sample)) return false;
+      verified = sample;
+      return true;
+    }, { timeout }).toBe(true);
+    return verified;
+  };
+  const web = await captureFollow();
 
   const screen = await page.locator('.xterm-screen').boundingBox();
   if (!screen) throw new Error('xterm screen has no measurable box');
@@ -107,24 +119,20 @@ async function verifyTerminalClearance(page, expect, runtime, targetSha) {
   const history = await geometry();
 
   await page.mouse.wheel(0, 5000);
-  await expect.poll(async () => valid(await geometry()), { timeout: 15000 }).toBe(true);
-  const restored = await geometry();
+  const restored = await captureFollow(15000);
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect.poll(async () => valid(await geometry()), { timeout: 20000 }).toBe(true);
-  const app = await geometry();
+  const app = await captureFollow();
 
   // Exercise a second App size: a change in safe area/capsule position must not
   // leave the terminal with a stale clearance, even after history was visited.
   await page.setViewportSize({ width: 375, height: 667 });
-  await expect.poll(async () => valid(await geometry()), { timeout: 20000 }).toBe(true);
-  const compactApp = await geometry();
+  const compactApp = await captureFollow();
 
   // Return to Web and verify the follow-mode clearance survives responsive
   // layout transitions. Alternate-screen TUI control is tested by terminal E2E.
   await page.setViewportSize({ width: 1440, height: 900 });
-  await expect.poll(async () => valid(await geometry()), { timeout: 20000 }).toBe(true);
-  const webRestored = await geometry();
+  const webRestored = await captureFollow();
 
   return {
     target_sha: targetSha, case_issue: 1482, revalidates: '#1347 SC-12',
