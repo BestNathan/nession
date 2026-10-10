@@ -27,7 +27,7 @@ impl ConnectionHandler {
 
         let view: Vec<nession_protocol::contracts::agent::v1::WebAgentInfo> = agents
             .iter()
-            .map(super::agent_view::agent_to_view)
+            .map(crate::server::agent_view::agent_to_view)
             .collect();
 
         info!(

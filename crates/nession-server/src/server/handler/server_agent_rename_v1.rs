@@ -83,7 +83,7 @@ impl ConnectionHandler {
                     // The one builder, which is what removes the drift this arm
                     // used to carry: `protocols` and `metadata.image_tag` were
                     // both missing from the block that was here.
-                    agent: super::agent_view::agent_to_view(&updated),
+                    agent: crate::server::agent_view::agent_to_view(&updated),
                 })),
             )),
             None => Ok(agent_rename_reply(
