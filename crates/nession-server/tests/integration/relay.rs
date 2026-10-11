@@ -310,11 +310,15 @@ async fn wait_for_discovered_session(
                             agent_registration = format!(
                                 "status={}, session_count={}, active_sessions={}, heartbeat={}",
                                 agent.get("status").unwrap_or(&serde_json::Value::Null),
-                                agent.get("session_count").unwrap_or(&serde_json::Value::Null),
+                                agent
+                                    .get("session_count")
+                                    .unwrap_or(&serde_json::Value::Null),
                                 agent
                                     .get("active_sessions")
                                     .unwrap_or(&serde_json::Value::Null),
-                                agent.get("last_heartbeat").unwrap_or(&serde_json::Value::Null),
+                                agent
+                                    .get("last_heartbeat")
+                                    .unwrap_or(&serde_json::Value::Null),
                             );
                         } else {
                             agent_registration = "not registered".to_string();
