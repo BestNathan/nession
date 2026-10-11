@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "kind": "agent_workflow_run",
+  "identity": {
+    "workflow_id": "issue-audit",
+    "github_workflow": "Issue Audit Agent",
+    "github_run_id": 38143488506,
+    "github_run_attempt": 1,
+    "job": "agent",
+    "repository": "BestNathan/nession",
+    "event": "issues",
+    "unique_run_name": "38143488506-1-issue-1645"
+  },
+  "task": {
+    "id": "issue-1645",
+    "type": "issue-audit",
+    "issue": 1645
+  },
+  "agent": {
+    "provider": "cursor",
+    "model": {
+      "id": "composer-2.5",
+      "fast": true,
+      "params": [
+        {
+          "id": "fast",
+          "value": "true"
+        }
+      ]
+    },
+    "run_id": "run-78c5e775-d959-4a8a-858c-46f4040e3853",
+    "request_id": "99d4c56e-a671-44be-9199-be4c1c95ebd5",
+    "status": "finished",
+    "prompt": {
+      "id": "issue-audit",
+      "version": "v1",
+      "sha256": "850c5050a5000aa50b361b84dc3d1f9448dbfe47dc47a29000e2f1da91b926a4"
+    }
+  },
+  "execution": {
+    "turns": 1,
+    "model_requests": 1,
+    "tools": {
+      "observed": true,
+      "total": 6,
+      "unique": 3,
+      "by_name": {
+        "glob": 1,
+        "mcp": 2,
+        "read": 3
+      }
+    }
+  },
+  "tokens": {
+    "input": 51612,
+    "output": 3113,
+    "cache_read": 23200,
+    "cache_write": 0,
+    "reasoning": null,
+    "total": 77925
+  },
+  "cost": {
+    "raw_usd": null,
+    "charged_usd": null,
+    "estimated_usd": null
+  },
+  "timing": {
+    "started_at": "2026-10-11T13:31:25.693Z",
+    "finished_at": "2026-10-11T13:31:47.021Z",
+    "agent_duration_ms": 21198,
+    "workflow_duration_ms": null
+  },
+  "result": {
+    "status": "repaired"
+  }
+}
