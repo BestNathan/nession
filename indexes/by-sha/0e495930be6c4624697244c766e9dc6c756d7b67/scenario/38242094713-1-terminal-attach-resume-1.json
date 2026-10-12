@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 38242094713,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "test/mixed-agent-case-acceptance-1674",
+    "target_sha": "0e495930be6c4624697244c766e9dc6c756d7b67",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/38242094713",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "8394c60b0da358907c9e573114b857652982e203b180e8f1d342a683bc950bdb"
+  },
+  "record": "runs/2026-10-12/38242094713-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "cbdbe46a613242c31c20761a14f34fe1780b746b96fd850195bdd34d5576a67a"
+}
