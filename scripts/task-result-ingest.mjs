@@ -25,7 +25,7 @@ function verify(event, record, snapshot) {
   if (!run || !event.repository || !run.head_repository) invalid('incomplete GitHub event');
   if (event.repository.full_name !== 'BestNathan/nession' ||
       run.head_repository.full_name !== 'BestNathan/nession' ||
-      run.name !== 'Ephemeral Task Runner' ||
+      run.name !== 'Task / Ephemeral Runner' ||
       !String(run.path || '').includes('.github/workflows/task-runner.yml')) {
     invalid('wrong repository, workflow or origin');
   }
@@ -118,7 +118,7 @@ function ingest(eventPath, sourceRoot, incomingPath, resultsRoot) {
 }
 function selfTest() {
   const fake = { repository: { full_name: 'BestNathan/nession' }, workflow_run: {
-    id: 123, run_attempt: 1, name: 'Ephemeral Task Runner',
+    id: 123, run_attempt: 1, name: 'Task / Ephemeral Runner',
     path: '.github/workflows/task-runner.yml',
     event: 'push', head_branch: 'task/test-task', head_sha: 'a'.repeat(40),
     head_repository: { full_name: 'BestNathan/nession' }, conclusion: 'success',
