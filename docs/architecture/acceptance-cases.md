@@ -139,3 +139,11 @@ A `remote-production` profile requires a separately approved VPN-connected runne
 Remote verifiers must never infer "deployed" from a main merge or image build. They must compare the actual deployed revision/digest. Production secrets are never exposed to source-aligned Case code from an untrusted PR.
 
 Remote profile implementation is **deferred until VPN runner and deployment-identity infrastructure are ready**. Until then, the schema intentionally enables only `full-stack-local`; the remote contract exists so enabling it later does not redefine the trust boundary.
+
+## Generic PR Case Smoke and staging merge-proofs
+
+The `Acceptance / Case Smoke` PR Gate is a **real-runtime regression test** over the exact PR head. The selector (`scripts/acceptance-case-smoke-select.mjs`) chooses source-aligned protocol-only and browser+protocol representative Case classes without a fixed Issue number. PR-associated, explicit `method: case` pre-merge SCs are additionally selected via the trusted main-owned canonical Case selector; their missing mandatory source manifests are blocking failures. The verifier runtime never receives Issue-write credentials or GitHub tokens.
+
+Generic Smoke is an infrastructure check: its successful representative Cases do **not** imply every Requirement's own SC has been accepted. A Requirement's staging/production obligations are evaluated by the separate source-aligned `Acceptance / Cases` push workflow and its trusted Ingest.
+
+For explicit `when: merged, branch: staging` criteria, an Issue's `staging` Acceptance Report row remains Pending on the source PR because the merge SHA does not yet exist. The canonical final PR Gate may defer that row **only for a PR targeting staging**, with an actionable evidence plan. Once staging is merged, the merged-SHA Agent/Case execution and trusted projector must provide independent evidence before promoting the same Requirement to main or closing it. A passing staging Case never serves as a main or production-deployed Case without a validator-approved equivalence contract.
