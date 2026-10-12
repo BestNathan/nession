@@ -267,8 +267,14 @@ ok(() => {
     'acceptance-case-smoke.yml'), 'utf8');
   assert.ok(smoke.includes('branches: [staging, main]'),
     'main-target promotions must run real source Case Smoke');
-  assert.ok(smoke.includes('ref: ${{ github.event.pull_request.head.sha || github.sha }}'),
-    'Case Smoke must execute exact source head, not synthetic PR merge SHA');
+  assert.ok(smoke.includes('PR_SHA: ${{ github.event.pull_request.head.sha }}') &&
+    smoke.includes('source_sha="${PR_SHA}"') &&
+    smoke.includes('ref: ${{ steps.target.outputs.sha }}'),
+    'Case Smoke must resolve and checkout exact PR source head, never a synthetic merge SHA');
+  assert.match(smoke, /trusted\/scripts\/select-acceptance-cases\.mjs select/,
+    'Case Smoke must reuse canonical trusted Case-method selector');
+  assert.ok(!smoke.includes('--issue 1474') && !smoke.includes('issues/1474'),
+    'Case Smoke must not hard-code a completed historical Issue');
   assert.match(smoke, /persist-credentials: false/,
     'untrusted verifier code must not inherit checkout write credentials');
 });
