@@ -71,7 +71,7 @@ assert.equal(fs.existsSync(path.join(repo,'acceptance','verifiers')),false,
   'legacy verifier driver path must be retired');
 assert.ok(fs.existsSync(path.join(repo,'e2e','runner','drivers','index.mjs')));
 assert.ok(fs.existsSync(path.join(repo,'e2e','runner','drivers','playwright.config.cjs')));
-const driverGate=fs.readFileSync(path.join(repo,'.github','workflows','quality.yml'),'utf8');
+const driverGate=fs.readFileSync(path.join(repo,'.github','workflows','ci-quality.yml'),'utf8');
 assert.match(driverGate, /\.\/gates\/run --suite quality-tooling/);
 const toolingSuite = fs.readFileSync(path.join(repo, 'gates', 'suites', 'quality-tooling.gates'), 'utf8');
 assert.match(toolingSuite, /^e2e-browser-report-selftest$/m);

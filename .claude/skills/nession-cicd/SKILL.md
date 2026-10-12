@@ -86,7 +86,7 @@ The long historical rationale is intentionally not carried in this entrypoint; t
 
 Treat the files themselves as live truth:
 
-- `.github/workflows/quality.yml`
+- `.github/workflows/ci-quality.yml`
 - `.github/workflows/release-staging.yml`
 - `.github/workflows/release-production.yml`
 - `.github/workflows/e2e-tests.yml`
