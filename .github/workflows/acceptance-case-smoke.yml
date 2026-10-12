@@ -16,15 +16,22 @@ concurrency:
 jobs:
   case-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 70
     env:
       RUSTC_WRAPPER: ""
       PLAYWRIGHT_BROWSERS_PATH: ~/.cache/ms-playwright
     steps:
       - uses: actions/checkout@v4
         with:
-          # PR checks must verify actual source SHA, not GitHub's synthetic merge ref.
+          # PR checks verify exact source SHA, never GitHub's synthetic merge ref.
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Checkout trusted main selectors (no write credentials)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: trusted
           persist-credentials: false
 
       - uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -40,8 +47,11 @@ jobs:
 
       - run: sudo apt-get update && sudo apt-get install -y tmux
 
-      - name: Validate Case contract
-        run: node scripts/acceptance-cases-selftest.mjs
+      - name: Validate canonical Case contracts and generic selection
+        run: |
+          node scripts/acceptance-cases-selftest.mjs
+          node scripts/acceptance-case-smoke-select.mjs self-test
+          node scripts/select-acceptance-cases.mjs self-test
 
       - name: Build runtime
         run: |
@@ -57,48 +67,90 @@ jobs:
           npm ci
           npx playwright install chromium --with-deps
 
-      - name: Fetch trusted Requirement contract
+      - name: Select representative Case verifier classes (untrusted source, no token)
+        run: |
+          set -euo pipefail
+          node scripts/acceptance-case-smoke-select.mjs select \
+            e2e/acceptance/cases "${RUNNER_TEMP}/representative-cases.json"
+
+      - name: Select PR-linked Case-method proofs (trusted main policy)
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh api "repos/${GITHUB_REPOSITORY}/issues/1474" > /tmp/issue-1474.json
-
-      - name: Run SC-03 protocol-only Case
-        id: protocol
-        continue-on-error: true
+          GITHUB_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
+          set -euo pipefail
           target_sha="$(git rev-parse HEAD)"
-          ./e2e/run acceptance \
-            --issue-json /tmp/issue-1474.json \
-            --issue 1474 \
-            --sc SC-03 \
-            --stage pre-merge \
-            --sha "$target_sha" \
-            --output /tmp/acceptance-case-SC-03.json
+          mkdir -p "${RUNNER_TEMP}/acceptance-smoke-contracts" "${RUNNER_TEMP}/acceptance-smoke-results"
+          echo '[]' > "${RUNNER_TEMP}/linked-cases.json"
+          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            issue_numbers="$(node trusted/scripts/requirement-acceptance.mjs discover-pre-merge)"
+            jq -r '.[]' <<< "${issue_numbers}" | while read -r issue; do
+              gh api "repos/${GITHUB_REPOSITORY}/issues/${issue}" \
+                > "${RUNNER_TEMP}/acceptance-smoke-contracts/${issue}.json"
+            done
+            ISSUE_NUMBERS="${issue_numbers}" ACCEPTANCE_STAGE="pre-merge" \
+              TARGET_SHA="${target_sha}" \
+              node trusted/scripts/select-acceptance-cases.mjs select \
+              e2e/acceptance/cases "${RUNNER_TEMP}/acceptance-smoke-contracts" \
+              "${RUNNER_TEMP}/selected-pr-cases.json" "${RUNNER_TEMP}/pr-case-coverage.json"
+            jq 'map(. + {stage:"pre-merge"})' "${RUNNER_TEMP}/selected-pr-cases.json" \
+              > "${RUNNER_TEMP}/linked-cases.json"
+          fi
 
-      - name: Run SC-14 browser + protocol Case
-        id: browser_protocol
-        continue-on-error: true
+          jq -s 'add | unique_by([.issue,.criterion,.stage])' \
+            "${RUNNER_TEMP}/representative-cases.json" \
+            "${RUNNER_TEMP}/linked-cases.json" \
+            > "${RUNNER_TEMP}/acceptance-smoke-plan.json"
+          jq -e 'length >= 2' "${RUNNER_TEMP}/acceptance-smoke-plan.json" > /dev/null
+          cp "${RUNNER_TEMP}/acceptance-smoke-plan.json" \
+            "${RUNNER_TEMP}/acceptance-smoke-results/selection.json"
+          echo "Selected generic Case Smoke plan:"
+          jq . "${RUNNER_TEMP}/acceptance-smoke-plan.json"
+
+      - name: Run selected source-aligned Cases against exact PR head
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           target_sha="$(git rev-parse HEAD)"
-          ./e2e/run acceptance \
-            --issue-json /tmp/issue-1474.json \
-            --issue 1474 \
-            --sc SC-14 \
-            --stage staging \
-            --sha "$target_sha" \
-            --output /tmp/acceptance-case-SC-14.json
+          source_token="${GH_TOKEN}"
+          status=0
+          while IFS= read -r selected; do
+            issue="$(jq -r '.issue' <<< "${selected}")"
+            criterion="$(jq -r '.criterion' <<< "${selected}")"
+            stage="$(jq -r '.stage' <<< "${selected}")"
+            # Never trust PR-head JSON to supply paths or CLI identifiers.
+            [[ "${issue}" =~ ^[1-9][0-9]*$ ]] || { echo "::error::Invalid Issue ID"; exit 1; }
+            [[ "${criterion}" =~ ^SC-[0-9]{2,}$ ]] || { echo "::error::Invalid SC ID"; exit 1; }
+            [[ "${stage}" =~ ^(pre-merge|staging|post-merge)$ ]] || { echo "::error::Invalid Stage"; exit 1; }
+            [[ -f "e2e/acceptance/cases/${issue}/${criterion}/case.yaml" ]] ||
+              { echo "::error::Selected Case missing from source"; exit 1; }
+            issue_json="${RUNNER_TEMP}/acceptance-smoke-contracts/${issue}.json"
+            output="${RUNNER_TEMP}/acceptance-smoke-results/${issue}-${criterion}-${stage}.json"
+            if [[ ! -s "${issue_json}" ]]; then
+              gh api "repos/${GITHUB_REPOSITORY}/issues/${issue}" > "${issue_json}"
+            fi
+            # Source Case verifier code must not inherit the GitHub token.
+            unset GH_TOKEN GITHUB_TOKEN
+            if ! ./e2e/run acceptance \
+              --issue-json "${issue_json}" \
+              --issue "${issue}" --sc "${criterion}" \
+              --stage "${stage}" --sha "${target_sha}" \
+              --output "${output}"; then
+              status=1
+              echo "::error::Generic Case Smoke failed for ${issue}/${criterion} (${stage})"
+            fi
+            export GH_TOKEN="${source_token}"
+          done < <(jq -c '.[]' "${RUNNER_TEMP}/acceptance-smoke-plan.json")
+          exit "${status}"
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: acceptance-case-smoke-1474
+          name: acceptance-case-smoke-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            /tmp/acceptance-case-SC-03.json
-            /tmp/acceptance-case-SC-14.json
+            ${{ runner.temp }}/acceptance-smoke-results/
             e2e/test-results/
           if-no-files-found: warn
           retention-days: 14
-
-      - name: Enforce Case results
-        if: steps.protocol.outcome != 'success' || steps.browser_protocol.outcome != 'success'
-        run: exit 1

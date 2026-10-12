@@ -139,7 +139,7 @@ export function parseAcceptanceReport(section) {
   return { rows, errors };
 }
 
-export function validateRequirementBody(body, { mode = 'closure' } = {}) {
+export function validateRequirementBody(body, { mode = 'closure', targetBranch = null } = {}) {
   if (!new Set(['pre-merge', 'merge', 'closure']).has(mode)) {
     throw new Error(`unsupported acceptance validation mode: ${mode}`);
   }
@@ -149,6 +149,7 @@ export function validateRequirementBody(body, { mode = 'closure' } = {}) {
   const plan = validateAcceptancePlan(body, success.criteria.keys(), report.rows);
   const errors = [...success.errors, ...report.errors, ...plan.errors];
   let deferredPostMergeCount = 0;
+  let deferredStagingCount = 0;
 
   for (const criterion of success.criteria.values()) {
     const row = report.rows.get(criterion.id);
@@ -176,13 +177,24 @@ export function validateRequirementBody(body, { mode = 'closure' } = {}) {
       && row.stage === 'post-merge'
       && normalizedResult === 'pending';
 
-    if (deferredPostMerge) {
-      deferredPostMergeCount += 1;
+    const planEntry = plan.plan?.get(criterion.id);
+    // Deferral is allowed only on the staging PR whose merge creates
+    // the target SHA, not on a main PR or on Issue closure.
+    const deferredStaging = mode === 'merge'
+      && targetBranch === 'staging'
+      && row.stage === 'staging'
+      && planEntry?.when === 'merged'
+      && planEntry.branch === 'staging'
+      && normalizedResult === 'pending';
+
+    if (deferredPostMerge || deferredStaging) {
+      if (deferredPostMerge) deferredPostMergeCount += 1;
+      else deferredStagingCount += 1;
       if (criterion.checked) {
-        errors.push(`${criterion.id} is checked but post-merge acceptance is still Pending`);
+        errors.push(`${criterion.id} is checked but deferred merged-stage acceptance is still Pending`);
       }
       if (PLACEHOLDER_EVIDENCE.has(row.evidence.trim().toLowerCase())) {
-        errors.push(`${criterion.id} post-merge Pending must describe the blocking merge/deployment/observation condition and planned verification`);
+        errors.push(`${criterion.id} ${deferredPostMerge ? 'post-merge' : 'staging merged-SHA'} Pending must describe the blocking merge/deployment/observation condition and planned verification`);
       }
       continue;
     }
@@ -214,6 +226,7 @@ export function validateRequirementBody(body, { mode = 'closure' } = {}) {
     errors,
     criteriaCount: success.criteria.size,
     deferredPostMergeCount,
+    deferredStagingCount,
   };
 }
 
@@ -460,10 +473,10 @@ async function runPrGate({ mode = 'merge', discovery = 'closing' } = {}) {
     : await closingRequirementIssues({ owner, name, body: pr.body, token });
   const failures = [];
   for (const issue of requirements) {
-    const result = validateRequirementBody(issue.body, { mode });
+    const result = validateRequirementBody(issue.body, { mode, targetBranch: pr.base?.ref });
     if (!result.ok) failures.push(formatErrors(issue.number, result.errors, mode));
-    else if (mode === 'merge' && result.deferredPostMergeCount > 0) {
-      console.log(`Requirement #${issue.number}: merge-ready with ${result.deferredPostMergeCount} deferred post-merge criterion/criteria.`);
+    else if (mode === 'merge' && (result.deferredPostMergeCount + result.deferredStagingCount > 0)) {
+      console.log(`Requirement #${issue.number}: merge-ready with ${result.deferredStagingCount} staging-SHA and ${result.deferredPostMergeCount} post-merge deferred criterion/criteria.`);
     } else {
       console.log(
         mode === 'pre-merge'
@@ -560,7 +573,7 @@ function runSelfTest() {
     ['post-merge pending blocks closure', postMergePendingBody(), 'closure', false, 'SC-02 is not checked'],
     ['post-merge pending needs actionable evidence', postMergePendingBody('implementation pending'), 'merge', false, 'post-merge Pending must describe'],
     ['post-merge fail blocks merge', postMergePendingBody().replace('| SC-02 | post-merge | Pending |', '| SC-02 | post-merge | Fail |'), 'merge', false, 'SC-02 result is Fail'],
-    ['checked post-merge pending is invalid', postMergePendingBody().replace('- [ ] SC-02', '- [x] SC-02'), 'merge', false, 'checked but post-merge acceptance is still Pending'],
+    ['checked post-merge pending is invalid', postMergePendingBody().replace('- [ ] SC-02', '- [x] SC-02'), 'merge', false, 'checked but deferred merged-stage acceptance is still Pending'],
     ['invalid stage fails', validBody().replace('| SC-01 | pre-merge | Pass |', '| SC-01 | production | Pass |'), 'closure', false, 'unsupported acceptance stage'],
     ['missing evidence', validBody().replace('| SC-01 | pre-merge | Pass | unit test: scripts/foo.test |', '| SC-01 | pre-merge | Pass | - |'), 'closure', false, 'SC-01 must include concrete acceptance evidence'],
     ['unknown report criterion', `${validBody()}\n| SC-99 | staging | Pass | ghost |`, 'closure', false, 'unknown criterion SC-99'],
@@ -575,6 +588,24 @@ function runSelfTest() {
       assert.ok(result.errors.some((error) => error.includes(expectedError)), `${name}: missing ${expectedError}; got ${result.errors.join('; ')}`);
     }
   }
+
+  // Staging-target PR may defer only explicitly declared merged-staging
+  // proof. Main promotion and Issue closure must still reject Pending.
+  const stagingDeferred = validBody()
+    .replace('- [x] SC-02 behaves', '- [ ] SC-02 behaves')
+    .replace('| SC-02 | staging | N/A | superseded by #88 after requirement amendment |',
+      '| SC-02 | staging | Pending | requires exact staging merge SHA then source Case |')
+    .replace('## Acceptance Report',
+      '## Acceptance Plan\n\n```yaml\nacceptance:\n' +
+      '  SC-01:\n    when: pr\n    method: agent\n' +
+      '  SC-02:\n    when: merged\n    branch: staging\n    method: case\n' +
+      '```\n\n## Acceptance Report');
+  assert.equal(validateRequirementBody(stagingDeferred, { mode: 'merge', targetBranch: 'staging' }).ok, true);
+  assert.equal(validateRequirementBody(stagingDeferred, { mode: 'merge', targetBranch: 'main' }).ok, false);
+  assert.equal(validateRequirementBody(stagingDeferred, { mode: 'closure' }).ok, false);
+  assert.equal(validateRequirementBody(stagingDeferred.replace(
+    'requires exact staging merge SHA then source Case', 'implementation pending'
+  ), { mode: 'merge', targetBranch: 'staging' }).ok, false);
 
   assert.deepEqual(
     parseClosingIssueNumbers('Closes #12\nFixes BestNathan/nession#13\nResolves https://github.com/BestNathan/nession/issues/14', 'BestNathan', 'nession'),
