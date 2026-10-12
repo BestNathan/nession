@@ -471,7 +471,7 @@ describe('TerminalController', () => {
     const callbacks: Array<() => void> = [];
     const spy = vi.spyOn(controller.terminal!, 'write').mockImplementation(
       ((_data: unknown, callback?: () => void) => {
-        if (callback) callbacks.push(callback);
+        if (callback) { callbacks.push(callback); }
       }) as never,
     );
     transport.onOutput!(new Uint8Array([49]), { requestedLines: 5000, truncated: false });
@@ -503,7 +503,7 @@ describe('TerminalController', () => {
     let oldCallback: (() => void) | undefined;
     const spy = vi.spyOn(controller.terminal!, 'write').mockImplementation(
       ((_data: unknown, callback?: () => void) => {
-        if (callback) oldCallback = callback;
+        if (callback) { oldCallback = callback; }
       }) as never,
     );
     first.onOutput!(new Uint8Array([49]), { requestedLines: 5000, truncated: false });
