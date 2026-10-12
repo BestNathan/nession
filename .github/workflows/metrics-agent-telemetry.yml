@@ -4,7 +4,7 @@ on:
   workflow_run:
     workflows:
       - Agent / SC Acceptance
-      - Requirement Acceptance
+      - Acceptance / Orchestrator
       - Agent / Issue Audit
       - Agent / Provider Smoke
     types: [completed]
