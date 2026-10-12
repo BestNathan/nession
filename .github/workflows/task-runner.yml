@@ -1,4 +1,4 @@
-name: Ephemeral Task Runner
+name: Task / Ephemeral Runner
 
 # This workflow is a read-only execution sandbox for untrusted task/* source.
 # Trusted source/run verification and task-results writes live in task-result-ingest.yml.
