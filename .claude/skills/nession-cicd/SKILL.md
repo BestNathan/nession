@@ -88,7 +88,7 @@ Treat the files themselves as live truth:
 
 - `.github/workflows/quality.yml`
 - `.github/workflows/staging.yml`
-- `.github/workflows/release.yml`
+- `.github/workflows/release-production.yml`
 - `.github/workflows/e2e.yml`
 - `.github/workflows/requirement-acceptance.yml`
 - `.github/workflows/agent-sc-acceptance.yml`
@@ -141,7 +141,7 @@ Version consistency is enforced by `release-version-consistency`. Version files 
 
 ## Release version policy
 
-Production release is **version-triggered**. `release.yml` runs on pushes to `main`, but its build/release/deploy jobs proceed only when the version moves forward (or the current version tag is absent for a retry). Merging runtime code to `main` without the required bump leaves production on the previous images.
+Production release is **version-triggered**. `release-production.yml` runs on pushes to `main`, but its build/release/deploy jobs proceed only when the version moves forward (or the current version tag is absent for a retry). Merging runtime code to `main` without the required bump leaves production on the previous images.
 
 Decide from what shipped:
 
@@ -160,9 +160,9 @@ The bump is a **separate PR after the staging -> main release PR has merged**:
 2. bump all four files together: `Cargo.toml`, `Cargo.lock`, `web/package.json`, `web/package-lock.json`;
 3. open the bump PR directly to `main`;
 4. merge it with `--merge` (no squash/rebase);
-5. observe `release.yml` through image publication, GitHub Release, production approval, and GitOps/ArgoCD rollout.
+5. observe `release-production.yml` through image publication, GitHub Release, production approval, and GitOps/ArgoCD rollout.
 
-If `v<version>` is absent because a release failed or never completed, `release.yml` may retry that same version without another bump. The executable version comparison/retry behavior remains owned by `.github/workflows/release.yml`; `release-version-consistency` only proves the version files agree, not whether a bump is required.
+If `v<version>` is absent because a release failed or never completed, `release-production.yml` may retry that same version without another bump. The executable version comparison/retry behavior remains owned by `.github/workflows/release-production.yml`; `release-version-consistency` only proves the version files agree, not whether a bump is required.
 
 ## 7. Deployment / GitOps
 
