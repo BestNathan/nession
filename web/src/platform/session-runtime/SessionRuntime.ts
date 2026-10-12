@@ -1029,18 +1029,13 @@ export class SessionRuntime {
       // disconnect). The phase guard keeps this inert before the relay is live.
       if (state !== 'connected') {
         if (this.attachState.phase === 'attached') {
-          // With a shared Agent Session stream (#1619), output stays in
-          // retention while another P2P peer is attached. Do not preemptively
-          // replace a nonempty Terminal with capture-pane: reattach and
-          // attempt replay from the last applied cursor first. A proven
-          // retention miss still sets historyMayHaveGap via the reconciler.
-          // Existing confirmed gaps remain flagged across this loss.
-          // Legacy Agents without stream epoch/cursor cannot replay anything:
-          // keep the historical snapshot fallback rather than treating a
-          // transport that cannot resume as if it retained a cursor.
-          if (this.p2pAttachSeed?.streamEpoch === undefined) {
-            this.noteStreamTruncated();
-          }
+          // Relay output is currently unsequenced (#1645): even if a prior
+          // P2P attach supplied a stream cursor, the Relay transport cannot
+          // resume from it. Every Relay disconnect can therefore hide PTY
+          // output. Always request a fresh history bootstrap on reattach.
+          // Once Relay has the same sequenced resume contract as P2P, this
+          // can be narrowed to proven retention gaps.
+          this.noteStreamTruncated();
           const result = this.attachController.dispatch({ type: 'TRANSPORT_LOST' });
           this.emitRuntimeEvent({ type: 'route-intent-changed', phase: result.phase });
         }
