@@ -125,7 +125,7 @@ jobs:
           for _ in $(seq 1 240); do
             runs="$(gh run list \
               --repo "${GITHUB_REPOSITORY}" \
-              --workflow e2e.yml \
+              --workflow e2e-tests.yml \
               --commit "${HEAD_SHA}" \
               --event pull_request \
               --limit 20 \
