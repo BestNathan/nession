@@ -626,7 +626,36 @@ function selfTest() {
     contract_sha256: agentOnly.contract_sha256, target_sha: agentOnly.target_ref,
   }), /criterion is absent/);
 
-  console.log('acceptance-executor self-test: legacy and explicit method cases passed');
+  const mixedBody = plannedBody
+    .replace('| SC-02 | post-merge | Pending |', '| SC-02 | staging | Pending |')
+    .replace('    method: case\n  SC-02:', '    method: agent\n  SC-02:')
+    .replace('    when: deployed\n    environment: production\n    method: case',
+      '    when: merged\n    branch: staging\n    method: case');
+  const mixedIssue = { ...issue, body: mixedBody };
+  const mixedAgent = buildAcceptanceContext(mixedIssue, 'staging', {
+    targetRef: 'c'.repeat(40), runId: 420, method: 'agent',
+  });
+  const mixedCase = buildAcceptanceContext(mixedIssue, 'staging', {
+    targetRef: 'c'.repeat(40), runId: 421, method: 'case',
+  });
+  assert.deepEqual(mixedAgent.criteria.map((x) => x.criterion), ['SC-01']);
+  assert.deepEqual(mixedCase.criteria.map((x) => x.criterion), ['SC-02']);
+  const mixedAgentResult = normalizeAcceptanceResult(mixedAgent, {
+    criteria: [{ criterion: 'SC-01', result: 'Pass', evidence: 'test: exact SHA static proof' }],
+  }, 'agent-cursor');
+  assert.deepEqual(mixedAgentResult.selected_criteria, ['SC-01']);
+  const mixedAgentBody = applyAcceptanceResultToBody(mixedBody, mixedAgentResult);
+  assert.match(mixedAgentBody, /\| SC-02 \| staging \| Pending \|/);
+  const forgedCase = normalizeAcceptanceResult(mixedCase, {
+    criteria: [{ criterion: 'SC-02', result: 'Pass', evidence: 'test: runtime execution proof' }],
+  }, 'agent-cursor');
+  assert.throws(() => applyAcceptanceResultToBody(mixedAgentBody, forgedCase), /selected method does not match/);
+  const mixedCaseResult = { ...forgedCase, source: 'case-runner' };
+  const fullyAccepted = applyAcceptanceResultToBody(mixedAgentBody, mixedCaseResult);
+  assert.match(fullyAccepted, /\| SC-01 \| staging \| Pass \|/);
+  assert.match(fullyAccepted, /\| SC-02 \| staging \| Pass \|/);
+
+  console.log('acceptance-executor self-test: legacy, mixed-method and provenance cases passed');
 }
 
 function usage() {
