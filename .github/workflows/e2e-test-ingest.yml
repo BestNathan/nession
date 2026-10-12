@@ -1,4 +1,4 @@
-name: E2E Test Run Ingest
+name: E2E / Test Ingest
 
 # Privileged ingest lives on default/main; source Playwright code receives no
 # content write token. Only GitHub-attested successful push runs are eligible.
