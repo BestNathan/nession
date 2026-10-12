@@ -7,7 +7,7 @@
 | Current file | Target file | Target Actions name | Notes |
 |---|---|---|---|
 | `acceptance.yml` | `agent-sc-acceptance.yml` | `Agent / SC Acceptance` | **Only after** separating deterministic bypass/updater into trusted Acceptance components |
-| `issue-audit.yml` | `agent-issue-audit.yml` | `Agent / Issue Audit` | Actually invokes LLM |
+| `agent-issue-audit.yml` | **Done** | `Agent / Issue Audit` | Actually invokes LLM; renamed with Metrics subscription and telemetry source |
 | `agent-provider-smoke.yml` | unchanged | `Agent / Provider Smoke` | Actually invokes LLM |
 | `requirement-acceptance.yml` | `acceptance-orchestrator.yml` | `Acceptance / Orchestrator` | Handles dispatch, PR gate and Issue-close guard; must not be misnamed as an Agent |
 | `acceptance-cases.yml` | unchanged | `Acceptance / Cases` | Source-aligned Case execution using shared E2E Runner |
@@ -47,7 +47,7 @@ e2e.yml ("E2E Tests")
 e2e-scenario-smoke.yml ("E2E Scenario Smoke")
   -- workflow_run display name --> e2e-run-ingest.yml
 
-acceptance.yml, requirement-acceptance.yml, issue-audit.yml,
+acceptance.yml, requirement-acceptance.yml, agent-issue-audit.yml,
 agent-provider-smoke.yml
   -- workflow_run display names --> metrics-ingest.yml
   -- telemetry path & stable workflow_id --> scripts/agent-workflow-telemetry-contract.mjs

@@ -5,7 +5,7 @@ on:
     workflows:
       - Acceptance
       - Requirement Acceptance
-      - Issue Audit Agent
+      - Agent / Issue Audit
       - Agent / Provider Smoke
     types: [completed]
   workflow_dispatch:
