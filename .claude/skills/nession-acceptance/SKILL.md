@@ -9,7 +9,7 @@ Acceptance is the executable phase that proves Requirement Success Criteria. It 
 
 Issue structure belongs to `nession-writing-requirements`; Gate semantics belong to `nession-gates`; Agent execution telemetry belongs to `nession-agent-workflow-metrics`.
 
-For cross-workflow naming and the **planned** `when × target × method` / Agent-vs-Case orchestrator separation, load `nession-workflows` and its acceptance-orchestration reference. This Skill describes the **currently implemented** three-stage contract; do not use the target syntax for live Issue/Case updates until the validators/Gates explicitly support it.
+For workflow taxonomy and the **implemented** `when × target × method` Agent/Case selection, load `nession-workflows` and its acceptance-orchestration reference. The optional `## Acceptance Plan` is validated and used by the active merged-SHA planner, while legacy Acceptance Report stages remain required. Production `when: deployed` execution remains deferred until an independently authenticated deployment-identity runner exists.
 
 ## Lifecycle
 
@@ -38,9 +38,9 @@ Do not mark a criterion Pass because implementation exists; execute/observe the 
 
 ## Execute through the trusted workflow
 
-Model-backed **Requirement Acceptance** evaluation is routed through `.github/workflows/agent-sc-acceptance.yml`. Source-aligned Issue/SC **Cases** use `.github/workflows/acceptance-cases.yml` and the single canonical `./e2e/run acceptance --issue N --sc SC-NN --sha SHA --stage STAGE --profile full-stack-local --issue-json CONTRACT --output RECORD` interface. Regression tests use `./e2e/run test`, observational reproduction uses `./e2e/run scenario`/`compare`; CI alone may execute live stack paths. The underlying `e2e/acceptance/evaluator/run-case.mjs` is internal to the CLI and does not receive Issue-write credentials.
+Model-backed **Agent / SC Acceptance** evaluation is routed through `.github/workflows/agent-sc-acceptance.yml`. Source-aligned Issue/SC **Acceptance / Cases** use `.github/workflows/acceptance-cases.yml` and the single canonical `./e2e/run acceptance --issue N --sc SC-NN --sha SHA --stage STAGE --profile full-stack-local --issue-json CONTRACT --output RECORD` interface. Regression tests use `./e2e/run test`, observational reproduction uses `./e2e/run scenario`/`compare`; CI alone may execute live stack paths. The underlying `e2e/acceptance/evaluator/run-case.mjs` is internal to the CLI and does not receive Issue-write credentials.
 
-Manual execution uses **Actions -> Acceptance -> Run workflow** (`workflow_dispatch`) with:
+Manual execution uses **Actions -> Agent / SC Acceptance -> Run workflow** (`workflow_dispatch`) with:
 
 - `issue_number`;
 - explicit `stage` (`pre-merge`, `staging`, or `post-merge`);

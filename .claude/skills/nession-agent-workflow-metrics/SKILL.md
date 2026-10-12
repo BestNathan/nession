@@ -7,7 +7,7 @@ description: Use when adding or changing a Nession workflow that invokes an AI/A
 
 Every workflow that actually invokes an AI/Agent runtime must emit canonical Agent Workflow Telemetry. This is a repository invariant, not optional observability.
 
-Workflow taxonomy and future `agent-` / `Agent /` naming belong to `nession-workflows`. **Metrics is a separate workflow domain** even when it ingests Agent usage. Changing a workflow path or display name does not authorize changing its stable logical telemetry `workflow_id`; update trusted source allowlists and subscribers as a coordinated migration.
+Workflow taxonomy and the active `agent-` / `Agent /` naming belong to `nession-workflows`. **Metrics is a separate workflow domain** even when it ingests Agent usage. Changing a workflow path or display name does not authorize changing its stable logical telemetry `workflow_id`; update trusted source allowlists and subscribers as a coordinated migration.
 
 Use this Skill together with `nession-cicd` for workflow changes and `nession-gates` when changing the executable telemetry contract.
 
@@ -103,7 +103,7 @@ Before the workflow is complete:
 2. produce one canonical telemetry JSON per actual Agent invocation;
 3. use a task ID that distinguishes matrix/subtasks within one GitHub run;
 4. upload it as an artifact whose name starts with `agent-telemetry-`;
-5. make Metrics Ingest observe that top-level workflow;
+5. make `Metrics / Agent Telemetry Ingest` observe that top-level workflow;
 6. preserve unknown provider fields as null/unobserved;
 7. run the telemetry self-test and `agent-workflow-telemetry` Gate.
 
