@@ -245,7 +245,9 @@ ok(() => {
     /- name: Install browser verifier runtime\s+if: steps\.select\.outputs\.needs_browser == 'true'/);
   assert.match(workflow,
     /- name: Install browser verifier runtime[\s\S]*?cd workspace\/e2e\s+npm ci\s+npx playwright install chromium --with-deps/);
-  assert.match(workflow, /needs_browser: verifiers\.some\(\(item\) => item\.type === 'browser'\)/);
+  assert.match(workflow, /node trusted\/scripts\/select-acceptance-cases\.mjs select/);
+  const selector = fs.readFileSync(path.join(repoRoot, 'scripts', 'select-acceptance-cases.mjs'), 'utf8');
+  assert.match(selector, /needs_browser: verifiers\.some\(\(item\) => item\.type === 'browser'\)/);
   for (const n of ['01','02','03','04']) {
     const caseDir = path.join(canonicalRoot, '1498', 'SC-' + n);
     const item = discoverCases(canonicalRoot).find(x =>
