@@ -1,4 +1,4 @@
-# SC Acceptance Orchestration — target contract (Issue #1649)
+# SC Acceptance Orchestration — operational contract and future deployment boundary
 
 > **Implementation status:** the constrained `## Acceptance Plan` YAML contract is supported for per-SC `when`, `branch`/`environment`, and `method`; main/staging merged-SHA Agent/Case selection, exact target proof, trusted Case ingestion and Issue result projection are operational. The legacy `pre-merge | staging | post-merge` Acceptance Report is still required; historical issues without a plan remain supported. **Production `when: deployed` execution remains deferred:** an actual environment/revision/digest and authorization boundary must be implemented independently; main merge is not deployment.
 
@@ -96,14 +96,14 @@ PR / merged push / verified deployment event / explicit manual request
 - Reuse staging evidence on main only under an explicit validator-approved reuse contract (source/build/runtime/environment equivalence). Never infer it from branch ancestry alone.
 - Distinguish GitHub workflow infrastructure success from SC `Pass`; a non-zero test command may produce an authenticated failure record.
 
-## Migration checkpoints
+## Implemented controls and the remaining production boundary
 
-1. Design and version the Issue SC plan schema; extend `scripts/issue-contract.mjs`, requirement validator, Acceptance updater, Case selection and negative self-tests compatibly.
-2. Add stage/target/method filters in the shared planner and ensure Agent-only SCs are not false Case-coverage errors.
-3. Reuse `./e2e/run` for Cases; keep browser-specific environments opt-in.
-4. Add trusted method-aware evidence checks; converge writes to one Issue projector without sacrificing historical Run Records.
-5. Prove separate E2E and Agent-only SC paths on a real PR/staging SHA, plus main exact-SHA and a negative/manual replay.
-6. Only after compatibility tests succeed, revise `nession-writing-requirements` and `nession-acceptance` to make the new syntax authoritative.
+1. `scripts/acceptance-plan.mjs` provides the optional, validated per-SC `when × method × branch/environment` contract; the Issue validator and Requirement Acceptance Gate retain the historic Acceptance Report Stage and reject inconsistent explicit plans.
+2. `scripts/acceptance-executor.mjs`, `scripts/select-merged-agents.mjs` and `scripts/select-acceptance-cases.mjs` enforce method- and stage-qualified eligibility, with negative fixtures and exact target SHA; Agent-only criteria do not require a Case.
+3. `./e2e/run acceptance` owns real source-aligned Case execution; the main-owned `Acceptance / Cases` and `Acceptance / Case Ingest` workflows preserve independent runtime evidence and trusted immutable record projection.
+4. `Acceptance / Orchestrator` owns the PR/merged-SHA routing and Issue-close Guard. Model-backed execution is separated into `Agent / SC Acceptance` and emits canonical telemetry; the source-run path/name and stable logical workflow ID must be checked when renaming.
+5. Real staging and main integration is documented in Issue #1674 and in the evidence below; a main merge is never assumed to be production deployment.
+6. **Still future:** `when: deployed` requires independently authenticated deployment identity, environment, exact artifact revision/digest, safe runtime profile and trusted event/permission boundary. Do not mark deployed-only SCs Pass from an ordinary `main` push.
 
 Owning implementation detail remains in `nession-acceptance`, `nession-writing-requirements`, `nession-gates`, `e2e/README.md`, and `docs/architecture/acceptance-cases.md`. This document governs cross-boundary design decisions, not an alternate executable validator.
 
