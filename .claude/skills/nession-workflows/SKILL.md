@@ -106,7 +106,7 @@ Read [Acceptance orchestration](references/acceptance-orchestration.md) for the 
 2. Inventory current paths, displayed `name:` values, triggers, `workflow_call` consumers, `workflow_run` subscribers, artifacts, identity allowlists, Gate names and external references.
 3. State whether work changes **only documentation**, **execution/policy**, **naming**, or **trust/mutation**.
 4. For a rename, migrate downstream subscriptions, paths, provenance allowlists and telemetry before or atomically with source rename; verify no duplicate ingestion or lost events.
-5. Add/extend the planned `workflow-conventions` Gate once its canonical validator exists; it must distinguish actual LLM invocation from mere use of an Agent binary or result.
+5. Run the `workflow-conventions` Gate (`node scripts/workflow-conventions.mjs self-test && node scripts/workflow-conventions.mjs check`): it inventories legacy and target names, checks missing consumers and distinguishes actual LLM invocation from mere use of an Agent binary/result. Keep its compatibility inventory synchronized during deliberate migrations.
 6. Run relevant self-tests/Gates, inspect actual GitHub Actions trigger and source-run identity, and validate artifact ingestion/Issue projection as applicable.
 7. For `.github/workflows/*` modifications, follow `nession-cicd` **main fast-track PR with merge commit**. Never silently loosen any existing gate for a rename.
 
