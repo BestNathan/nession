@@ -123,3 +123,5 @@ Use [Migration playbook](references/migration-playbook.md) for the detailed roll
 - Do not rename checked-in workflow files or the current Issue-stage schema without explicit backward-compatibility verification.
 
 Related design: [Issue #1649](https://github.com/BestNathan/nession/issues/1649), foundational E2E platform [Issue #1474](https://github.com/BestNathan/nession/issues/1474).
+
+The `gate-consumer-parity` command coverage matrix resolves workflow paths from `scripts/workflow-conventions.mjs` via `resolveWorkflowPath`; do not add another hardcoded workflow filename catalog when renaming a workflow.
