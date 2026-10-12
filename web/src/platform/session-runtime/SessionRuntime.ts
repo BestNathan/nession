@@ -257,6 +257,12 @@ export class SessionRuntime {
    */
   private historyMayHaveGap = false;
   /**
+   * A requested bootstrap is not a repaired buffer until the *current*
+   * xterm has parsed a complete snapshot. Agent attach success does not
+   * prove capture succeeded or that the parser applied its bytes (#1645).
+   */
+  private bootstrapRepairPending = false;
+  /**
    * Latest P2P attach cursor from agent.attach — the stream timeline's
    * (#1094) and the input cursor's (#1307).
    *
@@ -326,11 +332,8 @@ export class SessionRuntime {
     this.attachController.subscribeOutcomes((result) => {
       if (result.phase === 'attached') {
         this.attachedTransportGeneration = this.transportGeneration;
-        // Whatever the last outage left behind has just been repaired by this
-        // attach's bootstrap (if it needed one). A later re-attach on the same
-        // healthy transport must not ask again — the snapshot is a full screen
-        // repaint, and re-requesting it on every attach would flicker.
-        this.historyMayHaveGap = false;
+        // Attach confirms the PTY subscription, not the xterm buffer.
+        // Only noteBootstrapApplied() may clear a pending history repair.
         this.applyAttachSeedToLiveTransport();
       }
       if (result.forceRelay) {
@@ -481,6 +484,33 @@ export class SessionRuntime {
   }
 
   /**
+   * Capture the bootstrap decision *before* sending attach. Even on the
+   * first attach, session output can arrive while capture fails; a live
+   * frame must not make the next attach assume history is complete.
+   */
+  private requestBootstrapForAttach(): boolean {
+    const needed = this.needsBootstrap();
+    if (needed) {
+      this.historyMayHaveGap = true;
+      this.bootstrapRepairPending = true;
+    }
+    return needed;
+  }
+
+  /**
+   * Called only after a non-truncated bootstrap's xterm write callback,
+   * and only from the currently bound Terminal transport. A successful
+   * attach response alone is insufficient (#1645).
+   */
+  noteBootstrapApplied(): void {
+    if (!this.bootstrapRepairPending) {
+      return;
+    }
+    this.bootstrapRepairPending = false;
+    this.historyMayHaveGap = false;
+  }
+
+  /**
    * The stream reported that replay cannot reach back to this client's cursor
    * (#1304): the agent's retained window has passed it, or a hole was given up
    * on and the frames in hand committed over it. Either way the buffer this
@@ -502,6 +532,9 @@ export class SessionRuntime {
    */
   noteStreamTruncated(): void {
     this.historyMayHaveGap = true;
+    // A newly discovered hole invalidates a repair that was in flight
+    // before the loss was reported, even if its parser callback is late.
+    this.bootstrapRepairPending = false;
   }
 
   updateContext(next: Partial<SessionRuntimeConfig>): RuntimeMirrorSnapshot {
@@ -599,7 +632,7 @@ export class SessionRuntime {
     // If this client retained its Terminal buffer, the attach is a stream
     // continuation, not a fresh snapshot. The old *applied* cursor, rather
     // than the Agent's latest cursor, is the safe replay position (#1213).
-    const needsBootstrap = this.needsBootstrap();
+    const needsBootstrap = this.requestBootstrapForAttach();
     const preserveAppliedCursor = !needsBootstrap
       && this.p2pAttachSeed?.streamEpoch !== undefined;
     this.attachController.startP2PAttach({
@@ -996,18 +1029,13 @@ export class SessionRuntime {
       // disconnect). The phase guard keeps this inert before the relay is live.
       if (state !== 'connected') {
         if (this.attachState.phase === 'attached') {
-          // With a shared Agent Session stream (#1619), output stays in
-          // retention while another P2P peer is attached. Do not preemptively
-          // replace a nonempty Terminal with capture-pane: reattach and
-          // attempt replay from the last applied cursor first. A proven
-          // retention miss still sets historyMayHaveGap via the reconciler.
-          // Existing confirmed gaps remain flagged across this loss.
-          // Legacy Agents without stream epoch/cursor cannot replay anything:
-          // keep the historical snapshot fallback rather than treating a
-          // transport that cannot resume as if it retained a cursor.
-          if (this.p2pAttachSeed?.streamEpoch === undefined) {
-            this.historyMayHaveGap = true;
-          }
+          // Relay output is currently unsequenced (#1645): even if a prior
+          // P2P attach supplied a stream cursor, the Relay transport cannot
+          // resume from it. Every Relay disconnect can therefore hide PTY
+          // output. Always request a fresh history bootstrap on reattach.
+          // Once Relay has the same sequenced resume contract as P2P, this
+          // can be narrowed to proven retention gaps.
+          this.noteStreamTruncated();
           const result = this.attachController.dispatch({ type: 'TRANSPORT_LOST' });
           this.emitRuntimeEvent({ type: 'route-intent-changed', phase: result.phase });
         }
@@ -1057,7 +1085,7 @@ export class SessionRuntime {
     conn.beginRelay(this.sessionId, {
       cols: resize?.cols,
       rows: resize?.rows,
-      needsBootstrap: this.needsBootstrap(),
+      needsBootstrap: this.requestBootstrapForAttach(),
     });
     const result = this.attachController.dispatch({ type: 'RELAY_BEGIN_OK' });
     this.emitRuntimeEvent({ type: 'route-intent-changed', phase: result.phase });
@@ -1106,7 +1134,7 @@ export class SessionRuntime {
           // Older Agents cannot resume, so their existing bootstrap fallback
           // remains mandatory. A previously confirmed gap stays flagged.
           if (this.p2pAttachSeed?.streamEpoch === undefined) {
-            this.historyMayHaveGap = true;
+            this.noteStreamTruncated();
           }
           const result = this.attachController.dispatch({ type: 'TRANSPORT_LOST' });
           this.emitRuntimeEvent({ type: 'route-intent-changed', phase: result.phase });

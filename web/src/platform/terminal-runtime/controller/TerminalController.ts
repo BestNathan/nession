@@ -51,6 +51,8 @@ const BOOTSTRAP_SCREEN_RESET = '\x1b[2J\x1b[H';
 
 export interface TerminalControllerEvents {
   onTransportReady?: (ready: boolean) => void;
+  /** A complete remote history snapshot has finished xterm parsing (#1645). */
+  onBootstrapApplied?: () => void;
   onInputModeChange?: (sessionId: string, mode: InputMode) => void;
   onResize?: (sessionId: string, cols: number, rows: number) => void;
   onTitleChange?: (sessionId: string, title: string) => void;
@@ -293,8 +295,14 @@ export class TerminalController {
       terminal.write(data, () => {
         if (bootstrapSeq !== null
           && bootstrapSeq === this.bootstrapSequence
-          && this._terminal === terminal) {
+          && this._terminal === terminal
+          && this.transport === transport) {
           this.markSessionOutput();
+          // A truncated pane capture can repaint the current screen, but
+          // cannot establish that the missing history was recovered.
+          if (!bootstrap?.truncated) {
+            this.events?.onBootstrapApplied?.();
+          }
         }
         if (follow) {
           this.capsuleOcclusionScroll?.afterOutputWhileFollowing();

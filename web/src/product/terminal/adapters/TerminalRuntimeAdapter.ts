@@ -26,6 +26,9 @@ export function createTerminalRuntimeAdapter(runtime: SessionRuntime): TerminalC
     onTransportReady: (ready) => {
       runtime.setTransportReady(ready);
     },
+    onBootstrapApplied: () => {
+      runtime.noteBootstrapApplied();
+    },
     onInputModeChange: (sid, mode) => {
       store.set(inputModeAtomFamily(sid), mode);
     },

@@ -459,6 +459,62 @@ describe('TerminalController', () => {
     controller.detach();
   });
 
+  it('reports bootstrap applied only after the latest COMPLETE snapshot parses (#1645)', () => {
+    const transport = makeTransport();
+    const onBootstrapApplied = vi.fn();
+    const controller = new TerminalController(makeSession(), () => transport, {
+      rendererType: 'canvas',
+      events: { onBootstrapApplied },
+    });
+    controller.attach(host());
+
+    const callbacks: Array<() => void> = [];
+    const spy = vi.spyOn(controller.terminal!, 'write').mockImplementation(
+      ((_data: unknown, callback?: () => void) => {
+        if (callback) { callbacks.push(callback); }
+      }) as never,
+    );
+    transport.onOutput!(new Uint8Array([49]), { requestedLines: 5000, truncated: false });
+    transport.onOutput!(new Uint8Array([50]), { requestedLines: 5000, truncated: false });
+    expect(onBootstrapApplied).not.toHaveBeenCalled();
+    callbacks[0]!(); // Superseded by a newer snapshot
+    expect(onBootstrapApplied).not.toHaveBeenCalled();
+    callbacks[1]!();
+    expect(onBootstrapApplied).toHaveBeenCalledTimes(1);
+
+    transport.onOutput!(new Uint8Array([51]), { requestedLines: 5000, truncated: true });
+    callbacks[2]!(); // A truncated capture cannot repair a missing history range
+    expect(onBootstrapApplied).toHaveBeenCalledTimes(1);
+    spy.mockRestore();
+    controller.dispose();
+  });
+
+  it('does not accept a bootstrap parse callback from a replaced transport (#1645)', () => {
+    const first = makeTransport();
+    const second = makeTransport();
+    const transports = [first, second];
+    const onBootstrapApplied = vi.fn();
+    const controller = new TerminalController(makeSession(), () => transports.shift()!, {
+      rendererType: 'canvas',
+      events: { onBootstrapApplied },
+    });
+    controller.attach(host());
+
+    let oldCallback: (() => void) | undefined;
+    const spy = vi.spyOn(controller.terminal!, 'write').mockImplementation(
+      ((_data: unknown, callback?: () => void) => {
+        if (callback) { oldCallback = callback; }
+      }) as never,
+    );
+    first.onOutput!(new Uint8Array([49]), { requestedLines: 5000, truncated: false });
+    controller.attach(host()); // Viewport reparent replaces transport, not xterm
+    expect(oldCallback).toBeDefined();
+    oldCallback!();
+    expect(onBootstrapApplied).not.toHaveBeenCalled();
+    spy.mockRestore();
+    controller.dispose();
+  });
+
   it('detach disposes xterm, transport, and resize observer', () => {
     const transport = makeTransport();
     const controller = new TerminalController(makeSession(), () => transport);

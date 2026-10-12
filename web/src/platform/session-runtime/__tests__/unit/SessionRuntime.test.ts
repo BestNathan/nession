@@ -633,6 +633,33 @@ describe('SessionRuntime', () => {
       rt.dispose();
     });
 
+    it('requires a new bootstrap after relay loss even if an old P2P cursor exists (#1645)', async () => {
+      const serverConnection = makeRelayServerConnection('connected');
+      const rt = new SessionRuntime(makeConfig({
+        forcedRelay: true,
+        serverConnection,
+        hasSessionOutput: () => true,
+      }));
+      rt.setTransportReady(true);
+      await flushMicrotasks();
+
+      // A fully populated browser buffer needs no initial capture.
+      expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
+      expect(serverConnection.beginRelay.mock.calls[0]?.[1]).toMatchObject({
+        needsBootstrap: false,
+      });
+      // The relay path has no output sequence/cursor and cannot prove a
+      // continuous range across a server websocket outage.
+      serverConnection.emit('connecting');
+      serverConnection.emit('connected');
+      await flushMicrotasks();
+      expect(serverConnection.beginRelay).toHaveBeenCalledTimes(2);
+      expect(serverConnection.beginRelay.mock.calls[1]?.[1]).toMatchObject({
+        needsBootstrap: true,
+      });
+      rt.dispose();
+    });
+
     it('ignores repeated connecting while already reconnecting (no double TRANSPORT_LOST)', async () => {
       const serverConnection = makeRelayServerConnection('connected');
       const rt = new SessionRuntime(makeConfig({ forcedRelay: true, serverConnection }));
@@ -944,9 +971,38 @@ describe('SessionRuntime', () => {
       // stream set can say the buffer is incomplete rather than non-empty.
       expect(clientAttachBootstrapFlags()).toEqual([false, true]);
 
-      // This attach's bootstrap repairs the buffer, which is what clears the
-      // flag. The clear is unobservable from the attach that performs it —
-      // only from one that follows, and only because that one must *not* ask.
+      // Attach success is NOT parser success. A complete bootstrap, after
+      // being parsed by xterm, is what proves that history was restored.
+      answerAttach();
+      await flushMicrotasks();
+      expect(rt.attachState.phase).toBe('attached');
+      rt.noteBootstrapApplied();
+
+      rt.updateContext({ routeIntentEpoch: 2 });
+      await openWs();
+      await flushMicrotasks();
+
+      expect(clientAttachBootstrapFlags()).toEqual([false, true, false]);
+      rt.dispose();
+    });
+
+    it('does not clear the history gap on attach success without a parsed bootstrap (#1645)', async () => {
+      const rt = new SessionRuntime(makeConfig({ hasSessionOutput: () => true }));
+      rt.setTransportReady(true);
+      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      await openWs();
+      await flushMicrotasks();
+      answerAttach();
+      await flushMicrotasks();
+      expect(clientAttachBootstrapFlags()).toEqual([false]);
+
+      rt.noteStreamTruncated();
+      rt.updateContext({ routeIntentEpoch: 1 });
+      await openWs();
+      await flushMicrotasks();
+      expect(clientAttachBootstrapFlags()).toEqual([false, true]);
+      // The agent can successfully attach even if capture-pane returned
+      // nothing, or if xterm has not parsed the snapshot yet.
       answerAttach();
       await flushMicrotasks();
       expect(rt.attachState.phase).toBe('attached');
@@ -954,8 +1010,37 @@ describe('SessionRuntime', () => {
       rt.updateContext({ routeIntentEpoch: 2 });
       await openWs();
       await flushMicrotasks();
+      // Still needs the snapshot; a live output frame in an old xterm must
+      // not be treated as proof the hole was filled.
+      expect(clientAttachBootstrapFlags()).toEqual([false, true, true]);
+      rt.dispose();
+    });
 
-      expect(clientAttachBootstrapFlags()).toEqual([false, true, false]);
+    it('keeps a newer gap when a stale bootstrap callback arrives (#1645)', async () => {
+      const rt = new SessionRuntime(makeConfig({ hasSessionOutput: () => true }));
+      rt.setTransportReady(true);
+      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      await openWs();
+      await flushMicrotasks();
+      answerAttach();
+      await flushMicrotasks();
+
+      rt.noteStreamTruncated();
+      rt.updateContext({ routeIntentEpoch: 1 });
+      await openWs();
+      await flushMicrotasks();
+      expect(clientAttachBootstrapFlags()).toEqual([false, true]);
+      answerAttach();
+      await flushMicrotasks();
+
+      // A second gap while the previous capture is still being parsed makes
+      // its callback insufficient to re-establish continuity.
+      rt.noteStreamTruncated();
+      rt.noteBootstrapApplied();
+      rt.updateContext({ routeIntentEpoch: 2 });
+      await openWs();
+      await flushMicrotasks();
+      expect(clientAttachBootstrapFlags()).toEqual([false, true, true]);
       rt.dispose();
     });
 
