@@ -7,6 +7,8 @@ description: Use when creating/updating Nession Requirement or Bug GitHub issues
 
 This Skill owns **issue structure and requirement capture**. It does not own implementation, Gate semantics, or execution of acceptance.
 
+The `when × target × method` SC orchestration plan in `nession-workflows` / #1649 is **proposed**, not yet the live Issue schema. Continue writing the `Stage` Acceptance Report required below until `scripts/issue-contract.mjs` and downstream validators have been migrated compatibly.
+
 - implementation -> `nession-development`
 - acceptance execution -> `nession-acceptance`
 - Gate semantics -> `nession-gates`

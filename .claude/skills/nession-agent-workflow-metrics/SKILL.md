@@ -7,6 +7,8 @@ description: Use when adding or changing a Nession workflow that invokes an AI/A
 
 Every workflow that actually invokes an AI/Agent runtime must emit canonical Agent Workflow Telemetry. This is a repository invariant, not optional observability.
 
+Workflow taxonomy and future `agent-` / `Agent /` naming belong to `nession-workflows`. **Metrics is a separate workflow domain** even when it ingests Agent usage. Changing a workflow path or display name does not authorize changing its stable logical telemetry `workflow_id`; update trusted source allowlists and subscribers as a coordinated migration.
+
 Use this Skill together with `nession-cicd` for workflow changes and `nession-gates` when changing the executable telemetry contract.
 
 ## Canonical record

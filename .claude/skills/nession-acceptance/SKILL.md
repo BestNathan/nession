@@ -9,6 +9,8 @@ Acceptance is the executable phase that proves Requirement Success Criteria. It 
 
 Issue structure belongs to `nession-writing-requirements`; Gate semantics belong to `nession-gates`; Agent execution telemetry belongs to `nession-agent-workflow-metrics`.
 
+For cross-workflow naming and the **planned** `when × target × method` / Agent-vs-Case orchestrator separation, load `nession-workflows` and its acceptance-orchestration reference. This Skill describes the **currently implemented** three-stage contract; do not use the target syntax for live Issue/Case updates until the validators/Gates explicitly support it.
+
 ## Lifecycle
 
 ```text
