@@ -1,4 +1,4 @@
-name: Acceptance Cases
+name: Acceptance / Cases
 
 on:
   push:
