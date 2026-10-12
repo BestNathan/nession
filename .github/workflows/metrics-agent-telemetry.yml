@@ -3,7 +3,7 @@ name: Metrics / Agent Telemetry Ingest
 on:
   workflow_run:
     workflows:
-      - Acceptance
+      - Agent / SC Acceptance
       - Requirement Acceptance
       - Agent / Issue Audit
       - Agent / Provider Smoke
