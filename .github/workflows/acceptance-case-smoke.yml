@@ -27,6 +27,13 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
+      - name: Checkout trusted main selectors (no write credentials)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: trusted
+          persist-credentials: false
+
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with: { cache-workspaces: ".", cache-all-crates: "true" }
 
@@ -60,7 +67,13 @@ jobs:
           npm ci
           npx playwright install chromium --with-deps
 
-      - name: Select representative and PR-linked Case-method proofs
+      - name: Select representative Case verifier classes (untrusted source, no token)
+        run: |
+          set -euo pipefail
+          node scripts/acceptance-case-smoke-select.mjs select \
+            e2e/acceptance/cases "${RUNNER_TEMP}/representative-cases.json"
+
+      - name: Select PR-linked Case-method proofs (trusted main policy)
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_TOKEN: ${{ github.token }}
@@ -69,19 +82,16 @@ jobs:
           set -euo pipefail
           target_sha="$(git rev-parse HEAD)"
           mkdir -p "${RUNNER_TEMP}/acceptance-smoke-contracts" "${RUNNER_TEMP}/acceptance-smoke-results"
-          node scripts/acceptance-case-smoke-select.mjs select \
-            e2e/acceptance/cases "${RUNNER_TEMP}/representative-cases.json"
-
           echo '[]' > "${RUNNER_TEMP}/linked-cases.json"
           if [[ "${EVENT_NAME}" == "pull_request" ]]; then
-            issue_numbers="$(node scripts/requirement-acceptance.mjs discover-pre-merge)"
+            issue_numbers="$(node trusted/scripts/requirement-acceptance.mjs discover-pre-merge)"
             jq -r '.[]' <<< "${issue_numbers}" | while read -r issue; do
               gh api "repos/${GITHUB_REPOSITORY}/issues/${issue}" \
                 > "${RUNNER_TEMP}/acceptance-smoke-contracts/${issue}.json"
             done
             ISSUE_NUMBERS="${issue_numbers}" ACCEPTANCE_STAGE="pre-merge" \
               TARGET_SHA="${target_sha}" \
-              node scripts/select-acceptance-cases.mjs select \
+              node trusted/scripts/select-acceptance-cases.mjs select \
               e2e/acceptance/cases "${RUNNER_TEMP}/acceptance-smoke-contracts" \
               "${RUNNER_TEMP}/selected-pr-cases.json" "${RUNNER_TEMP}/pr-case-coverage.json"
             jq 'map(. + {stage:"pre-merge"})' "${RUNNER_TEMP}/selected-pr-cases.json" \
