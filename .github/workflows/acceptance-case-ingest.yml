@@ -2,7 +2,7 @@ name: Acceptance / Case Ingest
 
 on:
   workflow_run:
-    workflows: ["Acceptance Cases"]
+    workflows: ["Acceptance / Cases"]
     types: [completed]
 
 permissions:
