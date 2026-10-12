@@ -6,11 +6,16 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveWorkflowPath } from './workflow-conventions.mjs';
+
+// Workflow path identity is owned by workflow-conventions, not duplicated in
+// this Gate's consumer command matrix. The matrix owns only required commands.
+const wf = (id) => resolveWorkflowPath(id);
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const required = [
   [
-    ".github/workflows/quality.yml",
+    wf('ci-quality'),
     [
       "./gates/run --suite quality-rust",
       "./gates/run --suite quality-tooling",
@@ -18,7 +23,7 @@ const required = [
     ]
   ],
   [
-    ".github/workflows/staging.yml",
+    wf('release-staging'),
     [
       "./gates/run --suite quality-rust",
       "./gates/run web-eslint web-typecheck web-test-unit web-test-integration",
@@ -26,7 +31,7 @@ const required = [
     ]
   ],
   [
-    ".github/workflows/release.yml",
+    wf('release-production'),
     [
       "./gates/run release-version-consistency",
       "./gates/run --suite quality-rust",
@@ -34,14 +39,14 @@ const required = [
     ]
   ],
   [
-    ".github/workflows/e2e.yml",
+    wf('e2e-tests'),
     [
       "./gates/run design-system-browser",
       "./gates/run e2e-playwright"
     ]
   ],
   [
-    ".github/workflows/requirement-acceptance.yml",
+    wf('acceptance-orchestrator'),
     [
       "./gates/run --suite acceptance-tooling",
       "./gates/run requirement-acceptance-pre-merge",
@@ -50,45 +55,45 @@ const required = [
     ]
   ],
   [
-    ".github/workflows/acceptance.yml",
+    wf('agent-sc-acceptance'),
     [
       "./gates/run requirement-acceptance-selftest acceptance-executor-selftest acceptance-agent-selftest acceptance-ci-evidence-selftest",
       "./gates/run requirement-acceptance-selftest acceptance-executor-selftest"
     ]
   ],
   [
-    ".github/workflows/e2e-scenario-smoke.yml",
+    wf('e2e-scenario-smoke'),
     [
       "./gates/run terminal-attach-resume-selftest acceptance-runtime-contract"
     ]
   ],
   [
-    ".github/workflows/acceptance-case-ingest.yml",
+    wf('acceptance-case-ingest'),
     [
       "./gates/run requirement-acceptance-selftest acceptance-executor-selftest acceptance-case-ingest-selftest"
     ]
   ],
   [
-    ".github/workflows/agent-provider-smoke.yml",
+    wf('agent-provider-smoke'),
     [
       "./gates/run agent-provider-contract acceptance-agent-selftest agent-workflow-telemetry"
     ]
   ],
   [
-    ".github/workflows/agent-issue-audit.yml",
+    wf('agent-issue-audit'),
     [
       "./gates/run issue-contract-selftest",
       "./gates/run issue-contract-selftest issue-audit-agent-selftest issue-audit-cursor-selftest"
     ]
   ],
   [
-    ".github/workflows/metrics-ingest.yml",
+    wf('metrics-agent-telemetry'),
     [
       "./gates/run agent-workflow-telemetry"
     ]
   ],
   [
-    ".github/workflows/metrics-repository.yml",
+    wf('metrics-repository'),
     [
       "./gates/run repo-health-selftest repo-metrics-selftest agent-workflow-telemetry protocol-integrity"
     ]
@@ -145,7 +150,7 @@ for (const [file, commands] of required) {
     cases++;
   }
 }
-const first = '.github/workflows/agent-issue-audit.yml';
+const first = wf('agent-issue-audit');
 const fixture = new Map(source);
 fixture.set(first, fixture.get(first) + '\n      - run: node scripts/issue-contract.mjs self-test\n');
 assert.ok(verify(p => fixture.get(p) ?? null).some(p => p.includes('legacy raw Node/Bash')),
