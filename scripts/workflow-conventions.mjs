@@ -178,8 +178,8 @@ export function auditWorkflows(files, catalog = CATALOG, { complete = true, trus
 function selfTest() {
   const catalog = [
     ['agent-job', 'model.yml', 'Model', 'agent-model.yml', 'Agent / Model', 'agent'],
-    ['task-job', 'task.yml', 'Task', 'task.yml', 'Task / Runner', 'task'],
-    ['task-subscriber', 'subscriber.yml', 'Subscriber', 'subscriber.yml', 'Task / Subscriber', 'task'],
+    ['task-job', 'task.yml', 'Task', 'task-task.yml', 'Task / Runner', 'task'],
+    ['task-subscriber', 'subscriber.yml', 'Subscriber', 'task-subscriber.yml', 'Task / Subscriber', 'task'],
   ];
   const old = new Map([
     ['model.yml', 'name: Model\non:\n  workflow_dispatch:\njobs:\n  x:\n    steps:\n      - run: npm install @cursor/sdk'],
