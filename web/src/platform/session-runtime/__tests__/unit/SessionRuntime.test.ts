@@ -633,6 +633,33 @@ describe('SessionRuntime', () => {
       rt.dispose();
     });
 
+    it('requires a new bootstrap after relay loss even if an old P2P cursor exists (#1645)', async () => {
+      const serverConnection = makeRelayServerConnection('connected');
+      const rt = new SessionRuntime(makeConfig({
+        forcedRelay: true,
+        serverConnection,
+        hasSessionOutput: () => true,
+      }));
+      rt.setTransportReady(true);
+      await flushMicrotasks();
+
+      // A fully populated browser buffer needs no initial capture.
+      expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
+      expect(serverConnection.beginRelay.mock.calls[0]?.[1]).toMatchObject({
+        needsBootstrap: false,
+      });
+      // The relay path has no output sequence/cursor and cannot prove a
+      // continuous range across a server websocket outage.
+      serverConnection.emit('connecting');
+      serverConnection.emit('connected');
+      await flushMicrotasks();
+      expect(serverConnection.beginRelay).toHaveBeenCalledTimes(2);
+      expect(serverConnection.beginRelay.mock.calls[1]?.[1]).toMatchObject({
+        needsBootstrap: true,
+      });
+      rt.dispose();
+    });
+
     it('ignores repeated connecting while already reconnecting (no double TRANSPORT_LOST)', async () => {
       const serverConnection = makeRelayServerConnection('connected');
       const rt = new SessionRuntime(makeConfig({ forcedRelay: true, serverConnection }));
