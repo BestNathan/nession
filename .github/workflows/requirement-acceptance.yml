@@ -6,6 +6,8 @@ on:
     types: [opened, synchronize, reopened, edited, ready_for_review]
   issues:
     types: [closed]
+  push:
+    branches: [staging, main]
 
 permissions:
   contents: read
@@ -233,3 +235,76 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./gates/run requirement-acceptance-close
+
+  # The push target is already merged; only explicit method=agent SCs may
+  # invoke a model. The Case runner remains an independently authenticated
+  # evidence producer and uses the same trusted SC plan in acceptance-executor.
+  prepare-merged-agent:
+    if: github.event_name == 'push' && (github.ref_name == 'staging' || github.ref_name == 'main')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    outputs:
+      stage: ${{ steps.select.outputs.stage }}
+      agent_issues: ${{ steps.select.outputs.agent_issues }}
+      has_agents: ${{ steps.select.outputs.has_agents }}
+    steps:
+      - name: Checkout trusted main Acceptance planner
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Select merged-stage Agent SCs at exact source SHA
+        id: select
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_SHA: ${{ github.sha }}
+          BRANCH_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          case "${BRANCH_NAME}" in
+            staging) stage=staging ;;
+            main) stage=post-merge ;;
+            *) echo "unsupported merged Agent branch" >&2; exit 1 ;;
+          esac
+          echo "stage=${stage}" >> "${GITHUB_OUTPUT}"
+          issue_numbers="$(node scripts/requirement-acceptance.mjs discover-ref "${TARGET_SHA}")"
+          echo "ISSUE_NUMBERS=${issue_numbers}" >> "${GITHUB_ENV}"
+          echo "ACCEPTANCE_STAGE=${stage}" >> "${GITHUB_ENV}"
+          mkdir -p "${RUNNER_TEMP}/agent-issue-contracts"
+          jq -r '.[]' <<< "${issue_numbers}" | while read -r issue; do
+            gh api "repos/${GITHUB_REPOSITORY}/issues/${issue}" > "${RUNNER_TEMP}/agent-issue-contracts/${issue}.json"
+          done
+          agent_issues="$(ISSUE_NUMBERS="${issue_numbers}" ACCEPTANCE_STAGE="${stage}" \
+            node scripts/select-merged-agents.mjs select "${RUNNER_TEMP}/agent-issue-contracts")"
+          echo "agent_issues=${agent_issues}" >> "${GITHUB_OUTPUT}"
+          if [[ "$(jq 'length' <<< "${agent_issues}")" -gt 0 ]]; then
+            echo 'has_agents=true' >> "${GITHUB_OUTPUT}"
+          else
+            echo 'has_agents=false' >> "${GITHUB_OUTPUT}"
+          fi
+          echo "Merged Agent SC Issue selection: ${agent_issues} at ${TARGET_SHA} (${stage})"
+
+  merged-agent-acceptance:
+    needs: prepare-merged-agent
+    if: needs.prepare-merged-agent.outputs.has_agents == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        issue_number: ${{ fromJSON(needs.prepare-merged-agent.outputs.agent_issues) }}
+    # Use main-owned reusable workflow even for a staging push: staging content
+    # must not redefine a write-capable trusted Issue projector.
+    uses: BestNathan/nession/.github/workflows/acceptance.yml@main
+    with:
+      issue_number: ${{ matrix.issue_number }}
+      stage: ${{ needs.prepare-merged-agent.outputs.stage }}
+      provider: cursor
+      target_ref: ${{ github.sha }}
+      deployment: ''
+    secrets: inherit
