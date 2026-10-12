@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "131ee9ae6cbc78f51227eb85180744b4d2a4b0fe3fd5b646eb91c6ecc91c2eee",
+  "run_id": 38258395018,
+  "run_attempt": 1,
+  "issue": 1674,
+  "criterion": "SC-04",
+  "criterion_text": "On the exact merged `main` SHA, a protocol Case independently proves real Server authentication and online Agent registration, with new exact-SHA evidence rather than reusing SC-02 staging evidence.",
+  "stage": "post-merge",
+  "target_sha": "01111075dc08afa931907ee268d2dd7376d037d1",
+  "contract_sha256": "f825382e3559c3b664d1e76f8980ddfd4d7d970b37f1447db35ec9f7c0cc8cba",
+  "case_revision": "01111075dc08afa931907ee268d2dd7376d037d1",
+  "case_tree_sha": "d4b75facac4a6e89f260c7bb90ff2fe15b8daa77",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-12T13:51:29.971Z",
+  "finished_at": "2026-10-12T13:51:45.696Z",
+  "duration_ms": 15725,
+  "verifiers": [
+    {
+      "type": "protocol",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "Authenticated real Server + live Agent registration on exact merged SHA",
+      "evidence": [
+        {
+          "type": "protocol",
+          "value": "server.auth status=success over ws://127.0.0.1:42209/ws"
+        },
+        {
+          "type": "protocol",
+          "value": "server.agent.list contains agent_id=e2e-test-node status=online"
+        },
+        {
+          "type": "runtime",
+          "value": "target_sha=01111075dc08afa931907ee268d2dd7376d037d1 profile=full-stack-local"
+        }
+      ],
+      "duration_ms": 10054,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 38258395018,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "01111075dc08afa931907ee268d2dd7376d037d1",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/38258395018",
+    "record_path": "runs/2026-10-12/38258395018-1/1674/SC-04.json",
+    "source_result_sha256": "932ff96ea39b991e8c168447287521bc2bf2f0a9d502d98431b376dc6166c757"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-38258395018-1",
+    "sha256": "932ff96ea39b991e8c168447287521bc2bf2f0a9d502d98431b376dc6166c757",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/38258395018",
+    "durability": "time-limited; object archival not configured"
+  }
+}
