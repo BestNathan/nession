@@ -7,7 +7,7 @@ description: Use when creating/updating Nession Requirement or Bug GitHub issues
 
 This Skill owns **issue structure and requirement capture**. It does not own implementation, Gate semantics, or execution of acceptance.
 
-The `when × target × method` SC orchestration plan in `nession-workflows` / #1649 is **proposed**, not yet the live Issue schema. Continue writing the `Stage` Acceptance Report required below until `scripts/issue-contract.mjs` and downstream validators have been migrated compatibly.
+The optional, constrained `## Acceptance Plan` schema (`when × branch/environment × method`) is **implemented** and validated by `scripts/acceptance-plan.mjs`, `scripts/issue-contract.mjs`, and Requirement Acceptance. A legacy `Stage` Acceptance Report remains mandatory for backward compatibility. The full deployed-environment trigger and complete replacement of stages are **not implemented**. Keep new and historical Issue semantics explicit.
 
 - implementation -> `nession-development`
 - acceptance execution -> `nession-acceptance`
