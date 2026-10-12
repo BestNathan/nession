@@ -92,7 +92,7 @@ Treat the files themselves as live truth:
 - `.github/workflows/e2e.yml`
 - `.github/workflows/requirement-acceptance.yml`
 - `.github/workflows/acceptance.yml`
-- `.github/workflows/repo-metrics.yml`
+- `.github/workflows/metrics-repository.yml`
 - `.github/workflows/metrics-ingest.yml`
 - `.github/workflows/deploy.yml`
 

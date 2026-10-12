@@ -1,4 +1,4 @@
-name: Repository Metrics
+name: Metrics / Repository Health
 
 on:
   schedule:
