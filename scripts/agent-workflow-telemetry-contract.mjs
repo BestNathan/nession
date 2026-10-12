@@ -19,7 +19,7 @@ const TRUSTED_TELEMETRY_SOURCES = new Map([
     events: new Set(['workflow_dispatch']),
     workflow_dispatch_main_only: true,
   }],
-  ['.github/workflows/requirement-acceptance.yml', {
+  ['.github/workflows/acceptance-orchestrator.yml', {
     workflow_id: 'requirement-acceptance',
     events: new Set(['pull_request_target', 'issues', 'push']),
     allowed_push_branches: new Set(['staging', 'main']),
@@ -195,7 +195,7 @@ function selfTest() {
   assert.equal(validateTelemetrySourceRun({
     id: 10,
     run_attempt: 2,
-    path: '.github/workflows/requirement-acceptance.yml',
+    path: '.github/workflows/acceptance-orchestrator.yml',
     event: 'pull_request_target',
     head_branch: 'feature',
     repository: { full_name: 'BestNathan/nession' },
@@ -207,20 +207,20 @@ function selfTest() {
   for (const trustedBranch of ['staging', 'main']) {
     assert.equal(validateTelemetrySourceRun({
       id: 16, run_attempt: 1,
-      path: '.github/workflows/requirement-acceptance.yml',
+      path: '.github/workflows/acceptance-orchestrator.yml',
       event: 'push', head_branch: trustedBranch,
       repository: { full_name: 'BestNathan/nession' },
     }, 'BestNathan/nession').workflow_id, 'requirement-acceptance');
   }
   assert.throws(() => validateTelemetrySourceRun({
     id: 17, run_attempt: 1,
-    path: '.github/workflows/requirement-acceptance.yml',
+    path: '.github/workflows/acceptance-orchestrator.yml',
     event: 'push', head_branch: 'feature/untrusted',
     repository: { full_name: 'BestNathan/nession' },
   }, 'BestNathan/nession'), /untrusted telemetry source push branch/);
   assert.throws(() => validateTelemetrySourceRun({
     id: 18, run_attempt: 1,
-    path: '.github/workflows/requirement-acceptance.yml',
+    path: '.github/workflows/acceptance-orchestrator.yml',
     event: 'push', head_branch: 'main',
     repository: { full_name: 'attacker/nession' },
   }, 'BestNathan/nession'), /repository mismatch/);

@@ -7,7 +7,7 @@ description: Use when changing or troubleshooting Nession GitHub Actions, stagin
 
 This Skill owns **CI, staging, release, and deployment execution**. Workflows are routers; domain rules remain with their scripts/Gates/scoped owners.
 
-For **cross-workflow taxonomy, `Agent /` vs `Acceptance /` naming, Metrics/Task classification, orchestration boundaries, and rename compatibility**, load `nession-workflows` first. Its #1649 naming/SC plan is a target architecture; follow the paths and contracts checked into this repository until migrated.
+For **cross-workflow taxonomy, `Agent /` vs `Acceptance /` naming, Metrics/Task classification, orchestration boundaries, and rename compatibility**, load `nession-workflows` first. Its taxonomy is implemented in checked-in Actions and `scripts/workflow-conventions.mjs`; use the checked-in per-SC plan/validator. Production `when: deployed` runtime identity is a future boundary, not implied by main merge.
 
 Read `.github/AGENTS.md` before editing workflows and `nession-gates` when changing Gate routing. If a workflow invokes an AI/Agent runtime, also load `nession-agent-workflow-metrics`; canonical execution telemetry is mandatory for Agent workflows.
 
@@ -90,7 +90,7 @@ Treat the files themselves as live truth:
 - `.github/workflows/release-staging.yml`
 - `.github/workflows/release-production.yml`
 - `.github/workflows/e2e-tests.yml`
-- `.github/workflows/requirement-acceptance.yml`
+- `.github/workflows/acceptance-orchestrator.yml`
 - `.github/workflows/agent-sc-acceptance.yml`
 - `.github/workflows/metrics-repository.yml`
 - `.github/workflows/metrics-agent-telemetry.yml`

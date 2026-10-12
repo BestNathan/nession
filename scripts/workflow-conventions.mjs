@@ -126,7 +126,7 @@ export function directlyInvokesModel(content) {
   return /@cursor\/sdk|@anthropic-ai\/claude-code|node\s+scripts\/(?:acceptance-agent|issue-audit-agent|issue-audit-cursor)\.mjs/.test(lines);
 }
 
-export function auditWorkflows(files, catalog = CATALOG, { complete = true, trustedSources = '' } = {}) {
+export function auditWorkflows(files, catalog = CATALOG, { complete = true, trustedSources = '', ownerDocs = '' } = {}) {
   const errors = [];
   const byPath = new Map();
   const names = new Map();
@@ -186,6 +186,17 @@ export function auditWorkflows(files, catalog = CATALOG, { complete = true, trus
       }
     }
   }
+  // CI/CD Skill must advertise paths that actually exist. This is a doc-path
+  // invariant only; execution policy and workflow ownership stay elsewhere.
+  if (ownerDocs) {
+    const owners = ownerDocs.match(/## 3\. Current workflow owners([\s\S]*?)(?=\n## \d+\.|$)/)?.[1];
+    if (!owners) errors.push('CI/CD Skill missing current workflow owners section');
+    else {
+      for (const match of owners.matchAll(/^\s*- \x60\.github\/workflows\/([^\x60]+\.ya?ml)\x60/gm)) {
+        if (!files.has(match[1])) errors.push('CI/CD Skill references absent workflow: ' + match[1]);
+      }
+    }
+  }
   return { ok: errors.length === 0, errors, inventory: [...byPath.entries()].map(([file, id]) => ({ file, id })) };
 }
 
@@ -224,6 +235,7 @@ function selfTest() {
   assert.match(auditWorkflows(withoutSubscriber, catalog).errors.join('\n'), /missing workflow/);
   assert.match(auditWorkflows(old, catalog, { trustedSources: 'const TRUSTED_TELEMETRY_SOURCES = new Map([\n  [\'.github/workflows/missing.yml\', {}],\n]);' }).errors.join('\n'), /telemetry allowlist references absent/);
   assert.deepEqual(upstreamWorkflowNames('on:\n  workflow_run:\n    workflows:\n      - Model\n      - Task\n').names, ['Model', 'Task']);
+  assert.match(auditWorkflows(old, catalog, { ownerDocs: '## 3. Current workflow owners\n- \x60.github/workflows/missing.yml\x60\n## 4. Other' }).errors.join('\n'), /CI\/CD Skill references absent workflow/);
   assert.equal(workflowName('name: One\nname: Two'), null);
   console.log('workflow-conventions: 10 positive/negative scenarios passed');
 }
@@ -233,7 +245,8 @@ function check() {
     .filter((f) => /\.ya?ml$/.test(f))
     .map((f) => [f, fs.readFileSync(path.join(WORKFLOW_DIR, f), 'utf8')]));
   const sources = fs.readFileSync(path.join(ROOT, 'scripts/agent-workflow-telemetry-contract.mjs'), 'utf8');
-  const audit = auditWorkflows(files, CATALOG, { trustedSources: sources });
+  const ownerDocs = fs.readFileSync(path.join(ROOT, '.claude/skills/nession-cicd/SKILL.md'), 'utf8');
+  const audit = auditWorkflows(files, CATALOG, { trustedSources: sources, ownerDocs });
   if (!audit.ok) {
     for (const error of audit.errors) console.error('✗ ' + error);
     process.exitCode = 1;
