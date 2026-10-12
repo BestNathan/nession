@@ -162,6 +162,7 @@ export function normalizeAcceptanceResult(context, raw, source = 'agent') {
     target_ref: context.target_ref,
     deployment: context.deployment,
     source: String(source || 'unknown'),
+    selected_criteria: [...expected],
     criteria,
   };
 }
@@ -323,8 +324,14 @@ export function applyAcceptanceResultToBody(body, normalized) {
     : stageExpected;
   if (expected.length === 0) throw new Error('acceptance result selects no criteria');
   if (new Set(expected).size !== expected.length) throw new Error('acceptance result has duplicate selected criteria');
+  const proofSource = String(normalized.source ?? '');
+  const proofMethod = /^agent(?:-|$)/.test(proofSource) ? 'agent'
+    : proofSource === 'case-runner' ? 'case' : null;
   for (const id of expected) {
     if (!stageExpected.includes(id)) throw new Error('selected criterion ' + id + ' is unknown or belongs to another stage');
+    if (contract.plan && (!proofMethod || !isProofEligible(contract.plan.get(id), stage, proofMethod))) {
+      throw new Error(id + ' selected method does not match authenticated Acceptance Plan proof source ' + proofSource);
+    }
   }
   const resultMap = new Map();
   for (const raw of normalized.criteria) {
