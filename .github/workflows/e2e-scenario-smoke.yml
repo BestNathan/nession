@@ -1,4 +1,4 @@
-name: E2E Scenario Smoke
+name: E2E / Scenario Smoke
 
 on:
   pull_request:
