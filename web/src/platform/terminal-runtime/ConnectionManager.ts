@@ -550,8 +550,12 @@ export class ConnectionManager implements TerminalTransport {
   }
 
   /** Seed stream cursor after attach (late joiner / reconnect #1094). */
-  seedStreamCursor(streamEpoch: number | undefined, streamCursor: number | undefined): void {
-    this.reconciler.seed(streamEpoch, streamCursor);
+  seedStreamCursor(
+    streamEpoch: number | undefined,
+    streamCursor: number | undefined,
+    options?: { preserveAppliedCursor?: boolean },
+  ): void {
+    this.reconciler.seed(streamEpoch, streamCursor, options);
   }
 
   /**

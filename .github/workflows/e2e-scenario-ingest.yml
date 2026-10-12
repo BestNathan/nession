@@ -1,9 +1,9 @@
-name: E2E Run Ingest
+name: E2E / Scenario Ingest
 
 # Main-owned trusted ingestion; serialized with Acceptance Case Ingest.
 on:
   workflow_run:
-    workflows: ["E2E Scenario Smoke"]
+    workflows: ["E2E / Scenario Smoke"]
     types: [completed]
 
 permissions:

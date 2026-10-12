@@ -53,9 +53,9 @@ function validateObservation(item) {
 }
 export function sourceIdentity(event, repo) {
   const run = event?.workflow_run;
-  if (!run || run.name !== 'E2E Scenario Smoke' || run.status !== 'completed'
+  if (!run || run.name !== 'E2E / Scenario Smoke' || run.status !== 'completed'
       || !['success', 'failure'].includes(run.conclusion))
-    throw new Error('not a completed E2E Scenario Smoke workflow_run');
+    throw new Error('not a completed E2E / Scenario Smoke workflow_run');
   if (run.repository?.full_name !== repo || run.head_repository?.full_name !== repo)
     throw new Error('source workflow repository mismatch');
   const canonicalPath = '.github/workflows/e2e-scenario-smoke.yml';
@@ -225,7 +225,7 @@ function selfTest() {
     [{ ...observation('before-reload'), terminal_output: 'secret' }, observation('after-reload')] }, source), /forbidden/);
   assert.throws(() => validateScenario({ ...valid, observations:
     [observation('before-reload'), observation('before-reload')] }, source), /before\/after/);
-  const event = { workflow_run: { name: 'E2E Scenario Smoke', status: 'completed',
+  const event = { workflow_run: { name: 'E2E / Scenario Smoke', status: 'completed',
     conclusion: 'success', event: 'pull_request', head_branch: 'feat/scenario',
     id: 12, run_attempt: 1, workflow_id: 70, head_sha: source.target_sha,
     repository: { full_name: 'BestNathan/nession' },

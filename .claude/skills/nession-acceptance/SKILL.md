@@ -9,6 +9,8 @@ Acceptance is the executable phase that proves Requirement Success Criteria. It 
 
 Issue structure belongs to `nession-writing-requirements`; Gate semantics belong to `nession-gates`; Agent execution telemetry belongs to `nession-agent-workflow-metrics`.
 
+For cross-workflow naming and the **planned** `when × target × method` / Agent-vs-Case orchestrator separation, load `nession-workflows` and its acceptance-orchestration reference. This Skill describes the **currently implemented** three-stage contract; do not use the target syntax for live Issue/Case updates until the validators/Gates explicitly support it.
+
 ## Lifecycle
 
 ```text
@@ -24,6 +26,8 @@ Requirement Success Criteria
 
 Read the Requirement's current `Success Criteria` and `Acceptance Report`.
 
+For issues with an explicit `## Acceptance Plan`, the trusted executor also selects by `method`: the read-only Agent evaluates only `agent` SCs; Case Coverage and the Case runner evaluate only `case` SCs. `when: deployed` is deferred until actual deployment identity/runner exists, and does not execute as part of an ordinary main push. The legacy Acceptance Report Stage remains required and must agree with the plan. Issues without a plan retain historic behavior.
+
 Evaluate only criteria whose declared stage matches the environment/boundary being accepted:
 
 - `pre-merge`
@@ -34,7 +38,7 @@ Do not mark a criterion Pass because implementation exists; execute/observe the 
 
 ## Execute through the trusted workflow
 
-Model-backed **Requirement Acceptance** evaluation is routed through `.github/workflows/acceptance.yml`. Source-aligned Issue/SC **Cases** use `.github/workflows/acceptance-cases.yml` and the single canonical `./e2e/run acceptance --issue N --sc SC-NN --sha SHA --stage STAGE --profile full-stack-local --issue-json CONTRACT --output RECORD` interface. Regression tests use `./e2e/run test`, observational reproduction uses `./e2e/run scenario`/`compare`; CI alone may execute live stack paths. The underlying `e2e/acceptance/evaluator/run-case.mjs` is internal to the CLI and does not receive Issue-write credentials.
+Model-backed **Requirement Acceptance** evaluation is routed through `.github/workflows/agent-sc-acceptance.yml`. Source-aligned Issue/SC **Cases** use `.github/workflows/acceptance-cases.yml` and the single canonical `./e2e/run acceptance --issue N --sc SC-NN --sha SHA --stage STAGE --profile full-stack-local --issue-json CONTRACT --output RECORD` interface. Regression tests use `./e2e/run test`, observational reproduction uses `./e2e/run scenario`/`compare`; CI alone may execute live stack paths. The underlying `e2e/acceptance/evaluator/run-case.mjs` is internal to the CLI and does not receive Issue-write credentials.
 
 Manual execution uses **Actions -> Acceptance -> Run workflow** (`workflow_dispatch`) with:
 
@@ -108,3 +112,5 @@ Automatic Case execution maps staging push → `staging` and main push → `post
 Security boundary: target Case code is read-only (`contents: read`, `issues: read`). It must never mutate an Issue, push result branches, or receive production secrets. Only trusted `main` ingestion/updater code may write `acceptance-results` and project an eligible result into the Issue, after current-SHA, association and contract-digest checks.
 
 For the full creation, stage selection, verifier choice, evidence quality, archive/promotion and future remote-profile rules, read `docs/architecture/acceptance-cases.md`.
+
+For explicit `when: merged` + `method: agent` SCs, `Requirement Acceptance` selects only eligible Issue/SCs on the exact staging/main push SHA using `scripts/select-merged-agents.mjs`. The reusable Agent evaluator is pinned to trusted main, even when the source event is a staging merge. Legacy Issues without an `Acceptance Plan` are excluded from automatic merged-Agent invocations. This does not implement or imply deployed-production verification; `when: deployed` remains a separate future identity and runtime boundary.

@@ -18,7 +18,7 @@ const observation = (stage) => ({
   backend: { marker_count: 2, sha256: 'f'.repeat(64), bytes: 16 },
 });
 const event = { workflow_run: {
-  name: 'E2E Scenario Smoke', status: 'completed', conclusion: 'success',
+  name: 'E2E / Scenario Smoke', status: 'completed', conclusion: 'success',
   event: 'pull_request', head_branch: 'feat/scenario', workflow_id: 70,
   id: 12, run_attempt: 1, head_sha: sha,
   repository: { full_name: 'BestNathan/nession' },

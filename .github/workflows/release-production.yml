@@ -1,4 +1,4 @@
-name: Release
+name: Release / Production
 
 # Repository Cargo config enables a local-only rustc wrapper. CI deliberately
 # bypasses it and keeps using setup-rust-toolchain / rust-cache. This preserves
@@ -36,6 +36,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
       - id: check
         run: |
           RUST_VER=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
@@ -48,11 +51,8 @@ jobs:
           # agent-${RUST_VER} over already-released tags and then try to create
           # a GitHub Release at the existing v${RUST_VER} tag. Fail loudly
           # instead: the four version files must move together.
-          if [ "$RUST_VER" != "$WEB_VER" ]; then
-            echo "::error::Version mismatch — Cargo.toml=${RUST_VER}, web/package.json=${WEB_VER}."
-            echo "::error::Bump all four version files together (Cargo.toml, Cargo.lock, web/package.json, web/package-lock.json)."
-            exit 1
-          fi
+          # Single canonical owner of the release-version equality invariant.
+          ./gates/run release-version-consistency
 
           echo "rust_version=${RUST_VER}" >> $GITHUB_OUTPUT
           echo "web_version=${WEB_VER}" >> $GITHUB_OUTPUT
@@ -120,7 +120,8 @@ jobs:
           key: cargo-llvm-cov-v1
       - run: which cargo-llvm-cov || cargo install cargo-llvm-cov
       - run: rustup component add llvm-tools-preview
-      - run: just check
+      - name: Verify Rust and Acceptance Gates
+        run: ./gates/run --suite quality-rust
 
   web-check:
     needs: version-check
@@ -135,8 +136,8 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - uses: extractions/setup-just@v2
       - run: cd web && npm ci
-      - run: just web-lint
-      - run: just web-test
+      - name: Verify Web lint, types and tests
+        run: ./gates/run web-eslint web-typecheck web-test-unit web-test-integration
 
   # ═══════════════════════════════════════════════════════════════════
   # Build web UI

@@ -13,3 +13,4 @@ rust-coverage
 instruction-contract
 acceptance-runtime-contract
 acceptance-cases-contract
+release-version-consistency-selftest

@@ -42,6 +42,8 @@ Choose the Acceptance Report stage from the Requirement contract:
 
 The Case stage must exactly match the SC row in the Issue Acceptance Report. Automatic `staging` and `main` runs pin `github.sha`; manual replay requires an exact 40-character SHA plus Issue, SC, stage and runtime profile.
 
+**Method-specific Case Coverage:** the trusted `scripts/select-acceptance-cases.mjs` script is the canonical selector shared by the `Acceptance Cases` workflow; workflow YAML must not independently compute SC eligibility. A Requirement declaring `## Acceptance Plan` requires an executable Case for **every eligible `method: case` SC** at the exact target stage; missing source Case is a blocking error rather than a warning. `method: agent` criteria do not require Cases. Historical Issues without a Plan retain only their already-present source-aligned Cases and are not retroactively required to provide Cases for every legacy Agent-accepted SC. Explicit `when: deployed` criteria are not eligible on a plain `main` push.
+
 ## Runtime contract
 
 `e2e/runner/runtime/full-stack.js` owns the real local full stack and `e2e/runner/drivers/` owns Browser/Protocol/Runtime verifier execution (including Playwright assertion reporting). Workflow callers dispatch via `./e2e/run acceptance` and the source Case evaluator is `e2e/acceptance/evaluator/run-case.mjs`; neither `acceptance/runtime` nor `acceptance/run-case.mjs` remains a public entrypoint:

@@ -7,6 +7,8 @@ description: Use when creating/updating Nession Requirement or Bug GitHub issues
 
 This Skill owns **issue structure and requirement capture**. It does not own implementation, Gate semantics, or execution of acceptance.
 
+The `when × target × method` SC orchestration plan in `nession-workflows` / #1649 is **proposed**, not yet the live Issue schema. Continue writing the `Stage` Acceptance Report required below until `scripts/issue-contract.mjs` and downstream validators have been migrated compatibly.
+
 - implementation -> `nession-development`
 - acceptance execution -> `nession-acceptance`
 - Gate semantics -> `nession-gates`
@@ -87,6 +89,8 @@ Body must contain:
 Every Success Criterion has a stable `SC-xx` ID and exactly one Acceptance Report row.
 
 Stages are `pre-merge`, `staging`, or `post-merge`.
+
+Optionally, a Requirement may include one fenced `yaml` block under `## Acceptance Plan` with `acceptance.SC-xx.{when,method,branch|environment}`. If present it must cover **all** SCs, agree with the still-required legacy report Stage, and use `method: agent|case`. The constrained parser and its migration rules belong to `scripts/acceptance-plan.mjs`; do not infer a production deployment merely from `post-merge`. Absence of this plan retains historic behavior.
 
 Results are `Pending`, `Pass`, `Fail`, or justified `N/A`.
 

@@ -26,7 +26,7 @@ on:
       - '.github/**'
       - 'LICENSE'
   # Escape hatch for the case paths-ignore skipped a build you actually want
-  # (e.g. a workflow fix that needs to take effect on staging). release.yml
+  # (e.g. a workflow fix that needs to take effect on staging). release-production.yml
   # deliberately has no dispatch: without github.event.before, version-check
   # treats the version as changed and would force a full production release.
   workflow_dispatch:
@@ -57,7 +57,8 @@ jobs:
           key: cargo-llvm-cov-v1
       - run: which cargo-llvm-cov || cargo install cargo-llvm-cov
       - run: rustup component add llvm-tools-preview
-      - run: just check
+      - name: Verify Rust and Acceptance Gates
+        run: ./gates/run --suite quality-rust
 
   web-check:
     runs-on: ubuntu-latest
@@ -70,8 +71,8 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - uses: extractions/setup-just@v2
       - run: cd web && npm ci
-      - run: just web-lint
-      - run: just web-test
+      - name: Verify Web lint, types and tests
+        run: ./gates/run web-eslint web-typecheck web-test-unit web-test-integration
 
   # ═══════════════════════════════════════════════════════════════════
   # Phase 2 — Versions (gate for all downstream jobs)
@@ -85,6 +86,11 @@ jobs:
       short_sha: ${{ steps.versions.outputs.short_sha }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify unified release version invariant
+        run: ./gates/run release-version-consistency
 
       - id: versions
         run: |

@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { validateAcceptancePlan, isProofEligible } from './acceptance-plan.mjs';
 import {
   extractSection,
   parseAcceptanceReport,
@@ -46,8 +47,10 @@ function parseContract(body) {
   for (const row of report.rows.values()) {
     if (!success.criteria.has(row.id)) errors.push('Acceptance Report contains unknown criterion ' + row.id);
   }
+  const acceptedPlan = validateAcceptancePlan(body, success.criteria.keys(), report.rows);
+  errors.push(...acceptedPlan.errors);
   if (errors.length) throw new Error('invalid acceptance contract:\n- ' + errors.join('\n- '));
-  return { criteria: success.criteria, rows: report.rows };
+  return { criteria: success.criteria, rows: report.rows, plan: acceptedPlan.plan };
 }
 
 function contractDigest(contract) {
@@ -57,6 +60,9 @@ function contractDigest(contract) {
       id: criterion.id,
       text: criterion.text,
       stage: contract.rows.get(criterion.id).stage,
+      ...(contract.plan ? {
+        acceptance_plan: contract.plan.get(criterion.id),
+      } : {}),
     }));
   return crypto.createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
 }
@@ -67,6 +73,7 @@ export function buildAcceptanceContext(issue, stage, options = {}) {
   const contract = parseContract(issue.body);
   const criteria = [...contract.criteria.values()]
     .filter((criterion) => contract.rows.get(criterion.id).stage === normalizedStage)
+    .filter((criterion) => !options.method || isProofEligible(contract.plan?.get(criterion.id), normalizedStage, options.method))
     .map((criterion) => {
       const row = contract.rows.get(criterion.id);
       return {
@@ -155,6 +162,7 @@ export function normalizeAcceptanceResult(context, raw, source = 'agent') {
     target_ref: context.target_ref,
     deployment: context.deployment,
     source: String(source || 'unknown'),
+    selected_criteria: [...expected],
     criteria,
   };
 }
@@ -316,8 +324,14 @@ export function applyAcceptanceResultToBody(body, normalized) {
     : stageExpected;
   if (expected.length === 0) throw new Error('acceptance result selects no criteria');
   if (new Set(expected).size !== expected.length) throw new Error('acceptance result has duplicate selected criteria');
+  const proofSource = String(normalized.source ?? '');
+  const proofMethod = /^agent(?:-|$)/.test(proofSource) ? 'agent'
+    : proofSource === 'case-runner' ? 'case' : null;
   for (const id of expected) {
     if (!stageExpected.includes(id)) throw new Error('selected criterion ' + id + ' is unknown or belongs to another stage');
+    if (contract.plan && (!proofMethod || !isProofEligible(contract.plan.get(id), stage, proofMethod))) {
+      throw new Error(id + ' selected method does not match authenticated Acceptance Plan proof source ' + proofSource);
+    }
   }
   const resultMap = new Map();
   for (const raw of normalized.criteria) {
@@ -395,6 +409,7 @@ function prepareCommand(issueNumber, stage, targetRef, outFile, deployment, ciEv
     targetRef,
     deployment,
     ciEvidence,
+    method: 'agent',
     runId: process.env.ACCEPTANCE_RUN_ID ?? process.env.GITHUB_RUN_ID,
   });
   fs.writeFileSync(outFile, JSON.stringify(context, null, 2) + '\n');
@@ -576,7 +591,71 @@ function selfTest() {
     /unknown or belongs to another stage/,
   );
 
-  console.log('acceptance-executor self-test: 16 cases passed');
+  // Explicit SC plan: Agent-only and executable proofs are disjoint.
+  // Deployed cases must NOT be verified merely by a main merged SHA.
+  const plannedBody = fixtureBody().replace('## Product alignment', [
+    '## Acceptance Plan', '',
+    '\x60\x60\x60yaml',
+    'acceptance:',
+    '  SC-01:',
+    '    when: merged',
+    '    branch: staging',
+    '    method: case',
+    '  SC-02:',
+    '    when: deployed',
+    '    environment: production',
+    '    method: case',
+    '\x60\x60\x60', '', '## Product alignment',
+  ].join('\n').replace(/\\x60/g, '\x60'));
+  const plannedIssue = { ...issue, body: plannedBody };
+  const agentOnly = buildAcceptanceContext(plannedIssue, 'staging', {
+    targetRef: 'a'.repeat(40), runId: 400, method: 'agent',
+  });
+  const caseOnly = buildAcceptanceContext(plannedIssue, 'staging', {
+    targetRef: 'a'.repeat(40), runId: 400, method: 'case',
+  });
+  assert.deepEqual(agentOnly.criteria, []);
+  assert.deepEqual(caseOnly.criteria.map((entry) => entry.criterion), ['SC-01']);
+  assert.notEqual(caseOnly.contract_sha256, staging.contract_sha256);
+  const mainMergedCase = buildAcceptanceContext(plannedIssue, 'post-merge', {
+    targetRef: 'b'.repeat(40), runId: 401, method: 'case',
+  });
+  assert.deepEqual(mainMergedCase.criteria, []);
+  assert.throws(() => normalizeAcceptanceCaseResult(agentOnly, {
+    issue: 1360, stage: 'staging', criterion: 'SC-01',
+    contract_sha256: agentOnly.contract_sha256, target_sha: agentOnly.target_ref,
+  }), /criterion is absent/);
+
+  const mixedBody = plannedBody
+    .replace('| SC-02 | post-merge | Pending |', '| SC-02 | staging | Pending |')
+    .replace('    method: case\n  SC-02:', '    method: agent\n  SC-02:')
+    .replace('    when: deployed\n    environment: production\n    method: case',
+      '    when: merged\n    branch: staging\n    method: case');
+  const mixedIssue = { ...issue, body: mixedBody };
+  const mixedAgent = buildAcceptanceContext(mixedIssue, 'staging', {
+    targetRef: 'c'.repeat(40), runId: 420, method: 'agent',
+  });
+  const mixedCase = buildAcceptanceContext(mixedIssue, 'staging', {
+    targetRef: 'c'.repeat(40), runId: 421, method: 'case',
+  });
+  assert.deepEqual(mixedAgent.criteria.map((x) => x.criterion), ['SC-01']);
+  assert.deepEqual(mixedCase.criteria.map((x) => x.criterion), ['SC-02']);
+  const mixedAgentResult = normalizeAcceptanceResult(mixedAgent, {
+    criteria: [{ criterion: 'SC-01', result: 'Pass', evidence: 'test: exact SHA static proof' }],
+  }, 'agent-cursor');
+  assert.deepEqual(mixedAgentResult.selected_criteria, ['SC-01']);
+  const mixedAgentBody = applyAcceptanceResultToBody(mixedBody, mixedAgentResult);
+  assert.match(mixedAgentBody, /\| SC-02 \| staging \| Pending \|/);
+  const forgedCase = normalizeAcceptanceResult(mixedCase, {
+    criteria: [{ criterion: 'SC-02', result: 'Pass', evidence: 'test: runtime execution proof' }],
+  }, 'agent-cursor');
+  assert.throws(() => applyAcceptanceResultToBody(mixedAgentBody, forgedCase), /selected method does not match/);
+  const mixedCaseResult = { ...forgedCase, source: 'case-runner' };
+  const fullyAccepted = applyAcceptanceResultToBody(mixedAgentBody, mixedCaseResult);
+  assert.match(fullyAccepted, /\| SC-01 \| staging \| Pass \|/);
+  assert.match(fullyAccepted, /\| SC-02 \| staging \| Pass \|/);
+
+  console.log('acceptance-executor self-test: legacy, mixed-method and provenance cases passed');
 }
 
 function usage() {

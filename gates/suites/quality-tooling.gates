@@ -2,6 +2,7 @@
 instruction-contract
 gate-runtime-contract
 agent-workflow-telemetry
+workflow-conventions
 requirement-acceptance-selftest
 acceptance-case-ingest-selftest
 run-record-artifact-evidence-selftest
@@ -25,3 +26,14 @@ terminal-attach-resume-selftest
 e2e-cli-discovery
 issue-audit-agent-selftest
 issue-audit-cursor-selftest
+gate-router-contract
+# Deterministic known-violation fixtures for the custom blocking detectors.
+protocol-integrity-selftest
+test-isolation-selftest
+tmux-socket-isolation-selftest
+server-handler-locality-selftest
+server-handler-concurrency-selftest
+agent-provider-contract
+gate-consumer-parity
+dev-workspace-selftest
+detector-selftest-coverage

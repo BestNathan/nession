@@ -1,4 +1,4 @@
-name: Acceptance Case Smoke
+name: Acceptance / Case Smoke
 
 permissions:
   contents: read

@@ -1,3 +1,4 @@
 # gate-system
 # Gate IDs only. Not wired into current hooks/workflows yet.
 gate-runtime-contract
+gate-router-contract

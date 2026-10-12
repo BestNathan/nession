@@ -20,6 +20,9 @@ fi
 if matches_staged '^(scripts/check-tmux-socket|gates/checks/tmux-socket-isolation)'; then
   GATE_IDS+=(tmux-socket-isolation-selftest)
 fi
+if matches_staged '^(scripts/check-dev-workspace(\.sh|-selftest\.sh)$|gates/checks/dev-workspace-)'; then
+  GATE_IDS+=(dev-workspace-selftest)
+fi
 if matches_staged '^(scripts/check-test-isolation|gates/checks/test-isolation)'; then
   GATE_IDS+=(test-isolation test-isolation-selftest)
 fi
@@ -28,6 +31,9 @@ if matches_staged '(\.rs$|^web/src/|^scripts/protocol-gate|^gates/checks/protoco
 fi
 if matches_staged '^(scripts/protocol-gate|gates/checks/protocol-integrity)'; then
   GATE_IDS+=(protocol-integrity-selftest)
+fi
+if matches_staged '^(crates/nession-server/src/server/|scripts/server-handler-|gates/checks/server-handler-)'; then
+  GATE_IDS+=(server-handler-locality server-handler-locality-selftest server-handler-concurrency-selftest)
 fi
 if matches_staged '^(design/|docs/design/|web/src/|web/eslint-plugin-nession/|scripts/check-design-tokens|\.claude/skills/nession-web-design/|justfile$|gates/checks/design-system-)'; then
   GATE_IDS+=(design-system-fast)
@@ -39,8 +45,8 @@ if matches_staged '(^|/)(AGENTS|CLAUDE)\.md$|^\.agents/|^\.claude/skills/|^\.git
   GATE_IDS+=(instruction-contract)
 fi
 # A Gate's own change must at least prove its script/catalog/runtime contract.
-if matches_staged '^(gates/|\.githooks/(pre-commit|pre-push)$)'; then
-  GATE_IDS+=(gate-runtime-contract)
+if matches_staged '^(gates/|\.githooks/(pre-commit|pre-push)$|scripts/gate-router-selftest\.mjs$)'; then
+  GATE_IDS+=(gate-runtime-contract gate-router-contract)
 fi
 
 # Screenshot relocation is an existing non-Gate maintenance operation.
