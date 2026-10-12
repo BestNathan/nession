@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import fs from 'node:fs';
+import { validateAcceptancePlan } from './acceptance-plan.mjs';
 import assert from 'node:assert/strict';
 
 const ACCEPTED_RESULTS = new Set(['pass', 'n/a']);
@@ -145,7 +146,8 @@ export function validateRequirementBody(body, { mode = 'closure' } = {}) {
 
   const success = parseSuccessCriteria(extractSection(body, 'Success Criteria'));
   const report = parseAcceptanceReport(extractSection(body, 'Acceptance Report'));
-  const errors = [...success.errors, ...report.errors];
+  const plan = validateAcceptancePlan(body, success.criteria.keys(), report.rows);
+  const errors = [...success.errors, ...report.errors, ...plan.errors];
   let deferredPostMergeCount = 0;
 
   for (const criterion of success.criteria.values()) {
