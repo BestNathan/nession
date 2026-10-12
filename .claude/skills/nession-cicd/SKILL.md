@@ -7,6 +7,8 @@ description: Use when changing or troubleshooting Nession GitHub Actions, stagin
 
 This Skill owns **CI, staging, release, and deployment execution**. Workflows are routers; domain rules remain with their scripts/Gates/scoped owners.
 
+For **cross-workflow taxonomy, `Agent /` vs `Acceptance /` naming, Metrics/Task classification, orchestration boundaries, and rename compatibility**, load `nession-workflows` first. Its #1649 naming/SC plan is a target architecture; follow the paths and contracts checked into this repository until migrated.
+
 Read `.github/AGENTS.md` before editing workflows and `nession-gates` when changing Gate routing. If a workflow invokes an AI/Agent runtime, also load `nession-agent-workflow-metrics`; canonical execution telemetry is mandatory for Agent workflows.
 
 ## 1. First classify the problem
