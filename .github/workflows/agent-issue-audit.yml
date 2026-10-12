@@ -1,4 +1,4 @@
-name: Issue Audit Agent
+name: Agent / Issue Audit
 
 on:
   issues:

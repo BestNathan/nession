@@ -24,7 +24,7 @@ const TRUSTED_TELEMETRY_SOURCES = new Map([
     events: new Set(['pull_request_target', 'issues']),
     workflow_dispatch_main_only: false,
   }],
-  ['.github/workflows/issue-audit.yml', {
+  ['.github/workflows/agent-issue-audit.yml', {
     workflow_id: 'issue-audit',
     events: new Set(['issues', 'workflow_dispatch']),
     workflow_dispatch_main_only: true,
@@ -200,7 +200,7 @@ function selfTest() {
   assert.equal(validateTelemetrySourceRun({
     id: 11,
     run_attempt: 1,
-    path: '.github/workflows/issue-audit.yml',
+    path: '.github/workflows/agent-issue-audit.yml',
     event: 'issues',
     head_branch: 'main',
     repository: { full_name: 'BestNathan/nession' },
@@ -209,7 +209,7 @@ function selfTest() {
   assert.throws(() => validateTelemetrySourceRun({
     id: 12,
     run_attempt: 1,
-    path: '.github/workflows/issue-audit.yml',
+    path: '.github/workflows/agent-issue-audit.yml',
     event: 'workflow_dispatch',
     head_branch: 'feature',
     repository: { full_name: 'BestNathan/nession' },

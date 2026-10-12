@@ -75,7 +75,7 @@ const required = [
     ]
   ],
   [
-    ".github/workflows/issue-audit.yml",
+    ".github/workflows/agent-issue-audit.yml",
     [
       "./gates/run issue-contract-selftest",
       "./gates/run issue-contract-selftest issue-audit-agent-selftest issue-audit-cursor-selftest"
@@ -145,7 +145,7 @@ for (const [file, commands] of required) {
     cases++;
   }
 }
-const first = '.github/workflows/issue-audit.yml';
+const first = '.github/workflows/agent-issue-audit.yml';
 const fixture = new Map(source);
 fixture.set(first, fixture.get(first) + '\n      - run: node scripts/issue-contract.mjs self-test\n');
 assert.ok(verify(p => fixture.get(p) ?? null).some(p => p.includes('legacy raw Node/Bash')),
