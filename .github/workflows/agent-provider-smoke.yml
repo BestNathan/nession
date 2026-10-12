@@ -1,4 +1,4 @@
-name: AI Agent Provider Smoke
+name: Agent / Provider Smoke
 
 # Runs only on a trusted main push of this workflow or an explicit dispatch.
 # No credentialed PR-head execution, GitHub Issue writes, or deployment.
