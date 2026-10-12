@@ -89,7 +89,7 @@ Treat the files themselves as live truth:
 - `.github/workflows/ci-quality.yml`
 - `.github/workflows/release-staging.yml`
 - `.github/workflows/release-production.yml`
-- `.github/workflows/e2e.yml`
+- `.github/workflows/e2e-tests.yml`
 - `.github/workflows/requirement-acceptance.yml`
 - `.github/workflows/agent-sc-acceptance.yml`
 - `.github/workflows/metrics-repository.yml`
