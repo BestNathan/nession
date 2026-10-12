@@ -1,9 +1,9 @@
-name: Task Result Ingest
+name: Task / Result Ingest
 
 # Trusted default-branch handler; never execute the Task branch's code.
 on:
   workflow_run:
-    workflows: ['Ephemeral Task Runner']
+    workflows: ['Task / Ephemeral Runner']
     types: [completed]
 
 permissions:
