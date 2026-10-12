@@ -86,7 +86,7 @@ Large browser traces/screenshots/logs stay in GitHub Actions artifacts. Compact 
 
 ## Automatic staging and post-merge execution
 
-The repository-owned `Acceptance Cases` workflow uses the same runner for both merged branches.
+The repository-owned `Acceptance / Cases` workflow uses the same runner for both merged branches.
 
 - staging push → `stage=staging`;
 - main push → `stage=post-merge`;
@@ -98,7 +98,7 @@ Manual `workflow_dispatch` accepts one Issue/SC/SHA/stage/runtime tuple and foll
 
 ## Immutable results and Issue projection
 
-Case execution has only read permissions. Compact results are uploaded as artifacts. The trusted `Acceptance Case Ingest` workflow on `main` runs afterward with write permissions and serializes ingestion through one concurrency group.
+Case execution has only read permissions. Compact results are uploaded as artifacts. The trusted `Acceptance / Case Ingest` workflow on `main` runs afterward with write permissions and serializes ingestion through one concurrency group.
 
 The first ingestion creates the orphan `acceptance-results` branch. Records under `runs/<date>/<run>-<attempt>/<issue>/<SC>.json` are append-only: an existing destination is an error and the branch is never force-pushed. The record carries a checksum of the source result and links back to the workflow/artifact provenance.
 
