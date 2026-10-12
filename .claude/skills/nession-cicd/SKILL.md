@@ -94,7 +94,7 @@ Treat the files themselves as live truth:
 - `.github/workflows/agent-sc-acceptance.yml`
 - `.github/workflows/metrics-repository.yml`
 - `.github/workflows/metrics-agent-telemetry.yml`
-- `.github/workflows/deploy.yml`
+- `.github/workflows/deploy-manual.yml`
 
 When this Skill and workflow YAML disagree, inspect history/intent and repair the stale prose; do not copy the YAML's rule lists into this Skill.
 
