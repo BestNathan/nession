@@ -121,11 +121,11 @@ export function validateCaseRecord(raw) {
 // A digest of user-controlled fields alone is not an attestation.
 export function sourceRunIdentity(event, repository) {
   const run = event?.workflow_run;
-  if (!run || run.name !== 'Acceptance Cases') {
-    throw new Error('expected a completed Acceptance Cases workflow_run event');
+  if (!run || run.name !== 'Acceptance / Cases') {
+    throw new Error('expected a completed Acceptance / Cases workflow_run event');
   }
   if (run.status !== 'completed' || !['success', 'failure'].includes(run.conclusion)) {
-    throw new Error('source Acceptance Cases run has no terminal supported conclusion');
+    throw new Error('source Acceptance / Cases run has no terminal supported conclusion');
   }
   if (run.repository?.full_name !== repository || run.head_repository?.full_name !== repository) {
     throw new Error('source workflow repository mismatch');
@@ -443,7 +443,7 @@ async function selfTest() {
   assert.throws(() => assertSourceBoundRecord({ ...valid, stage: 'post-merge' }, source), /stage disagrees/);
   assert.throws(() => assertSourceBoundRecord({ ...valid, execution_id: 'a'.repeat(64) }, source), /execution_id/);
   const fixtureEvent = { workflow_run: {
-    name: 'Acceptance Cases', status: 'completed', conclusion: 'success',
+    name: 'Acceptance / Cases', status: 'completed', conclusion: 'success',
     repository: { full_name: 'BestNathan/nession' },
     head_repository: { full_name: 'BestNathan/nession' },
     head_branch: 'staging', head_sha: valid.target_sha, event: 'push',
