@@ -37,6 +37,21 @@ export const CATALOG = [
   ['historical-bug-replay', 'bug-acceptance-replay-1522-1523-1527.yml', 'One-time verified Bug Acceptance replay (1522, 1523, 1527)', 'acceptance-historical-bug-replay.yml', 'Acceptance / Historical Bug Replay', 'acceptance'],
 ];
 
+// Resolve the actual checked-in path from the single canonical catalog.
+// Reject missing and ambiguous dual legacy/target copies, rather than choosing
+// a different implicit owner than the taxonomy validator.
+export function resolveWorkflowPath(id, root = ROOT) {
+  const row = CATALOG.find(([value]) => value === id);
+  if (!row) throw new Error('unknown workflow catalog id: ' + id);
+  const [, legacy, , target] = row;
+  const paths = [...new Set([legacy, target])];
+  const present = paths.filter((file) => fs.existsSync(path.join(root, '.github/workflows', file)));
+  if (present.length !== 1) {
+    throw new Error(id + ': expected exactly one workflow file, found ' + present.join(', '));
+  }
+  return '.github/workflows/' + present[0];
+}
+
 const DOMAIN_PREFIX = {
   agent: 'Agent /',
   acceptance: 'Acceptance /',
@@ -228,7 +243,10 @@ function check() {
   console.log('workflow-conventions: ' + audit.inventory.length + ' classified workflows, upstream paths/names and telemetry sources valid');
 }
 
-const command = process.argv[2] ?? 'check';
-if (command === 'self-test' || command === '--self-test') selfTest();
-else if (command === 'check') check();
-else throw new Error('Usage: node scripts/workflow-conventions.mjs <check|self-test>');
+// Importing this contract for workflow consumers must never run the CLI Gate.
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const command = process.argv[2] ?? 'check';
+  if (command === 'self-test' || command === '--self-test') selfTest();
+  else if (command === 'check') check();
+  else throw new Error('Usage: node scripts/workflow-conventions.mjs <check|self-test>');
+}
