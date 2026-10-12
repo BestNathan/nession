@@ -6,7 +6,7 @@
 
 | Current file | Target file | Target Actions name | Notes |
 |---|---|---|---|
-| `acceptance.yml` | `agent-sc-acceptance.yml` | `Agent / SC Acceptance` | **Only after** separating deterministic bypass/updater into trusted Acceptance components |
+| `agent-sc-acceptance.yml` | **Migrated** | `Agent / SC Acceptance` | Model-execution entrypoint; deterministic compatibility bypass and trusted updater still require future separation |
 | `agent-issue-audit.yml` | **Done** | `Agent / Issue Audit` | Actually invokes LLM; renamed with Metrics subscription and telemetry source |
 | `agent-provider-smoke.yml` | unchanged | `Agent / Provider Smoke` | Actually invokes LLM |
 | `requirement-acceptance.yml` | `acceptance-orchestrator.yml` | `Acceptance / Orchestrator` | Handles dispatch, PR gate and Issue-close guard; must not be misnamed as an Agent |

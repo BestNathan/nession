@@ -1,4 +1,4 @@
-name: Acceptance
+name: Agent / SC Acceptance
 
 on:
   workflow_dispatch:

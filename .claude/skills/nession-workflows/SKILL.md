@@ -20,7 +20,7 @@ Load this before modifying `.github/workflows/` or introducing a new workflow fa
 
 The taxonomy and acceptance convergence below are the **approved design target tracked by Issue #1649**, not a claim that the repository has already been migrated.
 
-Current authoritative contracts remain the checked-in code and skills: `scripts/issue-contract.mjs`, `scripts/requirement-acceptance.mjs`, `acceptance.yml`, `acceptance-cases.yml`, `e2e/run`, and the trusted ingestion scripts. The optional constrained `## Acceptance Plan` YAML contract is supported for explicit per-SC Agent/Case selection, but the Acceptance Report stages remain `pre-merge | staging | post-merge` and are mandatory for compatibility. The broader orchestrator/Stage cutover is still pending. Do **not** create incompatible Issue/Case manifests or rename live workflows just because this Skill shows their future names.
+Current authoritative contracts remain the checked-in code and skills: `scripts/issue-contract.mjs`, `scripts/requirement-acceptance.mjs`, `agent-sc-acceptance.yml`, `acceptance-cases.yml`, `e2e/run`, and the trusted ingestion scripts. The optional constrained `## Acceptance Plan` YAML contract is supported for explicit per-SC Agent/Case selection, but the Acceptance Report stages remain `pre-merge | staging | post-merge` and are mandatory for compatibility. The broader orchestrator/Stage cutover is still pending. Do **not** create incompatible Issue/Case manifests or rename live workflows just because this Skill shows their future names.
 
 Keep the **current** and **target** state explicit in reviews and PRs. See [Acceptance orchestration](references/acceptance-orchestration.md) and [Migration playbook](references/migration-playbook.md).
 

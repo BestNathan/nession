@@ -14,7 +14,7 @@ const AGENT_SIGNALS = [
 
 
 const TRUSTED_TELEMETRY_SOURCES = new Map([
-  ['.github/workflows/acceptance.yml', {
+  ['.github/workflows/agent-sc-acceptance.yml', {
     workflow_id: 'requirement-acceptance',
     events: new Set(['workflow_dispatch']),
     workflow_dispatch_main_only: true,
