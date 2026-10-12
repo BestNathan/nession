@@ -67,7 +67,7 @@ The flow is:
 ```text
 Agent workflow
   -> canonical agent-telemetry artifact
-  -> trusted Metrics Ingest workflow
+  -> trusted Metrics / Agent Telemetry Ingest workflow
   -> validate schema/path
   -> append immutable JSON to metrics branch
 ```

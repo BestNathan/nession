@@ -138,9 +138,9 @@ function loadWorkflows(dir) {
 
 function checkRepository() {
   const dir = '.github/workflows';
-  const ingest = join(dir, 'metrics-ingest.yml');
+  const ingest = join(dir, 'metrics-agent-telemetry.yml');
   if (!existsSync(ingest)) {
-    throw new Error('metrics-ingest.yml is required for Agent workflow telemetry persistence');
+    throw new Error('metrics-agent-telemetry.yml is required for Agent workflow telemetry persistence');
   }
   const audit = auditAgentWorkflowTelemetry(loadWorkflows(dir), readFileSync(ingest, 'utf8'));
   if (!audit.ok) {
