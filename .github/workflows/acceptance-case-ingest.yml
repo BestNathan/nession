@@ -1,4 +1,4 @@
-name: Acceptance Case Ingest
+name: Acceptance / Case Ingest
 
 on:
   workflow_run:
