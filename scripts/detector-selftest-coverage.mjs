@@ -25,6 +25,7 @@ const pairs = [
   ['instruction-contract', ['instruction-contract'], 'tooling'],
   ['gate-router-contract', ['gate-router-contract'], 'tooling'],
   ['gate-consumer-parity', ['gate-consumer-parity'], 'tooling'],
+  ['workflow-conventions', ['workflow-conventions'], 'tooling'],
 ];
 
 const read = p => fs.readFileSync(path.join(ROOT, p), 'utf8');
