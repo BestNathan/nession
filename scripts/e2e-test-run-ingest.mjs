@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Main-controlled, append-only metadata-only ingestion for *push* E2E Tests.
+// Main-controlled, append-only metadata-only ingestion for *push* E2E / Tests.
 // PR runs (often synthetic merge refs) are intentionally excluded until their
 // precise checked-out SHA can be independently attested.
 import assert from 'node:assert/strict';
@@ -23,8 +23,8 @@ function assertSource(event, run, workflow) {
   assert.equal(run.repository?.full_name, REPO);
   assert.equal(run.head_repository?.full_name, REPO);
   assert.equal(run.workflow_id, workflow.id);
-  assert.equal(workflow.path, '.github/workflows/e2e.yml');
-  assert.equal(run.path, '.github/workflows/e2e.yml');
+  assert.equal(workflow.path, '.github/workflows/e2e-tests.yml');
+  assert.equal(run.path, '.github/workflows/e2e-tests.yml');
   assert.equal(run.event, 'push', 'untrusted PR/dispatch source is not an eligible Test Run');
   assert.ok(['staging','main'].includes(run.head_branch), 'untrusted source branch');
   assert.equal(run.status, 'completed');
@@ -103,7 +103,7 @@ async function create(eventFile, recordFile, indexFile, outputFile) {
   assert.ok(positive(id), 'invalid GitHub source-run ID');
   const [run, workflow, jobs, artifacts] = await Promise.all([
     github('/actions/runs/' + id),
-    github('/actions/workflows/e2e.yml'),
+    github('/actions/workflows/e2e-tests.yml'),
     github('/actions/runs/' + id + '/jobs?per_page=100'),
     github('/actions/runs/' + id + '/artifacts?per_page=100'),
   ]);
@@ -125,12 +125,12 @@ function selfTest() {
   const sha = 'a'.repeat(40), sourceTree = 'b'.repeat(40), commitTree = 'c'.repeat(40);
   const run = { id: 120, run_attempt: 2, workflow_id: 5,
     repository: { full_name: REPO }, head_repository: { full_name: REPO },
-    path: '.github/workflows/e2e.yml', event: 'push', head_branch: 'staging',
+    path: '.github/workflows/e2e-tests.yml', event: 'push', head_branch: 'staging',
     head_sha: sha, head_commit: { id: sha }, status: 'completed', conclusion: 'success',
     created_at: '2026-10-10T01:00:00Z' };
   const event = { repository: { full_name: REPO }, workflow_run: {
     id: 120, run_attempt: 2, head_sha: sha, event: 'push' } };
-  const workflow = { id: 5, path: '.github/workflows/e2e.yml' };
+  const workflow = { id: 5, path: '.github/workflows/e2e-tests.yml' };
   const tree = { sha: commitTree, tree: [{ type: 'tree',
     path: 'e2e/tests/browser', sha: sourceTree }] };
   const jobs = [{ name: 'e2e', run_id: 120, id: 66,
