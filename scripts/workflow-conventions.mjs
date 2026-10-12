@@ -126,7 +126,39 @@ export function directlyInvokesModel(content) {
   return /@cursor\/sdk|@anthropic-ai\/claude-code|node\s+scripts\/(?:acceptance-agent|issue-audit-agent|issue-audit-cursor)\.mjs/.test(lines);
 }
 
-export function auditWorkflows(files, catalog = CATALOG, { complete = true, trustedSources = '', ownerDocs = '' } = {}) {
+// SC-16: Gate the *documented* live workflow entrypoints against the same
+// canonical catalog that owns path and Actions display names. No second
+// independent list of workflow names may evolve inside an individual Skill.
+const DOCUMENTED_WORKFLOW_IDS = new Map([
+  ['.claude/skills/nession-acceptance/SKILL.md',
+    ['agent-sc-acceptance', 'acceptance-cases', 'acceptance-orchestrator']],
+  ['.claude/skills/nession-agent-workflow-metrics/SKILL.md',
+    ['metrics-agent-telemetry']],
+  ['docs/architecture/acceptance-cases.md',
+    ['acceptance-cases', 'acceptance-case-ingest']],
+]);
+
+export function auditWorkflowDocumentation(documents, catalog = CATALOG) {
+  const errors = [];
+  const byId = new Map(catalog.map(row => [row[0], row]));
+  for (const [docPath, ids] of DOCUMENTED_WORKFLOW_IDS) {
+    const doc = documents instanceof Map ? documents.get(docPath) : documents?.[docPath];
+    if (typeof doc !== 'string' || !doc) {
+      errors.push('missing workflow documentation: ' + docPath);
+      continue;
+    }
+    for (const id of ids) {
+      const owner = byId.get(id);
+      if (!owner) { errors.push('unknown documented workflow id: ' + id); continue; }
+      if (!doc.includes(owner[4])) {
+        errors.push(docPath + ': missing current workflow display name ' + owner[4]);
+      }
+    }
+  }
+  return errors;
+}
+
+export function auditWorkflows(files, catalog = CATALOG, { complete = true, trustedSources = '', ownerDocs = '', requireTargetNames = false, documents = null } = {}) {
   const errors = [];
   const byPath = new Map();
   const names = new Map();
@@ -148,9 +180,15 @@ export function auditWorkflows(files, catalog = CATALOG, { complete = true, trus
       if (complete) errors.push(id + ': missing workflow (expected ' + oldPath + ' or ' + newPath + ')');
       continue;
     }
+    if (requireTargetNames && presentPath !== newPath) {
+      errors.push(id + ': live workflow must use canonical target path ' + newPath);
+    }
     if (byPath.has(presentPath)) errors.push(presentPath + ': multiple catalog owners');
     byPath.set(presentPath, id);
     const actual = workflowName(files.get(presentPath));
+    if (requireTargetNames && actual !== newName) {
+      errors.push(presentPath + ': live workflow display name must be ' + newName);
+    }
     const expectedName = presentPath === newPath && oldPath !== newPath ? newName : null;
     if (expectedName ? actual !== expectedName : !(actual === oldName || (actual === newName && oldPath === newPath))) {
       errors.push(presentPath + ': unexpected name "' + actual + '"');
@@ -197,6 +235,7 @@ export function auditWorkflows(files, catalog = CATALOG, { complete = true, trus
       }
     }
   }
+  if (documents) errors.push(...auditWorkflowDocumentation(documents, catalog));
   return { ok: errors.length === 0, errors, inventory: [...byPath.entries()].map(([file, id]) => ({ file, id })) };
 }
 
@@ -212,6 +251,7 @@ function selfTest() {
     ['subscriber.yml', 'name: Subscriber\non:\n  workflow_run:\n    workflows: [Model]\n    types: [completed]\njobs:\n  x:\n    uses: ./.github/workflows/model.yml'],
   ]);
   assert.deepEqual(auditWorkflows(old, catalog).errors, []);
+  assert.match(auditWorkflows(old, catalog, { requireTargetNames: true }).errors.join('\n'), /canonical target path/);
   assert.equal(directlyInvokesModel(old.get('task.yml')), false, 'nession-agent binary is not LLM');
   const rename = new Map(old);
   rename.delete('model.yml');
@@ -237,6 +277,18 @@ function selfTest() {
   assert.deepEqual(upstreamWorkflowNames('on:\n  workflow_run:\n    workflows:\n      - Model\n      - Task\n').names, ['Model', 'Task']);
   assert.match(auditWorkflows(old, catalog, { ownerDocs: '## 3. Current workflow owners\n- \x60.github/workflows/missing.yml\x60\n## 4. Other' }).errors.join('\n'), /CI\/CD Skill references absent workflow/);
   assert.equal(workflowName('name: One\nname: Two'), null);
+  const docs = new Map([
+    ['.claude/skills/nession-acceptance/SKILL.md',
+      'Agent / SC Acceptance; Acceptance / Cases; Acceptance / Orchestrator'],
+    ['.claude/skills/nession-agent-workflow-metrics/SKILL.md',
+      'Metrics / Agent Telemetry Ingest'],
+    ['docs/architecture/acceptance-cases.md',
+      'Acceptance / Cases; Acceptance / Case Ingest'],
+  ]);
+  assert.deepEqual(auditWorkflowDocumentation(docs), []);
+  const staleDoc = new Map(docs);
+  staleDoc.set('.claude/skills/nession-acceptance/SKILL.md', 'Actions -> Acceptance');
+  assert.match(auditWorkflowDocumentation(staleDoc).join('\n'), /missing current workflow display name/);
   console.log('workflow-conventions: 10 positive/negative scenarios passed');
 }
 
@@ -246,13 +298,18 @@ function check() {
     .map((f) => [f, fs.readFileSync(path.join(WORKFLOW_DIR, f), 'utf8')]));
   const sources = fs.readFileSync(path.join(ROOT, 'scripts/agent-workflow-telemetry-contract.mjs'), 'utf8');
   const ownerDocs = fs.readFileSync(path.join(ROOT, '.claude/skills/nession-cicd/SKILL.md'), 'utf8');
-  const audit = auditWorkflows(files, CATALOG, { trustedSources: sources, ownerDocs });
+  const documents = new Map([...DOCUMENTED_WORKFLOW_IDS.keys()].map(docPath => [
+    docPath, fs.readFileSync(path.join(ROOT, docPath), 'utf8'),
+  ]));
+  const audit = auditWorkflows(files, CATALOG, {
+    trustedSources: sources, ownerDocs, requireTargetNames: true, documents,
+  });
   if (!audit.ok) {
     for (const error of audit.errors) console.error('✗ ' + error);
     process.exitCode = 1;
     return;
   }
-  console.log('workflow-conventions: ' + audit.inventory.length + ' classified workflows, upstream paths/names and telemetry sources valid');
+  console.log('workflow-conventions: ' + audit.inventory.length + ' target-name workflows, consumers, trusted telemetry sources and documented entrypoints valid');
 }
 
 // Importing this contract for workflow consumers must never run the CLI Gate.
