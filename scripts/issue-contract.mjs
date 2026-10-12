@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import { validateAcceptancePlan } from './acceptance-plan.mjs';
 
 export const KIND_LABELS = new Set(['bug', 'requirement']);
 export const AREA_LABELS = new Set([
@@ -180,6 +181,8 @@ function validateRequirement(issue, errors) {
 
   for (const id of success.ids) if (!report.rows.has(id)) errors.push(`${id} has no Acceptance Report row`);
   for (const id of report.rows.keys()) if (!success.ids.includes(id)) errors.push(`Acceptance Report contains unknown criterion ${id}`);
+  const plan = validateAcceptancePlan(issue.body, success.ids, report.rows);
+  errors.push(...plan.errors);
   for (const [id, row] of report.rows) {
     if (!new Set(['pre-merge', 'staging', 'post-merge']).has(row.stage)) errors.push(`${id} has unsupported Acceptance stage ${row.stage || '(empty)'}`);
     if (!new Set(['pending', 'pass', 'fail', 'n/a']).has(row.result)) errors.push(`${id} has unsupported Acceptance result ${row.result || '(empty)'}`);

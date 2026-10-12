@@ -1,6 +1,6 @@
 # SC Acceptance Orchestration — target contract (Issue #1649)
 
-> **Migration status:** design proposal, not the currently active Issue/Case schema. Until parser, Gate, workflows and updater support it, continue using the required `Stage: pre-merge | staging | post-merge` format from `nession-writing-requirements` and `nession-acceptance`. Do not silently mark existing historical runs as conforming to this future contract.
+> **Migration status:** the constrained `## Acceptance Plan` YAML subset is an **optional** current Issue contract for per-SC Method selection; the Acceptance Report still requires `Stage: pre-merge | staging | post-merge` and case manifests retain legacy stage fields. Full When/Target orchestration, deployed triggers and single-writer projection are **not** yet active. Historical issues without a plan remain supported.
 
 ## Problem and decision
 

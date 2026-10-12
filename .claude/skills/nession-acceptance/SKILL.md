@@ -26,6 +26,8 @@ Requirement Success Criteria
 
 Read the Requirement's current `Success Criteria` and `Acceptance Report`.
 
+For issues with an explicit `## Acceptance Plan`, the trusted executor also selects by `method`: the read-only Agent evaluates only `agent` SCs; Case Coverage and the Case runner evaluate only `case` SCs. `when: deployed` is deferred until actual deployment identity/runner exists, and does not execute as part of an ordinary main push. The legacy Acceptance Report Stage remains required and must agree with the plan. Issues without a plan retain historic behavior.
+
 Evaluate only criteria whose declared stage matches the environment/boundary being accepted:
 
 - `pre-merge`

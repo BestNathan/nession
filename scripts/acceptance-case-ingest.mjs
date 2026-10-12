@@ -374,6 +374,7 @@ export async function applyCaseRecord(record, { repository, token }) {
   }
 
   const context = buildAcceptanceContext(issue, item.stage, {
+    method: 'case',
     targetRef: item.target_sha,
     deployment: item.stage,
     runId: item.run_id,

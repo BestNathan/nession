@@ -90,6 +90,8 @@ Every Success Criterion has a stable `SC-xx` ID and exactly one Acceptance Repor
 
 Stages are `pre-merge`, `staging`, or `post-merge`.
 
+Optionally, a Requirement may include one fenced `yaml` block under `## Acceptance Plan` with `acceptance.SC-xx.{when,method,branch|environment}`. If present it must cover **all** SCs, agree with the still-required legacy report Stage, and use `method: agent|case`. The constrained parser and its migration rules belong to `scripts/acceptance-plan.mjs`; do not infer a production deployment merely from `post-merge`. Absence of this plan retains historic behavior.
+
 Results are `Pending`, `Pass`, `Fail`, or justified `N/A`.
 
 ## 4. Good Success Criteria
