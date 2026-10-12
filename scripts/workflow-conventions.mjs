@@ -31,7 +31,7 @@ export const CATALOG = [
   ['metrics-repository', 'repo-metrics.yml', 'Repository Metrics', 'metrics-repository.yml', 'Metrics / Repository Health', 'metrics'],
   ['release-staging', 'staging.yml', 'Staging', 'release-staging.yml', 'Release / Staging Artifacts', 'delivery'],
   ['release-production', 'release.yml', 'Release', 'release-production.yml', 'Release / Production', 'delivery'],
-  ['deploy-manual', 'deploy.yml', 'Deploy', 'deploy.yml', 'Deploy / Manual', 'delivery'],
+  ['deploy-manual', 'deploy.yml', 'Deploy', 'deploy-manual.yml', 'Deploy / Manual', 'delivery'],
   ['task-runner', 'task-runner.yml', 'Ephemeral Task Runner', 'task-runner.yml', 'Task / Ephemeral Runner', 'task'],
   ['task-result-ingest', 'task-result-ingest.yml', 'Task Result Ingest', 'task-result-ingest.yml', 'Task / Result Ingest', 'task'],
   ['historical-bug-replay', 'bug-acceptance-replay-1522-1523-1527.yml', 'One-time verified Bug Acceptance replay (1522, 1523, 1527)', 'acceptance-historical-bug-replay.yml', 'Acceptance / Historical Bug Replay', 'acceptance'],
