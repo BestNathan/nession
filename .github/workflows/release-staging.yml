@@ -1,4 +1,4 @@
-name: Staging
+name: Release / Staging Artifacts
 
 # Repository Cargo config enables a local-only rustc wrapper. CI deliberately
 # bypasses it and keeps using setup-rust-toolchain / rust-cache. This preserves
