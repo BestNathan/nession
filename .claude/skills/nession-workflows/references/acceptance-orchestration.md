@@ -1,6 +1,6 @@
 # SC Acceptance Orchestration — target contract (Issue #1649)
 
-> **Migration status:** the constrained `## Acceptance Plan` YAML subset is an **optional** current Issue contract for per-SC Method selection; the Acceptance Report still requires `Stage: pre-merge | staging | post-merge` and case manifests retain legacy stage fields. Full When/Target orchestration, deployed triggers and single-writer projection are **not** yet active. Historical issues without a plan remain supported.
+> **Implementation status:** the constrained `## Acceptance Plan` YAML contract is supported for per-SC `when`, `branch`/`environment`, and `method`; main/staging merged-SHA Agent/Case selection, exact target proof, trusted Case ingestion and Issue result projection are operational. The legacy `pre-merge | staging | post-merge` Acceptance Report is still required; historical issues without a plan remain supported. **Production `when: deployed` execution remains deferred:** an actual environment/revision/digest and authorization boundary must be implemented independently; main merge is not deployment.
 
 ## Problem and decision
 
@@ -32,9 +32,9 @@ acceptance:
     method: case
 ```
 
-This illustrates the **intended semantics**, not an already supported issue-contract YAML grammar. The canonical representation (e.g. `Acceptance Plan` in Issue body) must be decided, versioned and validated by the owning Issue contract. Avoid duplicating plan declarations across Issue and Case; Case manifests describe execution, not independent authority for SC selection.
+This is the **supported constrained Issue grammar**, validated by `scripts/acceptance-plan.mjs` and the owning Issue/Gate contracts. If present, the plan must cover every SC and match its legacy Acceptance Report Stage. Case manifests describe execution, not independent authority for SC selection.
 
-`branch` is an optional target selector for `when: merged`; a centralized documented default is allowed, but not inferred inconsistently by each workflow. Exact target SHA and source commit association must be recorded.
+`branch: staging | main` is required for `when: merged` in the current contract; no caller may silently infer a different default. Exact target SHA and source commit association must be recorded.
 
 ## Target dimensions
 
@@ -106,3 +106,7 @@ PR / merged push / verified deployment event / explicit manual request
 6. Only after compatibility tests succeed, revise `nession-writing-requirements` and `nession-acceptance` to make the new syntax authoritative.
 
 Owning implementation detail remains in `nession-acceptance`, `nession-writing-requirements`, `nession-gates`, `e2e/README.md`, and `docs/architecture/acceptance-cases.md`. This document governs cross-boundary design decisions, not an alternate executable validator.
+
+## Live independent staging/main verification
+
+[Requirement #1674](https://github.com/BestNathan/nession/issues/1674) proves method and SHA separation in actual GitHub Actions: staging `9249399c1a09b713c67d98687aa49e96bdc802fa` Agent run `38255975987` and full-stack Case run `38255975783`; main merged SHA `01111075dc08afa931907ee268d2dd7376d037d1` Agent run `38258395366` and Case run `38258395018`, with trusted Case Ingest `38258723607` and independently stored Case records. Neither main nor staging run proves a production deployment. The current Gate and workflow contracts, not this historical run sample, determine ongoing applicability.

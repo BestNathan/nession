@@ -1,4 +1,4 @@
-name: Deploy
+name: Deploy / Manual
 on:
   workflow_dispatch:
     inputs:
@@ -44,7 +44,7 @@ jobs:
             code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" \
               -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
               "https://ghcr.io/v2/${GITHUB_REPOSITORY_OWNER,,}/nession/manifests/${p}-${short}")
-            [ "$code" = "200" ] || { echo "image ${p}-${short} missing on ghcr (HTTP $code) — merge the commit to staging first (staging.yml builds sha images)"; exit 1; }
+            [ "$code" = "200" ] || { echo "image ${p}-${short} missing on ghcr (HTTP $code) — merge the commit to staging first (release-staging.yml builds sha images)"; exit 1; }
           done
 
       - name: write gitops deploy commit

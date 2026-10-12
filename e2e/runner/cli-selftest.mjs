@@ -71,7 +71,7 @@ assert.equal(fs.existsSync(path.join(repo,'acceptance','verifiers')),false,
   'legacy verifier driver path must be retired');
 assert.ok(fs.existsSync(path.join(repo,'e2e','runner','drivers','index.mjs')));
 assert.ok(fs.existsSync(path.join(repo,'e2e','runner','drivers','playwright.config.cjs')));
-const driverGate=fs.readFileSync(path.join(repo,'.github','workflows','quality.yml'),'utf8');
+const driverGate=fs.readFileSync(path.join(repo,'.github','workflows','ci-quality.yml'),'utf8');
 assert.match(driverGate, /\.\/gates\/run --suite quality-tooling/);
 const toolingSuite = fs.readFileSync(path.join(repo, 'gates', 'suites', 'quality-tooling.gates'), 'utf8');
 assert.match(toolingSuite, /^e2e-browser-report-selftest$/m);
@@ -94,7 +94,7 @@ assert.match(acceptanceArchitecture, /e2e\/runner\/runtime\/full-stack\.js/);
 assert.match(caseWorkflow, /--profile "\$\{profile\}"/);
 assert.match(caseWorkflow, /--sha "\$\{TARGET_SHA\}"/);
 const regressionWorkflow = fs.readFileSync(
-  path.join(repo, '.github', 'workflows', 'e2e.yml'), 'utf8');
+  path.join(repo, '.github', 'workflows', 'e2e-tests.yml'), 'utf8');
 assert.match(regressionWorkflow, /\.\/gates\/run e2e-playwright/);
 const regressionGate = fs.readFileSync(path.join(repo, 'gates', 'checks', 'e2e-playwright.sh'), 'utf8');
 assert.match(regressionGate, /GATE_COMMAND='cd e2e && CI=true \.\/run test --all'/);

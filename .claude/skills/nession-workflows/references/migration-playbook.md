@@ -9,11 +9,11 @@
 | `agent-sc-acceptance.yml` | **Migrated** | `Agent / SC Acceptance` | Model-execution entrypoint; deterministic compatibility bypass and trusted updater still require future separation |
 | `agent-issue-audit.yml` | **Done** | `Agent / Issue Audit` | Actually invokes LLM; renamed with Metrics subscription and telemetry source |
 | `agent-provider-smoke.yml` | unchanged | `Agent / Provider Smoke` | Actually invokes LLM |
-| `acceptance-orchestrator.yml` | **Migrated** | `Acceptance / Orchestrator` | Owns dispatch, PR gate and Issue-close guard; stable telemetry ID preserved |
+| `requirement-acceptance.yml` | `acceptance-orchestrator.yml` | `Acceptance / Orchestrator` | Handles dispatch, PR gate and Issue-close guard; must not be misnamed as an Agent |
 | `acceptance-cases.yml` | unchanged | `Acceptance / Cases` | Source-aligned Case execution using shared E2E Runner |
 | `acceptance-case-ingest.yml` | unchanged initially | `Acceptance / Case Ingest` | Trusted append-only record + authorized projection |
 | `acceptance-case-smoke.yml` | retire when replaced | `Acceptance / Case Smoke` (transitional) | #1474 hard-coded smoke; remove only after generic PR Case selector covers it |
-| `e2e.yml` | `e2e-tests.yml` | `E2E / Tests` | Regression E2E; exact SHA and playwright outcomes |
+| `e2e-tests.yml` | **Migrated** | `E2E / Tests` | Exact-SHA regression E2E; trusted Test Ingest source path/display subscription migrated atomically |
 | `e2e-scenario-smoke.yml` | unchanged | `E2E / Scenario Smoke` | Reproduction/observations |
 | `e2e-run-ingest.yml` | `e2e-scenario-ingest.yml` | `E2E / Scenario Ingest` | Verify actual source, preserve non-evaluative runs |
 | `e2e-test-run-ingest.yml` | `e2e-test-ingest.yml` | `E2E / Test Ingest` | Trusted test Run Records |
@@ -34,20 +34,20 @@
 Examples from the current repository:
 
 ```text
-acceptance-orchestrator.yml
+requirement-acceptance.yml
   -- reusable uses path --> acceptance.yml
   -- canonical metrics source --> metrics-ingest.yml
 
 acceptance-cases.yml ("Acceptance Cases")
   -- workflow_run display name --> acceptance-case-ingest.yml
 
-e2e.yml ("E2E Tests")
+e2e-tests.yml ("E2E / Tests")
   -- workflow_run display name --> e2e-test-run-ingest.yml
 
 e2e-scenario-smoke.yml ("E2E Scenario Smoke")
   -- workflow_run display name --> e2e-run-ingest.yml
 
-acceptance.yml, acceptance-orchestrator.yml, agent-issue-audit.yml,
+acceptance.yml, requirement-acceptance.yml, agent-issue-audit.yml,
 agent-provider-smoke.yml
   -- workflow_run display names --> metrics-ingest.yml
   -- telemetry path & stable workflow_id --> scripts/agent-workflow-telemetry-contract.mjs

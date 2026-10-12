@@ -1,4 +1,4 @@
-name: Staging
+name: Release / Staging Artifacts
 
 # Repository Cargo config enables a local-only rustc wrapper. CI deliberately
 # bypasses it and keeps using setup-rust-toolchain / rust-cache. This preserves
@@ -26,7 +26,7 @@ on:
       - '.github/**'
       - 'LICENSE'
   # Escape hatch for the case paths-ignore skipped a build you actually want
-  # (e.g. a workflow fix that needs to take effect on staging). release.yml
+  # (e.g. a workflow fix that needs to take effect on staging). release-production.yml
   # deliberately has no dispatch: without github.event.before, version-check
   # treats the version as changed and would force a full production release.
   workflow_dispatch:
