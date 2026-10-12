@@ -21,7 +21,8 @@ const TRUSTED_TELEMETRY_SOURCES = new Map([
   }],
   ['.github/workflows/requirement-acceptance.yml', {
     workflow_id: 'requirement-acceptance',
-    events: new Set(['pull_request_target', 'issues']),
+    events: new Set(['pull_request_target', 'issues', 'push']),
+    allowed_push_branches: new Set(['staging', 'main']),
     workflow_dispatch_main_only: false,
   }],
   ['.github/workflows/agent-issue-audit.yml', {
@@ -49,6 +50,9 @@ export function validateTelemetrySourceRun(run, repository = process.env.GITHUB_
   }
   if (repository && sourceRepository !== repository) {
     throw new Error('telemetry source repository mismatch: ' + sourceRepository + ' != ' + repository);
+  }
+  if (event === 'push' && source.allowed_push_branches && !source.allowed_push_branches.has(headBranch)) {
+    throw new Error('untrusted telemetry source push branch for ' + path + ': ' + headBranch);
   }
   if (source.workflow_dispatch_main_only && (event === 'workflow_dispatch' || event === 'push') && headBranch !== 'main') {
     throw new Error('workflow_dispatch telemetry is trusted only from main: ' + path + ' @ ' + headBranch);
@@ -196,6 +200,30 @@ function selfTest() {
     head_branch: 'feature',
     repository: { full_name: 'BestNathan/nession' },
   }, 'BestNathan/nession').workflow_id, 'requirement-acceptance');
+
+  // Merged-SHA Agent orchestration legitimately triggers on push, but only on
+  // the trusted staging/main branches. The Metrics consumer may observe no
+  // model artifact on push if no Agent-method SC was eligible.
+  for (const trustedBranch of ['staging', 'main']) {
+    assert.equal(validateTelemetrySourceRun({
+      id: 16, run_attempt: 1,
+      path: '.github/workflows/requirement-acceptance.yml',
+      event: 'push', head_branch: trustedBranch,
+      repository: { full_name: 'BestNathan/nession' },
+    }, 'BestNathan/nession').workflow_id, 'requirement-acceptance');
+  }
+  assert.throws(() => validateTelemetrySourceRun({
+    id: 17, run_attempt: 1,
+    path: '.github/workflows/requirement-acceptance.yml',
+    event: 'push', head_branch: 'feature/untrusted',
+    repository: { full_name: 'BestNathan/nession' },
+  }, 'BestNathan/nession'), /untrusted telemetry source push branch/);
+  assert.throws(() => validateTelemetrySourceRun({
+    id: 18, run_attempt: 1,
+    path: '.github/workflows/requirement-acceptance.yml',
+    event: 'push', head_branch: 'main',
+    repository: { full_name: 'attacker/nession' },
+  }, 'BestNathan/nession'), /repository mismatch/);
 
   assert.equal(validateTelemetrySourceRun({
     id: 11,
