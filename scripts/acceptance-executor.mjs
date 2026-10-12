@@ -616,6 +616,7 @@ function selfTest() {
   assert.deepEqual(mainMergedCase.criteria, []);
   assert.throws(() => normalizeAcceptanceCaseResult(agentOnly, {
     issue: 1360, stage: 'staging', criterion: 'SC-01',
+    contract_sha256: agentOnly.contract_sha256, target_sha: agentOnly.target_ref,
   }), /criterion is absent/);
 
   console.log('acceptance-executor self-test: legacy and explicit method cases passed');
