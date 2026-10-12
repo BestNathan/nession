@@ -88,7 +88,7 @@ const required = [
     ]
   ],
   [
-    ".github/workflows/repo-metrics.yml",
+    ".github/workflows/metrics-repository.yml",
     [
       "./gates/run repo-health-selftest repo-metrics-selftest agent-workflow-telemetry protocol-integrity"
     ]
