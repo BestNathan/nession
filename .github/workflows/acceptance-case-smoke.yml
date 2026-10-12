@@ -1,13 +1,36 @@
-name: Acceptance Case Smoke
+name: Acceptance / Case Smoke
 
+# A PR-head Case proof is CI evidence only. Trustworthy post-merge Run Records
+# are produced by the separate read-only Acceptance Cases + trusted ingest path.
 permissions:
   contents: read
   issues: read
+  pull-requests: read
 
 on:
   pull_request:
     branches: [staging, main]
   workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Requirement Issue number for an explicit replay
+        required: true
+        type: string
+      target_sha:
+        description: Exact 40-character source SHA
+        required: true
+        type: string
+      criterion:
+        description: Optional exact SC id; empty selects all eligible Case SCs
+        required: false
+        default: ''
+        type: string
+      stage:
+        description: Trusted acceptance stage
+        required: true
+        default: pre-merge
+        type: choice
+        options: [pre-merge, staging, post-merge]
 
 concurrency:
   group: acceptance-case-smoke-${{ github.event.pull_request.number || github.ref_name }}
@@ -16,89 +39,152 @@ concurrency:
 jobs:
   case-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 45
     env:
       RUSTC_WRAPPER: ""
-      PLAYWRIGHT_BROWSERS_PATH: ~/.cache/ms-playwright
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.cache/ms-playwright
+      NESSION_ACCEPTANCE_TRUSTED_ROOT: ${{ github.workspace }}/trusted
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout trusted main acceptance selector
+        uses: actions/checkout@v4
         with:
-          # PR checks must verify actual source SHA, not GitHub's synthetic merge ref.
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event.repository.default_branch }}
+          path: trusted
           persist-credentials: false
 
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-        with: { cache-workspaces: ".", cache-all-crates: "true" }
+      - name: Determine exact source and eligible Issues
+        id: target
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_SHA: ${{ github.event.pull_request.head.sha }}
+          INPUT_SHA: ${{ inputs.target_sha }}
+          INPUT_ISSUE: ${{ inputs.issue_number }}
+          INPUT_STAGE: ${{ inputs.stage }}
+          INPUT_CRITERION: ${{ inputs.criterion }}
+        run: |
+          set -euo pipefail
+          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            source_sha="${PR_SHA}"
+            stage=pre-merge
+            issues="$(node trusted/scripts/requirement-acceptance.mjs discover-pre-merge)"
+            criterion=""
+          else
+            source_sha="${INPUT_SHA}"
+            stage="${INPUT_STAGE}"
+            [[ "${INPUT_ISSUE}" =~ ^[0-9]+$ ]] || { echo "Issue must be numeric" >&2; exit 1; }
+            issues="$(jq -cn --arg issue "${INPUT_ISSUE}" '[$issue]')"
+            criterion="${INPUT_CRITERION}"
+          fi
+          [[ "${source_sha}" =~ ^[0-9a-fA-F]{40}$ ]] || { echo "Exact target SHA required" >&2; exit 1; }
+          echo "sha=${source_sha}" >> "${GITHUB_OUTPUT}"
+          echo "stage=${stage}" >> "${GITHUB_OUTPUT}"
+          echo "issues=${issues}" >> "${GITHUB_OUTPUT}"
+          echo "criterion=${criterion}" >> "${GITHUB_OUTPUT}"
+
+      - name: Checkout exact PR head or requested source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.target.outputs.sha }}
+          path: workspace
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: 'npm'
           cache-dependency-path: |
-            web/package-lock.json
-            e2e/package-lock.json
+            workspace/web/package-lock.json
+            workspace/e2e/package-lock.json
 
-      - run: sudo apt-get update && sudo apt-get install -y tmux
-
-      - name: Validate Case contract
-        run: node scripts/acceptance-cases-selftest.mjs
-
-      - name: Build runtime
+      - name: Validate trusted selector and Case contracts
         run: |
-          cd web
+          node trusted/scripts/acceptance-cases-selftest.mjs
+          node trusted/scripts/select-acceptance-cases.mjs self-test
+
+      - name: Fetch trusted Issue contracts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBERS: ${{ steps.target.outputs.issues }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/acceptance-contracts"
+          jq -r '.[]' <<< "${ISSUE_NUMBERS}" | while read -r issue; do
+            gh api "repos/${GITHUB_REPOSITORY}/issues/${issue}" > "${RUNNER_TEMP}/acceptance-contracts/${issue}.json"
+          done
+
+      - name: Select method-specific source-aligned Cases
+        id: select
+        env:
+          ISSUE_NUMBERS: ${{ steps.target.outputs.issues }}
+          ACCEPTANCE_STAGE: ${{ steps.target.outputs.stage }}
+          MANUAL_CRITERION: ${{ steps.target.outputs.criterion }}
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+          RUNTIME_PROFILE: ''
+        run: |
+          set -euo pipefail
+          node trusted/scripts/select-acceptance-cases.mjs select \
+            "workspace/e2e/acceptance/cases" \
+            "${RUNNER_TEMP}/acceptance-contracts" \
+            "${RUNNER_TEMP}/selected-cases.json" \
+            "${RUNNER_TEMP}/case-coverage.json"
+          count="$(jq 'length' "${RUNNER_TEMP}/selected-cases.json")"
+          needs_browser="$(jq 'any(.needs_browser == true)' "${RUNNER_TEMP}/selected-cases.json")"
+          echo "count=${count}" >> "${GITHUB_OUTPUT}"
+          echo "needs_browser=${needs_browser}" >> "${GITHUB_OUTPUT}"
+          echo "Case obligations: ${count}; no cases means no Case proof, not Pass" >> "${GITHUB_STEP_SUMMARY}"
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        if: steps.select.outputs.count != '0'
+        with: { cache-workspaces: "workspace", cache-all-crates: "true" }
+
+      - name: Prepare full-stack verifier runtime
+        if: steps.select.outputs.count != '0'
+        run: |
+          sudo apt-get update && sudo apt-get install -y tmux
+          cd workspace/web
           npm ci
           npm run build
           cd ..
           cargo build -p nession-server -p nession-agent
 
-      - name: Install browser Case runtime
+      - name: Install browser verifier runtime
+        if: steps.select.outputs.count != '0' && steps.select.outputs.needs_browser == 'true'
+        working-directory: workspace/e2e
         run: |
-          cd e2e
           npm ci
           npx playwright install chromium --with-deps
 
-      - name: Fetch trusted Requirement contract
+      - name: Execute every selected source-aligned Case
+        if: steps.select.outputs.count != '0'
+        working-directory: workspace
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh api "repos/${GITHUB_REPOSITORY}/issues/1474" > /tmp/issue-1474.json
-
-      - name: Run SC-03 protocol-only Case
-        id: protocol
-        continue-on-error: true
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+          ACCEPTANCE_STAGE: ${{ steps.target.outputs.stage }}
         run: |
-          target_sha="$(git rev-parse HEAD)"
-          ./e2e/run acceptance \
-            --issue-json /tmp/issue-1474.json \
-            --issue 1474 \
-            --sc SC-03 \
-            --stage pre-merge \
-            --sha "$target_sha" \
-            --output /tmp/acceptance-case-SC-03.json
-
-      - name: Run SC-14 browser + protocol Case
-        id: browser_protocol
-        continue-on-error: true
-        run: |
-          target_sha="$(git rev-parse HEAD)"
-          ./e2e/run acceptance \
-            --issue-json /tmp/issue-1474.json \
-            --issue 1474 \
-            --sc SC-14 \
-            --stage staging \
-            --sha "$target_sha" \
-            --output /tmp/acceptance-case-SC-14.json
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/case-smoke-results"
+          jq -c '.[]' "${RUNNER_TEMP}/selected-cases.json" | while read -r selected; do
+            issue="$(jq -r '.issue' <<< "${selected}")"
+            criterion="$(jq -r '.criterion' <<< "${selected}")"
+            ./e2e/run acceptance \
+              --issue-json "${RUNNER_TEMP}/acceptance-contracts/${issue}.json" \
+              --issue "${issue}" \
+              --sc "${criterion}" \
+              --stage "${ACCEPTANCE_STAGE}" \
+              --sha "${TARGET_SHA}" \
+              --output "${RUNNER_TEMP}/case-smoke-results/${issue}-${criterion}.json"
+          done
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: acceptance-case-smoke-1474
+          name: acceptance-case-smoke-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            /tmp/acceptance-case-SC-03.json
-            /tmp/acceptance-case-SC-14.json
-            e2e/test-results/
+            ${{ runner.temp }}/selected-cases.json
+            ${{ runner.temp }}/case-coverage.json
+            ${{ runner.temp }}/case-smoke-results/
+            workspace/e2e/test-results/
           if-no-files-found: warn
           retention-days: 14
-
-      - name: Enforce Case results
-        if: steps.protocol.outcome != 'success' || steps.browser_protocol.outcome != 'success'
-        run: exit 1
