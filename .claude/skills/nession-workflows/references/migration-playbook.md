@@ -25,7 +25,7 @@
 | `deploy.yml` | unchanged | `Deploy / Manual` | Actual manual deployment |
 | `task-runner.yml` | unchanged | `Task / Ephemeral Runner` | Generic task execution, not automatically LLM Agent |
 | `task-result-ingest.yml` | unchanged | `Task / Result Ingest` | Trusted Task result write boundary |
-| `bug-acceptance-replay-1522-1523-1527.yml` | retire when safe | `Acceptance / Historical Bug Replay` (transitional) | One-time reconciliation; preserve original history and references |
+| historical Bug Acceptance Replay | **Retired** | Not an active workflow | #1522, #1523, #1527 closed with fully checked SCs and exact run evidence retained on their Issues; Git history preserves the original one-time workflow |
 
 **Classification is determined by actual job execution**, never by a textual search for `agent`, `nession-agent`, or `metrics`. The catalog is a proposed migration target, not a mandate to rename every file in one PR.
 
