@@ -584,7 +584,41 @@ function selfTest() {
     /unknown or belongs to another stage/,
   );
 
-  console.log('acceptance-executor self-test: 16 cases passed');
+  // Explicit SC plan: Agent-only and executable proofs are disjoint.
+  // Deployed cases must NOT be verified merely by a main merged SHA.
+  const plannedBody = fixtureBody().replace('## Product alignment', [
+    '## Acceptance Plan', '',
+    '\x60\x60\x60yaml',
+    'acceptance:',
+    '  SC-01:',
+    '    when: merged',
+    '    branch: staging',
+    '    method: case',
+    '  SC-02:',
+    '    when: deployed',
+    '    environment: production',
+    '    method: case',
+    '\x60\x60\x60', '', '## Product alignment',
+  ].join('\n').replace(/\\x60/g, '\x60'));
+  const plannedIssue = { ...issue, body: plannedBody };
+  const agentOnly = buildAcceptanceContext(plannedIssue, 'staging', {
+    targetRef: 'a'.repeat(40), runId: 400, method: 'agent',
+  });
+  const caseOnly = buildAcceptanceContext(plannedIssue, 'staging', {
+    targetRef: 'a'.repeat(40), runId: 400, method: 'case',
+  });
+  assert.deepEqual(agentOnly.criteria, []);
+  assert.deepEqual(caseOnly.criteria.map((entry) => entry.criterion), ['SC-01']);
+  assert.notEqual(caseOnly.contract_sha256, staging.contract_sha256);
+  const mainMergedCase = buildAcceptanceContext(plannedIssue, 'post-merge', {
+    targetRef: 'b'.repeat(40), runId: 401, method: 'case',
+  });
+  assert.deepEqual(mainMergedCase.criteria, []);
+  assert.throws(() => normalizeAcceptanceCaseResult(agentOnly, {
+    issue: 1360, stage: 'staging', criterion: 'SC-01',
+  }), /criterion is absent/);
+
+  console.log('acceptance-executor self-test: legacy and explicit method cases passed');
 }
 
 function usage() {
