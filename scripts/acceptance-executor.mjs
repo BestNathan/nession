@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { validateAcceptancePlan, isProofEligible } from './acceptance-plan.mjs';
 import {
   extractSection,
   parseAcceptanceReport,
@@ -46,8 +47,10 @@ function parseContract(body) {
   for (const row of report.rows.values()) {
     if (!success.criteria.has(row.id)) errors.push('Acceptance Report contains unknown criterion ' + row.id);
   }
+  const acceptedPlan = validateAcceptancePlan(body, success.criteria.keys(), report.rows);
+  errors.push(...acceptedPlan.errors);
   if (errors.length) throw new Error('invalid acceptance contract:\n- ' + errors.join('\n- '));
-  return { criteria: success.criteria, rows: report.rows };
+  return { criteria: success.criteria, rows: report.rows, plan: acceptedPlan.plan };
 }
 
 function contractDigest(contract) {
@@ -57,6 +60,9 @@ function contractDigest(contract) {
       id: criterion.id,
       text: criterion.text,
       stage: contract.rows.get(criterion.id).stage,
+      ...(contract.plan ? {
+        acceptance_plan: contract.plan.get(criterion.id),
+      } : {}),
     }));
   return crypto.createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
 }
@@ -67,6 +73,7 @@ export function buildAcceptanceContext(issue, stage, options = {}) {
   const contract = parseContract(issue.body);
   const criteria = [...contract.criteria.values()]
     .filter((criterion) => contract.rows.get(criterion.id).stage === normalizedStage)
+    .filter((criterion) => !options.method || isProofEligible(contract.plan?.get(criterion.id), normalizedStage, options.method))
     .map((criterion) => {
       const row = contract.rows.get(criterion.id);
       return {
@@ -395,6 +402,7 @@ function prepareCommand(issueNumber, stage, targetRef, outFile, deployment, ciEv
     targetRef,
     deployment,
     ciEvidence,
+    method: 'agent',
     runId: process.env.ACCEPTANCE_RUN_ID ?? process.env.GITHUB_RUN_ID,
   });
   fs.writeFileSync(outFile, JSON.stringify(context, null, 2) + '\n');
