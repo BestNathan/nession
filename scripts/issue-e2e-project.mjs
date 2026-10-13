@@ -88,7 +88,7 @@ function selfTest() {
   assert.throws(() => projectIssueE2E(issue,plan,{...execution,plan_digest:'c'},evidence),/provenance/);
   assert.throws(() => projectIssueE2E(issue,plan,{...execution,run_id:999},evidence),/foreign/);
   assert.throws(() => projectIssueE2E(issue,plan,{...execution,run_attempt:3},evidence),/foreign/);
-  assert.throws(() => projectIssueE2E({...issue,body:body.replace('- terminal-resume','- another-test')},plan,execution,evidence),/stale/);
+  assert.throws(() => projectIssueE2E({...issue,body:body.replace('- terminal-resume','- another-test').replace('| terminal-resume | New','| another-test | New')},plan,execution,evidence),/stale/);
   assert.throws(() => projectIssueE2E(issue,plan,{...execution,results:[{...success,assertions:0},failure]},evidence),/unproven/);
   assert.throws(() => projectIssueE2E(issue,plan,{...execution,results:[success]},evidence),/missing from execution/);
   console.log('Issue E2E projector: Pass/Fail, stale, untrusted, zero-assertion, incomplete negatives passed');
