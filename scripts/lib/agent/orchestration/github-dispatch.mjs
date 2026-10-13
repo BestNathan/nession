@@ -107,6 +107,7 @@ export function planGitHubDispatch(state,actionId,registry,signer) {
   // return HTTP 204 with NO downstream run ID.
   return {
     repository:REPOSITORY,workflow_id:spec.workflow,ref:'main',
+    return_run_details:true,
     inputs:{action_id:body.action_id,issue_number:String(body.issue),agent_id:body.agent_id,
       task:body.task,input_sha:body.input_sha,dispatch_ticket:ticket},
   };
@@ -119,7 +120,7 @@ export function createGitHubRunReader(token,{api='https://api.github.com',fetchF
   const request=async path=>{
     const response=await fetchFn(api+'/repos/'+REPOSITORY+path,{
       method:'GET',headers:{Authorization:'Bearer '+token,Accept:'application/vnd.github+json',
-        'X-GitHub-Api-Version':'2022-11-28'}});
+        'X-GitHub-Api-Version':'2026-03-10'}});
     if (!response.ok) reject('GitHub API read failed: '+response.status);
     return response.json();
   };
@@ -128,8 +129,44 @@ export function createGitHubRunReader(token,{api='https://api.github.com',fetchF
     getPullRequest:number=>{if(!positive(number))reject('invalid PR number');return request('/pulls/'+number);},
   };
 }
+// Only the trusted Coordinator may call this with a token holding Actions:write.
+// The signing key is never passed into this client; the Agent receives only
+// the already-signed ticket. Requesting run details is now supported by the
+// GitHub REST workflow dispatch API; legacy 204 remains a valid *unverified*
+// acceptance response and must not be promoted into a made-up Run ID.
+export function createGitHubDispatchClient(token,{api='https://api.github.com',fetchFn=fetch}={}) {
+  if (typeof token!=='string' || token.length<8 || typeof fetchFn!=='function') {
+    reject('missing trusted dispatch credential');
+  }
+  if (api!=='https://api.github.com') reject('unsupported dispatch API origin');
+  return async function dispatch(plan) {
+    if (!plan || plan.repository!==REPOSITORY || plan.ref!=='main' ||
+        !plan.return_run_details || !Object.values(PROVIDERS).some(x=>x.workflow===plan.workflow_id) ||
+        !own(plan.inputs,['action_id','issue_number','agent_id','task','input_sha','dispatch_ticket']) ||
+        Object.keys(plan.inputs).length!==6 || !HEX64.test(plan.inputs.action_id??'')) {
+      reject('invalid or unapproved GitHub dispatch plan');
+    }
+    const response=await fetchFn(api+'/repos/'+REPOSITORY+'/actions/workflows/'+
+      plan.workflow_id+'/dispatches',{
+      method:'POST',headers:{Authorization:'Bearer '+token,Accept:'application/vnd.github+json',
+        'X-GitHub-Api-Version':'2026-03-10','Content-Type':'application/json'},
+      body:JSON.stringify({ref:'main',inputs:plan.inputs,return_run_details:true}),
+    });
+    if (response.status===204) {
+      return {status:'accepted',dispatch_id:plan.inputs.action_id};
+    }
+    if (response.status!==200) reject('GitHub workflow_dispatch failed: '+response.status);
+    const data=await response.json();
+    const id=data?.workflow_run_id;
+    if (!positive(id) || data.run_url!==
+        api+'/repos/'+REPOSITORY+'/actions/runs/'+id) {
+      reject('GitHub dispatch response lacks verifiable downstream Run identity');
+    }
+    return {status:'verified',dispatch_id:plan.inputs.action_id,source_run_id:id};
+  };
+}
+
 function compareSource(run,body,result) {
-  const runInput=run.inputs;
   const spec=PROVIDERS[body.role];
   if (!run || run.id!==result.run_id || run.run_attempt!==result.run_attempt ||
       run.path!==spec.path || run.name!==spec.name || run.event!=='workflow_dispatch' ||
@@ -140,20 +177,15 @@ function compareSource(run,body,result) {
       !spec.tasks.includes(body.task) || !HEX40.test(result.target_sha??'')) {
     reject('GitHub Run provenance or Agent outcome mismatch');
   }
-  if (!runInput || runInput.action_id!==body.action_id ||
-      runInput.issue_number!==String(body.issue) || runInput.agent_id!==body.agent_id ||
-      runInput.task!==body.task || runInput.input_sha!==body.input_sha) {
-    reject('GitHub Run dispatch inputs mismatch');
-  }
   if (typeof run.created_at!=='string' ||
       Date.parse(run.created_at)<body.issued_at-30000 ||
       Date.parse(run.created_at)>body.expires_at+30000) {
     reject('run created outside ticket dispatch window');
   }
 }
-// Inputs are fetched on the same GitHub API run object. Missing inputs fail
-// closed; a future signed artifact path must verify artifact ownership/digest
-// before it can substitute for unavailable GitHub run inputs.
+// GitHub Get Workflow Run does not reliably expose workflow_dispatch inputs.
+// Provenance instead binds the authenticated dispatch response's run ID to
+// this Outbox action BEFORE the worker's result can be consumed.
 export async function attestAgentOutcome({
   state,result,dispatch_ticket,pr_number,registry,reader,keyring,now=Date.now(),
   verified_main_sha,
@@ -171,7 +203,11 @@ export async function attestAgentOutcome({
   const pending=state.outbox.find(x=>x.id===body.action_id && x.status==='dispatched');
   if (!pending || pending.task.role!==body.role || pending.task.task!==body.task ||
       pending.task.agent_id!==body.agent_id || pending.task.sha!==body.input_sha ||
-      pending.receipt?.dispatch_id!==body.action_id) reject('ticket does not match a dispatched task');
+      pending.receipt?.dispatch_id!==body.action_id ||
+      pending.receipt.status!=='verified' ||
+      pending.receipt.source_run_id!==result.run_id) {
+    reject('ticket has no trusted run-bound dispatch receipt');
+  }
   const issuer=await reader.getRun(body.issuer_run_id);
   if (issuer.id!==body.issuer_run_id ||
       issuer.path!=='.github/workflows/acceptance-agent-controller.yml' ||
@@ -183,8 +219,6 @@ export async function attestAgentOutcome({
   const run=await reader.getRun(result.run_id);
   compareSource(run,body,result);
   if (run.head_sha!==verified_main_sha) reject('worker did not execute trusted main SHA');
-  if (typeof run.inputs.dispatch_ticket!=='string' ||
-      run.inputs.dispatch_ticket!==dispatch_ticket) reject('worker used a different dispatch ticket');
   if (!positive(pr_number)) reject('missing trusted publisher PR identity');
   const pr=await reader.getPullRequest(pr_number);
   if (pr.base?.repo?.full_name!==REPOSITORY || pr.head?.repo?.full_name!==REPOSITORY ||
