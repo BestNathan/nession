@@ -228,6 +228,8 @@ function selfTest() {
   });
   assert.throws(() => selectCursorModel([], { id: 'composer-2.5', fast: true }), /no fallback/i);
   assert.equal(claudeUsage({ usage: { input_tokens: 2, output_tokens: 1 } }).input, 2);
+  assert.equal(claudeUsage({}).input, null);
+  assert.equal(claudeUsage({ modelUsage: { modelA: { inputTokens: 5 } } }).input, 5);
   console.log('acceptance-agent self-test: 9 cases passed');
 }
 
