@@ -41,6 +41,28 @@ internal execution steps, not independent privileged workflow entrypoints.
 Results require **trusted ingestion** before they can update an Issue's SC;
 immutable evidence is stored on `acceptance-results`, not on the source branch.
 
+## Stable E2E Tests file IDs
+
+The long-lived regression catalog is **only** `e2e/tests/**/*.spec.ts`. Every runnable
+spec has a stable filename-derived ID (without `.spec.ts`), unique across subdirectories.
+Each file should test one coherent scenario; related assertions and viewport/transport
+variants may share the file, but unrelated behavior should be split. No separate
+mutable ID registry or source-code-to-E2E graph is maintained.
+
+```bash
+./e2e/run test --list                           # metadata only; safe locally
+# Run only in authorized CI with the provisioned full stack:
+./e2e/run test --id terminal-io --id login
+./e2e/run test --all
+```
+
+The original 21-spec baseline from #1512 remains pinned in migration-parity.json.
+The conversation regression was split by behavior into focused Web, narrow Web,
+scroll ownership and App specs without moving the 43 canonical visual PNGs.
+
+The established full regression Gate stays `e2e-playwright`. Issue-owned selection
+and trusted per-ID result publication are separate follow-up requirements (#1701/#1702).
+
 ## Execution policy
 
 **Do not run the full E2E suite on a development machine.** It starts real
@@ -114,9 +136,8 @@ gh run download <run-id> --name playwright-report
 npx playwright show-report playwright-report
 ```
 
-Canonical visual snapshots are defined by
-`e2e/tests/browser/fixture-visual.spec.ts` and committed PNGs in
-`e2e/tests/browser/__snapshots__/fixture-visual.spec.ts/`.
+Canonical visual snapshots are defined by the focused `fixture-visual*.spec.ts`
+files and matching directories under `e2e/tests/browser/__snapshots__/`.
 Their names include `-linux`; rely on the spec and files for the complete
 current set rather than a duplicated filename table. The fixture clock is
 frozen by `e2e/helpers/fixtureVisual.ts`.

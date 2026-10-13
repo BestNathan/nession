@@ -17,6 +17,11 @@ See `docs/architecture/acceptance-sc-format.md` for canonical examples and migra
 
 The executable structural owner is `scripts/issue-contract.mjs`.
 
+For new Issues, add **E2E Verification** with `### New` and `### Regression`; each contains a stable filename stem from `e2e/tests/**/*.spec.ts` or `- none: <specific reason>`. **E2E Report** has `ID | Type | Result | Evidence`; only trusted execution can mark Pass. Historical Issues lacking both sections remain supported. This is independent of the canonical v2 SC Acceptance Plan and Report.
+
+Developer/Reviewer Agents may submit typed, auditable proposals using `scripts/issue-e2e-proposal.mjs` (Issue comment only). A trusted approval flow must validate the current declaration digest and exact head/base test catalog before adding new Pending obligations. Untrusted Agent Issue-edit tools may not alter required E2E IDs or result/evidence fields. Only `scripts/issue-e2e-gate.mjs` accepts authenticated exact-SHA proof. No permanent source-code→E2E mapping is maintained.
+
+
 ## 1. Classify first
 
 Choose exactly one kind:
