@@ -154,7 +154,8 @@ jobs:
             "$GITHUB_EVENT_PATH" scratch/metadata/run.json scratch/metadata/pr.json \
             scratch/artifact/plan.json scratch/artifact/results.json \
             scratch/metadata/artifact.json scratch/metadata/issues.json \
-            source scratch/output scratch/artifact/playwright.json
+            source scratch/output scratch/artifact/playwright.json \
+            scratch/artifact/assertions.json
       - name: Store immutable results and update Issue reports
         if: steps.capability.outputs.available == 'true'
         env:
