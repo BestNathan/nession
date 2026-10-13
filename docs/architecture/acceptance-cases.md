@@ -34,13 +34,13 @@ Discovery is derived from the directory tree and manifest. There is no shared mu
 
 ## Stage selection
 
-Choose the Acceptance Report stage from the Requirement contract:
+Choose the effective Acceptance runner stage from the trusted Requirement contract: **derive it from `Acceptance Plan.when/branch/environment` for new canonical three-column Reports**, or use the explicit Stage for historical four-column Reports. See [SC authoring format](acceptance-sc-format.md).
 
 - `pre-merge`: evidence required before the feature PR gate.
 - `staging`: evidence that needs the merged staging SHA and integration environment.
 - `post-merge`: evidence that can only be established after the main merge. A main merge alone is not evidence that production deployed.
 
-The Case stage must exactly match the SC row in the Issue Acceptance Report. Automatic `staging` and `main` runs pin `github.sha`; manual replay requires an exact 40-character SHA plus Issue, SC, stage and runtime profile.
+The Case manifest's compatibility `stage` must match the trusted **effective SC stage** (Plan-derived for new Issues, Report-derived for legacy Issues). This source-aligned Case metadata is an execution selector, not a second authority defining SC timing. Automatic `staging` and `main` runs pin `github.sha`; manual replay requires an exact 40-character SHA plus Issue, SC, stage and runtime profile.
 
 **Method-specific Case Coverage:** the trusted `scripts/select-acceptance-cases.mjs` script is the canonical selector shared by the `Acceptance / Cases` workflow; workflow YAML must not independently compute SC eligibility. A Requirement declaring `## Acceptance Plan` requires an executable Case for **every eligible `method: case` SC** at the exact target stage; missing source Case is a blocking error rather than a warning. `method: agent` criteria do not require Cases. Historical Issues without a Plan retain only their already-present source-aligned Cases and are not retroactively required to provide Cases for every legacy Agent-accepted SC. Explicit `when: deployed` criteria are not eligible on a plain `main` push.
 
