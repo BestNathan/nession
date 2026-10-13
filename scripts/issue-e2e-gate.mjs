@@ -14,7 +14,8 @@ export function verifyIssueE2EGate(issue,targetSha) {
     const row=decl.rows.get(id);
     if(!row || row.result!=='Pass') {failures.push(id+': not Pass');continue;}
     if(!row.evidence.includes('SHA '+targetSha+',') ||
-       !row.evidence.includes('plan '+decl.digest+',')){
+       !row.evidence.includes('contract '+decl.digest+',') ||
+       !/\bplan [0-9a-f]{64},/.test(row.evidence)){
       failures.push(id+': stale or unbound evidence');
     }
   }
@@ -28,11 +29,11 @@ function selfTest(){
     '| ID | Type | Result | Evidence |','|---|---|---|---|'];
   const body0=prefix.concat(['| terminal-attach | Regression | Pending | - |']).join('\n');
   const decl=parseIssueE2E(body0);
-  const pass=body0.replace('| Pending | - |','| Pass | run 1/1, SHA '+sha+', plan '+decl.digest+', tests 1/1 |');
+  const pass=body0.replace('| Pending | - |','| Pass | run 1/1, SHA '+sha+', contract '+decl.digest+', plan '+'b'.repeat(64)+', tests 1/1 |');
   assert.equal(verifyIssueE2EGate({body:pass},sha).ok,true);
   assert.equal(verifyIssueE2EGate({body:body0},sha).ok,false);
   assert.equal(verifyIssueE2EGate({body:pass},'b'.repeat(40)).ok,false);
-  assert.equal(verifyIssueE2EGate({body:pass.replace('plan '+decl.digest, 'plan '+'0'.repeat(64))},sha).ok,false);
+  assert.equal(verifyIssueE2EGate({body:pass.replace('contract '+decl.digest, 'contract '+'0'.repeat(64))},sha).ok,false);
   const none=['## E2E Verification','### New','- none: no new tests',
     '### Regression','- none: no affected E2E','## E2E Report',
     '| ID | Type | Result | Evidence |','|---|---|---|---|'].join('\n');
