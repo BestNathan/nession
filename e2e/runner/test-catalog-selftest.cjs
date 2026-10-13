@@ -28,6 +28,9 @@ try {
     'tests/browser/unregistered.spec.ts',
   ]), /unregistered/);
   assert.throws(() => verifyDiscoveredFiles(catalog, []), /no runnable/);
+  assert.throws(() => verifyDiscoveredFiles(catalog, [
+    'tests/browser/terminal-attach.spec.ts', 'tests/browser/terminal-replay.spec.ts',
+  ]), /ID\/path mismatch/);
   write('protocol/terminal-attach.spec.ts');
   assert.throws(() => discover(root), /duplicate/);
   fs.unlinkSync(path.join(root, 'protocol/terminal-attach.spec.ts'));
