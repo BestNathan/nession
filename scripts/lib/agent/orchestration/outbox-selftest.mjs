@@ -139,9 +139,9 @@ try {
     state.version),/noncontiguous/);
   assert.throws(()=>writeIssueWorkflowState(folder,{...state,version:state.version+1},
     state.version-1),/CAS/);
-  const badFile=path.join(folder,issueStatePath(issue,1));
+  const badFile=path.join(folder,issueStatePath(issue,state.version));
   writeFileSync(badFile,'{"schema_version":1,"issue":1696}');
-  assert.throws(()=>readIssueWorkflowState(folder,issue),/digest mismatch|invalid state/);
+  assert.throws(()=>readIssueWorkflowState(folder,issue),/digest mismatch|invalid state|invalid state shape/);
 } finally {rmSync(folder,{recursive:true,force:true});}
 
 const symlinkDir=mkdtempSync(path.join(os.tmpdir(),'agent-outbox-symlink-'));
