@@ -77,12 +77,153 @@ function decodeNameStatus(bytes){
   }
   return entries;
 }
-function checkEntries(store,entries){
+function assertRegularBlob(root,pathName,commit=null){
+  noUnsafePath(pathName);
+  const lines=commit
+    ?git(root,['ls-tree','-z',commit,'--',pathName])
+    :git(root,['ls-files','--stage','-z','--',pathName]);
+  const expected=commit
+    ?new RegExp('^100644 blob [a-f0-9]{40}\\t'+pathName.replace(/[.*+?^$()|[\]{}\\]/g,'\\function checkEntries(store,entries){
   const seen=new Set();
   for(const item of entries){
     if(seen.has(item.path))reject('duplicate Git path change');
     seen.add(item.path);
     validateRunStoreChange(store,item.status,item.path);
+  }
+  return entries.length;
+}')+'\\x00
+export function auditStagedRunStore(root,store){
+  const entries=decodeNameStatus(git(root,[
+    'diff','--cached','--name-status','--no-renames','-z','--diff-filter=AMDTU'
+  ]));
+  return {schema_version:1,store,mode:'staged',checked_changes:checkEntries(store,entries,root)};
+}
+function resolveCommit(root,sha){
+  scalarSha(sha);
+  const resolved=git(root,['rev-parse','--verify',sha+'^{commit}']).toString('utf8').trim();
+  if(resolved!==sha)reject('commit identity differs from claimed anchor');
+  return sha;
+}
+export function auditAnchoredRunStore(root,store,baseline,observed){
+  if(!rules[store])reject('unclassified run store');
+  // Caller must obtain the baseline from a separately controlled anchor. A
+  // self-hash, current ref HEAD, GitHub workflow input or branch-local file
+  // does NOT establish such an anchor.
+  const base=resolveCommit(root,baseline),head=resolveCommit(root,observed);
+  const checkedOut=git(root,['rev-parse','--verify','HEAD']).toString('utf8').trim();
+  if(checkedOut!==head)reject('checkout HEAD differs from observed ref');
+  try{
+    execFileSync('git',['-C',root,'merge-base','--is-ancestor',base,head],{
+      timeout:20000,stdio:'ignore',
+      env:{...process.env,GIT_NO_REPLACE_OBJECTS:'1'},
+    });
+  }catch{reject('baseline is not ancestor of observed ref (rewrite/unrelated history)');}
+  const commits=git(root,['rev-list','--reverse','--first-parent',base+'..'+head])
+    .toString('utf8').trim().split('\n').filter(Boolean);
+  if(commits.length>20000)reject('audit window exceeds bounded commit count');
+  let prev=base,checkedChanges=0;
+  for(const sha of commits){
+    if(!HEX40.test(sha))reject('invalid Git ancestry SHA');
+    const parents=git(root,['show','-s','--format=%P',sha]).toString('utf8').trim().split(' ').filter(Boolean);
+    if(parents.length!==1||parents[0]!==prev)reject('nonlinear/merge history in orphan run store');
+    const delta=git(root,['diff','--name-status','--no-renames','-z','--diff-filter=AMDTU',prev,sha]);
+    checkedChanges+=checkEntries(store,decodeNameStatus(delta),root,sha);
+    prev=sha;
+  }
+  if(prev!==head)reject('unverified commit traversal');
+  return {
+    schema_version:RUN_STORE_INTEGRITY_SCHEMA_VERSION,
+    store,mode:'anchored-history',baseline:base,observed:head,
+    checked_commits:commits.length,checked_changes:checkedChanges,
+    // This means ancestry against a caller-provided anchor, not that an
+    // independent external anchor has been provisioned by this module.
+    anchor_source:'caller-supplied',
+  };
+}
+if(process.argv[1]?.endsWith('run-store-integrity.mjs')){
+  const [mode,store,repoDir,a,b]=process.argv.slice(2);
+  if(!repoDir||!path.isAbsolute(repoDir))reject('absolute checkout path is required');
+  if(mode==='staged')console.log(JSON.stringify(auditStagedRunStore(repoDir,store)));
+  else if(mode==='anchored')console.log(JSON.stringify(auditAnchoredRunStore(repoDir,store,a,b)));
+  else reject('usage: staged STORE ABS_DIR | anchored STORE ABS_DIR TRUSTED_BASE_SHA REF_SHA');
+}
+)
+    :new RegExp('^100644 [a-f0-9]{40} 0\\t'+pathName.replace(/[.*+?^$()|[\]{}\\]/g,'\\function checkEntries(store,entries){
+  const seen=new Set();
+  for(const item of entries){
+    if(seen.has(item.path))reject('duplicate Git path change');
+    seen.add(item.path);
+    validateRunStoreChange(store,item.status,item.path);
+  }
+  return entries.length;
+}')+'\\x00
+export function auditStagedRunStore(root,store){
+  const entries=decodeNameStatus(git(root,[
+    'diff','--cached','--name-status','--no-renames','-z','--diff-filter=AMDTU'
+  ]));
+  return {schema_version:1,store,mode:'staged',checked_changes:checkEntries(store,entries)};
+}
+function resolveCommit(root,sha){
+  scalarSha(sha);
+  const resolved=git(root,['rev-parse','--verify',sha+'^{commit}']).toString('utf8').trim();
+  if(resolved!==sha)reject('commit identity differs from claimed anchor');
+  return sha;
+}
+export function auditAnchoredRunStore(root,store,baseline,observed){
+  if(!rules[store])reject('unclassified run store');
+  // Caller must obtain the baseline from a separately controlled anchor. A
+  // self-hash, current ref HEAD, GitHub workflow input or branch-local file
+  // does NOT establish such an anchor.
+  const base=resolveCommit(root,baseline),head=resolveCommit(root,observed);
+  const checkedOut=git(root,['rev-parse','--verify','HEAD']).toString('utf8').trim();
+  if(checkedOut!==head)reject('checkout HEAD differs from observed ref');
+  try{
+    execFileSync('git',['-C',root,'merge-base','--is-ancestor',base,head],{
+      timeout:20000,stdio:'ignore',
+      env:{...process.env,GIT_NO_REPLACE_OBJECTS:'1'},
+    });
+  }catch{reject('baseline is not ancestor of observed ref (rewrite/unrelated history)');}
+  const commits=git(root,['rev-list','--reverse','--first-parent',base+'..'+head])
+    .toString('utf8').trim().split('\n').filter(Boolean);
+  if(commits.length>20000)reject('audit window exceeds bounded commit count');
+  let prev=base,checkedChanges=0;
+  for(const sha of commits){
+    if(!HEX40.test(sha))reject('invalid Git ancestry SHA');
+    const parents=git(root,['show','-s','--format=%P',sha]).toString('utf8').trim().split(' ').filter(Boolean);
+    if(parents.length!==1||parents[0]!==prev)reject('nonlinear/merge history in orphan run store');
+    const delta=git(root,['diff','--name-status','--no-renames','-z','--diff-filter=AMDTU',prev,sha]);
+    checkedChanges+=checkEntries(store,decodeNameStatus(delta));
+    prev=sha;
+  }
+  if(prev!==head)reject('unverified commit traversal');
+  return {
+    schema_version:RUN_STORE_INTEGRITY_SCHEMA_VERSION,
+    store,mode:'anchored-history',baseline:base,observed:head,
+    checked_commits:commits.length,checked_changes:checkedChanges,
+    // This means ancestry against a caller-provided anchor, not that an
+    // independent external anchor has been provisioned by this module.
+    anchor_source:'caller-supplied',
+  };
+}
+if(process.argv[1]?.endsWith('run-store-integrity.mjs')){
+  const [mode,store,repoDir,a,b]=process.argv.slice(2);
+  if(!repoDir||!path.isAbsolute(repoDir))reject('absolute checkout path is required');
+  if(mode==='staged')console.log(JSON.stringify(auditStagedRunStore(repoDir,store)));
+  else if(mode==='anchored')console.log(JSON.stringify(auditAnchoredRunStore(repoDir,store,a,b)));
+  else reject('usage: staged STORE ABS_DIR | anchored STORE ABS_DIR TRUSTED_BASE_SHA REF_SHA');
+}
+);
+  if(!expected.test(lines.toString('utf8'))) {
+    reject('nonregular or untrusted Git blob mode: '+pathName);
+  }
+}
+function checkEntries(store,entries,root,commit=null){
+  const seen=new Set();
+  for(const item of entries){
+    if(seen.has(item.path))reject('duplicate Git path change');
+    seen.add(item.path);
+    validateRunStoreChange(store,item.status,item.path);
+    if(item.status==='A'||item.status==='M')assertRegularBlob(root,item.path,commit);
   }
   return entries.length;
 }
