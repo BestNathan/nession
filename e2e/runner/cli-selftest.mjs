@@ -26,7 +26,7 @@ const expectError = (...args) => {
 const testList = call('test', '--list');
 assert.equal(testList.code, 0, testList.stderr);
 const declaredTests = JSON.parse(testList.stdout).tests;
-assert.equal(declaredTests.length, 21);
+assert.equal(declaredTests.length, 24);
 assert.equal(new Set(declaredTests.map(item => item.id)).size, declaredTests.length);
 assert.ok(declaredTests.some(item => item.id === 'terminal-io'));
 const catalogFixtures = spawnSync(process.execPath, [path.join(repo, 'e2e/runner/test-catalog-selftest.cjs')], { cwd: repo, encoding: 'utf8', timeout: 10000 });
@@ -41,9 +41,18 @@ assert.match(migration.source_sha, /^[a-f0-9]{40}$/);
 const browserRoot = path.join(repo, 'e2e', 'tests', 'browser');
 assert.equal(fs.existsSync(path.join(repo, 'e2e', 'specs')), false, 'legacy tests must be retired');
 const foundSpecs = fs.readdirSync(browserRoot).filter(name => name.endsWith('.spec.ts')).sort();
-assert.deepEqual(foundSpecs, migration.specs, 'browser spec inventory changed during migration');
-assert.equal(foundSpecs.length, 21, 'baseline migration needs all 21 spec files');
-assert.equal(catalog.browserTests, 21, 'catalog may not silently count duplicates or omit specs');
+// Historical #1512 inventory is immutable; the only approved post-migration
+// split is one conversation regression into four behavior-owned specs.
+// This is a migration parity assertion, not a duplicate runtime ID registry.
+const split = [
+  'conversation-disclosure-web.spec.ts',
+  'conversation-disclosure-narrow.spec.ts',
+  'conversation-live-scroll.spec.ts',
+  'conversation-disclosure-app.spec.ts',
+];
+const expectedSpecs = migration.specs.filter(name => name !== 'conversation-acceptance.spec.ts').concat(split).sort();
+assert.deepEqual(foundSpecs, expectedSpecs, 'regression spec dropped or drifted during semantic split');
+assert.equal(catalog.browserTests, expectedSpecs.length, 'catalog may not silently omit specs');
 const pngRoot = path.join(browserRoot, '__snapshots__', 'fixture-visual.spec.ts');
 const foundPngs = fs.readdirSync(pngRoot).filter(name => name.endsWith('.png')).sort();
 const pinned = Object.keys(migration.baseline_png_blobs).map(file => path.basename(file)).sort();
