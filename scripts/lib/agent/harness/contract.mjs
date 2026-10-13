@@ -103,7 +103,7 @@ function safeTree(root, relativePath) {
     if (stat.isDirectory()) {
       for (const name of readdirSync(file).sort()) scan(path.join(file, name), path.posix.join(rel, name));
     } else if (stat.isFile()) {
-      files.push({ path: rel, sha256: digest(readFileSync(file).toString('base64')) });
+      files.push({ path: rel, sha256: createHash('sha256').update(readFileSync(file)).digest('hex') });
     } else {
       deny('unsupported dependency file: ' + rel);
     }
