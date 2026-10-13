@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { pathToFileURL } from 'node:url';
 // Post-run normalizer. Missing or corrupt reporter evidence yields Error, never Pass.
 import fs from 'node:fs';
 import assert from 'node:assert/strict';
@@ -31,6 +32,7 @@ function selfTest(){
   assert.throws(()=>collect(p,null,0,1));
   console.log('Issue E2E collection: no fabricated Pass for absent/corrupted Playwright report');
 }
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
 const [op,planFile,reportFile,outFile]=process.argv.slice(2);
 if(op==='self-test')selfTest();
 else if(op==='collect'){
@@ -42,3 +44,4 @@ else if(op==='collect'){
   fs.writeFileSync(outFile,JSON.stringify(result,null,2)+'\n',{flag:'wx'});
   console.log('Collected '+result.results.length+' E2E IDs, '+result.status);
 }else throw Error('use self-test or collect');
+}
