@@ -22,6 +22,7 @@ issue-e2e-verification-selftest
 issue-e2e-obligations-selftest
 issue-e2e-projector-selftest
 issue-e2e-plan-selftest
+issue-e2e-import-selftest
 issue-e2e-contract-selftest
 task-runner-selftest
 task-result-ingest-selftest
