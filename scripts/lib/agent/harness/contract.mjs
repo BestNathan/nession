@@ -9,7 +9,7 @@ const PROVIDERS = new Set(['cursor', 'claude-code']);
 const TOOL_MAP = Object.freeze({
   cursor: {
     'repo.read': 'read', 'repo.search': 'grep', 'repo.edit': 'edit',
-    'shell.test': 'bash', 'github.issue.read': 'mcp',
+    'shell.test': 'shell', 'github.issue.read': 'mcp',
     'github.pr.read': 'mcp',
   },
   'claude-code': {
@@ -111,6 +111,10 @@ function safeTree(root, relativePath) {
   scan(full, '.');
   if (!files.length) deny('empty external dependency tree');
   return digest(files);
+}
+
+export function hashDependencyTree(root, relativePath) {
+  return safeTree(root, relativePath);
 }
 
 export function verifyExternalDependencies(registry, root) {
