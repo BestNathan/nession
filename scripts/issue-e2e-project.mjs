@@ -20,7 +20,12 @@ export function projectIssueE2E(issue, plan, execution, authenticated) {
   if (!authenticated || authenticated.target_sha !== plan.target_sha ||
       !Number.isSafeInteger(authenticated.run_id) || authenticated.run_id <= 0 ||
       !Number.isSafeInteger(authenticated.run_attempt) || authenticated.run_attempt <= 0 ||
-      !authenticated.workflow_verified) throw new Error('missing trusted workflow_run attestation');
+      !authenticated.workflow_verified ||
+      !Number.isSafeInteger(execution.run_id) || !Number.isSafeInteger(execution.run_attempt) ||
+      execution.run_id !== authenticated.run_id ||
+      execution.run_attempt !== authenticated.run_attempt) {
+    throw new Error('missing or foreign trusted workflow_run attestation');
+  }
   const current = parseIssueE2E(issue.body, { requireDeclaration: true });
   if (current.errors.length) throw new Error('invalid current Issue E2E contract');
   const owner = plan.issues.find(x => x.issue === issue.number);
@@ -73,7 +78,7 @@ function selfTest() {
   const evidence={target_sha:sha,run_id:456,run_attempt:2,workflow_verified:true};
   const success={id:'terminal-attach',result:'Pass',discovered:1,passed:1,failed:0,flaky:0,skipped:0,assertions:3};
   const failure={id:'terminal-resume',result:'Fail',discovered:1,passed:0,failed:1,flaky:0,skipped:0,assertions:2};
-  const execution={target_sha:sha,plan_digest:plan.plan_digest,results:[success,failure]};
+  const execution={target_sha:sha,plan_digest:plan.plan_digest,run_id:456,run_attempt:2,results:[success,failure]};
   const result=projectIssueE2E(issue,plan,execution,evidence);
   assert.equal(result.all_pass,false);
   assert.match(result.body,/terminal-attach \| Regression \| Pass/);
@@ -81,6 +86,8 @@ function selfTest() {
   assert.match(result.body,/keep existing SC evidence/);
   assert.throws(() => projectIssueE2E(issue,plan,execution,{...evidence,workflow_verified:false}),/attestation/);
   assert.throws(() => projectIssueE2E(issue,plan,{...execution,plan_digest:'c'},evidence),/provenance/);
+  assert.throws(() => projectIssueE2E(issue,plan,{...execution,run_id:999},evidence),/foreign/);
+  assert.throws(() => projectIssueE2E(issue,plan,{...execution,run_attempt:3},evidence),/foreign/);
   assert.throws(() => projectIssueE2E({...issue,body:body.replace('- terminal-resume','- another-test')},plan,execution,evidence),/stale/);
   assert.throws(() => projectIssueE2E(issue,plan,{...execution,results:[{...success,assertions:0},failure]},evidence),/unproven/);
   assert.throws(() => projectIssueE2E(issue,plan,{...execution,results:[success]},evidence),/missing from execution/);
