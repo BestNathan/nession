@@ -100,7 +100,11 @@ export function ingestEncryptedCheckpoint(root, source, sealed, registry, key, e
     const head = readHead(root, identity);
     if (expectedVersion !== head.version) {
       const already = readJson(root, sealed.path);
-      if (already && head.version === sealed.version &&
+      const oldRun = readJson(root, checkpointPrefix(identity) + '/runs/' +
+        source.run_id + '-' + source.attempt + '.json');
+      if (already && oldRun && head.version === sealed.version &&
+          oldRun.checkpoint_path === sealed.path && oldRun.ciphertext_sha256 === sealed.ciphertext_sha256 &&
+          oldRun.source_sha === source.target_sha && oldRun.workflow_sha === source.workflow_sha &&
           bytes(already).equals(bytes(sealed))) {
         return { idempotent:true, identity, version:head.version };
       }
