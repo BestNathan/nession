@@ -21,6 +21,13 @@ function secretKey(key) {
 }
 function hash(bytes) { return createHash('sha256').update(bytes).digest('hex'); }
 
+function authenticatedContext(location, metadata) {
+  // Path prevents cross-Agent replay; metadata is authenticated as well,
+  // so an attacker cannot rebind Provider session/Harness without the AES key.
+  const fields = Object.entries(metadata ?? {}).sort(([a],[b]) => a.localeCompare(b));
+  return Buffer.from(JSON.stringify({ path: location, metadata: Object.fromEntries(fields) }));
+}
+
 // All Provider-native checkpoint bytes are encrypted before touching Git or artifacts.
 // The encryption key remains outside this repository and its orphan branches.
 export function sealCheckpoint(identity, version, nativeBytes, key, metadata = {}) {
@@ -32,7 +39,7 @@ export function sealCheckpoint(identity, version, nativeBytes, key, metadata = {
   }
   const iv = randomBytes(12);
   const cipher = createCipheriv('aes-256-gcm', secretKey(key), iv);
-  const aad = Buffer.from(location);
+  const aad = authenticatedContext(location, metadata);
   cipher.setAAD(aad);
   const ciphertext = Buffer.concat([cipher.update(nativeBytes), cipher.final()]);
   return {
@@ -56,7 +63,7 @@ export function unsealCheckpoint(identity, record, key) {
   if (hash(ciphertext) !== record.ciphertext_sha256) reject('checkpoint ciphertext integrity mismatch');
   try {
     const decipher = createDecipheriv('aes-256-gcm', secretKey(key), Buffer.from(record.encryption.iv, 'base64'));
-    decipher.setAAD(Buffer.from(record.path));
+    decipher.setAAD(authenticatedContext(record.path, record.metadata));
     decipher.setAuthTag(Buffer.from(record.encryption.tag, 'base64'));
     return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
   } catch { reject('checkpoint authentication failed'); }
