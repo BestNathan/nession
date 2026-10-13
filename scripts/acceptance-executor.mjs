@@ -678,9 +678,9 @@ function selfTest() {
     normalizeAcceptanceResult(v2Agent, {
       criteria: [{ criterion: 'SC-01', result: 'Pass', evidence: 'test: source and CI tied to SHA' }],
     }, 'agent-cursor'));
-  assert.match(v2Accepted, /\\| SC-01 \\| Pass \\| run 420;/);
-  assert.match(v2Accepted, /\\| SC-02 \\| Pending \\|/);
-  assert.doesNotMatch(v2Accepted, /\\| SC-01 \\| staging \\|/);
+  assert.match(v2Accepted, /\| SC-01 \| Pass \| run 420;/);
+  assert.match(v2Accepted, /\| SC-02 \| Pending \|/);
+  assert.doesNotMatch(v2Accepted, /\| SC-01 \| staging \|/);
   assert.throws(() => applyAcceptanceResultToBody(v2Body,
     normalizeAcceptanceResult(v2Agent, {
       criteria: [{ criterion: 'SC-01', result: 'Pass', evidence: 'test: source and CI tied to SHA' }],
