@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 38374588045,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/1701-issue-e2e-contract",
+    "target_sha": "6f199cab2c7eb6fef149131c45aeb342e7650193",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/38374588045",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "77fdac79bc3a972b6ce963f7462083be98f850abc5e7f12b9822301a30355834"
+  },
+  "record": "runs/2026-10-13/38374588045-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "00a8f3d1f10efdfd28faea5c7be50c3c76dd1b174fc98bc9f57a07a74ed67c7d"
+}
