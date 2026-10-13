@@ -18,6 +18,7 @@ protocol-json-contract
 issue-contract-selftest
 e2e-tests-catalog
 e2e-selected-report-selftest
+issue-e2e-assertion-evidence-selftest
 issue-e2e-verification-selftest
 issue-e2e-obligations-selftest
 issue-e2e-projector-selftest
