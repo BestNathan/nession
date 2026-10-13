@@ -36,6 +36,10 @@ export function verifySmoke({ context, result, telemetry, provider }) {
   assert.equal(telemetry.schema_version, 1);
   const canonicalProvider = provider === 'qwen' ? 'claude-code' : provider;
   assert.equal(telemetry.agent.provider, canonicalProvider, 'telemetry provider must match selected harness/backend');
+  if (provider === 'qwen') {
+    assert.match(telemetry.agent.model?.id ?? '', /^qwen/i,
+      'Qwen smoke must report the configured Qwen model identity');
+  }
   assert.equal(telemetry.agent.status, 'finished');
   assert.equal(telemetry.agent.prompt?.id, 'acceptance');
   assert.equal(telemetry.agent.prompt?.version, 'v1');
@@ -66,6 +70,11 @@ export function selfTest() {
     },
   };
   assert.equal(verifySmoke(qwenFixture).outcome, 'Pending');
+  assert.throws(() => verifySmoke({ ...qwenFixture, telemetry: {
+    ...qwenFixture.telemetry, agent: {
+      ...qwenFixture.telemetry.agent, model: { id: 'claude-sonnet-5' }
+    }
+  } }), /Qwen model/);
   assert.throws(() => verifySmoke({ ...qwenFixture, telemetry: {
     ...qwenFixture.telemetry, agent: { ...qwenFixture.telemetry.agent, provider:'qwen' }
   } }), /provider/);
@@ -105,7 +114,7 @@ export function selfTest() {
       ...fixture.telemetry, identity: { unique_run_name: nameCursor },
     },
   }), /matrix collisions/);
-  console.log('AI Agent provider smoke self-test: 15 positive/negative cases passed');
+  console.log('AI Agent provider smoke self-test: 16 positive/negative cases passed');
 }
 
 async function main() {
