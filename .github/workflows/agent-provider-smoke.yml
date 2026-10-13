@@ -31,15 +31,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        provider: [cursor, deepseek]
-    environment: ${{ matrix.provider }}
+        include:
+          - provider: cursor
+            environment: cursor
+          - provider: deepseek
+            environment: deepseek
+          - provider: qwen
+            environment: dev-claude-qwen
+    environment: ${{ matrix.environment }}
     env:
       CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
       CURSOR_MODEL: ${{ vars.CURSOR_MODEL || 'composer-2.5' }}
       CURSOR_MODEL_FAST: ${{ vars.CURSOR_MODEL_FAST || 'true' }}
       CURSOR_SDK_VERSION: ${{ vars.CURSOR_SDK_VERSION || 'latest' }}
       ACCEPTANCE_MAX_TURNS: '3'
-      ACCEPTANCE_CLAUDE_MODEL: ${{ vars.ACCEPTANCE_CLAUDE_MODEL || 'claude-sonnet-5' }}
+      ACCEPTANCE_CLAUDE_MODEL: ${{ vars.ACCEPTANCE_CLAUDE_MODEL || (matrix.provider == 'qwen' && (vars.ANTHROPIC_MODEL || vars.ANTHROPIC_DEFAULT_SONNET_MODEL)) || (matrix.provider != 'qwen' && 'claude-sonnet-5') || '' }}
       ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
       ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -66,9 +72,15 @@ jobs:
           if [[ "$PROVIDER" == cursor ]]; then
             [[ -n "$CURSOR_API_KEY" ]] || { echo 'CURSOR_API_KEY missing in cursor Environment' >&2; exit 1; }
           else
-            [[ -n "$ANTHROPIC_BASE_URL" ]] || { echo 'ANTHROPIC_BASE_URL missing in deepseek Environment' >&2; exit 1; }
+            [[ -n "$ANTHROPIC_BASE_URL" ]] || { echo "ANTHROPIC_BASE_URL missing in ${PROVIDER} Environment" >&2; exit 1; }
             [[ -n "$ANTHROPIC_AUTH_TOKEN" || -n "$ANTHROPIC_API_KEY" ]] ||
-              { echo 'DeepSeek authentication missing in deepseek Environment' >&2; exit 1; }
+              { echo "Claude Gateway authentication missing in ${PROVIDER} Environment" >&2; exit 1; }
+            if [[ "$PROVIDER" == qwen ]]; then
+              [[ -n "$ACCEPTANCE_CLAUDE_MODEL" ]] ||
+                { echo 'Qwen model missing: set ACCEPTANCE_CLAUDE_MODEL or ANTHROPIC_MODEL as an Environment variable' >&2; exit 1; }
+              [[ ! "$ACCEPTANCE_CLAUDE_MODEL" =~ ^claude-(opus|sonnet|haiku) ]] ||
+                { echo 'Qwen model must not resolve to a Claude alias' >&2; exit 1; }
+            fi
           fi
       - name: Install selected Provider
         env:

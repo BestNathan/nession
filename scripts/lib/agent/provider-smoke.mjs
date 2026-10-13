@@ -26,7 +26,7 @@ export function smokeContext(sha) {
 }
 
 export function verifySmoke({ context, result, telemetry, provider }) {
-  if (!['cursor', 'deepseek'].includes(provider)) throw new Error('Unexpected smoke provider');
+  if (!['cursor', 'deepseek', 'qwen'].includes(provider)) throw new Error('Unexpected smoke provider');
   assert.equal(context.criteria.length, 1);
   assert.equal(context.criteria[0].criterion, EXPECTED);
   assert.equal(result.criteria?.length, 1, 'exactly one criterion must be returned');
@@ -34,13 +34,18 @@ export function verifySmoke({ context, result, telemetry, provider }) {
   assert.equal(answer.criterion, EXPECTED, 'provider must not change criterion identity');
   assert.equal(answer.result, 'Pending', 'fabricated evidence must never become Pass/Fail/N/A');
   assert.equal(telemetry.schema_version, 1);
-  assert.equal(telemetry.agent.provider, provider, 'telemetry provider must match selected provider');
+  const canonicalProvider = provider === 'qwen' ? 'claude-code' : provider;
+  assert.equal(telemetry.agent.provider, canonicalProvider, 'telemetry provider must match selected harness/backend');
+  if (provider === 'qwen') {
+    assert.match(telemetry.agent.model?.id ?? '', /^qwen/i,
+      'Qwen smoke must report the configured Qwen model identity');
+  }
   assert.equal(telemetry.agent.status, 'finished');
   assert.equal(telemetry.agent.prompt?.id, 'acceptance');
   assert.equal(telemetry.agent.prompt?.version, 'v1');
   assert.match(telemetry.agent.prompt?.sha256 || '', /^[0-9a-f]{64}$/, 'prompt sha256 must be valid');
   assert.equal(telemetry.task.target_ref, context.target_ref);
-  const expectedSuffix = '-issue-' + context.issue.number + '-' + context.stage + '-' + provider;
+  const expectedSuffix = '-issue-' + context.issue.number + '-' + context.stage + '-' + canonicalProvider;
   assert.ok(telemetry.identity?.unique_run_name?.endsWith(expectedSuffix),
     'immutable telemetry run name must be scoped by Provider to prevent matrix collisions');
   return { provider, outcome: 'Pending', template: telemetry.agent.prompt.id, template_version: telemetry.agent.prompt.version, prompt_sha256: telemetry.agent.prompt.sha256 };
@@ -56,6 +61,23 @@ export function selfTest() {
     } },
   };
   assert.equal(verifySmoke(fixture).outcome, 'Pending');
+  const qwenFixture = {
+    ...fixture, provider: 'qwen',
+    telemetry: {
+      ...fixture.telemetry,
+      identity: { unique_run_name: '42-1-issue-1556-staging-claude-code' },
+      agent: { ...fixture.telemetry.agent, provider: 'claude-code', model: {id:'qwen3-coder-plus'} },
+    },
+  };
+  assert.equal(verifySmoke(qwenFixture).outcome, 'Pending');
+  assert.throws(() => verifySmoke({ ...qwenFixture, telemetry: {
+    ...qwenFixture.telemetry, agent: {
+      ...qwenFixture.telemetry.agent, model: { id: 'claude-sonnet-5' }
+    }
+  } }), /Qwen model/);
+  assert.throws(() => verifySmoke({ ...qwenFixture, telemetry: {
+    ...qwenFixture.telemetry, agent: { ...qwenFixture.telemetry.agent, provider:'qwen' }
+  } }), /provider/);
   assert.throws(() => smokeContext('not-a-commit'), /exact commit/);
   assert.throws(() => verifySmoke({ ...fixture, provider: 'unknown' }), /Unexpected smoke provider/);
   assert.throws(() => verifySmoke({ ...fixture, result: { criteria: [] } }), /exactly one/);
@@ -73,6 +95,12 @@ export function selfTest() {
     taskId: 'issue-1556-staging', provider: 'deepseek',
   });
   assert.notEqual(nameCursor, nameDeepSeek, 'concurrent provider jobs must not have identical immutable paths');
+  const nameQwen = providerScopedRunName({
+    workflowId: 'agent-provider-smoke', runId: 42, runAttempt: 1,
+    taskId: 'issue-1556-staging', provider: 'claude-code',
+  });
+  assert.notEqual(nameQwen, nameDeepSeek);
+  assert.notEqual(nameQwen, nameCursor);
   assert.equal(providerScopedRunName({
     workflowId: 'requirement-acceptance', runId: 42, runAttempt: 1,
     taskId: 'issue-1556-staging', provider: 'cursor',
@@ -86,7 +114,7 @@ export function selfTest() {
       ...fixture.telemetry, identity: { unique_run_name: nameCursor },
     },
   }), /matrix collisions/);
-  console.log('AI Agent provider smoke self-test: 12 positive/negative cases passed');
+  console.log('AI Agent provider smoke self-test: 16 positive/negative cases passed');
 }
 
 async function main() {

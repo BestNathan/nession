@@ -102,6 +102,11 @@
       "role": "auditor",
       "provider": "cursor",
       "environment": "agent-audit-cursor-01"
+    },
+    "dev-qwen-01": {
+      "role": "developer",
+      "provider": "claude-code",
+      "environment": "dev-claude-qwen"
     }
   },
   "external_dependencies": []
