@@ -56,8 +56,8 @@ assert.equal(catalog.browserTests, expectedSpecs.length, 'catalog may not silent
 const snapshotRoot = path.join(browserRoot, '__snapshots__');
 // Original #1512 blob SHAs must remain byte-for-byte despite a file-ID split.
 const visualDir = name => /^web-compact-/.test(name) ? 'fixture-visual-web-compact.spec.ts'
-  : /^app-.*-375-linux\\.png$/.test(name) ? 'fixture-visual-app-compact.spec.ts'
-  : /^app-.*-844x390-linux\\.png$/.test(name) ? 'fixture-visual-app-landscape.spec.ts'
+  : /^app-.*-375-linux\.png$/.test(name) ? 'fixture-visual-app-compact.spec.ts'
+  : /^app-.*-844x390-linux\.png$/.test(name) ? 'fixture-visual-app-landscape.spec.ts'
   : /^app-/.test(name) ? 'fixture-visual-app.spec.ts' : 'fixture-visual.spec.ts';
 const expectedSnapshotPaths = Object.keys(migration.baseline_png_blobs).map(relative =>
   path.join(snapshotRoot, visualDir(path.basename(relative)), path.basename(relative))).sort();
@@ -72,7 +72,7 @@ for (const [relative, expectedSha] of Object.entries(migration.baseline_png_blob
   assert.ok(filename.startsWith(snapshotRoot + path.sep), 'snapshot path escaped browser tree');
   assert.equal(fs.lstatSync(filename).isSymbolicLink(), false, 'snapshots must be real files');
   const bytes = fs.readFileSync(filename);
-  const actual = createHash('sha1').update('blob ' + bytes.length + '\\0').update(bytes).digest('hex');
+  const actual = createHash('sha1').update('blob ' + bytes.length + '\0').update(bytes).digest('hex');
   assert.equal(actual, expectedSha, 'visual baseline bytes changed: ' + relative);
 }
 
