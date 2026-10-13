@@ -9,7 +9,7 @@ const PROVIDERS = new Set(['cursor', 'claude-code']);
 const TOOL_MAP = Object.freeze({
   cursor: {
     'repo.read': 'read', 'repo.search': 'grep', 'repo.edit': 'edit',
-    'shell.test': 'bash', 'github.issue.read': 'mcp',
+    'shell.test': 'shell', 'github.issue.read': 'mcp',
     'github.pr.read': 'mcp',
   },
   'claude-code': {
@@ -113,6 +113,10 @@ function safeTree(root, relativePath) {
   return digest(files);
 }
 
+export function hashDependencyTree(root, relativePath) {
+  return safeTree(root, relativePath);
+}
+
 export function verifyExternalDependencies(registry, root) {
   validateRegistry(registry);
   return registry.external_dependencies.map((dep) => {
@@ -158,7 +162,13 @@ export function verifyEffectiveHarness(plan, observed, sourceSha, providerVersio
     plugins: plan.canonical_capabilities.plugins,
   })) {
     const loaded = new Set(observed[family]);
-    for (const required of expected) if (!loaded.has(required)) deny('required ' + family + ' was not loaded: ' + required);
+    const allowed = new Set(expected);
+    if (loaded.size !== observed[family].length ||
+        observed[family].some(x => typeof x !== 'string' || !x)) {
+      deny('invalid/duplicate native loaded ' + family);
+    }
+    for (const required of allowed) if (!loaded.has(required)) deny('required ' + family + ' was not loaded: ' + required);
+    for (const actual of loaded) if (!allowed.has(actual)) deny('undeclared ' + family + ' capability loaded: ' + actual);
   }
   const effective = {
     schema_version: 1,
