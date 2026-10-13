@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-import { pathToFileURL } from 'node:url';
 // Lossless per-file outcome extraction from a Playwright JSON report.
 // Output contains bounded counters only; raw page content, URL and logs are not ingested.
 import fs from 'node:fs';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
 import assert from 'node:assert/strict';
 
 function allSpecs(suites, inheritedFile = '', output = []) {
@@ -82,7 +83,10 @@ function selfTest() {
   assert.throws(() => summarize(plan,null),/missing/);
   console.log('Selected E2E report: Pass/Fail/Flaky/Empty and missing-report negatives passed');
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// This module is also imported by scripts/issue-e2e-collect.mjs.
+// Importing it must never execute its CLI parser or throw based on the
+// *caller's* argv (e.g. "collect", not "summarize").
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
 if (process.argv[2] === 'self-test') selfTest();
 else if (process.argv[2] === 'summarize') {
   const [planFile, reporterFile, outputFile] = process.argv.slice(3);
