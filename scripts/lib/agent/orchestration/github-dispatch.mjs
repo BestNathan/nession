@@ -185,9 +185,10 @@ function compareSource(run,body,result) {
       !spec.tasks.includes(body.task) || !HEX40.test(result.target_sha??'')) {
     reject('GitHub Run provenance or Agent outcome mismatch');
   }
-  if (typeof run.created_at!=='string' ||
-      Date.parse(run.created_at)<body.issued_at-30000 ||
-      Date.parse(run.created_at)>body.expires_at+30000) {
+  const runCreated=Date.parse(run.created_at ?? '');
+  if (!Number.isFinite(runCreated) ||
+      runCreated<body.issued_at-30000 ||
+      runCreated>body.expires_at+30000) {
     reject('run created outside ticket dispatch window');
   }
 }
