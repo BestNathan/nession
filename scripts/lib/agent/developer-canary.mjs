@@ -89,7 +89,7 @@ function canaryIdentity(env,startedAt,finishedAt,envelope,events,result){
       model:{id:providerModel(env),request_model:providerModel(env)},
       run_id:envelope?.session_id??null,status:result.edit_verified?'finished':'error'},
     execution:{turns:envelope?.num_turns??null,model_requests:null,
-      tool_calls:nativeToolNames,tools_observed:true},
+      tool_calls:nativeToolNames,tools_observed:events.some(x=>x?.type==='assistant'&&Array.isArray(x.message?.content))},
     tokens:normalizeClaudeUsage(envelope),
     cost:{raw_usd:null,charged_usd:null,estimated_usd:null},
     timing:{started_at:startedAt,finished_at:finishedAt,agent_duration_ms:ended-started},
