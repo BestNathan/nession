@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "roles": {
+    "developer": {
+      "tasks": [
+        "implement",
+        "repair"
+      ],
+      "capabilities": {
+        "tools": [
+          "repo.read",
+          "repo.search",
+          "repo.edit",
+          "shell.test",
+          "github.issue.read",
+          "github.pr.read"
+        ],
+        "skills": [
+          "nession-development",
+          "nession-gates"
+        ],
+        "mcp": [],
+        "plugins": []
+      }
+    },
+    "reviewer": {
+      "tasks": [
+        "review"
+      ],
+      "capabilities": {
+        "tools": [
+          "repo.read",
+          "repo.search",
+          "github.issue.read",
+          "github.pr.read"
+        ],
+        "skills": [
+          "nession-code-review"
+        ],
+        "mcp": [],
+        "plugins": []
+      }
+    },
+    "acceptor": {
+      "tasks": [
+        "accept"
+      ],
+      "capabilities": {
+        "tools": [
+          "repo.read",
+          "repo.search",
+          "github.issue.read",
+          "github.pr.read"
+        ],
+        "skills": [
+          "nession-acceptance"
+        ],
+        "mcp": [],
+        "plugins": []
+      }
+    },
+    "auditor": {
+      "tasks": [
+        "audit"
+      ],
+      "capabilities": {
+        "tools": [
+          "repo.read",
+          "repo.search",
+          "github.issue.read"
+        ],
+        "skills": [
+          "nession-writing-requirements"
+        ],
+        "mcp": [],
+        "plugins": []
+      }
+    }
+  },
+  "instances": {
+    "dev-cursor-01": {
+      "role": "developer",
+      "provider": "cursor",
+      "environment": "agent-dev-cursor-01"
+    },
+    "dev-deepseek-01": {
+      "role": "developer",
+      "provider": "claude-code",
+      "environment": "agent-dev-deepseek-01"
+    },
+    "review-cursor-01": {
+      "role": "reviewer",
+      "provider": "cursor",
+      "environment": "agent-review-cursor-01"
+    },
+    "accept-cursor-01": {
+      "role": "acceptor",
+      "provider": "cursor",
+      "environment": "agent-accept-cursor-01"
+    },
+    "audit-cursor-01": {
+      "role": "auditor",
+      "provider": "cursor",
+      "environment": "agent-audit-cursor-01"
+    }
+  },
+  "external_dependencies": []
+}
