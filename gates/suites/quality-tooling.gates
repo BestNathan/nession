@@ -35,6 +35,7 @@ tmux-socket-isolation-selftest
 server-handler-locality-selftest
 server-handler-concurrency-selftest
 agent-provider-contract
+agent-checkpoint-store
 gate-consumer-parity
 dev-workspace-selftest
 detector-selftest-coverage
