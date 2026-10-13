@@ -27,6 +27,7 @@ try {
   assert.equal(a.version,1);
   assert.equal(a.idempotent,false);
   assert.equal(ingestEncryptedCheckpoint(root,source,first,registry,key,0).idempotent,true);
+  assert.throws(() => ingestEncryptedCheckpoint(root,{...source,run_id:999},first,registry,key,0),/CAS/);
   const restored = restoreEncryptedCheckpoint(root,identity,{
     provider:'cursor',source_sha:source.target_sha,harness_digest:'c'.repeat(64),
   },key);
