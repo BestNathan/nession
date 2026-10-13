@@ -44,6 +44,7 @@ server-handler-locality-selftest
 server-handler-concurrency-selftest
 agent-provider-contract
 agent-checkpoint-store
+run-store-integrity
 gate-consumer-parity
 dev-workspace-selftest
 detector-selftest-coverage
