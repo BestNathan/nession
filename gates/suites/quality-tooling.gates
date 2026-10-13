@@ -22,6 +22,7 @@ e2e-observation-collector-selftest
 e2e-browser-report-selftest
 e2e-full-stack-runtime-selftest
 e2e-cli-selftest
+e2e-tests-catalog
 acceptance-layout-contract
 terminal-attach-resume-selftest
 e2e-cli-discovery
