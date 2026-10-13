@@ -65,6 +65,9 @@ try {
   assert.equal(auditNativeLoad(prep,observed,'sdk-1.2',effective.sha256).sha256,effective.sha256);
   assert.throws(()=>auditNativeLoad(prep,observed,'sdk-1.2','0'.repeat(64)),/incompatible/);
   assert.throws(()=>auditNativeLoad(prep,{...observed,skills:[]},'sdk-1.2'),/not loaded/);
+  assert.throws(()=>auditNativeLoad(prep,{...observed,tools:[...observed.tools,'unapproved-tool']},'sdk-1.2'),/undeclared/);
+  assert.throws(()=>auditNativeLoad(prep,{...observed,skills:[...observed.skills,'unverified-plugin-skill']},'sdk-1.2'),/undeclared/);
+  assert.throws(()=>auditNativeLoad(prep,{...observed,tools:[...observed.tools,observed.tools[0]]},'sdk-1.2'),/duplicate/);
   assert.throws(()=>auditNativeLoad(prep,null,'sdk-1.2'),/unobserved/);
 
   const claudeReg=structuredClone(reg);
