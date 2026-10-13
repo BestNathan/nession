@@ -134,12 +134,45 @@ function requiredHostTools(prepared,providers) {
   if(missing.length) fail('missing permission-enforcing host tool: '+missing.join(','));
   return required;
 }
-export function cursorNativeOptions(prepared,{hostTools,mcpServers}={}) {
+function pinnedMcpServers(prepared) {
+  const servers={};
+  const requestedHost=prepared.plan.canonical_capabilities.tools.filter(t=>Object.hasOwn(HOST,t));
+  const provided=new Set();
+  for(const name of prepared.required_mcp) {
+    const root=path.join(prepared.workspace,'.harness/mcp',name);
+    requireDir(root,'pinned MCP '+name);
+    const manifestFile=path.join(root,'server.json');
+    if(!fs.existsSync(manifestFile)||!fs.lstatSync(manifestFile).isFile()||
+        fs.lstatSync(manifestFile).isSymbolicLink()) fail('missing pinned MCP manifest: '+name);
+    const manifest=JSON.parse(fs.readFileSync(manifestFile,'utf8'));
+    if(!plain(manifest)||Object.keys(manifest).some(k=>!['type','command','args','provides'].includes(k))||
+        manifest.type!=='stdio'||typeof manifest.command!=='string'||
+        !Array.isArray(manifest.args)||manifest.args.some(x=>typeof x!=='string'||x.length>256)||
+        !Array.isArray(manifest.provides)||manifest.provides.some(x=>typeof x!=='string')) {
+      fail('unsupported or unsafe MCP manifest: '+name);
+    }
+    const entry=path.resolve(root,manifest.command);
+    if(!entry.startsWith(root+path.sep)||!fs.existsSync(entry)||
+        !fs.lstatSync(entry).isFile()||fs.lstatSync(entry).isSymbolicLink()) {
+      fail('unpinned MCP executable: '+name);
+    }
+    for(const cap of manifest.provides) {
+      if(!Object.hasOwn(HOST,cap)||provided.has(cap)) fail('unexpected/duplicate MCP capability: '+cap);
+      provided.add(cap);
+    }
+    servers[name]={type:'stdio',command:entry,args:manifest.args};
+  }
+  if(prepared.identity.provider==='claude-code') {
+    for(const cap of requestedHost) if(!provided.has(cap)) fail('MCP does not declare required GitHub capability: '+cap);
+  }
+  return servers;
+}
+
+export function cursorNativeOptions(prepared,{hostTools}={}) {
   if(prepared.identity.provider!=='cursor') fail('provider mismatch');
   if(prepared.required_plugins.length) fail('Cursor plugin injection from untrusted ambient settings is unsupported');
   const required=requiredHostTools(prepared,hostTools);
-  if(prepared.required_mcp.some(x=>!plain(mcpServers?.[x]))) fail('required Cursor MCP server not configured');
-  if(Object.keys(mcpServers??{}).some(x=>!prepared.required_mcp.includes(x))) fail('undeclared Cursor MCP server');
+  const mcpServers=pinnedMcpServers(prepared);
   const builtins=new Set(prepared.plan.native_tools.map(x=>x.native_name).filter(x=>x!=='mcp'));
   const selected=[...builtins];
   if(required.length||prepared.required_mcp.length) selected.push('mcp');
@@ -156,7 +189,7 @@ export function cursorNativeOptions(prepared,{hostTools,mcpServers}={}) {
       plugins:[],host_tools:required},
   };
 }
-export function claudeNativeOptions(prepared,{mcpConfigFile}={}) {
+export function claudeNativeOptions(prepared) {
   if(prepared.identity.provider!=='claude-code') fail('provider mismatch');
   const tools=prepared.plan.canonical_capabilities.tools;
   // Host GitHub reads must have an explicitly bound, trusted MCP server; a
@@ -167,18 +200,26 @@ export function claudeNativeOptions(prepared,{mcpConfigFile}={}) {
   const builtin=[...new Set(tools.flatMap(t=>CLAUDE_TOOLS[t]??[]))];
   const missing=tools.filter(t=>!CLAUDE_TOOLS[t]&&!Object.hasOwn(HOST,t));
   if(missing.length) fail('unavailable Claude native tool: '+missing.join(','));
-  if(prepared.required_mcp.length && (!mcpConfigFile||
-      !path.isAbsolute(mcpConfigFile)||!fs.existsSync(mcpConfigFile))) {
-    fail('required Claude MCP configuration missing');
-  }
-  const configDir=path.resolve(prepared.workspace);
-  if(mcpConfigFile && (!path.resolve(mcpConfigFile).startsWith(configDir+path.sep) ||
-      fs.lstatSync(mcpConfigFile).isSymbolicLink())) fail('Claude MCP config outside prepared workspace');
+  const servers=pinnedMcpServers(prepared);
   const args=['--setting-sources','project','--strict-mcp-config',
     '--allowedTools',builtin.sort().join(',')];
-  if(prepared.required_mcp.length) args.push('--mcp-config',mcpConfigFile);
+  if(prepared.required_mcp.length) {
+    const configDir=safeParents(prepared.workspace,'.harness');
+    const configFile=path.join(configDir,'mcp-config.json');
+    if(fs.existsSync(configFile)) fail('Claude MCP config destination collision');
+    const config={mcpServers:Object.fromEntries(Object.entries(servers).map(([id,s])=>
+      [id,{command:s.command,args:s.args}]))};
+    fs.writeFileSync(configFile,JSON.stringify(config,null,2)+'\n',{flag:'wx',mode:0o600});
+    args.push('--mcp-config',configFile);
+  }
   for(const plugin of prepared.required_plugins) {
-    args.push('--plugin-dir',path.join(prepared.workspace,'.harness/plugins',plugin));
+    const full=path.join(prepared.workspace,'.harness/plugins',plugin);
+    const manifest=path.join(full,'.claude-plugin/plugin.json');
+    if(!fs.existsSync(manifest)||!fs.lstatSync(manifest).isFile()||
+        fs.lstatSync(manifest).isSymbolicLink()) fail('missing pinned Claude Plugin manifest');
+    const details=JSON.parse(fs.readFileSync(manifest,'utf8'));
+    if(details.name!==plugin) fail('Plugin identity does not match pinned role capability');
+    args.push('--plugin-dir',full);
   }
   return {
     provider:'claude-code',source_sha:prepared.source_sha,
