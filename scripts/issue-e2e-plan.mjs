@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { pathToFileURL } from 'node:url';
 // Deterministic Issue→E2E browser-regression plan; the LLM is never the selector.
 import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
@@ -112,6 +113,7 @@ function selfTest() {
   console.log('Issue E2E plan: deterministic dedupe, exact SHA and unlisted changed-test negatives passed');
 }
 
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
 if (process.argv[2] === 'self-test') selfTest();
 else if (process.argv[2] === 'plan') {
   const [repo, issuesFile, base, head, output] = process.argv.slice(3);
@@ -121,3 +123,4 @@ else if (process.argv[2] === 'plan') {
   fs.writeFileSync(output, JSON.stringify(plan, null, 2) + '\n', { flag: 'wx' });
   console.log('Selected ' + plan.selected.length + ' E2E test IDs');
 } else throw new Error('usage: issue-e2e-plan.mjs self-test | plan ROOT ISSUES_JSON BASE_SHA HEAD_SHA OUTPUT');
+}
