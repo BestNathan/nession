@@ -48,6 +48,14 @@ try {
   assert.equal(restoreEncryptedCheckpoint(root,identity,{
     provider:'cursor',source_sha:source.target_sha,harness_digest:'c'.repeat(64)},key).head.version,2);
   assert.throws(() => ingestEncryptedCheckpoint(root,{...source,run_id:126},second,registry,key,2),/sequence gap/);
+  const third = envelope(3,'AFTER INTERRUPTED HEAD');
+  const baseDir = path.join(root,'roles','developer','dev-cursor-01','issues','1694');
+  fs.writeFileSync(path.join(baseDir,'.head-127-1'),JSON.stringify({
+    version:3,checkpoint_path:third.path,ciphertext_sha256:third.ciphertext_sha256,
+  },null,2)+'\n');
+  assert.equal(ingestEncryptedCheckpoint(root,{...source,run_id:127},third,registry,key,2).version,3);
+  assert.equal(restoreEncryptedCheckpoint(root,identity,{
+    provider:'cursor',source_sha:source.target_sha,harness_digest:'c'.repeat(64)},key).head.version,3);
   const corrupt = path.join(root,'roles','developer','dev-cursor-01','issues','1694','head.json');
   fs.writeFileSync(corrupt,JSON.stringify({version:900,checkpoint_path:'../../etc/passwd',ciphertext_sha256:'a'.repeat(64)}));
   assert.throws(() => restoreEncryptedCheckpoint(root,identity,{
