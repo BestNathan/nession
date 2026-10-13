@@ -26,7 +26,7 @@ const expectError = (...args) => {
 const testList = call('test', '--list');
 assert.equal(testList.code, 0, testList.stderr);
 const declaredTests = JSON.parse(testList.stdout).tests;
-assert.equal(declaredTests.length, 25);
+assert.equal(declaredTests.length, 29);
 assert.equal(new Set(declaredTests.map(item => item.id)).size, declaredTests.length);
 assert.ok(declaredTests.some(item => item.id === 'terminal-io'));
 const catalogFixtures = spawnSync(process.execPath, [path.join(repo, 'e2e/runner/test-catalog-selftest.cjs')], { cwd: repo, encoding: 'utf8', timeout: 10000 });
@@ -50,20 +50,29 @@ const split = [
   'conversation-live-scroll.spec.ts',
   'conversation-disclosure-app.spec.ts',
 ];
-const expectedSpecs = migration.specs.filter(name => name !== 'conversation-acceptance.spec.ts').concat(split, ['terminal-attach-bootstrap.spec.ts']).sort();
+const expectedSpecs = migration.specs.filter(name => name !== 'conversation-acceptance.spec.ts').concat(split, ['terminal-attach-bootstrap.spec.ts', 'fixture-visual-web-compact.spec.ts', 'fixture-visual-app.spec.ts', 'fixture-visual-app-compact.spec.ts', 'fixture-visual-app-landscape.spec.ts']).sort();
 assert.deepEqual(foundSpecs, expectedSpecs, 'regression spec dropped or drifted during semantic split');
 assert.equal(catalog.browserTests, expectedSpecs.length, 'catalog may not silently omit specs');
-const pngRoot = path.join(browserRoot, '__snapshots__', 'fixture-visual.spec.ts');
-const foundPngs = fs.readdirSync(pngRoot).filter(name => name.endsWith('.png')).sort();
-const pinned = Object.keys(migration.baseline_png_blobs).map(file => path.basename(file)).sort();
-assert.deepEqual(foundPngs, pinned, 'snapshot inventory mismatch');
-assert.equal(foundPngs.length, 43, 'all 43 snapshots must migrate unchanged');
+const snapshotRoot = path.join(browserRoot, '__snapshots__');
+// Original #1512 blob SHAs must remain byte-for-byte despite a file-ID split.
+const visualDir = name => /^web-compact-/.test(name) ? 'fixture-visual-web-compact.spec.ts'
+  : /^app-.*-375-linux\\.png$/.test(name) ? 'fixture-visual-app-compact.spec.ts'
+  : /^app-.*-844x390-linux\\.png$/.test(name) ? 'fixture-visual-app-landscape.spec.ts'
+  : /^app-/.test(name) ? 'fixture-visual-app.spec.ts' : 'fixture-visual.spec.ts';
+const expectedSnapshotPaths = Object.keys(migration.baseline_png_blobs).map(relative =>
+  path.join(snapshotRoot, visualDir(path.basename(relative)), path.basename(relative))).sort();
+const actualSnapshotPaths = fs.readdirSync(snapshotRoot, { withFileTypes: true })
+  .filter(entry => entry.isDirectory())
+  .flatMap(entry => fs.readdirSync(path.join(snapshotRoot, entry.name))
+    .filter(name => name.endsWith('.png')).map(name => path.join(snapshotRoot, entry.name, name))).sort();
+assert.deepEqual(actualSnapshotPaths, expectedSnapshotPaths, 'visual snapshot set changed after semantic split');
+assert.equal(actualSnapshotPaths.length, 43, 'all 43 snapshot PNG blobs are retained');
 for (const [relative, expectedSha] of Object.entries(migration.baseline_png_blobs)) {
-  const filename = path.resolve(browserRoot, relative);
-  assert.ok(filename.startsWith(browserRoot + path.sep), 'snapshot path escaped browser tree');
+  const filename = path.resolve(snapshotRoot, visualDir(path.basename(relative)), path.basename(relative));
+  assert.ok(filename.startsWith(snapshotRoot + path.sep), 'snapshot path escaped browser tree');
   assert.equal(fs.lstatSync(filename).isSymbolicLink(), false, 'snapshots must be real files');
   const bytes = fs.readFileSync(filename);
-  const actual = createHash('sha1').update('blob ' + bytes.length + '\0').update(bytes).digest('hex');
+  const actual = createHash('sha1').update('blob ' + bytes.length + '\\0').update(bytes).digest('hex');
   assert.equal(actual, expectedSha, 'visual baseline bytes changed: ' + relative);
 }
 
