@@ -58,7 +58,7 @@ try {
   assert.ok(!cursor.agent_options.local.settingSources.includes('user'));
   assert.equal(cursor.agent_options.local.customTools.read_target_issue,hostTools['github.issue.read']);
   assert.throws(()=>cursorNativeOptions(prep,{hostTools,mcpServers:{unlisted:{command:'bash'}}}),/undeclared/);
-  const observed={tools:prep.plan.native_tools.map(x=>x.native_name),
+  const observed={tools:[...new Set(prep.plan.native_tools.map(x=>x.native_name))],
     skills:prep.required_skills,mcp:[],plugins:[]};
   const effective=auditNativeLoad(prep,observed,'sdk-1.2');
   assert.match(effective.sha256,/^[a-f0-9]{64}$/);
