@@ -1,6 +1,8 @@
 // Authenticated GitHub workflow_run boundary for Issue E2E evidence.
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { buildGitPlan } from './issue-e2e-plan.mjs';
 import { projectIssueE2E } from './issue-e2e-project.mjs';
 
 const SHA=/^[a-f0-9]{40}$/;
@@ -36,6 +38,15 @@ export function verifySource(event,run,pr,plan,results,artifact) {
     workflow_verified:true,artifact_digest:artifact.digest};
 }
 
+export function verifyPlanFromSource(sourceRoot, issues, pr, claimed) {
+  const rebuilt = buildGitPlan(sourceRoot,issues,pr.base.sha,pr.head.sha);
+  assert.equal(claimed.mode,rebuilt.mode);
+  assert.equal(claimed.plan_digest,rebuilt.plan_digest,'plan changed from current Issue/source');
+  assert.deepEqual(claimed.issues,rebuilt.issues,'Issue contract differs from captured plan');
+  assert.deepEqual(claimed.selected,rebuilt.selected,'test selection differs from trusted source');
+  return rebuilt;
+}
+
 export function projectAuthenticated(issues,plan,results,authenticated) {
   if(plan.mode!=='selected')throw Error('Only selected plans have per-ID Issue reports');
   const projected=[];
@@ -67,3 +78,24 @@ function selfTest(){
   console.log('Issue E2E source attestation: exact workflow, SHA, PR and artifact negative fixtures passed');
 }
 if(process.argv[2]==='self-test')selfTest();
+else if(process.argv[2]==='project') {
+  const [eventFile,runFile,prFile,planFile,resultFile,artifactFile,issueFile,sourceRoot,outputDir] = process.argv.slice(3);
+  if(!outputDir)throw Error('project EVENT RUN PR PLAN RESULTS ARTIFACT ISSUES SOURCE_ROOT OUTPUT_DIR');
+  const read = file => JSON.parse(fs.readFileSync(file,'utf8'));
+  const event=read(eventFile),run=read(runFile),pr=read(prFile);
+  const plan=read(planFile),results=read(resultFile),artifact=read(artifactFile);
+  const issues=read(issueFile);
+  const attested=verifySource(event,run,pr,plan,results,artifact);
+  verifyPlanFromSource(sourceRoot,issues,pr,plan);
+  const projections=projectAuthenticated(issues,plan,results,attested);
+  fs.mkdirSync(outputDir,{recursive:true});
+  for(const item of projections)
+    fs.writeFileSync(path.join(outputDir,String(item.issue)+'.json'),
+      JSON.stringify({body:item.body})+'\\n',{flag:'wx'});
+  fs.writeFileSync(path.join(outputDir,'record.json'),
+    JSON.stringify({schema_version:1,kind:'issue_e2e_run',
+      target_sha:attested.target_sha,run_id:attested.run_id,
+      run_attempt:attested.run_attempt,plan_digest:plan.plan_digest,
+      artifact_digest:attested.artifact_digest,results:results.results},null,2)+'\\n',{flag:'wx'});
+}
+
