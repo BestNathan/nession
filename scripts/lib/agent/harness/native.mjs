@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { hashDependencyTree, resolveIdentity, resolveProviderPlan, verifyExternalDependencies,
   verifyEffectiveHarness, digest } from './contract.mjs';
@@ -76,6 +77,14 @@ export function prepareNativeHarness(registry,request) {
   requireDir(sourceRoot,'source checkout');
   requireDir(destRoot,'isolated workspace');
   if(sourceRoot===destRoot) fail('native preparation requires a separate isolated workspace');
+  let gitHead, gitRoot;
+  try {
+    gitHead=execFileSync('git',['-C',sourceRoot,'rev-parse','HEAD'],{encoding:'utf8',timeout:5000}).trim();
+    gitRoot=execFileSync('git',['-C',sourceRoot,'rev-parse','--show-toplevel'],{encoding:'utf8',timeout:5000}).trim();
+  } catch { fail('source checkout must be a valid Git root'); }
+  if(gitHead!==source_sha || path.resolve(gitRoot)!==sourceRoot) {
+    fail('source checkout HEAD does not match required exact SHA');
+  }
   const role=registry.roles[identity.role];
   const verified=verifyExternalDependencies(registry,sourceRoot);
   const dependencyById=new Map(registry.external_dependencies.map(dep=>[dep.id,dep]));
