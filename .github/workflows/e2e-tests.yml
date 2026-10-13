@@ -100,7 +100,9 @@ jobs:
             [[ "$issue" =~ ^[1-9][0-9]*$ ]] || exit 1
             gh api "repos/$GITHUB_REPOSITORY/issues/$issue" > "$RUNNER_TEMP/issue-e2e/contracts/$issue.json"
           done
-          jq -s '.' "$RUNNER_TEMP"/issue-e2e/contracts/*.json > "$RUNNER_TEMP/issue-e2e/issues.json" 2>/dev/null || true
+          if compgen -G "$RUNNER_TEMP/issue-e2e/contracts/*.json" > /dev/null; then
+            jq -s '.' "$RUNNER_TEMP"/issue-e2e/contracts/*.json > "$RUNNER_TEMP/issue-e2e/issues.json"
+          fi
           node trusted/scripts/issue-e2e-selection-entry.mjs plan \
             "$GITHUB_EVENT_PATH" "$RUNNER_TEMP/issue-e2e/issues.json" \
             "$GITHUB_WORKSPACE" "$RUNNER_TEMP/issue-e2e/plan.json"
