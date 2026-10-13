@@ -60,7 +60,7 @@ Requirement: <concise outcome>
 
 Body must contain the **canonical v2 authoring format**:
 
-```markdown
+````markdown
 ## Requirements: <Topic>
 
 <problem, desired behavior, constraints, design decisions>
@@ -99,7 +99,7 @@ acceptance:
 
 ---
 **Status:** Draft | In Discussion | Approved
-```
+````
 
 Every `SC-xx` has a stable ID, exactly one Plan entry, and exactly one Report row. Define the timing and proof method **once in the Plan**. The Report and SC checkbox are trusted projections, not alternative sources of proof configuration.
 
