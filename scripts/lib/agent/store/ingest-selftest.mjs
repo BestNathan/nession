@@ -46,7 +46,7 @@ try {
   assert.equal(ingestEncryptedCheckpoint(root,{...source,run_id:124},second,registry,key,1).version,2);
   assert.equal(restoreEncryptedCheckpoint(root,identity,{
     provider:'cursor',source_sha:source.target_sha,harness_digest:'c'.repeat(64)},key).head.version,2);
-  assert.throws(() => ingestEncryptedCheckpoint(root,{...source,run_id:126},second,registry,key,2),/CAS/);
+  assert.throws(() => ingestEncryptedCheckpoint(root,{...source,run_id:126},second,registry,key,2),/sequence gap/);
   const corrupt = path.join(root,'roles','developer','dev-cursor-01','issues','1694','head.json');
   fs.writeFileSync(corrupt,JSON.stringify({version:900,checkpoint_path:'../../etc/passwd',ciphertext_sha256:'a'.repeat(64)}));
   assert.throws(() => restoreEncryptedCheckpoint(root,identity,{
