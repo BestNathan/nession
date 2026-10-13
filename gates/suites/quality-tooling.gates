@@ -20,6 +20,7 @@ issue-e2e-contract-selftest
 issue-e2e-plan-selftest
 e2e-selected-report-selftest
 issue-e2e-projector-selftest
+issue-e2e-verification-selftest
 task-runner-selftest
 task-result-ingest-selftest
 e2e-observation-collector-selftest
