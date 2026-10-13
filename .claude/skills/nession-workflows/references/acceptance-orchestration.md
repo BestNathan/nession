@@ -1,6 +1,6 @@
 # SC Acceptance Orchestration — operational contract and future deployment boundary
 
-> **Implementation status:** the constrained `## Acceptance Plan` YAML contract is supported for per-SC `when`, `branch`/`environment`, and `method`; main/staging merged-SHA Agent/Case selection, exact target proof, trusted Case ingestion and Issue result projection are operational. The legacy `pre-merge | staging | post-merge` Acceptance Report is still required; historical issues without a plan remain supported. **Production `when: deployed` execution remains deferred:** an actual environment/revision/digest and authorization boundary must be implemented independently; main merge is not deployment.
+> **Implementation status:** the constrained `## Acceptance Plan` YAML contract is supported for per-SC `when`, `branch`/`environment`, and `method`; main/staging merged-SHA Agent/Case selection, exact target proof, trusted Case ingestion and Issue result projection are operational. New three-column Acceptance Reports derive the compatibility stage from the Plan; historical four-column Reports and issues without a plan remain supported. **Production `when: deployed` execution remains deferred:** an actual environment/revision/digest and authorization boundary must be implemented independently; main merge is not deployment.
 
 ## Problem and decision
 
@@ -32,7 +32,7 @@ acceptance:
     method: case
 ```
 
-This is the **supported constrained Issue grammar**, validated by `scripts/acceptance-plan.mjs` and the owning Issue/Gate contracts. If present, the plan must cover every SC and match its legacy Acceptance Report Stage. Case manifests describe execution, not independent authority for SC selection.
+This is the **supported constrained Issue grammar**, validated by `scripts/acceptance-plan.mjs` and the owning Issue/Gate contracts. If present, the plan must cover every SC; its effective legacy runner stage is derived when the Report has no Stage column, or checked against any explicitly declared historical Stage. Case manifests describe execution, not independent authority for SC selection.
 
 `branch: staging | main` is required for `when: merged` in the current contract; no caller may silently infer a different default. Exact target SHA and source commit association must be recorded.
 
@@ -98,7 +98,7 @@ PR / merged push / verified deployment event / explicit manual request
 
 ## Implemented controls and the remaining production boundary
 
-1. `scripts/acceptance-plan.mjs` provides the optional, validated per-SC `when × method × branch/environment` contract; the Issue validator and Requirement Acceptance Gate retain the historic Acceptance Report Stage and reject inconsistent explicit plans.
+1. `scripts/acceptance-plan.mjs` provides the optional, validated per-SC `when × method × branch/environment` contract; the Issue validator and Requirement Acceptance Gate derive stage from a v2 Plan and reject mismatching explicitly-staged historical Reports.
 2. `scripts/acceptance-executor.mjs`, `scripts/select-merged-agents.mjs` and `scripts/select-acceptance-cases.mjs` enforce method- and stage-qualified eligibility, with negative fixtures and exact target SHA; Agent-only criteria do not require a Case.
 3. `./e2e/run acceptance` owns real source-aligned Case execution; the main-owned `Acceptance / Cases` and `Acceptance / Case Ingest` workflows preserve independent runtime evidence and trusted immutable record projection.
 4. `Acceptance / Orchestrator` owns the PR/merged-SHA routing and Issue-close Guard. Model-backed execution is separated into `Agent / SC Acceptance` and emits canonical telemetry; the source-run path/name and stable logical workflow ID must be checked when renaming.
