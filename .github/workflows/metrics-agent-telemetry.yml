@@ -158,3 +158,32 @@ jobs:
           git add -A raw agent-metrics.json agent-metrics-light.svg agent-metrics-dark.svg
           git commit -m "metrics: ingest agent telemetry from run ${SOURCE_RUN_ID}"
           git push origin HEAD:metrics
+
+      # A wake-up, not an Acceptance verdict; never loop on Acceptance telemetry.
+      - name: Notify Acceptance of durable Provider evidence
+        if: >-
+          steps.artifacts.outputs.count != '0' &&
+          steps.persist.outputs.changed != '0' &&
+          steps.source.outputs.expected_workflow_id == 'agent-provider-smoke'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE_RUN_ID: ${{ steps.source.outputs.run_id }}
+          SOURCE_RUN_ATTEMPT: ${{ steps.source.outputs.run_attempt }}
+        run: |
+          set -euo pipefail
+          jq -e --arg repo "$GITHUB_REPOSITORY" '
+            .repository.full_name == $repo and
+            .head_repository.full_name == $repo and
+            .path == ".github/workflows/agent-provider-smoke.yml" and
+            .name == "Agent / Provider Smoke" and
+            .event == "push" and .head_branch == "main" and
+            .status == "completed" and .conclusion == "success" and
+            (.head_sha | test("^[a-f0-9]{40}$"))' \
+            "$RUNNER_TEMP/telemetry-source-run.json" > /dev/null
+          source_sha="$(jq -er .head_sha "$RUNNER_TEMP/telemetry-source-run.json")"
+          gh api --method POST "repos/$GITHUB_REPOSITORY/dispatches" \
+            -f event_type=nession-agent-telemetry-ingested \
+            -F "client_payload[source_run_id]=$SOURCE_RUN_ID" \
+            -F "client_payload[source_run_attempt]=$SOURCE_RUN_ATTEMPT" \
+            -f "client_payload[target_sha]=$source_sha"
+          echo "Notified Acceptance: durable Provider telemetry for $source_sha" >> "$GITHUB_STEP_SUMMARY"
