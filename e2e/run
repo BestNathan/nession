@@ -40,10 +40,12 @@ function catalog() {
   if (fs.existsSync(at('acceptance'))) throw new Error('legacy root acceptance/ is forbidden');
   if (!fs.existsSync(canonical)) throw new Error('missing canonical Case root: e2e/acceptance/cases');
   const casesRoot = canonical;
+  const caseFiles = walk(casesRoot, 'case.yaml');
+  if (caseFiles.length === 0) throw new Error('canonical Case catalog must not be empty');
   return {
     caseRoot: casesRoot,
     caseLayout: 'canonical',
-    cases: walk(casesRoot, 'case.yaml').map((p) => path.relative(root, p)),
+    cases: caseFiles.map((p) => path.relative(root, p)),
     scenarios: walk(at('e2e', 'scenarios'), 'scenario.yaml')
       .map((p) => path.relative(root, p)),
     browserTests: [...walk(at('e2e', 'tests', 'browser'), ''), ...walk(at('e2e', 'specs'), '')]
