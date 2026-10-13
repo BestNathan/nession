@@ -461,8 +461,8 @@ jobs:
             > "$RUNNER_TEMP/acceptance-runs.json"
           id="$(jq -er --arg sha "$TARGET_SHA" --argjson pr "$pr" '
             [.workflow_runs[] | select(.head_sha == $sha and
-             [.pull_requests[].number] | index($pr) != null)] |
-            sort_by(.created_at) | last.id // empty' "$RUNNER_TEMP/acceptance-runs.json")" || exit 0
+             ([.pull_requests[].number] | index($pr) != null))] |
+            sort_by(.created_at) | last | .id // empty' "$RUNNER_TEMP/acceptance-runs.json")" || exit 0
           [[ "$id" =~ ^[1-9][0-9]*$ ]] || exit 0
           status="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id" --jq .status)"
           conclusion="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id" --jq .conclusion)"
