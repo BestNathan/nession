@@ -4,8 +4,22 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 
 const ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-function block(body, heading) {
+function visibleLines(body) {
   const lines = String(body ?? '').replace(/\r\n?/g, '\n').split('\n');
+  let fence = null;
+  return lines.map(line => {
+    const marker = line.match(/^\s*(`{3,}|~{3,})/);
+    if (marker) {
+      const token = marker[1];
+      if (!fence) fence = { char: token[0], length: token.length };
+      else if (token[0] === fence.char && token.length >= fence.length) fence = null;
+      return '';
+    }
+    return fence ? '' : line;
+  });
+}
+function block(body, heading) {
+  const lines = visibleLines(body);
   const begin = lines.findIndex(line => line.trim() === '## ' + heading);
   if (begin < 0) return null;
   let end = lines.findIndex((line, i) => i > begin && /^##\s/.test(line));
@@ -104,6 +118,7 @@ function selfTest() {
   assert.deepEqual(verifyIssueE2EAgainstCatalog(good, ['terminal-reconnect','terminal-attach'], ['terminal-attach']), ['terminal-attach', 'terminal-reconnect']);
   assert.equal(parseIssueE2E(body.replace('| Pending | - |', '| Pass | run 1 |')).digest, good.digest);
   assert.equal(parseIssueE2E('old issue'), null);
+  assert.equal(parseIssueE2E('```markdown\n## E2E Verification\n### New\n- fake\n## E2E Report\n```'), null);
   assert.match(parseIssueE2E('old issue', { requireDeclaration: true }).errors.join(','), /missing/);
   for (const [bad, expected] of [
     [body.replace('- terminal-attach', '- terminal-reconnect'), /cannot be New and Regression/],
