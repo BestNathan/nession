@@ -108,7 +108,7 @@ function selfTest() {
   for (const [bad, expected] of [
     [body.replace('- terminal-attach', '- terminal-reconnect'), /cannot be New and Regression/],
     [body.replace('- terminal-attach', '- ../escape'), /invalid E2E ID/],
-    [body.replace('### Regression\\n- terminal-attach', '### Regression\\n'), /must declare IDs/],
+    [body.replace('### Regression\n- terminal-attach', '### Regression\n'), /must declare IDs/],
     [body.replace('| terminal-attach | Regression | Pending | - |', ''), /missing E2E Report row/],
     [body.replace('| terminal-attach | Regression | Pending | - |', '| stale | Regression | Pass | forged |'), /unrequired/],
   ]) assert.match(parseIssueE2E(bad).errors.join(','), expected);
