@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { discover, select } = require('./test-catalog.cjs');
+const { discover, select, verifyDiscoveredFiles } = require('./test-catalog.cjs');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nession-e2e-test-catalog-'));
 try {
   const root = path.join(tmp, 'tests');
@@ -19,6 +19,18 @@ try {
   for (const ids of [[], ['missing'], ['terminal-attach', 'terminal-attach'], ['../escape'], ['']]) {
     assert.throws(() => select(catalog, ids));
   }
+  assert.equal(verifyDiscoveredFiles(catalog, [
+    'tests/browser/terminal-attach.spec.ts', 'tests/protocol/terminal-replay.spec.ts',
+  ]), 2);
+  assert.throws(() => verifyDiscoveredFiles(catalog, ['tests/browser/terminal-attach.spec.ts']), /omitted/);
+  assert.throws(() => verifyDiscoveredFiles(catalog, [
+    'tests/browser/terminal-attach.spec.ts', 'tests/protocol/terminal-replay.spec.ts',
+    'tests/browser/unregistered.spec.ts',
+  ]), /unregistered/);
+  assert.throws(() => verifyDiscoveredFiles(catalog, []), /no runnable/);
+  assert.throws(() => verifyDiscoveredFiles(catalog, [
+    'tests/browser/terminal-attach.spec.ts', 'tests/browser/terminal-replay.spec.ts',
+  ]), /ID\/path mismatch/);
   write('protocol/terminal-attach.spec.ts');
   assert.throws(() => discover(root), /duplicate/);
   fs.unlinkSync(path.join(root, 'protocol/terminal-attach.spec.ts'));

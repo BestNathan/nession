@@ -47,4 +47,21 @@ function select(tests, ids) {
   return selected;
 }
 
-module.exports = { discover, select };
+function verifyDiscoveredFiles(tests, files) {
+  const expected = new Map(tests.map(t => [t.id, t.file]));
+  const found = new Set();
+  for (const file of files) {
+    const normalized = String(file).replace(/\\/g, '/');
+    const filename = normalized.split('/').at(-1);
+    const id = filename.endsWith('.spec.ts') ? filename.slice(0, -8) : '';
+    if (!ID.test(id)) throw new Error('invalid Playwright discovered file: ' + file);
+    if (!expected.has(id)) throw new Error('unregistered Playwright test ' + id);
+    if (expected.get(id) !== normalized) throw new Error('Playwright ID/path mismatch for ' + id);
+    found.add(id);
+  }
+  if (!found.size) throw new Error('Playwright discovered no runnable tests');
+  for (const id of expected.keys()) if (!found.has(id)) throw new Error('Playwright discovery omitted ' + id);
+  return found.size;
+}
+
+module.exports = { discover, select, verifyDiscoveredFiles };
