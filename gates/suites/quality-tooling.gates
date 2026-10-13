@@ -16,6 +16,10 @@ repo-health-selftest
 repo-metrics-selftest
 protocol-json-contract
 issue-contract-selftest
+issue-e2e-contract-selftest
+issue-e2e-plan-selftest
+e2e-selected-report-selftest
+issue-e2e-projector-selftest
 task-runner-selftest
 task-result-ingest-selftest
 e2e-observation-collector-selftest
@@ -23,9 +27,6 @@ e2e-browser-report-selftest
 e2e-full-stack-runtime-selftest
 e2e-cli-selftest
 e2e-tests-catalog
-issue-e2e-plan-selftest
-e2e-selected-report-selftest
-issue-e2e-projector-selftest
 acceptance-layout-contract
 terminal-attach-resume-selftest
 e2e-cli-discovery

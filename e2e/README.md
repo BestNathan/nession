@@ -136,9 +136,8 @@ gh run download <run-id> --name playwright-report
 npx playwright show-report playwright-report
 ```
 
-Canonical visual snapshots are defined by
-`e2e/tests/browser/fixture-visual.spec.ts` and committed PNGs in
-`e2e/tests/browser/__snapshots__/fixture-visual.spec.ts/`.
+Canonical visual snapshots are defined by the focused `fixture-visual*.spec.ts`
+files and matching directories under `e2e/tests/browser/__snapshots__/`.
 Their names include `-linux`; rely on the spec and files for the complete
 current set rather than a duplicated filename table. The fixture clock is
 frozen by `e2e/helpers/fixtureVisual.ts`.
