@@ -162,7 +162,13 @@ export function verifyEffectiveHarness(plan, observed, sourceSha, providerVersio
     plugins: plan.canonical_capabilities.plugins,
   })) {
     const loaded = new Set(observed[family]);
-    for (const required of expected) if (!loaded.has(required)) deny('required ' + family + ' was not loaded: ' + required);
+    const allowed = new Set(expected);
+    if (loaded.size !== observed[family].length ||
+        observed[family].some(x => typeof x !== 'string' || !x)) {
+      deny('invalid/duplicate native loaded ' + family);
+    }
+    for (const required of allowed) if (!loaded.has(required)) deny('required ' + family + ' was not loaded: ' + required);
+    for (const actual of loaded) if (!allowed.has(actual)) deny('undeclared ' + family + ' capability loaded: ' + actual);
   }
   const effective = {
     schema_version: 1,
