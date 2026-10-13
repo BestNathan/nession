@@ -198,6 +198,28 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./gates/run requirement-acceptance-pre-merge
 
+      - name: Enforce Issue New and Regression E2E evidence on PR head
+        if: github.event_name == 'pull_request_target'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [[ ! -f scripts/issue-e2e-gate.mjs ]]; then
+            echo "Pre-activation compatibility: Issue E2E Gate not deployed on main"
+            exit 0
+          fi
+          issue_numbers="$(node scripts/requirement-acceptance.mjs discover-pre-merge)"
+          for number in $(jq -r '.[]' <<< "$issue_numbers"); do
+            gh api "repos/$GITHUB_REPOSITORY/issues/$number" > "$RUNNER_TEMP/e2e-issue-$number.json"
+            if jq -e '.body | contains("## E2E Verification")' "$RUNNER_TEMP/e2e-issue-$number.json" >/dev/null; then
+              node scripts/issue-e2e-gate.mjs verify "$RUNNER_TEMP/e2e-issue-$number.json" "$TARGET_SHA"
+            else
+              echo "Legacy Issue #$number: retaining full-suite E2E compatibility"
+            fi
+          done
+
   acceptance-pr-gate:
     needs: pre-merge-gate
     if: github.event_name == 'pull_request_target' && github.event.pull_request.base.ref == 'main' && needs.pre-merge-gate.result == 'success'
