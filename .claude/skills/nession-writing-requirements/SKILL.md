@@ -17,6 +17,8 @@ The executable structural owner is `scripts/issue-contract.mjs`.
 
 For newly adopted Issue contracts, declare **E2E Verification** under two headings `### New` and `### Regression`. Each contains `- <filename-stem>` from `e2e/tests/**/*.spec.ts` or `- none: <concrete explanation>`. E2E Report has `ID | Type | Result | Evidence`, one row per required ID, and is trusted execution output, never an author-controlled success signal. Historical Issues without either E2E section remain accepted. Runtime E2E execution is CI-only; exact file-ID registry #1700 and per-Issue execution #1702 remain separate responsibilities.
 
+Developer/Reviewer Agent **may suggest** new E2E IDs, but may not mark E2E evidence as Pass or remove required tests. Use the typed `scripts/issue-e2e-proposal.mjs` contract to produce an auditable Issue **comment** with E2E ID list, role, justification, and current declaration digest; the comment alone never changes required tests. Only a **trusted reviewer-approved updater**, after checking the current Issue digest and the exact head/base catalog, may apply additions and generate new Pending E2E Report rows. The trusted `scripts/issue-e2e-gate.mjs` contract checks each Pass against the exact SHA and declaration digest; missing or stale evidence cannot count as Pass.
+
 ## 1. Classify first
 
 Choose exactly one kind:
