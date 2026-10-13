@@ -25,7 +25,7 @@ assert.equal(canonicalJson({ z: 1, a: { q: 2 } }), canonicalJson({ a: { q: 2 }, 
 assert.match(digest(registry.roles.developer), /^[a-f0-9]{64}$/);
 const plan = resolveProviderPlan(registry, id, []);
 assert.ok(plan.native_tools.some(x => x.id === 'repo.read' && x.native_name === 'read'));
-const observed = { tools: plan.native_tools.map(x=>x.native_name), skills: plan.canonical_capabilities.skills,
+const observed = { tools: [...new Set(plan.native_tools.map(x=>x.native_name))], skills: plan.canonical_capabilities.skills,
   mcp: plan.canonical_capabilities.mcp, plugins: plan.canonical_capabilities.plugins };
 const effective = verifyEffectiveHarness(plan, observed, 'a'.repeat(40), 'sdk-1');
 assert.equal(effective.sha256, verifyEffectiveHarness(plan, observed, 'a'.repeat(40), 'sdk-1').sha256);
