@@ -97,7 +97,28 @@ export function createGitHubResultArtifactReader(token,{fetchFn=fetch}={}) {
   const get=async(suffix,zip=false)=>{
     const response=await fetchFn(prefix+suffix,{method:'GET',headers});
     if(!response.ok)fail('GitHub result Artifact API rejected read: '+response.status);
-    return zip?Buffer.from(await response.arrayBuffer()):response.json();
+    if(!zip)return response.json();
+    const announced=Number(response.headers?.get?.('content-length'));
+    if(Number.isFinite(announced)&&announced>MAX_ZIP)fail('Artifact HTTP body exceeds bounded archive limit');
+    const reader=response.body?.getReader?.();
+    if(reader) {
+      let total=0;
+      const chunks=[];
+      while(true){
+        const {done,value}=await reader.read();
+        if(done)break;
+        total+=value.length;
+        if(total>MAX_ZIP) {
+          await reader.cancel();
+          fail('Artifact download exceeds bounded archive limit');
+        }
+        chunks.push(Buffer.from(value));
+      }
+      return Buffer.concat(chunks,total);
+    }
+    const bytes=Buffer.from(await response.arrayBuffer());
+    if(bytes.length>MAX_ZIP)fail('Artifact download exceeds bounded archive limit');
+    return bytes;
   };
   return {
     listRunArtifacts:run=>{if(!positive(run))fail('invalid source run');return get('/actions/runs/'+run+'/artifacts?per_page=100');},
