@@ -1,7 +1,7 @@
 'use strict';
 const assert=require('node:assert/strict');
 const {execFileSync}=require('node:child_process');
-const {runtimeFromEnv,verifyOnlineAgent}=require('../../../../../acceptance/shared/protocol-online-agent.js');
+const {runtimeFromEnv,verifyOnlineAgent}=require('../../../shared/protocol-online-agent.js');
 const {pinnedRun,SOURCES,fetchJson,failIdentityFixtures,report,fail}=require('../../../shared/trusted-run-store-proof.cjs');
 const path=require('node:path');
 const root=path.resolve(__dirname,'../../../../..');

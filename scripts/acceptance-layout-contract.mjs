@@ -10,7 +10,7 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const sources = ['scripts', 'e2e', 'gates', '.github/workflows', '.claude/skills'];
 const executable = /\.(?:mjs|cjs|js|jsx|ts|tsx|sh|yml|yaml)$/;
 const excluded = new Set(['node_modules', 'dist', 'target', 'test-results', 'playwright-report', '.git']);
-const legacyReference = /(?:^|[^A-Za-z0-9_-])(?:\.\.\/|\.\/)*acceptance\/(?:cases\.mjs|shared\/)/g;
+const legacyReference = /(?<!e2e\/)acceptance\/(?:cases\.mjs|shared\/)/g;
 
 function scan(root) {
   const violations = [];

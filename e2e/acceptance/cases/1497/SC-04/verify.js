@@ -18,7 +18,7 @@ async function main(){
   assert.match(contract,/^[0-9a-f]{64}$/);
   const canonical=path.join(repo,'e2e/acceptance/cases');
   assert.equal(fs.existsSync(path.join(repo,'acceptance/cases')),false,'legacy Case alias still exists');
-  const {discoverCases}=await import(pathToFileURL(path.join(repo,'acceptance/cases.mjs')).href);
+  const {discoverCases}=await import(pathToFileURL(path.join(repo,'e2e/acceptance/contract/cases.mjs')).href);
   const all=discoverCases(canonical);
   assert.ok(all.length>0);
   const seen=new Set();
