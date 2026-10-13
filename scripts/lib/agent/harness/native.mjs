@@ -206,10 +206,22 @@ export function cursorNativeOptions(prepared,{hostTools}={}) {
       plugins:[],host_tools:required},
   };
 }
-export function claudeNativeOptions(prepared) {
+const CLAUDE_VISIBLE = new Set(['Read','Glob','Grep','Edit','Write','Bash']);
+export function claudeCliToolPolicy(tools, {restricted=false}={}) {
+  if (!Array.isArray(tools) || !tools.length || new Set(tools).size!==tools.length ||
+      tools.some(tool=>!CLAUDE_VISIBLE.has(tool)) || typeof restricted!=='boolean') {
+    fail('invalid Claude tool visibility policy');
+  }
+  const allowed=tools.slice().sort().join(',');
+  return ['--permission-mode','dontAsk','--tools',allowed,'--allowedTools',allowed,
+    ...(restricted?['--restricted','--disallowedTools','mcp__*']:[])];
+}
+export function claudeNativeOptions(prepared,{restricted=false}={}) {
   if(prepared.identity.provider!=='claude-code') fail('provider mismatch');
   validateStagedAssets(prepared);
   const tools=prepared.plan.canonical_capabilities.tools;
+  if(restricted && (prepared.required_skills.length || prepared.required_plugins.length ||
+     prepared.required_mcp.length)) fail('restricted Claude mode cannot attest external Skills/Plugins/MCP');
   // Host GitHub reads must have an explicitly bound, trusted MCP server; a
   // CLI flag is not evidence the required operations were implemented.
   if(tools.some(x=>Object.hasOwn(HOST,x)) && !prepared.required_mcp.length) {
@@ -220,7 +232,7 @@ export function claudeNativeOptions(prepared) {
   if(missing.length) fail('unavailable Claude native tool: '+missing.join(','));
   const servers=pinnedMcpServers(prepared);
   const args=['--setting-sources','project','--strict-mcp-config',
-    '--allowedTools',builtin.sort().join(',')];
+    ...claudeCliToolPolicy(builtin,{restricted})];
   if(prepared.required_mcp.length) {
     const configDir=safeParents(prepared.workspace,'.harness');
     const configFile=path.join(configDir,'mcp-config.json');

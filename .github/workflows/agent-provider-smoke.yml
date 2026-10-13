@@ -10,6 +10,8 @@ on:
       - .github/workflows/agent-provider-smoke.yml
       - scripts/acceptance-agent.mjs
       - scripts/lib/agent/provider-smoke.mjs
+      - scripts/lib/agent/developer-canary.mjs
+      - scripts/lib/agent/harness/native.mjs
       - scripts/lib/agent/telemetry/run-name.mjs
 
 permissions:
@@ -116,6 +118,26 @@ jobs:
             "$RUNNER_TEMP/context.json" \
             "$RUNNER_TEMP/acceptance-result.json" \
             "$RUNNER_TEMP/agent-telemetry.json" "$PROVIDER"
+      # A separate synthetic developer exercise. The process only sees the
+      # disposable calc.js directory via Claude --restricted file-tool scope.
+      # No PR head, publisher credential, git remote mutation or SC projection.
+      - name: Exercise Qwen Developer with restricted native edit tools
+        if: matrix.provider == 'qwen'
+        run: |
+          set -euo pipefail
+          claude --help | grep -q -- '--restricted' ||
+            { echo 'Claude CLI lacks required restricted mode; no unsafe fallback' >&2; exit 1; }
+          node scripts/lib/agent/developer-canary.mjs run "$RUNNER_TEMP/qwen-developer-metrics"
+      - name: Upload Qwen Developer canonical telemetry
+        if: always() && matrix.provider == 'qwen'
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-telemetry-provider-smoke-qwen-developer-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/qwen-developer-metrics/agent-telemetry.json
+            ${{ runner.temp }}/qwen-developer-metrics/agent-execution-trace.json
+          if-no-files-found: warn
+          retention-days: 14
       - name: Upload canonical Agent metadata
         if: always()
         uses: actions/upload-artifact@v4
