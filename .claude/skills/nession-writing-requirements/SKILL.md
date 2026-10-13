@@ -7,7 +7,9 @@ description: Use when creating/updating Nession Requirement or Bug GitHub issues
 
 This Skill owns **issue structure and requirement capture**. It does not own implementation, Gate semantics, or execution of acceptance.
 
-The optional, constrained `## Acceptance Plan` schema (`when × branch/environment × method`) is **implemented** and validated by `scripts/acceptance-plan.mjs`, `scripts/issue-contract.mjs`, and Requirement Acceptance. A legacy `Stage` Acceptance Report remains mandatory for backward compatibility. The full deployed-environment trigger and complete replacement of stages are **not implemented**. Keep new and historical Issue semantics explicit.
+**New Requirement authoring:** use `Success Criteria` for observable outcomes, `Acceptance Plan` for `when × branch/environment × method`, and a three-column `Acceptance Report` for `Result × Evidence`. **Do not duplicate Stage in new Reports.** Compatibility stages are derived from the Plan by `scripts/acceptance-plan.mjs`. Existing Issues without a Plan or with an explicit four-column Report remain unchanged. Production `when: deployed` requires separate authenticated deployment identity and is not inferred from a main merge.
+
+See `docs/architecture/acceptance-sc-format.md` for canonical examples and migration rules.
 
 - implementation -> `nession-development`
 - acceptance execution -> `nession-acceptance`
@@ -56,7 +58,7 @@ Title:
 Requirement: <concise outcome>
 ```
 
-Body must contain:
+Body must contain the **canonical v2 authoring format**:
 
 ```markdown
 ## Requirements: <Topic>
@@ -68,12 +70,25 @@ Body must contain:
 - [ ] SC-01 <observable criterion>
 - [ ] SC-02 <observable criterion>
 
+## Acceptance Plan
+
+```yaml
+acceptance:
+  SC-01:
+    when: pr
+    method: agent
+  SC-02:
+    when: merged
+    branch: staging
+    method: case
+```
+
 ## Acceptance Report
 
-| Criterion | Stage | Result | Evidence |
-|---|---|---|---|
-| SC-01 | pre-merge | Pending | implementation pending |
-| SC-02 | staging | Pending | implementation pending |
+| Criterion | Result | Evidence |
+|---|---|---|
+| SC-01 | Pending | awaiting exact PR head SHA Agent proof |
+| SC-02 | Pending | awaiting merged staging SHA E2E Case proof |
 
 ## Product alignment
 
@@ -86,13 +101,13 @@ Body must contain:
 **Status:** Draft | In Discussion | Approved
 ```
 
-Every Success Criterion has a stable `SC-xx` ID and exactly one Acceptance Report row.
+Every `SC-xx` has a stable ID, exactly one Plan entry, and exactly one Report row. Define the timing and proof method **once in the Plan**. The Report and SC checkbox are trusted projections, not alternative sources of proof configuration.
 
-Stages are `pre-merge`, `staging`, or `post-merge`.
+The Plan supports `when: pr | merged | deployed` and `method: agent | case`; `merged` requires `branch: staging | main`, while `deployed` requires `environment`. The runner compatibility stage derives from the Plan (`pr → pre-merge`, merged staging → staging, merged main/deployed → post-merge), **but a main merge is never production deployment evidence**.
 
-Optionally, a Requirement may include one fenced `yaml` block under `## Acceptance Plan` with `acceptance.SC-xx.{when,method,branch|environment}`. If present it must cover **all** SCs, agree with the still-required legacy report Stage, and use `method: agent|case`. The constrained parser and its migration rules belong to `scripts/acceptance-plan.mjs`; do not infer a production deployment merely from `post-merge`. Absence of this plan retains historic behavior.
+Historical four-column Reports (`Criterion | Stage | Result | Evidence`) remain readable and must agree with a Plan if one is present. Historical three-column Reports without a Plan continue to mean `staging`; do not infer a new proof method for them. Do not rewrite old evidence merely to normalize Markdown.
 
-Results are `Pending`, `Pass`, `Fail`, or justified `N/A`.
+Results are `Pending`, `Pass`, `Fail`, or justified `N/A`; infrastructure errors are separately recorded.
 
 ## 4. Good Success Criteria
 
