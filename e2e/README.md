@@ -41,6 +41,24 @@ internal execution steps, not independent privileged workflow entrypoints.
 Results require **trusted ingestion** before they can update an Issue's SC;
 immutable evidence is stored on `acceptance-results`, not on the source branch.
 
+## Stable E2E Tests file IDs
+
+The long-lived regression catalog is **only** `e2e/tests/**/*.spec.ts`. Every runnable
+spec has a stable filename-derived ID (without `.spec.ts`), unique across subdirectories.
+Each file should test one coherent scenario; related assertions and viewport/transport
+variants may share the file, but unrelated behavior should be split. No separate
+mutable ID registry or source-code-to-E2E graph is maintained.
+
+```bash
+./e2e/run test --list                           # metadata only; safe locally
+# Run only in authorized CI with the provisioned full stack:
+./e2e/run test --id terminal-io --id login
+./e2e/run test --all
+```
+
+The established full regression Gate stays `e2e-playwright`. Issue-owned selection
+and trusted per-ID result publication are separate follow-up requirements (#1701/#1702).
+
 ## Execution policy
 
 **Do not run the full E2E suite on a development machine.** It starts real

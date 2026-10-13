@@ -23,6 +23,14 @@ const expectError = (...args) => {
     '; stdout=' + result.stdout + '; stderr=' + result.stderr);
   assert.match(result.stderr, /E2E Error:/);
 };
+const testList = call('test', '--list');
+assert.equal(testList.code, 0, testList.stderr);
+const declaredTests = JSON.parse(testList.stdout).tests;
+assert.equal(declaredTests.length, 21);
+assert.equal(new Set(declaredTests.map(item => item.id)).size, declaredTests.length);
+assert.ok(declaredTests.some(item => item.id === 'terminal-io'));
+const catalogFixtures = spawnSync(process.execPath, [path.join(repo, 'e2e/runner/test-catalog-selftest.cjs')], { cwd: repo, encoding: 'utf8', timeout: 10000 });
+assert.equal(catalogFixtures.status, 0, catalogFixtures.stderr);
 const listed = call('--list');
 assert.equal(listed.code, 0);
 const catalog = JSON.parse(listed.stdout);
@@ -117,7 +125,9 @@ assert.equal(checked.code, 0);
 assert.ok(JSON.parse(checked.stdout).case_count > 0);
 
 expectError('test');
-expectError('test', '--all'); // CI-only: prevents unsafe local stack launch
+expectError('test', '--all');
+expectError('test', '--id', 'terminal-io');
+expectError('test', '--id', 'does-not-exist'); // CI-only: prevents unsafe local stack launch
 expectError('test', '--suite', '../escape');
 expectError('acceptance', '--issue', '0', '--sc', 'SC-01',
   '--sha', 'a'.repeat(40), '--stage', 'staging');
