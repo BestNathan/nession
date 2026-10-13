@@ -91,11 +91,11 @@ else if(process.argv[2]==='project') {
   fs.mkdirSync(outputDir,{recursive:true});
   for(const item of projections)
     fs.writeFileSync(path.join(outputDir,String(item.issue)+'.json'),
-      JSON.stringify({body:item.body})+'\\n',{flag:'wx'});
+      JSON.stringify({body:item.body})+'\n',{flag:'wx'});
   fs.writeFileSync(path.join(outputDir,'record.json'),
     JSON.stringify({schema_version:1,kind:'issue_e2e_run',
       target_sha:attested.target_sha,run_id:attested.run_id,
       run_attempt:attested.run_attempt,plan_digest:plan.plan_digest,
-      artifact_digest:attested.artifact_digest,results:results.results},null,2)+'\\n',{flag:'wx'});
+      artifact_digest:attested.artifact_digest,results:results.results},null,2)+'\n',{flag:'wx'});
 }
 
