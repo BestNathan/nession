@@ -9,7 +9,8 @@ const HEX = /^[a-f0-9]{64}$/;
 const TYPES = new Set(['model.usage', 'tool.started', 'tool.completed', 'tool.failed',
   'skill.loaded', 'skill.invoked', 'mcp.tool.completed', 'checkpoint.saved',
   'checkpoint.restored', 'agent.handoff']);
-const OBSERVATION = new Set(['native-event', 'host-tool', 'loader', 'trusted-workflow']);
+// Untrusted Agent artifacts must not self-attest a trusted Workflow observation.
+const OBSERVATION = new Set(['native-event', 'host-tool', 'loader']);
 const COVERAGE = new Set(['observed', 'partial', 'unobserved']);
 const MAX_EVENTS = 10000;
 const MAX_BYTES = 2 * 1024 * 1024;
@@ -308,6 +309,7 @@ export function selfTest() {
   rejected(t => {t.identity.github_run_attempt=2;return t}, /does not match/);
   rejected(t => {t.events.push({...t.events[0],type:'unknown',sequence:1});return t}, /invalid event/);
   rejected(t => {t.coverage.skills='zero';return t}, /coverage/);
+  rejected(t => {t.events[0].data.observation='trusted-workflow';return t}, /provenance/);
   rejected(t => {t.events[0].data.tool.native_name='read\nSECRET';return t}, /native tool/);
   const numericCall = structuredClone(trace);
   numericCall.events[0].data.call_id = '123e4567-e89b-12d3-a456-426614174000';
