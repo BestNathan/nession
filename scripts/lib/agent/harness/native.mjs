@@ -189,13 +189,12 @@ export function claudeNativeOptions(prepared,{mcpConfigFile}={}) {
   };
 }
 export function auditNativeLoad(prepared,observed,providerVersion,checkpointDigest=null) {
-  if(checkpointDigest!=null &&
-      (!/^[a-f0-9]{64}$/.test(checkpointDigest) ||
-       checkpointDigest!==prepared.preparation_sha256)) fail('checkpoint Harness is incompatible');
   const plan=prepared.plan;
   if(!observed||!Array.isArray(observed.tools)||!Array.isArray(observed.skills)||
       !Array.isArray(observed.mcp)||!Array.isArray(observed.plugins)) fail('native inventory is unobserved');
   // Effective capabilities are computed from actual Provider-reported values,
   // not from our expected launch descriptor.
-  return verifyEffectiveHarness(plan,observed,prepared.source_sha,providerVersion);
+  const effective=verifyEffectiveHarness(plan,observed,prepared.source_sha,providerVersion);
+  if(checkpointDigest!=null && checkpointDigest!==effective.sha256) fail('checkpoint Harness is incompatible');
+  return effective;
 }
