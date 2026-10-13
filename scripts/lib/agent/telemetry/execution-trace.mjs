@@ -167,6 +167,52 @@ export function traceStoragePath(trace) {
     trace.identity.unique_run_name + '.json'].join('/');
 }
 
+export function summarizeExecutionTrace(trace) {
+  validateExecutionTrace(trace);
+  function count(type, key) {
+    const rows = trace.events.filter(e => e.type === type);
+    return {
+      observed: trace.coverage[key] !== 'unobserved',
+      completeness: trace.coverage[key],
+      observed_count: rows.length,
+    };
+  }
+  const toolStarts = trace.events.filter(e => e.type === 'tool.started');
+  const toolEnds = trace.events.filter(e => ['tool.completed','tool.failed'].includes(e.type));
+  const byLogicalName = {};
+  for (const e of toolStarts) {
+    const name = e.data.tool.id ?? 'unmapped';
+    byLogicalName[name] = (byLogicalName[name] ?? 0) + 1;
+  }
+  const bySkill = {};
+  for (const e of trace.events.filter(e => e.type === 'skill.invoked')) {
+    const id = e.data.skill_id;
+    bySkill[id] = (bySkill[id] ?? 0) + 1;
+  }
+  const model = count('model.usage', 'model');
+  const tools = count('tool.started','tools');
+  const skills = count('skill.invoked','skills');
+  const mcp = count('mcp.tool.completed','mcp');
+  const knownLatencies = toolEnds.map(e => e.data.duration_ms).filter(Number.isFinite);
+  return {
+    schema_version: 1, kind: 'agent_execution_trace_summary',
+    identity: trace.identity, agent: trace.agent, task: trace.task, coverage: trace.coverage,
+    model: {
+      ...model, // Number of observed usage events is not a guaranteed model request count.
+      request_count: null,
+    },
+    tools: {
+      ...tools, by_logical_name: byLogicalName,
+      observed_completed: toolEnds.filter(e => e.type === 'tool.completed').length,
+      observed_failed: toolEnds.filter(e => e.type === 'tool.failed').length,
+      measured_duration_ms: knownLatencies.length ? knownLatencies.reduce((a,b)=>a+b,0) : null,
+    },
+    skills: { ...skills, loaded: trace.events.filter(e => e.type === 'skill.loaded').length,
+      by_skill: bySkill },
+    mcp,
+  };
+}
+
 export function writeExecutionTrace(file, trace) {
   validateExecutionTrace(trace);
   mkdirSync(dirname(file), { recursive:true });
@@ -246,6 +292,12 @@ export function selfTest() {
   assert.equal(traceStoragePath(trace), 'raw/events/agent-develop/2026-10-13/101-1-issue-1692-developer.json');
   assert.equal(validateExecutionTrace(trace), trace);
   assert.equal(validateTraceSource(trace, summary), true);
+  assert.equal(summarizeExecutionTrace(trace).tools.by_logical_name['repo.read'], 1);
+  assert.equal(summarizeExecutionTrace(trace).skills.completeness, 'unobserved');
+  assert.equal(summarizeExecutionTrace(trace).model.request_count, null);
+  const emptyTrace = buildExecutionTrace(summary, []);
+  assert.equal(summarizeExecutionTrace(emptyTrace).tools.observed, false);
+  assert.equal(summarizeExecutionTrace(emptyTrace).tools.observed_count, 0);
   assert.throws(() => validateTraceSource(trace, { ...summary, task: { ...summary.task, issue: 1693 } }), /task mismatch/);
   assert.throws(() => validateTraceSource(trace, { ...summary, identity: { ...summary.identity, github_run_attempt: 2 } }), /source mismatch/);
   const rejected = (mutate, message) => assert.throws(() => validateExecutionTrace(mutate(structuredClone(trace))), message);
