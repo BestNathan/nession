@@ -167,6 +167,25 @@ jobs:
             exit 1
           }
 
+          # Trace payloads are supplemental observations, not independent authority.
+          # Require the matching summary from the exact same source run and task,
+          # regardless of download ordering; never ingest a free-standing Trace.
+          while IFS= read -r -d '' file; do
+            [[ "$(jq -r '.kind // ""' "${file}")" == 'agent_execution_trace' ]] || continue
+            rel="$(node scripts/agent-workflow-telemetry.mjs validate "${file}")"
+            case "${rel}" in
+              raw/events/*) ;;
+              *) echo "Unexpected execution Trace path: ${rel}" >&2; exit 1 ;;
+            esac
+            summary_rel="raw/workflows/${rel#raw/events/}"
+            summary_file="${METRICS_DIR}/${summary_rel}"
+            [[ -f "${summary_file}" ]] || {
+              echo "Missing Agent run summary for execution Trace: ${summary_rel}" >&2
+              exit 1
+            }
+            node scripts/agent-workflow-telemetry.mjs correlate "${file}" "${summary_file}"
+          done < <(find "${SOURCE_DIR}" -type f -name '*.json' -print0)
+
           echo "changed=${changed}" >> "${GITHUB_OUTPUT}"
           {
             echo "## Metrics Ingest"
@@ -197,6 +216,6 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add raw/workflows agent-metrics.json agent-metrics-light.svg agent-metrics-dark.svg
+          git add -A raw agent-metrics.json agent-metrics-light.svg agent-metrics-dark.svg
           git commit -m "metrics: ingest agent telemetry from run ${SOURCE_RUN_ID}"
           git push origin HEAD:metrics
