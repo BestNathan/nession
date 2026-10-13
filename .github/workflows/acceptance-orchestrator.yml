@@ -4,6 +4,8 @@ on:
   pull_request_target:
     branches: [staging, main]
     types: [opened, synchronize, reopened, edited, ready_for_review]
+  repository_dispatch:
+    types: [nession-issue-e2e-projected]
   issues:
     types: [closed]
   push:
@@ -330,3 +332,88 @@ jobs:
       target_ref: ${{ github.sha }}
       deployment: ''
     secrets: inherit
+
+  # The privileged E2E ingest has already authenticated and projected the
+  # completed run. A dispatch, unlike GITHUB_TOKEN PR edits, can wake Actions.
+  # Rerun only the failed Acceptance jobs; no polling or fabricated Pass.
+  reconcile-issue-e2e:
+    if: github.event_name == 'repository_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
+      issues: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Authenticate E2E result and reconcile exact-head Acceptance run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.client_payload.pr_number }}
+          TARGET_SHA: ${{ github.event.client_payload.head_sha }}
+          SOURCE_RUN_ID: ${{ github.event.client_payload.source_run_id }}
+          PLAN_DIGEST: ${{ github.event.client_payload.plan_digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]] || exit 1
+          [[ "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]] || exit 1
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          [[ "$PLAN_DIGEST" =~ ^[0-9a-f]{64}$ ]] || exit 1
+          if [[ ! -f scripts/issue-e2e-gate.mjs ]]; then
+            echo 'Issue E2E trusted source not on main yet; no reconciliation'
+            exit 0
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" > "$RUNNER_TEMP/pr.json"
+          jq -e --arg sha "$TARGET_SHA" --arg repo "$GITHUB_REPOSITORY" \
+            '.state == "open" and .head.sha == $sha and .head.repo.full_name == $repo' \
+            "$RUNNER_TEMP/pr.json" > /dev/null || exit 0
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID" > "$RUNNER_TEMP/e2e-run.json"
+          jq -e --arg sha "$TARGET_SHA" --argjson pr "$PR_NUMBER" \
+            '.head_sha == $sha and .path == ".github/workflows/e2e-tests.yml" and
+             .event == "pull_request" and .status == "completed" and
+             (.conclusion == "success" or .conclusion == "failure") and
+             ([.pull_requests[].number] | index($pr) != null)' \
+            "$RUNNER_TEMP/e2e-run.json" > /dev/null
+          node --input-type=module -e '
+            import fs from "node:fs";
+            import { parsePreMergeIssueNumbers } from "./scripts/requirement-acceptance.mjs";
+            const p = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+            process.stdout.write(JSON.stringify(parsePreMergeIssueNumbers(
+              p.body, "BestNathan", "nession", p.title)));
+          ' "$RUNNER_TEMP/pr.json" > "$RUNNER_TEMP/issue-refs.json"
+          verified=0
+          while IFS= read -r issue_number; do
+            [[ "$issue_number" =~ ^[1-9][0-9]*$ ]] || exit 1
+            gh api "repos/$GITHUB_REPOSITORY/issues/$issue_number" > "$RUNNER_TEMP/issue-$issue_number.json"
+            if jq -e '.body | contains("## E2E Verification")' "$RUNNER_TEMP/issue-$issue_number.json" > /dev/null; then
+              node scripts/issue-e2e-gate.mjs verify "$RUNNER_TEMP/issue-$issue_number.json" "$TARGET_SHA"
+              jq -e --arg digest "$PLAN_DIGEST" '.body | contains("plan " + $digest + ",")' \
+                "$RUNNER_TEMP/issue-$issue_number.json" > /dev/null
+              verified=$((verified + 1))
+            fi
+          done < <(jq -r '.[]' "$RUNNER_TEMP/issue-refs.json")
+          (( verified > 0 )) || { echo 'No verified Issue E2E requirements'; exit 0; }
+          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/acceptance-orchestrator.yml/runs?event=pull_request_target&per_page=100" \
+            > "$RUNNER_TEMP/acceptance-runs.json"
+          jq -er --arg sha "$TARGET_SHA" --argjson pr "$PR_NUMBER" '
+            [.workflow_runs[] | select(.head_sha == $sha and .event == "pull_request_target" and
+             ([.pull_requests[].number] | index($pr) != null))] |
+            sort_by(.created_at) | last // empty |
+            [.id, .status, .conclusion] | @tsv' \
+            "$RUNNER_TEMP/acceptance-runs.json" > "$RUNNER_TEMP/acceptance-target.tsv"
+          IFS=$'\t' read -r accept_id accept_status accept_conclusion < "$RUNNER_TEMP/acceptance-target.tsv"
+          [[ "$accept_id" =~ ^[1-9][0-9]*$ ]] || exit 1
+          if [[ "$accept_status" != completed || "$accept_conclusion" == success ]]; then
+            echo "Acceptance already running or successful; no rerun"
+            exit 0
+          fi
+          gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$accept_id/rerun-failed-jobs"
+          echo "Reconciled E2E proof by rerunning failed Acceptance jobs for PR #$PR_NUMBER" >> "$GITHUB_STEP_SUMMARY"
