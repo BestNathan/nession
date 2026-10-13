@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { pathToFileURL } from 'node:url';
 // Deterministic replay/order guard for trusted Issue E2E Report publication.
 // The higher-privilege caller must independently attest the source artifact.
 import assert from 'node:assert/strict';
@@ -98,6 +99,7 @@ function selfTest() {
   assert.throws(()=>decideIssueE2EProjection(b,result(12,1,'Pass').replace('- login','- terminal-attach'),args(12,1)),/declaration/);
   console.log('Issue E2E reconciliation: replay, retry ordering, stale/duplicate, foreign SHA and forged SC negatives passed');
 }
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
 const [command,issueFile,projectionFile,run,attempt,sha] = process.argv.slice(2);
 if(command==='self-test') selfTest();
 else if(command==='decide'){
@@ -108,3 +110,4 @@ else if(command==='decide'){
     {runId:Number(run),attempt:Number(attempt),targetSha:sha});
   process.stdout.write(decision+'\n');
 }else throw Error('usage: issue-e2e-reconcile.mjs self-test | decide ISSUE PROJECTED RUN ATTEMPT SHA');
+}
