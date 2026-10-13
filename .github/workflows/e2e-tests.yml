@@ -192,6 +192,7 @@ jobs:
           path: |
             ${{ runner.temp }}/issue-e2e/plan.json
             ${{ runner.temp }}/issue-e2e/results.json
+            e2e/playwright-selected.json
           if-no-files-found: error
           retention-days: 14
 
