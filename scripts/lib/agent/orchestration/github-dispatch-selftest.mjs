@@ -115,6 +115,7 @@ await denyRun(r=>{r.repository.full_name='other/repo'},/provenance/);
 // REST Get Workflow Run does not reliably expose dispatch inputs. The
 // authoritative 200 dispatch response binds the Run ID to the Outbox instead.
 await denyRun(r=>{r.created_at=new Date(now+900000).toISOString()},/dispatch window/);
+await denyRun(r=>{r.created_at='invalid-date'},/dispatch window/);
 await denyRun(r=>{r.conclusion='failure'},/provenance/);
 runs.set(222,{...issuer,path:'evil.yml'});
 await assert.rejects(()=>attestAgentOutcome(options),/issuer/);
