@@ -15,6 +15,8 @@ The optional, constrained `## Acceptance Plan` schema (`when × branch/environme
 
 The executable structural owner is `scripts/issue-contract.mjs`.
 
+For newly adopted Issue contracts, declare **E2E Verification** under two headings `### New` and `### Regression`. Each contains `- <filename-stem>` from `e2e/tests/**/*.spec.ts` or `- none: <concrete explanation>`. E2E Report has `ID | Type | Result | Evidence`, one row per required ID, and is trusted execution output, never an author-controlled success signal. Historical Issues without either E2E section remain accepted. Runtime E2E execution is CI-only; exact file-ID registry #1700 and per-Issue execution #1702 remain separate responsibilities.
+
 ## 1. Classify first
 
 Choose exactly one kind:
