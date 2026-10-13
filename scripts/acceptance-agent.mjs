@@ -68,7 +68,7 @@ function requestedClaudeGatewayModel(backend, env = process.env) {
   const model = backend === 'qwen'
     ? (env.ACCEPTANCE_CLAUDE_MODEL || env.ANTHROPIC_MODEL)
     : (env.ACCEPTANCE_CLAUDE_MODEL || 'claude-sonnet-5');
-  if (backend === 'qwen' && (!model || /^claude-(?:opus|sonnet|haiku)/i.test(model))) {
+  if (backend === 'qwen' && (typeof model !== 'string' || !/^qwen[a-z0-9._-]*$/i.test(model))) {
     throw new Error('Qwen Environment must explicitly set a Qwen model via ACCEPTANCE_CLAUDE_MODEL or ANTHROPIC_MODEL');
   }
   return model;
@@ -244,8 +244,9 @@ function selfTest() {
   assert.equal(requestedClaudeGatewayModel('qwen', { ACCEPTANCE_CLAUDE_MODEL:'qwen3.7-plus' }), 'qwen3.7-plus');
   assert.throws(() => requestedClaudeGatewayModel('qwen', {}), /Qwen Environment/);
   assert.throws(() => requestedClaudeGatewayModel('qwen', {ANTHROPIC_MODEL:'claude-sonnet-5'}), /Qwen Environment/);
+  assert.throws(() => requestedClaudeGatewayModel('qwen', {ANTHROPIC_MODEL:'glm-5'}), /Qwen Environment/);
   assert.equal(requestedClaudeGatewayModel('deepseek', {}), 'claude-sonnet-5');
-  console.log('acceptance-agent self-test: 14 cases passed');
+  console.log('acceptance-agent self-test: 15 cases passed');
 }
 
 async function main() {
