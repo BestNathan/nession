@@ -128,7 +128,8 @@ export function createGitHubRunReader(token,{api='https://api.github.com',fetchF
     getPullRequest:number=>{if(!positive(number))reject('invalid PR number');return request('/pulls/'+number);},
   };
 }
-function compareSource(run,body,result,runInput) {
+function compareSource(run,body,result) {
+  const runInput=run.inputs;
   const spec=PROVIDERS[body.role];
   if (!run || run.id!==result.run_id || run.run_attempt!==result.run_attempt ||
       run.path!==spec.path || run.name!==spec.name || run.event!=='workflow_dispatch' ||
@@ -150,11 +151,11 @@ function compareSource(run,body,result,runInput) {
     reject('run created outside ticket dispatch window');
   }
 }
-// The trusted caller obtains runInput from GitHub's workflow run inputs API or
-// authenticates an immutable GitHub Action artifact tied to run+attempt; it must
-// never accept a stand-alone model-returned input binding.
+// Inputs are fetched on the same GitHub API run object. Missing inputs fail
+// closed; a future signed artifact path must verify artifact ownership/digest
+// before it can substitute for unavailable GitHub run inputs.
 export async function attestAgentOutcome({
-  state,result,dispatch_ticket,run_input,pr_number,registry,reader,keyring,now=Date.now(),
+  state,result,dispatch_ticket,pr_number,registry,reader,keyring,now=Date.now(),
   verified_main_sha,
 }) {
   validateDevelopmentState(state);
@@ -171,11 +172,19 @@ export async function attestAgentOutcome({
   if (!pending || pending.task.role!==body.role || pending.task.task!==body.task ||
       pending.task.agent_id!==body.agent_id || pending.task.sha!==body.input_sha ||
       pending.receipt?.dispatch_id!==body.action_id) reject('ticket does not match a dispatched task');
+  const issuer=await reader.getRun(body.issuer_run_id);
+  if (issuer.id!==body.issuer_run_id ||
+      issuer.path!=='.github/workflows/acceptance-agent-controller.yml' ||
+      issuer.name!=='Acceptance / Agent Controller' ||
+      issuer.repository?.full_name!==REPOSITORY || issuer.event!=='workflow_dispatch' ||
+      issuer.head_branch!=='main' || issuer.head_sha!==verified_main_sha) {
+    reject('dispatch ticket issuer is not the trusted Controller');
+  }
   const run=await reader.getRun(result.run_id);
-  compareSource(run,body,result,run_input);
+  compareSource(run,body,result);
   if (run.head_sha!==verified_main_sha) reject('worker did not execute trusted main SHA');
-  if (typeof run_input.dispatch_ticket!=='string' ||
-      run_input.dispatch_ticket!==dispatch_ticket) reject('worker used a different dispatch ticket');
+  if (typeof run.inputs.dispatch_ticket!=='string' ||
+      run.inputs.dispatch_ticket!==dispatch_ticket) reject('worker used a different dispatch ticket');
   if (!positive(pr_number)) reject('missing trusted publisher PR identity');
   const pr=await reader.getPullRequest(pr_number);
   if (pr.base?.repo?.full_name!==REPOSITORY || pr.head?.repo?.full_name!==REPOSITORY ||
