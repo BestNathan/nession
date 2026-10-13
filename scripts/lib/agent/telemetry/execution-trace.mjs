@@ -25,7 +25,7 @@ function tokenInteger(v, label) {
 function id(v, label, pattern = ID) {
   if (typeof v !== 'string' || !pattern.test(v)) fail('invalid ' + label);
 }
-function stringOrNull(value, name) { if (value != null) id(value, name, NATIVE); }
+function stringOrNull(value, name) { if (value != null) id(value, name, /^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}$/); }
 function validateEvent(e, run) {
   keysOnly(e, ['schema_version','kind','type','sequence','identity','data'], 'event');
   if (e.schema_version !== 1 || e.kind !== 'agent_execution_event' || !TYPES.has(e.type) ||
@@ -309,6 +309,9 @@ export function selfTest() {
   rejected(t => {t.events.push({...t.events[0],type:'unknown',sequence:1});return t}, /invalid event/);
   rejected(t => {t.coverage.skills='zero';return t}, /coverage/);
   rejected(t => {t.events[0].data.tool.native_name='read\nSECRET';return t}, /native tool/);
+  const numericCall = structuredClone(trace);
+  numericCall.events[0].data.call_id = '123e4567-e89b-12d3-a456-426614174000';
+  validateExecutionTrace(numericCall);
   const u = normalizeNativeTrace('cursor', [{type:'tool_call',status:'running',id:'x1',
     name:'read',input:{password:'dont store'}},
     {type:'usage',inputTokens:5,outputTokens:2}], summary, {tools:'observed',model:'observed'});
