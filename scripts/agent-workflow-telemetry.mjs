@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { validateExecutionTrace, validateTraceSource, traceStoragePath, selfTest as executionTraceSelfTest } from './lib/agent/telemetry/execution-trace.mjs';
 
 export const AGENT_TELEMETRY_SCHEMA_VERSION = 1;
 
@@ -410,6 +411,18 @@ function readRecord(file) {
   return validateAgentWorkflowTelemetry(record);
 }
 
+// Metrics Ingest validates both run summaries and sanitized execution traces.
+// Only run summaries participate in existing rolling aggregates.
+function readPersistableRecord(file) {
+  const record = JSON.parse(readFileSync(file, 'utf8'));
+  if (record?.kind === 'agent_execution_trace') return validateExecutionTrace(record);
+  return validateAgentWorkflowTelemetry(record);
+}
+
+function persistableStoragePath(record) {
+  return record.kind === 'agent_execution_trace' ? traceStoragePath(record) : telemetryStoragePath(record);
+}
+
 function aggregateCommand(rawDir, outputDir) {
   const records = walkJson(rawDir).map(readRecord);
   const now = process.env.METRICS_NOW ? new Date(process.env.METRICS_NOW) : new Date();
@@ -461,6 +474,7 @@ function selfTest() {
   assert.equal(metrics.windows['7d'].runs.total, 1);
   assert.equal(metrics.windows['30d'].tools.total, 3);
   assert.match(renderAgentMetricsSvg(metrics, 'dark'), /Agent Workflow Telemetry/);
+  executionTraceSelfTest();
   console.log('agent-workflow-telemetry self-test: 6 cases passed');
 }
 
@@ -468,12 +482,18 @@ async function main() {
   const command = process.argv[2];
   if (command === '--self-test' || command === 'self-test') return selfTest();
   if (command === 'validate') {
-    const record = readRecord(process.argv[3]);
-    console.log(telemetryStoragePath(record));
+    const record = readPersistableRecord(process.argv[3]);
+    console.log(persistableStoragePath(record));
     return;
   }
   if (command === 'path') {
-    console.log(telemetryStoragePath(readRecord(process.argv[3])));
+    console.log(persistableStoragePath(readPersistableRecord(process.argv[3])));
+    return;
+  }
+  if (command === 'correlate') {
+    const trace = readPersistableRecord(process.argv[3]);
+    const run = readRecord(process.argv[4]);
+    validateTraceSource(trace, run);
     return;
   }
   if (command === 'aggregate') {

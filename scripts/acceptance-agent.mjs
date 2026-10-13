@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { buildAgentWorkflowTelemetry, writeAgentWorkflowTelemetry } from './agent-workflow-telemetry.mjs';
+import { normalizeNativeTrace, writeExecutionTrace } from './lib/agent/telemetry/execution-trace.mjs';
 import { renderAcceptancePrompt } from './lib/agent/tasks/acceptance.mjs';
 import { promptTelemetry } from './lib/agent/telemetry/prompt.mjs';
 import { providerScopedRunName } from './lib/agent/telemetry/run-name.mjs';
@@ -51,7 +52,7 @@ async function runCursor(context, workspace) {
     provider: 'cursor',
     model: meta.model, run_id: meta.run_id, request_id: meta.request_id,
     status: meta.status, turns: meta.turns, model_requests: meta.turns,
-    tool_calls: meta.tool_calls, tools_observed: true,
+    tool_calls: meta.tool_calls, tools_observed: true, native_events: meta.native_events,
     tokens: meta.usage, cost: { ...meta.cost, estimated_usd: null },
     timing: { started_at: meta.started_at, finished_at: meta.finished_at, agent_duration_ms: meta.duration_ms },
   };
@@ -96,6 +97,7 @@ function runDeepSeek(context, workspace) {
     model_requests: null,
     tool_calls: null,
     tools_observed: false,
+    native_events: [], // JSON-only Claude invocation does not expose the tool lifecycle.
     tokens: claudeUsage(envelope),
     cost: {
       raw_usd: null,
@@ -149,6 +151,10 @@ function telemetryInput(context, providerMeta, result, status = 'completed') {
     },
     agent: {
       provider: providerMeta.provider,
+      // Legacy acceptance runs still use the shared cursor/deepseek Environments;
+      // do not misidentify them as the future per-ID Registry instances.
+      id: 'legacy-acceptance-' + providerMeta.provider,
+      role: 'acceptor',
       prompt: promptTelemetry(renderAcceptancePrompt(context)),
       model: providerMeta.model,
       run_id: providerMeta.run_id,
@@ -172,6 +178,24 @@ function telemetryInput(context, providerMeta, result, status = 'completed') {
       na: counts['N/A'],
     },
   };
+}
+
+function writeAcceptanceTelemetry(file, context, providerMeta, result, status = 'completed') {
+  const summary = buildAgentWorkflowTelemetry(telemetryInput(context, providerMeta, result, status));
+  writeAgentWorkflowTelemetry(file, summary);
+  const nativeEvents = providerMeta.native_events ?? [];
+  const seen = (type) => nativeEvents.some(event => event.type === type);
+  const coverage = {
+    model: seen('usage') ? 'observed' : 'unobserved',
+    tools: seen('tool_call') ? 'partial' : 'unobserved',
+    skills: 'unobserved',
+    mcp: 'unobserved',
+  };
+  // Claude JSON mode cannot support per-tool/Skill claims: an empty trace
+  // records the gap explicitly, rather than inventing observed=0.
+  const nativeProvider = providerMeta.provider === 'cursor' ? 'cursor' : 'claude-code';
+  const trace = normalizeNativeTrace(nativeProvider, nativeEvents, summary, coverage);
+  writeExecutionTrace(path.join(path.dirname(file), 'agent-execution-trace.json'), trace);
 }
 
 function selfTest() {
@@ -204,6 +228,8 @@ function selfTest() {
   });
   assert.throws(() => selectCursorModel([], { id: 'composer-2.5', fast: true }), /no fallback/i);
   assert.equal(claudeUsage({ usage: { input_tokens: 2, output_tokens: 1 } }).input, 2);
+  assert.equal(claudeUsage({}).input, null);
+  assert.equal(claudeUsage({ modelUsage: { modelA: { inputTokens: 5 } } }).input, 5);
   console.log('acceptance-agent self-test: 9 cases passed');
 }
 
@@ -218,7 +244,7 @@ async function main() {
     const { result, meta } = await runAcceptanceAgent(context, provider, workspace);
     fs.writeFileSync(outFile, JSON.stringify(result, null, 2) + '\n');
     if (telemetryFile && meta) {
-      writeAgentWorkflowTelemetry(telemetryFile, buildAgentWorkflowTelemetry(telemetryInput(context, meta, result)));
+      writeAcceptanceTelemetry(telemetryFile, context, meta, result);
     }
   } catch (error) {
     if (telemetryFile) {
@@ -242,10 +268,7 @@ async function main() {
           agent_duration_ms: null,
         },
       };
-      writeAgentWorkflowTelemetry(
-        telemetryFile,
-        buildAgentWorkflowTelemetry(telemetryInput(context, fallbackMeta, { criteria: [] }, 'agent-error')),
-      );
+      writeAcceptanceTelemetry(telemetryFile, context, fallbackMeta, { criteria: [] }, 'agent-error');
     }
     throw error;
   }

@@ -15,17 +15,25 @@ export function parseClaudeJson(raw) {
 export function normalizeClaudeUsage(envelope) {
   const usage = envelope?.usage ?? {};
   const models = Object.values(envelope?.modelUsage ?? {});
-  const sum = (keys) => models.reduce((acc, model) => {
-    for (const key of keys) {
-      if (model?.[key] != null && Number.isFinite(Number(model[key]))) return acc + Number(model[key]);
+  const sum = (keys) => {
+    let total = 0;
+    let observed = false;
+    for (const model of models) {
+      for (const key of keys) {
+        if (model?.[key] != null && Number.isFinite(Number(model[key]))) {
+          total += Number(model[key]);
+          observed = true;
+          break;
+        }
+      }
     }
-    return acc;
-  }, 0);
+    return observed ? total : null;
+  };
   const first = (...values) => {
     for (const value of values) {
       if (value != null && value !== '' && Number.isFinite(Number(value))) return Number(value);
     }
-    return 0;
+    return null;
   };
   return {
     input: first(usage.input_tokens, usage.inputTokens, sum(['inputTokens', 'input_tokens'])),

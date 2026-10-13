@@ -119,64 +119,22 @@ jobs:
           EXPECTED_WORKFLOW_ID: ${{ steps.source.outputs.expected_workflow_id }}
         run: |
           set -euo pipefail
-          found=0
-          changed=0
-
-          while IFS= read -r -d '' file; do
-            found=$((found + 1))
-            rel="$(node scripts/agent-workflow-telemetry.mjs validate "${file}")"
-
-            record_run_id="$(jq -r '.identity.github_run_id' "${file}")"
-            record_attempt="$(jq -r '.identity.github_run_attempt' "${file}")"
-            record_repo="$(jq -r '.identity.repository' "${file}")"
-            record_workflow_id="$(jq -r '.identity.workflow_id' "${file}")"
-
-            [[ "${record_workflow_id}" == "${EXPECTED_WORKFLOW_ID}" ]] || {
-              echo "Telemetry workflow id ${record_workflow_id} does not match trusted source ${EXPECTED_WORKFLOW_ID}: ${file}" >&2
-              exit 1
-            }
-            [[ "${record_run_id}" == "${SOURCE_RUN_ID}" ]] || {
-              echo "Telemetry run id ${record_run_id} does not match source run ${SOURCE_RUN_ID}: ${file}" >&2
-              exit 1
-            }
-            [[ "${record_attempt}" == "${SOURCE_RUN_ATTEMPT}" ]] || {
-              echo "Telemetry run attempt ${record_attempt} does not match source attempt ${SOURCE_RUN_ATTEMPT}: ${file}" >&2
-              exit 1
-            }
-            [[ "${record_repo}" == "${GITHUB_REPOSITORY}" ]] || {
-              echo "Telemetry repository ${record_repo} does not match ${GITHUB_REPOSITORY}: ${file}" >&2
-              exit 1
-            }
-
-            destination="${METRICS_DIR}/${rel}"
-            mkdir -p "$(dirname "${destination}")"
-            if [[ -e "${destination}" ]]; then
-              cmp -s "${file}" "${destination}" || {
-                echo "Immutable telemetry collision at ${rel}" >&2
-                exit 1
-              }
-              continue
-            fi
-
-            cp "${file}" "${destination}"
-            changed=$((changed + 1))
-          done < <(find "${SOURCE_DIR}" -type f -name '*.json' -print0)
-
-          [[ "${found}" -gt 0 ]] || {
-            echo 'Agent telemetry artifact contained no JSON record.' >&2
-            exit 1
-          }
-
-          echo "changed=${changed}" >> "${GITHUB_OUTPUT}"
+          # Source-run provenance was checked against GitHub API and the
+          # trusted allowlist before downloading these untrusted artifacts.
+          result="$(node scripts/agent-telemetry-ingest.mjs stage \
+            "$SOURCE_DIR" "$METRICS_DIR" "$SOURCE_RUN_ID" \
+            "$SOURCE_RUN_ATTEMPT" "$EXPECTED_WORKFLOW_ID" "$GITHUB_REPOSITORY")"
+          changed="$(jq -er '.changed' <<<"$result")"
+          found="$(jq -er '.found' <<<"$result")"
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
           {
             echo "## Metrics Ingest"
             echo
             echo "- Source run: ${SOURCE_RUN_ID} attempt ${SOURCE_RUN_ATTEMPT}"
-            echo "- Trusted workflow: ${{ steps.source.outputs.source_path }} (${{ steps.source.outputs.source_event }})"
             echo "- Canonical workflow ID: ${EXPECTED_WORKFLOW_ID}"
             echo "- Valid telemetry records: ${found}"
             echo "- New immutable records: ${changed}"
-          } >> "${GITHUB_STEP_SUMMARY}"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Regenerate rolling Agent metrics
         if: steps.artifacts.outputs.count != '0' && steps.persist.outputs.changed != '0'
@@ -197,6 +155,6 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add raw/workflows agent-metrics.json agent-metrics-light.svg agent-metrics-dark.svg
+          git add -A raw agent-metrics.json agent-metrics-light.svg agent-metrics-dark.svg
           git commit -m "metrics: ingest agent telemetry from run ${SOURCE_RUN_ID}"
           git push origin HEAD:metrics
