@@ -184,15 +184,15 @@ jobs:
             "$RUNNER_TEMP/issue-e2e/plan.json" \
             "$GITHUB_WORKSPACE/e2e/playwright-selected.json" \
             "$RUNNER_TEMP/issue-e2e/results.json"
+          if [[ -f "$GITHUB_WORKSPACE/e2e/playwright-selected.json" ]]; then
+            cp "$GITHUB_WORKSPACE/e2e/playwright-selected.json" "$RUNNER_TEMP/issue-e2e/playwright.json"
+          fi
 
       - uses: actions/upload-artifact@v4
         if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.selection.outcome == 'success' }}
         with:
           name: issue-e2e-verification
-          path: |
-            ${{ runner.temp }}/issue-e2e/plan.json
-            ${{ runner.temp }}/issue-e2e/results.json
-            e2e/playwright-selected.json
+          path: ${{ runner.temp }}/issue-e2e/
           if-no-files-found: error
           retention-days: 14
 
