@@ -134,7 +134,7 @@ export function createGitHubRunReader(token,{api='https://api.github.com',fetchF
 // the already-signed ticket. Requesting run details is now supported by the
 // GitHub REST workflow dispatch API; legacy 204 remains a valid *unverified*
 // acceptance response and must not be promoted into a made-up Run ID.
-export function createGitHubDispatchClient(token,{api='https://api.github.com',fetchFn=fetch}={}) {
+export function createGitHubDispatchClient(token,{api='https://api.github.com',fetchFn=fetch,keyring,now=Date.now()}={}) {
   if (typeof token!=='string' || token.length<8 || typeof fetchFn!=='function') {
     reject('missing trusted dispatch credential');
   }
@@ -145,6 +145,14 @@ export function createGitHubDispatchClient(token,{api='https://api.github.com',f
         !own(plan.inputs,['action_id','issue_number','agent_id','task','input_sha','dispatch_ticket']) ||
         Object.keys(plan.inputs).length!==6 || !HEX64.test(plan.inputs.action_id??'')) {
       reject('invalid or unapproved GitHub dispatch plan');
+    }
+    const body=verifyDispatchTicket(plan.inputs.dispatch_ticket,keyring,{now});
+    if (plan.workflow_id!==PROVIDERS[body.role].workflow ||
+        plan.inputs.action_id!==body.action_id ||
+        plan.inputs.issue_number!==String(body.issue) ||
+        plan.inputs.agent_id!==body.agent_id || plan.inputs.task!==body.task ||
+        plan.inputs.input_sha!==body.input_sha) {
+      reject('dispatch plan does not match the signed Outbox ticket');
     }
     const response=await fetchFn(api+'/repos/'+REPOSITORY+'/actions/workflows/'+
       plan.workflow_id+'/dispatches',{
