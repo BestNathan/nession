@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { buildGitPlan } from './issue-e2e-plan.mjs';
+import { summarize } from '../e2e/runner/selected-report.mjs';
 import { projectIssueE2E } from './issue-e2e-project.mjs';
 
 const SHA=/^[a-f0-9]{40}$/;
@@ -47,6 +48,18 @@ export function verifyPlanFromSource(sourceRoot, issues, pr, claimed) {
   return rebuilt;
 }
 
+export function verifyReporterEvidence(plan,results,report) {
+  let expected;
+  try { expected = summarize(plan,report); }
+  catch {
+    expected={status:'Unproven',results:plan.selected.map(x=>({
+      id:x.id,result:'Error',discovered:0,passed:0,failed:0,
+      skipped:0,flaky:0,assertions:0
+    }))};
+  }
+  assert.equal(results.status,expected.status,'reported verdict differs from Playwright evidence');
+  assert.deepEqual(results.results,expected.results,'per-ID evidence differs from Playwright JSON');
+}
 export function projectAuthenticated(issues,plan,results,authenticated) {
   if(plan.mode!=='selected')throw Error('Only selected plans have per-ID Issue reports');
   const projected=[];
@@ -79,7 +92,7 @@ function selfTest(){
 }
 if(process.argv[2]==='self-test')selfTest();
 else if(process.argv[2]==='project') {
-  const [eventFile,runFile,prFile,planFile,resultFile,artifactFile,issueFile,sourceRoot,outputDir] = process.argv.slice(3);
+  const [eventFile,runFile,prFile,planFile,resultFile,artifactFile,issueFile,sourceRoot,outputDir,playwrightFile] = process.argv.slice(3);
   if(!outputDir)throw Error('project EVENT RUN PR PLAN RESULTS ARTIFACT ISSUES SOURCE_ROOT OUTPUT_DIR');
   const read = file => JSON.parse(fs.readFileSync(file,'utf8'));
   const event=read(eventFile),run=read(runFile),pr=read(prFile);
@@ -87,6 +100,10 @@ else if(process.argv[2]==='project') {
   const issues=read(issueFile);
   const attested=verifySource(event,run,pr,plan,results,artifact);
   verifyPlanFromSource(sourceRoot,issues,pr,plan);
+  let playwright=null;
+  if(playwrightFile && fs.existsSync(playwrightFile))
+    playwright=JSON.parse(fs.readFileSync(playwrightFile,'utf8'));
+  verifyReporterEvidence(plan,results,playwright);
   const projections=projectAuthenticated(issues,plan,results,attested);
   fs.mkdirSync(outputDir,{recursive:true});
   for(const item of projections)
