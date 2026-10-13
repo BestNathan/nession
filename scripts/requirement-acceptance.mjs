@@ -600,6 +600,27 @@ function runSelfTest() {
       '  SC-01:\n    when: pr\n    method: agent\n' +
       '  SC-02:\n    when: merged\n    branch: staging\n    method: case\n' +
       '```\n\n## Acceptance Report');
+  // Canonical authoring format: when/method live in the Plan only, while
+  // the Acceptance Report is a three-column result/evidence projection.
+  const canonicalReport = stagingDeferred
+    .replace('| Criterion | Stage | Result | Evidence |', '| Criterion | Result | Evidence |')
+    .replace('|---|---|---|---|', '|---|---|---|')
+    .replace('| SC-01 | pre-merge | Pass |', '| SC-01 | Pass |')
+    .replace('| SC-02 | staging | Pending |', '| SC-02 | Pending |');
+  assert.deepEqual(
+    [...parseAcceptanceReport(extractSection(canonicalReport, 'Acceptance Report')).rows.values()]
+      .map((x) => x.explicitStage), [false, false]);
+  assert.equal(validateRequirementBody(canonicalReport, { mode: 'merge', targetBranch: 'staging' }).ok, true);
+  assert.equal(validateRequirementBody(canonicalReport, { mode: 'merge', targetBranch: 'main' }).ok, false);
+  assert.equal(validateRequirementBody(canonicalReport, { mode: 'closure' }).ok, false);
+  assert.equal(validateRequirementBody(
+    canonicalReport.replace('method: agent', 'method: invalid'),
+    { mode: 'merge', targetBranch: 'staging' }).ok, false);
+  // Explicit stage is still verified for old four-column Report data.
+  assert.equal(validateRequirementBody(
+    stagingDeferred.replace('| SC-01 | pre-merge |', '| SC-01 | staging |'),
+    { mode: 'merge', targetBranch: 'staging' }).ok, false);
+
   assert.equal(validateRequirementBody(stagingDeferred, { mode: 'merge', targetBranch: 'staging' }).ok, true);
   assert.equal(validateRequirementBody(stagingDeferred, { mode: 'merge', targetBranch: 'main' }).ok, false);
   assert.equal(validateRequirementBody(stagingDeferred, { mode: 'closure' }).ok, false);

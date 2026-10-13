@@ -655,6 +655,37 @@ function selfTest() {
   assert.match(fullyAccepted, /\| SC-01 \| staging \| Pass \|/);
   assert.match(fullyAccepted, /\| SC-02 \| staging \| Pass \|/);
 
+  // Plan is the only source of timing/method in the canonical v2 format.
+  // The read-only plan and trusted projector must derive exactly the same
+  // compatibility stage as the old explicit four-column representation.
+  const v2Body = mixedBody
+    .replace('| Criterion | Stage | Result | Evidence |', '| Criterion | Result | Evidence |')
+    .replace('|---|---|---|---|', '|---|---|---|')
+    .replace('| SC-01 | staging | Pending |', '| SC-01 | Pending |')
+    .replace('| SC-02 | staging | Pending |', '| SC-02 | Pending |');
+  const v2Issue = { ...issue, body: v2Body };
+  const v2Agent = buildAcceptanceContext(v2Issue, 'staging', {
+    targetRef: 'c'.repeat(40), runId: 420, method: 'agent',
+  });
+  const v2Case = buildAcceptanceContext(v2Issue, 'staging', {
+    targetRef: 'c'.repeat(40), runId: 421, method: 'case',
+  });
+  assert.equal(v2Agent.contract_sha256, mixedAgent.contract_sha256);
+  assert.equal(v2Case.contract_sha256, mixedCase.contract_sha256);
+  assert.deepEqual(v2Agent.criteria.map((x) => x.criterion), ['SC-01']);
+  assert.deepEqual(v2Case.criteria.map((x) => x.criterion), ['SC-02']);
+  const v2Accepted = applyAcceptanceResultToBody(v2Body,
+    normalizeAcceptanceResult(v2Agent, {
+      criteria: [{ criterion: 'SC-01', result: 'Pass', evidence: 'test: source and CI tied to SHA' }],
+    }, 'agent-cursor'));
+  assert.match(v2Accepted, /\| SC-01 \| Pass \| run 420;/);
+  assert.match(v2Accepted, /\| SC-02 \| Pending \|/);
+  assert.doesNotMatch(v2Accepted, /\| SC-01 \| staging \|/);
+  assert.throws(() => applyAcceptanceResultToBody(v2Body,
+    normalizeAcceptanceResult(v2Agent, {
+      criteria: [{ criterion: 'SC-01', result: 'Pass', evidence: 'test: source and CI tied to SHA' }],
+    }, 'case-runner')), /selected method does not match/);
+
   console.log('acceptance-executor self-test: legacy, mixed-method and provenance cases passed');
 }
 
