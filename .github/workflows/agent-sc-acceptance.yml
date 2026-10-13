@@ -241,7 +241,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: agent-telemetry-requirement-acceptance-${{ inputs.issue_number }}-${{ inputs.stage }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/agent-telemetry.json
+          # One artifact carries the canonical Run Summary and sanitized Execution Trace.
+          path: |
+            ${{ runner.temp }}/agent-telemetry.json
+            ${{ runner.temp }}/agent-execution-trace.json
           if-no-files-found: warn
           retention-days: 30
 
