@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 38411539561,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "sync/1702-assertion-receipt-workflows",
+    "target_sha": "137941034d5e49f6f571cebc804c4ee8b1eddc8e",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/38411539561",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "1d502c90fbcd30ce901052c14897e44f4b106aac23fe16a0fae437809311e265"
+  },
+  "record": "runs/2026-10-13/38411539561-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "765b665f38c41fe5631ea1715e05c764f71665517a1f7b25547dc4dd941c201d"
+}
