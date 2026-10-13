@@ -198,16 +198,29 @@ jobs:
               echo "Issue #$number changed since attestation; omit stale projection"
               continue
             fi
-            older="$(printf '%s' "$latest" | grep -oE 'run [0-9]+/[0-9]+, SHA' | head -1 || true)"
-            if [[ -n "$older" ]]; then
-              previous_id="${older#run }"
-              previous_id="${previous_id%%/*}"
-              previous_attempt="${older#*/}"
-              previous_attempt="${previous_attempt%%,*}"
-              if (( previous_id > run_id || (previous_id == run_id && previous_attempt >= attempt) )); then
-                echo "Issue #$number already carries an equally new or newer result"
-                continue
-              fi
-            fi
+            decision="$(node trusted/scripts/issue-e2e-reconcile.mjs decide \
+              "scratch/metadata/issue-$number.json" "$f" "$run_id" "$attempt" "$sha")"
+            case "$decision" in
+              apply) ;;
+              stale|duplicate)
+                echo "Issue #$number ignores $decision run result without overwriting newer proof"
+                continue ;;
+              *) echo "::error::Invalid E2E reconciliation decision"; exit 1 ;;
+            esac
             gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/$number" --input "$f" > /dev/null
           done
+          if ! jq -e '.status == "Pass"' scratch/artifact/results.json > /dev/null; then
+            echo 'Required E2E tests are not all Pass; keep Acceptance blocked, but preserve the failure report'
+            exit 0
+          fi
+          # GITHUB_TOKEN-triggered repository_dispatch is an intentional
+          # workflow-trigger exception. Do not poll or edit the PR as a wakeup.
+          jq -n --argjson pr "$live_pr" --arg sha "$sha" \
+            --argjson source_run_id "$run_id" \
+            --arg plan_digest "$(jq -r .plan_digest scratch/artifact/plan.json)" \
+            '{event_type:"nession-issue-e2e-projected",client_payload:{
+              pr_number:$pr,head_sha:$sha,source_run_id:$source_run_id,
+              plan_digest:$plan_digest}}' > scratch/metadata/dispatch.json
+          gh api --method POST "repos/$GITHUB_REPOSITORY/dispatches" \
+            --input scratch/metadata/dispatch.json
+          echo 'Requested event-driven Acceptance reconciliation after verified Issue E2E projection' >> "$GITHUB_STEP_SUMMARY"
