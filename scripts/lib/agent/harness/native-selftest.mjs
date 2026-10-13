@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { hashDependencyTree, validateRegistry } from './contract.mjs';
@@ -28,6 +29,14 @@ try {
   put('thirdparty/sample-plugin/.claude-plugin/plugin.json','{"name":"sample-plugin"}\n');
   put('thirdparty/github-readonly/server.json',JSON.stringify({type:'stdio',command:'server.sh',args:[],provides:['github.issue.read','github.pr.read']})+'\n');
   put('thirdparty/github-readonly/server.sh','#!/usr/bin/env bash\nexit 0\n');
+  const git=(...args)=>execFileSync('git',['-C',checkout,...args],{encoding:'utf8'}).trim();
+  git('init','-q');
+  git('config','user.email','agent-fixture@example.invalid');
+  git('config','user.name','Agent Harness Fixture');
+  git('add','-A');
+  git('commit','-qm','fixture');
+  const sourceSha=git('rev-parse','HEAD');
+
   const ext=[
     {id:'superpowers',kind:'skill',revision:'c7d152b4a','path':'thirdparty/superpowers'},
     {id:'shadcn',kind:'registry',revision:'v3.0.1','path':'thirdparty/shadcn'},
@@ -38,8 +47,10 @@ try {
   reg.external_dependencies=ext;
   validateRegistry(reg);
   const request={agent_id:'dev-cursor-01',task:'implement',environment:'agent-dev-cursor-01',
-    checkout,workspace:fresh('cursor'),source_sha:'a'.repeat(40)};
+    checkout,workspace:fresh('cursor'),source_sha:sourceSha};
   const prep=prepareNativeHarness(reg,request);
+  assert.throws(()=>prepareNativeHarness(reg,{...request,workspace:fresh('wrong-sha'),
+    source_sha:'f'.repeat(40)}),/HEAD does not match/);
   assert.equal(prep.assets.length,5);
   assert.ok(prep.assets.some(x=>x.id==='superpowers'&&x.origin==='external'));
   assert.ok(prep.assets.some(x=>x.id==='shadcn'&&x.kind==='registry'));
