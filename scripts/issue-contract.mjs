@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import { validateAcceptancePlan } from './acceptance-plan.mjs';
+import { parseIssueE2E } from './issue-e2e-contract.mjs';
 
 export const KIND_LABELS = new Set(['bug', 'requirement']);
 export const AREA_LABELS = new Set([
@@ -198,6 +199,8 @@ function validateRequirement(issue, errors) {
 export function auditIssue(issue) {
   const errors = [];
   const { kind, labels, areas } = validateKindAndArea(issue, errors);
+  const e2e = parseIssueE2E(issue.body);
+  if (e2e) errors.push(...e2e.errors);
   if (kind === 'bug') validateBug(issue, errors);
   else if (kind === 'requirement') validateRequirement(issue, errors);
   return { ok: errors.length === 0, kind, labels, areas, errors };
@@ -254,7 +257,10 @@ function selfTest() {
     auditIssue({ ...requirement, body: requirement.body.replace('| SC-01 | pre-merge |', '| SC-01 | production |') })
       .errors.some((x) => x.includes('unsupported Acceptance stage')),
   );
-  console.log('issue-contract self-test: 10 cases passed');
+  const withE2E = { ...requirement, body: requirement.body + '\n\n## E2E Verification\n### New\n- none: no new test\n### Regression\n- none: documentation only\n\n## E2E Report\n| ID | Type | Result | Evidence |\n|---|---|---|---|\n' };
+  assert.equal(auditIssue(withE2E).ok, true);
+  assert.equal(auditIssue({ ...withE2E, body: withE2E.body.replace('- none: documentation only', '') }).ok, false);
+  console.log('issue-contract self-test: 12 cases passed');
 }
 
 function writeResult(result, outputPath) {
