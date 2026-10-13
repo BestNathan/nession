@@ -16,6 +16,7 @@ repo-health-selftest
 repo-metrics-selftest
 protocol-json-contract
 issue-contract-selftest
+issue-e2e-contract-selftest
 task-runner-selftest
 task-result-ingest-selftest
 e2e-observation-collector-selftest
