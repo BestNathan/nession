@@ -192,5 +192,22 @@ jobs:
           for f in scratch/output/[0-9]*.json; do
             [[ -f "$f" ]] || continue
             number="$(basename "$f" .json)"
+            latest="$(gh api "repos/$GITHUB_REPOSITORY/issues/$number" --jq .body)"
+            original="$(jq -r .body "scratch/metadata/issue-$number.json")"
+            if [[ "$latest" != "$original" ]]; then
+              echo "Issue #$number changed since attestation; omit stale projection"
+              continue
+            fi
+            older="$(printf '%s' "$latest" | grep -oE 'run [0-9]+/[0-9]+, SHA' | head -1 || true)"
+            if [[ -n "$older" ]]; then
+              previous_id="${older#run }"
+              previous_id="${previous_id%%/*}"
+              previous_attempt="${older#*/}"
+              previous_attempt="${previous_attempt%%,*}"
+              if (( previous_id > run_id || (previous_id == run_id && previous_attempt >= attempt) )); then
+                echo "Issue #$number already carries an equally new or newer result"
+                continue
+              fi
+            fi
             gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/$number" --input "$f" > /dev/null
           done
