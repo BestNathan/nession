@@ -6,6 +6,7 @@ import path from 'node:path';
 import { canonicalJson, digest, validateRegistry, resolveIdentity,
   resolveProviderPlan, verifyEffectiveHarness, verifyExternalDependencies } from './harness/contract.mjs';
 import { advanceWorkflow, authorizeCommentCommand } from './orchestration/transition.mjs';
+import { issueSnapshot, reconcileIssueThread, formatResumeContext } from './orchestration/issue-thread.mjs';
 import { checkpointPath, sealCheckpoint, unsealCheckpoint, advanceCheckpointHead } from './store/checkpoint.mjs';
 import { canonicalToolId, normalizeProviderEvent, makeExecutionEvent } from './telemetry/execution-event.mjs';
 
@@ -116,4 +117,18 @@ assert.throws(() => makeExecutionEvent(context, 'tool.completed', 3,
 const usage = normalizeProviderEvent('cursor', { type:'usage', inputTokens:100 }, context, 3);
 assert.equal(usage.data.usage.input, 100);
 assert.equal(usage.data.usage.output, null);
+const issue = { number: 1664, title: 'test', body: 'SC-01', updated_at: '2026-10-13T00:00:00Z' };
+const comment = { id: 1001, user: { login: 'bot' }, body: 'Review feedback',
+  created_at: '2026-10-13T00:00:00Z', updated_at: '2026-10-13T00:00:00Z' };
+const snapshot = issueSnapshot(issue, [comment]);
+const initial = reconcileIssueThread(snapshot);
+assert.equal(initial.comments.length, 1);
+const none = reconcileIssueThread(snapshot, initial.cursor);
+assert.equal(none.comments.length, 0);
+const edited = issueSnapshot(issue, [{ ...comment, body: 'New review feedback',
+  updated_at: '2026-10-13T01:00:00Z' }]);
+const delta = reconcileIssueThread(edited, initial.cursor);
+assert.equal(delta.comments.length, 1);
+assert.match(formatResumeContext(edited, delta, 'b'.repeat(40)), /New review feedback/);
+assert.throws(() => reconcileIssueThread(issueSnapshot(issue, []), initial.cursor), /disappeared/);
 console.log('agent development foundation self-test: passed');
