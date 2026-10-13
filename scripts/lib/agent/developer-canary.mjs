@@ -146,7 +146,11 @@ function selfTest(){
     '--disallowedTools mcp__*','--no-session-persistence']){
     assert.ok(a.includes(flag),'required Claude flag absent: '+flag);
   }
-  assert.ok(!a.includes('Bash')&&!a.includes('bypassPermissions'));
+  const argv=canaryArgs('qwen3.7-plus');
+  const nativeVisible=argv[argv.indexOf('--tools')+1];
+  assert.equal(nativeVisible,'Edit,Read,Write');
+  assert.ok(!nativeVisible.includes('Bash'));
+  assert.ok(!argv.includes('bypassPermissions'));
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'qwen-canary-test-'));
   const good=[{type:'assistant',message:{content:[{type:'tool_use',id:'r1',name:'Read'},
     {type:'tool_use',id:'e1',name:'Edit'}]}}];
