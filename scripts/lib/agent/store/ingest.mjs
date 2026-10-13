@@ -130,7 +130,11 @@ export function ingestEncryptedCheckpoint(root, source, sealed, registry, key, e
     const next = { version:sealed.version, checkpoint_path:sealed.path,
       ciphertext_sha256:sealed.ciphertext_sha256 };
     const temporary = path.join(dir, '.head-' + source.run_id + '-' + source.attempt);
-    fs.writeFileSync(temporary, bytes(next), { flag:'wx', mode:0o600 });
+    if (fs.existsSync(temporary)) {
+      const stat = fs.lstatSync(temporary);
+      if (!stat.isFile() || stat.isSymbolicLink() ||
+          !fs.readFileSync(temporary).equals(bytes(next))) reject('conflicting unfinished checkpoint head');
+    } else fs.writeFileSync(temporary, bytes(next), { flag:'wx', mode:0o600 });
     fs.renameSync(temporary, path.join(dir, 'head.json'));
     return { idempotent:false, identity, version:sealed.version, run_path:runPath };
   } finally { plaintext.fill(0); }
