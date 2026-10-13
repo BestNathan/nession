@@ -250,6 +250,25 @@ function selfTest() {
       .replace('| SC-02 | staging | Pending | implementation pending |', '| SC-02 | Pending | implementation pending |'),
   };
   assert.equal(auditIssue(legacyRequirement).ok, true);
+  const fence = String.fromCharCode(96).repeat(3);
+  const v2 = {
+    ...requirement,
+    body: requirement.body
+      .replace('## Acceptance Report',
+        '## Acceptance Plan\\n\\n' + fence + 'yaml\\nacceptance:\\n' +
+        '  SC-01:\\n    when: pr\\n    method: agent\\n' +
+        '  SC-02:\\n    when: merged\\n    branch: staging\\n    method: case\\n' +
+        fence + '\\n\\n## Acceptance Report')
+      .replace('| Criterion | Stage | Result | Evidence |', '| Criterion | Result | Evidence |')
+      .replace('|---|---|---|---|', '|---|---|---|')
+      .replace('| SC-01 | pre-merge | Pending |', '| SC-01 | Pending |')
+      .replace('| SC-02 | staging | Pending |', '| SC-02 | Pending |'),
+  };
+  assert.equal(auditIssue(v2).ok, true, auditIssue(v2).errors.join('; '));
+  assert.ok(auditIssue({ ...v2, body: v2.body.replace('method: case', 'method: unknown') })
+    .errors.some((e) => e.includes('unsupported method')));
+  assert.ok(auditIssue({ ...v2, body: v2.body.replace('  SC-02:\\n    when: merged\\n    branch: staging\\n    method: case\\n', '') })
+    .errors.some((e) => e.includes('missing Acceptance Plan entry')));
   assert.ok(
     auditIssue({ ...requirement, body: requirement.body.replace('| SC-01 | pre-merge |', '| SC-01 | production |') })
       .errors.some((x) => x.includes('unsupported Acceptance stage')),
