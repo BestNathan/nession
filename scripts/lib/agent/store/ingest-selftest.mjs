@@ -38,6 +38,8 @@ try {
   assert.throws(() => ingestEncryptedCheckpoint(root,{...source,agent_id:'review-cursor-01'},first,registry,key,1),/task|role|identity/);
   assert.throws(() => ingestEncryptedCheckpoint(root,{...source,path:'.github/workflows/random.yml'},first,registry,key,1),/untrusted/);
   assert.throws(() => ingestEncryptedCheckpoint(root,{...source,run_id:125},first,registry,key,1),/sequence gap/);
+  assert.throws(() => ingestEncryptedCheckpoint(root,{...source,run_id:125},
+    {...first,metadata:{...first.metadata,session_id:'altered-valid-id'}},registry,key,1),/authentication/);
   assert.throws(() => ingestEncryptedCheckpoint(root,source,first,registry,Buffer.alloc(32,9),0),/authentication/);
   assert.throws(() => ingestEncryptedCheckpoint(root,source,{...first,ciphertext:'U0VDUkVU'},registry,key,1),/integrity mismatch/);
   assert.throws(() => restoreEncryptedCheckpoint(root,identity,{
