@@ -23,6 +23,8 @@ e2e-browser-report-selftest
 e2e-full-stack-runtime-selftest
 e2e-cli-selftest
 e2e-tests-catalog
+issue-e2e-plan-selftest
+e2e-selected-report-selftest
 acceptance-layout-contract
 terminal-attach-resume-selftest
 e2e-cli-discovery
