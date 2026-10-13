@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { makeExecutionEvent, normalizeProviderEvent } from './execution-event.mjs';
+import { makeExecutionEvent, normalizeProviderEvent, canonicalToolId } from './execution-event.mjs';
 
 const ID = /^[a-z0-9][a-z0-9._-]{0,127}$/;
 const NATIVE = /^[A-Za-z_][A-Za-z0-9_.:/-]{0,127}$/;
@@ -177,11 +177,52 @@ export function writeExecutionTrace(file, trace) {
 // Per-model/provider conversion happens before writing an untrusted telemetry artifact.
 // No native event input block or final model message is ever copied to the trace.
 export function normalizeNativeTrace(provider, nativeEvents, run, coverage) {
-  if (!Array.isArray(nativeEvents)) fail('native events must be an array');
+  if (!['cursor', 'claude-code'].includes(provider) || !Array.isArray(nativeEvents)) {
+    fail('unsupported native source');
+  }
   const identity = { role: run.agent.role, agent_id: run.agent.id, issue: run.task.issue,
     github_run_id: run.identity.github_run_id, github_run_attempt: run.identity.github_run_attempt };
   const events = [];
+  const calls = new Map();
+  let assistantUsageSeen = false;
+  const emit = (type, data) => events.push(makeExecutionEvent(identity, type, events.length, data));
   for (const input of nativeEvents) {
+    if (provider === 'claude-code') {
+      const content = input?.message?.content;
+      if (input?.type === 'assistant' && Array.isArray(content)) {
+        for (const block of content) {
+          if (block?.type !== 'tool_use' || !block.id || !block.name) continue;
+          const tool = canonicalToolId('claude-code', block.name);
+          const callId = String(block.id);
+          calls.set(callId, tool);
+          emit('tool.started', { call_id: callId, tool, observation: 'native-event' });
+        }
+        // Per-message model usage is observed independently from the final
+        // aggregate result. Do not sum both into model request count.
+        if (input.message.usage) {
+          const usage = normalizeProviderEvent('claude-code',
+            { type:'result', usage:input.message.usage }, identity, events.length);
+          if (usage) { events.push(usage); assistantUsageSeen = true; }
+        }
+        continue;
+      }
+      if (input?.type === 'user' && Array.isArray(content)) {
+        for (const block of content) {
+          if (block?.type !== 'tool_result') continue;
+          const callId = String(block.tool_use_id ?? '');
+          const tool = calls.get(callId);
+          if (!tool) continue; // result without an observed start is not evidence of lifecycle.
+          const failed = block.is_error === true;
+          emit(failed ? 'tool.failed' : 'tool.completed', {
+            call_id:callId, tool, status:failed ? 'error' : 'completed',
+            duration_ms:null, observation:'native-event',
+          });
+          calls.delete(callId);
+        }
+        continue;
+      }
+      if (input?.type === 'result' && assistantUsageSeen) continue;
+    }
     const normalized = normalizeProviderEvent(provider, input, identity, events.length);
     if (normalized) events.push(normalized);
   }
@@ -228,6 +269,22 @@ export function selfTest() {
     claude, {tools:'partial'});
   assert.equal(q.events[0].data.tool.id, u.events[0].data.tool.id);
   assert.equal(q.coverage.skills,'unobserved');
+  const multi = normalizeNativeTrace('claude-code', [
+    {type:'assistant', message:{ content:[
+      {type:'tool_use', id:'m1', name:'Read', input:{file_path:'/private/a'}},
+      {type:'tool_use', id:'m2', name:'Grep', input:{pattern:'SECRET'}}],
+      usage:{input_tokens:15, output_tokens:4} }},
+    {type:'user', message:{content:[
+      {type:'tool_result',tool_use_id:'m1',content:'PRIVATE OUTPUT'},
+      {type:'tool_result',tool_use_id:'m2',is_error:true,content:'PRIVATE FAILURE'}]}}
+  ], claude, {model:'partial',tools:'observed'});
+  assert.equal(multi.events.filter(e => e.type === 'tool.started').length, 2);
+  assert.equal(multi.events.filter(e => e.type === 'tool.completed').length, 1);
+  assert.equal(multi.events.filter(e => e.type === 'tool.failed').length, 1);
+  assert.equal(multi.events.filter(e => e.type === 'model.usage').length, 1);
+  assert.ok(!JSON.stringify(multi).includes('PRIVATE'));
+  assert.ok(!JSON.stringify(multi).includes('SECRET'));
+
   assert.ok(!JSON.stringify(q).includes('/private'));
   assert.throws(() => buildExecutionTrace({...summary,agent:{...summary.agent,id:null}},[]),/agent.id/);
   console.log('agent execution trace: schema, lifecycle, source identity and redaction fixtures passed');
