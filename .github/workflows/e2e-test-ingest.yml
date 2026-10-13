@@ -211,3 +211,14 @@ jobs:
             fi
             gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/$number" --input "$f" > /dev/null
           done
+          # GITHUB_TOKEN-triggered repository_dispatch is an intentional
+          # workflow-trigger exception. Do not poll or edit the PR as a wakeup.
+          jq -n --argjson pr "$live_pr" --arg sha "$sha" \
+            --argjson source_run_id "$run_id" \
+            --arg plan_digest "$(jq -r .plan_digest scratch/artifact/plan.json)" \
+            '{event_type:"nession-issue-e2e-projected",client_payload:{
+              pr_number:$pr,head_sha:$sha,source_run_id:$source_run_id,
+              plan_digest:$plan_digest}}' > scratch/metadata/dispatch.json
+          gh api --method POST "repos/$GITHUB_REPOSITORY/dispatches" \
+            --input scratch/metadata/dispatch.json
+          echo 'Requested event-driven Acceptance reconciliation after verified Issue E2E projection' >> "$GITHUB_STEP_SUMMARY"
