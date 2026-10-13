@@ -94,6 +94,10 @@ function selfTest() {
   assert.deepEqual(out.results.map(r=>r.assertions),[1,1]);
   input=make(one('terminal-resume','failed'));
   assert.equal(summarize(plan,input.json,input.receipt).results[1].result,'Fail');
+  input=make(one('terminal-resume','flaky'));
+  assert.equal(summarize(plan,input.json,input.receipt).results[1].result,'Pending');
+  input=make(one('terminal-resume','skipped'));
+  assert.equal(summarize(plan,input.json,input.receipt).results[1].result,'Pending');
   input=make(one('terminal-resume','passed',0));
   assert.equal(summarize(plan,input.json,input.receipt).results[1].result,'Pending');
   assert.throws(()=>summarize(plan,input.json,null),/receipt/);
