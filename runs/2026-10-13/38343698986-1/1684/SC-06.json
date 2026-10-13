@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "7e3b8ffb20389ac2d0007ed4dd6eca434f0f9554a28e9034a10250cdfaca91a4",
+  "run_id": 38343698986,
+  "run_attempt": 1,
+  "issue": 1684,
+  "criterion": "SC-06",
+  "criterion_text": "Real exact-SHA protocol and browser Acceptance Cases complete successfully on CI with authenticated evidence, correct verdicts and reliable shared Runtime teardown.",
+  "stage": "staging",
+  "target_sha": "1173895e0ee2ab1e33e7832a17a721e148df473e",
+  "contract_sha256": "06c04a4d78800c70681b7237cca32c8292b0cf7d58a8f8825f311fd8eefe0da6",
+  "case_revision": "1173895e0ee2ab1e33e7832a17a721e148df473e",
+  "case_tree_sha": "ed866d454669b96e81986ceda832f3f40baaea4e",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-13T03:54:04.808Z",
+  "finished_at": "2026-10-13T03:54:21.937Z",
+  "duration_ms": 17129,
+  "verifiers": [
+    {
+      "type": "protocol",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "Canonical Acceptance layout verified against a real Server/Agent on the pinned staging SHA.",
+      "evidence": [
+        {
+          "type": "protocol",
+          "value": "server.auth status=success over ws://127.0.0.1:45949/ws"
+        },
+        {
+          "type": "protocol",
+          "value": "server.agent.list contains agent_id=e2e-test-node status=online"
+        },
+        {
+          "type": "runtime",
+          "value": "target_sha=1173895e0ee2ab1e33e7832a17a721e148df473e profile=full-stack-local"
+        }
+      ],
+      "duration_ms": 10047,
+      "exit_code": 0
+    },
+    {
+      "type": "browser",
+      "entry": "verify.spec.js",
+      "result": "Pass",
+      "summary": "Playwright JSON confirms executed passing tests and assertions with no skips",
+      "evidence": [
+        {
+          "type": "browser",
+          "value": "Playwright discovered=1 passed=1 skipped=0 assertions=3"
+        }
+      ],
+      "execution": {
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 3
+      },
+      "duration_ms": 1408,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 38343698986,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "1173895e0ee2ab1e33e7832a17a721e148df473e",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/38343698986",
+    "record_path": "runs/2026-10-13/38343698986-1/1684/SC-06.json",
+    "source_result_sha256": "bd5b02c6a3f639461e21e3478b3415f3510137497e68ff97679f43028654eb32"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-38343698986-1",
+    "sha256": "bd5b02c6a3f639461e21e3478b3415f3510137497e68ff97679f43028654eb32",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/38343698986",
+    "durability": "time-limited; object archival not configured"
+  }
+}
