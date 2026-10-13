@@ -57,14 +57,18 @@ export function advanceWorkflow(state, event, trusted, config = {}) {
       // Existing Acceptance Orchestrator selects each SC by target and proof method.
       actions = [{ type: 'verify', gate: 'sc-acceptance', when: 'pr', sha: event.target_sha }];
     } else {
-      next.phase = 'repair';
-      actions = [{ type: 'dispatch', role: 'developer', task: 'repair', sha: event.target_sha, resume: true }];
+      next.repair_attempts++;
+      next.phase = next.repair_attempts > maxRepairs ? 'blocked' : 'repair';
+      actions = next.phase === 'blocked' ? [{ type: 'notify', reason: 'repair_limit' }] :
+        [{ type: 'dispatch', role: 'developer', task: 'repair', sha: event.target_sha, resume: true }];
     }
   } else if (event.kind === 'acceptance' && current.phase === 'acceptance' && current.target_sha === event.target_sha) {
-    next.phase = event.outcome === 'passed' ? 'waiting-merge' : event.outcome === 'failed' ? 'repair' : 'blocked';
+    if (event.outcome === 'failed') next.repair_attempts++;
+    next.phase = event.outcome === 'passed' ? 'waiting-merge' :
+      event.outcome === 'failed' && next.repair_attempts <= maxRepairs ? 'repair' : 'blocked';
     actions = event.outcome === 'passed' ? [{ type: 'notify', reason: 'requires_authorized_merge' }] :
-      event.outcome === 'failed' ? [{ type: 'dispatch', role: 'developer', task: 'repair', sha: event.target_sha, resume: true }] :
-      [{ type: 'notify', reason: 'acceptance_pending' }];
+      next.phase === 'repair' ? [{ type: 'dispatch', role: 'developer', task: 'repair', sha: event.target_sha, resume: true }] :
+      [{ type: 'notify', reason: event.outcome === 'pending' ? 'acceptance_pending' : 'repair_limit' }];
   } else if (event.kind === 'merge' && current.phase === 'waiting-merge' &&
       event.outcome === 'completed') {
     next.phase = 'post-merge-acceptance';
