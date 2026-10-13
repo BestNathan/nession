@@ -64,12 +64,29 @@ export async function runCursorSession({
   try {
     const run = await agent.send(prompt);
     const toolCalls = [];
+    // Store only bounded native event *metadata*. No tool arguments, result text,
+    // system messages, or model-generated text enter the telemetry collector.
+    const nativeEvents = [];
     let availableTools = [];
     let turns = 0;
     for await (const event of run.stream()) {
-      if (event.type === 'usage') turns += 1;
+      if (event.type === 'usage') {
+        turns += 1;
+        if (nativeEvents.length < 10000) {
+          const usage = event.usage ?? event;
+          nativeEvents.push({ type: 'usage', requestId: event.requestId ?? null,
+            usage: Object.fromEntries(['inputTokens','outputTokens','cacheReadTokens','cacheWriteTokens','reasoningTokens']
+              .filter(k => Number.isSafeInteger(usage[k]) && usage[k] >= 0).map(k => [k, usage[k]])) });
+        }
+      }
       if (event.type === 'system' && Array.isArray(event.tools)) availableTools = event.tools;
       if (event.type === 'tool_call' && event.status === 'running') toolCalls.push(event.name);
+      if (event.type === 'tool_call' && ['running','completed','error'].includes(event.status) &&
+          typeof event.name === 'string' && nativeEvents.length < 10000) {
+        nativeEvents.push({ type:'tool_call', status:event.status, name:event.name,
+          call_id: String(event.callId ?? event.call_id ?? event.id ?? 'tool-' + nativeEvents.length),
+          duration_ms: Number.isSafeInteger(event.durationMs) && event.durationMs >= 0 ? event.durationMs : null });
+      }
     }
     const result = await run.wait();
     let billed = null;
@@ -81,7 +98,7 @@ export async function runCursorSession({
         agent_id: agent.agentId ?? null,
         run_id: result.id ?? run.id ?? null,
         request_id: result.requestId ?? run.requestId ?? null,
-        turns, available_tools: availableTools, tool_calls: toolCalls,
+        turns, available_tools: availableTools, tool_calls: toolCalls, native_events: nativeEvents,
         status: result.status, error: result.error ?? null,
         usage: normalizeCursorUsage(result.usage),
         cost: normalizeCursorCost(billed),
