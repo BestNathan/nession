@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { validateExecutionTrace, traceStoragePath, selfTest as executionTraceSelfTest } from './lib/agent/telemetry/execution-trace.mjs';
+import { validateExecutionTrace, validateTraceSource, traceStoragePath, selfTest as executionTraceSelfTest } from './lib/agent/telemetry/execution-trace.mjs';
 
 export const AGENT_TELEMETRY_SCHEMA_VERSION = 1;
 
@@ -488,6 +488,12 @@ async function main() {
   }
   if (command === 'path') {
     console.log(persistableStoragePath(readPersistableRecord(process.argv[3])));
+    return;
+  }
+  if (command === 'correlate') {
+    const trace = readPersistableRecord(process.argv[3]);
+    const run = readRecord(process.argv[4]);
+    validateTraceSource(trace, run);
     return;
   }
   if (command === 'aggregate') {
