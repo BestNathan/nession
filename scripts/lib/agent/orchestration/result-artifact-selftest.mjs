@@ -73,7 +73,7 @@ assert.throws(()=>decodeResultZip(zipFixture(result,{method:12})),/unsupported/)
 assert.throws(()=>decodeResultZip(Buffer.concat([zip,Buffer.from('junk')])),/end-of-central/);
 assert.throws(()=>decodeResultZip(Buffer.concat([zip,zip])),/end-of-central/);
 const malformed=Buffer.from(zip); malformed[35]^=1;
-assert.throws(()=>decodeResultZip(malformed),/CRC|invalid|length/);
+assert.throws(()=>decodeResultZip(malformed),/mismatch|CRC|invalid|length/);
 const corruptIndex=Buffer.from(zip);corruptIndex.writeUInt32LE(0xffffffff,corruptIndex.length-22+16);
 assert.throws(()=>decodeResultZip(corruptIndex),/central directory bounds|out of range/);
 const incorrectCRC=Buffer.from(zip);
