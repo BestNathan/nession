@@ -211,6 +211,10 @@ jobs:
             fi
             gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/$number" --input "$f" > /dev/null
           done
+          if ! jq -e '.status == "Pass"' scratch/artifact/results.json > /dev/null; then
+            echo 'Required E2E tests are not all Pass; keep Acceptance blocked, but preserve the failure report'
+            exit 0
+          fi
           # GITHUB_TOKEN-triggered repository_dispatch is an intentional
           # workflow-trigger exception. Do not poll or edit the PR as a wakeup.
           jq -n --argjson pr "$live_pr" --arg sha "$sha" \
