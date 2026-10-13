@@ -145,6 +145,22 @@ export function buildExecutionTrace(run, events, coverage = {}) {
   return validateExecutionTrace(trace);
 }
 
+export function validateTraceSource(trace, summary) {
+  validateExecutionTrace(trace);
+  if (summary?.schema_version !== 1 || summary.kind !== 'agent_workflow_run') fail('missing canonical run summary');
+  for (const field of ['workflow_id','github_run_id','github_run_attempt','unique_run_name','repository']) {
+    if (trace.identity[field] !== summary.identity?.[field]) fail('trace/run summary source mismatch: ' + field);
+  }
+  if (trace.task.id !== summary.task?.id || trace.task.type !== summary.task?.type ||
+      trace.task.issue !== summary.task?.issue ||
+      trace.task.target_sha !== (summary.task.target_ref ?? null)) fail('trace/run summary task mismatch');
+  for (const field of ['id','role','provider','harness_sha256']) {
+    if (trace.agent[field] !== (summary.agent?.[field] ?? null)) fail('trace/run summary agent mismatch: ' + field);
+  }
+  if (trace.timing.started_at !== summary.timing?.started_at) fail('trace/run summary start mismatch');
+  return true;
+}
+
 export function traceStoragePath(trace) {
   validateExecutionTrace(trace);
   return ['raw','events',trace.identity.workflow_id,trace.timing.started_at.slice(0,10),
@@ -188,6 +204,9 @@ export function selfTest() {
   const trace = buildExecutionTrace(summary, [e], {tools:'observed'});
   assert.equal(traceStoragePath(trace), 'raw/events/agent-develop/2026-10-13/101-1-issue-1692-developer.json');
   assert.equal(validateExecutionTrace(trace), trace);
+  assert.equal(validateTraceSource(trace, summary), true);
+  assert.throws(() => validateTraceSource(trace, { ...summary, task: { ...summary.task, issue: 1693 } }), /task mismatch/);
+  assert.throws(() => validateTraceSource(trace, { ...summary, identity: { ...summary.identity, github_run_attempt: 2 } }), /source mismatch/);
   const rejected = (mutate, message) => assert.throws(() => validateExecutionTrace(mutate(structuredClone(trace))), message);
   rejected(t => {t.events[0].data.tool.args={api_key:'secret'};return t}, /unexpected/);
   rejected(t => {t.events[0].data.prompt='do this';return t}, /unexpected/);
