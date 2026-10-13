@@ -64,14 +64,14 @@ try {
     '### Regression', '- terminal-attach',
     '## E2E Report', '| ID | Type | Result | Evidence |',
     '|---|---|---|---|', '| terminal-attach | Regression | Pending | - |',
-  ].join('\\n');
+  ].join('\n');
   enforceE2EReadOnly(e2eContract,e2eContract);
   assert.throws(() => enforceE2EReadOnly(e2eContract,
     e2eContract.replace('| Pending | - |','| Pass | forged |')),/Unauthorized E2E/);
   assert.throws(() => enforceE2EReadOnly(e2eContract,
     e2eContract.replace('- terminal-attach','- terminal-replay')
       .replace('| terminal-attach | Regression','| terminal-replay | Regression')),/Unauthorized E2E/);
-  assert.throws(() => enforceE2EReadOnly(issue.body,issue.body+'\\n'+e2eContract),/Unauthorized E2E/);
+  assert.throws(() => enforceE2EReadOnly(issue.body,issue.body+'\n'+e2eContract),/Unauthorized E2E/);
   console.log('gh issue tools self-test: 14 assertions passed');
 } finally {
   process.env.PATH = oldPath;
