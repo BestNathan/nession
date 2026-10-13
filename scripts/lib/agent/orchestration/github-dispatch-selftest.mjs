@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {startDevelopment,recordDispatch,acceptTaskResult,reconcileOutbox} from './outbox.mjs';
 import {issueDispatchTicket,verifyDispatchTicket,planGitHubDispatch,
-  createGitHubRunReader,attestAgentOutcome} from './github-dispatch.mjs';
+  createGitHubRunReader,createGitHubDispatchClient,attestAgentOutcome} from './github-dispatch.mjs';
 
 const registry=JSON.parse(readFileSync('automation/agents/registry.json','utf8'));
 const a='a'.repeat(40), b='b'.repeat(40), main='f'.repeat(40);
@@ -26,8 +26,41 @@ assert.throws(()=>verifyDispatchTicket(ticket,{'control-v2':key},{now}),/unknown
 assert.throws(()=>verifyDispatchTicket(ticket.slice(0,-3)+'aaa',keyring,{now}),/HMAC|signature|malformed/);
 assert.throws(()=>issueDispatchTicket(state,item.id,registry,{...signer,ttl_ms:9999999}),/TTL/);
 assert.throws(()=>planGitHubDispatch(state,'0'.repeat(64),registry,signer),/not pending/);
-state=recordDispatch(state,state.version,item.id,{status:'accepted',dispatch_id:item.id});
+state=recordDispatch(state,state.version,item.id,
+  {status:'verified',dispatch_id:item.id,source_run_id:333});
 assert.throws(()=>planGitHubDispatch(state,item.id,registry,signer),/not pending/);
+const uncertain=recordDispatch(startDevelopment(registry,request,authority),1,item.id,
+  {status:'accepted',dispatch_id:item.id});
+await assert.rejects(()=>attestAgentOutcome({
+  state:uncertain,result:{kind:'developer',issue,run_id:333,run_attempt:1,
+    target_sha:b,outcome:'implementation_ready',task_id:item.id},
+  dispatch_ticket:ticket,pr_number:42,registry,
+  reader:{getRun:async()=>({}),getPullRequest:async()=>({})},
+  keyring,now:now+700000,verified_main_sha:main,
+}),/no trusted run-bound/);
+
+const posted=[];
+const api200=createGitHubDispatchClient('trustedActionWriter',{
+  fetchFn:async (url,params)=>{
+    posted.push({url,params});
+    return {status:200,json:async()=>({workflow_run_id:333,
+      run_url:'https://api.github.com/repos/BestNathan/nession/actions/runs/333'})};
+  },
+});
+const receipt=await api200(plan);
+assert.deepEqual(receipt,{status:'verified',dispatch_id:item.id,source_run_id:333});
+assert.equal(posted[0].params.method,'POST');
+assert.equal(JSON.parse(posted[0].params.body).return_run_details,true);
+assert.equal(posted[0].params.headers['X-GitHub-Api-Version'],'2026-03-10');
+const api204=createGitHubDispatchClient('trustedActionWriter',{
+  fetchFn:async()=>({status:204}),
+});
+assert.deepEqual(await api204(plan),{status:'accepted',dispatch_id:item.id});
+await assert.rejects(()=>createGitHubDispatchClient('trustedActionWriter',{
+  fetchFn:async()=>({status:200,json:async()=>({workflow_run_id:null})})
+})(plan),/verifiable downstream/);
+await assert.rejects(()=>api200({...plan,workflow_id:'evil.yml'}),/unapproved/);
+await assert.rejects(()=>api200({...plan,ref:'feature'}),/unapproved/);
 const issuer={id:222,path:'.github/workflows/acceptance-agent-controller.yml',
   name:'Acceptance / Agent Controller',event:'workflow_dispatch',head_branch:'main',
   repository:{full_name:'BestNathan/nession'},head_sha:main};
@@ -74,9 +107,8 @@ await denyRun(r=>{r.head_branch='feature'},/provenance/);
 await denyRun(r=>{r.head_sha='0'.repeat(40)},/trusted main SHA/);
 await denyRun(r=>{r.run_attempt=2},/provenance/);
 await denyRun(r=>{r.repository.full_name='other/repo'},/provenance/);
-await denyRun(r=>{r.inputs={...r.inputs,action_id:'0'.repeat(64)}},/inputs mismatch/);
-await denyRun(r=>{r.inputs={...r.inputs,dispatch_ticket:'forged'}},/different dispatch ticket/);
-await denyRun(r=>{delete r.inputs},/inputs mismatch/);
+// REST Get Workflow Run does not reliably expose dispatch inputs. The
+// authoritative 200 dispatch response binds the Run ID to the Outbox instead.
 await denyRun(r=>{r.created_at=new Date(now+900000).toISOString()},/dispatch window/);
 await denyRun(r=>{r.conclusion='failure'},/provenance/);
 runs.set(222,{...issuer,path:'evil.yml'});
@@ -100,7 +132,7 @@ const reviewAction=reconcileOutbox(advanced).pending[0];
 const reviewPlan=planGitHubDispatch(advanced,reviewAction.id,registry,signer);
 assert.equal(reviewPlan.workflow_id,'agent-review.yml');
 const reviewState=recordDispatch(advanced,advanced.version,reviewAction.id,
-  {status:'accepted',dispatch_id:reviewAction.id});
+  {status:'verified',dispatch_id:reviewAction.id,source_run_id:334});
 runs.set(334,{...devRun,id:334,path:'.github/workflows/agent-review.yml',
   name:'Agent / Review',inputs:reviewPlan.inputs});
 const reviewResult={kind:'reviewer',issue,run_id:334,run_attempt:1,target_sha:b,
