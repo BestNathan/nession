@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { hashDependencyTree, validateRegistry } from './contract.mjs';
-import { prepareNativeHarness,cursorNativeOptions,claudeNativeOptions,auditNativeLoad } from './native.mjs';
+import { prepareNativeHarness,cursorNativeOptions,claudeNativeOptions,claudeCliToolPolicy,auditNativeLoad } from './native.mjs';
 
 const registry=JSON.parse(fs.readFileSync('automation/agents/registry.json','utf8'));
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'nession-native-harness-'));
@@ -96,6 +96,18 @@ try {
   const stage=prepareNativeHarness(isolated,{...request,agent_id:'dev-claude-01',
     environment:'agent-dev-claude-01',workspace:fresh('claude-plugin')});
   const cli=claudeNativeOptions(stage);
+  assert.ok(cli.args.includes('--tools'));
+  assert.ok(cli.args.includes('--permission-mode'));
+  assert.equal(cli.args[cli.args.indexOf('--permission-mode')+1],'dontAsk');
+  assert.ok(!cli.args.includes('--restricted'));
+  assert.throws(()=>claudeNativeOptions(stage,{restricted:true}),/restricted Claude/);
+  const locked=claudeCliToolPolicy(['Read','Edit','Write'],{restricted:true});
+  assert.deepEqual(locked.slice(0,6),[
+    '--permission-mode','dontAsk','--tools','Edit,Read,Write','--allowedTools','Edit,Read,Write']);
+  assert.ok(locked.includes('--restricted'));
+  assert.ok(locked.includes('mcp__*'));
+  assert.throws(()=>claudeCliToolPolicy(['Read','Bash','Read']),/visibility policy/);
+  assert.throws(()=>claudeCliToolPolicy(['WebFetch']),/visibility policy/);
   assert.ok(cli.args.includes('--strict-mcp-config'));
   assert.ok(cli.args.includes('--setting-sources'));
   assert.ok(cli.args.includes('--plugin-dir'));
