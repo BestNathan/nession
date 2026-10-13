@@ -23,6 +23,14 @@ const expectError = (...args) => {
     '; stdout=' + result.stdout + '; stderr=' + result.stderr);
   assert.match(result.stderr, /E2E Error:/);
 };
+const testList = call('test', '--list');
+assert.equal(testList.code, 0, testList.stderr);
+const declaredTests = JSON.parse(testList.stdout).tests;
+assert.equal(declaredTests.length, 30);
+assert.equal(new Set(declaredTests.map(item => item.id)).size, declaredTests.length);
+assert.ok(declaredTests.some(item => item.id === 'terminal-io'));
+const catalogFixtures = spawnSync(process.execPath, [path.join(repo, 'e2e/runner/test-catalog-selftest.cjs')], { cwd: repo, encoding: 'utf8', timeout: 10000 });
+assert.equal(catalogFixtures.status, 0, catalogFixtures.stderr);
 const listed = call('--list');
 assert.equal(listed.code, 0);
 const catalog = JSON.parse(listed.stdout);
@@ -33,17 +41,35 @@ assert.match(migration.source_sha, /^[a-f0-9]{40}$/);
 const browserRoot = path.join(repo, 'e2e', 'tests', 'browser');
 assert.equal(fs.existsSync(path.join(repo, 'e2e', 'specs')), false, 'legacy tests must be retired');
 const foundSpecs = fs.readdirSync(browserRoot).filter(name => name.endsWith('.spec.ts')).sort();
-assert.deepEqual(foundSpecs, migration.specs, 'browser spec inventory changed during migration');
-assert.equal(foundSpecs.length, 21, 'baseline migration needs all 21 spec files');
-assert.equal(catalog.browserTests, 21, 'catalog may not silently count duplicates or omit specs');
-const pngRoot = path.join(browserRoot, '__snapshots__', 'fixture-visual.spec.ts');
-const foundPngs = fs.readdirSync(pngRoot).filter(name => name.endsWith('.png')).sort();
-const pinned = Object.keys(migration.baseline_png_blobs).map(file => path.basename(file)).sort();
-assert.deepEqual(foundPngs, pinned, 'snapshot inventory mismatch');
-assert.equal(foundPngs.length, 43, 'all 43 snapshots must migrate unchanged');
+// Historical #1512 inventory is immutable; the only approved post-migration
+// split is one conversation regression into four behavior-owned specs.
+// This is a migration parity assertion, not a duplicate runtime ID registry.
+const split = [
+  'conversation-disclosure-web.spec.ts',
+  'conversation-disclosure-narrow.spec.ts',
+  'conversation-live-scroll.spec.ts',
+  'conversation-disclosure-app.spec.ts',
+];
+const expectedSpecs = migration.specs.filter(name => name !== 'conversation-acceptance.spec.ts').concat(split, ['terminal-attach-bootstrap.spec.ts', 'ui-contract-web.spec.ts', 'fixture-visual-web-compact.spec.ts', 'fixture-visual-app.spec.ts', 'fixture-visual-app-compact.spec.ts', 'fixture-visual-app-landscape.spec.ts']).sort();
+assert.deepEqual(foundSpecs, expectedSpecs, 'regression spec dropped or drifted during semantic split');
+assert.equal(catalog.browserTests, expectedSpecs.length, 'catalog may not silently omit specs');
+const snapshotRoot = path.join(browserRoot, '__snapshots__');
+// Original #1512 blob SHAs must remain byte-for-byte despite a file-ID split.
+const visualDir = name => /^web-compact-/.test(name) ? 'fixture-visual-web-compact.spec.ts'
+  : /^app-.*-375-linux\.png$/.test(name) ? 'fixture-visual-app-compact.spec.ts'
+  : /^app-.*-844x390-linux\.png$/.test(name) ? 'fixture-visual-app-landscape.spec.ts'
+  : /^app-/.test(name) ? 'fixture-visual-app.spec.ts' : 'fixture-visual.spec.ts';
+const expectedSnapshotPaths = Object.keys(migration.baseline_png_blobs).map(relative =>
+  path.join(snapshotRoot, visualDir(path.basename(relative)), path.basename(relative))).sort();
+const actualSnapshotPaths = fs.readdirSync(snapshotRoot, { withFileTypes: true })
+  .filter(entry => entry.isDirectory())
+  .flatMap(entry => fs.readdirSync(path.join(snapshotRoot, entry.name))
+    .filter(name => name.endsWith('.png')).map(name => path.join(snapshotRoot, entry.name, name))).sort();
+assert.deepEqual(actualSnapshotPaths, expectedSnapshotPaths, 'visual snapshot set changed after semantic split');
+assert.equal(actualSnapshotPaths.length, 43, 'all 43 snapshot PNG blobs are retained');
 for (const [relative, expectedSha] of Object.entries(migration.baseline_png_blobs)) {
-  const filename = path.resolve(browserRoot, relative);
-  assert.ok(filename.startsWith(browserRoot + path.sep), 'snapshot path escaped browser tree');
+  const filename = path.resolve(snapshotRoot, visualDir(path.basename(relative)), path.basename(relative));
+  assert.ok(filename.startsWith(snapshotRoot + path.sep), 'snapshot path escaped browser tree');
   assert.equal(fs.lstatSync(filename).isSymbolicLink(), false, 'snapshots must be real files');
   const bytes = fs.readFileSync(filename);
   const actual = createHash('sha1').update('blob ' + bytes.length + '\0').update(bytes).digest('hex');
@@ -117,7 +143,9 @@ assert.equal(checked.code, 0);
 assert.ok(JSON.parse(checked.stdout).case_count > 0);
 
 expectError('test');
-expectError('test', '--all'); // CI-only: prevents unsafe local stack launch
+expectError('test', '--all');
+expectError('test', '--id', 'terminal-io');
+expectError('test', '--id', 'does-not-exist'); // CI-only: prevents unsafe local stack launch
 expectError('test', '--suite', '../escape');
 expectError('acceptance', '--issue', '0', '--sc', 'SC-01',
   '--sha', 'a'.repeat(40), '--stage', 'staging');

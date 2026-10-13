@@ -7,6 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync, spawnSync } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
+const testCatalog = require('./runner/test-catalog.cjs');
 
 const root = path.resolve(__dirname, '..');
 const at = (...segments) => path.join(root, ...segments);
@@ -48,8 +49,7 @@ function catalog() {
     cases: caseFiles.map((p) => path.relative(root, p)),
     scenarios: walk(at('e2e', 'scenarios'), 'scenario.yaml')
       .map((p) => path.relative(root, p)),
-    browserTests: [...walk(at('e2e', 'tests', 'browser'), ''), ...walk(at('e2e', 'specs'), '')]
-      .filter((name) => name.endsWith('.spec.ts')).length,
+    browserTests: testCatalog.discover(at('e2e', 'tests')).length,
   };
 }
 function exitByCode(code) { process.exitCode = code; }
@@ -242,18 +242,33 @@ function acceptance(args) {
   }
 }
 function tests(args) {
-  if (process.env.CI !== 'true') throw new Error(
-    'runtime E2E tests are CI-only; local machine can use: cd e2e && npx playwright test --list');
-  if (!args.includes('--all') && !arg(args, 'suite')) {
-    throw new Error('specify --all or --suite <name>');
+  const registry = testCatalog.discover(at('e2e', 'tests'));
+  if (args.length === 1 && args[0] === '--list') {
+    console.log(JSON.stringify({ schema_version: 1, tests: registry }, null, 2));
+    return 0;
   }
-  const suite = arg(args, 'suite');
-  if (suite && !/^[a-z0-9-]+$/.test(suite)) throw new Error('unsafe suite selection');
+  if (process.env.CI !== 'true') throw new Error(
+    'runtime E2E tests are CI-only; local machine may use: ./e2e/run test --list');
+  const hasAll = args.includes('--all'), suite = arg(args, 'suite');
+  const requestedIds = [];
+  for (let i = 0; i < args.length; ++i) {
+    if (args[i] === '--id') {
+      const next = args[++i];
+      if (!next || next.startsWith('--')) throw new Error('missing --id value');
+      requestedIds.push(next);
+    }
+  }
+  const kinds = Number(hasAll) + Number(!!suite) + Number(requestedIds.length > 0);
+  if (kinds !== 1) throw new Error('specify exactly one of --all, --suite NAME, --id ID...');
+  if (suite && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(suite)) throw new Error('unsafe suite selection');
   const update = args.includes('--update-snapshots=all');
-  if (update && (suite !== 'fixture-visual' || args.includes('--all'))) {
+  if (update && (suite !== 'fixture-visual' || hasAll || requestedIds.length)) {
     throw new Error('visual baseline rewrite only allowed for explicit fixture-visual suite');
   }
-  return execute('npx', ['playwright', 'test', ...(suite ? [suite] : []),
+  // Exact checked-in spec paths; never allow a caller-provided pattern or regex.
+  const selected = requestedIds.length ? testCatalog.select(registry, requestedIds).map(test => test.file) : [];
+  return execute('npx', ['playwright', 'test', ...selected, ...(suite ? [suite] : []),
+    ...(selected.length && process.env.PLAYWRIGHT_JSON_OUTPUT_FILE ? ['--reporter=json'] : []),
     ...(update ? ['--update-snapshots=all'] : [])], at('e2e'));
 }
 function scenario(args) {
@@ -281,6 +296,6 @@ async function main() {
   if (mode === 'acceptance') return exitByCode(acceptance(args));
   if (mode === 'scenario') return exitByCode(scenario(args));
   if (mode === 'compare') return compare(args);
-  throw new Error('usage: ./e2e/run --list|--validate|test --all|acceptance --issue N --sc SC-NN --sha SHA --stage staging|scenario ID|compare LEFT RIGHT');
+  throw new Error('usage: ./e2e/run --list|--validate|test --all|test --list|test --id ID [--id ID...]|acceptance --issue N --sc SC-NN --sha SHA --stage staging|scenario ID|compare LEFT RIGHT');
 }
 main().catch((error) => { console.error('E2E Error: ' + error.message); process.exitCode = 2; });

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, readFileSync, chmodSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { createIssueUpdateTool } from './update.mjs';
+import { createIssueUpdateTool, enforceE2EReadOnly } from './update.mjs';
 import { createIssueReadTool } from './read.mjs';
 import { createIssueCommentTool } from './comment.mjs';
 
@@ -59,7 +59,20 @@ try {
   await assert.rejects(comment.execute({ body: 'ok', issue_number: 18 }), /Unauthorized/);
   await comment.execute({ body: 'investigation trail' });
   assert.equal(readFileSync(filename + '.comment', 'utf8'), 'investigation trail');
-  console.log('gh issue tools self-test: 10 assertions passed');
+  const e2eContract = [
+    '## E2E Verification', '### New', '- none: no new E2E tests',
+    '### Regression', '- terminal-attach',
+    '## E2E Report', '| ID | Type | Result | Evidence |',
+    '|---|---|---|---|', '| terminal-attach | Regression | Pending | - |',
+  ].join('\n');
+  enforceE2EReadOnly(e2eContract,e2eContract);
+  assert.throws(() => enforceE2EReadOnly(e2eContract,
+    e2eContract.replace('| Pending | - |','| Pass | forged |')),/Unauthorized E2E/);
+  assert.throws(() => enforceE2EReadOnly(e2eContract,
+    e2eContract.replace('- terminal-attach','- terminal-replay')
+      .replace('| terminal-attach | Regression','| terminal-replay | Regression')),/Unauthorized E2E/);
+  assert.throws(() => enforceE2EReadOnly(issue.body,issue.body+'\n'+e2eContract),/Unauthorized E2E/);
+  console.log('gh issue tools self-test: 14 assertions passed');
 } finally {
   process.env.PATH = oldPath;
   if (oldFile == null) delete process.env.FAKE_GH_ISSUE_FILE;

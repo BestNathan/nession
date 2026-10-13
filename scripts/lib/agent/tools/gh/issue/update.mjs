@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { auditIssue, KIND_LABELS, AREA_LABELS } from '../../../../../issue-contract.mjs';
+import { parseIssueE2E } from '../../../../../issue-e2e-contract.mjs';
 import { fetchGitHubIssue } from './read.mjs';
 
 const CONTRACT_LABELS = new Set([...KIND_LABELS, ...AREA_LABELS]);
@@ -12,6 +13,17 @@ export function candidateIssue(issue, title, body, contractLabels) {
   const preserved = issueLabelNames(issue).filter((name) => !CONTRACT_LABELS.has(name));
   const labels = [...new Set([...preserved, ...contractLabels])];
   return { ...issue, title: title.trim(), body, labels: labels.map((name) => ({ name })) };
+}
+
+export function enforceE2EReadOnly(currentBody, candidateBody) {
+  const before = parseIssueE2E(currentBody);
+  const after = parseIssueE2E(candidateBody);
+  if (!before && !after) return;
+  if (!before || !after || before.errors.length || after.errors.length ||
+      before.digest !== after.digest ||
+      JSON.stringify([...before.rows]) !== JSON.stringify([...after.rows])) {
+    throw new Error('Unauthorized E2E Verification / Report mutation by Issue Agent; submit an E2E proposal for trusted review');
+  }
 }
 
 export function createIssueUpdateTool(issue, repository = process.env.GITHUB_REPOSITORY) {
@@ -42,6 +54,7 @@ export function createIssueUpdateTool(issue, repository = process.env.GITHUB_REP
       }
       const current = fetchGitHubIssue(issue.number, repository);
       if (String(current.state).toUpperCase() !== 'OPEN') throw new Error('Target Issue is no longer open');
+      enforceE2EReadOnly(current.body, body);
       const normalizedTitle = title.trim();
       const candidate = candidateIssue(current, normalizedTitle, body, labels);
       const before = auditIssue(candidate);
