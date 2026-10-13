@@ -6,7 +6,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
 const {execFileSync}=require('node:child_process');
-const {verifyOnlineAgent,runtimeFromEnv}=require('../../../../../acceptance/shared/protocol-online-agent.js');
+const {verifyOnlineAgent,runtimeFromEnv}=require('../../../shared/protocol-online-agent.js');
 const root=path.resolve(__dirname,'../../../../..');
 
 function mergeParents(sha){

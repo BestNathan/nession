@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 const { runtimeFromEnv, verifyOnlineAgent } =
-  require('../../../../../acceptance/shared/protocol-online-agent.js');
+  require('../../../shared/protocol-online-agent.js');
 
 async function main() {
   const runtime = runtimeFromEnv();

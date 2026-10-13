@@ -3,7 +3,7 @@ const assert=require('node:assert/strict');
 const path=require('node:path');
 const fs=require('node:fs');
 const {pathToFileURL}=require('node:url');
-const {runtimeFromEnv}=require('../../../../../acceptance/shared/protocol-online-agent.js');
+const {runtimeFromEnv}=require('../../../shared/protocol-online-agent.js');
 const {pinnedRun,SOURCES,fetchJson,report,fail}=require('../../../shared/trusted-run-store-proof.cjs');
 const root=path.resolve(__dirname,'../../../../..');
 async function main(){

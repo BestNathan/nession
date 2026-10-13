@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { discoverCases, parseCaseYaml } from '../acceptance/cases.mjs';
+import { discoverCases, parseCaseYaml } from '../e2e/acceptance/contract/cases.mjs';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nession-trusted-case-discovery-'));
 const caseDir = path.join(root, '1474', 'SC-03');

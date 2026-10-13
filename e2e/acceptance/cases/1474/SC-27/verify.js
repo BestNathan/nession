@@ -6,7 +6,7 @@ const {execFileSync}=require('node:child_process');
 const {repo,result,fail}=require('../../../shared/terminal-scenario-evidence.cjs');
 const {pinnedRun,SOURCES}=require('../../../shared/trusted-run-store-proof.cjs');
 async function main(){
- const cases=await import(pathToFileURL(path.join(repo,'acceptance/cases.mjs')).href);
+ const cases=await import(pathToFileURL(path.join(repo,'e2e/acceptance/contract/cases.mjs')).href);
  const browser=await import(pathToFileURL(path.join(repo,'e2e/runner/drivers/browser-report.mjs')).href);
  assert.equal(cases.aggregateVerifierResults([]),'Pending');
  assert.equal(cases.aggregateVerifierResults([{result:'Pass'},{result:'Pending'}]),'Pending');

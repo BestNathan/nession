@@ -12,7 +12,7 @@ e2e/acceptance/cases/<issue>/<SC>/
   verify.js | verify.spec.js | ...
 ```
 
-There is exactly **one Case per Issue/SC** and one independently reported result for that criterion. A Case can contain several verifier steps. Reusable implementation belongs under `acceptance/shared/`, but shared helpers are never independently accepted.
+There is exactly **one Case per Issue/SC** and one independently reported result for that criterion. A Case can contain several verifier steps. Reusable implementation belongs under `e2e/acceptance/shared/`, but shared helpers are never independently accepted. Case manifests, schema and deterministic discovery are owned by `e2e/acceptance/contract/cases.mjs`; trusted workflow selection loads this implementation from its trusted checkout and treats target-SHA manifests strictly as data.
 
 A minimal manifest:
 

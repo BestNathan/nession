@@ -1,6 +1,6 @@
 const fs = require('node:fs');
 const { test, expect } = require('@playwright/test');
-const { verifyTerminalClearance } = require('../../../../../acceptance/shared/terminal-clearance-browser.js');
+const { verifyTerminalClearance } = require('../../../shared/terminal-clearance-browser.js');
 
 test.use({ viewport: { width: 1440, height: 900 } });
 

@@ -12,7 +12,7 @@ import {
   parseCaseYaml,
   validateCaseAgainstAcceptanceContext,
   validateCaseManifest,
-} from '../acceptance/cases.mjs';
+} from '../e2e/acceptance/contract/cases.mjs';
 
 let cases = 0;
 function ok(fn) {
@@ -163,8 +163,8 @@ ok(() => {
 const repoRoot = path.resolve(process.cwd());
 const canonicalRoot = path.join(repoRoot, 'e2e', 'acceptance', 'cases');
 ok(() => {
-  assert.equal(fs.existsSync(path.join(repoRoot, 'acceptance', 'cases')), false,
-    'legacy Case tree must not survive canonical source migration');
+  assert.equal(fs.existsSync(path.join(repoRoot, 'acceptance')), false,
+    'legacy root acceptance/ must not survive canonical source migration');
   const discovered = discoverCases(canonicalRoot);
   assert.ok(discovered.length >= 12, 'canonical Case discovery must never silently be empty');
   const sharedScenario = path.join(repoRoot,'e2e','acceptance','shared','terminal-scenario-evidence.cjs');
@@ -203,7 +203,7 @@ ok(() => {
     NESSION_ACCEPTANCE_TRUSTED_ROOT: repoRoot,
     NESSION_ACCEPTANCE_TARGET_SHA: 'a'.repeat(40),
   };
-  const command = "const x=require('./acceptance/shared/infrastructure-contract.js');" +
+  const command = "const x=require('./e2e/acceptance/shared/infrastructure-contract.js');" +
     "console.log(JSON.stringify(x.verifyInfrastructureCriterion('SC-11')))";
   const positive = spawnSync(process.execPath, ['-e', command], {
     cwd: repoRoot, env, encoding: 'utf8', timeout: 5000,

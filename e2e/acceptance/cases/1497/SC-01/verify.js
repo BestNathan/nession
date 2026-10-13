@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { runtimeFromEnv, verifyOnlineAgent } = require('../../../../../acceptance/shared/protocol-online-agent.js');
+const { runtimeFromEnv, verifyOnlineAgent } = require('../../../shared/protocol-online-agent.js');
 const repo = path.resolve(__dirname, '../../../../..');
 async function main() {
   const runtime = runtimeFromEnv();
