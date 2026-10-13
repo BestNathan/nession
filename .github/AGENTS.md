@@ -2,7 +2,7 @@
 
 This scope owns `.github/` workflows/templates and GitHub execution routing.
 
-Load `nession-workflows` for workflow taxonomy, Agent/non-Agent naming, cross-workflow orchestration, and safe trigger/consumer migration; it points to the current-versus-target design for #1649.
+Load `nession-workflows` for the implemented Workflow taxonomy, Agent/non-Agent naming, SC acceptance orchestration and safe trigger/consumer migrations. Its references explicitly distinguish active merged-SHA acceptance from the still-deferred production `when: deployed` runtime boundary.
 
 Load `nession-cicd` for release/deployment changes and `nession-gates` for Gate routing. The currently checked-in workflow files and canonical scripts remain executable truth until a migration lands.
 

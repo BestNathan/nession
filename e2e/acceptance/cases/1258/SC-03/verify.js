@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const { execFileSync } = require('node:child_process');
 const path = require('node:path');
-const { runtimeFromEnv, verifyOnlineAgent } = require('../../../../../acceptance/shared/protocol-online-agent.js');
+const { runtimeFromEnv, verifyOnlineAgent } = require('../../../shared/protocol-online-agent.js');
 
 const repo = path.resolve(__dirname, '../../../../..');
 function openSocket(url) {

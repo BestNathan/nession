@@ -52,6 +52,11 @@ for (const [relative, expectedSha] of Object.entries(migration.baseline_png_blob
 
 assert.ok(catalog.cases.length > 0, 'Case catalog must discover source-aligned Cases');
 assert.ok(catalog.scenarios.length > 0, 'scenario catalog must not silently disappear');
+assert.equal(catalog.caseLayout, 'canonical');
+assert.equal(fs.existsSync(path.join(repo, 'acceptance')), false,
+  'root acceptance/ may not reappear as an alias');
+assert.ok(fs.existsSync(path.join(repo, 'e2e', 'acceptance', 'contract', 'cases.mjs')),
+  'canonical manifest contract must exist');
 
 // CI must preserve a single command surface after the Case source-tree migration.
 // The trusted Case selector/updater stay in the workflow, but actual execution
@@ -71,7 +76,7 @@ assert.equal(fs.existsSync(path.join(repo,'acceptance','verifiers')),false,
   'legacy verifier driver path must be retired');
 assert.ok(fs.existsSync(path.join(repo,'e2e','runner','drivers','index.mjs')));
 assert.ok(fs.existsSync(path.join(repo,'e2e','runner','drivers','playwright.config.cjs')));
-const driverGate=fs.readFileSync(path.join(repo,'.github','workflows','quality.yml'),'utf8');
+const driverGate=fs.readFileSync(path.join(repo,'.github','workflows','ci-quality.yml'),'utf8');
 assert.match(driverGate, /\.\/gates\/run --suite quality-tooling/);
 const toolingSuite = fs.readFileSync(path.join(repo, 'gates', 'suites', 'quality-tooling.gates'), 'utf8');
 assert.match(toolingSuite, /^e2e-browser-report-selftest$/m);
@@ -94,7 +99,7 @@ assert.match(acceptanceArchitecture, /e2e\/runner\/runtime\/full-stack\.js/);
 assert.match(caseWorkflow, /--profile "\$\{profile\}"/);
 assert.match(caseWorkflow, /--sha "\$\{TARGET_SHA\}"/);
 const regressionWorkflow = fs.readFileSync(
-  path.join(repo, '.github', 'workflows', 'e2e.yml'), 'utf8');
+  path.join(repo, '.github', 'workflows', 'e2e-tests.yml'), 'utf8');
 assert.match(regressionWorkflow, /\.\/gates\/run e2e-playwright/);
 const regressionGate = fs.readFileSync(path.join(repo, 'gates', 'checks', 'e2e-playwright.sh'), 'utf8');
 assert.match(regressionGate, /GATE_COMMAND='cd e2e && CI=true \.\/run test --all'/);

@@ -4,7 +4,7 @@ name: E2E / Test Ingest
 # content write token. Only GitHub-attested successful push runs are eligible.
 on:
   workflow_run:
-    workflows: ["E2E Tests"]
+    workflows: ["E2E / Tests"]
     types: [completed]
 
 permissions:

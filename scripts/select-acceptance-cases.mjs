@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { discoverCases } from '../acceptance/cases.mjs';
+import { discoverCases } from '../e2e/acceptance/contract/cases.mjs';
 import { buildAcceptanceContext } from './acceptance-executor.mjs';
 import { acceptancePlanSection } from './acceptance-plan.mjs';
 import { validateCaseSelection } from './acceptance-case-selection-contract.mjs';

@@ -12,7 +12,7 @@ import {
   parseCaseYaml,
   validateCaseAgainstAcceptanceContext,
   validateCaseManifest,
-} from '../acceptance/cases.mjs';
+} from '../e2e/acceptance/contract/cases.mjs';
 
 let cases = 0;
 function ok(fn) {
@@ -163,8 +163,8 @@ ok(() => {
 const repoRoot = path.resolve(process.cwd());
 const canonicalRoot = path.join(repoRoot, 'e2e', 'acceptance', 'cases');
 ok(() => {
-  assert.equal(fs.existsSync(path.join(repoRoot, 'acceptance', 'cases')), false,
-    'legacy Case tree must not survive canonical source migration');
+  assert.equal(fs.existsSync(path.join(repoRoot, 'acceptance')), false,
+    'legacy root acceptance/ must not survive canonical source migration');
   const discovered = discoverCases(canonicalRoot);
   assert.ok(discovered.length >= 12, 'canonical Case discovery must never silently be empty');
   const sharedScenario = path.join(repoRoot,'e2e','acceptance','shared','terminal-scenario-evidence.cjs');
@@ -203,7 +203,7 @@ ok(() => {
     NESSION_ACCEPTANCE_TRUSTED_ROOT: repoRoot,
     NESSION_ACCEPTANCE_TARGET_SHA: 'a'.repeat(40),
   };
-  const command = "const x=require('./acceptance/shared/infrastructure-contract.js');" +
+  const command = "const x=require('./e2e/acceptance/shared/infrastructure-contract.js');" +
     "console.log(JSON.stringify(x.verifyInfrastructureCriterion('SC-11')))";
   const positive = spawnSync(process.execPath, ['-e', command], {
     cwd: repoRoot, env, encoding: 'utf8', timeout: 5000,
@@ -276,12 +276,12 @@ ok(() => {
 // Exact PR-head checks must not execute GitHub's synthetic merge checkout.
 ok(() => {
   const expected='ref: ${{ github.event.pull_request.head.sha || github.sha }}';
-  for(const [workflow,count] of [['quality.yml',2],['e2e.yml',1],['e2e-scenario-smoke.yml',1]]){
+  for(const [workflow,count] of [['ci-quality.yml',2],['e2e-tests.yml',1],['e2e-scenario-smoke.yml',1]]){
     const source=fs.readFileSync(path.join(repoRoot,'.github','workflows',workflow),'utf8');
     assert.equal(source.split(expected).length-1,count,workflow+' must checkout exact PR head');
     assert.ok(source.split('persist-credentials: false').length-1>=count,workflow+' cannot retain write credentials');
   }
-  const e2e=fs.readFileSync(path.join(repoRoot,'.github','workflows','e2e.yml'),'utf8');
+  const e2e=fs.readFileSync(path.join(repoRoot,'.github','workflows','e2e-tests.yml'),'utf8');
   assert.ok(e2e.includes('NESSION_TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}'));
 });
 

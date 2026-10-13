@@ -9,7 +9,7 @@ Acceptance is the executable phase that proves Requirement Success Criteria. It 
 
 Issue structure belongs to `nession-writing-requirements`; Gate semantics belong to `nession-gates`; Agent execution telemetry belongs to `nession-agent-workflow-metrics`.
 
-For cross-workflow naming and the **planned** `when × target × method` / Agent-vs-Case orchestrator separation, load `nession-workflows` and its acceptance-orchestration reference. This Skill describes the **currently implemented** three-stage contract; do not use the target syntax for live Issue/Case updates until the validators/Gates explicitly support it.
+For workflow taxonomy and the **implemented** `when × target × method` Agent/Case selection, load `nession-workflows` and its acceptance-orchestration reference. The optional `## Acceptance Plan` is validated and used by the active merged-SHA planner, while legacy Acceptance Report stages remain required. Production `when: deployed` execution remains deferred until an independently authenticated deployment-identity runner exists.
 
 ## Lifecycle
 
@@ -38,9 +38,9 @@ Do not mark a criterion Pass because implementation exists; execute/observe the 
 
 ## Execute through the trusted workflow
 
-Model-backed **Requirement Acceptance** evaluation is routed through `.github/workflows/agent-sc-acceptance.yml`. Source-aligned Issue/SC **Cases** use `.github/workflows/acceptance-cases.yml` and the single canonical `./e2e/run acceptance --issue N --sc SC-NN --sha SHA --stage STAGE --profile full-stack-local --issue-json CONTRACT --output RECORD` interface. Regression tests use `./e2e/run test`, observational reproduction uses `./e2e/run scenario`/`compare`; CI alone may execute live stack paths. The underlying `e2e/acceptance/evaluator/run-case.mjs` is internal to the CLI and does not receive Issue-write credentials.
+Model-backed **Agent / SC Acceptance** evaluation is routed through `.github/workflows/agent-sc-acceptance.yml`. Source-aligned Issue/SC **Acceptance / Cases** use `.github/workflows/acceptance-cases.yml` and the single canonical `./e2e/run acceptance --issue N --sc SC-NN --sha SHA --stage STAGE --profile full-stack-local --issue-json CONTRACT --output RECORD` interface. Regression tests use `./e2e/run test`, observational reproduction uses `./e2e/run scenario`/`compare`; CI alone may execute live stack paths. The underlying `e2e/acceptance/evaluator/run-case.mjs` is internal to the CLI and does not receive Issue-write credentials.
 
-Manual execution uses **Actions -> Acceptance -> Run workflow** (`workflow_dispatch`) with:
+Manual execution uses **Actions -> Agent / SC Acceptance -> Run workflow** (`workflow_dispatch`) with:
 
 - `issue_number`;
 - explicit `stage` (`pre-merge`, `staging`, or `post-merge`);
@@ -113,4 +113,4 @@ Security boundary: target Case code is read-only (`contents: read`, `issues: rea
 
 For the full creation, stage selection, verifier choice, evidence quality, archive/promotion and future remote-profile rules, read `docs/architecture/acceptance-cases.md`.
 
-For explicit `when: merged` + `method: agent` SCs, `Requirement Acceptance` selects only eligible Issue/SCs on the exact staging/main push SHA using `scripts/select-merged-agents.mjs`. The reusable Agent evaluator is pinned to trusted main, even when the source event is a staging merge. Legacy Issues without an `Acceptance Plan` are excluded from automatic merged-Agent invocations. This does not implement or imply deployed-production verification; `when: deployed` remains a separate future identity and runtime boundary.
+For explicit `when: merged` + `method: agent` SCs, `Acceptance / Orchestrator` selects only eligible Issue/SCs on the exact staging/main push SHA using `scripts/select-merged-agents.mjs`. The reusable Agent evaluator is pinned to trusted main, even when the source event is a staging merge. Legacy Issues without an `Acceptance Plan` are excluded from automatic merged-Agent invocations. This does not implement or imply deployed-production verification; `when: deployed` remains a separate future identity and runtime boundary.

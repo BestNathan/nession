@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { discoverCases } from '../acceptance/cases.mjs';
+import { discoverCases } from '../e2e/acceptance/contract/cases.mjs';
 
 export function selectRepresentativeCases(cases) {
   const ordered = [...cases].sort((a, b) => {

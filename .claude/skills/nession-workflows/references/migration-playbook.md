@@ -1,103 +1,65 @@
-# Workflow naming and migration playbook (Issue #1649)
+# Workflow catalog and safe migration playbook
 
-> **Target mapping, not a live rename.** Re-inventory `.github/workflows/` from the current `main` before starting. Existing GitHub Action names/paths are contract surfaces, not cosmetic strings. The inventory below reflects the repository at design time (2026-10-12).
+The **executable current-state authority** is scripts/workflow-conventions.mjs (CATALOG), together with the actual .github/workflows directory. This page describes the implemented taxonomy from Issue #1649 and the rules for future changes. Do not use an old filename from a historical run as a current dispatch path.
 
-## Suggested catalog
+## Current canonical workflow ownership
 
-| Current file | Target file | Target Actions name | Notes |
+| Owner | Workflow file | GitHub Actions display name | Responsibility |
 |---|---|---|---|
-| `agent-sc-acceptance.yml` | **Migrated** | `Agent / SC Acceptance` | Model-execution entrypoint; deterministic compatibility bypass and trusted updater still require future separation |
-| `agent-issue-audit.yml` | **Done** | `Agent / Issue Audit` | Actually invokes LLM; renamed with Metrics subscription and telemetry source |
-| `agent-provider-smoke.yml` | unchanged | `Agent / Provider Smoke` | Actually invokes LLM |
-| `requirement-acceptance.yml` | `acceptance-orchestrator.yml` | `Acceptance / Orchestrator` | Handles dispatch, PR gate and Issue-close guard; must not be misnamed as an Agent |
-| `acceptance-cases.yml` | unchanged | `Acceptance / Cases` | Source-aligned Case execution using shared E2E Runner |
-| `acceptance-case-ingest.yml` | unchanged initially | `Acceptance / Case Ingest` | Trusted append-only record + authorized projection |
-| `acceptance-case-smoke.yml` | retire when replaced | `Acceptance / Case Smoke` (transitional) | #1474 hard-coded smoke; remove only after generic PR Case selector covers it |
-| `e2e.yml` | `e2e-tests.yml` | `E2E / Tests` | Regression E2E; exact SHA and playwright outcomes |
-| `e2e-scenario-smoke.yml` | unchanged | `E2E / Scenario Smoke` | Reproduction/observations |
-| `e2e-run-ingest.yml` | `e2e-scenario-ingest.yml` | `E2E / Scenario Ingest` | Verify actual source, preserve non-evaluative runs |
-| `e2e-test-run-ingest.yml` | `e2e-test-ingest.yml` | `E2E / Test Ingest` | Trusted test Run Records |
-| `quality.yml` | `ci-quality.yml` | `CI / Quality Gate` | Verify required check renaming semantics before cutover |
-| `metrics-ingest.yml` | `metrics-agent-telemetry.yml` | `Metrics / Agent Telemetry Ingest` | Metrics owns tokens/cost/usage; is **not** an Agent executor |
-| `repo-metrics.yml` | `metrics-repository.yml` | `Metrics / Repository Health` | Collect repository health indicators |
-| `staging.yml` | `release-staging.yml` | `Release / Staging Artifacts` | This workflow builds/publishes staging artifacts; don't call deployment proof |
-| `release.yml` | `release-production.yml` | `Release / Production` | Version-triggered release, image publication and approval/rollout |
-| `deploy.yml` | unchanged | `Deploy / Manual` | Actual manual deployment |
-| `task-runner.yml` | unchanged | `Task / Ephemeral Runner` | Generic task execution, not automatically LLM Agent |
-| `task-result-ingest.yml` | unchanged | `Task / Result Ingest` | Trusted Task result write boundary |
-| historical Bug Acceptance Replay | **Retired** | Not an active workflow | #1522, #1523, #1527 closed with fully checked SCs and exact run evidence retained on their Issues; Git history preserves the original one-time workflow |
+| Agent | agent-sc-acceptance.yml | Agent / SC Acceptance | Model-backed, read-only per-SC evaluation and telemetry |
+| Agent | agent-issue-audit.yml | Agent / Issue Audit | Model-backed Issue auditing |
+| Agent | agent-provider-smoke.yml | Agent / Provider Smoke | Model provider smoke |
+| Acceptance | acceptance-orchestrator.yml | Acceptance / Orchestrator | PR/merged-SHA/Issue-close routing and deterministic Gate; telemetry ID remains requirement-acceptance |
+| Acceptance | acceptance-cases.yml | Acceptance / Cases | Source-aligned per-SC Case execution at exact SHA |
+| Acceptance | acceptance-case-ingest.yml | Acceptance / Case Ingest | Trusted Case Run Record authentication and Issue projection |
+| Acceptance | acceptance-case-smoke.yml | Acceptance / Case Smoke | Generic source-aligned PR Case execution |
+| E2E | e2e-tests.yml | E2E / Tests | Regression at exact source SHA |
+| E2E | e2e-scenario-smoke.yml | E2E / Scenario Smoke | Reproducible Scenario observations |
+| E2E | e2e-scenario-ingest.yml | E2E / Scenario Ingest | Trusted Scenario Run Records |
+| E2E | e2e-test-ingest.yml | E2E / Test Ingest | Trusted Test Run Records |
+| CI | ci-quality.yml | CI / Quality Gate | Deterministic Rust/Web/tooling checks |
+| Metrics | metrics-agent-telemetry.yml | Metrics / Agent Telemetry Ingest | Agent token/cost/turn/tool/skill telemetry |
+| Metrics | metrics-repository.yml | Metrics / Repository Health | Repository health metrics |
+| Release | release-staging.yml | Release / Staging Artifacts | Staging builds and artifacts, not deployment proof |
+| Release | release-production.yml | Release / Production | Production release/version/artifact workflow |
+| Deploy | deploy-manual.yml | Deploy / Manual | Manual GitOps deployment |
+| Task | task-runner.yml | Task / Ephemeral Runner | Ephemeral Task execution, not automatically LLM |
+| Task | task-result-ingest.yml | Task / Result Ingest | Trusted Task result ingestion |
 
-**Classification is determined by actual job execution**, never by a textual search for `agent`, `nession-agent`, or `metrics`. The catalog is a proposed migration target, not a mandate to rename every file in one PR.
+There are **19 active workflows** across six main domains and the separately owned Task domain. The historical hard-coded Bug Acceptance Replay for #1522/#1523/#1527 was retired after their SCs and historical immutable evidence were validated. The original Case Smoke tied to #1474 was replaced with generic source-aligned representative Case selection; the canonical Smoke workflow filename remains unchanged.
 
-## Critical dependency graph
+## Real trusted dependency graph
 
-Examples from the current repository:
+- Acceptance / Orchestrator selects and routes PR, staging/main merged-SHA and Issue-close obligations. It calls main-owned Agent / SC Acceptance for declared Agent-method SCs. Acceptance / Cases provides separate executable Case evidence, followed by trusted Acceptance / Case Ingest.
+- CI / Quality Gate and E2E / Tests must be checked at exact PR-head SHA before pre-merge approval; their file paths are ci-quality.yml and e2e-tests.yml.
+- E2E / Tests triggers E2E / Test Ingest by display name. E2E / Scenario Smoke triggers E2E / Scenario Ingest. Task / Ephemeral Runner triggers Task / Result Ingest.
+- Actual LLM Agent invocations and orchestrator runs are subscribed by Metrics / Agent Telemetry Ingest. Only a run that produced real model-call telemetry creates usage data. A no-model orchestrator run must not synthesize token/turn records.
+- Untrusted Case/PR-head code cannot hold Issue-write authority. The main-owned trusted evaluator/projector authenticates exact source run/attempt, target SHA, method and immutable SC contract digest.
 
-```text
-requirement-acceptance.yml
-  -- reusable uses path --> acceptance.yml
-  -- canonical metrics source --> metrics-ingest.yml
+The current Issue grammar supports optional Acceptance Plan with when = pr / merged / deployed, method = agent / case, and mandatory explicit staging/main branch for merged conditions. Legacy Acceptance Report stages remain required. **Actual production deployed execution is not implemented**: it will need independently authenticated environment, revision/digest and authorization. A main merge is not a production deployment.
 
-acceptance-cases.yml ("Acceptance Cases")
-  -- workflow_run display name --> acceptance-case-ingest.yml
+## Names, paths and identity are distinct contracts
 
-e2e.yml ("E2E Tests")
-  -- workflow_run display name --> e2e-test-run-ingest.yml
+- workflow_run.workflows subscribes using the **display name**, so rename producers and subscribers atomically.
+- Reusable workflow uses paths, gh workflow run paths, gh run list --workflow file paths, and trusted ingestion allowlists are **file-path contracts**, not display names.
+- For exact-SHA PR check consumers, keep ci-quality.yml and e2e-tests.yml, while preserving job/check identities such as rust-check, web-check and e2e. Check live PR-head outcomes and required-check settings when changing a display name.
+- Canonical NSESSION_AGENT_WORKFLOW_ID is a stable **logical identity**. The identifiers requirement-acceptance and issue-audit remain unchanged despite workflow naming changes. Preserve agent-telemetry artifacts and immutable metrics orphan storage.
+- Evidence and Run Records identify actual run id, attempt, target SHA, Issue/SC digest and artifact digest. Historic records retain their historic workflow names.
+- scripts/gate-consumer-parity.mjs resolves workflow paths from workflow-conventions.mjs CATALOG; the CI/CD Skill's Current workflow owners section is also validated by workflow-conventions. Never introduce a second active name/path catalog.
 
-e2e-scenario-smoke.yml ("E2E Scenario Smoke")
-  -- workflow_run display name --> e2e-run-ingest.yml
+## Migration discipline
 
-acceptance.yml, requirement-acceptance.yml, agent-issue-audit.yml,
-agent-provider-smoke.yml
-  -- workflow_run display names --> metrics-ingest.yml
-  -- telemetry path & stable workflow_id --> scripts/agent-workflow-telemetry-contract.mjs
+1. Inventory current main workflow paths, top-level names, triggers, subscribed display names, reusable workflow references, artifact identifiers, exact-SHA CLI consumers and trusted source allowlists.
+2. Identify **direct responsibility**, never infer Agent just from use of the nession-agent binary or from collected model results. Metrics, Acceptance, E2E, CI, Delivery and Task remain separate owners.
+3. Extend workflow-conventions and gate-consumer-parity with positive and negative fixtures first. Never bypass them to force a rename.
+4. Change producer, subscriber, manual dispatch, trusted provenance, Skills and required-check consumers in one verified transition; reject missing or duplicate identities.
+5. Submit an isolated workflow-only PR to main and run CI / Quality Gate, E2E / Tests, Acceptance / Case Smoke and independent Requirement Acceptance gating on the exact PR head.
+6. Merge with a **merge commit**, not squash or rebase. Inspect merged main/staging push workflows and trusted ingestion afterward; record evidence and distinguish success, failure and skipped (no-artifact) paths.
+7. For a criterion requiring merged or deployed proof, require fresh exact-target main-SHA evidence or authenticated actual deployment identity. Do not reuse staging evidence or interpret workflow success as an SC Pass without assertions.
+8. Retire one-offs only after generic replacements and source/history integrity have been independently verified.
 
-all required PR checks
-  -- exact displayed check / job identity --> branch protection or rulesets
-```
+## Recorded end-to-end method separation
 
-Also search:
+[Requirement #1674](https://github.com/BestNathan/nession/issues/1674) contains independent staging-SHA Agent run 38255975987 and executable Case run 38255975783, and independent main-SHA Agent run 38258395366 and executable Case run 38258395018 with trusted Case Ingest 38258723607. The staging SHA is 9249399c1a09b713c67d98687aa49e96bdc802fa and the main SHA is 01111075dc08afa931907ee268d2dd7376d037d1. Both Case runs authenticated a real Server and observed an online Agent, with distinct immutable records. Main Release run 38258395318 was cancelled, so this **does not** prove deployment.
 
-- `gh workflow run <filename>`, `gh run list --workflow <name>`, `gh workflow view`, and GitHub REST paths.
-- `workflow_run.workflows`, `uses: ./.github/workflows/*.yml`, artifact download names and query patterns.
-- Script allowlists that match `workflow_run.path`, display name, event, head SHA and branch.
-- `NSESSION_AGENT_WORKFLOW_ID` logical identity, `agent-telemetry-*` artifacts, `metrics` orphan storage paths, status/check contexts.
-- Requirement Issue/SC source association, Case manifests, historical source-run links, manual runbooks and Skills/docs.
-- Concurrency group keys, cancellation behavior, environment/secret authorization, `pull_request_target` trust boundaries.
-
-Do not assume the name shown in GitHub Actions is the YAML filename. Renaming a display name can silently disconnect a downstream workflow_run subscriber. Renaming a path can invalidate a trusted provenance allowlist, a reusable `uses` reference, and manual `gh workflow run` commands.
-
-## Safe sequence
-
-1. **Snapshot current state.** Record current main SHA, all workflow paths/names/events/jobs, subscribers, data identities, required status checks and latest successful baseline runs.
-2. **Establish ownership and compatibility policy.** Classify 100% of workflows (six main families plus Task), locate split-required mixed responsibilities. Confirm the current source of truth for the Action/check identity.
-3. **Add deterministic tests before renaming.** Planned `workflow-conventions` Gate should parse current YAML and assert consistent file/name domain, direct LLM invocation -> Agent telemetry, event subscriptions, known reusable paths and allowlist alignment. Test negative cases. Gate must not rely on naive Agent substring heuristics.
-4. **Refactor logic before changing labels.** Split optional Agent invocation away from deterministic Acceptance evaluation and Issue projection. Keep existing execution behavior through a parity window.
-5. **Migrate consumers and producers compatibly.** Update `workflow_run.workflows`, reusable paths, `gh` dispatch commands, artifact consumers, trusted provenance paths, documentation and any required checks. Use an explicit short transition window if both old and new names must coexist; prevent double ingestion/writes.
-6. **Cut over in small atomic cohorts.** Validate both normal and failed runs on real GitHub Actions, exact head SHA, source run attempts and ingest/projection. Do not assert success merely because GitHub accepted YAML.
-7. **Retire old names and one-offs.** Confirm compatibility window ended, historical artifacts/links accessible, and no required check or consumer points to the retired identity.
-8. **Update all owning Skills.** Mark the target syntax active only after the executable Issue/SC parser, runner and Gate support it.
-
-### Test matrix for each cohort
-
-| Test | Failure that must be caught |
-|---|---|
-| Static workflow graph | Dangling workflow_run display names or reusable workflow path |
-| Named required checks | Renamed check silently stops blocking merge |
-| Agent telemetry | New Agent execution has no artifact / source rejected / stable ID altered |
-| Metrics ingest | Valid source run does not append to metrics orphan branch |
-| Acceptance read-only path | PR-head executor gains write permission or access to secrets |
-| Acceptance Issue projector | Cross-SHA/stale/forged result updates SC |
-| E2E Case selection | Agent-only SC incorrectly requires a Case, or missing Case passes |
-| Scenario/Test ingestion | Unsupported source event/head/ref silently accepted or dropped |
-| Retired one-off workflows | Real replacement cannot reproduce required Case proof |
-| Deployment proof | Main source SHA mistaken for actual production artifact digest |
-
-## PR / merge policy
-
-- Workflow-file changes are a standalone PR directly against **main**, using latest-main worktree and a **merge commit**, as required by `nession-cicd` and `.github/AGENTS.md`.
-- Docs/Skill-only architectural preparation can be delivered before runtime changes; it must not claim future behavior is already active.
-- Do not use a giant rename PR that combines security-sensitive `pull_request_target`, ingestion, and release rewrites without verifiable migration gates.
-- For partial PRs supporting #1649, do **not** write an issue-closing or implementation reference that causes the Requirement gate to demand all future SCs immediately. Link the design issue in non-implementing narrative/context and describe the subset actually delivered.
-
-Existing stable owners: `nession-cicd` for delivery, `nession-acceptance` for current Acceptance execution, `nession-agent-workflow-metrics` for telemetry, `nession-gates` for Gate semantics. This playbook owns only their cross-workflow coordination.
+Implementation owners remain nession-cicd (CI/release), nession-acceptance (SC runtime and trusted evaluation), nession-agent-workflow-metrics (telemetry), and nession-gates (blocking invariants). This page owns taxonomy and coordination.

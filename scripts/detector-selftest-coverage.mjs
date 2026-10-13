@@ -8,7 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const qualityFile = '.github/workflows/quality.yml';
+const qualityFile = '.github/workflows/ci-quality.yml';
 const sources = ['gates/suites/quality-rust.gates', 'gates/suites/quality-tooling.gates', qualityFile];
 const pairs = [
   ['dev-workspace-commit', ['dev-workspace-selftest'], 'tooling'],

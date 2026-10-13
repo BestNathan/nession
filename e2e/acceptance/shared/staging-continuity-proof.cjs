@@ -6,7 +6,7 @@ const fs=require('node:fs');
 const path=require('node:path');
 const crypto=require('node:crypto');
 const {execFileSync}=require('node:child_process');
-const {runtimeFromEnv,verifyOnlineAgent}=require('../../../acceptance/shared/protocol-online-agent.js');
+const {runtimeFromEnv,verifyOnlineAgent}=require('./protocol-online-agent.js');
 const repo=path.resolve(__dirname,'../../..');
 const api='https://api.github.com/repos/BestNathan/nession';
 async function get(endpoint){

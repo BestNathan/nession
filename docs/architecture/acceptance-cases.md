@@ -12,7 +12,7 @@ e2e/acceptance/cases/<issue>/<SC>/
   verify.js | verify.spec.js | ...
 ```
 
-There is exactly **one Case per Issue/SC** and one independently reported result for that criterion. A Case can contain several verifier steps. Reusable implementation belongs under `acceptance/shared/`, but shared helpers are never independently accepted.
+There is exactly **one Case per Issue/SC** and one independently reported result for that criterion. A Case can contain several verifier steps. Reusable implementation belongs under `e2e/acceptance/shared/`, but shared helpers are never independently accepted. Case manifests, schema and deterministic discovery are owned by `e2e/acceptance/contract/cases.mjs`; trusted workflow selection loads this implementation from its trusted checkout and treats target-SHA manifests strictly as data.
 
 A minimal manifest:
 
@@ -42,7 +42,7 @@ Choose the Acceptance Report stage from the Requirement contract:
 
 The Case stage must exactly match the SC row in the Issue Acceptance Report. Automatic `staging` and `main` runs pin `github.sha`; manual replay requires an exact 40-character SHA plus Issue, SC, stage and runtime profile.
 
-**Method-specific Case Coverage:** the trusted `scripts/select-acceptance-cases.mjs` script is the canonical selector shared by the `Acceptance Cases` workflow; workflow YAML must not independently compute SC eligibility. A Requirement declaring `## Acceptance Plan` requires an executable Case for **every eligible `method: case` SC** at the exact target stage; missing source Case is a blocking error rather than a warning. `method: agent` criteria do not require Cases. Historical Issues without a Plan retain only their already-present source-aligned Cases and are not retroactively required to provide Cases for every legacy Agent-accepted SC. Explicit `when: deployed` criteria are not eligible on a plain `main` push.
+**Method-specific Case Coverage:** the trusted `scripts/select-acceptance-cases.mjs` script is the canonical selector shared by the `Acceptance / Cases` workflow; workflow YAML must not independently compute SC eligibility. A Requirement declaring `## Acceptance Plan` requires an executable Case for **every eligible `method: case` SC** at the exact target stage; missing source Case is a blocking error rather than a warning. `method: agent` criteria do not require Cases. Historical Issues without a Plan retain only their already-present source-aligned Cases and are not retroactively required to provide Cases for every legacy Agent-accepted SC. Explicit `when: deployed` criteria are not eligible on a plain `main` push.
 
 ## Runtime contract
 
@@ -86,7 +86,7 @@ Large browser traces/screenshots/logs stay in GitHub Actions artifacts. Compact 
 
 ## Automatic staging and post-merge execution
 
-The repository-owned `Acceptance Cases` workflow uses the same runner for both merged branches.
+The repository-owned `Acceptance / Cases` workflow uses the same runner for both merged branches.
 
 - staging push → `stage=staging`;
 - main push → `stage=post-merge`;
@@ -98,7 +98,7 @@ Manual `workflow_dispatch` accepts one Issue/SC/SHA/stage/runtime tuple and foll
 
 ## Immutable results and Issue projection
 
-Case execution has only read permissions. Compact results are uploaded as artifacts. The trusted `Acceptance Case Ingest` workflow on `main` runs afterward with write permissions and serializes ingestion through one concurrency group.
+Case execution has only read permissions. Compact results are uploaded as artifacts. The trusted `Acceptance / Case Ingest` workflow on `main` runs afterward with write permissions and serializes ingestion through one concurrency group.
 
 The first ingestion creates the orphan `acceptance-results` branch. Records under `runs/<date>/<run>-<attempt>/<issue>/<SC>.json` are append-only: an existing destination is an error and the branch is never force-pushed. The record carries a checksum of the source result and links back to the workflow/artifact provenance.
 
@@ -139,3 +139,11 @@ A `remote-production` profile requires a separately approved VPN-connected runne
 Remote verifiers must never infer "deployed" from a main merge or image build. They must compare the actual deployed revision/digest. Production secrets are never exposed to source-aligned Case code from an untrusted PR.
 
 Remote profile implementation is **deferred until VPN runner and deployment-identity infrastructure are ready**. Until then, the schema intentionally enables only `full-stack-local`; the remote contract exists so enabling it later does not redefine the trust boundary.
+
+## Generic PR Case Smoke and staging merge-proofs
+
+The `Acceptance / Case Smoke` PR Gate is a **real-runtime regression test** over the exact PR head. The selector (`scripts/acceptance-case-smoke-select.mjs`) chooses source-aligned protocol-only and browser+protocol representative Case classes without a fixed Issue number. PR-associated, explicit `method: case` pre-merge SCs are additionally selected via the trusted main-owned canonical Case selector; their missing mandatory source manifests are blocking failures. The verifier runtime never receives Issue-write credentials or GitHub tokens.
+
+Generic Smoke is an infrastructure check: its successful representative Cases do **not** imply every Requirement's own SC has been accepted. A Requirement's staging/production obligations are evaluated by the separate source-aligned `Acceptance / Cases` push workflow and its trusted Ingest.
+
+For explicit `when: merged, branch: staging` criteria, an Issue's `staging` Acceptance Report row remains Pending on the source PR because the merge SHA does not yet exist. The canonical final PR Gate may defer that row **only for a PR targeting staging**, with an actionable evidence plan. Once staging is merged, the merged-SHA Agent/Case execution and trusted projector must provide independent evidence before promoting the same Requirement to main or closing it. A passing staging Case never serves as a main or production-deployed Case without a validator-approved equivalence contract.

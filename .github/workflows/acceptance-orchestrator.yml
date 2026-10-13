@@ -1,4 +1,4 @@
-name: Requirement Acceptance
+name: Acceptance / Orchestrator
 
 on:
   pull_request_target:
@@ -83,7 +83,7 @@ jobs:
           set -euo pipefail
 
           for _ in $(seq 1 240); do
-            runs="$(gh run list               --repo "${GITHUB_REPOSITORY}"               --workflow quality.yml               --commit "${HEAD_SHA}"               --event pull_request               --limit 20               --json databaseId,status,conclusion)"
+            runs="$(gh run list               --repo "${GITHUB_REPOSITORY}"               --workflow ci-quality.yml               --commit "${HEAD_SHA}"               --event pull_request               --limit 20               --json databaseId,status,conclusion)"
 
             run="$(jq -c '.[0] // empty' <<<"${runs}")"
             if [[ -z "${run}" ]]; then
@@ -125,7 +125,7 @@ jobs:
           for _ in $(seq 1 240); do
             runs="$(gh run list \
               --repo "${GITHUB_REPOSITORY}" \
-              --workflow e2e.yml \
+              --workflow e2e-tests.yml \
               --commit "${HEAD_SHA}" \
               --event pull_request \
               --limit 20 \
