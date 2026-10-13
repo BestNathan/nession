@@ -264,10 +264,12 @@ async function main() {
   } catch (error) {
     if (telemetryFile) {
       const fallbackMeta = error?.agentMeta ?? {
-        provider,
+        provider: provider === 'qwen' ? 'claude-code' : provider,
         model: provider === 'cursor'
           ? requestedCursorModel()
-          : { id: process.env.ANTHROPIC_MODEL || 'gateway-default', request_model: process.env.ACCEPTANCE_CLAUDE_MODEL || 'claude-sonnet-5' },
+          : { id: process.env.ANTHROPIC_MODEL || 'gateway-default',
+              request_model: provider === 'qwen' ? (process.env.ACCEPTANCE_CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || null)
+                : (process.env.ACCEPTANCE_CLAUDE_MODEL || 'claude-sonnet-5') },
         run_id: null,
         request_id: null,
         status: 'error',
