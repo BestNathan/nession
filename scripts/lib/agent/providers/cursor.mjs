@@ -26,13 +26,18 @@ export function selectCursorModel(models, requested) {
 }
 
 export function normalizeCursorUsage(usage) {
+  const observed = (value) => {
+    if (value == null) return null;
+    const n = Number(value);
+    return Number.isSafeInteger(n) && n >= 0 ? n : null;
+  };
   return {
-    input: Number(usage?.inputTokens ?? 0),
-    output: Number(usage?.outputTokens ?? 0),
-    cache_read: Number(usage?.cacheReadTokens ?? 0),
-    cache_write: Number(usage?.cacheWriteTokens ?? 0),
-    reasoning: usage?.reasoningTokens == null ? null : Number(usage.reasoningTokens),
-    total: usage?.totalTokens == null ? null : Number(usage.totalTokens),
+    input: observed(usage?.inputTokens),
+    output: observed(usage?.outputTokens),
+    cache_read: observed(usage?.cacheReadTokens),
+    cache_write: observed(usage?.cacheWriteTokens),
+    reasoning: observed(usage?.reasoningTokens),
+    total: observed(usage?.totalTokens),
   };
 }
 
