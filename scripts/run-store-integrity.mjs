@@ -79,19 +79,30 @@ function decodeNameStatus(bytes){
 }
 function assertRegularBlob(root,pathName,commit=null){
   noUnsafePath(pathName);
-  const lines=commit
+  const raw=commit
     ?git(root,['ls-tree','-z',commit,'--',pathName])
     :git(root,['ls-files','--stage','-z','--',pathName]);
-  const expected=commit
-    ?new RegExp('^100644 blob [a-f0-9]{40}\\t'+pathName.replace(/[.*+?^$()|[\]{}\\]/g,'\\function checkEntries(store,entries){
+  const data=raw.toString('utf8');
+  const tab=data.indexOf('\t');
+  if(tab<0||!data.endsWith('\0')||data.indexOf('\0')!==data.length-1 ||
+     data.slice(tab+1,-1)!==pathName) reject('untrusted Git tree entry: '+pathName);
+  const mode=commit
+    ?/^100644 blob [a-f0-9]{40}$/
+    :/^100644 [a-f0-9]{40} 0$/;
+  if(!mode.test(data.slice(0,tab))) {
+    reject('nonregular or untrusted Git blob mode: '+pathName);
+  }
+}
+function checkEntries(store,entries,root,commit=null){
   const seen=new Set();
   for(const item of entries){
     if(seen.has(item.path))reject('duplicate Git path change');
     seen.add(item.path);
     validateRunStoreChange(store,item.status,item.path);
+    if(item.status==='A'||item.status==='M')assertRegularBlob(root,item.path,commit);
   }
   return entries.length;
-}')+'\\x00
+}
 export function auditStagedRunStore(root,store){
   const entries=decodeNameStatus(git(root,[
     'diff','--cached','--name-status','--no-renames','-z','--diff-filter=AMDTU'
