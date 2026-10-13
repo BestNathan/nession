@@ -51,7 +51,7 @@ export function projectIssueE2E(issue, plan, execution, authenticated) {
     const runUrl = 'https://github.com/BestNathan/nession/actions/runs/' + authenticated.run_id;
     rows.push({ id, type, result: result.result,
       evidence: 'run ' + authenticated.run_id + '/' + authenticated.run_attempt +
-        ', SHA ' + authenticated.target_sha + ', plan ' + plan.plan_digest + ', ' +
+        ', SHA ' + authenticated.target_sha + ', contract ' + current.digest + ', plan ' + plan.plan_digest + ', ' +
         'tests ' + result.passed + '/' + result.discovered + ' (' + runUrl + ')' });
   }
   // Preserve non-E2E Issue data verbatim. Only the result section is projected.
