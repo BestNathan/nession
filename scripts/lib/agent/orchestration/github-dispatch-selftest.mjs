@@ -40,7 +40,7 @@ await assert.rejects(()=>attestAgentOutcome({
 }),/no trusted run-bound/);
 
 const posted=[];
-const api200=createGitHubDispatchClient('trustedActionWriter',{
+const api200=createGitHubDispatchClient('trustedActionWriter',{keyring,now,
   fetchFn:async (url,params)=>{
     posted.push({url,params});
     return {status:200,json:async()=>({workflow_run_id:333,
@@ -52,15 +52,20 @@ assert.deepEqual(receipt,{status:'verified',dispatch_id:item.id,source_run_id:33
 assert.equal(posted[0].params.method,'POST');
 assert.equal(JSON.parse(posted[0].params.body).return_run_details,true);
 assert.equal(posted[0].params.headers['X-GitHub-Api-Version'],'2026-03-10');
-const api204=createGitHubDispatchClient('trustedActionWriter',{
+const api204=createGitHubDispatchClient('trustedActionWriter',{keyring,now,
   fetchFn:async()=>({status:204}),
 });
 assert.deepEqual(await api204(plan),{status:'accepted',dispatch_id:item.id});
-await assert.rejects(()=>createGitHubDispatchClient('trustedActionWriter',{
+await assert.rejects(()=>createGitHubDispatchClient('trustedActionWriter',{keyring,now,
   fetchFn:async()=>({status:200,json:async()=>({workflow_run_id:null})})
 })(plan),/verifiable downstream/);
 await assert.rejects(()=>api200({...plan,workflow_id:'evil.yml'}),/unapproved/);
 await assert.rejects(()=>api200({...plan,ref:'feature'}),/unapproved/);
+await assert.rejects(()=>api200({...plan,inputs:{...plan.inputs,input_sha:b}}),
+  /signed Outbox ticket/);
+await assert.rejects(()=>api200({...plan,inputs:{...plan.inputs,dispatch_ticket:'tampered'}}),
+  /malformed/);
+
 const issuer={id:222,path:'.github/workflows/acceptance-agent-controller.yml',
   name:'Acceptance / Agent Controller',event:'workflow_dispatch',head_branch:'main',
   repository:{full_name:'BestNathan/nession'},head_sha:main};
