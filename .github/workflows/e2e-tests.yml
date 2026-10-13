@@ -4,6 +4,11 @@ name: E2E / Tests
 # bypasses it and keeps using setup-rust-toolchain / rust-cache. This preserves
 # the measured #126 decision: sccache on GHA had a 0–3% hit rate and competed
 # for the Actions cache quota.
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
 env:
   RUSTC_WRAPPER: ""
 
@@ -41,6 +46,26 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+          fetch-depth: 0
+
+      - name: Checkout trusted E2E planning code
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: trusted
+          persist-credentials: false
+
+      - name: Detect Issue-selected E2E support
+        if: github.event_name == 'pull_request'
+        id: selected-capability
+        shell: bash
+        run: |
+          if [[ -f trusted/scripts/issue-e2e-selection-entry.mjs && -f trusted/scripts/issue-e2e-collect.mjs ]]; then
+            echo 'available=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'available=false' >> "$GITHUB_OUTPUT"
+          fi
 
       # ── Rust toolchain ────────────────────────────────────────────────
       - uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -53,6 +78,33 @@ jobs:
           node-version: '24'
           cache: 'npm'
           cache-dependency-path: e2e/package-lock.json
+
+      - name: Resolve linked Issue E2E obligations
+        if: github.event_name == 'pull_request' && steps.selected-capability.outputs.available == 'true'
+        id: selection
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/issue-e2e"
+          node --input-type=module -e '
+            import fs from "node:fs";
+            import { parsePreMergeIssueNumbers } from "./trusted/scripts/requirement-acceptance.mjs";
+            const pr=JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH)).pull_request;
+            console.log(JSON.stringify(parsePreMergeIssueNumbers(pr.body,"BestNathan","nession",pr.title)));
+          ' > "$RUNNER_TEMP/issue-e2e/refs.json"
+          echo '[]' > "$RUNNER_TEMP/issue-e2e/issues.json"
+          mkdir -p "$RUNNER_TEMP/issue-e2e/contracts"
+          jq -r '.[]' "$RUNNER_TEMP/issue-e2e/refs.json" | while read -r issue; do
+            [[ "$issue" =~ ^[1-9][0-9]*$ ]] || exit 1
+            gh api "repos/$GITHUB_REPOSITORY/issues/$issue" > "$RUNNER_TEMP/issue-e2e/contracts/$issue.json"
+          done
+          jq -s '.' "$RUNNER_TEMP"/issue-e2e/contracts/*.json > "$RUNNER_TEMP/issue-e2e/issues.json" 2>/dev/null || true
+          node trusted/scripts/issue-e2e-selection-entry.mjs plan \
+            "$GITHUB_EVENT_PATH" "$RUNNER_TEMP/issue-e2e/issues.json" \
+            "$GITHUB_WORKSPACE" "$RUNNER_TEMP/issue-e2e/plan.json"
+          echo "mode=$(jq -r '.mode' "$RUNNER_TEMP/issue-e2e/plan.json")" >> "$GITHUB_OUTPUT"
 
       # tmux is required by nession-agent to create sessions. The runner
       # image may or may not have it pre-installed; install it explicitly.
@@ -103,9 +155,43 @@ jobs:
             # tighter since #1038, which narrows this window but does not close
             # it: any drift under the current value is still skipped in silence.
             ./run test --suite fixture-visual --update-snapshots=all
+          elif [[ "${{ github.event_name }}" == 'pull_request' && "${{ steps.selected-capability.outputs.available }}" == 'true' ]]; then
+            plan="$RUNNER_TEMP/issue-e2e/plan.json"
+            mode="$(jq -r '.mode' "$plan")"
+            case "$mode" in
+              selected)
+                mapfile -t ids < <(jq -r '.selected[].id' "$plan")
+                (( ${#ids[@]} > 0 )) || exit 1
+                args=()
+                for id in "${ids[@]}"; do args+=(--id "$id"); done
+                PLAYWRIGHT_JSON_OUTPUT_FILE="$GITHUB_WORKSPACE/e2e/playwright-selected.json" \
+                  CI=true ./e2e/run test "${args[@]}" ;;
+              not-required) echo 'Explicit Issue none; no browser test required for this PR' ;;
+              full) ./gates/run e2e-playwright ;;
+              *) echo "::error::Invalid Issue E2E mode"; exit 1 ;;
+            esac
           else
             ./gates/run e2e-playwright
           fi
+
+      - name: Normalize selected per-file results even on failure
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.selected-capability.outputs.available == 'true' && steps.selection.outcome == 'success' }}
+        shell: bash
+        run: |
+          node trusted/scripts/issue-e2e-collect.mjs collect \
+            "$RUNNER_TEMP/issue-e2e/plan.json" \
+            "$GITHUB_WORKSPACE/e2e/playwright-selected.json" \
+            "$RUNNER_TEMP/issue-e2e/results.json"
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.selection.outcome == 'success' }}
+        with:
+          name: issue-e2e-verification
+          path: |
+            ${{ runner.temp }}/issue-e2e/plan.json
+            ${{ runner.temp }}/issue-e2e/results.json
+          if-no-files-found: error
+          retention-days: 14
 
       - uses: actions/upload-artifact@v4
         if: github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots == true
