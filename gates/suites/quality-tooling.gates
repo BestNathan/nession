@@ -18,6 +18,8 @@ protocol-json-contract
 issue-contract-selftest
 issue-e2e-contract-selftest
 issue-e2e-plan-selftest
+issue-e2e-assertion-evidence-selftest
+issue-e2e-import-selftest
 issue-e2e-projector-selftest
 issue-e2e-obligations-selftest
 issue-e2e-verification-selftest

@@ -267,8 +267,19 @@ function tests(args) {
   }
   // Exact checked-in spec paths; never allow a caller-provided pattern or regex.
   const selected = requestedIds.length ? testCatalog.select(registry, requestedIds).map(test => test.file) : [];
+  let reporters = [];
+  if (selected.length && process.env.PLAYWRIGHT_JSON_OUTPUT_FILE) {
+    const reporter = at('trusted', 'scripts', 'issue-e2e-assertion-reporter.cjs');
+    if (!fs.existsSync(reporter) || fs.lstatSync(reporter).isSymbolicLink()) {
+      throw new Error('trusted Playwright assertion reporter is required for selected E2E');
+    }
+    if (!path.isAbsolute(process.env.NESSION_E2E_ASSERTIONS_OUTPUT_FILE ?? '')) {
+      throw new Error('selected E2E must have absolute assertion receipt output path');
+    }
+    reporters = ['--reporter=json,' + reporter];
+  }
   return execute('npx', ['playwright', 'test', ...selected, ...(suite ? [suite] : []),
-    ...(selected.length && process.env.PLAYWRIGHT_JSON_OUTPUT_FILE ? ['--reporter=json'] : []),
+    ...reporters,
     ...(update ? ['--update-snapshots=all'] : [])], at('e2e'));
 }
 function scenario(args) {
