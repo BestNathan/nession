@@ -82,3 +82,145 @@ jobs:
             echo "Identical immutable retry; no branch change" >> "$GITHUB_STEP_SUMMARY"
           fi
           echo "Test metadata ingested to acceptance-results with exact SHA and finite report-artifact digest" >> "$GITHUB_STEP_SUMMARY"
+
+  ingest-pr:
+    if: >-
+      ${{ github.event.workflow_run.event == 'pull_request' &&
+          (github.event.workflow_run.conclusion == 'success' ||
+           github.event.workflow_run.conclusion == 'failure') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: write
+      issues: write
+      pull-requests: read
+    steps:
+      - name: Checkout trusted code
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: trusted
+          persist-credentials: false
+      - name: Checkout exact source SHA, without write credentials
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with: { node-version: '24' }
+      - name: Check whether trusted selected-E2E code is installed
+        id: capability
+        run: |
+          if [[ -f trusted/scripts/issue-e2e-source-attestation.mjs ]]; then
+            echo 'available=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'available=false' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Fetch authenticated run and Playwright evidence
+        if: steps.capability.outputs.available == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p scratch/artifact scratch/metadata scratch/output
+          run_id="${{ github.event.workflow_run.id }}"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" > scratch/metadata/run.json
+          pr="$(jq -r '.pull_requests[0].number // empty' scratch/metadata/run.json)"
+          [[ "$pr" =~ ^[1-9][0-9]*$ ]] || { echo 'No verified source PR'; exit 1; }
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$pr" > scratch/metadata/pr.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts?per_page=100" > scratch/metadata/artifacts.json
+          jq -e '[.artifacts[] | select(.name=="issue-e2e-verification" and .expired==false)] | length==1' scratch/metadata/artifacts.json
+          jq '.artifacts[] | select(.name=="issue-e2e-verification")' scratch/metadata/artifacts.json > scratch/metadata/artifact.json
+          gh run download "$run_id" --repo "$GITHUB_REPOSITORY" --name issue-e2e-verification --dir scratch/artifact
+          [[ -s scratch/artifact/plan.json && -s scratch/artifact/results.json ]] || exit 1
+          echo "$pr" > scratch/metadata/pr-number
+      - name: Independently validate and project per-ID results
+        if: steps.capability.outputs.available == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$(jq -r .mode scratch/artifact/plan.json)" == selected ]] || exit 0
+          jq -r '.issues[].issue' scratch/artifact/plan.json | while read -r number; do
+            [[ "$number" =~ ^[1-9][0-9]*$ ]] || exit 1
+            gh api "repos/$GITHUB_REPOSITORY/issues/$number" > "scratch/metadata/issue-$number.json"
+          done
+          jq -s . scratch/metadata/issue-*.json > scratch/metadata/issues.json
+          node trusted/scripts/issue-e2e-source-attestation.mjs self-test
+          node trusted/scripts/issue-e2e-source-attestation.mjs project \
+            "$GITHUB_EVENT_PATH" scratch/metadata/run.json scratch/metadata/pr.json \
+            scratch/artifact/plan.json scratch/artifact/results.json \
+            scratch/metadata/artifact.json scratch/metadata/issues.json \
+            source scratch/output scratch/artifact/playwright.json
+      - name: Store immutable results and update Issue reports
+        if: steps.capability.outputs.available == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ -s scratch/output/record.json ]] || exit 0
+          run_id="${{ github.event.workflow_run.id }}"
+          attempt="${{ github.event.workflow_run.run_attempt }}"
+          sha="${{ github.event.workflow_run.head_sha }}"
+          day="${{ github.event.workflow_run.created_at }}"
+          day="${day:0:10}"
+          dest="runs/$day/$run_id-$attempt/test/issue-e2e.json"
+          mkdir results-repo
+          git -C results-repo init
+          git -C results-repo config user.name "github-actions[bot]"
+          git -C results-repo config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C results-repo remote add origin "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git"
+          git -C results-repo fetch --depth=1 origin acceptance-results
+          git -C results-repo checkout -B acceptance-results FETCH_HEAD
+          mkdir -p "results-repo/$(dirname "$dest")"
+          if [[ -e "results-repo/$dest" ]]; then
+            cmp -s scratch/output/record.json "results-repo/$dest" || exit 1
+          else
+            cp scratch/output/record.json "results-repo/$dest"
+          fi
+          git -C results-repo add runs
+          if ! git -C results-repo diff --cached --quiet; then
+            git -C results-repo commit -m "e2e: trusted Issue test $run_id attempt $attempt"
+            git -C results-repo push origin acceptance-results
+          fi
+          live_pr="$(jq -r .number scratch/metadata/pr.json)"
+          current_head="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$live_pr" --jq .head.sha)"
+          [[ "$current_head" == "$sha" ]] || { echo "Superseded PR; no Issue projection"; exit 0; }
+          for f in scratch/output/[0-9]*.json; do
+            [[ -f "$f" ]] || continue
+            number="$(basename "$f" .json)"
+            latest="$(gh api "repos/$GITHUB_REPOSITORY/issues/$number" --jq .body)"
+            original="$(jq -r .body "scratch/metadata/issue-$number.json")"
+            if [[ "$latest" != "$original" ]]; then
+              echo "Issue #$number changed since attestation; omit stale projection"
+              continue
+            fi
+            decision="$(node trusted/scripts/issue-e2e-reconcile.mjs decide \
+              "scratch/metadata/issue-$number.json" "$f" "$run_id" "$attempt" "$sha")"
+            case "$decision" in
+              apply) ;;
+              stale|duplicate)
+                echo "Issue #$number ignores $decision run result without overwriting newer proof"
+                continue ;;
+              *) echo "::error::Invalid E2E reconciliation decision"; exit 1 ;;
+            esac
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/$number" --input "$f" > /dev/null
+          done
+          if ! jq -e '.status == "Pass"' scratch/artifact/results.json > /dev/null; then
+            echo 'Required E2E tests are not all Pass; keep Acceptance blocked, but preserve the failure report'
+            exit 0
+          fi
+          # GITHUB_TOKEN-triggered repository_dispatch is an intentional
+          # workflow-trigger exception. Do not poll or edit the PR as a wakeup.
+          jq -n --argjson pr "$live_pr" --arg sha "$sha" \
+            --argjson source_run_id "$run_id" \
+            --arg plan_digest "$(jq -r .plan_digest scratch/artifact/plan.json)" \
+            '{event_type:"nession-issue-e2e-projected",client_payload:{
+              pr_number:$pr,head_sha:$sha,source_run_id:$source_run_id,
+              plan_digest:$plan_digest}}' > scratch/metadata/dispatch.json
+          gh api --method POST "repos/$GITHUB_REPOSITORY/dispatches" \
+            --input scratch/metadata/dispatch.json
+          echo 'Requested event-driven Acceptance reconciliation after verified Issue E2E projection' >> "$GITHUB_STEP_SUMMARY"
