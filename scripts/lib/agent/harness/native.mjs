@@ -134,6 +134,13 @@ function requiredHostTools(prepared,providers) {
   if(missing.length) fail('missing permission-enforcing host tool: '+missing.join(','));
   return required;
 }
+function validateStagedAssets(prepared) {
+  for(const asset of prepared.assets) {
+    const actual=hashDependencyTree(prepared.workspace,asset.loaded_path);
+    if(actual!==asset.tree_sha256) fail('staged asset was modified after verification: '+asset.id);
+  }
+}
+
 function pinnedMcpServers(prepared) {
   const servers={};
   const requestedHost=prepared.plan.canonical_capabilities.tools.filter(t=>Object.hasOwn(HOST,t));
@@ -170,6 +177,7 @@ function pinnedMcpServers(prepared) {
 
 export function cursorNativeOptions(prepared,{hostTools}={}) {
   if(prepared.identity.provider!=='cursor') fail('provider mismatch');
+  validateStagedAssets(prepared);
   if(prepared.required_plugins.length) fail('Cursor plugin injection from untrusted ambient settings is unsupported');
   const required=requiredHostTools(prepared,hostTools);
   const mcpServers=pinnedMcpServers(prepared);
@@ -191,6 +199,7 @@ export function cursorNativeOptions(prepared,{hostTools}={}) {
 }
 export function claudeNativeOptions(prepared) {
   if(prepared.identity.provider!=='claude-code') fail('provider mismatch');
+  validateStagedAssets(prepared);
   const tools=prepared.plan.canonical_capabilities.tools;
   // Host GitHub reads must have an explicitly bound, trusted MCP server; a
   // CLI flag is not evidence the required operations were implemented.
@@ -230,6 +239,7 @@ export function claudeNativeOptions(prepared) {
   };
 }
 export function auditNativeLoad(prepared,observed,providerVersion,checkpointDigest=null) {
+  validateStagedAssets(prepared);
   const plan=prepared.plan;
   if(!observed||!Array.isArray(observed.tools)||!Array.isArray(observed.skills)||
       !Array.isArray(observed.mcp)||!Array.isArray(observed.plugins)) fail('native inventory is unobserved');
