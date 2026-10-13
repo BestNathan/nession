@@ -1,12 +1,12 @@
 import { createHash } from 'node:crypto';
 
 const SHA = /^[a-f0-9]{40}$/;
-const PHASES = new Set(['ready', 'review', 'repair', 'quality', 'acceptance', 'waiting-merge', 'done', 'blocked']);
+const PHASES = new Set(['ready', 'review', 'repair', 'quality', 'acceptance', 'waiting-merge', 'post-merge-acceptance', 'done', 'blocked']);
 const OUTCOMES = {
   developer: new Set(['implementation_ready']),
   reviewer: new Set(['approved', 'changes_requested']),
   quality: new Set(['passed', 'failed']),
-  acceptor: new Set(['passed', 'failed', 'pending']),
+  acceptance: new Set(['passed', 'failed', 'pending']),
   merge: new Set(['completed']),
 };
 function reject(message) { throw new Error('agent orchestration: ' + message); }
@@ -54,21 +54,28 @@ export function advanceWorkflow(state, event, trusted, config = {}) {
   } else if (event.kind === 'quality' && current.phase === 'quality' && current.target_sha === event.target_sha) {
     if (event.outcome === 'passed') {
       next.phase = 'acceptance';
-      actions = [{ type: 'dispatch', role: 'acceptor', task: 'accept', sha: event.target_sha }];
+      // Existing Acceptance Orchestrator selects each SC by target and proof method.
+      actions = [{ type: 'verify', gate: 'sc-acceptance', when: 'pr', sha: event.target_sha }];
     } else {
       next.phase = 'repair';
       actions = [{ type: 'dispatch', role: 'developer', task: 'repair', sha: event.target_sha, resume: true }];
     }
-  } else if (event.kind === 'acceptor' && current.phase === 'acceptance' && current.target_sha === event.target_sha) {
+  } else if (event.kind === 'acceptance' && current.phase === 'acceptance' && current.target_sha === event.target_sha) {
     next.phase = event.outcome === 'passed' ? 'waiting-merge' : event.outcome === 'failed' ? 'repair' : 'blocked';
     actions = event.outcome === 'passed' ? [{ type: 'notify', reason: 'requires_authorized_merge' }] :
       event.outcome === 'failed' ? [{ type: 'dispatch', role: 'developer', task: 'repair', sha: event.target_sha, resume: true }] :
       [{ type: 'notify', reason: 'acceptance_pending' }];
   } else if (event.kind === 'merge' && current.phase === 'waiting-merge' &&
       event.outcome === 'completed') {
-    next.phase = 'done';
+    next.phase = 'post-merge-acceptance';
     next.merged_sha = event.target_sha;
-    actions = [{ type: 'verify', gate: 'post-merge-acceptance', sha: event.target_sha }];
+    next.target_sha = event.target_sha;
+    actions = [{ type: 'verify', gate: 'sc-acceptance', when: 'merged', sha: event.target_sha }];
+  } else if (event.kind === 'acceptance' && current.phase === 'post-merge-acceptance' &&
+      current.target_sha === event.target_sha) {
+    next.phase = event.outcome === 'passed' ? 'done' : 'blocked';
+    actions = event.outcome === 'passed' ? [] :
+      [{ type: 'notify', reason: event.outcome === 'pending' ? 'merged_acceptance_pending' : 'merged_acceptance_failed' }];
   } else {
     reject('stale SHA or illegal state transition: ' + current.phase + ' / ' + event.kind);
   }
