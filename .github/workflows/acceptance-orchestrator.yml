@@ -6,6 +6,9 @@ on:
     types: [opened, synchronize, reopened, edited, ready_for_review]
   repository_dispatch:
     types: [nession-issue-e2e-projected]
+  workflow_run:
+    workflows: ["CI / Quality Gate", "E2E / Tests"]
+    types: [completed]
   issues:
     types: [closed]
   push:
@@ -75,91 +78,54 @@ jobs:
             echo "has_requirements=false" >> "${GITHUB_OUTPUT}"
           fi
 
-      - name: Wait for Quality Gate on the exact PR head
+      - name: Check completed Quality Gate on exact PR head
         id: quality
         if: steps.discover.outputs.has_requirements == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
         run: |
           set -euo pipefail
+          # One bounded snapshot check only: workflow_run events later replay
+          # failed Acceptance jobs when source workflows finish.
+          runs="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci-quality.yml \
+            --commit "$HEAD_SHA" --event pull_request --limit 20 \
+            --json databaseId,status,conclusion)"
+          run="$(jq -c '.[0] // empty' <<< "$runs")"
+          [[ -n "$run" ]] || { echo "::error::Quality Gate has not completed; awaiting workflow_run reconciliation"; exit 1; }
+          status="$(jq -r .status <<< "$run")"
+          result="$(jq -r '.conclusion // ""' <<< "$run")"
+          [[ "$status" == completed && "$result" == success ]] || {
+            echo "::error::Quality Gate not yet verified success for $HEAD_SHA (state=$status, result=$result)"; exit 1;
+          }
+          run_id="$(jq -r .databaseId <<< "$run")"
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
 
-          for _ in $(seq 1 240); do
-            runs="$(gh run list               --repo "${GITHUB_REPOSITORY}"               --workflow ci-quality.yml               --commit "${HEAD_SHA}"               --event pull_request               --limit 20               --json databaseId,status,conclusion)"
-
-            run="$(jq -c '.[0] // empty' <<<"${runs}")"
-            if [[ -z "${run}" ]]; then
-              sleep 10
-              continue
-            fi
-
-            status="$(jq -r '.status' <<<"${run}")"
-            conclusion="$(jq -r '.conclusion // ""' <<<"${run}")"
-            run_id="$(jq -r '.databaseId' <<<"${run}")"
-
-            if [[ "${status}" != "completed" ]]; then
-              sleep 10
-              continue
-            fi
-
-            if [[ "${conclusion}" != "success" ]]; then
-              echo "::error::Quality Gate run ${run_id} for ${HEAD_SHA} concluded ${conclusion}."
-              exit 1
-            fi
-
-            echo "run_id=${run_id}" >> "${GITHUB_OUTPUT}"
-            echo "Quality Gate run ${run_id} passed for PR head ${HEAD_SHA}."
-            exit 0
-          done
-
-          echo "::error::No successful completed Quality Gate run appeared for PR head ${HEAD_SHA}."
-          exit 1
-
-      - name: Wait for E2E Tests on the exact PR head
+      - name: Check completed E2E Tests on exact PR head
         id: e2e
         if: steps.discover.outputs.has_requirements == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
         run: |
           set -euo pipefail
+          # One bounded snapshot check only: workflow_run events later replay
+          # failed Acceptance jobs when source workflows finish.
+          runs="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow e2e-tests.yml \
+            --commit "$HEAD_SHA" --event pull_request --limit 20 \
+            --json databaseId,status,conclusion)"
+          run="$(jq -c '.[0] // empty' <<< "$runs")"
+          [[ -n "$run" ]] || { echo "::error::E2E Tests has not completed; awaiting workflow_run reconciliation"; exit 1; }
+          status="$(jq -r .status <<< "$run")"
+          result="$(jq -r '.conclusion // ""' <<< "$run")"
+          [[ "$status" == completed && "$result" == success ]] || {
+            echo "::error::E2E Tests not yet verified success for $HEAD_SHA (state=$status, result=$result)"; exit 1;
+          }
+          run_id="$(jq -r .databaseId <<< "$run")"
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
 
-          for _ in $(seq 1 240); do
-            runs="$(gh run list \
-              --repo "${GITHUB_REPOSITORY}" \
-              --workflow e2e-tests.yml \
-              --commit "${HEAD_SHA}" \
-              --event pull_request \
-              --limit 20 \
-              --json databaseId,status,conclusion)"
-
-            run="$(jq -c '.[0] // empty' <<<"${runs}")"
-            if [[ -z "${run}" ]]; then
-              sleep 10
-              continue
-            fi
-
-            status="$(jq -r '.status' <<<"${run}")"
-            conclusion="$(jq -r '.conclusion // ""' <<<"${run}")"
-            run_id="$(jq -r '.databaseId' <<<"${run}")"
-
-            if [[ "${status}" != "completed" ]]; then
-              sleep 10
-              continue
-            fi
-
-            if [[ "${conclusion}" != "success" ]]; then
-              echo "::error::E2E Tests run ${run_id} for ${HEAD_SHA} concluded ${conclusion}."
-              exit 1
-            fi
-
-            echo "run_id=${run_id}" >> "${GITHUB_OUTPUT}"
-            echo "E2E Tests run ${run_id} passed for PR head ${HEAD_SHA}."
-            exit 0
-          done
-
-          echo "::error::No successful completed E2E Tests run appeared for PR head ${HEAD_SHA}."
-          exit 1
 
   pre-merge-acceptance:
     needs: prepare-pre-merge
