@@ -166,8 +166,16 @@ jobs:
                 (( ${#ids[@]} > 0 )) || exit 1
                 args=()
                 for id in "${ids[@]}"; do args+=(--id "$id"); done
-                PLAYWRIGHT_JSON_OUTPUT_FILE="$GITHUB_WORKSPACE/e2e/playwright-selected.json" \
-                  CI=true ./e2e/run test "${args[@]}" ;;
+                if [[ -f trusted/scripts/issue-e2e-assertion-reporter.cjs ]]; then
+                  NESSION_E2E_ASSERTIONS_OUTPUT_FILE="$RUNNER_TEMP/issue-e2e/assertions.json" \
+                    PLAYWRIGHT_JSON_OUTPUT_FILE="$GITHUB_WORKSPACE/e2e/playwright-selected.json" \
+                    CI=true ./e2e/run test "${args[@]}"
+                else
+                  # Compatibility until the trusted assertion reporter source lands.
+                  # Old results remain unproven rather than being promoted to Pass.
+                  PLAYWRIGHT_JSON_OUTPUT_FILE="$GITHUB_WORKSPACE/e2e/playwright-selected.json" \
+                    CI=true ./e2e/run test "${args[@]}"
+                fi ;;
               not-required) echo 'Explicit Issue none; no browser test required for this PR' ;;
               full) ./gates/run e2e-playwright ;;
               *) echo "::error::Invalid Issue E2E mode"; exit 1 ;;
@@ -180,10 +188,18 @@ jobs:
         if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.selected-capability.outputs.available == 'true' && steps.selection.outcome == 'success' }}
         shell: bash
         run: |
-          node trusted/scripts/issue-e2e-collect.mjs collect \
-            "$RUNNER_TEMP/issue-e2e/plan.json" \
-            "$GITHUB_WORKSPACE/e2e/playwright-selected.json" \
-            "$RUNNER_TEMP/issue-e2e/results.json"
+          if [[ -f trusted/scripts/issue-e2e-assertion-reporter.cjs ]]; then
+            node trusted/scripts/issue-e2e-collect.mjs collect \
+              "$RUNNER_TEMP/issue-e2e/plan.json" \
+              "$GITHUB_WORKSPACE/e2e/playwright-selected.json" \
+              "$RUNNER_TEMP/issue-e2e/assertions.json" \
+              "$RUNNER_TEMP/issue-e2e/results.json"
+          else
+            node trusted/scripts/issue-e2e-collect.mjs collect \
+              "$RUNNER_TEMP/issue-e2e/plan.json" \
+              "$GITHUB_WORKSPACE/e2e/playwright-selected.json" \
+              "$RUNNER_TEMP/issue-e2e/results.json"
+          fi
           if [[ -f "$GITHUB_WORKSPACE/e2e/playwright-selected.json" ]]; then
             cp "$GITHUB_WORKSPACE/e2e/playwright-selected.json" "$RUNNER_TEMP/issue-e2e/playwright.json"
           fi
