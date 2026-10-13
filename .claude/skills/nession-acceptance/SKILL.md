@@ -9,7 +9,7 @@ Acceptance is the executable phase that proves Requirement Success Criteria. It 
 
 Issue structure belongs to `nession-writing-requirements`; Gate semantics belong to `nession-gates`; Agent execution telemetry belongs to `nession-agent-workflow-metrics`.
 
-For workflow taxonomy and the **implemented** `when × target × method` Agent/Case selection, load `nession-workflows` and its acceptance-orchestration reference. The optional `## Acceptance Plan` is validated and used by the active merged-SHA planner, while legacy Acceptance Report stages remain required. Production `when: deployed` execution remains deferred until an independently authenticated deployment-identity runner exists.
+For workflow taxonomy and the **implemented** `when × target × method` Agent/Case selection, load `nession-workflows` and its acceptance-orchestration reference. The optional `## Acceptance Plan` is validated and used by the active merged-SHA planner, while new three-column Acceptance Reports derive their compatibility stage from the Plan; historical four-column Reports retain explicit Stage. Production `when: deployed` execution remains deferred until an independently authenticated deployment-identity runner exists.
 
 ## Lifecycle
 
@@ -26,7 +26,7 @@ Requirement Success Criteria
 
 Read the Requirement's current `Success Criteria` and `Acceptance Report`.
 
-For issues with an explicit `## Acceptance Plan`, the trusted executor also selects by `method`: the read-only Agent evaluates only `agent` SCs; Case Coverage and the Case runner evaluate only `case` SCs. `when: deployed` is deferred until actual deployment identity/runner exists, and does not execute as part of an ordinary main push. The legacy Acceptance Report Stage remains required and must agree with the plan. Issues without a plan retain historic behavior.
+For issues with an explicit `## Acceptance Plan`, the trusted executor also selects by `method`: the read-only Agent evaluates only `agent` SCs; Case Coverage and the Case runner evaluate only `case` SCs. `when: deployed` is deferred until actual deployment identity/runner exists, and does not execute as part of an ordinary main push. New three-column Reports inherit stage from the Plan; any explicit Stage in a historical four-column Report must agree with the Plan. Issues without a plan retain historic behavior.
 
 Evaluate only criteria whose declared stage matches the environment/boundary being accepted:
 
@@ -103,7 +103,7 @@ When a criterion depends on deployment/runtime state, prove the exact revision/e
 
 Use a source-aligned Case when one Success Criterion needs executable evidence tied to an exact product SHA. The canonical shape is `e2e/acceptance/cases/<issue>/<SC>/`: **one Case per Issue/SC**, one independently reported result, optional multiple verifier steps.
 
-Choose the Case stage from the Issue Acceptance Report. Use `browser` for UI/browser-observable behavior, `protocol` for wire/WebSocket behavior, and `runtime` for orchestration/process/config/file evidence. All verifier types may share the same `full-stack-local` Runtime Harness; protocol/runtime verification must not launch Playwright unless a browser verifier is declared.
+Choose the Case stage from the trusted Acceptance contract: the Plan for canonical new Issues or the explicit/legacy Acceptance Report for historical Issues. Use `browser` for UI/browser-observable behavior, `protocol` for wire/WebSocket behavior, and `runtime` for orchestration/process/config/file evidence. All verifier types may share the same `full-stack-local` Runtime Harness; protocol/runtime verification must not launch Playwright unless a browser verifier is declared.
 
 A Case Pass requires concrete evidence from every declared verifier. Skip/absence is Pending. Results pin exact target SHA, Case revision/tree SHA and SC contract digest. Compact immutable records are ingested into the append-only `acceptance-results` orphan branch; large traces/screenshots/logs remain workflow artifacts.
 
