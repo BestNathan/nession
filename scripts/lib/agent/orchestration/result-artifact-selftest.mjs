@@ -159,6 +159,20 @@ const client=createGitHubResultArtifactReader('ghReadOnlyToken1234',{
 });
 assert.equal((await client.listRunArtifacts(333)).artifacts[0].id,999);
 assert.deepEqual(await client.downloadZip(999),zip);
+const streamed=createGitHubResultArtifactReader('ghReadOnlyToken1234',{
+  fetchFn:async()=>({ok:true,body:{
+    getReader:()=>({
+      index:0,
+      async read(){if(this.index++)return{done:true};return{done:false,value:zip};},
+      async cancel(){}
+    }),
+  }}),
+});
+assert.deepEqual(await streamed.downloadZip(999),zip);
+const tooLarge=createGitHubResultArtifactReader('ghReadOnlyToken1234',{
+  fetchFn:async()=>({ok:true,headers:{get:()=>String(256*1024+1)}}),
+});
+await assert.rejects(()=>tooLarge.downloadZip(999),/bounded archive/);
 assert.ok(fetched.every(x=>x.opts.method==='GET'));
 assert.throws(()=>createGitHubResultArtifactReader(''),/read-only token/);
 console.log('Agent Artifact Ingest verified single-file ZIP, GitHub digest, run/Issue binding and replay fixtures passed');
