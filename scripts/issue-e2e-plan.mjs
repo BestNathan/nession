@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-import { pathToFileURL } from 'node:url';
 // Deterministic Issue→E2E browser-regression plan; the LLM is never the selector.
 import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parseIssueE2E, verifyIssueE2EAgainstCatalog } from './issue-e2e-contract.mjs';
 
 const HEX40 = /^[a-f0-9]{40}$/;
@@ -113,14 +113,16 @@ function selfTest() {
   console.log('Issue E2E plan: deterministic dedupe, exact SHA and unlisted changed-test negatives passed');
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-if (process.argv[2] === 'self-test') selfTest();
-else if (process.argv[2] === 'plan') {
-  const [repo, issuesFile, base, head, output] = process.argv.slice(3);
-  if (!repo || !issuesFile || !base || !head || !output) throw new Error('usage: plan ROOT ISSUES_JSON BASE_SHA HEAD_SHA OUTPUT');
-  const issues = JSON.parse(fs.readFileSync(issuesFile, 'utf8'));
-  const plan = buildGitPlan(repo, issues, base, head);
-  fs.writeFileSync(output, JSON.stringify(plan, null, 2) + '\n', { flag: 'wx' });
-  console.log('Selected ' + plan.selected.length + ' E2E test IDs');
-} else throw new Error('usage: issue-e2e-plan.mjs self-test | plan ROOT ISSUES_JSON BASE_SHA HEAD_SHA OUTPUT');
+// This module is also imported by the trusted Issue E2E selection adapter.
+// Never consume its process.argv or run CLI side effects during an import.
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  if (process.argv[2] === 'self-test') selfTest();
+  else if (process.argv[2] === 'plan') {
+    const [repo, issuesFile, base, head, output] = process.argv.slice(3);
+    if (!repo || !issuesFile || !base || !head || !output) throw new Error('usage: plan ROOT ISSUES_JSON BASE_SHA HEAD_SHA OUTPUT');
+    const issues = JSON.parse(fs.readFileSync(issuesFile, 'utf8'));
+    const plan = buildGitPlan(repo, issues, base, head);
+    fs.writeFileSync(output, JSON.stringify(plan, null, 2) + '\n', { flag: 'wx' });
+    console.log('Selected ' + plan.selected.length + ' E2E test IDs');
+  } else throw new Error('usage: issue-e2e-plan.mjs self-test | plan ROOT ISSUES_JSON BASE_SHA HEAD_SHA OUTPUT');
 }
