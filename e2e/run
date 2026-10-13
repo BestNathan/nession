@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
-// The transitional CLI owns dispatch, never a second stack lifecycle.
-// Harness: e2e/runner/runtime; verifier/source migration tracked in #1497.
+// Single canonical CLI; e2e/runner owns the full-stack lifecycle.
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -38,11 +37,12 @@ function walk(dir, fileName) {
 }
 function catalog() {
   const canonical = at('e2e', 'acceptance', 'cases');
-  const legacy = at('acceptance', 'cases');
-  const casesRoot = fs.existsSync(canonical) ? canonical : legacy;
+  if (fs.existsSync(at('acceptance'))) throw new Error('legacy root acceptance/ is forbidden');
+  if (!fs.existsSync(canonical)) throw new Error('missing canonical Case root: e2e/acceptance/cases');
+  const casesRoot = canonical;
   return {
     caseRoot: casesRoot,
-    caseLayout: casesRoot === canonical ? 'canonical' : 'migration-alias',
+    caseLayout: 'canonical',
     cases: walk(casesRoot, 'case.yaml').map((p) => path.relative(root, p)),
     scenarios: walk(at('e2e', 'scenarios'), 'scenario.yaml')
       .map((p) => path.relative(root, p)),
@@ -53,9 +53,7 @@ function catalog() {
 function exitByCode(code) { process.exitCode = code; }
 async function validate() {
   const state = catalog();
-  const sourceModule = fs.existsSync(at('e2e', 'acceptance', 'contract', 'cases.mjs'))
-    ? at('e2e', 'acceptance', 'contract', 'cases.mjs')
-    : at('acceptance', 'cases.mjs');
+  const sourceModule = at('e2e', 'acceptance', 'contract', 'cases.mjs');
   if (!fs.existsSync(sourceModule)) throw new Error('missing Case contract; fix: restore canonical discovery source');
   const { discoverCases } = await import(pathToFileURL(sourceModule).href);
   const cases = discoverCases(state.caseRoot);

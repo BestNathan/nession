@@ -12,7 +12,7 @@ import {
   aggregateVerifierResults,
   discoverCases,
   validateCaseAgainstAcceptanceContext,
-} from '../../../acceptance/cases.mjs';
+} from '../contract/cases.mjs';
 import { executeVerifier } from '../../runner/drivers/index.mjs';
 import { buildAcceptanceContext } from '../../../scripts/acceptance-executor.mjs';
 

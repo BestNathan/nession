@@ -52,6 +52,11 @@ for (const [relative, expectedSha] of Object.entries(migration.baseline_png_blob
 
 assert.ok(catalog.cases.length > 0, 'Case catalog must discover source-aligned Cases');
 assert.ok(catalog.scenarios.length > 0, 'scenario catalog must not silently disappear');
+assert.equal(catalog.caseLayout, 'canonical');
+assert.equal(fs.existsSync(path.join(repo, 'acceptance')), false,
+  'root acceptance/ may not reappear as an alias');
+assert.ok(fs.existsSync(path.join(repo, 'e2e', 'acceptance', 'contract', 'cases.mjs')),
+  'canonical manifest contract must exist');
 
 // CI must preserve a single command surface after the Case source-tree migration.
 // The trusted Case selector/updater stay in the workflow, but actual execution
