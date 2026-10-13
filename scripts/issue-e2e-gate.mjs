@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { pathToFileURL } from 'node:url';
 // E2E Issue gate: Issue-declared tests must all have evidence on the exact PR SHA.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -40,6 +41,7 @@ function selfTest(){
   assert.equal(verifyIssueE2EGate({body:none},sha).reason,'explicit-none');
   console.log('Issue E2E Gate: correct SHA/digest Pass, missing, stale and explicit-none fixtures passed');
 }
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
 const [cmd,issueFile,sha]=process.argv.slice(2);
 if(cmd==='self-test')selfTest();
 else if(cmd==='verify'){
@@ -48,3 +50,4 @@ else if(cmd==='verify'){
   if(!result.ok)throw Error(result.failures.join('; '));
   console.log('Issue E2E Gate: '+result.reason+', '+result.required+' required IDs passed');
 }else throw Error('self-test | verify ISSUE_JSON SHA');
+}
