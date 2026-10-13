@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 38393627935,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "test/1717-issue-e2e-projection-proof",
+    "target_sha": "837af824ed2fceeb4f4fa675562f113209a873b8",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/38393627935",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "3954bbe05bf956faaeec288eb22e13fa84c65dc2814b9251775021a0318c38bf"
+  },
+  "record": "runs/2026-10-13/38393627935-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "13e0501e98d9b7942b678359b681f18d35ace3d5ec7c620462f794ce2c392bcc"
+}
