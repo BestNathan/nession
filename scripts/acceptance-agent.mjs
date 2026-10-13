@@ -64,16 +64,26 @@ async function runCursor(context, workspace) {
   return { result: parseJsonText(result.result), meta: normalized };
 }
 
+function requestedClaudeGatewayModel(backend, env = process.env) {
+  const model = backend === 'qwen'
+    ? (env.ACCEPTANCE_CLAUDE_MODEL || env.ANTHROPIC_MODEL)
+    : (env.ACCEPTANCE_CLAUDE_MODEL || 'claude-sonnet-5');
+  if (backend === 'qwen' && (!model || /^claude-(?:opus|sonnet|haiku)/i.test(model))) {
+    throw new Error('Qwen Environment must explicitly set a Qwen model via ACCEPTANCE_CLAUDE_MODEL or ANTHROPIC_MODEL');
+  }
+  return model;
+}
+
 function claudeUsage(envelope) {
   return normalizeClaudeUsage(envelope);
 }
 
-function runDeepSeek(context, workspace) {
-  if (!process.env.ANTHROPIC_BASE_URL) throw new Error('ANTHROPIC_BASE_URL is required from the deepseek GitHub Environment');
+function runClaudeGateway(context, workspace, backend) {
+  if (!process.env.ANTHROPIC_BASE_URL) throw new Error('ANTHROPIC_BASE_URL is required from the selected Claude Gateway Environment');
   if (!process.env.ANTHROPIC_AUTH_TOKEN && !process.env.ANTHROPIC_API_KEY) {
-    throw new Error('ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY is required from the deepseek GitHub Environment');
+    throw new Error('ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY is required from the selected Claude Gateway Environment');
   }
-  const model = process.env.ACCEPTANCE_CLAUDE_MODEL || 'claude-sonnet-5';
+  const model = requestedClaudeGatewayModel(backend);
   const startedAt = new Date();
   const { proc, parsed: envelope } = runClaudeCli({
     prompt: promptFor(context), model,
@@ -84,11 +94,11 @@ function runDeepSeek(context, workspace) {
   });
   if (!envelope) throw new Error('Claude Code failed without a parseable response');
   const meta = {
-    provider: 'deepseek',
+    provider: backend === 'qwen' ? 'claude-code' : 'deepseek',
     model: {
-      id: process.env.ANTHROPIC_MODEL || 'gateway-default',
+      id: backend === 'qwen' ? model : (process.env.ANTHROPIC_MODEL || 'gateway-default'),
       request_model: model,
-      backend_mapping: 'claude-sonnet* -> deepseek-flash',
+      backend_mapping: backend === 'qwen' ? 'qwen-configured-gateway' : 'claude-sonnet* -> deepseek-flash',
     },
     run_id: envelope.session_id ?? envelope.sessionId ?? null,
     request_id: null,
@@ -121,7 +131,7 @@ function runDeepSeek(context, workspace) {
 export async function runAcceptanceAgent(context, provider, workspace) {
   if (!context.criteria?.length) return { result: { criteria: [] }, meta: null };
   if (provider === 'cursor') return runCursor(context, workspace);
-  if (provider === 'deepseek') return runDeepSeek(context, workspace);
+  if (provider === 'deepseek' || provider === 'qwen') return runClaudeGateway(context, workspace, provider);
   throw new Error('unsupported Acceptance Agent provider: ' + provider);
 }
 
@@ -230,7 +240,12 @@ function selfTest() {
   assert.equal(claudeUsage({ usage: { input_tokens: 2, output_tokens: 1 } }).input, 2);
   assert.equal(claudeUsage({}).input, null);
   assert.equal(claudeUsage({ modelUsage: { modelA: { inputTokens: 5 } } }).input, 5);
-  console.log('acceptance-agent self-test: 9 cases passed');
+  assert.equal(requestedClaudeGatewayModel('qwen', { ANTHROPIC_MODEL:'qwen3-coder-plus' }), 'qwen3-coder-plus');
+  assert.equal(requestedClaudeGatewayModel('qwen', { ACCEPTANCE_CLAUDE_MODEL:'qwen3.7-plus' }), 'qwen3.7-plus');
+  assert.throws(() => requestedClaudeGatewayModel('qwen', {}), /Qwen Environment/);
+  assert.throws(() => requestedClaudeGatewayModel('qwen', {ANTHROPIC_MODEL:'claude-sonnet-5'}), /Qwen Environment/);
+  assert.equal(requestedClaudeGatewayModel('deepseek', {}), 'claude-sonnet-5');
+  console.log('acceptance-agent self-test: 14 cases passed');
 }
 
 async function main() {
