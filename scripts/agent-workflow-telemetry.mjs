@@ -116,6 +116,10 @@ export function buildAgentWorkflowTelemetry(input) {
     task,
     agent: {
       provider: String(input.agent?.provider ?? 'unknown'),
+      id: input.agent?.id ?? null,
+      role: input.agent?.role ?? null,
+      harness_sha256: input.agent?.harness_sha256 ?? null,
+      checkpoint_id: input.agent?.checkpoint_id ?? null,
       model: input.agent?.model ?? null,
       run_id: input.agent?.run_id ?? null,
       request_id: input.agent?.request_id ?? null,
@@ -166,6 +170,12 @@ export function validateAgentWorkflowTelemetry(record) {
   }
   stableId(record?.task?.id, 'task.id');
   stableId(record?.task?.type, 'task.type');
+  // Optional correlation fields preserve compatibility with historical v1 run records.
+  if (record.agent.id != null && !/^[a-z][a-z0-9-]*$/.test(record.agent.id)) fail('invalid agent id');
+  if (record.agent.role != null && !/^[a-z][a-z0-9-]*$/.test(record.agent.role)) fail('invalid agent role');
+  if (record.agent.harness_sha256 != null && !/^[a-f0-9]{64}$/.test(record.agent.harness_sha256)) {
+    fail('invalid effective harness SHA-256');
+  }
   if (record.agent.prompt != null) {
     const prompt = record.agent.prompt;
     if (!/^[a-z][a-z0-9-]*$/.test(prompt.id) || !/^v[1-9][0-9]*$/.test(prompt.version) ||
@@ -275,6 +285,10 @@ function aggregateWindow(records) {
       total: records.length,
       by_workflow: countBy(records, (record) => record.identity.workflow_id),
       by_provider: countBy(records, (record) => record.agent.provider),
+      by_role: countBy(records, (record) => record.agent.role),
+      by_agent_id: countBy(records, (record) => record.agent.id),
+      by_issue: countBy(records, (record) => record.task?.issue && String(record.task.issue)),
+      by_harness: countBy(records, (record) => record.agent.harness_sha256),
       by_result: countBy(records, (record) => record.result?.status),
     },
     turns: numericStats(records, (record) => record.execution.turns),
@@ -430,6 +444,18 @@ function selfTest() {
   assert.deepEqual(fixture.execution.tools.by_name, { grep: 1, read: 2 });
   assert.equal(fixture.tokens.total, 35);
   assert.equal(fixture.agent.prompt.sha256, 'a'.repeat(64));
+  const correlated = buildAgentWorkflowTelemetry({
+    workflow_id: 'agent-develop', github_run_id: 321, github_run_attempt: 1,
+    task: { id: 'issue-1664', type: 'develop', issue: 1664 },
+    agent: { provider: 'cursor', id: 'dev-cursor-01', role: 'developer', harness_sha256: 'a'.repeat(64) },
+    execution: { turns: 2, tools: summarizeToolCalls(['read']) },
+  });
+  const correlatedAggregate = aggregateAgentWorkflowTelemetry([correlated], new Date());
+  assert.equal(correlatedAggregate.windows['7d'].runs.by_role.developer, 1);
+  assert.equal(correlatedAggregate.windows['7d'].runs.by_agent_id['dev-cursor-01'], 1);
+  assert.equal(correlatedAggregate.windows['7d'].runs.by_issue['1664'], 1);
+  assert.throws(() => validateAgentWorkflowTelemetry({ ...correlated, agent: {
+    ...correlated.agent, harness_sha256: 'invalid' } }), /harness SHA/);
   assert.throws(() => validateAgentWorkflowTelemetry({ ...fixture, agent: { ...fixture.agent, prompt: { ...fixture.agent.prompt, sha256: 'broken' } } }), /invalid agent prompt/);
   const metrics = aggregateAgentWorkflowTelemetry([fixture], new Date('2026-10-08T00:00:00Z'));
   assert.equal(metrics.windows['7d'].runs.total, 1);
