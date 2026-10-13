@@ -26,6 +26,8 @@ try {
   put('thirdparty/superpowers/references/usage.md','revision 19\n');
   put('thirdparty/shadcn/registry.json','{"components":["button"]}\n');
   put('thirdparty/sample-plugin/.claude-plugin/plugin.json','{"name":"sample-plugin"}\n');
+  put('thirdparty/github-readonly/server.json',JSON.stringify({type:'stdio',command:'server.sh',args:[],provides:['github.issue.read','github.pr.read']})+'\n');
+  put('thirdparty/github-readonly/server.sh','#!/usr/bin/env bash\nexit 0\n');
   const ext=[
     {id:'superpowers',kind:'skill',revision:'c7d152b4a','path':'thirdparty/superpowers'},
     {id:'shadcn',kind:'registry',revision:'v3.0.1','path':'thirdparty/shadcn'},
@@ -57,7 +59,7 @@ try {
   assert.ok(!cursor.agent_options.tools.includes('bash'));
   assert.ok(!cursor.agent_options.local.settingSources.includes('user'));
   assert.equal(cursor.agent_options.local.customTools.read_target_issue,hostTools['github.issue.read']);
-  assert.throws(()=>cursorNativeOptions(prep,{hostTools,mcpServers:{unlisted:{command:'bash'}}}),/undeclared/);
+  assert.equal(Object.hasOwn(cursor.agent_options,'mcpServers'),false);
   const observed={tools:[...new Set(prep.plan.native_tools.map(x=>x.native_name))],
     skills:prep.required_skills,mcp:[],plugins:[]};
   const effective=auditNativeLoad(prep,observed,'sdk-1.2');
@@ -93,6 +95,28 @@ try {
   assert.throws(()=>cursorNativeOptions({...stage,identity:{...stage.identity,provider:'cursor'}}),/plugin injection/);
   const cursorWithoutPlugin=prepareNativeHarness(reg,{...request,workspace:fresh('cursor-clean')});
   assert.equal(cursorNativeOptions(cursorWithoutPlugin,{hostTools}).provider,'cursor');
+
+  const pinnedMcp={id:'github-readonly',kind:'mcp',revision:'b1d2e3f4a5',
+    path:'thirdparty/github-readonly',
+    sha256:hashDependencyTree(checkout,'thirdparty/github-readonly')};
+  const withMcp=structuredClone(claudeReg);
+  withMcp.external_dependencies.push(pinnedMcp);
+  withMcp.roles.developer.capabilities.mcp=['github-readonly'];
+  const mcpClaude=prepareNativeHarness(withMcp,{...request,agent_id:'dev-claude-01',
+    environment:'agent-dev-claude-01',workspace:fresh('mcp-claude')});
+  const mcpArgs=claudeNativeOptions(mcpClaude);
+  assert.ok(mcpArgs.args.includes('--mcp-config'));
+  const configPath=mcpArgs.args[mcpArgs.args.indexOf('--mcp-config')+1];
+  const servers=JSON.parse(fs.readFileSync(configPath,'utf8')).mcpServers;
+  assert.deepEqual(Object.keys(servers),['github-readonly']);
+  assert.ok(servers['github-readonly'].command.endsWith('github-readonly/server.sh'));
+  const mcpCursor=prepareNativeHarness(withMcp,{...request,workspace:fresh('mcp-cursor')});
+  const mcpCursorOptions=cursorNativeOptions(mcpCursor,{hostTools});
+  assert.deepEqual(Object.keys(mcpCursorOptions.agent_options.mcpServers),['github-readonly']);
+  assert.ok(mcpCursorOptions.agent_options.tools.includes('mcp'));
+  const rogue=path.join(mcpClaude.workspace,'.harness/mcp/github-readonly/server.json');
+  fs.writeFileSync(rogue,'{"type":"stdio","command":"/bin/sh"}');
+  assert.throws(()=>claudeNativeOptions(mcpClaude),/staged asset was modified/);
 
   put('thirdparty/superpowers/references/usage.md','modified!\n');
   assert.throws(()=>prepareNativeHarness(reg,{...request,workspace:fresh('tampered')}),/sha256 mismatch/);
