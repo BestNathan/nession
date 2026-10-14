@@ -41,6 +41,15 @@ export function verifiedCommitPullAssociation(pulls,prNumber,expectedHeadSha,all
       pr.head?.repo?.full_name===REPO && pr.base?.repo?.full_name===REPO);
 }
 
+// Old, deliberately unmerged test PRs may predate durable Issue PATCH
+// receipts. Exclude those unproven runs; NEVER weaken validation for a present
+// receipt or synthesize applied from a Playwright execution artifact.
+export function hasExactAppliedProjectionReceipt(receipts,run) {
+  return Array.isArray(receipts)&&receipts.some(r=>
+    r.outcome==='applied'&&r.run_id===run?.id&&
+    r.run_attempt===run?.run_attempt&&r.target_sha===run?.head_sha);
+}
+
 export function verifyHistoricalE2ERun(run,record,prNumber,commitPulls=[],prHeadSha=null,allowTestOnly=false,verifiedPrCommits=[],verifiedReceipts=[]) {
   // GitHub may clear both associations after a test-only PR closes unmerged.
   // Source membership then requires GitHub's own PR Commit list AND a
@@ -334,6 +343,10 @@ export async function collectHistoricalE2EForPull(repo,pull,get,readPlan=readHis
       const plan=await readPlan(repo,artifact);
       const selection=verifyHistoricalPlan(run,record,plan,pull.number);
       const projections=await loadReceipts(repo,run,record,plan,get);
+      const runLinked=run.pull_requests?.some(p=>p.number===pull.number);
+      if(testDrill&&!runLinked&&!commitLinked&&
+         !hasExactAppliedProjectionReceipt(projections,run))
+        continue; // Legacy unreceipted drill, not a valid Issue PATCH proof.
       verified.push({...verifyHistoricalE2ERun(run,record,pull.number,
         commitPulls,pull.head.sha,testDrill,selected,projections),
         artifact_id:artifactId,created_at:run.created_at,selection,projections});
@@ -613,6 +626,14 @@ async function selfTest() {
     ...drillPr,title:'regular feature PR'}]),[]);
   assert.equal(verifiedCommitPullAssociation([drillPr],1761,b,true),true);
   assert.equal(verifiedCommitPullAssociation([drillPr],1761,b,false),false);
+  const olderUnreceipted={id:99,run_attempt:1,head_sha:a};
+  assert.equal(hasExactAppliedProjectionReceipt([],olderUnreceipted),false);
+  assert.equal(hasExactAppliedProjectionReceipt([{outcome:'recovered',
+    run_id:99,run_attempt:1,target_sha:a}],olderUnreceipted),false);
+  assert.equal(hasExactAppliedProjectionReceipt([{outcome:'applied',
+    run_id:99,run_attempt:1,target_sha:b}],olderUnreceipted),false);
+  assert.equal(hasExactAppliedProjectionReceipt([{outcome:'applied',
+    run_id:99,run_attempt:1,target_sha:a}],olderUnreceipted),true);
   const noAssociations={...current,pull_requests:[]};
   const applied=[{outcome:'applied',run_id:20,run_attempt:1,target_sha:b}];
   assert.equal(verifyHistoricalE2ERun(noAssociations,rec(current,'Pass'),1718,
