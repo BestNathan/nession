@@ -100,6 +100,16 @@ function workflows(root=ROOT){
 }
 function selfTest(){
   const manifest=data(),sources=workflows(),success=checkInventory(manifest,sources);
+  const trusted={GITHUB_REPOSITORY:REPO,GITHUB_REF:'refs/heads/main',
+    GITHUB_SHA:'a'.repeat(40)};
+  for(const event of ['push','schedule','workflow_dispatch'])
+    assert.equal(assertTrustedLiveContext({...trusted,GITHUB_EVENT_NAME:event}),true);
+  for(const invalid of [
+    {...trusted,GITHUB_EVENT_NAME:'pull_request_target'},
+    {...trusted,GITHUB_EVENT_NAME:'push',GITHUB_REF:'refs/heads/feature'},
+    {...trusted,GITHUB_EVENT_NAME:'push',GITHUB_REPOSITORY:'attacker/fork'},
+    {...trusted,GITHUB_EVENT_NAME:'push',GITHUB_SHA:'main'},
+  ]) assert.throws(()=>assertTrustedLiveContext(invalid),/trusted main/);
   assert.equal(success.writers,6);
   const clone=x=>JSON.parse(JSON.stringify(x));
   const unmatched=clone(manifest);
@@ -134,12 +144,16 @@ function gh(endpoint){
   }catch(e){return {unavailable:true,error_class:'permission-or-api-error',
     status:e.status??null};}
 }
-function live(out){
-  if(process.env.GITHUB_REPOSITORY!==REPO||
-     process.env.GITHUB_REF!=='refs/heads/main'||
-     !['schedule','workflow_dispatch'].includes(process.env.GITHUB_EVENT_NAME)||
-     !HEX40.test(process.env.GITHUB_SHA??''))
+export function assertTrustedLiveContext(env){
+  if(env.GITHUB_REPOSITORY!==REPO||
+     env.GITHUB_REF!=='refs/heads/main'||
+     !['push','schedule','workflow_dispatch'].includes(env.GITHUB_EVENT_NAME)||
+     !HEX40.test(env.GITHUB_SHA??''))
     fail('live protection audit must run on trusted main source SHA');
+  return true;
+}
+function live(out){
+  assertTrustedLiveContext(process.env);
   const inventory=data();
   checkInventory(inventory,workflows());
   const rulesets=gh('rulesets?per_page=100');
