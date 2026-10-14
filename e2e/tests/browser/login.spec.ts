@@ -24,5 +24,8 @@ test.describe('Login', () => {
     // Should skip the login page and go directly to the shell
     await waitForShell(page);
     await expect(page.locator('[data-testid="shell"]')).toBeVisible();
+    // Temporary #1702 evidence drill: this branch MUST NOT be merged.
+    // Force one actually executed Playwright ID to Fail after real login.
+    expect('issue-1702-failure-projection-drill').toBe('not-equal');
   });
 });
