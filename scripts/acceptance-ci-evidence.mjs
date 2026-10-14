@@ -296,7 +296,7 @@ async function collectCommand(workspace, outFile) {
   const linkedIssueE2E = [];
   let implementationPulls = [];
   const issueNumber = String(process.env.ISSUE_NUMBER || '').trim();
-  if (/^[1-9][0-9]*$/.test(issueNumber) && selectedPulls.length) {
+  if (/^[1-9][0-9]*$/.test(issueNumber)) {
     const currentIssue = await githubGet('/repos/' + repo + '/issues/' + issueNumber);
     const section = String(currentIssue.body ?? '').match(/^## E2E Verification\s*$/m);
     if (section) {
