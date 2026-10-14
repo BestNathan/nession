@@ -133,7 +133,43 @@ async function select(store){
   });
   console.log(JSON.stringify(result??{run_id:null}));
 }
+// The scheduled replay is allowed only through trusted main-selected workflow
+// code; an arbitrary-ref workflow_dispatch cannot obtain the metrics writer.
+export function validateRecoveryRouting(workflow){
+  const trigger=workflow.split(/^permissions:/m)[0];
+  const job=workflow.split(/^jobs:/m)[1]??'';
+  if(!/^  schedule:\s*\n    - cron: '[^'\n]+'\s*$/m.test(trigger) ||
+     /^  workflow_dispatch:/m.test(trigger))
+    fail('Metrics replay must be scheduled-only, never arbitrary-ref dispatch');
+  if(!job.includes("github.event_name == 'schedule' && github.ref == 'refs/heads/main'")||
+     !job.includes("github.repository == 'BestNathan/nession'"))
+    fail('missing trusted main schedule guard');
+  for(const source of SOURCES){
+    if(!trigger.includes('      - '+source.name)||
+       !job.includes("github.event.workflow_run.name == '"+source.name+"'"))
+      fail('unclassified or unregistered Agent source: '+source.name);
+  }
+  if(!workflow.includes('node scripts/agent-telemetry-reconcile.mjs select')||
+     !workflow.includes('run-store-integrity.mjs"'))
+    fail('trusted reconciliation or immutable Store Gate omitted');
+  if(!workflow.includes("github.event.workflow_run.event == 'push'") ||
+     !workflow.includes("github.event.workflow_run.event == 'pull_request_target'"))
+    fail('source event routing omitted');
+  return true;
+}
 function selfTest(){
+  const workflow=fs.readFileSync('.github/workflows/metrics-agent-telemetry.yml','utf8');
+  assert.equal(validateRecoveryRouting(workflow),true);
+  assert.throws(()=>validateRecoveryRouting(
+    workflow.replace("  schedule:\n", "  workflow_dispatch:\n  schedule:\n")
+  ),/scheduled-only/);
+  assert.throws(()=>validateRecoveryRouting(
+    workflow.replace("github.event_name == 'schedule' && github.ref == 'refs/heads/main'",
+      "github.event_name == 'schedule'")
+  ),/trusted main/);
+  assert.throws(()=>validateRecoveryRouting(
+    workflow.replace("node scripts/agent-telemetry-reconcile.mjs select", "echo skip")
+  ),/Gate omitted/);
   const source=SOURCES[0],sha='a'.repeat(40);
   const run={id:321,run_attempt:1,head_sha:sha,
     repository:{full_name:REPO},head_repository:{full_name:REPO},
