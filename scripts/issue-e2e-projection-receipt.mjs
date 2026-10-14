@@ -186,7 +186,7 @@ function selfTest(){
     results:[{id:'login',result:'Fail',discovered:1,passed:0,failed:1,
       skipped:0,flaky:0,assertions:1}]};
   const plan={mode:'selected',pr_number:10,target_sha:sha,
-    plan_digest:record.plan_digest,issues:[{issue,declaration_digest:contract.digest}],
+    plan_digest:record.plan_digest,issues:[{issue,declaration_digest:contract.digest,new_ids:[],regression_ids:['login']}],
     selected:[{id:'login',owners:[{issue}]}]};
   const before={number:issue,body:projected.body.replace('Fail','Pending')};
   const after={number:issue,body:projected.body,updated_at:'2026-10-14T00:00:02Z'};
