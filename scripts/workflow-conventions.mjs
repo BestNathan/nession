@@ -28,6 +28,8 @@ export const CATALOG = [
   ['e2e-scenario-ingest', 'e2e-run-ingest.yml', 'E2E Run Ingest', 'e2e-scenario-ingest.yml', 'E2E / Scenario Ingest', 'e2e'],
   ['e2e-test-ingest', 'e2e-test-run-ingest.yml', 'E2E Test Run Ingest', 'e2e-test-ingest.yml', 'E2E / Test Ingest', 'e2e'],
   ['ci-quality', 'quality.yml', 'Quality Gate', 'ci-quality.yml', 'CI / Quality Gate', 'ci'],
+  ['ci-pages', 'ci-pages.yml', 'CI / Pages', 'ci-pages.yml', 'CI / Pages', 'ci'],
+  ['deploy-pages', 'deploy-pages.yml', 'Deploy / Public Pages', 'deploy-pages.yml', 'Deploy / Public Pages', 'delivery'],
   ['metrics-agent-telemetry', 'metrics-ingest.yml', 'Metrics Ingest', 'metrics-agent-telemetry.yml', 'Metrics / Agent Telemetry Ingest', 'metrics'],
   ['metrics-repository', 'repo-metrics.yml', 'Repository Metrics', 'metrics-repository.yml', 'Metrics / Repository Health', 'metrics'],
   ['release-staging', 'staging.yml', 'Staging', 'release-staging.yml', 'Release / Staging Artifacts', 'delivery'],
