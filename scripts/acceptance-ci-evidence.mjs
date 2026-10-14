@@ -14,6 +14,7 @@ const IMPLEMENTATION_OWNER_PATHS = Object.freeze([
   '.github/workflows/e2e-test-ingest.yml',
   'scripts/issue-e2e-projection-receipt.mjs',
 ]);
+const COLLECTOR_OWNER_PATHS = Object.freeze(['scripts/acceptance-e2e-lineage.mjs']);
 const REQUIRED_PR_CHECKS = Object.freeze([
   'CI / Quality Gate', 'E2E / Tests', 'Acceptance / Case Smoke',
   'Acceptance / Orchestrator',
@@ -169,6 +170,17 @@ export function issueRequestsImplementationGates(issue) {
     success.split('\n').some(line=>/^- \[[x ]\] SC-\d+\b/i.test(line) &&
       /\bimplementation PR\b/i.test(line));
 }
+// A trusted collector change can only be credited after its OWN merged-main
+// workflow completed. The current Acceptance workflow is necessarily running
+// while evaluating itself and is never substituted for this older source.
+export function issueRequestsCollectorMergeProof(issue) {
+  const b=String(issue?.body??'');
+  const success=b.match(/###? Success Criteria\s*\n([\s\S]*?)(?=\n## Acceptance Plan|\n## Acceptance Report|$)/)?.[1]??'';
+  return success.split('\n').some(line=>
+    /^- \[[x ]\] SC-\d+\b/i.test(line) &&
+    /\bPR is merged to main\b/i.test(line) &&
+    /\bpost-merge Acceptance\b/i.test(line));
+}
 export function selectCrossReferencedImplementationPulls(issueNumber,events) {
   if(!Number.isSafeInteger(issueNumber)||issueNumber<=0||!Array.isArray(events))
     throw Error('invalid implementation discovery input');
@@ -184,7 +196,7 @@ export function selectCrossReferencedImplementationPulls(issueNumber,events) {
     throw Error('excessive implementation PR discovery scope');
   return [...found].sort((a,b)=>a-b);
 }
-export function eligibleImplementationPull(pull,files,issueNumber) {
+export function eligibleImplementationPull(pull,files,issueNumber,requiredPaths=IMPLEMENTATION_OWNER_PATHS) {
   const repo='BestNathan/nession';
   if(!Number.isSafeInteger(issueNumber)||issueNumber<=0||
      pull?.state!=='closed'||!pull.merged_at||
@@ -201,7 +213,7 @@ export function eligibleImplementationPull(pull,files,issueNumber) {
   }
   const paths=new Set(files.map(f=>f?.filename));
   return refs.has(issueNumber) &&
-    IMPLEMENTATION_OWNER_PATHS.every(p=>paths.has(p));
+    requiredPaths.every(p=>paths.has(p));
 }
 export function exactImplementationGateBundle(runs,headSha,jobResults=[]) {
   if(!/^[a-f0-9]{40}$/.test(headSha)||!Array.isArray(runs))
@@ -228,8 +240,11 @@ export function exactImplementationGateBundle(runs,headSha,jobResults=[]) {
   return {checks,deterministic,all_passed:allPassed};
 }
 async function collectImplementationGateEvidence(repo,issueNumber,currentIssue,targetSha) {
-  if(repo!=='BestNathan/nession'||!issueRequestsImplementationGates(currentIssue))
-    return [];
+  if(repo!=='BestNathan/nession')return [];
+  const collectorDelivery=issueRequestsCollectorMergeProof(currentIssue);
+  const ownerPaths=issueRequestsImplementationGates(currentIssue)
+    ? IMPLEMENTATION_OWNER_PATHS : collectorDelivery ? COLLECTOR_OWNER_PATHS : null;
+  if(!ownerPaths)return [];
   const events=[];
   for(let page=1;page<=3;page++){
     const pageEvents=await githubGet('/repos/'+repo+'/issues/'+issueNumber+
@@ -247,7 +262,7 @@ async function collectImplementationGateEvidence(repo,issueNumber,currentIssue,t
        pr.base.repo?.full_name!==repo||pr.head?.repo?.full_name!==repo)
       continue;
     const files=await githubGet('/repos/'+repo+'/pulls/'+number+'/files?per_page=100');
-    if(!eligibleImplementationPull(pr,files,issueNumber))continue;
+    if(!eligibleImplementationPull(pr,files,issueNumber,ownerPaths))continue;
     // GitHub's compare endpoint independently proves that the merged PR's
     // exact merge commit is an ancestor of the current Acceptance target.
     const comparison=await githubGet('/repos/'+repo+'/compare/'+
@@ -266,10 +281,26 @@ async function collectImplementationGateEvidence(repo,issueNumber,currentIssue,t
       jobs=body.jobs??[];
     }
     const proof=exactImplementationGateBundle(runs,pr.head.sha,jobs);
+    let mergeAcceptance=null;
+    if(collectorDelivery){
+      const afterMerge=await workflowRunsForSha(repo,pr.merge_commit_sha);
+      const accepted=afterMerge.filter(run=>
+        run.name==='Acceptance / Orchestrator'&&
+        run.path==='.github/workflows/acceptance-orchestrator.yml'&&
+        run.head_sha===pr.merge_commit_sha&&run.event==='push'&&
+        run.head_branch==='main'&&run.repository?.full_name===repo&&
+        run.status==='completed'&&run.conclusion==='success')
+        .sort((a,b)=>b.id-a.id)[0];
+      if(accepted)mergeAcceptance={
+        run_id:accepted.id,run_attempt:accepted.run_attempt,
+        head_sha:accepted.head_sha,conclusion:accepted.conclusion,
+        event:accepted.event,url:accepted.html_url,
+      };
+    }
     out.push({pr_number:number,pr_head_sha:pr.head.sha,
       merge_sha:pr.merge_commit_sha,merged_at:pr.merged_at,
-      source:'GitHub Issue cross-reference + main merged PR owned files + exact merge ancestry',
-      owner_files:IMPLEMENTATION_OWNER_PATHS,
+      source:'GitHub Issue cross-reference + main merged PR owner files + exact SHA/merge ancestry + completed workflow',
+      owner_files:ownerPaths,post_merge_acceptance:mergeAcceptance,
       ...proof});
   }
   return out;
@@ -373,6 +404,9 @@ function selfTest() {
   const implIssue={number:1759,body:'## Success Criteria\n- [ ] SC-05 Implementation PR Quality, E2E, Case and Acceptance gates pass.\n## E2E Verification\n### New\n- none'};
   assert.equal(issueRequestsImplementationGates(implIssue),true);
   assert.equal(issueRequestsImplementationGates({...implIssue,body:implIssue.body.replace('Implementation PR','test-only PR')}),false);
+  const collectorIssue={body:'## Success Criteria\n- [ ] SC-04 The PR is merged to main only after gates; a completed post-merge Acceptance run verifies that source.\n## Acceptance Report'};
+  assert.equal(issueRequestsCollectorMergeProof(collectorIssue),true);
+  assert.equal(issueRequestsCollectorMergeProof({body:collectorIssue.body.replace('PR is merged to main','PR may be queued')}),false);
   const repo='BestNathan/nession',sourceUrl='https://api.github.com/repos/'+repo+'/pulls/1760';
   const timeline=[{event:'cross-referenced',source:{issue:{number:1760,
     pull_request:{url:sourceUrl}}}}];
@@ -389,6 +423,9 @@ function selfTest() {
   assert.equal(eligibleImplementationPull({...merged,body:'Refs #9999'},paths,1759),false);
   assert.equal(eligibleImplementationPull({...merged,head:{...merged.head,repo:{full_name:'foreign/repo'}}},paths,1759),false);
   assert.equal(eligibleImplementationPull(merged,paths.slice(0,1),1759),false);
+  assert.equal(eligibleImplementationPull(merged,[{filename:'scripts/acceptance-e2e-lineage.mjs'}],
+    1759,COLLECTOR_OWNER_PATHS),true);
+  assert.equal(eligibleImplementationPull(merged,[],1759,COLLECTOR_OWNER_PATHS),false);
   const goodRuns=REQUIRED_PR_CHECKS.map((name,i)=>({
     name,id:i+101,run_attempt:1,head_sha:'a'.repeat(40),
     status:'completed',conclusion:'success',
