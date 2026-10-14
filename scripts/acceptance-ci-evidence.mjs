@@ -65,7 +65,7 @@ function compactRuns(runs, expectedSha) {
     .slice(0, MAX_RUNS_PER_SHA);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [] }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -93,6 +93,7 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     pull_requests: associated,
     source_ancestry: sourceAncestry,
     target_merge_commit: targetMergeProof,
+    declared_merge_commits: declaredMergeCommits,
     linked_issue_e2e_evidence: linkedIssueE2E,
     implementation_pull_requests: implementationPulls,
   };
@@ -318,6 +319,13 @@ async function collectCommand(workspace, outFile) {
   const targetMergeProof = sourceAncestry.length && process.env.ACCEPTANCE_STAGE === 'post-merge'
     ? checkGitMergeCommit(workspace, sha, sourceAncestry.map(x=>x.ancestor_sha))
     : null;
+  // Post-merge validation may concern an EARLIER merge that is now an
+  // ancestor of main. Validate each bounded, already ancestry-proven Issue
+  // SHA directly from Git, not just the current HEAD's own parents.
+  const declaredMergeCommits = targetMergeProof===null ? [] : sourceAncestry
+    .filter(x=>x.is_ancestor && x.ancestor_sha!==sha)
+    .map(x=>checkGitMergeCommit(workspace,x.ancestor_sha,
+      sourceAncestry.map(entry=>entry.ancestor_sha)));
   // Acceptance for E2E-specific Issues must also observe previous PR commits:
   // the current target SHA by itself cannot prove a fail-then-pass scenario.
   // Read the trusted orphan Run Record, joined to GitHub completed workflow
@@ -368,7 +376,7 @@ async function collectCommand(workspace, outFile) {
         repo,Number(issueNumber),currentIssue,sha);
   }
   const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls,
-    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof });
+    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits });
   fs.writeFileSync(outFile, JSON.stringify(evidence, null, 2) + '\n');
   console.log(
     'collected acceptance CI evidence for ' + sha +
@@ -492,7 +500,8 @@ function selfTest() {
   assert.equal(mergeProof.is_ordinary_merge,true);
   assert.equal(mergeProof.second_parent_matches_declared_source,true);
   assert.equal(normalizeCiEvidence({targetSha:head,
-    targetMergeProof:mergeProof}).target_merge_commit.second_parent_sha,parentB);
+    targetMergeProof:mergeProof,declaredMergeCommits:[mergeProof]})
+    .declared_merge_commits[0].second_parent_sha,parentB);
   assert.equal(checkGitMergeCommit('/tmp',head,[left],mergeGit)
     .second_parent_matches_declared_source,false);
   assert.equal(checkGitMergeCommit('/tmp',head,[parentB],
