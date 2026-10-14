@@ -176,6 +176,11 @@ jobs:
 
           git add metrics.json repo-metrics-light.svg repo-metrics-dark.svg             agent-metrics.json agent-metrics-light.svg agent-metrics-dark.svg
 
+          # The shared Run Store policy allows only declared derived Metrics
+          # projections to change; never publish raw/history deletion or
+          # unexpected paths from a privileged scheduled writer.
+          node "${GITHUB_WORKSPACE}/scripts/run-store-integrity.mjs" staged metrics "${GITHUB_WORKSPACE}/metrics-store"
+
           if git diff --cached --quiet; then
             echo "Metrics projections are unchanged."
             exit 0
