@@ -471,6 +471,42 @@ function selfTest() {
     [{name:'pre-merge-gate',conclusion:'success'}]).all_passed,false);
   assert.equal(exactImplementationGateBundle(goodRuns.map(x=>({...x,head_sha:'c'.repeat(40)})),
     'a'.repeat(40),gateJobs).all_passed,false);
+  const implIssue={number:1759,body:'## Success Criteria\n- [ ] SC-05 Implementation PR Quality, E2E, Case and Acceptance gates pass.\n## E2E Verification\n### New\n- none'};
+  assert.equal(issueRequestsImplementationGates(implIssue),true);
+  assert.equal(issueRequestsImplementationGates({...implIssue,body:implIssue.body.replace('Implementation PR','test-only PR')}),false);
+  const repo='BestNathan/nession',sourceUrl='https://api.github.com/repos/'+repo+'/pulls/1760';
+  const timeline=[{event:'cross-referenced',source:{issue:{number:1760,
+    pull_request:{url:sourceUrl}}}}];
+  assert.deepEqual(selectCrossReferencedImplementationPulls(1759,timeline),[1760]);
+  assert.deepEqual(selectCrossReferencedImplementationPulls(1759,[{
+    ...timeline[0],source:{issue:{number:1760,pull_request:{url:'https://api.github.com/repos/foreign/repo/pulls/1760'}}}
+  }]),[]);
+  const merged={number:1760,state:'closed',merged_at:'2026-10-14T09:00:00Z',
+    head:{sha:'a'.repeat(40),repo:{full_name:repo}},base:{ref:'main',repo:{full_name:repo}},
+    merge_commit_sha:'b'.repeat(40),body:'Refs #1759'};
+  const paths=IMPLEMENTATION_OWNER_PATHS.map(filename=>({filename}));
+  assert.equal(eligibleImplementationPull(merged,paths,1759),true);
+  assert.equal(eligibleImplementationPull({...merged,base:{ref:'staging',repo:{full_name:repo}}},paths,1759),false);
+  assert.equal(eligibleImplementationPull({...merged,body:'Refs #9999'},paths,1759),false);
+  assert.equal(eligibleImplementationPull({...merged,head:{...merged.head,repo:{full_name:'foreign/repo'}}},paths,1759),false);
+  assert.equal(eligibleImplementationPull(merged,paths.slice(0,1),1759),false);
+  const goodRuns=REQUIRED_PR_CHECKS.map((name,i)=>({
+    name,id:i+101,run_attempt:1,head_sha:'a'.repeat(40),
+    status:'completed',conclusion:'success',
+    event:name==='Acceptance / Orchestrator'?'pull_request_target':'pull_request',
+    html_url:'https://github.com/BestNathan/nession/actions/runs/'+(101+i),
+  }));
+  const gateJobs=['pre-merge-gate','acceptance-pr-gate'].map(name=>({name,conclusion:'success'}));
+  assert.equal(exactImplementationGateBundle(goodRuns,'a'.repeat(40),gateJobs).all_passed,true);
+  assert.equal(exactImplementationGateBundle(goodRuns.map(x=>
+    x.name==='Acceptance / Orchestrator'?{...x,event:'pull_request'}:x),
+    'a'.repeat(40),gateJobs).all_passed,false);
+  assert.equal(exactImplementationGateBundle(goodRuns.map(x=>x.name==='E2E / Tests'?{...x,conclusion:'failure'}:x),
+    'a'.repeat(40),gateJobs).all_passed,false);
+  assert.equal(exactImplementationGateBundle(goodRuns,'a'.repeat(40),
+    [{name:'pre-merge-gate',conclusion:'success'}]).all_passed,false);
+  assert.equal(exactImplementationGateBundle(goodRuns.map(x=>({...x,head_sha:'c'.repeat(40)})),
+    'a'.repeat(40),gateJobs).all_passed,false);
 
   assert.equal(evidence.target_sha, 'merge123');
   assert.deepEqual(evidence.direct_runs.map((run) => run.id), [2]);

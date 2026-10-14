@@ -35,6 +35,7 @@ export const CATALOG = [
   ['deploy-manual', 'deploy.yml', 'Deploy', 'deploy-manual.yml', 'Deploy / Manual', 'delivery'],
   ['task-runner', 'task-runner.yml', 'Ephemeral Task Runner', 'task-runner.yml', 'Task / Ephemeral Runner', 'task'],
   ['task-result-ingest', 'task-result-ingest.yml', 'Task Result Ingest', 'task-result-ingest.yml', 'Task / Result Ingest', 'task'],
+  ['store-governance-audit', 'store-governance-audit.yml', 'Store / Governance Audit', 'store-governance-audit.yml', 'Store / Governance Audit', 'store'],
 ];
 
 // Resolve the actual checked-in path from the single canonical catalog.
@@ -58,6 +59,7 @@ const DOMAIN_PREFIX = {
   e2e: 'E2E /',
   ci: 'CI /',
   metrics: 'Metrics /',
+  store: 'Store /',
   task: 'Task /',
 };
 const stripComment = (line) => line.replace(/\s+#.*$/, '');
