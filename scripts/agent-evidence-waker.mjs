@@ -77,9 +77,9 @@ const WAKE_OWNERS=[
 // a subsequent authenticated Metrics ingest can wake merged Agent SC checks.
 export function validateWakeProducerTrigger(workflow){
   const trigger=workflow.split(/^permissions:/m)[0];
-  const mainPush=/^  push:\s*\n    branches: \[main\]\s*\n    paths:\s*\n((?:      - [^\n]+\n)+)/m.exec(trigger);
+  const mainPush=/^  push:\s*\n    branches: \[main\]\s*\n    paths:\s*\n((?:      (?:- [^\n]+|#[^\n]*)\n)+)/m.exec(trigger);
   if(!mainPush)fail('Provider Smoke must have a main-only push paths selector');
-  const selected=new Set(mainPush[1].trim().split('\n').map(x=>x.trim().replace(/^-[ ]*/,'')));
+  const selected=new Set(mainPush[1].trim().split('\n').map(x=>x.trim()).filter(x=>x.startsWith('- ')).map(x=>x.slice(2)));
   for(const owner of WAKE_OWNERS){
     if(!selected.has(owner))fail('missing Provider Smoke wake source: '+owner);
   }
@@ -90,7 +90,7 @@ function selfTest(){
   assert.deepEqual(validateWakeProducerTrigger(wf),{sources:4});
   for(const owner of WAKE_OWNERS){
     assert.throws(()=>validateWakeProducerTrigger(
-      wf.replace('      - '+owner+'\\n','')
+      wf.replace('      - '+owner+'\n','')
     ),/missing Provider Smoke wake source/);
   }
   assert.throws(()=>validateWakeProducerTrigger(
