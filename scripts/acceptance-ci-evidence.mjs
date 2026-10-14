@@ -68,7 +68,7 @@ function compactRuns(runs, expectedSha) {
     .slice(0, MAX_RUNS_PER_SHA);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [] }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -97,6 +97,8 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     source_ancestry: sourceAncestry,
     target_merge_commit: targetMergeProof,
     declared_merge_commits: declaredMergeCommits,
+    historical_merge_ancestry: historicalAncestry,
+    historical_orchestrator_runs: historicalOrchestratorRuns,
     linked_issue_e2e_evidence: linkedIssueE2E,
     implementation_pull_requests: implementationPulls,
     provider_wake_evidence: providerWakeEvidence,
@@ -172,6 +174,38 @@ export function requestedAncestorsFromIssue(body) {
   const unique = [...new Set(hashes)];
   if (unique.length > 8) throw new Error('excessive ancestor proof targets in Issue criteria');
   return unique;
+}
+
+// The Issue's Success Criteria can pin prior source runs for discovery only.
+// All identity and completion claims are verified directly through GitHub.
+export function pinnedHistoricalOrchestratorIds(body) {
+  const section=String(body??'').match(/###? Success Criteria\s*\n([\s\S]*?)(?=\n## Acceptance Report|$)/)?.[1]??'';
+  const ids=[];
+  for(const line of section.split('\n')) {
+    if(!/^- \[[ x]\] SC-\d+\b/.test(line))continue;
+    for(const m of line.matchAll(/\bOrchestrator Run\s+\x60?([1-9]\d*)\x60?(?=\s|[.,;]|$)/g)){
+      const id=Number(m[1]);
+      if(!Number.isSafeInteger(id))throw Error('invalid historical Run ID');
+      ids.push(id);
+    }
+  }
+  const unique=[...new Set(ids)];
+  if(unique.length>8)throw Error('excessive historical Run scope');
+  return unique;
+}
+export function attestHistoricalOrchestrator(run,sha,runId,repo) {
+  if(!/^[a-f0-9]{40}$/.test(sha) || !Number.isSafeInteger(runId) || runId<=0 ||
+     run?.id!==runId || run?.repository?.full_name!==repo ||
+     run?.head_repository?.full_name!==repo ||
+     run?.name!=='Acceptance / Orchestrator' ||
+     run?.path!=='.github/workflows/acceptance-orchestrator.yml' ||
+     run?.event!=='push' || run?.head_branch!=='main' ||
+     run?.head_sha!==sha || run?.status!=='completed' ||
+     run?.conclusion!=='success' || !Number.isSafeInteger(run?.run_attempt) ||
+     run.run_attempt<=0)
+    throw Error('invalid historical completed Orchestrator provenance');
+  return {...compactRun(run),run_attempt:run.run_attempt,
+    provenance:'GitHub exact-run completed same-repo main push Orchestrator'};
 }
 
 // Read-only, fail-closed Git object proof. A detached checkout is valid;
@@ -365,6 +399,29 @@ async function collectCommand(workspace, outFile) {
     .filter(x=>x.is_ancestor && x.ancestor_sha!==sha)
     .map(x=>checkGitMergeCommit(workspace,x.ancestor_sha,
       sourceAncestry.map(entry=>entry.ancestor_sha)));
+  // Prove source → historical merge directly, not by separately asserting
+  // that both objects are ancestors of the CURRENT checkout HEAD.
+  const historicalAncestry=process.env.ACCEPTANCE_STAGE==='post-merge'
+    ? declaredMergeCommits.filter(x=>x.status==='verified'&&x.is_ordinary_merge)
+      .flatMap(merge=>sourceAncestry.filter(a=>a.ancestor_sha!==merge.target_sha)
+        .map(a=>checkGitAncestor(workspace,merge.target_sha,a.ancestor_sha)))
+    : [];
+  const historicalOrchestratorRuns=[];
+  if(process.env.ACCEPTANCE_STAGE==='post-merge'&&
+     /^[1-9][0-9]*$/.test(String(process.env.ISSUE_NUMBER??''))){
+    const current=await githubGet('/repos/'+repo+'/issues/'+process.env.ISSUE_NUMBER);
+    const pinned=pinnedHistoricalOrchestratorIds(current.body);
+    const verifiedMergeShas=new Set(declaredMergeCommits
+      .filter(x=>x.status==='verified'&&x.is_ordinary_merge)
+      .map(x=>x.target_sha));
+    for(const runId of pinned){
+      const source=await githubGet('/repos/'+repo+'/actions/runs/'+runId);
+      if(!verifiedMergeShas.has(source.head_sha))
+        throw Error('historical source SHA is not a verified merged ancestor');
+      historicalOrchestratorRuns.push(attestHistoricalOrchestrator(
+        source,source.head_sha,runId,repo));
+    }
+  }
   // Acceptance for E2E-specific Issues must also observe previous PR commits:
   // the current target SHA by itself cannot prove a fail-then-pass scenario.
   // Read the trusted orphan Run Record, joined to GitHub completed workflow
@@ -415,7 +472,7 @@ async function collectCommand(workspace, outFile) {
         repo,Number(issueNumber),currentIssue,sha);
   }
   const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls,
-    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence });
+    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns });
   fs.writeFileSync(outFile, JSON.stringify(evidence, null, 2) + '\n');
   console.log(
     'collected acceptance CI evidence for ' + sha +
@@ -588,6 +645,37 @@ function selfTest() {
   assert.equal(checkGitMergeCommit('/tmp',head,[parentB],
     ()=>({status:128,stdout:''})).is_ordinary_merge,false);
   assert.throws(()=>checkGitMergeCommit('/tmp','bad',[parentB]),/40-character/);
+
+  const exact={id:38573830595,run_attempt:1,
+    repository:{full_name:'BestNathan/nession'},
+    head_repository:{full_name:'BestNathan/nession'},
+    path:'.github/workflows/acceptance-orchestrator.yml',
+    name:'Acceptance / Orchestrator',event:'push',head_branch:'main',
+    head_sha:head,status:'completed',conclusion:'success'};
+  assert.deepEqual(pinnedHistoricalOrchestratorIds(
+    '### Success Criteria\n- [ ] SC-04 earlier Acceptance / Orchestrator Run `38573830595` completed\n## Acceptance Report'
+  ),[38573830595]);
+  assert.deepEqual(pinnedHistoricalOrchestratorIds(
+    '### Success Criteria\n- [ ] SC-04 vague run 38573830595'
+  ),[]);
+  assert.equal(attestHistoricalOrchestrator(exact,head,exact.id,'BestNathan/nession').id,
+    exact.id);
+  for(const forged of [
+    {...exact,conclusion:'failure'},
+    {...exact,head_sha:left},
+    {...exact,event:'workflow_dispatch'},
+    {...exact,repository:{full_name:'foreign/repo'}},
+    {...exact,run_attempt:0},
+    {...exact,status:'in_progress'},
+  ])assert.throws(()=>attestHistoricalOrchestrator(
+    forged,head,exact.id,'BestNathan/nession'),/invalid historical/);
+  assert.deepEqual(normalizeCiEvidence({targetSha:head,historicalAncestry:[
+    checkGitAncestor('/tmp',parentA,left,()=>({status:0}))],
+    historicalOrchestratorRuns:[attestHistoricalOrchestrator(exact,head,exact.id,
+      'BestNathan/nession')],
+  }).historical_merge_ancestry.map(p=>[p.target_sha,p.ancestor_sha,p.is_ancestor]),
+    [[parentA,left,true]]);
+
 
   console.log('acceptance-ci-evidence self-test: collector, bounded criteria and positive/negative Git ancestry passed');
 }
