@@ -36,7 +36,7 @@ function verifyRepositoryMetricsTrustedSource(workflow) {
     throw new Error('repository Metrics source is not schedule-only and read-only by default');
   }
   for(const job of ['rust-health','web-health','e2e-health','publish']) {
-    const matcher=new RegExp('^  '+job+':\\n    if: [^\\n]*');
+    const matcher=new RegExp('^  '+job+':\\n    if: [^\\n]*','m');
     const line=matcher.exec(workflow)?.[0]??'';
     for(const constraint of ["github.event_name == 'schedule'",
       "github.ref == 'refs/heads/main'",
