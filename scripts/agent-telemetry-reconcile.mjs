@@ -171,7 +171,7 @@ function selfTest(){
     const absent=await chooseMissing(runs,new Map(),async()=>0);
     assert.equal(absent,null);
     assert.equal(await chooseMissing(new Map([[source.file,[{
-      ...run,head_repository:{full_name:'attacker/fork'}}]]),
+      ...run,head_repository:{full_name:'attacker/fork'}}]]]),
     new Map(),async()=>1),null);
     console.log('Agent Metrics reconciliation: cancelled pending replay, SHA/source/artifact negatives, idempotent selection passed');
   })();
