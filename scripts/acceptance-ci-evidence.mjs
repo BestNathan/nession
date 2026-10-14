@@ -25,6 +25,68 @@ export function parentEvidenceDiscovery(issue) {
   return parent;
 }
 
+
+const SHA40=/^[0-9a-f]{40}$/;
+const MAX_HISTORY_PRS=12;
+export function selectMergedIssueHistory(repo,issue,events,pulls){
+  if(!Number.isSafeInteger(issue)||issue<1||!Array.isArray(events)||!Array.isArray(pulls))
+    throw Error('invalid Issue history discovery input');
+  const linked=new Set(events.filter(e=>e?.event==='cross-referenced'&&
+    e.source?.issue?.pull_request?.url==='https://api.github.com/repos/'+repo+
+      '/pulls/'+e.source.issue.number).map(e=>e.source.issue.number));
+  return pulls.filter(p=>linked.has(p?.number)&&p.state==='closed'&&p.merged_at&&
+    p.base?.ref==='main'&&p.base?.repo?.full_name===repo&&
+    p.head?.repo?.full_name===repo&&SHA40.test(String(p.head?.sha??''))&&
+    SHA40.test(String(p.merge_commit_sha??''))&&
+    String(p.body??'').split(/\r?\n/).some(line=>
+      /^\s*Refs?\s*:?\s*/i.test(line)&&
+      new RegExp('(?:^|\\s)#'+issue+'(?!\\d)').test(line)))
+    .sort((a,b)=>a.number-b.number).slice(-MAX_HISTORY_PRS);
+}
+function completedExactGateRuns(repo,sha,items){
+  return (Array.isArray(items)?items:[]).filter(r=>r?.head_sha===sha&&
+    r.repository?.full_name===repo&&r.status==='completed'&&
+    r.conclusion==='success'&&Number.isSafeInteger(r.id)&&r.id>0&&
+    ['CI / Quality Gate','E2E / Tests','Acceptance / Case Smoke',
+      'Acceptance / Orchestrator'].includes(r.name))
+    .map(compactRun).sort((a,b)=>b.id-a.id).slice(0,16);
+}
+export async function collectMergedIssueGateHistory(repo,issue,workspace,target,
+  get=githubGet,ancestry=checkGitAncestor){
+  if(!Number.isSafeInteger(issue)||issue<1||!SHA40.test(target))
+    throw Error('invalid merged gate history target');
+  const events=[];
+  for(let page=1;page<=3;page++){
+    const block=await get('/repos/'+repo+'/issues/'+issue+
+      '/timeline?per_page=100&page='+page);
+    if(!Array.isArray(block))throw Error('untrusted Issue timeline');
+    events.push(...block);
+    if(block.length<100)break;
+  }
+  const ids=[...new Set(events.filter(e=>e.event==='cross-referenced'&&
+    Number.isSafeInteger(e.source?.issue?.number)&&
+    e.source.issue.pull_request?.url==='https://api.github.com/repos/'+repo+
+      '/pulls/'+e.source.issue.number).map(e=>e.source.issue.number))];
+  if(ids.length>40)throw Error('excessive Issue historical PR references');
+  const pulls=await Promise.all(ids.map(n=>get('/repos/'+repo+'/pulls/'+n)));
+  const out=[];
+  for(const p of selectMergedIssueHistory(repo,issue,events,pulls)){
+    const proof=ancestry(workspace,target,p.merge_commit_sha);
+    if(proof?.target_sha!==target||proof?.ancestor_sha!==p.merge_commit_sha||
+      proof?.status!=='verified'||proof?.is_ancestor!==true)continue;
+    const [head,merged]=await Promise.all([
+      get('/repos/'+repo+'/actions/runs?head_sha='+p.head.sha+'&per_page=100'),
+      get('/repos/'+repo+'/actions/runs?head_sha='+p.merge_commit_sha+'&per_page=100'),
+    ]);
+    out.push({pr_number:p.number,pr_head_sha:p.head.sha,
+      merge_sha:p.merge_commit_sha,merged_at:p.merged_at,merge_ancestry:proof,
+      source_gate_runs:completedExactGateRuns(repo,p.head.sha,head?.workflow_runs),
+      merge_push_runs:completedExactGateRuns(repo,p.merge_commit_sha,
+        merged?.workflow_runs).filter(r=>r.event==='push'&&r.head_branch==='main'),
+      provenance:'GitHub cross-reference + merged same-repo main PR + Git ancestry + exact-SHA completed Actions'});
+  }
+  return out;
+}
 function requireText(value, label) {
   const text = String(value ?? '').trim();
   if (!text) throw new Error(label + ' is required');
@@ -55,7 +117,7 @@ function compactRuns(runs, expectedSha) {
     .slice(0, MAX_RUNS_PER_SHA);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [] }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], mergedGateHistory = [] }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -83,6 +145,7 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     pull_requests: associated,
     source_ancestry: sourceAncestry,
     linked_issue_e2e_evidence: linkedIssueE2E,
+    merged_issue_pr_gate_evidence: mergedGateHistory,
   };
 }
 
@@ -205,8 +268,11 @@ async function collectCommand(workspace, outFile) {
       }
     }
   }
+  const mergedGateHistory = process.env.ACCEPTANCE_STAGE === 'post-merge' &&
+    /^[1-9][0-9]*$/.test(issueNumber)
+    ? await collectMergedIssueGateHistory(repo,Number(issueNumber),workspace,sha) : [];
   const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls,
-    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E });
+    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, mergedGateHistory });
   fs.writeFileSync(outFile, JSON.stringify(evidence, null, 2) + '\n');
   console.log(
     'collected acceptance CI evidence for ' + sha +
@@ -215,6 +281,46 @@ async function collectCommand(workspace, outFile) {
   );
 }
 
+
+async function historySelfTest(){
+  const repo='BestNathan/nession',issue=1759,head='a'.repeat(40),
+    merge='b'.repeat(40),target='c'.repeat(40);
+  const pr={number:1760,state:'closed',merged_at:'2026-10-14T09:00:00Z',
+    base:{ref:'main',repo:{full_name:repo}},
+    head:{sha:head,repo:{full_name:repo}},merge_commit_sha:merge,
+    body:'Refs #1759'};
+  const ev=[{event:'cross-referenced',source:{issue:{number:1760,
+    pull_request:{url:'https://api.github.com/repos/'+repo+'/pulls/1760'}}}}];
+  assert.deepEqual(selectMergedIssueHistory(repo,issue,ev,[pr]).map(p=>p.number),[1760]);
+  assert.deepEqual(selectMergedIssueHistory(repo,issue,ev,[{...pr,body:'Refs #17590'}]),[]);
+  assert.deepEqual(selectMergedIssueHistory(repo,issue,ev,[{...pr,merged_at:null}]),[]);
+  assert.deepEqual(selectMergedIssueHistory(repo,issue,ev,[{...pr,
+    head:{sha:head,repo:{full_name:'foreign/repo'}}}]),[]);
+  const run={id:41,name:'CI / Quality Gate',event:'pull_request',
+    head_sha:head,repository:{full_name:repo},
+    status:'completed',conclusion:'success'};
+  const post={...run,id:42,name:'Acceptance / Orchestrator',
+    event:'push',head_branch:'main',head_sha:merge};
+  const get=async path=>{
+    if(path.includes('/timeline?'))return ev;
+    if(path.endsWith('/pulls/1760'))return pr;
+    if(path.includes('head_sha='+head))return {workflow_runs:[
+      run,{...run,id:43,head_sha:target}]};
+    if(path.includes('head_sha='+merge))return {workflow_runs:[
+      post,{...post,id:44,conclusion:'failure'}]};
+    throw Error('unexpected history API '+path);
+  };
+  const ancestor=(_w,t,m)=>({target_sha:t,ancestor_sha:m,
+    status:'verified',is_ancestor:true});
+  const result=await collectMergedIssueGateHistory(repo,issue,'/tmp/repo',
+    target,get,ancestor);
+  assert.deepEqual(result.map(x=>x.pr_number),[1760]);
+  assert.deepEqual(result[0].source_gate_runs.map(x=>x.id),[41]);
+  assert.deepEqual(result[0].merge_push_runs.map(x=>x.id),[42]);
+  assert.deepEqual(await collectMergedIssueGateHistory(repo,issue,'/tmp/repo',
+    target,get,(_w,t,m)=>({target_sha:t,ancestor_sha:m,
+      status:'not-ancestor',is_ancestor:false})),[]);
+}
 function selfTest() {
   const evidence = normalizeCiEvidence({
     targetSha: 'merge123',
@@ -285,12 +391,13 @@ function selfTest() {
     checkGitAncestor('/tmp', head, left, () => ({status:0})),
   ]}).source_ancestry.map(x => x.is_ancestor), [true]);
 
+  assert.deepEqual(normalizeCiEvidence({targetSha:'a'.repeat(40),mergedGateHistory:[{pr_number:1760}]}).merged_issue_pr_gate_evidence,[{pr_number:1760}]);
   console.log('acceptance-ci-evidence self-test: collector, bounded criteria and positive/negative Git ancestry passed');
 }
 
 async function main() {
   const command = process.argv[2];
-  if (command === 'self-test') return selfTest();
+  if (command === 'self-test') { selfTest(); return historySelfTest(); }
   if (command === 'collect') {
     const workspace = process.argv[3];
     const outFile = process.argv[4];
