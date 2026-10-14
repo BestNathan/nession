@@ -73,12 +73,31 @@ jobs:
           path: metrics-store
           fetch-depth: 0
 
+      # Read-only preflight: when an authenticated producer emitted no
+      # telemetry, reuse this already-running trusted Metrics writer to
+      # recover the oldest missed run instead of awaiting GitHub cron.
+      # If it did emit telemetry, preserve the original event delivery.
+      - name: Detect empty source telemetry
+        if: github.event_name == 'workflow_run'
+        id: event_artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          [[ "${EVENT_RUN_ID}" =~ ^[1-9][0-9]*$ ]] || exit 1
+          count="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${EVENT_RUN_ID}/artifacts?per_page=100" \
+            --jq '[.artifacts[] | select(.expired == false and (.name | startswith("agent-telemetry-")))] | length')"
+          echo "count=${count}" >> "${GITHUB_OUTPUT}"
+
       - name: Select missed trusted Agent telemetry source
-        if: github.event_name == 'schedule'
+        if: github.event_name == 'schedule' || (github.event_name == 'workflow_run' && steps.event_artifacts.outputs.count == '0')
         id: reconcile
         working-directory: trusted
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RECOVERY_EVENT_RUN_ID: ${{ github.event.workflow_run.id }}
+          RECOVERY_EMPTY_SOURCE_COUNT: ${{ steps.event_artifacts.outputs.count }}
         run: |
           set -euo pipefail
           node scripts/agent-telemetry-reconcile.mjs select \
@@ -100,7 +119,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          run_id="${EVENT_RUN_ID:-${RECOVERY_RUN_ID:-}}"
+          # Opportunistic recovery may supersede only a source with zero
+          # telemetry artifacts; an actual producer with artifacts is never
+          # displaced or silently discarded.
+          run_id="${RECOVERY_RUN_ID:-${EVENT_RUN_ID:-}}"
           if ! [[ "${run_id}" =~ ^[0-9]+$ ]] || [[ "${run_id}" -le 0 ]]; then
             echo "Invalid workflow run id: ${run_id}" >&2
             exit 1
