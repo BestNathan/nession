@@ -11,6 +11,7 @@ const DIRECT_WS = 'ws://localhost:19090/ws';
 // The form-login scenario is not yet implemented as an E2E test: the
 // "Connecting..." state races with startup. Restore it only once there is a
 // reliable readiness contract; do not leave a permanently skipped test case.
+// Test-only #1772 live multi-Issue no-E2E projector drill; unchanged behavior.
 test.describe('Login', () => {
   test('auto-connect via URL token parameter', async ({ page }) => {
     await page.goto('/');
