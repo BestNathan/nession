@@ -24,7 +24,6 @@ test.describe('Login', () => {
     // Should skip the login page and go directly to the shell
     await waitForShell(page);
     await expect(page.locator('[data-testid="shell"]')).toBeVisible();
-    // TEMPORARY trusted-projection receipt drill: this must fail, do not merge.
-    await expect(page.locator('[data-testid="shell"]')).toHaveCount(0);
+    // Post-failure E2E projection receipt drill: genuine shell assertion above remains.
   });
 });
