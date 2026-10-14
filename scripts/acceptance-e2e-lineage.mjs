@@ -41,14 +41,22 @@ export function verifiedCommitPullAssociation(pulls,prNumber,expectedHeadSha,all
       pr.head?.repo?.full_name===REPO && pr.base?.repo?.full_name===REPO);
 }
 
-export function verifyHistoricalE2ERun(run,record,prNumber,commitPulls=[],prHeadSha=null,allowTestOnly=false) {
+export function verifyHistoricalE2ERun(run,record,prNumber,commitPulls=[],prHeadSha=null,allowTestOnly=false,verifiedPrCommits=[],verifiedReceipts=[]) {
+  // GitHub may clear both associations after a test-only PR closes unmerged.
+  // Source membership then requires GitHub's own PR Commit list AND a
+  // separately authenticated successful Issue PATCH/read-back receipt.
+  const drillLinked=allowTestOnly&&Array.isArray(verifiedPrCommits)&&
+    verifiedPrCommits.some(c=>c?.sha===run?.head_sha)&&
+    Array.isArray(verifiedReceipts)&&verifiedReceipts.some(r=>
+      r.outcome==='applied'&&r.run_id===run.id&&
+      r.run_attempt===run.run_attempt&&r.target_sha===run.head_sha);
   if (!goodInt(prNumber) || !goodInt(run?.id) || !goodInt(run.run_attempt) ||
       !SHA.test(String(run.head_sha)) || run.path!=='.github/workflows/e2e-tests.yml' ||
       run.event!=='pull_request' || run.status!=='completed' ||
       !['success','failure'].includes(run.conclusion) ||
       run.repository?.full_name!==REPO || run.head_repository?.full_name!==REPO ||
       !(run.pull_requests?.some(p=>p.number===prNumber) ||
-        verifiedCommitPullAssociation(commitPulls,prNumber,prHeadSha,allowTestOnly)))
+        verifiedCommitPullAssociation(commitPulls,prNumber,prHeadSha,allowTestOnly)||drillLinked))
     throw Error('unrelated or untrusted E2E run');
   if (record?.schema_version!==1 || record.kind!=='issue_e2e_run' ||
       record.run_id!==run.id || record.run_attempt!==run.run_attempt ||
@@ -281,6 +289,10 @@ export async function collectHistoricalE2EForPull(repo,pull,get,readPlan=readHis
   const selected=(Array.isArray(commits)?commits:[]).slice(-MAX_COMMITS);
   if (!selected.some(x=>x.sha===pull.head.sha))
     throw Error('associated PR head is missing from commit history');
+  const testDrill=pull.state==='closed'&&!pull.merged_at&&
+    pull.head?.repo?.full_name===REPO&&pull.base?.repo?.full_name===REPO&&
+    /DO NOT MERGE/i.test(String(pull.title??''))&&
+    /DO NOT MERGE/i.test(String(pull.body??''));
   const verified=[];
   for (const commit of selected) {
     const sha=commit.sha;
@@ -300,7 +312,7 @@ export async function collectHistoricalE2EForPull(repo,pull,get,readPlan=readHis
     const commitLinked=verifiedCommitPullAssociation(
       commitPulls,pull.number,pull.head.sha,!pull.merged_at);
     const runs=candidates.filter(r=>
-      r.pull_requests?.some(p=>p.number===pull.number)||commitLinked)
+      r.pull_requests?.some(p=>p.number===pull.number)||commitLinked||testDrill)
       .sort((a,b)=>Number(b.id)-Number(a.id))
       .slice(0,MAX_RUNS_PER_COMMIT);
     for (const run of runs) {
@@ -322,7 +334,8 @@ export async function collectHistoricalE2EForPull(repo,pull,get,readPlan=readHis
       const plan=await readPlan(repo,artifact);
       const selection=verifyHistoricalPlan(run,record,plan,pull.number);
       const projections=await loadReceipts(repo,run,record,plan,get);
-      verified.push({...verifyHistoricalE2ERun(run,record,pull.number,commitPulls,pull.head.sha,!pull.merged_at),
+      verified.push({...verifyHistoricalE2ERun(run,record,pull.number,
+        commitPulls,pull.head.sha,testDrill,selected,projections),
         artifact_id:artifactId,created_at:run.created_at,selection,projections});
     }
   }
@@ -600,6 +613,16 @@ async function selfTest() {
     ...drillPr,title:'regular feature PR'}]),[]);
   assert.equal(verifiedCommitPullAssociation([drillPr],1761,b,true),true);
   assert.equal(verifiedCommitPullAssociation([drillPr],1761,b,false),false);
+  const noAssociations={...current,pull_requests:[]};
+  const applied=[{outcome:'applied',run_id:20,run_attempt:1,target_sha:b}];
+  assert.equal(verifyHistoricalE2ERun(noAssociations,rec(current,'Pass'),1718,
+    [],b,true,[{sha:b}],applied).conclusion,'success');
+  assert.throws(()=>verifyHistoricalE2ERun(noAssociations,rec(current,'Pass'),1718,
+    [],b,true,[{sha:a}],applied),/unrelated or untrusted/);
+  assert.throws(()=>verifyHistoricalE2ERun(noAssociations,rec(current,'Pass'),1718,
+    [],b,true,[{sha:b}],[]),/unrelated or untrusted/);
+  assert.throws(()=>verifyHistoricalE2ERun(noAssociations,rec(current,'Pass'),1718,
+    [],b,false,[{sha:b}],applied),/unrelated or untrusted/);
 
   // A non-E2E child Issue can observe authenticated sibling projections
   // within the same never-merged test PR, without being assigned a test ID.
