@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 38515481083,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "ci/sync-main-acceptance-e2e-preflight-staging",
+    "target_sha": "c85f3d248e348adeb5ddfbb08d4785acec0fb89f",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/38515481083",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "d6db9d2d2a53c0bf8c82ec54ff66cd10bb85cd88762ce8310789b8b98ba1b1c8"
+  },
+  "record": "runs/2026-10-14/38515481083-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "6ec9ff89f0c115ea45aa4e8f2687ea300efe4d2cbb26ad07e5c16968b16bac31"
+}
