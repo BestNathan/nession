@@ -117,7 +117,7 @@ function selfTest(){
   if(!acceptance.includes('PROVIDER_SOURCE_RUN_ID: ${{ inputs.provider_source_run_id }}')||
      !acceptance.includes('PROVIDER_SOURCE_RUN_ATTEMPT: ${{ inputs.provider_source_run_attempt }}')||
      !acceptance.includes("ref: metrics")||
-     !acceptance.includes('PROVIDER_METRICS_ROOT: ${{ github.workspace }}/provider-metrics'))
+     !acceptance.includes("path: provider-metrics"))
     fail('read-only Acceptance lost authenticated Provider source or Metrics checkout');
   assert.throws(()=>validateWakeConsumerRouting(
     orchestration.replace('provider_source_run_attempt: ${{ needs.prepare-post-merge-provider-evidence.outputs.source_run_attempt }}',
