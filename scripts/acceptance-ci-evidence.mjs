@@ -208,7 +208,8 @@ export function exactImplementationGateBundle(runs,headSha,jobResults=[]) {
     throw Error('invalid implementation source head SHA');
   const checks=REQUIRED_PR_CHECKS.map(name=>{
     const matching=runs.filter(r=>r.name===name&&
-      r.head_sha===headSha&&r.event==='pull_request'&&
+      r.head_sha===headSha&&
+      r.event===(name==='Acceptance / Orchestrator'?'pull_request_target':'pull_request')&&
       r.status==='completed')
       .sort((a,b)=>b.id-a.id);
     const run=matching[0];
@@ -390,11 +391,15 @@ function selfTest() {
   assert.equal(eligibleImplementationPull(merged,paths.slice(0,1),1759),false);
   const goodRuns=REQUIRED_PR_CHECKS.map((name,i)=>({
     name,id:i+101,run_attempt:1,head_sha:'a'.repeat(40),
-    status:'completed',conclusion:'success',event:'pull_request',
+    status:'completed',conclusion:'success',
+    event:name==='Acceptance / Orchestrator'?'pull_request_target':'pull_request',
     html_url:'https://github.com/BestNathan/nession/actions/runs/'+(101+i),
   }));
   const gateJobs=['pre-merge-gate','acceptance-pr-gate'].map(name=>({name,conclusion:'success'}));
   assert.equal(exactImplementationGateBundle(goodRuns,'a'.repeat(40),gateJobs).all_passed,true);
+  assert.equal(exactImplementationGateBundle(goodRuns.map(x=>
+    x.name==='Acceptance / Orchestrator'?{...x,event:'pull_request'}:x),
+    'a'.repeat(40),gateJobs).all_passed,false);
   assert.equal(exactImplementationGateBundle(goodRuns.map(x=>x.name==='E2E / Tests'?{...x,conclusion:'failure'}:x),
     'a'.repeat(40),gateJobs).all_passed,false);
   assert.equal(exactImplementationGateBundle(goodRuns,'a'.repeat(40),
