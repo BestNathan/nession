@@ -24,7 +24,6 @@ test.describe('Login', () => {
     // Should skip the login page and go directly to the shell
     await waitForShell(page);
     await expect(page.locator('[data-testid="shell"]')).toBeVisible();
-    // TEMPORARY DO-NOT-MERGE owners #1702/#1776 with #1759/#1772 none.
-    await expect(page.locator('[data-testid="shell"]')).toHaveCount(0);
+    // Verified controlled Fail receipt in #1702/#1776; genuine shell assertion above remains.
   });
 });
