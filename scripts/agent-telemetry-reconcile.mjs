@@ -47,15 +47,17 @@ export function countArtifactSummaries(value,run=null){
   let count=0;
   const names=new Set();
   for(const artifact of value.artifacts){
-    if(typeof artifact.name!=='string'||names.has(artifact.name)||
+    if(typeof artifact.name!=='string'||
        !Number.isSafeInteger(artifact.size_in_bytes)||artifact.size_in_bytes<0)
-      fail('invalid/duplicate source artifact');
-    names.add(artifact.name);
-    // GitHub lists artifacts from *all* run attempts together. Ignore prior
-    // attempts rather than mixing their immutable records into the latest run.
+      fail('invalid source artifact');
+    // GH allows different workflow attempts to publish the same unrelated
+    // artifact name (e.g. acceptance-result-<run_id>). Only matching telemetry
+    // names need to be unique within one authenticated attempt.
     if(artifact.name.startsWith('agent-telemetry-') &&
        artifact.expired===false &&
        (suffix===null || artifact.name.endsWith(suffix))){
+      if(names.has(artifact.name))fail('duplicate source artifact');
+      names.add(artifact.name);
       if(artifact.size_in_bytes===0||artifact.size_in_bytes>8*1024*1024)
         fail('invalid telemetry artifact size');
       count++;
@@ -263,6 +265,15 @@ function selfTest(){
   assert.equal(countArtifactSummaries(both,{id:321,run_attempt:2}),1);
   assert.equal(countArtifactSummaries(both,{id:321,run_attempt:3}),0);
   assert.equal(countArtifactSummaries(both,{id:322,run_attempt:1}),0);
+  const resultArtifact={name:'acceptance-result-321',size_in_bytes:200,expired:false};
+  const withCrossAttemptResultNames={total_count:4,artifacts:[
+    attempt1,attempt2,resultArtifact,{...resultArtifact,size_in_bytes:240},
+  ]};
+  assert.equal(countArtifactSummaries(withCrossAttemptResultNames,
+    {id:321,run_attempt:2}),1);
+  assert.throws(()=>countArtifactSummaries({total_count:3,artifacts:[
+    attempt2,attempt2,resultArtifact,
+  ]},{id:321,run_attempt:2}),/duplicate source artifact/);
   assert.throws(()=>countArtifactSummaries(both,{id:321,run_attempt:0}),/invalid source/);
   const runs=new Map([[source.file,[{...run,id:322,created_at:'2026-10-14T01:00:00Z'},run]]]);
   return (async()=>{
