@@ -180,7 +180,10 @@ async function findTrustedStaleReplay(repo,history,get,readLog=readTrustedJobLog
     const payload=await get('/repos/'+repo+'/actions/runs?event=workflow_run&created='+
       date+'&per_page=100&page='+page);
     const candidates=(payload.workflow_runs??[]).filter(r=>
-      r.name==='E2E / Test Ingest' && r.event==='workflow_run' &&
+      r.name==='E2E / Test Ingest' &&
+      r.path==='.github/workflows/e2e-test-ingest.yml' &&
+      r.repository?.full_name===REPO && r.head_branch==='main' &&
+      r.event==='workflow_run' &&
       r.conclusion==='failure' && r.status==='completed' &&
       goodInt(r.id) && goodInt(r.run_attempt) && r.run_attempt>1 &&
       String(r.updated_at??'')>=String(corrected.created_at??''));
@@ -188,7 +191,9 @@ async function findTrustedStaleReplay(repo,history,get,readLog=readTrustedJobLog
       const jobs=await get('/repos/'+repo+'/actions/runs/'+ingest.id+
         '/attempts/'+ingest.run_attempt+'/jobs?per_page=100');
       for(const job of (jobs.jobs??[]).filter(j=>
-        j.name==='ingest-pr'&&j.conclusion==='failure'&&goodInt(j.id))){
+        j.name==='ingest-pr'&&j.conclusion==='failure'&&goodInt(j.id) &&
+        j.steps?.some(s=>s.name==='Independently validate and project per-ID results' &&
+          s.conclusion==='failure'))){
         const log=await readLog(repo,job.id);
         for(const old of former) {
           try {
