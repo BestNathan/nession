@@ -8,6 +8,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { createProjectionReceipt, verifyArchivedProjectionReceipt } from './issue-e2e-projection-receipt.mjs';
+import { parseIssueE2E } from './issue-e2e-contract.mjs';
 
 const SHA=/^[a-f0-9]{40}$/;
 const DIGEST=/^[a-f0-9]{64}$/;
@@ -30,21 +32,23 @@ function recordFromApi(payload) {
 // The immutable commit SHA's GitHub Commit→PR association is the bounded
 // fallback. Both the PR head identity and same-repository merge are required;
 // the Run Record and Selection Plan are still verified independently.
-export function verifiedCommitPullAssociation(pulls,prNumber,expectedHeadSha) {
+export function verifiedCommitPullAssociation(pulls,prNumber,expectedHeadSha,allowTestOnly=false) {
   return SHA.test(String(expectedHeadSha??'')) && Array.isArray(pulls) &&
-    pulls.some(pr=>pr.number===prNumber && pr.state==='closed' &&
-      Boolean(pr.merged_at) && pr.head?.sha===expectedHeadSha &&
+    pulls.some(pr=>pr.number===prNumber &&
+      (pr.state==='closed'||(allowTestOnly&&pr.state==='open')) &&
+      (Boolean(pr.merged_at)||(allowTestOnly&&pr.merged_at==null)) &&
+      pr.head?.sha===expectedHeadSha &&
       pr.head?.repo?.full_name===REPO && pr.base?.repo?.full_name===REPO);
 }
 
-export function verifyHistoricalE2ERun(run,record,prNumber,commitPulls=[],prHeadSha=null) {
+export function verifyHistoricalE2ERun(run,record,prNumber,commitPulls=[],prHeadSha=null,allowTestOnly=false) {
   if (!goodInt(prNumber) || !goodInt(run?.id) || !goodInt(run.run_attempt) ||
       !SHA.test(String(run.head_sha)) || run.path!=='.github/workflows/e2e-tests.yml' ||
       run.event!=='pull_request' || run.status!=='completed' ||
       !['success','failure'].includes(run.conclusion) ||
       run.repository?.full_name!==REPO || run.head_repository?.full_name!==REPO ||
       !(run.pull_requests?.some(p=>p.number===prNumber) ||
-        verifiedCommitPullAssociation(commitPulls,prNumber,prHeadSha)))
+        verifiedCommitPullAssociation(commitPulls,prNumber,prHeadSha,allowTestOnly)))
     throw Error('unrelated or untrusted E2E run');
   if (record?.schema_version!==1 || record.kind!=='issue_e2e_run' ||
       record.run_id!==run.id || record.run_attempt!==run.run_attempt ||
@@ -227,7 +231,50 @@ async function findTrustedStaleReplay(repo,history,get,currentHead,readLog=readT
   return found;
 }
 
-export async function collectHistoricalE2EForPull(repo,pull,get,readPlan=readHistoricalPlanZip,findReplay=findTrustedStaleReplay) {
+// Evidence of a mutable GitHub Issue PATCH cannot be inferred from an E2E
+// result alone. Only receipts written by the trusted main ingest AFTER
+// PATCH+independent Issue GET qualify as historically applied.
+export async function collectAuthenticatedProjectionReceipts(repo,run,record,plan,get){
+  if(repo!==REPO||!goodInt(run?.id)||!goodInt(run.run_attempt)||
+     !/^\d{4}-\d{2}-\d{2}$/.test(String(run.created_at??'').slice(0,10)))
+    throw Error('invalid historical projection source');
+  const day=run.created_at.slice(0,10),proofs=[];
+  for(const owner of plan.issues){
+    const receiptPath='/repos/'+repo+'/contents/runs/'+day+'/'+run.id+'-'+run.run_attempt+
+      '/test/projections/'+owner.issue+'.json?ref=acceptance-results';
+    let payload;
+    try{payload=await get(receiptPath);}
+    catch(e){if(/GitHub API 404\b/.test(String(e?.message)))continue;throw e;}
+    if(payload?.encoding!=='base64'||typeof payload.content!=='string'||
+       !Number.isSafeInteger(payload.size)||payload.size>131072)
+      throw Error('invalid trusted projection receipt envelope');
+    const receipt=JSON.parse(Buffer.from(payload.content.replace(/\s/g,''),'base64').toString('utf8'));
+    const verified=verifyArchivedProjectionReceipt(receipt,record,plan,owner.issue);
+    const ingest=await get('/repos/'+repo+'/actions/runs/'+verified.ingest_run_id);
+    if(ingest?.id!==verified.ingest_run_id||
+       ingest.run_attempt!==verified.ingest_attempt||
+       ingest.repository?.full_name!==repo||
+       ingest.path!=='.github/workflows/e2e-test-ingest.yml'||
+       ingest.name!=='E2E / Test Ingest'||ingest.event!=='workflow_run'||
+       ingest.head_branch!=='main'||ingest.status!=='completed'||
+       ingest.conclusion!=='success'||
+       String(ingest.created_at??'')<String(run.created_at??''))
+      throw Error('projection receipt not issued by a successful trusted ingest');
+    const jobs=await get('/repos/'+repo+'/actions/runs/'+ingest.id+
+      '/attempts/'+ingest.run_attempt+'/jobs?per_page=100');
+    if(!(jobs.jobs??[]).some(j=>j.name==='ingest-pr' &&
+       j.status==='completed'&&j.conclusion==='success'&&
+       j.steps?.some(step=>step.name==='Store immutable results and update Issue reports' &&
+         step.conclusion==='success')))
+      throw Error('no trusted completed Issue projection step for receipt');
+    proofs.push({...verified,source_run_url:run.html_url,
+      ingest_url:ingest.html_url,
+      provenance:'authenticated main ingest + immutable post-PATCH Issue readback receipt'});
+  }
+  return proofs;
+}
+
+export async function collectHistoricalE2EForPull(repo,pull,get,readPlan=readHistoricalPlanZip,findReplay=findTrustedStaleReplay,loadReceipts=collectAuthenticatedProjectionReceipts) {
   if (repo!==REPO || !goodInt(pull?.number) || !SHA.test(String(pull.head?.sha)))
     throw Error('historical E2E scope requires a trusted associated PR');
   const commits=await get('/repos/'+repo+'/pulls/'+pull.number+'/commits?per_page=100');
@@ -251,7 +298,7 @@ export async function collectHistoricalE2EForPull(repo,pull,get,readPlan=readHis
       ? await get('/repos/'+repo+'/commits/'+sha+'/pulls?per_page=100')
       : [];
     const commitLinked=verifiedCommitPullAssociation(
-      commitPulls,pull.number,pull.head.sha);
+      commitPulls,pull.number,pull.head.sha,!pull.merged_at);
     const runs=candidates.filter(r=>
       r.pull_requests?.some(p=>p.number===pull.number)||commitLinked)
       .sort((a,b)=>Number(b.id)-Number(a.id))
@@ -274,8 +321,9 @@ export async function collectHistoricalE2EForPull(repo,pull,get,readPlan=readHis
       const artifact=artifactMetadata.artifacts.find(a=>a.id===artifactId);
       const plan=await readPlan(repo,artifact);
       const selection=verifyHistoricalPlan(run,record,plan,pull.number);
-      verified.push({...verifyHistoricalE2ERun(run,record,pull.number,commitPulls,pull.head.sha),
-        artifact_id:artifactId,created_at:run.created_at,selection});
+      const projections=await loadReceipts(repo,run,record,plan,get);
+      verified.push({...verifyHistoricalE2ERun(run,record,pull.number,commitPulls,pull.head.sha,!pull.merged_at),
+        artifact_id:artifactId,created_at:run.created_at,selection,projections});
     }
   }
   verified.sort((a,b)=>a.run_id-b.run_id||a.run_attempt-b.run_attempt);
@@ -305,17 +353,25 @@ export function selectCrossReferencedE2EPulls(repo, issueNumber, events, pulls) 
          'https://api.github.com/repos/'+repo+'/pulls/'+n)known.add(n);
   }
   return pulls.filter(pr=>{
-    if(!known.has(pr?.number)||pr?.state!=='closed'||!pr.merged_at||
-       pr?.base?.ref!=='staging'||pr?.base?.repo?.full_name!==repo||
-       pr?.head?.repo?.full_name!==repo||!SHA.test(pr?.head?.sha??'')||
-       !SHA.test(pr?.merge_commit_sha??''))return false;
+    if(!known.has(pr?.number)||pr?.base?.repo?.full_name!==repo||
+       pr?.head?.repo?.full_name!==repo||!SHA.test(pr?.head?.sha??''))
+      return false;
+    const merged=pr.state==='closed'&&Boolean(pr.merged_at)&&
+      pr.base.ref==='staging'&&SHA.test(pr.merge_commit_sha??'');
+    // DO-NOT-MERGE labels are for candidate discovery only, not Pass proof.
+    // Require real source Run/Plan/Artifact and trusted post-PATCH receipts.
+    const drill=pr.merged_at==null&&['open','closed'].includes(pr.state)&&
+      ['main','staging'].includes(pr.base.ref)&&
+      /DO NOT MERGE/i.test(String(pr.title??''))&&
+      /DO NOT MERGE/i.test(String(pr.body??''));
+    if(!merged&&!drill)return false;
     const refs=new Set();
     for(const line of String(pr.body??'').split(/\r?\n/)){
       const match=line.match(/^\s*Refs?\s*:?\s*(.*)$/i);
       if(match)for(const hit of match[1].matchAll(/#([1-9]\d*)\b/g))
         refs.add(Number(hit[1]));
     }
-    return refs.has(issueNumber)&&refs.size>=2;
+    return refs.has(issueNumber)&&(merged?refs.size>=2:refs.size>=1);
   }).sort((a,b)=>a.number-b.number).slice(-MAX_LINKED_PRS);
 }
 
@@ -367,14 +423,22 @@ export async function collectLinkedIssueE2EEvidence(repo,issueNumber,get,
     // PR prose is never authoritative. Require the authenticated Plan's
     // own Issue contracts and per-ID owners to include this requirement
     // alongside a second Issue, and every surfaced source run to match.
-    const proven=history.filter(row=>
-      row.selection?.issue_numbers?.includes(issueNumber) &&
-      row.selection.issue_numbers.length>=2 &&
-      row.selection.selected?.some(item=>
-        item.owners?.includes(issueNumber)&&item.owners.length>=2));
+    const proven=history.filter(row=>{
+      if(!row.selection?.issue_numbers?.includes(issueNumber))return false;
+      if(pr.merged_at)return row.selection.issue_numbers.length>=2 &&
+        row.selection.selected?.some(item=>item.owners?.includes(issueNumber)&&
+          item.owners.length>=2);
+      // Test-only drills may include a non-E2E child requirement with a
+      // validated none declaration. It may inspect the applied receipt of
+      // a sibling Issue that owns the ID, but never claims its own ID Pass.
+      return row.projections?.some(p=>p.outcome==='applied'&&
+        p.rows?.length>0&&row.selection.selected?.some(item=>
+          item.owners?.includes(p.issue)&&
+          p.rows.some(r=>r.id===item.id)));
+    });
     if(!proven.length)continue;
-    const payload=await get('/repos/'+repo+'/actions/runs?head_sha='+
-      pr.merge_commit_sha+'&per_page=100');
+    const payload=pr.merged_at?await get('/repos/'+repo+'/actions/runs?head_sha='+
+      pr.merge_commit_sha+'&per_page=100'):{workflow_runs:[]};
     const completed=(payload?.workflow_runs??[]).filter(run=>
       run.name==='E2E / Tests'&&run.path==='.github/workflows/e2e-tests.yml'&&
       run.event==='push'&&run.head_branch==='staging'&&
@@ -387,8 +451,9 @@ export async function collectLinkedIssueE2EEvidence(repo,issueNumber,get,
       staging_merge_sha:pr.merge_commit_sha,
       source:'GitHub Issue cross-reference + exact PR identity',
       verified_selected_runs:proven,
-      verified_staging_full:verifyHistoricalStagingFullRun(repo,
-        pr.merge_commit_sha,payload?.workflow_runs,artifact)});
+      scope:pr.merged_at?'merged-staging':'unmerged-test-only',
+      verified_staging_full:pr.merged_at?verifyHistoricalStagingFullRun(repo,
+        pr.merge_commit_sha,payload?.workflow_runs,artifact):null});
   }
   return proofs;
 }
@@ -432,7 +497,7 @@ async function selfTest() {
   ]);
   const get=async path=>{if(!map.has(path))throw Error('unexpected request '+path);return map.get(path)};
   const readPlan=async(_repo,artifact)=>fixturePlan(artifact.id===101?old:current);
-  const found=await collectHistoricalE2EForPull(REPO,pr,get,readPlan,async()=>[]);
+  const found=await collectHistoricalE2EForPull(REPO,pr,get,readPlan,async()=>[],async()=>[]);
   assert.deepEqual(found.map(r=>[r.run_id,r.results[0].result]),[[10,'Fail'],[20,'Pass']]);
   assert.deepEqual(found.map(x=>x.artifact_id),[101,202]);
   assert.deepEqual(found.map(x=>x.selection.selected),
@@ -451,7 +516,7 @@ async function selfTest() {
   mergedMap.set('/repos/'+REPO+'/commits/'+b+'/pulls?per_page=100',[mergedPr]);
   const mergedGet=async p=>{if(!mergedMap.has(p))throw Error('unexpected request '+p);
     return mergedMap.get(p)};
-  const mergedHistory=await collectHistoricalE2EForPull(REPO,pr,mergedGet,readPlan,async()=>[]);
+  const mergedHistory=await collectHistoricalE2EForPull(REPO,pr,mergedGet,readPlan,async()=>[],async()=>[]);
   assert.deepEqual(mergedHistory.map(row=>[row.run_id,row.results[0].result]),
     [[10,'Fail'],[20,'Pass']]);
   assert.throws(()=>verifyHistoricalE2ERun(mergedOld,rec(old,'Fail'),1718,[],b),
@@ -470,7 +535,7 @@ async function selfTest() {
     [{...mergedPr,number:1719}]);
   const forgedGet=async p=>{if(!forgedMap.has(p))throw Error('unexpected request '+p);
     return forgedMap.get(p)};
-  assert.deepEqual(await collectHistoricalE2EForPull(REPO,pr,forgedGet,readPlan,async()=>[]),[]);
+  assert.deepEqual(await collectHistoricalE2EForPull(REPO,pr,forgedGet,readPlan,async()=>[],async()=>[]),[]);
   assert.throws(()=>verifyHistoricalPlan(old,rec(old,'Fail'),{
     ...fixturePlan(old),target_sha:current.head_sha},1718),/identity/);
   assert.throws(()=>verifyHistoricalPlan(old,rec(old,'Fail'),{
@@ -522,6 +587,43 @@ async function selfTest() {
   const sourceUrl='https://api.github.com/repos/'+REPO+'/pulls/1718';
   const timeline=[{event:'cross-referenced',source:{issue:{number:1718,
     pull_request:{url:sourceUrl}}}}];
+  const drillPr={number:1761,state:'closed',merged_at:null,
+    title:'test(e2e): DO NOT MERGE historical Issue receipt proof',
+    body:'Refs #1702\nDO NOT MERGE',
+    base:{ref:'main',repo:{full_name:REPO}},
+    head:{sha:b,repo:{full_name:REPO}}};
+  const drillEvent={event:'cross-referenced',source:{issue:{number:1761,
+    pull_request:{url:'https://api.github.com/repos/'+REPO+'/pulls/1761'}}}};
+  assert.deepEqual(selectCrossReferencedE2EPulls(REPO,1702,[drillEvent],[drillPr])
+    .map(p=>p.number),[1761]);
+  assert.deepEqual(selectCrossReferencedE2EPulls(REPO,1702,[drillEvent],[{
+    ...drillPr,title:'regular feature PR'}]),[]);
+  assert.equal(verifiedCommitPullAssociation([drillPr],1761,b,true),true);
+  assert.equal(verifiedCommitPullAssociation([drillPr],1761,b,false),false);
+
+  // A non-E2E child Issue can observe authenticated sibling projections
+  // within the same never-merged test PR, without being assigned a test ID.
+  const childPr={...drillPr,body:'Refs #1702\nRefs #1759\nDO NOT MERGE'};
+  const childEvent={event:'cross-referenced',source:{issue:{number:1761,
+    pull_request:{url:'https://api.github.com/repos/'+REPO+'/pulls/1761'}}}};
+  const childGet=async url=>{
+    if(url.includes('/issues/1759/timeline?'))return [childEvent];
+    if(url.endsWith('/pulls/1761'))return childPr;
+    throw Error('unexpected child test-only API '+url);
+  };
+  const appliedSibling=[{run_id:10,selection:{issue_numbers:[1702,1759],
+    selected:[{id:'login',owners:[1702]}]},
+    results:[{id:'login',result:'Fail'}],
+    projections:[{issue:1702,outcome:'applied',rows:[{id:'login',result:'Fail'}]}]}];
+  const siblingProof=await collectLinkedIssueE2EEvidence(REPO,1759,childGet,
+    async()=>appliedSibling);
+  assert.deepEqual(siblingProof.map(x=>[x.pr_number,x.scope]),
+    [[1761,'unmerged-test-only']]);
+  assert.equal(siblingProof[0].verified_staging_full,null);
+  assert.deepEqual(await collectLinkedIssueE2EEvidence(REPO,1759,childGet,
+    async()=>appliedSibling.map(row=>({...row,
+      projections:[{...row.projections[0],outcome:'recovered'}]}))),[]);
+
   const linked={number:1718,state:'closed',merged_at:'2026-10-14T05:00:00Z',
     base:{ref:'staging',repo:{full_name:REPO}},
     head:{sha:b,repo:{full_name:REPO}},merge_commit_sha:mergeSha,
@@ -569,6 +671,64 @@ async function selfTest() {
     if(url.includes('/timeline?'))return [];
     throw Error('should not fetch unlinked Pull Request');
   }),[]);
+
+
+  // Independently join source evidence, immutable orphan projection receipt,
+  // trusted main Ingest workflow and completed privileged Issue PATCH step.
+  const issueNum=1702,proofSha='d'.repeat(40),proofPlan='e'.repeat(64);
+  const fixtureBody=['## E2E Verification','### New','- none: no new E2E',
+    '### Regression','- login','## E2E Report',
+    '| ID | Type | Result | Evidence |','|---|---|---|---|',
+    '| login | Regression | Fail | run 75/1, SHA '+proofSha+
+      ', contract CONTRACT, plan '+proofPlan+
+      ', tests 0/1 (https://github.com/BestNathan/nession/actions/runs/75) |',
+    '## Acceptance Report','unchanged'].join('\n');
+  const claim=parseIssueE2E(fixtureBody);
+  const projected={body:fixtureBody.replace('CONTRACT',claim.digest)};
+  const inputRecord={schema_version:1,kind:'issue_e2e_run',
+    run_id:75,run_attempt:1,target_sha:proofSha,plan_digest:proofPlan,
+    artifact_digest:'sha256:'+'a'.repeat(64),
+    results:[{id:'login',result:'Fail',discovered:1,passed:0,failed:1,
+      skipped:0,flaky:0,assertions:1}]};
+  const inputPlan={mode:'selected',pr_number:1718,target_sha:proofSha,
+    plan_digest:proofPlan,issues:[{issue:issueNum,
+      declaration_digest:claim.digest,new_ids:[],regression_ids:['login']}],
+    selected:[{id:'login',owners:[{issue:issueNum}]}]};
+  const after={number:issueNum,body:projected.body,updated_at:'2026-10-14T05:09:00Z'};
+  const patch={...after,updated_at:'2026-10-14T05:08:59Z'};
+  const receipt=createProjectionReceipt({record:inputRecord,plan:inputPlan,
+    issue:issueNum,projected,before:{body:'old version'},readback:after,patch,
+    outcome:'applied',ingestRunId:800,ingestAttempt:1});
+  const fixtureSource={id:75,run_attempt:1,created_at:'2026-10-14T05:00:00Z',
+    html_url:'https://github.com/'+REPO+'/actions/runs/75'};
+  const envelope={encoding:'base64',size:JSON.stringify(receipt).length,
+    content:Buffer.from(JSON.stringify(receipt)).toString('base64')};
+  const fixtureIngest={id:800,run_attempt:1,
+    path:'.github/workflows/e2e-test-ingest.yml',name:'E2E / Test Ingest',
+    event:'workflow_run',head_branch:'main',status:'completed',
+    conclusion:'success',created_at:'2026-10-14T05:02:00Z',
+    repository:{full_name:REPO},
+    html_url:'https://github.com/'+REPO+'/actions/runs/800'};
+  const fixtureJobs={jobs:[{name:'ingest-pr',status:'completed',conclusion:'success',
+    steps:[{name:'Store immutable results and update Issue reports',conclusion:'success'}]}]};
+  const projectionGet=async url=>{
+    if(url.includes('/test/projections/1702.json?ref=acceptance-results'))return envelope;
+    if(url.endsWith('/actions/runs/800'))return fixtureIngest;
+    if(url.endsWith('/actions/runs/800/attempts/1/jobs?per_page=100'))return fixtureJobs;
+    throw Error('unexpected projection source '+url);
+  };
+  const historyReceipts=await collectAuthenticatedProjectionReceipts(REPO,
+    fixtureSource,inputRecord,inputPlan,projectionGet);
+  assert.equal(historyReceipts[0].outcome,'applied');
+  assert.equal(historyReceipts[0].rows[0].result,'Fail');
+  await assert.rejects(()=>collectAuthenticatedProjectionReceipts(REPO,
+    fixtureSource,inputRecord,inputPlan,async url=>url.endsWith('/actions/runs/800')
+      ? {...fixtureIngest,conclusion:'failure'}:projectionGet(url)),
+      /successful trusted ingest/);
+  await assert.rejects(()=>collectAuthenticatedProjectionReceipts(REPO,
+    fixtureSource,inputRecord,inputPlan,async url=>url.includes('projections/1702.json')
+      ? {...envelope,content:Buffer.from(JSON.stringify({...receipt,body_sha256:'0'.repeat(64)})).toString('base64')}
+      : projectionGet(url)),/stored historical read-back body hash mismatch/);
 
   console.log('Acceptance historical Issue E2E evidence: bounded PR commit/run lineage and negative provenance fixtures passed');
 }
