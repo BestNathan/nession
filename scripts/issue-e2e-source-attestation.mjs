@@ -5,6 +5,7 @@ import path from 'node:path';
 import { buildGitPlan } from './issue-e2e-plan.mjs';
 import { summarize } from '../e2e/runner/selected-report.mjs';
 import { projectIssueE2E } from './issue-e2e-project.mjs';
+import { parseIssueE2E } from './issue-e2e-contract.mjs';
 
 const SHA=/^[a-f0-9]{40}$/;
 const positive=n=>Number.isSafeInteger(n)&&n>0;
@@ -66,6 +67,18 @@ export function projectAuthenticated(issues,plan,results,authenticated) {
   for(const info of plan.issues){
     const issue=issues.find(i=>i.number===info.issue);
     if(!issue)throw Error('Issue contract missing from trusted source');
+    if(info.no_e2e){
+      // An Issue that explicitly declares New/Regression=none is a valid
+      // contract participant in a selected multi-Issue PR, but owns no E2E
+      // row. Validate it against the authenticated plan and do NOT produce
+      // an empty E2E Report PATCH or projection receipt.
+      const empty=parseIssueE2E(issue.body,{requireDeclaration:true});
+      if(empty.errors.length || empty.digest!==info.declaration_digest ||
+         empty.selectedIds.length || info.new_ids?.length ||
+         info.regression_ids?.length)
+        throw Error('invalid not-required Issue E2E contract');
+      continue;
+    }
     const next=projectIssueE2E(issue,plan,results,authenticated);
     projected.push({issue:issue.number,body:next.body,all_pass:next.all_pass});
   }
@@ -88,6 +101,33 @@ function selfTest(){
   assert.throws(()=>verifySource(event,run,{...pr,head:{...pr.head,sha:base}},plan,results,artifact),/stale/);
   assert.throws(()=>verifySource(event,{...run,path:'bad.yml'},pr,plan,results,artifact));
   assert.throws(()=>verifySource(event,run,pr,plan,{...results,run_attempt:2},artifact));
+  const requiredBody=['## E2E Verification','### New','- none: none',
+    '### Regression','- login','## E2E Report',
+    '| ID | Type | Result | Evidence |','|---|---|---|---|',
+    '| login | Regression | Pending | - |','## Acceptance Report','unaltered'].join('\n');
+  const emptyBody=['## E2E Verification','### New','- none: no new E2E',
+    '### Regression','- none: not affected','## E2E Report',
+    '| ID | Type | Result | Evidence |','|---|---|---|',
+    '## Acceptance Report','unaltered'].join('\n');
+  const required=parseIssueE2E(requiredBody),empty=parseIssueE2E(emptyBody);
+  const multiPlan={...plan,mode:'selected',issues:[
+    {issue:1702,declaration_digest:required.digest,new_ids:[],
+      regression_ids:['login'],no_e2e:false},
+    {issue:1759,declaration_digest:empty.digest,new_ids:[],
+      regression_ids:[],no_e2e:true}
+  ],selected:[{id:'login',owners:[{issue:1702,type:'Regression'}]}]};
+  const pass={id:'login',result:'Pass',discovered:1,passed:1,failed:0,skipped:0,flaky:0,assertions:1};
+  const actual=projectAuthenticated([{number:1702,body:requiredBody},
+    {number:1759,body:emptyBody}],multiPlan,
+    {...results,results:[pass]},{
+      target_sha:sha,run_id:77,run_attempt:1,workflow_verified:true,
+    });
+  assert.deepEqual(actual.map(x=>x.issue),[1702]);
+  assert.throws(()=>projectAuthenticated([{number:1702,body:requiredBody},
+    {number:1759,body:emptyBody.replace('none: not affected','- login')}],
+    multiPlan,{...results,results:[pass]},{
+      target_sha:sha,run_id:77,run_attempt:1,workflow_verified:true,
+    }),/invalid not-required/);
   console.log('Issue E2E source attestation: exact workflow, SHA, PR and artifact negative fixtures passed');
 }
 if(process.argv[2]==='self-test')selfTest();
