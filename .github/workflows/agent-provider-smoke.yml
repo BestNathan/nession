@@ -13,6 +13,13 @@ on:
       - scripts/lib/agent/developer-canary.mjs
       - scripts/lib/agent/harness/native.mjs
       - scripts/lib/agent/telemetry/run-name.mjs
+      # The main-only Provider Smoke is also the authenticated source of
+      # post-merge Agent telemetry. An ingest/waker implementation change must
+      # exercise the full producer -> durable Metrics -> Acceptance wake chain.
+      - .github/workflows/metrics-agent-telemetry.yml
+      - .github/workflows/acceptance-orchestrator.yml
+      - scripts/agent-evidence-waker.mjs
+      - scripts/agent-telemetry-ingest.mjs
 
 permissions:
   contents: read
