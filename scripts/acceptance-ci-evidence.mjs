@@ -499,6 +499,14 @@ function selfTest() {
   assert.equal(mergeProof.status,'verified');
   assert.equal(mergeProof.is_ordinary_merge,true);
   assert.equal(mergeProof.second_parent_matches_declared_source,true);
+  // The main target may advance; a prior reachable merge retains its own
+  // independently verifiable two-parent Git object identity.
+  const historicalMerge=checkGitMergeCommit('/tmp',parentA,[parentB],
+    ()=>({status:0,stdout:parentA+' '+left+' '+parentB+'\n'}));
+  assert.equal(historicalMerge.target_sha,parentA);
+  assert.deepEqual(historicalMerge.parents,[left,parentB]);
+  assert.equal(historicalMerge.is_ordinary_merge,true);
+  assert.equal(historicalMerge.second_parent_matches_declared_source,true);
   assert.equal(normalizeCiEvidence({targetSha:head,
     targetMergeProof:mergeProof,declaredMergeCommits:[mergeProof]})
     .declared_merge_commits[0].second_parent_sha,parentB);
