@@ -450,6 +450,53 @@ async function selfTest() {
   assert.throws(()=>verifyHistoricalE2ERun(old,{...rec(old,'Fail'),run_id:99},1718),/provenance/);
   assert.throws(()=>verifyHistoricalE2ERun(current,{...rec(current,'Pass'),results:[{
     ...rec(current,'Pass').results[0],assertions:0}]},1718),/unproven Pass/);
+
+  const mergeSha='c'.repeat(40);
+  const sourceUrl='https://api.github.com/repos/'+REPO+'/pulls/1718';
+  const timeline=[{event:'cross-referenced',source:{issue:{number:1718,
+    pull_request:{url:sourceUrl}}}}];
+  const linked={number:1718,state:'closed',merged_at:'2026-10-14T05:00:00Z',
+    base:{ref:'staging',repo:{full_name:REPO}},
+    head:{sha:b,repo:{full_name:REPO}},merge_commit_sha:mergeSha,
+    body:'Refs #1702\nRefs #1717'};
+  assert.deepEqual(selectCrossReferencedE2EPulls(REPO,1702,timeline,[linked])
+    .map(pr=>pr.number),[1718]);
+  assert.deepEqual(selectCrossReferencedE2EPulls(REPO,1702,timeline,[{
+    ...linked,body:'Refs #1702'}]),[]);
+  assert.deepEqual(selectCrossReferencedE2EPulls(REPO,1702,[{
+    event:'cross-referenced',source:{issue:{number:1718,
+      pull_request:{url:'https://api.github.com/repos/other/repo/pulls/1718'}}}
+  }],[linked]),[]);
+  assert.deepEqual(selectCrossReferencedE2EPulls(REPO,1702,timeline,[{
+    ...linked,head:{sha:b,repo:{full_name:'foreign/repo'}}}]),[]);
+  const full={id:991,run_attempt:1,name:'E2E / Tests',
+    path:'.github/workflows/e2e-tests.yml',event:'push',head_branch:'staging',
+    head_sha:mergeSha,repository:{full_name:REPO},status:'completed',
+    conclusion:'success',html_url:'https://github.com/'+REPO+'/actions/runs/991'};
+  const fullArtifacts={artifacts:[{id:123,name:'playwright-report',
+    expired:false,digest:'sha256:'+'e'.repeat(64)}]};
+  assert.equal(verifyHistoricalStagingFullRun(REPO,mergeSha,[full],fullArtifacts).scope,'full');
+  assert.equal(verifyHistoricalStagingFullRun(REPO,mergeSha,[{
+    ...full,head_sha:a}],fullArtifacts),null);
+  assert.equal(verifyHistoricalStagingFullRun(REPO,mergeSha,[full],{artifacts:[{
+    ...fullArtifacts.artifacts[0],digest:'invalid'}]}),null);
+  const linkedGet=async url=>{
+    if(url.includes('/issues/1702/timeline?'))return timeline;
+    if(url.endsWith('/pulls/1718'))return linked;
+    if(url.includes('/actions/runs?head_sha='+mergeSha))return {workflow_runs:[full]};
+    if(url.endsWith('/actions/runs/991/artifacts?per_page=100'))return fullArtifacts;
+    throw Error('unexpected cross-Issue discovery API '+url);
+  };
+  const linkedProof=await collectLinkedIssueE2EEvidence(REPO,1702,
+    linkedGet,async()=>[{run_id:10,selection:{selected:[{
+      id:'login',owners:[1702,1717]}]},results:[{id:'login',result:'Fail'}]}]);
+  assert.deepEqual(linkedProof.map(x=>x.pr_number),[1718]);
+  assert.equal(linkedProof[0].verified_staging_full.run_id,991);
+  assert.deepEqual(await collectLinkedIssueE2EEvidence(REPO,1702,async url=>{
+    if(url.includes('/timeline?'))return [];
+    throw Error('should not fetch unlinked Pull Request');
+  }),[]);
+
   console.log('Acceptance historical Issue E2E evidence: bounded PR commit/run lineage and negative provenance fixtures passed');
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
