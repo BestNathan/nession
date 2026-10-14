@@ -244,7 +244,7 @@ export async function collectAuthenticatedProjectionReceipts(repo,run,record,pla
     try{payload=await get(receiptPath);}
     catch(e){if(/GitHub API 404\b/.test(String(e?.message)))continue;throw e;}
     if(payload?.encoding!=='base64'||typeof payload.content!=='string'||
-       !Number.isSafeInteger(payload.size)||payload.size>16384)
+       !Number.isSafeInteger(payload.size)||payload.size>131072)
       throw Error('invalid trusted projection receipt envelope');
     const receipt=JSON.parse(Buffer.from(payload.content.replace(/\s/g,''),'base64').toString('utf8'));
     const verified=verifyArchivedProjectionReceipt(receipt,record,plan,owner.issue);
@@ -672,7 +672,7 @@ async function selfTest() {
   await assert.rejects(()=>collectAuthenticatedProjectionReceipts(REPO,
     fixtureSource,inputRecord,inputPlan,async url=>url.includes('projections/1702.json')
       ? {...envelope,content:Buffer.from(JSON.stringify({...receipt,body_sha256:'0'.repeat(64)})).toString('base64')}
-      : projectionGet(url)),/source\/receipt|projection|body|identity|forged|mismatch|/);
+      : projectionGet(url)),/stored historical read-back body hash mismatch/);
 
   console.log('Acceptance historical Issue E2E evidence: bounded PR commit/run lineage and negative provenance fixtures passed');
 }
