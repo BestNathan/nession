@@ -47,3 +47,20 @@ This catches unsafe staged changes in that writer. It cannot stop another user/P
 4. Do not provision or write `agent-store` until its encryption key boundaries and shared write rules are in place.
 
 **Deterministic regression suite:** `./gates/run run-store-integrity` (includes fast-forward malicious commit, index repoint, history rewrite and projection/CAS fixtures). The Gate does not contact GitHub or write any production ref.
+
+## Opt-in production read-only audit workflow
+
+`.github/workflows/ci-run-store-integrity-audit.yml` runs under `CI / Run Store Integrity Audit` (scheduled daily and manually dispatchable). **It does not enable itself or create/modify refs.** The job is skipped until the repository variable `RUN_STORE_AUDIT_ENABLED` is exactly `true`.
+
+Before opting in:
+
+1. Independently review each live orphan ref's migration baseline and validate a read-only backup. Record SHA-1 commit IDs for `acceptance-results`, `task-results` and `metrics` **outside all of those Git branches**. Historical records before the baseline are not retrospectively attested.
+2. Provision the secret `RUN_STORE_AUDIT_ANCHORS_JSON` (exact three-key JSON object of 40-character commit SHAs) under an authority separate from the untrusted Agent / producer and ordinary ingestion tokens. For example, `{"acceptance-results":"<40 hex SHA>","task-results":"<40 hex SHA>","metrics":"<40 hex SHA>"}`. Do not pass the manifest as a `workflow_dispatch` input, log the secret, or derive it from a newly observed ref during a check.
+3. Grant only `contents: read` to the audit job. Protect the `main` workflow source and the secret's modification permissions. Set `RUN_STORE_AUDIT_ENABLED=true` only after the independent baseline is verified. Review the first scheduled/manual run and triage failures without rewriting any store.
+4. Preserve accepted ref checkpoints under a truly independent, access-controlled/WORM or signed external authority when implementing #1690's stronger SC-08. **A GitHub repository secret alone is not WORM or administrator-proof** and does not by itself satisfy independent anchoring, server-side write restrictions, or recovery proof.
+
+The runner checks its actual Git checkout against the event SHA, reads GitHub's current ref API for each fixed store, fetches only that ref into its **local tracking ref**, compares observed and fetched tips, checks the externally supplied baseline and intervening commit ancestry and all Git path/mode changes, and prints non-sensitive commit/count observations. Missing secret, unexpected repository/ref, GitHub 404, ref rewrite, malicious fast-forward overwrite/deletion, unclassified paths or executable/symlink blobs cause a failed job rather than an automatic repair or false Pass.
+
+It does not audit the **non-existent** `agent-store` ref; add that only after a separately authorized provisioning/migration baseline. This opt-in workflow is a real production audit *path*, but while anchors and ref Rulesets remain unprovisioned, #1690's live authorization/independent anchor/alert acceptance criteria remain Pending. GitHub Actions failures are visible but not yet an independent durable alarm channel.
+
+Gate: `./gates/run run-store-integrity` includes a disposable Git remote plus mocked ref API, a legitimate three-ref append, forged API tip, illegal fast-forward edit, and rewritten-ancestry tests.
