@@ -437,6 +437,40 @@ async function selfTest() {
   assert.deepEqual(found.map(x=>x.artifact_id),[101,202]);
   assert.deepEqual(found.map(x=>x.selection.selected),
     [[{id:'login',owners:[1702]}],[{id:'login',owners:[1702]}]]);
+  // GitHub can return pull_requests:[] for runs after their PR was merged.
+  // Verify membership from its commit-to-PR endpoint, never from PR prose.
+  const mergedPr={number:1718,state:'closed',merged_at:'2026-10-14T05:09:42Z',
+    head:{sha:b,repo:{full_name:REPO}},base:{repo:{full_name:REPO}}};
+  const mergedOld={...old,pull_requests:[]},mergedCurrent={...current,pull_requests:[]};
+  const mergedMap=new Map(map);
+  mergedMap.set('/repos/'+REPO+'/actions/runs?head_sha='+a+'&per_page=100',
+    {workflow_runs:[mergedOld]});
+  mergedMap.set('/repos/'+REPO+'/actions/runs?head_sha='+b+'&per_page=100',
+    {workflow_runs:[mergedCurrent]});
+  mergedMap.set('/repos/'+REPO+'/commits/'+a+'/pulls?per_page=100',[mergedPr]);
+  mergedMap.set('/repos/'+REPO+'/commits/'+b+'/pulls?per_page=100',[mergedPr]);
+  const mergedGet=async p=>{if(!mergedMap.has(p))throw Error('unexpected request '+p);
+    return mergedMap.get(p)};
+  const mergedHistory=await collectHistoricalE2EForPull(REPO,pr,mergedGet,readPlan,async()=>[]);
+  assert.deepEqual(mergedHistory.map(row=>[row.run_id,row.results[0].result]),
+    [[10,'Fail'],[20,'Pass']]);
+  assert.throws(()=>verifyHistoricalE2ERun(mergedOld,rec(old,'Fail'),1718,[],b),
+    /unrelated or untrusted/);
+  assert.deepEqual(verifyHistoricalE2ERun(mergedOld,rec(old,'Fail'),1718,
+    [mergedPr],b).results.map(row=>row.result),['Fail']);
+  assert.equal(verifiedCommitPullAssociation([{...mergedPr,number:1719}],1718,b),false);
+  assert.equal(verifiedCommitPullAssociation([{...mergedPr,merged_at:null}],1718,b),false);
+  assert.equal(verifiedCommitPullAssociation([{...mergedPr,head:{sha:a,repo:{full_name:REPO}}}],1718,b),false);
+  assert.equal(verifiedCommitPullAssociation([{...mergedPr,base:{repo:{full_name:'foreign/repo'}}}],1718,b),false);
+  assert.equal(verifiedCommitPullAssociation([{...mergedPr,head:{sha:b,repo:{full_name:'foreign/repo'}}}],1718,b),false);
+  const forgedMap=new Map(mergedMap);
+  forgedMap.set('/repos/'+REPO+'/commits/'+a+'/pulls?per_page=100',
+    [{...mergedPr,number:1719}]);
+  forgedMap.set('/repos/'+REPO+'/commits/'+b+'/pulls?per_page=100',
+    [{...mergedPr,number:1719}]);
+  const forgedGet=async p=>{if(!forgedMap.has(p))throw Error('unexpected request '+p);
+    return forgedMap.get(p)};
+  assert.deepEqual(await collectHistoricalE2EForPull(REPO,pr,forgedGet,readPlan,async()=>[]),[]);
   assert.throws(()=>verifyHistoricalPlan(old,rec(old,'Fail'),{
     ...fixturePlan(old),target_sha:current.head_sha},1718),/identity/);
   assert.throws(()=>verifyHistoricalPlan(old,rec(old,'Fail'),{
