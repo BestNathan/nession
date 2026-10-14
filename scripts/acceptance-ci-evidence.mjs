@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
+import { collectHistoricalE2EForPull } from './acceptance-e2e-lineage.mjs';
 
 const MAX_RUNS_PER_SHA = 20;
 const MAX_ASSOCIATED_PULLS = 5;
@@ -37,7 +38,7 @@ function compactRuns(runs, expectedSha) {
     .slice(0, MAX_RUNS_PER_SHA);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [] }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map() }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -53,6 +54,7 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
         head_sha: headSha,
         html_url: String(pull.html_url ?? ''),
         runs: compactRuns(pullRunsBySha.get(headSha) ?? [], headSha),
+        historical_e2e_runs: historicalE2EByPr.get(Number(pull.number)) ?? [],
       };
     });
 
@@ -140,7 +142,24 @@ async function collectCommand(workspace, outFile) {
     }
   }
   const sourceAncestry = await collectSourceAncestry(repo, workspace, sha);
-  const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls, pullRunsBySha, sourceAncestry });
+  // Acceptance for E2E-specific Issues must also observe previous PR commits:
+  // the current target SHA by itself cannot prove a fail-then-pass scenario.
+  // Read the trusted orphan Run Record, joined to GitHub completed workflow
+  // run ID, exact SHA, PR identity and attempt. These are bounded reads only.
+  const historicalE2EByPr = new Map();
+  const issueNumber = String(process.env.ISSUE_NUMBER || '').trim();
+  if (/^[1-9][0-9]*$/.test(issueNumber) && selectedPulls.length) {
+    const currentIssue = await githubGet('/repos/' + repo + '/issues/' + issueNumber);
+    const section = String(currentIssue.body ?? '').match(/^## E2E Verification\s*$/m);
+    if (section) {
+      for (const pull of selectedPulls) {
+        historicalE2EByPr.set(Number(pull.number),
+          await collectHistoricalE2EForPull(repo, pull, githubGet));
+      }
+    }
+  }
+  const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls,
+    pullRunsBySha, sourceAncestry, historicalE2EByPr });
   fs.writeFileSync(outFile, JSON.stringify(evidence, null, 2) + '\n');
   console.log(
     'collected acceptance CI evidence for ' + sha +
@@ -174,6 +193,12 @@ function selfTest() {
   assert.equal(evidence.target_sha, 'merge123');
   assert.deepEqual(evidence.direct_runs.map((run) => run.id), [2]);
   assert.deepEqual(evidence.pull_requests[0].runs.map((run) => run.id), [4]);
+  const lineage = normalizeCiEvidence({
+    targetSha: 'c'.repeat(40),
+    pulls: [{number: 5, head: {sha: 'c'.repeat(40)}}],
+    historicalE2EByPr: new Map([[5,[{run_id:2,results:[{id:'login',result:'Fail'}]}]]]),
+  });
+  assert.equal(lineage.pull_requests[0].historical_e2e_runs[0].run_id, 2);
   assert.throws(() => normalizeCiEvidence({ targetSha: '' }), /targetSha is required/);
   // Real criteria select only pinned source SHA ancestors; unrelated report
   // logs cannot inject extra proof targets.
