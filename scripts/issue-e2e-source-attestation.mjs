@@ -110,7 +110,7 @@ function selfTest(){
     '| ID | Type | Result | Evidence |','|---|---|---|',
     '## Acceptance Report','unaltered'].join('\n');
   const required=parseIssueE2E(requiredBody),empty=parseIssueE2E(emptyBody);
-  const multiPlan={...plan,issues:[
+  const multiPlan={...plan,mode:'selected',issues:[
     {issue:1702,declaration_digest:required.digest,new_ids:[],
       regression_ids:['login'],no_e2e:false},
     {issue:1759,declaration_digest:empty.digest,new_ids:[],
