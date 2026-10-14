@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 38538658271,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "ci/sync-1759-projection-receipts-staging",
+    "target_sha": "5e334868b099830a1adb381e9e4d19acb10b4206",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/38538658271",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "40c8fcbd564114ed0cef3e3e553512980a40a754af9a61208487149ccf790fd2"
+  },
+  "record": "runs/2026-10-14/38538658271-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "22fafc94ce9253df77acf9af28fc1968811125ad5cb49708ad740271c5ce9e32"
+}
