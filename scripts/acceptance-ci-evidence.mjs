@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
+import { collectHistoricalE2E } from './acceptance-e2e-history.mjs';
 
 const MAX_RUNS_PER_SHA = 20;
 const MAX_ASSOCIATED_PULLS = 5;
@@ -37,7 +38,7 @@ function compactRuns(runs, expectedSha) {
     .slice(0, MAX_RUNS_PER_SHA);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [] }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], e2eHistory = [] }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -63,6 +64,7 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     direct_runs: compactRuns(directRuns, sha),
     pull_requests: associated,
     source_ancestry: sourceAncestry,
+    trusted_e2e_history: e2eHistory,
   };
 }
 
@@ -140,12 +142,16 @@ async function collectCommand(workspace, outFile) {
     }
   }
   const sourceAncestry = await collectSourceAncestry(repo, workspace, sha);
-  const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls, pullRunsBySha, sourceAncestry });
+  const e2eHistory = await collectHistoricalE2E({repo,workspace,targetSha:sha,
+    pulls:selectedPulls,githubGet,runsForSha:workflowRunsForSha});
+  const evidence = normalizeCiEvidence({targetSha:sha,directRuns,pulls:selectedPulls,
+    pullRunsBySha,sourceAncestry,e2eHistory});
   fs.writeFileSync(outFile, JSON.stringify(evidence, null, 2) + '\n');
   console.log(
     'collected acceptance CI evidence for ' + sha +
     ': ' + evidence.direct_runs.length + ' direct run(s), ' +
-    evidence.pull_requests.length + ' associated PR(s)'
+    evidence.pull_requests.length + ' associated PR(s), ' +
+    evidence.trusted_e2e_history.length + ' authenticated historical E2E run(s)'
   );
 }
 
@@ -199,7 +205,9 @@ function selfTest() {
     checkGitAncestor('/tmp', head, left, () => ({status:0})),
   ]}).source_ancestry.map(x => x.is_ancestor), [true]);
 
-  console.log('acceptance-ci-evidence self-test: collector, bounded criteria and positive/negative Git ancestry passed');
+  assert.deepEqual(normalizeCiEvidence({targetSha:head,e2eHistory:[{run_id:123}]}).trusted_e2e_history,
+    [{run_id:123}]);
+  console.log('acceptance-ci-evidence self-test: collector, bounded ancestry and historical E2E projection passed');
 }
 
 async function main() {
