@@ -183,7 +183,7 @@ export function pinnedHistoricalOrchestratorIds(body) {
   const ids=[];
   for(const line of section.split('\n')) {
     if(!/^- \[[ x]\] SC-\d+\b/.test(line))continue;
-    for(const m of line.matchAll(/\bOrchestrator Run\s+([1-9]\d*)\b/g)){
+    for(const m of line.matchAll(/\bOrchestrator Run\s+\x60?([1-9]\d*)\x60?(?=\s|[.,;]|$)/g)){
       const id=Number(m[1]);
       if(!Number.isSafeInteger(id))throw Error('invalid historical Run ID');
       ids.push(id);
@@ -653,7 +653,7 @@ function selfTest() {
     name:'Acceptance / Orchestrator',event:'push',head_branch:'main',
     head_sha:head,status:'completed',conclusion:'success'};
   assert.deepEqual(pinnedHistoricalOrchestratorIds(
-    '### Success Criteria\n- [ ] SC-04 earlier Acceptance / Orchestrator Run 38573830595 completed\n## Acceptance Report'
+    '### Success Criteria\n- [ ] SC-04 earlier Acceptance / Orchestrator Run `38573830595` completed\n## Acceptance Report'
   ),[38573830595]);
   assert.deepEqual(pinnedHistoricalOrchestratorIds(
     '### Success Criteria\n- [ ] SC-04 vague run 38573830595'
