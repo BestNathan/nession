@@ -24,8 +24,5 @@ test.describe('Login', () => {
     // Should skip the login page and go directly to the shell
     await waitForShell(page);
     await expect(page.locator('[data-testid="shell"]')).toBeVisible();
-    // Repeat controlled failure with the new assertion receipt pipeline (#1702 / #1717).
-    // Remove this negative assertion in the subsequent proof revision.
-    await expect(page.locator('[data-testid="shell"]')).toHaveCount(0);
   });
 });
