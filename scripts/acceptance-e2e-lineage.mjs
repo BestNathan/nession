@@ -41,14 +41,22 @@ export function verifiedCommitPullAssociation(pulls,prNumber,expectedHeadSha,all
       pr.head?.repo?.full_name===REPO && pr.base?.repo?.full_name===REPO);
 }
 
-export function verifyHistoricalE2ERun(run,record,prNumber,commitPulls=[],prHeadSha=null,allowTestOnly=false) {
+export function verifyHistoricalE2ERun(run,record,prNumber,commitPulls=[],prHeadSha=null,allowTestOnly=false,verifiedPrCommits=[],verifiedReceipts=[]) {
+  // GitHub may clear both associations after a test-only PR closes unmerged.
+  // Source membership then requires GitHub's own PR Commit list AND a
+  // separately authenticated successful Issue PATCH/read-back receipt.
+  const drillLinked=allowTestOnly&&Array.isArray(verifiedPrCommits)&&
+    verifiedPrCommits.some(c=>c?.sha===run?.head_sha)&&
+    Array.isArray(verifiedReceipts)&&verifiedReceipts.some(r=>
+      r.outcome==='applied'&&r.run_id===run.id&&
+      r.run_attempt===run.run_attempt&&r.target_sha===run.head_sha);
   if (!goodInt(prNumber) || !goodInt(run?.id) || !goodInt(run.run_attempt) ||
       !SHA.test(String(run.head_sha)) || run.path!=='.github/workflows/e2e-tests.yml' ||
       run.event!=='pull_request' || run.status!=='completed' ||
       !['success','failure'].includes(run.conclusion) ||
       run.repository?.full_name!==REPO || run.head_repository?.full_name!==REPO ||
       !(run.pull_requests?.some(p=>p.number===prNumber) ||
-        verifiedCommitPullAssociation(commitPulls,prNumber,prHeadSha,allowTestOnly)))
+        verifiedCommitPullAssociation(commitPulls,prNumber,prHeadSha,allowTestOnly)||drillLinked))
     throw Error('unrelated or untrusted E2E run');
   if (record?.schema_version!==1 || record.kind!=='issue_e2e_run' ||
       record.run_id!==run.id || record.run_attempt!==run.run_attempt ||
@@ -257,9 +265,16 @@ export async function collectAuthenticatedProjectionReceipts(repo,run,record,pla
        ingest.path!=='.github/workflows/e2e-test-ingest.yml'||
        ingest.name!=='E2E / Test Ingest'||ingest.event!=='workflow_run'||
        ingest.head_branch!=='main'||ingest.status!=='completed'||
-       ingest.conclusion!=='success'||
        String(ingest.created_at??'')<String(run.created_at??''))
-      throw Error('projection receipt not issued by a successful trusted ingest');
+      throw Error('projection receipt issued by unrelated or untrusted ingest');
+    // A protected receipt can be durably pushed even when a later step in the
+    // same Ingest job fails (e.g. while reconciling another Issue). Do not
+    // re-label this incomplete run as a SUCCESSFUL Issue projection. Preserve
+    // its immutable record, but exclude it from positive Acceptance evidence.
+    // The receipt itself was verified above, so forged receipts still fail.
+    if(ingest.conclusion==='failure')continue;
+    if(ingest.conclusion!=='success')
+      throw Error('projection receipt has non-final trusted ingest status');
     const jobs=await get('/repos/'+repo+'/actions/runs/'+ingest.id+
       '/attempts/'+ingest.run_attempt+'/jobs?per_page=100');
     if(!(jobs.jobs??[]).some(j=>j.name==='ingest-pr' &&
@@ -281,6 +296,10 @@ export async function collectHistoricalE2EForPull(repo,pull,get,readPlan=readHis
   const selected=(Array.isArray(commits)?commits:[]).slice(-MAX_COMMITS);
   if (!selected.some(x=>x.sha===pull.head.sha))
     throw Error('associated PR head is missing from commit history');
+  const testDrill=pull.state==='closed'&&!pull.merged_at&&
+    pull.head?.repo?.full_name===REPO&&pull.base?.repo?.full_name===REPO&&
+    /DO NOT MERGE/i.test(String(pull.title??''))&&
+    /DO NOT MERGE/i.test(String(pull.body??''));
   const verified=[];
   for (const commit of selected) {
     const sha=commit.sha;
@@ -300,7 +319,7 @@ export async function collectHistoricalE2EForPull(repo,pull,get,readPlan=readHis
     const commitLinked=verifiedCommitPullAssociation(
       commitPulls,pull.number,pull.head.sha,!pull.merged_at);
     const runs=candidates.filter(r=>
-      r.pull_requests?.some(p=>p.number===pull.number)||commitLinked)
+      r.pull_requests?.some(p=>p.number===pull.number)||commitLinked||testDrill)
       .sort((a,b)=>Number(b.id)-Number(a.id))
       .slice(0,MAX_RUNS_PER_COMMIT);
     for (const run of runs) {
@@ -322,7 +341,18 @@ export async function collectHistoricalE2EForPull(repo,pull,get,readPlan=readHis
       const plan=await readPlan(repo,artifact);
       const selection=verifyHistoricalPlan(run,record,plan,pull.number);
       const projections=await loadReceipts(repo,run,record,plan,get);
-      verified.push({...verifyHistoricalE2ERun(run,record,pull.number,commitPulls,pull.head.sha,!pull.merged_at),
+      // Older test-only drills may have executed before durable Issue PATCH
+      // receipts existed. A source Run/Plan alone proves TEST execution, not
+      // an Issue mutation. Do not surface it as a historical projection, and
+      // do not let it block independently attested later drills.
+      //
+      // A present but forged/invalid receipt is never ignored: loadReceipts
+      // verifies it and fails closed before reaching this branch.
+      if(testDrill && !projections.some(p=>p.outcome==='applied'&&
+          p.run_id===run.id&&p.run_attempt===run.run_attempt&&
+          p.target_sha===run.head_sha))continue;
+      verified.push({...verifyHistoricalE2ERun(run,record,pull.number,
+        commitPulls,pull.head.sha,testDrill,selected,projections),
         artifact_id:artifactId,created_at:run.created_at,selection,projections});
     }
   }
@@ -600,6 +630,43 @@ async function selfTest() {
     ...drillPr,title:'regular feature PR'}]),[]);
   assert.equal(verifiedCommitPullAssociation([drillPr],1761,b,true),true);
   assert.equal(verifiedCommitPullAssociation([drillPr],1761,b,false),false);
+  const noAssociations={...current,pull_requests:[]};
+  const applied=[{outcome:'applied',run_id:20,run_attempt:1,target_sha:b}];
+  assert.equal(verifyHistoricalE2ERun(noAssociations,rec(current,'Pass'),1718,
+    [],b,true,[{sha:b}],applied).conclusion,'success');
+  assert.throws(()=>verifyHistoricalE2ERun(noAssociations,rec(current,'Pass'),1718,
+    [],b,true,[{sha:a}],applied),/unrelated or untrusted/);
+  assert.throws(()=>verifyHistoricalE2ERun(noAssociations,rec(current,'Pass'),1718,
+    [],b,true,[{sha:b}],[]),/unrelated or untrusted/);
+  assert.throws(()=>verifyHistoricalE2ERun(noAssociations,rec(current,'Pass'),1718,
+    [],b,false,[{sha:b}],applied),/unrelated or untrusted/);
+  const historicalDrill={...drillPr,number:1718,head:{...drillPr.head,sha:b}};
+  const drillMap=new Map(mergedMap);
+  drillMap.set('/repos/'+REPO+'/commits/'+a+'/pulls?per_page=100',[]);
+  drillMap.set('/repos/'+REPO+'/commits/'+b+'/pulls?per_page=100',[]);
+  const strictDrillGet=async p=>{
+    if(!drillMap.has(p))throw Error('unexpected drill source '+p);
+    return drillMap.get(p);
+  };
+  // Deliberate historical failures run before receipts were introduced:
+  // they are excluded, not promoted from a Playwright artifact into a PATCH.
+  assert.deepEqual(await collectHistoricalE2EForPull(REPO,historicalDrill,
+    strictDrillGet,readPlan,async()=>[],async()=>[]),[]);
+  const appliedDrill=await collectHistoricalE2EForPull(REPO,historicalDrill,
+    strictDrillGet,readPlan,async()=>[],async(_repo,run)=>[{
+      outcome:'applied',run_id:run.id,run_attempt:run.run_attempt,
+      target_sha:run.head_sha,issue:1702,rows:[{id:'login'}],
+    }]);
+  assert.deepEqual(appliedDrill.map(x=>[x.run_id,x.results[0].result]),
+    [[10,'Fail'],[20,'Pass']]);
+  assert.deepEqual(await collectHistoricalE2EForPull(REPO,historicalDrill,
+    strictDrillGet,readPlan,async()=>[],async(_repo,run)=>[{
+      outcome:'recovered',run_id:run.id,run_attempt:run.run_attempt,
+      target_sha:run.head_sha,
+    }]),[]);
+  await assert.rejects(()=>collectHistoricalE2EForPull(REPO,historicalDrill,
+    strictDrillGet,readPlan,async()=>[],async()=>{throw Error('forged receipt');}),
+    /forged receipt/);
 
   // A non-E2E child Issue can observe authenticated sibling projections
   // within the same never-merged test PR, without being assigned a test ID.
@@ -721,10 +788,13 @@ async function selfTest() {
     fixtureSource,inputRecord,inputPlan,projectionGet);
   assert.equal(historyReceipts[0].outcome,'applied');
   assert.equal(historyReceipts[0].rows[0].result,'Fail');
+  assert.deepEqual(await collectAuthenticatedProjectionReceipts(REPO,
+    fixtureSource,inputRecord,inputPlan,async url=>url.endsWith('/actions/runs/800')
+      ? {...fixtureIngest,conclusion:'failure'}:projectionGet(url)),[]);
   await assert.rejects(()=>collectAuthenticatedProjectionReceipts(REPO,
     fixtureSource,inputRecord,inputPlan,async url=>url.endsWith('/actions/runs/800')
-      ? {...fixtureIngest,conclusion:'failure'}:projectionGet(url)),
-      /successful trusted ingest/);
+      ? {...fixtureIngest,repository:{full_name:'foreign/repo'}}:projectionGet(url)),
+      /unrelated or untrusted ingest/);
   await assert.rejects(()=>collectAuthenticatedProjectionReceipts(REPO,
     fixtureSource,inputRecord,inputPlan,async url=>url.includes('projections/1702.json')
       ? {...envelope,content:Buffer.from(JSON.stringify({...receipt,body_sha256:'0'.repeat(64)})).toString('base64')}

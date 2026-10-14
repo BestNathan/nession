@@ -483,10 +483,25 @@ jobs:
             [[ "$issue_number" =~ ^[1-9][0-9]*$ ]] || exit 1
             gh api "repos/$GITHUB_REPOSITORY/issues/$issue_number" > "$RUNNER_TEMP/issue-$issue_number.json"
             if jq -e '.body | contains("## E2E Verification")' "$RUNNER_TEMP/issue-$issue_number.json" > /dev/null; then
-              node scripts/issue-e2e-gate.mjs verify "$RUNNER_TEMP/issue-$issue_number.json" "$TARGET_SHA"
-              jq -e --arg digest "$PLAN_DIGEST" '.body | contains("plan " + $digest + ",")' \
-                "$RUNNER_TEMP/issue-$issue_number.json" > /dev/null
-              verified=$((verified + 1))
+              # The canonical Gate distinguishes selected IDs from a valid
+              # explicit-none Issue. The latter has no per-ID E2E Report and
+              # MUST NOT pretend to contain the source Plan digest.
+              verdict="$(node scripts/issue-e2e-gate.mjs verify-json \
+                "$RUNNER_TEMP/issue-$issue_number.json" "$TARGET_SHA")"
+              case "$(jq -r .reason <<< "$verdict")" in
+                selected)
+                  [[ "$(jq -r .required <<< "$verdict")" =~ ^[1-9][0-9]*$ ]] || exit 1
+                  jq -e --arg digest "$PLAN_DIGEST" \
+                    '.body | contains("plan " + $digest + ",")' \
+                    "$RUNNER_TEMP/issue-$issue_number.json" > /dev/null
+                  verified=$((verified + 1))
+                  ;;
+                explicit-none)
+                  [[ "$(jq -r .required <<< "$verdict")" == 0 ]] || exit 1
+                  echo "Issue #$issue_number declares no browser E2E IDs; no Plan receipt required"
+                  ;;
+                *) echo "::error::Unclassified Issue E2E Gate verdict"; exit 1 ;;
+              esac
             fi
           done < <(jq -r '.[]' "$RUNNER_TEMP/issue-refs.json")
           (( verified > 0 )) || { echo 'No verified Issue E2E requirements'; exit 0; }
