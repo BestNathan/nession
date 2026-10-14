@@ -339,7 +339,15 @@ export async function collectLinkedIssueE2EEvidence(repo,issueNumber,get,
   const proofs=[];
   for(const pr of selected){
     const history=await collectPr(repo,pr,get);
-    if(!history.length)continue;
+    // PR prose is never authoritative. Require the authenticated Plan's
+    // own Issue contracts and per-ID owners to include this requirement
+    // alongside a second Issue, and every surfaced source run to match.
+    const proven=history.filter(row=>
+      row.selection?.issue_numbers?.includes(issueNumber) &&
+      row.selection.issue_numbers.length>=2 &&
+      row.selection.selected?.some(item=>
+        item.owners?.includes(issueNumber)&&item.owners.length>=2));
+    if(!proven.length)continue;
     const payload=await get('/repos/'+repo+'/actions/runs?head_sha='+
       pr.merge_commit_sha+'&per_page=100');
     const completed=(payload?.workflow_runs??[]).filter(run=>
@@ -353,7 +361,7 @@ export async function collectLinkedIssueE2EEvidence(repo,issueNumber,get,
     proofs.push({pr_number:pr.number,pr_head_sha:pr.head.sha,
       staging_merge_sha:pr.merge_commit_sha,
       source:'GitHub Issue cross-reference + exact PR identity',
-      verified_selected_runs:history,
+      verified_selected_runs:proven,
       verified_staging_full:verifyHistoricalStagingFullRun(repo,
         pr.merge_commit_sha,payload?.workflow_runs,artifact)});
   }
@@ -488,10 +496,16 @@ async function selfTest() {
     throw Error('unexpected cross-Issue discovery API '+url);
   };
   const linkedProof=await collectLinkedIssueE2EEvidence(REPO,1702,
-    linkedGet,async()=>[{run_id:10,selection:{selected:[{
-      id:'login',owners:[1702,1717]}]},results:[{id:'login',result:'Fail'}]}]);
+    linkedGet,async()=>[{run_id:10,selection:{
+      issue_numbers:[1702,1717],selected:[{
+        id:'login',owners:[1702,1717]}]},
+      results:[{id:'login',result:'Fail'}]}]);
   assert.deepEqual(linkedProof.map(x=>x.pr_number),[1718]);
   assert.equal(linkedProof[0].verified_staging_full.run_id,991);
+  assert.deepEqual(await collectLinkedIssueE2EEvidence(REPO,1702,
+    linkedGet,async()=>[{run_id:10,selection:{
+      issue_numbers:[999,1717],selected:[{id:'login',owners:[999,1717]}]},
+      results:[{id:'login',result:'Pass'}]}]),[]);
   assert.deepEqual(await collectLinkedIssueE2EEvidence(REPO,1702,async url=>{
     if(url.includes('/timeline?'))return [];
     throw Error('should not fetch unlinked Pull Request');
