@@ -56,9 +56,7 @@ export function verifyHistoricalE2ERun(run,record,prNumber,commitPulls=[],prHead
   // separately authenticated successful Issue PATCH/read-back receipt.
   const drillLinked=allowTestOnly&&Array.isArray(verifiedPrCommits)&&
     verifiedPrCommits.some(c=>c?.sha===run?.head_sha)&&
-    Array.isArray(verifiedReceipts)&&verifiedReceipts.some(r=>
-      r.outcome==='applied'&&r.run_id===run.id&&
-      r.run_attempt===run.run_attempt&&r.target_sha===run.head_sha);
+    hasExactAppliedProjectionReceipt(verifiedReceipts,run);
   if (!goodInt(prNumber) || !goodInt(run?.id) || !goodInt(run.run_attempt) ||
       !SHA.test(String(run.head_sha)) || run.path!=='.github/workflows/e2e-tests.yml' ||
       run.event!=='pull_request' || run.status!=='completed' ||
