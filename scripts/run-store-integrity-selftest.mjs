@@ -24,6 +24,55 @@ function write(root,name,content) {
 function commit(root,msg){
   run(root,'add','-A');run(root,'commit','-qm',msg);return run(root,'rev-parse','HEAD');
 }
+// A writable Store publisher cannot safely accept workflow_dispatch from an
+// arbitrary ref. No YAML job-level if can protect a modified workflow version
+// selected from the attacker-controlled ref, so disable manual dispatch until
+// server-enforced trusted writer identity/Rulesets are provisioned (#1690).
+function verifyRepositoryMetricsTrustedSource(workflow) {
+  const trigger=workflow.split(/^jobs:/m)[0];
+  if(!/^  schedule:\s*$/m.test(trigger) ||
+      /^  workflow_dispatch:\s*$/m.test(trigger) ||
+      !/^  contents: read\s*$/m.test(trigger)) {
+    throw new Error('repository Metrics source is not schedule-only and read-only by default');
+  }
+  for(const job of ['rust-health','web-health','e2e-health','publish']) {
+    const matcher=new RegExp('^  '+job+':\\n    if: [^\\n]*','m');
+    const line=matcher.exec(workflow)?.[0]??'';
+    for(const constraint of ["github.event_name == 'schedule'",
+      "github.ref == 'refs/heads/main'",
+      "github.repository == 'BestNathan/nession'"]) {
+      if(!line.includes(constraint)) throw new Error('unsafe Metrics source job '+job);
+    }
+  }
+  const writer=workflow.split(/^  publish:\s*$/m)[1]??'';
+  if(!/^    permissions:\s*\n      actions: read\s*\n      contents: write\s*$/m.test(writer)) {
+    throw new Error('Metrics writer contents:write must be scoped to publish only');
+  }
+  if(!writer.includes('node "${GITHUB_WORKSPACE}/scripts/run-store-integrity.mjs" staged metrics "${GITHUB_WORKSPACE}/metrics-store"')) {
+    throw new Error('trusted Metrics publisher omitted staged Run Store integrity validation');
+  }
+  return true;
+}
+const repoMetricsYml=fs.readFileSync('.github/workflows/metrics-repository.yml','utf8');
+assert.equal(verifyRepositoryMetricsTrustedSource(repoMetricsYml),true);
+assert.throws(()=>verifyRepositoryMetricsTrustedSource(
+  repoMetricsYml.replace(/^  schedule:/m,'  workflow_dispatch:\n  schedule:')
+),/schedule-only/);
+assert.throws(()=>verifyRepositoryMetricsTrustedSource(
+  repoMetricsYml.replace('  contents: read','  contents: write')
+),/read-only/);
+assert.throws(()=>verifyRepositoryMetricsTrustedSource(
+  repoMetricsYml.replace("github.event_name == 'schedule' && github.ref",
+    "github.event_name == 'workflow_dispatch' && github.ref")
+),/unsafe Metrics source/);
+assert.throws(()=>verifyRepositoryMetricsTrustedSource(
+  repoMetricsYml.replace('  publish:\n','  publish:\n    permissions:\n      contents: write\n')
+),/unsafe Metrics source|scoped to publish/);
+assert.throws(()=>verifyRepositoryMetricsTrustedSource(
+  repoMetricsYml.replace('node "${GITHUB_WORKSPACE}/scripts/run-store-integrity.mjs" staged metrics "${GITHUB_WORKSPACE}/metrics-store"',
+    'echo "skip staged audit"')
+),/omitted staged Run Store integrity/);
+
 const A='acceptance-results',T='task-results',M='metrics',S='agent-store';
 assert.deepEqual(RUN_STORE_REFS,[A,T,M,S]);
 assert.equal(classifyRunStorePath(M,'raw/workflows/canary/2026-10-13/1-1.json'),'immutable');

@@ -3,11 +3,10 @@ name: Metrics / Repository Health
 on:
   schedule:
     - cron: '17 */4 * * *'
-  workflow_dispatch:
 
 permissions:
   actions: read
-  contents: write
+  contents: read
   issues: read
   pull-requests: read
 
@@ -17,6 +16,7 @@ concurrency:
 
 jobs:
   rust-health:
+    if: github.event_name == 'schedule' && github.ref == 'refs/heads/main' && github.repository == 'BestNathan/nession'
     runs-on: ubuntu-latest
     env:
       RUSTC_WRAPPER: ""
@@ -44,6 +44,7 @@ jobs:
           retention-days: 1
 
   web-health:
+    if: github.event_name == 'schedule' && github.ref == 'refs/heads/main' && github.repository == 'BestNathan/nession'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -64,6 +65,7 @@ jobs:
           retention-days: 1
 
   e2e-health:
+    if: github.event_name == 'schedule' && github.ref == 'refs/heads/main' && github.repository == 'BestNathan/nession'
     runs-on: ubuntu-latest
     env:
       RUSTC_WRAPPER: ""
@@ -99,9 +101,14 @@ jobs:
           retention-days: 1
 
   publish:
-    if: ${{ always() }}
+    if: ${{ always() && github.event_name == 'schedule' && github.ref == 'refs/heads/main' && github.repository == 'BestNathan/nession' }}
     needs: [rust-health, web-health, e2e-health]
     runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+      issues: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -168,6 +175,11 @@ jobs:
           cp "${AGENT_OUT_DIR}/agent-metrics-dark.svg" .
 
           git add metrics.json repo-metrics-light.svg repo-metrics-dark.svg             agent-metrics.json agent-metrics-light.svg agent-metrics-dark.svg
+
+          # The shared Run Store policy allows only declared derived Metrics
+          # projections to change; never publish raw/history deletion or
+          # unexpected paths from a privileged scheduled writer.
+          node "${GITHUB_WORKSPACE}/scripts/run-store-integrity.mjs" staged metrics "${GITHUB_WORKSPACE}/metrics-store"
 
           if git diff --cached --quiet; then
             echo "Metrics projections are unchanged."
