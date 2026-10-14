@@ -8,15 +8,10 @@ import { resetAuth } from '../../helpers/reset';
  */
 const DIRECT_WS = 'ws://localhost:19090/ws';
 
-// Skip login form test — the form's "Connecting..." state races with the
-// server's startup in CI, making this test unreliable. The auto-connect
-// path below exercises the same WebSocket connection code.
-// TODO: fix once we have a reliable server readiness signal.
+// The form-login scenario is not yet implemented as an E2E test: the
+// "Connecting..." state races with startup. Restore it only once there is a
+// reliable readiness contract; do not leave a permanently skipped test case.
 test.describe('Login', () => {
-  test.skip('form login with server URL and auth token', async () => {
-    // skipped — see note above
-  });
-
   test('auto-connect via URL token parameter', async ({ page }) => {
     await page.goto('/');
     await resetAuth(page);
