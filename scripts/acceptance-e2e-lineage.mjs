@@ -41,15 +41,22 @@ export function verifiedCommitPullAssociation(pulls,prNumber,expectedHeadSha,all
       pr.head?.repo?.full_name===REPO && pr.base?.repo?.full_name===REPO);
 }
 
+// Old, deliberately unmerged test PRs may predate durable Issue PATCH
+// receipts. Exclude those unproven runs; NEVER weaken validation for a present
+// receipt or synthesize applied from a Playwright execution artifact.
+export function hasExactAppliedProjectionReceipt(receipts,run) {
+  return Array.isArray(receipts)&&receipts.some(r=>
+    r.outcome==='applied'&&r.run_id===run?.id&&
+    r.run_attempt===run?.run_attempt&&r.target_sha===run?.head_sha);
+}
+
 export function verifyHistoricalE2ERun(run,record,prNumber,commitPulls=[],prHeadSha=null,allowTestOnly=false,verifiedPrCommits=[],verifiedReceipts=[]) {
   // GitHub may clear both associations after a test-only PR closes unmerged.
   // Source membership then requires GitHub's own PR Commit list AND a
   // separately authenticated successful Issue PATCH/read-back receipt.
   const drillLinked=allowTestOnly&&Array.isArray(verifiedPrCommits)&&
     verifiedPrCommits.some(c=>c?.sha===run?.head_sha)&&
-    Array.isArray(verifiedReceipts)&&verifiedReceipts.some(r=>
-      r.outcome==='applied'&&r.run_id===run.id&&
-      r.run_attempt===run.run_attempt&&r.target_sha===run.head_sha);
+    hasExactAppliedProjectionReceipt(verifiedReceipts,run);
   if (!goodInt(prNumber) || !goodInt(run?.id) || !goodInt(run.run_attempt) ||
       !SHA.test(String(run.head_sha)) || run.path!=='.github/workflows/e2e-tests.yml' ||
       run.event!=='pull_request' || run.status!=='completed' ||
@@ -242,6 +249,29 @@ async function findTrustedStaleReplay(repo,history,get,currentHead,readLog=readT
 // Evidence of a mutable GitHub Issue PATCH cannot be inferred from an E2E
 // result alone. Only receipts written by the trusted main ingest AFTER
 // PATCH+independent Issue GET qualify as historically applied.
+export function attestProjectionIngestStatus(repo,run,verified,ingest,jobs){
+  if(repo!==REPO||ingest?.id!==verified?.ingest_run_id||
+     ingest.run_attempt!==verified.ingest_attempt||
+     ingest.repository?.full_name!==repo||
+     ingest.path!=='.github/workflows/e2e-test-ingest.yml'||
+     ingest.name!=='E2E / Test Ingest'||ingest.event!=='workflow_run'||
+     ingest.head_branch!=='main'||ingest.status!=='completed'||
+     !['success','failure'].includes(ingest.conclusion)||
+     String(ingest.created_at??'')<String(run?.created_at??''))
+    throw Error('projection receipt has untrusted GitHub ingest identity');
+  const job=(jobs?.jobs??[]).find(j=>j.name==='ingest-pr'&&
+    j.status==='completed');
+  const step=job?.steps?.find(x=>
+    x.name==='Store immutable results and update Issue reports');
+  // A failed trusted writer can have pushed one authenticated receipt before
+  // failing on the next Issue. This is *not* a completed ingestion proof.
+  if(ingest.conclusion==='failure'&&job?.conclusion==='failure'&&
+     step?.conclusion==='failure')return 'incomplete';
+  if(ingest.conclusion==='success'&&job?.conclusion==='success'&&
+     step?.conclusion==='success')return 'verified';
+  throw Error('no successful trusted Issue projection step for receipt');
+}
+
 export async function collectAuthenticatedProjectionReceipts(repo,run,record,plan,get){
   if(repo!==REPO||!goodInt(run?.id)||!goodInt(run.run_attempt)||
      !/^\d{4}-\d{2}-\d{2}$/.test(String(run.created_at??'').slice(0,10)))
@@ -259,22 +289,10 @@ export async function collectAuthenticatedProjectionReceipts(repo,run,record,pla
     const receipt=JSON.parse(Buffer.from(payload.content.replace(/\s/g,''),'base64').toString('utf8'));
     const verified=verifyArchivedProjectionReceipt(receipt,record,plan,owner.issue);
     const ingest=await get('/repos/'+repo+'/actions/runs/'+verified.ingest_run_id);
-    if(ingest?.id!==verified.ingest_run_id||
-       ingest.run_attempt!==verified.ingest_attempt||
-       ingest.repository?.full_name!==repo||
-       ingest.path!=='.github/workflows/e2e-test-ingest.yml'||
-       ingest.name!=='E2E / Test Ingest'||ingest.event!=='workflow_run'||
-       ingest.head_branch!=='main'||ingest.status!=='completed'||
-       ingest.conclusion!=='success'||
-       String(ingest.created_at??'')<String(run.created_at??''))
-      throw Error('projection receipt not issued by a successful trusted ingest');
     const jobs=await get('/repos/'+repo+'/actions/runs/'+ingest.id+
       '/attempts/'+ingest.run_attempt+'/jobs?per_page=100');
-    if(!(jobs.jobs??[]).some(j=>j.name==='ingest-pr' &&
-       j.status==='completed'&&j.conclusion==='success'&&
-       j.steps?.some(step=>step.name==='Store immutable results and update Issue reports' &&
-         step.conclusion==='success')))
-      throw Error('no trusted completed Issue projection step for receipt');
+    if(attestProjectionIngestStatus(repo,run,verified,ingest,jobs)==='incomplete')
+      continue;
     proofs.push({...verified,source_run_url:run.html_url,
       ingest_url:ingest.html_url,
       provenance:'authenticated main ingest + immutable post-PATCH Issue readback receipt'});
@@ -334,6 +352,10 @@ export async function collectHistoricalE2EForPull(repo,pull,get,readPlan=readHis
       const plan=await readPlan(repo,artifact);
       const selection=verifyHistoricalPlan(run,record,plan,pull.number);
       const projections=await loadReceipts(repo,run,record,plan,get);
+      const runLinked=run.pull_requests?.some(p=>p.number===pull.number);
+      if(testDrill&&!runLinked&&!commitLinked&&
+         !hasExactAppliedProjectionReceipt(projections,run))
+        continue; // Legacy unreceipted drill, not a valid Issue PATCH proof.
       verified.push({...verifyHistoricalE2ERun(run,record,pull.number,
         commitPulls,pull.head.sha,testDrill,selected,projections),
         artifact_id:artifactId,created_at:run.created_at,selection,projections});
@@ -613,6 +635,43 @@ async function selfTest() {
     ...drillPr,title:'regular feature PR'}]),[]);
   assert.equal(verifiedCommitPullAssociation([drillPr],1761,b,true),true);
   assert.equal(verifiedCommitPullAssociation([drillPr],1761,b,false),false);
+  const olderUnreceipted={id:99,run_attempt:1,head_sha:a};
+  assert.equal(hasExactAppliedProjectionReceipt([],olderUnreceipted),false);
+  assert.equal(hasExactAppliedProjectionReceipt([{outcome:'recovered',
+    run_id:99,run_attempt:1,target_sha:a}],olderUnreceipted),false);
+  assert.equal(hasExactAppliedProjectionReceipt([{outcome:'applied',
+    run_id:99,run_attempt:1,target_sha:b}],olderUnreceipted),false);
+  assert.equal(hasExactAppliedProjectionReceipt([{outcome:'applied',
+    run_id:99,run_attempt:1,target_sha:a}],olderUnreceipted),true);
+  // Real partial-ingest boundary: a prior Issue may have been patched and a
+  // receipt committed, but a later Issue fails in the same workflow. Such
+  // a writer is ineligible for successful historic projection evidence.
+  const partial={id:100,run_attempt:1,repository:{full_name:REPO},
+    path:'.github/workflows/e2e-test-ingest.yml',name:'E2E / Test Ingest',
+    event:'workflow_run',head_branch:'main',status:'completed',
+    conclusion:'failure',created_at:'2026-10-14T09:36:09Z'};
+  const srcRun={id:99,created_at:'2026-10-14T09:29:35Z'},
+    intent={ingest_run_id:100,ingest_attempt:1};
+  const ingestJob={name:'ingest-pr',status:'completed',conclusion:'failure',
+    steps:[{name:'Store immutable results and update Issue reports',conclusion:'failure'}]};
+  assert.equal(attestProjectionIngestStatus(REPO,srcRun,intent,partial,
+    {jobs:[ingestJob]}),'incomplete');
+  const successful={...partial,conclusion:'success'};
+  const goodJob={...ingestJob,conclusion:'success',steps:[
+    {name:'Store immutable results and update Issue reports',conclusion:'success'}]};
+  assert.equal(attestProjectionIngestStatus(REPO,srcRun,intent,successful,
+    {jobs:[goodJob]}),'verified');
+  assert.throws(()=>attestProjectionIngestStatus(REPO,srcRun,intent,
+    {...partial,repository:{full_name:'attacker/repo'}},{jobs:[ingestJob]}),/untrusted/);
+  assert.throws(()=>attestProjectionIngestStatus(REPO,srcRun,intent,
+    {...partial,run_attempt:2},{jobs:[ingestJob]}),/untrusted/);
+  assert.throws(()=>attestProjectionIngestStatus(REPO,srcRun,intent,
+    {...partial,created_at:'2026-10-14T09:00:00Z'},{jobs:[ingestJob]}),/untrusted/);
+  assert.throws(()=>attestProjectionIngestStatus(REPO,srcRun,intent,
+    successful,{jobs:[ingestJob]}),/successful trusted/);
+  assert.throws(()=>attestProjectionIngestStatus(REPO,srcRun,intent,
+    partial,{jobs:[goodJob]}),/successful trusted/);
+
   const noAssociations={...current,pull_requests:[]};
   const applied=[{outcome:'applied',run_id:20,run_attempt:1,target_sha:b}];
   assert.equal(verifyHistoricalE2ERun(noAssociations,rec(current,'Pass'),1718,
