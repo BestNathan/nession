@@ -61,6 +61,14 @@ on:
         required: false
         default: ''
         type: string
+      provider_source_run_id:
+        required: false
+        default: ''
+        type: string
+      provider_source_run_attempt:
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -93,6 +101,8 @@ jobs:
       TARGET_REF: ${{ inputs.target_ref }}
       DEPLOYMENT: ${{ inputs.deployment }}
       DETERMINISTIC_RESULT_JSON: ${{ inputs.deterministic_result_json }}
+      PROVIDER_SOURCE_RUN_ID: ${{ inputs.provider_source_run_id }}
+      PROVIDER_SOURCE_RUN_ATTEMPT: ${{ inputs.provider_source_run_attempt }}
 
       CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
       CURSOR_MODEL: ${{ vars.CURSOR_MODEL || 'composer-2.5' }}
@@ -127,6 +137,14 @@ jobs:
           # exact-source merge/parent proofs incorrectly Pending.
           fetch-depth: 0
 
+      - name: Checkout immutable authenticated Provider evidence
+        if: inputs.provider_source_run_id != ''
+        uses: actions/checkout@v4
+        with:
+          ref: metrics
+          path: provider-metrics
+          persist-credentials: false
+
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -157,6 +175,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PROVIDER_METRICS_ROOT: ${{ github.workspace }}/provider-metrics
         run: |
           set -euo pipefail
           node scripts/acceptance-ci-evidence.mjs collect \
