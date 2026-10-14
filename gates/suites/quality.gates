@@ -15,6 +15,7 @@ repo-health-selftest
 repo-metrics-selftest
 agent-workflow-telemetry
 agent-checkpoint-store
+run-store-integrity
 workflow-conventions
 issue-contract-selftest
 issue-audit-agent-selftest
