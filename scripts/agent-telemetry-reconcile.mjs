@@ -94,7 +94,7 @@ export async function chooseMissing(runsBySource,summaryCounts,artifactCount){
   // Provider is first so a cancelled ingest cannot strand merged-SHA SC wake.
   // Oldest eligible first within each bounded source listing avoids starvation.
   for(const source of SOURCES){
-    const runs=runsBySource.get(source.file);
+    const runs=runsBySource.get(source.file)??[];
     if(!Array.isArray(runs)||runs.length>MAX_RUNS)fail('unbounded source listing');
     const ordered=runs.filter(run=>trustedSource(run,source))
       .sort((a,b)=>String(a.created_at).localeCompare(String(b.created_at)));
