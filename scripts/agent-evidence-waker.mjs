@@ -97,6 +97,13 @@ export function validateWakeConsumerRouting(workflow){
   if(!provider.includes('ACCEPTANCE_STAGE=post-merge TARGET_SHA="$SOURCE_SHA" \\') ||
      !provider.includes('node scripts/select-merged-agents.mjs select'))
     fail('merged Agent selection must receive authenticated Provider target SHA');
+  const call=workflow.split('  post-merge-provider-evidence-acceptance:')[1]
+    ?.split('  # The privileged E2E ingest')[0]??'';
+  if(!provider.includes('echo "source_run_id=$SOURCE_RUN_ID" >> "$GITHUB_OUTPUT"') ||
+     !provider.includes('echo "source_run_attempt=$SOURCE_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"') ||
+     !call.includes('provider_source_run_id: ${{ needs.prepare-post-merge-provider-evidence.outputs.source_run_id }}') ||
+     !call.includes('provider_source_run_attempt: ${{ needs.prepare-post-merge-provider-evidence.outputs.source_run_attempt }}'))
+    fail('Provider evidence waker lost exact run/attempt forwarding to read-only Agent');
   if(!e2e?.includes("if: github.event_name == 'repository_dispatch' && github.event.action == 'nession-issue-e2e-projected'"))
     fail('E2E event source must be an exact repository_dispatch action');
   return {provider:true,e2e:true,source_sha:true};
@@ -106,6 +113,15 @@ function selfTest(){
   assert.deepEqual(validateWakeProducerTrigger(wf),{sources:4});
   const orchestration=fs.readFileSync('.github/workflows/acceptance-orchestrator.yml','utf8');
   assert.deepEqual(validateWakeConsumerRouting(orchestration),{provider:true,e2e:true,source_sha:true});
+  const acceptance=fs.readFileSync('.github/workflows/agent-sc-acceptance.yml','utf8');
+  if(!acceptance.includes('PROVIDER_SOURCE_RUN_ID: ${{ inputs.provider_source_run_id }}')||
+     !acceptance.includes('PROVIDER_SOURCE_RUN_ATTEMPT: ${{ inputs.provider_source_run_attempt }}')||
+     !acceptance.includes("ref: metrics")||
+     !acceptance.includes("path: provider-metrics"))
+    fail('read-only Acceptance lost authenticated Provider source or Metrics checkout');
+  assert.throws(()=>validateWakeConsumerRouting(
+    orchestration.replace('provider_source_run_attempt: ${{ needs.prepare-post-merge-provider-evidence.outputs.source_run_attempt }}',
+      'provider_source_run_attempt: 1')),/run\/attempt forwarding/);
   assert.throws(()=>validateWakeConsumerRouting(
     orchestration.replace('ACCEPTANCE_STAGE=post-merge TARGET_SHA="$SOURCE_SHA"',
       'ACCEPTANCE_STAGE=post-merge')),/target SHA/);

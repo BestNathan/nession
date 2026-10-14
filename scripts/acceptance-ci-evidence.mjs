@@ -5,6 +5,9 @@ import fs from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { collectHistoricalE2EForPull, collectLinkedIssueE2EEvidence } from './acceptance-e2e-lineage.mjs';
 import { parseIssueE2E } from './issue-e2e-contract.mjs';
+import { verifyWake } from './agent-evidence-waker.mjs';
+import os from 'node:os';
+import path from 'node:path';
 
 const MAX_RUNS_PER_SHA = 20;
 const MAX_ASSOCIATED_PULLS = 5;
@@ -65,7 +68,7 @@ function compactRuns(runs, expectedSha) {
     .slice(0, MAX_RUNS_PER_SHA);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [] }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -96,6 +99,7 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     declared_merge_commits: declaredMergeCommits,
     linked_issue_e2e_evidence: linkedIssueE2E,
     implementation_pull_requests: implementationPulls,
+    provider_wake_evidence: providerWakeEvidence,
   };
 }
 
@@ -114,6 +118,40 @@ async function githubGet(path) {
     throw new Error('GitHub API ' + response.status + ' for ' + path + ': ' + await response.text());
   }
   return response.json();
+}
+
+// A completed Provider source may be older than MAX_RUNS_PER_SHA and get
+// dropped from ordinary direct_runs. The main-only Provider dispatch already
+// supplies its exact locator; verify GitHub Run + persisted Metrics again here,
+// rather than widening an unbounded workflow-run listing or trusting prose.
+export function verifyPinnedProviderEvidence(targetSha,sourceId,attempt,run,metricsRoot){
+  if(!/^[a-f0-9]{40}$/.test(targetSha)||
+     !/^[1-9][0-9]*$/.test(String(sourceId))||
+     !/^[1-9][0-9]*$/.test(String(attempt))||
+     !Number.isSafeInteger(Number(sourceId))||
+     !Number.isSafeInteger(Number(attempt))||
+     !path.isAbsolute(metricsRoot))
+    throw Error('invalid pinned Provider evidence identity');
+  const source_run_id=Number(sourceId),source_run_attempt=Number(attempt);
+  const verified=verifyWake({source_run_id,source_run_attempt,target_sha:targetSha},run,metricsRoot);
+  return {kind:'verified_main_provider_wake',schema_version:1,
+    source_run_id,source_run_attempt,target_sha:targetSha,
+    source_url:'https://github.com/BestNathan/nession/actions/runs/'+source_run_id,
+    durable_metrics_matches:verified.matches,workflow_path:run.path,
+    source_event:run.event,source_status:run.status,source_conclusion:run.conclusion,
+    head_branch:run.head_branch,
+    provenance:'GitHub Provider Smoke Run + read-only authenticated Metrics orphan records'};
+}
+async function collectPinnedProviderEvidence(repo,sha){
+  const id=String(process.env.PROVIDER_SOURCE_RUN_ID??'').trim();
+  const attempt=String(process.env.PROVIDER_SOURCE_RUN_ATTEMPT??'').trim();
+  if(!id&&!attempt)return null;
+  if(process.env.ACCEPTANCE_STAGE!=='post-merge'||!id||!attempt)
+    throw Error('pinned Provider wake is only valid for complete post-merge identity');
+  const run=await githubGet('/repos/'+repo+'/actions/runs/'+encodeURIComponent(id));
+  const workspace=requireText(process.env.GITHUB_WORKSPACE,'GITHUB_WORKSPACE');
+  const metricsRoot=path.join(workspace,'provider-metrics');
+  return verifyPinnedProviderEvidence(sha,id,attempt,run,metricsRoot);
 }
 
 async function workflowRunsForSha(repo, sha) {
@@ -306,6 +344,7 @@ async function collectCommand(workspace, outFile) {
   const repo = requireText(process.env.GITHUB_REPOSITORY, 'GITHUB_REPOSITORY');
   const sha = execFileSync('git', ['-C', workspace, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   const directRuns = await workflowRunsForSha(repo, sha);
+  const providerWakeEvidence = await collectPinnedProviderEvidence(repo,sha);
   const pulls = await githubGet('/repos/' + repo + '/commits/' + encodeURIComponent(sha) + '/pulls?per_page=10');
   const selectedPulls = (Array.isArray(pulls) ? pulls : []).filter((pull) => pull?.head?.sha).slice(0, MAX_ASSOCIATED_PULLS);
   const pullRunsBySha = new Map();
@@ -376,7 +415,7 @@ async function collectCommand(workspace, outFile) {
         repo,Number(issueNumber),currentIssue,sha);
   }
   const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls,
-    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits });
+    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence });
   fs.writeFileSync(outFile, JSON.stringify(evidence, null, 2) + '\n');
   console.log(
     'collected acceptance CI evidence for ' + sha +
@@ -407,6 +446,32 @@ function selfTest() {
   });
 
   assert.equal(evidence.kind, 'acceptance_ci_evidence');
+  assert.equal(evidence.provider_wake_evidence,null);
+  const fixtureRoot=fs.mkdtempSync(path.join(os.tmpdir(),'nession-pinned-provider-evidence-'));
+  try {
+    const dir=path.join(fixtureRoot,'raw/workflows/agent-provider-smoke/2026-10-14');
+    fs.mkdirSync(dir,{recursive:true});
+    const target='a'.repeat(40);
+    fs.writeFileSync(path.join(dir,'55-2-issue-1728-cursor.json'),JSON.stringify({
+      kind:'agent_workflow_run',
+      identity:{github_run_id:55,github_run_attempt:2,workflow_id:'agent-provider-smoke',
+        repository:'BestNathan/nession',event:'push'},
+      task:{target_ref:target}
+    }));
+    const run={id:55,run_attempt:2,name:'Agent / Provider Smoke',
+      path:'.github/workflows/agent-provider-smoke.yml',event:'push',
+      head_branch:'main',head_sha:target,status:'completed',conclusion:'success',
+      repository:{full_name:'BestNathan/nession'},
+      head_repository:{full_name:'BestNathan/nession'}};
+    const pinned=verifyPinnedProviderEvidence(target,'55','2',run,fixtureRoot);
+    assert.equal(pinned.durable_metrics_matches,1);
+    assert.equal(normalizeCiEvidence({targetSha:target,providerWakeEvidence:pinned}).provider_wake_evidence.source_run_id,55);
+    assert.throws(()=>verifyPinnedProviderEvidence(target,'55','1',run,fixtureRoot),/source is not/);
+    assert.throws(()=>verifyPinnedProviderEvidence('b'.repeat(40),'55','2',run,fixtureRoot),/source is not/);
+    assert.throws(()=>verifyPinnedProviderEvidence(target,'55','2',{...run,event:'pull_request'},fixtureRoot),/source is not/);
+    fs.unlinkSync(path.join(dir,'55-2-issue-1728-cursor.json'));
+    assert.throws(()=>verifyPinnedProviderEvidence(target,'55','2',run,fixtureRoot),/no persisted/);
+  }finally{fs.rmSync(fixtureRoot,{recursive:true,force:true});}
   const implIssue={number:1759,body:'## Success Criteria\n- [ ] SC-05 Implementation PR Quality, E2E, Case and Acceptance gates pass.\n## E2E Verification\n### New\n- none'};
   assert.equal(issueRequestsImplementationGates(implIssue),true);
   assert.equal(issueRequestsImplementationGates({...implIssue,body:implIssue.body.replace('Implementation PR','test-only PR')}),false);

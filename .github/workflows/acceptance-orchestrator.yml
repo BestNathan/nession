@@ -342,6 +342,8 @@ jobs:
       pull-requests: read
     outputs:
       target_sha: ${{ steps.select.outputs.target_sha }}
+      source_run_id: ${{ steps.select.outputs.source_run_id }}
+      source_run_attempt: ${{ steps.select.outputs.source_run_attempt }}
       agent_issues: ${{ steps.select.outputs.agent_issues }}
       has_agents: ${{ steps.select.outputs.has_agents }}
     steps:
@@ -382,6 +384,8 @@ jobs:
             "$RUNNER_TEMP/telemetry-wake.json" "$RUNNER_TEMP/provider-source.json" \
             "$GITHUB_WORKSPACE/metrics-store"
           echo "target_sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
+          echo "source_run_id=$SOURCE_RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "source_run_attempt=$SOURCE_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
 
           # Reuse the canonical merged-stage association/method selector.
           issue_numbers="$(node scripts/requirement-acceptance.mjs discover-ref "$SOURCE_SHA")"
@@ -413,6 +417,8 @@ jobs:
       stage: post-merge
       provider: cursor
       target_ref: ${{ needs.prepare-post-merge-provider-evidence.outputs.target_sha }}
+      provider_source_run_id: ${{ needs.prepare-post-merge-provider-evidence.outputs.source_run_id }}
+      provider_source_run_attempt: ${{ needs.prepare-post-merge-provider-evidence.outputs.source_run_attempt }}
       deployment: ''
     secrets: inherit
 
