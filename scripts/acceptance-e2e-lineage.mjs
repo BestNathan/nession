@@ -32,21 +32,23 @@ function recordFromApi(payload) {
 // The immutable commit SHA's GitHub Commit→PR association is the bounded
 // fallback. Both the PR head identity and same-repository merge are required;
 // the Run Record and Selection Plan are still verified independently.
-export function verifiedCommitPullAssociation(pulls,prNumber,expectedHeadSha) {
+export function verifiedCommitPullAssociation(pulls,prNumber,expectedHeadSha,allowTestOnly=false) {
   return SHA.test(String(expectedHeadSha??'')) && Array.isArray(pulls) &&
-    pulls.some(pr=>pr.number===prNumber && pr.state==='closed' &&
-      Boolean(pr.merged_at) && pr.head?.sha===expectedHeadSha &&
+    pulls.some(pr=>pr.number===prNumber &&
+      (pr.state==='closed'||(allowTestOnly&&pr.state==='open')) &&
+      (Boolean(pr.merged_at)||(allowTestOnly&&pr.merged_at==null)) &&
+      pr.head?.sha===expectedHeadSha &&
       pr.head?.repo?.full_name===REPO && pr.base?.repo?.full_name===REPO);
 }
 
-export function verifyHistoricalE2ERun(run,record,prNumber,commitPulls=[],prHeadSha=null) {
+export function verifyHistoricalE2ERun(run,record,prNumber,commitPulls=[],prHeadSha=null,allowTestOnly=false) {
   if (!goodInt(prNumber) || !goodInt(run?.id) || !goodInt(run.run_attempt) ||
       !SHA.test(String(run.head_sha)) || run.path!=='.github/workflows/e2e-tests.yml' ||
       run.event!=='pull_request' || run.status!=='completed' ||
       !['success','failure'].includes(run.conclusion) ||
       run.repository?.full_name!==REPO || run.head_repository?.full_name!==REPO ||
       !(run.pull_requests?.some(p=>p.number===prNumber) ||
-        verifiedCommitPullAssociation(commitPulls,prNumber,prHeadSha)))
+        verifiedCommitPullAssociation(commitPulls,prNumber,prHeadSha,allowTestOnly)))
     throw Error('unrelated or untrusted E2E run');
   if (record?.schema_version!==1 || record.kind!=='issue_e2e_run' ||
       record.run_id!==run.id || record.run_attempt!==run.run_attempt ||
@@ -296,7 +298,7 @@ export async function collectHistoricalE2EForPull(repo,pull,get,readPlan=readHis
       ? await get('/repos/'+repo+'/commits/'+sha+'/pulls?per_page=100')
       : [];
     const commitLinked=verifiedCommitPullAssociation(
-      commitPulls,pull.number,pull.head.sha);
+      commitPulls,pull.number,pull.head.sha,!pull.merged_at);
     const runs=candidates.filter(r=>
       r.pull_requests?.some(p=>p.number===pull.number)||commitLinked)
       .sort((a,b)=>Number(b.id)-Number(a.id))
@@ -320,7 +322,7 @@ export async function collectHistoricalE2EForPull(repo,pull,get,readPlan=readHis
       const plan=await readPlan(repo,artifact);
       const selection=verifyHistoricalPlan(run,record,plan,pull.number);
       const projections=await loadReceipts(repo,run,record,plan,get);
-      verified.push({...verifyHistoricalE2ERun(run,record,pull.number,commitPulls,pull.head.sha),
+      verified.push({...verifyHistoricalE2ERun(run,record,pull.number,commitPulls,pull.head.sha,!pull.merged_at),
         artifact_id:artifactId,created_at:run.created_at,selection,projections});
     }
   }
@@ -351,17 +353,25 @@ export function selectCrossReferencedE2EPulls(repo, issueNumber, events, pulls) 
          'https://api.github.com/repos/'+repo+'/pulls/'+n)known.add(n);
   }
   return pulls.filter(pr=>{
-    if(!known.has(pr?.number)||pr?.state!=='closed'||!pr.merged_at||
-       pr?.base?.ref!=='staging'||pr?.base?.repo?.full_name!==repo||
-       pr?.head?.repo?.full_name!==repo||!SHA.test(pr?.head?.sha??'')||
-       !SHA.test(pr?.merge_commit_sha??''))return false;
+    if(!known.has(pr?.number)||pr?.base?.repo?.full_name!==repo||
+       pr?.head?.repo?.full_name!==repo||!SHA.test(pr?.head?.sha??''))
+      return false;
+    const merged=pr.state==='closed'&&Boolean(pr.merged_at)&&
+      pr.base.ref==='staging'&&SHA.test(pr.merge_commit_sha??'');
+    // DO-NOT-MERGE labels are for candidate discovery only, not Pass proof.
+    // Require real source Run/Plan/Artifact and trusted post-PATCH receipts.
+    const drill=pr.merged_at==null&&['open','closed'].includes(pr.state)&&
+      ['main','staging'].includes(pr.base.ref)&&
+      /DO NOT MERGE/i.test(String(pr.title??''))&&
+      /DO NOT MERGE/i.test(String(pr.body??''));
+    if(!merged&&!drill)return false;
     const refs=new Set();
     for(const line of String(pr.body??'').split(/\r?\n/)){
       const match=line.match(/^\s*Refs?\s*:?\s*(.*)$/i);
       if(match)for(const hit of match[1].matchAll(/#([1-9]\d*)\b/g))
         refs.add(Number(hit[1]));
     }
-    return refs.has(issueNumber)&&refs.size>=2;
+    return refs.has(issueNumber)&&(merged?refs.size>=2:refs.size>=1);
   }).sort((a,b)=>a.number-b.number).slice(-MAX_LINKED_PRS);
 }
 
@@ -415,12 +425,12 @@ export async function collectLinkedIssueE2EEvidence(repo,issueNumber,get,
     // alongside a second Issue, and every surfaced source run to match.
     const proven=history.filter(row=>
       row.selection?.issue_numbers?.includes(issueNumber) &&
-      row.selection.issue_numbers.length>=2 &&
+      (pr.merged_at?row.selection.issue_numbers.length>=2:true) &&
       row.selection.selected?.some(item=>
-        item.owners?.includes(issueNumber)&&item.owners.length>=2));
+        item.owners?.includes(issueNumber)&&(pr.merged_at?item.owners.length>=2:true)));
     if(!proven.length)continue;
-    const payload=await get('/repos/'+repo+'/actions/runs?head_sha='+
-      pr.merge_commit_sha+'&per_page=100');
+    const payload=pr.merged_at?await get('/repos/'+repo+'/actions/runs?head_sha='+
+      pr.merge_commit_sha+'&per_page=100'):{workflow_runs:[]};
     const completed=(payload?.workflow_runs??[]).filter(run=>
       run.name==='E2E / Tests'&&run.path==='.github/workflows/e2e-tests.yml'&&
       run.event==='push'&&run.head_branch==='staging'&&
@@ -433,8 +443,9 @@ export async function collectLinkedIssueE2EEvidence(repo,issueNumber,get,
       staging_merge_sha:pr.merge_commit_sha,
       source:'GitHub Issue cross-reference + exact PR identity',
       verified_selected_runs:proven,
-      verified_staging_full:verifyHistoricalStagingFullRun(repo,
-        pr.merge_commit_sha,payload?.workflow_runs,artifact)});
+      scope:pr.merged_at?'merged-staging':'unmerged-test-only',
+      verified_staging_full:pr.merged_at?verifyHistoricalStagingFullRun(repo,
+        pr.merge_commit_sha,payload?.workflow_runs,artifact):null});
   }
   return proofs;
 }
