@@ -26,13 +26,26 @@ function recordFromApi(payload) {
   throw Error('missing or invalid GitHub Run Record envelope');
 }
 
-export function verifyHistoricalE2ERun(run,record,prNumber) {
+// GitHub may erase workflow_run.pull_requests after a PR is merged.
+// The immutable commit SHA's GitHub Commit→PR association is the bounded
+// fallback. Both the PR head identity and same-repository merge are required;
+// the Run Record and Selection Plan are still verified independently.
+export function verifiedCommitPullAssociation(pulls,prNumber,expectedHeadSha) {
+  return SHA.test(String(expectedHeadSha??'')) && Array.isArray(pulls) &&
+    pulls.some(pr=>pr.number===prNumber && pr.state==='closed' &&
+      Boolean(pr.merged_at) && pr.head?.sha===expectedHeadSha &&
+      pr.head?.repo?.full_name===REPO && pr.base?.repo?.full_name===REPO);
+}
+
+export function verifyHistoricalE2ERun(run,record,prNumber,commitPulls=[],prHeadSha=null) {
   if (!goodInt(prNumber) || !goodInt(run?.id) || !goodInt(run.run_attempt) ||
       !SHA.test(String(run.head_sha)) || run.path!=='.github/workflows/e2e-tests.yml' ||
       run.event!=='pull_request' || run.status!=='completed' ||
       !['success','failure'].includes(run.conclusion) ||
       run.repository?.full_name!==REPO || run.head_repository?.full_name!==REPO ||
-      !run.pull_requests?.some(p=>p.number===prNumber)) throw Error('unrelated or untrusted E2E run');
+      !(run.pull_requests?.some(p=>p.number===prNumber) ||
+        verifiedCommitPullAssociation(commitPulls,prNumber,prHeadSha)))
+    throw Error('unrelated or untrusted E2E run');
   if (record?.schema_version!==1 || record.kind!=='issue_e2e_run' ||
       record.run_id!==run.id || record.run_attempt!==run.run_attempt ||
       record.target_sha!==run.head_sha || !DIGEST.test(record.plan_digest) ||
@@ -226,9 +239,21 @@ export async function collectHistoricalE2EForPull(repo,pull,get,readPlan=readHis
     const sha=commit.sha;
     if (!SHA.test(String(sha))) throw Error('untrusted commit SHA from GitHub API');
     const payload=await get('/repos/'+repo+'/actions/runs?head_sha='+sha+'&per_page=100');
-    const runs=(payload.workflow_runs??[]).filter(r=>
+    const candidates=(payload.workflow_runs??[]).filter(r=>
       r.path==='.github/workflows/e2e-tests.yml'&&r.event==='pull_request'&&
-      r.status==='completed'&&r.pull_requests?.some(p=>p.number===pull.number))
+      r.status==='completed'&&r.head_sha===sha);
+    // The source run's mutable PR association list is not stable after merge.
+    // Ask GitHub which PR owns the exact commit, and require a matching merged
+    // same-repo PR head before considering runs with an empty association list.
+    const needsFallback=candidates.some(r=>
+      !r.pull_requests?.some(p=>p.number===pull.number));
+    const commitPulls=needsFallback
+      ? await get('/repos/'+repo+'/commits/'+sha+'/pulls?per_page=100')
+      : [];
+    const commitLinked=verifiedCommitPullAssociation(
+      commitPulls,pull.number,pull.head.sha);
+    const runs=candidates.filter(r=>
+      r.pull_requests?.some(p=>p.number===pull.number)||commitLinked)
       .sort((a,b)=>Number(b.id)-Number(a.id))
       .slice(0,MAX_RUNS_PER_COMMIT);
     for (const run of runs) {
@@ -249,7 +274,7 @@ export async function collectHistoricalE2EForPull(repo,pull,get,readPlan=readHis
       const artifact=artifactMetadata.artifacts.find(a=>a.id===artifactId);
       const plan=await readPlan(repo,artifact);
       const selection=verifyHistoricalPlan(run,record,plan,pull.number);
-      verified.push({...verifyHistoricalE2ERun(run,record,pull.number),
+      verified.push({...verifyHistoricalE2ERun(run,record,pull.number,commitPulls,pull.head.sha),
         artifact_id:artifactId,created_at:run.created_at,selection});
     }
   }
@@ -412,6 +437,40 @@ async function selfTest() {
   assert.deepEqual(found.map(x=>x.artifact_id),[101,202]);
   assert.deepEqual(found.map(x=>x.selection.selected),
     [[{id:'login',owners:[1702]}],[{id:'login',owners:[1702]}]]);
+  // GitHub can return pull_requests:[] for runs after their PR was merged.
+  // Verify membership from its commit-to-PR endpoint, never from PR prose.
+  const mergedPr={number:1718,state:'closed',merged_at:'2026-10-14T05:09:42Z',
+    head:{sha:b,repo:{full_name:REPO}},base:{repo:{full_name:REPO}}};
+  const mergedOld={...old,pull_requests:[]},mergedCurrent={...current,pull_requests:[]};
+  const mergedMap=new Map(map);
+  mergedMap.set('/repos/'+REPO+'/actions/runs?head_sha='+a+'&per_page=100',
+    {workflow_runs:[mergedOld]});
+  mergedMap.set('/repos/'+REPO+'/actions/runs?head_sha='+b+'&per_page=100',
+    {workflow_runs:[mergedCurrent]});
+  mergedMap.set('/repos/'+REPO+'/commits/'+a+'/pulls?per_page=100',[mergedPr]);
+  mergedMap.set('/repos/'+REPO+'/commits/'+b+'/pulls?per_page=100',[mergedPr]);
+  const mergedGet=async p=>{if(!mergedMap.has(p))throw Error('unexpected request '+p);
+    return mergedMap.get(p)};
+  const mergedHistory=await collectHistoricalE2EForPull(REPO,pr,mergedGet,readPlan,async()=>[]);
+  assert.deepEqual(mergedHistory.map(row=>[row.run_id,row.results[0].result]),
+    [[10,'Fail'],[20,'Pass']]);
+  assert.throws(()=>verifyHistoricalE2ERun(mergedOld,rec(old,'Fail'),1718,[],b),
+    /unrelated or untrusted/);
+  assert.deepEqual(verifyHistoricalE2ERun(mergedOld,rec(old,'Fail'),1718,
+    [mergedPr],b).results.map(row=>row.result),['Fail']);
+  assert.equal(verifiedCommitPullAssociation([{...mergedPr,number:1719}],1718,b),false);
+  assert.equal(verifiedCommitPullAssociation([{...mergedPr,merged_at:null}],1718,b),false);
+  assert.equal(verifiedCommitPullAssociation([{...mergedPr,head:{sha:a,repo:{full_name:REPO}}}],1718,b),false);
+  assert.equal(verifiedCommitPullAssociation([{...mergedPr,base:{repo:{full_name:'foreign/repo'}}}],1718,b),false);
+  assert.equal(verifiedCommitPullAssociation([{...mergedPr,head:{sha:b,repo:{full_name:'foreign/repo'}}}],1718,b),false);
+  const forgedMap=new Map(mergedMap);
+  forgedMap.set('/repos/'+REPO+'/commits/'+a+'/pulls?per_page=100',
+    [{...mergedPr,number:1719}]);
+  forgedMap.set('/repos/'+REPO+'/commits/'+b+'/pulls?per_page=100',
+    [{...mergedPr,number:1719}]);
+  const forgedGet=async p=>{if(!forgedMap.has(p))throw Error('unexpected request '+p);
+    return forgedMap.get(p)};
+  assert.deepEqual(await collectHistoricalE2EForPull(REPO,pr,forgedGet,readPlan,async()=>[]),[]);
   assert.throws(()=>verifyHistoricalPlan(old,rec(old,'Fail'),{
     ...fixturePlan(old),target_sha:current.head_sha},1718),/identity/);
   assert.throws(()=>verifyHistoricalPlan(old,rec(old,'Fail'),{
