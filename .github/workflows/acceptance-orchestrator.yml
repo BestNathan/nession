@@ -129,8 +129,9 @@ jobs:
           echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
 
 
-      # Ensure the Issue projector has bound selected E2E results to this SHA
-      # before an expensive read-only Acceptance Agent is invoked.
+      # Verify only the Issues actually implemented by this PR. A workflow
+      # dependency PR must not claim another PR's selected-E2E verdicts.
+      # Require exact-head Issue projection before invoking an Acceptance Agent.
       - name: Verify exact-head Issue E2E obligations before Agent review
         if: steps.discover.outputs.has_requirements == 'true'
         env:
