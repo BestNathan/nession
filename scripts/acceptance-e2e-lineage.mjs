@@ -58,6 +58,16 @@ export function verifyHistoricalE2ERun(run,record,prNumber) {
     results};
 }
 
+export function verifyHistoricalArtifact(run,record,metadata) {
+  const matches=(metadata?.artifacts??[]).filter(x=>
+    x.name==='issue-e2e-verification' && x.expired===false);
+  if(matches.length!==1 || !goodInt(matches[0].id) ||
+     matches[0].digest!==record.artifact_digest) {
+    throw Error('source artifact digest does not authenticate orphan Run Record');
+  }
+  return matches[0].id;
+}
+
 export async function collectHistoricalE2EForPull(repo,pull,get) {
   if (repo!==REPO || !goodInt(pull?.number) || !SHA.test(String(pull.head?.sha)))
     throw Error('historical E2E scope requires a trusted associated PR');
@@ -87,7 +97,10 @@ export async function collectHistoricalE2EForPull(repo,pull,get) {
       }
       // A record on the orphan store alone is not a proof: bind it to a
       // completed GitHub run, its PR association, exact SHA and attempt.
-      verified.push(verifyHistoricalE2ERun(run,recordFromApi(payload),pull.number));
+      const record=recordFromApi(payload);
+      const artifactMetadata=await get('/repos/'+repo+'/actions/runs/'+run.id+'/artifacts?per_page=100');
+      const artifactId=verifyHistoricalArtifact(run,record,artifactMetadata);
+      verified.push({...verifyHistoricalE2ERun(run,record,pull.number),artifact_id:artifactId});
     }
   }
   return verified.sort((a,b)=>a.run_id-b.run_id||a.run_attempt-b.run_attempt);
@@ -115,10 +128,20 @@ async function selfTest() {
       {encoding:'base64',content:Buffer.from(JSON.stringify(rec(old,'Fail'))).toString('base64')}],
     ['/repos/'+REPO+'/contents/runs/2026-10-14/20-1/test/issue-e2e.json?ref=acceptance-results',
       {encoding:'base64',content:Buffer.from(JSON.stringify(rec(current,'Pass'))).toString('base64')}],
+    ['/repos/'+REPO+'/actions/runs/10/artifacts?per_page=100',{artifacts:[{
+      name:'issue-e2e-verification',expired:false,id:101,
+      digest:rec(old,'Fail').artifact_digest}]}],
+    ['/repos/'+REPO+'/actions/runs/20/artifacts?per_page=100',{artifacts:[{
+      name:'issue-e2e-verification',expired:false,id:202,
+      digest:rec(current,'Pass').artifact_digest}]}],
   ]);
   const get=async path=>{if(!map.has(path))throw Error('unexpected request '+path);return map.get(path)};
   const found=await collectHistoricalE2EForPull(REPO,pr,get);
   assert.deepEqual(found.map(r=>[r.run_id,r.results[0].result]),[[10,'Fail'],[20,'Pass']]);
+  assert.deepEqual(found.map(x=>x.artifact_id),[101,202]);
+  assert.throws(()=>verifyHistoricalArtifact(current,rec(current,'Pass'),{
+    artifacts:[{name:'issue-e2e-verification',expired:false,id:202,digest:'sha256:'+'0'.repeat(64)}],
+  }),/source artifact digest/);
   assert.throws(()=>verifyHistoricalE2ERun({...old,head_sha:b},rec(old,'Fail'),1718),/provenance/);
   assert.throws(()=>verifyHistoricalE2ERun({...old,pull_requests:[{number:1719}]},rec(old,'Fail'),1718),/untrusted/);
   assert.throws(()=>verifyHistoricalE2ERun(current,rec(current,'Fail'),1718),/non-Pass/);
