@@ -39,15 +39,21 @@ function selfTest(){
     '### Regression','- none: no affected E2E','## E2E Report',
     '| ID | Type | Result | Evidence |','|---|---|---|---|'].join('\n');
   assert.equal(verifyIssueE2EGate({body:none},sha).reason,'explicit-none');
+  assert.equal(verifyIssueE2EGate({body:none},sha).required,0);
+  assert.equal(verifyIssueE2EGate({body:pass},sha).required,1);
+  assert.equal(verifyIssueE2EGate({body:pass.replace('Pass','Fail')},sha).ok,false);
+  assert.throws(()=>verifyIssueE2EGate({body:none.replace('### Regression','### Regress')},sha),/invalid E2E declaration/);
   console.log('Issue E2E Gate: correct SHA/digest Pass, missing, stale and explicit-none fixtures passed');
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
 const [cmd,issueFile,sha]=process.argv.slice(2);
 if(cmd==='self-test')selfTest();
-else if(cmd==='verify'){
+else if(cmd==='verify'||cmd==='verify-json'){
   const issue=JSON.parse(fs.readFileSync(issueFile,'utf8'));
   const result=verifyIssueE2EGate(issue,sha);
   if(!result.ok)throw Error(result.failures.join('; '));
-  console.log('Issue E2E Gate: '+result.reason+', '+result.required+' required IDs passed');
-}else throw Error('self-test | verify ISSUE_JSON SHA');
+  if(cmd==='verify-json')
+    console.log(JSON.stringify({reason:result.reason,required:result.required}));
+  else console.log('Issue E2E Gate: '+result.reason+', '+result.required+' required IDs passed');
+}else throw Error('self-test | verify ISSUE_JSON SHA | verify-json ISSUE_JSON SHA');
 }
