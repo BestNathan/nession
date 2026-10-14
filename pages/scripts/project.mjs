@@ -10,7 +10,7 @@ const stores = [
 const roles = new Set(['developer', 'reviewer', 'acceptor', 'auditor']);
 function number(value) { return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null; }
 function safeText(value, max = 120) {
-  return typeof value === 'string' ? value.replace(/[<>\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max) : '';
+  return typeof value === 'string' ? value.replace(/<[^>]*>/g, ' ').replace(/[<>\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max) : '';
 }
 function safeSha(value) { return typeof value === 'string' && /^[a-f0-9]{40}$/.test(value) ? value : null; }
 function safeDate(value) { return typeof value === 'string' && !Number.isNaN(Date.parse(value)) ? new Date(value).toISOString() : null; }
