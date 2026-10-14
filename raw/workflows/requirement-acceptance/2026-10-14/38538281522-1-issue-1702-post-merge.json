@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "kind": "agent_workflow_run",
+  "identity": {
+    "workflow_id": "requirement-acceptance",
+    "github_workflow": "Acceptance / Orchestrator",
+    "github_run_id": 38538281522,
+    "github_run_attempt": 1,
+    "job": "execute",
+    "repository": "BestNathan/nession",
+    "event": "push",
+    "unique_run_name": "38538281522-1-issue-1702-post-merge"
+  },
+  "task": {
+    "id": "issue-1702-post-merge",
+    "type": "acceptance",
+    "issue": 1702,
+    "stage": "post-merge",
+    "target_ref": "06a7c60882e6b8363970d3473ea401b5d5f5ce40",
+    "deployment": null
+  },
+  "agent": {
+    "provider": "cursor",
+    "id": "legacy-acceptance-cursor",
+    "role": "acceptor",
+    "harness_sha256": null,
+    "checkpoint_id": null,
+    "model": {
+      "id": "composer-2.5",
+      "fast": true,
+      "params": [
+        {
+          "id": "fast",
+          "value": "true"
+        }
+      ]
+    },
+    "run_id": "run-27ff7a6b-992d-4de3-a7bb-f9274eb1ec57",
+    "request_id": "957b4dac-0922-4419-9ac3-cc03896903d8",
+    "status": "finished",
+    "prompt": {
+      "id": "acceptance",
+      "version": "v1",
+      "sha256": "dab794cbdc989651d03084eb14c8db77937ed4114372849f5b99ab813bc922cc"
+    }
+  },
+  "execution": {
+    "turns": 1,
+    "model_requests": 1,
+    "tools": {
+      "observed": true,
+      "total": 12,
+      "unique": 2,
+      "by_name": {
+        "grep": 3,
+        "read": 9
+      }
+    }
+  },
+  "tokens": {
+    "input": 152864,
+    "output": 4755,
+    "cache_read": 125312,
+    "cache_write": 0,
+    "reasoning": null,
+    "total": 282931
+  },
+  "cost": {
+    "raw_usd": null,
+    "charged_usd": null,
+    "estimated_usd": null
+  },
+  "timing": {
+    "started_at": "2026-10-14T08:53:58.505Z",
+    "finished_at": "2026-10-14T08:54:40.535Z",
+    "agent_duration_ms": 41732,
+    "workflow_duration_ms": null
+  },
+  "result": {
+    "status": "completed",
+    "pass": 5,
+    "pending": 2,
+    "fail": 0,
+    "na": 0
+  }
+}
