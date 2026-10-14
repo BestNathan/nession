@@ -68,7 +68,7 @@ function compactRuns(runs, expectedSha) {
     .slice(0, MAX_RUNS_PER_SHA);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], providerWakeEvidence = null }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -95,6 +95,8 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     direct_runs: compactRuns(directRuns, sha),
     pull_requests: associated,
     source_ancestry: sourceAncestry,
+    target_merge_commit: targetMergeProof,
+    declared_merge_commits: declaredMergeCommits,
     linked_issue_e2e_evidence: linkedIssueE2E,
     implementation_pull_requests: implementationPulls,
     provider_wake_evidence: providerWakeEvidence,
@@ -187,6 +189,31 @@ export function checkGitAncestor(workspace, targetSha, requiredSha, runner = spa
       result.status === 1 ? 'not-ancestor' : 'unknown-object-or-error',
   };
 }
+// Independently attest ordinary Git merge identity from the fetched trusted
+// checkout. GitHub PR metadata and success labels alone do not prove parents.
+// Input SHAs from Issue criteria are discovery constraints, never proof.
+export function checkGitMergeCommit(workspace,targetSha,expectedHeads=[],runner=spawnSync) {
+  if(!/^[a-f0-9]{40}$/.test(targetSha) ||
+     !Array.isArray(expectedHeads) || expectedHeads.length>8 ||
+     !expectedHeads.every(x=>/^[a-f0-9]{40}$/.test(x)))
+    throw new Error('merge parent proof requires exact 40-character SHAs');
+  const command=['-C',workspace,'rev-list','--parents','-n','1',targetSha];
+  const result=runner('git',command,{encoding:'utf8'});
+  const parts=typeof result.stdout==='string'?
+    result.stdout.trim().split(/\s+/):[];
+  const valid=!result.error && result.status===0 &&
+    parts[0]===targetSha && parts.length>=2 &&
+    parts.every(x=>/^[a-f0-9]{40}$/.test(x));
+  const parents=valid?parts.slice(1):[];
+  const isOrdinaryMerge=valid && parents.length===2;
+  return {target_sha:targetSha,verified_by:'git rev-list --parents -n 1',
+    status:valid?'verified':'unknown-object-or-error',
+    parents,is_ordinary_merge:isOrdinaryMerge,
+    second_parent_sha:isOrdinaryMerge?parents[1]:null,
+    second_parent_matches_declared_source:isOrdinaryMerge&&
+      expectedHeads.includes(parents[1])};
+}
+
 async function collectSourceAncestry(repo, workspace, targetSha) {
   const issueNumber = String(process.env.ISSUE_NUMBER || '').trim();
   if (!/^\d+$/.test(issueNumber)) return [];
@@ -328,6 +355,16 @@ async function collectCommand(workspace, outFile) {
     }
   }
   const sourceAncestry = await collectSourceAncestry(repo, workspace, sha);
+  const targetMergeProof = sourceAncestry.length && process.env.ACCEPTANCE_STAGE === 'post-merge'
+    ? checkGitMergeCommit(workspace, sha, sourceAncestry.map(x=>x.ancestor_sha))
+    : null;
+  // Post-merge validation may concern an EARLIER merge that is now an
+  // ancestor of main. Validate each bounded, already ancestry-proven Issue
+  // SHA directly from Git, not just the current HEAD's own parents.
+  const declaredMergeCommits = targetMergeProof===null ? [] : sourceAncestry
+    .filter(x=>x.is_ancestor && x.ancestor_sha!==sha)
+    .map(x=>checkGitMergeCommit(workspace,x.ancestor_sha,
+      sourceAncestry.map(entry=>entry.ancestor_sha)));
   // Acceptance for E2E-specific Issues must also observe previous PR commits:
   // the current target SHA by itself cannot prove a fail-then-pass scenario.
   // Read the trusted orphan Run Record, joined to GitHub completed workflow
@@ -378,7 +415,7 @@ async function collectCommand(workspace, outFile) {
         repo,Number(issueNumber),currentIssue,sha);
   }
   const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls,
-    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, providerWakeEvidence });
+    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence });
   fs.writeFileSync(outFile, JSON.stringify(evidence, null, 2) + '\n');
   console.log(
     'collected acceptance CI evidence for ' + sha +
@@ -471,6 +508,7 @@ function selfTest() {
     [{name:'pre-merge-gate',conclusion:'success'}]).all_passed,false);
   assert.equal(exactImplementationGateBundle(goodRuns.map(x=>({...x,head_sha:'c'.repeat(40)})),
     'a'.repeat(40),gateJobs).all_passed,false);
+
   assert.equal(evidence.target_sha, 'merge123');
   assert.deepEqual(evidence.direct_runs.map((run) => run.id), [2]);
   assert.deepEqual(evidence.pull_requests[0].runs.map((run) => run.id), [4]);
@@ -518,6 +556,38 @@ function selfTest() {
   assert.deepEqual(normalizeCiEvidence({targetSha:head, sourceAncestry:[
     checkGitAncestor('/tmp', head, left, () => ({status:0})),
   ]}).source_ancestry.map(x => x.is_ancestor), [true]);
+
+  const parentA='d'.repeat(40),parentB='e'.repeat(40);
+  const mergeGit=()=>({status:0,stdout:head+' '+parentA+' '+parentB+'\n'});
+  const mergeProof=checkGitMergeCommit('/tmp',head,[parentB],mergeGit);
+  assert.deepEqual(mergeProof.parents,[parentA,parentB]);
+  assert.equal(mergeProof.status,'verified');
+  assert.equal(mergeProof.is_ordinary_merge,true);
+  assert.equal(mergeProof.second_parent_matches_declared_source,true);
+  // The main target may advance; a prior reachable merge retains its own
+  // independently verifiable two-parent Git object identity.
+  const historicalMerge=checkGitMergeCommit('/tmp',parentA,[parentB],
+    ()=>({status:0,stdout:parentA+' '+left+' '+parentB+'\n'}));
+  assert.equal(historicalMerge.target_sha,parentA);
+  assert.deepEqual(historicalMerge.parents,[left,parentB]);
+  assert.equal(historicalMerge.is_ordinary_merge,true);
+  assert.equal(historicalMerge.second_parent_matches_declared_source,true);
+  assert.equal(normalizeCiEvidence({targetSha:head,
+    targetMergeProof:mergeProof,declaredMergeCommits:[mergeProof]})
+    .declared_merge_commits[0].second_parent_sha,parentB);
+  assert.equal(checkGitMergeCommit('/tmp',head,[left],mergeGit)
+    .second_parent_matches_declared_source,false);
+  assert.equal(checkGitMergeCommit('/tmp',head,[parentB],
+    ()=>({status:0,stdout:head+' '+parentA+'\n'})).is_ordinary_merge,false);
+  assert.equal(checkGitMergeCommit('/tmp',head,[parentB],
+    ()=>({status:0,stdout:head+' '+parentA+' '+parentB+' '+left+'\n'}))
+    .is_ordinary_merge,false);
+  assert.equal(checkGitMergeCommit('/tmp',head,[parentB],
+    ()=>({status:0,stdout:'wrong-object '+parentA+' '+parentB+'\n'}))
+    .status,'unknown-object-or-error');
+  assert.equal(checkGitMergeCommit('/tmp',head,[parentB],
+    ()=>({status:128,stdout:''})).is_ordinary_merge,false);
+  assert.throws(()=>checkGitMergeCommit('/tmp','bad',[parentB]),/40-character/);
 
   console.log('acceptance-ci-evidence self-test: collector, bounded criteria and positive/negative Git ancestry passed');
 }
