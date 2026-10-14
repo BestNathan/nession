@@ -26,13 +26,26 @@ function recordFromApi(payload) {
   throw Error('missing or invalid GitHub Run Record envelope');
 }
 
-export function verifyHistoricalE2ERun(run,record,prNumber) {
+// GitHub may erase workflow_run.pull_requests after a PR is merged.
+// The immutable commit SHA's GitHub Commit→PR association is the bounded
+// fallback. Both the PR head identity and same-repository merge are required;
+// the Run Record and Selection Plan are still verified independently.
+export function verifiedCommitPullAssociation(pulls,prNumber,expectedHeadSha) {
+  return SHA.test(String(expectedHeadSha??'')) && Array.isArray(pulls) &&
+    pulls.some(pr=>pr.number===prNumber && pr.state==='closed' &&
+      Boolean(pr.merged_at) && pr.head?.sha===expectedHeadSha &&
+      pr.head?.repo?.full_name===REPO && pr.base?.repo?.full_name===REPO);
+}
+
+export function verifyHistoricalE2ERun(run,record,prNumber,commitPulls=[],prHeadSha=null) {
   if (!goodInt(prNumber) || !goodInt(run?.id) || !goodInt(run.run_attempt) ||
       !SHA.test(String(run.head_sha)) || run.path!=='.github/workflows/e2e-tests.yml' ||
       run.event!=='pull_request' || run.status!=='completed' ||
       !['success','failure'].includes(run.conclusion) ||
       run.repository?.full_name!==REPO || run.head_repository?.full_name!==REPO ||
-      !run.pull_requests?.some(p=>p.number===prNumber)) throw Error('unrelated or untrusted E2E run');
+      !(run.pull_requests?.some(p=>p.number===prNumber) ||
+        verifiedCommitPullAssociation(commitPulls,prNumber,prHeadSha)))
+    throw Error('unrelated or untrusted E2E run');
   if (record?.schema_version!==1 || record.kind!=='issue_e2e_run' ||
       record.run_id!==run.id || record.run_attempt!==run.run_attempt ||
       record.target_sha!==run.head_sha || !DIGEST.test(record.plan_digest) ||
@@ -226,9 +239,21 @@ export async function collectHistoricalE2EForPull(repo,pull,get,readPlan=readHis
     const sha=commit.sha;
     if (!SHA.test(String(sha))) throw Error('untrusted commit SHA from GitHub API');
     const payload=await get('/repos/'+repo+'/actions/runs?head_sha='+sha+'&per_page=100');
-    const runs=(payload.workflow_runs??[]).filter(r=>
+    const candidates=(payload.workflow_runs??[]).filter(r=>
       r.path==='.github/workflows/e2e-tests.yml'&&r.event==='pull_request'&&
-      r.status==='completed'&&r.pull_requests?.some(p=>p.number===pull.number))
+      r.status==='completed'&&r.head_sha===sha);
+    // The source run's mutable PR association list is not stable after merge.
+    // Ask GitHub which PR owns the exact commit, and require a matching merged
+    // same-repo PR head before considering runs with an empty association list.
+    const needsFallback=candidates.some(r=>
+      !r.pull_requests?.some(p=>p.number===pull.number));
+    const commitPulls=needsFallback
+      ? await get('/repos/'+repo+'/commits/'+sha+'/pulls?per_page=100')
+      : [];
+    const commitLinked=verifiedCommitPullAssociation(
+      commitPulls,pull.number,pull.head.sha);
+    const runs=candidates.filter(r=>
+      r.pull_requests?.some(p=>p.number===pull.number)||commitLinked)
       .sort((a,b)=>Number(b.id)-Number(a.id))
       .slice(0,MAX_RUNS_PER_COMMIT);
     for (const run of runs) {
@@ -249,7 +274,7 @@ export async function collectHistoricalE2EForPull(repo,pull,get,readPlan=readHis
       const artifact=artifactMetadata.artifacts.find(a=>a.id===artifactId);
       const plan=await readPlan(repo,artifact);
       const selection=verifyHistoricalPlan(run,record,plan,pull.number);
-      verified.push({...verifyHistoricalE2ERun(run,record,pull.number),
+      verified.push({...verifyHistoricalE2ERun(run,record,pull.number,commitPulls,pull.head.sha),
         artifact_id:artifactId,created_at:run.created_at,selection});
     }
   }
