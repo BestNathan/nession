@@ -40,6 +40,12 @@ export function verifyArchivedProjectionReceipt(receipt,record,plan,issueNumber)
   assert.equal(receipt.declaration_digest,owner.declaration_digest);
   assert.match(receipt.before_body_sha256,DIGEST);
   assert.match(receipt.body_sha256,DIGEST);
+  assert.ok(typeof receipt.readback_body==='string' && receipt.readback_body.length<=100000);
+  assert.equal(hash(receipt.readback_body),receipt.body_sha256,
+    'stored historical read-back body hash mismatch');
+  const stored=parseIssueE2E(receipt.readback_body,{requireDeclaration:true});
+  assert.deepEqual(stored.errors,[]);
+  assert.equal(stored.digest,receipt.declaration_digest);
   const wanted=[...(owner.new_ids??[]),...(owner.regression_ids??[])].sort();
   assert.deepEqual(receipt.rows.map(x=>x.id),wanted,'Issue owner result IDs changed');
   const byId=new Map(record.results.map(x=>[x.id,x]));
@@ -49,6 +55,9 @@ export function verifyArchivedProjectionReceipt(receipt,record,plan,issueNumber)
       'missing source Plan owner');
     const result=byId.get(row.id);
     assert.ok(result&&row.result===result.result,'receipt is not the executed verdict');
+    const archivedRow=stored.rows.get(row.id);
+    assert.ok(archivedRow&&archivedRow.result===row.result&&
+      archivedRow.evidence===row.evidence,'read-back rows diverge from receipt');
     const exact='run '+record.run_id+'/'+record.run_attempt+
       ', SHA '+record.target_sha+
       ', contract '+owner.declaration_digest+
@@ -155,6 +164,7 @@ export function createProjectionReceipt({record,plan,issue,projected,before,read
     declaration_digest:parsed.digest,
     before_body_sha256:hash(before.body),
     body_sha256:hash(projected.body),
+    readback_body:readback.body,
     patch_updated_at:outcome==='applied'?patch.updated_at:null,
     readback_updated_at:readback.updated_at,
     rows:parsed.selectedIds.map(id=>{
