@@ -10,7 +10,10 @@ on:
     types: [completed]
 
 permissions:
+  actions: read
   contents: read
+  issues: write
+  pull-requests: read
 
 concurrency:
   group: acceptance-postrun-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
