@@ -26,6 +26,6 @@ test.describe('Login', () => {
     await expect(page.locator('[data-testid="shell"]')).toBeVisible();
     // Temporary #1702 evidence drill: this branch MUST NOT be merged.
     // Force one actually executed Playwright ID to Fail after real login.
-    expect('issue-1702-failure-projection-drill').toBe('not-equal');
+    expect('issue-1702-selected-fail-cycle-run').toBe('deliberately-not-equal');
   });
 });
