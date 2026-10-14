@@ -58,7 +58,7 @@ function lineItem(title, subtitle, value, url, stamp) {
   const bold = node('strong','',title);
   if (url && label.tagName === 'A') label.textContent = '';
   if (url && label.tagName === 'A') label.append(bold);
-  else label = label; // placeholder retained as a safe text node
+  // For non-linked entries label remains a safe text node.
   attach(main,label,node('small','',subtitle));
   const right = node('div','entry-right');
   attach(right,node('strong','',value),node('span','',stamp || ''));
