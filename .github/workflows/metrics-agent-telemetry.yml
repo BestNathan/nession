@@ -22,10 +22,29 @@ concurrency:
 
 jobs:
   ingest:
+    # Ignore unrelated Orchestrator workflow_run/repository_dispatch wakes.
+    # Those are not canonical Agent telemetry producer events and otherwise
+    # create repeated privileged runs that fail the source provenance contract.
     if: >-
       github.repository == 'BestNathan/nession' &&
-      (github.event_name == 'workflow_run' ||
-       (github.event_name == 'schedule' && github.ref == 'refs/heads/main'))
+      (
+        (github.event_name == 'schedule' && github.ref == 'refs/heads/main') ||
+        (github.event_name == 'workflow_run' &&
+          (github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure') &&
+          (
+            (github.event.workflow_run.name == 'Agent / Provider Smoke' &&
+             (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch')) ||
+            (github.event.workflow_run.name == 'Agent / SC Acceptance' &&
+             github.event.workflow_run.event == 'workflow_dispatch') ||
+            (github.event.workflow_run.name == 'Agent / Issue Audit' &&
+             (github.event.workflow_run.event == 'issues' || github.event.workflow_run.event == 'workflow_dispatch')) ||
+            (github.event.workflow_run.name == 'Acceptance / Orchestrator' &&
+             (github.event.workflow_run.event == 'pull_request_target' ||
+              github.event.workflow_run.event == 'issues' ||
+              github.event.workflow_run.event == 'push'))
+          )
+        )
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
