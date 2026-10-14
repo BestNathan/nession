@@ -2,6 +2,7 @@
 // Scope: commits that belong to an associated PR; never follow SHAs/URLs
 // suggested in mutable PR descriptions, comments or acceptance reports.
 import assert from 'node:assert/strict';
+import { pathToFileURL } from 'node:url';
 
 const SHA=/^[a-f0-9]{40}$/;
 const DIGEST=/^[a-f0-9]{64}$/;
@@ -127,4 +128,7 @@ async function selfTest() {
     ...rec(current,'Pass').results[0],assertions:0}]},1718),/unproven Pass/);
   console.log('Acceptance historical Issue E2E evidence: bounded PR commit/run lineage and negative provenance fixtures passed');
 }
-if (process.argv[2]==='self-test') await selfTest();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  if (process.argv[2] === 'self-test') await selfTest();
+  else throw Error('usage: acceptance-e2e-lineage.mjs self-test');
+}
