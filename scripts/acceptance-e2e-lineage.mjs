@@ -274,7 +274,20 @@ export async function collectAuthenticatedProjectionReceipts(repo,run,record,pla
        ingest.head_branch!=='main'||ingest.status!=='completed'||
        ingest.conclusion!=='success'||
        String(ingest.created_at??'')<String(run.created_at??''))
-      throw Error('projection receipt not issued by a successful trusted ingest');
+      throw Error('projection receipt not issued by a successful trusted ingest: '+
+        JSON.stringify({source_run_id:run.id,source_attempt:run.run_attempt,
+          source_created_at:run.created_at,
+          receipt_ingest_run_id:verified.ingest_run_id,
+          receipt_ingest_attempt:verified.ingest_attempt,
+          observed_ingest_run_id:ingest?.id,
+          observed_ingest_run_attempt:ingest?.run_attempt,
+          observed_ingest_path:ingest?.path,
+          observed_ingest_name:ingest?.name,
+          observed_ingest_event:ingest?.event,
+          observed_ingest_branch:ingest?.head_branch,
+          observed_ingest_status:ingest?.status,
+          observed_ingest_conclusion:ingest?.conclusion,
+          observed_ingest_created_at:ingest?.created_at}));
     const jobs=await get('/repos/'+repo+'/actions/runs/'+ingest.id+
       '/attempts/'+ingest.run_attempt+'/jobs?per_page=100');
     if(!(jobs.jobs??[]).some(j=>j.name==='ingest-pr' &&
