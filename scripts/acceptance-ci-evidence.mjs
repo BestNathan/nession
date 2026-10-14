@@ -4,9 +4,26 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { collectHistoricalE2EForPull, collectLinkedIssueE2EEvidence } from './acceptance-e2e-lineage.mjs';
+import { parseIssueE2E } from './issue-e2e-contract.mjs';
 
 const MAX_RUNS_PER_SHA = 20;
 const MAX_ASSOCIATED_PULLS = 5;
+
+
+// An Issue may describe itself as a child of a behavior verified on another
+// Issue. This mutable relationship is ONLY a bounded discovery hint, never
+// evidence that this Issue owned the source Plan or was itself patched.
+export function parentEvidenceDiscovery(issue) {
+  const title=String(issue?.title??'');
+  const body=String(issue?.body??'');
+  const a=title.match(/\(#([1-9]\d*)\)\s*$/);
+  const b=body.match(/\bchild\s+of\s+#([1-9]\d*)\b/i);
+  if(!a||!b||a[1]!==b[1])return null;
+  const parent=Number(a[1]);
+  if(!Number.isSafeInteger(parent)||parent<=0||parent===Number(issue?.number))
+    return null;
+  return parent;
+}
 
 function requireText(value, label) {
   const text = String(value ?? '').trim();
@@ -165,6 +182,26 @@ async function collectCommand(workspace, outFile) {
       if (process.env.ACCEPTANCE_STAGE === 'post-merge') {
         linkedIssueE2E.push(...await collectLinkedIssueE2EEvidence(repo,
           Number(issueNumber),githubGet));
+        // The child Issue's own "none" E2E declaration does not make it an
+        // owner of its parent's historical browser scenario. Include the
+        // independently authenticated parent source runs *as related
+        // behavior evidence only*, after validating the same-repo parent
+        // Issue contract. The Agent must not mislabel them as child-owned.
+        const parentNumber=parentEvidenceDiscovery(currentIssue);
+        if(parentNumber!==null){
+          const parent=await githubGet('/repos/'+repo+'/issues/'+parentNumber);
+          if(parent?.number!==parentNumber||parent?.pull_request)
+            throw Error('invalid related Issue provenance target');
+          const contract=parseIssueE2E(parent.body,{requireDeclaration:true});
+          if(contract?.errors?.length||!contract?.selectedIds?.length)
+            throw Error('parent Issue lacks authenticated E2E obligations');
+          const proof=await collectLinkedIssueE2EEvidence(repo,parentNumber,githubGet);
+          linkedIssueE2E.push(...proof.map(item=>({
+            ...item,behavior_owner_issue:parentNumber,
+            related_child_issue:Number(issueNumber),
+            relationship_provenance:'candidate parent only; source Plan and protected receipts remain authoritative',
+          })));
+        }
       }
     }
   }
@@ -212,6 +249,17 @@ function selfTest() {
   assert.deepEqual(normalizeCiEvidence({targetSha:'c'.repeat(40),linkedIssueE2E:[{
     pr_number:1718,verified_selected_runs:[{run_id:10}],verified_staging_full:null,
   }]}).linked_issue_e2e_evidence.map(x=>x.pr_number),[1718]);
+  assert.equal(parentEvidenceDiscovery({number:1759,
+    title:'Requirement: projection receipts (#1702)',
+    body:'Child of #1702; verified on parent Issue.'}),1702);
+  assert.equal(parentEvidenceDiscovery({number:1759,
+    title:'Issue (#1703)',body:'Child of #1702'}),null);
+  assert.equal(parentEvidenceDiscovery({number:1759,
+    title:'Issue (#1759)',body:'Child of #1759'}),null);
+  assert.equal(parentEvidenceDiscovery({number:1759,
+    title:'Issue (#1702)',body:'Not a child'}),null);
+  assert.equal(parentEvidenceDiscovery({number:1759,
+    title:'Issue (#xyz)',body:'Child of #1702'}),null);
   assert.throws(() => normalizeCiEvidence({ targetSha: '' }), /targetSha is required/);
   // Real criteria select only pinned source SHA ancestors; unrelated report
   // logs cannot inject extra proof targets.
