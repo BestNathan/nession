@@ -24,5 +24,7 @@ test.describe('Login', () => {
     // Should skip the login page and go directly to the shell
     await waitForShell(page);
     await expect(page.locator('[data-testid="shell"]')).toBeVisible();
+    // TEMPORARY DO-NOT-MERGE multi-Issue E2E provenance drill.
+    await expect(page.locator('[data-testid="shell"]')).toHaveCount(0);
   });
 });
