@@ -1,0 +1,113 @@
+{
+  "schema_version": 1,
+  "kind": "run_store_writer_inventory",
+  "repository": "BestNathan/nession",
+  "stores": [
+    {
+      "ref": "acceptance-results",
+      "lifecycle": "active",
+      "privacy": "public",
+      "writers": [
+        {
+          "workflow": ".github/workflows/acceptance-case-ingest.yml",
+          "source": "github-actions GITHUB_TOKEN",
+          "execution": "main-owned workflow_run",
+          "depends_on": [
+            ".github/workflows/acceptance-cases.yml"
+          ],
+          "permissions": [
+            "contents: write",
+            "issues: write"
+          ]
+        },
+        {
+          "workflow": ".github/workflows/e2e-scenario-ingest.yml",
+          "source": "github-actions GITHUB_TOKEN",
+          "execution": "main-owned workflow_run",
+          "depends_on": [
+            ".github/workflows/e2e-scenario-smoke.yml"
+          ],
+          "permissions": [
+            "contents: write"
+          ]
+        },
+        {
+          "workflow": ".github/workflows/e2e-test-ingest.yml",
+          "source": "github-actions GITHUB_TOKEN",
+          "execution": "main-owned workflow_run",
+          "depends_on": [
+            ".github/workflows/e2e-tests.yml"
+          ],
+          "permissions": [
+            "contents: write",
+            "issues: write"
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "task-results",
+      "lifecycle": "active",
+      "privacy": "public",
+      "writers": [
+        {
+          "workflow": ".github/workflows/task-result-ingest.yml",
+          "source": "github-actions GITHUB_TOKEN",
+          "execution": "main-owned workflow_run",
+          "depends_on": [
+            ".github/workflows/task-runner.yml"
+          ],
+          "permissions": [
+            "contents: write"
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "metrics",
+      "lifecycle": "active",
+      "privacy": "public",
+      "writers": [
+        {
+          "workflow": ".github/workflows/metrics-agent-telemetry.yml",
+          "source": "github-actions GITHUB_TOKEN",
+          "execution": "main-owned workflow_run and schedule",
+          "depends_on": [
+            ".github/workflows/agent-provider-smoke.yml",
+            ".github/workflows/agent-sc-acceptance.yml",
+            ".github/workflows/agent-issue-audit.yml",
+            ".github/workflows/acceptance-orchestrator.yml"
+          ],
+          "permissions": [
+            "contents: write"
+          ]
+        },
+        {
+          "workflow": ".github/workflows/metrics-repository.yml",
+          "source": "github-actions GITHUB_TOKEN",
+          "execution": "main-owned schedule",
+          "depends_on": [
+            ".github/workflows/e2e-tests.yml"
+          ],
+          "permissions": [
+            "contents: write"
+          ]
+        }
+      ]
+    },
+    {
+      "ref": "agent-store",
+      "lifecycle": "planned",
+      "privacy": "encrypted-only",
+      "writers": [],
+      "rollout_blocker": "Separate authorized ref/App identity, Ruleset, independent cryptographic anchor and encrypted native checkpoints required by #1690/#1664. Never write plaintext into public Git."
+    }
+  ],
+  "governance": {
+    "source": "Live GitHub REST API at trusted main workflow run, not this committed inventory",
+    "ruleset_enforcement": "unknown_until_live_probe",
+    "branch_protection": "unknown_until_live_probe",
+    "secrets": "Never resolve, print or store secret values",
+    "independent_anchor": "pending_offline_admin_control"
+  }
+}

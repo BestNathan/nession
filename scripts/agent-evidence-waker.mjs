@@ -66,7 +66,63 @@ export function verifyWake(payload,run,root){
   const verified=validateWakeSource(payload,run);
   return {...verified,...verifyDurableTelemetry(root,verified)};
 }
+const WAKE_OWNERS=[
+  '.github/workflows/metrics-agent-telemetry.yml',
+  '.github/workflows/acceptance-orchestrator.yml',
+  'scripts/agent-evidence-waker.mjs',
+  'scripts/agent-telemetry-ingest.mjs',
+];
+// These selectors are part of the end-to-end evidence dependency graph:
+// a trusted wake owner change must generate a fresh main Provider Smoke before
+// a subsequent authenticated Metrics ingest can wake merged Agent SC checks.
+export function validateWakeProducerTrigger(workflow){
+  const trigger=workflow.split(/^permissions:/m)[0];
+  const mainPush=/^  push:\s*\n    branches: \[main\]\s*\n    paths:\s*\n((?:      (?:- [^\n]+|#[^\n]*)\n)+)/m.exec(trigger);
+  if(!mainPush)fail('Provider Smoke must have a main-only push paths selector');
+  const selected=new Set(mainPush[1].trim().split('\n').map(x=>x.trim()).filter(x=>x.startsWith('- ')).map(x=>x.slice(2)));
+  for(const owner of WAKE_OWNERS){
+    if(!selected.has(owner))fail('missing Provider Smoke wake source: '+owner);
+  }
+  return {sources:WAKE_OWNERS.length};
+}
+// The same workflow dispatches unrelated E2E and Provider wake events. Prove
+// both route filters and the exact-SHA propagation to the canonical selector.
+export function validateWakeConsumerRouting(workflow){
+  const provider=workflow.split('  prepare-post-merge-provider-evidence:')[1]
+    ?.split('  post-merge-provider-evidence-acceptance:')[0];
+  const e2e=workflow.split('  reconcile-issue-e2e:')[1]
+    ?.split('  reconcile-completed-quality-e2e:')[0];
+  if(!provider?.includes("github.event.action == 'nession-agent-telemetry-ingested'"))
+    fail('Provider event source must be an exact repository_dispatch action');
+  if(!provider.includes('ACCEPTANCE_STAGE=post-merge TARGET_SHA="$SOURCE_SHA" \\') ||
+     !provider.includes('node scripts/select-merged-agents.mjs select'))
+    fail('merged Agent selection must receive authenticated Provider target SHA');
+  if(!e2e?.includes("if: github.event_name == 'repository_dispatch' && github.event.action == 'nession-issue-e2e-projected'"))
+    fail('E2E event source must be an exact repository_dispatch action');
+  return {provider:true,e2e:true,source_sha:true};
+}
 function selfTest(){
+  const wf=fs.readFileSync('.github/workflows/agent-provider-smoke.yml','utf8');
+  assert.deepEqual(validateWakeProducerTrigger(wf),{sources:4});
+  const orchestration=fs.readFileSync('.github/workflows/acceptance-orchestrator.yml','utf8');
+  assert.deepEqual(validateWakeConsumerRouting(orchestration),{provider:true,e2e:true,source_sha:true});
+  assert.throws(()=>validateWakeConsumerRouting(
+    orchestration.replace('ACCEPTANCE_STAGE=post-merge TARGET_SHA="$SOURCE_SHA"',
+      'ACCEPTANCE_STAGE=post-merge')),/target SHA/);
+  assert.throws(()=>validateWakeConsumerRouting(
+    orchestration.replace("github.event.action == 'nession-issue-e2e-projected'",
+      "github.event.action == 'nession-agent-telemetry-ingested'")),/E2E event source/);
+  assert.throws(()=>validateWakeConsumerRouting(
+    orchestration.replace("github.event.action == 'nession-agent-telemetry-ingested'",
+      "github.event.action == 'nession-issue-e2e-projected'")),/Provider event source/);
+  for(const owner of WAKE_OWNERS){
+    assert.throws(()=>validateWakeProducerTrigger(
+      wf.replace('      - '+owner+'\n','')
+    ),/missing Provider Smoke wake source/);
+  }
+  assert.throws(()=>validateWakeProducerTrigger(
+    wf.replace('branches: [main]','branches: [feature]')
+  ),/main-only/);
   const sha='a'.repeat(40),payload={source_run_id:789,source_run_attempt:1,target_sha:sha};
   const run={id:789,run_attempt:1,path:WORKFLOW,name:'Agent / Provider Smoke',
     event:'push',head_branch:'main',head_sha:sha,status:'completed',conclusion:'success',

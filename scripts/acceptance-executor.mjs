@@ -534,6 +534,32 @@ function selfTest() {
   assert.match(failedBody, /- \[ \] SC-02 failing acceptance stays unchecked/);
   assert.match(failedBody, /\| SC-02 \| post-merge \| Fail \| run 101; ref def456;/);
   assert.equal(validateRequirementBody(failedBody, { mode: 'closure' }).ok, false);
+  // A rerun retains the workflow run ID but has a different attempt.
+  // Only exact-attempt artifact lookup prevents reusing the prior verdict.
+  const corrected=normalizeAcceptanceResult(post,{
+    criteria:[{criterion:'SC-02',result:'Pass',
+      evidence:[{type:'workflow',value:'new attempt independently passed'}],
+      summary:'verified correction'}],
+  },'agent-cursor');
+  const correctedBody=applyAcceptanceResultToBody(failedBody,corrected);
+  assert.match(correctedBody, /- \[x\] SC-02 failing acceptance stays unchecked/);
+  assert.match(correctedBody, /\| SC-02 \| post-merge \| Pass \| run 101;/);
+  assert.equal(applyAcceptanceResultToBody(correctedBody,corrected),correctedBody);
+  const workflow=fs.readFileSync(new URL('../.github/workflows/agent-sc-acceptance.yml',
+    import.meta.url),'utf8');
+  const receipts=[...workflow.matchAll(/^\s*name: (acceptance-result-[^\r\n]+)$/gm)]
+    .map(match=>match[1]);
+  const exact='acceptance-result-${{ inputs.issue_number }}-${{ inputs.stage }}-${{ github.run_id }}-${{ github.run_attempt }}';
+  assert.deepEqual(receipts,[exact,exact],
+    'Acceptance upload and download must bind both Run ID and Attempt');
+  const renderReceipt=(attempt)=>exact
+    .replace('${{ inputs.issue_number }}','1702')
+    .replace('${{ inputs.stage }}','post-merge')
+    .replace('${{ github.run_id }}','38516094498')
+    .replace('${{ github.run_attempt }}',String(attempt));
+  assert.equal(renderReceipt(1),'acceptance-result-1702-post-merge-38516094498-1');
+  assert.equal(renderReceipt(2),'acceptance-result-1702-post-merge-38516094498-2');
+  assert.notEqual(renderReceipt(1),renderReceipt(2));
 
   assert.throws(
     () => normalizeAcceptanceResult(staging, { criteria: [{ criterion: 'SC-99', result: 'Pass', evidence: 'ghost' }] }),

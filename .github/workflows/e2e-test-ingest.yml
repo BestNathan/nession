@@ -190,25 +190,73 @@ jobs:
           live_pr="$(jq -r .number scratch/metadata/pr.json)"
           current_head="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$live_pr" --jq .head.sha)"
           [[ "$current_head" == "$sha" ]] || { echo "Superseded PR; no Issue projection"; exit 0; }
+          # Persist a projection receipt ONLY after a trusted Issue PATCH and
+          # an independent GitHub Issue GET read-back. Never persist a receipt
+          # for stale/foreign/changed Issue projections.
+          receipt_root="runs/$day/$run_id-$attempt/test/projections"
           for f in scratch/output/[0-9]*.json; do
             [[ -f "$f" ]] || continue
             number="$(basename "$f" .json)"
-            latest="$(gh api "repos/$GITHUB_REPOSITORY/issues/$number" --jq .body)"
-            original="$(jq -r .body "scratch/metadata/issue-$number.json")"
-            if [[ "$latest" != "$original" ]]; then
-              echo "Issue #$number changed since attestation; omit stale projection"
+            [[ "$number" =~ ^[1-9][0-9]*$ ]] || { echo "::error::Invalid Issue receipt path"; exit 1; }
+            receipt_path="$receipt_root/$number.json"
+            if [[ -e "results-repo/$receipt_path" ]]; then
+              node trusted/scripts/issue-e2e-projection-receipt.mjs verify \
+                scratch/output/record.json scratch/artifact/plan.json \
+                "results-repo/$receipt_path" "$f"
+              echo "Already stored authenticated Issue #$number receipt; immutable retry"
               continue
             fi
-            decision="$(node trusted/scripts/issue-e2e-reconcile.mjs decide \
-              "scratch/metadata/issue-$number.json" "$f" "$run_id" "$attempt" "$sha")"
+            gh api "repos/$GITHUB_REPOSITORY/issues/$number" > "scratch/metadata/live-$number.json"
+            latest="$(jq -r .body "scratch/metadata/live-$number.json")"
+            original="$(jq -r .body "scratch/metadata/issue-$number.json")"
+            projected="$(jq -r .body "$f")"
+            if [[ "$latest" == "$original" ]]; then
+              decision="$(node trusted/scripts/issue-e2e-reconcile.mjs decide \
+                "scratch/metadata/live-$number.json" "$f" "$run_id" "$attempt" "$sha")"
+            elif [[ "$latest" == "$projected" ]]; then
+              # Safe interruption recovery: an earlier PATCH may have been
+              # applied even though its receipt push failed. Re-attest the
+              # existing exact-source Issue body; do not issue another PATCH.
+              decision="$(node trusted/scripts/issue-e2e-reconcile.mjs decide \
+                "scratch/metadata/live-$number.json" "$f" "$run_id" "$attempt" "$sha")"
+              [[ "$decision" == duplicate ]] || exit 1
+            else
+              echo "Issue #$number changed since attestation; no stale PATCH or receipt"
+              continue
+            fi
+            mode=""
+            patch_file="-"
             case "$decision" in
-              apply) ;;
-              stale|duplicate)
-                echo "Issue #$number ignores $decision run result without overwriting newer proof"
-                continue ;;
+              apply)
+                patch_file="scratch/metadata/patch-$number.json"
+                gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/$number" \
+                  --input "$f" > "$patch_file"
+                mode=applied
+                ;;
+              duplicate)
+                # Historical projection already equals the exact trusted
+                # candidate; this is RECOVERED, never an invented PATCH.
+                mode=recovered
+                ;;
+              stale)
+                echo "Issue #$number ignores stale run; no applied receipt"
+                continue
+                ;;
               *) echo "::error::Invalid E2E reconciliation decision"; exit 1 ;;
             esac
-            gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/$number" --input "$f" > /dev/null
+            gh api "repos/$GITHUB_REPOSITORY/issues/$number" > "scratch/metadata/readback-$number.json"
+            node trusted/scripts/issue-e2e-projection-receipt.mjs create \
+              scratch/output/record.json scratch/artifact/plan.json "$number" "$f" \
+              "scratch/metadata/issue-$number.json" "scratch/metadata/readback-$number.json" \
+              "$patch_file" "$mode" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+              "scratch/output/projection-receipt-$number.json"
+            mkdir -p "results-repo/$receipt_root"
+            cp "scratch/output/projection-receipt-$number.json" "results-repo/$receipt_path"
+            git -C results-repo add "$receipt_path"
+            if ! git -C results-repo diff --cached --quiet; then
+              git -C results-repo commit -m "e2e: $mode Issue #$number projection $run_id/$attempt"
+              git -C results-repo push origin acceptance-results
+            fi
           done
           if ! jq -e '.status == "Pass"' scratch/artifact/results.json > /dev/null; then
             echo 'Required E2E tests are not all Pass; keep Acceptance blocked, but preserve the failure report'

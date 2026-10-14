@@ -46,6 +46,7 @@ server-handler-concurrency-selftest
 agent-provider-contract
 agent-checkpoint-store
 run-store-integrity
+run-store-inventory
 gate-consumer-parity
 dev-workspace-selftest
 detector-selftest-coverage
