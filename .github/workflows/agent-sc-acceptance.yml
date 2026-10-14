@@ -175,7 +175,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PROVIDER_METRICS_ROOT: ${{ github.workspace }}/provider-metrics
         run: |
           set -euo pipefail
           node scripts/acceptance-ci-evidence.mjs collect \
