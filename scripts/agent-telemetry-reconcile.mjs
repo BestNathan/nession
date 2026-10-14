@@ -115,11 +115,20 @@ function ghJson(endpoint){
   });
   return JSON.parse(output);
 }
+export function validateReconciliationContext(env){
+  if(env.GITHUB_REPOSITORY!==REPO||
+     env.GITHUB_REF!=='refs/heads/main')
+    fail('reconciler must execute only on trusted main');
+  if(env.GITHUB_EVENT_NAME==='schedule')return 'schedule';
+  if(env.GITHUB_EVENT_NAME==='workflow_run' &&
+     /^[1-9][0-9]*$/.test(env.RECOVERY_EVENT_RUN_ID??'') &&
+     positive(Number(env.RECOVERY_EVENT_RUN_ID)) &&
+     env.RECOVERY_EMPTY_SOURCE_COUNT==='0')return 'empty-source-event';
+  fail('reconciliation denied: only main schedule or empty authenticated workflow_run');
+}
 async function select(store){
-  if(process.env.GITHUB_REPOSITORY!==REPO||
-     process.env.GITHUB_EVENT_NAME!=='schedule'||
-     process.env.GITHUB_REF!=='refs/heads/main'||
-     !path.isAbsolute(store))fail('reconciler must be trusted scheduled main checkout');
+  validateReconciliationContext(process.env);
+  if(!path.isAbsolute(store))fail('absolute trusted Metrics Store path required');
   const summaryCounts=indexedSourceSummaries(store),runsBySource=new Map();
   for(const source of SOURCES){
     const response=ghJson('actions/workflows/'+source.file+
@@ -152,6 +161,11 @@ export function validateRecoveryRouting(workflow){
   if(!workflow.includes('node scripts/agent-telemetry-reconcile.mjs select')||
      !workflow.includes('run-store-integrity.mjs"'))
     fail('trusted reconciliation or immutable Store Gate omitted');
+  if(!job.includes("steps.event_artifacts.outputs.count == '0'")||
+     !job.includes('RECOVERY_EMPTY_SOURCE_COUNT: ${{ steps.event_artifacts.outputs.count }}')||
+     !job.includes('RECOVERY_EVENT_RUN_ID: ${{ github.event.workflow_run.id }}')||
+     !job.includes('run_id="${RECOVERY_RUN_ID:-${EVENT_RUN_ID:-}}"'))
+    fail('empty authenticated producer fallback or recovered run precedence missing');
   if(!workflow.includes("github.event.workflow_run.event == 'push'") ||
      !workflow.includes("github.event.workflow_run.event == 'pull_request_target'"))
     fail('source event routing omitted');
@@ -170,6 +184,22 @@ function selfTest(){
   assert.throws(()=>validateRecoveryRouting(
     workflow.replace("node scripts/agent-telemetry-reconcile.mjs select", "echo skip")
   ),/Gate omitted/);
+  const mainEnv={GITHUB_REPOSITORY:REPO,GITHUB_REF:'refs/heads/main'};
+  assert.equal(validateReconciliationContext({...mainEnv,GITHUB_EVENT_NAME:'schedule'}),'schedule');
+  assert.equal(validateReconciliationContext({...mainEnv,GITHUB_EVENT_NAME:'workflow_run',
+    RECOVERY_EVENT_RUN_ID:'321',RECOVERY_EMPTY_SOURCE_COUNT:'0'}),'empty-source-event');
+  for(const invalid of [
+    {...mainEnv,GITHUB_EVENT_NAME:'workflow_dispatch'},
+    {...mainEnv,GITHUB_EVENT_NAME:'workflow_run',RECOVERY_EVENT_RUN_ID:'321',RECOVERY_EMPTY_SOURCE_COUNT:'1'},
+    {...mainEnv,GITHUB_EVENT_NAME:'workflow_run',RECOVERY_EVENT_RUN_ID:'0',RECOVERY_EMPTY_SOURCE_COUNT:'0'},
+    {...mainEnv,GITHUB_EVENT_NAME:'workflow_run',RECOVERY_EVENT_RUN_ID:'feature',RECOVERY_EMPTY_SOURCE_COUNT:'0'},
+    {...mainEnv,GITHUB_EVENT_NAME:'workflow_run',RECOVERY_EVENT_RUN_ID:'321'},
+    {...mainEnv,GITHUB_EVENT_NAME:'schedule',GITHUB_REF:'refs/heads/feature'},
+    {...mainEnv,GITHUB_EVENT_NAME:'schedule',GITHUB_REPOSITORY:'attacker/fork'},
+  ])assert.throws(()=>validateReconciliationContext(invalid),/reconciliation denied|trusted main/);
+  assert.throws(()=>validateRecoveryRouting(workflow.replace(
+    "steps.event_artifacts.outputs.count == '0'","steps.event_artifacts.outputs.count != '0'"
+  )),/empty authenticated/);
   const source=SOURCES[0],sha='a'.repeat(40);
   const run={id:321,run_attempt:1,head_sha:sha,
     repository:{full_name:REPO},head_repository:{full_name:REPO},
