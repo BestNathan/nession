@@ -1,6 +1,10 @@
 name: Metrics / Agent Telemetry Ingest
 
 on:
+  # A cancelled pending workflow_run is not retried by GitHub automatically.
+  # A bounded main-owned scan recovers missing canonical Agent telemetry.
+  schedule:
+    - cron: '*/5 * * * *'
   workflow_run:
     workflows:
       - Agent / SC Acceptance
@@ -8,13 +12,6 @@ on:
       - Agent / Issue Audit
       - Agent / Provider Smoke
     types: [completed]
-  workflow_dispatch:
-    inputs:
-      run_id:
-        description: GitHub Actions run ID whose agent telemetry artifacts should be ingested
-        required: true
-        type: string
-
 permissions:
   actions: read
   contents: write
@@ -25,6 +22,10 @@ concurrency:
 
 jobs:
   ingest:
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      (github.event_name == 'workflow_run' ||
+       (github.event_name == 'schedule' && github.ref == 'refs/heads/main'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -44,20 +45,58 @@ jobs:
         run: |
           ./gates/run agent-workflow-telemetry
 
-      - name: Resolve source run
-        id: source
+      # The same existing writer owns event and scheduled recovery. No user-
+      # controlled workflow_dispatch or source-ref-selected privileged code.
+      - name: Checkout metrics history
+        uses: actions/checkout@v4
+        with:
+          ref: metrics
+          path: metrics-store
+          fetch-depth: 0
+
+      - name: Select missed trusted Agent telemetry source
+        if: github.event_name == 'schedule'
+        id: reconcile
+        working-directory: trusted
         env:
-          EVENT_RUN_ID: ${{ github.event.workflow_run.id }}
-          INPUT_RUN_ID: ${{ inputs.run_id }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          run_id="${EVENT_RUN_ID:-${INPUT_RUN_ID:-}}"
+          node scripts/agent-telemetry-reconcile.mjs select \
+            "${GITHUB_WORKSPACE}/metrics-store" > "${RUNNER_TEMP}/reconcile.json"
+          run_id="$(jq -r '.run_id // empty' "${RUNNER_TEMP}/reconcile.json")"
+          echo "run_id=${run_id}" >> "${GITHUB_OUTPUT}"
+          if [[ -n "${run_id}" ]]; then
+            echo "Recovered an authenticated missing source run (id=${run_id})" >> "${GITHUB_STEP_SUMMARY}"
+          else
+            echo "No missing authenticated Agent telemetry in bounded recovery window" >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
+      - name: Resolve source run
+        if: github.event_name == 'workflow_run' || steps.reconcile.outputs.run_id != ''
+        id: source
+        env:
+          EVENT_RUN_ID: ${{ github.event.workflow_run.id }}
+          RECOVERY_RUN_ID: ${{ steps.reconcile.outputs.run_id }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          run_id="${EVENT_RUN_ID:-${RECOVERY_RUN_ID:-}}"
           if ! [[ "${run_id}" =~ ^[0-9]+$ ]] || [[ "${run_id}" -le 0 ]]; then
             echo "Invalid workflow run id: ${run_id}" >&2
             exit 1
           fi
           gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" > "${RUNNER_TEMP}/telemetry-source-run.json"
+          # GitHub metadata, not Issue text or a scheduled run ID, determines
+          # source identity. Validate origin and completion before artifacts.
+          jq -e --arg repo "${GITHUB_REPOSITORY}" '
+            .repository.full_name == $repo and
+            .head_repository.full_name == $repo and
+            .status == "completed" and
+            (.conclusion == "success" or .conclusion == "failure") and
+            (.head_sha | test("^[a-f0-9]{40}$")) and
+            (.run_attempt | type == "number" and . > 0)' \
+            "${RUNNER_TEMP}/telemetry-source-run.json" > /dev/null
           provenance="$(node trusted/scripts/agent-workflow-telemetry-contract.mjs provenance "${RUNNER_TEMP}/telemetry-source-run.json")"
 
           run_attempt="$(jq -r '.github_run_attempt' <<<"${provenance}")"
@@ -72,6 +111,7 @@ jobs:
           echo "expected_workflow_id=${expected_workflow_id}" >> "${GITHUB_OUTPUT}"
 
       - name: Discover Agent telemetry artifacts
+        if: steps.source.outputs.run_id != ''
         id: artifacts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -98,14 +138,6 @@ jobs:
         run: |
           mkdir -p "${RUNNER_TEMP}/agent-telemetry"
           gh run download "${RUN_ID}"             --repo "${GITHUB_REPOSITORY}"             --pattern 'agent-telemetry-*'             --dir "${RUNNER_TEMP}/agent-telemetry"
-
-      - name: Checkout metrics history
-        if: steps.artifacts.outputs.count != '0'
-        uses: actions/checkout@v4
-        with:
-          ref: metrics
-          path: metrics-store
-          fetch-depth: 0
 
       - name: Validate and append immutable telemetry
         if: steps.artifacts.outputs.count != '0'
@@ -156,6 +188,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A raw agent-metrics.json agent-metrics-light.svg agent-metrics-dark.svg
+          # Shared immutable Run Store policy: never rewrite or delete old data.
+          node "${GITHUB_WORKSPACE}/trusted/scripts/run-store-integrity.mjs" \
+            staged metrics "${GITHUB_WORKSPACE}/metrics-store"
           git commit -m "metrics: ingest agent telemetry from run ${SOURCE_RUN_ID}"
           git push origin HEAD:metrics
 
