@@ -141,8 +141,8 @@ jobs:
         run: |
           set -euo pipefail
           if [[ ! -f scripts/issue-e2e-gate.mjs ]]; then
-            echo "E2E Issue contract not deployed on main; keep legacy full-E2E check"
-            exit 0
+            echo "::error::Trusted Issue E2E gate owner is missing from main; exact-head selected evidence cannot be verified"
+            exit 1
           fi
           issue_numbers='${{ steps.discover.outputs.issue_numbers }}'
           for issue in $(jq -r '.[]' <<< "$issue_numbers"); do
