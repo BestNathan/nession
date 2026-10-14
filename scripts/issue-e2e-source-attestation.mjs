@@ -48,9 +48,9 @@ export function verifyPlanFromSource(sourceRoot, issues, pr, claimed) {
   return rebuilt;
 }
 
-export function verifyReporterEvidence(plan,results,report) {
+export function verifyReporterEvidence(plan,results,report,receipt) {
   let expected;
-  try { expected = summarize(plan,report); }
+  try { expected = summarize(plan,report,receipt); }
   catch {
     expected={status:'Unproven',results:plan.selected.map(x=>({
       id:x.id,result:'Error',discovered:0,passed:0,failed:0,
@@ -92,7 +92,7 @@ function selfTest(){
 }
 if(process.argv[2]==='self-test')selfTest();
 else if(process.argv[2]==='project') {
-  const [eventFile,runFile,prFile,planFile,resultFile,artifactFile,issueFile,sourceRoot,outputDir,playwrightFile] = process.argv.slice(3);
+  const [eventFile,runFile,prFile,planFile,resultFile,artifactFile,issueFile,sourceRoot,outputDir,playwrightFile,assertionsFile] = process.argv.slice(3);
   if(!outputDir)throw Error('project EVENT RUN PR PLAN RESULTS ARTIFACT ISSUES SOURCE_ROOT OUTPUT_DIR');
   const read = file => JSON.parse(fs.readFileSync(file,'utf8'));
   const event=read(eventFile),run=read(runFile),pr=read(prFile);
@@ -103,7 +103,10 @@ else if(process.argv[2]==='project') {
   let playwright=null;
   if(playwrightFile && fs.existsSync(playwrightFile))
     playwright=JSON.parse(fs.readFileSync(playwrightFile,'utf8'));
-  verifyReporterEvidence(plan,results,playwright);
+  let assertions=null;
+  if(assertionsFile && fs.existsSync(assertionsFile))
+    assertions=JSON.parse(fs.readFileSync(assertionsFile,'utf8'));
+  verifyReporterEvidence(plan,results,playwright,assertions);
   const projections=projectAuthenticated(issues,plan,results,attested);
   fs.mkdirSync(outputDir,{recursive:true});
   for(const item of projections)

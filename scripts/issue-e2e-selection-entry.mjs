@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { pathToFileURL } from 'node:url';
 // Deterministic adapter: Issue JSONs are fetched read-only by the workflow.
 // This script never edits Issues or invokes an Agent for test selection.
 import assert from 'node:assert/strict';
@@ -37,6 +38,7 @@ function selfTest() {
   assert.equal(prepare(event,[{number:1702,body:'old issue',state:'open'}],'.').mode,'full');
   console.log('Issue E2E planner adapter: legacy fallback, source identity and unrelated Issue rejected');
 }
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
 const [op,eventFile,issuesFile,sourceRoot,output] = process.argv.slice(2);
 if (op === 'self-test') selfTest();
 else if (op === 'plan') {
@@ -46,3 +48,4 @@ else if (op === 'plan') {
   fs.writeFileSync(output,JSON.stringify(plan,null,2)+'\n',{flag:'wx'});
   console.log('E2E selection mode: '+plan.mode+', selected: '+plan.selected.map(x=>x.id).join(','));
 } else throw Error('use self-test or plan');
+}
