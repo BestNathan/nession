@@ -21,7 +21,7 @@ test.describe('Login', () => {
     // The server_url param is the direct WS URL — bypasses vite preview proxy.
     await page.goto(`/?token=e2e-test-token&server_url=${encodeURIComponent(DIRECT_WS)}`);
 
-    // Trusted #1778 selected+explicit-none wake drill: preserve real Login assertions.
+    // Live selected-plus-none wake drill: verified Login remains executable for open Issue owner.
     // Should skip the login page and go directly to the shell
     await waitForShell(page);
     await expect(page.locator('[data-testid="shell"]')).toBeVisible();
