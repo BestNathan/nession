@@ -8,7 +8,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { verifyArchivedProjectionReceipt } from './issue-e2e-projection-receipt.mjs';
+import { createProjectionReceipt, verifyArchivedProjectionReceipt } from './issue-e2e-projection-receipt.mjs';
+import { parseIssueE2E } from './issue-e2e-contract.mjs';
 
 const SHA=/^[a-f0-9]{40}$/;
 const DIGEST=/^[a-f0-9]{64}$/;
@@ -614,6 +615,64 @@ async function selfTest() {
     if(url.includes('/timeline?'))return [];
     throw Error('should not fetch unlinked Pull Request');
   }),[]);
+
+
+  // Independently join source evidence, immutable orphan projection receipt,
+  // trusted main Ingest workflow and completed privileged Issue PATCH step.
+  const issueNum=1702,proofSha='d'.repeat(40),proofPlan='e'.repeat(64);
+  const fixtureBody=['## E2E Verification','### New','- none: no new E2E',
+    '### Regression','- login','## E2E Report',
+    '| ID | Type | Result | Evidence |','|---|---|---|---|',
+    '| login | Regression | Fail | run 75/1, SHA '+proofSha+
+      ', contract CONTRACT, plan '+proofPlan+
+      ', tests 0/1 (https://github.com/BestNathan/nession/actions/runs/75) |',
+    '## Acceptance Report','unchanged'].join('\n');
+  const claim=parseIssueE2E(fixtureBody);
+  const projected={body:fixtureBody.replace('CONTRACT',claim.digest)};
+  const inputRecord={schema_version:1,kind:'issue_e2e_run',
+    run_id:75,run_attempt:1,target_sha:proofSha,plan_digest:proofPlan,
+    artifact_digest:'sha256:'+'a'.repeat(64),
+    results:[{id:'login',result:'Fail',discovered:1,passed:0,failed:1,
+      skipped:0,flaky:0,assertions:1}]};
+  const inputPlan={mode:'selected',pr_number:1718,target_sha:proofSha,
+    plan_digest:proofPlan,issues:[{issue:issueNum,
+      declaration_digest:claim.digest,new_ids:[],regression_ids:['login']}],
+    selected:[{id:'login',owners:[{issue:issueNum}]}]};
+  const after={number:issueNum,body:projected.body,updated_at:'2026-10-14T05:09:00Z'};
+  const patch={...after,updated_at:'2026-10-14T05:08:59Z'};
+  const receipt=createProjectionReceipt({record:inputRecord,plan:inputPlan,
+    issue:issueNum,projected,before:{body:'old version'},readback:after,patch,
+    outcome:'applied',ingestRunId:800,ingestAttempt:1});
+  const fixtureSource={id:75,run_attempt:1,created_at:'2026-10-14T05:00:00Z',
+    html_url:'https://github.com/'+REPO+'/actions/runs/75'};
+  const envelope={encoding:'base64',size:JSON.stringify(receipt).length,
+    content:Buffer.from(JSON.stringify(receipt)).toString('base64')};
+  const fixtureIngest={id:800,run_attempt:1,
+    path:'.github/workflows/e2e-test-ingest.yml',name:'E2E / Test Ingest',
+    event:'workflow_run',head_branch:'main',status:'completed',
+    conclusion:'success',created_at:'2026-10-14T05:02:00Z',
+    repository:{full_name:REPO},
+    html_url:'https://github.com/'+REPO+'/actions/runs/800'};
+  const fixtureJobs={jobs:[{name:'ingest-pr',status:'completed',conclusion:'success',
+    steps:[{name:'Store immutable results and update Issue reports',conclusion:'success'}]}]};
+  const projectionGet=async url=>{
+    if(url.includes('/test/projections/1702.json?ref=acceptance-results'))return envelope;
+    if(url.endsWith('/actions/runs/800'))return fixtureIngest;
+    if(url.endsWith('/actions/runs/800/attempts/1/jobs?per_page=100'))return fixtureJobs;
+    throw Error('unexpected projection source '+url);
+  };
+  const historyReceipts=await collectAuthenticatedProjectionReceipts(REPO,
+    fixtureSource,inputRecord,inputPlan,projectionGet);
+  assert.equal(historyReceipts[0].outcome,'applied');
+  assert.equal(historyReceipts[0].rows[0].result,'Fail');
+  await assert.rejects(()=>collectAuthenticatedProjectionReceipts(REPO,
+    fixtureSource,inputRecord,inputPlan,async url=>url.endsWith('/actions/runs/800')
+      ? {...fixtureIngest,conclusion:'failure'}:projectionGet(url)),
+      /successful trusted ingest/);
+  await assert.rejects(()=>collectAuthenticatedProjectionReceipts(REPO,
+    fixtureSource,inputRecord,inputPlan,async url=>url.includes('projections/1702.json')
+      ? {...envelope,content:Buffer.from(JSON.stringify({...receipt,body_sha256:'0'.repeat(64)})).toString('base64')}
+      : projectionGet(url)),/source\/receipt|projection|body|identity|forged|mismatch|/);
 
   console.log('Acceptance historical Issue E2E evidence: bounded PR commit/run lineage and negative provenance fixtures passed');
 }
