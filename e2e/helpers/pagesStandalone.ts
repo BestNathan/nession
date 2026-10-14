@@ -2,7 +2,8 @@
 import {createServer} from 'node:http';
 import {readFile} from 'node:fs/promises';
 import {resolve,join} from 'node:path';
-const root=resolve(process.cwd(),'pages');
+const cwd=process.cwd();
+const root=resolve(cwd,cwd.endsWith('/e2e')?'../pages':'pages');
 const fixture={
  schema_version:1,generated_at:'2026-10-14T12:00:00Z',
  source:{repository:'BestNathan/nession',main_sha:'a'.repeat(40),metrics_sha:'b'.repeat(40)},
