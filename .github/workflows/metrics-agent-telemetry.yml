@@ -73,12 +73,35 @@ jobs:
           path: metrics-store
           fetch-depth: 0
 
+      # Read-only preflight: when an authenticated producer emitted no
+      # telemetry, reuse this already-running trusted Metrics writer to
+      # recover the oldest missed run instead of awaiting GitHub cron.
+      # If it did emit telemetry, preserve the original event delivery.
+      - name: Detect empty source telemetry
+        if: github.event_name == 'workflow_run'
+        id: event_artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_RUN_ID: ${{ github.event.workflow_run.id }}
+          EVENT_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+        run: |
+          set -euo pipefail
+          [[ "${EVENT_RUN_ID}" =~ ^[1-9][0-9]*$ ]] || exit 1
+          [[ "${EVENT_RUN_ATTEMPT}" =~ ^[1-9][0-9]*$ ]] || exit 1
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${EVENT_RUN_ID}/artifacts?per_page=100" \
+            > "${RUNNER_TEMP}/event-source-artifacts.json"
+          count="$(node trusted/scripts/agent-telemetry-reconcile.mjs artifact-count \
+            "${RUNNER_TEMP}/event-source-artifacts.json" "${EVENT_RUN_ID}" "${EVENT_RUN_ATTEMPT}")"
+          echo "count=${count}" >> "${GITHUB_OUTPUT}"
+
       - name: Select missed trusted Agent telemetry source
-        if: github.event_name == 'schedule'
+        if: github.event_name == 'schedule' || (github.event_name == 'workflow_run' && steps.event_artifacts.outputs.count == '0')
         id: reconcile
         working-directory: trusted
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RECOVERY_EVENT_RUN_ID: ${{ github.event.workflow_run.id }}
+          RECOVERY_EMPTY_SOURCE_COUNT: ${{ steps.event_artifacts.outputs.count }}
         run: |
           set -euo pipefail
           node scripts/agent-telemetry-reconcile.mjs select \
@@ -100,7 +123,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          run_id="${EVENT_RUN_ID:-${RECOVERY_RUN_ID:-}}"
+          # Opportunistic recovery may supersede only a source with zero
+          # telemetry artifacts; an actual producer with artifacts is never
+          # displaced or silently discarded.
+          run_id="${RECOVERY_RUN_ID:-${EVENT_RUN_ID:-}}"
           if ! [[ "${run_id}" =~ ^[0-9]+$ ]] || [[ "${run_id}" -le 0 ]]; then
             echo "Invalid workflow run id: ${run_id}" >&2
             exit 1
@@ -135,9 +161,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN_ID: ${{ steps.source.outputs.run_id }}
+          RUN_ATTEMPT: ${{ steps.source.outputs.run_attempt }}
         run: |
           set -euo pipefail
-          count="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/artifacts?per_page=100"             --jq '[.artifacts[] | select(.expired == false and (.name | startswith("agent-telemetry-")))] | length')"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/artifacts?per_page=100" \
+            > "${RUNNER_TEMP}/source-artifacts.json"
+          count="$(node trusted/scripts/agent-telemetry-reconcile.mjs artifact-count \
+            "${RUNNER_TEMP}/source-artifacts.json" "${RUN_ID}" "${RUN_ATTEMPT}")"
           echo "count=${count}" >> "${GITHUB_OUTPUT}"
           if [[ "${count}" -eq 0 ]]; then
             {
@@ -150,16 +180,22 @@ jobs:
           fi
 
       - name: Download Agent telemetry artifacts
-        if: steps.artifacts.outputs.count != '0'
+        if: steps.artifacts.outputs.count != '' && steps.artifacts.outputs.count != '0'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN_ID: ${{ steps.source.outputs.run_id }}
+          RUN_ATTEMPT: ${{ steps.source.outputs.run_attempt }}
         run: |
+          set -euo pipefail
           mkdir -p "${RUNNER_TEMP}/agent-telemetry"
-          gh run download "${RUN_ID}"             --repo "${GITHUB_REPOSITORY}"             --pattern 'agent-telemetry-*'             --dir "${RUNNER_TEMP}/agent-telemetry"
+          # GitHub lists artifacts from all attempts. A rerun cannot mix
+          # older summaries/traces with the newly authenticated attempt.
+          gh run download "${RUN_ID}" --repo "${GITHUB_REPOSITORY}" \
+            --pattern "agent-telemetry-*-${RUN_ID}-${RUN_ATTEMPT}" \
+            --dir "${RUNNER_TEMP}/agent-telemetry"
 
       - name: Validate and append immutable telemetry
-        if: steps.artifacts.outputs.count != '0'
+        if: steps.artifacts.outputs.count != '' && steps.artifacts.outputs.count != '0'
         id: persist
         working-directory: trusted
         env:
@@ -188,7 +224,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Regenerate rolling Agent metrics
-        if: steps.artifacts.outputs.count != '0' && steps.persist.outputs.changed != '0'
+        if: steps.artifacts.outputs.count != '' && steps.artifacts.outputs.count != '0' && steps.persist.outputs.changed != '0'
         working-directory: trusted
         run: |
           set -euo pipefail
@@ -198,7 +234,7 @@ jobs:
           cp "${RUNNER_TEMP}/agent-metrics/agent-metrics-dark.svg" "${GITHUB_WORKSPACE}/metrics-store/"
 
       - name: Commit metrics history
-        if: steps.artifacts.outputs.count != '0' && steps.persist.outputs.changed != '0'
+        if: steps.artifacts.outputs.count != '' && steps.artifacts.outputs.count != '0' && steps.persist.outputs.changed != '0'
         working-directory: metrics-store
         env:
           SOURCE_RUN_ID: ${{ steps.source.outputs.run_id }}
@@ -216,7 +252,7 @@ jobs:
       # A wake-up, not an Acceptance verdict; never loop on Acceptance telemetry.
       - name: Notify Acceptance of durable Provider evidence
         if: >-
-          steps.artifacts.outputs.count != '0' &&
+          steps.artifacts.outputs.count != '' && steps.artifacts.outputs.count != '0' &&
           steps.persist.outputs.changed != '0' &&
           steps.source.outputs.expected_workflow_id == 'agent-provider-smoke'
         env:
