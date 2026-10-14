@@ -273,7 +273,14 @@ async function collectCommand(workspace, outFile) {
     }
   }
   const sourceAncestry = await collectSourceAncestry(repo, workspace, sha);
-  const prE2EHistory = await collectPrE2EHistory(repo,sha,process.env.ISSUE_NUMBER);
+  let prE2EHistory = [];
+  try {
+    prE2EHistory = await collectPrE2EHistory(repo,sha,process.env.ISSUE_NUMBER);
+  } catch (error) {
+    // Historical evidence is optional: never fabricate Pass or break unrelated
+    // SC acceptance when a GitHub artifact is expired or temporarily unavailable.
+    console.warn('Bounded historical PR E2E evidence unavailable: ' + error.message);
+  }
   const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls, pullRunsBySha, sourceAncestry });
   evidence.pr_e2e_history = prE2EHistory;
   fs.writeFileSync(outFile, JSON.stringify(evidence, null, 2) + '\n');
