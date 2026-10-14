@@ -8,6 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { verifyStoredProjectionReceipt } from './issue-e2e-projection-receipt.mjs';
 
 const SHA=/^[a-f0-9]{40}$/;
 const DIGEST=/^[a-f0-9]{64}$/;
@@ -227,6 +228,46 @@ async function findTrustedStaleReplay(repo,history,get,currentHead,readLog=readT
   return found;
 }
 
+// Verify actual trusted GitHub Issue mutations, distinct from the prior
+// Playwright source Run Record. Absence is not proof of non-projection for
+// legacy runs, but cannot be claimed as a positive historical receipt.
+export async function collectHistoricalProjectionReceipts(repo,run,record,selection,get){
+  if(repo!==REPO||!goodInt(run?.id)||!goodInt(run.run_attempt)||
+     !/^\d{4}-\d{2}-\d{2}$/.test(String(run.created_at??'').slice(0,10))||
+     !Array.isArray(selection?.issue_numbers)||selection.issue_numbers.length>10)
+    throw Error('invalid bounded historical projection discovery');
+  const day=String(run.created_at).slice(0,10);
+  const results=[];
+  for(const number of selection.issue_numbers){
+    if(!goodInt(number))throw Error('invalid projection Issue number');
+    const root='/repos/'+repo+'/contents/runs/'+day+'/'+run.id+'-'+run.run_attempt+
+      '/test/';
+    let intent,receipt;
+    try{
+      intent=recordFromApiKind(await get(root+'projection-intents/'+number+'.json?ref=acceptance-results'),
+        'issue_e2e_projection_intent');
+      receipt=recordFromApiKind(await get(root+'projection-receipts/'+number+'.json?ref=acceptance-results'),
+        'issue_e2e_projection_receipt');
+    }catch(error){
+      if(/GitHub API 404\b/.test(String(error?.message)))continue;
+      throw error;
+    }
+    results.push(verifyStoredProjectionReceipt(record,intent,receipt,number));
+  }
+  return results;
+}
+function recordFromApiKind(payload,kind){
+  if(typeof payload?.content==='string'&&payload.encoding==='base64'){
+    if(payload.size>65536||payload.content.length>100000)
+      throw Error('historical projection exceeds bounded JSON size');
+    const item=JSON.parse(Buffer.from(payload.content.replace(/\s/g,''),'base64').toString('utf8'));
+    if(item?.kind!==kind)throw Error('wrong historical projection record kind');
+    return item;
+  }
+  if(payload?.kind===kind)return payload; // pure self-test
+  throw Error('missing historical projection Run Store envelope');
+}
+
 export async function collectHistoricalE2EForPull(repo,pull,get,readPlan=readHistoricalPlanZip,findReplay=findTrustedStaleReplay) {
   if (repo!==REPO || !goodInt(pull?.number) || !SHA.test(String(pull.head?.sha)))
     throw Error('historical E2E scope requires a trusted associated PR');
@@ -274,8 +315,10 @@ export async function collectHistoricalE2EForPull(repo,pull,get,readPlan=readHis
       const artifact=artifactMetadata.artifacts.find(a=>a.id===artifactId);
       const plan=await readPlan(repo,artifact);
       const selection=verifyHistoricalPlan(run,record,plan,pull.number);
+      const projection_receipts=await collectHistoricalProjectionReceipts(
+        repo,run,record,selection,get);
       verified.push({...verifyHistoricalE2ERun(run,record,pull.number,commitPulls,pull.head.sha),
-        artifact_id:artifactId,created_at:run.created_at,selection});
+        artifact_id:artifactId,created_at:run.created_at,selection,projection_receipts});
     }
   }
   verified.sort((a,b)=>a.run_id-b.run_id||a.run_attempt-b.run_attempt);
@@ -430,11 +473,19 @@ async function selfTest() {
       name:'issue-e2e-verification',expired:false,id:202,
       digest:rec(current,'Pass').artifact_digest}]}],
   ]);
-  const get=async path=>{if(!map.has(path))throw Error('unexpected request '+path);return map.get(path)};
+  const get=async path=>{
+    if(/\/projection-(?:intents|receipts)\//.test(path))
+      throw Error('GitHub API 404 missing historical projection');
+    if(!map.has(path))throw Error('unexpected request '+path);
+    return map.get(path);
+  };
   const readPlan=async(_repo,artifact)=>fixturePlan(artifact.id===101?old:current);
   const found=await collectHistoricalE2EForPull(REPO,pr,get,readPlan,async()=>[]);
   assert.deepEqual(found.map(r=>[r.run_id,r.results[0].result]),[[10,'Fail'],[20,'Pass']]);
   assert.deepEqual(found.map(x=>x.artifact_id),[101,202]);
+  assert.deepEqual(found.map(x=>x.projection_receipts),[[],[]]);
+  assert.throws(()=>verifyStoredProjectionReceipt(rec(old,'Fail'),{kind:'forged'},{
+    kind:'issue_e2e_projection_receipt'},1702),/historical projection intent/);
   assert.deepEqual(found.map(x=>x.selection.selected),
     [[{id:'login',owners:[1702]}],[{id:'login',owners:[1702]}]]);
   // GitHub can return pull_requests:[] for runs after their PR was merged.
@@ -449,7 +500,10 @@ async function selfTest() {
     {workflow_runs:[mergedCurrent]});
   mergedMap.set('/repos/'+REPO+'/commits/'+a+'/pulls?per_page=100',[mergedPr]);
   mergedMap.set('/repos/'+REPO+'/commits/'+b+'/pulls?per_page=100',[mergedPr]);
-  const mergedGet=async p=>{if(!mergedMap.has(p))throw Error('unexpected request '+p);
+  const mergedGet=async p=>{
+    if(/\/projection-(?:intents|receipts)\//.test(p))
+      throw Error('GitHub API 404 missing historical projection');
+    if(!mergedMap.has(p))throw Error('unexpected request '+p);
     return mergedMap.get(p)};
   const mergedHistory=await collectHistoricalE2EForPull(REPO,pr,mergedGet,readPlan,async()=>[]);
   assert.deepEqual(mergedHistory.map(row=>[row.run_id,row.results[0].result]),
@@ -468,7 +522,10 @@ async function selfTest() {
     [{...mergedPr,number:1719}]);
   forgedMap.set('/repos/'+REPO+'/commits/'+b+'/pulls?per_page=100',
     [{...mergedPr,number:1719}]);
-  const forgedGet=async p=>{if(!forgedMap.has(p))throw Error('unexpected request '+p);
+  const forgedGet=async p=>{
+    if(/\/projection-(?:intents|receipts)\//.test(p))
+      throw Error('GitHub API 404 missing historical projection');
+    if(!forgedMap.has(p))throw Error('unexpected request '+p);
     return forgedMap.get(p)};
   assert.deepEqual(await collectHistoricalE2EForPull(REPO,pr,forgedGet,readPlan,async()=>[]),[]);
   assert.throws(()=>verifyHistoricalPlan(old,rec(old,'Fail'),{
