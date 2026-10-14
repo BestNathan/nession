@@ -6,6 +6,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import {pathToFileURL} from 'node:url';
+import {spawnSync} from 'node:child_process';
 
 const REPO='BestNathan/nession', WORKFLOW='.github/workflows/agent-provider-smoke.yml';
 const HEX40=/^[a-f0-9]{40}$/;
@@ -169,12 +171,29 @@ function selfTest(){
     fs.symlinkSync('/etc/passwd',f);
     assert.throws(()=>verifyWake(payload,run,root),/unsafe Metrics record file/);
   }finally{fs.rmSync(root,{recursive:true,force:true});}
-  console.log('post-merge evidence waker: source, digest lineage and negative fixtures passed');
+  // The CI evidence collector imports verifyWake as an ES module. Importing
+  // a module MUST NOT execute its CLI error/verify branch as a side effect.
+  const imported=spawnSync(process.execPath,['--input-type=module','-e',
+    "const m = await import('./scripts/agent-evidence-waker.mjs'); if(typeof m.verifyWake !== 'function') process.exit(7)"],{
+    cwd:process.cwd(),encoding:'utf8',timeout:10000,
+  });
+  assert.equal(imported.status,0,'ESM import cannot execute direct CLI');
+  assert.equal(imported.stdout,'','import must not emit CLI output');
+  const invalid=spawnSync(process.execPath,['scripts/agent-evidence-waker.mjs','bad-command'],{
+    cwd:process.cwd(),encoding:'utf8',timeout:10000,
+  });
+  assert.notEqual(invalid.status,0,'invalid direct CLI still fails closed');
+  assert.match(invalid.stderr,/usage: self-test \| verify/);
+  console.log('post-merge evidence waker: source, digest lineage, import-safe CLI and negative fixtures passed');
 }
-if(process.argv[2]==='self-test')selfTest();
-else if(process.argv[2]==='verify'){
-  const [payloadFile,runFile,metricsRoot]=process.argv.slice(3);
-  if(!payloadFile||!runFile||!metricsRoot)fail('usage: verify PAYLOAD_JSON GITHUB_RUN_JSON METRICS_ROOT');
-  const result=verifyWake(readRecord(payloadFile),readRecord(runFile),metricsRoot);
-  console.log(JSON.stringify(result));
-}else fail('usage: self-test | verify ...');
+// The read-only CI collector imports verifyWake. Only a direct invocation of
+// this file may dispatch the standalone CLI; import never reads argv or exits.
+if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href){
+  if(process.argv[2]==='self-test')selfTest();
+  else if(process.argv[2]==='verify'){
+    const [payloadFile,runFile,metricsRoot]=process.argv.slice(3);
+    if(!payloadFile||!runFile||!metricsRoot)fail('usage: verify PAYLOAD_JSON GITHUB_RUN_JSON METRICS_ROOT');
+    const result=verifyWake(readRecord(payloadFile),readRecord(runFile),metricsRoot);
+    console.log(JSON.stringify(result));
+  }else fail('usage: self-test | verify ...');
+}
