@@ -165,9 +165,10 @@ async function readTrustedJobLog(repo,jobId) {
   return text;
 }
 
-async function findTrustedStaleReplay(repo,history,get,readLog=readTrustedJobLog) {
-  const corrected=history.find(r=>r.conclusion==='success' &&
-    r.results.length && r.results.every(t=>t.result==='Pass'));
+async function findTrustedStaleReplay(repo,history,get,currentHead,readLog=readTrustedJobLog) {
+  const corrected=history.filter(r=>r.head_sha===currentHead &&
+    r.conclusion==='success' && r.results.length &&
+    r.results.every(t=>t.result==='Pass')).at(-1);
   const former=history.filter(r=>r.conclusion==='failure' &&
     r.head_sha!==corrected?.head_sha);
   if(!corrected||!former.length)return [];
@@ -194,7 +195,9 @@ async function findTrustedStaleReplay(repo,history,get,readLog=readTrustedJobLog
         j.name==='ingest-pr'&&j.conclusion==='failure'&&goodInt(j.id) &&
         j.steps?.some(s=>s.name==='Independently validate and project per-ID results' &&
           s.conclusion==='failure'))){
-        const log=await readLog(repo,job.id);
+        let log;
+        try { log=await readLog(repo,job.id); }
+        catch { continue; } // Missing log is not positive stale-replay proof.
         for(const old of former) {
           try {
             const proof=verifyStaleReplayLog(log,old,corrected.head_sha);
@@ -251,7 +254,7 @@ export async function collectHistoricalE2EForPull(repo,pull,get,readPlan=readHis
     }
   }
   verified.sort((a,b)=>a.run_id-b.run_id||a.run_attempt-b.run_attempt);
-  const stale_replays=await findReplay(repo,verified,get);
+  const stale_replays=await findReplay(repo,verified,get,pull.head.sha);
   return verified.map(row=>({...row,stale_replays:
     stale_replays.filter(x=>x.source_run_id===row.run_id)}));
 }
@@ -312,6 +315,30 @@ async function selfTest() {
     run_id:10,head_sha:a},b).error,'stale PR head');
   assert.throws(()=>verifyStaleReplayLog(log,{run_id:11,head_sha:a},b),/binding/);
   assert.throws(()=>verifyStaleReplayLog(log,{run_id:10,head_sha:b},a),/rejection/);
+
+  const replayGet=async request=>{
+    if(request.includes('/attempts/2/jobs?per_page=100'))return {jobs:[{
+      id:777,name:'ingest-pr',conclusion:'failure',
+      steps:[{name:'Independently validate and project per-ID results',conclusion:'failure'}],
+    }]};
+    return {workflow_runs:request.endsWith('&page=1')?[{
+      id:90,name:'E2E / Test Ingest',path:'.github/workflows/e2e-test-ingest.yml',
+      repository:{full_name:REPO},head_branch:'main',event:'workflow_run',
+      status:'completed',conclusion:'failure',run_attempt:2,
+      updated_at:'2026-10-14T02:00:00Z',
+    }]:[]};
+  };
+  const replay=await findTrustedStaleReplay(REPO,[
+    {...verifyHistoricalE2ERun(old,rec(old,'Fail'),1718),created_at:old.created_at},
+    {...verifyHistoricalE2ERun(current,rec(current,'Pass'),1718),created_at:current.created_at},
+  ],replayGet,b,async()=>log);
+  assert.equal(replay[0].source_run_id,10);
+  assert.equal(replay[0].ingest_run_id,90);
+  assert.deepEqual(await findTrustedStaleReplay(REPO,[
+    {...verifyHistoricalE2ERun(old,rec(old,'Fail'),1718),created_at:old.created_at},
+    {...verifyHistoricalE2ERun(current,rec(current,'Pass'),1718),created_at:current.created_at},
+  ],replayGet,'e'.repeat(40),async()=>log),[]);
+
   assert.throws(()=>verifyHistoricalArtifact(current,rec(current,'Pass'),{
     artifacts:[{name:'issue-e2e-verification',expired:false,id:202,digest:'sha256:'+'0'.repeat(64)}],
   }),/source artifact digest/);
