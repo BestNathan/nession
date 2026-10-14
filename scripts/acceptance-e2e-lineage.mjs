@@ -425,7 +425,8 @@ export async function collectLinkedIssueE2EEvidence(repo,issueNumber,get,
     // alongside a second Issue, and every surfaced source run to match.
     const proven=history.filter(row=>
       row.selection?.issue_numbers?.includes(issueNumber) &&
-      (pr.merged_at?row.selection.issue_numbers.length>=2:true) &&
+      (pr.merged_at?row.selection.issue_numbers.length>=2:
+        row.projections?.some(p=>p.issue===issueNumber&&p.outcome==='applied')) &&
       row.selection.selected?.some(item=>
         item.owners?.includes(issueNumber)&&(pr.merged_at?item.owners.length>=2:true)));
     if(!proven.length)continue;
@@ -579,6 +580,20 @@ async function selfTest() {
   const sourceUrl='https://api.github.com/repos/'+REPO+'/pulls/1718';
   const timeline=[{event:'cross-referenced',source:{issue:{number:1718,
     pull_request:{url:sourceUrl}}}}];
+  const drillPr={number:1761,state:'closed',merged_at:null,
+    title:'test(e2e): DO NOT MERGE historical Issue receipt proof',
+    body:'Refs #1702\nDO NOT MERGE',
+    base:{ref:'main',repo:{full_name:REPO}},
+    head:{sha:b,repo:{full_name:REPO}}};
+  const drillEvent={event:'cross-referenced',source:{issue:{number:1761,
+    pull_request:{url:'https://api.github.com/repos/'+REPO+'/pulls/1761'}}}};
+  assert.deepEqual(selectCrossReferencedE2EPulls(REPO,1702,[drillEvent],[drillPr])
+    .map(p=>p.number),[1761]);
+  assert.deepEqual(selectCrossReferencedE2EPulls(REPO,1702,[drillEvent],[{
+    ...drillPr,title:'regular feature PR'}]),[]);
+  assert.equal(verifiedCommitPullAssociation([drillPr],1761,b,true),true);
+  assert.equal(verifiedCommitPullAssociation([drillPr],1761,b,false),false);
+
   const linked={number:1718,state:'closed',merged_at:'2026-10-14T05:00:00Z',
     base:{ref:'staging',repo:{full_name:REPO}},
     head:{sha:b,repo:{full_name:REPO}},merge_commit_sha:mergeSha,
