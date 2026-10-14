@@ -646,6 +646,37 @@ function selfTest() {
     ()=>({status:128,stdout:''})).is_ordinary_merge,false);
   assert.throws(()=>checkGitMergeCommit('/tmp','bad',[parentB]),/40-character/);
 
+  const exact={id:38573830595,run_attempt:1,
+    repository:{full_name:'BestNathan/nession'},
+    head_repository:{full_name:'BestNathan/nession'},
+    path:'.github/workflows/acceptance-orchestrator.yml',
+    name:'Acceptance / Orchestrator',event:'push',head_branch:'main',
+    head_sha:head,status:'completed',conclusion:'success'};
+  assert.deepEqual(pinnedHistoricalOrchestratorIds(
+    '### Success Criteria\n- [ ] SC-04 earlier Acceptance / Orchestrator Run 38573830595 completed\n## Acceptance Report'
+  ),[38573830595]);
+  assert.deepEqual(pinnedHistoricalOrchestratorIds(
+    '### Success Criteria\n- [ ] SC-04 vague run 38573830595'
+  ),[]);
+  assert.equal(attestHistoricalOrchestrator(exact,head,exact.id,'BestNathan/nession').id,
+    exact.id);
+  for(const forged of [
+    {...exact,conclusion:'failure'},
+    {...exact,head_sha:left},
+    {...exact,event:'workflow_dispatch'},
+    {...exact,repository:{full_name:'foreign/repo'}},
+    {...exact,run_attempt:0},
+    {...exact,status:'in_progress'},
+  ])assert.throws(()=>attestHistoricalOrchestrator(
+    forged,head,exact.id,'BestNathan/nession'),/invalid historical/);
+  assert.deepEqual(normalizeCiEvidence({targetSha:head,historicalAncestry:[
+    checkGitAncestor('/tmp',parentA,left,()=>({status:0}))],
+    historicalOrchestratorRuns:[attestHistoricalOrchestrator(exact,head,exact.id,
+      'BestNathan/nession')],
+  }).historical_merge_ancestry.map(p=>[p.target_sha,p.ancestor_sha,p.is_ancestor]),
+    [[parentA,left,true]]);
+
+
   console.log('acceptance-ci-evidence self-test: collector, bounded criteria and positive/negative Git ancestry passed');
 }
 
