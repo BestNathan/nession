@@ -5,6 +5,7 @@ import path from 'node:path';
 import { buildGitPlan } from './issue-e2e-plan.mjs';
 import { summarize } from '../e2e/runner/selected-report.mjs';
 import { projectIssueE2E } from './issue-e2e-project.mjs';
+import { parseIssueE2E } from './issue-e2e-contract.mjs';
 
 const SHA=/^[a-f0-9]{40}$/;
 const positive=n=>Number.isSafeInteger(n)&&n>0;
@@ -64,6 +65,15 @@ export function projectAuthenticated(issues,plan,results,authenticated) {
   if(plan.mode!=='selected')throw Error('Only selected plans have per-ID Issue reports');
   const projected=[];
   for(const info of plan.issues){
+    // A multi-Issue PR may have required browser IDs on one Issue and a
+    // justified `none` contract on another. The latter owns no per-ID
+    // execution verdict and must never receive an empty E2E Report PATCH.
+    // verifyPlanFromSource already authenticated every Issue contract.
+    if(info.no_e2e===true) {
+      if((info.new_ids??[]).length||(info.regression_ids??[]).length)
+        throw Error('no-E2E Issue has contradictory declared IDs');
+      continue;
+    }
     const issue=issues.find(i=>i.number===info.issue);
     if(!issue)throw Error('Issue contract missing from trusted source');
     const next=projectIssueE2E(issue,plan,results,authenticated);
@@ -85,6 +95,38 @@ function selfTest(){
   const results={target_sha:sha,plan_digest:plan.plan_digest,run_id:77,run_attempt:1,results:[]};
   const artifact={id:1,name:'issue-e2e-verification',expired:false,digest:'sha256:'+'d'.repeat(64)};
   assert.equal(verifySource(event,run,pr,plan,results,artifact).workflow_verified,true);
+  // Mixed selected + none Issue contracts: only the selected owner is
+  // projected; an unrelated no-E2E Issue cannot receive a fake empty Pass.
+  const selectedBody=[
+    '## E2E Verification','### New','- none: no new browser test',
+    '### Regression','- login','## E2E Report',
+    '| ID | Type | Result | Evidence |','|---|---|---|---|',
+    '| login | Regression | Pending | - |'].join('\n');
+  const noneBody=[
+    '## E2E Verification','### New','- none: no new browser test',
+    '### Regression','- none: no browser regression',
+    '## E2E Report','| ID | Type | Result | Evidence |',
+    '|---|---|---|---|'].join('\n');
+  const ownerDigest=parseIssueE2E(selectedBody,{requireDeclaration:true}).digest;
+  const noneDigest=parseIssueE2E(noneBody,{requireDeclaration:true}).digest;
+  const mixedPlan={target_sha:sha,plan_digest:'c'.repeat(64),mode:'selected',
+    selected:[{id:'login',owners:[{issue:1702,type:'Regression'}]}],
+    issues:[{issue:1702,no_e2e:false,declaration_digest:ownerDigest},
+      {issue:1759,no_e2e:true,declaration_digest:noneDigest,new_ids:[],
+        regression_ids:[]}]};
+  const mixedExecution={target_sha:sha,plan_digest:mixedPlan.plan_digest,
+    run_id:77,run_attempt:1,results:[{id:'login',result:'Pass',
+      discovered:1,passed:1,failed:0,skipped:0,flaky:0,assertions:1}]};
+  const onlyOwner=projectAuthenticated([
+    {number:1702,body:selectedBody},{number:1759,body:noneBody}],
+    mixedPlan,mixedExecution,{...verifySource(event,run,pr,plan,results,artifact)});
+  assert.deepEqual(onlyOwner.map(x=>x.issue),[1702]);
+  assert.throws(()=>projectAuthenticated([
+    {number:1702,body:selectedBody},{number:1759,body:noneBody}],
+    {...mixedPlan,issues:mixedPlan.issues.map(x=>x.issue===1759?
+      {...x,new_ids:['forged']}:x)},mixedExecution,
+    verifySource(event,run,pr,plan,results,artifact)),/contradictory/);
+
   assert.throws(()=>verifySource(event,run,{...pr,head:{...pr.head,sha:base}},plan,results,artifact),/stale/);
   assert.throws(()=>verifySource(event,{...run,path:'bad.yml'},pr,plan,results,artifact));
   assert.throws(()=>verifySource(event,run,pr,plan,{...results,run_attempt:2},artifact));
