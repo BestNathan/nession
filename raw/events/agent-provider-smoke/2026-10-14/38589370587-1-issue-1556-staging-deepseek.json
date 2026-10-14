@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "kind": "agent_execution_trace",
+  "identity": {
+    "workflow_id": "agent-provider-smoke",
+    "github_run_id": 38589370587,
+    "github_run_attempt": 1,
+    "unique_run_name": "38589370587-1-issue-1556-staging-deepseek",
+    "repository": "BestNathan/nession"
+  },
+  "task": {
+    "id": "issue-1556-staging",
+    "type": "acceptance",
+    "issue": 1556,
+    "target_sha": "9dabe70867c55a278e19df7248cdef40e6804d98"
+  },
+  "agent": {
+    "id": "legacy-acceptance-deepseek",
+    "role": "acceptor",
+    "provider": "deepseek",
+    "harness_sha256": null
+  },
+  "timing": {
+    "started_at": "2026-10-14T15:26:58.737Z",
+    "finished_at": "2026-10-14T15:27:01.870Z"
+  },
+  "coverage": {
+    "model": "unobserved",
+    "tools": "unobserved",
+    "skills": "unobserved",
+    "mcp": "unobserved"
+  },
+  "events": []
+}
