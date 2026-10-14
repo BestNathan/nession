@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_projection_receipt",
+  "outcome": "applied",
+  "issue": 1776,
+  "run_id": 38557570973,
+  "run_attempt": 1,
+  "target_sha": "ac601555c1de69e66b7d9cf2da73fe4971862230",
+  "plan_digest": "64b6c683a9c9fc6d16178c116a37f2c1d2486ca9449e8cd30e5c10dd2322f571",
+  "artifact_digest": "sha256:a5073751234a87917268522be0645c0844b014c496b7cb4559bcfa31ecbca5f6",
+  "ingest_run_id": 38558355729,
+  "ingest_attempt": 1,
+  "declaration_digest": "5bcb292f5cfba99cfc330434191b4cf9d73845f7fc60e4e236a23bf88f760657",
+  "before_body_sha256": "b8fc2d293bb48d2540620b7d0e3ea21b9669622c20e2bb93a8348049b5a50901",
+  "body_sha256": "535680fa673110fd0a976d82b5525d1e9b6f46a517c06531adb20b51ce148158",
+  "readback_body": "## Requirements: Two-owner live login E2E projection\n\nLive two-owner Issue-centric E2E verification for parent #1702 on the current main-owned trusted source, after #1771 and #1773. This is a **test-only requirement** and must never merge deliberately failing test code.\n\n### Success Criteria\n\n- [ ] SC-01 A real open PR referencing this Issue and #1702 executes the stable `login` Regression ID **only once**, attributes it to both owners, and preserves `session-lifecycle` for its other owner.\n- [ ] SC-02 A deliberate `login` assertion failure reaches a completed trusted main-owned Ingest and produces verifiable **applied** Fail receipts for both owning Issues while `session-lifecycle` remains Pass.\n- [ ] SC-03 A later HEAD removes the deliberate failure, executes actual tests, and results in verifiable **applied** Pass receipts on both Issues; previous Fail receipts remain immutable and stale ordering is not overwritten.\n- [ ] SC-04 The DO-NOT-MERGE source PR closes unmerged. No Issue report or SC is manually marked Pass; exact Run ID/Attempt/SHA/contract/plan/artifact and trusted Ingest evidence is attached.\n\n## Acceptance Plan\n```yaml\nacceptance:\n  SC-01:\n    when: merged\n    branch: main\n    method: agent\n  SC-02:\n    when: merged\n    branch: main\n    method: agent\n  SC-03:\n    when: merged\n    branch: main\n    method: agent\n  SC-04:\n    when: merged\n    branch: main\n    method: agent\n```\n\n## Acceptance Report\n| Criterion | Result | Evidence |\n|---|---|---|\n| SC-01 | Pending | Awaiting authenticated selected Run + Plan |\n| SC-02 | Pending | Awaiting actual failing Ingest PATCH + receipt |\n| SC-03 | Pending | Awaiting newer passing source SHA + receipts |\n| SC-04 | Pending | Awaiting closed unmerged source and authenticated proof |\n\n## E2E Verification\n### New\n- none: No additional Spec file is needed.\n### Regression\n- login\n\n## E2E Report\n\n| ID | Type | Result | Evidence |\n|---|---|---|---|\n| login | Regression | Pass | run 38557570973/1, SHA ac601555c1de69e66b7d9cf2da73fe4971862230, contract 5bcb292f5cfba99cfc330434191b4cf9d73845f7fc60e4e236a23bf88f760657, plan 64b6c683a9c9fc6d16178c116a37f2c1d2486ca9449e8cd30e5c10dd2322f571, tests 1/1 (https://github.com/BestNathan/nession/actions/runs/38557570973) |\n\n## Product alignment\n- [x] Uses the existing stable ID and runner, no static code→E2E mapping.\n- [x] Uses existing trusted main Ingest and protected orphan receipt store.\n- [x] Introduces no user-facing behavior or new browser test.\n\n---\n**Status:** Approved",
+  "patch_updated_at": "2026-10-14T11:41:58Z",
+  "readback_updated_at": "2026-10-14T11:41:58Z",
+  "rows": [
+    {
+      "id": "login",
+      "result": "Pass",
+      "evidence": "run 38557570973/1, SHA ac601555c1de69e66b7d9cf2da73fe4971862230, contract 5bcb292f5cfba99cfc330434191b4cf9d73845f7fc60e4e236a23bf88f760657, plan 64b6c683a9c9fc6d16178c116a37f2c1d2486ca9449e8cd30e5c10dd2322f571, tests 1/1 (https://github.com/BestNathan/nession/actions/runs/38557570973)"
+    }
+  ]
+}
