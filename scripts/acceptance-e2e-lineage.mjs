@@ -334,6 +334,16 @@ export async function collectHistoricalE2EForPull(repo,pull,get,readPlan=readHis
       const plan=await readPlan(repo,artifact);
       const selection=verifyHistoricalPlan(run,record,plan,pull.number);
       const projections=await loadReceipts(repo,run,record,plan,get);
+      // Older test-only drills may have executed before durable Issue PATCH
+      // receipts existed. A source Run/Plan alone proves TEST execution, not
+      // an Issue mutation. Do not surface it as a historical projection, and
+      // do not let it block independently attested later drills.
+      //
+      // A present but forged/invalid receipt is never ignored: loadReceipts
+      // verifies it and fails closed before reaching this branch.
+      if(testDrill && !projections.some(p=>p.outcome==='applied'&&
+          p.run_id===run.id&&p.run_attempt===run.run_attempt&&
+          p.target_sha===run.head_sha))continue;
       verified.push({...verifyHistoricalE2ERun(run,record,pull.number,
         commitPulls,pull.head.sha,testDrill,selected,projections),
         artifact_id:artifactId,created_at:run.created_at,selection,projections});
@@ -623,6 +633,33 @@ async function selfTest() {
     [],b,true,[{sha:b}],[]),/unrelated or untrusted/);
   assert.throws(()=>verifyHistoricalE2ERun(noAssociations,rec(current,'Pass'),1718,
     [],b,false,[{sha:b}],applied),/unrelated or untrusted/);
+  const historicalDrill={...drillPr,number:1718,head:{...drillPr.head,sha:b}};
+  const drillMap=new Map(mergedMap);
+  drillMap.set('/repos/'+REPO+'/commits/'+a+'/pulls?per_page=100',[]);
+  drillMap.set('/repos/'+REPO+'/commits/'+b+'/pulls?per_page=100',[]);
+  const strictDrillGet=async p=>{
+    if(!drillMap.has(p))throw Error('unexpected drill source '+p);
+    return drillMap.get(p);
+  };
+  // Deliberate historical failures run before receipts were introduced:
+  // they are excluded, not promoted from a Playwright artifact into a PATCH.
+  assert.deepEqual(await collectHistoricalE2EForPull(REPO,historicalDrill,
+    strictDrillGet,readPlan,async()=>[],async()=>[]),[]);
+  const appliedDrill=await collectHistoricalE2EForPull(REPO,historicalDrill,
+    strictDrillGet,readPlan,async()=>[],async(_repo,run)=>[{
+      outcome:'applied',run_id:run.id,run_attempt:run.run_attempt,
+      target_sha:run.head_sha,issue:1702,rows:[{id:'login'}],
+    }]);
+  assert.deepEqual(appliedDrill.map(x=>[x.run_id,x.results[0].result]),
+    [[10,'Fail'],[20,'Pass']]);
+  assert.deepEqual(await collectHistoricalE2EForPull(REPO,historicalDrill,
+    strictDrillGet,readPlan,async()=>[],async(_repo,run)=>[{
+      outcome:'recovered',run_id:run.id,run_attempt:run.run_attempt,
+      target_sha:run.head_sha,
+    }]),[]);
+  await assert.rejects(()=>collectHistoricalE2EForPull(REPO,historicalDrill,
+    strictDrillGet,readPlan,async()=>[],async()=>{throw Error('forged receipt');}),
+    /forged receipt/);
 
   // A non-E2E child Issue can observe authenticated sibling projections
   // within the same never-merged test PR, without being assigned a test ID.
