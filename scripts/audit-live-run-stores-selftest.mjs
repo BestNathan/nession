@@ -37,7 +37,7 @@ try {
   git(tmp,'init','--bare','-q',remote);
   git(repo,'remote','add','origin',remote);
   git(repo,'push','-q','origin','main');
-  const anchors={};
+  const anchors={},originalTips={};
   for(const store of AUDITED_STORES) {
     git(repo,'checkout','-q','--orphan',store);
     git(repo,'rm','-rfq','.');
@@ -49,6 +49,7 @@ try {
       : 'runs/2026-10-14/100-1.json';
     write(repo,entry,'{"result":"valid"}\n');
     git(repo,'add','-A');git(repo,'commit','-qm','append immutable');
+    originalTips[store]=git(repo,'rev-parse','HEAD');
     git(repo,'push','-q','origin',store);
   }
   git(repo,'checkout','-q','main');
@@ -103,9 +104,8 @@ try {
   git(repo,'push','-q','--force','origin','task-results');
   git(repo,'checkout','-q','main');
   const tipAnchors={...anchors};
-  // Pin the previous real task-results tip (retained in local reflog) via
-  // its orphan branch's original reflog entry.
-  tipAnchors['task-results']=git(repo,'rev-parse','task-results@{1}');
+  // Pin the original observed tip independently; the replacement omits it.
+  tipAnchors['task-results']=originalTips['task-results'];
   await assert.rejects(()=>auditLiveRunStores({...base,anchors:tipAnchors}),
     /baseline is not ancestor|checkout HEAD differs/);
   console.log('live anchored Run Store audit fixtures: three refs, API cross-check, malicious fast-forward, forged ref and history reset passed');
