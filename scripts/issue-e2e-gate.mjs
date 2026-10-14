@@ -23,6 +23,26 @@ export function verifyIssueE2EGate(issue,targetSha) {
   return {ok:failures.length===0,required:decl.selectedIds.length,failures,
     reason:decl.selectedIds.length?'selected':'explicit-none'};
 }
+// Guard the privileged wake router against falsely requiring a plan receipt
+// on a validated no-E2E Issue. Only selected Issues can authorize a rerun.
+export function assertTrustedWakeRouting(workflow) {
+  const begin=workflow.indexOf('name: Authenticate E2E result and reconcile exact-head Acceptance run');
+  const end=workflow.indexOf('  # Source Quality/E2E workflow_run completion',begin);
+  if(begin<0||end<begin)throw Error('missing canonical event-driven E2E wake');
+  const part=workflow.slice(begin,end);
+  if(!part.includes('node scripts/issue-e2e-gate.mjs verify-json')||
+     !part.includes('case "$(jq -r .reason <<< "$verdict")" in')||
+     !/selected\)[\s\S]*?\.body \| contains\("plan " \+ \$digest \+ ","\)/.test(part)||
+     !/explicit-none\)[\s\S]*?\.required/.test(part)||
+     !part.includes('(( verified > 0 ))'))
+    throw Error('E2E wake must require exact Plan only for selected and never for explicit-none');
+  const selected=part.slice(part.indexOf('                selected)'),part.indexOf('                explicit-none)'));
+  const none=part.slice(part.indexOf('                explicit-none)'),part.indexOf('                *) echo'));
+  if(!selected.includes('verified=$((verified + 1))')||
+     none.includes('verified=$((verified + 1))')||
+     none.includes('plan " + $digest'))
+    throw Error('empty-E2E wake must not grant selected evidence authority');
+}
 function selfTest(){
   const sha='a'.repeat(40);
   const prefix=['## E2E Verification','### New','- none: no new test',
@@ -38,6 +58,16 @@ function selfTest(){
   const none=['## E2E Verification','### New','- none: no new tests',
     '### Regression','- none: no affected E2E','## E2E Report',
     '| ID | Type | Result | Evidence |','|---|---|---|---|'].join('\n');
+  const trustedWorkflow=fs.readFileSync('.github/workflows/acceptance-orchestrator.yml','utf8');
+  assert.doesNotThrow(()=>assertTrustedWakeRouting(trustedWorkflow));
+  assert.throws(()=>assertTrustedWakeRouting(trustedWorkflow.replace(
+    'node scripts/issue-e2e-gate.mjs verify-json',
+    'node scripts/issue-e2e-gate.mjs verify')),
+    /E2E wake must/);
+  assert.throws(()=>assertTrustedWakeRouting(trustedWorkflow.replace(
+    'verified=$((verified + 1))\n                  ;;\n                explicit-none)',
+    'verified=$((verified + 1))\n                  ;;\n                explicit-none)\n                  verified=$((verified + 1))')),
+    /empty-E2E wake/);
   assert.equal(verifyIssueE2EGate({body:none},sha).reason,'explicit-none');
   assert.equal(verifyIssueE2EGate({body:none},sha).required,0);
   assert.equal(verifyIssueE2EGate({body:pass},sha).required,1);
