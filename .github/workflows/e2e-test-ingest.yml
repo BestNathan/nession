@@ -190,10 +190,41 @@ jobs:
           live_pr="$(jq -r .number scratch/metadata/pr.json)"
           current_head="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$live_pr" --jq .head.sha)"
           [[ "$current_head" == "$sha" ]] || { echo "Superseded PR; no Issue projection"; exit 0; }
+          [[ "$day" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || exit 1
+          mkdir -p scratch/output/receipt-intents scratch/output/receipts scratch/metadata/readback
+          # Only this trusted main-owned writer can append projection proofs.
+          # Intents commit *before* PATCH; confirmed receipts commit only
+          # *after* GitHub's PATCH response AND an independent Issue GET.
+          append_projection_proof() {
+            local source="$1" dest="$2" kind="$3"
+            case "$dest" in
+              runs/"$day"/"$run_id"-"$attempt"/test/projection-intents/[1-9]*.json|\
+              runs/"$day"/"$run_id"-"$attempt"/test/projection-receipts/[1-9]*.json) ;;
+              *) echo "::error::Unsafe E2E projection proof path" >&2; exit 1 ;;
+            esac
+            mkdir -p "results-repo/$(dirname "$dest")"
+            if [[ -f "results-repo/$dest" ]]; then
+              cmp -s "$source" "results-repo/$dest" || {
+                echo "::error::Divergent immutable E2E projection proof" >&2; exit 1;
+              }
+            else
+              cp "$source" "results-repo/$dest"
+            fi
+            git -C results-repo add -- "$dest"
+            if ! git -C results-repo diff --cached --quiet; then
+              node trusted/scripts/run-store-integrity.mjs staged acceptance-results \
+                "$GITHUB_WORKSPACE/results-repo"
+              git -C results-repo commit -m "e2e: append trusted $kind for $run_id/$attempt Issue $number"
+              git -C results-repo push origin acceptance-results
+            fi
+          }
           for f in scratch/output/[0-9]*.json; do
             [[ -f "$f" ]] || continue
             number="$(basename "$f" .json)"
-            latest="$(gh api "repos/$GITHUB_REPOSITORY/issues/$number" --jq .body)"
+            [[ "$number" =~ ^[1-9][0-9]*$ ]] || exit 1
+            current_file="scratch/metadata/readback/$number-before.json"
+            gh api "repos/$GITHUB_REPOSITORY/issues/$number" > "$current_file"
+            latest="$(jq -r .body "$current_file")"
             original="$(jq -r .body "scratch/metadata/issue-$number.json")"
             if [[ "$latest" != "$original" ]]; then
               echo "Issue #$number changed since attestation; omit stale projection"
@@ -201,14 +232,53 @@ jobs:
             fi
             decision="$(node trusted/scripts/issue-e2e-reconcile.mjs decide \
               "scratch/metadata/issue-$number.json" "$f" "$run_id" "$attempt" "$sha")"
+            intent_rel="runs/$day/$run_id-$attempt/test/projection-intents/$number.json"
+            receipt_rel="runs/$day/$run_id-$attempt/test/projection-receipts/$number.json"
+            intent_file="results-repo/$intent_rel"
+            receipt_file="scratch/output/receipts/$number.json"
             case "$decision" in
-              apply) ;;
-              stale|duplicate)
-                echo "Issue #$number ignores $decision run result without overwriting newer proof"
+              stale)
+                echo "Issue #$number ignores stale source; no projection receipt"
                 continue ;;
+              duplicate)
+                # A previous PATCH may have succeeded before receipt storage
+                # was interrupted. Do not claim a new PATCH; recover only an
+                # already-persisted trusted intent and exact Issue read-back.
+                if [[ ! -f "$intent_file" ]]; then
+                  echo "Issue #$number is a legacy duplicate without a persisted intent"
+                  continue
+                fi
+                if [[ -f "results-repo/$receipt_rel" ]]; then
+                  echo "Existing immutable projection receipt; no duplicate write"
+                  continue
+                fi
+                node trusted/scripts/issue-e2e-projection-receipt.mjs confirm \
+                  "$intent_file" scratch/output/record.json "$f" "$current_file" - "$receipt_file"
+                append_projection_proof "$receipt_file" "$receipt_rel" "recovered read-back"
+                continue ;;
+              apply) ;;
               *) echo "::error::Invalid E2E reconciliation decision"; exit 1 ;;
             esac
-            gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/$number" --input "$f" > /dev/null
+            # Stage a verifiable intent before any Issue mutation. The intent
+            # by itself is NEVER evidence that the API PATCH succeeded.
+            intent_output="scratch/output/receipt-intents/$number.json"
+            node trusted/scripts/issue-e2e-projection-receipt.mjs intent \
+              scratch/output/record.json "scratch/metadata/issue-$number.json" \
+              "$f" "$intent_output"
+            append_projection_proof "$intent_output" "$intent_rel" "pre-PATCH intent"
+            # Reconfirm both the PR head and current Issue before PATCH.
+            [[ "$(gh api "repos/$GITHUB_REPOSITORY/pulls/$live_pr" --jq .head.sha)" == "$sha" ]] ||
+              { echo "Superseded PR after intent; omit PATCH"; continue; }
+            gh api "repos/$GITHUB_REPOSITORY/issues/$number" > "$current_file"
+            [[ "$(jq -r .body "$current_file")" == "$original" ]] ||
+              { echo "Issue changed after intent; omit PATCH"; continue; }
+            patched_file="scratch/metadata/readback/$number-patched.json"
+            after_file="scratch/metadata/readback/$number-after.json"
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/$number" --input "$f" > "$patched_file"
+            gh api "repos/$GITHUB_REPOSITORY/issues/$number" > "$after_file"
+            node trusted/scripts/issue-e2e-projection-receipt.mjs confirm \
+              "$intent_output" scratch/output/record.json "$f" "$after_file" "$patched_file" "$receipt_file"
+            append_projection_proof "$receipt_file" "$receipt_rel" "verified post-PATCH receipt"
           done
           if ! jq -e '.status == "Pass"' scratch/artifact/results.json > /dev/null; then
             echo 'Required E2E tests are not all Pass; keep Acceptance blocked, but preserve the failure report'
