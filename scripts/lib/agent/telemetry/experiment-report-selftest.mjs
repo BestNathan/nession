@@ -113,9 +113,9 @@ try{
   const outside=path.join(root,'unsafe.txt');fs.writeFileSync(outside,'PRIVATE');
   const evil=path.join(metrics,'raw/events/evil.json');
   fs.symlinkSync(outside,evil);
-  assert.throws(()=>generatePinnedReport(metrics,pinned,evidenceFile,digest),/symlink/);
+  assert.throws(()=>generatePinnedReport(metrics,pinned,evidenceFile,digest),/dirty|symlink/);
   fs.unlinkSync(evil);
   fs.writeFileSync(runPath,JSON.stringify({...qwen,agent:{...qwen.agent,id:'other'}}));
-  assert.throws(()=>generatePinnedReport(metrics,pinned,evidenceFile,digest),/storage path mismatch|canonical|trace/);
+  assert.throws(()=>generatePinnedReport(metrics,pinned,evidenceFile,digest),/dirty|storage path mismatch|canonical|trace/);
   console.log('Agent experiment report: exact-SHA lineage, Qwen/Cursor coverage, Review/SC joins, replay and tamper fixtures passed');
 }finally{fs.rmSync(root,{recursive:true,force:true});}
