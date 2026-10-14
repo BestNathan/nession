@@ -241,7 +241,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: agent-telemetry-requirement-acceptance-${{ inputs.issue_number }}-${{ inputs.stage }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/agent-telemetry.json
+          # One artifact carries the canonical Run Summary and sanitized Execution Trace.
+          path: |
+            ${{ runner.temp }}/agent-telemetry.json
+            ${{ runner.temp }}/agent-execution-trace.json
           if-no-files-found: warn
           retention-days: 30
 
@@ -276,10 +279,13 @@ jobs:
             echo "Requirement-level Pass/Pending/Fail/N/A values are data; they do not change workflow infrastructure status."
           } >> "${GITHUB_STEP_SUMMARY}"
 
+      # Reruns reuse github.run_id, but each attempt must publish and consume
+      # its own immutable result. Otherwise actions/download-artifact selects
+      # the first attempt's same-name artifact and projects stale evidence.
       - name: Upload structured Acceptance Result
         uses: actions/upload-artifact@v4
         with:
-          name: acceptance-result-${{ inputs.issue_number }}-${{ inputs.stage }}-${{ github.run_id }}
+          name: acceptance-result-${{ inputs.issue_number }}-${{ inputs.stage }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/acceptance-result.json
           if-no-files-found: error
           retention-days: 30
@@ -313,10 +319,12 @@ jobs:
         run: |
           ./gates/run requirement-acceptance-selftest acceptance-executor-selftest
 
+      # Read the exact current attempt, never the earlier artifact of a
+      # successful/failed re-run sharing this workflow run ID.
       - name: Download structured Acceptance Result
         uses: actions/download-artifact@v4
         with:
-          name: acceptance-result-${{ inputs.issue_number }}-${{ inputs.stage }}-${{ github.run_id }}
+          name: acceptance-result-${{ inputs.issue_number }}-${{ inputs.stage }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/acceptance-result
 
       - name: Apply Acceptance Report and checkbox projection
