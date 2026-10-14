@@ -249,6 +249,29 @@ async function findTrustedStaleReplay(repo,history,get,currentHead,readLog=readT
 // Evidence of a mutable GitHub Issue PATCH cannot be inferred from an E2E
 // result alone. Only receipts written by the trusted main ingest AFTER
 // PATCH+independent Issue GET qualify as historically applied.
+export function attestProjectionIngestStatus(repo,run,verified,ingest,jobs){
+  if(repo!==REPO||ingest?.id!==verified?.ingest_run_id||
+     ingest.run_attempt!==verified.ingest_attempt||
+     ingest.repository?.full_name!==repo||
+     ingest.path!=='.github/workflows/e2e-test-ingest.yml'||
+     ingest.name!=='E2E / Test Ingest'||ingest.event!=='workflow_run'||
+     ingest.head_branch!=='main'||ingest.status!=='completed'||
+     !['success','failure'].includes(ingest.conclusion)||
+     String(ingest.created_at??'')<String(run?.created_at??''))
+    throw Error('projection receipt has untrusted GitHub ingest identity');
+  const job=(jobs?.jobs??[]).find(j=>j.name==='ingest-pr'&&
+    j.status==='completed');
+  const step=job?.steps?.find(x=>
+    x.name==='Store immutable results and update Issue reports');
+  // A failed trusted writer can have pushed one authenticated receipt before
+  // failing on the next Issue. This is *not* a completed ingestion proof.
+  if(ingest.conclusion==='failure'&&job?.conclusion==='failure'&&
+     step?.conclusion==='failure')return 'incomplete';
+  if(ingest.conclusion==='success'&&job?.conclusion==='success'&&
+     step?.conclusion==='success')return 'verified';
+  throw Error('no successful trusted Issue projection step for receipt');
+}
+
 export async function collectAuthenticatedProjectionReceipts(repo,run,record,plan,get){
   if(repo!==REPO||!goodInt(run?.id)||!goodInt(run.run_attempt)||
      !/^\d{4}-\d{2}-\d{2}$/.test(String(run.created_at??'').slice(0,10)))
@@ -266,35 +289,10 @@ export async function collectAuthenticatedProjectionReceipts(repo,run,record,pla
     const receipt=JSON.parse(Buffer.from(payload.content.replace(/\s/g,''),'base64').toString('utf8'));
     const verified=verifyArchivedProjectionReceipt(receipt,record,plan,owner.issue);
     const ingest=await get('/repos/'+repo+'/actions/runs/'+verified.ingest_run_id);
-    if(ingest?.id!==verified.ingest_run_id||
-       ingest.run_attempt!==verified.ingest_attempt||
-       ingest.repository?.full_name!==repo||
-       ingest.path!=='.github/workflows/e2e-test-ingest.yml'||
-       ingest.name!=='E2E / Test Ingest'||ingest.event!=='workflow_run'||
-       ingest.head_branch!=='main'||ingest.status!=='completed'||
-       !['success','failure'].includes(ingest.conclusion)||
-       String(ingest.created_at??'')<String(run.created_at??''))
-      throw Error('projection receipt has untrusted GitHub ingest identity');
     const jobs=await get('/repos/'+repo+'/actions/runs/'+ingest.id+
       '/attempts/'+ingest.run_attempt+'/jobs?per_page=100');
-    const trustedJob=(jobs.jobs??[]).find(j=>j.name==='ingest-pr' &&
-      j.status==='completed');
-    const projectionStep=trustedJob?.steps?.find(step=>
-      step.name==='Store immutable results and update Issue reports');
-    // GitHub Actions jobs are not transactional with git/Issue API calls.
-    // A multi-Issue source can durably write one correct receipt, then fail
-    // projecting a second (e.g. a declared no-E2E Issue). Its overall
-    // workflow is failure, even though the first receipt exists. Preserve
-    // validation above, but NEVER treat this incomplete writer as successful
-    // historical Issue PATCH proof. It must not poison unrelated, fully
-    // authenticated Fail→Pass runs in the same acceptance evidence set.
-    if(ingest.conclusion==='failure'&&trustedJob?.conclusion==='failure'&&
-       projectionStep?.conclusion==='failure'){
+    if(attestProjectionIngestStatus(repo,run,verified,ingest,jobs)==='incomplete')
       continue;
-    }
-    if(ingest.conclusion!=='success'||trustedJob?.conclusion!=='success'||
-       projectionStep?.conclusion!=='success')
-      throw Error('no successful trusted Issue projection step for receipt');
     proofs.push({...verified,source_run_url:run.html_url,
       ingest_url:ingest.html_url,
       provenance:'authenticated main ingest + immutable post-PATCH Issue readback receipt'});
@@ -652,7 +650,27 @@ async function selfTest() {
     path:'.github/workflows/e2e-test-ingest.yml',name:'E2E / Test Ingest',
     event:'workflow_run',head_branch:'main',status:'completed',
     conclusion:'failure',created_at:'2026-10-14T09:36:09Z'};
-  assert.equal(partial.conclusion,'failure');
+  const srcRun={id:99,created_at:'2026-10-14T09:29:35Z'},
+    intent={ingest_run_id:100,ingest_attempt:1};
+  const ingestJob={name:'ingest-pr',status:'completed',conclusion:'failure',
+    steps:[{name:'Store immutable results and update Issue reports',conclusion:'failure'}]};
+  assert.equal(attestProjectionIngestStatus(REPO,srcRun,intent,partial,
+    {jobs:[ingestJob]}),'incomplete');
+  const successful={...partial,conclusion:'success'};
+  const goodJob={...ingestJob,conclusion:'success',steps:[
+    {name:'Store immutable results and update Issue reports',conclusion:'success'}]};
+  assert.equal(attestProjectionIngestStatus(REPO,srcRun,intent,successful,
+    {jobs:[goodJob]}),'verified');
+  assert.throws(()=>attestProjectionIngestStatus(REPO,srcRun,intent,
+    {...partial,repository:{full_name:'attacker/repo'}},{jobs:[ingestJob]}),/untrusted/);
+  assert.throws(()=>attestProjectionIngestStatus(REPO,srcRun,intent,
+    {...partial,run_attempt:2},{jobs:[ingestJob]}),/untrusted/);
+  assert.throws(()=>attestProjectionIngestStatus(REPO,srcRun,intent,
+    {...partial,created_at:'2026-10-14T09:00:00Z'},{jobs:[ingestJob]}),/untrusted/);
+  assert.throws(()=>attestProjectionIngestStatus(REPO,srcRun,intent,
+    successful,{jobs:[ingestJob]}),/successful trusted/);
+  assert.throws(()=>attestProjectionIngestStatus(REPO,srcRun,intent,
+    partial,{jobs:[goodJob]}),/successful trusted/);
 
   const noAssociations={...current,pull_requests:[]};
   const applied=[{outcome:'applied',run_id:20,run_attempt:1,target_sha:b}];
