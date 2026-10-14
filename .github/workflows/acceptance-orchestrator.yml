@@ -363,7 +363,7 @@ jobs:
             gh api "repos/$GITHUB_REPOSITORY/issues/$issue" \
               > "$RUNNER_TEMP/agent-issue-contracts/$issue.json"
           done
-          agent_issues="$(ISSUE_NUMBERS="$issue_numbers" ACCEPTANCE_STAGE=post-merge \
+          agent_issues="$(ISSUE_NUMBERS="$issue_numbers" ACCEPTANCE_STAGE=post-merge TARGET_SHA="$SOURCE_SHA" \
             node scripts/select-merged-agents.mjs select "$RUNNER_TEMP/agent-issue-contracts")"
           echo "agent_issues=$agent_issues" >> "$GITHUB_OUTPUT"
           if [[ "$(jq length <<< "$agent_issues")" -gt 0 ]]; then
@@ -392,7 +392,7 @@ jobs:
   # completed run. A dispatch, unlike GITHUB_TOKEN PR edits, can wake Actions.
   # Rerun only the failed Acceptance jobs; no polling or fabricated Pass.
   reconcile-issue-e2e:
-    if: github.event_name == 'repository_dispatch'
+    if: github.event_name == 'repository_dispatch' && github.event.action == 'nession-issue-e2e-projected'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
