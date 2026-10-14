@@ -22,7 +22,7 @@ function git(cwd,...args){
   }catch{deny('Git fetch/worktree operation failed');}
 }
 export function parseProtectedAnchors(raw) {
-  if(typeof raw!=='string'||raw.length>2048)deny('independent anchor secret missing/oversized');
+  if(typeof raw!=='string'||!raw.trim()||raw.length>2048)deny('independent anchor secret missing/oversized');
   let value;
   try{value=JSON.parse(raw);}catch{deny('invalid anchor JSON');}
   if(!value||typeof value!=='object'||Array.isArray(value)||
