@@ -8,6 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { verifyArchivedProjectionReceipt } from './issue-e2e-projection-receipt.mjs';
 
 const SHA=/^[a-f0-9]{40}$/;
 const DIGEST=/^[a-f0-9]{64}$/;
@@ -227,7 +228,50 @@ async function findTrustedStaleReplay(repo,history,get,currentHead,readLog=readT
   return found;
 }
 
-export async function collectHistoricalE2EForPull(repo,pull,get,readPlan=readHistoricalPlanZip,findReplay=findTrustedStaleReplay) {
+// Evidence of a mutable GitHub Issue PATCH cannot be inferred from an E2E
+// result alone. Only receipts written by the trusted main ingest AFTER
+// PATCH+independent Issue GET qualify as historically applied.
+export async function collectAuthenticatedProjectionReceipts(repo,run,record,plan,get){
+  if(repo!==REPO||!goodInt(run?.id)||!goodInt(run.run_attempt)||
+     !/^\d{4}-\d{2}-\d{2}$/.test(String(run.created_at??'').slice(0,10)))
+    throw Error('invalid historical projection source');
+  const day=run.created_at.slice(0,10),proofs=[];
+  for(const owner of plan.issues){
+    const receiptPath='/repos/'+repo+'/contents/runs/'+day+'/'+run.id+'-'+run.run_attempt+
+      '/test/projections/'+owner.issue+'.json?ref=acceptance-results';
+    let payload;
+    try{payload=await get(receiptPath);}
+    catch(e){if(/GitHub API 404\b/.test(String(e?.message)))continue;throw e;}
+    if(payload?.encoding!=='base64'||typeof payload.content!=='string'||
+       !Number.isSafeInteger(payload.size)||payload.size>16384)
+      throw Error('invalid trusted projection receipt envelope');
+    const receipt=JSON.parse(Buffer.from(payload.content.replace(/\s/g,''),'base64').toString('utf8'));
+    const verified=verifyArchivedProjectionReceipt(receipt,record,plan,owner.issue);
+    const ingest=await get('/repos/'+repo+'/actions/runs/'+verified.ingest_run_id);
+    if(ingest?.id!==verified.ingest_run_id||
+       ingest.run_attempt!==verified.ingest_attempt||
+       ingest.repository?.full_name!==repo||
+       ingest.path!=='.github/workflows/e2e-test-ingest.yml'||
+       ingest.name!=='E2E / Test Ingest'||ingest.event!=='workflow_run'||
+       ingest.head_branch!=='main'||ingest.status!=='completed'||
+       ingest.conclusion!=='success'||
+       String(ingest.created_at??'')<String(run.created_at??''))
+      throw Error('projection receipt not issued by a successful trusted ingest');
+    const jobs=await get('/repos/'+repo+'/actions/runs/'+ingest.id+
+      '/attempts/'+ingest.run_attempt+'/jobs?per_page=100');
+    if(!(jobs.jobs??[]).some(j=>j.name==='ingest-pr' &&
+       j.status==='completed'&&j.conclusion==='success'&&
+       j.steps?.some(step=>step.name==='Store immutable results and update Issue reports' &&
+         step.conclusion==='success')))
+      throw Error('no trusted completed Issue projection step for receipt');
+    proofs.push({...verified,source_run_url:run.html_url,
+      ingest_url:ingest.html_url,
+      provenance:'authenticated main ingest + immutable post-PATCH Issue readback receipt'});
+  }
+  return proofs;
+}
+
+export async function collectHistoricalE2EForPull(repo,pull,get,readPlan=readHistoricalPlanZip,findReplay=findTrustedStaleReplay,loadReceipts=collectAuthenticatedProjectionReceipts) {
   if (repo!==REPO || !goodInt(pull?.number) || !SHA.test(String(pull.head?.sha)))
     throw Error('historical E2E scope requires a trusted associated PR');
   const commits=await get('/repos/'+repo+'/pulls/'+pull.number+'/commits?per_page=100');
@@ -274,8 +318,9 @@ export async function collectHistoricalE2EForPull(repo,pull,get,readPlan=readHis
       const artifact=artifactMetadata.artifacts.find(a=>a.id===artifactId);
       const plan=await readPlan(repo,artifact);
       const selection=verifyHistoricalPlan(run,record,plan,pull.number);
+      const projections=await loadReceipts(repo,run,record,plan,get);
       verified.push({...verifyHistoricalE2ERun(run,record,pull.number,commitPulls,pull.head.sha),
-        artifact_id:artifactId,created_at:run.created_at,selection});
+        artifact_id:artifactId,created_at:run.created_at,selection,projections});
     }
   }
   verified.sort((a,b)=>a.run_id-b.run_id||a.run_attempt-b.run_attempt);
@@ -432,7 +477,7 @@ async function selfTest() {
   ]);
   const get=async path=>{if(!map.has(path))throw Error('unexpected request '+path);return map.get(path)};
   const readPlan=async(_repo,artifact)=>fixturePlan(artifact.id===101?old:current);
-  const found=await collectHistoricalE2EForPull(REPO,pr,get,readPlan,async()=>[]);
+  const found=await collectHistoricalE2EForPull(REPO,pr,get,readPlan,async()=>[],async()=>[]);
   assert.deepEqual(found.map(r=>[r.run_id,r.results[0].result]),[[10,'Fail'],[20,'Pass']]);
   assert.deepEqual(found.map(x=>x.artifact_id),[101,202]);
   assert.deepEqual(found.map(x=>x.selection.selected),
@@ -451,7 +496,7 @@ async function selfTest() {
   mergedMap.set('/repos/'+REPO+'/commits/'+b+'/pulls?per_page=100',[mergedPr]);
   const mergedGet=async p=>{if(!mergedMap.has(p))throw Error('unexpected request '+p);
     return mergedMap.get(p)};
-  const mergedHistory=await collectHistoricalE2EForPull(REPO,pr,mergedGet,readPlan,async()=>[]);
+  const mergedHistory=await collectHistoricalE2EForPull(REPO,pr,mergedGet,readPlan,async()=>[],async()=>[]);
   assert.deepEqual(mergedHistory.map(row=>[row.run_id,row.results[0].result]),
     [[10,'Fail'],[20,'Pass']]);
   assert.throws(()=>verifyHistoricalE2ERun(mergedOld,rec(old,'Fail'),1718,[],b),
@@ -470,7 +515,7 @@ async function selfTest() {
     [{...mergedPr,number:1719}]);
   const forgedGet=async p=>{if(!forgedMap.has(p))throw Error('unexpected request '+p);
     return forgedMap.get(p)};
-  assert.deepEqual(await collectHistoricalE2EForPull(REPO,pr,forgedGet,readPlan,async()=>[]),[]);
+  assert.deepEqual(await collectHistoricalE2EForPull(REPO,pr,forgedGet,readPlan,async()=>[],async()=>[]),[]);
   assert.throws(()=>verifyHistoricalPlan(old,rec(old,'Fail'),{
     ...fixturePlan(old),target_sha:current.head_sha},1718),/identity/);
   assert.throws(()=>verifyHistoricalPlan(old,rec(old,'Fail'),{
