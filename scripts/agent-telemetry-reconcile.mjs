@@ -37,7 +37,10 @@ export function trustedSource(run,source){
   if(run.event==='push'&&!source.branches.includes(run.head_branch))return false;
   return true;
 }
-export function countArtifactSummaries(value){
+export function countArtifactSummaries(value,run=null){
+  if(run && (!positive(Number(run.id)) || !positive(Number(run.run_attempt))))
+    fail('invalid source run identity for attempt-scoped artifact count');
+  const suffix=run ? '-'+String(run.id)+'-'+String(run.run_attempt) : null;
   if(!value||!Array.isArray(value.artifacts)||!Number.isSafeInteger(value.total_count)||
      value.total_count<0||value.total_count>MAX_ARTIFACTS||
      value.artifacts.length!==value.total_count)fail('incomplete/oversized artifact listing');
@@ -48,7 +51,11 @@ export function countArtifactSummaries(value){
        !Number.isSafeInteger(artifact.size_in_bytes)||artifact.size_in_bytes<0)
       fail('invalid/duplicate source artifact');
     names.add(artifact.name);
-    if(artifact.name.startsWith('agent-telemetry-') && artifact.expired===false){
+    // GitHub lists artifacts from *all* run attempts together. Ignore prior
+    // attempts rather than mixing their immutable records into the latest run.
+    if(artifact.name.startsWith('agent-telemetry-') &&
+       artifact.expired===false &&
+       (suffix===null || artifact.name.endsWith(suffix))){
       if(artifact.size_in_bytes===0||artifact.size_in_bytes>8*1024*1024)
         fail('invalid telemetry artifact size');
       count++;
@@ -138,7 +145,7 @@ async function select(store){
   }
   const result=await chooseMissing(runsBySource,summaryCounts,async run=>{
     const artifacts=ghJson('actions/runs/'+run.id+'/artifacts?per_page='+MAX_ARTIFACTS);
-    return countArtifactSummaries(artifacts);
+    return countArtifactSummaries(artifacts,run);
   });
   console.log(JSON.stringify(result??{run_id:null}));
 }
@@ -236,6 +243,16 @@ function selfTest(){
   assert.equal(countArtifactSummaries({total_count:1,artifacts:[{...artifact,expired:true}]}),0);
   assert.throws(()=>countArtifactSummaries({total_count:2,artifacts:[artifact]}),/incomplete/);
   assert.throws(()=>countArtifactSummaries({total_count:2,artifacts:[artifact,artifact]}),/duplicate/);
+  // A real rerun may publish both attempts under the same run id. Do not
+  // misinterpret earlier attempt artifacts as current-attempt receipts.
+  const attempt1={...artifact,name:'agent-telemetry-source-321-1'};
+  const attempt2={...artifact,name:'agent-telemetry-source-321-2'};
+  const both={total_count:2,artifacts:[attempt1,attempt2]};
+  assert.equal(countArtifactSummaries(both,{id:321,run_attempt:1}),1);
+  assert.equal(countArtifactSummaries(both,{id:321,run_attempt:2}),1);
+  assert.equal(countArtifactSummaries(both,{id:321,run_attempt:3}),0);
+  assert.equal(countArtifactSummaries(both,{id:322,run_attempt:1}),0);
+  assert.throws(()=>countArtifactSummaries(both,{id:321,run_attempt:0}),/invalid source/);
   const runs=new Map([[source.file,[{...run,id:322,created_at:'2026-10-14T01:00:00Z'},run]]]);
   return (async()=>{
     const selected=await chooseMissing(runs,new Map(),async()=>1);
@@ -256,7 +273,14 @@ function selfTest(){
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   const cmd=process.argv[2];
-  (cmd==='self-test'?selfTest():
-    cmd==='select'?select(process.argv[3]):Promise.reject(Error('usage: self-test | select ABS_METRICS_DIR')))
-  .catch(e=>{console.error(e.message);process.exitCode=1;});
+  const operation=cmd==='self-test'?selfTest():
+    cmd==='select'?select(process.argv[3]):
+    cmd==='artifact-count'?Promise.resolve().then(()=>{
+      const [file,id,attempt]=process.argv.slice(3);
+      if(!file || !/^[1-9][0-9]*$/.test(id??'') || !/^[1-9][0-9]*$/.test(attempt??''))
+        fail('usage: artifact-count GITHUB_ARTIFACTS_JSON SOURCE_RUN_ID RUN_ATTEMPT');
+      const data=JSON.parse(fs.readFileSync(file,'utf8'));
+      console.log(countArtifactSummaries(data,{id:Number(id),run_attempt:Number(attempt)}));
+    }):Promise.reject(Error('usage: self-test | select ABS_METRICS_DIR | artifact-count GITHUB_ARTIFACTS_JSON RUN_ID ATTEMPT'));
+  operation.catch(e=>{console.error(e.message);process.exitCode=1;});
 }
