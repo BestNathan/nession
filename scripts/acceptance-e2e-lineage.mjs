@@ -423,12 +423,19 @@ export async function collectLinkedIssueE2EEvidence(repo,issueNumber,get,
     // PR prose is never authoritative. Require the authenticated Plan's
     // own Issue contracts and per-ID owners to include this requirement
     // alongside a second Issue, and every surfaced source run to match.
-    const proven=history.filter(row=>
-      row.selection?.issue_numbers?.includes(issueNumber) &&
-      (pr.merged_at?row.selection.issue_numbers.length>=2:
-        row.projections?.some(p=>p.issue===issueNumber&&p.outcome==='applied')) &&
-      row.selection.selected?.some(item=>
-        item.owners?.includes(issueNumber)&&(pr.merged_at?item.owners.length>=2:true)));
+    const proven=history.filter(row=>{
+      if(!row.selection?.issue_numbers?.includes(issueNumber))return false;
+      if(pr.merged_at)return row.selection.issue_numbers.length>=2 &&
+        row.selection.selected?.some(item=>item.owners?.includes(issueNumber)&&
+          item.owners.length>=2);
+      // Test-only drills may include a non-E2E child requirement with a
+      // validated none declaration. It may inspect the applied receipt of
+      // a sibling Issue that owns the ID, but never claims its own ID Pass.
+      return row.projections?.some(p=>p.outcome==='applied'&&
+        p.rows?.length>0&&row.selection.selected?.some(item=>
+          item.owners?.includes(p.issue)&&
+          p.rows.some(r=>r.id===item.id)));
+    });
     if(!proven.length)continue;
     const payload=pr.merged_at?await get('/repos/'+repo+'/actions/runs?head_sha='+
       pr.merge_commit_sha+'&per_page=100'):{workflow_runs:[]};
