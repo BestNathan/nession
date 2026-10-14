@@ -206,7 +206,7 @@ async function findTrustedStaleReplay(repo,history,get,readLog=readTrustedJobLog
   return found;
 }
 
-export async function collectHistoricalE2EForPull(repo,pull,get) {
+export async function collectHistoricalE2EForPull(repo,pull,get,readPlan=readHistoricalPlanZip,findReplay=findTrustedStaleReplay) {
   if (repo!==REPO || !goodInt(pull?.number) || !SHA.test(String(pull.head?.sha)))
     throw Error('historical E2E scope requires a trusted associated PR');
   const commits=await get('/repos/'+repo+'/pulls/'+pull.number+'/commits?per_page=100');
@@ -239,14 +239,14 @@ export async function collectHistoricalE2EForPull(repo,pull,get) {
       const artifactMetadata=await get('/repos/'+repo+'/actions/runs/'+run.id+'/artifacts?per_page=100');
       const artifactId=verifyHistoricalArtifact(run,record,artifactMetadata);
       const artifact=artifactMetadata.artifacts.find(a=>a.id===artifactId);
-      const plan=await readHistoricalPlanZip(repo,artifact);
+      const plan=await readPlan(repo,artifact);
       const selection=verifyHistoricalPlan(run,record,plan,pull.number);
       verified.push({...verifyHistoricalE2ERun(run,record,pull.number),
         artifact_id:artifactId,created_at:run.created_at,selection});
     }
   }
   verified.sort((a,b)=>a.run_id-b.run_id||a.run_attempt-b.run_attempt);
-  const stale_replays=await findTrustedStaleReplay(repo,verified,get);
+  const stale_replays=await findReplay(repo,verified,get);
   return verified.map(row=>({...row,stale_replays:
     stale_replays.filter(x=>x.source_run_id===row.run_id)}));
 }
@@ -259,9 +259,17 @@ async function selfTest() {
     conclusion,repository:{full_name:REPO},head_repository:{full_name:REPO},
     pull_requests:[{number:1718}],html_url:'https://github.com/BestNathan/nession/actions/runs/'+id,
   });
+  const fixturePlan=(run)=>{
+    const canonical={schema_version:1,kind:'issue_e2e_selection',
+      base_sha:'0'.repeat(40),target_sha:run.head_sha,
+      issues:[{issue:1702}],selected:[{id:'login',owners:[{issue:1702}]}],
+      mode:'selected'};
+    return {...canonical,plan_digest:createHash('sha256')
+      .update(JSON.stringify(canonical)).digest('hex')};
+  };
   const rec=(run,result)=>({schema_version:1,kind:'issue_e2e_run',
     run_id:run.id,run_attempt:1,target_sha:run.head_sha,
-    plan_digest:'c'.repeat(64),artifact_digest:'sha256:'+'d'.repeat(64),
+    plan_digest:fixturePlan(run).plan_digest,artifact_digest:'sha256:'+'d'.repeat(64),
     results:[{id:'login',result,discovered:1,
       passed:result==='Pass'?1:0,failed:result==='Fail'?1:0,skipped:0,flaky:0,assertions:2}]});
   const old=run(10,a,'failure'),current=run(20,b,'success');
@@ -281,9 +289,24 @@ async function selfTest() {
       digest:rec(current,'Pass').artifact_digest}]}],
   ]);
   const get=async path=>{if(!map.has(path))throw Error('unexpected request '+path);return map.get(path)};
-  const found=await collectHistoricalE2EForPull(REPO,pr,get);
+  const readPlan=async(_repo,artifact)=>fixturePlan(artifact.id===101?old:current);
+  const found=await collectHistoricalE2EForPull(REPO,pr,get,readPlan,async()=>[]);
   assert.deepEqual(found.map(r=>[r.run_id,r.results[0].result]),[[10,'Fail'],[20,'Pass']]);
   assert.deepEqual(found.map(x=>x.artifact_id),[101,202]);
+  assert.deepEqual(found.map(x=>x.selection.selected),
+    [[{id:'login',owners:[1702]}],[{id:'login',owners:[1702]}]]);
+  assert.throws(()=>verifyHistoricalPlan(old,rec(old,'Fail'),{
+    ...fixturePlan(old),target_sha:current.head_sha},1718),/identity/);
+  assert.throws(()=>verifyHistoricalPlan(old,rec(old,'Fail'),{
+    ...fixturePlan(old),selected:[{id:'login',owners:[{issue:9999}]}]},1718),/digest/);
+  const log='run_id="10"\nAssertionError [ERR_ASSERTION]: stale PR head\n'+
+    "+ 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'\n"+
+    "- 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'\n"+
+    'at verifySource (verified source)';
+  assert.equal(verifyStaleReplayLog(log,{
+    run_id:10,head_sha:a},b).error,'stale PR head');
+  assert.throws(()=>verifyStaleReplayLog(log,{run_id:11,head_sha:a},b),/binding/);
+  assert.throws(()=>verifyStaleReplayLog(log,{run_id:10,head_sha:b},a),/rejection/);
   assert.throws(()=>verifyHistoricalArtifact(current,rec(current,'Pass'),{
     artifacts:[{name:'issue-e2e-verification',expired:false,id:202,digest:'sha256:'+'0'.repeat(64)}],
   }),/source artifact digest/);
