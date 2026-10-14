@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { parseIssueE2E } from './issue-e2e-contract.mjs';
+import { decideIssueE2EProjection } from './issue-e2e-reconcile.mjs';
 
 const SHA=/^[a-f0-9]{40}$/, DIGEST=/^[a-f0-9]{64}$/;
 const ARTIFACT=/^sha256:[a-f0-9]{64}$/;
@@ -207,6 +208,21 @@ function selfTest(){
   assert.equal(applied.outcome,'applied');
   const recovered=createProjectionReceipt({...args,outcome:'recovered'});
   assert.equal(recovered.outcome,'recovered');
+  // Crash injection: PATCH succeeds, then orphan receipt push fails.
+  // On a subsequent trusted retry, no new PATCH may occur; the exact
+  // source Run/Attempt produces only a recovered read-back receipt.
+  const source={runId:record.run_id,attempt:record.run_attempt,targetSha:record.target_sha};
+  const interruptedStore=new Map();
+  assert.equal(interruptedStore.size,0,'simulated Store push failed after Issue PATCH');
+  assert.equal(decideIssueE2EProjection(after.body,projected.body,source),'duplicate');
+  interruptedStore.set(issue,recovered);
+  assert.equal(verifyArchivedProjectionReceipt(interruptedStore.get(issue),record,plan,issue).outcome,'recovered');
+  assert.deepEqual(interruptedStore.get(issue),recovered,'same-run recovery must remain idempotent');
+  const newer=projected.body.replace('run 123/1, SHA','run 124/1, SHA')
+    .replace('/actions/runs/123)','/actions/runs/124)');
+  assert.equal(decideIssueE2EProjection(newer,projected.body,source),'stale');
+  assert.throws(()=>createProjectionReceipt({...args,readback:{...after,body:newer},
+    outcome:'recovered'}),/read-back/);
   assert.throws(()=>createProjectionReceipt({...args,readback:{...after,body:'forged'},
     outcome:'recovered'}),/read-back/);
   assert.throws(()=>createProjectionReceipt({...args,patch:{...patched,number:9},
