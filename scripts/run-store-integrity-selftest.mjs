@@ -48,6 +48,9 @@ function verifyRepositoryMetricsTrustedSource(workflow) {
   if(!/^    permissions:\s*\n      actions: read\s*\n      contents: write\s*$/m.test(writer)) {
     throw new Error('Metrics writer contents:write must be scoped to publish only');
   }
+  if(!writer.includes('node "${GITHUB_WORKSPACE}/scripts/run-store-integrity.mjs" staged metrics "${GITHUB_WORKSPACE}/metrics-store"')) {
+    throw new Error('trusted Metrics publisher omitted staged Run Store integrity validation');
+  }
   return true;
 }
 const repoMetricsYml=fs.readFileSync('.github/workflows/metrics-repository.yml','utf8');
@@ -65,6 +68,10 @@ assert.throws(()=>verifyRepositoryMetricsTrustedSource(
 assert.throws(()=>verifyRepositoryMetricsTrustedSource(
   repoMetricsYml.replace('  publish:\n','  publish:\n    permissions:\n      contents: write\n')
 ),/unsafe Metrics source|scoped to publish/);
+assert.throws(()=>verifyRepositoryMetricsTrustedSource(
+  repoMetricsYml.replace('node "${GITHUB_WORKSPACE}/scripts/run-store-integrity.mjs" staged metrics "${GITHUB_WORKSPACE}/metrics-store"',
+    'echo "skip staged audit"')
+),/omitted staged Run Store integrity/);
 
 const A='acceptance-results',T='task-results',M='metrics',S='agent-store';
 assert.deepEqual(RUN_STORE_REFS,[A,T,M,S]);
