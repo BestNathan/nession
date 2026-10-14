@@ -8,6 +8,16 @@ import { parseIssueE2E } from './issue-e2e-contract.mjs';
 
 const MAX_RUNS_PER_SHA = 20;
 const MAX_ASSOCIATED_PULLS = 5;
+const MAX_IMPLEMENTATION_PULLS = 2;
+const MAX_CROSS_REFERENCED_PULLS = 40;
+const IMPLEMENTATION_OWNER_PATHS = Object.freeze([
+  '.github/workflows/e2e-test-ingest.yml',
+  'scripts/issue-e2e-projection-receipt.mjs',
+]);
+const REQUIRED_PR_CHECKS = Object.freeze([
+  'CI / Quality Gate', 'E2E / Tests', 'Acceptance / Case Smoke',
+  'Acceptance / Orchestrator',
+]);
 
 
 // An Issue may describe itself as a child of a behavior verified on another
@@ -55,7 +65,7 @@ function compactRuns(runs, expectedSha) {
     .slice(0, MAX_RUNS_PER_SHA);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [] }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [] }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -83,6 +93,7 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     pull_requests: associated,
     source_ancestry: sourceAncestry,
     linked_issue_e2e_evidence: linkedIssueE2E,
+    implementation_pull_requests: implementationPulls,
   };
 }
 
@@ -146,6 +157,124 @@ async function collectSourceAncestry(repo, workspace, targetSha) {
   return wanted.map((sha) => checkGitAncestor(workspace, targetSha, sha));
 }
 
+// Optional bounded discovery of *historical implementation* PR gates for
+// a requirement that explicitly asks for them in its Success Criteria.
+// Mutable Issue/PR prose only enables discovery. GitHub cross-reference,
+// merged same-repo PR, exact paths, ancestry and source SHA independently
+// establish whether the check bundle is relevant.
+export function issueRequestsImplementationGates(issue) {
+  const b=String(issue?.body??'');
+  const success=b.match(/###? Success Criteria\s*\n([\s\S]*?)(?=\n## Acceptance Plan|\n## Acceptance Report|$)/)?.[1]??'';
+  return /## E2E Verification\s*$/m.test(b) &&
+    success.split('\n').some(line=>/^- \[[x ]\] SC-\d+\b/i.test(line) &&
+      /\bimplementation PR\b/i.test(line));
+}
+export function selectCrossReferencedImplementationPulls(issueNumber,events) {
+  if(!Number.isSafeInteger(issueNumber)||issueNumber<=0||!Array.isArray(events))
+    throw Error('invalid implementation discovery input');
+  const repo='BestNathan/nession',found=new Set();
+  for(const event of events){
+    const source=event?.source?.issue;
+    const n=source?.number;
+    if(event?.event==='cross-referenced'&&Number.isSafeInteger(n)&&n>0&&
+       source?.pull_request?.url==='https://api.github.com/repos/'+repo+'/pulls/'+n)
+      found.add(n);
+  }
+  if(found.size>MAX_CROSS_REFERENCED_PULLS)
+    throw Error('excessive implementation PR discovery scope');
+  return [...found].sort((a,b)=>a-b);
+}
+export function eligibleImplementationPull(pull,files,issueNumber) {
+  const repo='BestNathan/nession';
+  if(!Number.isSafeInteger(issueNumber)||issueNumber<=0||
+     pull?.state!=='closed'||!pull.merged_at||
+     pull?.base?.ref!=='main'||pull.base.repo?.full_name!==repo||
+     pull?.head?.repo?.full_name!==repo||
+     !/^[a-f0-9]{40}$/.test(pull?.head?.sha??'')||
+     !/^[a-f0-9]{40}$/.test(pull?.merge_commit_sha??'')||
+     !Array.isArray(files)||files.length>100)return false;
+  const refs=new Set();
+  for(const line of String(pull.body??'').split(/\r?\n/)){
+    const match=line.match(/^\s*Refs?\s*:?\s*(.*)$/i);
+    if(match)for(const m of match[1].matchAll(/#([1-9]\d*)\b/g))
+      refs.add(Number(m[1]));
+  }
+  const paths=new Set(files.map(f=>f?.filename));
+  return refs.has(issueNumber) &&
+    IMPLEMENTATION_OWNER_PATHS.every(p=>paths.has(p));
+}
+export function exactImplementationGateBundle(runs,headSha,jobResults=[]) {
+  if(!/^[a-f0-9]{40}$/.test(headSha)||!Array.isArray(runs))
+    throw Error('invalid implementation source head SHA');
+  const checks=REQUIRED_PR_CHECKS.map(name=>{
+    const matching=runs.filter(r=>r.name===name&&
+      r.head_sha===headSha&&
+      r.event===(name==='Acceptance / Orchestrator'?'pull_request_target':'pull_request')&&
+      r.status==='completed')
+      .sort((a,b)=>b.id-a.id);
+    const run=matching[0];
+    return {name,run_id:run?.id??null,run_attempt:run?.run_attempt??null,
+      conclusion:run?.conclusion??'missing',head_sha:headSha,
+      url:run?.html_url??null};
+  });
+  const accepted=checks.find(x=>x.name==='Acceptance / Orchestrator');
+  const gateNames=['pre-merge-gate','acceptance-pr-gate'];
+  const deterministic=gateNames.map(name=>({
+    name,conclusion:jobResults.find(j=>j.name===name)?.conclusion??'missing',
+  }));
+  const allPassed=checks.every(x=>x.conclusion==='success')&&
+    deterministic.every(x=>x.conclusion==='success')&&
+    accepted.run_id!=null;
+  return {checks,deterministic,all_passed:allPassed};
+}
+async function collectImplementationGateEvidence(repo,issueNumber,currentIssue,targetSha) {
+  if(repo!=='BestNathan/nession'||!issueRequestsImplementationGates(currentIssue))
+    return [];
+  const events=[];
+  for(let page=1;page<=3;page++){
+    const pageEvents=await githubGet('/repos/'+repo+'/issues/'+issueNumber+
+      '/timeline?per_page=100&page='+page);
+    if(!Array.isArray(pageEvents))throw Error('untrusted implementation timeline');
+    events.push(...pageEvents);
+    if(pageEvents.length<100)break;
+  }
+  const numbers=selectCrossReferencedImplementationPulls(issueNumber,events);
+  const out=[];
+  for(const number of numbers){
+    if(out.length>=MAX_IMPLEMENTATION_PULLS)break;
+    const pr=await githubGet('/repos/'+repo+'/pulls/'+number);
+    if(pr?.state!=='closed'||!pr.merged_at||pr.base?.ref!=='main'||
+       pr.base.repo?.full_name!==repo||pr.head?.repo?.full_name!==repo)
+      continue;
+    const files=await githubGet('/repos/'+repo+'/pulls/'+number+'/files?per_page=100');
+    if(!eligibleImplementationPull(pr,files,issueNumber))continue;
+    // GitHub's compare endpoint independently proves that the merged PR's
+    // exact merge commit is an ancestor of the current Acceptance target.
+    const comparison=await githubGet('/repos/'+repo+'/compare/'+
+      pr.merge_commit_sha+'...'+targetSha);
+    if(!['ahead','identical'].includes(comparison?.status)||
+       comparison?.merge_base_commit?.sha!==pr.merge_commit_sha)
+      continue;
+    const runs=await workflowRunsForSha(repo,pr.head.sha);
+    const acceptance=runs.filter(x=>x.name==='Acceptance / Orchestrator'&&
+      x.head_sha===pr.head.sha&&x.conclusion==='success'&&x.status==='completed')
+      .sort((a,b)=>b.id-a.id)[0];
+    let jobs=[];
+    if(acceptance) {
+      const body=await githubGet('/repos/'+repo+'/actions/runs/'+acceptance.id+
+        '/attempts/'+acceptance.run_attempt+'/jobs?per_page=100');
+      jobs=body.jobs??[];
+    }
+    const proof=exactImplementationGateBundle(runs,pr.head.sha,jobs);
+    out.push({pr_number:number,pr_head_sha:pr.head.sha,
+      merge_sha:pr.merge_commit_sha,merged_at:pr.merged_at,
+      source:'GitHub Issue cross-reference + main merged PR owned files + exact merge ancestry',
+      owner_files:IMPLEMENTATION_OWNER_PATHS,
+      ...proof});
+  }
+  return out;
+}
+
 async function collectCommand(workspace, outFile) {
   const repo = requireText(process.env.GITHUB_REPOSITORY, 'GITHUB_REPOSITORY');
   const sha = execFileSync('git', ['-C', workspace, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
@@ -166,8 +295,9 @@ async function collectCommand(workspace, outFile) {
   // run ID, exact SHA, PR identity and attempt. These are bounded reads only.
   const historicalE2EByPr = new Map();
   const linkedIssueE2E = [];
+  let implementationPulls = [];
   const issueNumber = String(process.env.ISSUE_NUMBER || '').trim();
-  if (/^[1-9][0-9]*$/.test(issueNumber) && selectedPulls.length) {
+  if (/^[1-9][0-9]*$/.test(issueNumber)) {
     const currentIssue = await githubGet('/repos/' + repo + '/issues/' + issueNumber);
     const section = String(currentIssue.body ?? '').match(/^## E2E Verification\s*$/m);
     if (section) {
@@ -204,9 +334,12 @@ async function collectCommand(workspace, outFile) {
         }
       }
     }
+    if(process.env.ACCEPTANCE_STAGE==='post-merge')
+      implementationPulls=await collectImplementationGateEvidence(
+        repo,Number(issueNumber),currentIssue,sha);
   }
   const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls,
-    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E });
+    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls });
   fs.writeFileSync(outFile, JSON.stringify(evidence, null, 2) + '\n');
   console.log(
     'collected acceptance CI evidence for ' + sha +
@@ -237,6 +370,43 @@ function selfTest() {
   });
 
   assert.equal(evidence.kind, 'acceptance_ci_evidence');
+  const implIssue={number:1759,body:'## Success Criteria\n- [ ] SC-05 Implementation PR Quality, E2E, Case and Acceptance gates pass.\n## E2E Verification\n### New\n- none'};
+  assert.equal(issueRequestsImplementationGates(implIssue),true);
+  assert.equal(issueRequestsImplementationGates({...implIssue,body:implIssue.body.replace('Implementation PR','test-only PR')}),false);
+  const repo='BestNathan/nession',sourceUrl='https://api.github.com/repos/'+repo+'/pulls/1760';
+  const timeline=[{event:'cross-referenced',source:{issue:{number:1760,
+    pull_request:{url:sourceUrl}}}}];
+  assert.deepEqual(selectCrossReferencedImplementationPulls(1759,timeline),[1760]);
+  assert.deepEqual(selectCrossReferencedImplementationPulls(1759,[{
+    ...timeline[0],source:{issue:{number:1760,pull_request:{url:'https://api.github.com/repos/foreign/repo/pulls/1760'}}}
+  }]),[]);
+  const merged={number:1760,state:'closed',merged_at:'2026-10-14T09:00:00Z',
+    head:{sha:'a'.repeat(40),repo:{full_name:repo}},base:{ref:'main',repo:{full_name:repo}},
+    merge_commit_sha:'b'.repeat(40),body:'Refs #1759'};
+  const paths=IMPLEMENTATION_OWNER_PATHS.map(filename=>({filename}));
+  assert.equal(eligibleImplementationPull(merged,paths,1759),true);
+  assert.equal(eligibleImplementationPull({...merged,base:{ref:'staging',repo:{full_name:repo}}},paths,1759),false);
+  assert.equal(eligibleImplementationPull({...merged,body:'Refs #9999'},paths,1759),false);
+  assert.equal(eligibleImplementationPull({...merged,head:{...merged.head,repo:{full_name:'foreign/repo'}}},paths,1759),false);
+  assert.equal(eligibleImplementationPull(merged,paths.slice(0,1),1759),false);
+  const goodRuns=REQUIRED_PR_CHECKS.map((name,i)=>({
+    name,id:i+101,run_attempt:1,head_sha:'a'.repeat(40),
+    status:'completed',conclusion:'success',
+    event:name==='Acceptance / Orchestrator'?'pull_request_target':'pull_request',
+    html_url:'https://github.com/BestNathan/nession/actions/runs/'+(101+i),
+  }));
+  const gateJobs=['pre-merge-gate','acceptance-pr-gate'].map(name=>({name,conclusion:'success'}));
+  assert.equal(exactImplementationGateBundle(goodRuns,'a'.repeat(40),gateJobs).all_passed,true);
+  assert.equal(exactImplementationGateBundle(goodRuns.map(x=>
+    x.name==='Acceptance / Orchestrator'?{...x,event:'pull_request'}:x),
+    'a'.repeat(40),gateJobs).all_passed,false);
+  assert.equal(exactImplementationGateBundle(goodRuns.map(x=>x.name==='E2E / Tests'?{...x,conclusion:'failure'}:x),
+    'a'.repeat(40),gateJobs).all_passed,false);
+  assert.equal(exactImplementationGateBundle(goodRuns,'a'.repeat(40),
+    [{name:'pre-merge-gate',conclusion:'success'}]).all_passed,false);
+  assert.equal(exactImplementationGateBundle(goodRuns.map(x=>({...x,head_sha:'c'.repeat(40)})),
+    'a'.repeat(40),gateJobs).all_passed,false);
+
   assert.equal(evidence.target_sha, 'merge123');
   assert.deepEqual(evidence.direct_runs.map((run) => run.id), [2]);
   assert.deepEqual(evidence.pull_requests[0].runs.map((run) => run.id), [4]);
