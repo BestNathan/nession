@@ -80,7 +80,8 @@ export async function collectMergedIssueGateHistory(repo,issue,workspace,target,
     ]);
     out.push({pr_number:p.number,pr_head_sha:p.head.sha,
       merge_sha:p.merge_commit_sha,merged_at:p.merged_at,merge_ancestry:proof,
-      source_gate_runs:completedExactGateRuns(repo,p.head.sha,head?.workflow_runs),
+      source_gate_runs:completedExactGateRuns(repo,p.head.sha,head?.workflow_runs)
+        .filter(r=>r.event==='pull_request'),
       merge_push_runs:completedExactGateRuns(repo,p.merge_commit_sha,
         merged?.workflow_runs).filter(r=>r.event==='push'&&r.head_branch==='main'),
       provenance:'GitHub cross-reference + merged same-repo main PR + Git ancestry + exact-SHA completed Actions'});
@@ -305,7 +306,8 @@ async function historySelfTest(){
     if(path.includes('/timeline?'))return ev;
     if(path.endsWith('/pulls/1760'))return pr;
     if(path.includes('head_sha='+head))return {workflow_runs:[
-      run,{...run,id:43,head_sha:target}]};
+      run,{...run,id:43,head_sha:target},
+      {...run,id:45,event:'workflow_dispatch'}]};
     if(path.includes('head_sha='+merge))return {workflow_runs:[
       post,{...post,id:44,conclusion:'failure'}]};
     throw Error('unexpected history API '+path);
