@@ -49,14 +49,20 @@ function summarizeRows(rows){
     ? r.traceSummary.mcp.observed_count : null);
   const durations=rows.map(r=>known(r.summary.timing.agent_duration_ms));
   const tokens=rows.map(r=>known(r.summary.tokens?.total));
-  const costs=rows.map(r=>known(r.summary.cost?.charged_usd??r.summary.cost?.estimated_usd));
+  const charged=rows.map(r=>known(r.summary.cost?.charged_usd));
+  const estimated=rows.map(r=>known(r.summary.cost?.estimated_usd));
+  const costBasis=charged.every(x=>x!=null)?'charged':
+    charged.every(x=>x==null)&&estimated.every(x=>x!=null)?'estimated':
+      'mixed_or_incomplete';
+  const costs=costBasis==='charged'?charged:costBasis==='estimated'?estimated:[];
   return {
     run_count:rows.length,
     run_refs:rows.map(x=>x.ref).sort(),
     tokens_total:summed(tokens),tokens_coverage:{observed:tokens.filter(x=>x!=null).length,total:rows.length},
-    usd_total:summed(costs),usd_coverage:{observed:costs.filter(x=>x!=null).length,total:rows.length},
-    cost_basis:rows.every(r=>r.summary.cost?.charged_usd!=null)?'charged':
-      rows.some(r=>r.summary.cost?.charged_usd!=null)?'mixed_or_incomplete':'estimated_or_unknown',
+    usd_total:costBasis==='mixed_or_incomplete'?null:summed(costs),
+    usd_coverage:{observed:charged.filter(x=>x!=null).length+estimated.filter((x,i)=>x!=null&&charged[i]==null).length,
+      total:rows.length},
+    cost_basis:costBasis,
     duration_avg_ms:average(durations),duration_coverage:{observed:durations.filter(x=>x!=null).length,total:rows.length},
     tool_calls_total:summed(tools),tool_coverage:{observed:tools.filter(x=>x!=null).length,total:rows.length},
     skill_invocations_total:summed(skills),skill_coverage:{observed:skills.filter(x=>x!=null).length,total:rows.length},
@@ -148,9 +154,11 @@ export function buildExperimentReport(summaries,traces=[],proof=null,provenance=
   const acceptedCosts=accepted.map(item=>{
     const items=linked(item);
     if(items.length!==1)deny('ambiguous accepted SC source attribution');
+    const cost=items[0].summary.cost??{};
     return {issue:item.issue,sc:item.sc,sha:item.sha,run_ref:items[0].ref,
       token_total:known(items[0].summary.tokens?.total),
-      usd:known(items[0].summary.cost?.charged_usd??items[0].summary.cost?.estimated_usd)};
+      usd:known(cost.charged_usd??cost.estimated_usd),
+      cost_basis:cost.charged_usd!=null?'charged':cost.estimated_usd!=null?'estimated':'unobserved'};
   });
   return {
     schema_version:1,kind:'agent_experiment_report',repository:'BestNathan/nession',
@@ -167,7 +175,8 @@ export function buildExperimentReport(summaries,traces=[],proof=null,provenance=
         evidence.reviews.filter(x=>x.outcome==='changes_requested').length:null},
     acceptance:{accepted_sc_count:accepted.length,accepted_sc_costs:acceptedCosts,
       accepted_tokens_total:summed(acceptedCosts.map(x=>x.token_total)),
-      accepted_usd_total:summed(acceptedCosts.map(x=>x.usd))},
+      accepted_usd_total:acceptedCosts.length && new Set(acceptedCosts.map(x=>x.cost_basis)).size===1 &&
+        acceptedCosts[0].cost_basis!=='unobserved'?summed(acceptedCosts.map(x=>x.usd)):null},
     recovery:{attempts:evidence.checkpoints.length,
       recovered:evidence.checkpoints.length?evidence.checkpoints.filter(x=>x.recovered).length:null,
       rate:evidence.checkpoints.length?
