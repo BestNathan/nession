@@ -41,6 +41,9 @@ try{
     allowed_paths:['src/calc.js']}),one);
   const bad=(input,regex)=>assert.throws(()=>
     preflightAgentPatch({checkout:repo,source_sha:sha,...input}),regex);
+  const noop=good.replace('+module.exports = (a,b) => a + b;',
+    '+module.exports = (a,b) => a - b;');
+  bad({patch:noop,allowed_paths:['src/calc.js']},/applied changes do not match|no-op/);
   bad({patch:good,allowed_paths:['src/normal.txt']},/uniquely authorized/);
   bad({patch:good,allowed_paths:['src/calc.js','src/calc.js']},/invalid trusted/);
   bad({patch:good,allowed_paths:['../src/calc.js']},/unsafe or protected/);
