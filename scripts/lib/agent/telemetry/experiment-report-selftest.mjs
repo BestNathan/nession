@@ -65,6 +65,16 @@ try{
   assert.equal(report.acceptance.accepted_tokens_total,21);
   assert.equal(report.acceptance.accepted_usd_total,0.1);
   assert.equal(report.recovery.rate,1);
+  const estimatedRun=makeRun({runId:102,usd:null});
+  estimatedRun.cost.estimated_usd=0.3;
+  const mixed=buildExperimentReport([qwen,estimatedRun],[]);
+  assert.equal(mixed.issues[0].usd_total,null);
+  assert.equal(mixed.issues[0].cost_basis,'mixed_or_incomplete');
+  assert.equal(mixed.issues[0].usd_coverage.observed,2);
+  assert.equal(mixed.issues[0].usd_coverage.total,2);
+  const est=buildExperimentReport([estimatedRun],[]);
+  assert.equal(est.issues[0].cost_basis,'estimated');
+  assert.equal(est.issues[0].usd_total,0.3);
   assert.equal(report.inputs.trace_count,2);
   assert.ok(!JSON.stringify(report).includes('model prompt'));
   assert.ok(renderExperimentMarkdown(report).includes('unobserved'));
