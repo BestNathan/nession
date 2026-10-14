@@ -164,8 +164,8 @@ if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href){
       ingestRunId:Number(ingestRunId),ingestAttempt:Number(ingestAttempt)});
     fs.writeFileSync(outFile,JSON.stringify(receipt,null,2)+'\n',{flag:'wx'});
   }else if(op==='verify'){
-    assert.equal(verifyProjectionReceipt(read(projectionFile),read(recordFile),
-      read(planFile),read(beforeFile)),true);
+    assert.equal(verifyProjectionReceipt(read(issueArg),read(recordFile),
+      read(planFile),read(projectionFile)),true);
     console.log('authenticated immutable Issue E2E projection receipt');
   }else throw Error('usage: issue-e2e-projection-receipt.mjs self-test | create RECORD PLAN ISSUE PROJECTED BEFORE READBACK PATCH|- MODE INGEST_RUN INGEST_ATTEMPT OUTPUT | verify RECORD PLAN RECEIPT PROJECTED');
 }
