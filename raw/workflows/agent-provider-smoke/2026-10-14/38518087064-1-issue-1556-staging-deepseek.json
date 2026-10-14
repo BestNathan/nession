@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "kind": "agent_workflow_run",
+  "identity": {
+    "workflow_id": "agent-provider-smoke",
+    "github_workflow": "Agent / Provider Smoke",
+    "github_run_id": 38518087064,
+    "github_run_attempt": 1,
+    "job": "execute",
+    "repository": "BestNathan/nession",
+    "event": "push",
+    "unique_run_name": "38518087064-1-issue-1556-staging-deepseek"
+  },
+  "task": {
+    "id": "issue-1556-staging",
+    "type": "acceptance",
+    "issue": 1556,
+    "stage": "staging",
+    "target_ref": "c195818bbe85f70a857f371b59447b21a313e266",
+    "deployment": null
+  },
+  "agent": {
+    "provider": "deepseek",
+    "id": "legacy-acceptance-deepseek",
+    "role": "acceptor",
+    "harness_sha256": null,
+    "checkpoint_id": null,
+    "model": {
+      "id": "deepseek-flash[1m]",
+      "request_model": "claude-sonnet-5",
+      "backend_mapping": "claude-sonnet* -> deepseek-flash"
+    },
+    "run_id": "e9cfd442-92dc-4cea-8b42-561c1432ec4e",
+    "request_id": null,
+    "status": "finished",
+    "prompt": {
+      "id": "acceptance",
+      "version": "v1",
+      "sha256": "28f5f7611810cbbe517276b992f554b36dde2f08e5418ad9bae98183b604d500"
+    }
+  },
+  "execution": {
+    "turns": 1,
+    "model_requests": null,
+    "tools": {
+      "observed": false,
+      "total": null,
+      "unique": null,
+      "by_name": null
+    }
+  },
+  "tokens": {
+    "input": 25829,
+    "output": 254,
+    "cache_read": 0,
+    "cache_write": 0,
+    "reasoning": null,
+    "total": 26083
+  },
+  "cost": {
+    "raw_usd": null,
+    "charged_usd": null,
+    "estimated_usd": null
+  },
+  "timing": {
+    "started_at": "2026-10-14T05:42:48.440Z",
+    "finished_at": "2026-10-14T05:42:52.454Z",
+    "agent_duration_ms": 3607,
+    "workflow_duration_ms": null
+  },
+  "result": {
+    "status": "completed",
+    "pass": 0,
+    "pending": 1,
+    "fail": 0,
+    "na": 0
+  }
+}
