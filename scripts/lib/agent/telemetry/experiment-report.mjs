@@ -87,9 +87,10 @@ function evidenceSnapshot(proof){
     if(!positive(c.issue)||!SHA40.test(c.sha??'')||
       typeof c.recovered!=='boolean'||!positive(c.run_id)||!positive(c.attempt))deny('invalid checkpoint proof');
   }
-  const key=r=>r.issue+':'+r.run_id+':'+r.attempt+':'+(r.sc??r.pr??r.agent_id);
+  const key=(r,family)=>r.issue+':'+r.run_id+':'+r.attempt+':'+(r.sc??r.pr??r.agent_id)+
+    (family==='reviews'?':'+r.ordinal:'');
   for(const name of ['reviews','acceptances','checkpoints']){
-    const rows=proof[name],ids=rows.map(key);
+    const rows=proof[name],ids=rows.map(row=>key(row,name));
     if(new Set(ids).size!==ids.length)deny('duplicate/conflicting '+name+' evidence');
   }
   return proof;
@@ -185,6 +186,8 @@ export function loadPinnedMetrics(root,expectedSha){
   const real=fs.realpathSync(root);
   const actual=execFileSync('git',['-C',real,'rev-parse','HEAD'],{encoding:'utf8'}).trim();
   if(actual!==expectedSha)deny('Metrics checkout SHA mismatch');
+  const dirty=execFileSync('git',['-C',real,'status','--porcelain','--untracked-files=all','--','raw'],{encoding:'utf8'});
+  if(dirty.trim())deny('Metrics checkout is dirty or has untrusted extra paths');
   const sources=[],summaries=[],traces=[];
   function walk(dir){
     const items=fs.readdirSync(dir,{withFileTypes:true}).sort((a,b)=>a.name.localeCompare(b.name));
