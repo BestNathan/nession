@@ -180,6 +180,12 @@ export function validateRecoveryRouting(workflow){
   const artifactConsumers=job.match(/steps\.artifacts\.outputs\.count != '' && steps\.artifacts\.outputs\.count != '0'/g)??[];
   if(artifactConsumers.length!==5)
     fail('missing empty-artifact no-op guard in a privileged ingest consumer');
+  const scopedCounts=job.match(/agent-telemetry-reconcile\.mjs artifact-count/g)??[];
+  if(scopedCounts.length!==2 ||
+     !job.includes('EVENT_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}') ||
+     !job.includes('RUN_ATTEMPT: ${{ steps.source.outputs.run_attempt }}') ||
+     !job.includes('--pattern "agent-telemetry-*-${RUN_ID}-${RUN_ATTEMPT}"'))
+    fail('source attempt-scoped telemetry discovery/download is required');
   if(!workflow.includes("github.event.workflow_run.event == 'push'") ||
      !workflow.includes("github.event.workflow_run.event == 'pull_request_target'"))
     fail('source event routing omitted');
@@ -218,6 +224,11 @@ function selfTest(){
     "steps.artifacts.outputs.count != '' && steps.artifacts.outputs.count != '0'",
     "steps.artifacts.outputs.count != '0'"
   )),/empty-artifact no-op guard/);
+  assert.throws(()=>validateRecoveryRouting(workflow.replace(
+    '--pattern "agent-telemetry-*-${RUN_ID}-${RUN_ATTEMPT}"',
+    "--pattern 'agent-telemetry-*'"
+  )),/attempt-scoped/);
+
 
   const source=SOURCES[0],sha='a'.repeat(40);
   const run={id:321,run_attempt:1,head_sha:sha,
