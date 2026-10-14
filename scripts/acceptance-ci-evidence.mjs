@@ -190,6 +190,33 @@ export function summarizePrE2EArtifact({ prNumber, issueNumber, run, plan, resul
   };
 }
 
+
+export function verifyStoredPrE2ERun(run, plan, results, artifact, stored) {
+  if (stored?.schema_version !== 1 || stored.kind !== 'issue_e2e_run' ||
+      stored.run_id !== run.id || stored.run_attempt !== run.run_attempt ||
+      stored.target_sha !== run.head_sha ||
+      stored.plan_digest !== plan.plan_digest ||
+      stored.artifact_digest !== artifact.digest ||
+      JSON.stringify(stored.results) !== JSON.stringify(results.results))
+    throw new Error('orphan Run Record fails source/plan/result/artifact binding');
+  return {status:'matched',source:'acceptance-results orphan branch',
+    record_id:String(run.id)+'-'+String(run.run_attempt)};
+}
+
+async function readTrustedStoredPrE2ERun(repo,run,plan,results,artifact) {
+  const day=String(run.created_at||'').slice(0,10);
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(day))throw new Error('invalid source run date');
+  const recordPath='runs/'+day+'/'+run.id+'-'+run.run_attempt+'/test/issue-e2e.json';
+  const file=await githubGet('/repos/'+repo+'/contents/'+recordPath+'?ref=acceptance-results');
+  if(file.type!=='file' || file.encoding!=='base64' || !file.content)
+    throw new Error('run record is not an authenticated GitHub file');
+  const bytes=Buffer.from(file.content.replace(/\s/g,''),'base64');
+  if(bytes.length>128*1024)throw new Error('unexpectedly large E2E Run Record');
+  const stored=JSON.parse(bytes.toString('utf8'));
+  return {...verifyStoredPrE2ERun(run,plan,results,artifact,stored),
+    blob_sha:file.sha,record_path:recordPath};
+}
+
 async function readSelectedArtifactZip(repo, artifact) {
   if (!Number.isSafeInteger(artifact.size_in_bytes) || artifact.size_in_bytes > MAX_ARTIFACT_ZIP_BYTES ||
       artifact.size_in_bytes <= 0) throw new Error('E2E artifact ZIP exceeds bounded history budget');
@@ -247,10 +274,16 @@ export async function collectPrE2EHistory(repo, targetSha, issueNumber) {
     if (eligible.length !== 1) continue;
     try {
       const {plan,results} = await readSelectedArtifactZip(repo,eligible[0]);
-      history.push(summarizePrE2EArtifact({
+      const proof=summarizePrE2EArtifact({
         prNumber:pr.number, issueNumber:Number(issueNumber),
         run,plan,results,artifact:eligible[0],
-      }));
+      });
+      try {
+        proof.trusted_ingest = await readTrustedStoredPrE2ERun(repo,run,plan,results,eligible[0]);
+      } catch(error) {
+        proof.trusted_ingest = {status:'not-verified',reason:'no matching authenticated orphan Run Record'};
+      }
+      history.push(proof);
     } catch (error) {
       // Malformed PR-head artifacts are never trusted or promoted to evidence.
       console.warn('Ignored unverified historical E2E artifact for run '+run.id+': '+error.message);
@@ -360,6 +393,13 @@ function selfTest() {
     run,plan,results,artifact});
   assert.deepEqual(history.selected,[{id:'login',owners:[1702,1717]}]);
   assert.equal(history.results[0].result,'Fail');
+  const stored={schema_version:1,kind:'issue_e2e_run',run_id:100,run_attempt:1,
+    target_sha:fullA,plan_digest:digest,artifact_digest:artifact.digest,results:results.results};
+  assert.equal(verifyStoredPrE2ERun({...run,run_attempt:1},plan,results,artifact,stored).status,'matched');
+  assert.throws(()=>verifyStoredPrE2ERun({...run,run_attempt:1},plan,results,artifact,
+    {...stored,artifact_digest:'sha256:forged'}),/orphan Run Record/);
+  assert.throws(()=>verifyStoredPrE2ERun({...run,run_attempt:1},plan,results,artifact,
+    {...stored,results:[{id:'login',result:'Pass'}]}),/orphan Run Record/);
   assert.throws(()=>summarizePrE2EArtifact({prNumber:prNum,issueNumber:issueNum,
     run:{...run,head_sha:fullB},plan,results,artifact}),/untrusted PR/);
   assert.throws(()=>summarizePrE2EArtifact({prNumber:prNum,issueNumber:issueNum,
