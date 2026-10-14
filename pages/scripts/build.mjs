@@ -13,6 +13,7 @@ async function optionalJson(file){
   catch { return null; }
 }
 async function api(path) {
+  if (process.env.PAGES_OFFLINE === '1') throw new Error('offline fixture');
   // Build-time, never browser-side. No token or trusted API access is deployed.
   const headers = { 'accept':'application/vnd.github+json', 'x-github-api-version':'2022-11-28', 'user-agent':'nession-pages-projection' };
   if(token) headers.authorization='Bearer '+token;
