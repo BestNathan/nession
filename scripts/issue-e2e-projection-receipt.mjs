@@ -13,6 +13,66 @@ const positive=n=>Number.isSafeInteger(n)&&n>0;
 const hash=s=>createHash('sha256').update(s).digest('hex');
 const read=f=>JSON.parse(fs.readFileSync(f,'utf8'));
 
+// Read-only historical attestation. A completed trusted Ingest workflow and
+// protected orphan Run Store establish who wrote this receipt; immutable
+// source Run/Plan independently establish what could have been projected.
+// Only outcome=applied is evidence of an actual historical Issue PATCH.
+export function verifyArchivedProjectionReceipt(receipt,record,plan,issueNumber){
+  assert.equal(receipt?.schema_version,1);
+  assert.equal(receipt.kind,'issue_e2e_projection_receipt');
+  assert.ok(['applied','recovered'].includes(receipt.outcome));
+  assert.equal(receipt.issue,issueNumber);
+  assert.equal(record?.schema_version,1);
+  assert.equal(record.kind,'issue_e2e_run');
+  assert.ok(positive(record.run_id)&&positive(record.run_attempt));
+  assert.match(record.target_sha,SHA);
+  assert.match(record.plan_digest,DIGEST);
+  assert.match(record.artifact_digest,ARTIFACT);
+  assert.equal(plan?.mode,'selected');
+  assert.equal(plan.target_sha,record.target_sha);
+  assert.equal(plan.plan_digest,record.plan_digest);
+  assert.ok(positive(plan.pr_number));
+  for(const key of ['run_id','run_attempt','target_sha','plan_digest','artifact_digest'])
+    assert.equal(receipt[key],record[key],'source/receipt identity mismatch: '+key);
+  assert.ok(positive(receipt.ingest_run_id)&&positive(receipt.ingest_attempt));
+  const owner=plan.issues.find(x=>x.issue===issueNumber);
+  assert.ok(owner&&DIGEST.test(owner.declaration_digest));
+  assert.equal(receipt.declaration_digest,owner.declaration_digest);
+  assert.match(receipt.before_body_sha256,DIGEST);
+  assert.match(receipt.body_sha256,DIGEST);
+  const wanted=[...(owner.new_ids??[]),...(owner.regression_ids??[])].sort();
+  assert.deepEqual(receipt.rows.map(x=>x.id),wanted,'Issue owner result IDs changed');
+  const byId=new Map(record.results.map(x=>[x.id,x]));
+  assert.equal(byId.size,record.results.length,'duplicated source result ID');
+  for(const row of receipt.rows){
+    assert.ok(plan.selected.some(s=>s.id===row.id&&s.owners.some(o=>o.issue===issueNumber)),
+      'missing source Plan owner');
+    const result=byId.get(row.id);
+    assert.ok(result&&row.result===result.result,'receipt is not the executed verdict');
+    const exact='run '+record.run_id+'/'+record.run_attempt+
+      ', SHA '+record.target_sha+
+      ', contract '+owner.declaration_digest+
+      ', plan '+record.plan_digest+
+      ', tests '+result.passed+'/'+result.discovered+
+      ' (https://github.com/BestNathan/nession/actions/runs/'+record.run_id+')';
+    assert.equal(row.evidence,exact,'forged issue projection evidence');
+  }
+  assert.ok(typeof receipt.readback_updated_at==='string'&&
+    !Number.isNaN(Date.parse(receipt.readback_updated_at)));
+  if(receipt.outcome==='applied'){
+    assert.ok(typeof receipt.patch_updated_at==='string'&&
+      !Number.isNaN(Date.parse(receipt.patch_updated_at)));
+    assert.ok(Date.parse(receipt.readback_updated_at)>=Date.parse(receipt.patch_updated_at));
+  }else assert.equal(receipt.patch_updated_at,null);
+  return {issue:issueNumber,outcome:receipt.outcome,
+    ingest_run_id:receipt.ingest_run_id,ingest_attempt:receipt.ingest_attempt,
+    run_id:receipt.run_id,run_attempt:receipt.run_attempt,
+    target_sha:receipt.target_sha,plan_digest:receipt.plan_digest,
+    declaration_digest:receipt.declaration_digest,
+    body_sha256:receipt.body_sha256,readback_updated_at:receipt.readback_updated_at,
+    rows:receipt.rows};
+}
+
 export function verifyProjectionReceipt(receipt,record,plan,projected) {
   assert.equal(receipt?.schema_version,1);
   assert.equal(receipt.kind,'issue_e2e_projection_receipt');
@@ -103,6 +163,7 @@ export function createProjectionReceipt({record,plan,issue,projected,before,read
     }),
   };
   verifyProjectionReceipt(receipt,record,plan,projected);
+  verifyArchivedProjectionReceipt(receipt,record,plan,issue);
   return receipt;
 }
 
@@ -147,6 +208,9 @@ function selfTest(){
   assert.throws(()=>verifyProjectionReceipt(applied,{...record,run_id:124},plan,projected));
   assert.throws(()=>verifyProjectionReceipt(applied,record,{...plan,
     issues:[{issue:999,declaration_digest:contract.digest}]},projected));
+  assert.equal(verifyArchivedProjectionReceipt(applied,record,plan,issue).outcome,'applied');
+  assert.throws(()=>verifyArchivedProjectionReceipt({...applied,rows:[{...applied.rows[0],result:'Pass'}]},record,plan,issue));
+  assert.throws(()=>verifyArchivedProjectionReceipt(applied,record,plan,9999));
   assert.throws(()=>createProjectionReceipt({...args,patch:patched,
     outcome:'recovered'}),/must not claim/);
   console.log('Issue E2E post-PATCH and recovered receipt integrity fixtures passed');
