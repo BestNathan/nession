@@ -601,6 +601,29 @@ async function selfTest() {
   assert.equal(verifiedCommitPullAssociation([drillPr],1761,b,true),true);
   assert.equal(verifiedCommitPullAssociation([drillPr],1761,b,false),false);
 
+  // A non-E2E child Issue can observe authenticated sibling projections
+  // within the same never-merged test PR, without being assigned a test ID.
+  const childPr={...drillPr,body:'Refs #1702\nRefs #1759\nDO NOT MERGE'};
+  const childEvent={event:'cross-referenced',source:{issue:{number:1761,
+    pull_request:{url:'https://api.github.com/repos/'+REPO+'/pulls/1761'}}}};
+  const childGet=async url=>{
+    if(url.includes('/issues/1759/timeline?'))return [childEvent];
+    if(url.endsWith('/pulls/1761'))return childPr;
+    throw Error('unexpected child test-only API '+url);
+  };
+  const appliedSibling=[{run_id:10,selection:{issue_numbers:[1702,1759],
+    selected:[{id:'login',owners:[1702]}]},
+    results:[{id:'login',result:'Fail'}],
+    projections:[{issue:1702,outcome:'applied',rows:[{id:'login',result:'Fail'}]}]}];
+  const siblingProof=await collectLinkedIssueE2EEvidence(REPO,1759,childGet,
+    async()=>appliedSibling);
+  assert.deepEqual(siblingProof.map(x=>[x.pr_number,x.scope]),
+    [[1761,'unmerged-test-only']]);
+  assert.equal(siblingProof[0].verified_staging_full,null);
+  assert.deepEqual(await collectLinkedIssueE2EEvidence(REPO,1759,childGet,
+    async()=>appliedSibling.map(row=>({...row,
+      projections:[{...row.projections[0],outcome:'recovered'}]}))),[]);
+
   const linked={number:1718,state:'closed',merged_at:'2026-10-14T05:00:00Z',
     base:{ref:'staging',repo:{full_name:REPO}},
     head:{sha:b,repo:{full_name:REPO}},merge_commit_sha:mergeSha,
