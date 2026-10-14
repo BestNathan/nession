@@ -265,9 +265,16 @@ export async function collectAuthenticatedProjectionReceipts(repo,run,record,pla
        ingest.path!=='.github/workflows/e2e-test-ingest.yml'||
        ingest.name!=='E2E / Test Ingest'||ingest.event!=='workflow_run'||
        ingest.head_branch!=='main'||ingest.status!=='completed'||
-       ingest.conclusion!=='success'||
        String(ingest.created_at??'')<String(run.created_at??''))
-      throw Error('projection receipt not issued by a successful trusted ingest');
+      throw Error('projection receipt issued by unrelated or untrusted ingest');
+    // A protected receipt can be durably pushed even when a later step in the
+    // same Ingest job fails (e.g. while reconciling another Issue). Do not
+    // re-label this incomplete run as a SUCCESSFUL Issue projection. Preserve
+    // its immutable record, but exclude it from positive Acceptance evidence.
+    // The receipt itself was verified above, so forged receipts still fail.
+    if(ingest.conclusion==='failure')continue;
+    if(ingest.conclusion!=='success')
+      throw Error('projection receipt has non-final trusted ingest status');
     const jobs=await get('/repos/'+repo+'/actions/runs/'+ingest.id+
       '/attempts/'+ingest.run_attempt+'/jobs?per_page=100');
     if(!(jobs.jobs??[]).some(j=>j.name==='ingest-pr' &&
@@ -781,10 +788,13 @@ async function selfTest() {
     fixtureSource,inputRecord,inputPlan,projectionGet);
   assert.equal(historyReceipts[0].outcome,'applied');
   assert.equal(historyReceipts[0].rows[0].result,'Fail');
+  assert.deepEqual(await collectAuthenticatedProjectionReceipts(REPO,
+    fixtureSource,inputRecord,inputPlan,async url=>url.endsWith('/actions/runs/800')
+      ? {...fixtureIngest,conclusion:'failure'}:projectionGet(url)),[]);
   await assert.rejects(()=>collectAuthenticatedProjectionReceipts(REPO,
     fixtureSource,inputRecord,inputPlan,async url=>url.endsWith('/actions/runs/800')
-      ? {...fixtureIngest,conclusion:'failure'}:projectionGet(url)),
-      /successful trusted ingest/);
+      ? {...fixtureIngest,repository:{full_name:'foreign/repo'}}:projectionGet(url)),
+      /unrelated or untrusted ingest/);
   await assert.rejects(()=>collectAuthenticatedProjectionReceipts(REPO,
     fixtureSource,inputRecord,inputPlan,async url=>url.includes('projections/1702.json')
       ? {...envelope,content:Buffer.from(JSON.stringify({...receipt,body_sha256:'0'.repeat(64)})).toString('base64')}
