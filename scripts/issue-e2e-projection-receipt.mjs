@@ -101,6 +101,58 @@ export function confirmProjection(intent,record,projected,readback,patched=null)
     projected_body_sha256:intent.expected_body_sha256,
     mode,rows:report.rows.map(({id,type,result})=>({id,type,result}))};
 }
+// Read-only acceptance verifier for the immutable orphan Store pair. It does
+// not read an Issue's mutable current E2E Report or trust a PR comment.
+export function verifyStoredProjectionReceipt(record,intent,receipt,issueNumber){
+  const src=source(record);
+  if(!positive(issueNumber)||intent?.schema_version!==1||
+     intent.kind!=='issue_e2e_projection_intent'||
+     intent.issue_number!==issueNumber||
+     !DIGEST.test(intent.source_record_sha256??'')||
+     intent.source_record_sha256!==sha256(JSON.stringify(record))||
+     !DIGEST.test(intent.previous_body_sha256??'')||
+     !DIGEST.test(intent.expected_body_sha256??'')||
+     !DIGEST.test(intent.declaration_digest??'')||
+     Object.entries(src).some(([key,value])=>intent[key]!==value)||
+     !Array.isArray(intent.rows)||!intent.rows.length)
+    fail('untrusted source-aligned historical projection intent');
+  const results=new Map(record.results.map(row=>[row.id,row]));
+  const seen=new Set();
+  for(const row of intent.rows){
+    const sourceResult=results.get(row?.id);
+    if(typeof row?.id!=='string'||seen.has(row.id)||!sourceResult||
+       row.result!==sourceResult.result||
+       !['New','Regression'].includes(row.type)||
+       typeof row.evidence!=='string'||
+       row.evidence!==('run '+src.run_id+'/'+src.run_attempt+
+       ', SHA '+src.target_sha+', contract '+intent.declaration_digest+
+       ', plan '+src.plan_digest+', tests '+
+       sourceResult.passed+'/'+sourceResult.discovered+
+       ' (https://github.com/BestNathan/nession/actions/runs/'+src.run_id+')'))
+      fail('untrusted historical projection ID/result/evidence');
+    seen.add(row.id);
+  }
+  if(results.size!==seen.size||!receipt||
+     receipt.schema_version!==1||
+     receipt.kind!=='issue_e2e_projection_receipt'||
+     receipt.issue_number!==issueNumber||
+     receipt.run_id!==src.run_id||receipt.run_attempt!==src.run_attempt||
+     receipt.target_sha!==src.target_sha||
+     receipt.plan_digest!==src.plan_digest||
+     receipt.declaration_digest!==intent.declaration_digest||
+     receipt.intent_sha256!==sha256(JSON.stringify(intent))||
+     receipt.projected_body_sha256!==intent.expected_body_sha256||
+     !['patched-and-read-back','recovered-exact-readback'].includes(receipt.mode)||
+     JSON.stringify(receipt.rows)!==JSON.stringify(
+       intent.rows.map(({id,type,result})=>({id,type,result}))))
+    fail('source Run Record does not authenticate historical projection receipt');
+  return {issue:issueNumber,source_run_id:src.run_id,
+    source_run_attempt:src.run_attempt,head_sha:src.target_sha,
+    plan_digest:src.plan_digest,receipt_mode:receipt.mode,
+    projection_verified:receipt.mode==='patched-and-read-back',
+    results:receipt.rows,provenance:'trusted acceptance-results projection intent + Issue API read-back receipt'};
+}
+
 function fixture(){
   const pending=['## E2E Verification','### New','- none: no new spec',
     '### Regression','- login','- session-lifecycle','## E2E Report',
@@ -132,6 +184,20 @@ function selfTest(){
   const receipt=confirmProjection(intent,record,projected,after,after);
   assert.equal(receipt.mode,'patched-and-read-back');
   assert.deepEqual(receipt.rows.map(x=>x.result),['Fail','Pass']);
+  const verified=verifyStoredProjectionReceipt(record,intent,receipt,1702);
+  assert.equal(verified.projection_verified,true);
+  assert.deepEqual(verified.results.map(x=>x.result),['Fail','Pass']);
+  const recoveredReceipt=confirmProjection(intent,record,projected,after);
+  assert.equal(verifyStoredProjectionReceipt(record,intent,recoveredReceipt,1702).projection_verified,false);
+  assert.throws(()=>verifyStoredProjectionReceipt(record,intent,receipt,1703),/historical projection intent/);
+  assert.throws(()=>verifyStoredProjectionReceipt(record,intent,
+    {...receipt,projected_body_sha256:'d'.repeat(64)},1702),/historical projection receipt/);
+  assert.throws(()=>verifyStoredProjectionReceipt(record,intent,
+    {...receipt,rows:[{...receipt.rows[0],result:'Pass'},receipt.rows[1]]},1702),
+    /historical projection receipt/);
+  assert.throws(()=>verifyStoredProjectionReceipt(record,
+    {...intent,rows:[{...intent.rows[0],result:'Pass'},intent.rows[1]]},receipt,1702),
+    /historical projection ID/);
   assert.equal(confirmProjection(intent,record,projected,after).mode,
     'recovered-exact-readback');
   assert.throws(()=>makeProjectionIntent(record,{...issue,body:projected.body},projected),
