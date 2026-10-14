@@ -19,7 +19,7 @@ const refPattern=/(?:refs\/heads\/)?(acceptance-results|task-results|agent-store
 export function findStorePushes(workflow){
   const entries=[];
   for(const [i,line] of workflow.split(/\r?\n/).entries()){
-    if(!/^\s*git(?:\s+-C\s+[^\s]+)?\s+push\b/.test(line))continue;
+    if(!/^\s*(?:-\s*run:\s*)?git(?:\s+-C\s+[^\s]+)?\s+push\b/.test(line))continue;
     const refs=[...line.matchAll(refPattern)].map(x=>x[1]);
     for(const ref of new Set(refs))
       entries.push({ref,line:i+1,command:line.trim()});
