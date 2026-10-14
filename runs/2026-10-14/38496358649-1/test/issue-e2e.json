@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "63f13956c9124b2c67c5d554b4ccf570c7f9daa1",
+  "run_id": 38496358649,
+  "run_attempt": 1,
+  "plan_digest": "6565cf80aa1dcf47b8969c4c96ea3055f4fbc2f7ded2aea30d9f8085501d2f58",
+  "artifact_digest": "sha256:b8bb030779d496a06d0ce9ae1f2de8f45dfa471cf2c8703eefde95fd849441c6",
+  "results": [
+    {
+      "id": "login",
+      "result": "Error",
+      "discovered": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 0
+    },
+    {
+      "id": "session-lifecycle",
+      "result": "Error",
+      "discovered": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 0
+    }
+  ]
+}
