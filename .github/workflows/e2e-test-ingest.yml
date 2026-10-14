@@ -226,10 +226,9 @@ jobs:
             gh api "repos/$GITHUB_REPOSITORY/issues/$number" > "$current_file"
             latest="$(jq -r .body "$current_file")"
             original="$(jq -r .body "scratch/metadata/issue-$number.json")"
-            if [[ "$latest" != "$original" ]]; then
-              echo "Issue #$number changed since attestation; omit stale projection"
-              continue
-            fi
+            # Compare the authenticated original with the proposed result,
+            # not the mutable current snapshot. An interrupted PATCH may have
+            # already changed the Issue, but lost its durable receipt.
             decision="$(node trusted/scripts/issue-e2e-reconcile.mjs decide \
               "scratch/metadata/issue-$number.json" "$f" "$run_id" "$attempt" "$sha")"
             intent_rel="runs/$day/$run_id-$attempt/test/projection-intents/$number.json"
@@ -240,25 +239,30 @@ jobs:
               stale)
                 echo "Issue #$number ignores stale source; no projection receipt"
                 continue ;;
-              duplicate)
-                # A previous PATCH may have succeeded before receipt storage
-                # was interrupted. Do not claim a new PATCH; recover only an
-                # already-persisted trusted intent and exact Issue read-back.
-                if [[ ! -f "$intent_file" ]]; then
-                  echo "Issue #$number is a legacy duplicate without a persisted intent"
-                  continue
-                fi
-                if [[ -f "results-repo/$receipt_rel" ]]; then
-                  echo "Existing immutable projection receipt; no duplicate write"
-                  continue
-                fi
-                node trusted/scripts/issue-e2e-projection-receipt.mjs confirm \
-                  "$intent_file" scratch/output/record.json "$f" "$current_file" - "$receipt_file"
-                append_projection_proof "$receipt_file" "$receipt_rel" "recovered read-back"
-                continue ;;
               apply) ;;
               *) echo "::error::Invalid E2E reconciliation decision"; exit 1 ;;
             esac
+            if [[ "$latest" != "$original" ]]; then
+              # Same exact projected Issue body means a prior PATCH already
+              # happened. Only a previously committed intent permits recovery;
+              # a changed Issue from any other cause remains stale and unwritable.
+              if [[ ! -f "$intent_file" || "$latest" != "$(jq -r .body "$f")" ]]; then
+                echo "Issue #$number changed since source attestation; no receipt"
+                continue
+              fi
+              if [[ -f "results-repo/$receipt_rel" ]]; then
+                echo "Existing exact immutable receipt; idempotent replay"
+                continue
+              fi
+              node trusted/scripts/issue-e2e-projection-receipt.mjs confirm \
+                "$intent_file" scratch/output/record.json "$f" "$current_file" - "$receipt_file"
+              append_projection_proof "$receipt_file" "$receipt_rel" "recovered exact read-back"
+              continue
+            fi
+            if [[ -f "results-repo/$receipt_rel" ]]; then
+              echo "::error::Recorded Issue projection is missing from live read-back" >&2
+              exit 1
+            fi
             # Stage a verifiable intent before any Issue mutation. The intent
             # by itself is NEVER evidence that the API PATCH succeeded.
             intent_output="scratch/output/receipt-intents/$number.json"
