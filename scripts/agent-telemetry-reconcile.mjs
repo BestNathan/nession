@@ -166,6 +166,13 @@ export function validateRecoveryRouting(workflow){
      !job.includes('RECOVERY_EVENT_RUN_ID: ${{ github.event.workflow_run.id }}')||
      !job.includes('run_id="${RECOVERY_RUN_ID:-${EVENT_RUN_ID:-}}"'))
     fail('empty authenticated producer fallback or recovered run precedence missing');
+  // A schedule scan can legitimately discover no missing run. Skipped
+  // source/artifact steps produce empty strings, not the literal '0'.
+  // Every consumer must guard both cases; otherwise an empty scan tries to
+  // download an undefined run ID and becomes a false workflow failure.
+  const artifactConsumers=job.match(/steps\.artifacts\.outputs\.count != '' && steps\.artifacts\.outputs\.count != '0'/g)??[];
+  if(artifactConsumers.length!==5)
+    fail('missing empty-artifact no-op guard in a privileged ingest consumer');
   if(!workflow.includes("github.event.workflow_run.event == 'push'") ||
      !workflow.includes("github.event.workflow_run.event == 'pull_request_target'"))
     fail('source event routing omitted');
@@ -200,6 +207,11 @@ function selfTest(){
   assert.throws(()=>validateRecoveryRouting(workflow.replace(
     "steps.event_artifacts.outputs.count == '0'","steps.event_artifacts.outputs.count != '0'"
   )),/empty authenticated/);
+  assert.throws(()=>validateRecoveryRouting(workflow.replace(
+    "steps.artifacts.outputs.count != '' && steps.artifacts.outputs.count != '0'",
+    "steps.artifacts.outputs.count != '0'"
+  )),/empty-artifact no-op guard/);
+
   const source=SOURCES[0],sha='a'.repeat(40);
   const run={id:321,run_attempt:1,head_sha:sha,
     repository:{full_name:REPO},head_repository:{full_name:REPO},
