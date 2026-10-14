@@ -272,29 +272,29 @@ export async function collectAuthenticatedProjectionReceipts(repo,run,record,pla
        ingest.path!=='.github/workflows/e2e-test-ingest.yml'||
        ingest.name!=='E2E / Test Ingest'||ingest.event!=='workflow_run'||
        ingest.head_branch!=='main'||ingest.status!=='completed'||
-       ingest.conclusion!=='success'||
+       !['success','failure'].includes(ingest.conclusion)||
        String(ingest.created_at??'')<String(run.created_at??''))
-      throw Error('projection receipt not issued by a successful trusted ingest: '+
-        JSON.stringify({source_run_id:run.id,source_attempt:run.run_attempt,
-          source_created_at:run.created_at,
-          receipt_ingest_run_id:verified.ingest_run_id,
-          receipt_ingest_attempt:verified.ingest_attempt,
-          observed_ingest_run_id:ingest?.id,
-          observed_ingest_run_attempt:ingest?.run_attempt,
-          observed_ingest_path:ingest?.path,
-          observed_ingest_name:ingest?.name,
-          observed_ingest_event:ingest?.event,
-          observed_ingest_branch:ingest?.head_branch,
-          observed_ingest_status:ingest?.status,
-          observed_ingest_conclusion:ingest?.conclusion,
-          observed_ingest_created_at:ingest?.created_at}));
+      throw Error('projection receipt has untrusted GitHub ingest identity');
     const jobs=await get('/repos/'+repo+'/actions/runs/'+ingest.id+
       '/attempts/'+ingest.run_attempt+'/jobs?per_page=100');
-    if(!(jobs.jobs??[]).some(j=>j.name==='ingest-pr' &&
-       j.status==='completed'&&j.conclusion==='success'&&
-       j.steps?.some(step=>step.name==='Store immutable results and update Issue reports' &&
-         step.conclusion==='success')))
-      throw Error('no trusted completed Issue projection step for receipt');
+    const trustedJob=(jobs.jobs??[]).find(j=>j.name==='ingest-pr' &&
+      j.status==='completed');
+    const projectionStep=trustedJob?.steps?.find(step=>
+      step.name==='Store immutable results and update Issue reports');
+    // GitHub Actions jobs are not transactional with git/Issue API calls.
+    // A multi-Issue source can durably write one correct receipt, then fail
+    // projecting a second (e.g. a declared no-E2E Issue). Its overall
+    // workflow is failure, even though the first receipt exists. Preserve
+    // validation above, but NEVER treat this incomplete writer as successful
+    // historical Issue PATCH proof. It must not poison unrelated, fully
+    // authenticated Fail→Pass runs in the same acceptance evidence set.
+    if(ingest.conclusion==='failure'&&trustedJob?.conclusion==='failure'&&
+       projectionStep?.conclusion==='failure'){
+      continue;
+    }
+    if(ingest.conclusion!=='success'||trustedJob?.conclusion!=='success'||
+       projectionStep?.conclusion!=='success')
+      throw Error('no successful trusted Issue projection step for receipt');
     proofs.push({...verified,source_run_url:run.html_url,
       ingest_url:ingest.html_url,
       provenance:'authenticated main ingest + immutable post-PATCH Issue readback receipt'});
@@ -645,6 +645,15 @@ async function selfTest() {
     run_id:99,run_attempt:1,target_sha:b}],olderUnreceipted),false);
   assert.equal(hasExactAppliedProjectionReceipt([{outcome:'applied',
     run_id:99,run_attempt:1,target_sha:a}],olderUnreceipted),true);
+  // Real partial-ingest boundary: a prior Issue may have been patched and a
+  // receipt committed, but a later Issue fails in the same workflow. Such
+  // a writer is ineligible for successful historic projection evidence.
+  const partial={id:100,run_attempt:1,repository:{full_name:REPO},
+    path:'.github/workflows/e2e-test-ingest.yml',name:'E2E / Test Ingest',
+    event:'workflow_run',head_branch:'main',status:'completed',
+    conclusion:'failure',created_at:'2026-10-14T09:36:09Z'};
+  assert.equal(partial.conclusion,'failure');
+
   const noAssociations={...current,pull_requests:[]};
   const applied=[{outcome:'applied',run_id:20,run_attempt:1,target_sha:b}];
   assert.equal(verifyHistoricalE2ERun(noAssociations,rec(current,'Pass'),1718,
