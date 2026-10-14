@@ -354,7 +354,7 @@ function selfTest() {
   assert.deepEqual(history.selected,[{id:'login',owners:[1702,1717]}]);
   assert.equal(history.results[0].result,'Fail');
   assert.throws(()=>summarizePrE2EArtifact({prNumber:prNum,issueNumber:issueNum,
-    run:{...run,head_sha:fullB},plan,results,artifact}),/plan identity/);
+    run:{...run,head_sha:fullB},plan,results,artifact}),/untrusted PR/);
   assert.throws(()=>summarizePrE2EArtifact({prNumber:prNum,issueNumber:issueNum,
     run,plan:{...plan,plan_digest:'0'.repeat(64)},results,artifact}),/digest mismatch/);
   assert.throws(()=>summarizePrE2EArtifact({prNumber:prNum,issueNumber:999,
