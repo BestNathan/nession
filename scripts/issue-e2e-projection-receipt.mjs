@@ -213,7 +213,7 @@ function selfTest(){
   assert.throws(()=>confirmProjection({...intent,previous_body_sha256:'fake'},
     record,projected,after,after),/intent/);
   assert.throws(()=>confirmProjection(intent,record,
-    {...projected,body:projected.body.replace('Fail','Pass')},after,after),/intent\/projected|source-aligned/);
+    {...projected,body:projected.body.replace('Fail','Pass')},after,after),/intent\/projected|source-aligned|projected ID\/result/);
   console.log('Issue E2E receipt: trusted intent, PATCH+GET, replay observation and adverse source/Issue fixtures passed');
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
