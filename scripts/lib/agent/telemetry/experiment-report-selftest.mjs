@@ -51,8 +51,8 @@ try{
   const report=buildExperimentReport([qwen,cursor],[obs,empty],proof,{
     metrics_commit_sha:OTHER,evidence_sha256:'c'.repeat(64)});
   assert.equal(report.groups.length,2);
-  const qw=report.groups.find(x=>x.id.includes('qwen3.7-plus'));
-  const cs=report.groups.find(x=>x.id.includes('composer'));
+  const qw=report.groups.find(x=>x.group.includes('qwen3.7-plus'));
+  const cs=report.groups.find(x=>x.group.includes('composer'));
   assert.equal(qw.tool_calls_total,1);
   assert.equal(qw.skill_invocations_total,null);
   assert.equal(qw.tokens_total,21);
@@ -75,7 +75,7 @@ try{
   assert.equal(missing.review.repair_requests,null);
   assert.equal(missing.recovery.rate,null);
   assert.equal(missing.acceptance.accepted_tokens_total,null);
-  assert.equal(missing.groups.find(x=>x.id.includes('qwen3.7-plus')).mcp_calls_total,null);
+  assert.equal(missing.groups.find(x=>x.group.includes('qwen3.7-plus')).mcp_calls_total,null);
   assert.throws(()=>buildExperimentReport([qwen,qwen],[obs]),/duplicate run/);
   assert.throws(()=>buildExperimentReport([qwen,cursor],[obs,obs]),/duplicate trace/);
   assert.throws(()=>buildExperimentReport([cursor],[obs]),/orphan trace/);
