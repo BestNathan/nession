@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "kind": "agent_workflow_run",
+  "identity": {
+    "workflow_id": "requirement-acceptance",
+    "github_workflow": "Acceptance / Orchestrator",
+    "github_run_id": 38565407999,
+    "github_run_attempt": 2,
+    "job": "execute",
+    "repository": "BestNathan/nession",
+    "event": "push",
+    "unique_run_name": "38565407999-2-issue-1759-post-merge"
+  },
+  "task": {
+    "id": "issue-1759-post-merge",
+    "type": "acceptance",
+    "issue": 1759,
+    "stage": "post-merge",
+    "target_ref": "4d20adc259d463440ac6abfe3335b056e681f0cc",
+    "deployment": null
+  },
+  "agent": {
+    "provider": "cursor",
+    "id": "legacy-acceptance-cursor",
+    "role": "acceptor",
+    "harness_sha256": null,
+    "checkpoint_id": null,
+    "model": {
+      "id": "composer-2.5",
+      "fast": true,
+      "params": [
+        {
+          "id": "fast",
+          "value": "true"
+        }
+      ]
+    },
+    "run_id": "run-cef0036f-21c5-4d56-9b91-8ca2c0f615d6",
+    "request_id": "d75ac5ee-33e3-4cfe-831f-5a96b275dcdc",
+    "status": "finished",
+    "prompt": {
+      "id": "acceptance",
+      "version": "v1",
+      "sha256": "dab794cbdc989651d03084eb14c8db77937ed4114372849f5b99ab813bc922cc"
+    }
+  },
+  "execution": {
+    "turns": 1,
+    "model_requests": 1,
+    "tools": {
+      "observed": true,
+      "total": 2,
+      "unique": 1,
+      "by_name": {
+        "read": 2
+      }
+    }
+  },
+  "tokens": {
+    "input": 90744,
+    "output": 2283,
+    "cache_read": 33760,
+    "cache_write": 0,
+    "reasoning": null,
+    "total": 126787
+  },
+  "cost": {
+    "raw_usd": null,
+    "charged_usd": null,
+    "estimated_usd": null
+  },
+  "timing": {
+    "started_at": "2026-10-14T13:11:13.605Z",
+    "finished_at": "2026-10-14T13:11:38.182Z",
+    "agent_duration_ms": 23503,
+    "workflow_duration_ms": null
+  },
+  "result": {
+    "status": "completed",
+    "pass": 3,
+    "pending": 0,
+    "fail": 0,
+    "na": 0
+  }
+}
