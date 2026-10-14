@@ -238,8 +238,14 @@ if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href){
       ingestRunId:Number(ingestRunId),ingestAttempt:Number(ingestAttempt)});
     fs.writeFileSync(outFile,JSON.stringify(receipt,null,2)+'\n',{flag:'wx'});
   }else if(op==='verify'){
-    assert.equal(verifyProjectionReceipt(read(issueArg),read(recordFile),
-      read(planFile),read(projectionFile)),true);
-    console.log('authenticated immutable Issue E2E projection receipt');
+    const receipt=read(issueArg),record=read(recordFile),plan=read(planFile);
+    const current=parseIssueE2E(read(projectionFile).body,{requireDeclaration:true});
+    assert.deepEqual(current.errors,[]);
+    assert.equal(current.digest,receipt.declaration_digest);
+    // A historical receipt is immutable even if unrelated Issue SC prose
+    // changed after the original PATCH. Verify its stored read-back snapshot,
+    // not a newly generated whole-body projection from a later retry.
+    verifyArchivedProjectionReceipt(receipt,record,plan,receipt.issue);
+    console.log('authenticated immutable historical Issue E2E projection receipt');
   }else throw Error('usage: issue-e2e-projection-receipt.mjs self-test | create RECORD PLAN ISSUE PROJECTED BEFORE READBACK PATCH|- MODE INGEST_RUN INGEST_ATTEMPT OUTPUT | verify RECORD PLAN RECEIPT PROJECTED');
 }
