@@ -214,11 +214,64 @@ export function makeProjection({ repository, agent, registry, issues, pulls, wor
     evidence:{ stores:stores.map(([name,purpose])=>record(name,purpose)) },
   };
 }
+// Only exported public contract keys are permitted. This is a release gate,
+// independent of the read-only producer's allowlisting.
+function allowedFields(item,keys,where) {
+  if (!item||typeof item!=='object'||Array.isArray(item))throw Error('invalid public '+where);
+  for (const key of Object.keys(item))
+    if(!keys.includes(key))throw Error('disallowed public field '+where+'.'+key);
+}
+function checkFreshness(item) {
+  allowedFields(item,['state','age_hours'],'freshness');
+  if(!['fresh','stale','unavailable'].includes(item.state)||
+     (item.age_hours!==null&&(!Number.isFinite(item.age_hours)||item.age_hours<0)))
+    throw Error('invalid metric freshness');
+}
 export function validateProjection(p) {
   if (p?.schema_version !== 1 || p?.source?.repository !== REPO || !safeDate(p.generated_at)) throw new Error('invalid public projection');
   if (!Array.isArray(p.agents?.roster) || !Array.isArray(p.evidence?.stores)) throw new Error('missing sections');
   // Schema is constructed by an allowlist. These keys would imply an accidental raw-data leak.
-  const exported=JSON.stringify(p);
-  if (/"(?:prompt|transcript|checkpoint_bytes|tool_arguments|tool_results|auth_token|secret|private_key|env)"\s*:/i.test(exported)) throw new Error('private field in projection');
+  allowedFields(p,['schema_version','generated_at','source','repository','agents','work','evidence'],'root');
+  allowedFields(p.source,['repository','main_sha','metrics_sha','issues_status','pulls_status','workflow_runs_status'],'source');
+  allowedFields(p.repository,['available','sha','generated_at','freshness','current','efficiency'],'repository');
+  allowedFields(p.agents,['available','generated_at','freshness','roster','distribution','summary'],'agents');
+  allowedFields(p.work,['issues_status','pulls_status','workflow_runs_status','issues','pulls'],'work');
+  allowedFields(p.evidence,['stores'],'evidence');
+  checkFreshness(p.repository.freshness);
+  checkFreshness(p.agents.freshness);
+  if(!Array.isArray(p.work.issues)||p.work.issues.length>12||
+     !Array.isArray(p.work.pulls)||p.work.pulls.length>12||
+     p.agents.roster.length>40||p.evidence.stores.length>4)
+    throw Error('unbounded public data');
+  const issueFields=['number','title','url','state','updated_at','observed_agent_runs_7d','pr_references'];
+  const prFields=['number','title','url','state','updated_at','workflow'];
+  for(const item of p.work.issues){
+    allowedFields(item,issueFields,'issue');
+    allowedFields(item.pr_references,['status','prs'],'issue references');
+    if(!Array.isArray(item.pr_references.prs)||item.pr_references.prs.length>6)
+      throw Error('unbounded public Issue links');
+  }
+  for(const item of p.work.pulls)allowedFields(item,prFields,'PR');
+  let serializedBytes=0;
+  const scan=(data,key='')=>{
+    if(data===null||data===undefined)return;
+    if(typeof data==='number'&&(!Number.isFinite(data)||data<0))
+      throw Error('invalid public metric');
+    if(typeof data==='string'){
+      serializedBytes+=Buffer.byteLength(data);
+      if(serializedBytes>128*1024)throw Error('public projection exceeds release limit');
+      if(PRIVATE_TEXT.test(data))throw Error('private field value in public projection');
+      if(key==='url'&&!/^https:\/\/github\.com\/BestNathan\/nession\/(?:issues\/[1-9]\d*|pull\/[1-9]\d*|actions\/runs\/[1-9]\d*|tree\/(?:metrics|acceptance-results|task-results|agent-store))$/.test(data))
+        throw Error('untrusted public URL');
+    } else if(Array.isArray(data))data.forEach(x=>scan(x,key));
+    else if(typeof data==='object'){
+      for(const [name,value] of Object.entries(data)){
+        if(/^(?:prompt|transcript|checkpoint_bytes|tool_arguments|tool_results|auth_token|secret|private_key|env|session_id|hostname)$/i.test(name))
+          throw Error('private field in projection');
+        scan(value,name);
+      }
+    }
+  };
+  scan(p);
   return p;
 }
