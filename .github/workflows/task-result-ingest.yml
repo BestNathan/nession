@@ -120,6 +120,18 @@ jobs:
           fi
           echo 'Task result verified and archived on task-results (not acceptance-results).' >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Verify immutable Git bytes before uploading Run Store receipts
+        if: success()
+        run: |
+          set -euo pipefail
+          count=0
+          for file in "${RUNNER_TEMP}"/run-store-receipts/*.json; do
+            [[ -f "$file" ]] || continue
+            node "${GITHUB_WORKSPACE}/trusted/scripts/run-store-receipt-verify.mjs" "$file" "${GITHUB_WORKSPACE}/task-store" task-results
+            count=$((count + 1))
+          done
+          echo "Read-only exact Git-byte receipts verified: ${count}; no independent signing/anchor claimed" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Preserve Run Store post-commit receipts
         if: always()
         uses: actions/upload-artifact@v4
