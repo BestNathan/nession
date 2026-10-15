@@ -481,7 +481,7 @@ export function verifyHistoricalStagingFullRun(repo,mergeSha,runs,artifacts) {
 }
 
 export async function collectLinkedIssueE2EEvidence(repo,issueNumber,get,
-  collectPr=collectHistoricalE2EForPull) {
+  collectPr=collectHistoricalE2EForPull,targetSha=null) {
   if(repo!==REPO||!goodInt(issueNumber))return [];
   const events=[];
   for(let page=1;page<=MAX_TIMELINE_PAGES;page++){
@@ -531,9 +531,11 @@ export async function collectLinkedIssueE2EEvidence(repo,issueNumber,get,
     if(!proven.length)continue;
     let mainMerge=null;
     if(mergedMain){
+      if(!SHA.test(targetSha??''))
+        throw Error('main merge evidence requires exact checked-out Acceptance target SHA');
       const [commit,comparison,source]=await Promise.all([
         get('/repos/'+repo+'/commits/'+pr.merge_commit_sha),
-        get('/repos/'+repo+'/compare/'+pr.merge_commit_sha+'...main'),
+        get('/repos/'+repo+'/compare/'+pr.merge_commit_sha+'...'+targetSha),
         get('/repos/'+repo+'/actions/runs?head_sha='+pr.head.sha+'&per_page=100'),
       ]);
       const runs=source.workflow_runs??[];
