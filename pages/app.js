@@ -144,6 +144,25 @@ function renderWork(){
   root.append(pageHead('OPEN COLLABORATION','Work in progress.','A read-only view of recently updated public Issues and PRs. No stage or SC verdict is inferred from an Issue title or workflow name.'));
   const w=snapshot.work||{};
   const listing=(type,items,availability)=>{
+    const issueRow=(x)=>{
+      const row=lineItem('#'+x.number+'  '+x.title,
+        x.state+' · source GitHub · observed Agent runs (7d): '+
+        (x.observed_agent_runs_7d===null||x.observed_agent_runs_7d===undefined
+          ?'Not observed':fmt(x.observed_agent_runs_7d)),
+        'Issue',x.url,date(x.updated_at));
+      const pane=node('div','issue-pr-evidence');
+      const refs=x.pr_references||{},items=Array.isArray(refs.prs)?refs.prs:[];
+      pane.append(node('span','issue-pr-source','GitHub Timeline · PR cross-references (not ownership or SC proof)'));
+      if(refs.status==='unavailable')pane.append(node('span','', 'Timeline unavailable'));
+      else {
+        if(!items.length)pane.append(node('span','',refs.status==='truncated'
+          ?'No PR references in this incomplete snapshot':'No PR cross-references observed'));
+        for(const item of items)pane.append(ext('PR #'+item.number+' · GitHub cross-reference',item.url));
+        if(refs.status==='truncated')pane.append(node('span','', 'Timeline truncated · other references may be missing'));
+      }
+      row.querySelector?.('.entry-main')?.append(pane);
+      return row;
+    };
     const evidenceRow=(x)=>{
       const row=lineItem('#'+x.number+'  '+x.title,x.state+' · GitHub source',
         'PR',x.url,date(x.updated_at));
@@ -162,9 +181,8 @@ function renderWork(){
     const s=section('GITHUB / '+type.toUpperCase(),type,'Recently updated · open items');
     if(availability!=='available')s.append(empty('Snapshot unavailable','GitHub API data could not be fetched or validated. This is not evidence of zero active items.'));
     else if(!items.length)s.append(empty('No open items','No items returned by the current bounded snapshot.'));
-    else s.append(attach(node('div','list'),...items.map(x=>type==='Pull Requests'?evidenceRow(x):lineItem('#'+x.number+'  '+x.title,
-      x.state+' · source GitHub'+(type==='Issues'?' · observed Agent runs (7d): '+(x.observed_agent_runs_7d===null||x.observed_agent_runs_7d===undefined?'Not observed':fmt(x.observed_agent_runs_7d)):''),
-      type==='Issues'?'Issue':'PR',x.url,date(x.updated_at)))));
+    else s.append(attach(node('div','list'),...items.map(x=>
+      type==='Pull Requests'?evidenceRow(x):issueRow(x))));
     root.append(s);
   };
   listing('Issues',w.issues||[],w.issues_status);listing('Pull Requests',w.pulls||[],w.pulls_status);

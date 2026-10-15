@@ -32,6 +32,27 @@ function list(input, type) {
     .slice(0,12);
 }
 function countIn(obj,key) { return number(obj && obj[key]); }
+function timelineReferences(issueId,source){
+  const status=source?.status;
+  if(!['available','truncated'].includes(status)||!Array.isArray(source?.events))
+    return {status:'unavailable',prs:[]};
+  const candidates=source.events.slice(0,100);
+  const links=new Set();
+  for(const e of candidates){
+    if(e?.event!=='cross-referenced'||e?.source?.type!=='issue')continue;
+    const item=e.source.issue,id=item?.number;
+    if(!Number.isSafeInteger(id)||id<=0||item?.repository?.full_name!==REPO||
+       !item.pull_request||item.url!== 'https://api.github.com/repos/'+REPO+'/issues/'+id||
+       item.html_url!==GH+'/pull/'+id||
+       item.pull_request.url!=='https://api.github.com/repos/'+REPO+'/pulls/'+id||
+       item.pull_request.html_url!==GH+'/pull/'+id)continue;
+    links.add(id);
+  }
+  const prs=[...links].sort((a,b)=>a-b).slice(0,6).map(number=>({
+    number,url:GH+'/pull/'+number,relation:'github_cross_reference',
+  }));
+  return {status:status==='truncated'||source.events.length>=100?'truncated':'available',prs};
+}
 const WORKFLOWS = Object.freeze({
   ci:{name:'CI / Quality Gate',path:'.github/workflows/ci-quality.yml'},
   e2e:{name:'E2E / Tests',path:'.github/workflows/e2e-tests.yml'},
@@ -96,7 +117,7 @@ function rosterFrom(registry, agentWindow) {
     observed_7d: Object.hasOwn(usage,id) ? number(usage[id]) : null,
   })).sort((a,b)=>a.role.localeCompare(b.role)||a.id.localeCompare(b.id));
 }
-export function makeProjection({ repository, agent, registry, issues, pulls, workflowRuns, refs={}, meta={} }) {
+export function makeProjection({ repository, agent, registry, issues, pulls, workflowRuns, issueTimelines, refs={}, meta={} }) {
   const r = repository?.schema_version === 2 ? repository : null;
   const a = agent?.schema_version === 1 && agent?.kind === 'agent_metrics_aggregate' ? agent : null;
   const current = r?.repository || {}, efficiency = r?.efficiency || {};
@@ -169,6 +190,7 @@ export function makeProjection({ repository, agent, registry, issues, pulls, wor
       workflow_runs_status:Array.isArray(workflowRuns)?'available':'unavailable',
       issues:list(issues,'issue').map(x=>({
         ...x, observed_agent_runs_7d:observedIssueCount(aw,x.number),
+        pr_references:timelineReferences(x.number,issueTimelines?.[String(x.number)]),
       })),
       pulls:list(pulls,'pr').map(x=>{
         const source=Array.isArray(pulls)?pulls.find(p=>p.number===x.number):null;

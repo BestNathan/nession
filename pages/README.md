@@ -33,3 +33,7 @@ The build-only `agent-metrics.json` source supplies rolling 7-day and 30-day `ru
 ## Phase 2-B1 — public PR HEAD evidence
 
 Recent GitHub Actions Run metadata is fetched **only during the independent Pages build** and validated against exact, same-repository PR HEAD SHA, canonical workflow path/event, positive Run/attempt identity and bounded listing. The Collaboration view reports each canonical CI/E2E **workflow outcome**, never a Success Criterion / Acceptance verdict or an Issue↔PR/Agent causal join. No observed run means Not observed within a 100-run snapshot, not a claim about all history.
+
+## Phase 2-B2 — source-only Issue Timeline PR references
+
+For up to 12 public Issues, the independent Pages build requests GitHub `cross-referenced` Timeline events (bounded 100 events per Issue). A displayed PR must have a canonical same-repository GitHub Issue/PR API and HTML path. Deduplicated and capped at 6 PR links per Issue; a 100-event Timeline is labeled **truncated**, and a failed API fetch **unavailable**. A cross-reference is a GitHub mention/source link, not verified Issue ownership, implementation, Agent provenance, exact PR HEAD or SC Acceptance. Browser code never calls authenticated APIs.

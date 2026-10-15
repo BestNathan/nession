@@ -129,3 +129,45 @@ test('wrong repo, workflow path, event, invalid attempts and unobserved CI never
  assert.equal(makeProjection({pulls:[pr],workflowRuns:null}).work.workflow_runs_status,'unavailable');
  assert.equal(makeProjection({pulls:[{...pr,head:{...pr.head,repo:{full_name:'foreign/repo'}}}],workflowRuns:[base]}).work.pulls[0].workflow.head_sha,null);
 });
+
+test('Issue→PR uses only genuine same-repo GitHub Timeline cross-reference identities',()=>{
+ const refs=n=>({event:'cross-referenced',source:{type:'issue',issue:{
+  number:n,url:'https://api.github.com/repos/BestNathan/nession/issues/'+n,
+  html_url:'https://github.com/BestNathan/nession/pull/'+n,
+  repository:{full_name:'BestNathan/nession'},pull_request:{
+   url:'https://api.github.com/repos/BestNathan/nession/pulls/'+n,
+   html_url:'https://github.com/BestNathan/nession/pull/'+n},
+ }}});
+ const proof=refs(99),unrelated=refs(100);
+ unrelated.source.issue.repository.full_name='other/repo';
+ const forged=refs(101);
+ forged.source.issue.html_url='https://evil.com/steal';
+ const notPR=refs(102);delete notPR.source.issue.pull_request;
+ const p=validateProjection(makeProjection({...base,issueTimelines:{'6':{
+  status:'available',events:[proof,refs(99),unrelated,forged,notPR,{event:'referenced',source:proof.source}]
+ }}}));
+ assert.deepEqual(p.work.issues[0].pr_references,{status:'available',prs:[{
+  number:99,url:'https://github.com/BestNathan/nession/pull/99',relation:'github_cross_reference'
+ }]});
+ assert.ok(!JSON.stringify(p).includes('evil.com'));
+ assert.ok(!JSON.stringify(p).includes('other/repo'));
+});
+test('Timeline unavailable, truncated, excessive and malformed references never imply no history',()=>{
+ const as=n=>({event:'cross-referenced',source:{type:'issue',issue:{
+  number:n,url:'https://api.github.com/repos/BestNathan/nession/issues/'+n,
+  html_url:'https://github.com/BestNathan/nession/pull/'+n,
+  repository:{full_name:'BestNathan/nession'},
+  pull_request:{url:'https://api.github.com/repos/BestNathan/nession/pulls/'+n,
+   html_url:'https://github.com/BestNathan/nession/pull/'+n},
+ } }});
+ const items=Array.from({length:100},(_,i)=>as(100+i));
+ const capped=makeProjection({...base,issueTimelines:{'6':{status:'truncated',events:items}}}).work.issues[0].pr_references;
+ assert.equal(capped.status,'truncated');
+ assert.equal(capped.prs.length,6);
+ assert.equal(capped.prs[0].number,100);
+ assert.equal(capped.prs[5].number,105);
+ assert.deepEqual(makeProjection({...base,issueTimelines:null}).work.issues[0].pr_references,
+  {status:'unavailable',prs:[]});
+ const malformed=makeProjection({...base,issueTimelines:{'6':{status:'available',events:[as(-4)]}}}).work.issues[0].pr_references;
+ assert.deepEqual(malformed,{status:'available',prs:[]});
+});
