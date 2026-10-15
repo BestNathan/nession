@@ -547,7 +547,7 @@ async function collectCommand(workspace, outFile) {
       // immutable E2E Run Store and selection artifact before showing it.
       if (process.env.ACCEPTANCE_STAGE === 'post-merge') {
         linkedIssueE2E.push(...await collectLinkedIssueE2EEvidence(repo,
-          Number(issueNumber),githubGet));
+          Number(issueNumber),githubGet,undefined,sha));
         // The child Issue's own "none" E2E declaration does not make it an
         // owner of its parent's historical browser scenario. Include the
         // independently authenticated parent source runs *as related
@@ -561,7 +561,7 @@ async function collectCommand(workspace, outFile) {
           const contract=parseIssueE2E(parent.body,{requireDeclaration:true});
           if(contract?.errors?.length||!contract?.selectedIds?.length)
             throw Error('parent Issue lacks authenticated E2E obligations');
-          const proof=await collectLinkedIssueE2EEvidence(repo,parentNumber,githubGet);
+          const proof=await collectLinkedIssueE2EEvidence(repo,parentNumber,githubGet,undefined,sha);
           linkedIssueE2E.push(...proof.map(item=>({
             ...item,behavior_owner_issue:parentNumber,
             related_child_issue:Number(issueNumber),
