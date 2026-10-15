@@ -186,7 +186,7 @@ test('source age follows metric measurement instead of site build time',()=>{
  assert.equal(clockDrift.agents.freshness.state,'unavailable');
 });
 test('untrusted local address and private file paths are removed before publication',()=>{
- for(const text of ['192.168.12.100','/home/developer/private.conf','localhost']){
+ for(const text of ['192.168.12.100','/home/developer/private.conf','localhost','api_key=nonproduction_placeholder','gh'+'p_'+'Z'.repeat(24)]){
   const p=validateProjection(makeProjection({...base,issues:[{
    number:6,title:'Do not publish '+text,updated_at:now,
   }],registry:{instances:{'review-01':{role:'reviewer',provider:text}}}}));
@@ -205,6 +205,8 @@ test('public release gate rejects arbitrary fields, unsafe links and invalid val
    const p=initial();p.work.issues[0].url=link;
    assert.throws(()=>validateProjection(p),/untrusted public URL/);
  }
+ const token=initial();token.work.issues[0].title='api_key=placeholder';
+ assert.throws(()=>validateProjection(token),/private field value/);
  const invalid=initial();invalid.agents.summary.runs_7d=Infinity;
  assert.throws(()=>validateProjection(invalid),/invalid public metric/);
  const huge=initial();huge.work.issues[0].title='x'.repeat(140000);
