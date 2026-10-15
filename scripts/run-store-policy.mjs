@@ -19,8 +19,9 @@ export function coversStoreRef(rule,ref){
   const c=rule.conditions?.ref_name;
   if(!Array.isArray(c?.include)||!Array.isArray(c?.exclude))return false;
   const name='refs/heads/'+ref;
-  return c.include.includes(name)&&!c.exclude.includes(name)&&
-    !c.exclude.includes('~ALL');
+  return c.include.length>0&&c.exclude.length===0&&
+    c.include.includes(name)&&
+    c.include.every(x=>GOVERNED_REFS.some(ref=>'refs/heads/'+ref===x));
 }
 
 // Only a dedicated Integration bypass is acceptable. RepoRole/Admin/User
@@ -35,8 +36,10 @@ export function evaluateStoreRules(ref,rulesets,approvedAppId){
   const accepted=candidates.find(rule=>{
     const types=new Set((rule.rules??[]).map(x=>x.type));
     const bypass=rule.bypass_actors;
-    return required.every(x=>types.has(x))&&positive(approvedAppId)&&
-      Array.isArray(bypass)&&bypass.length===1&&
+    const update=rule.rules.find(x=>x.type==='update');
+    return required.every(x=>types.has(x))&&
+      update?.parameters?.update_allows_fetch_and_merge===false&&
+      positive(approvedAppId)&&Array.isArray(bypass)&&bypass.length===1&&
       bypass[0].actor_type==='Integration'&&
       bypass[0].actor_id===approvedAppId&&bypass[0].bypass_mode==='always';
   });
@@ -45,7 +48,7 @@ export function evaluateStoreRules(ref,rulesets,approvedAppId){
     matching_active_ruleset_ids:candidates.map(x=>x.id).filter(positive),
     qualifying_ruleset_id:accepted?.id??null,
     missing_requirements:accepted?[]:[
-      'active exact-ref Ruleset','creation/update/deletion/non_fast_forward/required_linear_history',
+      'active exact-ref Ruleset','creation/update(no fetch/merge bypass)/deletion/non_fast_forward/required_linear_history',
       'exactly one trusted GitHub App Integration bypass with mode always',
     ],
     // A configuration match is not a live denial test or externally
@@ -83,7 +86,7 @@ export function runTests(){
     enforcement:'active',
     conditions:{ref_name:{include:['refs/heads/'+ref],exclude:[]}},
     rules:['creation','update','deletion','non_fast_forward','required_linear_history']
-      .map(type=>({type})),
+      .map(type=>type==='update'?{type,parameters:{update_allows_fetch_and_merge:false}}:{type}),
     bypass_actors:[{actor_id:app,actor_type:'Integration',bypass_mode:'always'}]};
   assert.equal(evaluateStoreRules(ref,[rule],app).configuration_verified,true);
   assert.equal(evaluateStoreRules(ref,[rule],app).denied_write_test_verified,false);
@@ -91,6 +94,9 @@ export function runTests(){
     {...rule,enforcement:'disabled'},
     {...rule,conditions:{ref_name:{include:['refs/heads/main'],exclude:[]}}},
     {...rule,conditions:{ref_name:{include:['refs/heads/'+ref],exclude:['refs/heads/'+ref]}}},
+    {...rule,conditions:{ref_name:{include:['refs/heads/'+ref,'refs/heads/main'],exclude:[]}}},
+    {...rule,rules:rule.rules.map(x=>x.type==='update'
+      ?{type:'update',parameters:{update_allows_fetch_and_merge:true}}:x)},
     {...rule,rules:rule.rules.filter(x=>x.type!=='update')},
     {...rule,rules:rule.rules.filter(x=>x.type!=='deletion')},
     {...rule,bypass_actors:[]},
