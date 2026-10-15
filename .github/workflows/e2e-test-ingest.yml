@@ -1,8 +1,5 @@
 name: E2E / Test Ingest
 
-env:
-  RUN_STORE_RECEIPT_DIR: ${{ runner.temp }}/run-store-receipts
-
 # Privileged ingest lives on default/main; source Playwright code receives no
 # content write token. Only GitHub-attested successful push runs are eligible.
 on:
