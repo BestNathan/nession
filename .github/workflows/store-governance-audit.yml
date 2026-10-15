@@ -10,7 +10,12 @@ on:
       - scripts/run-store-inventory.json
       - scripts/run-store-inventory.mjs
       - scripts/run-store-integrity.mjs
+      - scripts/run-store-policy.mjs
+      - scripts/run-store-governance-live.mjs
+      - scripts/run-store-migration-baseline.json
+      - scripts/audit-live-run-stores.mjs
       - .github/workflows/*-ingest.yml
+      - .github/workflows/metrics-repository.yml
   workflow_dispatch:
   schedule:
     - cron: '43 3 * * *'
@@ -23,18 +28,19 @@ jobs:
   observe:
     if: github.repository == 'BestNathan/nession' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
       - name: Checkout only trusted main
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.sha }}
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
       - name: Verify canonical writers and negative inventory fixtures
-        run: ./gates/run run-store-inventory
+        run: ./gates/run run-store-inventory run-store-integrity
       - name: Observe live branch and Ruleset enforcement without modifying refs
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -43,10 +49,24 @@ jobs:
           mkdir -p "${RUNNER_TEMP}/store-governance"
           node scripts/run-store-inventory.mjs live \
             "${RUNNER_TEMP}/store-governance/live.json"
+      # This is a mandatory warning while the actual refs remain unprotected.
+      # It fetches only GitHub refs / full Git ancestry through read-only
+      # permissions. No secret admin token or privileged writer is supplied.
+      - name: Independently audit orphan Git ancestry and live App Rulesets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STORE_WRITER_APP_ID: ${{ vars.RUN_STORE_WRITER_APP_ID }}
+        run: |
+          set -euo pipefail
+          node scripts/run-store-policy.mjs self-test
+          node scripts/run-store-governance-live.mjs live \
+            "${RUNNER_TEMP}/store-governance/integrity.json"
+
       - name: Publish source-aligned read-only governance evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: store-governance-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/store-governance/live.json
-          if-no-files-found: error
+          path: ${{ runner.temp }}/store-governance/
+          if-no-files-found: warn
           retention-days: 30
