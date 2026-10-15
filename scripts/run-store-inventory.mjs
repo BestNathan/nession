@@ -233,7 +233,7 @@ function selfTest(){
   const noPersistDisabled=new Map(sources);
   noPersistDisabled.set(caseWriter,noPersistDisabled.get(caseWriter)
     .replace('persist-credentials: false','persist-credentials: true'));
-  assert.throws(()=>checkInventory(manifest,noPersistDisabled),/without persisted credentials/);
+  assert.throws(()=>checkInventory(manifest,noPersistDisabled),/checkout persists credentials/);
   const triggerStripped=new Map(sources);
   triggerStripped.set(privilegedMetrics,triggerStripped.get(privilegedMetrics)
     .replace(/^  schedule:/m,'  workflow_dispatch:'));
