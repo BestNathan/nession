@@ -541,13 +541,15 @@ async function collectCommand(workspace, outFile) {
         historicalE2EByPr.set(Number(pull.number),
           await collectHistoricalE2EForPull(repo, pull, githubGet));
       }
-      // Merged main verification may need an earlier, separately merged
-      // two-Issue staging PR. Discover that provenance only via GitHub's
-      // authenticated Issue→PR timeline and independently revalidate the
-      // immutable E2E Run Store and selection artifact before showing it.
+      // Both pre-merge and post-merge must independently re-attest earlier
+      // cross-Issue selected-run and post-PATCH receipt history. A previous
+      // Pass is not itself reusable proof: exact GitHub Run, source SHA,
+      // immutable orphan receipts and (for main merges) target ancestry are
+      // verified again before an Agent evaluates the current criterion.
+      // This is read-only and NEVER aliases old PR-head tests to target SHA.
+      linkedIssueE2E.push(...await collectLinkedIssueE2EEvidence(repo,
+        Number(issueNumber),githubGet,undefined,sha));
       if (process.env.ACCEPTANCE_STAGE === 'post-merge') {
-        linkedIssueE2E.push(...await collectLinkedIssueE2EEvidence(repo,
-          Number(issueNumber),githubGet));
         // The child Issue's own "none" E2E declaration does not make it an
         // owner of its parent's historical browser scenario. Include the
         // independently authenticated parent source runs *as related
@@ -561,7 +563,7 @@ async function collectCommand(workspace, outFile) {
           const contract=parseIssueE2E(parent.body,{requireDeclaration:true});
           if(contract?.errors?.length||!contract?.selectedIds?.length)
             throw Error('parent Issue lacks authenticated E2E obligations');
-          const proof=await collectLinkedIssueE2EEvidence(repo,parentNumber,githubGet);
+          const proof=await collectLinkedIssueE2EEvidence(repo,parentNumber,githubGet,undefined,sha);
           linkedIssueE2E.push(...proof.map(item=>({
             ...item,behavior_owner_issue:parentNumber,
             related_child_issue:Number(issueNumber),

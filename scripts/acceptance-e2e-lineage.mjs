@@ -130,7 +130,14 @@ export function verifyHistoricalPlan(run,record,plan,prNumber) {
   if(record.results.some(r=>!declared.has(r.id)) ||
      new Set(record.results.map(r=>r.id)).size!==selected.length)
     throw Error('historical per-ID results differ from executed Selection Plan');
+  const noE2E=plan.issues.filter(info=>info.no_e2e===true);
+  for(const info of noE2E){
+    if((info.new_ids?.length??0)!==0 || (info.regression_ids?.length??0)!==0 ||
+       selected.some(row=>row.owners.includes(info.issue)))
+      throw Error('nonempty selected ownership under authenticated no_e2e Issue');
+  }
   return {selected,issue_numbers:[...owners].sort((a,b)=>a-b),
+    no_e2e_issues:noE2E.map(info=>info.issue).sort((a,b)=>a-b),
     digest:plan.plan_digest,source:'authenticated issue-e2e-verification artifact'};
 }
 
@@ -387,7 +394,7 @@ export function selectCrossReferencedE2EPulls(repo, issueNumber, events, pulls) 
        pr?.head?.repo?.full_name!==repo||!SHA.test(pr?.head?.sha??''))
       return false;
     const merged=pr.state==='closed'&&Boolean(pr.merged_at)&&
-      pr.base.ref==='staging'&&SHA.test(pr.merge_commit_sha??'');
+      ['staging','main'].includes(pr.base.ref)&&SHA.test(pr.merge_commit_sha??'');
     // DO-NOT-MERGE labels are for candidate discovery only, not Pass proof.
     // Require real source Run/Plan/Artifact and trusted post-PATCH receipts.
     const drill=pr.merged_at==null&&['open','closed'].includes(pr.state)&&
@@ -403,6 +410,52 @@ export function selectCrossReferencedE2EPulls(repo, issueNumber, events, pulls) 
     }
     return refs.has(issueNumber)&&(merged?refs.size>=2:refs.size>=1);
   }).sort((a,b)=>a.number-b.number).slice(-MAX_LINKED_PRS);
+}
+
+// This is a historical PR-head selected run, not an invented main-SHA test
+// result. The independently verified *ordinary main merge* and ancestry
+// bridge are separate from source Run/Plan/Issue-PATCH provenance.
+export function verifyMainSelectedMerge(pr,mergeCommit,comparison,runs,jobs){
+  const sha=pr?.merge_commit_sha,head=pr?.head?.sha;
+  if(pr?.state!=='closed'||!pr.merged_at||pr?.base?.ref!=='main'||
+     pr.base.repo?.full_name!==REPO||pr.head.repo?.full_name!==REPO||
+     !SHA.test(sha??'')||!SHA.test(head??'')||
+     mergeCommit?.sha!==sha||!Array.isArray(mergeCommit.parents)||
+     mergeCommit.parents.length!==2||mergeCommit.parents[1]?.sha!==head||
+     !SHA.test(mergeCommit.parents[0]?.sha??'')||
+     !['ahead','identical'].includes(comparison?.status)||
+     comparison?.merge_base_commit?.sha!==sha)
+    throw Error('unverified ordinary main merge or current-main ancestry');
+  const checks=['CI / Quality Gate','E2E / Tests',
+    'Acceptance / Case Smoke','Acceptance / Orchestrator'];
+  const selected=checks.map(name=>{
+    const matches=(Array.isArray(runs)?runs:[]).filter(run=>
+      run.name===name&&run.head_sha===head&&run.status==='completed'&&
+      run.conclusion==='success'&&run.repository?.full_name===REPO&&
+      run.path===({
+        'CI / Quality Gate':'.github/workflows/ci-quality.yml',
+        'E2E / Tests':'.github/workflows/e2e-tests.yml',
+        'Acceptance / Case Smoke':'.github/workflows/acceptance-case-smoke.yml',
+        'Acceptance / Orchestrator':'.github/workflows/acceptance-orchestrator.yml',
+      })[name]&&run.event===(name==='Acceptance / Orchestrator'?'pull_request_target':'pull_request')&&
+      goodInt(run.id)&&goodInt(run.run_attempt));
+    const winner=matches.sort((a,b)=>b.id-a.id)[0];
+    if(!winner)throw Error('missing verified exact-head pre-merge gate '+name);
+    return {name,run_id:winner.id,run_attempt:winner.run_attempt,
+      source_sha:head,conclusion:'success'};
+  });
+  if(!Array.isArray(jobs))throw Error('missing completed deterministic PR jobs');
+  if(!jobs.some(j=>/^pre-merge-acceptance \([1-9]\d*\) \/ Execute acceptance$/.test(j.name)&&
+       j.status==='completed'&&j.conclusion==='success'))
+    throw Error('missing read-only pre-merge Agent acceptance');
+  for(const name of ['pre-merge-gate','acceptance-pr-gate']){
+    if(!jobs.some(j=>j.name===name&&j.status==='completed'&&j.conclusion==='success'))
+      throw Error('missing successful deterministic PR gate '+name);
+  }
+  return {merge_sha:sha,pr_head_sha:head,first_parent_sha:mergeCommit.parents[0].sha,
+    target_ancestor_verified:true,ordinary_two_parent_merge:true,
+    head_gates: selected,deterministic_gates:['pre-merge-gate','acceptance-pr-gate'],
+    source_boundary:'verified PR-head selected E2E; merge SHA is ancestry only'};
 }
 
 export function verifyHistoricalStagingFullRun(repo,mergeSha,runs,artifacts) {
@@ -428,7 +481,7 @@ export function verifyHistoricalStagingFullRun(repo,mergeSha,runs,artifacts) {
 }
 
 export async function collectLinkedIssueE2EEvidence(repo,issueNumber,get,
-  collectPr=collectHistoricalE2EForPull) {
+  collectPr=collectHistoricalE2EForPull,targetSha=null) {
   if(repo!==REPO||!goodInt(issueNumber))return [];
   const events=[];
   for(let page=1;page<=MAX_TIMELINE_PAGES;page++){
@@ -453,21 +506,57 @@ export async function collectLinkedIssueE2EEvidence(repo,issueNumber,get,
     // PR prose is never authoritative. Require the authenticated Plan's
     // own Issue contracts and per-ID owners to include this requirement
     // alongside a second Issue, and every surfaced source run to match.
+    const mergedMain=Boolean(pr.merged_at)&&pr.base.ref==='main';
     const proven=history.filter(row=>{
       if(!row.selection?.issue_numbers?.includes(issueNumber))return false;
+      if(mergedMain){
+        const empty=row.selection.no_e2e_issues??[];
+        const receipts=row.projections??[];
+        const selected=row.selection.selected??[];
+        const applied=owner=>receipts.some(p=>p.issue===owner&&
+          p.outcome==='applied'&&p.rows?.length>0&&
+          selected.some(item=>item.owners?.includes(owner)&&
+            p.rows.some(r=>r.id===item.id&&r.result==='Pass')));
+        return row.selection.issue_numbers.length>=2&&empty.length>0&&
+          row.conclusion==='success'&&row.results?.length>0&&
+          row.results.every(item=>item.result==='Pass')&&
+          empty.every(n=>!receipts.some(p=>p.issue===n))&&
+          (empty.includes(issueNumber)
+            ? row.selection.issue_numbers.some(n=>!empty.includes(n)&&applied(n))
+            : selected.some(item=>item.owners?.includes(issueNumber))&&
+              applied(issueNumber));
+      }
       if(pr.merged_at)return row.selection.issue_numbers.length>=2 &&
         row.selection.selected?.some(item=>item.owners?.includes(issueNumber)&&
           item.owners.length>=2);
-      // Test-only drills may include a non-E2E child requirement with a
-      // validated none declaration. It may inspect the applied receipt of
-      // a sibling Issue that owns the ID, but never claims its own ID Pass.
+      // A test-only none Issue may inspect authenticated sibling receipts
+      // but is never treated as an owner of its sibling's test ID.
       return row.projections?.some(p=>p.outcome==='applied'&&
         p.rows?.length>0&&row.selection.selected?.some(item=>
           item.owners?.includes(p.issue)&&
           p.rows.some(r=>r.id===item.id)));
     });
     if(!proven.length)continue;
-    const payload=pr.merged_at?await get('/repos/'+repo+'/actions/runs?head_sha='+
+    let mainMerge=null;
+    if(mergedMain){
+      if(!SHA.test(targetSha??''))
+        throw Error('main merge evidence requires exact checked-out Acceptance target SHA');
+      const [commit,comparison,source]=await Promise.all([
+        get('/repos/'+repo+'/commits/'+pr.merge_commit_sha),
+        get('/repos/'+repo+'/compare/'+pr.merge_commit_sha+'...'+targetSha),
+        get('/repos/'+repo+'/actions/runs?head_sha='+pr.head.sha+'&per_page=100'),
+      ]);
+      const runs=source.workflow_runs??[];
+      const orchestrator=runs.filter(r=>r.name==='Acceptance / Orchestrator'&&
+        r.head_sha===pr.head.sha&&r.status==='completed'&&r.conclusion==='success')
+        .sort((a,b)=>b.id-a.id)[0];
+      if(!orchestrator)throw Error('no completed pre-merge Orchestrator to verify');
+      const detail=await get('/repos/'+repo+'/actions/runs/'+orchestrator.id+
+        '/attempts/'+orchestrator.run_attempt+'/jobs?per_page=100');
+      mainMerge={...verifyMainSelectedMerge(pr,commit,comparison,runs,detail.jobs),
+        evaluation_target_sha:targetSha};
+    }
+    const payload=pr.merged_at&&!mergedMain?await get('/repos/'+repo+'/actions/runs?head_sha='+
       pr.merge_commit_sha+'&per_page=100'):{workflow_runs:[]};
     const completed=(payload?.workflow_runs??[]).filter(run=>
       run.name==='E2E / Tests'&&run.path==='.github/workflows/e2e-tests.yml'&&
@@ -478,11 +567,15 @@ export async function collectLinkedIssueE2EEvidence(repo,issueNumber,get,
     const artifact=completed.length?await get('/repos/'+repo+
       '/actions/runs/'+completed[0].id+'/artifacts?per_page=100'):{artifacts:[]};
     proofs.push({pr_number:pr.number,pr_head_sha:pr.head.sha,
-      staging_merge_sha:pr.merge_commit_sha,
+      staging_merge_sha:mergedMain?null:pr.merge_commit_sha,
+      main_merge_sha:mergedMain?pr.merge_commit_sha:null,
       source:'GitHub Issue cross-reference + exact PR identity',
       verified_selected_runs:proven,
-      scope:pr.merged_at?'merged-staging':'unmerged-test-only',
-      verified_staging_full:pr.merged_at?verifyHistoricalStagingFullRun(repo,
+      scope:mergedMain?(proven.every(row=>row.selection.no_e2e_issues?.includes(issueNumber))?
+        'merged-main-no-e2e':'merged-main-selected-owner'):
+        pr.merged_at?'merged-staging':'unmerged-test-only',
+      verified_main_merge:mainMerge,
+      verified_staging_full:pr.merged_at&&!mergedMain?verifyHistoricalStagingFullRun(repo,
         pr.merge_commit_sha,payload?.workflow_runs,artifact):null});
   }
   return proofs;
@@ -800,6 +893,97 @@ async function selfTest() {
       ? {...envelope,content:Buffer.from(JSON.stringify({...receipt,body_sha256:'0'.repeat(64)})).toString('base64')}
       : projectionGet(url)),/stored historical read-back body hash mismatch/);
 
+  // Ordinary main merge must not re-label a selected PR-head E2E
+  // result as a merge-SHA run. Every parent, gate and ancestor is checked.
+  const mergedHead='1'.repeat(40),mergedSha='2'.repeat(40);
+  const mainFixturePr={number:1777,state:'closed',merged_at:'2026-10-14T12:00:00Z',
+    merge_commit_sha:mergedSha,
+    head:{sha:mergedHead,repo:{full_name:REPO}},
+    base:{ref:'main',repo:{full_name:REPO}}};
+  const mergedCommit={sha:mergedSha,parents:[{sha:'3'.repeat(40)},{sha:mergedHead}]};
+  const ancestry={status:'ahead',merge_base_commit:{sha:mergedSha}};
+  const names=[
+    ['CI / Quality Gate','.github/workflows/ci-quality.yml','pull_request'],
+    ['E2E / Tests','.github/workflows/e2e-tests.yml','pull_request'],
+    ['Acceptance / Case Smoke','.github/workflows/acceptance-case-smoke.yml','pull_request'],
+    ['Acceptance / Orchestrator','.github/workflows/acceptance-orchestrator.yml','pull_request_target'],
+  ];
+  const gates=names.map(([name,workflow,event],i)=>({
+    id:40+i,run_attempt:1,name,path:workflow,event,
+    head_sha:mergedHead,status:'completed',conclusion:'success',
+    repository:{full_name:REPO}
+  }));
+  const jobs=[
+    {name:'pre-merge-acceptance (1772) / Execute acceptance',
+      status:'completed',conclusion:'success'},
+    ...['pre-merge-gate','acceptance-pr-gate'].map(name=>({
+      name,status:'completed',conclusion:'success'})),
+  ];
+  const trusted=verifyMainSelectedMerge(mainFixturePr,mergedCommit,ancestry,gates,jobs);
+  assert.equal(trusted.merge_sha,mergedSha);
+  assert.equal(trusted.pr_head_sha,mergedHead);
+  assert.equal(trusted.source_boundary.includes('PR-head'),true);
+  assert.throws(()=>verifyMainSelectedMerge(mainFixturePr,
+    {...mergedCommit,parents:[...mergedCommit.parents].reverse()},ancestry,gates,jobs),/ordinary main merge/);
+  assert.throws(()=>verifyMainSelectedMerge(mainFixturePr,mergedCommit,
+    {...ancestry,merge_base_commit:{sha:'4'.repeat(40)}},gates,jobs),/ancestry/);
+  assert.throws(()=>verifyMainSelectedMerge(mainFixturePr,mergedCommit,ancestry,
+    gates.map(g=>g.name==='E2E / Tests'?{...g,head_sha:mergedSha}:g),jobs),/E2E \/ Tests/);
+  assert.throws(()=>verifyMainSelectedMerge(mainFixturePr,mergedCommit,ancestry,
+    gates,jobs.filter(j=>j.name!=='acceptance-pr-gate')),/deterministic PR gate/);
+  assert.throws(()=>verifyMainSelectedMerge(mainFixturePr,mergedCommit,ancestry,
+    gates,jobs.filter(j=>!j.name.includes('Execute acceptance'))),/read-only pre-merge Agent/);
+  // Main-target proof crosses four independent boundaries: Issue timeline,
+  // archived selected Plan, trusted main Ingest receipts, and the actual
+  // two-parent merge in the *evaluated SHA's* ancestry.
+  const mainHistory=[{
+    run_id:75,conclusion:'success',
+    selection:{issue_numbers:[1702,1772],no_e2e_issues:[1772],
+      selected:[{id:'login',owners:[1702]}]},
+    results:[{id:'login',result:'Pass'}],
+    projections:[{issue:1702,outcome:'applied',
+      rows:[{id:'login',result:'Pass'}]}],
+  }];
+  const target='9'.repeat(40),prWithRefs={...mainFixturePr,
+    body:'Refs #1702\\nRefs #1772'};
+  const mainCrossRefs=[{event:'cross-referenced',source:{issue:{
+    number:1777,pull_request:{url:'https://api.github.com/repos/'+REPO+'/pulls/1777'},
+  }}}];
+  const mainGet=async url=>{
+    if(url.includes('/issues/1772/timeline?'))return mainCrossRefs;
+    if(url.endsWith('/pulls/1777'))return prWithRefs;
+    if(url.endsWith('/commits/'+mergedSha))return mergedCommit;
+    if(url.endsWith('/compare/'+mergedSha+'...'+target))return ancestry;
+    if(url.endsWith('/actions/runs?head_sha='+mergedHead+'&per_page=100'))
+      return {workflow_runs:gates};
+    if(url.endsWith('/actions/runs/43/attempts/1/jobs?per_page=100'))
+      return {jobs};
+    throw Error('unexpected independent main-merge verification API '+url);
+  };
+  const mainProof=await collectLinkedIssueE2EEvidence(REPO,1772,
+    mainGet,async()=>mainHistory,target);
+  assert.deepEqual(mainProof.map(x=>x.scope),['merged-main-no-e2e']);
+  assert.equal(mainProof[0].verified_main_merge.evaluation_target_sha,target);
+  assert.equal(mainProof[0].verified_main_merge.merge_sha,mergedSha);
+  assert.equal(mainProof[0].verified_selected_runs[0].projections[0].issue,1702);
+  const ownerProof=await collectLinkedIssueE2EEvidence(REPO,1702,
+    async url=>url.includes('/issues/1702/timeline?')?mainCrossRefs:mainGet(url),
+    async()=>mainHistory,target);
+  assert.deepEqual(ownerProof.map(x=>x.scope),['merged-main-selected-owner']);
+  assert.deepEqual(await collectLinkedIssueE2EEvidence(REPO,1702,
+    async url=>url.includes('/issues/1702/timeline?')?mainCrossRefs:mainGet(url),
+    async()=>[{...mainHistory[0],projections:[]}],target),[]);
+  assert.deepEqual(await collectLinkedIssueE2EEvidence(REPO,1772,mainGet,
+    async()=>[{...mainHistory[0],projections:[
+      {issue:1772,outcome:'applied',rows:[{id:'login',result:'Pass'}]}]}],target),[]);
+  // A completed selected browser source without an applied sibling receipt,
+  // or with an actual Fail, cannot become positive merged-main evidence.
+  assert.deepEqual(await collectLinkedIssueE2EEvidence(REPO,1772,mainGet,
+    async()=>[{...mainHistory[0],projections:[]}],target),[]);
+  assert.deepEqual(await collectLinkedIssueE2EEvidence(REPO,1772,mainGet,
+    async()=>[{...mainHistory[0],results:[{id:'login',result:'Fail'}]}],target),[]);
+  await assert.rejects(()=>collectLinkedIssueE2EEvidence(REPO,1772,
+    mainGet,async()=>mainHistory),/exact checked-out Acceptance target/);
   console.log('Acceptance historical Issue E2E evidence: bounded PR commit/run lineage and negative provenance fixtures passed');
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
