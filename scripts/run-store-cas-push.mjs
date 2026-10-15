@@ -102,14 +102,22 @@ function receipt(root,store,head,changed,replayed){
     catch{fail('cannot read trusted GitHub source event for receipt');}
   }
   const src=event.workflow_run??null;
+  const workspace=process.env.GITHUB_WORKSPACE;
+  const trusted=workspace&&fs.existsSync(path.join(workspace,'trusted','.git'))
+    ?path.join(workspace,'trusted'):workspace;
+  const toolSha=trusted&&fs.existsSync(path.join(trusted,'.git'))
+    ?git(trusted,['rev-parse','HEAD']):process.env.GITHUB_SHA;
+  if(!HEX40.test(toolSha??''))fail('unverifiable trusted tool SHA in receipt');
   const body={schema_version:1,kind:'run_store_post_commit_receipt',
     trust_level:'trusted_workflow_artifact_not_independent_anchor',
     status:replayed?'idempotent-replay':'published',ref:'refs/heads/'+store,
     store,commit_sha:head,
     ingester:{repository:safe(process.env.GITHUB_REPOSITORY),
       run_id:safe(process.env.GITHUB_RUN_ID),attempt:safe(process.env.GITHUB_RUN_ATTEMPT),
-      workflow_ref:safe(process.env.GITHUB_WORKFLOW_REF),tool_sha:safe(process.env.GITHUB_SHA)},
-    source:{workflow_id:safe(src?.workflow_id),run_id:safe(src?.id??process.env.GITHUB_RUN_ID),
+      workflow_ref:safe(process.env.GITHUB_WORKFLOW_REF),tool_sha:toolSha},
+    source:{workflow_id:safe(src?.workflow_id),workflow_path:safe(src?.path),
+      repository:safe(src?.head_repository?.full_name??process.env.GITHUB_REPOSITORY),
+      run_id:safe(src?.id??process.env.GITHUB_RUN_ID),
       attempt:safe(src?.run_attempt??process.env.GITHUB_RUN_ATTEMPT),
       target_sha:safe(src?.head_sha??process.env.GITHUB_SHA),
       event:safe(src?.event??process.env.GITHUB_EVENT_NAME)},
