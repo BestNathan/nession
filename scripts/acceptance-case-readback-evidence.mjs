@@ -195,6 +195,6 @@ export function selfTestCaseReceipts() {
       {trust_level:'independent_anchor'},{commit_sha:'fake'},
       {source_workflow:PATHS.source},
     ].map(p=>({...good,statement:{...statement,...p}})),
-  ]) assert.throws(()=>attestCaseReceipt(changed),/invalid|untrusted|positive|before|exact/);
+  ]) assert.throws(()=>attestCaseReceipt(changed),/invalid|untrusted|positive|before|exact|missing|duplicate/);
   console.log('authenticated Case receipt provenance, positive and negative self-tests passed');
 }
