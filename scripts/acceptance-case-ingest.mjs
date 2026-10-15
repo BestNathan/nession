@@ -9,7 +9,7 @@ import {
   buildAcceptanceContext,
   normalizeAcceptanceCaseResult,
 } from './acceptance-executor.mjs';
-import { parsePreMergeIssueNumbers } from './requirement-acceptance.mjs';
+import { extractSection, parseAcceptanceReport, parsePreMergeIssueNumbers } from './requirement-acceptance.mjs';
 import { artifactEvidence, validateArtifactEvidence } from './run-record-artifact-evidence.mjs';
 import { makeRunIndex } from './run-record-index-contract.mjs';
 
@@ -346,6 +346,37 @@ async function currentStageSha(owner, name, stage, token) {
   return String(ref.object?.sha ?? '');
 }
 
+/**
+ * An authenticated Case proves its merged commit, not whatever unrelated
+ * commit becomes the branch tip while an async evidence ingest is running.
+ *
+ * A historical Case can be projected only when its SHA is verified as a
+ * strict ancestor of the current branch tip. A successful workflow or a
+ * syntactically valid merge SHA alone does NOT establish ancestry.
+ */
+export function classifyCaseBranchAncestry(target, current, comparison) {
+  const targetSha = sha(target, 40, 'target');
+  const currentSha = sha(current, 40, 'current');
+  if (targetSha === currentSha) return 'exact-head';
+  if (!comparison || comparison.status !== 'ahead' ||
+      comparison.base_commit?.sha !== targetSha ||
+      comparison.merge_base_commit?.sha !== targetSha ||
+      !Number.isSafeInteger(comparison.ahead_by) || comparison.ahead_by < 1 ||
+      comparison.behind_by !== 0) return 'unproven';
+  return 'verified-ancestor';
+}
+
+/** Historical merge-SHA proof must not overwrite an existing SC conclusion. */
+export function historicalCaseMayProject(issueBody, criterion) {
+  const { rows, errors } = parseAcceptanceReport(extractSection(issueBody, 'Acceptance Report'));
+  if (errors.length) return false;
+  const previous = rows.get(criterion);
+  // A previous authenticated result (including a Fail or a Pending result
+  // from another run) is never superseded by an older target SHA.
+  return !!previous && previous.result.toLowerCase() === 'pending' &&
+    !/^run\s+[1-9]\d*\s*;/i.test(previous.evidence);
+}
+
 export async function applyCaseRecord(record, { repository, token }) {
   const item = validateCaseRecord(record);
   const [owner, name] = String(repository ?? '').split('/');
@@ -356,11 +387,18 @@ export async function applyCaseRecord(record, { repository, token }) {
   }
 
   const currentSha = await currentStageSha(owner, name, item.stage, token);
-  if (currentSha !== item.target_sha) {
-    return {
-      projected: false,
-      reason: 'historical target ' + item.target_sha + ' is not current ' + item.stage + ' SHA ' + currentSha,
-    };
+  let ancestry = classifyCaseBranchAncestry(item.target_sha, currentSha, null);
+  if (ancestry === 'unproven') {
+    // GitHub's compare API authenticates the merge-base against the actual
+    // current branch tip; off-branch/diverged histories must fail closed.
+    const comparison = await githubRequest(
+      '/repos/' + owner + '/' + name + '/compare/' + item.target_sha + '...' + currentSha,
+      { token },
+    );
+    ancestry = classifyCaseBranchAncestry(item.target_sha, currentSha, comparison);
+    if (ancestry !== 'verified-ancestor') {
+      return { projected: false, reason: 'historical Case SHA is not an authenticated ancestor of current ' + item.stage + ' tip' };
+    }
   }
   if (!await issueIsAssociatedWithSha(owner, name, item.issue, item.target_sha, token)) {
     return { projected: false, reason: 'target SHA is not associated with Requirement #' + item.issue };
@@ -371,6 +409,9 @@ export async function applyCaseRecord(record, { repository, token }) {
   if (!labels.has('requirement')) throw new Error('#' + item.issue + ' is not a requirement');
   if (String(issue.state).toLowerCase() !== 'open') {
     return { projected: false, reason: 'Requirement #' + item.issue + ' is not open' };
+  }
+  if (ancestry === 'verified-ancestor' && !historicalCaseMayProject(issue.body, item.criterion)) {
+    return { projected: false, reason: 'historical merged-SHA Case cannot supersede an existing SC verdict or run' };
   }
 
   const context = buildAcceptanceContext(issue, item.stage, {
@@ -426,6 +467,36 @@ function fixtureRecord(overrides = {}) {
 }
 
 async function selfTest() {
+  // Async ingestion must recognize validated ancestor evidence but refuse
+  // unmerged/foreign refs, incomplete comparisons, or replacement of a later
+  // Issue decision. No network or mutable GitHub fixtures required.
+  const ancestor = 'a'.repeat(40), latest = 'b'.repeat(40);
+  const comparison = {
+    status: 'ahead', base_commit: { sha: ancestor },
+    merge_base_commit: { sha: ancestor }, ahead_by: 2, behind_by: 0,
+  };
+  assert.equal(classifyCaseBranchAncestry(ancestor, ancestor, null), 'exact-head');
+  assert.equal(classifyCaseBranchAncestry(ancestor, latest, comparison), 'verified-ancestor');
+  for (const mutated of [
+    { ...comparison, status: 'diverged' },
+    { ...comparison, status: 'behind' },
+    { ...comparison, merge_base_commit: { sha: latest } },
+    { ...comparison, base_commit: { sha: latest } },
+    { ...comparison, behind_by: 1 },
+    { ...comparison, ahead_by: 0 },
+    null,
+  ]) {
+    assert.equal(classifyCaseBranchAncestry(ancestor, latest, mutated), 'unproven');
+  }
+  assert.throws(() => classifyCaseBranchAncestry('bad-sha', latest, comparison), /40-character/);
+  const report = (result, evidence) =>
+    '## Acceptance Report\\n| Criterion | Result | Evidence |\\n|---|---|---|\\n| SC-07 | ' +
+    result + ' | ' + evidence + ' |\\n';
+  assert.equal(historicalCaseMayProject(report('Pending', 'Post-merge proof not yet run'), 'SC-07'), true);
+  assert.equal(historicalCaseMayProject(report('Pass', 'proof'), 'SC-07'), false);
+  assert.equal(historicalCaseMayProject(report('Fail', 'failure'), 'SC-07'), false);
+  assert.equal(historicalCaseMayProject(report('Pending', 'run 900; ref ' + latest), 'SC-07'), false);
+  assert.equal(historicalCaseMayProject(report('Pending', '-'), 'SC-08'), false);
   const valid = fixtureRecord();
   const canonical = JSON.stringify({
     schema_version: 1, run_id: valid.run_id, run_attempt: valid.run_attempt,
