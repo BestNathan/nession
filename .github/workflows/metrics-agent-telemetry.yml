@@ -1,8 +1,5 @@
 name: Metrics / Agent Telemetry Ingest
 
-env:
-  RUN_STORE_RECEIPT_DIR: ${{ runner.temp }}/run-store-receipts
-
 on:
   # A cancelled pending workflow_run is not retried by GitHub automatically.
   # A bounded main-owned scan recovers missing canonical Agent telemetry.
