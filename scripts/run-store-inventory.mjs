@@ -64,6 +64,14 @@ export function checkInventory(manifest,workflows){
          app.private_key_secret!=='RUN_STORE_WRITER_APP_PRIVATE_KEY'||
          app.scope!=='nession: contents write'||app.trusted_job_only!==true)
         fail('unclassified App writer identity or token scope: '+writer.workflow);
+      // Every checkout step is a distinct credential boundary. A single
+      // harmless checkout with persist-credentials:false elsewhere in the YAML
+      // must NOT mask a credential-bearing checkout in a contents:write job.
+      const steps=body.split(/^      - /m);
+      const checkouts=steps.filter(step=>/^\s*(?:name:[^\n]*\n\s*)?uses: actions\/checkout@v4\b/m.test(step));
+      if(checkouts.length===0||
+         checkouts.some(step=>!/^\s*persist-credentials:\s*false\s*$/m.test(step)))
+        fail('privileged Store writer checkout persists credentials: '+writer.workflow);
       // #1690 SC-09: a privileged writer must not accept arbitrary ref-
       // selected workflow_dispatch or attacker-selected repository_dispatch.
       // Such events can run branch-selected workflow code with contents:write,
@@ -77,7 +85,7 @@ export function checkInventory(manifest,workflows){
         ? body.includes('ref: ${{ github.sha }}')&&
           body.includes("github.ref == 'refs/heads/main'")
         : body.includes('ref: main');
-      if(!trustedSource||!body.includes('persist-credentials: false'))
+      if(!trustedSource)
         fail('privileged Store writer must checkout trusted main without persisted credentials: '+writer.workflow);
       if(writer.workflow==='.github/workflows/metrics-repository.yml'&&
          (!/^  schedule:\s*$/m.test(triggers)||
@@ -209,6 +217,19 @@ function selfTest(){
   noTrustedCheckout.set(caseWriter,noTrustedCheckout.get(caseWriter)
     .replace('          ref: main','          ref: ${{ github.event.workflow_run.head_sha }}'));
   assert.throws(()=>checkInventory(manifest,noTrustedCheckout),/checkout trusted main/);
+  const metricsCheckoutLeak=new Map(sources);
+  const health='.github/workflows/metrics-repository.yml';
+  metricsCheckoutLeak.set(health,metricsCheckoutLeak.get(health)
+    .replace('ref: ${{ github.sha }}\n          persist-credentials: false',
+      'ref: ${{ github.sha }}\n          persist-credentials: true'));
+  assert.throws(()=>checkInventory(manifest,metricsCheckoutLeak),
+    /checkout persists credentials/);
+  const extraUntrustedCheckout=new Map(sources);
+  extraUntrustedCheckout.set(caseWriter,extraUntrustedCheckout.get(caseWriter)
+    .replace('      - uses: actions/setup-node@v4',
+      '      - uses: actions/checkout@v4\n        with:\n          ref: ${{ github.event.workflow_run.head_sha }}\n      - uses: actions/setup-node@v4'));
+  assert.throws(()=>checkInventory(manifest,extraUntrustedCheckout),
+    /checkout persists credentials/);
   const noPersistDisabled=new Map(sources);
   noPersistDisabled.set(caseWriter,noPersistDisabled.get(caseWriter)
     .replace('persist-credentials: false','persist-credentials: true'));
