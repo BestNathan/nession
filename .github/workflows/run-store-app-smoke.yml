@@ -1,0 +1,102 @@
+name: Store / App Writer Smoke
+
+# Main-owned, read-only GITHUB_TOKEN. Writes ONLY a disposable, uniquely
+# named probe ref through the scoped GitHub App installation token.
+# This is credential connectivity proof, NOT orphan Ruleset enforcement proof.
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/run-store-app-smoke.yml
+      - .github/workflows/*-ingest.yml
+      - .github/workflows/metrics-repository.yml
+      - scripts/run-store-inventory.json
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: run-store-app-smoke
+  cancel-in-progress: false
+
+jobs:
+  disposable-append:
+    if: github.repository == 'BestNathan/nession' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Require the configured App ID
+        env:
+          APP_ID: ${{ vars.RUN_STORE_WRITER_APP_ID }}
+        run: |
+          set -euo pipefail
+          [[ "$APP_ID" =~ ^[1-9][0-9]*$ ]] || {
+            echo "::error::RUN_STORE_WRITER_APP_ID must be the numeric App ID" >&2
+            exit 1
+          }
+
+      - name: Mint single-repository, contents-only App token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        id: app-token
+        with:
+          app-id: ${{ vars.RUN_STORE_WRITER_APP_ID }}
+          private-key: ${{ secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY }}
+          repositories: nession
+          permission-contents: write
+
+      - name: Verify installation can read the target repository
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          [[ "$(gh api "repos/$GITHUB_REPOSITORY" --jq .full_name)" == "$GITHUB_REPOSITORY" ]]
+          echo "Verified scoped App token; installation ${{ steps.app-token.outputs.installation-id }}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Test authenticated App-only append and expected remote head
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          probe="refs/heads/run-store-smoke/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          root="${RUNNER_TEMP}/run-store-smoke"
+          git init -q --initial-branch=probe "$root"
+          git -C "$root" config user.name 'nession-run-store-smoke'
+          git -C "$root" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git -C "$root" remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          printf 'probe=%s\n' "$probe" > "$root/README.txt"
+          git -C "$root" add README.txt
+          git -C "$root" commit -qm 'run-store: disposable App root'
+          git -C "$root" push origin "HEAD:${probe}"
+          printf 'append-only\n' > "$root/record.txt"
+          git -C "$root" add record.txt
+          git -C "$root" commit -qm 'run-store: disposable App append'
+          git -C "$root" push origin "HEAD:${probe}"
+          expected="$(git -C "$root" rev-parse HEAD)"
+          observed="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/run-store-smoke/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" --jq .object.sha)"
+          [[ "$observed" == "$expected" ]] || {
+            echo '::error::App append remote SHA mismatch' >&2
+            exit 1
+          }
+          # Byte-identical retry: a second push must not create a new commit.
+          git -C "$root" push origin "HEAD:${probe}"
+          retry="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/run-store-smoke/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" --jq .object.sha)"
+          [[ "$retry" == "$observed" ]]
+          {
+            echo 'App installation: authenticated'
+            echo 'Disposable ref: created, appended, and idempotently replayed'
+            echo "Verified append SHA: \`${expected}\`"
+            echo 'Production orphan branches: untouched'
+            echo 'Unauthorized-write denial and Ruleset enforcement: NOT tested'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove only this run's disposable probe ref
+        if: always() && steps.app-token.outputs.token != ''
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          ref="repos/${GITHUB_REPOSITORY}/git/refs/heads/run-store-smoke/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          if gh api "${ref}" >/dev/null 2>&1; then
+            gh api --method DELETE "${ref}" >/dev/null
+          fi
