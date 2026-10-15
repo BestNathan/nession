@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "kind": "agent_workflow_run",
+  "identity": {
+    "workflow_id": "requirement-acceptance",
+    "github_workflow": "Acceptance / Orchestrator",
+    "github_run_id": 38677114829,
+    "github_run_attempt": 2,
+    "job": "execute",
+    "repository": "BestNathan/nession",
+    "event": "pull_request_target",
+    "unique_run_name": "38677114829-2-issue-1806-pre-merge"
+  },
+  "task": {
+    "id": "issue-1806-pre-merge",
+    "type": "acceptance",
+    "issue": 1806,
+    "stage": "pre-merge",
+    "target_ref": "96e164fd1da6e554549be8529700fbe1175ee702",
+    "deployment": null
+  },
+  "agent": {
+    "provider": "cursor",
+    "id": "legacy-acceptance-cursor",
+    "role": "acceptor",
+    "harness_sha256": null,
+    "checkpoint_id": null,
+    "model": {
+      "id": "composer-2.5",
+      "fast": true,
+      "params": [
+        {
+          "id": "fast",
+          "value": "true"
+        }
+      ]
+    },
+    "run_id": "run-b6057bda-8a4a-43cb-be38-525410eb954f",
+    "request_id": "5fd0897f-70cf-4917-b96c-3417ab37ecd8",
+    "status": "finished",
+    "prompt": {
+      "id": "acceptance",
+      "version": "v1",
+      "sha256": "10706d98f08bf480283d96f409c255c9330bc355751de1fe2b927095cd9b257d"
+    }
+  },
+  "execution": {
+    "turns": 1,
+    "model_requests": 1,
+    "tools": {
+      "observed": true,
+      "total": 2,
+      "unique": 2,
+      "by_name": {
+        "glob": 1,
+        "grep": 1
+      }
+    }
+  },
+  "tokens": {
+    "input": 28666,
+    "output": 2090,
+    "cache_read": 7424,
+    "cache_write": 0,
+    "reasoning": null,
+    "total": 38180
+  },
+  "cost": {
+    "raw_usd": null,
+    "charged_usd": null,
+    "estimated_usd": null
+  },
+  "timing": {
+    "started_at": "2026-10-15T03:42:32.052Z",
+    "finished_at": "2026-10-15T03:42:49.708Z",
+    "agent_duration_ms": 17463,
+    "workflow_duration_ms": null
+  },
+  "result": {
+    "status": "completed",
+    "pass": 2,
+    "pending": 0,
+    "fail": 0,
+    "na": 0
+  }
+}
