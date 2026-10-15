@@ -11,11 +11,12 @@ assert.ok(pushArea,'missing main push event');
 assert.doesNotMatch(pushArea,/^    paths(?:-ignore)?:/m,
   'path-filtered fixture evidence strands unrelated new main SHAs as Pending');
 const waker=fs.readFileSync('.github/workflows/acceptance-postrun-waker.yml','utf8');
-assert.match(waker,/workflows: \["Acceptance \/ Orchestrator", "CI \/ Run Store Fixture Evidence"\]/,
+assert.match(waker,/workflows: \["Acceptance \/ Orchestrator", "CI \/ Run Store Fixture Evidence", "E2E \/ Tests"\]/,
   'postmerge acceptance must be awakened after exact-main-SHA fixture success');
 for(const [name,source] of [
   ['Acceptance / Orchestrator','.github/workflows/acceptance-orchestrator.yml'],
   ['CI / Run Store Fixture Evidence','.github/workflows/ci-run-store-fixture-evidence.yml'],
+  ['E2E / Tests','.github/workflows/e2e-tests.yml'],
 ]){
   assert.ok(waker.includes('.name == "'+name+'" and') &&
     waker.includes('.path == "'+source+'"'),
