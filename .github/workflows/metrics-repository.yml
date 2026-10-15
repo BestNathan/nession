@@ -1,8 +1,5 @@
 name: Metrics / Repository Health
 
-env:
-  RUN_STORE_RECEIPT_DIR: ${{ runner.temp }}/run-store-receipts
-
 on:
   schedule:
     - cron: '17 */4 * * *'
