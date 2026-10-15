@@ -509,15 +509,23 @@ export async function collectLinkedIssueE2EEvidence(repo,issueNumber,get,
     const mergedMain=Boolean(pr.merged_at)&&pr.base.ref==='main';
     const proven=history.filter(row=>{
       if(!row.selection?.issue_numbers?.includes(issueNumber))return false;
-      if(mergedMain)return row.selection.issue_numbers.length>=2 &&
-        row.selection.no_e2e_issues?.includes(issueNumber) &&
-        row.conclusion==='success' && row.results?.length>0 &&
-        row.results.every(item=>item.result==='Pass') &&
-        !row.projections?.some(p=>p.issue===issueNumber) &&
-        row.projections?.some(p=>p.outcome==='applied'&&
-          p.rows?.length>0&&row.selection.selected?.some(item=>
-            item.owners?.includes(p.issue)&&
+      if(mergedMain){
+        const empty=row.selection.no_e2e_issues??[];
+        const receipts=row.projections??[];
+        const selected=row.selection.selected??[];
+        const applied=owner=>receipts.some(p=>p.issue===owner&&
+          p.outcome==='applied'&&p.rows?.length>0&&
+          selected.some(item=>item.owners?.includes(owner)&&
             p.rows.some(r=>r.id===item.id&&r.result==='Pass')));
+        return row.selection.issue_numbers.length>=2&&empty.length>0&&
+          row.conclusion==='success'&&row.results?.length>0&&
+          row.results.every(item=>item.result==='Pass')&&
+          empty.every(n=>!receipts.some(p=>p.issue===n))&&
+          (empty.includes(issueNumber)
+            ? row.selection.issue_numbers.some(n=>!empty.includes(n)&&applied(n))
+            : selected.some(item=>item.owners?.includes(issueNumber))&&
+              applied(issueNumber));
+      }
       if(pr.merged_at)return row.selection.issue_numbers.length>=2 &&
         row.selection.selected?.some(item=>item.owners?.includes(issueNumber)&&
           item.owners.length>=2);
@@ -563,7 +571,9 @@ export async function collectLinkedIssueE2EEvidence(repo,issueNumber,get,
       main_merge_sha:mergedMain?pr.merge_commit_sha:null,
       source:'GitHub Issue cross-reference + exact PR identity',
       verified_selected_runs:proven,
-      scope:mergedMain?'merged-main-no-e2e':pr.merged_at?'merged-staging':'unmerged-test-only',
+      scope:mergedMain?(proven.every(row=>row.selection.no_e2e_issues?.includes(issueNumber))?
+        'merged-main-no-e2e':'merged-main-selected-owner'):
+        pr.merged_at?'merged-staging':'unmerged-test-only',
       verified_main_merge:mainMerge,
       verified_staging_full:pr.merged_at&&!mergedMain?verifyHistoricalStagingFullRun(repo,
         pr.merge_commit_sha,payload?.workflow_runs,artifact):null});
@@ -956,6 +966,13 @@ async function selfTest() {
   assert.equal(mainProof[0].verified_main_merge.evaluation_target_sha,target);
   assert.equal(mainProof[0].verified_main_merge.merge_sha,mergedSha);
   assert.equal(mainProof[0].verified_selected_runs[0].projections[0].issue,1702);
+  const ownerProof=await collectLinkedIssueE2EEvidence(REPO,1702,
+    async url=>url.includes('/issues/1702/timeline?')?mainCrossRefs:mainGet(url),
+    async()=>mainHistory,target);
+  assert.deepEqual(ownerProof.map(x=>x.scope),['merged-main-selected-owner']);
+  assert.deepEqual(await collectLinkedIssueE2EEvidence(REPO,1702,
+    async url=>url.includes('/issues/1702/timeline?')?mainCrossRefs:mainGet(url),
+    async()=>[{...mainHistory[0],projections:[]}],target),[]);
   assert.deepEqual(await collectLinkedIssueE2EEvidence(REPO,1772,mainGet,
     async()=>[{...mainHistory[0],projections:[
       {issue:1772,outcome:'applied',rows:[{id:'login',result:'Pass'}]}]}],target),[]);
