@@ -50,6 +50,7 @@ try{
   process.env.RUN_STORE_RECEIPT_DIR=receipts;
   process.env.GITHUB_REPOSITORY='BestNathan/nession';
   process.env.GITHUB_RUN_ID='1234';
+  process.env.GITHUB_SHA='a'.repeat(40);
   const first=publish('acceptance-results',a);
   assert.equal(first.replayed,false);
   const second=publish('acceptance-results',b);
