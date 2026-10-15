@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "kind": "agent_execution_trace",
+  "identity": {
+    "workflow_id": "requirement-acceptance",
+    "github_run_id": 38780695601,
+    "github_run_attempt": 1,
+    "unique_run_name": "38780695601-1-issue-1818-post-merge",
+    "repository": "BestNathan/nession"
+  },
+  "task": {
+    "id": "issue-1818-post-merge",
+    "type": "acceptance",
+    "issue": 1818,
+    "target_sha": "2082858d8042cb4bf9871c52910ff78cfdaa8840"
+  },
+  "agent": {
+    "id": "legacy-acceptance-cursor",
+    "role": "acceptor",
+    "provider": "cursor",
+    "harness_sha256": null
+  },
+  "timing": {
+    "started_at": "2026-10-15T17:51:21.086Z",
+    "finished_at": "2026-10-15T17:51:45.501Z"
+  },
+  "coverage": {
+    "model": "observed",
+    "tools": "partial",
+    "skills": "unobserved",
+    "mcp": "unobserved"
+  },
+  "events": [
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "tool.started",
+      "sequence": 0,
+      "identity": {
+        "agent_id": "legacy-acceptance-cursor",
+        "role": "acceptor",
+        "issue": 1818,
+        "github_run_id": 38780695601,
+        "github_run_attempt": 1
+      },
+      "data": {
+        "call_id": "tool_cb47f275-c3d5-45c7-b6f3-efb2f320928",
+        "tool": {
+          "id": "repo.search",
+          "native_name": "grep",
+          "observed": true
+        },
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "tool.completed",
+      "sequence": 1,
+      "identity": {
+        "agent_id": "legacy-acceptance-cursor",
+        "role": "acceptor",
+        "issue": 1818,
+        "github_run_id": 38780695601,
+        "github_run_attempt": 1
+      },
+      "data": {
+        "call_id": "tool_cb47f275-c3d5-45c7-b6f3-efb2f320928",
+        "tool": {
+          "id": "repo.search",
+          "native_name": "grep",
+          "observed": true
+        },
+        "status": "completed",
+        "duration_ms": null,
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "model.usage",
+      "sequence": 2,
+      "identity": {
+        "agent_id": "legacy-acceptance-cursor",
+        "role": "acceptor",
+        "issue": 1818,
+        "github_run_id": 38780695601,
+        "github_run_attempt": 1
+      },
+      "data": {
+        "usage": {
+          "input": 26528,
+          "output": 3335,
+          "cache_read": 15648,
+          "cache_write": 0,
+          "reasoning": null
+        },
+        "request_id": null,
+        "observation": "native-event"
+      }
+    }
+  ]
+}
