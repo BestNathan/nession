@@ -12,6 +12,14 @@ function number(value) { return typeof value === 'number' && Number.isFinite(val
 function safeText(value, max = 120) {
   return typeof value === 'string' ? value.replace(/<[^>]*>/g, ' ').replace(/[<>\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max) : '';
 }
+// A build timestamp never turns an old source measurement into a fresh one.
+function sourceFreshness(sourceTime, builtAt, hours=8) {
+  const source=safeDate(sourceTime), built=safeDate(builtAt);
+  if (!source||!built)return {state:'unavailable',age_hours:null};
+  const hoursOld=(Date.parse(built)-Date.parse(source))/3600000;
+  if (hoursOld < -1/6)return {state:'unavailable',age_hours:null};
+  return {state:hoursOld>hours?'stale':'fresh',age_hours:Math.round(Math.max(hoursOld,0)*10)/10};
+}
 function safeSha(value) { return typeof value === 'string' && /^[a-f0-9]{40}$/.test(value) ? value : null; }
 function safeDate(value) { return typeof value === 'string' && !Number.isNaN(Date.parse(value)) ? new Date(value).toISOString() : null; }
 function canonIssue(entry, type) {
@@ -148,6 +156,7 @@ export function makeProjection({ repository, agent, registry, issues, pulls, wor
       available:!!r,
       sha:safeSha(r?.commit_sha),
       generated_at:safeDate(r?.generated_at),
+      freshness:sourceFreshness(r?.generated_at,meta.generated_at),
       current: {
         loc:countIn(current.source,'loc'),
         files:countIn(current.source,'files'),
@@ -169,6 +178,7 @@ export function makeProjection({ repository, agent, registry, issues, pulls, wor
     agents: {
       available:!!a,
       generated_at:safeDate(a?.generated_at),
+      freshness:sourceFreshness(a?.generated_at,meta.generated_at),
       roster:rosterFrom(registry,aw),
       distribution: {
         '7d': {providers:observedSegments(aw,'by_provider'), workflows:observedSegments(aw,'by_workflow')},
