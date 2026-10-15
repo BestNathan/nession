@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "kind": "unanchored_run_store_migration_baseline",
+  "repository": "BestNathan/nession",
+  "observed_utc": "2026-10-15T04:05:00Z",
+  "trust_level": "repository_main_observation_only",
+  "independently_anchored": false,
+  "limitations": [
+    "This is a verified GitHub API observation of the three live orphan refs before Ruleset rollout; it is not an independent external/WORM anchor.",
+    "No historical producer/ingester writes are retroactively attested, including existing records at these heads.",
+    "An actor with repository admin permission can edit this baseline and branches; a separately controlled signed checkpoint is still mandatory."
+  ],
+  "stores": [
+    {
+      "ref": "acceptance-results",
+      "head_sha": "7b0c318eda13e4820596c1f89506f126716cbc5a",
+      "tree_sha": "5c8a1d7a679474634ec9f4834808b5741097f254",
+      "baseline_kind": "pre_enforcement_observation"
+    },
+    {
+      "ref": "task-results",
+      "head_sha": "e713093ead0459bcc46645426a056ff46915ee4b",
+      "tree_sha": "e5c7df84c6b262fba2a5e15507a6bccc424e84eb",
+      "baseline_kind": "pre_enforcement_observation"
+    },
+    {
+      "ref": "metrics",
+      "head_sha": "09abf3903d762e460b8b8b8b6b26ed4b0a6937a3",
+      "tree_sha": "9035774be419b263c36f71922b3ea8494ae2678b",
+      "baseline_kind": "pre_enforcement_observation"
+    }
+  ]
+}
