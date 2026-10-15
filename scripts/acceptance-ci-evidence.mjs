@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { collectHistoricalE2EForPull, collectLinkedIssueE2EEvidence } from './acceptance-e2e-lineage.mjs';
 import { parseIssueE2E } from './issue-e2e-contract.mjs';
+import { collectCrossIssueAcceptance } from './acceptance-cross-issue-receipt.mjs';
 import { verifyWake } from './agent-evidence-waker.mjs';
 import os from 'node:os';
 import path from 'node:path';
@@ -70,7 +71,7 @@ function compactRuns(runs, expectedSha) {
     .slice(0, MAX_RUNS_PER_SHA);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], exactHeadE2eSteps = [], historicalReporterE2eRerun = null }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], exactHeadE2eSteps = [], historicalReporterE2eRerun = null, relatedAcceptance = [] }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -96,6 +97,7 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     target_sha: sha,
     direct_runs: compactRuns(directRuns, sha),
     exact_head_e2e_steps: exactHeadE2eSteps,
+    related_issue_acceptance_receipts: relatedAcceptance,
     historical_reporter_e2e_rerun: historicalReporterE2eRerun,
     pull_requests: associated,
     source_ancestry: sourceAncestry,
@@ -690,6 +692,7 @@ async function collectCommand(workspace, outFile) {
   const linkedIssueE2E = [];
   let implementationPulls = [];
   let historicalReporterE2eRerun = null;
+  let relatedAcceptance = [];
   const issueNumber = String(process.env.ISSUE_NUMBER || '').trim();
   if (/^[1-9][0-9]*$/.test(issueNumber)) {
     const currentIssue = await githubGet('/repos/' + repo + '/issues/' + issueNumber);
@@ -735,10 +738,12 @@ async function collectCommand(workspace, outFile) {
         repo,Number(issueNumber),currentIssue,sha);
       historicalReporterE2eRerun=await collectHistoricalReporterE2eRerun(
         repo,currentIssue,sha);
+      relatedAcceptance=await collectCrossIssueAcceptance(repo,currentIssue.body,
+        sha,Number(issueNumber),githubGet,attestExactHeadE2eSteps);
     }
   }
   const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls,
-    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, exactHeadE2eSteps, historicalReporterE2eRerun });
+    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, exactHeadE2eSteps, historicalReporterE2eRerun, relatedAcceptance });
   fs.writeFileSync(outFile, JSON.stringify(evidence, null, 2) + '\n');
   console.log(
     'collected acceptance CI evidence for ' + sha +
