@@ -11,10 +11,13 @@ const roles = new Set(['developer', 'reviewer', 'acceptor', 'auditor']);
 function number(value) { return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null; }
 // Exclude private network addressing and machine-local paths from text fields.
 const PRIVATE_TEXT = /(?:\b(?:10|127)\.(?:\d{1,3}\.){2}\d{1,3}\b|\b192\.168\.(?:\d{1,3}\.)\d{1,3}\b|\b172\.(?:1[6-9]|2\d|3[01])\.(?:\d{1,3}\.)\d{1,3}\b|\b(?:localhost|[a-z0-9.-]+\.internal)\b|\/(?:Users|home|etc|root)\/|[a-z]:\\\\(?:Users|Windows)\\\\|file:\/\/|\b(?:authorization|credential|private.key)\s*[:=])/i;
+// Recognize credential-shaped strings by syntax only; no credential values or
+// raw Agent inputs are ever needed for the public build.
+const SENSITIVE_MARKER = new RegExp('(?:\\bgh[pousr]_|\\bgithub_pat_|\\b(?:sk|rk)-)[A-Za-z0-9_-]{16,}|\\b(?:api[_-]?key|access[_-]?token|password)\\s*[=:]\\s*[^\\s]+','i');
 function safeText(value, max = 120) {
   if (typeof value!=='string')return '';
   const clean=value.replace(/<[^>]*>/g, ' ').replace(/[<>\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
-  return PRIVATE_TEXT.test(clean)?'[redacted public text]':clean.slice(0,max);
+  return PRIVATE_TEXT.test(clean)||SENSITIVE_MARKER.test(clean)?'[redacted public text]':clean.slice(0,max);
 }
 // A build timestamp never turns an old source measurement into a fresh one.
 function sourceFreshness(sourceTime, builtAt, hours=8) {
@@ -260,7 +263,7 @@ export function validateProjection(p) {
     if(typeof data==='string'){
       serializedBytes+=Buffer.byteLength(data);
       if(serializedBytes>128*1024)throw Error('public projection exceeds release limit');
-      if(PRIVATE_TEXT.test(data))throw Error('private field value in public projection');
+      if(PRIVATE_TEXT.test(data)||SENSITIVE_MARKER.test(data))throw Error('private field value in public projection');
       if(key==='url'&&!/^https:\/\/github\.com\/BestNathan\/nession\/(?:issues\/[1-9]\d*|pull\/[1-9]\d*|actions\/runs\/[1-9]\d*|tree\/(?:metrics|acceptance-results|task-results|agent-store))$/.test(data))
         throw Error('untrusted public URL');
     } else if(Array.isArray(data))data.forEach(x=>scan(x,key));
