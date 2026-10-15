@@ -88,6 +88,20 @@ function verifiedStage(pin,kind,run,jobs,artifact,result) {
     pass_criteria:desired,contract_digest:result.contract_sha256};
 }
 
+// Historical evidence must be pinned inside an actual SC row. Both ## and
+// ### Success Criteria are supported by the canonical Issue contract parser.
+// Never inspect mutable Acceptance Reports, comments or arbitrary Issue prose.
+export function historicalWitnessFromBugCriteria(body) {
+  const match=String(body??'').match(/^#{2,3} Success Criteria[^\S\r\n]*\r?\n([\s\S]*?)(?=^#{1,3} [^\r\n]*|$(?![\s\S]))/m);
+  if(!match)return null;
+  const eligible=match[1].split(/\r?\n/).filter(line=>
+    /^- \[[ x]\] SC-\d{2,}\b/.test(line) &&
+    line.includes('Historical E2E witness:'));
+  if(eligible.length!==1)return null;
+  const candidates=[...eligible[0].matchAll(/Historical E2E witness: PR #(\d+) SHA ([a-f0-9]{40}); Reporter Fix PR #(\d+); E2E Run (\d+) attempt (\d+)/g)];
+  return candidates.length===1?candidates[0]:null;
+}
+
 export function attestBugBootstrap(pin,sourceIssue,pr,pre,post,e2e,comparison,targetSha){
   if(!pin||pin.issue!==1725||pin.pr!==1830||!SHA.test(targetSha)||
      !sourceIssue||sourceIssue.number!==1725||sourceIssue.state!=='closed'||
@@ -108,9 +122,7 @@ export function attestBugBootstrap(pin,sourceIssue,pr,pre,post,e2e,comparison,ta
     throw Error('related Bug source Issue contract is not completed');
   // The original Issue SC pins the unchanged PR-head rerun. Match the
   // historical source declaration to GitHub rather than accepting any green E2E.
-  const criteriaSection=String(sourceIssue.body??'').match(/^## Success Criteria\s*\n([\s\S]*?)(?=^## |$(?![\s\S]))/m)?.[1]??'';
-  const candidates=[...criteriaSection.matchAll(/Historical E2E witness: PR #(\d+) SHA ([a-f0-9]{40}); Reporter Fix PR #(\d+); E2E Run (\d+) attempt (\d+)/g)];
-  const historical=candidates.length===1?candidates[0]:null;
+  const historical=historicalWitnessFromBugCriteria(sourceIssue.body);
   if(!historical || Number(historical[1])!==1716 || Number(historical[3])!==1724 ||
       Number(historical[4])!==pin.e2eRun || Number(historical[5])!==pin.e2eAttempt ||
       !SHA.test(historical[2]) || e2e?.head_sha!==historical[2])
@@ -178,6 +190,17 @@ function selfTest() {
   const text='## Related Bug Completion Evidence\nRelated Bug witness: Issue #1725; PR #1830 HEAD '+pin.head+
     ' MERGE '+pin.merge+'; pre-merge Run 38733245163 attempt 2; post-merge Run 38734877707 attempt 1; E2E Run 38387630403 attempt 3\n\n## Next';
   assert.deepEqual(pinnedBugBootstrap(text),pin);
+  const witness='Historical E2E witness: PR #1716 SHA '+('c'.repeat(40))+
+    '; Reporter Fix PR #1724; E2E Run 38387630403 attempt 3';
+  for(const heading of ['## Success Criteria','### Success Criteria']) {
+    const valid=heading+'\n\n- [x] SC-03 regression: '+witness+
+      '\n\n## Acceptance Plan\n'+witness;
+    assert.equal(historicalWitnessFromBugCriteria(valid)?.[2],'c'.repeat(40));
+    assert.equal(historicalWitnessFromBugCriteria(valid.replace('- [x] SC-03 regression:', 'Some prose:')),null);
+    assert.equal(historicalWitnessFromBugCriteria(valid.replace('## Acceptance Plan','### Acceptance Report').replace('SC-03 regression:', 'SC-03 regression: '+witness+' ')),null);
+  }
+  assert.equal(historicalWitnessFromBugCriteria('## Acceptance Report\n'+witness),null);
+
   assert.equal(pinnedBugBootstrap('## Other\n- none'),null);
   assert.throws(()=>pinnedBugBootstrap(text.replace('pre-merge Run','pre Run')),/invalid/);
   const run=(stage)=>({id:stage==='pre'?pin.preRun:pin.postRun,
