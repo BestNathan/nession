@@ -642,7 +642,54 @@ async function collectCommand(workspace, outFile) {
   );
 }
 
-function selfTest() {
+async function selfTest() {
+  const e2eSha='a'.repeat(40);
+  const run={id:38388288917,run_attempt:4,head_sha:e2eSha,
+    name:'E2E / Tests',path:'.github/workflows/e2e-tests.yml',
+    event:'pull_request',status:'completed',conclusion:'failure',
+    repository:{full_name:'BestNathan/nession'},
+    head_repository:{full_name:'BestNathan/nession'}};
+  const job={id:116369824499,run_id:run.id,run_attempt:4,head_sha:e2eSha,
+    name:'e2e',status:'completed',steps:[
+      {name:'Resolve linked Issue E2E obligations',status:'completed',conclusion:'success'},
+      {name:'Run E2E tests',status:'completed',conclusion:'success'},
+      {name:'Normalize selected per-file results even on failure',status:'completed',conclusion:'failure'},
+      {name:'Enforce authenticated selected-E2E execution result',status:'completed',conclusion:'skipped'},
+    ]};
+  const attested=attestExactHeadE2eSteps(run,{jobs:[job]},e2eSha,'BestNathan/nession');
+  assert.equal(attested.workflow_conclusion,'failure');
+  assert.deepEqual(attested.steps.map(x=>x.conclusion),
+    ['success','success','failure','skipped']);
+  assert.equal(attested.run_attempt,4);
+  assert.deepEqual(normalizeCiEvidence({targetSha:e2eSha,
+    exactHeadE2eSteps:[attested]}).exact_head_e2e_steps,[attested]);
+  for(const variant of [
+    [{...run,head_sha:'b'.repeat(40)},job],
+    [{...run,run_attempt:3},job],
+    [{...run,status:'in_progress'},job],
+    [{...run,event:'push'},job],
+    [{...run,path:'different-workflow.yml'},job],
+    [{...run,repository:{full_name:'other/repo'}},job],
+    [run,{...job,run_id:100}],
+    [run,{...job,run_attempt:3}],
+    [run,{...job,head_sha:'b'.repeat(40)}],
+    [run,{...job,status:'in_progress'}],
+    [run,{...job,steps:job.steps.concat(job.steps[0])}],
+  ]) {
+    assert.throws(()=>attestExactHeadE2eSteps(variant[0],
+      {jobs:[variant[1]]},e2eSha,'BestNathan/nession'),/unverified|duplicate/);
+  }
+  const skipped=attestExactHeadE2eSteps(run,{jobs:[{...job,
+    steps:[{name:'Resolve linked Issue E2E obligations',
+      status:'in_progress',conclusion:null}]}]},e2eSha,'BestNathan/nession');
+  assert.deepEqual(skipped.steps,[]);
+  const selected=await collectExactHeadE2eSteps('BestNathan/nession',e2eSha,
+    [run,{...run,head_sha:'b'.repeat(40)},{...run,event:'push'}],
+    async apiPath=>{
+      assert.equal(apiPath,'/repos/BestNathan/nession/actions/runs/38388288917/attempts/4/jobs?per_page=100');
+      return {jobs:[job]};
+    });
+  assert.deepEqual(selected,[attested]);
   const evidence = normalizeCiEvidence({
     targetSha: 'merge123',
     directRuns: [
