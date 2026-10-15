@@ -235,7 +235,7 @@ jobs:
           cp "${RUNNER_TEMP}/agent-metrics/agent-metrics-dark.svg" "${GITHUB_WORKSPACE}/metrics-store/"
 
       - name: Mint scoped App token for orphan Run Store updates
-        if: vars.RUN_STORE_WRITER_MODE == 'app' && steps.artifacts.outputs.count != '' && steps.artifacts.outputs.count != '0' && steps.persist.outputs.changed != '0'
+        if: vars.RUN_STORE_WRITER_MODE == 'app' && steps.persist.outputs.changed != '' && steps.persist.outputs.changed != '0'
         id: store_app
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
         with:
@@ -244,7 +244,7 @@ jobs:
           repositories: nession
           permission-contents: write
       - name: Reject unrecognized writer mode or unavailable App token
-        if: steps.artifacts.outputs.count != '' && steps.artifacts.outputs.count != '0' && steps.persist.outputs.changed != '0'
+        if: steps.persist.outputs.changed != '' && steps.persist.outputs.changed != '0'
         env:
           WRITER_MODE: ${{ vars.RUN_STORE_WRITER_MODE }}
           APP_TOKEN: ${{ steps.store_app.outputs.token }}
