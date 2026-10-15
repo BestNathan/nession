@@ -110,6 +110,20 @@ function downloadVerified(readback, repo) {
   }
 }
 
+export function selectCaseReadbacks(runs, ingesters, targetSha) {
+  if (!SHA.test(targetSha)) throw Error('exact target SHA required');
+  return (Array.isArray(runs) ? runs : [])
+    .filter(x => validRun(x, 'readback', targetSha))
+    .filter(r => ingesters.some(i => {
+      // GitHub workflow_run starts after an ingester completes. Future
+      // unrelated readbacks cannot crowd out its nearby legitimate consumer.
+      const diff = Date.parse(r.created_at) - Date.parse(i.updated_at);
+      return Number.isFinite(diff) && diff >= 0 && diff <= 5 * 60 * 1000;
+    }))
+    .sort((a,b) => Date.parse(a.created_at) - Date.parse(b.created_at))
+    .slice(0, 8);
+}
+
 export async function collectAuthenticatedCaseReadbacks({
   repo, targetSha, runs, request, download = downloadVerified,
 }) {
@@ -117,8 +131,10 @@ export async function collectAuthenticatedCaseReadbacks({
   const known = (Array.isArray(runs) ? runs : []).filter(x => x?.head_sha === targetSha);
   const sources = known.filter(x => validRun(x, 'source', targetSha));
   const ingesters = known.filter(x => validRun(x, 'ingester', targetSha));
-  const readbacks = known.filter(x => validRun(x, 'readback', targetSha))
-    .sort((a,b) => b.id - a.id).slice(0, 4);
+  // Readbacks from unrelated Metrics/Test runs can be much newer than
+  // the Case receipt. Select by independently observed publication timing,
+  // not "latest N green workflows" (which silently loses genuine Case proof).
+  const readbacks = selectCaseReadbacks(known, ingesters, targetSha);
   if (!sources.length || !ingesters.length || !readbacks.length) return [];
   const positives = [];
   for (const readback of readbacks) {
@@ -176,6 +192,12 @@ export function selfTestCaseReceipts() {
     checked_records:2,changed_records:2};
   const good={targetSha:sha,source,ingester,readback,ingesterArtifacts:ia,
     readbackArtifacts:ra,statement};
+  assert.deepEqual(selectCaseReadbacks([
+    {...readback, id: 99, created_at:'2026-10-15T12:20:00Z'},
+    readback,
+    {...readback, id: 14, created_at:'2026-10-15T12:04:30Z'},
+    {...readback, id: 15, created_at:'2026-10-15T12:05:00Z', conclusion:'skipped'},
+  ], [ingester], sha).map(x=>x.id), [13,14]);
   assert.equal(attestCaseReceipt(good).changed_records,2);
   assert.equal(attestCaseReceipt(good).receipt_artifact_id,14);
   for(const changed of [
