@@ -87,7 +87,8 @@ function makeCommit(root,remote,changes,message){
   }finally{fs.rmSync(directory,{force:true,recursive:true});}
 }
 function receipt(root,store,head,changed,replayed){
-  const dest=process.env.RUN_STORE_RECEIPT_DIR;
+  const dest=process.env.RUN_STORE_RECEIPT_DIR ||
+    (process.env.RUNNER_TEMP?path.join(process.env.RUNNER_TEMP,'run-store-receipts'):null);
   if(!dest)return;
   if(!path.isAbsolute(dest))fail('receipt directory must be absolute');
   const safe=v=>String(v??'').slice(0,200);
