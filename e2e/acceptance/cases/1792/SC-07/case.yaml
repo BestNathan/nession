@@ -1,7 +1,7 @@
 schema_version: 1
 issue: 1792
 criterion: SC-07
-stage: pre-merge
+stage: post-merge
 runtime: full-stack-local
 verifiers:
   - type: browser

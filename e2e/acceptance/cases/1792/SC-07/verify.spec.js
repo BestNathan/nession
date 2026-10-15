@@ -7,7 +7,7 @@ const {test,expect}=require('@playwright/test');
 const project=path.resolve(__dirname,'../../../../../');
 const dist=path.join(project,'pages/dist');
 const available={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/styles.css':'styles.css','/favicon.svg':'favicon.svg','/data/site.json':'data/site.json'};
-test('Nession Pages renders independently on the exact accepted PR source',async({page})=>{
+test('Nession Pages renders independently on the exact accepted main-merge source',async({page})=>{
  const sha=process.env.NESSION_ACCEPTANCE_TARGET_SHA;
  expect(sha).toMatch(/^[a-f0-9]{40}$/);
  const runtimeFile=process.env.NESSION_ACCEPTANCE_RUNTIME_FILE;
