@@ -67,14 +67,15 @@ jobs:
 
       - name: Append Test Run Record and SHA index only to orphan branch
         env:
-          GH_TOKEN: ${{ vars.RUN_STORE_WRITER_MODE == 'app' && steps.store_app.outputs.token || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STORE_PUSH_TOKEN: ${{ vars.RUN_STORE_WRITER_MODE == 'app' && steps.store_app.outputs.token || secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           mkdir results-repo
           git -C results-repo init
           git -C results-repo config user.name "github-actions[bot]"
           git -C results-repo config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git -C results-repo remote add origin "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git"
+          git -C results-repo remote add origin "https://x-access-token:$STORE_PUSH_TOKEN@github.com/$GITHUB_REPOSITORY.git"
           git -C results-repo fetch --depth=1 origin acceptance-results
           git -C results-repo checkout -B acceptance-results FETCH_HEAD
           record="$(jq -r .record scratch/paths.json)"
