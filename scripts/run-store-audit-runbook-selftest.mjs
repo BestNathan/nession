@@ -7,6 +7,10 @@ const doc=fs.readFileSync('docs/architecture/run-store-integrity-audit-runbook.m
 assert.match(wf,/permissions:\s*\n\s*contents: read\b/);
 assert.doesNotMatch(wf,/contents: write\b/);
 assert.match(wf,/github\.ref == 'refs\/heads\/main'/);
+assert.match(wf,/repository_dispatch:/);
+assert.match(wf,/nession-run-store-integrity-audit/);
+assert.doesNotMatch(wf,/^  workflow_dispatch:/m);
+assert.match(wf,/github.event_name == 'repository_dispatch'/);
 assert.match(wf,/vars\.RUN_STORE_AUDIT_ENABLED == 'true'/);
 assert.match(wf,/RUN_STORE_AUDIT_ANCHORS_JSON/);
 for (const phrase of [
