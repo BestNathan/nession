@@ -1,8 +1,5 @@
 name: E2E / Scenario Ingest
 
-env:
-  RUN_STORE_RECEIPT_DIR: ${{ runner.temp }}/run-store-receipts
-
 # Main-owned trusted ingestion; serialized with Acceptance Case Ingest.
 on:
   workflow_run:
