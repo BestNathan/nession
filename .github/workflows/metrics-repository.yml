@@ -3,6 +3,10 @@ name: Metrics / Repository Health
 on:
   schedule:
     - cron: '17 */4 * * *'
+  # Trusted main receives completion events; upstream dispatch has NO secrets.
+  workflow_run:
+    workflows: ["Metrics / Replay Request"]
+    types: [completed]
 
 permissions:
   actions: read
@@ -15,8 +19,29 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  authorize-replay:
+    if: github.repository == 'BestNathan/nession' && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_run')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout default-main authorization code, never upstream source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with: { node-version: '24' }
+      - name: Authenticate owner/main replay request using GitHub REST
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/metrics-replay-source.mjs authorize
+
   rust-health:
-    if: github.event_name == 'schedule' && github.ref == 'refs/heads/main' && github.repository == 'BestNathan/nession'
+    needs: authorize-replay
+    if: needs.authorize-replay.result == 'success' && github.ref == 'refs/heads/main' && github.repository == 'BestNathan/nession'
     runs-on: ubuntu-latest
     env:
       RUSTC_WRAPPER: ""
@@ -45,7 +70,8 @@ jobs:
           retention-days: 1
 
   web-health:
-    if: github.event_name == 'schedule' && github.ref == 'refs/heads/main' && github.repository == 'BestNathan/nession'
+    needs: authorize-replay
+    if: needs.authorize-replay.result == 'success' && github.ref == 'refs/heads/main' && github.repository == 'BestNathan/nession'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -67,7 +93,8 @@ jobs:
           retention-days: 1
 
   e2e-health:
-    if: github.event_name == 'schedule' && github.ref == 'refs/heads/main' && github.repository == 'BestNathan/nession'
+    needs: authorize-replay
+    if: needs.authorize-replay.result == 'success' && github.ref == 'refs/heads/main' && github.repository == 'BestNathan/nession'
     runs-on: ubuntu-latest
     env:
       RUSTC_WRAPPER: ""
@@ -104,8 +131,8 @@ jobs:
           retention-days: 1
 
   publish:
-    if: ${{ always() && github.event_name == 'schedule' && github.ref == 'refs/heads/main' && github.repository == 'BestNathan/nession' }}
-    needs: [rust-health, web-health, e2e-health]
+    if: ${{ always() && needs.authorize-replay.result == 'success' && github.ref == 'refs/heads/main' && github.repository == 'BestNathan/nession' }}
+    needs: [authorize-replay, rust-health, web-health, e2e-health]
     runs-on: ubuntu-latest
     permissions:
       actions: read
