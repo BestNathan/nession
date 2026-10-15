@@ -506,29 +506,39 @@ async function runPrGate({ mode = 'merge', discovery = 'closing' } = {}) {
       : `Requirement acceptance gate passed for PR #${number} (${requirements.length} requirement issue(s)).`,
   );
 }
+// Shared by the real closure handler and regression fixtures; this is a
+// decision only, not permission to update Issues. The trusted close guard
+// remains the sole mutator and preserves the not_planned exemption.
+export function completedIssueAcceptanceDecision(issue) {
+  if (!isAcceptanceIssue(issue)) return { kind: 'ignore' };
+  if (issue.state_reason === 'not_planned') return { kind: 'not-planned' };
+  const result = validateRequirementBody(issue.body, { mode: 'closure' });
+  if (result.ok) return { kind: 'accepted', result };
+  const mergeReadiness = validateRequirementBody(issue.body, { mode: 'merge' });
+  return {
+    kind: 'reopen', result, mergeReadiness,
+    deferredOnly: mergeReadiness.ok && mergeReadiness.deferredPostMergeCount > 0,
+  };
+}
+
 async function runIssueCloseGuard() {
   const event = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
   const issue = event.issue;
   if (!issue) throw new Error('issues event context is required');
-  if (!isAcceptanceIssue(issue)) {
+  const decision = completedIssueAcceptanceDecision(issue);
+  if (decision.kind === 'ignore') {
     console.log(`Issue #${issue.number} has no bug or requirement label; nothing to guard.`);
     return;
   }
-  if (issue.state_reason === 'not_planned') {
-    console.log(`Requirement #${issue.number} closed as not_planned; acceptance is not required.`);
+  if (decision.kind === 'not-planned') {
+    console.log(`Issue #${issue.number} closed as not_planned; acceptance is not required.`);
     return;
   }
-
-  const result = validateRequirementBody(issue.body, { mode: 'closure' });
-  if (result.ok) {
-    console.log(`Requirement #${issue.number}: ${result.criteriaCount} criteria accepted; closure stands.`);
+  if (decision.kind === 'accepted') {
+    console.log(`Issue #${issue.number}: ${decision.result.criteriaCount} criteria accepted; closure stands.`);
     return;
   }
-
-  const mergeReadiness = validateRequirementBody(issue.body, { mode: 'merge' });
-  const deferredOnly =
-    mergeReadiness.ok
-    && mergeReadiness.deferredPostMergeCount > 0;
+  const { result, mergeReadiness, deferredOnly } = decision;
 
   const [owner, name] = process.env.GITHUB_REPOSITORY.split('/');
   const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
@@ -581,6 +591,19 @@ function runSelfTest() {
   for (const [issue, accepted, discoverable] of labelFixtures) {
     assert.equal(isAcceptanceIssue(issue), accepted);
     assert.equal(isOpenAcceptanceIssue(issue), discoverable);
+  }
+  // Bug and Requirement follow the identical close/reopen decision,
+  // including the not_planned exemption and rejection of ambiguous kinds.
+  for (const label of ['bug', 'requirement']) {
+    const base={number:42,labels:[{name:label}],state:'closed',body:validBody()};
+    assert.equal(completedIssueAcceptanceDecision(base).kind,'accepted');
+    assert.equal(completedIssueAcceptanceDecision({...base,body:postMergePendingBody()}).kind,'reopen');
+    assert.equal(completedIssueAcceptanceDecision({...base,body:postMergePendingBody()}).deferredOnly,true);
+    assert.equal(completedIssueAcceptanceDecision({...base,body:validBody().replace('- [x] SC-01','- [ ] SC-01')}).kind,'reopen');
+    assert.equal(completedIssueAcceptanceDecision({...base,state_reason:'not_planned',body:'invalid'}).kind,'not-planned');
+  }
+  for (const labels of [[],[{name:'ci'}],[{name:'bug'},{name:'requirement'}]]) {
+    assert.equal(completedIssueAcceptanceDecision({number:42,labels,body:'invalid'}).kind,'ignore');
   }
   const cases = [
     ['valid accepted requirement', validBody(), 'closure', true, null],
