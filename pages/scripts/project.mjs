@@ -240,6 +240,21 @@ export function validateProjection(p) {
   allowedFields(p.agents,['available','generated_at','freshness','roster','distribution','summary'],'agents');
   allowedFields(p.work,['issues_status','pulls_status','workflow_runs_status','issues','pulls'],'work');
   allowedFields(p.evidence,['stores'],'evidence');
+  allowedFields(p.repository.current,['loc','files','tests','rust_coverage','web_coverage','protocol_units','unit_pass'],'repository.current');
+  allowedFields(p.repository.efficiency,['commits_7d','additions_7d','deletions_7d','merged_7d','open_issues','open_prs'],'repository.efficiency');
+  allowedFields(p.agents.summary,['runs_7d','runs_30d','tokens_7d','tokens_observed_runs','tools_7d','tools_observed_runs','cost_7d'],'agents.summary');
+  allowedFields(p.agents.distribution,['7d','30d'],'agents.distribution');
+  for(const period of ['7d','30d']){
+    allowedFields(p.agents.distribution[period],['providers','workflows'],'distribution');
+    for(const key of ['providers','workflows']){
+      const segment=p.agents.distribution[period][key];
+      allowedFields(segment,['available','items'],'distribution segment');
+      if(!Array.isArray(segment.items)||segment.items.length>12)throw Error('unbounded public distribution');
+      segment.items.forEach(x=>allowedFields(x,['name','count'],'distribution entry'));
+    }
+  }
+  p.agents.roster.forEach(x=>allowedFields(x,['id','role','provider','observed_7d'],'Agent roster'));
+  p.evidence.stores.forEach(x=>allowedFields(x,['name','purpose','state','sha','url'],'store'));
   checkFreshness(p.repository.freshness);
   checkFreshness(p.agents.freshness);
   if(!Array.isArray(p.work.issues)||p.work.issues.length>12||
@@ -255,6 +270,14 @@ export function validateProjection(p) {
       throw Error('unbounded public Issue links');
   }
   for(const item of p.work.pulls)allowedFields(item,prFields,'PR');
+  for(const item of p.work.issues){
+    item.pr_references.prs.forEach(ref=>allowedFields(ref,['number','url','relation'],'Issue PR source'));
+  }
+  for(const item of p.work.pulls){
+    allowedFields(item.workflow,['head_sha','ci','e2e'],'PR workflow');
+    for(const key of ['ci','e2e'])if(item.workflow[key]!==null)
+      allowedFields(item.workflow[key],['run_id','attempt','head_sha','status','updated_at','url'],'workflow Run');
+  }
   let serializedBytes=0;
   const scan=(data,key='')=>{
     if(data===null||data===undefined)return;
