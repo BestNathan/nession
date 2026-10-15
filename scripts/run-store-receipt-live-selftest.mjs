@@ -51,7 +51,7 @@ try{
    source:{workflow_id:'987',workflow_path:'.github/workflows/agent-provider-smoke.yml',
      repository:'BestNathan/nession',run_id:'123',attempt:'1',target_sha:root,event:'push'},
    records:[{path:file,sha256:hash(body)}]};
- const verify=(a=ingest,b=plan,c=receipt,d=source)=>verifyAuthenticatedReceipt(a,b,artifact.name,c,d,home,home);
+ const verify=(a=ingest,b=plan,c=receipt,d=source)=>verifyAuthenticatedReceipt(a,listed,b,artifact.name,c,d,home,home);
  const ok=verify();
  assert.equal(ok.checked_records,1);
  assert.equal(ok.artifact_id,909);
