@@ -125,7 +125,7 @@ export function attestCrossIssueAcceptance(pin, sourceRun, jobs, artifact, resul
 
 // The zipped artifact is the source of the SC verdict, not editable Issue prose,
 // an agent summary, or the existence of an artifact record alone.
-async function downloadedResult(repo, artifact, token) {
+export async function downloadedResult(repo, artifact, token) {
   if (repo!==REPO || !Number.isSafeInteger(artifact?.id) ||
       !DIGEST.test(artifact?.digest ?? '')) throw Error('invalid artifact download locator');
   const res=await fetch('https://api.github.com/repos/'+repo+'/actions/artifacts/'+artifact.id+'/zip',{
