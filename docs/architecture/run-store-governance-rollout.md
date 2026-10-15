@@ -27,11 +27,7 @@ protected production ref.
 Required repository Actions configuration:
 - Variable `RUN_STORE_WRITER_APP_ID`: numeric **GitHub App ID** (not installation ID).
 - Secret `RUN_STORE_WRITER_APP_PRIVATE_KEY`: the GitHub App private PEM key (never print or commit).
-- Variable `RUN_STORE_WRITER_MODE`: **unset or `legacy` initially**. After a green
-  merged-main App smoke, and separately verified production writer path/read permissions,
-  set `app` to route all six canonical workflows (seven write-capable jobs) to scoped
-  short-lived App tokens; unsupported modes and App-token failures fail closed instead
-  of silently falling back to the legacy credential.
+- Variable `RUN_STORE_WRITER_MODE`: after **verified main App smoke** (run `38687705225`, merged SHA `bcfb61ed8e20715774e6b76f302f134467d3d194`), **unset or `app`** routes all six canonical workflows (seven write-capable jobs) to scoped short-lived App tokens; explicitly set `legacy` only for emergency rollback **while Rulesets remain disabled**. Unsupported modes and App-token failures fail closed, never silently fall back to GITHUB_TOKEN.
 
 The App mint action is SHA-pinned to
 `actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349` (v2),
@@ -40,6 +36,14 @@ trusted writer steps; upstream Actions artifact downloads, Issue projection API 
 Task branch cleanup and repository_dispatch continue using the separate workflow
 `GITHUB_TOKEN` authorization contract. Metrics checkouts disable persisted credentials;
 store pushes inject the selected credential only at publication.
+
+### Stage B.1 — App-default production canary
+
+PR #1808 merged to `main` on 2026-10-15 after the exact SHA Quality/E2E/Acceptance gates passed. Its post-merge `Store / App Writer Smoke` [38687705225](https://github.com/BestNathan/nession/actions/runs/38687705225) completed authenticated App token mint, disposable create/append/idempotent replay and owned-ref cleanup.
+
+After the separate **App-default** rollout PR merges, trusted `main` jobs use App tokens by default (provided the repository Variable is unset or exactly `app`). Confirm the **effective mode** without reading secrets: each real canary job's `Mint scoped App token` step must be **success, not skipped**, and its archive/commit push must succeed. For the E2E Test workflow verify **both** Test and PR publication jobs if eligible. A skipped job due to no authenticated producer artifacts does not prove App ingestion.
+
+Run a bounded multi-source matrix of Case, Scenario, Test, Task, Agent Metrics, and Repository Metrics on production without creating synthetic signed evidence or resetting any orphan ref. Record run IDs, trusted source SHAs, committed Store refs/heads and idempotent retry/collision proofs. Keep unauthorized Ruleset enforcement **disabled** until this evidence has passed and every writer has a non-disruptive rollback strategy. The `legacy` mode is a temporary break-glass control ONLY before protected refs become App-only; `GITHUB_TOKEN` should lose `contents: write` in a later reviewed reduction after protected writes are fully migrated.
 
 **Do not activate Rulesets merely because a token smoke or source Gate passes.**
 The workflow `GITHUB_TOKEN` still retains its legacy contents:write for rollback and

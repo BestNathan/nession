@@ -146,7 +146,7 @@ jobs:
           node scripts/agent-workflow-telemetry.mjs aggregate             "${GITHUB_WORKSPACE}/metrics-store/raw/workflows"             "${RUNNER_TEMP}/agent-metrics"
 
       - name: Mint scoped App token for orphan Run Store updates
-        if: vars.RUN_STORE_WRITER_MODE == 'app'
+        if: (vars.RUN_STORE_WRITER_MODE == '' || vars.RUN_STORE_WRITER_MODE == 'app')
         id: store_app
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
         with:
@@ -161,8 +161,8 @@ jobs:
         run: |
           set -euo pipefail
           case "$WRITER_MODE" in
-            ''|legacy) ;;
-            app) [[ -n "$APP_TOKEN" ]] || { echo "::error::No App token; refuse legacy fallback" >&2; exit 1; } ;;
+            legacy) ;;
+            ''|app) [[ -n "$APP_TOKEN" ]] || { echo "::error::No App token; refuse legacy fallback" >&2; exit 1; } ;;
             *) echo "::error::Unsupported RUN_STORE_WRITER_MODE" >&2; exit 1 ;;
           esac
 
@@ -170,7 +170,7 @@ jobs:
         env:
           OUT_DIR: ${{ runner.temp }}/repo-metrics
           AGENT_OUT_DIR: ${{ runner.temp }}/agent-metrics
-          STORE_PUSH_TOKEN: ${{ vars.RUN_STORE_WRITER_MODE == 'app' && steps.store_app.outputs.token || secrets.GITHUB_TOKEN }}
+          STORE_PUSH_TOKEN: ${{ vars.RUN_STORE_WRITER_MODE == 'legacy' && secrets.GITHUB_TOKEN || steps.store_app.outputs.token }}
         run: |
           set -euo pipefail
           for file in metrics.json repo-metrics-light.svg repo-metrics-dark.svg; do
