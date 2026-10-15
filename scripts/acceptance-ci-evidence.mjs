@@ -13,6 +13,8 @@ const MAX_RUNS_PER_SHA = 20;
 const MAX_ASSOCIATED_PULLS = 5;
 const MAX_IMPLEMENTATION_PULLS = 2;
 const MAX_CROSS_REFERENCED_PULLS = 40;
+const MAX_EXACT_E2E_STEP_RUNS = 2;
+const E2E_STEP_NAMES = Object.freeze(['Resolve linked Issue E2E obligations', 'Run E2E tests', 'Normalize selected per-file results even on failure', 'Enforce authenticated selected-E2E execution result']);
 const IMPLEMENTATION_OWNER_PATHS = Object.freeze([
   '.github/workflows/e2e-test-ingest.yml',
   'scripts/issue-e2e-projection-receipt.mjs',
@@ -68,7 +70,7 @@ function compactRuns(runs, expectedSha) {
     .slice(0, MAX_RUNS_PER_SHA);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [] }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], exactHeadE2eSteps = [] }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -93,6 +95,7 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     kind: 'acceptance_ci_evidence',
     target_sha: sha,
     direct_runs: compactRuns(directRuns, sha),
+    exact_head_e2e_steps: exactHeadE2eSteps,
     pull_requests: associated,
     source_ancestry: sourceAncestry,
     target_merge_commit: targetMergeProof,
@@ -104,6 +107,58 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     implementation_pull_requests: implementationPulls,
     provider_wake_evidence: providerWakeEvidence,
   };
+}
+
+// Report only GitHub-authenticated exact-attempt job outcomes. A planner step
+// can pass inside an overall failed run; this is NOT an E2E Pass receipt.
+export function attestExactHeadE2eSteps(run, payload, sha, repo) {
+  if (!/^[0-9a-f]{40}$/.test(sha) ||
+      !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) ||
+      !Number.isSafeInteger(run?.id) || run.id<=0 ||
+      !Number.isSafeInteger(run?.run_attempt) || run.run_attempt<=0 ||
+      run.head_sha!==sha || run.repository?.full_name!==repo ||
+      run.head_repository?.full_name!==repo ||
+      run.name!=='E2E / Tests' || run.path!=='.github/workflows/e2e-tests.yml' ||
+      run.event!=='pull_request' || run.status!=='completed' ||
+      !['success','failure'].includes(run.conclusion))
+    throw Error('unverified exact-head E2E workflow identity');
+  if (!Array.isArray(payload?.jobs) || payload.jobs.length>100)
+    throw Error('unverified exact-attempt job payload');
+  const matched=payload.jobs.filter(j=>j?.name==='e2e');
+  if(matched.length!==1)throw Error('missing/ambiguous canonical E2E job');
+  const job=matched[0];
+  if(!Number.isSafeInteger(job.id)||job.id<=0||job.run_id!==run.id||
+     job.run_attempt!==run.run_attempt||job.head_sha!==sha||
+     job.status!=='completed'||!Array.isArray(job.steps))
+    throw Error('unverified exact-run/attempt E2E job');
+  const steps=[];
+  for(const name of E2E_STEP_NAMES) {
+    const found=job.steps.filter(step=>step?.name===name);
+    if(found.length>1)throw Error('duplicate E2E step');
+    const step=found[0];
+    if(step?.status==='completed' &&
+       ['success','failure','skipped','cancelled','timed_out'].includes(step.conclusion))
+      steps.push({name,status:'completed',conclusion:step.conclusion});
+  }
+  return {run_id:run.id,run_attempt:run.run_attempt,head_sha:sha,job_id:job.id,
+    workflow_conclusion:run.conclusion,steps,
+    provenance:'GitHub exact-SHA same-repository PR E2E Run + exact-attempt job steps'};
+}
+
+export async function collectExactHeadE2eSteps(repo,sha,runs,request=githubGet) {
+  const selected=(Array.isArray(runs)?runs:[]).filter(run=>
+    run?.name==='E2E / Tests'&&run.path==='.github/workflows/e2e-tests.yml'&&
+    run.event==='pull_request'&&run.head_sha===sha&&run.status==='completed'&&
+    ['success','failure'].includes(run.conclusion)&&
+    run.repository?.full_name===repo&&run.head_repository?.full_name===repo)
+    .sort((a,b)=>b.id-a.id).slice(0,MAX_EXACT_E2E_STEP_RUNS);
+  const proof=[];
+  for(const run of selected) {
+    const payload=await request('/repos/'+repo+'/actions/runs/'+run.id+
+      '/attempts/'+run.run_attempt+'/jobs?per_page=100');
+    proof.push(attestExactHeadE2eSteps(run,payload,sha,repo));
+  }
+  return proof;
 }
 
 async function githubGet(path) {
@@ -465,6 +520,7 @@ async function collectCommand(workspace, outFile) {
   const repo = requireText(process.env.GITHUB_REPOSITORY, 'GITHUB_REPOSITORY');
   const sha = execFileSync('git', ['-C', workspace, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   const directRuns = await workflowRunsForSha(repo, sha);
+  const exactHeadE2eSteps = await collectExactHeadE2eSteps(repo,sha,directRuns);
   const providerWakeEvidence = await collectPinnedProviderEvidence(repo,sha);
   const pulls = await githubGet('/repos/' + repo + '/commits/' + encodeURIComponent(sha) + '/pulls?per_page=10');
   const selectedPulls = (Array.isArray(pulls) ? pulls : []).filter((pull) => pull?.head?.sha).slice(0, MAX_ASSOCIATED_PULLS);
@@ -577,7 +633,7 @@ async function collectCommand(workspace, outFile) {
         repo,Number(issueNumber),currentIssue,sha);
   }
   const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls,
-    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains });
+    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, exactHeadE2eSteps });
   fs.writeFileSync(outFile, JSON.stringify(evidence, null, 2) + '\n');
   console.log(
     'collected acceptance CI evidence for ' + sha +
