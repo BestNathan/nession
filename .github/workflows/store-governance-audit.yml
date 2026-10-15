@@ -16,6 +16,7 @@ on:
       - scripts/audit-live-run-stores.mjs
       - scripts/run-store-five-mode-evidence.mjs
       - scripts/run-store-integrity-drill.mjs
+      - scripts/run-store-cas-matrix.mjs
       - .github/workflows/*-ingest.yml
       - .github/workflows/metrics-repository.yml
   workflow_dispatch:
@@ -64,6 +65,13 @@ jobs:
           set -euo pipefail
           node scripts/run-store-integrity-drill.mjs collect \
             "${RUNNER_TEMP}/store-governance/isolated-tamper-drill.json"
+      - name: Verify concurrent CAS, idempotent replay and divergent collision in disposable bare Git
+        run: |
+          set -euo pipefail
+          node scripts/run-store-cas-matrix.mjs collect \
+            "${RUNNER_TEMP}/store-governance/isolated-cas-matrix.json"
+      # Matrix executes real concurrent publisher processes against temporary local
+      # bare Git, not live server-side Apps or branch authorization.
       # The drill uses only disposable local Git; it cannot prove live denial.
       # This is a mandatory warning while the actual refs remain unprotected.
       # It fetches only GitHub refs / full Git ancestry through read-only
