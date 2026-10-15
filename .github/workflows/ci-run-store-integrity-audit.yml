@@ -1,0 +1,40 @@
+name: CI / Run Store Integrity Audit
+
+# Observe immutable orphan histories from trusted main code only.
+# Anchors are a separately governed secret, NEVER auto-learned from the refs.
+# This job is intentionally disabled until its external anchor control exists.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 5 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-run-store-integrity-audit
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    name: Read-only anchored store audit
+    if: github.repository == 'BestNathan/nession' && github.ref == 'refs/heads/main' && vars.RUN_STORE_AUDIT_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      RUN_STORE_AUDIT_ANCHORS_JSON: ${{ secrets.RUN_STORE_AUDIT_ANCHORS_JSON }}
+    steps:
+      - name: Checkout trusted main at exact SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify immutable history and audit fixtures
+        run: ./gates/run run-store-integrity
+      - name: Audit live orphan refs against independently controlled baselines
+        run: node scripts/audit-live-run-stores.mjs
