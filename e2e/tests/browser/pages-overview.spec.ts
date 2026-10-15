@@ -23,6 +23,8 @@ test.describe('standalone Pages overview',()=>{
   await expect(page.getByRole('heading',{name:'Work in progress.'})).toBeVisible();
   await expect(page.locator('img[src="x"]')).toHaveCount(0);
   await expect(page.getByText('observed Agent runs (7d): 2', {exact:false})).toBeVisible();
+  await expect(page.getByText('Quality · success · run 42 / attempt 1')).toBeVisible();
+  await expect(page.getByText('E2E: Not observed')).toBeVisible();
   await page.reload();
   await expect(page.getByRole('heading',{name:'Work in progress.'})).toBeVisible();
  });

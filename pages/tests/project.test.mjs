@@ -89,3 +89,43 @@ test('public source rollups reject private keys, fractions and invalid numbers',
   assert.ok(!JSON.stringify(p).includes('../web'));
   assert.ok(!JSON.stringify(p).includes('badfraction'));
 });
+
+test('only exact PR HEAD and canonical GitHub CI/E2E workflow runs are projected',()=>{
+ const sha='a'.repeat(40),meta={generated_at:now};
+ const pr={number:5,title:'Proof',state:'open',updated_at:now,head:{sha,repo:{full_name:'BestNathan/nession'}}};
+ const mk=(id,name,path,status='completed',conclusion='success')=>({
+  id,run_attempt:2,name,path,event:'pull_request',head_sha:sha,
+  status,conclusion,updated_at:now,
+  repository:{full_name:'BestNathan/nession'},head_repository:{full_name:'BestNathan/nession'}
+ });
+ const ci=mk(43,'CI / Quality Gate','.github/workflows/ci-quality.yml');
+ const e2e=mk(45,'E2E / Tests','.github/workflows/e2e-tests.yml','completed','failure');
+ const forged=mk(999,'CI / Quality Gate','.github/workflows/ci-quality.yml');
+ forged.head_sha='b'.repeat(40);
+ const p=validateProjection(makeProjection({pulls:[pr],workflowRuns:[ci,e2e,forged],meta}));
+ const evidence=p.work.pulls[0].workflow;
+ assert.equal(evidence.head_sha,sha);
+ assert.equal(evidence.ci.run_id,43);
+ assert.equal(evidence.ci.attempt,2);
+ assert.equal(evidence.e2e.status,'failure');
+ assert.equal(evidence.e2e.url,'https://github.com/BestNathan/nession/actions/runs/45');
+ assert.ok(!JSON.stringify(evidence).includes('999'));
+});
+test('wrong repo, workflow path, event, invalid attempts and unobserved CI never show Pass',()=>{
+ const sha='a'.repeat(40),pr={number:5,title:'P',head:{sha,repo:{full_name:'BestNathan/nession'}}};
+ const base={id:18,run_attempt:1,name:'CI / Quality Gate',
+  path:'.github/workflows/ci-quality.yml',event:'pull_request',
+  head_sha:sha,status:'completed',conclusion:'success',
+  repository:{full_name:'BestNathan/nession'},head_repository:{full_name:'BestNathan/nession'}};
+ const invalid=[
+  {...base,id:0},{...base,run_attempt:0},{...base,event:'push'},
+  {...base,path:'.github/workflows/deploy-pages.yml'},
+  {...base,repository:{full_name:'foreign/repo'}},
+  {...base,head_repository:{full_name:'foreign/repo'}},
+ ];
+ const p=makeProjection({pulls:[pr],workflowRuns:invalid});
+ assert.equal(p.work.pulls[0].workflow.ci,null);
+ assert.equal(p.work.pulls[0].workflow.e2e,null);
+ assert.equal(makeProjection({pulls:[pr],workflowRuns:null}).work.workflow_runs_status,'unavailable');
+ assert.equal(makeProjection({pulls:[{...pr,head:{...pr.head,repo:{full_name:'foreign/repo'}}}],workflowRuns:[base]}).work.pulls[0].workflow.head_sha,null);
+});
