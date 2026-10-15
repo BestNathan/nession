@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { extname, resolve } from 'node:path';
@@ -229,42 +230,61 @@ async function issueAndPrStats(
   };
 }
 
-async function workflowStats(repository, cutoff7dMs, cutoff30dMs, token) {
-  let page = 1;
-  let total = 0;
-  let last_7d = 0;
-  let last_30d = 0;
+// GitHub Actions' run-list response includes a total_count independent of
+// page size. Do not walk every run: a busy repository can exceed the old
+// arbitrary 10k pagination cap within 30 days. Query each bounded, exact UTC
+// creation window and count GitHub-authenticated run identities once.
+export async function workflowStats(repository, cutoff7dMs, cutoff30dMs, token,
+  nowMs = Date.now(), getJson = githubJson) {
+  if(!/^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(repository) ||
+     ![cutoff7dMs,cutoff30dMs,nowMs].every(Number.isFinite) ||
+     cutoff30dMs >= cutoff7dMs || cutoff7dMs > nowMs)
+    fail('invalid Actions workflow-count window',
+      'provide ordered absolute UTC timestamps for the 30d/7d reporting windows.');
 
-  while (true) {
-    const payload = await githubJson(
-      `/repos/${repository}/actions/runs?per_page=100&page=${page}`,
-      token,
-    );
-    const runs = payload.workflow_runs ?? [];
-
-    if (page === 1) total = payload.total_count ?? runs.length;
-
-    let sawOlderThan30d = false;
-    for (const run of runs) {
-      const created = Date.parse(run.created_at);
-      if (Number.isNaN(created)) continue;
-      if (created >= cutoff7dMs) last_7d += 1;
-      if (created >= cutoff30dMs) last_30d += 1;
-      else sawOlderThan30d = true;
+  // GitHub stores and filters workflow created_at at whole-second precision.
+  // Round the inclusive start UP so the returned count is equivalent to
+  // "created >= cutoffMs", which used to be checked per run.
+  const startAt = ms => new Date(Math.ceil(ms / 1000) * 1000).toISOString()
+    .replace('.000Z','Z');
+  const endAt = ms => new Date(Math.floor(ms / 1000) * 1000).toISOString()
+    .replace('.000Z','Z');
+  const end = endAt(nowMs);
+  const countWindow = async startMs => {
+    if(Math.ceil(startMs/1000)>Math.floor(nowMs/1000))return 0;
+    const range = startAt(startMs)+'..'+end;
+    const endpoint = '/repos/'+repository+'/actions/runs?per_page=1&created='+
+      encodeURIComponent(range);
+    const data = await getJson(endpoint, token);
+    if(!Number.isSafeInteger(data?.total_count) || data.total_count<0 ||
+       !Array.isArray(data.workflow_runs) ||
+       (data.total_count>0 && data.workflow_runs.length!==1) ||
+       (data.total_count===0 && data.workflow_runs.length!==0))
+      fail('invalid exact-window GitHub Actions count response',
+        'restore trusted Actions run-list total_count instead of truncating it.');
+    // The one representative run must belong to the queried range; no
+    // return of a repository-global total masked as a filtered count.
+    if(data.total_count>0){
+      const created=Date.parse(data.workflow_runs[0].created_at);
+      if(!Number.isFinite(created) || created<Math.ceil(startMs/1000)*1000 ||
+         created>Math.floor(nowMs/1000)*1000)
+        fail('workflow-count response is not scoped to the requested range',
+          'verify the created filter and GitHub API source.');
     }
-
-    if (sawOlderThan30d || runs.length < 100) break;
-
-    page += 1;
-    if (page > 100) {
-      fail(
-        'workflow-run pagination exceeded 10,000 runs in the 30d window',
-        'narrow the collection strategy or aggregate workflow activity from a durable store.',
-      );
-    }
-  }
-
-  return { total, last_7d, last_30d };
+    return data.total_count;
+  };
+  const overall = await getJson('/repos/'+repository+'/actions/runs?per_page=1',token);
+  if(!Number.isSafeInteger(overall?.total_count)||overall.total_count<0||
+     !Array.isArray(overall.workflow_runs))
+    fail('invalid global Actions workflow-count response',
+      'verify GitHub Actions metadata and repository token.');
+  const [last_7d,last_30d] = await Promise.all([
+    countWindow(cutoff7dMs),countWindow(cutoff30dMs),
+  ]);
+  if(last_7d>last_30d || last_30d>overall.total_count)
+    fail('inconsistent GitHub Actions activity counts',
+      'retry with a consistent run-list snapshot and retain exact-window provenance.');
+  return {total:overall.total_count,last_7d,last_30d};
 }
 
 function readJson(path, label) {
@@ -600,7 +620,7 @@ function renderSvg(metrics, theme) {
 `;
 }
 
-function runSelfTest() {
+async function runSelfTest() {
   const checks = [
     [isSourcePath('crates/nession-server/src/main.rs'), true],
     [isSourcePath('web/src/generated/protocol.ts'), false],
@@ -662,6 +682,44 @@ function runSelfTest() {
     },
   };
 
+  // Real regression: >10,000 Actions runs in 30d must be counted exactly,
+  // never capped, silently sampled or lost to the legacy 100-page limit.
+  const now=Date.parse('2026-10-15T00:00:00Z');
+  const cutoff7=now-7*DAY_MS,cutoff30=now-30*DAY_MS;
+  const requested=[];
+  const metadata=async endpoint=>{
+    requested.push(endpoint);
+    const value=endpoint.includes('created=')?
+      (decodeURIComponent(endpoint).includes('2026-10-08T00:00:00Z')?4100:11800):12345;
+    return {total_count:value,workflow_runs:[{
+      created_at: new Date(value===4100?cutoff7: value===11800?cutoff30:now).toISOString(),
+    }]};
+  };
+  const large=await workflowStats('BestNathan/nession',cutoff7,cutoff30,
+    'fixture-token',now,metadata);
+  assert.deepEqual(large,{total:12345,last_7d:4100,last_30d:11800});
+  assert.equal(requested.length,3);
+  assert.ok(requested.some(endpoint=>endpoint.includes('per_page=1&created=')));
+  assert.ok(!requested.some(endpoint=>endpoint.includes('&page=')));
+  const empty=await workflowStats('BestNathan/nession',cutoff7,cutoff30,
+    'fixture-token',now,async endpoint=>({
+      total_count:0,workflow_runs:[],
+    }));
+  assert.deepEqual(empty,{total:0,last_7d:0,last_30d:0});
+  await assert.rejects(()=>workflowStats('BestNathan/nession',cutoff7,cutoff30,
+    'fixture-token',now,async endpoint=>({
+      total_count:endpoint.includes('created=')?100:1000,
+      workflow_runs:[{created_at:'2026-01-01T00:00:00Z'}],
+    })),/not scoped/);
+  await assert.rejects(()=>workflowStats('BestNathan/nession',cutoff7,cutoff30,
+    'fixture-token',now,async endpoint=>({
+      total_count: endpoint.includes('created=')?12000:1000,
+      workflow_runs:[{created_at:'2026-10-10T00:00:00Z'}],
+    })),/inconsistent/);
+  await assert.rejects(()=>workflowStats('foreign/repo',cutoff7,cutoff30,
+    'fixture-token',now,async()=>({total_count:'12000',workflow_runs:[]})),
+    /invalid global/);
+
   const svg = renderSvg(fixture, 'dark');
   for (const required of [
     'REPOSITORY METRICS',
@@ -685,7 +743,7 @@ function runSelfTest() {
 
 async function main() {
   if (process.argv.includes('--self-test')) {
-    runSelfTest();
+    await runSelfTest();
     return;
   }
 
@@ -735,7 +793,8 @@ async function main() {
   const commits = commitStats(cutoff7dIso, cutoff30dIso);
   const [{ issues, pull_requests }, workflow_runs] = await Promise.all([
     issueAndPrStats(repository, cutoff7dIso, cutoff30dIso, token),
-    workflowStats(repository, cutoff7d.getTime(), cutoff30d.getTime(), token),
+    workflowStats(repository, cutoff7d.getTime(), cutoff30d.getTime(), token,
+      now.getTime()),
   ]);
 
   const metrics = {
