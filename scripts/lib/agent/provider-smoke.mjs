@@ -16,11 +16,11 @@ export function smokeContext(sha) {
     target_ref: sha,
     deployment: null,
     ci_evidence: null,
-    requirement_body: 'Synthetic fixture. No test, deployment, or CI evidence supports the following claim. This run must not update an Issue.',
+    requirement_body: 'Synthetic fixture: the external deployment outcome is unknown. No positive or negative test, deployment, or CI evidence is supplied. This run must not update an Issue.',
     criteria: [{
       criterion: EXPECTED,
       stage: 'staging',
-      text: 'An external service has independently proven successful deployment of the nonexistent synthetic service canary-example-000. Evidence is not supplied.',
+      text: 'An external service has independently verified deployment of an isolated synthetic canary with a signed external receipt; the receipt and any independent observations are not available in this context.',
     }],
   };
 }
