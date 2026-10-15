@@ -70,6 +70,8 @@ export function attestCrossIssueAcceptance(pin, sourceRun, jobs, artifact, resul
   const executor=candidate('Execute acceptance');
   const updater=candidate('Deterministic Issue updater');
   if (!uniqueSuccessfulStep(executor,'Prepare stage-specific immutable acceptance context') ||
+      // A manually supplied deterministic_result_json is not Agent attestation.
+      !uniqueSuccessfulStep(executor,'Run read-only Acceptance Agent') ||
       !uniqueSuccessfulStep(executor,'Upload structured Acceptance Result') ||
       !uniqueSuccessfulStep(updater,'Apply Acceptance Report and checkbox projection'))
     throw Error('historical Acceptance source/updater step missing or unsuccessful');
@@ -195,6 +197,7 @@ function selfTest(){
   const j=(id,name,step)=>({id,name,run_id:pin.run,run_attempt:7,head_sha:head,
     status:'completed',conclusion:'success',steps:[{name:step,status:'completed',conclusion:'success'}]});
   const exec=j(8,'Execute acceptance','Prepare stage-specific immutable acceptance context');
+  exec.steps.push({name:'Run read-only Acceptance Agent',status:'completed',conclusion:'success'});
   exec.steps.push({name:'Upload structured Acceptance Result',status:'completed',conclusion:'success'});
   const updater=j(9,'Deterministic Issue updater','Apply Acceptance Report and checkbox projection');
   const jobs={jobs:[exec,updater]};
@@ -221,6 +224,7 @@ function selfTest(){
   for (const [r,jb,a,re,p,c,e,o] of [
     [{...run,run_attempt:6},jobs,artifact,result,pr,compare,e2e,options],
     [run,{jobs:[exec,{...updater,run_attempt:6}]},artifact,result,pr,compare,e2e,options],
+    [run,{jobs:[{...exec,steps:exec.steps.filter(s=>s.name!=='Run read-only Acceptance Agent')},updater]},artifact,result,pr,compare,e2e,options],
     [run,jobs,{...artifact,digest:'sha256:broken'},result,pr,compare,e2e,options],
     [run,jobs,artifact,{...result,target_ref:head},pr,compare,e2e,options],
     [run,jobs,artifact,{...result,criteria:[{criterion:'SC-02',result:'Pending'}]},pr,compare,e2e,options],
