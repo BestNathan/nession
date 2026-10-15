@@ -59,7 +59,7 @@ try{
   const tampered=read();tampered.records[0].sha256='c'.repeat(64);
   assert.throws(()=>verifyRunStoreReceipt(tampered,home),/record bytes differ/);
   const repointed=read();repointed.commit_sha=root;
-  assert.throws(()=>verifyRunStoreReceipt(repointed,home),/record missing/);
+  assert.throws(()=>verifyRunStoreReceipt(repointed,home),/published Run Store commit must have exactly one parent|record missing/);
   const foreign=read();foreign.ingester.repository='untrusted/fork';
   assert.throws(()=>verifyRunStoreReceipt(foreign,home),/unexpected ingester repository/);
   const arbitrary=read();arbitrary.ingester.workflow_ref='BestNathan/nession/.github/workflows/untrusted.yml@refs/heads/feature';
