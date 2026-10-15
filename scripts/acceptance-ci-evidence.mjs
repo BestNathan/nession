@@ -18,6 +18,7 @@ const MAX_ASSOCIATED_PULLS = 5;
 const MAX_IMPLEMENTATION_PULLS = 2;
 const MAX_CROSS_REFERENCED_PULLS = 40;
 const MAX_EXACT_E2E_STEP_RUNS = 2;
+const MAX_TARGET_PUSH_E2E_RUNS = 5;
 const E2E_STEP_NAMES = Object.freeze(['Resolve linked Issue E2E obligations', 'Run E2E tests', 'Normalize selected per-file results even on failure', 'Enforce authenticated selected-E2E execution result']);
 const IMPLEMENTATION_OWNER_PATHS = Object.freeze([
   '.github/workflows/e2e-test-ingest.yml',
@@ -74,7 +75,7 @@ function compactRuns(runs, expectedSha) {
     .slice(0, MAX_RUNS_PER_SHA);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [] }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -99,6 +100,7 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     kind: 'acceptance_ci_evidence',
     target_sha: sha,
     direct_runs: compactRuns(directRuns, sha),
+    target_push_e2e_runs: targetPushE2eRuns,
     exact_head_e2e_steps: exactHeadE2eSteps,
     related_issue_acceptance_receipts: relatedAcceptance,
     related_bug_completion_evidence: relatedBugCompletion,
@@ -182,6 +184,49 @@ async function githubJobLog(path){
   if(body.length>=1048576)throw Error('historical Case log too large');
   return body;
 }
+
+// Global /actions/runs?head_sha is noisy on main (Orchestrator/Waker), and
+// compactRuns retains only twenty latest items. Collect canonical push E2E
+// independently from its exact workflow route; never promote PR-head gates
+// or overall failed runs to a merge-SHA E2E success.
+export function attestTargetPushE2eRuns(payload,sha,repo) {
+  if(!/^[a-f0-9]{40}$/.test(sha) || repo!=='BestNathan/nession' ||
+      !Array.isArray(payload?.workflow_runs) ||
+      payload.workflow_runs.length>MAX_TARGET_PUSH_E2E_RUNS)
+    throw Error('invalid scoped target-push E2E payload');
+  const proof=[];
+  const seen=new Set();
+  for(const run of payload.workflow_runs) {
+    if(!Number.isSafeInteger(run?.id)||run.id<=0||seen.has(run.id)||
+       !Number.isSafeInteger(run.run_attempt)||run.run_attempt<=0||
+       run.name!=='E2E / Tests'||
+       !['.github/workflows/e2e-tests.yml',
+         '.github/workflows/e2e-tests.yml@refs/heads/main'].includes(run.path)||
+       run.head_sha!==sha||run.head_branch!=='main'||run.event!=='push'||
+       run.repository?.full_name!==repo||
+       run.head_repository?.full_name!==repo||
+       !['queued','in_progress','completed'].includes(run.status)||
+       (run.status==='completed'
+         ? !['success','failure','cancelled','timed_out'].includes(run.conclusion)
+         : run.conclusion!==null))
+      throw Error('unverified target-push E2E workflow identity');
+    seen.add(run.id);
+    proof.push({...compactRun(run),run_attempt:run.run_attempt,
+      provenance:'GitHub scoped canonical main-push E2E workflow run, same-repo exact SHA and status'});
+  }
+  return proof;
+}
+
+export async function collectTargetPushE2eRuns(repo,sha,request=githubGet) {
+  if(repo!=='BestNathan/nession'||!/^[a-f0-9]{40}$/.test(sha))
+    throw Error('invalid scoped main-push E2E request');
+  const q=new URLSearchParams({head_sha:sha,event:'push',
+    per_page:String(MAX_TARGET_PUSH_E2E_RUNS)});
+  const payload=await request('/repos/'+repo+
+    '/actions/workflows/e2e-tests.yml/runs?'+q.toString());
+  return attestTargetPushE2eRuns(payload,sha,repo);
+}
+
 async function githubGet(path) {
   const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
   if (!token) throw new Error('GITHUB_TOKEN/GH_TOKEN is required');
@@ -641,6 +686,8 @@ async function collectCommand(workspace, outFile) {
   const repo = requireText(process.env.GITHUB_REPOSITORY, 'GITHUB_REPOSITORY');
   const sha = execFileSync('git', ['-C', workspace, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   const directRuns = await workflowRunsForSha(repo, sha);
+  const targetPushE2eRuns=process.env.ACCEPTANCE_STAGE==='post-merge'
+    ? await collectTargetPushE2eRuns(repo,sha) : [];
   // Independently bound Git-byte Case receipts only, never green no-op success.
   const verifiedCaseReceipts = process.env.ACCEPTANCE_STAGE === 'post-merge'
     ? await collectAuthenticatedCaseReadbacks({repo,targetSha:sha,runs:directRuns,request:githubGet})
@@ -775,7 +822,7 @@ async function collectCommand(workspace, outFile) {
     }
   }
   const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls,
-    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion });
+    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns });
   fs.writeFileSync(outFile, JSON.stringify(evidence, null, 2) + '\n');
   console.log(
     'collected acceptance CI evidence for ' + sha +
@@ -855,6 +902,46 @@ async function selfTest() {
   assert.throws(()=>attestHistoricalReporterE2eRerun(witness,sourcePr,repairPr,
     fileList,reporterRun,{jobs:[reporterJob]},comparison,reporterTarget,
     'BestNathan/nession',1726),/unverified/);
+  const pushSha='e'.repeat(40);
+  const mainPush={id:38743713356,run_attempt:1,name:'E2E / Tests',
+    path:'.github/workflows/e2e-tests.yml',
+    event:'push',head_sha:pushSha,head_branch:'main',
+    status:'completed',conclusion:'success',
+    repository:{full_name:'BestNathan/nession'},
+    head_repository:{full_name:'BestNathan/nession'}};
+  const mainProof=attestTargetPushE2eRuns({workflow_runs:[mainPush]},
+    pushSha,'BestNathan/nession');
+  assert.equal(mainProof[0].conclusion,'success');
+  assert.deepEqual(normalizeCiEvidence({targetSha:pushSha,
+    directRuns:Array.from({length:40},(_,i)=>({
+      id:9000+i,head_sha:pushSha,name:'Acceptance / Orchestrator',
+      created_at:'2026-10-16T00:00:00Z',conclusion:'success',status:'completed'})),
+    targetPushE2eRuns:mainProof}).target_push_e2e_runs,mainProof);
+  const scoped=await collectTargetPushE2eRuns('BestNathan/nession',pushSha,
+    async apiPath=>{
+      assert.equal(apiPath,'/repos/BestNathan/nession/actions/workflows/e2e-tests.yml/runs?head_sha='+pushSha+'&event=push&per_page=5');
+      return {workflow_runs:[mainPush]};
+    });
+  assert.deepEqual(scoped,mainProof);
+  for(const bad of [
+    {...mainPush,head_sha:'a'.repeat(40)},
+    {...mainPush,run_attempt:0},
+    {...mainPush,head_branch:'feature'},
+    {...mainPush,event:'pull_request'},
+    {...mainPush,name:'Acceptance / Orchestrator'},
+    {...mainPush,path:'.github/workflows/other.yml'},
+    {...mainPush,status:'in_progress',conclusion:'success'},
+    {...mainPush,status:'completed',conclusion:null},
+    {...mainPush,status:'completed',conclusion:'failure',
+      repository:{full_name:'other/repo'}},
+  ])assert.throws(()=>attestTargetPushE2eRuns({workflow_runs:[bad]},
+    pushSha,'BestNathan/nession'),/unverified/);
+  assert.throws(()=>attestTargetPushE2eRuns({workflow_runs:[mainPush,mainPush]},
+    pushSha,'BestNathan/nession'),/unverified/);
+  const red=attestTargetPushE2eRuns({workflow_runs:[{...mainPush,conclusion:'failure'}]},
+    pushSha,'BestNathan/nession');
+  assert.equal(red[0].conclusion,'failure');
+
   const e2eSha='a'.repeat(40);
   const run={id:38388288917,run_attempt:4,head_sha:e2eSha,
     name:'E2E / Tests',path:'.github/workflows/e2e-tests.yml',
