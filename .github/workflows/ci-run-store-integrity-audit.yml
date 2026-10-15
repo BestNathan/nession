@@ -27,7 +27,6 @@ jobs:
     timeout-minutes: 25
     env:
       GITHUB_TOKEN: ${{ github.token }}
-      RUN_STORE_AUDIT_ANCHORS_JSON: ${{ secrets.RUN_STORE_AUDIT_ANCHORS_JSON }}
     steps:
       - name: Checkout trusted main at exact SHA
         uses: actions/checkout@v4
@@ -41,4 +40,8 @@ jobs:
       - name: Verify immutable history and audit fixtures
         run: ./gates/run run-store-integrity
       - name: Audit live orphan refs against independently controlled baselines
+        # The anchor secret is unavailable to checkout, setup-node and Gates.
+        # Only main-owned audited Node code observes the checkpoint locator.
+        env:
+          RUN_STORE_AUDIT_ANCHORS_JSON: ${{ secrets.RUN_STORE_AUDIT_ANCHORS_JSON }}
         run: node scripts/audit-live-run-stores.mjs
