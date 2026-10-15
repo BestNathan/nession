@@ -20,7 +20,7 @@
             "issues: write"
           ],
           "app_token": {
-            "when": "RUN_STORE_WRITER_MODE=app",
+            "when": "RUN_STORE_WRITER_MODE unset or app; legacy explicitly rolls back",
             "app_id_variable": "RUN_STORE_WRITER_APP_ID",
             "private_key_secret": "RUN_STORE_WRITER_APP_PRIVATE_KEY",
             "scope": "nession: contents write",
@@ -38,7 +38,7 @@
             "contents: write"
           ],
           "app_token": {
-            "when": "RUN_STORE_WRITER_MODE=app",
+            "when": "RUN_STORE_WRITER_MODE unset or app; legacy explicitly rolls back",
             "app_id_variable": "RUN_STORE_WRITER_APP_ID",
             "private_key_secret": "RUN_STORE_WRITER_APP_PRIVATE_KEY",
             "scope": "nession: contents write",
@@ -57,7 +57,7 @@
             "issues: write"
           ],
           "app_token": {
-            "when": "RUN_STORE_WRITER_MODE=app",
+            "when": "RUN_STORE_WRITER_MODE unset or app; legacy explicitly rolls back",
             "app_id_variable": "RUN_STORE_WRITER_APP_ID",
             "private_key_secret": "RUN_STORE_WRITER_APP_PRIVATE_KEY",
             "scope": "nession: contents write",
@@ -82,7 +82,7 @@
             "contents: write"
           ],
           "app_token": {
-            "when": "RUN_STORE_WRITER_MODE=app",
+            "when": "RUN_STORE_WRITER_MODE unset or app; legacy explicitly rolls back",
             "app_id_variable": "RUN_STORE_WRITER_APP_ID",
             "private_key_secret": "RUN_STORE_WRITER_APP_PRIVATE_KEY",
             "scope": "nession: contents write",
@@ -110,7 +110,7 @@
             "contents: write"
           ],
           "app_token": {
-            "when": "RUN_STORE_WRITER_MODE=app",
+            "when": "RUN_STORE_WRITER_MODE unset or app; legacy explicitly rolls back",
             "app_id_variable": "RUN_STORE_WRITER_APP_ID",
             "private_key_secret": "RUN_STORE_WRITER_APP_PRIVATE_KEY",
             "scope": "nession: contents write",
@@ -128,7 +128,7 @@
             "contents: write"
           ],
           "app_token": {
-            "when": "RUN_STORE_WRITER_MODE=app",
+            "when": "RUN_STORE_WRITER_MODE unset or app; legacy explicitly rolls back",
             "app_id_variable": "RUN_STORE_WRITER_APP_ID",
             "private_key_secret": "RUN_STORE_WRITER_APP_PRIVATE_KEY",
             "scope": "nession: contents write",
@@ -151,6 +151,6 @@
     "branch_protection": "unknown_until_live_probe",
     "secrets": "Never resolve, print or store secret values",
     "independent_anchor": "pending_offline_admin_control",
-    "writer_rollout": "legacy-by-default; app mode is opt-in until disposable ref smoke and all six writers are verified"
+    "writer_rollout": "app-by-default after verified main smoke; explicit legacy rollback; no Ruleset before production App ingestion checks"
   }
 }
