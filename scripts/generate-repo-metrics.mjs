@@ -230,60 +230,79 @@ async function issueAndPrStats(
   };
 }
 
-// GitHub Actions' run-list response includes a total_count independent of
-// page size. Do not walk every run: a busy repository can exceed the old
-// arbitrary 10k pagination cap within 30 days. Query each bounded, exact UTC
-// creation window and count GitHub-authenticated run identities once.
+// GitHub's filtered Actions list can report total_count capped at 2,500,
+// *even with per_page=1*. Partition timestamp ranges until every exact
+// subrange is below the cap; never silently mistake a capped total for truth.
 export async function workflowStats(repository, cutoff7dMs, cutoff30dMs, token,
   nowMs = Date.now(), getJson = githubJson) {
   if(!/^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(repository) ||
      ![cutoff7dMs,cutoff30dMs,nowMs].every(Number.isFinite) ||
      cutoff30dMs >= cutoff7dMs || cutoff7dMs > nowMs)
     fail('invalid Actions workflow-count window',
-      'provide ordered absolute UTC timestamps for the 30d/7d reporting windows.');
-
-  // GitHub stores and filters workflow created_at at whole-second precision.
-  // Round the inclusive start UP so the returned count is equivalent to
-  // "created >= cutoffMs", which used to be checked per run.
-  const startAt = ms => new Date(Math.ceil(ms / 1000) * 1000).toISOString()
-    .replace('.000Z','Z');
-  const endAt = ms => new Date(Math.floor(ms / 1000) * 1000).toISOString()
-    .replace('.000Z','Z');
-  const end = endAt(nowMs);
-  const countWindow = async startMs => {
-    if(Math.ceil(startMs/1000)>Math.floor(nowMs/1000))return 0;
-    const range = startAt(startMs)+'..'+end;
-    const endpoint = '/repos/'+repository+'/actions/runs?per_page=1&created='+
+      'provide ordered absolute UTC timestamps for 30d/7d.');
+  // GitHub created_at has second-level resolution. Ranges are inclusive and
+  // adjacent children never overlap, preserving the old created >= cutoff.
+  const start7 = Math.ceil(cutoff7dMs/1000);
+  const start30 = Math.ceil(cutoff30dMs/1000);
+  const end = Math.floor(nowMs/1000);
+  const format = sec => new Date(sec*1000).toISOString().replace('.000Z','Z');
+  const COUNT_SPLIT_THRESHOLD = 2000; // below observed 2,500 API result ceiling
+  const MAX_QUERIES = 256;
+  let queries = 0;
+  const cache = new Map();
+  const countRange = async (startSec,endSec) => {
+    if(startSec>endSec)return 0;
+    const key=startSec+':'+endSec;
+    if(cache.has(key))return cache.get(key);
+    if(++queries>MAX_QUERIES)
+      fail('GitHub Actions count needs more than 256 bounded queries',
+        'aggregate authoritative run records or narrow the collection window.');
+    const range=format(startSec)+'..'+format(endSec);
+    const endpoint='/repos/'+repository+'/actions/runs?per_page=1&created='+
       encodeURIComponent(range);
-    const data = await getJson(endpoint, token);
-    if(!Number.isSafeInteger(data?.total_count) || data.total_count<0 ||
-       !Array.isArray(data.workflow_runs) ||
-       (data.total_count>0 && data.workflow_runs.length!==1) ||
-       (data.total_count===0 && data.workflow_runs.length!==0))
-      fail('invalid exact-window GitHub Actions count response',
-        'restore trusted Actions run-list total_count instead of truncating it.');
-    // The one representative run must belong to the queried range; no
-    // return of a repository-global total masked as a filtered count.
-    if(data.total_count>0){
-      const created=Date.parse(data.workflow_runs[0].created_at);
-      if(!Number.isFinite(created) || created<Math.ceil(startMs/1000)*1000 ||
-         created>Math.floor(nowMs/1000)*1000)
+    const payload=await getJson(endpoint,token);
+    if(!Number.isSafeInteger(payload?.total_count)||payload.total_count<0||
+       !Array.isArray(payload.workflow_runs)||
+       (payload.total_count>0&&payload.workflow_runs.length!==1)||
+       (payload.total_count===0&&payload.workflow_runs.length!==0))
+      fail('invalid GitHub Actions count response',
+        'restore authenticated GitHub run-list metadata.');
+    if(payload.total_count>0){
+      const created=Date.parse(payload.workflow_runs[0].created_at);
+      if(!Number.isFinite(created)||created<startSec*1000||created>endSec*1000)
         fail('workflow-count response is not scoped to the requested range',
-          'verify the created filter and GitHub API source.');
+          'verify GitHub created-time filter and source provenance.');
     }
-    return data.total_count;
+    let count=payload.total_count;
+    // Treat equality/excess at a conservative threshold as possibly capped.
+    // A single second that still saturates cannot be proven exact -> FAIL.
+    if(count>=COUNT_SPLIT_THRESHOLD){
+      if(startSec===endSec)
+        fail('GitHub count cap reached within a single UTC second',
+          'use an independently authenticated per-run durable log; do not truncate.');
+      const mid=startSec+Math.floor((endSec-startSec)/2);
+      const [left,right]=await Promise.all([
+        countRange(startSec,mid),countRange(mid+1,endSec),
+      ]);
+      count=left+right;
+      if(!Number.isSafeInteger(count))
+        fail('Actions workflow count overflow','retain exact integer counts.');
+    }
+    cache.set(key,count);
+    return count;
   };
-  const overall = await getJson('/repos/'+repository+'/actions/runs?per_page=1',token);
+  const overall=await getJson('/repos/'+repository+'/actions/runs?per_page=1',token);
   if(!Number.isSafeInteger(overall?.total_count)||overall.total_count<0||
-     !Array.isArray(overall.workflow_runs))
+     !Array.isArray(overall.workflow_runs)||
+     (overall.total_count>0&&overall.workflow_runs.length!==1))
     fail('invalid global Actions workflow-count response',
       'verify GitHub Actions metadata and repository token.');
-  const [last_7d,last_30d] = await Promise.all([
-    countWindow(cutoff7dMs),countWindow(cutoff30dMs),
+  const [last_7d,last_30d]=await Promise.all([
+    countRange(start7,end),countRange(start30,end),
   ]);
-  if(last_7d>last_30d || last_30d>overall.total_count)
+  if(last_7d>last_30d||last_30d>overall.total_count)
     fail('inconsistent GitHub Actions activity counts',
-      'retry with a consistent run-list snapshot and retain exact-window provenance.');
+      'retry with a consistent run-list snapshot and retain source provenance.');
   return {total:overall.total_count,last_7d,last_30d};
 }
 
@@ -682,30 +701,34 @@ async function runSelfTest() {
     },
   };
 
-  // Real regression: >10,000 Actions runs in 30d must be counted exactly,
-  // never capped, silently sampled or lost to the legacy 100-page limit.
+  // Reproduce GitHub's real 2,500 filtered-count ceiling. An unpartitioned
+  // 30d query returns 2,500 even though there are 11,800 actual runs.
   const now=Date.parse('2026-10-15T00:00:00Z');
   const cutoff7=now-7*DAY_MS,cutoff30=now-30*DAY_MS;
+  const events=[];
+  for(let day=0;day<10;day++)
+    for(let i=0;i<1180;i++)
+      events.push(now-Math.floor((day+0.5)*DAY_MS));
   const requested=[];
-  const metadata=async endpoint=>{
+  const cappedMetadata=async endpoint=>{
     requested.push(endpoint);
-    const value=endpoint.includes('created=')?
-      (decodeURIComponent(endpoint).includes('2026-10-08T00:00:00Z')?4100:11800):12345;
-    return {total_count:value,workflow_runs:[{
-      created_at: new Date(value===4100?cutoff7: value===11800?cutoff30:now).toISOString(),
-    }]};
+    if(!endpoint.includes('created='))
+      return {total_count:12345,workflow_runs:[{created_at:new Date(now).toISOString()}]};
+    const range=decodeURIComponent(endpoint.split('created=')[1]);
+    const [from,to]=range.split('..').map(Date.parse);
+    const selected=events.filter(ms=>ms>=from&&ms<=to);
+    return {total_count:Math.min(2500,selected.length),
+      workflow_runs:selected.length?[{created_at:new Date(selected[0]).toISOString()}]:[]};
   };
-  const large=await workflowStats('BestNathan/nession',cutoff7,cutoff30,
-    'fixture-token',now,metadata);
-  assert.deepEqual(large,{total:12345,last_7d:4100,last_30d:11800});
-  assert.equal(requested.length,3);
-  assert.ok(requested.some(endpoint=>endpoint.includes('per_page=1&created=')));
-  assert.ok(!requested.some(endpoint=>endpoint.includes('&page=')));
-  const empty=await workflowStats('BestNathan/nession',cutoff7,cutoff30,
-    'fixture-token',now,async endpoint=>({
-      total_count:0,workflow_runs:[],
-    }));
-  assert.deepEqual(empty,{total:0,last_7d:0,last_30d:0});
+  const counts=await workflowStats('BestNathan/nession',cutoff7,cutoff30,
+    'fixture-token',now,cappedMetadata);
+  assert.deepEqual(counts,{total:12345,last_7d:8260,last_30d:11800});
+  assert.ok(requested.length>5);
+  assert.ok(requested.some(x=>x.includes('per_page=1&created=')));
+  assert.ok(!requested.some(x=>x.includes('&page=')));
+  assert.deepEqual(await workflowStats('BestNathan/nession',cutoff7,cutoff30,
+    'fixture-token',now,async()=>({total_count:0,workflow_runs:[]})),
+  {total:0,last_7d:0,last_30d:0});
   await assert.rejects(()=>workflowStats('BestNathan/nession',cutoff7,cutoff30,
     'fixture-token',now,async endpoint=>({
       total_count:endpoint.includes('created=')?100:1000,
@@ -713,12 +736,19 @@ async function runSelfTest() {
     })),/not scoped/);
   await assert.rejects(()=>workflowStats('BestNathan/nession',cutoff7,cutoff30,
     'fixture-token',now,async endpoint=>({
-      total_count: endpoint.includes('created=')?12000:1000,
+      total_count:endpoint.includes('created=')?1500:1000,
       workflow_runs:[{created_at:'2026-10-10T00:00:00Z'}],
     })),/inconsistent/);
   await assert.rejects(()=>workflowStats('foreign/repo',cutoff7,cutoff30,
     'fixture-token',now,async()=>({total_count:'12000',workflow_runs:[]})),
-    /invalid global/);
+  /invalid global/);
+  // Even when all ≥2,000 matching runs have identical second timestamps,
+  // never claim the capped count is precise.
+  await assert.rejects(()=>workflowStats('BestNathan/nession',cutoff7,cutoff30,
+    'fixture-token',now,async endpoint=>({
+      total_count:endpoint.includes('created=')?2500:3000,
+      workflow_runs:[{created_at:new Date(now-1000).toISOString()}],
+    })),/cap reached|not scoped/);
 
   const svg = renderSvg(fixture, 'dark');
   for (const required of [
