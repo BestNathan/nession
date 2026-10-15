@@ -234,8 +234,8 @@ function selfTest() {
   assert.equal(sourceIdentity(event, 'BestNathan/nession').run_id, 12);
   // #1690: main Push Scenario production source must be reachable, not only
   // a PR or an arbitrary-ref manual dispatch. Still observational, never Pass.
-  const producerYml=fs.readFileSync('.github/workflows/e2e-scenario-smoke.yml','utf8');
-  const ingesterYml=fs.readFileSync('.github/workflows/e2e-scenario-ingest.yml','utf8');
+  const producerYml=fs.readFileSync(new URL('../.github/workflows/e2e-scenario-smoke.yml',import.meta.url),'utf8');
+  const ingesterYml=fs.readFileSync(new URL('../.github/workflows/e2e-scenario-ingest.yml',import.meta.url),'utf8');
   assert.match(producerYml,/^  push:\n    branches: \[main\]/m,
     'main post-merge terminal Scenario source is not connected');
   assert.match(producerYml,/^      - '\.github\/workflows\/e2e-scenario-smoke\.yml'$/m,
