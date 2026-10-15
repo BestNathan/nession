@@ -95,3 +95,44 @@ jobs:
       - name: Deploy GitHub Pages
         id: publication
         uses: actions/deploy-pages@v4
+      - name: Verify public site URL and exact deployed main SHA
+        env:
+          PUBLISHED_URL: ${{ steps.publication.outputs.page_url }}
+          EXPECTED_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Verify the actual anonymous HTTPS website, not just an upload job.
+          url="${PUBLISHED_URL%/}"
+          [[ "$url" == "https://bestnathan.github.io/nession" ]] || {
+            echo "::error::Unexpected Pages publication origin: $url"
+            exit 1
+          }
+          json="$(mktemp)"
+          html="$(mktemp)"
+          trap 'rm -f "$json" "$html"' EXIT
+          matched=false
+          for attempt in {1..18}; do
+            if curl --fail --silent --show-error --location --connect-timeout 10 --max-time 20 \
+                -H 'Cache-Control: no-cache' "$url/data/site.json?revision=$EXPECTED_SHA" -o "$json" \
+              && jq -e --arg sha "$EXPECTED_SHA" \
+                '.schema_version == 1 and .source.repository == "BestNathan/nession" and .source.main_sha == $sha' "$json" >/dev/null \
+              && curl --fail --silent --show-error --location --connect-timeout 10 --max-time 20 \
+                -H 'Cache-Control: no-cache' "$url/?revision=$EXPECTED_SHA" -o "$html" \
+              && grep -Fq '<title>Nession' "$html"; then
+              matched=true
+              break
+            fi
+            sleep 5
+          done
+          [[ "$matched" == true ]] || {
+            echo "::error::Deployed public site did not serve the expected SHA and HTML"
+            exit 1
+          }
+          {
+            echo "## Public Pages verified"
+            echo
+            echo "- Public HTTPS URL: $url/"
+            echo "- Exact deployed main SHA: \`$EXPECTED_SHA\`"
+            echo "- Checked: HTTP static HTML and schema-v1 sanitized /data/site.json"
+          } >> "$GITHUB_STEP_SUMMARY"
