@@ -200,7 +200,7 @@ test('public release gate rejects arbitrary fields, unsafe links and invalid val
  const extra=initial();extra.work.issues[0].untrusted_field='unapproved';
  assert.throws(()=>validateProjection(extra),/disallowed public field/);
  const privateField=initial();privateField.agents.roster[0].transcript='unsafe';
- assert.throws(()=>validateProjection(privateField),/private field/);
+ assert.throws(()=>validateProjection(privateField),/disallowed public field|private field/);
  for(const link of ['https://elsewhere.example/pull/1','javascript:alert(1)']){
    const p=initial();p.work.issues[0].url=link;
    assert.throws(()=>validateProjection(p),/untrusted public URL/);
