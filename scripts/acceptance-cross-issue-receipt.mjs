@@ -15,7 +15,7 @@ const DIGEST = /^sha256:([0-9a-f]{64})$/;
 const MAX_BYTES = 128 * 1024;
 
 export function pinnedCrossIssueAcceptance(body) {
-  const section = String(body ?? '').match(/^## Historical Acceptance Evidence\s*\n([\s\S]*?)(?=^## |\s*$)/m)?.[1] ?? '';
+  const section = String(body ?? '').match(/^## Historical Acceptance Evidence\s*\n([\s\S]*?)(?=^## |$(?![\s\S]))/m)?.[1] ?? '';
   const lines = section.split('\n').filter(s => s.startsWith('Historical Acceptance witness:'));
   if (lines.length > 2) throw Error('too many historical Acceptance witnesses');
   return lines.map(line => {
