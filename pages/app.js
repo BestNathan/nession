@@ -168,6 +168,9 @@ function renderWork(){
     root.append(s);
   };
   listing('Issues',w.issues||[],w.issues_status);listing('Pull Requests',w.pulls||[],w.pulls_status);
+  root.append(node('p','hint',w.workflow_runs_status==='available'
+    ? 'Run evidence is sampled from the 100 most recent GitHub Actions runs. Not observed does not imply no historical run.'
+    : 'CI/E2E workflow source unavailable; missing evidence is not a successful or failed run.'));
   root.append(node('div','callout','The trusted Issue → PR → Agent run/attempt → exact-SHA Acceptance graph is not yet publicly projected. Until that data is verified, it is intentionally not presented as complete.'));
 }
 function renderRepository(){
