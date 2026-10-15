@@ -68,10 +68,12 @@ jobs:
           git -C "$root" add README.txt
           git -C "$root" commit -qm 'run-store: disposable App root'
           git -C "$root" push origin "HEAD:${probe}"
+          git -C "$root" rev-parse HEAD > "${RUNNER_TEMP}/run-store-smoke-owned-head"
           printf 'append-only\n' > "$root/record.txt"
           git -C "$root" add record.txt
           git -C "$root" commit -qm 'run-store: disposable App append'
           git -C "$root" push origin "HEAD:${probe}"
+          git -C "$root" rev-parse HEAD > "${RUNNER_TEMP}/run-store-smoke-owned-head"
           expected="$(git -C "$root" rev-parse HEAD)"
           observed="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/run-store-smoke/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" --jq .object.sha)"
           [[ "$observed" == "$expected" ]] || {
@@ -98,5 +100,15 @@ jobs:
           set -euo pipefail
           ref="repos/${GITHUB_REPOSITORY}/git/refs/heads/run-store-smoke/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           if gh api "${ref}" >/dev/null 2>&1; then
+            if [[ ! -s "${RUNNER_TEMP}/run-store-smoke-owned-head" ]]; then
+              echo "::error::Probe ref exists but this run has no recorded owned head; refuse deletion" >&2
+              exit 1
+            fi
+            observed="$(gh api "${ref}" --jq .object.sha)"
+            expected="$(cat "${RUNNER_TEMP}/run-store-smoke-owned-head")"
+            [[ "$observed" == "$expected" ]] || {
+              echo "::error::Probe head moved; refuse to delete unowned commits" >&2
+              exit 1
+            }
             gh api --method DELETE "${ref}" >/dev/null
           fi
