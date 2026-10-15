@@ -6,6 +6,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { collectHistoricalE2EForPull, collectLinkedIssueE2EEvidence } from './acceptance-e2e-lineage.mjs';
 import { parseIssueE2E } from './issue-e2e-contract.mjs';
 import { collectCrossIssueAcceptance } from './acceptance-cross-issue-receipt.mjs';
+import { collectRelatedBugCompletion } from './acceptance-bug-bootstrap-receipt.mjs';
 import { verifyWake } from './agent-evidence-waker.mjs';
 import {historicalCaseEvidence,selfTestHistoricalCase} from './acceptance-historical-case-replay.mjs';
 import { collectAuthenticatedCaseReadbacks, selfTestCaseReceipts } from './acceptance-case-readback-evidence.mjs';
@@ -73,7 +74,7 @@ function compactRuns(runs, expectedSha) {
     .slice(0, MAX_RUNS_PER_SHA);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [] }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -100,6 +101,7 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     direct_runs: compactRuns(directRuns, sha),
     exact_head_e2e_steps: exactHeadE2eSteps,
     related_issue_acceptance_receipts: relatedAcceptance,
+    related_bug_completion_receipt: relatedBugCompletion,
     verified_historical_case_replays: verifiedHistoricalCaseReplays,
     verified_case_receipts: verifiedCaseReceipts,
     historical_reporter_e2e_rerun: historicalReporterE2eRerun,
@@ -720,6 +722,7 @@ async function collectCommand(workspace, outFile) {
   let implementationPulls = [];
   let historicalReporterE2eRerun = null;
   let relatedAcceptance = [];
+  let relatedBugCompletion = null;
   const issueNumber = String(process.env.ISSUE_NUMBER || '').trim();
   if (/^[1-9][0-9]*$/.test(issueNumber)) {
     const currentIssue = await githubGet('/repos/' + repo + '/issues/' + issueNumber);
@@ -767,10 +770,12 @@ async function collectCommand(workspace, outFile) {
         repo,currentIssue,sha);
       relatedAcceptance=await collectCrossIssueAcceptance(repo,currentIssue.body,
         sha,Number(issueNumber),githubGet,attestExactHeadE2eSteps);
+      relatedBugCompletion=await collectRelatedBugCompletion(repo,currentIssue,
+        sha,githubGet);
     }
   }
   const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls,
-    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance });
+    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion });
   fs.writeFileSync(outFile, JSON.stringify(evidence, null, 2) + '\n');
   console.log(
     'collected acceptance CI evidence for ' + sha +
