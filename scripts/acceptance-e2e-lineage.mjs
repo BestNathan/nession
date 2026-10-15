@@ -545,7 +545,8 @@ export async function collectLinkedIssueE2EEvidence(repo,issueNumber,get,
       if(!orchestrator)throw Error('no completed pre-merge Orchestrator to verify');
       const detail=await get('/repos/'+repo+'/actions/runs/'+orchestrator.id+
         '/attempts/'+orchestrator.run_attempt+'/jobs?per_page=100');
-      mainMerge=verifyMainSelectedMerge(pr,commit,comparison,runs,detail.jobs);
+      mainMerge={...verifyMainSelectedMerge(pr,commit,comparison,runs,detail.jobs),
+        evaluation_target_sha:targetSha};
     }
     const payload=pr.merged_at&&!mergedMain?await get('/repos/'+repo+'/actions/runs?head_sha='+
       pr.merge_commit_sha+'&per_page=100'):{workflow_runs:[]};
@@ -922,6 +923,44 @@ async function selfTest() {
     gates,jobs.filter(j=>j.name!=='acceptance-pr-gate')),/deterministic PR gate/);
   assert.throws(()=>verifyMainSelectedMerge(mainFixturePr,mergedCommit,ancestry,
     gates,jobs.filter(j=>!j.name.includes('Execute acceptance'))),/read-only pre-merge Agent/);
+  // Main-target proof crosses four independent boundaries: Issue timeline,
+  // archived selected Plan, trusted main Ingest receipts, and the actual
+  // two-parent merge in the *evaluated SHA's* ancestry.
+  const mainHistory=[{
+    run_id:75,conclusion:'success',
+    selection:{issue_numbers:[1702,1772],no_e2e_issues:[1772],
+      selected:[{id:'login',owners:[1702]}]},
+    results:[{id:'login',result:'Pass'}],
+    projections:[{issue:1702,outcome:'applied',
+      rows:[{id:'login',result:'Pass'}]}],
+  }];
+  const target='9'.repeat(40),prWithRefs={...mainFixturePr,
+    body:'Refs #1702\\nRefs #1772'};
+  const mainCrossRefs=[{event:'cross-referenced',source:{issue:{
+    number:1777,pull_request:{url:'https://api.github.com/repos/'+REPO+'/pulls/1777'},
+  }}}];
+  const mainGet=async url=>{
+    if(url.includes('/issues/1772/timeline?'))return mainCrossRefs;
+    if(url.endsWith('/pulls/1777'))return prWithRefs;
+    if(url.endsWith('/commits/'+mergedSha))return mergedCommit;
+    if(url.endsWith('/compare/'+mergedSha+'...'+target))return ancestry;
+    if(url.endsWith('/actions/runs?head_sha='+mergedHead+'&per_page=100'))
+      return {workflow_runs:gates};
+    if(url.endsWith('/actions/runs/43/attempts/1/jobs?per_page=100'))
+      return {jobs};
+    throw Error('unexpected independent main-merge verification API '+url);
+  };
+  const mainProof=await collectLinkedIssueE2EEvidence(REPO,1772,
+    mainGet,async()=>mainHistory,target);
+  assert.deepEqual(mainProof.map(x=>x.scope),['merged-main-no-e2e']);
+  assert.equal(mainProof[0].verified_main_merge.evaluation_target_sha,target);
+  assert.equal(mainProof[0].verified_main_merge.merge_sha,mergedSha);
+  assert.equal(mainProof[0].verified_selected_runs[0].projections[0].issue,1702);
+  assert.deepEqual(await collectLinkedIssueE2EEvidence(REPO,1772,mainGet,
+    async()=>[{...mainHistory[0],projections:[
+      {issue:1772,outcome:'applied',rows:[{id:'login',result:'Pass'}]}]}],target),[]);
+  await assert.rejects(()=>collectLinkedIssueE2EEvidence(REPO,1772,
+    mainGet,async()=>mainHistory),/exact checked-out Acceptance target/);
   console.log('Acceptance historical Issue E2E evidence: bounded PR commit/run lineage and negative provenance fixtures passed');
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
