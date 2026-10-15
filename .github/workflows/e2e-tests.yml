@@ -20,8 +20,10 @@ on:
         description: 'Regenerate canonical visual baselines with --update-snapshots=all (download artifact and commit PNGs)'
         type: boolean
         default: false
+  # Real post-merge E2E on main is consumed by the existing trusted
+  # E2E / Test Ingest: exact-SHA push evidence, App CAS, receipt/readback.
   push:
-    branches: [staging]
+    branches: [staging, main]
   pull_request:
     branches: [staging, main]
 
