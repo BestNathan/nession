@@ -33,6 +33,7 @@ export const CATALOG = [
   ['ci-pages', 'ci-pages.yml', 'CI / Pages', 'ci-pages.yml', 'CI / Pages', 'ci'],
   ['deploy-pages', 'deploy-pages.yml', 'Deploy / Public Pages', 'deploy-pages.yml', 'Deploy / Public Pages', 'delivery'],
   ['metrics-agent-telemetry', 'metrics-ingest.yml', 'Metrics Ingest', 'metrics-agent-telemetry.yml', 'Metrics / Agent Telemetry Ingest', 'metrics'],
+  ['metrics-replay-request', 'metrics-replay-request.yml', 'Metrics / Replay Request', 'metrics-replay-request.yml', 'Metrics / Replay Request', 'metrics'],
   ['metrics-repository', 'repo-metrics.yml', 'Repository Metrics', 'metrics-repository.yml', 'Metrics / Repository Health', 'metrics'],
   ['release-staging', 'staging.yml', 'Staging', 'release-staging.yml', 'Release / Staging Artifacts', 'delivery'],
   ['release-production', 'release.yml', 'Release', 'release-production.yml', 'Release / Production', 'delivery'],
