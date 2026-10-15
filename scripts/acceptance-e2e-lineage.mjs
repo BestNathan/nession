@@ -883,7 +883,7 @@ async function selfTest() {
   // Ordinary main merge must not re-label a selected PR-head E2E
   // result as a merge-SHA run. Every parent, gate and ancestor is checked.
   const mergedHead='1'.repeat(40),mergedSha='2'.repeat(40);
-  const mergedPr={number:1777,state:'closed',merged_at:'2026-10-14T12:00:00Z',
+  const mainFixturePr={number:1777,state:'closed',merged_at:'2026-10-14T12:00:00Z',
     merge_commit_sha:mergedSha,
     head:{sha:mergedHead,repo:{full_name:REPO}},
     base:{ref:'main',repo:{full_name:REPO}}};
@@ -906,19 +906,19 @@ async function selfTest() {
     ...['pre-merge-gate','acceptance-pr-gate'].map(name=>({
       name,status:'completed',conclusion:'success'})),
   ];
-  const trusted=verifyMainSelectedMerge(mergedPr,mergedCommit,ancestry,gates,jobs);
+  const trusted=verifyMainSelectedMerge(mainFixturePr,mergedCommit,ancestry,gates,jobs);
   assert.equal(trusted.merge_sha,mergedSha);
   assert.equal(trusted.pr_head_sha,mergedHead);
   assert.equal(trusted.source_boundary.includes('PR-head'),true);
-  assert.throws(()=>verifyMainSelectedMerge(mergedPr,
+  assert.throws(()=>verifyMainSelectedMerge(mainFixturePr,
     {...mergedCommit,parents:[...mergedCommit.parents].reverse()},ancestry,gates,jobs),/ordinary main merge/);
-  assert.throws(()=>verifyMainSelectedMerge(mergedPr,mergedCommit,
+  assert.throws(()=>verifyMainSelectedMerge(mainFixturePr,mergedCommit,
     {...ancestry,merge_base_commit:{sha:'4'.repeat(40)}},gates,jobs),/ancestry/);
-  assert.throws(()=>verifyMainSelectedMerge(mergedPr,mergedCommit,ancestry,
+  assert.throws(()=>verifyMainSelectedMerge(mainFixturePr,mergedCommit,ancestry,
     gates.map(g=>g.name==='E2E / Tests'?{...g,head_sha:mergedSha}:g),jobs),/E2E \/ Tests/);
-  assert.throws(()=>verifyMainSelectedMerge(mergedPr,mergedCommit,ancestry,
+  assert.throws(()=>verifyMainSelectedMerge(mainFixturePr,mergedCommit,ancestry,
     gates,jobs.filter(j=>j.name!=='acceptance-pr-gate')),/deterministic PR gate/);
-  assert.throws(()=>verifyMainSelectedMerge(mergedPr,mergedCommit,ancestry,
+  assert.throws(()=>verifyMainSelectedMerge(mainFixturePr,mergedCommit,ancestry,
     gates,jobs.filter(j=>!j.name.includes('Execute acceptance'))),/read-only pre-merge Agent/);
   console.log('Acceptance historical Issue E2E evidence: bounded PR commit/run lineage and negative provenance fixtures passed');
 }
