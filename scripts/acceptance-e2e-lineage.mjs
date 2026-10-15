@@ -445,6 +445,9 @@ export function verifyMainSelectedMerge(pr,mergeCommit,comparison,runs,jobs){
       source_sha:head,conclusion:'success'};
   });
   if(!Array.isArray(jobs))throw Error('missing completed deterministic PR jobs');
+  if(!jobs.some(j=>/^pre-merge-acceptance \([1-9]\d*\) \/ Execute acceptance$/.test(j.name)&&
+       j.status==='completed'&&j.conclusion==='success'))
+    throw Error('missing read-only pre-merge Agent acceptance');
   for(const name of ['pre-merge-gate','acceptance-pr-gate']){
     if(!jobs.some(j=>j.name===name&&j.status==='completed'&&j.conclusion==='success'))
       throw Error('missing successful deterministic PR gate '+name);
@@ -877,6 +880,46 @@ async function selfTest() {
       ? {...envelope,content:Buffer.from(JSON.stringify({...receipt,body_sha256:'0'.repeat(64)})).toString('base64')}
       : projectionGet(url)),/stored historical read-back body hash mismatch/);
 
+  // Ordinary main merge must not re-label a selected PR-head E2E
+  // result as a merge-SHA run. Every parent, gate and ancestor is checked.
+  const mergedHead='1'.repeat(40),mergedSha='2'.repeat(40);
+  const mergedPr={number:1777,state:'closed',merged_at:'2026-10-14T12:00:00Z',
+    merge_commit_sha:mergedSha,
+    head:{sha:mergedHead,repo:{full_name:REPO}},
+    base:{ref:'main',repo:{full_name:REPO}}};
+  const mergedCommit={sha:mergedSha,parents:[{sha:'3'.repeat(40)},{sha:mergedHead}]};
+  const ancestry={status:'ahead',merge_base_commit:{sha:mergedSha}};
+  const names=[
+    ['CI / Quality Gate','.github/workflows/ci-quality.yml','pull_request'],
+    ['E2E / Tests','.github/workflows/e2e-tests.yml','pull_request'],
+    ['Acceptance / Case Smoke','.github/workflows/acceptance-case-smoke.yml','pull_request'],
+    ['Acceptance / Orchestrator','.github/workflows/acceptance-orchestrator.yml','pull_request_target'],
+  ];
+  const gates=names.map(([name,workflow,event],i)=>({
+    id:40+i,run_attempt:1,name,path:workflow,event,
+    head_sha:mergedHead,status:'completed',conclusion:'success',
+    repository:{full_name:REPO}
+  }));
+  const jobs=[
+    {name:'pre-merge-acceptance (1772) / Execute acceptance',
+      status:'completed',conclusion:'success'},
+    ...['pre-merge-gate','acceptance-pr-gate'].map(name=>({
+      name,status:'completed',conclusion:'success'})),
+  ];
+  const trusted=verifyMainSelectedMerge(mergedPr,mergedCommit,ancestry,gates,jobs);
+  assert.equal(trusted.merge_sha,mergedSha);
+  assert.equal(trusted.pr_head_sha,mergedHead);
+  assert.equal(trusted.source_boundary.includes('PR-head'),true);
+  assert.throws(()=>verifyMainSelectedMerge(mergedPr,
+    {...mergedCommit,parents:[...mergedCommit.parents].reverse()},ancestry,gates,jobs),/ordinary main merge/);
+  assert.throws(()=>verifyMainSelectedMerge(mergedPr,mergedCommit,
+    {...ancestry,merge_base_commit:{sha:'4'.repeat(40)}},gates,jobs),/ancestry/);
+  assert.throws(()=>verifyMainSelectedMerge(mergedPr,mergedCommit,ancestry,
+    gates.map(g=>g.name==='E2E / Tests'?{...g,head_sha:mergedSha}:g),jobs),/E2E \/ Tests/);
+  assert.throws(()=>verifyMainSelectedMerge(mergedPr,mergedCommit,ancestry,
+    gates,jobs.filter(j=>j.name!=='acceptance-pr-gate')),/deterministic PR gate/);
+  assert.throws(()=>verifyMainSelectedMerge(mergedPr,mergedCommit,ancestry,
+    gates,jobs.filter(j=>!j.name.includes('Execute acceptance'))),/read-only pre-merge Agent/);
   console.log('Acceptance historical Issue E2E evidence: bounded PR commit/run lineage and negative provenance fixtures passed');
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
