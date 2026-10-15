@@ -118,5 +118,13 @@ export function runTests(){
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
   if(process.argv[2]==='self-test')runTests();
-  else fail('usage: self-test');
+  else if(process.argv[2]==='verify-baseline'){
+    const {readFileSync}=await import('node:fs');
+    const {fileURLToPath}=await import('node:url');
+    const {resolve,dirname}=await import('node:path');
+    const dir=resolve(dirname(fileURLToPath(import.meta.url)),'..');
+    const file=resolve(dir,'scripts/run-store-migration-baseline.json');
+    validateMigrationBaseline(JSON.parse(readFileSync(file,'utf8')));
+    console.log('Run Store historical Git heads are valid migration observations, not external/WORM proof');
+  } else fail('usage: self-test | verify-baseline');
 }
