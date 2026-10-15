@@ -75,6 +75,7 @@ async function live(out){
     checkout:ROOT,sourceSha:process.env.GITHUB_SHA,
     anchors,token:process.env.GH_TOKEN??process.env.GITHUB_TOKEN,
     anchorTrust:'main_migration_observation',
+    baselineTrees:Object.fromEntries(manifest.stores.map(x=>[x.ref,x.tree_sha])),
   });
   const appId=Number(process.env.STORE_WRITER_APP_ID??0);
   const report=summarizeGovernance(manifest,details,appId,history);
