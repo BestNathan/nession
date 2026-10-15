@@ -1,0 +1,73 @@
+name: CI / Run Store Fixture Evidence
+
+# SC-10 independently repeatable post-merge *fixture* evidence. This does not
+# attest real agent-store provisioning, writer identity, branch Rulesets or a
+# separately controlled checkpoint. No production orphan refs are modified.
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/ci-run-store-fixture-evidence.yml
+      - scripts/run-store-agent-disposable-selftest.mjs
+      - scripts/lib/agent/store/**
+      - scripts/run-store-integrity.mjs
+      - scripts/run-store-cas-push.mjs
+      - gates/checks/agent-checkpoint-store.sh
+      - gates/checks/run-store-integrity.sh
+  # Unlike workflow_dispatch, repository_dispatch evaluates default-branch code.
+  repository_dispatch:
+    types: [nession-run-store-fixture-evidence]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-run-store-fixture-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Immutable encrypted checkpoint and CAS fixture
+    if: github.repository == 'BestNathan/nession' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'repository_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout exact trusted main SHA (no persisted credentials)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify main-owned read-only fixture Workflow contract
+        run: node scripts/run-store-fixture-evidence-selftest.mjs
+      - name: Run both canonical checkpoint and Run Store integrity Gates
+        run: ./gates/run agent-checkpoint-store run-store-integrity
+      - name: Preserve source-bound successful fixture evidence (not live Store proof)
+        env:
+          TRUSTED_SHA: ${{ github.sha }}
+          EVIDENCE_RUN_ID: ${{ github.run_id }}
+          EVIDENCE_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$TRUSTED_SHA"
+          mkdir -p "$RUNNER_TEMP/store-fixture-evidence"
+          jq -n --arg sha "$TRUSTED_SHA" --arg run "$EVIDENCE_RUN_ID" --arg attempt "$EVIDENCE_ATTEMPT" \
+            --arg gate_script_sha256 "$(sha256sum scripts/run-store-agent-disposable-selftest.mjs | cut -d ' ' -f1)" \
+            '{schema_version:1,kind:"agent_store_disposable_fixture_evidence",repository:"BestNathan/nession",trusted_main_sha:$sha,workflow_run_id:$run,attempt:$attempt,fixture_sha256:$gate_script_sha256,gate_ids:["agent-checkpoint-store","run-store-integrity"],status:"fixture_pass",live_branch_enforcement:"not_tested",external_anchor:"not_provisioned",real_agent_store:"not_provisioned"}' \
+            > "$RUNNER_TEMP/store-fixture-evidence/fixture.json"
+          {
+            echo "## Disposable encrypted agent-store / CAS proof"
+            echo "- Trusted main SHA: $TRUSTED_SHA"
+            echo "- Canonical gates: agent-checkpoint-store, run-store-integrity **Pass**"
+            echo "- Status: fixture only. Production Ruleset, App identity, external anchor and real agent-store remain Pending"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload finite-retention main SHA Gate evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-store-fixture-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/store-fixture-evidence/fixture.json
+          if-no-files-found: warn
+          retention-days: 30
