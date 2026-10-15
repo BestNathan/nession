@@ -3,7 +3,7 @@
   "repository_name": "BestNathan/nession",
   "branch": "main",
   "commit_sha": "8965ea4389cd19dfbfcc328a9ae5d3d70a8a79de",
-  "generated_at": "2026-10-15T19:59:49.791Z",
+  "generated_at": "2026-10-15T23:10:55.069Z",
   "repository": {
     "source": {
       "loc": 259763,
@@ -49,9 +49,9 @@
     "coverage": {
       "rust": {
         "lines": {
-          "covered": 29595,
+          "covered": 29596,
           "total": 34086,
-          "rate": 0.8682450272839289
+          "rate": 0.8682743648418706
         },
         "crates": {
           "nession-common": {
@@ -64,9 +64,9 @@
           },
           "nession-agent": {
             "lines": {
-              "covered": 12041,
+              "covered": 12042,
               "total": 13390,
-              "rate": 0.8992531740104556
+              "rate": 0.8993278566094101
             },
             "threshold": 0.79
           },
@@ -158,8 +158,8 @@
   },
   "efficiency": {
     "window": "7d",
-    "window_start": "2026-10-08T19:59:49.791Z",
-    "window_30d_start": "2026-09-15T19:59:49.791Z",
+    "window_start": "2026-10-08T23:10:55.069Z",
+    "window_30d_start": "2026-09-15T23:10:55.069Z",
     "source_churn": {
       "additions": 45934,
       "deletions": 17329,
@@ -192,9 +192,9 @@
       "merged_30d": 786
     },
     "workflow_runs": {
-      "total": 14883,
-      "last_7d": 9171,
-      "last_30d": 13221
+      "total": 14888,
+      "last_7d": 9175,
+      "last_30d": 13226
     }
   }
 }
