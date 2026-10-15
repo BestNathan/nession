@@ -594,7 +594,7 @@ async function selfTest() {
       base_sha:'0'.repeat(40),target_sha:run.head_sha,
       issues:[{issue:1702}],selected:[{id:'login',owners:[{issue:1702}]}],
       mode:'selected'};
-    return {...canonical,plan_digest:createHash('sha256')
+    return {...canonical,pr_number:1718,plan_digest:createHash('sha256')
       .update(JSON.stringify(canonical)).digest('hex')};
   };
   const rec=(run,result)=>({schema_version:1,kind:'issue_e2e_run',
