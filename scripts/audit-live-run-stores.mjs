@@ -96,7 +96,7 @@ async function main(){
   if(process.env.GITHUB_REPOSITORY!==REPO||
      process.env.GITHUB_REF!=='refs/heads/main'||
      !SHA.test(process.env.GITHUB_SHA??'')||
-     !['schedule','workflow_dispatch'].includes(process.env.GITHUB_EVENT_NAME)) {
+     !['schedule','repository_dispatch'].includes(process.env.GITHUB_EVENT_NAME)) {
     deny('only trusted main schedule/manual workflow may audit');
   }
   const report=await auditLiveRunStores({
