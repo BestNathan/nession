@@ -15,10 +15,13 @@ const PLACEHOLDER_EVIDENCE = new Set([
 // Product classification stays intact: a Bug never needs a Requirement label
 // merely to participate in the same trusted SC/Acceptance pipeline.
 export function isAcceptanceIssue(issue) {
-  return (issue?.labels ?? []).some((label) => {
+  // The canonical Issue contract requires exactly one kind: Bug OR Requirement.
+  // Do not reclassify a Bug by stacking the Requirement label onto it.
+  const kinds = (issue?.labels ?? []).filter((label) => {
     const name = typeof label === 'string' ? label : label?.name;
     return ACCEPTANCE_ISSUE_LABELS.has(name);
   });
+  return kinds.length === 1;
 }
 
 export function isOpenAcceptanceIssue(issue) {
@@ -570,6 +573,7 @@ function runSelfTest() {
     [{ labels: ['requirement'], state: 'open' }, true, true],
     [{ labels: [{ name: 'requirement' }], state: 'closed' }, true, false],
     [{ labels: ['bug'], state: 'closed' }, true, false],
+    [{ labels: ['bug', 'requirement'], state: 'open' }, false, false],
     [{ labels: ['ci', 'test'], state: 'open' }, false, false],
     [{ labels: [], state: 'open' }, false, false],
     [{ state: 'open' }, false, false],
