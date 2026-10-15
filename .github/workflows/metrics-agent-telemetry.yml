@@ -287,6 +287,13 @@ jobs:
           SOURCE_RUN_ATTEMPT: ${{ steps.source.outputs.run_attempt }}
         run: |
           set -euo pipefail
+          # A failed Provider run may emit authentic immutable telemetry that
+          # MUST be archived, but it must never wake success-only Acceptance.
+          # Preserve all identity checks below for genuinely successful runs.
+          if [[ "$(jq -r '.conclusion // ""' "$RUNNER_TEMP/telemetry-source-run.json")" != 'success' ]]; then
+            echo 'Verified failed Provider telemetry archived; no success-only Acceptance wake' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           jq -e --arg repo "$GITHUB_REPOSITORY" '
             .repository.full_name == $repo and
             .head_repository.full_name == $repo and
