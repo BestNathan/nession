@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "kind": "agent_workflow_run",
+  "identity": {
+    "workflow_id": "requirement-acceptance",
+    "github_workflow": "Acceptance / Orchestrator",
+    "github_run_id": 38692324073,
+    "github_run_attempt": 2,
+    "job": "execute",
+    "repository": "BestNathan/nession",
+    "event": "push",
+    "unique_run_name": "38692324073-2-issue-1799-post-merge"
+  },
+  "task": {
+    "id": "issue-1799-post-merge",
+    "type": "acceptance",
+    "issue": 1799,
+    "stage": "post-merge",
+    "target_ref": "2f4147390ef8eeb26749d51c8b7d2638437fb79e",
+    "deployment": null
+  },
+  "agent": {
+    "provider": "cursor",
+    "id": "legacy-acceptance-cursor",
+    "role": "acceptor",
+    "harness_sha256": null,
+    "checkpoint_id": null,
+    "model": {
+      "id": "composer-2.5",
+      "fast": true,
+      "params": [
+        {
+          "id": "fast",
+          "value": "true"
+        }
+      ]
+    },
+    "run_id": "run-6b0d35f1-f953-461e-b212-8f5fbaafde11",
+    "request_id": "9e172430-3ff5-4a45-b1aa-c94c31526d1e",
+    "status": "finished",
+    "prompt": {
+      "id": "acceptance",
+      "version": "v1",
+      "sha256": "10706d98f08bf480283d96f409c255c9330bc355751de1fe2b927095cd9b257d"
+    }
+  },
+  "execution": {
+    "turns": 1,
+    "model_requests": 1,
+    "tools": {
+      "observed": true,
+      "total": 17,
+      "unique": 3,
+      "by_name": {
+        "glob": 4,
+        "grep": 1,
+        "read": 12
+      }
+    }
+  },
+  "tokens": {
+    "input": 216474,
+    "output": 3450,
+    "cache_read": 164064,
+    "cache_write": 0,
+    "reasoning": null,
+    "total": 383988
+  },
+  "cost": {
+    "raw_usd": null,
+    "charged_usd": null,
+    "estimated_usd": null
+  },
+  "timing": {
+    "started_at": "2026-10-15T06:30:24.024Z",
+    "finished_at": "2026-10-15T06:31:09.751Z",
+    "agent_duration_ms": 44863,
+    "workflow_duration_ms": null
+  },
+  "result": {
+    "status": "completed",
+    "pass": 0,
+    "pending": 1,
+    "fail": 0,
+    "na": 0
+  }
+}
