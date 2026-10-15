@@ -515,7 +515,7 @@ async function selfTest() {
     '| Criterion | Result | Evidence |',
     '|---|---|---|',
     '| SC-07 | Pending | - |',
-  ].join('\\n');
+  ].join('\n');
   const historicalIssue = {
     number:1792,title:'Pages browser proof',state:'open',
     labels:[{name:'requirement'}],body:historicalIssueBody,
@@ -554,8 +554,8 @@ async function selfTest() {
     repository:'BestNathan/nession',token:'offline-proof',request:historicalApi,
   });
   assert.deepEqual(once,{projected:true,changed:true});
-  assert.match(currentHistoricalIssue.body, /- \\[x\\] SC-07/);
-  assert.match(currentHistoricalIssue.body, /\\| SC-07 \\| Pass \\| run 100;/);
+  assert.match(currentHistoricalIssue.body, /- \[x\] SC-07/);
+  assert.match(currentHistoricalIssue.body, /\| SC-07 \| Pass \| run 100;/);
   assert.match(currentHistoricalIssue.body, new RegExp(ancestor));
   const replay=await applyCaseRecord(historicalRecord,{
     repository:'BestNathan/nession',token:'offline-proof',request:historicalApi,
