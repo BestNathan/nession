@@ -28,6 +28,25 @@ async function optionalList(path) {
     return Array.isArray(data)?data:null;
   } catch (e) { console.error('Optional GitHub listing unavailable:',path,e.message);return null; }
 }
+async function optionalIssueTimelines(sourceIssues){
+  if(!Array.isArray(sourceIssues))return null;
+  // Match the public Pages Issue window, never enumerate all private/old Issues.
+  const selected=sourceIssues.filter(x=>Number.isSafeInteger(x?.number)&&x.number>0&&!x.pull_request)
+    .sort((a,b)=>String(b.updated_at||'').localeCompare(String(a.updated_at||''))||a.number-b.number)
+    .slice(0,12);
+  const entries=await Promise.all(selected.map(async issue=>{
+    try{
+      const events=await api('/issues/'+issue.number+'/timeline?per_page=100');
+      return [String(issue.number),Array.isArray(events)
+        ? {status:events.length>=100?'truncated':'available',events:events.slice(0,100)}
+        : {status:'unavailable',events:[]}];
+    }catch(err){
+      console.error('Optional Issue Timeline unavailable:',issue.number,err.message);
+      return [String(issue.number),{status:'unavailable',events:[]}];
+    }
+  }));
+  return Object.fromEntries(entries);
+}
 async function optionalRuns(){
   try{
     const result=await api('/actions/runs?per_page=100');
@@ -50,9 +69,10 @@ const [repository,agent,registry,issues,pulls,workflowRuns,allRefs] = await Prom
   optionalRuns(),
   Promise.all(['metrics','acceptance-results','task-results','agent-store'].map(optionalRef))
 ]);
+const issueTimelines=await optionalIssueTimelines(issues);
 const refs=Object.fromEntries(['metrics','acceptance-results','task-results','agent-store'].map((name,index)=>[name,allRefs[index]]));
 const result=validateProjection(makeProjection({
-  repository,agent,registry,issues,pulls,workflowRuns,refs,
+  repository,agent,registry,issues,pulls,workflowRuns,issueTimelines,refs,
   meta:{ generated_at:new Date().toISOString(),main_sha:process.env.SOURCE_MAIN_SHA,metrics_sha:process.env.METRICS_SHA }
 }));
 await mkdir(join(out,'data'),{recursive:true});
