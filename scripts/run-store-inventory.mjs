@@ -68,7 +68,7 @@ export function checkInventory(manifest,workflows){
          !body.includes('vars.RUN_STORE_WRITER_MODE')||
          !body.includes("if: (vars.RUN_STORE_WRITER_MODE == '' || vars.RUN_STORE_WRITER_MODE == 'app')")||
          !body.includes("vars.RUN_STORE_WRITER_MODE == 'legacy' && secrets.GITHUB_TOKEN || steps.store_app.outputs.token")||
-         !body.includes("legacy) ;;")||
+         !/^(?:\s+)legacy\) ;;\s*$/m.test(body)||
          !body.includes("''|app) [[ -n \"$APP_TOKEN\" ]]")||
          !body.includes('vars.RUN_STORE_WRITER_APP_ID')||
          !body.includes('secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY')||
