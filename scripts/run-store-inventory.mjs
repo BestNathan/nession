@@ -64,6 +64,26 @@ export function checkInventory(manifest,workflows){
          app.private_key_secret!=='RUN_STORE_WRITER_APP_PRIVATE_KEY'||
          app.scope!=='nession: contents write'||app.trusted_job_only!==true)
         fail('unclassified App writer identity or token scope: '+writer.workflow);
+      // #1690 SC-09: a privileged writer must not accept arbitrary ref-
+      // selected workflow_dispatch or attacker-selected repository_dispatch.
+      // Such events can run branch-selected workflow code with contents:write,
+      // irrespective of whether its default-branch YAML has a guarded job.
+      const triggers=body.split(/^permissions:\s*$/m)[0];
+      if(!/^on:\s*$/m.test(triggers)||
+         !/^  (workflow_run|schedule):\s*$/m.test(triggers)||
+         /^  (workflow_dispatch|repository_dispatch):\s*$/m.test(triggers))
+        fail('untrusted manual dispatch/trigger on privileged Store writer: '+writer.workflow);
+      const trustedSource=writer.workflow==='.github/workflows/metrics-repository.yml'
+        ? body.includes('ref: ${{ github.sha }}')&&
+          body.includes("github.ref == 'refs/heads/main'")
+        : body.includes('ref: main');
+      if(!trustedSource||!body.includes('persist-credentials: false'))
+        fail('privileged Store writer must checkout trusted main without persisted credentials: '+writer.workflow);
+      if(writer.workflow==='.github/workflows/metrics-repository.yml'&&
+         (!/^  schedule:\s*$/m.test(triggers)||
+           /workflow_run:/m.test(triggers)||
+           !body.includes("github.event_name == 'schedule'")))
+        fail('Metrics health writer must remain schedule/main-only; manual dispatch needs a separate trusted design');
       // Source check does not prove runtime token possession or GitHub Ruleset
       // enforcement. It fails closed if a writer loses the controlled App path.
       if(!body.includes('actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349')||
@@ -175,6 +195,28 @@ function selfTest(){
   const forged=clone(manifest);
   forged.governance.ruleset_enforcement='enforced';
   assert.throws(()=>checkInventory(forged,sources),/must not assert/);
+  const manuallyDispatched=new Map(sources);
+  const privilegedMetrics='.github/workflows/metrics-repository.yml';
+  manuallyDispatched.set(privilegedMetrics,
+    manuallyDispatched.get(privilegedMetrics).replace(
+      /^  schedule:/m,'  workflow_dispatch:\n  schedule:'));
+  assert.throws(()=>checkInventory(manifest,manuallyDispatched),/untrusted manual dispatch\/trigger/);
+  const repoDispatched=new Map(sources);
+  repoDispatched.set(caseWriter,repoDispatched.get(caseWriter).replace(
+    /^  workflow_run:/m,'  repository_dispatch:\n  workflow_run:'));
+  assert.throws(()=>checkInventory(manifest,repoDispatched),/untrusted manual dispatch\/trigger/);
+  const noTrustedCheckout=new Map(sources);
+  noTrustedCheckout.set(caseWriter,noTrustedCheckout.get(caseWriter)
+    .replace('          ref: main','          ref: ${{ github.event.workflow_run.head_sha }}'));
+  assert.throws(()=>checkInventory(manifest,noTrustedCheckout),/checkout trusted main/);
+  const noPersistDisabled=new Map(sources);
+  noPersistDisabled.set(caseWriter,noPersistDisabled.get(caseWriter)
+    .replace('persist-credentials: false','persist-credentials: true'));
+  assert.throws(()=>checkInventory(manifest,noPersistDisabled),/without persisted credentials/);
+  const triggerStripped=new Map(sources);
+  triggerStripped.set(privilegedMetrics,triggerStripped.get(privilegedMetrics)
+    .replace(/^  schedule:/m,'  workflow_dispatch:'));
+  assert.throws(()=>checkInventory(manifest,triggerStripped),/untrusted manual dispatch\/trigger/);
   const unknownWorkflow=new Map(sources);
   unknownWorkflow.set('.github/workflows/unreviewed.yml',
     'on: push\npermissions:\n  contents: write\njobs:\n  writer:\n    steps:\n      - run: git push origin HEAD:metrics\n');
