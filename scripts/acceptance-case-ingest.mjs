@@ -9,7 +9,7 @@ import {
   buildAcceptanceContext,
   normalizeAcceptanceCaseResult,
 } from './acceptance-executor.mjs';
-import { extractSection, parseAcceptanceReport, parsePreMergeIssueNumbers } from './requirement-acceptance.mjs';
+import { extractSection, isAcceptanceIssue, parseAcceptanceReport, parsePreMergeIssueNumbers } from './requirement-acceptance.mjs';
 import { artifactEvidence, validateArtifactEvidence } from './run-record-artifact-evidence.mjs';
 import { makeRunIndex } from './run-record-index-contract.mjs';
 
@@ -405,8 +405,7 @@ export async function applyCaseRecord(record, { repository, token, request = git
   }
 
   const issue = await request('/repos/' + owner + '/' + name + '/issues/' + item.issue, { token });
-  const labels = new Set((issue.labels ?? []).map((label) => typeof label === 'string' ? label : label.name));
-  if (!labels.has('requirement')) throw new Error('#' + item.issue + ' is not a requirement');
+  if (!isAcceptanceIssue(issue)) throw new Error('#' + item.issue + ' must be labeled bug or requirement');
   if (String(issue.state).toLowerCase() !== 'open') {
     return { projected: false, reason: 'Requirement #' + item.issue + ' is not open' };
   }
@@ -562,6 +561,25 @@ async function selfTest() {
   });
   assert.equal(replay.projected,false);
   assert.equal(historicalWrites,1,'historical Case may never overwrite its existing verdict');
+
+  // Bug-only acceptance Case must follow the identical authenticated source
+  // and deterministic projection path; labels do not replace SHA/SC checks.
+  currentHistoricalIssue={...historicalIssue,labels:[{name:'bug'}]};
+  const bugResult=await applyCaseRecord(historicalRecord,{
+    repository:'BestNathan/nession',token:'offline-proof',request:historicalApi,
+  });
+  assert.deepEqual(bugResult,{projected:true,changed:true});
+  assert.match(currentHistoricalIssue.body, /- \[x\] SC-07/);
+  assert.equal(historicalWrites,2);
+  currentHistoricalIssue={...historicalIssue,labels:[{name:'ci'}]};
+  await assert.rejects(()=>applyCaseRecord(historicalRecord,{
+    repository:'BestNathan/nession',token:'offline-proof',request:historicalApi,
+  }),/must be labeled bug or requirement/);
+  currentHistoricalIssue={...historicalIssue,labels:[{name:'bug'},{name:'requirement'}]};
+  await assert.rejects(()=>applyCaseRecord(historicalRecord,{
+    repository:'BestNathan/nession',token:'offline-proof',request:historicalApi,
+  }),/must be labeled bug or requirement/);
+
   currentHistoricalIssue={...historicalIssue};
   const rejected=await applyCaseRecord(historicalRecord,{
     repository:'BestNathan/nession',token:'offline-proof',
@@ -569,7 +587,7 @@ async function selfTest() {
       ? {...comparison,status:'diverged'}:historicalApi(apiPath,options),
   });
   assert.equal(rejected.projected,false);
-  assert.equal(historicalWrites,1,'diverged SHA cannot mutate Issue SC');
+  assert.equal(historicalWrites,2,'diverged SHA cannot mutate Issue SC');
   const valid = fixtureRecord();
   const canonical = JSON.stringify({
     schema_version: 1, run_id: valid.run_id, run_attempt: valid.run_attempt,
