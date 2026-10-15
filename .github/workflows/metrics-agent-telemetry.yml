@@ -235,7 +235,7 @@ jobs:
           cp "${RUNNER_TEMP}/agent-metrics/agent-metrics-dark.svg" "${GITHUB_WORKSPACE}/metrics-store/"
 
       - name: Mint scoped App token for orphan Run Store updates
-        if: vars.RUN_STORE_WRITER_MODE == 'app' && steps.persist.outputs.changed != '' && steps.persist.outputs.changed != '0'
+        if: (vars.RUN_STORE_WRITER_MODE == '' || vars.RUN_STORE_WRITER_MODE == 'app') && steps.persist.outputs.changed != '' && steps.persist.outputs.changed != '0'
         id: store_app
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
         with:
@@ -251,8 +251,8 @@ jobs:
         run: |
           set -euo pipefail
           case "$WRITER_MODE" in
-            ''|legacy) ;;
-            app) [[ -n "$APP_TOKEN" ]] || { echo "::error::No App token; refuse legacy fallback" >&2; exit 1; } ;;
+            legacy) ;;
+            ''|app) [[ -n "$APP_TOKEN" ]] || { echo "::error::No App token; refuse legacy fallback" >&2; exit 1; } ;;
             *) echo "::error::Unsupported RUN_STORE_WRITER_MODE" >&2; exit 1 ;;
           esac
 
@@ -261,7 +261,7 @@ jobs:
         working-directory: metrics-store
         env:
           SOURCE_RUN_ID: ${{ steps.source.outputs.run_id }}
-          STORE_PUSH_TOKEN: ${{ vars.RUN_STORE_WRITER_MODE == 'app' && steps.store_app.outputs.token || secrets.GITHUB_TOKEN }}
+          STORE_PUSH_TOKEN: ${{ vars.RUN_STORE_WRITER_MODE == 'legacy' && secrets.GITHUB_TOKEN || steps.store_app.outputs.token }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
