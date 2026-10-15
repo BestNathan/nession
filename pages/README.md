@@ -29,3 +29,7 @@ The static UI uses hash navigation (\`#/agents\`, \`#/work\`, etc.) so direct de
 ## Phase 2-A — public source-backed observations
 
 The build-only `agent-metrics.json` source supplies rolling 7-day and 30-day `runs.by_provider` and `runs.by_workflow` counts, and 7-day `runs.by_issue` counts. The versioned public projection includes only bounded, safe category names, observed nonnegative integer counts and source metadata. Missing observations remain `null` / N/A (not an inferred zero). It does **not** establish causal PR↔Agent linkage, exact-SHA Acceptance verdicts, live presence, per-Agent cost or orphan integrity. The independent Pages layout and UI do not depend on product `web/`.
+
+## Phase 2-B1 — public PR HEAD evidence
+
+Recent GitHub Actions Run metadata is fetched **only during the independent Pages build** and validated against exact, same-repository PR HEAD SHA, canonical workflow path/event, positive Run/attempt identity and bounded listing. The Collaboration view reports each canonical CI/E2E **workflow outcome**, never a Success Criterion / Acceptance verdict or an Issue↔PR/Agent causal join. No observed run means Not observed within a 100-run snapshot, not a claim about all history.

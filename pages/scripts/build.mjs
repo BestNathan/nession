@@ -28,6 +28,12 @@ async function optionalList(path) {
     return Array.isArray(data)?data:null;
   } catch (e) { console.error('Optional GitHub listing unavailable:',path,e.message);return null; }
 }
+async function optionalRuns(){
+  try{
+    const result=await api('/actions/runs?per_page=100');
+    return Array.isArray(result?.workflow_runs)?result.workflow_runs:null;
+  }catch(error){console.error('Public CI Run snapshot unavailable:',error.message);return null;}
+}
 async function optionalRef(branch) {
   try {
     const result=await api('/git/ref/heads/'+encodeURIComponent(branch));
@@ -35,17 +41,18 @@ async function optionalRef(branch) {
     return {state:'present',sha:result?.object?.sha};
   } catch(e){console.error('Optional ref unavailable:',branch,e.message);return {state:'unavailable'};}
 }
-const [repository,agent,registry,issues,pulls,allRefs] = await Promise.all([
+const [repository,agent,registry,issues,pulls,workflowRuns,allRefs] = await Promise.all([
   optionalJson(join(metrics,'metrics.json')),
   optionalJson(join(metrics,'agent-metrics.json')),
   optionalJson(join(root,'../automation/agents/registry.json')),
   optionalList('/issues?state=open&sort=updated&direction=desc&per_page=100'),
   optionalList('/pulls?state=open&sort=updated&direction=desc&per_page=100'),
+  optionalRuns(),
   Promise.all(['metrics','acceptance-results','task-results','agent-store'].map(optionalRef))
 ]);
 const refs=Object.fromEntries(['metrics','acceptance-results','task-results','agent-store'].map((name,index)=>[name,allRefs[index]]));
 const result=validateProjection(makeProjection({
-  repository,agent,registry,issues,pulls,refs,
+  repository,agent,registry,issues,pulls,workflowRuns,refs,
   meta:{ generated_at:new Date().toISOString(),main_sha:process.env.SOURCE_MAIN_SHA,metrics_sha:process.env.METRICS_SHA }
 }));
 await mkdir(join(out,'data'),{recursive:true});

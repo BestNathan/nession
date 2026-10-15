@@ -32,6 +32,34 @@ function list(input, type) {
     .slice(0,12);
 }
 function countIn(obj,key) { return number(obj && obj[key]); }
+const WORKFLOWS = Object.freeze({
+  ci:{name:'CI / Quality Gate',path:'.github/workflows/ci-quality.yml'},
+  e2e:{name:'E2E / Tests',path:'.github/workflows/e2e-tests.yml'},
+});
+function runProof(raw,headSha,key){
+  const canonical=WORKFLOWS[key];
+  if(!raw||raw.name!==canonical.name||
+     raw.path?.replace(/@refs\/heads\/[^\s]+$/,'')!==canonical.path||
+     raw.event!=='pull_request'||raw.head_sha!==headSha||
+     raw.repository?.full_name!==REPO||raw.head_repository?.full_name!==REPO||
+     !Number.isSafeInteger(raw.id)||raw.id<=0||
+     !Number.isSafeInteger(raw.run_attempt)||raw.run_attempt<=0||
+     !['completed','queued','in_progress'].includes(raw.status))return null;
+  const status=raw.status==='completed'&&
+    ['success','failure','cancelled','timed_out'].includes(raw.conclusion)
+      ? raw.conclusion : raw.status==='completed'?'unavailable':raw.status;
+  return {run_id:raw.id,attempt:raw.run_attempt,head_sha:headSha,
+    status,updated_at:safeDate(raw.updated_at),
+    url:GH+'/actions/runs/'+raw.id};
+}
+function prWorkflowEvidence(raw,allRuns){
+  const head=raw?.head;
+  if(!head||head.repo?.full_name!==REPO||!safeSha(head.sha))return {head_sha:null,ci:null,e2e:null};
+  const rows=Array.isArray(allRuns)?allRuns.slice(0,100):[];
+  const pick=key=>rows.map(r=>runProof(r,head.sha,key)).filter(Boolean)
+     .sort((a,b)=>b.run_id-a.run_id||b.attempt-a.attempt)[0]||null;
+  return {head_sha:head.sha,ci:pick('ci'),e2e:pick('e2e')};
+}
 
 // Canonical aggregate metrics are not exact-SHA Issue/PR/Agent-Run proofs.
 // Strictly allowlist public category names and bounded integer counts.
@@ -68,7 +96,7 @@ function rosterFrom(registry, agentWindow) {
     observed_7d: Object.hasOwn(usage,id) ? number(usage[id]) : null,
   })).sort((a,b)=>a.role.localeCompare(b.role)||a.id.localeCompare(b.id));
 }
-export function makeProjection({ repository, agent, registry, issues, pulls, refs={}, meta={} }) {
+export function makeProjection({ repository, agent, registry, issues, pulls, workflowRuns, refs={}, meta={} }) {
   const r = repository?.schema_version === 2 ? repository : null;
   const a = agent?.schema_version === 1 && agent?.kind === 'agent_metrics_aggregate' ? agent : null;
   const current = r?.repository || {}, efficiency = r?.efficiency || {};
@@ -93,6 +121,7 @@ export function makeProjection({ repository, agent, registry, issues, pulls, ref
       metrics_sha:safeSha(meta.metrics_sha),
       issues_status:Array.isArray(issues)?'available':'unavailable',
       pulls_status:Array.isArray(pulls)?'available':'unavailable',
+      workflow_runs_status:Array.isArray(workflowRuns)?'available':'unavailable',
     },
     repository: {
       available:!!r,
@@ -140,7 +169,10 @@ export function makeProjection({ repository, agent, registry, issues, pulls, ref
       issues:list(issues,'issue').map(x=>({
         ...x, observed_agent_runs_7d:observedIssueCount(aw,x.number),
       })),
-      pulls:list(pulls,'pr'),
+      pulls:list(pulls,'pr').map(x=>{
+        const source=Array.isArray(pulls)?pulls.find(p=>p.number===x.number):null;
+        return {...x,workflow:prWorkflowEvidence(source,workflowRuns)};
+      }),
     },
     evidence:{ stores:stores.map(([name,purpose])=>record(name,purpose)) },
   };

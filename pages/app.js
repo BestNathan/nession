@@ -144,10 +144,25 @@ function renderWork(){
   root.append(pageHead('OPEN COLLABORATION','Work in progress.','A read-only view of recently updated public Issues and PRs. No stage or SC verdict is inferred from an Issue title or workflow name.'));
   const w=snapshot.work||{};
   const listing=(type,items,availability)=>{
+    const evidenceRow=(x)=>{
+      const row=lineItem('#'+x.number+'  '+x.title,x.state+' · GitHub source',
+        'PR',x.url,date(x.updated_at));
+      const pane=node('div','work-evidence');
+      const sha=x.workflow?.head_sha;
+      pane.append(node('span','mono',sha?'PR HEAD '+sha.slice(0,12):'PR HEAD unavailable'));
+      for(const [k,label] of [['ci','Quality'],['e2e','E2E']]){
+        const run=x.workflow?.[k];
+        if(run)pane.append(ext(label+' · '+run.status+' · run '+run.run_id+
+          ' / attempt '+run.attempt,run.url));
+        else pane.append(node('span','',label+': Not observed'));
+      }
+      row.querySelector?.('.entry-main')?.append(pane);
+      return row;
+    };
     const s=section('GITHUB / '+type.toUpperCase(),type,'Recently updated · open items');
     if(availability!=='available')s.append(empty('Snapshot unavailable','GitHub API data could not be fetched or validated. This is not evidence of zero active items.'));
     else if(!items.length)s.append(empty('No open items','No items returned by the current bounded snapshot.'));
-    else s.append(attach(node('div','list'),...items.map(x=>lineItem('#'+x.number+'  '+x.title,
+    else s.append(attach(node('div','list'),...items.map(x=>type==='Pull Requests'?evidenceRow(x):lineItem('#'+x.number+'  '+x.title,
       x.state+' · source GitHub'+(type==='Issues'?' · observed Agent runs (7d): '+(x.observed_agent_runs_7d===null||x.observed_agent_runs_7d===undefined?'Not observed':fmt(x.observed_agent_runs_7d)):''),
       type==='Issues'?'Issue':'PR',x.url,date(x.updated_at)))));
     root.append(s);
