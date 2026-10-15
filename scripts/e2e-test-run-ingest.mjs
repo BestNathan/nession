@@ -148,8 +148,8 @@ function selfTest() {
   assert.deepEqual(recordFor(event, run, workflow, tree, jobs, artifacts), result);
   // Producer/consumer reachability is part of the security contract: a green
   // PR-only E2E is NOT real post-merge main Push Test evidence.
-  const sourceWorkflowYml=fs.readFileSync('.github/workflows/e2e-tests.yml','utf8');
-  const ingesterWorkflowYml=fs.readFileSync('.github/workflows/e2e-test-ingest.yml','utf8');
+  const sourceWorkflowYml=fs.readFileSync(new URL('../.github/workflows/e2e-tests.yml',import.meta.url),'utf8');
+  const ingesterWorkflowYml=fs.readFileSync(new URL('../.github/workflows/e2e-test-ingest.yml',import.meta.url),'utf8');
   assert.match(sourceWorkflowYml,/^  push:\n    branches: \[staging, main\]$/m,
     'main push must run real E2E and produce its own trusted source SHA');
   assert.match(ingesterWorkflowYml,/github\.event\.workflow_run\.event == 'push'/,
