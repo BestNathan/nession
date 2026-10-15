@@ -9,8 +9,12 @@ const stores = [
 ];
 const roles = new Set(['developer', 'reviewer', 'acceptor', 'auditor']);
 function number(value) { return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null; }
+// Exclude private network addressing and machine-local paths from text fields.
+const PRIVATE_TEXT = /(?:\b(?:10|127)\.(?:\d{1,3}\.){2}\d{1,3}\b|\b192\.168\.(?:\d{1,3}\.)\d{1,3}\b|\b172\.(?:1[6-9]|2\d|3[01])\.(?:\d{1,3}\.)\d{1,3}\b|\b(?:localhost|[a-z0-9.-]+\.internal)\b|\/(?:Users|home|etc|root)\/|[a-z]:\\\\(?:Users|Windows)\\\\|file:\/\/|\b(?:authorization|credential|private.key)\s*[:=])/i;
 function safeText(value, max = 120) {
-  return typeof value === 'string' ? value.replace(/<[^>]*>/g, ' ').replace(/[<>\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max) : '';
+  if (typeof value!=='string')return '';
+  const clean=value.replace(/<[^>]*>/g, ' ').replace(/[<>\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
+  return PRIVATE_TEXT.test(clean)?'[redacted public text]':clean.slice(0,max);
 }
 // A build timestamp never turns an old source measurement into a fresh one.
 function sourceFreshness(sourceTime, builtAt, hours=8) {
