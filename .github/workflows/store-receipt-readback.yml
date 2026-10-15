@@ -10,24 +10,22 @@ on:
       - "Metrics / Agent Telemetry Ingest"
       - "Metrics / Repository Health"
     types: [completed]
-  workflow_dispatch:
-    inputs:
-      ingest_run_id:
-        description: "Trusted main Ingest run ID"
-        required: true
-        type: string
+  # Only default-branch code handles trusted manual readback requests. An
+  # arbitrary-ref workflow_dispatch could otherwise read Actions artifacts.
+  repository_dispatch:
+    types: [nession-run-store-receipt-readback]
 permissions:
   actions: read
   contents: read
 concurrency:
-  group: run-store-receipt-readback-${{ github.event.workflow_run.id || inputs.ingest_run_id }}
+  group: run-store-receipt-readback-${{ github.event.workflow_run.id || github.event.client_payload.ingest_run_id }}
   cancel-in-progress: false
 jobs:
   readback:
     if: >-
       github.repository == 'BestNathan/nession' &&
       github.ref == 'refs/heads/main' &&
-      (github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'repository_dispatch' ||
         (github.event_name == 'workflow_run' &&
           github.event.workflow_run.conclusion == 'success' &&
           github.event.workflow_run.head_repository.full_name == github.repository &&
@@ -52,7 +50,7 @@ jobs:
         id: source
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REQUESTED_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.ingest_run_id || github.event.workflow_run.id }}
+          REQUESTED_ID: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.ingest_run_id || github.event.workflow_run.id }}
           BOUND_ATTEMPT: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.run_attempt || '' }}
         run: |
           set -euo pipefail
