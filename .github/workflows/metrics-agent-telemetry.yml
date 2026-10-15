@@ -244,6 +244,7 @@ jobs:
           repositories: nession
           permission-contents: write
       - name: Reject unrecognized writer mode or unavailable App token
+        if: steps.artifacts.outputs.count != '' && steps.artifacts.outputs.count != '0' && steps.persist.outputs.changed != '0'
         env:
           WRITER_MODE: ${{ vars.RUN_STORE_WRITER_MODE }}
           APP_TOKEN: ${{ steps.store_app.outputs.token }}
