@@ -166,6 +166,7 @@ export function makeProjection({ repository, agent, registry, issues, pulls, wor
     work: {
       issues_status:Array.isArray(issues)?'available':'unavailable',
       pulls_status:Array.isArray(pulls)?'available':'unavailable',
+      workflow_runs_status:Array.isArray(workflowRuns)?'available':'unavailable',
       issues:list(issues,'issue').map(x=>({
         ...x, observed_agent_runs_7d:observedIssueCount(aw,x.number),
       })),
