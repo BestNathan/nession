@@ -68,7 +68,7 @@ function compactRuns(runs, expectedSha) {
     .slice(0, MAX_RUNS_PER_SHA);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [] }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [] }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -99,6 +99,7 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     declared_merge_commits: declaredMergeCommits,
     historical_merge_ancestry: historicalAncestry,
     historical_orchestrator_runs: historicalOrchestratorRuns,
+    historical_provider_chains: historicalProviderChains,
     linked_issue_e2e_evidence: linkedIssueE2E,
     implementation_pull_requests: implementationPulls,
     provider_wake_evidence: providerWakeEvidence,
@@ -206,6 +207,92 @@ export function attestHistoricalOrchestrator(run,sha,runId,repo) {
     throw Error('invalid historical completed Orchestrator provenance');
   return {...compactRun(run),run_attempt:run.run_attempt,
     provenance:'GitHub exact-run completed same-repo main push Orchestrator'};
+}
+
+// Historical Issue criteria merely nominate exact GitHub Runs for discovery.
+// This must never be construed as an Issue-supplied success assertion.
+export function pinnedHistoricalProviderChains(body) {
+  const section=String(body??'').match(/###? Success Criteria\s*\n([\s\S]*?)(?=\n## Acceptance Report|$)/)?.[1]??'';
+  const chains=[];
+  for(const line of section.split('\n')){
+    if(!/^- \[[ x]\] SC-\d+\b/.test(line)||
+       !line.includes('Historical evidence discovery constraint'))continue;
+    const p=line.match(/\bSource Provider Run\s+`?([1-9]\d*)`?/);
+    const m=line.match(/\bMetrics Ingest Run\s+`?([1-9]\d*)`?/);
+    const a=line.match(/\bOrchestrator Run\s+`?([1-9]\d*)`?\s+attempt\s+([1-9]\d*)/);
+    const issue=line.match(/\bin a real main run,\s+#([1-9]\d*)\s+SC-/);
+    if(!p||!m||!a||!issue)throw Error('incomplete historical dependency Run pins');
+    const ids=[p[1],m[1],a[1],a[2],issue[1]].map(Number);
+    if(ids.some(n=>!Number.isSafeInteger(n)||n<=0)||
+       new Set(ids.slice(0,3)).size!==3)throw Error('invalid historical dependency Run pins');
+    chains.push({provider_run_id:ids[0],metrics_run_id:ids[1],
+      orchestrator_run_id:ids[2],orchestrator_attempt:ids[3],
+      issue_number:ids[4]});
+  }
+  if(chains.length>2)throw Error('excessive historical dependency Run chains');
+  return chains;
+}
+
+function attestSourceRun(run,id,sha,repo,name,workflow,event) {
+  if(run?.id!==id||run?.repository?.full_name!==repo||
+     run?.head_repository?.full_name!==repo||
+     run?.name!==name||run?.path!==workflow||run?.event!==event||
+     run?.head_sha!==sha||run?.head_branch!=='main'||
+     run?.status!=='completed'||run?.conclusion!=='success'||
+     !Number.isSafeInteger(run?.run_attempt)||run.run_attempt<=0)
+    throw Error('invalid historical dependency source Run provenance');
+  return {...compactRun(run),run_attempt:run.run_attempt};
+}
+
+function verifiedTimestamp(value,label){
+  if(typeof value!=='string'||!/^\d{4}-\d\d-\d\dT/.test(value))
+    throw Error('missing historical dependency '+label);
+  const n=Date.parse(value);
+  if(!Number.isFinite(n))throw Error('invalid historical dependency '+label);
+  return n;
+}
+
+// Prove original main merge ancestry separately from source Run identity,
+// retry attempt, sequence timing and the actual Issue-scoped execution jobs.
+// No historical metadata can change an Issue or publish a new SC result.
+export function attestHistoricalProviderChain(pins,provider,metrics,orchestrator,
+  response,verifiedMergeShas,repo='BestNathan/nession'){
+  const sha=orchestrator?.head_sha;
+  if(!/^[a-f0-9]{40}$/.test(sha??'')||
+     !(verifiedMergeShas instanceof Set)||!verifiedMergeShas.has(sha))
+    throw Error('historical dependency merge SHA not Git-verified');
+  const p=attestSourceRun(provider,pins.provider_run_id,sha,repo,
+    'Agent / Provider Smoke','.github/workflows/agent-provider-smoke.yml','push');
+  const m=attestSourceRun(metrics,pins.metrics_run_id,sha,repo,
+    'Metrics / Agent Telemetry Ingest','.github/workflows/metrics-agent-telemetry.yml','workflow_run');
+  const a=attestHistoricalOrchestrator(orchestrator,sha,pins.orchestrator_run_id,repo);
+  if(a.run_attempt!==pins.orchestrator_attempt)throw Error('historical orchestrator attempt mismatch');
+  const pEnd=verifiedTimestamp(provider.updated_at,'Provider completion');
+  const mStart=verifiedTimestamp(metrics.run_started_at,'Metrics start');
+  const mEnd=verifiedTimestamp(metrics.updated_at,'Metrics completion');
+  const aStart=verifiedTimestamp(orchestrator.run_started_at,'Acceptance retry start');
+  if(!(pEnd<=mStart&&mStart<=mEnd&&mEnd<=aStart))
+    throw Error('historical Provider/Metrics/Acceptance execution order mismatch');
+  if(!Array.isArray(response?.jobs)||response.jobs.length>100)
+    throw Error('historical Acceptance job collection missing/oversized');
+  const expected=[
+    'merged-agent-acceptance ('+pins.issue_number+') / Execute acceptance',
+    'merged-agent-acceptance ('+pins.issue_number+') / Deterministic Issue updater',
+  ];
+  const selected=expected.map(name=>{
+    const matches=response.jobs.filter(j=>j.name===name);
+    if(matches.length!==1||matches[0].status!=='completed'||
+       matches[0].conclusion!=='success'||
+       !(verifiedTimestamp(matches[0].started_at,'Acceptance job start')>=aStart))
+      throw Error('historical Issue-scoped Acceptance job not verified: '+name);
+    return {id:matches[0].id,name,status:matches[0].status,
+      conclusion:matches[0].conclusion,started_at:matches[0].started_at};
+  });
+  return {kind:'verified_historical_provider_metrics_acceptance',
+    source:'independent GitHub Run + attempt-2 scoped jobs + verified Git merge ancestry',
+    target_sha:sha,issue_number:pins.issue_number,provider:p,metrics:m,
+    orchestrator:a,accepted_jobs:selected,verified_order:true,
+    evidence_limit:'Run metadata and job success; do not equate this with independent Metrics record-byte attestation'};
 }
 
 // Read-only, fail-closed Git object proof. A detached checkout is valid;
@@ -407,6 +494,7 @@ async function collectCommand(workspace, outFile) {
         .map(a=>checkGitAncestor(workspace,merge.target_sha,a.ancestor_sha)))
     : [];
   const historicalOrchestratorRuns=[];
+  const historicalProviderChains=[];
   if(process.env.ACCEPTANCE_STAGE==='post-merge'&&
      /^[1-9][0-9]*$/.test(String(process.env.ISSUE_NUMBER??''))){
     const current=await githubGet('/repos/'+repo+'/issues/'+process.env.ISSUE_NUMBER);
@@ -420,6 +508,21 @@ async function collectCommand(workspace, outFile) {
         throw Error('historical source SHA is not a verified merged ancestor');
       historicalOrchestratorRuns.push(attestHistoricalOrchestrator(
         source,source.head_sha,runId,repo));
+    }
+    // Historical sequences are evaluated only for Git-verified two-parent
+    // main merge ancestors. The Issue's SC text is a lookup hint, never proof.
+    for(const pins of pinnedHistoricalProviderChains(current.body)){
+      const already=historicalOrchestratorRuns.find(r=>r.id===pins.orchestrator_run_id);
+      if(!already)throw Error('historical dependency Orchestrator Run was not independently attested');
+      const [provider,metrics,orchestrator,jobs]=await Promise.all([
+        githubGet('/repos/'+repo+'/actions/runs/'+pins.provider_run_id),
+        githubGet('/repos/'+repo+'/actions/runs/'+pins.metrics_run_id),
+        githubGet('/repos/'+repo+'/actions/runs/'+pins.orchestrator_run_id),
+        githubGet('/repos/'+repo+'/actions/runs/'+pins.orchestrator_run_id+
+          '/attempts/'+pins.orchestrator_attempt+'/jobs?per_page=100'),
+      ]);
+      historicalProviderChains.push(attestHistoricalProviderChain(
+        pins,provider,metrics,orchestrator,jobs,verifiedMergeShas,repo));
     }
   }
   // Acceptance for E2E-specific Issues must also observe previous PR commits:
@@ -472,7 +575,7 @@ async function collectCommand(workspace, outFile) {
         repo,Number(issueNumber),currentIssue,sha);
   }
   const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls,
-    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns });
+    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains });
   fs.writeFileSync(outFile, JSON.stringify(evidence, null, 2) + '\n');
   console.log(
     'collected acceptance CI evidence for ' + sha +
@@ -676,6 +779,52 @@ function selfTest() {
   }).historical_merge_ancestry.map(p=>[p.target_sha,p.ancestor_sha,p.is_ancestor]),
     [[parentA,left,true]]);
 
+
+  const sc='### Success Criteria\n- [ ] SC-04 in a real main run, #1715 SC-02/SC-04; '+
+    'Historical evidence discovery constraint: main merge '+head+
+    ' is an ancestor; Acceptance / Orchestrator Run `38397558926` attempt 2; '+
+    'after Source Provider Run `38397558713` and Metrics Ingest Run `38397651981` completed.\n## Acceptance Report';
+  const pins=pinnedHistoricalProviderChains(sc)[0];
+  assert.equal(pins.issue_number,1715);
+  assert.equal(pins.orchestrator_attempt,2);
+  assert.deepEqual(pinnedHistoricalProviderChains('### Success Criteria\n- [ ] SC-01 no pins'),[]);
+  assert.throws(()=>pinnedHistoricalProviderChains(sc.replace('Metrics Ingest Run','Untrusted Run')),
+    /incomplete historical/);
+  const sourceMeta={repository:{full_name:'BestNathan/nession'},
+    head_repository:{full_name:'BestNathan/nession'},head_sha:head,
+    head_branch:'main',status:'completed',conclusion:'success',run_attempt:1};
+  const provider={...sourceMeta,id:pins.provider_run_id,
+    name:'Agent / Provider Smoke',path:'.github/workflows/agent-provider-smoke.yml',
+    event:'push',updated_at:'2026-10-13T12:29:20Z'};
+  const metrics={...sourceMeta,id:pins.metrics_run_id,
+    name:'Metrics / Agent Telemetry Ingest',path:'.github/workflows/metrics-agent-telemetry.yml',
+    event:'workflow_run',run_started_at:'2026-10-13T12:29:23Z',
+    updated_at:'2026-10-13T12:29:46Z'};
+  const orchestration={...sourceMeta,id:pins.orchestrator_run_id,run_attempt:2,
+    name:'Acceptance / Orchestrator',path:'.github/workflows/acceptance-orchestrator.yml',
+    event:'push',run_started_at:'2026-10-13T12:35:47Z'};
+  const validJobs={jobs:[
+    {id:1,name:'merged-agent-acceptance (1715) / Execute acceptance',
+      status:'completed',conclusion:'success',started_at:'2026-10-13T12:35:50Z'},
+    {id:2,name:'merged-agent-acceptance (1715) / Deterministic Issue updater',
+      status:'completed',conclusion:'success',started_at:'2026-10-13T12:37:50Z'},
+  ]};
+  const proof=attestHistoricalProviderChain(pins,provider,metrics,orchestration,
+    validJobs,new Set([head]));
+  assert.equal(proof.verified_order,true);
+  assert.equal(proof.accepted_jobs.length,2);
+  assert.deepEqual(normalizeCiEvidence({targetSha:head,historicalProviderChains:[proof]})
+    .historical_provider_chains.map(x=>x.target_sha),[head]);
+  const reject=(p,m,a,j,shas=new Set([head]))=>
+    assert.throws(()=>attestHistoricalProviderChain(pins,p,m,a,j,shas),/historical/);
+  reject(provider,metrics,orchestration,validJobs,new Set([left]));
+  reject({...provider,event:'pull_request'},metrics,orchestration,validJobs);
+  reject(provider,{...metrics,head_sha:left},orchestration,validJobs);
+  reject(provider,{...metrics,updated_at:'2026-10-13T12:36:00Z'},orchestration,validJobs);
+  reject(provider,metrics,{...orchestration,run_attempt:1},validJobs);
+  reject(provider,metrics,orchestration,{jobs:validJobs.jobs.slice(0,1)});
+  reject(provider,metrics,orchestration,{jobs:validJobs.jobs.map(x=>({...x,started_at:'2026-10-13T12:29:00Z'}))});
+  reject(provider,metrics,orchestration,{jobs:validJobs.jobs.map(x=>({...x,conclusion:'failure'}))});
 
   console.log('acceptance-ci-evidence self-test: collector, bounded criteria and positive/negative Git ancestry passed');
 }
