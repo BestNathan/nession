@@ -3,17 +3,12 @@ name: CI / Run Store Fixture Evidence
 # SC-10 independently repeatable post-merge *fixture* evidence. This does not
 # attest real agent-store provisioning, writer identity, branch Rulesets or a
 # separately controlled checkpoint. No production orphan refs are modified.
+# Acceptance post-merge evaluates each SHA; this cheap fixture MUST produce
+# independently source-aligned evidence for every main Push, not only selected
+# paths. Otherwise a later unrelated merge silently downgrades SC-10.
 on:
   push:
     branches: [main]
-    paths:
-      - .github/workflows/ci-run-store-fixture-evidence.yml
-      - scripts/run-store-agent-disposable-selftest.mjs
-      - scripts/lib/agent/store/**
-      - scripts/run-store-integrity.mjs
-      - scripts/run-store-cas-push.mjs
-      - gates/checks/agent-checkpoint-store.sh
-      - gates/checks/run-store-integrity.sh
   # Unlike workflow_dispatch, repository_dispatch evaluates default-branch code.
   repository_dispatch:
     types: [nession-run-store-fixture-evidence]

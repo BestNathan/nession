@@ -6,6 +6,25 @@ const workflow=fs.readFileSync('.github/workflows/ci-run-store-fixture-evidence.
 const catalog=fs.readFileSync('scripts/workflow-conventions.mjs','utf8');
 assert.match(workflow,/^name: CI \/ Run Store Fixture Evidence$/m);
 assert.match(workflow,/^on:\n  push:\n    branches: \[main\]/m);
+const pushArea=workflow.split('  push:')[1]?.split('  repository_dispatch:')[0]??'';
+assert.ok(pushArea,'missing main push event');
+assert.doesNotMatch(pushArea,/^    paths(?:-ignore)?:/m,
+  'path-filtered fixture evidence strands unrelated new main SHAs as Pending');
+const waker=fs.readFileSync('.github/workflows/acceptance-postrun-waker.yml','utf8');
+assert.match(waker,/workflows: \["Acceptance \/ Orchestrator", "CI \/ Run Store Fixture Evidence"\]/,
+  'postmerge acceptance must be awakened after exact-main-SHA fixture success');
+for(const [name,source] of [
+  ['Acceptance / Orchestrator','.github/workflows/acceptance-orchestrator.yml'],
+  ['CI / Run Store Fixture Evidence','.github/workflows/ci-run-store-fixture-evidence.yml'],
+]){
+  assert.ok(waker.includes('.name == "'+name+'" and') &&
+    waker.includes('.path == "'+source+'"'),
+  'waker must authenticate the workflow name/path pair, not name alone: '+name);
+}
+assert.match(waker,/github\.event\.workflow_run\.event == 'push'/);
+assert.match(waker,/github\.event\.workflow_run\.conclusion == 'success'/);
+assert.match(waker,/git merge-base --is-ancestor/);
+
 assert.match(workflow,/^  repository_dispatch:\n    types: \[nession-run-store-fixture-evidence\]/m);
 assert.doesNotMatch(workflow,/^  workflow_dispatch:/m);
 assert.match(workflow,/^permissions:\n  contents: read$/m);
