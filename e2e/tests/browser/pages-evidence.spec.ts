@@ -7,6 +7,7 @@ test.describe('standalone Pages evidence',()=>{
  test('repository figures have source revision and measured coverage',async({page})=>{
   await page.goto(site.origin+'/#/repository');
   await expect(page.getByRole('heading',{name:'Built in the open.'})).toBeVisible();
+  await expect(page.getByText('Repository metrics source: stale',{exact:false})).toBeVisible();
   await expect(page.getByText('85%',{exact:true})).toBeVisible();
   await expect(page.getByText('90%',{exact:true})).toBeVisible();
   await expect(page.getByText('Current measured main revision · aaaaaaaaaaaa', {exact:true})).toBeVisible();
