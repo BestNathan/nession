@@ -146,6 +146,20 @@ function selfTest() {
   assert.equal(record.evidence.sha256, 'd'.repeat(64));
   assert.equal(JSON.parse(result.indexBytes).record_sha256, sha256(result.recordBytes));
   assert.deepEqual(recordFor(event, run, workflow, tree, jobs, artifacts), result);
+  // Producer/consumer reachability is part of the security contract: a green
+  // PR-only E2E is NOT real post-merge main Push Test evidence.
+  const sourceWorkflowYml=fs.readFileSync('.github/workflows/e2e-tests.yml','utf8');
+  const ingesterWorkflowYml=fs.readFileSync('.github/workflows/e2e-test-ingest.yml','utf8');
+  assert.match(sourceWorkflowYml,/^  push:\n    branches: \[staging, main\]$/m,
+    'main push must run real E2E and produce its own trusted source SHA');
+  assert.match(ingesterWorkflowYml,/github\.event\.workflow_run\.event == 'push'/,
+    'Test Ingest must reject PR/dispatch-only sources');
+  assert.match(ingesterWorkflowYml,/github\.event\.workflow_run\.head_branch == 'main'/,
+    'main successful push Test Ingest must be reachable');
+  const mainRun={...run,head_branch:'main'};
+  const mainRecord=recordFor(event,mainRun,workflow,tree,jobs,artifacts);
+  assert.equal(JSON.parse(mainRecord.recordBytes).source.head_branch,'main');
+
   for (const [ev, r, wf, tr, js, as] of [
     [{...event, workflow_run:{...event.workflow_run, id:121}},run,workflow,tree,jobs,artifacts],
     [event,{...run,event:'pull_request'},workflow,tree,jobs,artifacts],
