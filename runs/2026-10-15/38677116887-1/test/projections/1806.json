@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_projection_receipt",
+  "outcome": "applied",
+  "issue": 1806,
+  "run_id": 38677116887,
+  "run_attempt": 1,
+  "target_sha": "96e164fd1da6e554549be8529700fbe1175ee702",
+  "plan_digest": "83b195063aca5be72338accb40dcd0e76dbbe872878b0b6f24a33bc5a9ff945e",
+  "artifact_digest": "sha256:05a4abbab7535444c7ef0868117ba188d2a9206d051375d2ae28c33405ed032a",
+  "ingest_run_id": 38677547642,
+  "ingest_attempt": 1,
+  "declaration_digest": "cd345d0e4fb24a67367c008768bb98aebacf60f0107f22e8a4f5d6cabfc61d37",
+  "before_body_sha256": "ad963ae3dd1fe294d4d9f69d3a328d5cae9649177cf8092e4f6ed8589e67d9b1",
+  "body_sha256": "cc7699a3947ec01d8e26c772afe75f0de3456bc8ebc9dd1ab6b2df8e6ab8c4a4",
+  "readback_body": "## Requirements: Live selected login owner for #1772 no-E2E multi-Issue merge acceptance\n\nThis is a bounded **real acceptance evidence owner**, not a new browser feature or a second projector. PR #1804 implements the independent historical main-merge attestation for #1772. The original #1772 has `New: none` and `Regression: none`, so its PR by itself cannot produce a selected browser plan or a sibling's real PATCH receipt. A new open regression owner is necessary for a truthful selected multi-Issue PR rather than weakening #1772's SC-01/SC-03.\n\n**Required source**: actual `e2e/tests/**/login.spec.ts` through the canonical `E2E / Tests` on the PR HEAD; main-owned `E2E / Test Ingest`, authenticated Plan and assertion artifact, existing `acceptance-results` immutable receipt. Neither this Issue nor its acceptance can invent results.\n\n### Success Criteria\n\n- [ ] SC-01 A PR implementing this Issue together with #1772 runs one real selected `login` Regression ID on its exact PR head with at least one executed assertion and independently authenticated completed Playwright Run/Plan.\n- [ ] SC-02 Main-owned trusted E2E Ingest verifies exact Run ID/attempt/SHA, writes and independently reads back an applied per-Issue `login` Pass receipt for this Issue, and produces **no** E2E Report PATCH or receipt for #1772 (the explicit `no_e2e` sibling).\n- [ ] SC-03 The code PR passes exact-head Quality, E2E, Case Smoke, read-only pre-merge Agent, deterministic pre-merge and PR Gates; no forced result, changed `login` test or relaxed security provenance.\n\n## Acceptance Plan\n```yaml\nacceptance:\n  SC-01:\n    when: pr\n    method: agent\n  SC-02:\n    when: pr\n    method: agent\n  SC-03:\n    when: merged\n    branch: main\n    method: agent\n```\n\n## Acceptance Report\n| Criterion | Result | Evidence |\n|---|---|---|\n| SC-01 | Pending | - |\n| SC-02 | Pending | - |\n| SC-03 | Pending | - |\n\n## E2E Verification\n### New\n- none: No new browser scenario or Spec is introduced.\n### Regression\n- login\n\n## E2E Report\n\n| ID | Type | Result | Evidence |\n|---|---|---|---|\n| login | Regression | Pass | run 38677116887/1, SHA 96e164fd1da6e554549be8529700fbe1175ee702, contract cd345d0e4fb24a67367c008768bb98aebacf60f0107f22e8a4f5d6cabfc61d37, plan 83b195063aca5be72338accb40dcd0e76dbbe872878b0b6f24a33bc5a9ff945e, tests 1/1 (https://github.com/BestNathan/nession/actions/runs/38677116887) |\n\n## Product alignment\n- [x] Reuses the current `e2e/run test --id login` runner and immutable trusted main-owned Issue E2E projector.\n- [x] No direct Issue E2E Report edits or counterfeit Pass receipts.\n- [x] Zero browser test-code changes; this is a live end-to-end proof owner.\n\n---\n**Status:** Approved",
+  "patch_updated_at": "2026-10-15T03:41:28Z",
+  "readback_updated_at": "2026-10-15T03:41:28Z",
+  "rows": [
+    {
+      "id": "login",
+      "result": "Pass",
+      "evidence": "run 38677116887/1, SHA 96e164fd1da6e554549be8529700fbe1175ee702, contract cd345d0e4fb24a67367c008768bb98aebacf60f0107f22e8a4f5d6cabfc61d37, plan 83b195063aca5be72338accb40dcd0e76dbbe872878b0b6f24a33bc5a9ff945e, tests 1/1 (https://github.com/BestNathan/nession/actions/runs/38677116887)"
+    }
+  ]
+}
