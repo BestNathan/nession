@@ -29,8 +29,10 @@ on:
 
 # One run per branch/PR. Superseded runs are useless, so cancel them.
 concurrency:
-  group: e2e-${{ github.event.pull_request.number || github.ref_name }}
-  cancel-in-progress: true
+  # A superseded PR can be cancelled; each completed main Push must retain
+  # an independent exact-SHA run for trusted Run Store ingestion (#1690).
+  group: e2e-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   e2e:
