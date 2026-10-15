@@ -71,8 +71,8 @@ async function one(tmp,k){
   const outcomes=await Promise.all([publish(a,k.store,{receipts}),publish(b,k.store,{receipts})]);
   assert.ok(outcomes.every(x=>x.replayed===false&&SHA.test(x.commit_sha)));
   const remoteHead=git(remote,'rev-parse','refs/heads/'+k.store);
-  assert.equal(git(a,'show',remoteHead+':'+k.a),'{"writer":"a"}');
-  assert.equal(git(a,'show',remoteHead+':'+k.b),'{"writer":"b"}');
+  assert.equal(git(remote,'show',remoteHead+':'+k.a),'{"writer":"a"}');
+  assert.equal(git(remote,'show',remoteHead+':'+k.b),'{"writer":"b"}');
   assert.equal(Number(git(remote,'rev-list','--count',base+'..'+remoteHead)),2);
   assert.equal(git(remote,'show','-s','--format=%P',remoteHead).split(' ').length,1);
   // Same key and SAME byte content => idempotent; NO extra commit.
