@@ -108,8 +108,9 @@ export function attestBugBootstrap(pin,sourceIssue,pr,pre,post,e2e,comparison,ta
     throw Error('related Bug source Issue contract is not completed');
   // The original Issue SC pins the unchanged PR-head rerun. Match the
   // historical source declaration to GitHub rather than accepting any green E2E.
-  const historical=String(sourceIssue.body??'').match(
-    /Historical E2E witness: PR #(\d+) SHA ([a-f0-9]{40}); Reporter Fix PR #(\d+); E2E Run (\d+) attempt (\d+)/);
+  const criteriaSection=String(sourceIssue.body??'').match(/^## Success Criteria\s*\n([\s\S]*?)(?=^## |$(?![\s\S]))/m)?.[1]??'';
+  const candidates=[...criteriaSection.matchAll(/Historical E2E witness: PR #(\d+) SHA ([a-f0-9]{40}); Reporter Fix PR #(\d+); E2E Run (\d+) attempt (\d+)/g)];
+  const historical=candidates.length===1?candidates[0]:null;
   if(!historical || Number(historical[1])!==1716 || Number(historical[3])!==1724 ||
       Number(historical[4])!==pin.e2eRun || Number(historical[5])!==pin.e2eAttempt ||
       !SHA.test(historical[2]) || e2e?.head_sha!==historical[2])
@@ -226,6 +227,7 @@ function selfTest() {
     ()=>check(issue,pr,pre,[post[0],post[1],post[2],{...post[3],contract_sha256:'a'.repeat(64)}]),
     ()=>check(issue,pr,pre,post,{...e2e,conclusion:'failure'}),
     ()=>check({...issue,body:issue.body.replace('PR #1716', 'PR #1717')}),
+    ()=>check({...issue,body:issue.body+'\nHistorical E2E witness: PR #1716 SHA '+('c'.repeat(40))+'; Reporter Fix PR #1724; E2E Run 38387630403 attempt 3'}),
     ()=>check(issue,pr,pre,post,e2e,{...comparison,merge_base_commit:{sha:pin.head}}),
   ]) assert.throws(item,/unverified|source|related|contract/);
   console.log('related Bug completed Acceptance receipts self-test passed');
