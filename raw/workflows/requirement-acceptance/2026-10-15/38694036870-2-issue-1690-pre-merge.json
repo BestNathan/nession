@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "kind": "agent_workflow_run",
+  "identity": {
+    "workflow_id": "requirement-acceptance",
+    "github_workflow": "Acceptance / Orchestrator",
+    "github_run_id": 38694036870,
+    "github_run_attempt": 2,
+    "job": "execute",
+    "repository": "BestNathan/nession",
+    "event": "pull_request_target",
+    "unique_run_name": "38694036870-2-issue-1690-pre-merge"
+  },
+  "task": {
+    "id": "issue-1690-pre-merge",
+    "type": "acceptance",
+    "issue": 1690,
+    "stage": "pre-merge",
+    "target_ref": "010953fd581acc6817c67c7870eb66b056da7000",
+    "deployment": null
+  },
+  "agent": {
+    "provider": "cursor",
+    "id": "legacy-acceptance-cursor",
+    "role": "acceptor",
+    "harness_sha256": null,
+    "checkpoint_id": null,
+    "model": {
+      "id": "composer-2.5",
+      "fast": true,
+      "params": [
+        {
+          "id": "fast",
+          "value": "true"
+        }
+      ]
+    },
+    "run_id": "run-f25825a0-484f-44b9-80bc-00e2c9f24ab5",
+    "request_id": "76acd661-89f6-40ff-a4ad-69cd726fb4f8",
+    "status": "finished",
+    "prompt": {
+      "id": "acceptance",
+      "version": "v1",
+      "sha256": "10706d98f08bf480283d96f409c255c9330bc355751de1fe2b927095cd9b257d"
+    }
+  },
+  "execution": {
+    "turns": 1,
+    "model_requests": 1,
+    "tools": {
+      "observed": true,
+      "total": 12,
+      "unique": 2,
+      "by_name": {
+        "grep": 2,
+        "read": 10
+      }
+    }
+  },
+  "tokens": {
+    "input": 73237,
+    "output": 1736,
+    "cache_read": 25056,
+    "cache_write": 0,
+    "reasoning": null,
+    "total": 100029
+  },
+  "cost": {
+    "raw_usd": null,
+    "charged_usd": null,
+    "estimated_usd": null
+  },
+  "timing": {
+    "started_at": "2026-10-15T06:55:16.812Z",
+    "finished_at": "2026-10-15T06:55:34.764Z",
+    "agent_duration_ms": 17721,
+    "workflow_duration_ms": null
+  },
+  "result": {
+    "status": "completed",
+    "pass": 2,
+    "pending": 0,
+    "fail": 0,
+    "na": 0
+  }
+}
