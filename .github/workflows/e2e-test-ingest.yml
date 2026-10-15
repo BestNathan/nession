@@ -45,7 +45,7 @@ jobs:
           node trusted/scripts/e2e-test-run-ingest.mjs create \
             "$GITHUB_EVENT_PATH" scratch/test-record.json scratch/test-index.json scratch/paths.json
       - name: Mint scoped App token for orphan Run Store updates
-        if: vars.RUN_STORE_WRITER_MODE == 'app'
+        if: (vars.RUN_STORE_WRITER_MODE == '' || vars.RUN_STORE_WRITER_MODE == 'app')
         id: store_app
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
         with:
@@ -60,15 +60,15 @@ jobs:
         run: |
           set -euo pipefail
           case "$WRITER_MODE" in
-            ''|legacy) ;;
-            app) [[ -n "$APP_TOKEN" ]] || { echo "::error::No App token; refuse legacy fallback" >&2; exit 1; } ;;
+            legacy) ;;
+            ''|app) [[ -n "$APP_TOKEN" ]] || { echo "::error::No App token; refuse legacy fallback" >&2; exit 1; } ;;
             *) echo "::error::Unsupported RUN_STORE_WRITER_MODE" >&2; exit 1 ;;
           esac
 
       - name: Append Test Run Record and SHA index only to orphan branch
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          STORE_PUSH_TOKEN: ${{ vars.RUN_STORE_WRITER_MODE == 'app' && steps.store_app.outputs.token || secrets.GITHUB_TOKEN }}
+          STORE_PUSH_TOKEN: ${{ vars.RUN_STORE_WRITER_MODE == 'legacy' && secrets.GITHUB_TOKEN || steps.store_app.outputs.token }}
         run: |
           set -euo pipefail
           mkdir results-repo
@@ -179,7 +179,7 @@ jobs:
             source scratch/output scratch/artifact/playwright.json \
             scratch/artifact/assertions.json
       - name: Mint scoped App token for orphan Run Store updates
-        if: vars.RUN_STORE_WRITER_MODE == 'app' && steps.capability.outputs.available == 'true'
+        if: (vars.RUN_STORE_WRITER_MODE == '' || vars.RUN_STORE_WRITER_MODE == 'app') && steps.capability.outputs.available == 'true'
         id: store_app
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
         with:
@@ -195,8 +195,8 @@ jobs:
         run: |
           set -euo pipefail
           case "$WRITER_MODE" in
-            ''|legacy) ;;
-            app) [[ -n "$APP_TOKEN" ]] || { echo "::error::No App token; refuse legacy fallback" >&2; exit 1; } ;;
+            legacy) ;;
+            ''|app) [[ -n "$APP_TOKEN" ]] || { echo "::error::No App token; refuse legacy fallback" >&2; exit 1; } ;;
             *) echo "::error::Unsupported RUN_STORE_WRITER_MODE" >&2; exit 1 ;;
           esac
 
@@ -204,7 +204,7 @@ jobs:
         if: steps.capability.outputs.available == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          STORE_PUSH_TOKEN: ${{ vars.RUN_STORE_WRITER_MODE == 'app' && steps.store_app.outputs.token || secrets.GITHUB_TOKEN }}
+          STORE_PUSH_TOKEN: ${{ vars.RUN_STORE_WRITER_MODE == 'legacy' && secrets.GITHUB_TOKEN || steps.store_app.outputs.token }}
         run: |
           set -euo pipefail
           [[ -s scratch/output/record.json ]] || exit 0
