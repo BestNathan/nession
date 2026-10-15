@@ -1,5 +1,8 @@
 name: Metrics / Repository Health
 
+env:
+  RUN_STORE_RECEIPT_DIR: ${{ runner.temp }}/run-store-receipts
+
 on:
   schedule:
     - cron: '17 */4 * * *'
@@ -211,6 +214,13 @@ jobs:
 
           git commit -m "metrics: update repository telemetry projections"
           git remote set-url origin "https://x-access-token:${STORE_PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git push origin HEAD:metrics
+          node "${GITHUB_WORKSPACE}/scripts/run-store-cas-push.mjs" metrics "${GITHUB_WORKSPACE}/metrics-store"
           git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
-
+      - name: Preserve Run Store post-commit receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-store-receipt-${{ github.run_id }}-${{ github.run_attempt }}-repository
+          path: ${{ runner.temp }}/run-store-receipts
+          if-no-files-found: ignore
+          retention-days: 14
