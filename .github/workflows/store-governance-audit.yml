@@ -1,0 +1,52 @@
+name: Store / Governance Audit
+
+# The live report is an observation only. Neither a green Gate nor a GitHub
+# Actions token can assert that an admin-enforced Ruleset/App writer exists.
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/store-governance-audit.yml
+      - scripts/run-store-inventory.json
+      - scripts/run-store-inventory.mjs
+      - scripts/run-store-integrity.mjs
+      - .github/workflows/*-ingest.yml
+  workflow_dispatch:
+  schedule:
+    - cron: '43 3 * * *'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  observe:
+    if: github.repository == 'BestNathan/nession' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout only trusted main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify canonical writers and negative inventory fixtures
+        run: ./gates/run run-store-inventory
+      - name: Observe live branch and Ruleset enforcement without modifying refs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/store-governance"
+          node scripts/run-store-inventory.mjs live \
+            "${RUNNER_TEMP}/store-governance/live.json"
+      - name: Publish source-aligned read-only governance evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: store-governance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/store-governance/live.json
+          if-no-files-found: error
+          retention-days: 30

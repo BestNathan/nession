@@ -19,6 +19,7 @@ export const CATALOG = [
   ['agent-issue-audit', 'issue-audit.yml', 'Issue Audit Agent', 'agent-issue-audit.yml', 'Agent / Issue Audit', 'agent'],
   ['agent-provider-smoke', 'agent-provider-smoke.yml', 'AI Agent Provider Smoke', 'agent-provider-smoke.yml', 'Agent / Provider Smoke', 'agent'],
   ['acceptance-orchestrator', 'requirement-acceptance.yml', 'Requirement Acceptance', 'acceptance-orchestrator.yml', 'Acceptance / Orchestrator', 'acceptance'],
+  ['acceptance-postrun-waker', 'acceptance-postrun-waker.yml', 'Acceptance / Post-Run Waker', 'acceptance-postrun-waker.yml', 'Acceptance / Post-Run Waker', 'acceptance'],
   ['acceptance-cases', 'acceptance-cases.yml', 'Acceptance Cases', 'acceptance-cases.yml', 'Acceptance / Cases', 'acceptance'],
   ['acceptance-case-ingest', 'acceptance-case-ingest.yml', 'Acceptance Case Ingest', 'acceptance-case-ingest.yml', 'Acceptance / Case Ingest', 'acceptance'],
   ['acceptance-case-smoke', 'acceptance-case-smoke.yml', 'Acceptance Case Smoke', 'acceptance-case-smoke.yml', 'Acceptance / Case Smoke', 'acceptance'],
@@ -28,6 +29,8 @@ export const CATALOG = [
   ['e2e-test-ingest', 'e2e-test-run-ingest.yml', 'E2E Test Run Ingest', 'e2e-test-ingest.yml', 'E2E / Test Ingest', 'e2e'],
   ['ci-quality', 'quality.yml', 'Quality Gate', 'ci-quality.yml', 'CI / Quality Gate', 'ci'],
   ['ci-run-store-integrity-audit', 'ci-run-store-integrity-audit.yml', 'CI / Run Store Integrity Audit', 'ci-run-store-integrity-audit.yml', 'CI / Run Store Integrity Audit', 'ci'],
+  ['ci-pages', 'ci-pages.yml', 'CI / Pages', 'ci-pages.yml', 'CI / Pages', 'ci'],
+  ['deploy-pages', 'deploy-pages.yml', 'Deploy / Public Pages', 'deploy-pages.yml', 'Deploy / Public Pages', 'delivery'],
   ['metrics-agent-telemetry', 'metrics-ingest.yml', 'Metrics Ingest', 'metrics-agent-telemetry.yml', 'Metrics / Agent Telemetry Ingest', 'metrics'],
   ['metrics-repository', 'repo-metrics.yml', 'Repository Metrics', 'metrics-repository.yml', 'Metrics / Repository Health', 'metrics'],
   ['release-staging', 'staging.yml', 'Staging', 'release-staging.yml', 'Release / Staging Artifacts', 'delivery'],
@@ -35,6 +38,7 @@ export const CATALOG = [
   ['deploy-manual', 'deploy.yml', 'Deploy', 'deploy-manual.yml', 'Deploy / Manual', 'delivery'],
   ['task-runner', 'task-runner.yml', 'Ephemeral Task Runner', 'task-runner.yml', 'Task / Ephemeral Runner', 'task'],
   ['task-result-ingest', 'task-result-ingest.yml', 'Task Result Ingest', 'task-result-ingest.yml', 'Task / Result Ingest', 'task'],
+  ['store-governance-audit', 'store-governance-audit.yml', 'Store / Governance Audit', 'store-governance-audit.yml', 'Store / Governance Audit', 'store'],
 ];
 
 // Resolve the actual checked-in path from the single canonical catalog.
@@ -58,6 +62,7 @@ const DOMAIN_PREFIX = {
   e2e: 'E2E /',
   ci: 'CI /',
   metrics: 'Metrics /',
+  store: 'Store /',
   task: 'Task /',
 };
 const stripComment = (line) => line.replace(/\s+#.*$/, '');

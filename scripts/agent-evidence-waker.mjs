@@ -6,6 +6,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import {pathToFileURL} from 'node:url';
+import {spawnSync} from 'node:child_process';
 
 const REPO='BestNathan/nession', WORKFLOW='.github/workflows/agent-provider-smoke.yml';
 const HEX40=/^[a-f0-9]{40}$/;
@@ -66,7 +68,79 @@ export function verifyWake(payload,run,root){
   const verified=validateWakeSource(payload,run);
   return {...verified,...verifyDurableTelemetry(root,verified)};
 }
+const WAKE_OWNERS=[
+  '.github/workflows/metrics-agent-telemetry.yml',
+  '.github/workflows/acceptance-orchestrator.yml',
+  'scripts/agent-evidence-waker.mjs',
+  'scripts/agent-telemetry-ingest.mjs',
+];
+// These selectors are part of the end-to-end evidence dependency graph:
+// a trusted wake owner change must generate a fresh main Provider Smoke before
+// a subsequent authenticated Metrics ingest can wake merged Agent SC checks.
+export function validateWakeProducerTrigger(workflow){
+  const trigger=workflow.split(/^permissions:/m)[0];
+  const mainPush=/^  push:\s*\n    branches: \[main\]\s*\n    paths:\s*\n((?:      (?:- [^\n]+|#[^\n]*)\n)+)/m.exec(trigger);
+  if(!mainPush)fail('Provider Smoke must have a main-only push paths selector');
+  const selected=new Set(mainPush[1].trim().split('\n').map(x=>x.trim()).filter(x=>x.startsWith('- ')).map(x=>x.slice(2)));
+  for(const owner of WAKE_OWNERS){
+    if(!selected.has(owner))fail('missing Provider Smoke wake source: '+owner);
+  }
+  return {sources:WAKE_OWNERS.length};
+}
+// The same workflow dispatches unrelated E2E and Provider wake events. Prove
+// both route filters and the exact-SHA propagation to the canonical selector.
+export function validateWakeConsumerRouting(workflow){
+  const provider=workflow.split('  prepare-post-merge-provider-evidence:')[1]
+    ?.split('  post-merge-provider-evidence-acceptance:')[0];
+  const e2e=workflow.split('  reconcile-issue-e2e:')[1]
+    ?.split('  reconcile-completed-quality-e2e:')[0];
+  if(!provider?.includes("github.event.action == 'nession-agent-telemetry-ingested'"))
+    fail('Provider event source must be an exact repository_dispatch action');
+  if(!provider.includes('ACCEPTANCE_STAGE=post-merge TARGET_SHA="$SOURCE_SHA" \\') ||
+     !provider.includes('node scripts/select-merged-agents.mjs select'))
+    fail('merged Agent selection must receive authenticated Provider target SHA');
+  const call=workflow.split('  post-merge-provider-evidence-acceptance:')[1]
+    ?.split('  # The privileged E2E ingest')[0]??'';
+  if(!provider.includes('echo "source_run_id=$SOURCE_RUN_ID" >> "$GITHUB_OUTPUT"') ||
+     !provider.includes('echo "source_run_attempt=$SOURCE_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"') ||
+     !call.includes('provider_source_run_id: ${{ needs.prepare-post-merge-provider-evidence.outputs.source_run_id }}') ||
+     !call.includes('provider_source_run_attempt: ${{ needs.prepare-post-merge-provider-evidence.outputs.source_run_attempt }}'))
+    fail('Provider evidence waker lost exact run/attempt forwarding to read-only Agent');
+  if(!e2e?.includes("if: github.event_name == 'repository_dispatch' && github.event.action == 'nession-issue-e2e-projected'"))
+    fail('E2E event source must be an exact repository_dispatch action');
+  return {provider:true,e2e:true,source_sha:true};
+}
 function selfTest(){
+  const wf=fs.readFileSync('.github/workflows/agent-provider-smoke.yml','utf8');
+  assert.deepEqual(validateWakeProducerTrigger(wf),{sources:4});
+  const orchestration=fs.readFileSync('.github/workflows/acceptance-orchestrator.yml','utf8');
+  assert.deepEqual(validateWakeConsumerRouting(orchestration),{provider:true,e2e:true,source_sha:true});
+  const acceptance=fs.readFileSync('.github/workflows/agent-sc-acceptance.yml','utf8');
+  if(!acceptance.includes('PROVIDER_SOURCE_RUN_ID: ${{ inputs.provider_source_run_id }}')||
+     !acceptance.includes('PROVIDER_SOURCE_RUN_ATTEMPT: ${{ inputs.provider_source_run_attempt }}')||
+     !acceptance.includes("ref: metrics")||
+     !acceptance.includes("path: provider-metrics"))
+    fail('read-only Acceptance lost authenticated Provider source or Metrics checkout');
+  assert.throws(()=>validateWakeConsumerRouting(
+    orchestration.replace('provider_source_run_attempt: ${{ needs.prepare-post-merge-provider-evidence.outputs.source_run_attempt }}',
+      'provider_source_run_attempt: 1')),/run\/attempt forwarding/);
+  assert.throws(()=>validateWakeConsumerRouting(
+    orchestration.replace('ACCEPTANCE_STAGE=post-merge TARGET_SHA="$SOURCE_SHA"',
+      'ACCEPTANCE_STAGE=post-merge')),/target SHA/);
+  assert.throws(()=>validateWakeConsumerRouting(
+    orchestration.replace("github.event.action == 'nession-issue-e2e-projected'",
+      "github.event.action == 'nession-agent-telemetry-ingested'")),/E2E event source/);
+  assert.throws(()=>validateWakeConsumerRouting(
+    orchestration.replace("github.event.action == 'nession-agent-telemetry-ingested'",
+      "github.event.action == 'nession-issue-e2e-projected'")),/Provider event source/);
+  for(const owner of WAKE_OWNERS){
+    assert.throws(()=>validateWakeProducerTrigger(
+      wf.replace('      - '+owner+'\n','')
+    ),/missing Provider Smoke wake source/);
+  }
+  assert.throws(()=>validateWakeProducerTrigger(
+    wf.replace('branches: [main]','branches: [feature]')
+  ),/main-only/);
   const sha='a'.repeat(40),payload={source_run_id:789,source_run_attempt:1,target_sha:sha};
   const run={id:789,run_attempt:1,path:WORKFLOW,name:'Agent / Provider Smoke',
     event:'push',head_branch:'main',head_sha:sha,status:'completed',conclusion:'success',
@@ -97,12 +171,29 @@ function selfTest(){
     fs.symlinkSync('/etc/passwd',f);
     assert.throws(()=>verifyWake(payload,run,root),/unsafe Metrics record file/);
   }finally{fs.rmSync(root,{recursive:true,force:true});}
-  console.log('post-merge evidence waker: source, digest lineage and negative fixtures passed');
+  // The CI evidence collector imports verifyWake as an ES module. Importing
+  // a module MUST NOT execute its CLI error/verify branch as a side effect.
+  const imported=spawnSync(process.execPath,['--input-type=module','-e',
+    "const m = await import('./scripts/agent-evidence-waker.mjs'); if(typeof m.verifyWake !== 'function') process.exit(7)"],{
+    cwd:process.cwd(),encoding:'utf8',timeout:10000,
+  });
+  assert.equal(imported.status,0,'ESM import cannot execute direct CLI');
+  assert.equal(imported.stdout,'','import must not emit CLI output');
+  const invalid=spawnSync(process.execPath,['scripts/agent-evidence-waker.mjs','bad-command'],{
+    cwd:process.cwd(),encoding:'utf8',timeout:10000,
+  });
+  assert.notEqual(invalid.status,0,'invalid direct CLI still fails closed');
+  assert.match(invalid.stderr,/usage: self-test \| verify/);
+  console.log('post-merge evidence waker: source, digest lineage, import-safe CLI and negative fixtures passed');
 }
-if(process.argv[2]==='self-test')selfTest();
-else if(process.argv[2]==='verify'){
-  const [payloadFile,runFile,metricsRoot]=process.argv.slice(3);
-  if(!payloadFile||!runFile||!metricsRoot)fail('usage: verify PAYLOAD_JSON GITHUB_RUN_JSON METRICS_ROOT');
-  const result=verifyWake(readRecord(payloadFile),readRecord(runFile),metricsRoot);
-  console.log(JSON.stringify(result));
-}else fail('usage: self-test | verify ...');
+// The read-only CI collector imports verifyWake. Only a direct invocation of
+// this file may dispatch the standalone CLI; import never reads argv or exits.
+if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href){
+  if(process.argv[2]==='self-test')selfTest();
+  else if(process.argv[2]==='verify'){
+    const [payloadFile,runFile,metricsRoot]=process.argv.slice(3);
+    if(!payloadFile||!runFile||!metricsRoot)fail('usage: verify PAYLOAD_JSON GITHUB_RUN_JSON METRICS_ROOT');
+    const result=verifyWake(readRecord(payloadFile),readRecord(runFile),metricsRoot);
+    console.log(JSON.stringify(result));
+  }else fail('usage: self-test | verify ...');
+}

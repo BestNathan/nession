@@ -61,6 +61,14 @@ on:
         required: false
         default: ''
         type: string
+      provider_source_run_id:
+        required: false
+        default: ''
+        type: string
+      provider_source_run_attempt:
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -93,6 +101,8 @@ jobs:
       TARGET_REF: ${{ inputs.target_ref }}
       DEPLOYMENT: ${{ inputs.deployment }}
       DETERMINISTIC_RESULT_JSON: ${{ inputs.deterministic_result_json }}
+      PROVIDER_SOURCE_RUN_ID: ${{ inputs.provider_source_run_id }}
+      PROVIDER_SOURCE_RUN_ATTEMPT: ${{ inputs.provider_source_run_attempt }}
 
       CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
       CURSOR_MODEL: ${{ vars.CURSOR_MODEL || 'composer-2.5' }}
@@ -126,6 +136,14 @@ jobs:
           # depth-1 leaves only the commit SHA in .git/shallow and makes
           # exact-source merge/parent proofs incorrectly Pending.
           fetch-depth: 0
+
+      - name: Checkout immutable authenticated Provider evidence
+        if: inputs.provider_source_run_id != ''
+        uses: actions/checkout@v4
+        with:
+          ref: metrics
+          path: provider-metrics
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -279,10 +297,13 @@ jobs:
             echo "Requirement-level Pass/Pending/Fail/N/A values are data; they do not change workflow infrastructure status."
           } >> "${GITHUB_STEP_SUMMARY}"
 
+      # Reruns reuse github.run_id, but each attempt must publish and consume
+      # its own immutable result. Otherwise actions/download-artifact selects
+      # the first attempt's same-name artifact and projects stale evidence.
       - name: Upload structured Acceptance Result
         uses: actions/upload-artifact@v4
         with:
-          name: acceptance-result-${{ inputs.issue_number }}-${{ inputs.stage }}-${{ github.run_id }}
+          name: acceptance-result-${{ inputs.issue_number }}-${{ inputs.stage }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/acceptance-result.json
           if-no-files-found: error
           retention-days: 30
@@ -316,10 +337,12 @@ jobs:
         run: |
           ./gates/run requirement-acceptance-selftest acceptance-executor-selftest
 
+      # Read the exact current attempt, never the earlier artifact of a
+      # successful/failed re-run sharing this workflow run ID.
       - name: Download structured Acceptance Result
         uses: actions/download-artifact@v4
         with:
-          name: acceptance-result-${{ inputs.issue_number }}-${{ inputs.stage }}-${{ github.run_id }}
+          name: acceptance-result-${{ inputs.issue_number }}-${{ inputs.stage }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/acceptance-result
 
       - name: Apply Acceptance Report and checkbox projection

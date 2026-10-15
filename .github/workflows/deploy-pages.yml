@@ -1,0 +1,97 @@
+name: Deploy / Public Pages
+
+# Trusted main-only public projection; never Nession product web/.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'pages/**'
+      - 'automation/agents/registry.json'
+      - '.github/workflows/deploy-pages.yml'
+  schedule:
+    - cron: '43 */4 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-public-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build independent Pages
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    outputs:
+      active: ${{ steps.detect.outputs.active }}
+    steps:
+      - name: Checkout trusted main
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - id: detect
+        name: Detect standalone Pages source
+        shell: bash
+        run: |
+          if [[ -f pages/index.html && -f pages/scripts/build.mjs ]]; then
+            echo 'active=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'active=false' >> "$GITHUB_OUTPUT"
+            echo 'Pages source has not merged to main; skipping deployment.'
+          fi
+      - name: Checkout pinned metrics snapshot
+        if: steps.detect.outputs.active == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: metrics
+          path: metrics-store
+          persist-credentials: false
+      - name: Setup standalone Node toolchain
+        if: steps.detect.outputs.active == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate independent public projection
+        if: steps.detect.outputs.active == 'true'
+        run: cd pages && npm run check
+      - name: Build sanitized static Pages artifact
+        if: steps.detect.outputs.active == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SOURCE_MAIN_SHA: ${{ github.sha }}
+          METRICS_DIR: ${{ github.workspace }}/metrics-store
+        shell: bash
+        run: |
+          set -euo pipefail
+          export METRICS_SHA="$(git -C metrics-store rev-parse HEAD)"
+          node pages/scripts/build.mjs
+          test -s pages/dist/index.html
+          test -s pages/dist/data/site.json
+          node -e "const d=require('./pages/dist/data/site.json'); if(d.schema_version!==1 || d.source.main_sha!==process.env.SOURCE_MAIN_SHA || d.source.metrics_sha!==process.env.METRICS_SHA) process.exit(1)"
+      - name: Configure GitHub Pages
+        if: steps.detect.outputs.active == 'true'
+        uses: actions/configure-pages@v5
+      - name: Upload standalone Pages
+        if: steps.detect.outputs.active == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: pages/dist
+
+  deploy:
+    name: Publish independent Pages
+    if: needs.build.outputs.active == 'true'
+    needs: [build]
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.publication.outputs.page_url }}
+    steps:
+      - name: Deploy GitHub Pages
+        id: publication
+        uses: actions/deploy-pages@v4

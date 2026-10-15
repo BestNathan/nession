@@ -21,7 +21,9 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: requirement-acceptance-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.event.client_payload.pr_number || github.event.issue.number || github.run_id }}
+  # New PR edits may cancel stale PR review but must never cancel the sole
+  # verified-evidence waker for the same PR.
+  group: requirement-acceptance-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.event.client_payload.pr_number || github.event.issue.number || github.run_id }}-${{ github.event_name == 'pull_request_target' && 'pr' || 'waker' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request_target' }}
 
 jobs:
@@ -127,6 +129,32 @@ jobs:
           echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
 
 
+      # Verify only the Issues actually implemented by this PR. A workflow
+      # dependency PR must not claim another PR's selected-E2E verdicts.
+      # Require exact-head Issue projection before invoking an Acceptance Agent.
+      - name: Verify exact-head Issue E2E obligations before Agent review
+        if: steps.discover.outputs.has_requirements == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -f scripts/issue-e2e-gate.mjs ]]; then
+            echo "::error::Trusted Issue E2E gate owner is missing from main; exact-head selected evidence cannot be verified"
+            exit 1
+          fi
+          issue_numbers='${{ steps.discover.outputs.issue_numbers }}'
+          for issue in $(jq -r '.[]' <<< "$issue_numbers"); do
+            [[ "$issue" =~ ^[1-9][0-9]*$ ]] || exit 1
+            gh api "repos/$GITHUB_REPOSITORY/issues/$issue" > "$RUNNER_TEMP/e2e-preflight-$issue.json"
+            if jq -e '.body | contains("## E2E Verification")' "$RUNNER_TEMP/e2e-preflight-$issue.json" > /dev/null; then
+              node scripts/issue-e2e-gate.mjs verify "$RUNNER_TEMP/e2e-preflight-$issue.json" "$TARGET_SHA"
+            else
+              echo "Legacy Issue #$issue retains existing full-E2E eligibility"
+            fi
+          done
   pre-merge-acceptance:
     needs: prepare-pre-merge
     if: needs.prepare-pre-merge.outputs.has_requirements == 'true'
@@ -314,6 +342,8 @@ jobs:
       pull-requests: read
     outputs:
       target_sha: ${{ steps.select.outputs.target_sha }}
+      source_run_id: ${{ steps.select.outputs.source_run_id }}
+      source_run_attempt: ${{ steps.select.outputs.source_run_attempt }}
       agent_issues: ${{ steps.select.outputs.agent_issues }}
       has_agents: ${{ steps.select.outputs.has_agents }}
     steps:
@@ -354,6 +384,8 @@ jobs:
             "$RUNNER_TEMP/telemetry-wake.json" "$RUNNER_TEMP/provider-source.json" \
             "$GITHUB_WORKSPACE/metrics-store"
           echo "target_sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
+          echo "source_run_id=$SOURCE_RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "source_run_attempt=$SOURCE_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
 
           # Reuse the canonical merged-stage association/method selector.
           issue_numbers="$(node scripts/requirement-acceptance.mjs discover-ref "$SOURCE_SHA")"
@@ -363,7 +395,7 @@ jobs:
             gh api "repos/$GITHUB_REPOSITORY/issues/$issue" \
               > "$RUNNER_TEMP/agent-issue-contracts/$issue.json"
           done
-          agent_issues="$(ISSUE_NUMBERS="$issue_numbers" ACCEPTANCE_STAGE=post-merge \
+          agent_issues="$(ISSUE_NUMBERS="$issue_numbers" ACCEPTANCE_STAGE=post-merge TARGET_SHA="$SOURCE_SHA" \
             node scripts/select-merged-agents.mjs select "$RUNNER_TEMP/agent-issue-contracts")"
           echo "agent_issues=$agent_issues" >> "$GITHUB_OUTPUT"
           if [[ "$(jq length <<< "$agent_issues")" -gt 0 ]]; then
@@ -385,6 +417,8 @@ jobs:
       stage: post-merge
       provider: cursor
       target_ref: ${{ needs.prepare-post-merge-provider-evidence.outputs.target_sha }}
+      provider_source_run_id: ${{ needs.prepare-post-merge-provider-evidence.outputs.source_run_id }}
+      provider_source_run_attempt: ${{ needs.prepare-post-merge-provider-evidence.outputs.source_run_attempt }}
       deployment: ''
     secrets: inherit
 
@@ -392,7 +426,7 @@ jobs:
   # completed run. A dispatch, unlike GITHUB_TOKEN PR edits, can wake Actions.
   # Rerun only the failed Acceptance jobs; no polling or fabricated Pass.
   reconcile-issue-e2e:
-    if: github.event_name == 'repository_dispatch'
+    if: github.event_name == 'repository_dispatch' && github.event.action == 'nession-issue-e2e-projected'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -449,10 +483,25 @@ jobs:
             [[ "$issue_number" =~ ^[1-9][0-9]*$ ]] || exit 1
             gh api "repos/$GITHUB_REPOSITORY/issues/$issue_number" > "$RUNNER_TEMP/issue-$issue_number.json"
             if jq -e '.body | contains("## E2E Verification")' "$RUNNER_TEMP/issue-$issue_number.json" > /dev/null; then
-              node scripts/issue-e2e-gate.mjs verify "$RUNNER_TEMP/issue-$issue_number.json" "$TARGET_SHA"
-              jq -e --arg digest "$PLAN_DIGEST" '.body | contains("plan " + $digest + ",")' \
-                "$RUNNER_TEMP/issue-$issue_number.json" > /dev/null
-              verified=$((verified + 1))
+              # The canonical Gate distinguishes selected IDs from a valid
+              # explicit-none Issue. The latter has no per-ID E2E Report and
+              # MUST NOT pretend to contain the source Plan digest.
+              verdict="$(node scripts/issue-e2e-gate.mjs verify-json \
+                "$RUNNER_TEMP/issue-$issue_number.json" "$TARGET_SHA")"
+              case "$(jq -r .reason <<< "$verdict")" in
+                selected)
+                  [[ "$(jq -r .required <<< "$verdict")" =~ ^[1-9][0-9]*$ ]] || exit 1
+                  jq -e --arg digest "$PLAN_DIGEST" \
+                    '.body | contains("plan " + $digest + ",")' \
+                    "$RUNNER_TEMP/issue-$issue_number.json" > /dev/null
+                  verified=$((verified + 1))
+                  ;;
+                explicit-none)
+                  [[ "$(jq -r .required <<< "$verdict")" == 0 ]] || exit 1
+                  echo "Issue #$issue_number declares no browser E2E IDs; no Plan receipt required"
+                  ;;
+                *) echo "::error::Unclassified Issue E2E Gate verdict"; exit 1 ;;
+              esac
             fi
           done < <(jq -r '.[]' "$RUNNER_TEMP/issue-refs.json")
           (( verified > 0 )) || { echo 'No verified Issue E2E requirements'; exit 0; }

@@ -1,0 +1,12 @@
+{
+  "name": "@nession/pages",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "description": "Independent public Nession engineering observatory",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "build": "node scripts/build.mjs",
+    "check": "node --check app.js && node --check scripts/project.mjs && node --check scripts/build.mjs && npm test"
+  }
+}
