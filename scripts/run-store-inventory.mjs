@@ -68,8 +68,8 @@ export function checkInventory(manifest,workflows){
          !body.includes('vars.RUN_STORE_WRITER_MODE')||
          !body.includes('vars.RUN_STORE_WRITER_APP_ID')||
          !body.includes('secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY')||
-         !/repositories:\\s*nession\\s*$/.test(body)||
-         !/permission-contents:\\s*write\\s*$/.test(body)||
+         !/repositories:\s*nession\s*$/.test(body)||
+         !/permission-contents:\s*write\s*$/.test(body)||
          !body.includes('refuse legacy fallback')||
          !body.includes('steps.store_app.outputs.token'))
         fail('missing pinned and scoped App migration path: '+writer.workflow);
