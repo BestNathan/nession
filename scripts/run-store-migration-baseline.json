@@ -2,7 +2,6 @@
   "schema_version": 1,
   "kind": "unanchored_run_store_migration_baseline",
   "repository": "BestNathan/nession",
-  "observed_utc": "2026-10-15T04:05:00Z",
   "trust_level": "repository_main_observation_only",
   "independently_anchored": false,
   "limitations": [
@@ -29,5 +28,6 @@
       "tree_sha": "9035774be419b263c36f71922b3ea8494ae2678b",
       "baseline_kind": "pre_enforcement_observation"
     }
-  ]
+  ],
+  "observation_note": "Commit/tree SHAs collected from GitHub REST branch and commit responses on 2026-10-15; no independent timestamp attestation"
 }
