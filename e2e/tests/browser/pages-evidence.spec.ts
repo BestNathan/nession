@@ -9,7 +9,7 @@ test.describe('standalone Pages evidence',()=>{
   await expect(page.getByRole('heading',{name:'Built in the open.'})).toBeVisible();
   await expect(page.getByText('85%',{exact:true})).toBeVisible();
   await expect(page.getByText('90%',{exact:true})).toBeVisible();
-  await expect(page.getByText('aaaaaaaaaaaa')).toBeVisible();
+  await expect(page.getByText('Current measured main revision · aaaaaaaaaaaa', {exact:true})).toBeVisible();
  });
  test('orphan ref presence never claims independent audit',async({page})=>{
   await page.goto(site.origin+'/#/evidence');
