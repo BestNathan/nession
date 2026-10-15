@@ -1,8 +1,5 @@
 name: Task / Result Ingest
 
-env:
-  RUN_STORE_RECEIPT_DIR: ${{ runner.temp }}/run-store-receipts
-
 # Trusted default-branch handler; never execute the Task branch's code.
 on:
   workflow_run:
