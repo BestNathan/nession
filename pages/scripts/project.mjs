@@ -32,6 +32,30 @@ function list(input, type) {
     .slice(0,12);
 }
 function countIn(obj,key) { return number(obj && obj[key]); }
+
+// Canonical aggregate metrics are not exact-SHA Issue/PR/Agent-Run proofs.
+// Strictly allowlist public category names and bounded integer counts.
+function observedCount(value) {
+  return Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+function observedSegments(window, key) {
+  const raw = window?.runs?.[key];
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {available:false, items:[]};
+  return {
+    available:true,
+    items:Object.entries(raw)
+      .filter(([name,value]) => /^[a-z][a-z0-9_-]{0,47}$/.test(name) && observedCount(value) !== null)
+      .map(([name,count]) => ({name,count}))
+      .sort((a,b) => b.count-a.count || a.name.localeCompare(b.name))
+      .slice(0,12),
+  };
+}
+function observedIssueCount(window, issueNumber) {
+  const counts = window?.runs?.by_issue;
+  if (!counts || typeof counts !== 'object' || Array.isArray(counts)) return null;
+  const key=String(issueNumber);
+  return Object.hasOwn(counts,key) ? observedCount(counts[key]) : null;
+}
 function rosterFrom(registry, agentWindow) {
   const known = registry && typeof registry.instances === 'object' && registry.instances || {};
   const usage = agentWindow?.runs?.by_agent_id || {};
@@ -49,6 +73,7 @@ export function makeProjection({ repository, agent, registry, issues, pulls, ref
   const a = agent?.schema_version === 1 && agent?.kind === 'agent_metrics_aggregate' ? agent : null;
   const current = r?.repository || {}, efficiency = r?.efficiency || {};
   const aw = a?.windows?.['7d'] || {};
+  const aw30 = a?.windows?.['30d'] || {};
   const tok = aw?.tokens?.total || {}, tool=aw?.tools||{}, cost=aw?.cost_usd?.charged || {};
   const record = (name,purpose)=>{
     const v=refs[name];
@@ -95,8 +120,13 @@ export function makeProjection({ repository, agent, registry, issues, pulls, ref
       available:!!a,
       generated_at:safeDate(a?.generated_at),
       roster:rosterFrom(registry,aw),
+      distribution: {
+        '7d': {providers:observedSegments(aw,'by_provider'), workflows:observedSegments(aw,'by_workflow')},
+        '30d': {providers:observedSegments(aw30,'by_provider'), workflows:observedSegments(aw30,'by_workflow')},
+      },
       summary: {
         runs_7d:countIn(aw.runs,'total'),
+        runs_30d:countIn(aw30.runs,'total'),
         tokens_7d:number(tok.total),
         tokens_observed_runs:number(tok.observed_runs),
         tools_7d:number(tool.total),
@@ -107,7 +137,10 @@ export function makeProjection({ repository, agent, registry, issues, pulls, ref
     work: {
       issues_status:Array.isArray(issues)?'available':'unavailable',
       pulls_status:Array.isArray(pulls)?'available':'unavailable',
-      issues:list(issues,'issue'),pulls:list(pulls,'pr'),
+      issues:list(issues,'issue').map(x=>({
+        ...x, observed_agent_runs_7d:observedIssueCount(aw,x.number),
+      })),
+      pulls:list(pulls,'pr'),
     },
     evidence:{ stores:stores.map(([name,purpose])=>record(name,purpose)) },
   };
