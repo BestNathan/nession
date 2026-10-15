@@ -7,9 +7,23 @@ import assert from 'node:assert/strict';
 const ACCEPTED_RESULTS = new Set(['pass', 'n/a']);
 const ALL_RESULTS = new Set(['pass', 'pending', 'fail', 'n/a']);
 const ACCEPTANCE_STAGES = new Set(['pre-merge', 'staging', 'post-merge']);
+const ACCEPTANCE_ISSUE_LABELS = new Set(['bug', 'requirement']);
 const PLACEHOLDER_EVIDENCE = new Set([
   '', '-', 'none', 'n/a', 'na', 'pending', 'tbd', 'todo', 'implementation pending',
 ]);
+
+// Product classification stays intact: a Bug never needs a Requirement label
+// merely to participate in the same trusted SC/Acceptance pipeline.
+export function isAcceptanceIssue(issue) {
+  return (issue?.labels ?? []).some((label) => {
+    const name = typeof label === 'string' ? label : label?.name;
+    return ACCEPTANCE_ISSUE_LABELS.has(name);
+  });
+}
+
+export function isOpenAcceptanceIssue(issue) {
+  return isAcceptanceIssue(issue) && String(issue.state).toLowerCase() === 'open';
+}
 
 export function extractSection(body, heading) {
   const lines = String(body ?? '').replace(/\r\n?/g, '\n').split('\n');
@@ -383,8 +397,7 @@ async function closingRequirementIssues({ owner, name, body, token }) {
   const numbers = parseClosingIssueNumbers(body, owner, name);
   for (const number of numbers) {
     const issue = await githubRequest(`/repos/${owner}/${name}/issues/${number}`, { token });
-    const labels = new Set((issue.labels ?? []).map((label) => typeof label === 'string' ? label : label.name));
-    if (labels.has('requirement')) issues.push(issue);
+    if (isAcceptanceIssue(issue)) issues.push(issue);
   }
   return issues;
 }
@@ -393,8 +406,7 @@ async function preMergeRequirementIssues({ owner, name, title = '', body, token 
   const numbers = parsePreMergeIssueNumbers(body, owner, name, title);
   for (const number of numbers) {
     const issue = await githubRequest(`/repos/${owner}/${name}/issues/${number}`, { token });
-    const labels = new Set((issue.labels ?? []).map((label) => typeof label === 'string' ? label : label.name));
-    if (labels.has('requirement') && String(issue.state).toLowerCase() === 'open') issues.push(issue);
+    if (isOpenAcceptanceIssue(issue)) issues.push(issue);
   }
   return issues;
 }
@@ -418,8 +430,7 @@ async function requirementIssuesForRef({ owner, name, sha, token }) {
   const issues = [];
   for (const number of [...numbers].sort((a, b) => a - b)) {
     const issue = await githubRequest(`/repos/${owner}/${name}/issues/${number}`, { token });
-    const labels = new Set((issue.labels ?? []).map((label) => typeof label === 'string' ? label : label.name));
-    if (labels.has('requirement') && String(issue.state).toLowerCase() === 'open') {
+    if (isOpenAcceptanceIssue(issue)) {
       issues.push(issue);
     }
   }
@@ -496,9 +507,8 @@ async function runIssueCloseGuard() {
   const event = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
   const issue = event.issue;
   if (!issue) throw new Error('issues event context is required');
-  const labels = new Set((issue.labels ?? []).map((label) => typeof label === 'string' ? label : label.name));
-  if (!labels.has('requirement')) {
-    console.log(`Issue #${issue.number} is not a requirement; nothing to guard.`);
+  if (!isAcceptanceIssue(issue)) {
+    console.log(`Issue #${issue.number} has no bug or requirement label; nothing to guard.`);
     return;
   }
   if (issue.state_reason === 'not_planned') {
@@ -554,6 +564,20 @@ function postMergePendingBody(evidence = 'requires production deployment; verify
 }
 
 function runSelfTest() {
+  const labelFixtures = [
+    [{ labels: ['bug'], state: 'open' }, true, true],
+    [{ labels: [{ name: 'bug' }, { name: 'ci' }], state: 'open' }, true, true],
+    [{ labels: ['requirement'], state: 'open' }, true, true],
+    [{ labels: [{ name: 'requirement' }], state: 'closed' }, true, false],
+    [{ labels: ['bug'], state: 'closed' }, true, false],
+    [{ labels: ['ci', 'test'], state: 'open' }, false, false],
+    [{ labels: [], state: 'open' }, false, false],
+    [{ state: 'open' }, false, false],
+  ];
+  for (const [issue, accepted, discoverable] of labelFixtures) {
+    assert.equal(isAcceptanceIssue(issue), accepted);
+    assert.equal(isOpenAcceptanceIssue(issue), discoverable);
+  }
   const cases = [
     ['valid accepted requirement', validBody(), 'closure', true, null],
     ['pre-merge ignores later-stage pending criteria', validBody()
@@ -680,7 +704,7 @@ function runSelfTest() {
       error.message.includes('PR remains open; merge blocked') &&
       error.message.includes('SC-02 is Fail'));
 
-  console.log(`requirement-acceptance self-test: ${cases.length + 3} cases passed`);
+  console.log(`requirement-acceptance self-test: ${cases.length + 3 + labelFixtures.length * 2} cases passed`);
 }
 
 async function main() {
