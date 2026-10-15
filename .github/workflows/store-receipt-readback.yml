@@ -1,0 +1,122 @@
+name: Store / Receipt Readback
+# Trusted default branch; independent read-only GITHUB_TOKEN. No App writer secret.
+on:
+  workflow_run:
+    workflows:
+      - "Acceptance / Case Ingest"
+      - "E2E / Scenario Ingest"
+      - "E2E / Test Ingest"
+      - "Task / Result Ingest"
+      - "Metrics / Agent Telemetry Ingest"
+      - "Metrics / Repository Health"
+    types: [completed]
+  # Only default-branch code handles trusted manual readback requests. An
+  # arbitrary-ref workflow_dispatch could otherwise read Actions artifacts.
+  repository_dispatch:
+    types: [nession-run-store-receipt-readback]
+permissions:
+  actions: read
+  contents: read
+concurrency:
+  group: run-store-receipt-readback-${{ github.event.workflow_run.id || github.event.client_payload.ingest_run_id }}
+  cancel-in-progress: false
+jobs:
+  readback:
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'repository_dispatch' ||
+        (github.event_name == 'workflow_run' &&
+          github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.head_repository.full_name == github.repository &&
+          github.event.workflow_run.head_branch == 'main'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout trusted-main consumer
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: trusted
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify read-only consumer contract
+        working-directory: trusted
+        run: node scripts/run-store-receipt-live-selftest.mjs
+      - name: Fetch authenticated ingester and receipt artifact listing
+        id: source
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REQUESTED_ID: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.ingest_run_id || github.event.workflow_run.id }}
+          BOUND_ATTEMPT: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.run_attempt || '' }}
+        run: |
+          set -euo pipefail
+          [[ "$REQUESTED_ID" =~ ^[1-9][0-9]*$ ]] || exit 2
+          mkdir -p "$RUNNER_TEMP/readback"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$REQUESTED_ID" > "$RUNNER_TEMP/readback/ingester.json"
+          attempt="$(jq -er .run_attempt "$RUNNER_TEMP/readback/ingester.json")"
+          if [[ -n "$BOUND_ATTEMPT" && "$attempt" != "$BOUND_ATTEMPT" ]]; then
+            echo "::error::GitHub event run attempt mismatch" >&2
+            exit 1
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$REQUESTED_ID/artifacts?per_page=100" > "$RUNNER_TEMP/readback/artifacts.json"
+          node trusted/scripts/run-store-receipt-live.mjs plan \
+            "$RUNNER_TEMP/readback/ingester.json" "$RUNNER_TEMP/readback/artifacts.json" \
+            "$REQUESTED_ID" "$attempt" "$RUNNER_TEMP/readback/plan.json"
+          echo "source_run=$REQUESTED_ID" >> "$GITHUB_OUTPUT"
+      - name: Independently download and verify source-aligned receipts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ steps.source.outputs.source_run }}
+        run: |
+          set -euo pipefail
+          plan="$RUNNER_TEMP/readback/plan.json"
+          store="$(jq -er .store "$plan")"
+          count="$(jq -er '.artifacts | length' "$plan")"
+          if [[ "$count" -eq 0 ]]; then
+            echo "PENDING: no authenticated publication receipt; cannot attest App write" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          mkdir -p "$RUNNER_TEMP/readback/store"
+          git -C "$RUNNER_TEMP/readback/store" init -q
+          git -C "$RUNNER_TEMP/readback/store" remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
+          git -C "$RUNNER_TEMP/readback/store" fetch --no-tags origin "refs/heads/$store"
+          git -C "$RUNNER_TEMP/readback/store" checkout --detach -q FETCH_HEAD
+          verified=0
+          while IFS=$'\t' read -r name store_name; do
+            [[ "$name" =~ ^run-store-receipt-[0-9]+-[0-9]+-[a-z]+$ && "$store_name" == "$store" ]] || exit 1
+            directory="$RUNNER_TEMP/readback/artifact/$name"
+            mkdir -p "$directory"
+            gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --name "$name" --dir "$directory"
+            files=()
+            while IFS= read -r -d '' file; do files+=("$file"); done \
+              < <(find "$directory" -type f -name '*.json' -print0)
+            [[ "${#files[@]}" -gt 0 && "${#files[@]}" -le 200 ]] || exit 1
+            for file in "${files[@]}"; do
+              source_id="$(jq -er '.source.run_id' "$file")"
+              [[ "$source_id" =~ ^[1-9][0-9]*$ ]] || exit 1
+              gh api "repos/$GITHUB_REPOSITORY/actions/runs/$source_id" > "$RUNNER_TEMP/readback/source.json"
+              node trusted/scripts/run-store-receipt-live.mjs verify \
+                "$RUNNER_TEMP/readback/ingester.json" "$RUNNER_TEMP/readback/artifacts.json" "$plan" "$name" "$file" \
+                "$RUNNER_TEMP/readback/source.json" "$RUNNER_TEMP/readback/store" \
+                "$GITHUB_WORKSPACE/trusted" | tee -a "$RUNNER_TEMP/readback/verified.jsonl"
+              verified=$((verified + 1))
+            done
+          done < <(jq -r '.artifacts[] | [.name,.store] | @tsv' "$plan")
+          [[ "$verified" -gt 0 ]] || exit 1
+          echo "Authenticated source/commit receipt readback: $verified; no signed/WORM anchor" >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve independent read-only verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-store-receipt-readback-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/readback/ingester.json
+            ${{ runner.temp }}/readback/artifacts.json
+            ${{ runner.temp }}/readback/plan.json
+            ${{ runner.temp }}/readback/verified.jsonl
+          if-no-files-found: warn
+          retention-days: 14

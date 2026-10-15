@@ -40,6 +40,7 @@ export const CATALOG = [
   ['task-result-ingest', 'task-result-ingest.yml', 'Task Result Ingest', 'task-result-ingest.yml', 'Task / Result Ingest', 'task'],
   ['store-governance-audit', 'store-governance-audit.yml', 'Store / Governance Audit', 'store-governance-audit.yml', 'Store / Governance Audit', 'store'],
   ['store-app-writer-smoke', 'store-app-writer-smoke.yml', 'Store / App Writer Smoke', 'store-app-writer-smoke.yml', 'Store / App Writer Smoke', 'store'],
+  ['store-receipt-readback', 'store-receipt-readback.yml', 'Store / Receipt Readback', 'store-receipt-readback.yml', 'Store / Receipt Readback', 'store'],
 ];
 
 // Resolve the actual checked-in path from the single canonical catalog.
