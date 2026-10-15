@@ -53,3 +53,39 @@ test('independent UI must not import product Web styles/components/tokens',async
     assert.doesNotMatch(contents,/web\/src\/|web\/public\/|design\/tokens\//);
   }
 });
+
+test('public 7d/30d workflow and provider aggregates derive only from source maps',()=>{
+  const p=makeProjection({
+    ...base,
+    agent:{schema_version:1,kind:'agent_metrics_aggregate',generated_at:now,windows:{
+      '7d':{runs:{total:8,by_issue:{'6':3,'99':2,'7':-2},by_provider:{cursor:6,'claude-code':2,evil_tag:NaN},by_workflow:{'issue-audit':4,'agent-provider-smoke':4}}},
+      '30d':{runs:{total:12,by_provider:{cursor:9,'claude-code':3},by_workflow:{'issue-audit':7}}},
+    }},
+  });
+  assert.equal(p.agents.summary.runs_7d,8);
+  assert.equal(p.agents.summary.runs_30d,12);
+  assert.deepEqual(p.agents.distribution['7d'].providers.items,[{name:'cursor',count:6},{name:'claude-code',count:2}]);
+  assert.equal(p.agents.distribution['30d'].workflows.items[0].count,7);
+  assert.equal(p.work.issues[0].observed_agent_runs_7d,3);
+  assert.ok(!JSON.stringify(p).includes('evil_tag'));
+});
+test('absent source is not a fabricated zero or exact-SHA association',()=>{
+  const p=makeProjection({...base,agent:{schema_version:1,kind:'agent_metrics_aggregate',windows:{'7d':{runs:{total:0,by_issue:{'6':0}}}}}});
+  assert.equal(p.agents.summary.runs_7d,0);
+  assert.equal(p.agents.summary.runs_30d,null);
+  assert.equal(p.work.issues[0].observed_agent_runs_7d,0);
+  assert.equal(p.agents.distribution['30d'].providers.available,false);
+  const n=makeProjection({...base,agent:null});
+  assert.equal(n.work.issues[0].observed_agent_runs_7d,null);
+  assert.equal(n.agents.distribution['7d'].providers.available,false);
+});
+test('public source rollups reject private keys, fractions and invalid numbers',()=>{
+  const by_provider=Object.fromEntries(Array.from({length:80},(_,i)=>['provider-'+i,i]));
+  by_provider['secret:token']=9;by_provider['../web']=10;by_provider['badfraction']=2.3;
+  const p=validateProjection(makeProjection({...base,agent:{schema_version:1,kind:'agent_metrics_aggregate',windows:{'7d':{runs:{by_provider}}}}}));
+  assert.equal(p.agents.distribution['7d'].providers.items.length,12);
+  assert.ok(p.agents.distribution['7d'].providers.items.every(x=>/^[a-z][a-z0-9_-]{0,47}$/.test(x.name)));
+  assert.ok(!JSON.stringify(p).includes('secret:token'));
+  assert.ok(!JSON.stringify(p).includes('../web'));
+  assert.ok(!JSON.stringify(p).includes('badfraction'));
+});

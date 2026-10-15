@@ -110,6 +110,28 @@ function renderAgents(){
     metric('Tokens',fmt(s.tokens_7d),'observed '+fmt(s.tokens_observed_runs)+' runs'),
     metric('Tool calls',fmt(s.tools_7d),'observed '+fmt(s.tools_observed_runs)+' runs'),
     metric('Cost in USD',s.cost_7d===null?'Unobserved':'$'+fmt(s.cost_7d),'no estimation inferred')],'four'));root.append(stats);
+  const summary30=section('OBSERVED TIME WINDOWS','7 days and 30 days','Canonical workflow totals · generated '+date(w.generated_at)+' · metrics revision '+(snapshot.source?.metrics_sha?.slice(0,12)||'unavailable'));
+  summary30.append(grid([metric('7-day runs',fmt(s.runs_7d),'observed workflow runs'),metric('30-day runs',fmt(s.runs_30d),'observed workflow runs')],'two'));
+  root.append(summary30);
+  const breakdown=section('SOURCE AGGREGATES','Who ran the work','By provider and workflow. Counts are measured totals, not individual Agent costs, real-time presence or success verdicts.');
+  const distribution=w.distribution||{};
+  const panelFor=(title,key)=>{
+    const panel=node('article','panel');
+    panel.append(node('h3','',title));
+    const w7=distribution['7d']?.[key], w30=distribution['30d']?.[key];
+    if(!w7?.available && !w30?.available){
+      panel.append(node('p','', 'Breakdown unavailable for these windows.'));return panel;
+    }
+    const names=[...new Set([...(w7?.items||[]),...(w30?.items||[])].map(x=>x.name))].slice(0,12);
+    const counts=(source,name)=>source?.items?.find(item=>item.name===name)?.count;
+    const rows=names.map(name=>lineItem(name,'Canonical '+title.toLowerCase()+' aggregation',
+      fmt(counts(w7,name))+' / '+fmt(counts(w30,name)),null,'runs · 7d / 30d'));
+    if(rows.length)panel.append(attach(node('div','list'),...rows));
+    else panel.append(node('p','','No valid observations in these source windows.'));
+    return panel;
+  };
+  breakdown.append(grid([panelFor('Providers','providers'),panelFor('Workflows','workflows')],'two'));
+  root.append(breakdown);
   const roster=section('ROLE REGISTRY','Who can do what','Registered instances · per-agent counts require observed identities.');
   const rows=(w.roster||[]).map(x=>lineItem(x.id,'Role: '+x.role+'  /  Provider: '+x.provider,
     x.observed_7d===null?'Not observed':fmt(x.observed_7d)+' runs',null,'7d source'));
@@ -125,7 +147,9 @@ function renderWork(){
     const s=section('GITHUB / '+type.toUpperCase(),type,'Recently updated · open items');
     if(availability!=='available')s.append(empty('Snapshot unavailable','GitHub API data could not be fetched or validated. This is not evidence of zero active items.'));
     else if(!items.length)s.append(empty('No open items','No items returned by the current bounded snapshot.'));
-    else s.append(attach(node('div','list'),...items.map(x=>lineItem('#'+x.number+'  '+x.title,x.state+' · source GitHub',type==='Issues'?'Issue':'PR',x.url,date(x.updated_at)))));
+    else s.append(attach(node('div','list'),...items.map(x=>lineItem('#'+x.number+'  '+x.title,
+      x.state+' · source GitHub'+(type==='Issues'?' · observed Agent runs (7d): '+(x.observed_agent_runs_7d===null||x.observed_agent_runs_7d===undefined?'Not observed':fmt(x.observed_agent_runs_7d)):''),
+      type==='Issues'?'Issue':'PR',x.url,date(x.updated_at)))));
     root.append(s);
   };
   listing('Issues',w.issues||[],w.issues_status);listing('Pull Requests',w.pulls||[],w.pulls_status);

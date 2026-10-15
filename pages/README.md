@@ -25,3 +25,7 @@ GITHUB_TOKEN=<read-only-token> node scripts/build.mjs
 If a source is unavailable the snapshot retains \`null\` / \`unavailable\` rather than inventing zero or success. Aggregate tokens and costs are not attributed to individual Agents. Orphan ref presence must not be interpreted as verified append-only protection. All browser links are bounded to the public GitHub repository.
 
 The static UI uses hash navigation (\`#/agents\`, \`#/work\`, etc.) so direct deep links work under the repository's GitHub Pages base path without rewrite rules. Deployment is owned by a **separate, trusted, main-based workflow PR** per \`.github/AGENTS.md\`; it must not build, deploy, or modify \`web/\`.
+
+## Phase 2-A — public source-backed observations
+
+The build-only `agent-metrics.json` source supplies rolling 7-day and 30-day `runs.by_provider` and `runs.by_workflow` counts, and 7-day `runs.by_issue` counts. The versioned public projection includes only bounded, safe category names, observed nonnegative integer counts and source metadata. Missing observations remain `null` / N/A (not an inferred zero). It does **not** establish causal PR↔Agent linkage, exact-SHA Acceptance verdicts, live presence, per-Agent cost or orphan integrity. The independent Pages layout and UI do not depend on product `web/`.
