@@ -76,16 +76,15 @@ function git(root,args){
     env:{...process.env,GIT_OPTIONAL_LOCKS:'0',GIT_NO_REPLACE_OBJECTS:'1'},
   }).trim();}catch{fail('unverifiable trusted-main SHA ancestry');}
 }
-export function verifyAuthenticatedReceipt(ingester,plan,artifactName,receipt,upstream,storeCheckout,trustedCheckout){
+export function verifyAuthenticatedReceipt(ingester,listing,plan,artifactName,receipt,upstream,storeCheckout,trustedCheckout){
   const config=writerFor(ingester);
   obj(plan,'receipt plan');
-  const expected=planReceiptEvidence(ingester,{
-    artifacts:plan.artifacts.map(a=>({name:a.name,id:a.id,expired:false,
-      workflow_run:{id:ingester.id,head_sha:ingester.head_sha},digest:a.sha256_zip})),
-  },plan.run_id,plan.attempt);
+  // Rebuild from the independently fetched REST artifact listing, never from
+  // receipt-controlled paths, or a local plan claiming its own authenticity.
+  const expected=planReceiptEvidence(ingester,listing,plan.run_id,plan.attempt);
   if(plan.workflow!==expected.workflow||plan.store!==expected.store||
      plan.head_sha!==expected.head_sha||plan.status!==expected.status||
-     plan.artifacts.length!==expected.artifacts.length)
+     JSON.stringify(plan.artifacts)!==JSON.stringify(expected.artifacts))
     fail('receipt plan changed after authenticated GitHub API selection');
   const art=plan.artifacts.find(a=>a.name===artifactName);
   if(!art||art.store!==config.store||!NUMBER.test(String(art.id)))
@@ -133,11 +132,12 @@ try{
     fs.writeFileSync(out,JSON.stringify(x,null,2)+'\n',{flag:'wx'});
     console.log(JSON.stringify({status:x.status,receipts:x.artifacts.length}));
   }else if(mode==='verify'){
-    const [ingPath,planPath,name,receiptPath,upstreamPath,storeDir,trustedDir]=args;
-    if(![ingPath,planPath,receiptPath,upstreamPath,storeDir,trustedDir].every(x=>x&&path.isAbsolute(x)))
-      fail('usage: verify ABS_INGESTER ABS_PLAN ARTIFACT_NAME ABS_RECEIPT ABS_SOURCE ABS_STORE ABS_TRUSTED');
+    const [ingPath,listingPath,planPath,name,receiptPath,upstreamPath,storeDir,trustedDir]=args;
+    if(![ingPath,listingPath,planPath,receiptPath,upstreamPath,storeDir,trustedDir].every(x=>x&&path.isAbsolute(x)))
+      fail('usage: verify ABS_INGESTER ABS_ARTIFACTS ABS_PLAN ARTIFACT_NAME ABS_RECEIPT ABS_SOURCE ABS_STORE ABS_TRUSTED');
     console.log(JSON.stringify(verifyAuthenticatedReceipt(
-      JSON.parse(fs.readFileSync(ingPath)),JSON.parse(fs.readFileSync(planPath)),name,
+      JSON.parse(fs.readFileSync(ingPath)),JSON.parse(fs.readFileSync(listingPath)),
+      JSON.parse(fs.readFileSync(planPath)),name,
       JSON.parse(fs.readFileSync(receiptPath)),JSON.parse(fs.readFileSync(upstreamPath)),
       storeDir,trustedDir)));
   }else if(process.argv[1]===fileURLToPath(import.meta.url))
