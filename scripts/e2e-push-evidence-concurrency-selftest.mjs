@@ -3,6 +3,10 @@
 // check. A newer main Push must NEVER cancel/purge the prior main SHA run.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {execFileSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
 
 const producerWorkflows=[
   ['.github/workflows/e2e-tests.yml','e2e'],
@@ -27,4 +31,15 @@ for(const [file,prefix] of producerWorkflows){
     /^  group: .+$/m,'  group: '+prefix+'-'+'$'+'{{ github.ref_name }}'),prefix),
     /each main Push uses its own run ID/);
 }
+// Both ingestion validators also run from main-owned trusted/ checkouts. They
+// must never depend on an accidental repository-root current directory.
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+const unrelated=fs.mkdtempSync(path.join(os.tmpdir(),'run-store-selftest-cwd-'));
+try{
+  for(const file of ['scripts/e2e-run-ingest.mjs','scripts/e2e-test-run-ingest.mjs']){
+    execFileSync(process.execPath,[path.join(root,file),'self-test'],{
+      cwd:unrelated,encoding:'utf8',timeout:20000,stdio:['ignore','pipe','pipe'],
+    });
+  }
+}finally{fs.rmSync(unrelated,{recursive:true,force:true});}
 console.log('Run Store source cancellation Gate: PR supersession only; main Push E2E and Scenario runs retain separate immutable source identities');
