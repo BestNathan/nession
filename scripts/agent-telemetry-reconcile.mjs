@@ -191,6 +191,13 @@ export function validateRecoveryRouting(workflow){
   if(!workflow.includes("github.event.workflow_run.event == 'push'") ||
      !workflow.includes("github.event.workflow_run.event == 'pull_request_target'"))
     fail('source event routing omitted');
+  // Never report successful metrics ingestion as failed merely because the
+  // *authentic source Provider job* failed. Only a successful source may wake
+  // Acceptance; all source identity checks still apply to success cases.
+  if(!workflow.includes("jq -r '.conclusion // \"\"'")||
+     !workflow.includes("Verified failed Provider telemetry archived; no success-only Acceptance wake")||
+     !workflow.includes('.status == "completed" and .conclusion == "success"'))
+    fail('failed Provider evidence must not trigger success-only Acceptance wake');
   return true;
 }
 function selfTest(){
@@ -206,7 +213,11 @@ function selfTest(){
   assert.throws(()=>validateRecoveryRouting(
     workflow.replace("node scripts/agent-telemetry-reconcile.mjs select", "echo skip")
   ),/Gate omitted/);
-  const mainEnv={GITHUB_REPOSITORY:REPO,GITHUB_REF:'refs/heads/main'};
+  assert.throws(()=>validateRecoveryRouting(
+    workflow.replace("Verified failed Provider telemetry archived; no success-only Acceptance wake",
+      "Always wake Acceptance irrespective of Provider conclusion")
+  ),/failed Provider evidence/);
+    const mainEnv={GITHUB_REPOSITORY:REPO,GITHUB_REF:'refs/heads/main'};
   assert.equal(validateReconciliationContext({...mainEnv,GITHUB_EVENT_NAME:'schedule'}),'schedule');
   assert.equal(validateReconciliationContext({...mainEnv,GITHUB_EVENT_NAME:'workflow_run',
     RECOVERY_EVENT_RUN_ID:'321',RECOVERY_EMPTY_SOURCE_COUNT:'0'}),'empty-source-event');
