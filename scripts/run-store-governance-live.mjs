@@ -1,0 +1,127 @@
+#!/usr/bin/env node
+// Single read-only live governance entrypoint; reuses the canonical
+// scripts/audit-live-run-stores.mjs lineage auditor rather than duplicating
+// store-specific validation. Report status is never an Acceptance verdict.
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import {execFileSync} from 'node:child_process';
+import {fileURLToPath,pathToFileURL} from 'node:url';
+import {auditLiveRunStores} from './audit-live-run-stores.mjs';
+import {GOVERNED_REFS,evaluateStoreRules,validateMigrationBaseline,assertTrustedAuditContext}
+  from './run-store-policy.mjs';
+
+const REPO='BestNathan/nession';
+const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+const fail=reason=>{throw Error('run-store-governance-live: '+reason);};
+function api(endpoint){
+  const raw=execFileSync('gh',['api','repos/'+REPO+'/'+endpoint],{
+    encoding:'utf8',maxBuffer:2*1024*1024,timeout:30000,
+    stdio:['ignore','pipe','pipe'],
+  });
+  return JSON.parse(raw);
+}
+export function summarizeGovernance(manifest,rulesets,appId,history){
+  validateMigrationBaseline(manifest);
+  if(!Array.isArray(rulesets))fail('unavailable GitHub Ruleset details');
+  const decisions=GOVERNED_REFS.map(ref=>evaluateStoreRules(ref,rulesets,appId));
+  const records=history?.records??[];
+  const coverage=records.length===GOVERNED_REFS.length&&
+    records.every(x=>GOVERNED_REFS.includes(x.store)&&
+      x.api_ref_verified===true&&x.mode==='anchored-history');
+  const policy=decisions.every(x=>x.configuration_verified);
+  const observation=history?.anchoring==='repository_main_migration_observation_only';
+  if(!observation)fail('governance observation must not reuse a falsely independent anchor');
+  return {
+    schema_version:1,kind:'run_store_governance_integrity_observation',
+    repository:REPO,
+    protected_by_server_ruleset:policy,
+    authorized_positive_negative_write_attempts_proven:false,
+    externally_controlled_checkpoint_proven:false,
+    actual_history_checked_against_unanchored_baseline:coverage,
+    run_store_integration_verdict:'Pending',
+    baseline_class:'repository_main_observation_only; not independently durable',
+    stores:decisions.map((d,i)=>({
+      ...d,branch_observed_sha:records.find(x=>x.store===d.ref)?.observed??null,
+      checked_commits:records.find(x=>x.store===d.ref)?.checked_commits??null,
+      checked_changes:records.find(x=>x.store===d.ref)?.checked_changes??null,
+      // Absence of a new author/ingester receipt means authorship of older
+      // commits is NOT independently authenticated by this observation.
+      commit_writer_identity_attested:false,
+    })),
+    verified_mutation_drill:'offline fixtures only; no real server-side denied writes',
+    alert_channel:'GitHub Actions failed status and retained artifacts only; external WORM alert pending',
+    result:!coverage?'ERROR: incomplete exact-ref history scan':
+      policy?'PENDING: real authorized/denied writes and independent external checkpoint':
+      'PENDING: no fully enforced exact-ref App-only write Ruleset',
+  };
+}
+async function live(out){
+  assertTrustedAuditContext(process.env);
+  if(!path.isAbsolute(out))fail('absolute output file required');
+  const manifest=JSON.parse(fs.readFileSync(
+    path.join(ROOT,'scripts/run-store-migration-baseline.json'),'utf8'));
+  validateMigrationBaseline(manifest);
+  const records=manifest.stores.map(x=>[x.ref,x.head_sha]);
+  const anchors=Object.fromEntries(records);
+  const rulesetSummary=api('rulesets?per_page=100');
+  if(!Array.isArray(rulesetSummary))fail('GitHub Rulesets are unreadable');
+  const details=rulesetSummary.map(row=>{
+    if(!Number.isSafeInteger(row.id)||row.id<1)fail('invalid Ruleset ID');
+    return api('rulesets/'+row.id);
+  });
+  const history=await auditLiveRunStores({
+    checkout:ROOT,sourceSha:process.env.GITHUB_SHA,
+    anchors,token:process.env.GH_TOKEN??process.env.GITHUB_TOKEN,
+    anchorTrust:'main_migration_observation',
+  });
+  const appId=Number(process.env.STORE_WRITER_APP_ID??0);
+  const report=summarizeGovernance(manifest,details,appId,history);
+  report.observed_at=new Date().toISOString();
+  report.trusted_main_sha=process.env.GITHUB_SHA;
+  report.audit_run_id=process.env.GITHUB_RUN_ID??null;
+  report.policy_summary=details.map(r=>({id:r.id,enforcement:r.enforcement,
+    target:r.target,name:r.name}));
+  fs.writeFileSync(out,JSON.stringify(report,null,2)+'\n',{flag:'wx'});
+  if(process.env.GITHUB_STEP_SUMMARY)fs.appendFileSync(
+    process.env.GITHUB_STEP_SUMMARY,
+    '## Store Governance Live Read-only Audit\n\n'+
+    '| Branch | Audited changes | App-only branch policy |\n|---|---:|---|\n'+
+    report.stores.map(x=>'| '+x.ref+' | '+x.checked_changes+' | '+
+      (x.configuration_verified?'configured':'NOT VERIFIED')+' |').join('\n')+
+    '\n\n**'+report.result+'**. This is not a true external anchor, writer denial, or SC Pass.\n');
+  console.log('Store governance: '+report.result);
+  // Explicit fail-closed alert status on unprotected branch policies. Caller
+  // uploads the report even on failure, with zero write permissions.
+  if(!report.actual_history_checked_against_unanchored_baseline||
+     !report.protected_by_server_ruleset)process.exitCode=1;
+}
+function selfTest(){
+  const sha='a'.repeat(40);
+  const migration={schema_version:1,kind:'unanchored_run_store_migration_baseline',
+    repository:REPO,trust_level:'repository_main_observation_only',
+    independently_anchored:false,stores:GOVERNED_REFS.map(ref=>({
+      ref,head_sha:sha,tree_sha:'b'.repeat(40),
+      baseline_kind:'pre_enforcement_observation'}))};
+  const history={anchoring:'repository_main_migration_observation_only',
+    records:GOVERNED_REFS.map(store=>({
+      store,observed:sha,api_ref_verified:true,mode:'anchored-history',
+      checked_commits:1,checked_changes:2}))};
+  const report=summarizeGovernance(migration,[],0,history);
+  assert.equal(report.protected_by_server_ruleset,false);
+  assert.equal(report.actual_history_checked_against_unanchored_baseline,true);
+  assert.equal(report.externally_controlled_checkpoint_proven,false);
+  assert.equal(report.authorized_positive_negative_write_attempts_proven,false);
+  assert.equal(report.run_store_integration_verdict,'Pending');
+  assert.equal(summarizeGovernance(migration,[],0,
+    {...history,records:history.records.slice(1)}).actual_history_checked_against_unanchored_baseline,false);
+  assert.throws(()=>summarizeGovernance(migration,[],0,
+    {...history,anchoring:'separately_supplied_secret'}),/falsely independent anchor/);
+  console.log('Run Store governance live summary: incomplete coverage, unprotected refs and no independent checkpoint fail closed');
+}
+if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
+  if(process.argv[2]==='self-test')selfTest();
+  else if(process.argv[2]==='live'&&process.argv[3])
+    await live(process.argv[3]).catch(e=>{console.error(e.message);process.exitCode=1;});
+  else fail('usage: self-test | live ABS_REPORT');
+}
