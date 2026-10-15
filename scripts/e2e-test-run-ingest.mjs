@@ -4,6 +4,8 @@
 // precise checked-out SHA can be independently attested.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
+import {spawnSync} from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
@@ -149,8 +151,19 @@ function selfTest() {
   assert.deepEqual(recordFor(event, run, workflow, tree, jobs, artifacts), result);
   // Producer/consumer reachability is part of the security contract: a green
   // PR-only E2E is NOT real post-merge main Push Test evidence.
-  const sourceWorkflowYml=fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.github/workflows/e2e-tests.yml'),'utf8');
-  const ingesterWorkflowYml=fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.github/workflows/e2e-test-ingest.yml'),'utf8');
+  // Trusted Ingest runs from workspace root while code is checked out in trusted/.
+  // Contract fixtures must inspect the script's own authenticated checkout,
+  // never whatever untrusted working directory happens to be current.
+  const trustedRoot=path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const sourceWorkflowYml=fs.readFileSync(path.join(trustedRoot,'.github/workflows/e2e-tests.yml'),'utf8');
+  const ingesterWorkflowYml=fs.readFileSync(path.join(trustedRoot,'.github/workflows/e2e-test-ingest.yml'),'utf8');
+  if (!process.env.NESSION_E2E_INGEST_CWD_NEGATIVE_CHILD) {
+    const child=spawnSync(process.execPath,[fileURLToPath(import.meta.url),'self-test'],{
+      cwd:os.tmpdir(),encoding:'utf8',timeout:15000,
+      env:{...process.env,NESSION_E2E_INGEST_CWD_NEGATIVE_CHILD:'1'},
+    });
+    assert.equal(child.status,0,'trusted E2E selftest must pass outside repository cwd: '+child.stderr);
+  }
   assert.match(sourceWorkflowYml,/^  push:\n    branches: \[staging, main\]$/m,
     'main push must run real E2E and produce its own trusted source SHA');
   assert.match(ingesterWorkflowYml,/github\.event\.workflow_run\.event == 'push'/,
