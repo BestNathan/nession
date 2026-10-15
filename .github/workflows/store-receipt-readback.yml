@@ -102,7 +102,7 @@ jobs:
               [[ "$source_id" =~ ^[1-9][0-9]*$ ]] || exit 1
               gh api "repos/$GITHUB_REPOSITORY/actions/runs/$source_id" > "$RUNNER_TEMP/readback/source.json"
               node trusted/scripts/run-store-receipt-live.mjs verify \
-                "$RUNNER_TEMP/readback/ingester.json" "$plan" "$name" "$file" \
+                "$RUNNER_TEMP/readback/ingester.json" "$RUNNER_TEMP/readback/artifacts.json" "$plan" "$name" "$file" \
                 "$RUNNER_TEMP/readback/source.json" "$RUNNER_TEMP/readback/store" \
                 "$GITHUB_WORKSPACE/trusted" | tee -a "$RUNNER_TEMP/readback/verified.jsonl"
               verified=$((verified + 1))
