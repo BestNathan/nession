@@ -2,7 +2,7 @@ name: Acceptance / Post-Run Waker
 
 # A post-merge Agent cannot attest its own Orchestrator's completion while
 # running. Both fixture evidence and the exact-main-SHA E2E tests may finish
-# AFTER the Agent, so re-evaluate on either verified completion.
+# AFTER the Agent. Re-evaluate after independently verified completion,
 # using the same trusted evaluator and Issue updater, not a second projector.
 on:
   workflow_run:
