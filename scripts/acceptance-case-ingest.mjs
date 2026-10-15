@@ -9,7 +9,7 @@ import {
   buildAcceptanceContext,
   normalizeAcceptanceCaseResult,
 } from './acceptance-executor.mjs';
-import { parsePreMergeIssueNumbers } from './requirement-acceptance.mjs';
+import { extractSection, parseAcceptanceReport, parsePreMergeIssueNumbers } from './requirement-acceptance.mjs';
 import { artifactEvidence, validateArtifactEvidence } from './run-record-artifact-evidence.mjs';
 import { makeRunIndex } from './run-record-index-contract.mjs';
 
@@ -327,8 +327,8 @@ async function githubRequest(apiPath, { token, method = 'GET', body } = {}) {
   throw lastError ?? new Error('GitHub API request failed without an error');
 }
 
-async function issueIsAssociatedWithSha(owner, name, issueNumber, targetSha, token) {
-  const pulls = await githubRequest(
+async function issueIsAssociatedWithSha(owner, name, issueNumber, targetSha, token, request = githubRequest) {
+  const pulls = await request(
     '/repos/' + owner + '/' + name + '/commits/' + targetSha + '/pulls?per_page=100',
     { token },
   );
@@ -339,14 +339,45 @@ async function issueIsAssociatedWithSha(owner, name, issueNumber, targetSha, tok
   return false;
 }
 
-async function currentStageSha(owner, name, stage, token) {
+async function currentStageSha(owner, name, stage, token, request = githubRequest) {
   const branch = stage === 'staging' ? 'staging' : stage === 'post-merge' ? 'main' : null;
   if (!branch) return null;
-  const ref = await githubRequest('/repos/' + owner + '/' + name + '/git/ref/heads/' + branch, { token });
+  const ref = await request('/repos/' + owner + '/' + name + '/git/ref/heads/' + branch, { token });
   return String(ref.object?.sha ?? '');
 }
 
-export async function applyCaseRecord(record, { repository, token }) {
+/**
+ * An authenticated Case proves its merged commit, not whatever unrelated
+ * commit becomes the branch tip while an async evidence ingest is running.
+ *
+ * A historical Case can be projected only when its SHA is verified as a
+ * strict ancestor of the current branch tip. A successful workflow or a
+ * syntactically valid merge SHA alone does NOT establish ancestry.
+ */
+export function classifyCaseBranchAncestry(target, current, comparison) {
+  const targetSha = sha(target, 40, 'target');
+  const currentSha = sha(current, 40, 'current');
+  if (targetSha === currentSha) return 'exact-head';
+  if (!comparison || comparison.status !== 'ahead' ||
+      comparison.base_commit?.sha !== targetSha ||
+      comparison.merge_base_commit?.sha !== targetSha ||
+      !Number.isSafeInteger(comparison.ahead_by) || comparison.ahead_by < 1 ||
+      comparison.behind_by !== 0) return 'unproven';
+  return 'verified-ancestor';
+}
+
+/** Historical merge-SHA proof must not overwrite an existing SC conclusion. */
+export function historicalCaseMayProject(issueBody, criterion) {
+  const { rows, errors } = parseAcceptanceReport(extractSection(issueBody, 'Acceptance Report'));
+  if (errors.length) return false;
+  const previous = rows.get(criterion);
+  // A previous authenticated result (including a Fail or a Pending result
+  // from another run) is never superseded by an older target SHA.
+  return !!previous && previous.result.toLowerCase() === 'pending' &&
+    !/^run\s+[1-9]\d*\s*;/i.test(previous.evidence);
+}
+
+export async function applyCaseRecord(record, { repository, token, request = githubRequest }) {
   const item = validateCaseRecord(record);
   const [owner, name] = String(repository ?? '').split('/');
   if (!owner || !name) throw new Error('repository must be owner/name');
@@ -355,22 +386,32 @@ export async function applyCaseRecord(record, { repository, token }) {
     return { projected: false, reason: 'pre-merge Case records are evidence-only; PR Acceptance owns pre-merge projection' };
   }
 
-  const currentSha = await currentStageSha(owner, name, item.stage, token);
-  if (currentSha !== item.target_sha) {
-    return {
-      projected: false,
-      reason: 'historical target ' + item.target_sha + ' is not current ' + item.stage + ' SHA ' + currentSha,
-    };
+  const currentSha = await currentStageSha(owner, name, item.stage, token, request);
+  let ancestry = classifyCaseBranchAncestry(item.target_sha, currentSha, null);
+  if (ancestry === 'unproven') {
+    // GitHub's compare API authenticates the merge-base against the actual
+    // current branch tip; off-branch/diverged histories must fail closed.
+    const comparison = await request(
+      '/repos/' + owner + '/' + name + '/compare/' + item.target_sha + '...' + currentSha,
+      { token },
+    );
+    ancestry = classifyCaseBranchAncestry(item.target_sha, currentSha, comparison);
+    if (ancestry !== 'verified-ancestor') {
+      return { projected: false, reason: 'historical Case SHA is not an authenticated ancestor of current ' + item.stage + ' tip' };
+    }
   }
-  if (!await issueIsAssociatedWithSha(owner, name, item.issue, item.target_sha, token)) {
+  if (!await issueIsAssociatedWithSha(owner, name, item.issue, item.target_sha, token, request)) {
     return { projected: false, reason: 'target SHA is not associated with Requirement #' + item.issue };
   }
 
-  const issue = await githubRequest('/repos/' + owner + '/' + name + '/issues/' + item.issue, { token });
+  const issue = await request('/repos/' + owner + '/' + name + '/issues/' + item.issue, { token });
   const labels = new Set((issue.labels ?? []).map((label) => typeof label === 'string' ? label : label.name));
   if (!labels.has('requirement')) throw new Error('#' + item.issue + ' is not a requirement');
   if (String(issue.state).toLowerCase() !== 'open') {
     return { projected: false, reason: 'Requirement #' + item.issue + ' is not open' };
+  }
+  if (ancestry === 'verified-ancestor' && !historicalCaseMayProject(issue.body, item.criterion)) {
+    return { projected: false, reason: 'historical merged-SHA Case cannot supersede an existing SC verdict or run' };
   }
 
   const context = buildAcceptanceContext(issue, item.stage, {
@@ -383,7 +424,7 @@ export async function applyCaseRecord(record, { repository, token }) {
   const updatedBody = applyAcceptanceResultToBody(issue.body, normalized);
   if (updatedBody === issue.body) return { projected: true, changed: false };
 
-  await githubRequest('/repos/' + owner + '/' + name + '/issues/' + item.issue, {
+  await request('/repos/' + owner + '/' + name + '/issues/' + item.issue, {
     token,
     method: 'PATCH',
     body: { body: updatedBody },
@@ -426,6 +467,109 @@ function fixtureRecord(overrides = {}) {
 }
 
 async function selfTest() {
+  // Async ingestion must recognize validated ancestor evidence but refuse
+  // unmerged/foreign refs, incomplete comparisons, or replacement of a later
+  // Issue decision. No network or mutable GitHub fixtures required.
+  const ancestor = 'a'.repeat(40), latest = 'b'.repeat(40);
+  const comparison = {
+    status: 'ahead', base_commit: { sha: ancestor },
+    merge_base_commit: { sha: ancestor }, ahead_by: 2, behind_by: 0,
+  };
+  assert.equal(classifyCaseBranchAncestry(ancestor, ancestor, null), 'exact-head');
+  assert.equal(classifyCaseBranchAncestry(ancestor, latest, comparison), 'verified-ancestor');
+  for (const mutated of [
+    { ...comparison, status: 'diverged' },
+    { ...comparison, status: 'behind' },
+    { ...comparison, merge_base_commit: { sha: latest } },
+    { ...comparison, base_commit: { sha: latest } },
+    { ...comparison, behind_by: 1 },
+    { ...comparison, ahead_by: 0 },
+    null,
+  ]) {
+    assert.equal(classifyCaseBranchAncestry(ancestor, latest, mutated), 'unproven');
+  }
+  assert.throws(() => classifyCaseBranchAncestry('bad-sha', latest, comparison), /40-character/);
+  const report = (result, evidence) =>
+    '## Acceptance Report\n| Criterion | Result | Evidence |\n|---|---|---|\n| SC-07 | ' +
+    result + ' | ' + evidence + ' |\n';
+  assert.equal(historicalCaseMayProject(report('Pending', 'Post-merge proof not yet run'), 'SC-07'), true);
+  assert.equal(historicalCaseMayProject(report('Pass', 'proof'), 'SC-07'), false);
+  assert.equal(historicalCaseMayProject(report('Fail', 'failure'), 'SC-07'), false);
+  assert.equal(historicalCaseMayProject(report('Pending', 'run 900; ref ' + latest), 'SC-07'), false);
+  assert.equal(historicalCaseMayProject(report('Pending', '-'), 'SC-08'), false);
+
+  // End-to-end mock of the actual authenticated projector: a newer unrelated
+  // main merge must not strand a passed Case for its verified merged ancestor.
+  const historicalIssueBody = [
+    '## Success Criteria',
+    '- [ ] SC-07 Verify the exact merged SHA by a real browser Case.',
+    '## Acceptance Plan',
+    '```yaml',
+    'acceptance:',
+    '  SC-07:',
+    '    when: merged',
+    '    branch: main',
+    '    method: case',
+    '```',
+    '## Acceptance Report',
+    '| Criterion | Result | Evidence |',
+    '|---|---|---|',
+    '| SC-07 | Pending | - |',
+  ].join('\n');
+  const historicalIssue = {
+    number:1792,title:'Pages browser proof',state:'open',
+    labels:[{name:'requirement'}],body:historicalIssueBody,
+  };
+  const historicalContext = buildAcceptanceContext(historicalIssue,'post-merge',{
+    targetRef:ancestor,runId:100,
+  });
+  const historicalRecord = fixtureRecord({
+    issue:1792,criterion:'SC-07',
+    criterion_text:'Verify the exact merged SHA by a real browser Case.',
+    stage:'post-merge',target_sha:ancestor,case_revision:ancestor,
+    contract_sha256:historicalContext.contract_sha256,
+  });
+  historicalRecord.execution_id=crypto.createHash('sha256').update(JSON.stringify({
+    schema_version:1,run_id:historicalRecord.run_id,run_attempt:historicalRecord.run_attempt,
+    target_sha:historicalRecord.target_sha,issue:historicalRecord.issue,
+    criterion:historicalRecord.criterion,contract_sha256:historicalRecord.contract_sha256,
+    case_tree_sha:historicalRecord.case_tree_sha,
+  })).digest('hex');
+  let currentHistoricalIssue={...historicalIssue};
+  let historicalWrites=0;
+  const historicalApi=async(apiPath, options={})=>{
+    if(apiPath.endsWith('/git/ref/heads/main'))return {object:{sha:latest}};
+    if(apiPath.includes('/compare/'))return comparison;
+    if(apiPath.includes('/commits/'+ancestor+'/pulls'))return [{title:'Pages browser proof',body:'Refs #1792'}];
+    if(apiPath.endsWith('/issues/1792')){
+      if(options.method==='PATCH'){
+        currentHistoricalIssue={...currentHistoricalIssue,body:options.body.body};
+        historicalWrites++;
+      }
+      return currentHistoricalIssue;
+    }
+    throw Error('Unmocked historical ingest source: '+apiPath);
+  };
+  const once=await applyCaseRecord(historicalRecord,{
+    repository:'BestNathan/nession',token:'offline-proof',request:historicalApi,
+  });
+  assert.deepEqual(once,{projected:true,changed:true});
+  assert.match(currentHistoricalIssue.body, /- \[x\] SC-07/);
+  assert.match(currentHistoricalIssue.body, /\| SC-07 \| Pass \| run 100;/);
+  assert.match(currentHistoricalIssue.body, new RegExp(ancestor));
+  const replay=await applyCaseRecord(historicalRecord,{
+    repository:'BestNathan/nession',token:'offline-proof',request:historicalApi,
+  });
+  assert.equal(replay.projected,false);
+  assert.equal(historicalWrites,1,'historical Case may never overwrite its existing verdict');
+  currentHistoricalIssue={...historicalIssue};
+  const rejected=await applyCaseRecord(historicalRecord,{
+    repository:'BestNathan/nession',token:'offline-proof',
+    request:async(apiPath,options)=>apiPath.includes('/compare/')
+      ? {...comparison,status:'diverged'}:historicalApi(apiPath,options),
+  });
+  assert.equal(rejected.projected,false);
+  assert.equal(historicalWrites,1,'diverged SHA cannot mutate Issue SC');
   const valid = fixtureRecord();
   const canonical = JSON.stringify({
     schema_version: 1, run_id: valid.run_id, run_attempt: valid.run_attempt,
