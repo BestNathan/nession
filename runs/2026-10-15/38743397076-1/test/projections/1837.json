@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_projection_receipt",
+  "outcome": "applied",
+  "issue": 1837,
+  "run_id": 38743397076,
+  "run_attempt": 1,
+  "target_sha": "83b15d0c68322b2e3cd90820058d5fc934b192f9",
+  "plan_digest": "a4b71ff2a674f9c206f2a8e188b3e52b8abcd7ff19a7717957b825694af02b90",
+  "artifact_digest": "sha256:de0d3f9b9e1765b5b34921017cb5f6e6126f5b3d89636c5660e1290f29962b77",
+  "ingest_run_id": 38743909532,
+  "ingest_attempt": 1,
+  "declaration_digest": "43a5100f03d9e07efe6a070b02ce915e61f8d05944bfaf49df800c9d4e97ce7b",
+  "before_body_sha256": "74bed04f01730b551907f6ae1d76694804285cadabc4a5424f95daee05e5f50f",
+  "body_sha256": "5b1770a0e612bb2af99e81e9e19022ca7cad9d3a7343c5c39349d5bc18aa6726",
+  "readback_body": "## Requirements: Pages Phase 2-B2 — GitHub-sourced Issue to PR references\n\nIncremental Phase 2-B2 of #1782: add an exact **GitHub Issue Timeline → PR cross-reference** edge to the independent public Nession Pages Collaboration view. The already merged #1834 displays exact PR HEAD and source CI/E2E workflows. This slice covers the **first** Issue→PR edge without inferring that a mention denotes ownership, implementation, or SC Acceptance.\n\n### Trust, security and coverage\n\n- The only relation source is build-time GitHub API `/issues/{N}/timeline?per_page=100`, scoped to *displayed* public Issues, bounded to at most twelve timeline requests. Keep only `event='cross-referenced'` with `source.type='issue'`, same-repository `source.issue.repository.full_name='BestNathan/nession'`, a real `pull_request` object, canonical `source.issue.number`, and a match of GitHub canonical API/HTML path for this PR. Never parse title/body/Issue comments as a trusted edge.\n- Project an allowlisted, maximum six **cross-referenced PR numbers** per Issue, deduplicated/deterministic, with canonical `https://github.com/BestNathan/nession/pull/N` links and `relationship='github_cross_reference'`. Avoid inventing an exact HEAD SHA or author/Agent attribution for closed PRs not in the active PR snapshot.\n- Retain `available`, `unavailable`, and `truncated` timeline coverage. A missing Timeline or its >=100 results is not proof of zero linked PRs / complete history; explicit unknown source state, do not trust foreign or malformed records.\n- Render source-linked PRs in the independent `#/work` Issue rows and ensure browser/mobile/deep-link/regression security tests.\n- Absolutely no product `web/` UI/design imports and no privileged runtime or token in the published browser bundle.\n\n### Explicit exclusions\n\nThis is an *observed GitHub cross-reference*, not a verified implementation/closing relationship. Issue → exact PR HEAD → CI/E2E proof is only available where the PR is independently in the existing trusted active PR snapshot. Agent run/attempt and Acceptance history remain unlinked until separate canonical evidence is projected. Strong Run Store integrity still depends on #1690.\n\n### Success Criteria\n\n- [ ] SC-01 Build-time source projection uses authenticated same-repository GitHub Issue Timeline cross-references only, with strict PR identity allowlist, bounded deterministic dedup and explicit truncated/unavailable coverage.\n- [ ] SC-02 Standalone Work view shows source-linked PR cross-references for Issue rows, with missing/incomplete states clearly marked; never claims ownership, implementation, Agent provenance or SC Pass.\n- [ ] SC-03 Deterministic unit/security and browser E2E fixtures reject cross-repo forged PR, non-PR reference, fake URL/ID, duplicates, overflow, unavailable API and malicious HTML while preserving existing Pages/CI/E2E functions.\n- [ ] SC-04 Exact-HEAD independent Pages CI, canonical Quality, selected E2E and Acceptance Case Smoke all pass; read-only Agent Acceptance enforced separately through the canonical merge gate.\n\n## Acceptance Plan\n\n```yaml\nacceptance:\n  SC-01:\n    when: pr\n    method: agent\n  SC-02:\n    when: pr\n    method: agent\n  SC-03:\n    when: pr\n    method: agent\n  SC-04:\n    when: pr\n    method: agent\n```\n\n## Acceptance Report\n| Criterion | Result | Evidence |\n|---|---|---|\n| SC-01 | Pending | - |\n| SC-02 | Pending | - |\n| SC-03 | Pending | - |\n| SC-04 | Pending | - |\n\n## E2E Verification\n### New\n- none: expand the canonical Pages browser Collaboration view\n### Regression\n- pages-overview\n- pages-evidence\n\n## E2E Report\n\n| ID | Type | Result | Evidence |\n|---|---|---|---|\n| pages-evidence | Regression | Pass | run 38743397076/1, SHA 83b15d0c68322b2e3cd90820058d5fc934b192f9, contract 43a5100f03d9e07efe6a070b02ce915e61f8d05944bfaf49df800c9d4e97ce7b, plan a4b71ff2a674f9c206f2a8e188b3e52b8abcd7ff19a7717957b825694af02b90, tests 2/2 (https://github.com/BestNathan/nession/actions/runs/38743397076) |\n| pages-overview | Regression | Pass | run 38743397076/1, SHA 83b15d0c68322b2e3cd90820058d5fc934b192f9, contract 43a5100f03d9e07efe6a070b02ce915e61f8d05944bfaf49df800c9d4e97ce7b, plan a4b71ff2a674f9c206f2a8e188b3e52b8abcd7ff19a7717957b825694af02b90, tests 2/2 (https://github.com/BestNathan/nession/actions/runs/38743397076) |\n\n## Product alignment\n- [x] One canonical GitHub Timeline source, no duplicate relationship state machine\n- [x] Strict standalone public Pages design and anonymous security boundary\n- [x] Do not imply Issue→PR causality/Agent attribution without stronger evidence\n\n---\n**Status:** Approved\n",
+  "patch_updated_at": "2026-10-15T13:35:09Z",
+  "readback_updated_at": "2026-10-15T13:35:09Z",
+  "rows": [
+    {
+      "id": "pages-evidence",
+      "result": "Pass",
+      "evidence": "run 38743397076/1, SHA 83b15d0c68322b2e3cd90820058d5fc934b192f9, contract 43a5100f03d9e07efe6a070b02ce915e61f8d05944bfaf49df800c9d4e97ce7b, plan a4b71ff2a674f9c206f2a8e188b3e52b8abcd7ff19a7717957b825694af02b90, tests 2/2 (https://github.com/BestNathan/nession/actions/runs/38743397076)"
+    },
+    {
+      "id": "pages-overview",
+      "result": "Pass",
+      "evidence": "run 38743397076/1, SHA 83b15d0c68322b2e3cd90820058d5fc934b192f9, contract 43a5100f03d9e07efe6a070b02ce915e61f8d05944bfaf49df800c9d4e97ce7b, plan a4b71ff2a674f9c206f2a8e188b3e52b8abcd7ff19a7717957b825694af02b90, tests 2/2 (https://github.com/BestNathan/nession/actions/runs/38743397076)"
+    }
+  ]
+}
