@@ -48,13 +48,14 @@ function requireArtifact(list,run,name){
   if(matches.length===0)return null; // Retained Actions artifacts have a finite TTL.
   if(matches.length!==1)fail('duplicate artifact identity');
   const a=matches[0];
+  if(a.expired===true)return null; // Historical proof TTL elapsed: Pending, not tampering or Pass.
   if(!N(a.id)||a.expired!==false||!DIGEST.test(a.digest??'')||
      !N(a.size_in_bytes)||a.workflow_run?.id!==run.id||
      a.workflow_run?.head_sha!==run.head_sha)fail('invalid provenance/expiry/digest for '+name);
   return a;
 }
 export function attestFiveMode(pin,source,ingest,readback,ingestArtifacts,readbackArtifacts,statements){
-  if(!PINS.some(p=>p.mode===pin?.mode&&p.source===pin.source&&p.ingest===pin.ingest&&p.readback===pin.readback))
+  if(!PINS.some(p=>JSON.stringify(p)===JSON.stringify(pin)))
     fail('unknown or altered evidence locator');
   if(!complete(source)||source.id!==pin.source||source.event!=='push'||
      source.name!==pin.source_name||normalizePath(source)!==pin.source_path||
@@ -205,7 +206,8 @@ function selfTest(){
   bad(2,{...ingest,head_branch:'untrusted'});
   bad(3,{...readback,path:p.ingest_path});
   bad(3,{...readback,created_at:'2026-10-15T11:50:00Z'});
-  bad(4,{artifacts:ia.artifacts.map(x=>({...x,expired:true}))});
+  assert.equal(run(p,source,ingest,readback,{artifacts:ia.artifacts.map(x=>({...x,expired:true}))},ra,[stmt]),null);
+  bad(4,{artifacts:ia.artifacts.map(x=>({...x,digest:'invalid'}))});
   bad(5,{artifacts:[...ra.artifacts,...ra.artifacts]});
   for(const patch of [{changed_records:0},{changed_records:3},{artifact_id:999},
     {upstream_run_id:'999'},{ingester_attempt:'2'},{commit_sha:'fake'},
