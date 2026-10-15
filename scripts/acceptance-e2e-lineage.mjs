@@ -959,6 +959,12 @@ async function selfTest() {
   assert.deepEqual(await collectLinkedIssueE2EEvidence(REPO,1772,mainGet,
     async()=>[{...mainHistory[0],projections:[
       {issue:1772,outcome:'applied',rows:[{id:'login',result:'Pass'}]}]}],target),[]);
+  // A completed selected browser source without an applied sibling receipt,
+  // or with an actual Fail, cannot become positive merged-main evidence.
+  assert.deepEqual(await collectLinkedIssueE2EEvidence(REPO,1772,mainGet,
+    async()=>[{...mainHistory[0],projections:[]}],target),[]);
+  assert.deepEqual(await collectLinkedIssueE2EEvidence(REPO,1772,mainGet,
+    async()=>[{...mainHistory[0],results:[{id:'login',result:'Fail'}]}],target),[]);
   await assert.rejects(()=>collectLinkedIssueE2EEvidence(REPO,1772,
     mainGet,async()=>mainHistory),/exact checked-out Acceptance target/);
   console.log('Acceptance historical Issue E2E evidence: bounded PR commit/run lineage and negative provenance fixtures passed');
