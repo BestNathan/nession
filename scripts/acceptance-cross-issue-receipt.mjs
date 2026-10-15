@@ -18,6 +18,7 @@ export function pinnedCrossIssueAcceptance(body) {
   const section = String(body ?? '').match(/^## Historical Acceptance Evidence\s*\n([\s\S]*?)(?=^## |$(?![\s\S]))/m)?.[1] ?? '';
   const lines = section.split('\n').filter(s => s.startsWith('Historical Acceptance witness:'));
   if (lines.length > 2) throw Error('too many historical Acceptance witnesses');
+  if (new Set(lines).size !== lines.length) throw Error('duplicate historical Acceptance witness');
   return lines.map(line => {
     const m = line.match(/^Historical Acceptance witness: Issue #([1-9]\d*) (SC-\d{2,}); PR #([1-9]\d*) SHA ([0-9a-f]{40}); Agent Run ([1-9]\d*) attempt ([1-9]\d*); E2E Run ([1-9]\d*) attempt ([1-9]\d*)$/);
     if (!m) throw Error('malformed historical Acceptance witness');
@@ -83,7 +84,8 @@ export function attestCrossIssueAcceptance(pin, sourceRun, jobs, artifact, resul
       !Array.isArray(result.selected_criteria) ||
       !result.selected_criteria.includes(pin.sc) ||
       !Array.isArray(result.criteria) ||
-      result.criteria.filter(x=>x?.criterion===pin.sc && x.result==='Pass').length!==1)
+      result.criteria.filter(x=>x?.criterion===pin.sc).length!==1 ||
+      !result.criteria.some(x=>x?.criterion===pin.sc && x.result==='Pass'))
     throw Error('historical Acceptance artifact lacks selected SC Pass');
   if (sourcePr?.number!==pin.pr || !sourcePr.merged_at ||
       sourcePr?.state!=='closed' || sourcePr?.head?.sha!==pin.sha ||
@@ -188,6 +190,7 @@ function selfTest(){
   const body='## Historical Acceptance Evidence\nHistorical Acceptance witness: Issue #1719 SC-02; PR #1720 SHA '+sha+
     '; Agent Run 38718918820 attempt 7; E2E Run 38388288917 attempt 4\n\n## Other';
   assert.deepEqual(pinnedCrossIssueAcceptance(body),[pin]);
+  assert.throws(()=>pinnedCrossIssueAcceptance(body.replace('\n\n## Other', '\n'+body.split('\n')[1]+'\n\n## Other')),/duplicate/);
   assert.deepEqual(pinnedCrossIssueAcceptance('## Success Criteria\n- [ ] SC-01 none'),[]);
   assert.throws(()=>pinnedCrossIssueAcceptance(body.replace('attempt 7','attempt forged')),/malformed/);
   const run={id:pin.run,run_attempt:7,name:'Agent / SC Acceptance',
