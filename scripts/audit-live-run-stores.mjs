@@ -49,10 +49,13 @@ function validateRef(value,store){
 }
 export async function auditLiveRunStores({
   checkout,sourceSha,anchors,token,fetchFn=fetch,gitRunner=git,
+  anchorTrust='externally_supplied',
 }){
   trustedCheckout(checkout,sourceSha);
   if(!token||typeof token!=='string'||token.length<8||
       typeof fetchFn!=='function'||typeof gitRunner!=='function')deny('read-only API credential missing');
+  if(!['externally_supplied','main_migration_observation'].includes(anchorTrust))
+    deny('invalid audit anchor trust boundary');
   const trust=typeof anchors==='string'?parseProtectedAnchors(anchors):parseProtectedAnchors(JSON.stringify(anchors));
   const headers={Authorization:'Bearer '+token,Accept:'application/vnd.github+json',
     'X-GitHub-Api-Version':'2022-11-28'};
@@ -79,7 +82,12 @@ export async function auditLiveRunStores({
       }
     }
     return {schema_version:1,kind:'read_only_run_store_audit',repository:REPO,
-      source_sha:sourceSha,passed:true,anchoring:'separately_supplied_secret',records};
+      source_sha:sourceSha,passed:true,
+      anchoring:anchorTrust==='externally_supplied'
+        ?'separately_supplied_secret':'repository_main_migration_observation_only',
+      historical_provenance_trust:anchorTrust==='externally_supplied'
+        ?'caller_supplied_not_proven_WORM':'not_independent_or_retroactive',
+      records};
   }finally{
     fs.rmSync(auditDir,{force:true,recursive:true});
   }
