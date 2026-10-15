@@ -7,6 +7,7 @@ import { collectHistoricalE2EForPull, collectLinkedIssueE2EEvidence } from './ac
 import { parseIssueE2E } from './issue-e2e-contract.mjs';
 import { collectCrossIssueAcceptance } from './acceptance-cross-issue-receipt.mjs';
 import { verifyWake } from './agent-evidence-waker.mjs';
+import {historicalCaseEvidence,selfTestHistoricalCase} from './acceptance-historical-case-replay.mjs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -71,7 +72,7 @@ function compactRuns(runs, expectedSha) {
     .slice(0, MAX_RUNS_PER_SHA);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], exactHeadE2eSteps = [], historicalReporterE2eRerun = null, relatedAcceptance = [] }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], relatedAcceptance = [] }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -98,6 +99,7 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     direct_runs: compactRuns(directRuns, sha),
     exact_head_e2e_steps: exactHeadE2eSteps,
     related_issue_acceptance_receipts: relatedAcceptance,
+    verified_historical_case_replays: verifiedHistoricalCaseReplays,
     historical_reporter_e2e_rerun: historicalReporterE2eRerun,
     pull_requests: associated,
     source_ancestry: sourceAncestry,
@@ -164,6 +166,18 @@ export async function collectExactHeadE2eSteps(repo,sha,runs,request=githubGet) 
   return proof;
 }
 
+async function githubJobLog(path){
+  const token=process.env.GITHUB_TOKEN??process.env.GH_TOKEN;
+  if(!token)throw Error('historical Case read requires GitHub token');
+  const response=await fetch('https://api.github.com'+path,{
+    headers:{Accept:'application/vnd.github+json',Authorization:'Bearer '+token,
+      'X-GitHub-Api-Version':'2022-11-28'},
+    signal:AbortSignal.timeout(30000)});
+  if(!response.ok)throw Error('GitHub historical Case logs HTTP '+response.status);
+  const body=await response.text();
+  if(body.length>=1048576)throw Error('historical Case log too large');
+  return body;
+}
 async function githubGet(path) {
   const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
   if (!token) throw new Error('GITHUB_TOKEN/GH_TOKEN is required');
@@ -623,6 +637,13 @@ async function collectCommand(workspace, outFile) {
   const repo = requireText(process.env.GITHUB_REPOSITORY, 'GITHUB_REPOSITORY');
   const sha = execFileSync('git', ['-C', workspace, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   const directRuns = await workflowRunsForSha(repo, sha);
+  const issueNumberForReplay=String(process.env.ISSUE_NUMBER||'');
+  const replayIssue=process.env.ACCEPTANCE_STAGE==='post-merge'&&
+    /^[1-9][0-9]*$/.test(issueNumberForReplay)
+    ? await githubGet('/repos/'+repo+'/issues/'+issueNumberForReplay) : null;
+  const verifiedHistoricalCaseReplays=replayIssue ? await historicalCaseEvidence({
+    repo,target:sha,body:replayIssue.body,get:githubGet,getText:githubJobLog,
+  }) : [];
   const exactHeadE2eSteps = await collectExactHeadE2eSteps(repo,sha,directRuns);
   const providerWakeEvidence = await collectPinnedProviderEvidence(repo,sha);
   const pulls = await githubGet('/repos/' + repo + '/commits/' + encodeURIComponent(sha) + '/pulls?per_page=10');
@@ -743,7 +764,7 @@ async function collectCommand(workspace, outFile) {
     }
   }
   const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls,
-    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, exactHeadE2eSteps, historicalReporterE2eRerun, relatedAcceptance });
+    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, relatedAcceptance });
   fs.writeFileSync(outFile, JSON.stringify(evidence, null, 2) + '\n');
   console.log(
     'collected acceptance CI evidence for ' + sha +
@@ -1111,6 +1132,7 @@ async function selfTest() {
   reject(provider,metrics,orchestration,{jobs:validJobs.jobs.map(x=>({...x,started_at:'2026-10-13T12:29:00Z'}))});
   reject(provider,metrics,orchestration,{jobs:validJobs.jobs.map(x=>({...x,conclusion:'failure'}))});
 
+  selfTestHistoricalCase();
   console.log('acceptance-ci-evidence self-test: collector, bounded criteria and positive/negative Git ancestry passed');
 }
 
