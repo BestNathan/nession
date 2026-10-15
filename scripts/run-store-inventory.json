@@ -120,9 +120,10 @@
         {
           "workflow": ".github/workflows/metrics-repository.yml",
           "source": "github-actions GITHUB_TOKEN (legacy) or scoped GitHub App installation token (app rollout)",
-          "execution": "main-owned schedule",
+          "execution": "main-owned schedule and attested owner/main workflow_run replay",
           "depends_on": [
-            ".github/workflows/e2e-tests.yml"
+            ".github/workflows/e2e-tests.yml",
+            ".github/workflows/metrics-replay-request.yml"
           ],
           "permissions": [
             "contents: write"
