@@ -22,6 +22,12 @@ for(const [name,source] of [
     waker.includes('.path == "'+source+'"'),
   'waker must authenticate the workflow name/path pair, not name alone: '+name);
 }
+assert.match(waker,/\.id == \$id and \.run_attempt == \$attempt and/,
+  'Waker must authenticate exact GitHub run ID and attempt');
+assert.match(waker,/\.repository\.full_name == \$repo and \.head_repository\.full_name == \$repo and/,
+  'Waker must reject cross-repo source or head');
+assert.match(waker,/\.event == "push" and \.head_branch == "main" and/,
+  'Waker only accepts main-push workflow completions');
 assert.match(waker,/github\.event\.workflow_run\.event == 'push'/);
 assert.match(waker,/github\.event\.workflow_run\.conclusion == 'success'/);
 assert.match(waker,/git merge-base --is-ancestor/);
