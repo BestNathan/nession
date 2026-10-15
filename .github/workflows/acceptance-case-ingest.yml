@@ -1,8 +1,5 @@
 name: Acceptance / Case Ingest
 
-env:
-  RUN_STORE_RECEIPT_DIR: ${{ runner.temp }}/run-store-receipts
-
 on:
   workflow_run:
     workflows: ["Acceptance / Cases"]
