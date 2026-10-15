@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_projection_receipt",
+  "outcome": "applied",
+  "issue": 1792,
+  "run_id": 38661442761,
+  "run_attempt": 1,
+  "target_sha": "97864f8c3a9a6982bd451e01ad3a8e2853597e4c",
+  "plan_digest": "48565755a43bbfd7a990627294b06bcfc9fb5e8c7a9292cc6dc5b3d74a1048af",
+  "artifact_digest": "sha256:1272b92eefc755a161967d8bfc4968577e2adef463539df7a87ba658c432d5f9",
+  "ingest_run_id": 38661938151,
+  "ingest_attempt": 2,
+  "declaration_digest": "275fa78b4fd6872f85f139b47070595f3373268a510c56d1b4d0fe82c5a0973a",
+  "before_body_sha256": "792f1d4b1e25502ebe9bb0fdb54921442975e1d526f4510115166eaa829ce6f0",
+  "body_sha256": "56010959d4089e1ba73b42ccffbd4e54bb5e1bc9701ff9b574d86b9b00b6ca3c",
+  "readback_body": "## Requirements: standalone Nession Pages MVP\n\n**Parent:** #1782. Deliver Phase 1 only, without claiming that Phase 2 full Issue→PR→Agent exact-SHA drilldown or Phase 3 independent orphan integrity audit is complete.\n\n### Scope / boundaries\nBuild a public project home and read-only AI engineering observatory, completely isolated under root `pages/`. It must have its **own typography, themes, design tokens, components, CSS, navigation and build**, never import or copy the authenticated product `web/`. The public artifact is generated from a pinned read-only `metrics` checkout, sanitized AI Role Registry and GitHub API snapshots. Unknown observations are N/A, never guessed. A public orphan ref does not imply trusted integrity.\n\n### Success Criteria\n- [ ] SC-01 A dependency-independent root `pages/` project builds an accessible static public site, with its own design system and no `web/` imports or copied UI assets.\n- [ ] SC-02 Home explains Nession and the AI collaboration workflow, with independent mobile navigation and direct hash-based deep links.\n- [ ] SC-03 Agents shows role registry plus observed 7d runs/tokens/tool calls/cost coverage without equating workflow Agents to runtime node Agents or inventing per-Agent token costs.\n- [ ] SC-04 Repository and Collaboration render sanitized public snapshot metrics and open GitHub Issues/PRs with clear main SHA/generation metadata and truthful absent data.\n- [ ] SC-05 Evidence view only exposes branch-presence metadata; no raw Run Store data, private sessions, host identifiers or false append-only claims.\n- [ ] SC-06 Build-time projection has strict read-only, versioned, bounded allowlists and deterministic positive/negative fixtures; Pages and product Web builds stay independent.\n- [ ] SC-07 Real Playwright assertions exercise standalone public Home/Agents/Work/Repository/Evidence navigation, safe untrusted text, responsive/deep link behavior and source/absence states at exact PR SHA.\n\n## Acceptance Plan\n```yaml\nacceptance:\n  SC-01:\n    when: pr\n    method: agent\n  SC-02:\n    when: pr\n    method: agent\n  SC-03:\n    when: pr\n    method: agent\n  SC-04:\n    when: pr\n    method: agent\n  SC-05:\n    when: pr\n    method: agent\n  SC-06:\n    when: pr\n    method: agent\n  SC-07:\n    when: pr\n    method: case\n```\n\n## Acceptance Report\n| Criterion | Result | Evidence |\n|---|---|---|\n| SC-01 | Pending | PR-head proof required |\n| SC-02 | Pending | PR-head proof required |\n| SC-03 | Pending | PR-head proof required |\n| SC-04 | Pending | PR-head proof required |\n| SC-05 | Pending | PR-head proof required |\n| SC-06 | Pending | PR-head proof required |\n| SC-07 | Pending | Source-aligned Playwright Case required |\n\n## E2E Verification\n### New\n- pages-overview\n- pages-evidence\n### Regression\n- none: An independent static Pages site; product Web runtime is unchanged.\n\n## E2E Report\n\n| ID | Type | Result | Evidence |\n|---|---|---|---|\n| pages-evidence | New | Pass | run 38661442761/1, SHA 97864f8c3a9a6982bd451e01ad3a8e2853597e4c, contract 275fa78b4fd6872f85f139b47070595f3373268a510c56d1b4d0fe82c5a0973a, plan 48565755a43bbfd7a990627294b06bcfc9fb5e8c7a9292cc6dc5b3d74a1048af, tests 2/2 (https://github.com/BestNathan/nession/actions/runs/38661442761) |\n| pages-overview | New | Pass | run 38661442761/1, SHA 97864f8c3a9a6982bd451e01ad3a8e2853597e4c, contract 275fa78b4fd6872f85f139b47070595f3373268a510c56d1b4d0fe82c5a0973a, plan 48565755a43bbfd7a990627294b06bcfc9fb5e8c7a9292cc6dc5b3d74a1048af, tests 2/2 (https://github.com/BestNathan/nession/actions/runs/38661442761) |\n\n## Product alignment\n- [x] VISION.md: explain intelligent continuous workspace.\n- [x] PRINCIPLE.md: work-first narrative, progressive data disclosure without reusing Web UI.\n- [x] Existing #1210/#1240/#1664/#1692/#1737/#1690 source owners preserved.\n- [x] Parent advanced Phase 2/3 SCs remain open, not silently marked complete.\n\n---\n**Status:** Draft\n",
+  "patch_updated_at": "2026-10-15T00:48:00Z",
+  "readback_updated_at": "2026-10-15T00:48:00Z",
+  "rows": [
+    {
+      "id": "pages-evidence",
+      "result": "Pass",
+      "evidence": "run 38661442761/1, SHA 97864f8c3a9a6982bd451e01ad3a8e2853597e4c, contract 275fa78b4fd6872f85f139b47070595f3373268a510c56d1b4d0fe82c5a0973a, plan 48565755a43bbfd7a990627294b06bcfc9fb5e8c7a9292cc6dc5b3d74a1048af, tests 2/2 (https://github.com/BestNathan/nession/actions/runs/38661442761)"
+    },
+    {
+      "id": "pages-overview",
+      "result": "Pass",
+      "evidence": "run 38661442761/1, SHA 97864f8c3a9a6982bd451e01ad3a8e2853597e4c, contract 275fa78b4fd6872f85f139b47070595f3373268a510c56d1b4d0fe82c5a0973a, plan 48565755a43bbfd7a990627294b06bcfc9fb5e8c7a9292cc6dc5b3d74a1048af, tests 2/2 (https://github.com/BestNathan/nession/actions/runs/38661442761)"
+    }
+  ]
+}
