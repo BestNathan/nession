@@ -490,8 +490,8 @@ async function selfTest() {
   }
   assert.throws(() => classifyCaseBranchAncestry('bad-sha', latest, comparison), /40-character/);
   const report = (result, evidence) =>
-    '## Acceptance Report\\n| Criterion | Result | Evidence |\\n|---|---|---|\\n| SC-07 | ' +
-    result + ' | ' + evidence + ' |\\n';
+    '## Acceptance Report\n| Criterion | Result | Evidence |\n|---|---|---|\n| SC-07 | ' +
+    result + ' | ' + evidence + ' |\n';
   assert.equal(historicalCaseMayProject(report('Pending', 'Post-merge proof not yet run'), 'SC-07'), true);
   assert.equal(historicalCaseMayProject(report('Pass', 'proof'), 'SC-07'), false);
   assert.equal(historicalCaseMayProject(report('Fail', 'failure'), 'SC-07'), false);
