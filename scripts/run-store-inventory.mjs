@@ -57,7 +57,7 @@ export function checkInventory(manifest,workflows){
       const body=workflows.get(writer.workflow);
       if(typeof body!=='string')fail('writer workflow missing: '+writer.workflow);
       const app=writer.app_token;
-      if(app?.when!=='RUN_STORE_WRITER_MODE=app'||
+      if(app?.when!=='RUN_STORE_WRITER_MODE unset or app; legacy explicitly rolls back'||
          app.app_id_variable!=='RUN_STORE_WRITER_APP_ID'||
          app.private_key_secret!=='RUN_STORE_WRITER_APP_PRIVATE_KEY'||
          app.scope!=='nession: contents write'||app.trusted_job_only!==true)
@@ -66,6 +66,10 @@ export function checkInventory(manifest,workflows){
       // enforcement. It fails closed if a writer loses the controlled App path.
       if(!body.includes('actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349')||
          !body.includes('vars.RUN_STORE_WRITER_MODE')||
+         !body.includes("if: (vars.RUN_STORE_WRITER_MODE == '' || vars.RUN_STORE_WRITER_MODE == 'app')")||
+         !body.includes("vars.RUN_STORE_WRITER_MODE == 'legacy' && secrets.GITHUB_TOKEN || steps.store_app.outputs.token")||
+         !body.includes("legacy) ;;")||
+         !body.includes("''|app) [[ -n \"$APP_TOKEN\" ]]")||
          !body.includes('vars.RUN_STORE_WRITER_APP_ID')||
          !body.includes('secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY')||
          !/repositories:\s*nession\s*$/m.test(body)||
@@ -105,7 +109,7 @@ export function checkInventory(manifest,workflows){
     }
   }
   if(!manifest.governance||
-     manifest.governance.writer_rollout!=='legacy-by-default; app mode is opt-in until disposable ref smoke and all six writers are verified'||
+     manifest.governance.writer_rollout!=='app-by-default after verified main smoke; explicit legacy rollback; no Ruleset before production App ingestion checks'||
      manifest.governance.ruleset_enforcement!=='unknown_until_live_probe'||
      manifest.governance.branch_protection!=='unknown_until_live_probe'||
      manifest.governance.independent_anchor!=='pending_offline_admin_control')
@@ -142,6 +146,15 @@ function selfTest(){
   const downgraded=clone(manifest);
   downgraded.stores.find(x=>x.ref==='metrics').writers[0].app_token.scope='all repositories';
   assert.throws(()=>checkInventory(downgraded,sources),/unclassified App writer/);
+  const fallback=new Map(sources);
+  const caseWriter='.github/workflows/acceptance-case-ingest.yml';
+  fallback.set(caseWriter,fallback.get(caseWriter).replace("legacy) ;;","''|legacy) ;;"));
+  assert.throws(()=>checkInventory(manifest,fallback),/missing pinned and scoped App/);
+  const appFallback=new Map(sources);
+  appFallback.set(caseWriter,appFallback.get(caseWriter)
+    .replace("vars.RUN_STORE_WRITER_MODE == 'legacy' && secrets.GITHUB_TOKEN || steps.store_app.outputs.token",
+      "vars.RUN_STORE_WRITER_MODE == 'app' && steps.store_app.outputs.token || secrets.GITHUB_TOKEN"));
+  assert.throws(()=>checkInventory(manifest,appFallback),/missing pinned and scoped App/);
   const unscoped=new Map(sources);
   const testWriter='.github/workflows/e2e-scenario-ingest.yml';
   unscoped.set(testWriter,unscoped.get(testWriter).replace('permission-contents: write','permission-contents: read'));
@@ -161,7 +174,7 @@ function selfTest(){
   assert.throws(()=>checkInventory(manifest,unsupported),/upstream dependency/);
   assert.deepEqual(findStorePushes('git -C result push origin acceptance-results\n'+
     'git push origin HEAD:metrics').map(x=>x.ref),['acceptance-results','metrics']);
-  console.log('Run Store inventory: 4 refs, 6 dual-mode writers (7 jobs), pinned scoped App action, source/permission/token/unknown-push negatives passed');
+  console.log('Run Store inventory: 4 refs, 6 App-default writers (7 jobs), explicit legacy rollback, no silent App fallback, source/permission/token/unknown-push negatives passed');
 }
 function gh(endpoint){
   try{
