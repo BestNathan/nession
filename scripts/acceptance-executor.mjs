@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { validateAcceptancePlan, isProofEligible } from './acceptance-plan.mjs';
 import {
   extractSection,
+  isAcceptanceIssue,
   parseAcceptanceReport,
   parseSuccessCriteria,
   validateRequirementBody,
@@ -358,10 +359,6 @@ export function applyAcceptanceResultToBody(body, normalized) {
   return updated;
 }
 
-function labelNames(issue) {
-  return (issue.labels ?? []).map((label) => typeof label === 'string' ? label : label?.name).filter(Boolean);
-}
-
 function fetchIssue(issueNumber) {
   if (!Number.isSafeInteger(Number(issueNumber)) || Number(issueNumber) <= 0) throw new Error('issue number must be a positive integer');
   const repo = process.env.GITHUB_REPOSITORY;
@@ -394,7 +391,7 @@ function implicitCiEvidenceFile(outFile) {
 function prepareCommand(issueNumber, stage, targetRef, outFile, deployment, ciEvidenceFile) {
   const issue = fetchIssue(issueNumber);
   if (String(issue.state).toUpperCase() !== 'OPEN') throw new Error('requirement #' + issueNumber + ' is not open');
-  if (!labelNames(issue).includes('requirement')) throw new Error('issue #' + issueNumber + ' is not labeled requirement');
+  if (!isAcceptanceIssue(issue)) throw new Error('issue #' + issueNumber + ' must be labeled bug or requirement');
 
   // Current Acceptance workflows pass a trusted CI-evidence file explicitly.
   // Older workflow runs do not. GitHub re-runs preserve the workflow definition
@@ -429,7 +426,7 @@ function isSupersededRunError(error) {
 
 function applyCommand(issueNumber, resultFile) {
   const issue = fetchIssue(issueNumber);
-  if (!labelNames(issue).includes('requirement')) throw new Error('issue #' + issueNumber + ' is not labeled requirement');
+  if (!isAcceptanceIssue(issue)) throw new Error('issue #' + issueNumber + ' must be labeled bug or requirement');
   const normalized = JSON.parse(fs.readFileSync(resultFile, 'utf8'));
   if (Number(normalized.issue) !== Number(issueNumber)) throw new Error('result targets issue #' + normalized.issue + ', not #' + issueNumber);
   // Concurrent Acceptance runs may finish out of order. Never project older
@@ -489,6 +486,14 @@ function fixtureBody() {
 }
 
 function selfTest() {
+  // Both issue kinds use the same trusted Acceptance context/projector.
+  // Discussions without an eligible label remain out of scope.
+  for (const labels of [['bug'], [{ name: 'bug' }], ['requirement'], [{ name: 'requirement' }]]) {
+    assert.equal(isAcceptanceIssue({ labels }), true);
+  }
+  for (const labels of [[], ['ci'], ['test', 'documentation']]) {
+    assert.equal(isAcceptanceIssue({ labels }), false);
+  }
   const issue = { number: 1360, title: 'Requirement: fixture', url: 'https://example.test/1360', body: fixtureBody() };
   const staging = buildAcceptanceContext(issue, 'staging', {
     targetRef: 'abc123',
