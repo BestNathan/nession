@@ -15,6 +15,7 @@ on:
       - scripts/run-store-migration-baseline.json
       - scripts/audit-live-run-stores.mjs
       - scripts/run-store-five-mode-evidence.mjs
+      - scripts/run-store-integrity-drill.mjs
       - .github/workflows/*-ingest.yml
       - .github/workflows/metrics-repository.yml
   workflow_dispatch:
@@ -58,6 +59,12 @@ jobs:
           node scripts/run-store-five-mode-evidence.mjs collect \
             "${RUNNER_TEMP}/store-governance/five-mode-readback.json"
       # This matrix proves source/ingester/consumer bytes, NOT Ruleset policy.
+      - name: Execute isolated tamper detection drill against canonical Git audit
+        run: |
+          set -euo pipefail
+          node scripts/run-store-integrity-drill.mjs collect \
+            "${RUNNER_TEMP}/store-governance/isolated-tamper-drill.json"
+      # The drill uses only disposable local Git; it cannot prove live denial.
       # This is a mandatory warning while the actual refs remain unprotected.
       # It fetches only GitHub refs / full Git ancestry through read-only
       # permissions. No secret admin token or privileged writer is supplied.
