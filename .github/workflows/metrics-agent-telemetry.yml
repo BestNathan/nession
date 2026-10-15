@@ -272,8 +272,17 @@ jobs:
             staged metrics "${GITHUB_WORKSPACE}/metrics-store"
           git commit -m "metrics: ingest agent telemetry from run ${SOURCE_RUN_ID}"
           git remote set-url origin "https://x-access-token:${STORE_PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git push origin HEAD:metrics
+          node "${GITHUB_WORKSPACE}/trusted/scripts/run-store-cas-push.mjs" metrics "${GITHUB_WORKSPACE}/metrics-store"
           git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
+
+      - name: Preserve Run Store post-commit receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-store-receipt-${{ github.run_id }}-${{ github.run_attempt }}-agent
+          path: ${{ runner.temp }}/run-store-receipts
+          if-no-files-found: ignore
+          retention-days: 14
 
       # A wake-up, not an Acceptance verdict; never loop on Acceptance telemetry.
       - name: Notify Acceptance of durable Provider evidence

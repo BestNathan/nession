@@ -19,10 +19,12 @@ const refPattern=/(?:refs\/heads\/)?(acceptance-results|task-results|agent-store
 export function findStorePushes(workflow){
   const entries=[];
   for(const [i,line] of workflow.split(/\r?\n/).entries()){
-    if(!/^\s*(?:-\s*run:\s*)?git(?:\s+-C\s+[^\s]+)?\s+push\b/.test(line))continue;
-    const refs=[...line.matchAll(refPattern)].map(x=>x[1]);
+    const direct=/^\s*(?:-\s*run:\s*)?git(?:\s+-C\s+[^\s]+)?\s+push\b/.test(line);
+    const cas=/^\s*node\s+\S*run-store-cas-push\.mjs["']?\s+(acceptance-results|task-results|metrics|agent-store)\s/.exec(line);
+    if(!direct&&!cas)continue;
+    const refs=cas?[cas[1]]:[...line.matchAll(refPattern)].map(x=>x[1]);
     for(const ref of new Set(refs))
-      entries.push({ref,line:i+1,command:line.trim()});
+      entries.push({ref,line:i+1,command:line.trim(),kind:cas?'cas':'direct'});
   }
   return entries;
 }
@@ -95,8 +97,10 @@ export function checkInventory(manifest,workflows){
           fail('unclassified upstream dependency: '+dep);
       }
       const actual=findStorePushes(body);
-      if(!actual.some(p=>p.ref===store.ref))
-        fail('writer is not publishing the claimed Store: '+writer.workflow+' '+store.ref);
+      if(!actual.some(p=>p.ref===store.ref&&p.kind==='cas'))
+        fail('writer is not using the bounded CAS Store publisher: '+writer.workflow+' '+store.ref);
+      if(actual.some(p=>p.ref===store.ref&&p.kind==='direct'))
+        fail('unwrapped Git Store push bypasses CAS: '+writer.workflow+' '+store.ref);
       const key=writer.workflow+'|'+store.ref;
       if(seen.has(key))fail('duplicate Store writer declaration: '+key);
       seen.set(key,writer);
@@ -136,6 +140,12 @@ function selfTest(){
     {...trusted,GITHUB_EVENT_NAME:'push',GITHUB_SHA:'main'},
   ]) assert.throws(()=>assertTrustedLiveContext(invalid),/trusted main/);
   assert.equal(success.writers,6);
+  const bypass=new Map(sources);
+  const scenario='.github/workflows/e2e-scenario-ingest.yml';
+  bypass.set(scenario,bypass.get(scenario).replace(
+    'node trusted/scripts/run-store-cas-push.mjs acceptance-results "${GITHUB_WORKSPACE}/results-repo"',
+    'git -C results-repo push origin acceptance-results'));
+  assert.throws(()=>checkInventory(manifest,bypass),/bounded CAS Store publisher/);
   const clone=x=>JSON.parse(JSON.stringify(x));
   const unmatched=clone(manifest);
   unmatched.stores.find(x=>x.ref==='metrics').writers.pop();

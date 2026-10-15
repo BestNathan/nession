@@ -162,8 +162,17 @@ jobs:
             echo "Idempotent Case ingestion retry: identical durable record and index bytes"
           else
             git -C results-repo commit -m "acceptance: ingest run ${{ github.event.workflow_run.id }} attempt ${{ github.event.workflow_run.run_attempt }}"
-            git -C results-repo push origin acceptance-results
+            node trusted/scripts/run-store-cas-push.mjs acceptance-results "${GITHUB_WORKSPACE}/results-repo"
           fi
+      - name: Preserve Run Store post-commit receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-store-receipt-${{ github.run_id }}-${{ github.run_attempt }}-case
+          path: ${{ runner.temp }}/run-store-receipts
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Project only currently eligible results
         if: steps.records.outputs.count != '0'
         env:

@@ -99,11 +99,20 @@ jobs:
           git -C results-repo add runs indexes
           if ! git -C results-repo diff --cached --quiet; then
             git -C results-repo commit -m "e2e: ingest trusted Test run ${{ github.event.workflow_run.id }} attempt ${{ github.event.workflow_run.run_attempt }}"
-            git -C results-repo push origin acceptance-results
+            node trusted/scripts/run-store-cas-push.mjs acceptance-results "${GITHUB_WORKSPACE}/results-repo"
           else
             echo "Identical immutable retry; no branch change" >> "$GITHUB_STEP_SUMMARY"
           fi
           echo "Test metadata ingested to acceptance-results with exact SHA and finite report-artifact digest" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Preserve Run Store post-commit receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-store-receipt-${{ github.run_id }}-${{ github.run_attempt }}-test
+          path: ${{ runner.temp }}/run-store-receipts
+          if-no-files-found: ignore
+          retention-days: 14
 
   ingest-pr:
     if: >-
@@ -230,7 +239,7 @@ jobs:
           git -C results-repo add runs
           if ! git -C results-repo diff --cached --quiet; then
             git -C results-repo commit -m "e2e: trusted Issue test $run_id attempt $attempt"
-            git -C results-repo push origin acceptance-results
+            node trusted/scripts/run-store-cas-push.mjs acceptance-results "${GITHUB_WORKSPACE}/results-repo"
           fi
           live_pr="$(jq -r .number scratch/metadata/pr.json)"
           current_head="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$live_pr" --jq .head.sha)"
@@ -300,7 +309,7 @@ jobs:
             git -C results-repo add "$receipt_path"
             if ! git -C results-repo diff --cached --quiet; then
               git -C results-repo commit -m "e2e: $mode Issue #$number projection $run_id/$attempt"
-              git -C results-repo push origin acceptance-results
+              node trusted/scripts/run-store-cas-push.mjs acceptance-results "${GITHUB_WORKSPACE}/results-repo"
             fi
           done
           if ! jq -e '.status == "Pass"' scratch/artifact/results.json > /dev/null; then
@@ -318,3 +327,11 @@ jobs:
           gh api --method POST "repos/$GITHUB_REPOSITORY/dispatches" \
             --input scratch/metadata/dispatch.json
           echo 'Requested event-driven Acceptance reconciliation after verified Issue E2E projection' >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve Run Store post-commit receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-store-receipt-${{ github.run_id }}-${{ github.run_attempt }}-pr
+          path: ${{ runner.temp }}/run-store-receipts
+          if-no-files-found: ignore
+          retention-days: 14
