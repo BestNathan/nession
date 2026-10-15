@@ -73,7 +73,11 @@ export function checkInventory(manifest,workflows){
          !/^  (workflow_run|schedule):\s*$/m.test(triggers)||
          /^  (workflow_dispatch|repository_dispatch):\s*$/m.test(triggers))
         fail('untrusted manual dispatch/trigger on privileged Store writer: '+writer.workflow);
-      if(!body.includes('ref: main')||!body.includes('persist-credentials: false'))
+      const trustedSource=writer.workflow==='.github/workflows/metrics-repository.yml'
+        ? body.includes('ref: ${{ github.sha }}')&&
+          body.includes("github.ref == 'refs/heads/main'")
+        : body.includes('ref: main');
+      if(!trustedSource||!body.includes('persist-credentials: false'))
         fail('privileged Store writer must checkout trusted main without persisted credentials: '+writer.workflow);
       if(writer.workflow==='.github/workflows/metrics-repository.yml'&&
          (!/^  schedule:\s*$/m.test(triggers)||
