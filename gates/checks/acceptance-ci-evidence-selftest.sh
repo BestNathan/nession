@@ -13,6 +13,7 @@ gate_check() {
   gate_require_command node "Install Node.js to evaluate this Gate." || return $?
   gate_require_path './scripts/acceptance-ci-evidence.mjs' "Restore scripts/acceptance-ci-evidence.mjs." || return $?
   gate_run_invariant node scripts/acceptance-e2e-lineage.mjs self-test
+  gate_run_invariant node scripts/acceptance-cross-issue-receipt.mjs self-test
   gate_run_invariant node scripts/acceptance-ci-evidence.mjs self-test
 }
 gate_main "$@"
