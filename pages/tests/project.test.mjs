@@ -171,3 +171,46 @@ test('Timeline unavailable, truncated, excessive and malformed references never 
  const malformed=makeProjection({...base,issueTimelines:{'6':{status:'available',events:[as(-4)]}}}).work.issues[0].pr_references;
  assert.deepEqual(malformed,{status:'available',prs:[]});
 });
+
+test('source age follows metric measurement instead of site build time',()=>{
+ const fresh=makeProjection({...base,meta:{...base.meta,generated_at:'2026-10-14T17:00:00Z'}});
+ assert.equal(fresh.repository.freshness.state,'fresh');
+ assert.equal(fresh.agents.freshness.state,'fresh');
+ const old=makeProjection({...base,meta:{...base.meta,generated_at:'2026-10-15T03:00:00Z'}});
+ assert.equal(old.repository.freshness.state,'stale');
+ assert.equal(old.agents.freshness.state,'stale');
+ const absent=makeProjection({...base,agent:null,repository:null});
+ assert.equal(absent.agents.freshness.state,'unavailable');
+ assert.equal(absent.repository.freshness.age_hours,null);
+ const clockDrift=makeProjection({...base,meta:{...base.meta,generated_at:'2026-10-13T00:00:00Z'}});
+ assert.equal(clockDrift.agents.freshness.state,'unavailable');
+});
+test('untrusted local address and private file paths are removed before publication',()=>{
+ for(const text of ['192.168.12.100','/home/developer/private.conf','localhost','api_key=nonproduction_placeholder','gh'+'p_'+'Z'.repeat(24)]){
+  const p=validateProjection(makeProjection({...base,issues:[{
+   number:6,title:'Do not publish '+text,updated_at:now,
+  }],registry:{instances:{'review-01':{role:'reviewer',provider:text}}}}));
+  assert.equal(p.work.issues[0].title,'[redacted public text]');
+  assert.equal(p.agents.roster[0].provider,'[redacted public text]');
+  assert.doesNotMatch(JSON.stringify(p),new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')));
+ }
+});
+test('public release gate rejects arbitrary fields, unsafe links and invalid values',()=>{
+ const initial=()=>validateProjection(makeProjection(base));
+ const extra=initial();extra.work.issues[0].untrusted_field='unapproved';
+ assert.throws(()=>validateProjection(extra),/disallowed public field/);
+ const privateField=initial();privateField.agents.roster[0].transcript='unsafe';
+ assert.throws(()=>validateProjection(privateField),/disallowed public field|private field/);
+ for(const link of ['https://elsewhere.example/pull/1','javascript:alert(1)']){
+   const p=initial();p.work.issues[0].url=link;
+   assert.throws(()=>validateProjection(p),/untrusted public URL/);
+ }
+ const token=initial();token.work.issues[0].title='api_key=placeholder';
+ assert.throws(()=>validateProjection(token),/private field value/);
+ const invalid=initial();invalid.agents.summary.runs_7d=Infinity;
+ assert.throws(()=>validateProjection(invalid),/invalid public metric/);
+ const huge=initial();huge.work.issues[0].title='x'.repeat(140000);
+ assert.throws(()=>validateProjection(huge),/release limit/);
+ const unsafe=initial();unsafe.work.issues[0].title='/home/person/secret.txt';
+ assert.throws(()=>validateProjection(unsafe),/private field value/);
+});

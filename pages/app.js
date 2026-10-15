@@ -105,6 +105,8 @@ function renderHome() {
 function renderAgents(){
   root.append(pageHead('THE AI TEAM','The agents behind the work.','Registered workflow Agents are not the Nession runtime node Agents. A role can exist without a successful run; usage is shown only where actually observed.'));
   const w=snapshot.agents||{}, s=w.summary||{};
+  root.append(node('p','hint','Agent metrics source: '+(w.freshness?.state||'unavailable')+' · measured '+date(w.generated_at)+' · site built '+date(snapshot.generated_at)));
+
   const stats=section('OBSERVED USAGE','Work in numbers','7-day window · missing measurements are N/A, not zero.');
   stats.append(grid([metric('Agent runs',fmt(s.runs_7d),'workflow summary'),
     metric('Tokens',fmt(s.tokens_7d),'observed '+fmt(s.tokens_observed_runs)+' runs'),
@@ -194,6 +196,8 @@ function renderWork(){
 function renderRepository(){
   root.append(pageHead('ENGINEERING SIGNALS','Built in the open.','Repository health and engineering throughput come from the existing canonical metrics pipeline. Measured SHA and age remain visible.'));
   const r=snapshot.repository||{}, c=r.current||{}, e=r.efficiency||{};
+  root.append(node('p','hint','Repository metrics source: '+(r.freshness?.state||'unavailable')+' · measured '+date(r.generated_at)+' · site built '+date(snapshot.generated_at)));
+
   const a=section('REPOSITORY METRICS','Structure and quality','Current measured main revision · '+(r.sha?r.sha.slice(0,12):'unavailable'));
   a.append(grid([metric('Tracked source lines',fmt(c.loc),fmt(c.files)+' files'),
     metric('Tests discovered',fmt(c.tests),'unit / integration / E2E'),

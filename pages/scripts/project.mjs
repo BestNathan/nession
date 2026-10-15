@@ -9,8 +9,23 @@ const stores = [
 ];
 const roles = new Set(['developer', 'reviewer', 'acceptor', 'auditor']);
 function number(value) { return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null; }
+// Exclude private network addressing and machine-local paths from text fields.
+const PRIVATE_TEXT = /(?:\b(?:10|127)\.(?:\d{1,3}\.){2}\d{1,3}\b|\b192\.168\.(?:\d{1,3}\.)\d{1,3}\b|\b172\.(?:1[6-9]|2\d|3[01])\.(?:\d{1,3}\.)\d{1,3}\b|\b(?:localhost|[a-z0-9.-]+\.internal)\b|\/(?:Users|home|etc|root)\/|[a-z]:\\\\(?:Users|Windows)\\\\|file:\/\/|\b(?:authorization|credential|private.key)\s*[:=])/i;
+// Recognize credential-shaped strings by syntax only; no credential values or
+// raw Agent inputs are ever needed for the public build.
+const SENSITIVE_MARKER = new RegExp('(?:\\bgh[pousr]_|\\bgithub_pat_|\\b(?:sk|rk)-)[A-Za-z0-9_-]{16,}|\\b(?:api[_-]?key|access[_-]?token|password)\\s*[=:]\\s*[^\\s]+','i');
 function safeText(value, max = 120) {
-  return typeof value === 'string' ? value.replace(/<[^>]*>/g, ' ').replace(/[<>\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max) : '';
+  if (typeof value!=='string')return '';
+  const clean=value.replace(/<[^>]*>/g, ' ').replace(/[<>\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
+  return PRIVATE_TEXT.test(clean)||SENSITIVE_MARKER.test(clean)?'[redacted public text]':clean.slice(0,max);
+}
+// A build timestamp never turns an old source measurement into a fresh one.
+function sourceFreshness(sourceTime, builtAt, hours=8) {
+  const source=safeDate(sourceTime), built=safeDate(builtAt);
+  if (!source||!built)return {state:'unavailable',age_hours:null};
+  const hoursOld=(Date.parse(built)-Date.parse(source))/3600000;
+  if (hoursOld < -1/6)return {state:'unavailable',age_hours:null};
+  return {state:hoursOld>hours?'stale':'fresh',age_hours:Math.round(Math.max(hoursOld,0)*10)/10};
 }
 function safeSha(value) { return typeof value === 'string' && /^[a-f0-9]{40}$/.test(value) ? value : null; }
 function safeDate(value) { return typeof value === 'string' && !Number.isNaN(Date.parse(value)) ? new Date(value).toISOString() : null; }
@@ -148,6 +163,7 @@ export function makeProjection({ repository, agent, registry, issues, pulls, wor
       available:!!r,
       sha:safeSha(r?.commit_sha),
       generated_at:safeDate(r?.generated_at),
+      freshness:sourceFreshness(r?.generated_at,meta.generated_at),
       current: {
         loc:countIn(current.source,'loc'),
         files:countIn(current.source,'files'),
@@ -169,6 +185,7 @@ export function makeProjection({ repository, agent, registry, issues, pulls, wor
     agents: {
       available:!!a,
       generated_at:safeDate(a?.generated_at),
+      freshness:sourceFreshness(a?.generated_at,meta.generated_at),
       roster:rosterFrom(registry,aw),
       distribution: {
         '7d': {providers:observedSegments(aw,'by_provider'), workflows:observedSegments(aw,'by_workflow')},
@@ -200,11 +217,87 @@ export function makeProjection({ repository, agent, registry, issues, pulls, wor
     evidence:{ stores:stores.map(([name,purpose])=>record(name,purpose)) },
   };
 }
+// Only exported public contract keys are permitted. This is a release gate,
+// independent of the read-only producer's allowlisting.
+function allowedFields(item,keys,where) {
+  if (!item||typeof item!=='object'||Array.isArray(item))throw Error('invalid public '+where);
+  for (const key of Object.keys(item))
+    if(!keys.includes(key))throw Error('disallowed public field '+where+'.'+key);
+}
+function checkFreshness(item) {
+  allowedFields(item,['state','age_hours'],'freshness');
+  if(!['fresh','stale','unavailable'].includes(item.state)||
+     (item.age_hours!==null&&(!Number.isFinite(item.age_hours)||item.age_hours<0)))
+    throw Error('invalid metric freshness');
+}
 export function validateProjection(p) {
   if (p?.schema_version !== 1 || p?.source?.repository !== REPO || !safeDate(p.generated_at)) throw new Error('invalid public projection');
   if (!Array.isArray(p.agents?.roster) || !Array.isArray(p.evidence?.stores)) throw new Error('missing sections');
   // Schema is constructed by an allowlist. These keys would imply an accidental raw-data leak.
-  const exported=JSON.stringify(p);
-  if (/"(?:prompt|transcript|checkpoint_bytes|tool_arguments|tool_results|auth_token|secret|private_key|env)"\s*:/i.test(exported)) throw new Error('private field in projection');
+  allowedFields(p,['schema_version','generated_at','source','repository','agents','work','evidence'],'root');
+  allowedFields(p.source,['repository','main_sha','metrics_sha','issues_status','pulls_status','workflow_runs_status'],'source');
+  allowedFields(p.repository,['available','sha','generated_at','freshness','current','efficiency'],'repository');
+  allowedFields(p.agents,['available','generated_at','freshness','roster','distribution','summary'],'agents');
+  allowedFields(p.work,['issues_status','pulls_status','workflow_runs_status','issues','pulls'],'work');
+  allowedFields(p.evidence,['stores'],'evidence');
+  allowedFields(p.repository.current,['loc','files','tests','rust_coverage','web_coverage','protocol_units','unit_pass'],'repository.current');
+  allowedFields(p.repository.efficiency,['commits_7d','additions_7d','deletions_7d','merged_7d','open_issues','open_prs'],'repository.efficiency');
+  allowedFields(p.agents.summary,['runs_7d','runs_30d','tokens_7d','tokens_observed_runs','tools_7d','tools_observed_runs','cost_7d'],'agents.summary');
+  allowedFields(p.agents.distribution,['7d','30d'],'agents.distribution');
+  for(const period of ['7d','30d']){
+    allowedFields(p.agents.distribution[period],['providers','workflows'],'distribution');
+    for(const key of ['providers','workflows']){
+      const segment=p.agents.distribution[period][key];
+      allowedFields(segment,['available','items'],'distribution segment');
+      if(!Array.isArray(segment.items)||segment.items.length>12)throw Error('unbounded public distribution');
+      segment.items.forEach(x=>allowedFields(x,['name','count'],'distribution entry'));
+    }
+  }
+  p.agents.roster.forEach(x=>allowedFields(x,['id','role','provider','observed_7d'],'Agent roster'));
+  p.evidence.stores.forEach(x=>allowedFields(x,['name','purpose','state','sha','url'],'store'));
+  checkFreshness(p.repository.freshness);
+  checkFreshness(p.agents.freshness);
+  if(!Array.isArray(p.work.issues)||p.work.issues.length>12||
+     !Array.isArray(p.work.pulls)||p.work.pulls.length>12||
+     p.agents.roster.length>40||p.evidence.stores.length>4)
+    throw Error('unbounded public data');
+  const issueFields=['number','title','url','state','updated_at','observed_agent_runs_7d','pr_references'];
+  const prFields=['number','title','url','state','updated_at','workflow'];
+  for(const item of p.work.issues){
+    allowedFields(item,issueFields,'issue');
+    allowedFields(item.pr_references,['status','prs'],'issue references');
+    if(!Array.isArray(item.pr_references.prs)||item.pr_references.prs.length>6)
+      throw Error('unbounded public Issue links');
+  }
+  for(const item of p.work.pulls)allowedFields(item,prFields,'PR');
+  for(const item of p.work.issues){
+    item.pr_references.prs.forEach(ref=>allowedFields(ref,['number','url','relation'],'Issue PR source'));
+  }
+  for(const item of p.work.pulls){
+    allowedFields(item.workflow,['head_sha','ci','e2e'],'PR workflow');
+    for(const key of ['ci','e2e'])if(item.workflow[key]!==null)
+      allowedFields(item.workflow[key],['run_id','attempt','head_sha','status','updated_at','url'],'workflow Run');
+  }
+  let serializedBytes=0;
+  const scan=(data,key='')=>{
+    if(data===null||data===undefined)return;
+    if(typeof data==='number'&&(!Number.isFinite(data)||data<0))
+      throw Error('invalid public metric');
+    if(typeof data==='string'){
+      serializedBytes+=Buffer.byteLength(data);
+      if(serializedBytes>128*1024)throw Error('public projection exceeds release limit');
+      if(PRIVATE_TEXT.test(data)||SENSITIVE_MARKER.test(data))throw Error('private field value in public projection');
+      if(key==='url'&&!/^https:\/\/github\.com\/BestNathan\/nession\/(?:issues\/[1-9]\d*|pull\/[1-9]\d*|actions\/runs\/[1-9]\d*|tree\/(?:metrics|acceptance-results|task-results|agent-store))$/.test(data))
+        throw Error('untrusted public URL');
+    } else if(Array.isArray(data))data.forEach(x=>scan(x,key));
+    else if(typeof data==='object'){
+      for(const [name,value] of Object.entries(data)){
+        if(/^(?:prompt|transcript|checkpoint_bytes|tool_arguments|tool_results|auth_token|secret|private_key|env|session_id|hostname)$/i.test(name))
+          throw Error('private field in projection');
+        scan(value,name);
+      }
+    }
+  };
+  scan(p);
   return p;
 }

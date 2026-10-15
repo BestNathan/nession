@@ -9,6 +9,7 @@ test.describe('standalone Pages overview',()=>{
   await expect(page.getByRole('heading',{name:/An open space/})).toBeVisible();
   await page.getByRole('link',{name:'AI Agents',exact:true}).click();
   await expect(page.getByRole('heading',{name:'The agents behind the work.'})).toBeVisible();
+  await expect(page.getByText('Agent metrics source: unavailable',{exact:false})).toBeVisible();
   await expect(page.getByText('dev-qwen-01')).toBeVisible();
   await expect(page.getByText('Unobserved',{exact:true})).toBeVisible();
   await expect(page.getByText('Not observed')).toBeVisible();

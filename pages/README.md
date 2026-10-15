@@ -37,3 +37,7 @@ Recent GitHub Actions Run metadata is fetched **only during the independent Page
 ## Phase 2-B2 — source-only Issue Timeline PR references
 
 For up to 12 public Issues, the independent Pages build requests GitHub `cross-referenced` Timeline events (bounded 100 events per Issue). A displayed PR must have a canonical same-repository GitHub Issue/PR API and HTML path. Deduplicated and capped at 6 PR links per Issue; a 100-event Timeline is labeled **truncated**, and a failed API fetch **unavailable**. A cross-reference is a GitHub mention/source link, not verified Issue ownership, implementation, Agent provenance, exact PR HEAD or SC Acceptance. Browser code never calls authenticated APIs.
+
+## Public export safety and freshness (Phase 2-B3)
+
+Public metric freshness is evaluated against each canonical source's `generated_at`, **not** the Pages build time (8-hour fresh threshold, then stale; missing/future-skewed source unavailable). Standalone Pages performs a fail-closed release audit of the versioned allowlisted JSON payload: bounded Issue/PR, registry and source references; canonical GitHub links; finite metrics; no injected fields, private local addresses or filesystem paths. Untrusted free-text Issue titles/providers are redacted before export when they contain private host/path information. Source freshness and site build times are displayed independently. This is a public publication gate, not an orphan-store integrity certificate.
