@@ -27,6 +27,7 @@ export function summarizeGovernance(manifest,rulesets,appId,history){
   const decisions=GOVERNED_REFS.map(ref=>evaluateStoreRules(ref,rulesets,appId));
   const records=history?.records??[];
   const coverage=records.length===GOVERNED_REFS.length&&
+    new Set(records.map(x=>x.store)).size===GOVERNED_REFS.length&&
     records.every(x=>GOVERNED_REFS.includes(x.store)&&
       x.api_ref_verified===true&&x.mode==='anchored-history');
   const policy=decisions.every(x=>x.configuration_verified);
@@ -115,6 +116,9 @@ function selfTest(){
   assert.equal(report.run_store_integration_verdict,'Pending');
   assert.equal(summarizeGovernance(migration,[],0,
     {...history,records:history.records.slice(1)}).actual_history_checked_against_unanchored_baseline,false);
+  assert.equal(summarizeGovernance(migration,[],0,
+    {...history,records:[history.records[0],history.records[0],history.records[2]]})
+    .actual_history_checked_against_unanchored_baseline,false);
   assert.throws(()=>summarizeGovernance(migration,[],0,
     {...history,anchoring:'separately_supplied_secret'}),/falsely independent anchor/);
   console.log('Run Store governance live summary: incomplete coverage, unprotected refs and no independent checkpoint fail closed');
@@ -122,6 +126,17 @@ function selfTest(){
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
   if(process.argv[2]==='self-test')selfTest();
   else if(process.argv[2]==='live'&&process.argv[3])
-    await live(process.argv[3]).catch(e=>{console.error(e.message);process.exitCode=1;});
+    await live(process.argv[3]).catch(e=>{
+      const out=process.argv[3];
+      const incident={schema_version:1,kind:'run_store_governance_integrity_observation',
+        repository:REPO,source_sha:process.env.GITHUB_SHA??null,
+        audit_run_id:process.env.GITHUB_RUN_ID??null,result:'ERROR',
+        store_mutation_performed:false,error:e.message,
+        note:'Read-only run failed; no ref repair and no acceptance claim.'};
+      if(path.isAbsolute(out)&&fs.existsSync(path.dirname(out))&&!fs.existsSync(out))
+        fs.writeFileSync(out,JSON.stringify(incident,null,2)+'\n',{flag:'wx'});
+      console.error('::error::'+e.message);
+      process.exitCode=1;
+    });
   else fail('usage: self-test | live ABS_REPORT');
 }
