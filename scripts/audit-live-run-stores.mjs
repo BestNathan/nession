@@ -49,7 +49,7 @@ function validateRef(value,store){
 }
 export async function auditLiveRunStores({
   checkout,sourceSha,anchors,token,fetchFn=fetch,gitRunner=git,
-  anchorTrust='externally_supplied',
+  anchorTrust='externally_supplied',baselineTrees=null,
 }){
   trustedCheckout(checkout,sourceSha);
   if(!token||typeof token!=='string'||token.length<8||
@@ -75,6 +75,15 @@ export async function auditLiveRunStores({
       const worktree=path.join(auditDir,store);
       gitRunner(checkout,'worktree','add','--detach',worktree,observed);
       try{
+        // A repository-main migration observation records both a commit and
+        // its tree. The commit SHA alone proves only the claimed object name;
+        // verify exact tree identity before trusting the ancestry classifier.
+        if(anchorTrust==='main_migration_observation'){
+          const expectedTree=baselineTrees?.[store];
+          if(typeof expectedTree!=='string'||!/^[a-f0-9]{40}$/.test(expectedTree)||
+             gitRunner(worktree,'rev-parse',trust[store]+'^{tree}')!==expectedTree)
+            deny('migration baseline tree identity does not match Git object for '+store);
+        }
         const result=auditAnchoredRunStore(worktree,store,trust[store],observed);
         records.push({...result,api_ref_verified:true});
       }finally{
