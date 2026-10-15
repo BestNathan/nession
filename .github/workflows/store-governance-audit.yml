@@ -14,6 +14,7 @@ on:
       - scripts/run-store-governance-live.mjs
       - scripts/run-store-migration-baseline.json
       - scripts/audit-live-run-stores.mjs
+      - scripts/run-store-five-mode-evidence.mjs
       - .github/workflows/*-ingest.yml
       - .github/workflows/metrics-repository.yml
   workflow_dispatch:
@@ -49,6 +50,14 @@ jobs:
           mkdir -p "${RUNNER_TEMP}/store-governance"
           node scripts/run-store-inventory.mjs live \
             "${RUNNER_TEMP}/store-governance/live.json"
+      - name: Collect five-mode authenticated Git-byte receipt evidence (read-only)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          node scripts/run-store-five-mode-evidence.mjs collect \
+            "${RUNNER_TEMP}/store-governance/five-mode-readback.json"
+      # This matrix proves source/ingester/consumer bytes, NOT Ruleset policy.
       # This is a mandatory warning while the actual refs remain unprotected.
       # It fetches only GitHub refs / full Git ancestry through read-only
       # permissions. No secret admin token or privileged writer is supplied.
