@@ -71,7 +71,7 @@ function compactRuns(runs, expectedSha) {
     .slice(0, MAX_RUNS_PER_SHA);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], exactHeadE2eSteps = [], verifiedCaseReceipts = [] }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedCaseReceipts = [] }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -97,6 +97,7 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     target_sha: sha,
     direct_runs: compactRuns(directRuns, sha),
     exact_head_e2e_steps: exactHeadE2eSteps,
+    historical_reporter_e2e_rerun: historicalReporterE2eRerun,
     verified_case_receipts: verifiedCaseReceipts,
     pull_requests: associated,
     source_ancestry: sourceAncestry,
@@ -518,14 +519,114 @@ async function collectImplementationGateEvidence(repo,issueNumber,currentIssue,t
   return out;
 }
 
+
+// SC wording is discovery only. Do not accept success claims from mutable
+// Issue text; resolve every identity and step independently through GitHub.
+// A single, explicit witness keeps historical workflow reads bounded.
+export function pinnedHistoricalReporterE2eRerun(body) {
+  const section=String(body??'').match(/###? Success Criteria\s*\n([\s\S]*?)(?=\n## Acceptance Plan|\n## Acceptance Report|$)/)?.[1]??'';
+  const lines=section.split('\n').filter(x=>/^- \[[x ]\] SC-\d+\b/.test(x)&&
+    x.includes('Historical E2E witness:'));
+  if(lines.length>1)throw Error('excessive historical reporter E2E witnesses');
+  if(!lines.length)return null;
+  const match=lines[0].match(
+    /\bHistorical E2E witness:\s*PR #([1-9]\d*) SHA ([a-f0-9]{40}); Reporter Fix PR #([1-9]\d*); E2E Run ([1-9]\d*) attempt ([1-9]\d*)\b/);
+  if(!match)throw Error('malformed historical reporter E2E witness locator');
+  const [sourcePr,repairPr,runId,attempt]=[match[1],match[3],match[4],match[5]].map(Number);
+  if([sourcePr,repairPr,runId,attempt].some(n=>!Number.isSafeInteger(n)||n<=0)||
+     sourcePr===repairPr)throw Error('invalid historical reporter E2E witness locator');
+  return {source_pr_number:sourcePr,source_sha:match[2],repair_pr_number:repairPr,
+    run_id:runId,run_attempt:attempt};
+}
+
+export function attestHistoricalReporterE2eRerun(pin,sourcePr,repairPr,repairFiles,
+  run,jobs,comparison,targetSha,repo,issueNumber){
+  const own=pr=>pr?.state==='closed'&&!!pr.merged_at&&
+    pr?.base?.ref==='main'&&pr?.base?.repo?.full_name===repo&&
+    pr?.head?.repo?.full_name===repo;
+  if(repo!=='BestNathan/nession'||issueNumber!==1725||
+     !/^[a-f0-9]{40}$/.test(targetSha)||!pin||
+     !own(sourcePr)||!own(repairPr)||
+     sourcePr.number!==pin.source_pr_number||
+     sourcePr.head.sha!==pin.source_sha||
+     repairPr.number!==pin.repair_pr_number||
+     !/^[a-f0-9]{40}$/.test(repairPr.merge_commit_sha)||
+     !String(repairPr.body??'').split(/\r?\n/).some(x=>
+       /^Refs?\s*:?\s*#1725(?:\s|$)/i.test(x))||
+     !Array.isArray(repairFiles)||repairFiles.length>100||
+     !repairFiles.some(f=>f?.filename==='e2e/runner/selected-report.mjs')||
+     !['ahead','identical'].includes(comparison?.status)||
+     comparison?.merge_base_commit?.sha!==repairPr.merge_commit_sha)
+     throw Error('historical reporter repair identity/ancestry unverified');
+  if(run?.id!==pin.run_id||run?.run_attempt!==pin.run_attempt||
+     run?.name!=='E2E / Tests'||run?.path!=='.github/workflows/e2e-tests.yml'||
+     run?.event!=='pull_request'||run?.head_sha!==pin.source_sha||
+     run?.repository?.full_name!==repo||run?.head_repository?.full_name!==repo||
+     run?.status!=='completed'||run?.conclusion!=='success')
+     throw Error('historical reporter E2E exact-run identity unverified');
+  if(!Array.isArray(jobs?.jobs)||jobs.jobs.length>100)
+    throw Error('historical reporter E2E jobs missing');
+  const candidates=jobs.jobs.filter(j=>j?.name==='e2e');
+  if(candidates.length!==1)throw Error('historical reporter E2E job ambiguous');
+  const j=candidates[0];
+  if(!Number.isSafeInteger(j.id)||j.id<=0||
+     j.run_id!==pin.run_id||j.run_attempt!==pin.run_attempt||
+     j.head_sha!==pin.source_sha||j.status!=='completed'||
+     j.conclusion!=='success'||!Array.isArray(j.steps))
+    throw Error('historical reporter E2E exact-attempt job unverified');
+  // A retry created BEFORE main was repaired is not evidence of the fix.
+  const repairTime=Date.parse(repairPr.merged_at),jobTime=Date.parse(j.started_at);
+  if(!Number.isFinite(repairTime)||!Number.isFinite(jobTime)||
+     jobTime<=repairTime)throw Error('historical E2E attempt predates trusted reporter repair');
+  const names=['Resolve linked Issue E2E obligations','Run E2E tests',
+    'Normalize selected per-file results even on failure',
+    'Enforce authenticated selected-E2E execution result'];
+  const steps=names.map(name=>{
+    const found=j.steps.filter(s=>s?.name===name);
+    if(found.length!==1||found[0].status!=='completed'||
+       found[0].conclusion!=='success')
+      throw Error('historical reporter E2E required step is not proven success: '+name);
+    return {name,conclusion:'success'};
+  });
+  return {
+    kind:'verified_historical_reporter_e2e_rerun',source_pr_number:pin.source_pr_number,
+    source_sha:pin.source_sha,repair_pr_number:pin.repair_pr_number,
+    repair_merge_sha:repairPr.merge_commit_sha,repair_merged_at:repairPr.merged_at,
+    target_sha:targetSha,run_id:pin.run_id,run_attempt:pin.run_attempt,
+    job_id:j.id,attempt_job_started_at:j.started_at,
+    workflow_conclusion:'success',steps,
+    selected_e2e_issue_receipt:'not_attested_by_this_proof',
+    provenance:'same-repo merged repair + exact-GitHub-merge ancestry + exact original PR head E2E Run/attempt/job steps after repair',
+  };
+}
+
+async function collectHistoricalReporterE2eRerun(repo,issue,targetSha){
+  if(process.env.ACCEPTANCE_STAGE!=='post-merge')return null;
+  const pin=pinnedHistoricalReporterE2eRerun(issue?.body);
+  if(!pin)return null;
+  const [source,repair,run]=await Promise.all([
+    githubGet('/repos/'+repo+'/pulls/'+pin.source_pr_number),
+    githubGet('/repos/'+repo+'/pulls/'+pin.repair_pr_number),
+    githubGet('/repos/'+repo+'/actions/runs/'+pin.run_id),
+  ]);
+  const [files,jobs,comparison]=await Promise.all([
+    githubGet('/repos/'+repo+'/pulls/'+pin.repair_pr_number+'/files?per_page=100'),
+    githubGet('/repos/'+repo+'/actions/runs/'+pin.run_id+
+      '/attempts/'+pin.run_attempt+'/jobs?per_page=100'),
+    githubGet('/repos/'+repo+'/compare/'+repair.merge_commit_sha+'...'+targetSha),
+  ]);
+  return attestHistoricalReporterE2eRerun(pin,source,repair,files,run,jobs,
+    comparison,targetSha,repo,Number(issue.number));
+}
+
 async function collectCommand(workspace, outFile) {
   const repo = requireText(process.env.GITHUB_REPOSITORY, 'GITHUB_REPOSITORY');
   const sha = execFileSync('git', ['-C', workspace, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   const directRuns = await workflowRunsForSha(repo, sha);
-  // Accept only authenticated, nonempty Case publication proved by the separate
-  // read-only Receipt Readback artifact. A green no-op cannot be evidence.
+  // Only a completed independently verified Git-byte Receipt may establish a positive Case write.
+  // Green no-op workflows, stale ancestry and missing/expired artifacts never do.
   const verifiedCaseReceipts = process.env.ACCEPTANCE_STAGE === 'post-merge'
-    ? await collectAuthenticatedCaseReadbacks({repo, targetSha:sha, runs:directRuns, request:githubGet})
+    ? await collectAuthenticatedCaseReadbacks({repo,targetSha:sha,runs:directRuns,request:githubGet})
     : [];
   const exactHeadE2eSteps = await collectExactHeadE2eSteps(repo,sha,directRuns);
   const providerWakeEvidence = await collectPinnedProviderEvidence(repo,sha);
@@ -595,6 +696,7 @@ async function collectCommand(workspace, outFile) {
   const historicalE2EByPr = new Map();
   const linkedIssueE2E = [];
   let implementationPulls = [];
+  let historicalReporterE2eRerun = null;
   const issueNumber = String(process.env.ISSUE_NUMBER || '').trim();
   if (/^[1-9][0-9]*$/.test(issueNumber)) {
     const currentIssue = await githubGet('/repos/' + repo + '/issues/' + issueNumber);
@@ -635,12 +737,15 @@ async function collectCommand(workspace, outFile) {
         }
       }
     }
-    if(process.env.ACCEPTANCE_STAGE==='post-merge')
+    if(process.env.ACCEPTANCE_STAGE==='post-merge') {
       implementationPulls=await collectImplementationGateEvidence(
         repo,Number(issueNumber),currentIssue,sha);
+      historicalReporterE2eRerun=await collectHistoricalReporterE2eRerun(
+        repo,currentIssue,sha);
+    }
   }
   const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls,
-    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, exactHeadE2eSteps, verifiedCaseReceipts });
+    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedCaseReceipts });
   fs.writeFileSync(outFile, JSON.stringify(evidence, null, 2) + '\n');
   console.log(
     'collected acceptance CI evidence for ' + sha +
@@ -650,6 +755,76 @@ async function collectCommand(workspace, outFile) {
 }
 
 async function selfTest() {
+
+  // Positive rerun: original pull_request HEAD unchanged; trusted-main repair
+  // is merged into exact acceptance target before attempt 3 starts.
+  const reporterTarget='c'.repeat(40),reporterSource='a'.repeat(40);
+  const reporterRepairMerge='b'.repeat(40);
+  const witnessLine='- [ ] SC-03 Verify import fix. Historical E2E witness: PR #1716 SHA '+
+    reporterSource+'; Reporter Fix PR #1724; E2E Run 38387630403 attempt 3.';
+  const witness=pinnedHistoricalReporterE2eRerun(
+    '## Success Criteria\n'+witnessLine+'\n## Acceptance Plan');
+  assert.deepEqual(witness,{source_pr_number:1716,source_sha:reporterSource,
+    repair_pr_number:1724,run_id:38387630403,run_attempt:3});
+  assert.equal(pinnedHistoricalReporterE2eRerun('## Success Criteria\n- [ ] SC-03 no witness'),null);
+  assert.throws(()=>pinnedHistoricalReporterE2eRerun(
+    '## Success Criteria\n'+witnessLine+'\n'+witnessLine),
+    /excessive/);
+  const sameRepo={full_name:'BestNathan/nession'};
+  const base={ref:'main',repo:sameRepo};
+  const sourcePr={number:1716,state:'closed',merged_at:'2026-10-13T11:38:00Z',
+    base,head:{sha:reporterSource,repo:sameRepo}};
+  const repairPr={number:1724,state:'closed',merged_at:'2026-10-13T11:38:51Z',
+    base,head:{sha:'d'.repeat(40),repo:sameRepo},
+    merge_commit_sha:reporterRepairMerge,body:'Refs #1725'};
+  const reporterRun={id:38387630403,run_attempt:3,name:'E2E / Tests',
+    path:'.github/workflows/e2e-tests.yml',event:'pull_request',
+    status:'completed',conclusion:'success',head_sha:reporterSource,
+    repository:sameRepo,head_repository:sameRepo};
+  const stepNames=['Resolve linked Issue E2E obligations','Run E2E tests',
+    'Normalize selected per-file results even on failure',
+    'Enforce authenticated selected-E2E execution result'];
+  const reporterJob={id:115276755422,name:'e2e',
+    run_id:38387630403,run_attempt:3,head_sha:reporterSource,
+    status:'completed',conclusion:'success',started_at:'2026-10-13T11:39:08Z',
+    steps:stepNames.map(name=>({name,status:'completed',conclusion:'success'}))};
+  const fileList=[{filename:'e2e/runner/selected-report.mjs'}];
+  const comparison={status:'ahead',merge_base_commit:{sha:reporterRepairMerge}};
+  const verifyReporter=(a=sourcePr,b=repairPr,c=fileList,d=reporterRun,
+    e={jobs:[reporterJob]},f=comparison,g=reporterTarget)=>
+    attestHistoricalReporterE2eRerun(witness,a,b,c,d,e,f,g,
+      'BestNathan/nession',1725);
+  const proven=verifyReporter();
+  assert.equal(proven.workflow_conclusion,'success');
+  assert.equal(proven.steps.length,4);
+  assert.equal(proven.selected_e2e_issue_receipt,'not_attested_by_this_proof');
+  assert.deepEqual(normalizeCiEvidence({targetSha:reporterTarget,
+    historicalReporterE2eRerun:proven}).historical_reporter_e2e_rerun,proven);
+  const rejectReporter=(...variants)=>assert.throws(()=>verifyReporter(...variants),
+    /unverified|predates|not proven|ambiguous/);
+  rejectReporter({...sourcePr,head:{sha:'e'.repeat(40),repo:sameRepo}});
+  rejectReporter(sourcePr,{...repairPr,base:{ref:'staging',repo:sameRepo}});
+  rejectReporter(sourcePr,{...repairPr,body:'Refs #1999'});
+  rejectReporter(sourcePr,repairPr,[]);
+  rejectReporter(sourcePr,repairPr,fileList,{...reporterRun,head_sha:'e'.repeat(40)});
+  rejectReporter(sourcePr,repairPr,fileList,{...reporterRun,conclusion:'failure'});
+  rejectReporter(sourcePr,repairPr,fileList,reporterRun,
+    {jobs:[{...reporterJob,run_attempt:2}]});
+  rejectReporter(sourcePr,repairPr,fileList,reporterRun,
+    {jobs:[{...reporterJob,started_at:'2026-10-13T11:38:00Z'}]});
+  rejectReporter(sourcePr,repairPr,fileList,reporterRun,
+    {jobs:[{...reporterJob,steps:reporterJob.steps.map(s=>
+      s.name==='Normalize selected per-file results even on failure'?
+        {...s,conclusion:'skipped'}:s)}]});
+  rejectReporter(sourcePr,repairPr,fileList,reporterRun,
+    {jobs:[reporterJob,reporterJob]});
+  rejectReporter(sourcePr,repairPr,fileList,reporterRun,
+    {jobs:[reporterJob]},{status:'diverged',merge_base_commit:{sha:reporterRepairMerge}});
+  rejectReporter(sourcePr,repairPr,fileList,reporterRun,
+    {jobs:[reporterJob]},{status:'ahead',merge_base_commit:{sha:'f'.repeat(40)}});
+  assert.throws(()=>attestHistoricalReporterE2eRerun(witness,sourcePr,repairPr,
+    fileList,reporterRun,{jobs:[reporterJob]},comparison,reporterTarget,
+    'BestNathan/nession',1726),/unverified/);
   const e2eSha='a'.repeat(40);
   const run={id:38388288917,run_attempt:4,head_sha:e2eSha,
     name:'E2E / Tests',path:'.github/workflows/e2e-tests.yml',
@@ -940,7 +1115,7 @@ async function selfTest() {
 
   selfTestCaseReceipts();
   assert.deepEqual(normalizeCiEvidence({targetSha:head, verifiedCaseReceipts:[{changed_records:2}]}).verified_case_receipts,[{changed_records:2}]);
-  console.log('acceptance-ci-evidence self-test: collector, authenticated Case Receipt and negative Git ancestry passed');
+  console.log('acceptance-ci-evidence self-test: collector, authenticated Case receipt, reporter history and negative ancestry passed');
 }
 
 async function main() {
