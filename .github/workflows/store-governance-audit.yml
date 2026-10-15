@@ -19,6 +19,8 @@ on:
       - scripts/run-store-cas-matrix.mjs
       - .github/workflows/*-ingest.yml
       - .github/workflows/metrics-repository.yml
+      - .github/workflows/metrics-replay-request.yml
+      - scripts/metrics-replay-source.mjs
   workflow_dispatch:
   schedule:
     - cron: '43 3 * * *'

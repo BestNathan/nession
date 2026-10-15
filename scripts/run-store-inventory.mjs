@@ -87,11 +87,31 @@ export function checkInventory(manifest,workflows){
         : body.includes('ref: main');
       if(!trustedSource)
         fail('privileged Store writer must checkout trusted main without persisted credentials: '+writer.workflow);
-      if(writer.workflow==='.github/workflows/metrics-repository.yml'&&
-         (!/^  schedule:\s*$/m.test(triggers)||
-           /workflow_run:/m.test(triggers)||
-           !body.includes("github.event_name == 'schedule'")))
-        fail('Metrics health writer must remain schedule/main-only; manual dispatch needs a separate trusted design');
+      if(writer.workflow==='.github/workflows/metrics-repository.yml'){
+        const request=workflows.get('.github/workflows/metrics-replay-request.yml');
+        // The manual workflow can execute at an attacker-selected ref, so it
+        // must NEVER possess Store credentials. Only its authenticated REST
+        // run identity wakes this separate, trusted-main privileged workflow.
+        if(typeof request!=='string'||
+           !/^name: Metrics \/ Replay Request\s*$/m.test(request)||
+           !/^  workflow_dispatch:\s*$/m.test(request)||
+           !/^permissions:\s*\n  contents: read\s*$/m.test(request)||
+           !request.includes("github.ref == 'refs/heads/main'")||
+           !request.includes("github.actor == 'BestNathan'")||
+           /contents: write|actions: write|repository_dispatch:|RUN_STORE_WRITER_APP_PRIVATE_KEY|actions\/checkout@|actions\/create-github-app-token/.test(request))
+          fail('untrusted or privilege-bearing Metrics Replay request workflow');
+        if(!/^  schedule:\s*$/m.test(triggers)||
+           !/^  workflow_run:\s*\n    workflows: \["Metrics \/ Replay Request"\]\s*\n    types: \[completed\]/m.test(triggers)||
+           /^  workflow_dispatch:\s*$/m.test(triggers)||
+           !body.includes("node scripts/metrics-replay-source.mjs authorize")||
+           !body.includes('  authorize-replay:')||
+           !body.includes("github.event_name == 'schedule' || github.event_name == 'workflow_run'")||
+           (body.match(/needs: authorize-replay/g)||[]).length!==3||
+           (body.match(/needs\.authorize-replay\.result == 'success'/g)||[]).length!==4||
+           !body.includes('needs: [authorize-replay, rust-health, web-health, e2e-health]')||
+           !body.includes('        GH_TOKEN: \${{ secrets.GITHUB_TOKEN }}'))
+          fail('Metrics publisher must remain schedule-or-attested-request only, with all jobs gated');
+      }
       // Source check does not prove runtime token possession or GitHub Ruleset
       // enforcement. It fails closed if a writer loses the controlled App path.
       if(!body.includes('actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349')||
@@ -203,6 +223,44 @@ function selfTest(){
   const forged=clone(manifest);
   forged.governance.ruleset_enforcement='enforced';
   assert.throws(()=>checkInventory(forged,sources),/must not assert/);
+  const replaySource='.github/workflows/metrics-replay-request.yml';
+  const replayWriter='.github/workflows/metrics-repository.yml';
+  const requestWithWriterToken=new Map(sources);
+  requestWithWriterToken.set(replaySource,
+    requestWithWriterToken.get(replaySource).replace('contents: read','contents: write'));
+  assert.throws(()=>checkInventory(manifest,requestWithWriterToken),
+    /privilege-bearing Metrics Replay request/);
+  const requestWithWrongActor=new Map(sources);
+  requestWithWrongActor.set(replaySource,
+    requestWithWrongActor.get(replaySource).replace("github.actor == 'BestNathan'","github.actor == 'anyone'"));
+  assert.throws(()=>checkInventory(manifest,requestWithWrongActor),
+    /privilege-bearing Metrics Replay request/);
+  const requestFromWrongWorkflow=new Map(sources);
+  requestFromWrongWorkflow.set(replayWriter,
+    requestFromWrongWorkflow.get(replayWriter)
+      .replace('workflows: ["Metrics / Replay Request"]','workflows: ["Untrusted / Job"]'));
+  assert.throws(()=>checkInventory(manifest,requestFromWrongWorkflow),
+    /schedule-or-attested-request/);
+  const noAuthorization=new Map(sources);
+  noAuthorization.set(replayWriter,
+    noAuthorization.get(replayWriter).replace(
+      'needs: [authorize-replay, rust-health, web-health, e2e-health]',
+      'needs: [rust-health, web-health, e2e-health]'));
+  assert.throws(()=>checkInventory(manifest,noAuthorization),
+    /schedule-or-attested-request/);
+  const bypassAuthorizer=new Map(sources);
+  bypassAuthorizer.set(replayWriter,
+    bypassAuthorizer.get(replayWriter).replace(
+      "needs.authorize-replay.result == 'success'",
+      "needs.authorize-replay.result != 'cancelled'"));
+  assert.throws(()=>checkInventory(manifest,bypassAuthorizer),
+    /schedule-or-attested-request/);
+  const ownerAuthRemoved=new Map(sources);
+  ownerAuthRemoved.set(replayWriter,
+    ownerAuthRemoved.get(replayWriter).replace(
+      'node scripts/metrics-replay-source.mjs authorize','echo skipping provenance'));
+  assert.throws(()=>checkInventory(manifest,ownerAuthRemoved),
+    /schedule-or-attested-request/);
   const manuallyDispatched=new Map(sources);
   const privilegedMetrics='.github/workflows/metrics-repository.yml';
   manuallyDispatched.set(privilegedMetrics,

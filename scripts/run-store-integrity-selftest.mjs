@@ -31,21 +31,38 @@ function commit(root,msg){
 function verifyRepositoryMetricsTrustedSource(workflow) {
   const trigger=workflow.split(/^jobs:/m)[0];
   if(!/^  schedule:\s*$/m.test(trigger) ||
-      /^  workflow_dispatch:\s*$/m.test(trigger) ||
+      !/^  workflow_run:\s*\n    workflows: \["Metrics \/ Replay Request"\]\s*\n    types: \[completed\]/m.test(trigger) ||
+      /^  (workflow_dispatch|repository_dispatch):\s*$/m.test(trigger) ||
       !/^  contents: read\s*$/m.test(trigger)) {
-    throw new Error('repository Metrics source is not schedule-only and read-only by default');
+    throw new Error('repository Metrics source must be scheduled or default-main attested-only, read-only by default');
+  }
+  const auth=workflow.split(/^  authorize-replay:\s*$/m)[1]?.split(/^  rust-health:\s*$/m)[0]??'';
+  if(!auth.includes("github.event_name == 'schedule' || github.event_name == 'workflow_run'") ||
+      !auth.includes('node scripts/metrics-replay-source.mjs authorize')||
+      !/^\s+permissions:\s*\n\s+contents: read\s*\n\s+actions: read\s*$/m.test(auth)||
+      !auth.includes('persist-credentials: false')){
+    throw new Error('Metrics authorization must be read-only and main-source-attested');
   }
   for(const job of ['rust-health','web-health','e2e-health','publish']) {
-    const matcher=new RegExp('^  '+job+':\\n    if: [^\\n]*','m');
-    const line=matcher.exec(workflow)?.[0]??'';
-    for(const constraint of ["github.event_name == 'schedule'",
+    const jobPrefix='\n  '+job+':\n';
+    const start=workflow.indexOf(jobPrefix);
+    if(start<0)throw new Error('missing Metrics source job '+job);
+    const jobBody=workflow.slice(start+jobPrefix.length);
+    const line=jobBody.split(/^  [a-z][a-z0-9-]*:/m)[0]
+      .split(/^    steps:/m)[0];
+    for(const constraint of ["needs.authorize-replay.result == 'success'",
       "github.ref == 'refs/heads/main'",
       "github.repository == 'BestNathan/nession'"]) {
-      if(!line.includes(constraint)) throw new Error('unsafe Metrics source job '+job);
+      if(!line.includes(constraint))throw new Error('unsafe Metrics source job '+job);
     }
+    if(job==='publish'&&!line.includes('needs: [authorize-replay, rust-health, web-health, e2e-health]'))
+      throw new Error('unsafe Metrics source job '+job);
+    if(job!=='publish'&&!line.includes('needs: authorize-replay'))
+      throw new Error('unsafe Metrics source job '+job);
   }
   const writer=workflow.split(/^  publish:\s*$/m)[1]??'';
-  if(!/^    permissions:\s*\n      actions: read\s*\n      contents: write\s*$/m.test(writer)) {
+  if((writer.match(/^    permissions:/gm)||[]).length!==1 ||
+      !/^\s+permissions:\s*\n      actions: read\s*\n      contents: write\s*$/m.test(writer)) {
     throw new Error('Metrics writer contents:write must be scoped to publish only');
   }
   if(!writer.includes('node "${GITHUB_WORKSPACE}/scripts/run-store-integrity.mjs" staged metrics "${GITHUB_WORKSPACE}/metrics-store"')) {
@@ -57,12 +74,12 @@ const repoMetricsYml=fs.readFileSync('.github/workflows/metrics-repository.yml',
 assert.equal(verifyRepositoryMetricsTrustedSource(repoMetricsYml),true);
 assert.throws(()=>verifyRepositoryMetricsTrustedSource(
   repoMetricsYml.replace(/^  schedule:/m,'  workflow_dispatch:\n  schedule:')
-),/schedule-only/);
+),/attested-only/);
 assert.throws(()=>verifyRepositoryMetricsTrustedSource(
   repoMetricsYml.replace('  contents: read','  contents: write')
 ),/read-only/);
 assert.throws(()=>verifyRepositoryMetricsTrustedSource(
-  repoMetricsYml.replace("github.event_name == 'schedule' && github.ref",
+  repoMetricsYml.replace("needs.authorize-replay.result == 'success' && github.ref",
     "github.event_name == 'workflow_dispatch' && github.ref")
 ),/unsafe Metrics source/);
 assert.throws(()=>verifyRepositoryMetricsTrustedSource(
