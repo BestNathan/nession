@@ -1,0 +1,8 @@
+{
+  "task_id": "1690-provenance-smoke-20261015",
+  "source_sha": "336fa6e8172e59a564671c8e7e3d49c503ff2b39",
+  "run_id": 38723112110,
+  "run_attempt": 1,
+  "record_path": "runs/1690-provenance-smoke-20261015/38723112110-1/record.json",
+  "source_path": "sources/336fa6e8172e59a564671c8e7e3d49c503ff2b39/1690-provenance-smoke-20261015.json"
+}

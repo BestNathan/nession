@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "trust": "untrusted-task-observation",
+  "provenance": "github-workflow-run-and-independent-exact-source",
+  "task_id": "1690-provenance-smoke-20261015",
+  "source_sha": "336fa6e8172e59a564671c8e7e3d49c503ff2b39",
+  "source_digest": "0012a56fe51fd083e07db1eee0ea71aabe02ef3f6d24dd84bc1261507301f1af",
+  "entry": "verify.mjs",
+  "workflow": {
+    "id": 38723112110,
+    "attempt": 1,
+    "url": "https://github.com/BestNathan/nession/actions/runs/38723112110",
+    "event": "push",
+    "branch": "task/1690-provenance-smoke-20261015",
+    "conclusion": "success"
+  },
+  "execution": {
+    "status": "Success",
+    "exit_code": 0,
+    "started_at": "2026-10-15T10:50:45.398Z",
+    "finished_at": "2026-10-15T10:50:45.434Z",
+    "result": {
+      "schema_version": 1,
+      "kind": "run_store_task_provenance_smoke",
+      "issue": 1690,
+      "purpose": "authenticated-real-task-source-and-run-store-ingest",
+      "task_id": "1690-provenance-smoke-20261015",
+      "source_sha": "336fa6e8172e59a564671c8e7e3d49c503ff2b39",
+      "assertions": [
+        "exact_sha_shape",
+        "requested_task_id",
+        "explicit_issue",
+        "ci_isolation"
+      ]
+    }
+  },
+  "cleanup_on_success": true,
+  "acceptance_result": null,
+  "source_snapshot_path": "sources/336fa6e8172e59a564671c8e7e3d49c503ff2b39/1690-provenance-smoke-20261015.json"
+}
