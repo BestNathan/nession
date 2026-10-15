@@ -64,9 +64,30 @@ jobs:
           ref: ${{ steps.source.outputs.source_sha }}
           path: source
           persist-credentials: false
+      - name: Mint scoped App token for orphan Run Store updates
+        if: vars.RUN_STORE_WRITER_MODE == 'app'
+        id: store_app
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.RUN_STORE_WRITER_APP_ID }}
+          private-key: ${{ secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY }}
+          repositories: nession
+          permission-contents: write
+      - name: Reject unrecognized writer mode or unavailable App token
+        env:
+          WRITER_MODE: ${{ vars.RUN_STORE_WRITER_MODE }}
+          APP_TOKEN: ${{ steps.store_app.outputs.token }}
+        run: |
+          set -euo pipefail
+          case "$WRITER_MODE" in
+            ''|legacy) ;;
+            app) [[ -n "$APP_TOKEN" ]] || { echo "::error::No App token; refuse legacy fallback" >&2; exit 1; } ;;
+            *) echo "::error::Unsupported RUN_STORE_WRITER_MODE" >&2; exit 1 ;;
+          esac
+
       - name: Initialize independent orphan result store
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ vars.RUN_STORE_WRITER_MODE == 'app' && steps.store_app.outputs.token || secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           mkdir -p task-store
@@ -104,6 +125,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          # Cleanup is a separate Task permission, NEVER use the scoped Store App token.
+          git -C task-store remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           id="$(jq -er '.task_id' incoming/record.json)"
           sha="$(jq -er '.source_sha' incoming/record.json)"
           run_id="${{ github.event.workflow_run.id }}"

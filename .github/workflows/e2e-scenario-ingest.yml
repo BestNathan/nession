@@ -37,9 +37,31 @@ jobs:
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: incoming
+      - name: Mint scoped App token for orphan Run Store updates
+        if: vars.RUN_STORE_WRITER_MODE == 'app'
+        id: store_app
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.RUN_STORE_WRITER_APP_ID }}
+          private-key: ${{ secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY }}
+          repositories: nession
+          permission-contents: write
+      - name: Reject unrecognized writer mode or unavailable App token
+        env:
+          WRITER_MODE: ${{ vars.RUN_STORE_WRITER_MODE }}
+          APP_TOKEN: ${{ steps.store_app.outputs.token }}
+        run: |
+          set -euo pipefail
+          case "$WRITER_MODE" in
+            ''|legacy) ;;
+            app) [[ -n "$APP_TOKEN" ]] || { echo "::error::No App token; refuse legacy fallback" >&2; exit 1; } ;;
+            *) echo "::error::Unsupported RUN_STORE_WRITER_MODE" >&2; exit 1 ;;
+          esac
+
       - name: Append immutable records and indexes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STORE_PUSH_TOKEN: ${{ vars.RUN_STORE_WRITER_MODE == 'app' && steps.store_app.outputs.token || secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
@@ -47,7 +69,7 @@ jobs:
           git -C results-repo init
           git -C results-repo config user.name "github-actions[bot]"
           git -C results-repo config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git -C results-repo remote add origin "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git"
+          git -C results-repo remote add origin "https://x-access-token:$STORE_PUSH_TOKEN@github.com/$GITHUB_REPOSITORY.git"
           git -C results-repo fetch --depth=1 origin acceptance-results
           git -C results-repo checkout -B acceptance-results FETCH_HEAD
           count=0

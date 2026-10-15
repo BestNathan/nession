@@ -10,7 +10,7 @@
       "writers": [
         {
           "workflow": ".github/workflows/acceptance-case-ingest.yml",
-          "source": "github-actions GITHUB_TOKEN",
+          "source": "github-actions GITHUB_TOKEN (legacy) or scoped GitHub App installation token (app rollout)",
           "execution": "main-owned workflow_run",
           "depends_on": [
             ".github/workflows/acceptance-cases.yml"
@@ -18,22 +18,36 @@
           "permissions": [
             "contents: write",
             "issues: write"
-          ]
+          ],
+          "app_token": {
+            "when": "RUN_STORE_WRITER_MODE=app",
+            "app_id_variable": "RUN_STORE_WRITER_APP_ID",
+            "private_key_secret": "RUN_STORE_WRITER_APP_PRIVATE_KEY",
+            "scope": "nession: contents write",
+            "trusted_job_only": true
+          }
         },
         {
           "workflow": ".github/workflows/e2e-scenario-ingest.yml",
-          "source": "github-actions GITHUB_TOKEN",
+          "source": "github-actions GITHUB_TOKEN (legacy) or scoped GitHub App installation token (app rollout)",
           "execution": "main-owned workflow_run",
           "depends_on": [
             ".github/workflows/e2e-scenario-smoke.yml"
           ],
           "permissions": [
             "contents: write"
-          ]
+          ],
+          "app_token": {
+            "when": "RUN_STORE_WRITER_MODE=app",
+            "app_id_variable": "RUN_STORE_WRITER_APP_ID",
+            "private_key_secret": "RUN_STORE_WRITER_APP_PRIVATE_KEY",
+            "scope": "nession: contents write",
+            "trusted_job_only": true
+          }
         },
         {
           "workflow": ".github/workflows/e2e-test-ingest.yml",
-          "source": "github-actions GITHUB_TOKEN",
+          "source": "github-actions GITHUB_TOKEN (legacy) or scoped GitHub App installation token (app rollout)",
           "execution": "main-owned workflow_run",
           "depends_on": [
             ".github/workflows/e2e-tests.yml"
@@ -41,7 +55,14 @@
           "permissions": [
             "contents: write",
             "issues: write"
-          ]
+          ],
+          "app_token": {
+            "when": "RUN_STORE_WRITER_MODE=app",
+            "app_id_variable": "RUN_STORE_WRITER_APP_ID",
+            "private_key_secret": "RUN_STORE_WRITER_APP_PRIVATE_KEY",
+            "scope": "nession: contents write",
+            "trusted_job_only": true
+          }
         }
       ]
     },
@@ -52,14 +73,21 @@
       "writers": [
         {
           "workflow": ".github/workflows/task-result-ingest.yml",
-          "source": "github-actions GITHUB_TOKEN",
+          "source": "github-actions GITHUB_TOKEN (legacy) or scoped GitHub App installation token (app rollout)",
           "execution": "main-owned workflow_run",
           "depends_on": [
             ".github/workflows/task-runner.yml"
           ],
           "permissions": [
             "contents: write"
-          ]
+          ],
+          "app_token": {
+            "when": "RUN_STORE_WRITER_MODE=app",
+            "app_id_variable": "RUN_STORE_WRITER_APP_ID",
+            "private_key_secret": "RUN_STORE_WRITER_APP_PRIVATE_KEY",
+            "scope": "nession: contents write",
+            "trusted_job_only": true
+          }
         }
       ]
     },
@@ -70,7 +98,7 @@
       "writers": [
         {
           "workflow": ".github/workflows/metrics-agent-telemetry.yml",
-          "source": "github-actions GITHUB_TOKEN",
+          "source": "github-actions GITHUB_TOKEN (legacy) or scoped GitHub App installation token (app rollout)",
           "execution": "main-owned workflow_run and schedule",
           "depends_on": [
             ".github/workflows/agent-provider-smoke.yml",
@@ -80,18 +108,32 @@
           ],
           "permissions": [
             "contents: write"
-          ]
+          ],
+          "app_token": {
+            "when": "RUN_STORE_WRITER_MODE=app",
+            "app_id_variable": "RUN_STORE_WRITER_APP_ID",
+            "private_key_secret": "RUN_STORE_WRITER_APP_PRIVATE_KEY",
+            "scope": "nession: contents write",
+            "trusted_job_only": true
+          }
         },
         {
           "workflow": ".github/workflows/metrics-repository.yml",
-          "source": "github-actions GITHUB_TOKEN",
+          "source": "github-actions GITHUB_TOKEN (legacy) or scoped GitHub App installation token (app rollout)",
           "execution": "main-owned schedule",
           "depends_on": [
             ".github/workflows/e2e-tests.yml"
           ],
           "permissions": [
             "contents: write"
-          ]
+          ],
+          "app_token": {
+            "when": "RUN_STORE_WRITER_MODE=app",
+            "app_id_variable": "RUN_STORE_WRITER_APP_ID",
+            "private_key_secret": "RUN_STORE_WRITER_APP_PRIVATE_KEY",
+            "scope": "nession: contents write",
+            "trusted_job_only": true
+          }
         }
       ]
     },
@@ -108,6 +150,7 @@
     "ruleset_enforcement": "unknown_until_live_probe",
     "branch_protection": "unknown_until_live_probe",
     "secrets": "Never resolve, print or store secret values",
-    "independent_anchor": "pending_offline_admin_control"
+    "independent_anchor": "pending_offline_admin_control",
+    "writer_rollout": "legacy-by-default; app mode is opt-in until disposable ref smoke and all six writers are verified"
   }
 }

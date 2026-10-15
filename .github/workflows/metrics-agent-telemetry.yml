@@ -72,6 +72,7 @@ jobs:
           ref: metrics
           path: metrics-store
           fetch-depth: 0
+          persist-credentials: false
 
       # Read-only preflight: when an authenticated producer emitted no
       # telemetry, reuse this already-running trusted Metrics writer to
@@ -233,11 +234,34 @@ jobs:
           cp "${RUNNER_TEMP}/agent-metrics/agent-metrics-light.svg" "${GITHUB_WORKSPACE}/metrics-store/"
           cp "${RUNNER_TEMP}/agent-metrics/agent-metrics-dark.svg" "${GITHUB_WORKSPACE}/metrics-store/"
 
+      - name: Mint scoped App token for orphan Run Store updates
+        if: vars.RUN_STORE_WRITER_MODE == 'app' && steps.persist.outputs.changed != '' && steps.persist.outputs.changed != '0'
+        id: store_app
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.RUN_STORE_WRITER_APP_ID }}
+          private-key: ${{ secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY }}
+          repositories: nession
+          permission-contents: write
+      - name: Reject unrecognized writer mode or unavailable App token
+        if: steps.persist.outputs.changed != '' && steps.persist.outputs.changed != '0'
+        env:
+          WRITER_MODE: ${{ vars.RUN_STORE_WRITER_MODE }}
+          APP_TOKEN: ${{ steps.store_app.outputs.token }}
+        run: |
+          set -euo pipefail
+          case "$WRITER_MODE" in
+            ''|legacy) ;;
+            app) [[ -n "$APP_TOKEN" ]] || { echo "::error::No App token; refuse legacy fallback" >&2; exit 1; } ;;
+            *) echo "::error::Unsupported RUN_STORE_WRITER_MODE" >&2; exit 1 ;;
+          esac
+
       - name: Commit metrics history
         if: steps.artifacts.outputs.count != '' && steps.artifacts.outputs.count != '0' && steps.persist.outputs.changed != '0'
         working-directory: metrics-store
         env:
           SOURCE_RUN_ID: ${{ steps.source.outputs.run_id }}
+          STORE_PUSH_TOKEN: ${{ vars.RUN_STORE_WRITER_MODE == 'app' && steps.store_app.outputs.token || secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -247,7 +271,9 @@ jobs:
           node "${GITHUB_WORKSPACE}/trusted/scripts/run-store-integrity.mjs" \
             staged metrics "${GITHUB_WORKSPACE}/metrics-store"
           git commit -m "metrics: ingest agent telemetry from run ${SOURCE_RUN_ID}"
+          git remote set-url origin "https://x-access-token:${STORE_PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git push origin HEAD:metrics
+          git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
 
       # A wake-up, not an Acceptance verdict; never loop on Acceptance telemetry.
       - name: Notify Acceptance of durable Provider evidence

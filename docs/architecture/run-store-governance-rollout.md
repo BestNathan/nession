@@ -14,6 +14,41 @@ The Ruleset policy requires, for EACH exact refs/heads/{store}, an active reposi
 
 Read-only governance history comparison can succeed while authorization is absent; that produces a FAILED audit with a retained report. GitHub Actions run failures and retention-limited artifacts are not an independently durable alert channel. They do not constitute Acceptance SC Pass.
 
+## Stage B.0 — App writer connectivity and opt-in migration (2026-10-15)
+
+The repository owner created a dedicated GitHub App. The main-owned workflows now have an
+explicit opt-in writer-token mode and the new `Store / App Writer Smoke` workflow verifies
+its *real* installation token on a uniquely named disposable `run-store-smoke/<run-id>-<attempt>`
+ref. That smoke must succeed **after merge** on trusted `main` before changing production
+writer mode. Probe cleanup is head-SHA-leased and will refuse to delete a ref that advanced
+beyond the probe's last recorded head. This smoke does **not** prove denied writes to any
+protected production ref.
+
+Required repository Actions configuration:
+- Variable `RUN_STORE_WRITER_APP_ID`: numeric **GitHub App ID** (not installation ID).
+- Secret `RUN_STORE_WRITER_APP_PRIVATE_KEY`: the GitHub App private PEM key (never print or commit).
+- Variable `RUN_STORE_WRITER_MODE`: **unset or `legacy` initially**. After a green
+  merged-main App smoke, and separately verified production writer path/read permissions,
+  set `app` to route all six canonical workflows (seven write-capable jobs) to scoped
+  short-lived App tokens; unsupported modes and App-token failures fail closed instead
+  of silently falling back to the legacy credential.
+
+The App mint action is SHA-pinned to
+`actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349` (v2),
+with `repositories: nession` and `permission-contents: write`. The token only goes to
+trusted writer steps; upstream Actions artifact downloads, Issue projection API updates,
+Task branch cleanup and repository_dispatch continue using the separate workflow
+`GITHUB_TOKEN` authorization contract. Metrics checkouts disable persisted credentials;
+store pushes inject the selected credential only at publication.
+
+**Do not activate Rulesets merely because a token smoke or source Gate passes.**
+The workflow `GITHUB_TOKEN` still retains its legacy contents:write for rollback and
+separate Task cleanup. App-mode rollout must be exercised by actual Case, Scenario, Test,
+Task and Metrics production ingests with immutable replay/collision evidence before
+all unauthorized normal updates are denied by exact-ref Rulesets. App-protected
+refs must first have a tested authorized bypass. No workflow deliberately
+force-pushes or modifies the three production ref histories to test migration.
+
 ## Stage B — minimal privileged App and Ruleset (administrator required)
 
 GitHub Rulesets restrict ordinary fast-forward updates in addition to force pushes; see https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets and https://docs.github.com/en/rest/repos/rules.

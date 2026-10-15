@@ -48,7 +48,7 @@ export function checkInventory(manifest,workflows){
       fail('private Agent Store deployment blocker must be explicit');
     for(const writer of store.writers){
       if(!/^\.github\/workflows\/[a-z0-9-]+\.yml$/.test(writer.workflow)||
-         writer.source!=='github-actions GITHUB_TOKEN'||
+         writer.source!=='github-actions GITHUB_TOKEN (legacy) or scoped GitHub App installation token (app rollout)'||
          !String(writer.execution).includes('main-owned')||
          !Array.isArray(writer.depends_on)||
          !Array.isArray(writer.permissions)||
@@ -56,6 +56,26 @@ export function checkInventory(manifest,workflows){
         fail('unclassified writer identity/authority/dependency: '+store.ref);
       const body=workflows.get(writer.workflow);
       if(typeof body!=='string')fail('writer workflow missing: '+writer.workflow);
+      const app=writer.app_token;
+      if(app?.when!=='RUN_STORE_WRITER_MODE=app'||
+         app.app_id_variable!=='RUN_STORE_WRITER_APP_ID'||
+         app.private_key_secret!=='RUN_STORE_WRITER_APP_PRIVATE_KEY'||
+         app.scope!=='nession: contents write'||app.trusted_job_only!==true)
+        fail('unclassified App writer identity or token scope: '+writer.workflow);
+      // Source check does not prove runtime token possession or GitHub Ruleset
+      // enforcement. It fails closed if a writer loses the controlled App path.
+      if(!body.includes('actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349')||
+         !body.includes('vars.RUN_STORE_WRITER_MODE')||
+         !body.includes('vars.RUN_STORE_WRITER_APP_ID')||
+         !body.includes('secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY')||
+         !/repositories:\s*nession\s*$/m.test(body)||
+         !/permission-contents:\s*write\s*$/m.test(body)||
+         !body.includes('refuse legacy fallback')||
+         !body.includes('steps.store_app.outputs.token'))
+        fail('missing pinned and scoped App migration path: '+writer.workflow);
+      if(writer.workflow.endsWith('/e2e-test-ingest.yml')&&
+         (body.match(/id: store_app/g)||[]).length!==2)
+        fail('both E2E Test/PR writers require independent scoped App tokens');
       if(!/^\s+contents:\s*write\s*$/m.test(body)||
          !/secrets\.GITHUB_TOKEN/.test(body))
         fail('writer lacks declared contents:write/token source: '+writer.workflow);
@@ -85,6 +105,7 @@ export function checkInventory(manifest,workflows){
     }
   }
   if(!manifest.governance||
+     manifest.governance.writer_rollout!=='legacy-by-default; app mode is opt-in until disposable ref smoke and all six writers are verified'||
      manifest.governance.ruleset_enforcement!=='unknown_until_live_probe'||
      manifest.governance.branch_protection!=='unknown_until_live_probe'||
      manifest.governance.independent_anchor!=='pending_offline_admin_control')
@@ -118,6 +139,13 @@ function selfTest(){
   const foreign=clone(manifest);
   foreign.stores.find(x=>x.ref==='task-results').writers[0].source='attacker';
   assert.throws(()=>checkInventory(foreign,sources),/unclassified writer/);
+  const downgraded=clone(manifest);
+  downgraded.stores.find(x=>x.ref==='metrics').writers[0].app_token.scope='all repositories';
+  assert.throws(()=>checkInventory(downgraded,sources),/unclassified App writer/);
+  const unscoped=new Map(sources);
+  const testWriter='.github/workflows/e2e-scenario-ingest.yml';
+  unscoped.set(testWriter,unscoped.get(testWriter).replace('permission-contents: write','permission-contents: read'));
+  assert.throws(()=>checkInventory(manifest,unscoped),/missing pinned and scoped App/);
   const undeclared=clone(manifest);
   undeclared.stores.push({ref:'private-secrets',lifecycle:'active',writers:[]});
   assert.throws(()=>checkInventory(undeclared,sources),/canonical/);
@@ -133,7 +161,7 @@ function selfTest(){
   assert.throws(()=>checkInventory(manifest,unsupported),/upstream dependency/);
   assert.deepEqual(findStorePushes('git -C result push origin acceptance-results\n'+
     'git push origin HEAD:metrics').map(x=>x.ref),['acceptance-results','metrics']);
-  console.log('Run Store inventory: 4 classified refs, 6 authenticated writers, source/permission/token/unknown-push negatives passed');
+  console.log('Run Store inventory: 4 refs, 6 dual-mode writers (7 jobs), pinned scoped App action, source/permission/token/unknown-push negatives passed');
 }
 function gh(endpoint){
   try{
