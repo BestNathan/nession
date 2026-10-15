@@ -232,6 +232,20 @@ function selfTest() {
     head_repository: { full_name: 'BestNathan/nession' },
     path: '.github/workflows/e2e-scenario-smoke.yml' } };
   assert.equal(sourceIdentity(event, 'BestNathan/nession').run_id, 12);
+  // #1690: main Push Scenario production source must be reachable, not only
+  // a PR or an arbitrary-ref manual dispatch. Still observational, never Pass.
+  const producerYml=fs.readFileSync('.github/workflows/e2e-scenario-smoke.yml','utf8');
+  const ingesterYml=fs.readFileSync('.github/workflows/e2e-scenario-ingest.yml','utf8');
+  assert.match(producerYml,/^  push:\n    branches: \[main\]/m,
+    'main post-merge terminal Scenario source is not connected');
+  assert.match(producerYml,/^      - '\.github\/workflows\/e2e-scenario-smoke\.yml'$/m,
+    'a change to this workflow must exercise the real scenario');
+  assert.match(ingesterYml,/workflows: \["E2E \/ Scenario Smoke"\]/,
+    'trusted Scenario Ingest must follow the canonical producer');
+  const mainEvent={workflow_run:{...event.workflow_run,
+    event:'push',head_branch:'main'}};
+  assert.equal(sourceIdentity(mainEvent,'BestNathan/nession').event,'push');
+  assert.equal(sourceIdentity(mainEvent,'BestNathan/nession').branch,'main');
   assert.equal(sourceIdentity({ workflow_run: { ...event.workflow_run,
     path: 'BestNathan/nession/.github/workflows/e2e-scenario-smoke.yml' } }, 'BestNathan/nession').run_id, 12);
   for (const path of [undefined, '', 'other/.github/workflows/e2e-scenario-smoke.yml',

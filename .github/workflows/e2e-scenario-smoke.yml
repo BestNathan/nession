@@ -3,6 +3,17 @@ name: E2E / Scenario Smoke
 on:
   pull_request:
     branches: [staging]
+  # Real main-owned post-merge terminal observations feed the existing trusted
+  # E2E / Scenario Ingest. Restrict the costly real replay to relevant changes.
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/e2e-scenario-smoke.yml'
+      - 'e2e/scenarios/**'
+      - 'e2e/run'
+      - 'web/src/**/terminal/**'
+      - 'agent/src/**'
+      - 'server/src/**'
   workflow_dispatch:
 
 permissions:
