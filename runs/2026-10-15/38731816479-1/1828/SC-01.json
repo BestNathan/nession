@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "63e51e5e21e690c952a8a1c9c2900c3a638812a185feb7102688e07d21a9cdd6",
+  "run_id": 38731816479,
+  "run_attempt": 1,
+  "issue": 1828,
+  "criterion": "SC-01",
+  "criterion_text": "Exact-main-SHA post-merge Case verifier runs against the real isolated Server/Agent/Web stack and source-bound trusted pipeline; emits nonempty real source-aligned Case record under the canonical Case contract; invalid identity/runtime inputs fail.",
+  "stage": "post-merge",
+  "target_sha": "238f06fe5ae050d7281da36105e90b368c29df17",
+  "contract_sha256": "1b548f508ed3c13ed207ba1f6061f596ae44838568c37d4970c58de74ed5518a",
+  "case_revision": "238f06fe5ae050d7281da36105e90b368c29df17",
+  "case_tree_sha": "7c30d4c291539878db5ce349d93bef4e78dad3a7",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-15T12:06:49.481Z",
+  "finished_at": "2026-10-15T12:07:05.496Z",
+  "duration_ms": 16015,
+  "verifiers": [
+    {
+      "type": "protocol",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "Exact main SHA ran a live Server/Agent/Web Acceptance Case and source-bound trusted Case App/CAS/readback wiring is intact. Only later ingester and separate consumer can prove an actual orphan write.",
+      "evidence": [
+        {
+          "type": "source",
+          "value": "real main push run=38731816479 target_sha=238f06fe5ae050d7281da36105e90b368c29df17"
+        },
+        {
+          "type": "contract",
+          "value": "case_contract_sha256=1b548f508ed3c13ed207ba1f6061f596ae44838568c37d4970c58de74ed5518a"
+        },
+        {
+          "type": "protocol",
+          "value": "server.auth status=success over ws://127.0.0.1:43837/ws"
+        },
+        {
+          "type": "protocol",
+          "value": "server.agent.list contains agent_id=e2e-test-node status=online"
+        },
+        {
+          "type": "runtime",
+          "value": "target_sha=238f06fe5ae050d7281da36105e90b368c29df17 profile=full-stack-local"
+        },
+        {
+          "type": "runtime",
+          "value": "isolated Web HTTP status=200"
+        },
+        {
+          "type": "trust",
+          "value": "trusted main-only Case Ingest has scoped App + CAS + Git-byte postverify; consumer is a separate read-only Workflow"
+        },
+        {
+          "type": "boundary",
+          "value": "this source Case is not proof of successful later ingestion, denied writes, Ruleset enforcement, or external WORM checkpoint"
+        }
+      ],
+      "duration_ms": 10092,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 38731816479,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "238f06fe5ae050d7281da36105e90b368c29df17",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/38731816479",
+    "record_path": "runs/2026-10-15/38731816479-1/1828/SC-01.json",
+    "source_result_sha256": "d9987b8395fde702c39945f29fa34a26994cfff74444f0b46c96f54b6fae21ad"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-38731816479-1",
+    "sha256": "d9987b8395fde702c39945f29fa34a26994cfff74444f0b46c96f54b6fae21ad",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/38731816479",
+    "durability": "time-limited; object archival not configured"
+  }
+}
