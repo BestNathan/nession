@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_projection_receipt",
+  "outcome": "applied",
+  "issue": 1841,
+  "run_id": 38754629978,
+  "run_attempt": 1,
+  "target_sha": "20c90fff8fe38796324da4bc90af0bbbdb1dc6f4",
+  "plan_digest": "68a6ae5d3f855e9418f5ccc070630d06a60899889e2a7616b1a8f3fe28cd942a",
+  "artifact_digest": "sha256:256cfaffeb11f78d6e48cb5eaa922f2385bec67af8d7e4fbf9eae9340d05bc6c",
+  "ingest_run_id": 38755385265,
+  "ingest_attempt": 1,
+  "declaration_digest": "eb7268386d05779435e82749c7044a9c57e09ab03a3407d657c93e0e3a8603c9",
+  "before_body_sha256": "f850e0ba6b0d2c6648a4a06d722be1867a11adfebbbcd29a1c7d0b660b929b2f",
+  "body_sha256": "20204fbfe8061cb3181c755aaee78ae5f546d319316e272517984f855955f372",
+  "readback_body": "## Requirements: Pages public export safety and metric freshness\n\nPhase 2-B3 child of #1782: harden the **standalone public Pages artifact contract** and display honest metric freshness/coverage. This work is unblocked by #1690 and #1664 and must not claim Agent Run→PR causal provenance.\n\nCurrent `pages/scripts/project.mjs` whitelists exported fields, but `validateProjection` only blocks a handful of forbidden JSON key names. Free-text Issue titles, registry provider strings, and embedded URLs/host paths need a defense-in-depth release gate. The current artifact also exposes build time without an explicit freshness status for the older `metrics.json` and `agent-metrics.json` source measurements.\n\n- Add deterministic, versioned **public projection release validation**: strict bounds on Issues, PRs, Agent roster, cross-reference and Run metadata counts; require source repository, exact SHA and canonical GitHub link identities, safe dates and finite public metrics; reject non-whitelisted/private source fields, absolute filesystem paths, private addresses, credential/token-like material, raw prompt/transcript/tool/checkpoint payloads before publication.\n- Sanitize unsafe untrusted Issue/PR titles and registry-provided human text at projection time without publishing their disallowed content; fail closed when a constructed export would leak it. Preserve canonical GitHub links, safe title text and meaningful source identifiers.\n- Record separate metric source ages/statuses (fresh/stale/unavailable) derived from the **source generated_at**, not the Pages build time; display these states on relevant Agents/Repository UI without claiming offline/incomplete data is zero.\n- Add deterministic positive/negative fixtures for malicious strings, PII/secret markers, private IP/path/URL, forged extra fields, truncation, NaN/Infinity, stale timestamps, source-SHA drift and unknown-vs-zero. Preserve independent `pages/` code/build/design.\n- Expand existing `pages-overview` / `pages-evidence` browser assertions for stale/missing source and text safety. No new privileged writer or runtime API.\n\n### Success Criteria\n\n- [ ] SC-01 Versioned standalone exported Pages projection has an explicit bounded allowlist and fails release if a sensitive or untrusted payload escapes sanitization; positive source-sanitization and negative tests are deterministic.\n- [ ] SC-02 Agents/Repository display source-derived freshness and observation coverage; stale/absent metrics are not conflated with current or zero, and generated/export times are distinct.\n- [ ] SC-03 Deterministic fixtures reject raw prompt/transcript/tool/checkpoint secrets, private IP/path/host/URL, injected fields, unsafe source link identity and malformed numeric/window values; normal public GitHub links and titles remain usable.\n- [ ] SC-04 Independent Pages build, Quality/Case Smoke and existing stable Pages browser E2E pass on exact PR HEAD without import/copy of product `web/` or changes to orphan writers/SC projectors.\n\n## Acceptance Plan\n\n```yaml\nacceptance:\n  SC-01:\n    when: pr\n    method: agent\n  SC-02:\n    when: pr\n    method: agent\n  SC-03:\n    when: pr\n    method: agent\n  SC-04:\n    when: pr\n    method: agent\n```\n\n## Acceptance Report\n\n| Criterion | Result | Evidence |\n|---|---|---|\n| SC-01 | Pending | awaiting exact PR head SHA Agent proof |\n| SC-02 | Pending | awaiting exact PR head SHA Agent proof |\n| SC-03 | Pending | awaiting exact PR head SHA Agent proof |\n| SC-04 | Pending | awaiting exact PR head SHA Agent proof |\n\n## E2E Verification\n### New\n- none: reuse existing Pages UI regression IDs.\n### Regression\n- pages-overview\n- pages-evidence\n## E2E Report\n\n| ID | Type | Result | Evidence |\n|---|---|---|---|\n| pages-evidence | Regression | Pass | run 38754629978/1, SHA 20c90fff8fe38796324da4bc90af0bbbdb1dc6f4, contract eb7268386d05779435e82749c7044a9c57e09ab03a3407d657c93e0e3a8603c9, plan 68a6ae5d3f855e9418f5ccc070630d06a60899889e2a7616b1a8f3fe28cd942a, tests 2/2 (https://github.com/BestNathan/nession/actions/runs/38754629978) |\n| pages-overview | Regression | Pass | run 38754629978/1, SHA 20c90fff8fe38796324da4bc90af0bbbdb1dc6f4, contract eb7268386d05779435e82749c7044a9c57e09ab03a3407d657c93e0e3a8603c9, plan 68a6ae5d3f855e9418f5ccc070630d06a60899889e2a7616b1a8f3fe28cd942a, tests 2/2 (https://github.com/BestNathan/nession/actions/runs/38754629978) |\n\n## Product alignment\n\n- [x] Public read-only release gate, not a second trusted writer.\n- [x] Not coupled to product `web/` or its design assets.\n- [x] Incomplete upstream #1690/#1664 cannot become fake public integrity/Agent attribution.\n\n---\n**Status:** Approved",
+  "patch_updated_at": "2026-10-15T14:53:25Z",
+  "readback_updated_at": "2026-10-15T14:53:25Z",
+  "rows": [
+    {
+      "id": "pages-evidence",
+      "result": "Pass",
+      "evidence": "run 38754629978/1, SHA 20c90fff8fe38796324da4bc90af0bbbdb1dc6f4, contract eb7268386d05779435e82749c7044a9c57e09ab03a3407d657c93e0e3a8603c9, plan 68a6ae5d3f855e9418f5ccc070630d06a60899889e2a7616b1a8f3fe28cd942a, tests 2/2 (https://github.com/BestNathan/nession/actions/runs/38754629978)"
+    },
+    {
+      "id": "pages-overview",
+      "result": "Pass",
+      "evidence": "run 38754629978/1, SHA 20c90fff8fe38796324da4bc90af0bbbdb1dc6f4, contract eb7268386d05779435e82749c7044a9c57e09ab03a3407d657c93e0e3a8603c9, plan 68a6ae5d3f855e9418f5ccc070630d06a60899889e2a7616b1a8f3fe28cd942a, tests 2/2 (https://github.com/BestNathan/nession/actions/runs/38754629978)"
+    }
+  ]
+}
