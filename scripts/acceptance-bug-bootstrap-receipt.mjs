@@ -221,6 +221,7 @@ function selfTest() {
   assert.deepEqual(check().post_merge_agent.pass_criteria,['SC-03']);
   for(const item of [
     ()=>check({...issue,state:'open'}),
+    ()=>check({...issue,labels:[{name:'bug'},{name:'requirement'}]}),
     ()=>check(issue,{...pr,merge_commit_sha:pin.head}),
     ()=>check(issue,pr,[pre[0],pre[1],pre[2],{...pre[3],criteria:[]}]),
     ()=>check(issue,pr,[{...pre[0],run_attempt:3},...pre.slice(1)]),
