@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_projection_receipt",
+  "outcome": "applied",
+  "issue": 1834,
+  "run_id": 38738875459,
+  "run_attempt": 1,
+  "target_sha": "5a3d277f00790d36853ab58c7a9225af033312af",
+  "plan_digest": "e609376665c1d3c5b28934123cecb3d721321886bf11762be379ff421d2056ad",
+  "artifact_digest": "sha256:ba31f3b9069e8f14022e9fcc25ebca62c202981c21a3ae5a5a0f0d2712f31f62",
+  "ingest_run_id": 38739738265,
+  "ingest_attempt": 1,
+  "declaration_digest": "1227c0e2c9c3624c0ca3500fb20c127534d7ecce075ca02f709ad6d0e349ab04",
+  "before_body_sha256": "3c27d693283499e483007e2db61c55e70c7719bfa17d378496bdeeb14621bf38",
+  "body_sha256": "e389626e48506fc6ee61650c505edcc0e4be768b96182bb9017bd13234f1a9b6",
+  "readback_body": "## Requirements: Pages Phase 2-B1 exact-SHA PR CI/E2E evidence\n\n**Parent:** #1782 · Public Pages Phase 2-B1: show independently sourced **PR HEAD SHA → GitHub CI/E2E Run/attempt** evidence. Existing #1792 and #1811 static Pages are released. This is a bounded public-only source projection; it is **not** an assertion that an Issue is linked to a PR, that an Agent actually authored the code, or that a Success Criterion passed.\n\n### Invariants\n\n- Only GitHub-authenticated same-repository PR heads and workflow runs are eligible; enforce exact 40-hex HEAD SHA and integer Run/attempt identity. No project Web import/component, private Agent/host info, GitHub token/client API, or source prompts/tools.\n- Include canonical workflow **CI / Quality Gate** and **E2E / Tests** separately; a workflow's `success` is a *workflow outcome*, never a verified SC Acceptance verdict. A cancelled/failed/pending/absent source remains explicitly distinct.\n- Bounded build-time listing (at most 100 recent GitHub runs; max 12 current PRs). Source-window coverage is labelled: no matching Run in the bounded snapshot means **Not observed**, not Pass/zero or an exhaustive no-run assertion.\n- Validate workflow name, exact path, event, repo/head-repo, HEAD SHA and attempts; derive GitHub links from canonical ID, never trust arbitrary `html_url`.\n- Display small source-linked per-PR Run/attempt links in standalone `#/work`, responsive and deep-link safe. Preserve Issue aggregate counts and all earlier Pages routes.\n- Keep Issue→PR linkage, Agent run attribution, exact-SHA SC Acceptance, historical replay and Run Store audit as separate, stricter stages (no heuristic inference).\n\n### Success Criteria\n\n- [ ] SC-01 Public projection contains bounded same-repository PR HEAD SHA and only exact-SHA canonical CI/E2E workflow Run/attempt metadata, preserving unknown vs failure vs succeeded outcome.\n- [ ] SC-02 Standalone Collaboration view exposes explicit source-linked CI/E2E workflow outcomes for a PR without claiming SC Pass, Issue ownership or Agent causality; mobile/deep link remain usable.\n- [ ] SC-03 Deterministic positive/negative tests reject foreign repos, mismatched SHA, fake workflow paths, wrong event, zero/invalid run IDs, stale/unobserved source, and arbitrary URLs.\n- [ ] SC-04 Existing Pages browser E2E, projection safety checks, independent Pages build, Quality Gate and Acceptance Case Smoke each pass on the exact PR HEAD SHA. The pre-merge Agent Acceptance result is enforced separately by the canonical merge gate rather than recursively required as evidence within its own SC.\n\n## Acceptance Plan\n\n```yaml\nacceptance:\n  SC-01:\n    when: pr\n    method: agent\n  SC-02:\n    when: pr\n    method: agent\n  SC-03:\n    when: pr\n    method: agent\n  SC-04:\n    when: pr\n    method: agent\n```\n\n## Acceptance Report\n\n| Criterion | Result | Evidence |\n|---|---|---|\n| SC-01 | Pending | - |\n| SC-02 | Pending | - |\n| SC-03 | Pending | - |\n| SC-04 | Pending | - |\n\n## E2E Verification\n\n### New\n- none: No new independent user flow; extend existing stable Pages browser ID.\n\n### Regression\n- pages-overview\n- pages-evidence\n\n## E2E Report\n\n| ID | Type | Result | Evidence |\n|---|---|---|---|\n| pages-evidence | Regression | Pass | run 38738875459/1, SHA 5a3d277f00790d36853ab58c7a9225af033312af, contract 1227c0e2c9c3624c0ca3500fb20c127534d7ecce075ca02f709ad6d0e349ab04, plan e609376665c1d3c5b28934123cecb3d721321886bf11762be379ff421d2056ad, tests 2/2 (https://github.com/BestNathan/nession/actions/runs/38738875459) |\n| pages-overview | Regression | Pass | run 38738875459/1, SHA 5a3d277f00790d36853ab58c7a9225af033312af, contract 1227c0e2c9c3624c0ca3500fb20c127534d7ecce075ca02f709ad6d0e349ab04, plan e609376665c1d3c5b28934123cecb3d721321886bf11762be379ff421d2056ad, tests 2/2 (https://github.com/BestNathan/nession/actions/runs/38738875459) |\n\n## Product alignment\n- [x] Reuses canonical GitHub/CI evidence with no second writer or inference of completion.\n- [x] Completely independent public `pages/` design from authenticated product `web/`.\n- [x] Fails closed on ambiguous, unobserved or unrelated Run identities.\n\n---\n**Status:** Draft\n",
+  "patch_updated_at": "2026-10-15T13:05:49Z",
+  "readback_updated_at": "2026-10-15T13:05:49Z",
+  "rows": [
+    {
+      "id": "pages-evidence",
+      "result": "Pass",
+      "evidence": "run 38738875459/1, SHA 5a3d277f00790d36853ab58c7a9225af033312af, contract 1227c0e2c9c3624c0ca3500fb20c127534d7ecce075ca02f709ad6d0e349ab04, plan e609376665c1d3c5b28934123cecb3d721321886bf11762be379ff421d2056ad, tests 2/2 (https://github.com/BestNathan/nession/actions/runs/38738875459)"
+    },
+    {
+      "id": "pages-overview",
+      "result": "Pass",
+      "evidence": "run 38738875459/1, SHA 5a3d277f00790d36853ab58c7a9225af033312af, contract 1227c0e2c9c3624c0ca3500fb20c127534d7ecce075ca02f709ad6d0e349ab04, plan e609376665c1d3c5b28934123cecb3d721321886bf11762be379ff421d2056ad, tests 2/2 (https://github.com/BestNathan/nession/actions/runs/38738875459)"
+    }
+  ]
+}
