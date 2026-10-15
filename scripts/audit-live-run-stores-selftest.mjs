@@ -66,6 +66,17 @@ try {
   const result=await auditLiveRunStores(base);
   assert.equal(result.passed,true);
   assert.equal(result.records.length,3);
+  const baselineTrees=Object.fromEntries(AUDITED_STORES.map(store=>[
+    store,git(remote,'rev-parse',anchors[store]+'^{tree}')]));
+  const migrated={...base,anchorTrust:'main_migration_observation',baselineTrees};
+  const migrationResult=await auditLiveRunStores(migrated);
+  assert.equal(migrationResult.anchoring,'repository_main_migration_observation_only');
+  assert.equal(migrationResult.historical_provenance_trust,'not_independent_or_retroactive');
+  await assert.rejects(()=>auditLiveRunStores({...migrated,
+    baselineTrees:{...baselineTrees,metrics:'f'.repeat(40)}}),
+    /migration baseline tree identity does not match/);
+  await assert.rejects(()=>auditLiveRunStores({...base,anchorTrust:'main_migration_observation'}),
+    /migration baseline tree identity does not match/);
   assert.ok(result.records.every(x=>x.checked_changes===1&&x.checked_commits===1));
   assert.throws(()=>parseProtectedAnchors(JSON.stringify({
     ...anchors,metrics:'0'.repeat(39),
