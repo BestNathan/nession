@@ -20,6 +20,10 @@ on:
       - .github/workflows/acceptance-orchestrator.yml
       - scripts/agent-evidence-waker.mjs
       - scripts/agent-telemetry-ingest.mjs
+      # Changes to the read-only CI evidence collector must produce a new
+      # exact-main-SHA Provider -> Metrics -> Acceptance wake proof. Otherwise
+      # the merged verifier can only observe historical runs and SC-01 stays Pending.
+      - scripts/acceptance-ci-evidence.mjs
 
 permissions:
   contents: read
