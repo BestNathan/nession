@@ -20,8 +20,33 @@ function rel(root, file) {
   return path.relative(root, file) || '.';
 }
 
+// Git exports its repository-locating variables to hooks (`GIT_DIR`,
+// `GIT_WORK_TREE`, ...) and documents that a hook invoking Git "in a foreign
+// repository or in a different working tree" must clear them. This probe runs
+// `git -C <root>` on a directory that is deliberately not a repository (the
+// self-test fixture), so an inherited `GIT_DIR` made it list the *exporting*
+// repository's index instead of falling back to walking `root`, yielding paths
+// such as `pages/AGENTS.md` that do not exist under the fixture and turning a
+// pre-push `instruction-contract` run into an ENOENT failure.
+//
+// Every Git command that targets a foreign directory must use this — including
+// the self-test's own `init`/`add`, where inheriting `GIT_DIR` from a hook
+// redirects the write into the *real* repository (it set `core.bare` and
+// replaced the caller's index) instead of the scratch repository.
+export function foreignGitEnv(env) {
+  const clean = { ...env };
+  const git = spawnSync('git', ['rev-parse', '--local-env-vars'], { encoding: 'utf8' });
+  const locals = !git.error && git.status === 0
+    ? git.stdout.split('\n').filter((key) => /^GIT_[A-Z_]+$/.test(key))
+    : ['GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_COMMON_DIR', 'GIT_DIR',
+      'GIT_GRAFT_FILE', 'GIT_IMPLICIT_WORK_TREE', 'GIT_INDEX_FILE',
+      'GIT_OBJECT_DIRECTORY', 'GIT_PREFIX', 'GIT_SHALLOW_FILE', 'GIT_WORK_TREE'];
+  for (const key of locals) delete clean[key];
+  return clean;
+}
+
 function discoverInstructionPaths(root) {
-  const git = spawnSync('git', ['-C', root, 'ls-files', '-z'], { encoding: 'utf8' });
+  const git = spawnSync('git', ['-C', root, 'ls-files', '-z'], { encoding: 'utf8', env: foreignGitEnv(process.env) });
   if (!git.error && git.status === 0) {
     return git.stdout
       .split('\0')
