@@ -11,7 +11,7 @@ import { collectE2eWakeReceipts } from './acceptance-postrun-e2e-receipt.mjs';
 import { verifyWake } from './agent-evidence-waker.mjs';
 import {parseReplayDenialLog,attestReplayDenial,makeDenialReceipt,DENIAL_LOG_PREFIX} from './metrics-replay-denial-receipt.mjs';
 import {parsePolicyObservabilityLog,attestPolicyObservability,makePolicyObservabilityReceipt,
-  POLICY_WORKFLOW,POLICY_WORKFLOW_NAME,POLICY_OBSERVE_JOB,
+  POLICY_WORKFLOW,POLICY_WORKFLOW_NAME,POLICY_OBSERVE_JOB,POLICY_TRIGGER_EVENTS,
   POLICY_OBSERVABILITY_LOG_PREFIX} from './run-store-policy-observability-receipt.mjs';
 import {GOVERNED_REFS,UNOBSERVABLE_CAPABILITIES} from './run-store-policy.mjs';
 import {historicalCaseEvidence,selfTestHistoricalCase} from './acceptance-historical-case-replay.mjs';
@@ -257,7 +257,7 @@ export async function collectStorePolicyObservability(repo,sha,runs,
      !Array.isArray(runs))throw Error('invalid store policy observability scope');
   const candidates=runs.filter(r=>r?.name===POLICY_WORKFLOW_NAME&&
     String(r.path??'').replace(/@refs\/heads\/[^\s]+$/,'')===POLICY_WORKFLOW&&
-    r.event==='push'&&r.head_sha===sha&&r.head_branch==='main'&&
+    POLICY_TRIGGER_EVENTS.includes(r.event)&&r.head_sha===sha&&r.head_branch==='main'&&
     r.status==='completed'&&r.conclusion==='failure')
     .sort((a,b)=>b.id-a.id).slice(0,4);
   const evidence=[];
@@ -1046,14 +1046,25 @@ async function selfTest() {
   // A successful governance run is not this channel's business.
   assert.deepEqual(await collectStorePolicyObservability(denialRepo,policySha,
     [{...policyRun,conclusion:'success'}],policyRequest,async()=>policyLog),[]);
-  // A run at another SHA, another workflow, or a non-push event is not evidence.
+  // A run at another SHA, another workflow, or an event the audit does not
+  // declare is not evidence.
   assert.deepEqual(await collectStorePolicyObservability(denialRepo,policySha,
     [{...policyRun,head_sha:'e'.repeat(40)}],policyRequest,async()=>policyLog),[]);
   assert.deepEqual(await collectStorePolicyObservability(denialRepo,policySha,
-    [{...policyRun,event:'workflow_dispatch'}],policyRequest,async()=>policyLog),[]);
+    [{...policyRun,event:'pull_request'}],policyRequest,async()=>policyLog),[]);
   assert.deepEqual(await collectStorePolicyObservability(denialRepo,policySha,
     [{...policyRun,path:'.github/workflows/evil.yml'}],policyRequest,
     async()=>policyLog),[]);
+  // Every trigger Store / Governance Audit actually declares IS a legitimate
+  // producer. Restricting this to `push` made the receipt unreachable on any
+  // unrelated merge SHA, where a dispatch is the only audit that exists, and the
+  // criterion silently fell back to reading a bare failed run.
+  for(const event of POLICY_TRIGGER_EVENTS){
+    const seen=await collectStorePolicyObservability(denialRepo,policySha,
+      [{...policyRun,event}],policyRequest,async()=>policyLog);
+    assert.equal(seen.length,1,'declared trigger '+event+' must be accepted');
+    assert.equal(seen[0].maximum_supported_result,'Pending');
+  }
   // An absent log or an absent receipt is not evidence, and must not throw.
   assert.deepEqual(await collectStorePolicyObservability(denialRepo,policySha,
     [{...policyRun,id:911}],policyRequest,async()=>''),[]);

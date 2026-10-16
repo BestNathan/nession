@@ -26,6 +26,16 @@ export const POLICY_OBSERVABILITY_LOG_PREFIX='RUN_STORE_POLICY_OBSERVABILITY_V1 
 export const POLICY_WORKFLOW='.github/workflows/store-governance-audit.yml';
 export const POLICY_WORKFLOW_NAME='Store / Governance Audit';
 export const POLICY_OBSERVE_JOB='observe';
+// Exactly the triggers Store / Governance Audit declares and the producer's own
+// assertTrustedAuditContext accepts. Restricting the collector to `push` was
+// wrong: for a paths-filtered workflow, workflow_dispatch (and schedule) are
+// legitimate producers, and on an unrelated merge SHA a dispatch is the ONLY way
+// an audit exists at all — so the receipt was unreachable and the criterion fell
+// back to reading a bare failed run. Trust does not rest on the event name: the
+// producer refuses to emit a receipt outside trusted main, and the collector
+// independently re-binds the run/attempt/SHA, the main branch and the observe
+// job's failure.
+export const POLICY_TRIGGER_EVENTS=Object.freeze(['push','workflow_dispatch','schedule']);
 export const REPO='BestNathan/nession';
 const SHA=/^[a-f0-9]{40}$/;
 const POS=x=>Number.isSafeInteger(x)&&x>0;
