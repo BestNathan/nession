@@ -66,6 +66,23 @@ try {
   const result=await auditLiveRunStores(base);
   assert.equal(result.passed,true);
   assert.equal(result.records.length,3);
+  // `git rev-parse --show-toplevel` resolves symlinks, so the root comparison
+  // must realpath both sides. Reaching the same checkout through a symlinked
+  // ancestor is the same tree and must be accepted — otherwise the check can
+  // never pass on a host whose tmpdir is a symlink (darwin: /var -> /private/var).
+  const alias=path.join(tmp,'alias');
+  fs.symlinkSync(tmp,alias);
+  assert.equal((await auditLiveRunStores({...base,
+    checkout:path.join(alias,'repo')})).passed,true);
+  // The counterexample: a directory INSIDE the same tree at the same SHA is not
+  // the checkout root and must still be rejected, proving the realpath change
+  // did not turn the identity check into a no-op.
+  const nested=path.join(repo,'scripts');
+  fs.mkdirSync(nested,{recursive:true});
+  assert.equal(git(nested,'rev-parse','HEAD'),sourceSha);
+  assert.equal(git(nested,'rev-parse','--show-toplevel'),fs.realpathSync(repo));
+  await assert.rejects(()=>auditLiveRunStores({...base,checkout:nested}),
+    /SHA\/root mismatch/);
   const baselineTrees=Object.fromEntries(AUDITED_STORES.map(store=>[
     store,git(remote,'rev-parse',anchors[store]+'^{tree}')]));
   const migrated={...base,anchorTrust:'main_migration_observation',baselineTrees};

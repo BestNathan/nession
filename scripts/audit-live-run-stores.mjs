@@ -35,8 +35,17 @@ export function parseProtectedAnchors(raw) {
 function trustedCheckout(root,sha) {
   if(typeof root!=='string'||!path.isAbsolute(root)||!SHA.test(sha))deny('invalid main checkout');
   if(!fs.existsSync(root)||fs.lstatSync(root).isSymbolicLink())deny('unsafe checkout');
+  // `git rev-parse --show-toplevel` resolves symlinks in the path it reports.
+  // Comparing that against a merely lexical `path.resolve` fails whenever an
+  // *ancestor* is a symlink — on darwin `os.tmpdir()` is `/var/…` while git
+  // reports the resolved `/private/var/…`, so this checker could never pass for
+  // a scratch checkout and the whole run-store-integrity Gate was red locally
+  // and green on Linux CI. Realpath both sides: the invariant (this root IS the
+  // git top-level of this tree) is unchanged and still fails closed.
+  let real;
+  try{real=fs.realpathSync(root);}catch{deny('unsafe checkout');}
   if(git(root,'rev-parse','HEAD')!==sha||
-     git(root,'rev-parse','--show-toplevel')!==path.resolve(root)) {
+     git(root,'rev-parse','--show-toplevel')!==real) {
     deny('trusted main checkout SHA/root mismatch');
   }
 }
