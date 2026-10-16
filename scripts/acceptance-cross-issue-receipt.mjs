@@ -20,12 +20,24 @@ export function pinnedCrossIssueAcceptance(body) {
   if (lines.length > 2) throw Error('too many historical Acceptance witnesses');
   if (new Set(lines).size !== lines.length) throw Error('duplicate historical Acceptance witness');
   return lines.map(line => {
-    const m = line.match(/^Historical Acceptance witness: Issue #([1-9]\d*) (SC-\d{2,}); PR #([1-9]\d*) SHA ([0-9a-f]{40}); Agent Run ([1-9]\d*) attempt ([1-9]\d*); E2E Run ([1-9]\d*) attempt ([1-9]\d*)$/);
-    if (!m) throw Error('malformed historical Acceptance witness');
-    const [issue,pr,run,attempt,e2eRun,e2eAttempt] = [m[1],m[3],m[5],m[6],m[7],m[8]].map(Number);
-    if (![issue,pr,run,attempt,e2eRun,e2eAttempt].every(Number.isSafeInteger))
-      throw Error('historical Acceptance witness integer overflow');
-    return {issue,sc:m[2],pr,sha:m[4],run,attempt,e2eRun,e2eAttempt};
+    const pre = line.match(/^Historical Acceptance witness: Issue #([1-9]\d*) (SC-\d{2,}); PR #([1-9]\d*) SHA ([0-9a-f]{40}); Agent Run ([1-9]\d*) attempt ([1-9]\d*); E2E Run ([1-9]\d*) attempt ([1-9]\d*)$/);
+    if (pre) {
+      const [issue,pr,run,attempt,e2eRun,e2eAttempt] = [pre[1],pre[3],pre[5],pre[6],pre[7],pre[8]].map(Number);
+      if (![issue,pr,run,attempt,e2eRun,e2eAttempt].every(Number.isSafeInteger))
+        throw Error('historical Acceptance witness integer overflow');
+      return {kind:'pre-merge',issue,sc:pre[2],pr,sha:pre[4],run,attempt,e2eRun,e2eAttempt};
+    }
+    // A post-merge witness names the canonical Agent run that already evaluated
+    // this commit, so it needs no source PR or ancestry chain: the run itself
+    // must execute at the target SHA, which is a strictly tighter binding.
+    const post = line.match(/^Historical Acceptance witness: Issue #([1-9]\d*) (SC-\d{2,}); Post-Merge Run ([1-9]\d*) attempt ([1-9]\d*)$/);
+    if (post) {
+      const [issue,run,attempt] = [post[1],post[3],post[4]].map(Number);
+      if (![issue,run,attempt].every(Number.isSafeInteger))
+        throw Error('historical Acceptance witness integer overflow');
+      return {kind:'post-merge',issue,sc:post[2],run,attempt};
+    }
+    throw Error('malformed historical Acceptance witness');
   });
 }
 
@@ -123,6 +135,75 @@ export function attestCrossIssueAcceptance(pin, sourceRun, jobs, artifact, resul
   };
 }
 
+// Post-merge variant: the canonical Agent Acceptance run must have executed at
+// the evaluated commit itself, so `sourceRun.head_sha===targetSha` replaces the
+// pre-merge path's source-PR + ancestry + E2E-planner attestation. Everything
+// else (exact-attempt jobs, required steps, digest-bound artifact, SC Pass in
+// the artifact rather than in Issue prose) is enforced identically.
+export function attestPostmergeCrossIssueAcceptance(pin, sourceRun, jobs, artifact,
+    result, {repo=REPO,targetSha,subjectIssue}={}) {
+  if (repo !== REPO || !SHA.test(String(targetSha)) ||
+      !Number.isSafeInteger(subjectIssue) || subjectIssue===pin?.issue ||
+      !pin || pin.kind!=='post-merge' ||
+      !DIGEST.test(artifact?.digest ?? '') || artifact?.expired!==false ||
+      artifact?.name!==('acceptance-result-'+pin.issue+'-post-merge-'+pin.run+'-'+pin.attempt) ||
+      artifact.workflow_run?.id!==pin.run ||
+      artifact.workflow_run?.head_sha!==sourceRun?.head_sha ||
+      artifact.workflow_run?.repository_id!==sourceRun?.repository?.id ||
+      !Number.isSafeInteger(artifact.id) || artifact.id<=0 ||
+      !Number.isSafeInteger(artifact.size_in_bytes) || artifact.size_in_bytes>MAX_BYTES ||
+      sourceRun?.id!==pin.run || sourceRun.run_attempt!==pin.attempt ||
+      sourceRun.name!=='Agent / SC Acceptance' ||
+      sourceRun.path!=='.github/workflows/agent-sc-acceptance.yml' ||
+      sourceRun.event!=='workflow_dispatch' ||
+      sourceRun.head_branch!=='main' || sourceRun.head_sha!==targetSha ||
+      sourceRun.repository?.full_name!==repo ||
+      sourceRun.head_repository?.full_name!==repo ||
+      sourceRun.status!=='completed' || sourceRun.conclusion!=='success')
+    throw Error('post-merge Acceptance workflow/artifact identity unverified');
+  if (!Array.isArray(jobs?.jobs) || jobs.jobs.length>100)
+    throw Error('untrusted Acceptance job listing');
+  const candidate = name => {
+    const found = jobs.jobs.filter(j => j?.name === name);
+    if (found.length!==1) throw Error('missing or ambiguous Acceptance job');
+    const j=found[0];
+    if (!Number.isSafeInteger(j.id) || j.id<=0 || j.run_id!==pin.run ||
+        j.run_attempt!==pin.attempt || j.head_sha!==targetSha ||
+        j.status!=='completed' || j.conclusion!=='success')
+      throw Error('unverified post-merge Acceptance job binding');
+    return j;
+  };
+  const executor=candidate('Execute acceptance');
+  const updater=candidate('Deterministic Issue updater');
+  if (!uniqueSuccessfulStep(executor,'Prepare stage-specific immutable acceptance context') ||
+      // A manually supplied deterministic_result_json is not Agent attestation.
+      !uniqueSuccessfulStep(executor,'Run read-only Acceptance Agent') ||
+      !uniqueSuccessfulStep(executor,'Upload structured Acceptance Result') ||
+      !uniqueSuccessfulStep(updater,'Apply Acceptance Report and checkbox projection'))
+    throw Error('post-merge Acceptance source/updater step missing or unsuccessful');
+  if (result?.schema_version!==1 || result.issue!==pin.issue ||
+      result.stage!=='post-merge' || result.run_id!==pin.run ||
+      result.target_ref!==targetSha ||
+      !/^[0-9a-f]{64}$/.test(result.contract_sha256 ?? '') ||
+      !['agent-cursor','agent-deepseek'].includes(result.source) ||
+      !Array.isArray(result.selected_criteria) ||
+      !result.selected_criteria.includes(pin.sc) ||
+      !Array.isArray(result.criteria) ||
+      result.criteria.filter(x=>x?.criterion===pin.sc).length!==1 ||
+      !result.criteria.some(x=>x?.criterion===pin.sc && x.result==='Pass'))
+    throw Error('post-merge Acceptance artifact lacks selected SC Pass');
+  return {
+    kind:'related_issue_postmerge_sc_receipt',subject_issue:subjectIssue,
+    source_issue:pin.issue,source_sc:pin.sc,source_sha:targetSha,
+    target_sha:targetSha,acceptance_run:pin.run,acceptance_attempt:pin.attempt,
+    acceptance_run_head_sha:sourceRun.head_sha,executor_job:executor.id,
+    updater_job:updater.id,acceptance_artifact_id:artifact.id,
+    acceptance_artifact_digest:artifact.digest,source_sc_result:'Pass',
+    provenance:'GitHub exact-attempt same-SHA canonical post-merge Acceptance run jobs + downloaded SHA256-bound immutable result artifact',
+    limitation:'Historical source Issue result; not an authorization to update this Issue',
+  };
+}
+
 // The zipped artifact is the source of the SC verdict, not editable Issue prose,
 // an agent summary, or the existence of an artifact record alone.
 export async function downloadedResult(repo, artifact, token) {
@@ -159,6 +240,22 @@ export async function collectCrossIssueAcceptance(repo,body,targetSha,subjectIss
     throw Error('historical Acceptance source environment unavailable');
   const results=[];
   for (const pin of pins) {
+    if (pin.kind==='post-merge') {
+      const [run,jobs,artifacts]=await Promise.all([
+        request('/repos/'+repo+'/actions/runs/'+pin.run+'/attempts/'+pin.attempt),
+        request('/repos/'+repo+'/actions/runs/'+pin.run+'/attempts/'+pin.attempt+'/jobs?per_page=100'),
+        request('/repos/'+repo+'/actions/runs/'+pin.run+'/artifacts?per_page=100'),
+      ]);
+      if (!Array.isArray(artifacts?.artifacts) || artifacts.artifacts.length>100)
+        throw Error('untrusted historical Acceptance artifact listing');
+      const matches=artifacts.artifacts.filter(a=>
+        a?.name==='acceptance-result-'+pin.issue+'-post-merge-'+pin.run+'-'+pin.attempt);
+      if (matches.length!==1) throw Error('missing or ambiguous historical Acceptance artifact');
+      const raw=await downloadedResult(repo,matches[0],token);
+      results.push(attestPostmergeCrossIssueAcceptance(pin,run,jobs,matches[0],raw,
+        {repo,targetSha,subjectIssue}));
+      continue;
+    }
     const [run,jobs,artifacts,sourcePr,e2eRun,e2eJobs] = await Promise.all([
       request('/repos/'+repo+'/actions/runs/'+pin.run+'/attempts/'+pin.attempt),
       request('/repos/'+repo+'/actions/runs/'+pin.run+'/attempts/'+pin.attempt+'/jobs?per_page=100'),
@@ -185,7 +282,7 @@ export async function collectCrossIssueAcceptance(repo,body,targetSha,subjectIss
 
 function selfTest(){
   const sha='a'.repeat(40),head='b'.repeat(40),merge='c'.repeat(40),target='d'.repeat(40);
-  const pin={issue:1719,sc:'SC-02',pr:1720,sha,run:38718918820,attempt:7,
+  const pin={kind:'pre-merge',issue:1719,sc:'SC-02',pr:1720,sha,run:38718918820,attempt:7,
     e2eRun:38388288917,e2eAttempt:4};
   const body='## Historical Acceptance Evidence\nHistorical Acceptance witness: Issue #1719 SC-02; PR #1720 SHA '+sha+
     '; Agent Run 38718918820 attempt 7; E2E Run 38388288917 attempt 4\n\n## Other';
@@ -237,6 +334,54 @@ function selfTest(){
     [run,jobs,artifact,result,pr,compare,{...e2e,steps:e2e.steps.slice(1)},options],
     [run,jobs,artifact,result,pr,compare,e2e,{...options,subjectIssue:1719}],
   ]) assert.throws(()=>invoke(r,jb,a,re,p,c,e,o),/unverified|not verified|missing|unsuccessful|lacks/);
+
+  // Post-merge witness: bound to the evaluated commit itself, so the run must
+  // execute at the target SHA and no PR/ancestry/E2E attestation is involved.
+  const postId=38876407870;
+  const postBody='## Historical Acceptance Evidence\nHistorical Acceptance witness: Issue #1719 SC-02; Post-Merge Run '+
+    postId+' attempt 1\n\n## Other';
+  assert.deepEqual(pinnedCrossIssueAcceptance(postBody),
+    [{kind:'post-merge',issue:1719,sc:'SC-02',run:postId,attempt:1}]);
+  assert.throws(()=>pinnedCrossIssueAcceptance(postBody.replace('attempt 1','attempt x')),/malformed/);
+  // Both witness forms stay in one bounded section.
+  assert.equal(pinnedCrossIssueAcceptance('## Historical Acceptance Evidence\n'+
+    body.split('\n')[1]+'\n'+postBody.split('\n')[1]+'\n\n## Other').length,2);
+  const postRun={...run,id:postId,run_attempt:1,head_sha:target};
+  const postJob=(id,name,names)=>({id,name,run_id:postId,run_attempt:1,head_sha:target,
+    status:'completed',conclusion:'success',
+    steps:names.map(s=>({name:s,status:'completed',conclusion:'success'}))});
+  const postJobs={jobs:[
+    postJob(18,'Execute acceptance',['Prepare stage-specific immutable acceptance context',
+      'Run read-only Acceptance Agent','Upload structured Acceptance Result']),
+    postJob(19,'Deterministic Issue updater',['Apply Acceptance Report and checkbox projection']),
+  ]};
+  const postArtifact={id:42,name:'acceptance-result-1719-post-merge-'+postId+'-1',
+    expired:false,digest:'sha256:'+'e'.repeat(64),size_in_bytes:900,
+    workflow_run:{id:postId,head_sha:target,repository_id:123}};
+  const postResult={schema_version:1,issue:1719,stage:'post-merge',run_id:postId,
+    target_ref:target,contract_sha256:'f'.repeat(64),source:'agent-cursor',
+    selected_criteria:['SC-02'],criteria:[{criterion:'SC-02',result:'Pass'}]};
+  const postPin={kind:'post-merge',issue:1719,sc:'SC-02',run:postId,attempt:1};
+  const postOptions={repo:REPO,targetSha:target,subjectIssue:1822};
+  const invokePost=(r=postRun,jb=postJobs,a=postArtifact,re=postResult,o=postOptions)=>
+    attestPostmergeCrossIssueAcceptance(postPin,r,jb,a,re,o);
+  assert.equal(invokePost().source_sc_result,'Pass');
+  assert.equal(invokePost().source_sha,target);
+  for (const [r,jb,a,re,o] of [
+    // A run that is not at the evaluated commit is not post-merge evidence.
+    [{...postRun,head_sha:head},postJobs,postArtifact,postResult,postOptions],
+    [{...postRun,event:'push'},postJobs,postArtifact,postResult,postOptions],
+    [{...postRun,conclusion:'failure'},postJobs,postArtifact,postResult,postOptions],
+    [postRun,{jobs:[postJobs.jobs[0]]},postArtifact,postResult,postOptions],
+    [postRun,{jobs:[{...postJobs.jobs[1],run_attempt:2}]},postArtifact,postResult,postOptions],
+    [postRun,postJobs,{...postArtifact,name:'acceptance-result-1719-pre-merge-'+postId+'-1'},postResult,postOptions],
+    [postRun,postJobs,{...postArtifact,digest:'sha256:broken'},postResult,postOptions],
+    [postRun,postJobs,postArtifact,{...postResult,stage:'pre-merge'},postOptions],
+    [postRun,postJobs,postArtifact,{...postResult,target_ref:head},postOptions],
+    [postRun,postJobs,postArtifact,{...postResult,selected_criteria:['SC-01']},postOptions],
+    [postRun,postJobs,postArtifact,{...postResult,criteria:[{criterion:'SC-02',result:'Pending'}]},postOptions],
+    [postRun,postJobs,postArtifact,postResult,{...postOptions,subjectIssue:1719}],
+  ]) assert.throws(()=>invokePost(r,jb,a,re,o),/unverified|not verified|missing|unsuccessful|lacks/);
   console.log('historical cross-Issue Acceptance proof self-test passed');
 }
 if(process.argv[1] && path.resolve(process.argv[1])===path.resolve(new URL(import.meta.url).pathname)){
