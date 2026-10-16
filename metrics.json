@@ -2,11 +2,11 @@
   "schema_version": 2,
   "repository_name": "BestNathan/nession",
   "branch": "main",
-  "commit_sha": "fa8d9ce944b0df2001dd9dcaf8e2278429539da9",
-  "generated_at": "2026-10-16T08:49:13.637Z",
+  "commit_sha": "b7caac20c4a059507e5bd5fb0dc47dfea211afc8",
+  "generated_at": "2026-10-16T11:47:20.231Z",
   "repository": {
     "source": {
-      "loc": 260617,
+      "loc": 260762,
       "files": 1497
     },
     "tests": {
@@ -49,9 +49,9 @@
     "coverage": {
       "rust": {
         "lines": {
-          "covered": 29594,
+          "covered": 29596,
           "total": 34086,
-          "rate": 0.8682156897259872
+          "rate": 0.8682743648418706
         },
         "crates": {
           "nession-common": {
@@ -64,9 +64,9 @@
           },
           "nession-agent": {
             "lines": {
-              "covered": 12040,
+              "covered": 12042,
               "total": 13390,
-              "rate": 0.8991784914115011
+              "rate": 0.8993278566094101
             },
             "threshold": 0.79
           },
@@ -158,43 +158,43 @@
   },
   "efficiency": {
     "window": "7d",
-    "window_start": "2026-10-09T08:49:13.637Z",
-    "window_30d_start": "2026-09-16T08:49:13.637Z",
+    "window_start": "2026-10-09T11:47:20.231Z",
+    "window_30d_start": "2026-09-16T11:47:20.231Z",
     "source_churn": {
-      "additions": 56723,
-      "deletions": 17628,
-      "baseline": "9ed76bd641985fb80c5c48326c2fa3a34b98ef73"
+      "additions": 37058,
+      "deletions": 13032,
+      "baseline": "66992259c96d938c9f662d06267331f56d2af911"
     },
     "source_churn_30d": {
-      "additions": 219683,
-      "deletions": 59317,
-      "baseline": "4c73c1c77c149266e5d0735c35f4f4fac410a56c"
+      "additions": 219775,
+      "deletions": 58992,
+      "baseline": "cb4fab91ac1fd7ecea9466b9694a25534c1e6dbc"
     },
     "commits": {
-      "total": 5377,
-      "last_7d": 1154,
-      "last_30d": 3293
+      "total": 5379,
+      "last_7d": 1131,
+      "last_30d": 3284
     },
     "issues": {
       "total": 383,
       "open": 16,
       "created_7d": 59,
-      "closed_7d": 80,
-      "created_30d": 246,
+      "closed_7d": 78,
+      "created_30d": 244,
       "closed_30d": 243
     },
     "pull_requests": {
-      "total": 1476,
+      "total": 1477,
       "open": 2,
-      "created_7d": 253,
-      "merged_7d": 234,
-      "created_30d": 863,
-      "merged_30d": 792
+      "created_7d": 250,
+      "merged_7d": 227,
+      "created_30d": 862,
+      "merged_30d": 791
     },
     "workflow_runs": {
-      "total": 15524,
-      "last_7d": 9342,
-      "last_30d": 13857
+      "total": 15581,
+      "last_7d": 9306,
+      "last_30d": 13904
     }
   }
 }
