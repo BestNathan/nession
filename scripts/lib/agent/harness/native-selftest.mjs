@@ -51,6 +51,19 @@ try {
   const prep=prepareNativeHarness(reg,request);
   assert.throws(()=>prepareNativeHarness(reg,{...request,workspace:fresh('wrong-sha'),
     source_sha:'f'.repeat(40)}),/HEAD does not match/);
+  // `git rev-parse --show-toplevel` resolves symlinks, so reaching the SAME
+  // checkout through a symlinked ancestor is the same tree and must be accepted.
+  // A lexical path.resolve comparison rejected it, which made this harness
+  // unusable for any fixture built under a symlinked temp directory (darwin
+  // /var -> /private/var). Pinned here so the regression is caught on every host.
+  const alias=path.join(root,'alias');
+  fs.symlinkSync(root,alias);
+  assert.equal(prepareNativeHarness(reg,{...request,workspace:fresh('alias-workspace'),
+    checkout:path.join(alias,'checkout')}).assets.length,5);
+  // A directory INSIDE the same tree is not the checkout root and still fails.
+  fs.mkdirSync(path.join(checkout,'scripts'),{recursive:true});
+  assert.throws(()=>prepareNativeHarness(reg,{...request,workspace:fresh('nested'),
+    checkout:path.join(checkout,'scripts')}),/HEAD does not match/);
   assert.equal(prep.assets.length,5);
   assert.ok(prep.assets.some(x=>x.id==='superpowers'&&x.origin==='external'));
   assert.ok(prep.assets.some(x=>x.id==='shadcn'&&x.kind==='registry'));

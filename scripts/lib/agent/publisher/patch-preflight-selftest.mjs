@@ -36,6 +36,17 @@ try{
   assert.match(one.patch_sha256,/^[a-f0-9]{64}$/);
   assert.notEqual(one.files[0].old_sha256,one.files[0].new_sha256);
   assert.equal(one.scope,'preflight_only');
+  // Git reports a symlink-resolved toplevel, so the same checkout reached
+  // through a symlinked ancestor is the same tree and must be accepted. A
+  // lexical path.resolve rejected it, making preflight unusable for any
+  // checkout under a symlinked temp directory (darwin /var -> /private/var).
+  const alias=path.join(root,'alias');
+  fs.symlinkSync(root,alias);
+  assert.equal(preflightAgentPatch({checkout:path.join(alias,'repo'),source_sha:sha,
+    patch:good,allowed_paths:['src/calc.js']}).files.length,1);
+  // A directory INSIDE the tree is not the checkout root and still fails.
+  assert.throws(()=>preflightAgentPatch({checkout:path.join(repo,'src'),source_sha:sha,
+    patch:good,allowed_paths:['src/calc.js']}),/dirty or has wrong pinned SHA/);
   assert.equal(fs.readFileSync(path.join(repo,'src/calc.js'),'utf8'),original);
   assert.deepEqual(preflightAgentPatch({checkout:repo,source_sha:sha,patch:good,
     allowed_paths:['src/calc.js']}),one);

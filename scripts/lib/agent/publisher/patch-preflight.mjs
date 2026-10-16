@@ -87,7 +87,15 @@ export function preflightAgentPatch({checkout,source_sha,patch,allowed_paths}){
   const source=path.resolve(checkout),root=fs.mkdtempSync(path.join(os.tmpdir(),'agent-patch-preflight-'));
   const env=safeGitEnv(root);
   try{
-    if(runGit(source,['rev-parse','--show-toplevel'],env)!==source||
+    // Git resolves symlinks in the path it reports; path.resolve does not. An
+    // ancestor symlink (darwin os.tmpdir() -> /private/var) therefore made every
+    // fixture checkout look like the wrong root. Realpath both sides; the
+    // invariant that this root IS that checkout's top-level is unchanged. The
+    // guard keeps an unreadable path a clean rejection rather than a raw throw,
+    // and stays inside try so the scratch directory is still removed.
+    let sourceReal;
+    try{sourceReal=fs.realpathSync(source);}catch{reject('source checkout is unreadable');}
+    if(runGit(source,['rev-parse','--show-toplevel'],env)!==sourceReal||
        runGit(source,['rev-parse','HEAD'],env)!==source_sha||
        runGit(source,['status','--porcelain=v1','--untracked-files=no'],env)!==''){
       reject('source checkout is dirty or has wrong pinned SHA');
