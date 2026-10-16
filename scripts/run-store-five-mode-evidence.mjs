@@ -218,10 +218,19 @@ function selfTest(){
   const task=PINS.find(x=>x.mode==='task');
   assert.match(task.source_branch,/^task\//);
   assert.notEqual(task.source_sha,PINS[0].source_sha);
-  const wf=fs.readFileSync('.github/workflows/store-governance-audit.yml','utf8');
+  // The readback must be carried by a workflow that can succeed at the
+  // evaluated SHA, on every main push. It used to run only inside
+  // Store / Governance Audit, whose fail-closed policy alert fails that run and
+  // therefore discarded this unrelated, genuinely passing observation. Pinning
+  // both halves means a move back into the failing owner fails loudly instead
+  // of silently making the evidence uncitable again.
+  const wf=fs.readFileSync('.github/workflows/store-five-mode-readback.yml','utf8');
   assert.match(wf,/run-store-five-mode-evidence\.mjs collect/);
   assert.match(wf,/permissions:\s*\n  contents: read\s*\n  actions: read/);
   assert.doesNotMatch(wf,/contents: write|RUN_STORE_WRITER_APP_PRIVATE_KEY/);
+  assert.match(wf,/push:\s*\n    branches: \[main\]/);
+  assert.doesNotMatch(fs.readFileSync('.github/workflows/store-governance-audit.yml','utf8'),
+    /run-store-five-mode-evidence\.mjs/);
   console.log('five-mode authenticated Git-byte receipts: source/ingester/readback, positive and hostile negatives passed');
 }
 if(process.argv[1]===fileURLToPath(import.meta.url)){

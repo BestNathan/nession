@@ -41,6 +41,7 @@ export const CATALOG = [
   ['task-runner', 'task-runner.yml', 'Ephemeral Task Runner', 'task-runner.yml', 'Task / Ephemeral Runner', 'task'],
   ['task-result-ingest', 'task-result-ingest.yml', 'Task Result Ingest', 'task-result-ingest.yml', 'Task / Result Ingest', 'task'],
   ['store-governance-audit', 'store-governance-audit.yml', 'Store / Governance Audit', 'store-governance-audit.yml', 'Store / Governance Audit', 'store'],
+  ['store-five-mode-readback', 'store-five-mode-readback.yml', 'Store / Five-Mode Readback', 'store-five-mode-readback.yml', 'Store / Five-Mode Readback', 'store'],
   ['store-app-writer-smoke', 'store-app-writer-smoke.yml', 'Store / App Writer Smoke', 'store-app-writer-smoke.yml', 'Store / App Writer Smoke', 'store'],
   ['store-receipt-readback', 'store-receipt-readback.yml', 'Store / Receipt Readback', 'store-receipt-readback.yml', 'Store / Receipt Readback', 'store'],
 ];
