@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_test_run",
+  "mode": "test",
+  "target_sha": "5b1c86a71bc6fe171bb84b3c041ebd7405feb419",
+  "source_tree_sha": "eed742fff729d8568db417d00b2b3dc612b1f0b7",
+  "run_id": 38923459704,
+  "run_attempt": 1,
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 382193593,
+    "run_id": 38923459704,
+    "run_attempt": 1,
+    "head_sha": "5b1c86a71bc6fe171bb84b3c041ebd7405feb419",
+    "head_branch": "main",
+    "event": "push"
+  },
+  "started_at": "2026-10-16T15:22:54Z",
+  "status": "Completed",
+  "evaluation": null,
+  "test_job": {
+    "job_id": 117048943359,
+    "name": "e2e",
+    "conclusion": "success"
+  },
+  "evidence": {
+    "artifact_id": 12056421968,
+    "name": "playwright-report",
+    "size_bytes": 1701266,
+    "sha256": "15b0f055057335746159ba32ee6250c6f8a0aeec8a2fe97dded3721afa44a8a6",
+    "expires_at": "2026-10-23T15:35:36Z",
+    "durability": "GitHub Actions artifact; time-limited, not indefinitely archived"
+  },
+  "execution_id": "269ceae74e044d5bb376438ea4b3be7570f7d9254245bb8cf3850f1d7bf57d4e"
+}
