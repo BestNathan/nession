@@ -7,6 +7,7 @@ import { collectHistoricalE2EForPull, collectLinkedIssueE2EEvidence } from './ac
 import { parseIssueE2E } from './issue-e2e-contract.mjs';
 import { collectCrossIssueAcceptance } from './acceptance-cross-issue-receipt.mjs';
 import { collectRelatedBugCompletion } from './acceptance-bug-bootstrap-receipt.mjs';
+import { collectE2eWakeReceipts } from './acceptance-postrun-e2e-receipt.mjs';
 import { verifyWake } from './agent-evidence-waker.mjs';
 import {historicalCaseEvidence,selfTestHistoricalCase} from './acceptance-historical-case-replay.mjs';
 import { collectAuthenticatedCaseReadbacks, selfTestCaseReceipts } from './acceptance-case-readback-evidence.mjs';
@@ -75,7 +76,7 @@ function compactRuns(runs, expectedSha) {
     .slice(0, MAX_RUNS_PER_SHA);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [] }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [] }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -101,6 +102,7 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     target_sha: sha,
     direct_runs: compactRuns(directRuns, sha),
     target_push_e2e_runs: targetPushE2eRuns,
+    authenticated_post_e2e_wake_receipts: postE2eWakeReceipts,
     exact_head_e2e_steps: exactHeadE2eSteps,
     related_issue_acceptance_receipts: relatedAcceptance,
     related_bug_completion_evidence: relatedBugCompletion,
@@ -688,6 +690,11 @@ async function collectCommand(workspace, outFile) {
   const directRuns = await workflowRunsForSha(repo, sha);
   const targetPushE2eRuns=process.env.ACCEPTANCE_STAGE==='post-merge'
     ? await collectTargetPushE2eRuns(repo,sha) : [];
+  // A post-E2E Agent cannot prove its own Waker has completed. Read the
+  // bounded, exact-attempt, SHA256-bound prior cycle independently instead.
+  const postE2eWakeReceipts=process.env.ACCEPTANCE_STAGE==='post-merge'&&
+    String(process.env.ISSUE_NUMBER??'')==='1850'
+    ? await collectE2eWakeReceipts({repo,sha,issue:1850,get:githubGet,getText:githubJobLog}) : [];
   // Independently bound Git-byte Case receipts only, never green no-op success.
   const verifiedCaseReceipts = process.env.ACCEPTANCE_STAGE === 'post-merge'
     ? await collectAuthenticatedCaseReadbacks({repo,targetSha:sha,runs:directRuns,request:githubGet})
@@ -822,7 +829,7 @@ async function collectCommand(workspace, outFile) {
     }
   }
   const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls,
-    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns });
+    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts });
   fs.writeFileSync(outFile, JSON.stringify(evidence, null, 2) + '\n');
   console.log(
     'collected acceptance CI evidence for ' + sha +
