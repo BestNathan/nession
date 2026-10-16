@@ -15,6 +15,7 @@ gate_check() {
   gate_run_invariant node scripts/acceptance-e2e-lineage.mjs self-test
   gate_run_invariant node scripts/acceptance-cross-issue-receipt.mjs self-test
   gate_run_invariant node scripts/acceptance-bug-bootstrap-receipt.mjs self-test
+  gate_run_invariant node scripts/acceptance-postrun-e2e-receipt.mjs self-test
   gate_run_invariant node scripts/acceptance-ci-evidence.mjs self-test
 }
 gate_main "$@"
