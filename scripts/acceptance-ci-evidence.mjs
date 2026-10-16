@@ -69,12 +69,35 @@ function compactRun(run) {
   };
 }
 
-function compactRuns(runs, expectedSha) {
-  return (Array.isArray(runs) ? runs : [])
+// #1858: retaining only the newest MAX_RUNS_PER_SHA runs hid live evidence. A
+// main push fires its Gate workflows first, so they are the oldest runs at that
+// SHA and age out first once the SHA exceeds the bound, while a dropped run is
+// indistinguishable from one that never ran. Keep the newest run of every
+// workflow path present at the SHA, unioned with the newest MAX_RUNS_PER_SHA,
+// and report how many runs were still dropped so absence is never silent.
+function retainedRuns(runs, expectedSha) {
+  const atSha = (Array.isArray(runs) ? runs : [])
     .filter((run) => String(run?.head_sha ?? '') === expectedSha)
-    .map(compactRun)
-    .sort((a, b) => String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')))
-    .slice(0, MAX_RUNS_PER_SHA);
+    .sort((a, b) => String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')));
+  const keyOf = (run) => String(run?.id ?? String(run?.path ?? '') + '@' + String(run?.created_at ?? ''));
+  const chosen = new Map();
+  const seenPath = new Set();
+  for (const run of atSha) {
+    const path = String(run?.path ?? '');
+    if (seenPath.has(path)) continue;
+    seenPath.add(path);
+    chosen.set(keyOf(run), run);
+  }
+  for (const run of atSha.slice(0, MAX_RUNS_PER_SHA)) {
+    if (!chosen.has(keyOf(run))) chosen.set(keyOf(run), run);
+  }
+  const kept = [...chosen.values()]
+    .sort((a, b) => String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')));
+  return { runs: kept, dropped: atSha.length - kept.length };
+}
+
+function compactRuns(runs, expectedSha) {
+  return retainedRuns(runs, expectedSha).runs.map(compactRun);
 }
 
 export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], replayDenials = [] }) {
@@ -97,11 +120,13 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
       };
     });
 
+  const directRunsAtSha = retainedRuns(directRuns, sha);
   return {
     schema_version: 1,
     kind: 'acceptance_ci_evidence',
     target_sha: sha,
-    direct_runs: compactRuns(directRuns, sha),
+    direct_runs: directRunsAtSha.runs.map(compactRun),
+    direct_runs_dropped: directRunsAtSha.dropped,
     verified_metrics_replay_denials: replayDenials,
     target_push_e2e_runs: targetPushE2eRuns,
     authenticated_post_e2e_wake_receipts: postE2eWakeReceipts,
@@ -1182,6 +1207,25 @@ async function selfTest() {
 
   assert.equal(evidence.target_sha, 'merge123');
   assert.deepEqual(evidence.direct_runs.map((run) => run.id), [2]);
+
+  // #1858: an early push-triggered Gate run must survive an over-cap SHA, and
+  // any remaining truncation must be reported rather than read as absence.
+  const capSha = 'd'.repeat(40);
+  const capRun = (id, workflowPath, createdAt) => ({id, path: workflowPath, event: 'push',
+    status: 'completed', conclusion: 'success', head_branch: 'main', head_sha: capSha,
+    html_url: 'https://example.invalid/' + id, created_at: createdAt, updated_at: createdAt});
+  const capRuns = [
+    capRun(1, '.github/workflows/ci-run-store-fixture-evidence.yml', '2026-10-16T00:00:00Z'),
+    ...Array.from({length: 24}, (_, i) => capRun(i + 2,
+      '.github/workflows/noise-' + (i % 3) + '.yml',
+      '2026-10-16T01:' + String(i).padStart(2, '0') + ':00Z')),
+  ];
+  const capBundle = normalizeCiEvidence({targetSha: capSha, directRuns: capRuns});
+  assert.ok(capBundle.direct_runs.some((run) => run.id === 1),
+    'the earliest push Gate run must not be truncated away');
+  assert.equal(capBundle.direct_runs_dropped, capRuns.length - capBundle.direct_runs.length);
+  assert.ok(capBundle.direct_runs_dropped > 0,
+    'an over-cap SHA must report dropped runs instead of hiding them');
   assert.deepEqual(evidence.pull_requests[0].runs.map((run) => run.id), [4]);
   const lineage = normalizeCiEvidence({
     targetSha: 'c'.repeat(40),
