@@ -7,17 +7,20 @@ name: Metrics / Replay Request
 # GitHub REST before initiating any privileged work.
 on:
   workflow_dispatch:
+  # Disposable branch-only probe. This does not add a privileged event to main.
+  push:
+    branches: [test/1690-replay-untrusted-ref]
 
 permissions:
   contents: read
 
 jobs:
   request:
-    if: github.repository == 'BestNathan/nession' && github.ref == 'refs/heads/main' && github.actor == 'BestNathan'
+    if: github.repository == 'BestNathan/nession' && ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BestNathan') || (github.event_name == 'push' && github.ref == 'refs/heads/test/1690-replay-untrusted-ref'))
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - name: Record read-only main/owner replay request
+      - name: Record read-only branch-origin denial probe
         run: |
           set -euo pipefail
           echo "Metrics replay request, no publisher credentials or source artifacts." >> "$GITHUB_STEP_SUMMARY"
