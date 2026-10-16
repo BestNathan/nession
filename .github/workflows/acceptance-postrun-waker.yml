@@ -1,14 +1,13 @@
 name: Acceptance / Post-Run Waker
 
 # A post-merge Agent cannot attest its own Orchestrator's completion while
-# running, and a fixture must finish before the exact-main-SHA SC-10 result
-# can be evaluated. Re-evaluate AFTER verified successful source workflows,
+# running. Both fixture evidence and the exact-main-SHA E2E tests may finish
+# AFTER the Agent. Re-evaluate after independently verified completion,
 # using the same trusted evaluator and Issue updater, not a second projector.
 on:
   workflow_run:
-    # Reconcile after either merged Agent execution or the independent
-    # fixture source completes. Both are read-only, trusted-main source runs.
-    workflows: ["Acceptance / Orchestrator", "CI / Run Store Fixture Evidence"]
+    # Keep E2E completion independent of Issue/PR mutable comments.
+    workflows: ["Acceptance / Orchestrator", "CI / Run Store Fixture Evidence", "E2E / Tests"]
     types: [completed]
 
 permissions:
@@ -71,7 +70,9 @@ jobs:
               (.name == "Acceptance / Orchestrator" and
                .path == ".github/workflows/acceptance-orchestrator.yml") or
               (.name == "CI / Run Store Fixture Evidence" and
-               .path == ".github/workflows/ci-run-store-fixture-evidence.yml")
+               .path == ".github/workflows/ci-run-store-fixture-evidence.yml") or
+              (.name == "E2E / Tests" and
+               .path == ".github/workflows/e2e-tests.yml")
             ) and
             .event == "push" and .head_branch == "main" and
             .head_sha == $sha and .status == "completed" and
@@ -103,7 +104,7 @@ jobs:
           else
             echo 'has_agents=false' >> "$GITHUB_OUTPUT"
           fi
-          echo "Reconcile completed main Orchestrator at $TARGET_SHA: $agent_issues" >> "$GITHUB_STEP_SUMMARY"
+          echo "Reconcile completed, authenticated main source at $TARGET_SHA: $agent_issues" >> "$GITHUB_STEP_SUMMARY"
 
   evaluate:
     needs: select

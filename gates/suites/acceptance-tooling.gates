@@ -3,3 +3,4 @@
 requirement-acceptance-selftest
 acceptance-executor-selftest
 acceptance-agent-selftest
+acceptance-postrun-waker-selftest
