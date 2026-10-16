@@ -14,10 +14,14 @@ permissions:
   issues: read
   pull-requests: read
 
-concurrency:
-  group: metrics-writer
-  cancel-in-progress: false
-
+# Deliberately NO run-level concurrency group. GitHub cancels *any* previously
+# pending job or workflow in a group as soon as a newer one is queued, even with
+# `cancel-in-progress: false`. A run-level membership here let ordinary
+# `metrics-writer` traffic (the `*/5` telemetry writer) evict this run while it
+# was still pending and before `authorize-replay` was ever scheduled, silently
+# dropping a one-shot `workflow_run` wake: the replay request was neither
+# authorized nor denied and no denial receipt was produced (#1690 SC-09). Only
+# the Store writer job below serializes on `metrics-writer`.
 jobs:
   authorize-replay:
     if: github.repository == 'BestNathan/nession' && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_run')
@@ -146,6 +150,14 @@ jobs:
     # `always()` previously allowed a publish attempt after failed/skipped health jobs.
     if: ${{ success() && needs.authorize-replay.result == 'success' && needs.rust-health.result == 'success' && needs.web-health.result == 'success' && needs.e2e-health.result == 'success' && github.ref == 'refs/heads/main' && github.repository == 'BestNathan/nession' }}
     needs: [authorize-replay, rust-health, web-health, e2e-health]
+    # Only the job that actually CAS-pushes the `metrics` orphan branch joins the
+    # shared writer group. `metrics-agent-telemetry.yml` holds the same group for
+    # its ingest job; both rewrite `agent-metrics*.{json,svg}`, so cross-workflow
+    # serialization is still required. Authorization and health collection are
+    # read-only and must never queue behind this group.
+    concurrency:
+      group: metrics-writer
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
       actions: read

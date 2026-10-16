@@ -146,8 +146,28 @@ function selfTest(){
   assert.match(writer,/workflow_run:\s*\n    workflows: \["Metrics \/ Replay Request"\]\s*\n    types: \[completed\]/);
   assert.doesNotMatch(writer,/^  workflow_dispatch:\s*$/m);
   assert.match(writer,/needs: \[authorize-replay, rust-health, web-health, e2e-health\]/);
+  // Invariant: the shared Store writer group may only be joined by a *job*.
+  // GitHub cancels every previously pending job or workflow in a group as soon
+  // as a newer one queues, even with `cancel-in-progress: false`. Run-level
+  // membership made a one-shot replay wake evictable by ordinary `metrics-writer`
+  // traffic before `authorize-replay` was ever scheduled, so the request was
+  // neither authorized nor denied and no denial receipt existed (#1690 SC-09).
+  const assertWriterGroupIsJobScoped=(file,yaml)=>{
+    assert.doesNotMatch(yaml,/^concurrency:/m,
+      file+': run-level metrics-writer membership can evict a pending replay authorization');
+  };
+  assertWriterGroupIsJobScoped('metrics-repository.yml',writer);
+  assertWriterGroupIsJobScoped('metrics-agent-telemetry.yml',
+    fs.readFileSync('.github/workflows/metrics-agent-telemetry.yml','utf8'));
+  // Negative fixture: the detector must reject run-level membership, and a
+  // skipped-event producer must not reach the group before its own job filter.
+  assert.throws(()=>assertWriterGroupIsJobScoped('fixture.yml',
+    'jobs:\n  x:\n    runs-on: ubuntu-latest\nconcurrency:\n  group: metrics-writer\n'),
+  /fixture\.yml: run-level metrics-writer membership/);
   const publisher=writer.split(/\n  publish:\s*\n/)[1];
   assert.ok(publisher, 'privileged Metrics Publisher job is required');
+  assert.match(publisher,/^    concurrency:\n      group: metrics-writer\n      cancel-in-progress: false$/m,
+    'only the CAS-pushing Publisher may serialize on the shared writer group');
   assert.match(publisher,/^    if:.*success\(\)/m);
   assert.doesNotMatch(publisher,/^    if:.*always\(\)/m);
   for(const dependency of ['authorize-replay','rust-health','web-health','e2e-health']) {

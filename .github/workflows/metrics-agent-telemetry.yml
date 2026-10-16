@@ -16,12 +16,16 @@ permissions:
   actions: read
   contents: write
 
-concurrency:
-  group: metrics-writer
-  cancel-in-progress: false
-
+# Deliberately NO run-level concurrency group. Run-level membership puts the
+# whole workflow into `metrics-writer`, so every wake-up event contends for the
+# shared writer group whether or not this job's `if` filter below goes on to
+# ingest it, and GitHub cancels any previously pending member of a group as soon
+# as a newer one queues (#1690 SC-09). Only the writer job needs the group.
 jobs:
   ingest:
+    concurrency:
+      group: metrics-writer
+      cancel-in-progress: false
     # Ignore unrelated Orchestrator workflow_run/repository_dispatch wakes.
     # Those are not canonical Agent telemetry producer events and otherwise
     # create repeated privileged runs that fail the source provenance contract.
