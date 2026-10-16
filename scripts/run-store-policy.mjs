@@ -24,6 +24,37 @@ export function coversStoreRef(rule,ref){
     c.include.every(x=>GOVERNED_REFS.some(ref=>'refs/heads/'+ref===x));
 }
 
+// GitHub omits `bypass_actors` from a ruleset detail unless the requesting
+// identity has write access to that ruleset, and omits the `update` rule's
+// stored parameters from every read (see withRuleParameters). An absent field
+// therefore means "this credential cannot observe the capability", which is a
+// *different fact* from "the capability is not configured". Collapsing the two
+// made a real, actively enforced policy read exactly like an absent one, so
+// the report names the unobservable capability instead of letting silence
+// stand in for evidence of absence. This never softens the verdict:
+// configuration_verified stays false in every one of these cases.
+export const UNOBSERVABLE_CAPABILITIES=Object.freeze({
+  detail:'ruleset_detail_not_readable_by_requesting_credential',
+  bypass:'ruleset_bypass_actors_not_returned_to_requesting_credential',
+  update:'ruleset_update_parameters_not_returned_by_rest',
+});
+// Only a candidate whose check could not even be *evaluated* is unobservable.
+// A field that is present and wrong (including an explicitly empty
+// bypass_actors list, or a ruleset that simply has no update rule) is an
+// observable failure and must keep reporting as a real policy gap.
+function unobservableCapabilities(candidates){
+  if(candidates.length===0)return [];
+  const named=[];
+  if(candidates.some(r=>!Array.isArray(r?.rules)))named.push(UNOBSERVABLE_CAPABILITIES.detail);
+  if(candidates.some(r=>!Array.isArray(r?.bypass_actors)))
+    named.push(UNOBSERVABLE_CAPABILITIES.bypass);
+  if(candidates.some(r=>{
+    const update=(r?.rules??[]).find(x=>x?.type==='update');
+    return update!==undefined&&
+      typeof update?.parameters?.update_allows_fetch_and_merge!=='boolean';
+  }))named.push(UNOBSERVABLE_CAPABILITIES.update);
+  return named.sort();
+}
 // Only a dedicated Integration bypass is acceptable. RepoRole/Admin/User
 // bypass permits unrelated writes; 'pull_request' cannot append an orphan
 // branch, and 'exempt' is unauditable.
@@ -34,15 +65,21 @@ export function evaluateStoreRules(ref,rulesets,approvedAppId){
   const candidates=applicable.filter(r=>r.enforcement==='active');
   const required=['creation','update','deletion','non_fast_forward','required_linear_history'];
   const accepted=candidates.find(rule=>{
-    const types=new Set((rule.rules??[]).map(x=>x.type));
+    // A detail whose `rules` could not be read is not a match and must not
+    // throw: an unexpected response shape may never abort the audit and discard
+    // its unrelated observation. It is reported through
+    // unobservable_capabilities instead, and the verdict stays false.
+    if(!Array.isArray(rule?.rules))return false;
+    const types=new Set(rule.rules.map(x=>x?.type));
     const bypass=rule.bypass_actors;
-    const update=rule.rules.find(x=>x.type==='update');
+    const update=rule.rules.find(x=>x?.type==='update');
     return required.every(x=>types.has(x))&&
       update?.parameters?.update_allows_fetch_and_merge===false&&
       positive(approvedAppId)&&Array.isArray(bypass)&&bypass.length===1&&
       bypass[0].actor_type==='Integration'&&
       bypass[0].actor_id===approvedAppId&&bypass[0].bypass_mode==='always';
   });
+  const unobservable=accepted?[]:unobservableCapabilities(candidates);
   return {
     ref,configuration_verified:!!accepted,approved_writer_app_id:approvedAppId??null,
     matching_active_ruleset_ids:candidates.map(x=>x.id).filter(positive),
@@ -51,6 +88,15 @@ export function evaluateStoreRules(ref,rulesets,approvedAppId){
       'active exact-ref Ruleset','creation/update(no fetch/merge bypass)/deletion/non_fast_forward/required_linear_history',
       'exactly one trusted GitHub App Integration bypass with mode always',
     ],
+    // `missing_requirements` records what THIS evaluation could not satisfy. It
+    // is not a claim about the repository, and the difference is exactly what a
+    // reader needs in order to choose Pending over Fail.
+    unobservable_capabilities:unobservable,
+    missing_requirements_meaning:accepted?
+      'all requirements satisfied by a live read of every required field':
+      unobservable.length>0?
+        'unmet here because the requesting credential cannot read the field(s) named in unobservable_capabilities; this is not evidence that the repository lacks them':
+        'unmet: every required field was readable and none satisfied the policy',
     // A configuration match is not a live denial test or externally
     // controlled anchor; do not collapse distinct security proofs.
     authorized_write_test_verified:false,
@@ -133,6 +179,32 @@ export function runTests(){
   assert.deepEqual(withRuleParameters(restShape,undefined),restShape);
   assert.deepEqual(withRuleParameters(restShape,'false'),restShape);
   assert.deepEqual(withRuleParameters({id:1},false),{id:1});
+  // "Unobservable by this credential" and "not configured" must stay distinct
+  // facts, and a real gap must never be excused as unobservable. A readable but
+  // wrong bypass, an explicitly empty bypass list, a ruleset with no update
+  // rule, and no active ruleset at all are all observable failures.
+  const unobservableNames=ids=>ids.map(id=>UNOBSERVABLE_CAPABILITIES[id]).sort();
+  assert.deepEqual(evaluateStoreRules(ref,[rule],app).unobservable_capabilities,[]);
+  assert.deepEqual(evaluateStoreRules(ref,[{...rule,bypass_actors:[]}],app)
+    .unobservable_capabilities,[]);
+  assert.deepEqual(evaluateStoreRules(ref,[{...rule,bypass_actors:[{actor_id:1,
+    actor_type:'User',bypass_mode:'always'}]}],app).unobservable_capabilities,[]);
+  assert.deepEqual(evaluateStoreRules(ref,[restShape],app).unobservable_capabilities,
+    unobservableNames(['update']));
+  assert.deepEqual(evaluateStoreRules(ref,[{...rule,bypass_actors:undefined}],app)
+    .unobservable_capabilities,unobservableNames(['bypass']));
+  assert.deepEqual(evaluateStoreRules(ref,[{...rule,bypass_actors:undefined,
+    rules:undefined}],app).unobservable_capabilities,
+  unobservableNames(['bypass','detail']));
+  // No active exact-ref ruleset is a readable, reportable policy gap — not an
+  // unsupported capability.
+  assert.deepEqual(evaluateStoreRules(ref,[],app).unobservable_capabilities,[]);
+  assert.deepEqual(evaluateStoreRules(ref,[{...rule,enforcement:'disabled'}],app)
+    .unobservable_capabilities,[]);
+  assert.match(evaluateStoreRules(ref,[{...rule,bypass_actors:undefined}],app)
+    .missing_requirements_meaning,/not evidence that the repository lacks them/);
+  assert.match(evaluateStoreRules(ref,[{...rule,bypass_actors:[]}],app)
+    .missing_requirements_meaning,/every required field was readable/);
   assert.equal(evaluateStoreRules(ref,[rule],app+1).configuration_verified,false);
   assert.equal(evaluateStoreRules(ref,[{...rule,source:'attacker/repo'}],app).configuration_verified,false);
   assert.throws(()=>evaluateStoreRules('other',[],app),/invalid target/);

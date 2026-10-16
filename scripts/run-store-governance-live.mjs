@@ -8,7 +8,8 @@ import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {auditLiveRunStores} from './audit-live-run-stores.mjs';
-import {GOVERNED_REFS,evaluateStoreRules,validateMigrationBaseline,assertTrustedAuditContext,
+import {GOVERNED_REFS,UNOBSERVABLE_CAPABILITIES,evaluateStoreRules,
+  validateMigrationBaseline,assertTrustedAuditContext,
   withRuleParameters} from './run-store-policy.mjs';
 
 const REPO='BestNathan/nession';
@@ -79,6 +80,19 @@ export function summarizeGovernance(manifest,rulesets,appId,history){
     records.every(x=>GOVERNED_REFS.includes(x.store)&&
       x.api_ref_verified===true&&x.mode==='anchored-history');
   const policy=decisions.every(x=>x.configuration_verified);
+  // "The policy is not configured" and "this credential cannot see the policy"
+  // kept rendering as the same line, so a live, actively enforced Ruleset was
+  // indistinguishable from an absent one and every reader had to fall back to
+  // the log to tell them apart. The report names the unobservable capability
+  // instead. This is deliberately NOT a Pass and NOT a relaxation: the verdict,
+  // protected_by_server_ruleset and the non-zero alert are unchanged; only the
+  // *reason* stops being reported as evidence of absence.
+  const unverified=decisions.filter(x=>!x.configuration_verified);
+  const unobservable=unverified.filter(x=>x.unobservable_capabilities.length>0);
+  const capabilities=[...new Set(unobservable.flatMap(x=>x.unobservable_capabilities))];
+  const observability=policy?'verified':unobservable.length===0?'observable':
+    unobservable.length===unverified.length?'unobservable_by_this_credential'
+    :'partially_unobservable_by_this_credential';
   const observation=history?.anchoring==='repository_main_migration_observation_only';
   if(!observation)fail('governance observation must not reuse a falsely independent anchor');
   return {
@@ -100,9 +114,23 @@ export function summarizeGovernance(manifest,rulesets,appId,history){
     })),
     verified_mutation_drill:'offline fixtures only; no real server-side denied writes',
     alert_channel:'GitHub Actions failed status and retained artifacts only; external WORM alert pending',
+    policy_observability:{
+      verdict:observability,
+      unobservable_capabilities:capabilities,
+      refs_whose_policy_is_unobservable_here:unobservable.map(x=>x.ref),
+      establishes_neither_presence_nor_absence:unobservable.length>0,
+      note:'An unobservable capability is not evidence that the governing policy'+
+        ' is absent, and it is not a Pass: it is a bounded limitation of this'+
+        ' read-only credential. Resolve it with an identity that can read the'+
+        ' named field, or record it as an unsupported administration capability.',
+    },
     result:!coverage?'ERROR: incomplete exact-ref history scan':
       policy?'PENDING: real authorized/denied writes and independent external checkpoint':
-      'PENDING: no fully enforced exact-ref App-only write Ruleset',
+      observability==='observable'?
+        'PENDING: no fully enforced exact-ref App-only write Ruleset':
+      'PENDING: unsupported administration capability — this read-only credential cannot observe '+
+        capabilities.join(', ')+' on '+unobservable.map(x=>x.ref).join(', ')+
+        '; the App-only policy is neither established nor disproven here',
   };
 }
 async function live(out){
@@ -148,8 +176,12 @@ async function live(out){
     '## Store Governance Live Read-only Audit\n\n'+
     '| Branch | Audited changes | App-only branch policy |\n|---|---:|---|\n'+
     report.stores.map(x=>'| '+x.ref+' | '+x.checked_changes+' | '+
-      (x.configuration_verified?'configured':'NOT VERIFIED')+' |').join('\n')+
-    '\n\n**'+report.result+'**. This is not a true external anchor, writer denial, or SC Pass.\n');
+      (x.configuration_verified?'configured'
+        :x.unobservable_capabilities.length>0?'NOT OBSERVABLE HERE'
+        :'NOT CONFIGURED')+' |').join('\n')+
+    '\n\n**'+report.result+'**. This is not a true external anchor, writer denial, or SC Pass.\n'+
+    (report.policy_observability.establishes_neither_presence_nor_absence?
+      '\nBounded limitation: '+report.policy_observability.note+'\n':''));
   console.log('Store governance: '+report.result);
   // Explicit fail-closed alert status on unprotected branch policies. Caller
   // uploads the report even on failure, with zero write permissions.
@@ -180,7 +212,57 @@ function selfTest(){
     .actual_history_checked_against_unanchored_baseline,false);
   assert.throws(()=>summarizeGovernance(migration,[],0,
     {...history,anchoring:'separately_supplied_secret'}),/falsely independent anchor/);
-  console.log('Run Store governance live summary: incomplete coverage, unprotected refs and no independent checkpoint fail closed');
+  // Report layer: an unreadable capability and a real policy gap must not
+  // render as the same line. Both stay fail-closed (policy false, alert
+  // non-zero); only the reason differs, so a reader can choose Pending over
+  // Fail without ever being able to read it as a Pass.
+  const refs=GOVERNED_REFS,app=77881;
+  const shape=over=>({id:25248129,name:'run-store',target:'branch',
+    source_type:'Repository',source:REPO,enforcement:'active',
+    conditions:{ref_name:{include:refs.map(r=>'refs/heads/'+r),exclude:[]}},
+    rules:['creation','update','deletion','non_fast_forward','required_linear_history']
+      .map(type=>type==='update'?{type,parameters:{update_allows_fetch_and_merge:false}}:{type}),
+    bypass_actors:[{actor_id:app,actor_type:'Integration',bypass_mode:'always'}],...over});
+  // A credential that can read every required field and finds a real match:
+  // verified, and the bounded-limitation note stays out of the report.
+  const readable=summarizeGovernance(migration,[shape({})],app,history);
+  assert.equal(readable.protected_by_server_ruleset,true);
+  assert.equal(readable.policy_observability.verdict,'verified');
+  assert.equal(readable.policy_observability
+    .establishes_neither_presence_nor_absence,false);
+  // A bypass the credential can read but that is wrong is a REAL gap.
+  const wrong=summarizeGovernance(migration,
+    [shape({bypass_actors:[{actor_id:app+1,actor_type:'Integration',bypass_mode:'always'}]})],
+    app,history);
+  assert.equal(wrong.protected_by_server_ruleset,false);
+  assert.equal(wrong.policy_observability.verdict,'observable');
+  assert.deepEqual(wrong.policy_observability.unobservable_capabilities,[]);
+  assert.match(wrong.result,/no fully enforced exact-ref App-only write Ruleset/);
+  // A bypass GitHub withholds is an unsupported capability, not an absence.
+  const blind=summarizeGovernance(migration,[shape({bypass_actors:undefined})],app,history);
+  assert.equal(blind.protected_by_server_ruleset,false);
+  assert.equal(blind.policy_observability.verdict,'unobservable_by_this_credential');
+  assert.deepEqual(blind.policy_observability.unobservable_capabilities,
+    [UNOBSERVABLE_CAPABILITIES.bypass]);
+  assert.deepEqual(blind.policy_observability.refs_whose_policy_is_unobservable_here,refs);
+  assert.equal(blind.policy_observability
+    .establishes_neither_presence_nor_absence,true);
+  assert.match(blind.result,/unsupported administration capability/);
+  assert.match(blind.result,/neither established nor disproven/);
+  assert.doesNotMatch(blind.result,/no fully enforced/);
+  // Mixed: one ref blind, the others a readable failure — both facts survive.
+  const mixed=summarizeGovernance(migration,[
+    {...shape({bypass_actors:undefined,id:1}),
+      conditions:{ref_name:{include:['refs/heads/'+refs[0]],exclude:[]}}},
+    {...shape({bypass_actors:[{actor_id:app+1,actor_type:'Integration',
+      bypass_mode:'always'}],id:2}),
+    conditions:{ref_name:{include:refs.slice(1).map(r=>'refs/heads/'+r),exclude:[]}}},
+  ],app,history);
+  assert.equal(mixed.policy_observability.verdict,'partially_unobservable_by_this_credential');
+  assert.deepEqual(mixed.policy_observability.refs_whose_policy_is_unobservable_here,
+    [refs[0]]);
+  assert.equal(mixed.protected_by_server_ruleset,false);
+  console.log('Run Store governance live summary: incomplete coverage, unprotected refs, unobservable capabilities and no independent checkpoint fail closed');
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
   if(process.argv[2]==='self-test')selfTest();
