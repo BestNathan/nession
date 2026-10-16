@@ -2,6 +2,7 @@
 // #1690: prevent silently weakening the real post-merge fixture evidence owner.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
 const workflow=fs.readFileSync('.github/workflows/ci-run-store-fixture-evidence.yml','utf8');
 const catalog=fs.readFileSync('scripts/workflow-conventions.mjs','utf8');
 assert.match(workflow,/^name: CI \/ Run Store Fixture Evidence$/m);
@@ -46,4 +47,5 @@ assert.match(workflow,/real_agent_store:"not_provisioned"/);
 assert.match(workflow,/external_anchor:"not_provisioned"/);
 assert.match(workflow,/if: always\(\)/);
 assert.match(catalog,/ci-run-store-fixture-evidence\.yml', 'CI \/ Run Store Fixture Evidence'/);
+execFileSync(process.execPath,['scripts/acceptance-postrun-waker-selftest.mjs'],{stdio:'inherit'});
 console.log('Main-only read-only agent-store fixture evidence contract: trusted ref, no App credentials, no production writes or external anchor assertions passed');
