@@ -33,7 +33,7 @@ export function attestE2eWakeReceipt({repo=REPO,sha,issue,e2e,waker,jobs,log,art
     !Number.isSafeInteger(waker.run_attempt)||waker.run_attempt<=0||
     !Number.isFinite(Date.parse(e2e.updated_at))||
     !Number.isFinite(Date.parse(waker.created_at))||
-    Date.parse(waker.created_at)<Date.parse(e2e.updated_at)||
+    Date.parse(waker.created_at)<=Date.parse(e2e.updated_at)||
     !Array.isArray(jobs?.jobs)||jobs.jobs.length>20)
     throw Error('source E2E/Waker exact-SHA workflow identity unverified');
 
