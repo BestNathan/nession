@@ -95,7 +95,7 @@ export function attestReplayDenial(receipt,source,recipient,jobs,workflow){
      source?.id!==src.run_id||source?.run_attempt!==src.run_attempt||
      workflow?.id!==source?.workflow_id||
      workflow?.name!==source?.name||
-     workflow?.path!==String(source?.path??'').replace(/@refs\\/heads\\/[^\\s]+$/,'')||
+     workflow?.path!==String(source?.path??'').replace(/@refs\/heads\/[^\s]+$/,'')||
      !/^[A-Za-z0-9_-]{1,64}$/.test(source?.actor?.login??'')||
      !/^[A-Za-z0-9_-]{1,64}$/.test(source?.triggering_actor?.login??'')||
      source?.workflow_id!==src.workflow_id||
