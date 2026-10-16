@@ -79,7 +79,7 @@ export function validateDenialReceipt(receipt){
 
 // GitHub REST Run/Attempt metadata and original job logs are separate from the
 // source event claim. Never infer publication safety from a failed run alone.
-export function attestReplayDenial(receipt,source,recipient,jobs){
+export function attestReplayDenial(receipt,source,recipient,jobs,workflow){
   validateDenialReceipt(receipt);
   const rec=receipt.recipient,src=receipt.source_claim;
   if(recipient?.id!==rec.run_id||
@@ -93,6 +93,11 @@ export function attestReplayDenial(receipt,source,recipient,jobs){
      recipient?.head_repository?.full_name!==REPO||
      recipient?.status!=='completed'||recipient?.conclusion!=='failure'||
      source?.id!==src.run_id||source?.run_attempt!==src.run_attempt||
+     workflow?.id!==source?.workflow_id||
+     workflow?.name!==source?.name||
+     workflow?.path!==String(source?.path??'').replace(/@refs\\/heads\\/[^\\s]+$/,'')||
+     !/^[A-Za-z0-9_-]{1,64}$/.test(source?.actor?.login??'')||
+     !/^[A-Za-z0-9_-]{1,64}$/.test(source?.triggering_actor?.login??'')||
      source?.workflow_id!==src.workflow_id||
      source?.event!==src.event||source?.head_branch!==src.branch||
      source?.head_sha!==src.sha||
@@ -129,6 +134,8 @@ export function attestReplayDenial(receipt,source,recipient,jobs){
   return Object.freeze({kind:'verified_metrics_replay_denial',
     source_run_id:src.run_id,source_attempt:src.run_attempt,
     source_branch:src.branch,source_event:src.event,source_sha:src.sha,
+    source_actor:source.actor.login,source_triggering_actor:source.triggering_actor.login,
+    source_workflow_id:source.workflow_id,source_workflow_path:workflow.path,
     recipient_run_id:rec.run_id,recipient_attempt:rec.run_attempt,
     recipient_sha:rec.sha,reason_code:receipt.reason_code,
     privileged_publisher_job:'skipped',health_jobs:'all_skipped',
@@ -170,6 +177,7 @@ function selfTest(){
   const source={id:22,run_attempt:1,workflow_id:33,
     name:'Metrics / Replay Request',
     path:'.github/workflows/metrics-replay-request.yml',event:'push',
+    actor:{login:'BestNathan'},triggering_actor:{login:'BestNathan'},
     head_branch:'feature',head_sha:'b'.repeat(40),
     repository:repo,head_repository:repo,status:'completed',
     conclusion:'success'};
@@ -177,10 +185,12 @@ function selfTest(){
   const jobs={jobs:jobNames.map((name,i)=>({id:100+i,name,
     run_id:1234,run_attempt:1,head_sha:sha,status:'completed',
     conclusion:i===0?'failure':'skipped'}))};
-  assert.equal(attestReplayDenial(receipt,source,recipient,jobs)
+  const sourceWorkflow={id:33,name:'Metrics / Replay Request',
+    path:'.github/workflows/metrics-replay-request.yml'};
+  assert.equal(attestReplayDenial(receipt,source,recipient,jobs,sourceWorkflow)
     .privileged_publisher_job,'skipped');
   const reject=(rr,ss,cc,jj)=>
-    assert.throws(()=>attestReplayDenial(rr,ss,cc,jj),/mismatch|unverified|denial/);
+    assert.throws(()=>attestReplayDenial(rr,ss,cc,jj,sourceWorkflow),/mismatch|unverified|denial/);
   reject(receipt,{...source,run_attempt:2},recipient,jobs);
   reject(receipt,{...source,head_sha:sha},recipient,jobs);
   reject(receipt,source,{...recipient,head_branch:'feature'},jobs);
@@ -191,6 +201,9 @@ function selfTest(){
   reject(receipt,source,recipient,{jobs:jobs.jobs.map(x=>
     x.name==='authorize-replay'?{...x,run_attempt:2}:x)});
   reject(receipt,{...source,event:'workflow_dispatch'},recipient,jobs);
+  assert.throws(()=>attestReplayDenial(receipt,source,recipient,jobs,
+    {...sourceWorkflow,path:'.github/workflows/evil.yml'}),/provenance mismatch/);
+  reject(receipt,{...source,actor:{login:'bad.actor!'}},recipient,jobs);
   const log='2026-10-16T00:00:00Z '+DENIAL_LOG_PREFIX+JSON.stringify(receipt)+'\n';
   assert.deepEqual(parseReplayDenialLog(log),receipt);
   assert.equal(parseReplayDenialLog('other job log'),null);
