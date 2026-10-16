@@ -207,7 +207,8 @@ export async function collectAuthenticatedReplayDenials(repo,sha,runs,
     const receipt=parseReplayDenialLog(log);
     if(!receipt)continue; // Older pre-receipt runs are not proof.
     const source=await request('/repos/'+repo+'/actions/runs/'+receipt.source_claim.run_id);
-    evidence.push(attestReplayDenial(receipt,source,recipient,jobs));
+    const workflow=await request('/repos/'+repo+'/actions/workflows/'+source.workflow_id);
+    evidence.push(attestReplayDenial(receipt,source,recipient,jobs,workflow));
   }
   return evidence;
 }
@@ -897,7 +898,8 @@ async function selfTest() {
     event:'push',head_branch:'test/untrusted',head_sha:branchSha,
     repository:denialFull,head_repository:denialFull,status:'completed',
     conclusion:'success',name:'Metrics / Replay Request',
-    path:'.github/workflows/metrics-replay-request.yml'};
+    path:'.github/workflows/metrics-replay-request.yml',
+    actor:{login:'BestNathan'},triggering_actor:{login:'BestNathan'}};
   const deniedRecipient={id:811,run_attempt:1,head_sha:denialSha,
     head_branch:'main',event:'workflow_run',repository:denialFull,
     head_repository:denialFull,status:'completed',conclusion:'failure',
@@ -911,6 +913,9 @@ async function selfTest() {
   const request=async p=>{
     if(p.endsWith('/actions/runs/811'))return deniedRecipient;
     if(p.endsWith('/actions/runs/701'))return deniedSource;
+    if(p.endsWith('/actions/workflows/385795701'))return {
+      id:385795701,name:'Metrics / Replay Request',
+      path:'.github/workflows/metrics-replay-request.yml'};
     if(p.endsWith('/actions/runs/811/attempts/1/jobs?per_page=100'))
       return deniedJobs;
     throw Error('unexpected negative evidence API: '+p);
