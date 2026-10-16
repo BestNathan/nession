@@ -7,6 +7,8 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {fileURLToPath} from 'node:url';
+import path from 'node:path';
+import {makeDenialReceipt,DENIAL_LOG_PREFIX} from './metrics-replay-denial-receipt.mjs';
 
 export const REPO='BestNathan/nession';
 export const REQUEST_PATH='.github/workflows/metrics-replay-request.yml';
@@ -160,5 +162,28 @@ if(process.argv[1]===fileURLToPath(import.meta.url)){
     if(process.argv[2]==='self-test')selfTest();
     else if(process.argv[2]==='authorize')await authorize();
     else no('usage: self-test | authorize');
-  }catch(e){console.error('::error::'+String(e.message));process.exitCode=1;}
+  }catch(e){
+    // A *refused* source can be independently analyzed later, but this job
+    // never claims its event payload is authenticated nor that its Publisher
+    // was skipped. GitHub recipient/attempt/jobs must be checked separately.
+    if(process.argv[2]==='authorize'&&process.env.GITHUB_EVENT_NAME==='workflow_run'){
+      try{
+        const file=process.env.GITHUB_EVENT_PATH;
+        const raw=file&&fs.existsSync(file)&&fs.statSync(file).size<=512*1024
+          ?JSON.parse(fs.readFileSync(file,'utf8')):null;
+        const receipt=makeDenialReceipt(process.env,raw,e);
+        if(receipt&&process.env.RUNNER_TEMP){
+          const output=path.join(process.env.RUNNER_TEMP,'metrics-replay-denial.json');
+          fs.writeFileSync(output,JSON.stringify(receipt)+'\\n',{flag:'wx',mode:0o600});
+          console.log(DENIAL_LOG_PREFIX+JSON.stringify(receipt));
+        }
+      }catch(error){
+        // A malformed/absent denial receipt is never allowed to turn a
+        // refusal into authorization, nor a failed job into success.
+        console.error('::warning::Metrics Replay denial evidence unavailable');
+      }
+    }
+    console.error('::error::'+String(e.message));
+    process.exitCode=1;
+  }
 }
