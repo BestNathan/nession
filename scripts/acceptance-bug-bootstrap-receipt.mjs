@@ -242,6 +242,10 @@ function selfTest() {
   const check=(i=issue,p=pr,a=pre,b=post,e=e2e,c=comparison)=>
     attestBugBootstrap(pin,i,p,a,b,e,c,target);
   assert.deepEqual(check().post_merge_agent.pass_criteria,['SC-03']);
+  // An unrelated witness in Issue prose OUTSIDE Success Criteria must be ignored,
+  // not allowed to override/reject a valid SC-bound historical witness.
+  assert.deepEqual(check({...issue,body:issue.body+'\nHistorical E2E witness: PR #1716 SHA '+
+    ('c'.repeat(40))+'; Reporter Fix PR #1724; E2E Run 38387630403 attempt 3'}),check());
   for(const item of [
     ()=>check({...issue,state:'open'}),
     ()=>check({...issue,labels:[{name:'bug'},{name:'requirement'}]}),
@@ -251,7 +255,7 @@ function selfTest() {
     ()=>check(issue,pr,pre,[post[0],post[1],post[2],{...post[3],contract_sha256:'a'.repeat(64)}]),
     ()=>check(issue,pr,pre,post,{...e2e,conclusion:'failure'}),
     ()=>check({...issue,body:issue.body.replace('PR #1716', 'PR #1717')}),
-    ()=>check({...issue,body:issue.body+'\nHistorical E2E witness: PR #1716 SHA '+('c'.repeat(40))+'; Reporter Fix PR #1724; E2E Run 38387630403 attempt 3'}),
+
     ()=>check(issue,pr,pre,post,e2e,{...comparison,merge_base_commit:{sha:pin.head}}),
   ]) assert.throws(item,/unverified|source|related|contract/);
   console.log('related Bug completed Acceptance receipts self-test passed');
