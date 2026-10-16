@@ -144,10 +144,12 @@ function selfTest(){
   assert.match(writer,/workflow_run:\s*\n    workflows: \["Metrics \/ Replay Request"\]\s*\n    types: \[completed\]/);
   assert.doesNotMatch(writer,/^  workflow_dispatch:\s*$/m);
   assert.match(writer,/needs: \[authorize-replay, rust-health, web-health, e2e-health\]/);
-  assert.match(writer,/publish:\s*\n\s*#[^\n]*\n\s*#[^\n]*\n\s*if:.*success\(\)/);
-  assert.doesNotMatch(writer,/publish:\s*\n(?:[^\n]*\n){0,4}\s*if:.*always\(\)/);
+  const publisher=writer.split(/\n  publish:\s*\n/)[1];
+  assert.ok(publisher, 'privileged Metrics Publisher job is required');
+  assert.match(publisher,/^\s*if:.*success\(\)/m);
+  assert.doesNotMatch(publisher,/^\s*if:.*always\(\)/m);
   for(const dependency of ['authorize-replay','rust-health','web-health','e2e-health']) {
-    assert.ok(writer.includes(`needs.${dependency}.result == 'success'`),
+    assert.ok(publisher.includes(`needs.${dependency}.result == 'success'`),
       `privileged Publisher must require successful ${dependency}`);
   }
   assert.match(writer,/scripts\/metrics-replay-source\.mjs authorize/);
