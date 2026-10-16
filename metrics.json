@@ -2,11 +2,11 @@
   "schema_version": 2,
   "repository_name": "BestNathan/nession",
   "branch": "main",
-  "commit_sha": "a3fa36ae7a369ed01c5aa26ddb09a8a861ce51b2",
-  "generated_at": "2026-10-16T08:16:39.797Z",
+  "commit_sha": "fa8d9ce944b0df2001dd9dcaf8e2278429539da9",
+  "generated_at": "2026-10-16T08:49:13.637Z",
   "repository": {
     "source": {
-      "loc": 260573,
+      "loc": 260617,
       "files": 1497
     },
     "tests": {
@@ -158,43 +158,43 @@
   },
   "efficiency": {
     "window": "7d",
-    "window_start": "2026-10-09T08:16:39.797Z",
-    "window_30d_start": "2026-09-16T08:16:39.797Z",
+    "window_start": "2026-10-09T08:49:13.637Z",
+    "window_30d_start": "2026-09-16T08:49:13.637Z",
     "source_churn": {
-      "additions": 56705,
-      "deletions": 17624,
-      "baseline": "8253b07bb7be6b4e0275638f74d9e1cf3aaedaf8"
+      "additions": 56723,
+      "deletions": 17628,
+      "baseline": "9ed76bd641985fb80c5c48326c2fa3a34b98ef73"
     },
     "source_churn_30d": {
-      "additions": 219891,
-      "deletions": 59200,
-      "baseline": "0b4e012b615dc0b6e56ca8f3d0b98756b3cca95e"
+      "additions": 219683,
+      "deletions": 59317,
+      "baseline": "4c73c1c77c149266e5d0735c35f4f4fac410a56c"
     },
     "commits": {
-      "total": 5375,
-      "last_7d": 1163,
-      "last_30d": 3292
+      "total": 5377,
+      "last_7d": 1154,
+      "last_30d": 3293
     },
     "issues": {
-      "total": 382,
+      "total": 383,
       "open": 16,
-      "created_7d": 58,
-      "closed_7d": 79,
-      "created_30d": 245,
-      "closed_30d": 242
+      "created_7d": 59,
+      "closed_7d": 80,
+      "created_30d": 246,
+      "closed_30d": 243
     },
     "pull_requests": {
-      "total": 1475,
+      "total": 1476,
       "open": 2,
-      "created_7d": 255,
-      "merged_7d": 235,
-      "created_30d": 862,
-      "merged_30d": 791
+      "created_7d": 253,
+      "merged_7d": 234,
+      "created_30d": 863,
+      "merged_30d": 792
     },
     "workflow_runs": {
-      "total": 15471,
-      "last_7d": 9345,
-      "last_30d": 13804
+      "total": 15524,
+      "last_7d": 9342,
+      "last_30d": 13857
     }
   }
 }
