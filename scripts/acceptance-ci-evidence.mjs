@@ -9,6 +9,7 @@ import { collectCrossIssueAcceptance } from './acceptance-cross-issue-receipt.mj
 import { collectRelatedBugCompletion } from './acceptance-bug-bootstrap-receipt.mjs';
 import { collectE2eWakeReceipts } from './acceptance-postrun-e2e-receipt.mjs';
 import { verifyWake } from './agent-evidence-waker.mjs';
+import {parseReplayDenialLog,attestReplayDenial} from './metrics-replay-denial-receipt.mjs';
 import {historicalCaseEvidence,selfTestHistoricalCase} from './acceptance-historical-case-replay.mjs';
 import { collectAuthenticatedCaseReadbacks, selfTestCaseReceipts } from './acceptance-case-readback-evidence.mjs';
 import os from 'node:os';
@@ -76,7 +77,7 @@ function compactRuns(runs, expectedSha) {
     .slice(0, MAX_RUNS_PER_SHA);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [] }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], replayDenials = [] }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -101,6 +102,7 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     kind: 'acceptance_ci_evidence',
     target_sha: sha,
     direct_runs: compactRuns(directRuns, sha),
+    verified_metrics_replay_denials: replayDenials,
     target_push_e2e_runs: targetPushE2eRuns,
     authenticated_post_e2e_wake_receipts: postE2eWakeReceipts,
     exact_head_e2e_steps: exactHeadE2eSteps,
@@ -172,6 +174,42 @@ export async function collectExactHeadE2eSteps(repo,sha,runs,request=githubGet) 
     proof.push(attestExactHeadE2eSteps(run,payload,sha,repo));
   }
   return proof;
+}
+
+// Bounded, trusted-main exact-target collection. An off-main SOURCE SHA is
+// expected for a denied replay and can never become an authorized writer.
+// Reauthenticate recipient/attempt, original authorization log, upstream
+// source identity and all five job outcomes independently through GitHub.
+export async function collectAuthenticatedReplayDenials(repo,sha,runs,
+  request=githubGet,getText=githubJobLog){
+  if(repo!=='BestNathan/nession'||!/^[a-f0-9]{40}$/.test(sha)||
+     !Array.isArray(runs))throw Error('invalid replay denial discovery scope');
+  const candidates=runs.filter(r=>r?.name==='Metrics / Repository Health'&&
+    r.path==='.github/workflows/metrics-repository.yml'&&
+    r.event==='workflow_run'&&r.head_sha===sha&&
+    r.head_branch==='main'&&r.status==='completed'&&r.conclusion==='failure')
+    .sort((a,b)=>b.id-a.id).slice(0,12);
+  const evidence=[];
+  for(const candidate of candidates){
+    const recipient=await request('/repos/'+repo+'/actions/runs/'+candidate.id);
+    if(recipient?.id!==candidate.id||recipient.head_sha!==sha||
+       !Number.isSafeInteger(recipient.run_attempt)||recipient.run_attempt<1)
+      throw Error('unverified replay denial recipient selection');
+    const jobs=await request('/repos/'+repo+'/actions/runs/'+candidate.id+
+      '/attempts/'+recipient.run_attempt+'/jobs?per_page=100');
+    if(!Array.isArray(jobs?.jobs)||jobs.jobs.length>100)
+      throw Error('unverified replay denial recipient jobs');
+    const matches=jobs.jobs.filter(j=>j.name==='authorize-replay');
+    if(matches.length!==1||matches[0].conclusion!=='failure')continue;
+    let log;
+    try{log=await getText('/repos/'+repo+'/actions/jobs/'+matches[0].id+'/logs');}
+    catch{continue;} // Missing/expired log cannot be counted as evidence.
+    const receipt=parseReplayDenialLog(log);
+    if(!receipt)continue; // Older pre-receipt runs are not proof.
+    const source=await request('/repos/'+repo+'/actions/runs/'+receipt.source_claim.run_id);
+    evidence.push(attestReplayDenial(receipt,source,recipient,jobs));
+  }
+  return evidence;
 }
 
 async function githubJobLog(path){
@@ -688,6 +726,9 @@ async function collectCommand(workspace, outFile) {
   const repo = requireText(process.env.GITHUB_REPOSITORY, 'GITHUB_REPOSITORY');
   const sha = execFileSync('git', ['-C', workspace, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   const directRuns = await workflowRunsForSha(repo, sha);
+  const replayDenials=process.env.ACCEPTANCE_STAGE==='post-merge'&&
+    ['1690','1853'].includes(String(process.env.ISSUE_NUMBER??''))
+    ?await collectAuthenticatedReplayDenials(repo,sha,directRuns):[];
   const targetPushE2eRuns=process.env.ACCEPTANCE_STAGE==='post-merge'
     ? await collectTargetPushE2eRuns(repo,sha) : [];
   // A post-E2E Agent cannot prove its own Waker has completed. Read the
@@ -829,7 +870,7 @@ async function collectCommand(workspace, outFile) {
     }
   }
   const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls,
-    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts });
+    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts, replayDenials });
   fs.writeFileSync(outFile, JSON.stringify(evidence, null, 2) + '\n');
   console.log(
     'collected acceptance CI evidence for ' + sha +
@@ -1018,6 +1059,9 @@ async function selfTest() {
 
   assert.equal(evidence.kind, 'acceptance_ci_evidence');
   assert.equal(evidence.provider_wake_evidence,null);
+  assert.deepEqual(normalizeCiEvidence({targetSha:'a'.repeat(40),
+    replayDenials:[{kind:'verified_metrics_replay_denial',source_run_id:22}]})
+    .verified_metrics_replay_denials,[{kind:'verified_metrics_replay_denial',source_run_id:22}]);
   const fixtureRoot=fs.mkdtempSync(path.join(os.tmpdir(),'nession-pinned-provider-evidence-'));
   try {
     const dir=path.join(fixtureRoot,'raw/workflows/agent-provider-smoke/2026-10-14');
