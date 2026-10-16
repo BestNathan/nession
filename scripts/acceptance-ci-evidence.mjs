@@ -10,6 +10,10 @@ import { collectRelatedBugCompletion } from './acceptance-bug-bootstrap-receipt.
 import { collectE2eWakeReceipts } from './acceptance-postrun-e2e-receipt.mjs';
 import { verifyWake } from './agent-evidence-waker.mjs';
 import {parseReplayDenialLog,attestReplayDenial,makeDenialReceipt,DENIAL_LOG_PREFIX} from './metrics-replay-denial-receipt.mjs';
+import {parsePolicyObservabilityLog,attestPolicyObservability,makePolicyObservabilityReceipt,
+  POLICY_WORKFLOW,POLICY_WORKFLOW_NAME,POLICY_OBSERVE_JOB,
+  POLICY_OBSERVABILITY_LOG_PREFIX} from './run-store-policy-observability-receipt.mjs';
+import {GOVERNED_REFS,UNOBSERVABLE_CAPABILITIES} from './run-store-policy.mjs';
 import {historicalCaseEvidence,selfTestHistoricalCase} from './acceptance-historical-case-replay.mjs';
 import { collectAuthenticatedCaseReadbacks, selfTestCaseReceipts } from './acceptance-case-readback-evidence.mjs';
 import os from 'node:os';
@@ -100,7 +104,7 @@ function compactRuns(runs, expectedSha) {
   return retainedRuns(runs, expectedSha).runs.map(compactRun);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], replayDenials = [] }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], replayDenials = [], storePolicyObservability = [] }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -128,6 +132,7 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     direct_runs: directRunsAtSha.runs.map(compactRun),
     direct_runs_dropped: directRunsAtSha.dropped,
     verified_metrics_replay_denials: replayDenials,
+    store_policy_observability: storePolicyObservability,
     target_push_e2e_runs: targetPushE2eRuns,
     authenticated_post_e2e_wake_receipts: postE2eWakeReceipts,
     exact_head_e2e_steps: exactHeadE2eSteps,
@@ -234,6 +239,45 @@ export async function collectAuthenticatedReplayDenials(repo,sha,runs,
     const source=await request('/repos/'+repo+'/actions/runs/'+receipt.source_claim.run_id);
     const workflow=await request('/repos/'+repo+'/actions/workflows/'+source.workflow_id);
     evidence.push(attestReplayDenial(receipt,source,recipient,jobs,workflow));
+  }
+  return evidence;
+}
+
+// Store / Governance Audit fails closed whenever it cannot verify the live
+// Ruleset policy. compactRun exposes only run metadata and the harness never
+// reads workflow artifacts, so a failed run was the ONLY thing an evaluator
+// could see about it and "this read-only credential cannot observe the
+// capability" was indistinguishable from "the policy is absent". Re-read the
+// observability receipt from the trusted observe job's own log, the same
+// bounded way the replay denial above is attested. The receipt can only ever
+// support Pending — never Pass.
+export async function collectStorePolicyObservability(repo,sha,runs,
+  request=githubGet,getText=githubJobLog){
+  if(repo!=='BestNathan/nession'||!/^[a-f0-9]{40}$/.test(sha)||
+     !Array.isArray(runs))throw Error('invalid store policy observability scope');
+  const candidates=runs.filter(r=>r?.name===POLICY_WORKFLOW_NAME&&
+    String(r.path??'').replace(/@refs\/heads\/[^\s]+$/,'')===POLICY_WORKFLOW&&
+    r.event==='push'&&r.head_sha===sha&&r.head_branch==='main'&&
+    r.status==='completed'&&r.conclusion==='failure')
+    .sort((a,b)=>b.id-a.id).slice(0,4);
+  const evidence=[];
+  for(const candidate of candidates){
+    const run=await request('/repos/'+repo+'/actions/runs/'+candidate.id);
+    if(run?.id!==candidate.id||run.head_sha!==sha||run.conclusion!=='failure'||
+       !Number.isSafeInteger(run.run_attempt)||run.run_attempt<1)
+      throw Error('unverified store policy observability recipient selection');
+    const jobs=await request('/repos/'+repo+'/actions/runs/'+candidate.id+
+      '/attempts/'+run.run_attempt+'/jobs?per_page=100');
+    if(!Array.isArray(jobs?.jobs)||jobs.jobs.length>100)
+      throw Error('unverified store policy observability recipient jobs');
+    const matches=jobs.jobs.filter(j=>j.name===POLICY_OBSERVE_JOB);
+    if(matches.length!==1||matches[0].conclusion!=='failure')continue;
+    let log;
+    try{log=await getText('/repos/'+repo+'/actions/jobs/'+matches[0].id+'/logs');}
+    catch{continue;} // Missing/expired log cannot be counted as evidence.
+    const receipt=parsePolicyObservabilityLog(log);
+    if(!receipt)continue; // Runs predating the receipt are not proof of anything.
+    evidence.push(attestPolicyObservability(receipt,run,matches[0]));
   }
   return evidence;
 }
@@ -755,6 +799,10 @@ async function collectCommand(workspace, outFile) {
   const replayDenials=process.env.ACCEPTANCE_STAGE==='post-merge'&&
     ['1690','1853'].includes(String(process.env.ISSUE_NUMBER??''))
     ?await collectAuthenticatedReplayDenials(repo,sha,directRuns):[];
+  // General, not issue-gated: any post-merge criterion about the governed refs
+  // needs to be able to tell "unobservable here" from "absent".
+  const storePolicyObservability=process.env.ACCEPTANCE_STAGE==='post-merge'
+    ?await collectStorePolicyObservability(repo,sha,directRuns):[];
   const targetPushE2eRuns=process.env.ACCEPTANCE_STAGE==='post-merge'
     ? await collectTargetPushE2eRuns(repo,sha) : [];
   // A post-E2E Agent cannot prove its own Waker has completed. Read the
@@ -896,7 +944,7 @@ async function collectCommand(workspace, outFile) {
     }
   }
   const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls,
-    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts, replayDenials });
+    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts, replayDenials, storePolicyObservability });
   fs.writeFileSync(outFile, JSON.stringify(evidence, null, 2) + '\n');
   console.log(
     'collected acceptance CI evidence for ' + sha +
@@ -961,6 +1009,67 @@ async function selfTest() {
   await assert.rejects(()=>collectAuthenticatedReplayDenials(denialRepo,denialSha,
     [candidate],async p=>p.endsWith('/actions/runs/701')?
       {...deniedSource,run_attempt:2}:request(p),async()=>denialLog),/provenance mismatch/);
+
+  // Store policy observability: the failed governance run's only evaluator-
+  // visible fact was its conclusion, which made an unobservable capability read
+  // exactly like an absent policy. The receipt is re-read from the trusted
+  // observe job's own log and its ceiling is Pending.
+  const policySha='d'.repeat(40);
+  const policyReceipt=makePolicyObservabilityReceipt({
+    GITHUB_REPOSITORY:denialRepo,GITHUB_REF:'refs/heads/main',GITHUB_SHA:policySha,
+    GITHUB_RUN_ID:'911',GITHUB_RUN_ATTEMPT:'1'},{
+    protected_by_server_ruleset:false,policy_observability:{
+      verdict:'unobservable_by_this_credential',
+      unobservable_capabilities:[UNOBSERVABLE_CAPABILITIES.bypass],
+      refs_whose_policy_is_unobservable_here:[...GOVERNED_REFS],
+      establishes_neither_presence_nor_absence:true}});
+  const policyRun={id:911,run_attempt:1,head_sha:policySha,head_branch:'main',
+    event:'push',status:'completed',conclusion:'failure',
+    name:POLICY_WORKFLOW_NAME,path:POLICY_WORKFLOW,
+    repository:denialFull,head_repository:denialFull};
+  const policyJobs={jobs:[{name:POLICY_OBSERVE_JOB,id:300,run_id:911,
+    run_attempt:1,head_sha:policySha,status:'completed',conclusion:'failure'}]};
+  const policyRequest=async p=>{
+    if(p.endsWith('/actions/runs/911'))return policyRun;
+    if(p.endsWith('/actions/runs/911/attempts/1/jobs?per_page=100'))return policyJobs;
+    throw Error('unexpected policy observability API: '+p);
+  };
+  const policyLog='2026-10-16T17:00:00Z '+POLICY_OBSERVABILITY_LOG_PREFIX+
+    JSON.stringify(policyReceipt)+'\n';
+  const observed=await collectStorePolicyObservability(denialRepo,policySha,
+    [{...policyRun,id:911}],policyRequest,async()=>policyLog);
+  assert.equal(observed.length,1);
+  assert.equal(observed[0].protection_established,false);
+  assert.equal(observed[0].maximum_supported_result,'Pending');
+  assert.deepEqual(observed[0].unobservable_capabilities,
+    [UNOBSERVABLE_CAPABILITIES.bypass]);
+  // A successful governance run is not this channel's business.
+  assert.deepEqual(await collectStorePolicyObservability(denialRepo,policySha,
+    [{...policyRun,conclusion:'success'}],policyRequest,async()=>policyLog),[]);
+  // A run at another SHA, another workflow, or a non-push event is not evidence.
+  assert.deepEqual(await collectStorePolicyObservability(denialRepo,policySha,
+    [{...policyRun,head_sha:'e'.repeat(40)}],policyRequest,async()=>policyLog),[]);
+  assert.deepEqual(await collectStorePolicyObservability(denialRepo,policySha,
+    [{...policyRun,event:'workflow_dispatch'}],policyRequest,async()=>policyLog),[]);
+  assert.deepEqual(await collectStorePolicyObservability(denialRepo,policySha,
+    [{...policyRun,path:'.github/workflows/evil.yml'}],policyRequest,
+    async()=>policyLog),[]);
+  // An absent log or an absent receipt is not evidence, and must not throw.
+  assert.deepEqual(await collectStorePolicyObservability(denialRepo,policySha,
+    [{...policyRun,id:911}],policyRequest,async()=>''),[]);
+  // A tampered receipt is rejected, never silently accepted or downgraded.
+  await assert.rejects(()=>collectStorePolicyObservability(denialRepo,policySha,
+    [{...policyRun,id:911}],policyRequest,
+    async()=>'2026-10-16T17:00:00Z '+POLICY_OBSERVABILITY_LOG_PREFIX+
+      JSON.stringify({...policyReceipt,protected_by_server_ruleset:true})+'\n'),
+    /invalid Run Store policy observability receipt/);
+  // A green observe job is not this channel: only a fail-closed run can be
+  // unobservable, so it yields no evidence rather than a throwing error. The
+  // collector stays fail-safe here — silence can never become a Pass.
+  assert.deepEqual(await collectStorePolicyObservability(denialRepo,policySha,
+    [{...policyRun,id:911}],async p=>p.includes('/jobs?')
+      ?{jobs:policyJobs.jobs.map(j=>({...j,conclusion:'success'}))}:policyRequest(p),
+    async()=>policyLog),[]);
 
   // Positive rerun: original pull_request HEAD unchanged; trusted-main repair
   // is merged into exact acceptance target before attempt 3 starts.

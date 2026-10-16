@@ -11,6 +11,8 @@ import {auditLiveRunStores} from './audit-live-run-stores.mjs';
 import {GOVERNED_REFS,UNOBSERVABLE_CAPABILITIES,evaluateStoreRules,
   validateMigrationBaseline,assertTrustedAuditContext,
   withRuleParameters} from './run-store-policy.mjs';
+import {makePolicyObservabilityReceipt,POLICY_OBSERVABILITY_LOG_PREFIX}
+  from './run-store-policy-observability-receipt.mjs';
 
 const REPO='BestNathan/nession';
 const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
@@ -183,6 +185,14 @@ async function live(out){
     (report.policy_observability.establishes_neither_presence_nor_absence?
       '\nBounded limitation: '+report.policy_observability.note+'\n':''));
   console.log('Store governance: '+report.result);
+  // The artifact above is the human-readable report, but acceptance evidence is
+  // compacted run metadata: an evaluator never sees a workflow artifact and can
+  // only read this run's conclusion. Without a receipt on the one channel that
+  // does reach it — the job log — "this credential cannot observe the
+  // capability" stays indistinguishable from "the policy is absent". Emitted
+  // before the fail-closed exit so the alert itself is unchanged.
+  const receipt=makePolicyObservabilityReceipt(process.env,report);
+  if(receipt)console.log(POLICY_OBSERVABILITY_LOG_PREFIX+JSON.stringify(receipt));
   // Explicit fail-closed alert status on unprotected branch policies. Caller
   // uploads the report even on failure, with zero write permissions.
   if(!report.actual_history_checked_against_unanchored_baseline||
@@ -250,6 +260,21 @@ function selfTest(){
   assert.match(blind.result,/unsupported administration capability/);
   assert.match(blind.result,/neither established nor disproven/);
   assert.doesNotMatch(blind.result,/no fully enforced/);
+  // The report artifact is not reachable by an evaluator, so the reason must
+  // also leave on the job-log receipt. Its ceiling is Pending.
+  const receiptEnv={GITHUB_REPOSITORY:REPO,GITHUB_REF:'refs/heads/main',
+    GITHUB_SHA:'b'.repeat(40),GITHUB_RUN_ID:'39000000002',GITHUB_RUN_ATTEMPT:'1'};
+  const receipt=makePolicyObservabilityReceipt(receiptEnv,blind);
+  assert.equal(receipt.verdict,'unobservable_by_this_credential');
+  assert.equal(receipt.maximum_supported_result,'Pending');
+  assert.equal(receipt.protected_by_server_ruleset,false);
+  assert.deepEqual(receipt.unobservable_capabilities,
+    [UNOBSERVABLE_CAPABILITIES.bypass]);
+  // A readable policy gap is a REAL finding, not an unsupported capability, and
+  // must never be receipted as one.
+  assert.equal(makePolicyObservabilityReceipt(receiptEnv,wrong),null);
+  // A verified policy is expressed by the run succeeding, not by a receipt.
+  assert.equal(makePolicyObservabilityReceipt(receiptEnv,readable),null);
   // Mixed: one ref blind, the others a readable failure — both facts survive.
   const mixed=summarizeGovernance(migration,[
     {...shape({bypass_actors:undefined,id:1}),
