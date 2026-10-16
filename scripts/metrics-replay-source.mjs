@@ -146,8 +146,8 @@ function selfTest(){
   assert.match(writer,/needs: \[authorize-replay, rust-health, web-health, e2e-health\]/);
   const publisher=writer.split(/\n  publish:\s*\n/)[1];
   assert.ok(publisher, 'privileged Metrics Publisher job is required');
-  assert.match(publisher,/^\s*if:.*success\(\)/m);
-  assert.doesNotMatch(publisher,/^\s*if:.*always\(\)/m);
+  assert.match(publisher,/^    if:.*success\(\)/m);
+  assert.doesNotMatch(publisher,/^    if:.*always\(\)/m);
   for(const dependency of ['authorize-replay','rust-health','web-health','e2e-health']) {
     assert.ok(publisher.includes(`needs.${dependency}.result == 'success'`),
       `privileged Publisher must require successful ${dependency}`);
