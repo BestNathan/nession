@@ -7,15 +7,13 @@ name: Metrics / Replay Request
 # GitHub REST before initiating any privileged work.
 on:
   workflow_dispatch:
-  push:
-    branches: [test/1690-denial-receipt-postmerge]
 
 permissions:
   contents: read
 
 jobs:
   request:
-    if: github.repository == 'BestNathan/nession' && github.ref == 'refs/heads/test/1690-denial-receipt-postmerge' && github.event_name == 'push' && github.actor == 'BestNathan'
+    if: github.repository == 'BestNathan/nession' && github.ref == 'refs/heads/main' && github.actor == 'BestNathan'
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
