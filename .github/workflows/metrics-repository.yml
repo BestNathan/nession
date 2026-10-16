@@ -38,6 +38,17 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/metrics-replay-source.mjs authorize
+      # A denied, main-owned authorizer may emit a tiny untrusted-source
+      # *claim* for later independent REST/job verification. Never attach
+      # App Store credentials or turn a rejected upstream into success.
+      - name: Preserve denied request source claim
+        if: ${{ failure() && github.event_name == 'workflow_run' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: metrics-replay-denial-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/metrics-replay-denial.json
+          if-no-files-found: ignore
+          retention-days: 14
 
   rust-health:
     needs: authorize-replay
