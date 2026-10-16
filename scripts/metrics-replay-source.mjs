@@ -144,7 +144,14 @@ function selfTest(){
   assert.match(writer,/workflow_run:\s*\n    workflows: \["Metrics \/ Replay Request"\]\s*\n    types: \[completed\]/);
   assert.doesNotMatch(writer,/^  workflow_dispatch:\s*$/m);
   assert.match(writer,/needs: \[authorize-replay, rust-health, web-health, e2e-health\]/);
-  assert.match(writer,/needs\.authorize-replay\.result == 'success'/);
+  const publisher=writer.split(/\n  publish:\s*\n/)[1];
+  assert.ok(publisher, 'privileged Metrics Publisher job is required');
+  assert.match(publisher,/^    if:.*success\(\)/m);
+  assert.doesNotMatch(publisher,/^    if:.*always\(\)/m);
+  for(const dependency of ['authorize-replay','rust-health','web-health','e2e-health']) {
+    assert.ok(publisher.includes(`needs.${dependency}.result == 'success'`),
+      `privileged Publisher must require successful ${dependency}`);
+  }
   assert.match(writer,/scripts\/metrics-replay-source\.mjs authorize/);
   console.log('Metrics Replay trusted-main source provenance: owner, exact SHA, actor, attempt, trigger and fallback negatives passed');
 }
