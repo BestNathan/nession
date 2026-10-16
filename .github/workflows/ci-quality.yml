@@ -11,10 +11,18 @@ env:
 on:
   pull_request:
     branches: [staging, main]
+  # Main pushes need their own run. #1853 SC-04 requires the blocking Gates and
+  # the acceptance self-test verdicts to be evidenced at the *merged* commit, and
+  # an exact-SHA post-merge evaluation can never see a `pull_request` run: those
+  # carry the PR head, not the merge SHA. This is deliberate, not a duplicate of
+  # the PR run — do not remove it as redundant.
+  push:
+    branches: [main]
 
-# One gate run per PR. Superseded runs are useless, so cancel them.
+# One gate run per PR, and one per main ref. Without the ref fallback every push
+# run would share the empty-number group `quality-` and cancel its predecessor.
 concurrency:
-  group: quality-${{ github.event.pull_request.number }}
+  group: quality-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
