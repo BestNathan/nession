@@ -58,6 +58,21 @@ export function evaluateStoreRules(ref,rulesets,approvedAppId){
     externally_anchored:false,
   };
 }
+// GitHub's REST ruleset response never carries the `update` rule's parameters:
+// a ruleset created with update_allows_fetch_and_merge false and one created
+// with true both read back as a bare {"type":"update"} (verified 2026-10-16
+// against a real ruleset and a throwaway probe). The value IS stored and IS
+// exposed by GraphQL, so the live reader must merge it in before evaluation.
+// evaluateStoreRules' strict `=== false` is deliberately unchanged: an absent
+// or non-boolean parameter stays absent, and only a real boolean is attached.
+export function withRuleParameters(detail,updateAllowsFetchAndMerge){
+  if(!Array.isArray(detail?.rules)||typeof updateAllowsFetchAndMerge!=='boolean')
+    return detail;
+  return {...detail,rules:detail.rules.map(rule=>rule?.type==='update'
+    ?{...rule,parameters:{update_allows_fetch_and_merge:updateAllowsFetchAndMerge}}
+    :rule)};
+}
+
 export function validateMigrationBaseline(manifest){
   if(manifest?.schema_version!==1||
      manifest.kind!=='unanchored_run_store_migration_baseline'||
@@ -104,6 +119,20 @@ export function runTests(){
     {...rule,bypass_actors:[{actor_id:app,actor_type:'Integration',bypass_mode:'exempt'}]},
     {...rule,bypass_actors:[...rule.bypass_actors,{actor_id:1,actor_type:'User',bypass_mode:'always'}]},
   ])assert.equal(evaluateStoreRules(ref,[mutation],app).configuration_verified,false);
+  // The REST shape GitHub actually returns drops the update rule's parameters,
+  // which is what made a correctly configured ruleset read as unverifiable.
+  // Merging the GraphQL-read value is the fix; an absent or non-boolean value
+  // must still fail closed.
+  const restShape={...rule,
+    rules:rule.rules.map(x=>x.type==='update'?{type:'update'}:x)};
+  assert.equal(evaluateStoreRules(ref,[restShape],app).configuration_verified,false);
+  assert.equal(evaluateStoreRules(ref,[withRuleParameters(restShape,false)],app)
+    .configuration_verified,true);
+  assert.equal(evaluateStoreRules(ref,[withRuleParameters(restShape,true)],app)
+    .configuration_verified,false);
+  assert.deepEqual(withRuleParameters(restShape,undefined),restShape);
+  assert.deepEqual(withRuleParameters(restShape,'false'),restShape);
+  assert.deepEqual(withRuleParameters({id:1},false),{id:1});
   assert.equal(evaluateStoreRules(ref,[rule],app+1).configuration_verified,false);
   assert.equal(evaluateStoreRules(ref,[{...rule,source:'attacker/repo'}],app).configuration_verified,false);
   assert.throws(()=>evaluateStoreRules('other',[],app),/invalid target/);

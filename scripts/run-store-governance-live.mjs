@@ -8,8 +8,8 @@ import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {auditLiveRunStores} from './audit-live-run-stores.mjs';
-import {GOVERNED_REFS,evaluateStoreRules,validateMigrationBaseline,assertTrustedAuditContext}
-  from './run-store-policy.mjs';
+import {GOVERNED_REFS,evaluateStoreRules,validateMigrationBaseline,assertTrustedAuditContext,
+  withRuleParameters} from './run-store-policy.mjs';
 
 const REPO='BestNathan/nession';
 const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
@@ -20,6 +20,25 @@ function api(endpoint){
     stdio:['ignore','pipe','pipe'],
   });
   return JSON.parse(raw);
+}
+// REST omits the update rule's parameters entirely, so read the stored value
+// from GraphQL. Any failure returns null: the policy then stays unverified
+// (fail closed) instead of aborting the audit and losing its independent,
+// genuinely passing history/five-mode observation along with it.
+function updateRuleParameter(id){
+  const query='query($id:Int!){repository(owner:"BestNathan",name:"nession")'+
+    '{ruleset(databaseId:$id){rules(first:50){nodes{type parameters{'+
+    '... on UpdateParameters{updateAllowsFetchAndMerge}}}}}}}';
+  try{
+    const raw=execFileSync('gh',['api','graphql','-f','query='+query,'-F','id='+id],{
+      encoding:'utf8',maxBuffer:2*1024*1024,timeout:30000,stdio:['ignore','pipe','pipe']});
+    const nodes=JSON.parse(raw)?.data?.repository?.ruleset?.rules?.nodes;
+    if(!Array.isArray(nodes))return null;
+    const update=nodes.filter(node=>node?.type==='UPDATE');
+    if(update.length!==1)return null;
+    const value=update[0]?.parameters?.updateAllowsFetchAndMerge;
+    return typeof value==='boolean'?value:null;
+  }catch{return null;}
 }
 export function summarizeGovernance(manifest,rulesets,appId,history){
   validateMigrationBaseline(manifest);
@@ -69,7 +88,7 @@ async function live(out){
   if(!Array.isArray(rulesetSummary))fail('GitHub Rulesets are unreadable');
   const details=rulesetSummary.map(row=>{
     if(!Number.isSafeInteger(row.id)||row.id<1)fail('invalid Ruleset ID');
-    return api('rulesets/'+row.id);
+    return withRuleParameters(api('rulesets/'+row.id),updateRuleParameter(row.id));
   });
   const history=await auditLiveRunStores({
     checkout:ROOT,sourceSha:process.env.GITHUB_SHA,
