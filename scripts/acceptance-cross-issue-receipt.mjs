@@ -236,7 +236,7 @@ function selfTest(){
     [run,jobs,artifact,result,pr,compare,{...e2e,workflow_conclusion:'success'},options],
     [run,jobs,artifact,result,pr,compare,{...e2e,steps:e2e.steps.slice(1)},options],
     [run,jobs,artifact,result,pr,compare,e2e,{...options,subjectIssue:1719}],
-  ]) assert.throws(()=>invoke(r,jb,a,re,p,c,e,o),/unverified|missing|unsuccessful|lacks/);
+  ]) assert.throws(()=>invoke(r,jb,a,re,p,c,e,o),/unverified|not verified|missing|unsuccessful|lacks/);
   console.log('historical cross-Issue Acceptance proof self-test passed');
 }
 if(process.argv[1] && path.resolve(process.argv[1])===path.resolve(new URL(import.meta.url).pathname)){
