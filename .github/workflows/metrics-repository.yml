@@ -131,7 +131,9 @@ jobs:
           retention-days: 1
 
   publish:
-    if: ${{ always() && needs.authorize-replay.result == 'success' && github.ref == 'refs/heads/main' && github.repository == 'BestNathan/nession' }}
+    # Do not mint the privileged App token unless every health dependency passed.
+    # `always()` previously allowed a publish attempt after failed/skipped health jobs.
+    if: ${{ success() && needs.authorize-replay.result == 'success' && needs.rust-health.result == 'success' && needs.web-health.result == 'success' && needs.e2e-health.result == 'success' && github.ref == 'refs/heads/main' && github.repository == 'BestNathan/nession' }}
     needs: [authorize-replay, rust-health, web-health, e2e-health]
     runs-on: ubuntu-latest
     permissions:
