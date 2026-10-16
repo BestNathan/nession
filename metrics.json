@@ -3,7 +3,7 @@
   "repository_name": "BestNathan/nession",
   "branch": "main",
   "commit_sha": "4d627e9b303477f626e0155a4d07159aa2a505ad",
-  "generated_at": "2026-10-16T13:13:18.371Z",
+  "generated_at": "2026-10-16T13:21:57.736Z",
   "repository": {
     "source": {
       "loc": 260762,
@@ -49,9 +49,9 @@
     "coverage": {
       "rust": {
         "lines": {
-          "covered": 29595,
+          "covered": 29596,
           "total": 34086,
-          "rate": 0.8682450272839289
+          "rate": 0.8682743648418706
         },
         "crates": {
           "nession-common": {
@@ -64,9 +64,9 @@
           },
           "nession-agent": {
             "lines": {
-              "covered": 12041,
+              "covered": 12042,
               "total": 13390,
-              "rate": 0.8992531740104556
+              "rate": 0.8993278566094101
             },
             "threshold": 0.79
           },
@@ -130,9 +130,9 @@
       },
       "web": {
         "lines": {
-          "covered": 9414,
+          "covered": 9413,
           "total": 10831,
-          "rate": 0.8691718216231188
+          "rate": 0.8690794940448712
         }
       }
     },
@@ -158,12 +158,12 @@
   },
   "efficiency": {
     "window": "7d",
-    "window_start": "2026-10-09T13:13:18.371Z",
-    "window_30d_start": "2026-09-16T13:13:18.371Z",
+    "window_start": "2026-10-09T13:21:57.736Z",
+    "window_30d_start": "2026-09-16T13:21:57.736Z",
     "source_churn": {
-      "additions": 37042,
-      "deletions": 13036,
-      "baseline": "7a190c4fc6e691605caec5ca6d49809158886403"
+      "additions": 37037,
+      "deletions": 13034,
+      "baseline": "4ffa800980b96d87b1360f0a49ed12d954a6e066"
     },
     "source_churn_30d": {
       "additions": 219719,
@@ -172,7 +172,7 @@
     },
     "commits": {
       "total": 5381,
-      "last_7d": 1129,
+      "last_7d": 1126,
       "last_30d": 3280
     },
     "issues": {
@@ -186,15 +186,15 @@
     "pull_requests": {
       "total": 1478,
       "open": 2,
-      "created_7d": 250,
+      "created_7d": 249,
       "merged_7d": 227,
       "created_30d": 862,
       "merged_30d": 791
     },
     "workflow_runs": {
-      "total": 15640,
-      "last_7d": 9327,
-      "last_30d": 13956
+      "total": 15649,
+      "last_7d": 9306,
+      "last_30d": 13965
     }
   }
 }
