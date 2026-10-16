@@ -76,6 +76,80 @@ export function validateDenialReceipt(receipt){
   if(Object.keys(receipt).some(k=>!allowed.has(k)))throw Error('unexpected receipt fields');
   return receipt;
 }
+
+// GitHub REST Run/Attempt metadata and original job logs are separate from the
+// source event claim. Never infer publication safety from a failed run alone.
+export function attestReplayDenial(receipt,source,recipient,jobs){
+  validateDenialReceipt(receipt);
+  const rec=receipt.recipient,src=receipt.source_claim;
+  const repo={full_name:REPO};
+  if(recipient?.id!==rec.run_id||
+     recipient?.run_attempt!==rec.run_attempt||
+     recipient?.name!=='Metrics / Repository Health'||
+     !['.github/workflows/metrics-repository.yml',
+       '.github/workflows/metrics-repository.yml@refs/heads/main'].includes(recipient.path)||
+     recipient?.event!=='workflow_run'||recipient?.head_branch!=='main'||
+     recipient?.head_sha!==rec.sha||
+     recipient?.repository?.full_name!==REPO||
+     recipient?.head_repository?.full_name!==REPO||
+     recipient?.status!=='completed'||recipient?.conclusion!=='failure'||
+     source?.id!==src.run_id||source?.run_attempt!==src.run_attempt||
+     source?.workflow_id!==src.workflow_id||
+     source?.event!==src.event||source?.head_branch!==src.branch||
+     source?.head_sha!==src.sha||
+     source?.repository?.full_name!==REPO||
+     source?.head_repository?.full_name!==REPO||
+     source?.status!=='completed'||source?.conclusion!=='success'||
+     !['push','workflow_dispatch'].includes(source?.event)||
+     !Array.isArray(jobs?.jobs)||jobs.jobs.length!==5)
+    throw Error('Metrics Replay denial Run/Attempt/source provenance mismatch');
+  if(receipt.reason_code==='unexpected_source_event'&&
+     source.event==='workflow_dispatch')
+    throw Error('Metrics Replay denied-event reason contradicts source');
+  if(receipt.reason_code==='untrusted_source'&&
+     source.event==='workflow_dispatch'&&source.head_branch==='main'&&
+     source.name==='Metrics / Replay Request'&&
+     source.path==='.github/workflows/metrics-replay-request.yml'&&
+     source.actor?.login==='BestNathan'&&
+     source.triggering_actor?.login==='BestNathan')
+    throw Error('Metrics Replay denied-source reason contradicts source');
+  const expected=new Map([
+    ['authorize-replay','failure'],['rust-health','skipped'],
+    ['web-health','skipped'],['e2e-health','skipped'],['publish','skipped']]);
+  const seen=new Set();
+  for(const job of jobs.jobs){
+    if(seen.has(job.name)||!expected.has(job.name)||
+       job.run_id!==rec.run_id||job.run_attempt!==rec.run_attempt||
+       job.head_sha!==rec.sha||job.status!=='completed'||
+       job.conclusion!==expected.get(job.name))
+      throw Error('Metrics Replay denial publisher/job outcomes unverified');
+    seen.add(job.name);
+  }
+  if(seen.size!==expected.size)
+    throw Error('Metrics Replay denial jobs missing');
+  return Object.freeze({kind:'verified_metrics_replay_denial',
+    source_run_id:src.run_id,source_attempt:src.run_attempt,
+    source_branch:src.branch,source_event:src.event,source_sha:src.sha,
+    recipient_run_id:rec.run_id,recipient_attempt:rec.run_attempt,
+    recipient_sha:rec.sha,reason_code:receipt.reason_code,
+    privileged_publisher_job:'skipped',health_jobs:'all_skipped',
+    evidence:'GitHub API Run/Attempt + exact original trusted-main authorize log and job outcomes',
+    independent_store_ref_anchor:'not_proven'});
+}
+// GitHub job logs are service-hosted, but only a trusted-main authorizer's
+// exact job may produce an attested receipt. Never parse an arbitrary log.
+export function parseReplayDenialLog(log){
+  if(typeof log!=='string'||log.length>1048576)
+    throw Error('invalid Metrics Replay denial log size');
+  const candidates=log.split(/\\r?\\n/).filter(line=>line.includes(DENIAL_LOG_PREFIX));
+  if(candidates.length!==1)return null;
+  const line=candidates[0];
+  const match=line.match(/METRICS_REPLAY_DENIAL_V1 (\\{.*\\})\\s*$/);
+  if(!match||match[1].length>8192)
+    throw Error('invalid Metrics Replay denial record framing');
+  return validateDenialReceipt(JSON.parse(match[1]));
+}
+
 function selfTest(){
   const sha='a'.repeat(40),repo={full_name:REPO};
   const env={GITHUB_REPOSITORY:REPO,GITHUB_EVENT_NAME:'workflow_run',
@@ -89,6 +163,10 @@ function selfTest(){
   assert.equal(validateDenialReceipt(receipt).reason_code,'unexpected_source_event');
   assert.equal(receipt.source_claim.branch,'feature');
   assert.equal(receipt.store_write_authorized,false);
+  const log='2026-10-16T00:00:00Z '+DENIAL_LOG_PREFIX+JSON.stringify(receipt)+'\\n';
+  assert.deepEqual(parseReplayDenialLog(log),receipt);
+  assert.equal(parseReplayDenialLog('other job log'),null);
+  assert.equal(parseReplayDenialLog(log+log),null);
   assert.equal(makeDenialReceipt(env,event,new Error('GitHub API timeout')),null);
   assert.equal(makeDenialReceipt({...env,GITHUB_REF:'refs/heads/feature'},event,denial),null);
   assert.equal(makeDenialReceipt({...env,GITHUB_RUN_ATTEMPT:'x'},event,denial),null);
