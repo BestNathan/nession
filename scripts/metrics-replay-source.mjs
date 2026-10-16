@@ -174,7 +174,7 @@ if(process.argv[1]===fileURLToPath(import.meta.url)){
         const receipt=makeDenialReceipt(process.env,raw,e);
         if(receipt&&process.env.RUNNER_TEMP){
           const output=path.join(process.env.RUNNER_TEMP,'metrics-replay-denial.json');
-          fs.writeFileSync(output,JSON.stringify(receipt)+'\\n',{flag:'wx',mode:0o600});
+          fs.writeFileSync(output,JSON.stringify(receipt)+'\n',{flag:'wx',mode:0o600});
           console.log(DENIAL_LOG_PREFIX+JSON.stringify(receipt));
         }
       }catch(error){
