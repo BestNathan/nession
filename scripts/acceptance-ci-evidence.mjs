@@ -9,7 +9,7 @@ import { collectCrossIssueAcceptance } from './acceptance-cross-issue-receipt.mj
 import { collectRelatedBugCompletion } from './acceptance-bug-bootstrap-receipt.mjs';
 import { collectE2eWakeReceipts } from './acceptance-postrun-e2e-receipt.mjs';
 import { verifyWake } from './agent-evidence-waker.mjs';
-import {parseReplayDenialLog,attestReplayDenial} from './metrics-replay-denial-receipt.mjs';
+import {parseReplayDenialLog,attestReplayDenial,makeDenialReceipt,DENIAL_LOG_PREFIX} from './metrics-replay-denial-receipt.mjs';
 import {historicalCaseEvidence,selfTestHistoricalCase} from './acceptance-historical-case-replay.mjs';
 import { collectAuthenticatedCaseReadbacks, selfTestCaseReceipts } from './acceptance-case-readback-evidence.mjs';
 import os from 'node:os';
@@ -880,6 +880,57 @@ async function collectCommand(workspace, outFile) {
 }
 
 async function selfTest() {
+  // Security evidence cannot inherit the target's main SHA from an off-main
+  // source, cannot trust the job log without REST identities, and must prove
+  // the privileged Publisher actually skipped.
+  const denialSha='a'.repeat(40),branchSha='b'.repeat(40);
+  const denialRepo='BestNathan/nession',denialFull={full_name:denialRepo};
+  const receipt=makeDenialReceipt({
+    GITHUB_REPOSITORY:denialRepo,GITHUB_EVENT_NAME:'workflow_run',
+    GITHUB_REF:'refs/heads/main',GITHUB_SHA:denialSha,
+    GITHUB_RUN_ID:'811',GITHUB_RUN_ATTEMPT:'1',
+  },{workflow_run:{id:701,run_attempt:1,workflow_id:385795701,
+    event:'push',head_branch:'test/untrusted',head_sha:branchSha,
+    repository:denialFull,head_repository:denialFull}},
+  new Error('Metrics Replay refused: unexpected wake-up event or upstream trigger'));
+  const deniedSource={id:701,run_attempt:1,workflow_id:385795701,
+    event:'push',head_branch:'test/untrusted',head_sha:branchSha,
+    repository:denialFull,head_repository:denialFull,status:'completed',
+    conclusion:'success',name:'Metrics / Replay Request',
+    path:'.github/workflows/metrics-replay-request.yml'};
+  const deniedRecipient={id:811,run_attempt:1,head_sha:denialSha,
+    head_branch:'main',event:'workflow_run',repository:denialFull,
+    head_repository:denialFull,status:'completed',conclusion:'failure',
+    name:'Metrics / Repository Health',
+    path:'.github/workflows/metrics-repository.yml'};
+  const deniedJobs={jobs:['authorize-replay','rust-health','web-health',
+    'e2e-health','publish'].map((name,i)=>({name,id:200+i,run_id:811,
+    run_attempt:1,head_sha:denialSha,status:'completed',
+    conclusion:i===0?'failure':'skipped'}))};
+  const candidate={...deniedRecipient};
+  const request=async p=>{
+    if(p.endsWith('/actions/runs/811'))return deniedRecipient;
+    if(p.endsWith('/actions/runs/701'))return deniedSource;
+    if(p.endsWith('/actions/runs/811/attempts/1/jobs?per_page=100'))
+      return deniedJobs;
+    throw Error('unexpected negative evidence API: '+p);
+  };
+  const denialLog='2026-10-16T03:06:57Z '+DENIAL_LOG_PREFIX+
+    JSON.stringify(receipt)+'\\n';
+  const verified=await collectAuthenticatedReplayDenials(denialRepo,denialSha,
+    [candidate,{...candidate,head_sha:branchSha}],request,async()=>denialLog);
+  assert.equal(verified.length,1);
+  assert.equal(verified[0].source_sha,branchSha);
+  assert.equal(verified[0].privileged_publisher_job,'skipped');
+  assert.deepEqual(await collectAuthenticatedReplayDenials(denialRepo,denialSha,
+    [candidate],request,async()=>''),[]);
+  await assert.rejects(()=>collectAuthenticatedReplayDenials(denialRepo,denialSha,
+    [candidate],async p=>p.includes('/jobs?')?{jobs:deniedJobs.jobs.map(j=>
+      j.name==='publish'?{...j,conclusion:'success'}:j)}:request(p),
+    async()=>denialLog),/publisher\/job/);
+  await assert.rejects(()=>collectAuthenticatedReplayDenials(denialRepo,denialSha,
+    [candidate],async p=>p.endsWith('/actions/runs/701')?
+      {...deniedSource,run_attempt:2}:request(p),async()=>denialLog),/provenance mismatch/);
 
   // Positive rerun: original pull_request HEAD unchanged; trusted-main repair
   // is merged into exact acceptance target before attempt 3 starts.
