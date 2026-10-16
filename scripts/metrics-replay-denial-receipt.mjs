@@ -96,8 +96,8 @@ export function attestReplayDenial(receipt,source,recipient,jobs,workflow){
      workflow?.id!==source?.workflow_id||
      workflow?.name!==source?.name||
      workflow?.path!==String(source?.path??'').replace(/@refs\/heads\/[^\s]+$/,'')||
-     !/^[A-Za-z0-9_-]{1,64}$/.test(source?.actor?.login??'')||
-     !/^[A-Za-z0-9_-]{1,64}$/.test(source?.triggering_actor?.login??'')||
+     !/^[A-Za-z0-9_-]{1,58}(?:\[bot\])?$/.test(source?.actor?.login??'')||
+     !/^[A-Za-z0-9_-]{1,58}(?:\[bot\])?$/.test(source?.triggering_actor?.login??'')||
      source?.workflow_id!==src.workflow_id||
      source?.event!==src.event||source?.head_branch!==src.branch||
      source?.head_sha!==src.sha||
@@ -207,6 +207,9 @@ function selfTest(){
   assert.throws(()=>attestReplayDenial(receipt,source,recipient,jobs,
     {...sourceWorkflow,path:'.github/workflows/evil.yml'}),/provenance mismatch/);
   reject(receipt,{...source,actor:{login:'bad.actor!'}},recipient,jobs);
+  assert.equal(attestReplayDenial(receipt,{...source,actor:{login:'github-actions[bot]'},
+    triggering_actor:{login:'github-actions[bot]'}},recipient,jobs,sourceWorkflow)
+    .source_actor,'github-actions[bot]');
   const log='2026-10-16T00:00:00Z '+DENIAL_LOG_PREFIX+JSON.stringify(receipt)+'\n';
   assert.deepEqual(parseReplayDenialLog(log),receipt);
   assert.equal(parseReplayDenialLog('other job log'),null);
