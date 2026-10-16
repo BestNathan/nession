@@ -162,6 +162,35 @@ function selfTest(){
   assert.equal(validateDenialReceipt(receipt).reason_code,'unexpected_source_event');
   assert.equal(receipt.source_claim.branch,'feature');
   assert.equal(receipt.store_write_authorized,false);
+  const recipient={id:receipt.recipient.run_id,run_attempt:1,
+    name:'Metrics / Repository Health',
+    path:'.github/workflows/metrics-repository.yml',event:'workflow_run',
+    head_branch:'main',head_sha:sha,repository:repo,head_repository:repo,
+    status:'completed',conclusion:'failure'};
+  const source={id:22,run_attempt:1,workflow_id:33,
+    name:'Metrics / Replay Request',
+    path:'.github/workflows/metrics-replay-request.yml',event:'push',
+    head_branch:'feature',head_sha:'b'.repeat(40),
+    repository:repo,head_repository:repo,status:'completed',
+    conclusion:'success'};
+  const jobNames=['authorize-replay','rust-health','web-health','e2e-health','publish'];
+  const jobs={jobs:jobNames.map((name,i)=>({id:100+i,name,
+    run_id:1234,run_attempt:1,head_sha:sha,status:'completed',
+    conclusion:i===0?'failure':'skipped'}))};
+  assert.equal(attestReplayDenial(receipt,source,recipient,jobs)
+    .privileged_publisher_job,'skipped');
+  const reject=(rr,ss,cc,jj)=>
+    assert.throws(()=>attestReplayDenial(rr,ss,cc,jj),/mismatch|unverified|denial/);
+  reject(receipt,{...source,run_attempt:2},recipient,jobs);
+  reject(receipt,{...source,head_sha:sha},recipient,jobs);
+  reject(receipt,source,{...recipient,head_branch:'feature'},jobs);
+  reject(receipt,source,{...recipient,conclusion:'success'},jobs);
+  reject(receipt,source,recipient,{jobs:jobs.jobs.slice(1)});
+  reject(receipt,source,recipient,{jobs:jobs.jobs.map(x=>
+    x.name==='publish'?{...x,conclusion:'success'}:x)});
+  reject(receipt,source,recipient,{jobs:jobs.jobs.map(x=>
+    x.name==='authorize-replay'?{...x,run_attempt:2}:x)});
+  reject(receipt,{...source,event:'workflow_dispatch'},recipient,jobs);
   const log='2026-10-16T00:00:00Z '+DENIAL_LOG_PREFIX+JSON.stringify(receipt)+'\n';
   assert.deepEqual(parseReplayDenialLog(log),receipt);
   assert.equal(parseReplayDenialLog('other job log'),null);
