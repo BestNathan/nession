@@ -44,11 +44,29 @@ function updateRuleParameter(id){
       ' — policy stays unverified (fail closed)');
     return null;
   }
-  const nodes=JSON.parse(raw)?.data?.repository?.ruleset?.rules?.nodes;
-  if(!Array.isArray(nodes))fail('unreadable Ruleset rule parameters for '+id);
+  // Every branch reports *why* the value is unavailable and returns null. This
+  // runs for every ruleset in the repository, including ones unrelated to the
+  // governed refs (e.g. a disabled "main" ruleset with no update rule), so an
+  // unexpected shape here is an absent parameter — not grounds for aborting the
+  // whole audit and discarding its independent observation.
+  const ruleset=JSON.parse(raw)?.data?.repository?.ruleset;
+  const nodes=ruleset?.rules?.nodes;
+  if(!Array.isArray(nodes)){
+    console.error('::warning::Run Store Ruleset '+id+' not readable via GraphQL (ruleset='+
+      (ruleset===null?'null':'malformed')+') — policy stays unverified (fail closed)');
+    return null;
+  }
   const update=nodes.filter(node=>node?.type==='UPDATE');
-  if(update.length!==1)fail('ambiguous update rule parameters for '+id);
+  if(update.length!==1){
+    console.error('::warning::Run Store Ruleset '+id+' exposes '+update.length+
+      ' UPDATE rule(s); no fetch-and-merge parameter to read — policy stays unverified');
+    return null;
+  }
   const value=update[0]?.parameters?.updateAllowsFetchAndMerge;
+  if(typeof value!=='boolean'){
+    console.error('::warning::Run Store Ruleset '+id+
+      ' exposes no boolean updateAllowsFetchAndMerge — policy stays unverified');
+  }
   return typeof value==='boolean'?value:null;
 }
 export function summarizeGovernance(manifest,rulesets,appId,history){
@@ -99,7 +117,17 @@ async function live(out){
   if(!Array.isArray(rulesetSummary))fail('GitHub Rulesets are unreadable');
   const details=rulesetSummary.map(row=>{
     if(!Number.isSafeInteger(row.id)||row.id<1)fail('invalid Ruleset ID');
-    return withRuleParameters(api('rulesets/'+row.id),updateRuleParameter(row.id));
+    const detail=api('rulesets/'+row.id);
+    // GitHub omits bypass_actors unless the requesting identity has write access
+    // to the ruleset, so an absent list means "unreadable here", never "no
+    // bypass configured". Without it the App-only bypass cannot be verified at
+    // all, which is the difference between a real policy gap and a credential
+    // that cannot see the policy.
+    if(!Array.isArray(detail?.bypass_actors))
+      console.error('::warning::Run Store Ruleset '+row.id+
+        ' returns no bypass_actors; the requesting token lacks ruleset write access,'+
+        ' so the App-only bypass cannot be verified — policy stays unverified');
+    return withRuleParameters(detail,updateRuleParameter(row.id));
   });
   const history=await auditLiveRunStores({
     checkout:ROOT,sourceSha:process.env.GITHUB_SHA,
