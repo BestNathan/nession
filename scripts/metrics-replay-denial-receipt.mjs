@@ -103,7 +103,7 @@ export function attestReplayDenial(receipt,source,recipient,jobs,workflow){
      source?.head_sha!==src.sha||
      source?.repository?.full_name!==REPO||
      source?.head_repository?.full_name!==REPO||
-     source?.status!=='completed'||source?.conclusion!=='success'||
+     source?.status!=='completed'||!['success','skipped'].includes(source?.conclusion)||
      !['push','workflow_dispatch'].includes(source?.event)||
      !Array.isArray(jobs?.jobs)||jobs.jobs.length!==5)
     throw Error('Metrics Replay denial Run/Attempt/source provenance mismatch');
@@ -201,6 +201,9 @@ function selfTest(){
   reject(receipt,source,recipient,{jobs:jobs.jobs.map(x=>
     x.name==='authorize-replay'?{...x,run_attempt:2}:x)});
   reject(receipt,{...source,event:'workflow_dispatch'},recipient,jobs);
+  assert.equal(attestReplayDenial(receipt,{...source,conclusion:'skipped'},
+    recipient,jobs,sourceWorkflow).source_event,'push');
+  reject(receipt,{...source,conclusion:'failure'},recipient,jobs);
   assert.throws(()=>attestReplayDenial(receipt,source,recipient,jobs,
     {...sourceWorkflow,path:'.github/workflows/evil.yml'}),/provenance mismatch/);
   reject(receipt,{...source,actor:{login:'bad.actor!'}},recipient,jobs);
