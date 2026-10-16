@@ -13,7 +13,9 @@ permissions:
 
 jobs:
   request:
-    if: github.repository == 'BestNathan/nession' && github.ref == 'refs/heads/main' && github.actor == 'BestNathan'
+    # Disposable adversarial-ref fixture only: run an otherwise harmless request,
+    # to prove trusted-main recipient rejects a *successful* non-main dispatch.
+    if: github.repository == 'BestNathan/nession' && github.ref == 'refs/heads/test/1690-untrusted-replay-ref' && github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
