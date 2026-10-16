@@ -14,7 +14,6 @@ on:
       - scripts/run-store-governance-live.mjs
       - scripts/run-store-migration-baseline.json
       - scripts/audit-live-run-stores.mjs
-      - scripts/run-store-five-mode-evidence.mjs
       - scripts/run-store-integrity-drill.mjs
       - scripts/run-store-cas-matrix.mjs
       - .github/workflows/*-ingest.yml
@@ -54,13 +53,10 @@ jobs:
           mkdir -p "${RUNNER_TEMP}/store-governance"
           node scripts/run-store-inventory.mjs live \
             "${RUNNER_TEMP}/store-governance/live.json"
-      - name: Collect five-mode authenticated Git-byte receipt evidence (read-only)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          node scripts/run-store-five-mode-evidence.mjs collect \
-            "${RUNNER_TEMP}/store-governance/five-mode-readback.json"
+      # The five-mode Git-byte receipt readback deliberately lives in its own
+      # owner, Store / Five-Mode Readback. It is read-only and unrelated to
+      # Ruleset enforcement, so leaving it here meant this job's fail-closed
+      # policy alert also discarded a genuinely passing observation.
       # This matrix proves source/ingester/consumer bytes, NOT Ruleset policy.
       - name: Execute isolated tamper detection drill against canonical Git audit
         run: |

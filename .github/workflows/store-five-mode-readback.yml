@@ -1,0 +1,62 @@
+name: Store / Five-Mode Readback
+
+# #1862 SC-02: the read-only five-mode Git-byte receipt readback must be carried
+# by a run that can succeed at the evaluated SHA. It used to run only inside
+# Store / Governance Audit, whose fail-closed policy alert makes that whole run
+# fail, so a genuinely passing observation was never carried by a successful run
+# and no exact-SHA evaluator could cite it.
+#
+# This workflow owns ONLY the readback. The fail-closed alert for an unenforced
+# or unverifiable Ruleset policy stays with its own owner, Store / Governance
+# Audit, and is unchanged. Read-only: it never writes an orphan ref, a Ruleset
+# or an Issue, and carries no writer secret.
+on:
+  push:
+    branches: [main]
+  # Unlike workflow_dispatch, repository_dispatch evaluates default-branch code.
+  repository_dispatch:
+    types: [nession-run-store-five-mode-readback]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: store-five-mode-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  readback:
+    name: Five-mode authenticated Git-byte receipt readback
+    if: github.repository == 'BestNathan/nession' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'repository_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact trusted main SHA (no persisted credentials)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify read-only five-mode readback contract
+        run: node scripts/run-store-five-mode-evidence.mjs self-test
+      # An expired or missing proof is recorded as Pending in the report, not a
+      # fabricated Pass; only an unreadable API or wrong identity fails here.
+      - name: Collect source/ingester/readback receipts across five modes (read-only)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/store-five-mode"
+          node scripts/run-store-five-mode-evidence.mjs collect \
+            "${RUNNER_TEMP}/store-five-mode/five-mode-readback.json"
+      - name: Publish source-aligned read-only readback evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: store-five-mode-readback-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/store-five-mode/
+          if-no-files-found: warn
+          retention-days: 30
