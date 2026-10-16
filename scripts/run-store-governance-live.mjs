@@ -29,16 +29,27 @@ function updateRuleParameter(id){
   const query='query($id:Int!){repository(owner:"BestNathan",name:"nession")'+
     '{ruleset(databaseId:$id){rules(first:50){nodes{type parameters{'+
     '... on UpdateParameters{updateAllowsFetchAndMerge}}}}}}}';
+  let raw;
   try{
-    const raw=execFileSync('gh',['api','graphql','-f','query='+query,'-F','id='+id],{
+    raw=execFileSync('gh',['api','graphql','-f','query='+query,'-F','id='+id],{
       encoding:'utf8',maxBuffer:2*1024*1024,timeout:30000,stdio:['ignore','pipe','pipe']});
-    const nodes=JSON.parse(raw)?.data?.repository?.ruleset?.rules?.nodes;
-    if(!Array.isArray(nodes))return null;
-    const update=nodes.filter(node=>node?.type==='UPDATE');
-    if(update.length!==1)return null;
-    const value=update[0]?.parameters?.updateAllowsFetchAndMerge;
-    return typeof value==='boolean'?value:null;
-  }catch{return null;}
+  }catch(error){
+    // An unreadable parameter and an absent one are different facts. Swallowing
+    // this is how the original check stayed silently unsatisfiable, so report
+    // the reason and keep the policy unverified (fail closed) without aborting
+    // the audit and discarding its independent observation.
+    console.error('::warning::Run Store Ruleset '+id+
+      ' update-rule parameter unreadable via GraphQL: '+
+      String(error?.message??error).split('\n')[0]+
+      ' — policy stays unverified (fail closed)');
+    return null;
+  }
+  const nodes=JSON.parse(raw)?.data?.repository?.ruleset?.rules?.nodes;
+  if(!Array.isArray(nodes))fail('unreadable Ruleset rule parameters for '+id);
+  const update=nodes.filter(node=>node?.type==='UPDATE');
+  if(update.length!==1)fail('ambiguous update rule parameters for '+id);
+  const value=update[0]?.parameters?.updateAllowsFetchAndMerge;
+  return typeof value==='boolean'?value:null;
 }
 export function summarizeGovernance(manifest,rulesets,appId,history){
   validateMigrationBaseline(manifest);
