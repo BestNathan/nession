@@ -82,7 +82,15 @@ export function prepareNativeHarness(registry,request) {
     gitHead=execFileSync('git',['-C',sourceRoot,'rev-parse','HEAD'],{encoding:'utf8',timeout:5000}).trim();
     gitRoot=execFileSync('git',['-C',sourceRoot,'rev-parse','--show-toplevel'],{encoding:'utf8',timeout:5000}).trim();
   } catch { fail('source checkout must be a valid Git root'); }
-  if(gitHead!==source_sha || path.resolve(gitRoot)!==sourceRoot) {
+  // `git rev-parse --show-toplevel` resolves symlinks in the path it reports, so
+  // comparing it against a lexical path.resolve fails whenever an *ancestor* is a
+  // symlink — on darwin os.tmpdir() is /var/… while git reports
+  // /private/var/…, which made this harness unusable for any fixture checkout
+  // built under the temp directory. Realpath the caller's path: the invariant
+  // (this root IS the top-level of the tree at the pinned SHA) is unchanged.
+  let sourceReal;
+  try{sourceReal=fs.realpathSync(sourceRoot);}catch{fail('source checkout is unreadable');}
+  if(gitHead!==source_sha || path.resolve(gitRoot)!==sourceReal) {
     fail('source checkout HEAD does not match required exact SHA');
   }
   const role=registry.roles[identity.role];
