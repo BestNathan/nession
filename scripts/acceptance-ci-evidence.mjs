@@ -921,7 +921,7 @@ async function selfTest() {
     throw Error('unexpected negative evidence API: '+p);
   };
   const denialLog='2026-10-16T03:06:57Z '+DENIAL_LOG_PREFIX+
-    JSON.stringify(receipt)+'\\n';
+    JSON.stringify(receipt)+'\n';
   const verified=await collectAuthenticatedReplayDenials(denialRepo,denialSha,
     [candidate,{...candidate,head_sha:branchSha}],request,async()=>denialLog);
   assert.equal(verified.length,1);
