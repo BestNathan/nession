@@ -82,7 +82,6 @@ export function validateDenialReceipt(receipt){
 export function attestReplayDenial(receipt,source,recipient,jobs){
   validateDenialReceipt(receipt);
   const rec=receipt.recipient,src=receipt.source_claim;
-  const repo={full_name:REPO};
   if(recipient?.id!==rec.run_id||
      recipient?.run_attempt!==rec.run_attempt||
      recipient?.name!=='Metrics / Repository Health'||
@@ -141,10 +140,10 @@ export function attestReplayDenial(receipt,source,recipient,jobs){
 export function parseReplayDenialLog(log){
   if(typeof log!=='string'||log.length>1048576)
     throw Error('invalid Metrics Replay denial log size');
-  const candidates=log.split(/\\r?\\n/).filter(line=>line.includes(DENIAL_LOG_PREFIX));
+  const candidates=log.split(/\r?\n/).filter(line=>line.includes(DENIAL_LOG_PREFIX));
   if(candidates.length!==1)return null;
   const line=candidates[0];
-  const match=line.match(/METRICS_REPLAY_DENIAL_V1 (\\{.*\\})\\s*$/);
+  const match=line.match(/METRICS_REPLAY_DENIAL_V1 (\{.*\})\s*$/);
   if(!match||match[1].length>8192)
     throw Error('invalid Metrics Replay denial record framing');
   return validateDenialReceipt(JSON.parse(match[1]));
@@ -163,7 +162,7 @@ function selfTest(){
   assert.equal(validateDenialReceipt(receipt).reason_code,'unexpected_source_event');
   assert.equal(receipt.source_claim.branch,'feature');
   assert.equal(receipt.store_write_authorized,false);
-  const log='2026-10-16T00:00:00Z '+DENIAL_LOG_PREFIX+JSON.stringify(receipt)+'\\n';
+  const log='2026-10-16T00:00:00Z '+DENIAL_LOG_PREFIX+JSON.stringify(receipt)+'\n';
   assert.deepEqual(parseReplayDenialLog(log),receipt);
   assert.equal(parseReplayDenialLog('other job log'),null);
   assert.equal(parseReplayDenialLog(log+log),null);
