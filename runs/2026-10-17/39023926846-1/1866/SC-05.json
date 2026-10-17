@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "47fe6bb4ed372214d0707ae39c9900bbe585c5ee1d0f48b958e89d0060928345",
+  "run_id": 39023926846,
+  "run_attempt": 1,
+  "issue": 1866,
+  "criterion": "SC-05",
+  "criterion_text": "A Case that mutates shared state is reset and demonstrably isolated before reuse, or triggers an explicit **fresh runtime fallback**. A dirty DB/tmux/session, incompatible profile/SHA or failed health check can never cause false Pass or cross-Case contamination.",
+  "stage": "post-merge",
+  "target_sha": "597fc54ad7db9e3b7ac6431656fddfae5f6f79f4",
+  "contract_sha256": "37fd0cde23f4b0f35de37429b30f307e8c9ec527199306f6b0bce727b257eff3",
+  "case_revision": "597fc54ad7db9e3b7ac6431656fddfae5f6f79f4",
+  "case_tree_sha": "c8fdffeb1a83078863cfbda2bf894260589e0eb6",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-17T10:14:20.099Z",
+  "finished_at": "2026-10-17T10:14:26.083Z",
+  "duration_ms": 5984,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "The batch planner isolates a non-opted Case on its own fresh runtime, splits incompatible profiles, and a failed shared runtime never suppresses later evidence.",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "non-opted Case executed on a freshly-started runtime while the opted-in pair shared one"
+        },
+        {
+          "type": "runtime",
+          "value": "profile mismatch produced separate batches rather than cross-Case contamination"
+        },
+        {
+          "type": "runtime",
+          "value": "failed shared runtime recorded per-Case errors and preserved the later Case record"
+        }
+      ],
+      "duration_ms": 72,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 39023926846,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "597fc54ad7db9e3b7ac6431656fddfae5f6f79f4",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/39023926846",
+    "record_path": "runs/2026-10-17/39023926846-1/1866/SC-05.json",
+    "source_result_sha256": "e8d71e7dfb1ef3d04127120eb58090ba3bb316bbfaa18dd6244dbe239ab42603"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-39023926846-1",
+    "sha256": "e8d71e7dfb1ef3d04127120eb58090ba3bb316bbfaa18dd6244dbe239ab42603",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/39023926846",
+    "durability": "time-limited; object archival not configured"
+  }
+}
