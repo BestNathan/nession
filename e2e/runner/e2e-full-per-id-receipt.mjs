@@ -128,6 +128,9 @@ function selfTest() {
   console.log('Full E2E per-ID receipt: 11 fail-closed tests passed');
 }
 
+// Imported by trusted Acceptance collector: never interpret its argv or
+// execute a CLI command as a side effect of module import.
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
 if (process.argv[2] === 'self-test') selfTest();
 else if (process.argv[2] === 'verify') {
   const [jsonFile, assertionFile, sha] = process.argv.slice(3);
@@ -138,6 +141,7 @@ else if (process.argv[2] === 'verify') {
   const run_id = Number(process.env.GITHUB_RUN_ID), run_attempt = Number(process.env.GITHUB_RUN_ATTEMPT);
   if (!positive(run_id) || !positive(run_attempt)) throw Error('GitHub Run/Attempt required');
   console.log(PREFIX + JSON.stringify({...receipt,run_id,run_attempt}));
-} else if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+} else {
   throw Error('usage: e2e-full-per-id-receipt.mjs self-test | verify JSON ASSERTIONS SHA');
+}
 }
