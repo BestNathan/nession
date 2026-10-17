@@ -60,17 +60,6 @@ jobs:
           path: trusted
           persist-credentials: false
 
-      - name: Detect Issue-selected E2E support
-        if: github.event_name == 'pull_request'
-        id: selected-capability
-        shell: bash
-        run: |
-          if [[ -f trusted/scripts/issue-e2e-selection-entry.mjs && -f trusted/scripts/issue-e2e-collect.mjs ]]; then
-            echo 'available=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'available=false' >> "$GITHUB_OUTPUT"
-          fi
-
       # ── Rust toolchain ────────────────────────────────────────────────
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with: { cache-workspaces: ".", cache-all-crates: "true" }
@@ -82,6 +71,30 @@ jobs:
           node-version: '24'
           cache: 'npm'
           cache-dependency-path: e2e/package-lock.json
+
+      - name: Detect import-safe trusted Issue E2E support
+        if: github.event_name == 'pull_request'
+        id: selected-capability
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A version/file-presence check is insufficient: importing the
+          # planner/reporter may execute a CLI and crash before any test runs.
+          # Missing or broken trusted selection MUST expand to full E2E,
+          # never produce an empty/successful selected verification artifact.
+          if [[ -f trusted/scripts/issue-e2e-selection-entry.mjs &&
+                -f trusted/scripts/issue-e2e-collect.mjs &&
+                -f trusted/scripts/issue-e2e-source-attestation.mjs ]] &&
+             node --input-type=module -e '
+               await import("./trusted/scripts/issue-e2e-selection-entry.mjs");
+               await import("./trusted/scripts/issue-e2e-collect.mjs");
+               await import("./trusted/scripts/issue-e2e-source-attestation.mjs");
+             ' >/dev/null 2>&1; then
+            echo 'available=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'available=false' >> "$GITHUB_OUTPUT"
+            echo "::warning::Trusted selected-E2E modules are not import-safe; expanding to full browser regression"
+          fi
 
       - name: Resolve linked Issue E2E obligations
         if: github.event_name == 'pull_request' && steps.selected-capability.outputs.available == 'true'
