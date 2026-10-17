@@ -169,11 +169,19 @@ jobs:
           E2E_RUNTIME_PROVISION_LOG: ${{ runner.temp }}/issue-e2e/design-provision.log
         run: |
           set -euo pipefail
+          # On a push event the trusted selection (which creates this dir) does
+          # not run, so the directory must exist before the runtime's
+          # best-effort counter appends to it.
+          mkdir -p "$(dirname "$E2E_RUNTIME_PROVISION_LOG")"
           ./gates/run design-system-browser
           # Every runtime the design gate resolves must be web-only: that is
           # the parity proof that lets a `not-required` plan skip the Rust
           # build. The gate runs one Playwright invocation per browser rule,
           # so the number of provisions is not fixed.
+          if [[ ! -f "$E2E_RUNTIME_PROVISION_LOG" ]]; then
+            echo "::error::design gate did not record any runtime provision"
+            exit 1
+          fi
           count="$(wc -l < "$E2E_RUNTIME_PROVISION_LOG" | tr -d ' ')"
           cat "$E2E_RUNTIME_PROVISION_LOG" >&2
           if [ "$count" -lt 1 ] || grep -qv '"web_only":true' "$E2E_RUNTIME_PROVISION_LOG"; then
