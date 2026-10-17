@@ -170,16 +170,30 @@ jobs:
                 (( ${#ids[@]} > 0 )) || exit 1
                 args=()
                 for id in "${ids[@]}"; do args+=(--id "$id"); done
+                # #1866 SC-02: measure, do not claim, how many full-stack
+                # runtimes the whole selected invocation resolved. One line per
+                # real provision is appended by the runtime itself.
+                provision_log="$RUNNER_TEMP/issue-e2e/provision.log"
+                : > "$provision_log"
                 if [[ -f trusted/scripts/issue-e2e-assertion-reporter.cjs ]]; then
-                  NESSION_E2E_ASSERTIONS_OUTPUT_FILE="$RUNNER_TEMP/issue-e2e/assertions.json" \
+                  E2E_RUNTIME_PROVISION_LOG="$provision_log" \
+                    NESSION_E2E_ASSERTIONS_OUTPUT_FILE="$RUNNER_TEMP/issue-e2e/assertions.json" \
                     PLAYWRIGHT_JSON_OUTPUT_FILE="$GITHUB_WORKSPACE/e2e/playwright-selected.json" \
                     CI=true ./e2e/run test "${args[@]}"
                 else
                   # Compatibility until the trusted assertion reporter source lands.
                   # Old results remain unproven rather than being promoted to Pass.
-                  PLAYWRIGHT_JSON_OUTPUT_FILE="$GITHUB_WORKSPACE/e2e/playwright-selected.json" \
+                  E2E_RUNTIME_PROVISION_LOG="$provision_log" \
+                    PLAYWRIGHT_JSON_OUTPUT_FILE="$GITHUB_WORKSPACE/e2e/playwright-selected.json" \
                     CI=true ./e2e/run test "${args[@]}"
-                fi ;;
+                fi
+                # Bounded receipt into the job log: the Acceptance harness never
+                # reads artifacts, so the one-runtime measurement must live here.
+                provisions="$(wc -l < "$provision_log" | tr -d ' ')"
+                node scripts/e2e-selected-run-receipt.mjs emit \
+                  --sha "$(git rev-parse HEAD)" \
+                  --ids "$(IFS=,; echo "${ids[*]}")" \
+                  --provisions "$provisions" ;;
               not-required) echo 'Explicit Issue none; no browser test required for this PR' ;;
               full) ./gates/run e2e-playwright ;;
               *) echo "::error::Invalid Issue E2E mode"; exit 1 ;;
