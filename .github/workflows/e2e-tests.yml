@@ -348,6 +348,19 @@ jobs:
       # skips, flaky retries, zero assertions, list drift or a foreign SHA.
       # It runs even when unrelated E2E files failed, so the design verdict is
       # never inferred from the Full E2E exit status.
+      # #1876 SC-01: the completed Full E2E run must account for EVERY
+      # canonical file-ID with independent Playwright assertion reporter
+      # evidence. A missing/duplicate/skipped/zero-assertion ID fails closed.
+      - name: Attest Full E2E per-ID assertion coverage
+        if: github.event_name == 'push'
+        env:
+          TARGET_SHA: ${{ github.sha }}
+          FULL_JSON: ${{ runner.temp }}/issue-e2e/playwright-run.json
+          FULL_ASSERTIONS: ${{ runner.temp }}/issue-e2e/playwright-run-assertions.json
+        run: |
+          node e2e/runner/e2e-full-per-id-receipt.mjs verify \
+            "$FULL_JSON" "$FULL_ASSERTIONS" "$TARGET_SHA"
+
       - name: Verify canonical browser design gate from the single E2E run
         if: ${{ !cancelled() && !(github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots == true) && steps.selection.outputs.mode != 'not-required' }}
         env:
