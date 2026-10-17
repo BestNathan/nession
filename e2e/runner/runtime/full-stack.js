@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const { execFileSync, spawn } = require('node:child_process');
 const { once } = require('node:events');
-const { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } = require('node:fs');
+const { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } = require('node:fs');
 const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
@@ -365,6 +365,18 @@ async function startFullStackRuntime(options) {
       base_url: baseURL,
     };
     writeFileSync(path.join(home, 'runtime.json'), JSON.stringify(metadata, null, 2) + '\n');
+    // #1866: a bounded, non-sensitive provision counter. The Full E2E Gate used
+    // to start this stack twice per invocation and nothing in CI recorded it, so
+    // "at most once" was unmeasurable. One appended line per real provision lets
+    // the owning Gate report a measured count instead of a claim. Absolute paths
+    // only; failures here must never break provisioning.
+    const provisionLog = process.env.E2E_RUNTIME_PROVISION_LOG;
+    if (typeof provisionLog === 'string' && path.isAbsolute(provisionLog)) {
+      try {
+        appendFileSync(provisionLog,
+          JSON.stringify({ profile: metadata.profile, at: new Date().toISOString() }) + '\n');
+      } catch { /* measurement is best-effort; never fail the runtime for it */ }
+    }
     console.log('[e2e runner] ready ' + JSON.stringify(metadata));
 
     return { ...metadata, stop };
