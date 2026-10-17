@@ -59,6 +59,15 @@ gate_check() {
   # job log so a trusted collector can attest at-most-one provision and the
   # retained selector/canary assurance at the exact push SHA.
   if [ -n "${GITHUB_REPOSITORY:-}" ]; then
+    # `gates/run` captures the Gate's own output, so the workflow passes an
+    # absolute file path and prints it after the Gate returns.
+    if [ -n "${E2E_PROVISION_RECEIPT_FILE:-}" ]; then
+      case "$E2E_PROVISION_RECEIPT_FILE" in
+        /*) ;;
+        *) echo "E2E_PROVISION_RECEIPT_FILE must be absolute" >&2; return 1 ;;
+      esac
+      mkdir -p "$(dirname "$E2E_PROVISION_RECEIPT_FILE")"
+    fi
     gate_run_invariant node -e '
       const provisions = Number(process.argv[1]);
       const sha = String(process.argv[2] || "");
@@ -70,13 +79,17 @@ gate_check() {
         console.error("full Gate receipt requires an exact SHA, one provision and a run identity");
         process.exit(1);
       }
-      process.stdout.write("E2E_FULL_GATE_PROVISION_V1 " + JSON.stringify({
+      const line = "E2E_FULL_GATE_PROVISION_V1 " + JSON.stringify({
         schema_version: 1, kind: "e2e_full_gate",
         repository: process.env.GITHUB_REPOSITORY, workflow: ".github/workflows/e2e-tests.yml",
         run_id: runId, run_attempt: runAttempt, sha, mode: "all", provisions,
         selector_verified: true, selected_report_verified: true,
-      }) + "\n");
-    ' "$(wc -l < "$provision_log" | tr -d ' ')" "${GITHUB_SHA:-}"
+      }) + "\n";
+      process.stdout.write(line);
+      const receiptFile = String(process.argv[3] || "");
+      if (receiptFile) require("node:fs").writeFileSync(receiptFile, line);
+    ' "$(wc -l < "$provision_log" | tr -d ' ')" "${GITHUB_SHA:-}" \
+      "${E2E_PROVISION_RECEIPT_FILE:-}"
   fi
 }
 

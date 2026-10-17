@@ -193,7 +193,12 @@ jobs:
       - name: Run E2E tests
         env:
           CI: true
+          # `gates/run` captures Gate output, so the Full Gate writes its
+          # measured receipt here and this step prints it into the job log.
+          E2E_PROVISION_RECEIPT_FILE: ${{ runner.temp }}/issue-e2e/full-gate-receipt.jsonl
         run: |
+          mkdir -p "$(dirname "$E2E_PROVISION_RECEIPT_FILE")"
+          rm -f "$E2E_PROVISION_RECEIPT_FILE"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.update_visual_snapshots }}" = "true" ]; then
             cd e2e
             # `=all` is required, not optional. A bare `--update-snapshots` means
@@ -252,6 +257,9 @@ jobs:
             esac
           else
             ./gates/run e2e-playwright
+          fi
+          if [[ -f "$E2E_PROVISION_RECEIPT_FILE" ]]; then
+            cat "$E2E_PROVISION_RECEIPT_FILE" >&2
           fi
 
       - name: Normalize selected per-file results even on failure
