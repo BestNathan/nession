@@ -5,7 +5,10 @@
 // Case that does not opt in, an unknown Case, or a profile mismatch must each
 // fall back to a fresh runtime rather than joining a batch.
 import assert from 'node:assert/strict';
-import { planAcceptanceBatches } from './acceptance-batch.mjs';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { executeAcceptanceBatches, planAcceptanceBatches } from './acceptance-batch.mjs';
 
 const manifests = new Map([
   ['1:SC-01', { runtime: 'full-stack-local', isolation: 'shared' }],
@@ -66,5 +69,71 @@ assert.equal(plan([{ issue: 1, criterion: 'SC-01' }])[0].shared, false);
 assert.throws(() => plan([]), /at least one Case/);
 assert.throws(() => planAcceptanceBatches({ repoRoot: '.' }), /at least one Case/);
 
+// --- execution: one runtime for a shared batch, and failures never suppress
+// other batches' evidence (SC-06).
+const contractsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'acceptance-batch-contracts-'));
+const resultsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'acceptance-batch-results-'));
+try {
+  for (const issue of [1, 2, 3, 7]) {
+    fs.writeFileSync(path.join(contractsDir, issue + '.json'),
+      JSON.stringify({ number: issue, body: '' }));
+  }
+  const record = (opts) => ({
+    issue: opts.issueNumber, criterion: opts.criterion, result: 'Pass',
+    runtime_profile: 'full-stack-local', execution_id: String(opts.issueNumber).repeat(64).slice(0, 64),
+    contract_sha256: 'c'.repeat(64), case_tree_sha: 'a'.repeat(40),
+  });
+  const run = (batches, options = {}) => executeAcceptanceBatches({
+    repoRoot: '.', batches, stage: 'post-merge', targetSha: 'a'.repeat(40),
+    runId: 9, runAttempt: 1, resultsDir, contractsDir, ...options,
+  });
+
+  // Two opted-in Cases receive the SAME runtime object; an isolated Case does
+  // not, and the shared runtime is stopped exactly once.
+  const seen = [];
+  let stops = 0;
+  const runtime = { stop: async () => { stops += 1; } };
+  const sharedPlan = plan([{ issue: 1, criterion: 'SC-01' },
+    { issue: 2, criterion: 'SC-01' }, { issue: 3, criterion: 'SC-01' }]);
+  const shared = await run(sharedPlan, {
+    runtimeFactory: async () => runtime,
+    runCaseImpl: async (opts) => { seen.push(opts.runtime); return record(opts); },
+  });
+  assert.equal(shared.records.length, 3);
+  assert.equal(shared.errors.length, 0);
+  assert.equal(shared.sharedRuntimeCount, 1);
+  assert.equal(seen[0], runtime);
+  assert.equal(seen[1], runtime);
+  assert.equal(seen[2], null);
+  assert.equal(stops, 1);
+
+  // A shared runtime that cannot start is an error for that batch only; the
+  // following isolated Case still produces its own record.
+  const failedPlan = plan([{ issue: 1, criterion: 'SC-01' },
+    { issue: 2, criterion: 'SC-01' }, { issue: 7, criterion: 'SC-01' }]);
+  const survived = await run(failedPlan, {
+    runtimeFactory: async () => { throw new Error('stack unavailable'); },
+    runCaseImpl: async (opts) => record(opts),
+  });
+  assert.equal(survived.records.length, 1);
+  assert.equal(survived.records[0].issue, 7);
+  assert.equal(survived.errors.length, 2);
+  assert.deepEqual(survived.errors.map((error) => error.issue), [1, 2]);
+  assert.match(survived.errors[0].message, /batch runtime: stack unavailable/);
+  assert.equal(survived.sharedRuntimeCount, 0);
+
+  // A teardown failure is reported but never hides the records already made.
+  const teardown = await run(
+    plan([{ issue: 1, criterion: 'SC-01' }, { issue: 2, criterion: 'SC-01' }]), {
+      runtimeFactory: async () => ({ stop: async () => { throw new Error('busy'); } }),
+      runCaseImpl: async (opts) => record(opts),
+      log: () => {},
+    });
+  assert.equal(teardown.records.length, 2);
+} finally {
+  fs.rmSync(contractsDir, { recursive: true, force: true });
+  fs.rmSync(resultsDir, { recursive: true, force: true });
+}
+
 console.log('acceptance batch isolation: opt-in sharing, isolated default, ' +
-  'profile mismatch and unknown-Case fallbacks passed');
+  'profile mismatch, unknown-Case and batch-failure fallbacks passed');
