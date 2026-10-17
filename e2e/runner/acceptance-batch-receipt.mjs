@@ -121,7 +121,10 @@ export function makeAcceptanceBatchReceipt({
     const key = String(issue) + '|' + String(criterion);
     const where = placement.get(key);
     const caseStage = stageOf(record, where);
+    const profile = record?.runtime_profile ?? where?.profile ?? null;
     if (!Number.isSafeInteger(issue) || issue <= 0 || !CRITERION.test(String(criterion)) ||
+        !(profile === null ||
+          (typeof profile === 'string' && profile.length > 0 && profile.length <= 100)) ||
         !ACCEPTANCE_BATCH_RESULTS.includes(record?.result) ||
         !ACCEPTANCE_BATCH_STAGES.includes(caseStage) ||
         !SHA.test(String(record?.case_tree_sha ?? '')) ||
@@ -142,7 +145,7 @@ export function makeAcceptanceBatchReceipt({
       isolation: where.isolation,
       // The profile the Case declared and executed at; a shared batch only
       // ever contains one profile because the planner refuses to mix them.
-      profile: record.runtime_profile ?? where.profile ?? null,
+      profile,
       batch_index: where.batch_index,
       execution_id: record.execution_id,
       contract_sha256: record.contract_sha256,
@@ -201,6 +204,9 @@ export function validateAcceptanceBatchReceipt(receipt) {
   for (const item of receipt.cases) {
     if (!Number.isSafeInteger(item?.issue) || item.issue <= 0 ||
         !CRITERION.test(String(item?.criterion)) ||
+        !(item?.profile === null ||
+          (typeof item?.profile === 'string' && item.profile.length > 0 &&
+           item.profile.length <= 100)) ||
         !ACCEPTANCE_BATCH_RESULTS.includes(item?.result) ||
         !ACCEPTANCE_BATCH_STAGES.includes(item?.stage) ||
         !['shared', 'isolated'].includes(item?.isolation) ||
