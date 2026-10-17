@@ -22,6 +22,7 @@ import {parseE2eSelectedRunLog,attestE2eSelectedRunReceipt,makeE2eSelectedRunRec
   E2E_SELECTED_RUN_LOG_PREFIX,E2E_NOT_REQUIRED_LOG_PREFIX,E2E_FULL_GATE_LOG_PREFIX,
   E2E_SELECTED_WORKFLOW,E2E_SELECTED_WORKFLOW_NAME,E2E_SELECTED_JOB,
   E2E_SELECTED_EVENTS} from './e2e-selected-run-receipt.mjs';
+import {attestFullReceipt} from '../e2e/runner/e2e-full-per-id-receipt.mjs';
 import {historicalCaseEvidence,selfTestHistoricalCase} from './acceptance-historical-case-replay.mjs';
 import { collectAuthenticatedCaseReadbacks, selfTestCaseReceipts } from './acceptance-case-readback-evidence.mjs';
 import os from 'node:os';
@@ -425,7 +426,20 @@ export async function collectFullGateProvisionReceipts(repo,sha,runs,
     let receipt;
     try{receipt=parseE2eFullGateLog(log);}catch{continue;}
     if(!receipt)continue;
-    evidence.push(attestE2eFullGateReceipt(receipt,run,matches[0]));
+    const attested=attestE2eFullGateReceipt(receipt,run,matches[0]);
+    // #1876: this per-file proof is emitted only after a real push Full E2E
+    // run. Bind the producer's bounded counters to GitHub's independently
+    // read Run/Attempt/SHA, and the exact successful verifier job step.
+    // Older runs legitimately have no receipt; never invent a Pass for them.
+    const prefix='E2E_FULL_PER_ID_V1 ';
+    const rows=log.split(/\r?\n/).filter(line=>line.includes(prefix));
+    if(rows.length>1)throw Error('duplicate Full E2E per-ID proof in source job');
+    if(rows.length===1){
+      const raw=rows[0].slice(rows[0].indexOf(prefix)+prefix.length).trim();
+      const perId=JSON.parse(raw);
+      attested.full_per_id=attestFullReceipt(perId,run,matches[0]);
+    }
+    evidence.push(attested);
   }
   return evidence;
 }
