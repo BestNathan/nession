@@ -54,12 +54,15 @@ async function run() {
   const fonts = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies }).filter(x => x.startsWith('@fontsource')).sort();
   assert.ok(fonts.length, 'missing font packages');
   let upgradeSeen = false;
+  const upgradedSockets = new Set();
   const backend = createServer((req, res) => {
     if (!req.url?.startsWith('/api/__nession_web_parity')) { res.writeHead(404); res.end(); return; }
     res.writeHead(200, { 'content-type': 'application/json', 'x-parity': 'backend' });
     res.end(JSON.stringify({ proxied: true, path: req.url }));
   });
   backend.on('upgrade', (req, socket) => {
+    upgradedSockets.add(socket);
+    socket.on('close', () => upgradedSockets.delete(socket));
     if (!req.url?.startsWith('/ws?parity=1')) { socket.destroy(); return; }
     upgradeSeen = true;
     const key = req.headers['sec-websocket-key'];
@@ -113,6 +116,7 @@ async function run() {
         else preview.kill('SIGKILL');
       } catch { /* already exited */ }
     }
+    for (const socket of upgradedSockets) socket.destroy();
     await new Promise(r => backend.close(r));
   }
 }
