@@ -155,8 +155,10 @@ export function makeAcceptanceBatchReceipt({
   // A shared batch is only a fact when a resolved runtime actually started for
   // it. `startFullStackRuntime` resolves after server/agent/web readiness, so
   // every shared runtime counted here was proven ready before any Case ran.
+  // The converse does not hold: a shared runtime may have started for a batch
+  // whose Cases all failed preparation and therefore produced no records. That
+  // must not suppress the other batches' evidence.
   if (sharedBatches.size > 0 && sharedRuntimeCount < 1) return null;
-  if (sharedRuntimeCount > sharedBatches.size) return null;
   return Object.freeze({
     schema_version: 1,
     kind: 'acceptance_case_batch',
@@ -191,7 +193,7 @@ export function validateAcceptanceBatchReceipt(receipt) {
       !COUNT(receipt.shared_batch_count) ||
       receipt.shared_batch_count > receipt.case_count ||
       !COUNT(receipt.shared_ready_runtimes) ||
-      receipt.shared_ready_runtimes > receipt.shared_batch_count ||
+      receipt.shared_ready_runtimes > receipt.selected_count ||
       !Array.isArray(receipt.cases) || receipt.cases.length !== receipt.case_count ||
       !Array.isArray(receipt.stages) || receipt.stages.length === 0 ||
       receipt.stages.some((item) => !ACCEPTANCE_BATCH_STAGES.includes(item)) ||
@@ -222,7 +224,7 @@ export function validateAcceptanceBatchReceipt(receipt) {
     if (item.isolation === 'shared') sharedBatches.add(item.batch_index);
   }
   if (sharedBatches.size !== receipt.shared_batch_count ||
-      (sharedBatches.size > 0) !== (receipt.shared_ready_runtimes > 0) ||
+      (sharedBatches.size > 0 && receipt.shared_ready_runtimes < 1) ||
       [...stages].sort().join(',') !== [...receipt.stages].sort().join(',')) {
     throw Error('Acceptance Case batch receipt isolation/stage mismatch');
   }
@@ -382,6 +384,19 @@ function selfTest() {
     ...args, records: [...args.records, record(1474, 'SC-12')],
     selectionCount: 4,
   }), null);
+  // A shared runtime that started for a batch whose Cases produced no records
+  // must not suppress the receipt for the batches that did run.
+  const partial = makeAcceptanceBatchReceipt({
+    ...args,
+    records: [record(1474, 'SC-11')],
+    errors: [{ issue: 1474, criterion: 'SC-09', message: 'prepare failed' },
+      { issue: 1474, criterion: 'SC-10', message: 'prepare failed' }],
+    sharedRuntimeCount: 1,
+  });
+  assert.equal(validateAcceptanceBatchReceipt(partial).shared_ready_runtimes, 1);
+  assert.equal(partial.shared_batch_count, 0);
+  assert.equal(partial.case_count, 1);
+
   // Per-Case stages are preserved and validated.
   const mixed = makeAcceptanceBatchReceipt({
     ...args,
