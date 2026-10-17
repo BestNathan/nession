@@ -3,6 +3,9 @@ issue: 1866
 criterion: SC-05
 stage: post-merge
 runtime: full-stack-local
+# Pure contract checks that never use the job runtime, so sharing is safe and
+# makes the target-SHA reuse comparison measurable (#1866 SC-08).
+isolation: shared
 verifiers:
   - type: runtime
     entry: verify.js
