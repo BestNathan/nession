@@ -112,7 +112,7 @@ function compactRuns(runs, expectedSha) {
   return retainedRuns(runs, expectedSha).runs.map(compactRun);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], replayDenials = [], storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [] }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], replayDenials = [], storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [], exactHeadStepsBySha = new Map(), batchReceiptsBySha = new Map() }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -130,6 +130,11 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
         runs: compactRuns(pullRunsBySha.get(headSha) ?? [], headSha),
         e2e_selected_run_receipts: selectedRunReceiptsBySha.get(headSha) ?? [],
         e2e_not_required_receipts: notRequiredRunReceiptsBySha.get(headSha) ?? [],
+        // A merged target has no pull_request run of its own, so the PR head's
+        // exact-head E2E contract steps and Case batch receipts are the only
+        // reachable acceptance evidence for the merged code.
+        exact_head_e2e_steps: exactHeadStepsBySha.get(headSha) ?? [],
+        acceptance_batch_receipts: batchReceiptsBySha.get(headSha) ?? [],
         historical_e2e_runs: historicalE2EByPr.get(Number(pull.number)) ?? [],
       };
     });
@@ -1059,11 +1064,17 @@ async function collectCommand(workspace, outFile) {
   // measurement is reachable from that boundary.
   const selectedRunReceiptsBySha = new Map();
   const notRequiredRunReceiptsBySha = new Map();
+  const exactHeadStepsBySha = new Map();
+  const batchReceiptsBySha = new Map();
   for (const [headSha, runs] of pullRunsBySha) {
     selectedRunReceiptsBySha.set(headSha,
       await collectSelectedE2eRunReceipts(repo, headSha, runs));
     notRequiredRunReceiptsBySha.set(headSha,
       await collectNotRequiredE2eReceipts(repo, headSha, runs));
+    exactHeadStepsBySha.set(headSha,
+      await collectExactHeadE2eSteps(repo, headSha, runs));
+    batchReceiptsBySha.set(headSha,
+      await collectAcceptanceBatchReceipts(repo, headSha, runs));
   }
   const selectedRunReceipts = await collectSelectedE2eRunReceipts(repo, sha, directRuns);
   const notRequiredRunReceipts = await collectNotRequiredE2eReceipts(repo, sha, directRuns);
@@ -1181,7 +1192,7 @@ async function collectCommand(workspace, outFile) {
     }
   }
   const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls,
-    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts, replayDenials, storePolicyObservability, ancestryRuns, acceptanceBatchReceipts, selectedRunReceiptsBySha, selectedRunReceipts, notRequiredRunReceiptsBySha, notRequiredRunReceipts, fullGateProvisionReceipts });
+    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts, replayDenials, storePolicyObservability, ancestryRuns, acceptanceBatchReceipts, selectedRunReceiptsBySha, selectedRunReceipts, notRequiredRunReceiptsBySha, notRequiredRunReceipts, fullGateProvisionReceipts, exactHeadStepsBySha, batchReceiptsBySha });
   fs.writeFileSync(outFile, JSON.stringify(evidence, null, 2) + '\n');
   console.log(
     'collected acceptance CI evidence for ' + sha +
@@ -1457,6 +1468,16 @@ async function selfTest() {
     selectedRunReceipts:selectedReceipts});
   assert.equal(selNormalized.pull_requests[0].e2e_selected_run_receipts.length,1);
   assert.equal(selNormalized.e2e_selected_run_receipts.length,1);
+  // A merged target has no pull_request run of its own; the PR head's
+  // exact-head E2E steps and Case batch receipts must still be reachable.
+  const prHeadNormalized=normalizeCiEvidence({targetSha:'b'.repeat(40),
+    pulls:[{number:3,state:'closed',merged_at:'2026-10-17T00:00:00Z',
+      head:{sha:selSha,ref:'feat/z'},base:{ref:'main'},html_url:'https://example.invalid'}],
+    pullRunsBySha:new Map([[selSha,[selRun]]]),
+    exactHeadStepsBySha:new Map([[selSha,[{kind:'verified_exact_head_e2e_steps'}]]]),
+    batchReceiptsBySha:new Map([[selSha,[{kind:'verified_acceptance_case_batch'}]]])});
+  assert.equal(prHeadNormalized.pull_requests[0].exact_head_e2e_steps.length,1);
+  assert.equal(prHeadNormalized.pull_requests[0].acceptance_batch_receipts.length,1);
 
   // #1866 SC-01: an explicit `not-required` plan must prove, from GitHub's own
   // resolved step outcomes, that E2E-only preparation was skipped while the
