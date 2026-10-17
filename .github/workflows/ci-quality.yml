@@ -19,11 +19,13 @@ on:
   push:
     branches: [main]
 
-# One gate run per PR, and one per main ref. Without the ref fallback every push
-# run would share the empty-number group `quality-` and cancel its predecessor.
+# PR heads may supersede earlier runs, but each main-push SHA must retain
+# its own completed Quality Gate for exact-SHA post-merge Acceptance (#1876).
+# GitHub run_id is unique per push; a newer main commit must not cancel the
+# previous commit's evidence (nor should unrelated branches share a group).
 concurrency:
-  group: quality-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: quality-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   rust-check:
