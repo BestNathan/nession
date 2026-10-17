@@ -277,6 +277,13 @@ function tests(args) {
       throw new Error('selected E2E must have absolute assertion receipt output path');
     }
     reporters = ['--reporter=json,' + reporter];
+  } else if (!selected.length && process.env.PLAYWRIGHT_JSON_OUTPUT_FILE) {
+    // #1866 SC-03: the Full E2E Gate derives per-ID attribution from the SAME
+    // full run instead of provisioning a second stack for a canary. That needs
+    // a JSON report for `--all`/`--suite` too. The html report is kept so
+    // failure artifacts are unchanged; the config's single-reporter default is
+    // only overridden when a caller explicitly asked for a machine-readable one.
+    reporters = ['--reporter=json,html'];
   }
   return execute('npx', ['playwright', 'test', ...selected, ...(suite ? [suite] : []),
     ...reporters,
