@@ -28,14 +28,108 @@ function commit(root,msg){
 // arbitrary ref. No YAML job-level if can protect a modified workflow version
 // selected from the attacker-controlled ref, so disable manual dispatch until
 // server-enforced trusted writer identity/Rulesets are provisioned (#1690).
-function verifyRepositoryMetricsTrustedSource(workflow) {
-  const trigger=workflow.split(/^jobs:/m)[0];
-  if(!/^  schedule:\s*$/m.test(trigger) ||
-      !/^  workflow_run:\s*\n    workflows: \["Metrics \/ Replay Request"\]\s*\n    types: \[completed\]/m.test(trigger) ||
-      /^  (workflow_dispatch|repository_dispatch):\s*$/m.test(trigger) ||
-      !/^  contents: read\s*$/m.test(trigger)) {
-    throw new Error('repository Metrics source must be scheduled or default-main attested-only, read-only by default');
+// #1789 review 2026-10-17: ENUMERATE the declared triggers, jobs and per-job
+// permissions instead of textual-matching for two banned trigger names. An
+// accidental `push:`/`pull_request_target:` trigger, an extra job, or a write
+// permission on any job other than the publisher must fail closed rather than
+// slip past a regex that only knows the names it was written to look for.
+const REPOSITORY_METRICS_ALLOWED_TRIGGERS=Object.freeze(['schedule','workflow_run']);
+const REPOSITORY_METRICS_ALLOWED_JOBS=Object.freeze(['authorize-replay','rust-health',
+  'web-health','e2e-health','publish']);
+const REPOSITORY_METRICS_WRITER_JOB='publish';
+// The most the publisher may ever hold. Every declared entry must equal this
+// value; an added key or a widened scope fails.
+const REPOSITORY_METRICS_WRITER_CEILING=Object.freeze({actions:'read',
+  contents:'write',issues:'read','pull-requests':'read'});
+// Bounded structural helpers. They intentionally understand only the shapes this
+// workflow is allowed to have and fail closed everywhere else.
+function columnZeroBlock(text,key){
+  const lines=String(text).split('\n');
+  const start=lines.findIndex(line=>new RegExp('^'+key+':').test(line));
+  if(start<0)return null;
+  const out=[];
+  for(let i=start+1;i<lines.length;i+=1){
+    const line=lines[i];
+    if(line.trim()===''||line.startsWith('#')){out.push(line);continue;}
+    if(/^\S/.test(line))break; // next column-0 key
+    out.push(line);
   }
+  return out.join('\n');
+}
+function keysAt(blockText,indent){
+  const re=new RegExp('^'+' '.repeat(indent)+'([A-Za-z0-9_.-]+):');
+  return String(blockText??'').split('\n').map(line=>line.match(re)?.[1]).filter(Boolean);
+}
+function jobBodies(workflow){
+  const jobs=columnZeroBlock(workflow,'jobs');
+  if(jobs===null)throw new Error('missing Metrics jobs block');
+  const bodies=new Map();
+  let current=null;
+  for(const line of jobs.split('\n')){
+    const key=line.match(/^  ([A-Za-z0-9_.-]+):\s*$/);
+    if(key){current=key[1];bodies.set(current,[]);continue;}
+    if(current)bodies.get(current).push(line);
+  }
+  return new Map([...bodies].map(([name,lines])=>[name,lines.join('\n')]));
+}
+function permissionBlocks(jobBody){
+  const lines=String(jobBody).split('\n');
+  const blocks=[];
+  for(let i=0;i<lines.length;i+=1){
+    if(!/^    permissions:\s*$/.test(lines[i]))continue;
+    const entries=new Map();
+    for(let j=i+1;j<lines.length;j+=1){
+      if(lines[j].trim()==='')continue;
+      const entry=lines[j].match(/^      ([a-z-]+):\s*(\S+)\s*$/);
+      if(!entry)break;
+      entries.set(entry[1],entry[2]);
+    }
+    blocks.push(entries);
+  }
+  return blocks;
+}
+function verifyRepositoryMetricsTrustedSource(workflow) {
+  const triggerText=columnZeroBlock(workflow,'on')??'';
+  const triggers=keysAt(triggerText,2);
+  const unexpectedTrigger=triggers.find(name=>!REPOSITORY_METRICS_ALLOWED_TRIGGERS.includes(name));
+  if(unexpectedTrigger||triggers.length!==REPOSITORY_METRICS_ALLOWED_TRIGGERS.length)
+    throw new Error('repository Metrics source must be scheduled or default-main attested-only: unexpected trigger '+
+      (unexpectedTrigger??('count '+triggers.length)));
+  // The trigger bodies themselves must still name the Replay Request workflow.
+  if(!/^  schedule:\s*$/m.test(triggerText) ||
+      !/^  workflow_run:\s*\n    workflows: \["Metrics \/ Replay Request"\]\s*\n    types: \[completed\]/m.test(triggerText)) {
+    throw new Error('repository Metrics source must be scheduled or default-main attested-only: trigger body drift');
+  }
+  // Workflow-level default token: every declared scope must be read.
+  const workflowPermissions=(columnZeroBlock(workflow,'permissions')??'').split('\n')
+    .map(line=>line.match(/^  ([a-z-]+):\s*(\S+)\s*$/)).filter(Boolean).map(m=>[m[1],m[2]]);
+  if(!workflowPermissions.length||workflowPermissions.some(([,value])=>value!=='read')) {
+    throw new Error('repository Metrics source must be read-only by default');
+  }
+  const bodies=jobBodies(workflow);
+  const unexpectedJob=[...bodies.keys()].find(name=>!REPOSITORY_METRICS_ALLOWED_JOBS.includes(name));
+  const missingJob=REPOSITORY_METRICS_ALLOWED_JOBS.find(name=>!bodies.has(name));
+  if(unexpectedJob||missingJob||bodies.size!==REPOSITORY_METRICS_ALLOWED_JOBS.length)
+    throw new Error('unsafe Metrics source job: '+
+      (unexpectedJob?'unexpected job '+unexpectedJob:'missing job '+missingJob));
+  // Per-job ceiling: only the publisher may declare write, and exactly once.
+  for(const [name,body] of bodies){
+    const blocks=permissionBlocks(body);
+    if(blocks.length>1)
+      throw new Error('Metrics writer contents:write must be scoped to publish only: duplicate permissions in '+name);
+    if(name===REPOSITORY_METRICS_WRITER_JOB)continue;
+    const declared=blocks[0];
+    if(declared&&[...declared.values()].some(value=>value!=='read'))
+      throw new Error('Metrics writer contents:write must be scoped to publish only: job '+name);
+  }
+  const writerBlocks=permissionBlocks(bodies.get(REPOSITORY_METRICS_WRITER_JOB)??'');
+  if(writerBlocks.length!==1)
+    throw new Error('Metrics writer contents:write must be scoped to publish only: publish permission count');
+  const writerPermissions=writerBlocks[0];
+  const outsideCeiling=[...writerPermissions].find(([key,value])=>REPOSITORY_METRICS_WRITER_CEILING[key]!==value);
+  if(outsideCeiling||writerPermissions.get('contents')!=='write')
+    throw new Error('Metrics writer contents:write must be scoped to publish only: '+
+      (outsideCeiling?('unexpected permission '+outsideCeiling[0]):'contents must be write'));
   const auth=workflow.split(/^  authorize-replay:\s*$/m)[1]?.split(/^  rust-health:\s*$/m)[0]??'';
   if(!auth.includes("github.event_name == 'schedule' || github.event_name == 'workflow_run'") ||
       !auth.includes('node scripts/metrics-replay-source.mjs authorize')||
@@ -89,6 +183,26 @@ assert.throws(()=>verifyRepositoryMetricsTrustedSource(
   repoMetricsYml.replace('node "${GITHUB_WORKSPACE}/scripts/run-store-integrity.mjs" staged metrics "${GITHUB_WORKSPACE}/metrics-store"',
     'echo "skip staged audit"')
 ),/omitted staged Run Store integrity/);
+// #1789 review 2026-10-17: the verifier must ENUMERATE triggers, jobs and
+// per-job permissions. These fixtures are the ones a name-matching check could
+// not have caught: an added trigger it never looked for, an added job, and a
+// widened permission scope.
+for(const [label,mutation] of [
+  ['push trigger',yml=>yml.replace(/^  schedule:/m,'  push:\n  schedule:')],
+  ['pull_request_target trigger',yml=>yml.replace(/^  schedule:/m,'  pull_request_target:\n  schedule:')],
+  ['extra job',yml=>yml.replace(/^  publish:\s*$/m,'  quiet-writer:\n    runs-on: ubuntu-latest\n  publish:')],
+  ['write permission on a health job',yml=>yml.replace(
+    /^(  rust-health:[\s\S]*?)\n    steps:/m,'$1\n    permissions:\n      contents: write\n    steps:')],
+  ['extra permission key on the publisher',yml=>yml.replace(
+    '      contents: write\n','      contents: write\n      packages: write\n')],
+  ['duplicate publisher permission block',yml=>yml.replace(
+    /^(  publish:[\s\S]*?)    steps:/m,'$1    permissions:\n      contents: read\n    steps:')],
+]){
+  assert.throws(()=>verifyRepositoryMetricsTrustedSource(mutation(repoMetricsYml)),
+    /attested-only|unsafe Metrics source|scoped to publish/,label+' must be rejected');
+}
+// Positive counterexample: the real workflow still passes after the hardening.
+assert.equal(verifyRepositoryMetricsTrustedSource(repoMetricsYml),true);
 
 const A='acceptance-results',T='task-results',M='metrics',S='agent-store';
 assert.deepEqual(RUN_STORE_REFS,[A,T,M,S]);
