@@ -31,6 +31,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
   issues: read
 
 concurrency:
@@ -163,15 +164,31 @@ jobs:
         if: steps.select.outputs.count != '0'
         run: sudo apt-get update && sudo apt-get install -y tmux
 
-      - name: Build full-stack runtime
+      - name: Install Web preview dependencies
         if: steps.select.outputs.count != '0'
-        run: |
-          set -euo pipefail
-          cd workspace/web
-          npm ci
-          npm run build
-          cd ..
-          cargo build -p nession-server -p nession-agent
+        run: cd workspace/web && npm ci
+
+      # Only an exact main push may read a completed successful main Quality
+      # producer. PR or manual/other stage Cases build locally without any
+      # GH_TOKEN passed to target-controlled code. This never suppresses Cases.
+      - name: Restore verified main Web dist
+        id: web-dist
+        if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && steps.target.outputs.stage == 'post-merge' && steps.target.outputs.target_sha == github.sha)) && github.ref == 'refs/heads/main' && steps.select.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash workspace/scripts/ci/try-web-build-reuse.sh workspace "${{ steps.target.outputs.target_sha }}"
+
+      - name: Build Web on cold/mismatched artifact
+        if: steps.select.outputs.count != '0' && steps.web-dist.outputs.hit != 'true'
+        run: cd workspace/web && npm run build
+
+      - name: Verify runnable Web preview and proxy parity
+        if: steps.select.outputs.count != '0'
+        run: node workspace/scripts/ci/web-preview-parity.mjs workspace
+
+      - name: Build Rust runtime
+        if: steps.select.outputs.count != '0'
+        run: cd workspace && cargo build -p nession-server -p nession-agent
 
       # Runtime/Protocol verifiers may invoke a real Browser/Terminal Scenario
       # transitively. Each such Case must explicitly declare a Browser verifier;
