@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "230318c991fd8268c8b6ddae83216b5de135633f",
+  "run_id": 39017629401,
+  "run_attempt": 1,
+  "plan_digest": "52d86f684f88191d1e7ecb25e96515e10b489f1724c993b23ba1cc898bbd2482",
+  "artifact_digest": "sha256:f2b281c27c581d70efeb6c98848f742dda5ee62dc1dd7f4075f9bee39f7e2b1e",
+  "results": [
+    {
+      "id": "login",
+      "result": "Pass",
+      "discovered": 1,
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 2
+    },
+    {
+      "id": "session-lifecycle",
+      "result": "Pass",
+      "discovered": 1,
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 18
+    },
+    {
+      "id": "terminal-io",
+      "result": "Pass",
+      "discovered": 16,
+      "passed": 16,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 525
+    }
+  ]
+}
