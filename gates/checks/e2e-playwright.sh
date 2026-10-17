@@ -21,15 +21,22 @@ gate_check() {
   gate_require_command node "Install Node.js and rerun the E2E gate." || return $?
   gate_require_path "./e2e/run" "Restore the canonical E2E runner." || return $?
   local list_file="${RUNNER_TEMP:-/tmp}/e2e-playwright-list-${GITHUB_RUN_ID:-local}.txt"
-  local selected_report="${RUNNER_TEMP:-/tmp}/e2e-playwright-selected-${GITHUB_RUN_ID:-local}.json"
+  local full_report="${RUNNER_TEMP:-/tmp}/e2e-playwright-full-${GITHUB_RUN_ID:-local}.json"
   # Playwright list-only discovery has no full-stack startup; verify it matches file-ID catalog.
   gate_run_invariant bash -c 'cd e2e && npx playwright test --list > "$1"' _ "$list_file"
   gate_run_invariant node e2e/runner/verify-playwright-list.cjs "$list_file"
-  # One two-ID canary: prove precise selection and independently attributable real outcomes.
-  # Once #1702 owns PR selection this transitional extra run can be retired.
-  gate_run_invariant bash -c 'cd e2e && CI=true PLAYWRIGHT_JSON_OUTPUT_FILE="$1" ./run test --id login --id session-lifecycle' _ "$selected_report"
-  gate_run_invariant node e2e/runner/verify-playwright-selected.cjs "$selected_report" login session-lifecycle
-  gate_run_invariant bash -c 'cd e2e && CI=true ./run test --all'
+  # #1866 SC-03: this Gate used to provision the real full stack TWICE — a
+  # two-ID canary run, then `--all`. Selection is a pure ID -> spec-file
+  # mapping, so its positive and negative contract is verified without a
+  # runtime, and each canary ID's REAL outcome is verified per ID from the one
+  # full run below. The subset runtime path keeps live coverage on every
+  # selected PR run, which invokes `./e2e/run test --id …` for real.
+  gate_run_invariant node e2e/runner/verify-e2e-selector.cjs login session-lifecycle
+  # Exactly one full-stack provision for this Gate invocation.
+  gate_run_invariant bash -c 'cd e2e && CI=true PLAYWRIGHT_JSON_OUTPUT_FILE="$1" ./run test --all' _ "$full_report"
+  # Legacy selector/canary assurance retained against that single run: a canary
+  # ID that did not run, was skipped, or did not fully pass still fails here.
+  gate_run_invariant node e2e/runner/verify-playwright-selected.cjs "$full_report" login session-lifecycle
 }
 
 gate_main "$@"

@@ -15,8 +15,15 @@ function walk(suites, parent = '') {
   }
 }
 walk(data.suites);
+// Playwright reports `file` relative to rootDir in a test run but as a bare
+// basename in some modes (observed with `--list`). Accept both: E2E ID stems are
+// unique across the catalog, so basename matching cannot be ambiguous.
+const matchesId = (file, id) => {
+  const normalized = String(file).replace(/\\/g, '/');
+  return normalized.endsWith('/' + id + '.spec.ts') || normalized === id + '.spec.ts';
+};
 for (const id of ids) {
-  const tests = cases.filter(x => String(x.file).replace(/\\/g, '/').endsWith('/' + id + '.spec.ts'))
+  const tests = cases.filter(x => matchesId(x.file, id))
     .flatMap(x => x.tests);
   assert.ok(tests.length, id + ' absent from selected Playwright JSON');
   assert.ok(tests.every(t => t.status === 'expected' && t.results?.some(r => r.status === 'passed')),
