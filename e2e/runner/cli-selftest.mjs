@@ -143,8 +143,10 @@ const regressionGate = fs.readFileSync(path.join(repo, 'gates', 'checks', 'e2e-p
 assert.match(regressionGate, /GATE_COMMAND='cd e2e && CI=true \.\/run test --all'/);
 // #1866 SC-03: the regression Gate runs the canonical full suite through the
 // shared runtime with the provision counter and JSON report wired in.
+// #1876 Phase A: the same single run also produces the assertion receipt the
+// independent Browser Design verdict reads.
 assert.match(regressionGate,
-  /gate_run_invariant bash -c 'cd e2e && CI=true E2E_RUNTIME_PROVISION_LOG="\$2" PLAYWRIGHT_JSON_OUTPUT_FILE="\$1" \.\/run test --all'/);
+  /gate_run_invariant bash -c 'cd e2e && CI=true E2E_RUNTIME_PROVISION_LOG="\$3" PLAYWRIGHT_JSON_OUTPUT_FILE="\$1" NESSION_E2E_ASSERTIONS_OUTPUT_FILE="\$2" \.\/run test --all'/);
 // And exactly ONE Playwright run invocation: a second one would provision a
 // second full stack, which is the waste this Gate contract forbids.
 assert.equal((regressionGate.match(/gate_run_invariant bash -c 'cd e2e && CI=true/g) || []).length, 1,

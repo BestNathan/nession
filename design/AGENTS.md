@@ -20,6 +20,12 @@ The canonical design checker is `design/scripts/design-gate.mjs`. Callers choose
 ./gates/run design-system-full
 ```
 
-Browser-profile proof belongs in the E2E environment.
+Browser-profile proof belongs in the E2E environment. The mandatory browser
+subset is owned by `design/scripts/browser-design-catalog.mjs`; workflows and
+the coalesced Full E2E verdict consume it instead of restating spec paths.
+`design/scripts/verify-browser-design-report.mjs` derives the independent
+design verdict from an already-executed Playwright report and assertion
+receipt; missing, skipped, flaky, zero-assertion or foreign-SHA evidence fails
+closed.
 
 When adding a design rule, name the invariant, owner, expected state, and repair path. Prefer executable contracts over prose-only restrictions.

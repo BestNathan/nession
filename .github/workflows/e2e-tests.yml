@@ -158,36 +158,45 @@ jobs:
       # manual work and hooks. The browser profile owns the contract/matrix
       # subset; this workflow does not duplicate that list.
       #
+      # #1876 Phase A: this standalone invocation remains for the paths that do
+      # NOT execute the full suite — an explicit `not-required` plan and the
+      # baseline-regeneration dispatch. Every other mode derives the design
+      # verdict from the single full/selected Playwright run below.
+      #
       # #1866 SC-01: the browser profile renders client-side fixtures, so it
       # runs on a web-only runtime. That is what lets a `not-required` plan
       # skip the Rust build while the required design gate still executes.
-      - name: Run canonical browser design gate
+      - name: Run canonical browser design gate (standalone)
         id: design
+        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots == true) || steps.selection.outputs.mode == 'not-required' }}
         env:
           CI: true
           E2E_RUNTIME_WEB_ONLY: '1'
           E2E_RUNTIME_PROVISION_LOG: ${{ runner.temp }}/issue-e2e/design-provision.log
+          DESIGN_BROWSER_RECEIPT_FILE: ${{ runner.temp }}/issue-e2e/browser-design-receipt.jsonl
         run: |
           set -euo pipefail
           # On a push event the trusted selection (which creates this dir) does
           # not run, so the directory must exist before the runtime's
           # best-effort counter appends to it.
           mkdir -p "$(dirname "$E2E_RUNTIME_PROVISION_LOG")"
+          rm -f "$DESIGN_BROWSER_RECEIPT_FILE"
           ./gates/run design-system-browser
           # Every runtime the design gate resolves must be web-only: that is
           # the parity proof that lets a `not-required` plan skip the Rust
-          # build. The gate runs one Playwright invocation per browser rule,
-          # so the number of provisions is not fixed.
+          # build. The standalone profile runs the canonical subset in ONE
+          # Playwright process, so exactly one provision is expected.
           if [[ ! -f "$E2E_RUNTIME_PROVISION_LOG" ]]; then
             echo "::error::design gate did not record any runtime provision"
             exit 1
           fi
           count="$(wc -l < "$E2E_RUNTIME_PROVISION_LOG" | tr -d ' ')"
           cat "$E2E_RUNTIME_PROVISION_LOG" >&2
-          if [ "$count" -lt 1 ] || grep -qv '"web_only":true' "$E2E_RUNTIME_PROVISION_LOG"; then
-            echo "::error::design gate resolved a non-web-only runtime (${count} provision(s))"
+          if [ "$count" -ne 1 ] || grep -qv '"web_only":true' "$E2E_RUNTIME_PROVISION_LOG"; then
+            echo "::error::design gate resolved ${count} runtime provision(s), expected one web-only runtime"
             exit 1
           fi
+          cat "$DESIGN_BROWSER_RECEIPT_FILE" >&2
 
       # ── Run E2E ───────────────────────────────────────────────────────
       - name: Run E2E tests
@@ -196,6 +205,10 @@ jobs:
           # `gates/run` captures Gate output, so the Full Gate writes its
           # measured receipt here and this step prints it into the job log.
           E2E_PROVISION_RECEIPT_FILE: ${{ runner.temp }}/issue-e2e/full-gate-receipt.jsonl
+          # #1876 Phase A: the one real Playwright run is the evidence both the
+          # Full E2E verdict and the independent Browser Design verdict read.
+          E2E_PLAYWRIGHT_REPORT_FILE: ${{ runner.temp }}/issue-e2e/playwright-run.json
+          E2E_PLAYWRIGHT_ASSERTIONS_FILE: ${{ runner.temp }}/issue-e2e/playwright-run-assertions.json
         run: |
           mkdir -p "$(dirname "$E2E_PROVISION_RECEIPT_FILE")"
           rm -f "$E2E_PROVISION_RECEIPT_FILE"
@@ -215,8 +228,30 @@ jobs:
             mode="$(jq -r '.mode' "$plan")"
             case "$mode" in
               selected)
-                mapfile -t ids < <(jq -r '.selected[].id' "$plan")
-                (( ${#ids[@]} > 0 )) || exit 1
+                mapfile -t plan_ids < <(jq -r '.selected[].id' "$plan")
+                (( ${#plan_ids[@]} > 0 )) || exit 1
+                # #1876 Phase A: the mandatory Browser Design subset joins the
+                # Issue-selected IDs in the SAME Playwright process. Dedupe
+                # preserves every obligation exactly once: a design ID that is
+                # also Issue-selected is not executed twice, and design IDs are
+                # never counted as Issue-selected coverage.
+                mapfile -t design_ids < <(node --input-type=module -e '
+                  import { BROWSER_DESIGN_IDS } from "./design/scripts/browser-design-catalog.mjs";
+                  process.stdout.write(BROWSER_DESIGN_IDS.join("\n") + "\n");')
+                # Fail closed rather than silently running only the Issue
+                # selection: the design verdict below requires these IDs.
+                if (( ${#design_ids[@]} == 0 )); then
+                  echo "::error::canonical Browser Design catalog resolved no IDs"
+                  exit 1
+                fi
+                ids=("${plan_ids[@]}")
+                for design_id in "${design_ids[@]}"; do
+                  found=false
+                  for existing in "${ids[@]}"; do
+                    [[ "$existing" == "$design_id" ]] && found=true
+                  done
+                  [[ "$found" == true ]] || ids+=("$design_id")
+                done
                 args=()
                 for id in "${ids[@]}"; do args+=(--id "$id"); done
                 # #1866 SC-02: measure, do not claim, how many full-stack
@@ -224,24 +259,35 @@ jobs:
                 # real provision is appended by the runtime itself.
                 provision_log="$RUNNER_TEMP/issue-e2e/provision.log"
                 : > "$provision_log"
+                rm -f "$E2E_PLAYWRIGHT_REPORT_FILE" "$E2E_PLAYWRIGHT_ASSERTIONS_FILE"
                 if [[ -f trusted/scripts/issue-e2e-assertion-reporter.cjs ]]; then
                   E2E_RUNTIME_PROVISION_LOG="$provision_log" \
-                    NESSION_E2E_ASSERTIONS_OUTPUT_FILE="$RUNNER_TEMP/issue-e2e/assertions.json" \
-                    PLAYWRIGHT_JSON_OUTPUT_FILE="$GITHUB_WORKSPACE/e2e/playwright-selected.json" \
+                    NESSION_E2E_ASSERTIONS_OUTPUT_FILE="$E2E_PLAYWRIGHT_ASSERTIONS_FILE" \
+                    PLAYWRIGHT_JSON_OUTPUT_FILE="$E2E_PLAYWRIGHT_REPORT_FILE" \
                     CI=true ./e2e/run test "${args[@]}"
                 else
                   # Compatibility until the trusted assertion reporter source lands.
                   # Old results remain unproven rather than being promoted to Pass.
                   E2E_RUNTIME_PROVISION_LOG="$provision_log" \
-                    PLAYWRIGHT_JSON_OUTPUT_FILE="$GITHUB_WORKSPACE/e2e/playwright-selected.json" \
+                    PLAYWRIGHT_JSON_OUTPUT_FILE="$E2E_PLAYWRIGHT_REPORT_FILE" \
                     CI=true ./e2e/run test "${args[@]}"
+                fi
+                # The coalesced run's assertion receipt also covers the design
+                # subset. The trusted Issue projection accepts only obligated
+                # IDs, so project those rows into their own receipt instead of
+                # weakening that #1866 contract.
+                if [[ -f "$E2E_PLAYWRIGHT_ASSERTIONS_FILE" ]]; then
+                  jq --argjson ids "$(printf '%s\n' "${plan_ids[@]}" | jq -R . | jq -s .)" \
+                    '{schema_version, kind, tests: [.tests[] | select(.id as $x | $ids | any(. == $x))]}' \
+                    "$E2E_PLAYWRIGHT_ASSERTIONS_FILE" \
+                    > "$RUNNER_TEMP/issue-e2e/assertions.json"
                 fi
                 # Bounded receipt into the job log: the Acceptance harness never
                 # reads artifacts, so the one-runtime measurement must live here.
                 provisions="$(wc -l < "$provision_log" | tr -d ' ')"
                 node scripts/e2e-selected-run-receipt.mjs emit \
                   --sha "$(git rev-parse HEAD)" \
-                  --ids "$(IFS=,; echo "${ids[*]}")" \
+                  --ids "$(IFS=,; echo "${plan_ids[*]}")" \
                   --provisions "$provisions" ;;
               not-required)
                 # GitHub's own step outcomes prove the skip; the receipt is
@@ -262,24 +308,47 @@ jobs:
             cat "$E2E_PROVISION_RECEIPT_FILE" >&2
           fi
 
+      # ── Independent Browser Design verdict ─────────────────────────────
+      # The canonical design specs have already executed inside the single
+      # Playwright run above. This Gate derives its own verdict from that
+      # exact report and assertion receipt and fails closed on missing IDs,
+      # skips, flaky retries, zero assertions, list drift or a foreign SHA.
+      # It runs even when unrelated E2E files failed, so the design verdict is
+      # never inferred from the Full E2E exit status.
+      - name: Verify canonical browser design gate from the single E2E run
+        if: ${{ !cancelled() && !(github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots == true) && steps.selection.outputs.mode != 'not-required' }}
+        env:
+          DESIGN_BROWSER_REPORT: ${{ runner.temp }}/issue-e2e/playwright-run.json
+          DESIGN_BROWSER_ASSERTIONS: ${{ runner.temp }}/issue-e2e/playwright-run-assertions.json
+          DESIGN_BROWSER_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          DESIGN_BROWSER_RECEIPT_FILE: ${{ runner.temp }}/issue-e2e/browser-design-receipt.jsonl
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$DESIGN_BROWSER_RECEIPT_FILE")"
+          rm -f "$DESIGN_BROWSER_RECEIPT_FILE"
+          ./gates/run design-system-browser
+          cat "$DESIGN_BROWSER_RECEIPT_FILE" >&2
+
       - name: Normalize selected per-file results even on failure
         if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.selected-capability.outputs.available == 'true' && steps.selection.outcome == 'success' }}
         shell: bash
+        env:
+          E2E_PLAYWRIGHT_REPORT_FILE: ${{ runner.temp }}/issue-e2e/playwright-run.json
         run: |
           if [[ -f trusted/scripts/issue-e2e-assertion-reporter.cjs ]]; then
             node trusted/scripts/issue-e2e-collect.mjs collect \
               "$RUNNER_TEMP/issue-e2e/plan.json" \
-              "$GITHUB_WORKSPACE/e2e/playwright-selected.json" \
+              "$E2E_PLAYWRIGHT_REPORT_FILE" \
               "$RUNNER_TEMP/issue-e2e/assertions.json" \
               "$RUNNER_TEMP/issue-e2e/results.json"
           else
             node trusted/scripts/issue-e2e-collect.mjs collect \
               "$RUNNER_TEMP/issue-e2e/plan.json" \
-              "$GITHUB_WORKSPACE/e2e/playwright-selected.json" \
+              "$E2E_PLAYWRIGHT_REPORT_FILE" \
               "$RUNNER_TEMP/issue-e2e/results.json"
           fi
-          if [[ -f "$GITHUB_WORKSPACE/e2e/playwright-selected.json" ]]; then
-            cp "$GITHUB_WORKSPACE/e2e/playwright-selected.json" "$RUNNER_TEMP/issue-e2e/playwright.json"
+          if [[ -f "$E2E_PLAYWRIGHT_REPORT_FILE" ]]; then
+            cp "$E2E_PLAYWRIGHT_REPORT_FILE" "$RUNNER_TEMP/issue-e2e/playwright.json"
           fi
 
       - uses: actions/upload-artifact@v4

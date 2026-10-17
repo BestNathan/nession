@@ -39,7 +39,7 @@ itself is an operation rather than a reproducible source-quality invariant.
 | Rust build cache/worktree safety | `rustc-wrapper`, `worktree-target-seed`, `build-cache-verifier` | Their individual `scripts/*selftest.sh` owners |
 | Test/tmux isolation | `test-isolation`, `tmux-socket-isolation`; matching `-selftest` IDs | `scripts/check-test-isolation.sh`, `scripts/check-tmux-socket.sh` |
 | Protocol correctness and generated bindings | `protocol-integrity`, `protocol-json-contract`, `protocol-codegen-drift`, `protocol-integrity-selftest` | `scripts/protocol-gate.mjs`, `scripts/check-codegen-drift.sh` |
-| Design invariants | `design-system-fast`, `design-system-full`, `design-system-browser` | `design/scripts/design-gate.mjs` |
+| Design invariants | `design-system-fast`, `design-system-full`, `design-system-browser` | `design/scripts/design-gate.mjs` + `design/scripts/browser-design-catalog.mjs` |
 | Web type/lint/test/coverage | `web-eslint`, `web-typecheck`, `web-test-unit`, `web-test-integration`, `web-coverage` | ESLint/TypeScript/Vitest and existing Web test helpers |
 | Acceptance and Requirement governance | `acceptance-runtime-contract`, `acceptance-cases-contract`, `requirement-acceptance-pre-merge`, `requirement-acceptance-pr`, `requirement-acceptance-close`, their named deterministic self-tests | `scripts/requirement-acceptance.mjs`, canonical E2E/Acceptance harness, trusted ingestion |
 | Runtime/browser and evidence integrity | `e2e-playwright`, `e2e-cli-discovery` and E2E/Run Record/Case/Scenario/collector `-selftest` IDs | `e2e/run`, `e2e/runner`, `scripts/*ingest*.mjs` |
@@ -55,7 +55,7 @@ itself is an operation rather than a reproducible source-quality invariant.
 | `.githooks/pre-push` | Router | Pushed SHA diff and fallback choose Rust/Web/design/protocol/self-test Gate IDs; missing diff base must broaden selection |
 | `justfile` | Router plus developer utilities | `just gate <id>`, `just gates <suite>`, `just check` → `quality-rust`, Web commands → exact Web Gate IDs |
 | `.github/workflows/quality.yml` | Router + environment setup | Rust `quality-rust`, repository `quality-tooling`, Web/design Gate IDs. Node/npm/Rust setup is a utility |
-| `.github/workflows/e2e.yml` | Router + runtime/build + snapshot operation | Normal `e2e-playwright` (canonical `e2e/run test --all`), `design-system-browser`; snapshot regeneration is not a passing Gate |
+| `.github/workflows/e2e-tests.yml` | Router + runtime/build + snapshot operation | Normal `e2e-playwright` (canonical `e2e/run test --all`) also yields the independent `design-system-browser` verdict from the same report and assertion receipt; standalone `design-system-browser` remains for `not-required` plans and snapshot regeneration. Snapshot regeneration is not a passing Gate |
 | `.github/workflows/staging.yml` | Router + build/deploy operations | Rust/Web Gate IDs run before build; image build, registry publication and GitOps updates are operations |
 | `.github/workflows/release.yml` | Router + version decision + deploy operations | Rust/Web Gate IDs; equality invariant belongs to `release-version-consistency`, while version advance, tag retry and publication remain release-policy operations |
 | `.github/workflows/requirement-acceptance.yml` | Router / trusted authorization boundary | Stage-specific `requirement-acceptance-pre-merge`, `-pr`, `-close` Gate IDs; trust/permissions remain workflow-owned |
