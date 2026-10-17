@@ -89,10 +89,13 @@ assert.ok(fs.existsSync(path.join(repo, 'e2e', 'acceptance', 'contract', 'cases.
 // must flow through ./e2e/run rather than a second legacy entrypoint.
 const caseWorkflow = fs.readFileSync(
   path.join(repo, '.github', 'workflows', 'acceptance-cases.yml'), 'utf8');
-assert.match(caseWorkflow, /args=\(acceptance --issue-json/);
-assert.match(caseWorkflow, /node workspace\/e2e\/run "\$\{args\[@\]\}"/);
-assert.match(caseWorkflow, /while read -r issue criterion profile; do/);
-assert.match(caseWorkflow, /done < <\(jq -r/);
+// #1866 Phase B: one canonical batch invocation, not a per-Case loop. The old
+// `args=(acceptance --issue-json …)` array and its while-loop are asserted
+// ABSENT, so a future change cannot quietly reintroduce one provision per Case.
+assert.match(caseWorkflow, /node workspace\/e2e\/run acceptance-batch/);
+assert.match(caseWorkflow, /--selection "\$\{RUNNER_TEMP\}\/selected-cases\.json"/);
+assert.doesNotMatch(caseWorkflow, /args=\(acceptance --issue-json/);
+assert.doesNotMatch(caseWorkflow, /while read -r issue criterion profile; do/);
 assert.doesNotMatch(caseWorkflow, /node workspace\/acceptance\/run-case\.mjs/);
 assert.equal(fs.existsSync(path.join(repo, 'acceptance', 'run-case.mjs')), false,
   'legacy public Case runner must be retired');
@@ -113,7 +116,12 @@ assert.equal(fs.existsSync(path.join(repo, 'e2e', 'acceptance', 'evaluator', 'ru
 const gateRecipes = fs.readFileSync(path.join(repo, 'justfile'), 'utf8');
 assert.match(gateRecipes, /check-acceptance-runtime:[\s\S]*?\.\/gates\/run acceptance-runtime-contract/);
 const runtimeGate = fs.readFileSync(path.join(repo, 'gates', 'checks', 'acceptance-runtime-contract.sh'), 'utf8');
-assert.match(runtimeGate, /GATE_COMMAND='\.\/e2e\/run --validate'/);
+// The declared command and the executed one must not drift: the batch
+// isolation contract is part of this Gate's own invariant now (#1866 SC-05).
+assert.match(runtimeGate,
+  /GATE_COMMAND='\.\/e2e\/run --validate && node e2e\/runner\/acceptance-batch-selftest\.mjs'/);
+assert.match(runtimeGate,
+  /gate_run_invariant node e2e\/runner\/acceptance-batch-selftest\.mjs/);
 assert.match(runtimeGate, /gate_run_invariant \.\/e2e\/run --validate/);
 assert.doesNotMatch(gateRecipes, /acceptance\/runtime\/full-stack\.js/);
 const acceptanceSkill = fs.readFileSync(path.join(repo, '.claude', 'skills',
@@ -122,7 +130,9 @@ assert.match(acceptanceSkill, /\.\/e2e\/run acceptance/);
 const acceptanceArchitecture = fs.readFileSync(path.join(repo, 'docs', 'architecture',
   'acceptance-cases.md'), 'utf8');
 assert.match(acceptanceArchitecture, /e2e\/runner\/runtime\/full-stack\.js/);
-assert.match(caseWorkflow, /--profile "\$\{profile\}"/);
+// #1866 Phase B: the runtime profile is resolved per Case by the trusted
+// selector and carried inside the selection, not passed as a CLI flag.
+assert.match(caseWorkflow, /--selection "\$\{RUNNER_TEMP\}\/selected-cases\.json"/);
 assert.match(caseWorkflow, /--sha "\$\{TARGET_SHA\}"/);
 const regressionWorkflow = fs.readFileSync(
   path.join(repo, '.github', 'workflows', 'e2e-tests.yml'), 'utf8');

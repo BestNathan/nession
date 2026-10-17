@@ -241,6 +241,34 @@ function acceptance(args) {
     if (disposable) fs.rmSync(disposable, { recursive: true, force: true });
   }
 }
+// #1866 Phase B: one job-scoped invocation for a whole selected batch. Each
+// Case still emits its own record; eligible Cases may share one runtime.
+function acceptanceBatch(args) {
+  const sha = required(args, 'sha');
+  const stage = required(args, 'stage');
+  const selection = required(args, 'selection');
+  const contractsDir = required(args, 'contracts-dir');
+  const resultsDir = required(args, 'results-dir');
+  if (!/^[0-9a-f]{40}$/.test(sha) ||
+      !['pre-merge', 'staging', 'post-merge'].includes(stage)) {
+    throw new Error('invalid batch target SHA or stage');
+  }
+  const targetSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+  if (sha !== targetSha) throw new Error('requested SHA does not match checked-out source SHA');
+  for (const file of [selection, contractsDir, resultsDir]) {
+    if (!path.isAbsolute(file)) throw new Error('acceptance-batch paths must be absolute');
+  }
+  if (!fs.existsSync(selection) || !fs.lstatSync(contractsDir).isDirectory()) {
+    throw new Error('acceptance-batch selection or contracts directory is missing');
+  }
+  return execute(process.execPath, [
+    at('e2e', 'acceptance', 'evaluator', 'run-batch.mjs'),
+    '--repo-root', root, '--sha', sha, '--stage', stage,
+    '--selection', selection, '--contracts-dir', contractsDir, '--results-dir', resultsDir,
+    '--run-id', process.env.GITHUB_RUN_ID ?? '1',
+    '--run-attempt', process.env.GITHUB_RUN_ATTEMPT ?? '1',
+  ]);
+}
 function tests(args) {
   const registry = testCatalog.discover(at('e2e', 'tests'));
   if (args.length === 1 && args[0] === '--list') {
@@ -312,6 +340,7 @@ async function main() {
   if (mode === '--validate') return await validate();
   if (mode === 'test') return exitByCode(tests(args));
   if (mode === 'acceptance') return exitByCode(acceptance(args));
+  if (mode === 'acceptance-batch') return exitByCode(acceptanceBatch(args));
   if (mode === 'scenario') return exitByCode(scenario(args));
   if (mode === 'compare') return compare(args);
   throw new Error('usage: ./e2e/run --list|--validate|test --all|test --list|test --id ID [--id ID...]|acceptance --issue N --sc SC-NN --sha SHA --stage staging|scenario ID|compare LEFT RIGHT');

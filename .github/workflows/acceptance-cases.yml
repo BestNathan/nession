@@ -184,7 +184,11 @@ jobs:
           npm ci
           npx playwright install chromium --with-deps
 
-      - name: Execute selected Cases
+      # #1866 Phase B: one job-scoped invocation instead of one `run acceptance`
+      # per Case. Each Case still emits its own record and verdict; eligible
+      # Cases (manifest `isolation: shared`) may share one runtime. Every Case
+      # still runs even when an earlier one fails, and the step still fails.
+      - name: Execute selected Cases in one job-scoped batch
         id: cases
         if: steps.select.outputs.count != '0'
         env:
@@ -192,16 +196,24 @@ jobs:
           ACCEPTANCE_STAGE: ${{ steps.target.outputs.stage }}
         run: |
           set -uo pipefail
-          failed=0
-          while read -r issue criterion profile; do
-            output="${RUNNER_TEMP}/acceptance-case-results/${issue}-${criterion}.case.json"
-            # The trusted selector stays here; the canonical CLI owns dispatch.
-            args=(acceptance --issue-json "${RUNNER_TEMP}/acceptance-contracts/${issue}.json")
-            args+=(--issue "${issue}" --sc "${criterion}" --stage "${ACCEPTANCE_STAGE}")
-            args+=(--sha "${TARGET_SHA}" --profile "${profile}" --output "${output}")
-            node workspace/e2e/run "${args[@]}" || failed=1
-          done < <(jq -r '.[] | [.issue, .criterion, .runtime] | @tsv' "${RUNNER_TEMP}/selected-cases.json")
-          exit "${failed}"
+          results="${RUNNER_TEMP}/acceptance-case-results"
+          node workspace/e2e/run acceptance-batch \
+            --sha "${TARGET_SHA}" \
+            --stage "${ACCEPTANCE_STAGE}" \
+            --selection "${RUNNER_TEMP}/selected-cases.json" \
+            --contracts-dir "${RUNNER_TEMP}/acceptance-contracts" \
+            --results-dir "${results}" \
+            > "${results}/records.jsonl" 2> "${results}/batch.log"
+          status=$?
+          cat "${results}/batch.log" >&2
+          {
+            echo "## Acceptance Case batch"
+            echo
+            echo '```'
+            grep -E '^\[acceptance-batch\]' "${results}/batch.log" || true
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+          exit "${status}"
       - name: Enforce Case coverage without suppressing executed Case evidence
         if: always() && steps.select.outcome == 'success'
         run: |
