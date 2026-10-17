@@ -1,0 +1,106 @@
+name: CI / Web Dist Reuse Proof
+
+# #1876: A short real post-Quality consumer. E2E and Quality start in
+# parallel, so main-push E2E normally cold-builds. This independent job
+# proves artifact restoration and runnable Preview at the producer's exact SHA.
+# It is diagnostics/SC evidence, never a replacement for Full E2E or Acceptance.
+on:
+  workflow_run:
+    workflows: ["CI / Quality Gate"]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  # Every completed producer SHA/attempt has an independent durable receipt.
+  group: web-dist-proof-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: >-
+      ${{ github.event.workflow_run.event == 'push' &&
+          github.event.workflow_run.head_branch == 'main' &&
+          github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.head_repository.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # workflow_run has access to read credentials. First only execute
+      # trusted default-branch attestation; never run PR/fork source code here.
+      - name: Checkout trusted source attestation
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: trusted
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: trusted/web/package-lock.json
+
+      - name: Attest exact successful main Quality producer
+        id: producer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node trusted/scripts/ci/web-dist-source-attestation.mjs attest "$GITHUB_EVENT_PATH" "$GITHUB_OUTPUT"
+
+      - name: Checkout attested main source SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.producer.outputs.sha }}
+          path: target
+          persist-credentials: false
+
+      # The artifact contains dist only. Vite preview (including /api and /ws
+      # proxy) still requires its local runtime dependencies.
+      - name: Install Web preview dependencies
+        run: cd target/web && npm ci
+
+      - name: Download exact producer artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ steps.producer.outputs.run_id }}
+          SOURCE_ATTEMPT: ${{ steps.producer.outputs.attempt }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/web-dist-proof"
+          gh run download "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" \
+            --name "nession-web-dist-$SOURCE_ATTEMPT" \
+            --dir "$RUNNER_TEMP/web-dist-proof"
+
+      - name: Restore verified exact-SHA dist
+        id: restore
+        env:
+          SOURCE_SHA: ${{ steps.producer.outputs.sha }}
+          SOURCE_RUN: ${{ steps.producer.outputs.run_id }}
+          SOURCE_ATTEMPT: ${{ steps.producer.outputs.attempt }}
+        run: |
+          set -euo pipefail
+          node target/scripts/ci/web-build-artifact.mjs restore \
+            --root target --source "$RUNNER_TEMP/web-dist-proof" \
+            --sha "$SOURCE_SHA" --run-id "$SOURCE_RUN" --attempt "$SOURCE_ATTEMPT"
+          echo 'hit=true' >> "$GITHUB_OUTPUT"
+
+      - name: Verify restored runnable Web preview parity
+        run: node target/scripts/ci/web-preview-parity.mjs target
+
+      - name: Report bounded producer-consumer evidence
+        env:
+          SOURCE_SHA: ${{ steps.producer.outputs.sha }}
+          SOURCE_RUN: ${{ steps.producer.outputs.run_id }}
+          SOURCE_ATTEMPT: ${{ steps.producer.outputs.attempt }}
+        run: |
+          set -euo pipefail
+          [ "${{ steps.restore.outputs.hit }}" = true ]
+          {
+            echo "## Verified Web dist reuse (diagnostic, not SC Pass)"
+            echo "- Exact source SHA: `$SOURCE_SHA`"
+            echo "- Quality Gate run/attempt: `$SOURCE_RUN/$SOURCE_ATTEMPT`"
+            echo "- Outcome: verified restore + real Preview HTTP/API/WS/fonts parity"
+            echo "- This job must not replace the required Full E2E/Acceptance."
+          } >> "$GITHUB_STEP_SUMMARY"
