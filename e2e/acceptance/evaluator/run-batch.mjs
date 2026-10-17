@@ -14,6 +14,10 @@ import {
   executeAcceptanceBatches,
   planAcceptanceBatches,
 } from '../../runner/acceptance-batch.mjs';
+import {
+  ACCEPTANCE_BATCH_LOG_PREFIX,
+  makeAcceptanceBatchReceipt,
+} from '../../runner/acceptance-batch-receipt.mjs';
 
 function arg(name, required = false) {
   const index = process.argv.indexOf('--' + name);
@@ -65,6 +69,38 @@ async function main() {
   });
 
   for (const record of records) process.stdout.write(JSON.stringify(record) + '\n');
+
+  // #1866 SC-04: the batch decision is written into the job log, because the
+  // Acceptance harness never reads workflow artifacts. Each Case keeps its own
+  // execution id/contract/tree attribution; `placement` only records which
+  // planned batch it belonged to.
+  const placement = new Map();
+  batches.forEach((batch, index) => {
+    for (const entry of batch.cases) {
+      placement.set(entry.issue + '|' + entry.criterion, {
+        batch_index: index,
+        isolation: batch.shared ? 'shared' : 'isolated',
+        profile: batch.profile,
+        stage: entry.stage ?? stage,
+      });
+    }
+  });
+  const receipt = makeAcceptanceBatchReceipt({
+    env: process.env,
+    runId,
+    runAttempt,
+    sha,
+    stage,
+    selectionCount: selection.length,
+    records,
+    errors,
+    sharedRuntimeCount,
+    placement,
+    stageOf: (record, where) => where?.stage ?? stage,
+  });
+  if (receipt) {
+    process.stderr.write(ACCEPTANCE_BATCH_LOG_PREFIX + JSON.stringify(receipt) + '\n');
+  }
 
   const failed = records.filter((record) => record.result !== 'Pass');
   // Bounded, non-sensitive measurement (#1866 SC-08): how many runtimes a batch

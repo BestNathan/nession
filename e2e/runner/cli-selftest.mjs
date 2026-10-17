@@ -119,9 +119,11 @@ const runtimeGate = fs.readFileSync(path.join(repo, 'gates', 'checks', 'acceptan
 // The declared command and the executed one must not drift: the batch
 // isolation contract is part of this Gate's own invariant now (#1866 SC-05).
 assert.match(runtimeGate,
-  /GATE_COMMAND='\.\/e2e\/run --validate && node e2e\/runner\/acceptance-batch-selftest\.mjs'/);
+  /GATE_COMMAND='\.\/e2e\/run --validate && node e2e\/runner\/acceptance-batch-selftest\.mjs && node e2e\/runner\/acceptance-batch-receipt\.mjs'/);
 assert.match(runtimeGate,
   /gate_run_invariant node e2e\/runner\/acceptance-batch-selftest\.mjs/);
+assert.match(runtimeGate,
+  /gate_run_invariant node e2e\/runner\/acceptance-batch-receipt\.mjs/);
 assert.match(runtimeGate, /gate_run_invariant \.\/e2e\/run --validate/);
 assert.doesNotMatch(gateRecipes, /acceptance\/runtime\/full-stack\.js/);
 const acceptanceSkill = fs.readFileSync(path.join(repo, '.claude', 'skills',

@@ -120,6 +120,10 @@ export async function executeAcceptanceBatches({
           ' Case(s) at profile ' + batch.profile);
       }
       for (const entry of batch.cases) {
+        // A workflow may select Cases for more than one stage in one job (the
+        // PR smoke plan does). The batch's stage is the default; a Case's own
+        // declared stage wins and is what its record carries.
+        const caseStage = entry.stage ?? stage;
         const issue = JSON.parse(
           (await import('node:fs')).readFileSync(
             path.join(contractsDir, entry.issue + '.json'), 'utf8',
@@ -132,7 +136,7 @@ export async function executeAcceptanceBatches({
             issue,
             issueNumber: Number(entry.issue),
             criterion: entry.criterion,
-            stage,
+            stage: caseStage,
             targetSha,
             runId,
             runAttempt,
