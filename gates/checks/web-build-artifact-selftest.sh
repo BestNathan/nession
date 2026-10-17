@@ -15,5 +15,7 @@ gate_check() {
   gate_require_command git "Install Git for source identity tests." || return $?
   gate_require_path './scripts/ci/web-build-artifact.mjs' "Restore the Web artifact owner." || return $?
   gate_run_invariant node scripts/ci/web-build-artifact.mjs self-test
+  gate_require_path './scripts/ci/web-dist-source-attestation.mjs' "Restore Web dist producer source attestation." || return $?
+  gate_run_invariant node scripts/ci/web-dist-source-attestation.mjs self-test
 }
 gate_main "$@"
