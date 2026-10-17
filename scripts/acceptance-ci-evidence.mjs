@@ -661,10 +661,25 @@ async function collectPinnedProviderEvidence(repo,sha){
   return verifyPinnedProviderEvidence(sha,id,attempt,run,metricsRoot);
 }
 
-async function workflowRunsForSha(repo, sha) {
-  const query = new URLSearchParams({ head_sha: sha, per_page: '100' });
-  const payload = await githubGet('/repos/' + repo + '/actions/runs?' + query.toString());
-  return payload.workflow_runs ?? [];
+// #1749 SC-05: a busy main SHA can exceed one listing page. A scheduled
+// Metrics run, its ingest/wake children and replay dispatches push the SHA past
+// 100 runs, and the oldest runs — the push Gate and Provider Smoke — fall off
+// page 1. They exist but become unreachable, which read as "never ran".
+const MAX_RUN_PAGES = 3;
+export async function workflowRunsForSha(repo, sha, get = githubGet) {
+  const runs = [];
+  for (let page = 1; page <= MAX_RUN_PAGES; page += 1) {
+    const query = new URLSearchParams({
+      head_sha: sha, per_page: '100', page: String(page),
+    });
+    const payload = await get('/repos/' + repo + '/actions/runs?' + query.toString());
+    const pageRuns = Array.isArray(payload?.workflow_runs) ? payload.workflow_runs : [];
+    runs.push(...pageRuns);
+    if (pageRuns.length < 100) break;
+  }
+  if (runs.length > MAX_RUN_PAGES * 100)
+    throw Error('excessive workflow run listing for exact SHA');
+  return runs;
 }
 
 // Exact-head runs for Git-verified ancestor SHAs named by the criterion.
@@ -1709,6 +1724,23 @@ async function selfTest() {
   assert.equal(reuseComparisonFixture.selected_run.provisioned_runtimes,1);
   assert.equal(reuseComparisonFixture.main_push_full_e2e_success,true);
   assert.equal(computeReuseComparison({targetSha:'b'.repeat(40)}),null);
+
+  // #1749 SC-05: a busy SHA exceeds one listing page; the oldest Gate/Provider
+  // runs must still be fetched instead of reading as "never ran".
+  const pageRuns=(from,count)=>Array.from({length:count},(_,i)=>({
+    id:from+i,name:'Workflow '+(from+i)%7,path:'.github/workflows/w'+((from+i)%7)+'.yml',
+    event:'push',status:'completed',conclusion:'success',head_sha:'a'.repeat(40),
+    head_branch:'main',created_at:new Date(1700000000000+(from+i)*1000).toISOString(),
+  }));
+  const pages=new Map([[1,pageRuns(1,100)],[2,pageRuns(101,8)]]);
+  const listedRuns=await workflowRunsForSha('BestNathan/nession','a'.repeat(40),
+    async path=>{
+      const match=path.match(/[?&]page=(\d+)/);
+      return {workflow_runs:pages.get(match?Number(match[1]):1)??[]};
+    });
+  assert.equal(listedRuns.length,108);
+  assert.equal((await workflowRunsForSha('BestNathan/nession','a'.repeat(40),
+    async()=>({workflow_runs:pageRuns(1,3)}))).length,3);
 
   // Exact-head runs for an ancestor SHA named by the criterion must be reachable
   // even though `pulls` only returns PRs containing the TARGET commit.
