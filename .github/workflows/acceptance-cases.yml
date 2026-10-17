@@ -173,7 +173,7 @@ jobs:
       # GH_TOKEN passed to target-controlled code. This never suppresses Cases.
       - name: Restore verified main Web dist
         id: web-dist
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.select.outputs.count != '0'
+        if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && steps.target.outputs.stage == 'post-merge' && steps.target.outputs.target_sha == github.sha)) && github.ref == 'refs/heads/main' && steps.select.outputs.count != '0'
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash workspace/scripts/ci/try-web-build-reuse.sh workspace "${{ steps.target.outputs.target_sha }}"
