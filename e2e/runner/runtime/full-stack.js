@@ -382,7 +382,8 @@ async function startFullStackRuntime(options) {
     if (typeof provisionLog === 'string' && path.isAbsolute(provisionLog)) {
       try {
         appendFileSync(provisionLog,
-          JSON.stringify({ profile: metadata.profile, at: new Date().toISOString() }) + '\n');
+          JSON.stringify({ profile: metadata.profile, web_only: webOnly,
+            at: new Date().toISOString() }) + '\n');
       } catch { /* measurement is best-effort; never fail the runtime for it */ }
     }
     console.log('[e2e runner] ready ' + JSON.stringify(metadata));
