@@ -111,6 +111,20 @@ function retainedRuns(runs, expectedSha) {
     seenCompletedPath.add(path);
     chosen.set(keyOf(run), run);
   }
+  // A path's newest completed run can be an administrative `skipped` wake.
+  // Keep the newest completed run of each substantive conclusion as well, so
+  // an older success/failure/cancellation at this SHA stays visible behind
+  // newer skips instead of reading as "never happened".
+  const seenCompletedOutcome = new Set();
+  for (const run of atSha) {
+    if (String(run?.status ?? '') !== 'completed') continue;
+    const conclusion = String(run?.conclusion ?? '');
+    if (!['success', 'failure', 'cancelled'].includes(conclusion)) continue;
+    const outcomeKey = String(run?.path ?? '') + '|' + conclusion;
+    if (seenCompletedOutcome.has(outcomeKey)) continue;
+    seenCompletedOutcome.add(outcomeKey);
+    chosen.set(keyOf(run), run);
+  }
   for (const run of atSha.slice(0, MAX_RUNS_PER_SHA)) {
     if (!chosen.has(keyOf(run))) chosen.set(keyOf(run), run);
   }
@@ -2065,6 +2079,27 @@ async function selfTest() {
   assert.ok(liveIds.includes(10),
     'the newest completed run of a path must survive an in-progress successor');
   assert.ok(liveIds.includes(11));
+  // A newer administrative skip must not hide an older substantive outcome of
+  // the same path (the evaluator's own Orchestrator wakes are `skipped`).
+  const outcomeSha='f'.repeat(40);
+  const outcomeRun=(id,event,conclusion,createdAt)=>({
+    id,path:'.github/workflows/acceptance-orchestrator.yml',event,status:'completed',
+    conclusion,head_branch:'main',head_sha:outcomeSha,html_url:'https://example.invalid/'+id,
+    created_at:createdAt,updated_at:createdAt});
+  const outcomeRuns=[
+    outcomeRun(30,'push','success','2026-10-17T00:00:00Z'),
+    outcomeRun(31,'workflow_run','cancelled','2026-10-17T00:30:00Z'),
+    ...Array.from({length:25},(_,i)=>outcomeRun(40+i,'workflow_run','skipped',
+      '2026-10-17T01:'+String(i).padStart(2,'0')+':00Z')),
+  ];
+  const outcomeBundle=normalizeCiEvidence({targetSha:outcomeSha,directRuns:outcomeRuns});
+  const outcomeIds=outcomeBundle.direct_runs.map(run=>run.id);
+  assert.ok(outcomeIds.includes(30),
+    'an older success must survive newer skipped runs of the same path');
+  assert.ok(outcomeIds.includes(31),
+    'an older cancellation must survive newer skipped runs of the same path');
+  assert.ok(outcomeBundle.direct_runs_dropped > 0,
+    'retention beyond the newest page window must still be reported');
   assert.deepEqual(evidence.pull_requests[0].runs.map((run) => run.id), [4]);
   const lineage = normalizeCiEvidence({
     targetSha: 'c'.repeat(40),
