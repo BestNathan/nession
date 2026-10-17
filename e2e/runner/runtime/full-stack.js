@@ -256,6 +256,11 @@ async function startFullStackRuntime(options) {
   const readyTimeoutMs = Number(options?.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS);
   const cleanupHome = options?.cleanupHome !== false;
   const targetSha = assertTargetSha(repoRoot, options?.targetSha);
+  // #1866 SC-01: fixture-only browser gates (the design-system browser profile)
+  // need the built web app and nothing else. A web-only runtime still proves
+  // the preview is ready, but does not start Server, Agent or tmux, so a
+  // `not-required` E2E plan can skip the Rust build entirely.
+  const webOnly = options?.webOnly === true;
 
   const serverTemplate = path.resolve(
     options?.serverConfigTemplate ??
@@ -306,35 +311,37 @@ async function startFullStackRuntime(options) {
   };
 
   try {
-    const server = binaryCommand(repoRoot, 'nession-server', 'nession-server', serverConfig);
-    const serverProcess = spawnManaged(server.command, server.args, {
-      cwd: repoRoot,
-      env: {
-        ...isolationEnv,
-        RUST_LOG: 'info',
-        RUST_BACKTRACE: '1',
-      },
-      label: 'nession-server',
-    });
-    processes.push(serverProcess);
-    await waitForTcp(serverPort, readyTimeoutMs, serverProcess.child, serverProcess.label);
+    if (!webOnly) {
+      const server = binaryCommand(repoRoot, 'nession-server', 'nession-server', serverConfig);
+      const serverProcess = spawnManaged(server.command, server.args, {
+        cwd: repoRoot,
+        env: {
+          ...isolationEnv,
+          RUST_LOG: 'info',
+          RUST_BACKTRACE: '1',
+        },
+        label: 'nession-server',
+      });
+      processes.push(serverProcess);
+      await waitForTcp(serverPort, readyTimeoutMs, serverProcess.child, serverProcess.label);
 
-    // Preserve the existing E2E stabilization window after server readiness.
-    await sleep(Number(options?.agentStartDelayMs ?? 5_000));
+      // Preserve the existing E2E stabilization window after server readiness.
+      await sleep(Number(options?.agentStartDelayMs ?? 5_000));
 
-    const agent = binaryCommand(repoRoot, 'nession-agent', 'nession-agent', agentConfig);
-    const agentProcess = spawnManaged(agent.command, agent.args, {
-      cwd: repoRoot,
-      env: {
-        ...isolationEnv,
-        LANG: 'C.UTF-8',
-        RUST_LOG: 'info',
-        RUST_BACKTRACE: '1',
-      },
-      label: 'nession-agent',
-    });
-    processes.push(agentProcess);
-    await waitForTcp(agentPort, readyTimeoutMs, agentProcess.child, agentProcess.label);
+      const agent = binaryCommand(repoRoot, 'nession-agent', 'nession-agent', agentConfig);
+      const agentProcess = spawnManaged(agent.command, agent.args, {
+        cwd: repoRoot,
+        env: {
+          ...isolationEnv,
+          LANG: 'C.UTF-8',
+          RUST_LOG: 'info',
+          RUST_BACKTRACE: '1',
+        },
+        label: 'nession-agent',
+      });
+      processes.push(agentProcess);
+      await waitForTcp(agentPort, readyTimeoutMs, agentProcess.child, agentProcess.label);
+    }
 
     const webProcess = spawnManaged(
       'npm',
@@ -356,11 +363,12 @@ async function startFullStackRuntime(options) {
     const metadata = {
       schema_version: 1,
       target_sha: targetSha,
-      profile: options?.profile ?? 'full-stack-local',
+      profile: options?.profile ?? (webOnly ? 'web-only' : 'full-stack-local'),
       home,
       tmux_socket: tmuxSocket,
-      server_port: serverPort,
-      agent_port: agentPort,
+      // A web-only runtime has no Server/Agent; reporting invented ports would
+      // claim a stack that was never started.
+      ...(webOnly ? {} : { server_port: serverPort, agent_port: agentPort }),
       web_port: webPort,
       base_url: baseURL,
     };
