@@ -60,6 +60,7 @@ function context(root, env = process.env) {
     npm: npmVersion(),
     platform: process.platform,
     arch: process.arch,
+    node_env: env.NODE_ENV ?? '',
     vite_env_sha256: envDigest(env),
   };
 }
@@ -161,6 +162,7 @@ function selfTest() {
     assert.ok(existsSync(path.join(root, 'web', 'dist', 'index.html')));
     assert.throws(() => restore({ root, source: out, sha: 'b'.repeat(40), runId: 17, runAttempt: 2, env }), /mismatched/);
     assert.throws(() => restore({ root, source: out, sha, runId: 99, runAttempt: 2, env }), /mismatched/);
+    assert.throws(() => restore({ root, source: out, sha, runId: 17, runAttempt: 2, env: { ...env, NODE_ENV: 'development' } }), /mismatched/);
     writeFileSync(path.join(out, 'dist', 'index.html'), 'tamper');
     assert.throws(() => restore({ root, source: out, sha, runId: 17, runAttempt: 2, env }), /checksum/);
     assert.equal(readFileSync(path.join(root, 'web', 'dist', 'index.html'), 'utf8'), '<html></html>');
