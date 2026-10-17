@@ -71,12 +71,9 @@ jobs:
             echo 'available=false' >> "$GITHUB_OUTPUT"
           fi
 
-      # ── Rust toolchain ────────────────────────────────────────────────
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-        with: { cache-workspaces: ".", cache-all-crates: "true" }
-      - uses: extractions/setup-just@v2
-
       # ── Node ──────────────────────────────────────────────────────────
+      # Node comes FIRST: the trusted selection runs before any E2E-only
+      # preparation, so an explicit `not-required` plan can skip it.
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -112,9 +109,26 @@ jobs:
             "$GITHUB_WORKSPACE" "$RUNNER_TEMP/issue-e2e/plan.json"
           echo "mode=$(jq -r '.mode' "$RUNNER_TEMP/issue-e2e/plan.json")" >> "$GITHUB_OUTPUT"
 
+      # ── E2E-only preparation ──────────────────────────────────────────
+      # An explicit `not-required` plan skips the Rust build and the full-stack
+      # prerequisites below. Every other mode (and every non-PR event) keeps
+      # the conservative full preparation, because `steps.selection.outputs.mode`
+      # is only set by a successful trusted selection.
+      - name: Install Rust toolchain
+        id: rust
+        if: steps.selection.outputs.mode != 'not-required'
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with: { cache-workspaces: ".", cache-all-crates: "true" }
+
+      - uses: extractions/setup-just@v2
+        if: steps.selection.outputs.mode != 'not-required'
+
       # tmux is required by nession-agent to create sessions. The runner
       # image may or may not have it pre-installed; install it explicitly.
-      - run: sudo apt-get update && sudo apt-get install -y tmux
+      - name: Install tmux
+        id: tmux
+        if: steps.selection.outputs.mode != 'not-required'
+        run: sudo apt-get update && sudo apt-get install -y tmux
 
       # Restore browser cache BEFORE install — a cache hit means the install
       # below skips the download entirely.
@@ -135,15 +149,37 @@ jobs:
       # Pre-build Rust binaries so the webServer startup is fast and the
       # three `cargo run` invocations don't each pay the compile cost.
       # (cargo's flock still serialises them; this is just the first hit.)
-      - run: cargo build -p nession-server -p nession-agent
+      - name: Build Rust binaries
+        id: rust-build
+        if: steps.selection.outputs.mode != 'not-required'
+        run: cargo build -p nession-server -p nession-agent
 
       # #759: browser contract enforcement uses the same canonical gate as
       # manual work and hooks. The browser profile owns the contract/matrix
       # subset; this workflow does not duplicate that list.
+      #
+      # #1866 SC-01: the browser profile renders client-side fixtures, so it
+      # runs on a web-only runtime. That is what lets a `not-required` plan
+      # skip the Rust build while the required design gate still executes.
       - name: Run canonical browser design gate
+        id: design
         env:
           CI: true
-        run: ./gates/run design-system-browser
+          E2E_RUNTIME_WEB_ONLY: '1'
+          E2E_RUNTIME_PROVISION_LOG: ${{ runner.temp }}/issue-e2e/design-provision.log
+        run: |
+          set -euo pipefail
+          ./gates/run design-system-browser
+          # Every runtime the design gate resolves must be web-only: that is
+          # the parity proof that lets a `not-required` plan skip the Rust
+          # build. The gate runs one Playwright invocation per browser rule,
+          # so the number of provisions is not fixed.
+          count="$(wc -l < "$E2E_RUNTIME_PROVISION_LOG" | tr -d ' ')"
+          cat "$E2E_RUNTIME_PROVISION_LOG" >&2
+          if [ "$count" -lt 1 ] || grep -qv '"web_only":true' "$E2E_RUNTIME_PROVISION_LOG"; then
+            echo "::error::design gate resolved a non-web-only runtime (${count} provision(s))"
+            exit 1
+          fi
 
       # ── Run E2E ───────────────────────────────────────────────────────
       - name: Run E2E tests
@@ -194,7 +230,15 @@ jobs:
                   --sha "$(git rev-parse HEAD)" \
                   --ids "$(IFS=,; echo "${ids[*]}")" \
                   --provisions "$provisions" ;;
-              not-required) echo 'Explicit Issue none; no browser test required for this PR' ;;
+              not-required)
+                # GitHub's own step outcomes prove the skip; the receipt is
+                # the only channel the Acceptance harness can read.
+                node scripts/e2e-selected-run-receipt.mjs emit-not-required \
+                  --sha "$(git rev-parse HEAD)" \
+                  --rust "${{ steps.rust.outcome }}" \
+                  --cargo "${{ steps.rust-build.outcome }}" \
+                  --tmux "${{ steps.tmux.outcome }}" \
+                  --design "${{ steps.design.outcome }}" ;;
               full) ./gates/run e2e-playwright ;;
               *) echo "::error::Invalid Issue E2E mode"; exit 1 ;;
             esac

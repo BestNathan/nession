@@ -30,6 +30,10 @@ export default async function setup(): Promise<() => Promise<void>> {
     agentPort: E2E_AGENT_PORT,
     stalledProbePort: E2E_STALLED_PROBE_PORT,
     webPort: E2E_WEB_PORT,
+    // #1866 SC-01: the design-system browser profile renders client-side
+    // fixtures, so it only needs the built web preview. Every other caller
+    // keeps the full Server/Agent/tmux stack.
+    webOnly: process.env.E2E_RUNTIME_WEB_ONLY === '1',
     // Preserve the old regression-run artifact/debug lifetime: the next run
     // wipes NESSION_HOME before provisioning, while teardown always removes
     // processes and this run's isolated tmux server/socket.
