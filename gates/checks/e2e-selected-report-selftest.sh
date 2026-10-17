@@ -15,6 +15,7 @@ GATE_OWNER='e2e/runner/selected-report.mjs'
 gate_check() {
   gate_require_command node "Install Node.js and rerun the E2E contract Gate." || return $?
   gate_run_invariant node e2e/runner/selected-report.mjs self-test
+  gate_run_invariant node e2e/runner/e2e-full-per-id-receipt.mjs self-test
   # The real E2E collector imports the reporter while argv[2]='collect'.
   # The reporter must be passive as a library, not run its own CLI.
   gate_run_invariant node --input-type=module -e '
