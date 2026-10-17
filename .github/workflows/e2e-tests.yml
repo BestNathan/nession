@@ -155,7 +155,9 @@ jobs:
       # cross-workflow wait and no cache-derived Gate Pass.
       - name: Restore verified main Web dist
         id: web-dist
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        # A manual full E2E run on the exact current main SHA is a distinct
+        # consumer after Quality completion; a branch dispatch never qualifies.
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash scripts/ci/try-web-build-reuse.sh "$GITHUB_WORKSPACE" "$GITHUB_SHA"
