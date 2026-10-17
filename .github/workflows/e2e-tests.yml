@@ -166,6 +166,9 @@ jobs:
         if: steps.web-dist.outputs.hit != 'true'
         run: cd web && npm run build
 
+      - name: Verify runnable Web preview and proxy parity
+        run: node scripts/ci/web-preview-parity.mjs .
+
       # Pre-build Rust binaries so the webServer startup is fast and the
       # three `cargo run` invocations don't each pay the compile cost.
       # (cargo's flock still serialises them; this is just the first hit.)
