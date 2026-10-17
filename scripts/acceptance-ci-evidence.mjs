@@ -18,8 +18,10 @@ import {parseAcceptanceBatchLog,attestAcceptanceBatchReceipt,makeAcceptanceBatch
   ACCEPTANCE_BATCH_WORKFLOWS,ACCEPTANCE_BATCH_LOG_PREFIX} from '../e2e/runner/acceptance-batch-receipt.mjs';
 import {parseE2eSelectedRunLog,attestE2eSelectedRunReceipt,makeE2eSelectedRunReceipt,
   parseE2eNotRequiredLog,attestE2eNotRequiredReceipt,makeE2eNotRequiredReceipt,
-  E2E_SELECTED_RUN_LOG_PREFIX,E2E_NOT_REQUIRED_LOG_PREFIX,E2E_SELECTED_WORKFLOW,
-  E2E_SELECTED_WORKFLOW_NAME,E2E_SELECTED_JOB,E2E_SELECTED_EVENTS} from './e2e-selected-run-receipt.mjs';
+  parseE2eFullGateLog,attestE2eFullGateReceipt,
+  E2E_SELECTED_RUN_LOG_PREFIX,E2E_NOT_REQUIRED_LOG_PREFIX,E2E_FULL_GATE_LOG_PREFIX,
+  E2E_SELECTED_WORKFLOW,E2E_SELECTED_WORKFLOW_NAME,E2E_SELECTED_JOB,
+  E2E_SELECTED_EVENTS} from './e2e-selected-run-receipt.mjs';
 import {historicalCaseEvidence,selfTestHistoricalCase} from './acceptance-historical-case-replay.mjs';
 import { collectAuthenticatedCaseReadbacks, selfTestCaseReceipts } from './acceptance-case-readback-evidence.mjs';
 import os from 'node:os';
@@ -110,7 +112,7 @@ function compactRuns(runs, expectedSha) {
   return retainedRuns(runs, expectedSha).runs.map(compactRun);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], replayDenials = [], storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [] }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], replayDenials = [], storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [] }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -145,6 +147,7 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     acceptance_batch_receipts: acceptanceBatchReceipts,
     e2e_selected_run_receipts: selectedRunReceipts,
     e2e_not_required_receipts: notRequiredRunReceipts,
+    e2e_full_gate_provision_receipts: fullGateProvisionReceipts,
     target_push_e2e_runs: targetPushE2eRuns,
     authenticated_post_e2e_wake_receipts: postE2eWakeReceipts,
     exact_head_e2e_steps: exactHeadE2eSteps,
@@ -368,6 +371,43 @@ export async function collectNotRequiredE2eReceipts(repo,sha,runs,
     try{receipt=parseE2eNotRequiredLog(log);}catch{continue;}
     if(!receipt)continue;
     evidence.push(attestE2eNotRequiredReceipt(receipt,run,matches[0]));
+  }
+  return evidence;
+}
+
+// #1866 SC-03: the Full E2E Gate measures exactly one full-stack provision and
+// verifies the retained selector/canary assurance, but discards its output on
+// success. Re-read the measured receipt from the push job's own log.
+export async function collectFullGateProvisionReceipts(repo,sha,runs,
+  request=githubGet,getText=githubJobLog){
+  if(repo!=='BestNathan/nession'||!/^[a-f0-9]{40}$/.test(sha)||!Array.isArray(runs))
+    throw Error('invalid full Gate provision receipt scope');
+  const candidates=runs.filter(run=>run?.name===E2E_SELECTED_WORKFLOW_NAME&&
+    String(run.path??'').replace(/@refs\/[^\s]+$/,'')===E2E_SELECTED_WORKFLOW&&
+    run.event==='push'&&run.head_sha===sha&&run.status==='completed'&&
+    run.conclusion==='success')
+    .sort((a,b)=>b.id-a.id).slice(0,MAX_SELECTED_RUN_RECEIPTS);
+  const evidence=[];
+  for(const candidate of candidates){
+    const run=await request('/repos/'+repo+'/actions/runs/'+candidate.id);
+    if(run?.id!==candidate.id||run.head_sha!==sha||
+       !Number.isSafeInteger(run.run_attempt)||run.run_attempt<1||
+       run.conclusion!=='success')
+      throw Error('unverified full Gate provision receipt selection');
+    const jobs=await request('/repos/'+repo+'/actions/runs/'+candidate.id+
+      '/attempts/'+run.run_attempt+'/jobs?per_page=100');
+    if(!Array.isArray(jobs?.jobs)||jobs.jobs.length>100)
+      throw Error('unverified full Gate provision receipt jobs');
+    const matches=jobs.jobs.filter(job=>job?.name===E2E_SELECTED_JOB);
+    if(matches.length!==1)continue;
+    let log;
+    try{log=await getText('/repos/'+repo+'/actions/jobs/'+matches[0].id+'/logs',
+      SELECTED_RUN_LOG_BYTES);}
+    catch{continue;}
+    let receipt;
+    try{receipt=parseE2eFullGateLog(log);}catch{continue;}
+    if(!receipt)continue;
+    evidence.push(attestE2eFullGateReceipt(receipt,run,matches[0]));
   }
   return evidence;
 }
@@ -1027,6 +1067,7 @@ async function collectCommand(workspace, outFile) {
   }
   const selectedRunReceipts = await collectSelectedE2eRunReceipts(repo, sha, directRuns);
   const notRequiredRunReceipts = await collectNotRequiredE2eReceipts(repo, sha, directRuns);
+  const fullGateProvisionReceipts = await collectFullGateProvisionReceipts(repo, sha, directRuns);
   const sourceAncestry = await collectSourceAncestry(repo, workspace, sha);
   const ancestryRuns = await collectAncestryRuns(repo, sourceAncestry, sha);
   const targetMergeProof = sourceAncestry.length && process.env.ACCEPTANCE_STAGE === 'post-merge'
@@ -1140,7 +1181,7 @@ async function collectCommand(workspace, outFile) {
     }
   }
   const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls,
-    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts, replayDenials, storePolicyObservability, ancestryRuns, acceptanceBatchReceipts, selectedRunReceiptsBySha, selectedRunReceipts, notRequiredRunReceiptsBySha, notRequiredRunReceipts });
+    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts, replayDenials, storePolicyObservability, ancestryRuns, acceptanceBatchReceipts, selectedRunReceiptsBySha, selectedRunReceipts, notRequiredRunReceiptsBySha, notRequiredRunReceipts, fullGateProvisionReceipts });
   fs.writeFileSync(outFile, JSON.stringify(evidence, null, 2) + '\n');
   console.log(
     'collected acceptance CI evidence for ' + sha +
@@ -1465,6 +1506,38 @@ async function selfTest() {
     notRequiredRunReceipts:notRequired});
   assert.equal(nrNormalized.pull_requests[0].e2e_not_required_receipts.length,1);
   assert.equal(nrNormalized.e2e_not_required_receipts.length,1);
+
+  // #1866 SC-03: the Full Gate's measured provision receipt is reachable from
+  // the push job log at the exact target SHA.
+  const fgSha='5'.repeat(40);
+  const fgReceipt={schema_version:1,kind:'e2e_full_gate',repository:denialRepo,
+    workflow:'.github/workflows/e2e-tests.yml',run_id:916,run_attempt:1,sha:fgSha,
+    mode:'all',provisions:1,selector_verified:true,selected_report_verified:true};
+  const fgRun={...selRun,id:916,head_sha:fgSha,event:'push',conclusion:'success'};
+  const fgJobs={jobs:[{name:'e2e',id:404,run_id:916,run_attempt:1,head_sha:fgSha,
+    status:'completed',conclusion:'success',
+    steps:[{name:'Run E2E tests',conclusion:'success'}]}]};
+  const fgRequest=async p=>{
+    if(p.endsWith('/actions/runs/916'))return fgRun;
+    if(p.endsWith('/actions/runs/916/attempts/1/jobs?per_page=100'))return fgJobs;
+    throw Error('unexpected full Gate API: '+p);
+  };
+  const fgLog='2026-10-17T07:30:00Z '+E2E_FULL_GATE_LOG_PREFIX+
+    JSON.stringify(fgReceipt)+'\n';
+  const fullGate=await collectFullGateProvisionReceipts(denialRepo,fgSha,[fgRun],
+    fgRequest,async()=>fgLog);
+  assert.equal(fullGate.length,1);
+  assert.equal(fullGate[0].at_most_one_full_stack_provision,true);
+  assert.equal(fullGate[0].selector_verified,true);
+  // A PR run or another SHA is not the canonical push Gate.
+  assert.deepEqual(await collectFullGateProvisionReceipts(denialRepo,fgSha,
+    [{...fgRun,event:'pull_request'}],fgRequest,async()=>fgLog),[]);
+  assert.deepEqual(await collectFullGateProvisionReceipts(denialRepo,fgSha,
+    [{...fgRun,head_sha:'6'.repeat(40)}],fgRequest,async()=>fgLog),[]);
+  assert.deepEqual(await collectFullGateProvisionReceipts(denialRepo,fgSha,[fgRun],
+    fgRequest,async()=>''),[]);
+  assert.equal(normalizeCiEvidence({targetSha:fgSha,
+    fullGateProvisionReceipts:fullGate}).e2e_full_gate_provision_receipts.length,1);
 
   // Exact-head runs for an ancestor SHA named by the criterion must be reachable
   // even though `pulls` only returns PRs containing the TARGET commit.

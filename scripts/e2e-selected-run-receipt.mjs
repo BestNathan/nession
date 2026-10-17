@@ -266,6 +266,85 @@ export function parseE2eNotRequiredLog(log) {
   return validateE2eNotRequiredReceipt(JSON.parse(match[1]));
 }
 
+// ── Full Gate provision receipt (push/full regression) ──────────────────
+// The Gate already measures "exactly one full-stack provision" and verifies
+// the retained selector/canary assurance, but its output is discarded on
+// success. This receipt carries those measured facts into the job log.
+export const E2E_FULL_GATE_LOG_PREFIX = 'E2E_FULL_GATE_PROVISION_V1 ';
+export const E2E_FULL_GATE_KIND = 'e2e_full_gate';
+export const E2E_FULL_GATE_EVENTS = Object.freeze(['push']);
+export const E2E_FULL_GATE_STEP = 'Run E2E tests';
+
+export function validateE2eFullGateReceipt(receipt) {
+  if (receipt?.schema_version !== 1 || receipt.kind !== E2E_FULL_GATE_KIND ||
+      receipt.repository !== REPO || receipt.workflow !== E2E_SELECTED_WORKFLOW ||
+      !POS(receipt.run_id) || !POS(receipt.run_attempt) ||
+      !SHA.test(receipt.sha ?? '') || receipt.mode !== 'all' ||
+      receipt.provisions !== 1 ||
+      receipt.selector_verified !== true || receipt.selected_report_verified !== true) {
+    throw Error('invalid full Gate provision receipt');
+  }
+  const allowed = new Set(['schema_version', 'kind', 'repository', 'workflow',
+    'run_id', 'run_attempt', 'sha', 'mode', 'provisions',
+    'selector_verified', 'selected_report_verified']);
+  if (Object.keys(receipt).some((key) => !allowed.has(key))) {
+    throw Error('unexpected full Gate provision receipt fields');
+  }
+  return receipt;
+}
+
+export function attestE2eFullGateReceipt(receipt, run, job) {
+  validateE2eFullGateReceipt(receipt);
+  const steps = Array.isArray(job?.steps) ? job.steps : [];
+  const runSteps = steps.filter((step) => step?.name === E2E_FULL_GATE_STEP);
+  if (run?.id !== receipt.run_id ||
+      run?.run_attempt !== receipt.run_attempt ||
+      run?.head_sha !== receipt.sha ||
+      !E2E_FULL_GATE_EVENTS.includes(run?.event) ||
+      run?.name !== E2E_SELECTED_WORKFLOW_NAME ||
+      normalizeWorkflowPath(run?.path) !== E2E_SELECTED_WORKFLOW ||
+      run?.repository?.full_name !== REPO ||
+      run?.head_repository?.full_name !== REPO ||
+      run?.status !== 'completed' || run?.conclusion !== 'success' ||
+      job?.name !== E2E_SELECTED_JOB ||
+      job?.run_id !== receipt.run_id ||
+      job?.run_attempt !== receipt.run_attempt ||
+      job?.head_sha !== receipt.sha ||
+      job?.status !== 'completed' || job?.conclusion !== 'success' ||
+      runSteps.length !== 1 || runSteps[0].conclusion !== 'success') {
+    throw Error('full Gate provision receipt Run/Attempt/job provenance mismatch');
+  }
+  return Object.freeze({
+    kind: 'verified_e2e_full_gate_provision',
+    run_id: receipt.run_id,
+    run_attempt: receipt.run_attempt,
+    sha: receipt.sha,
+    event: run.event,
+    branch: run.head_branch ?? null,
+    mode: 'all',
+    provisions: 1,
+    at_most_one_full_stack_provision: true,
+    selector_verified: true,
+    selected_report_verified: true,
+    evidence: 'GitHub API Run/Attempt/job/step outcomes + exact original full ' +
+      'Gate job log receipt emitted after the measured provision assertion',
+  });
+}
+
+export function parseE2eFullGateLog(log) {
+  if (typeof log !== 'string' || log.length > 4194304) {
+    throw Error('invalid full Gate log size');
+  }
+  const candidates = log.split(/\r?\n/)
+    .filter((line) => line.includes(E2E_FULL_GATE_LOG_PREFIX));
+  if (candidates.length !== 1) return null;
+  const match = candidates[0].match(/E2E_FULL_GATE_PROVISION_V1 (\{.*\})\s*$/);
+  if (!match || match[1].length > 16384) {
+    throw Error('invalid full Gate record framing');
+  }
+  return validateE2eFullGateReceipt(JSON.parse(match[1]));
+}
+
 function emitNotRequired() {
   const receipt = makeE2eNotRequiredReceipt({
     env: process.env,
@@ -398,6 +477,24 @@ function selfTest() {
   assert.equal(parseE2eNotRequiredLog(nrLine).plan_mode, 'not-required');
   assert.equal(parseE2eNotRequiredLog(line), null);
   reject(() => parseE2eNotRequiredLog(E2E_NOT_REQUIRED_LOG_PREFIX + '{"not":'), /framing/);
+  // Full Gate provision receipt: at-most-one provision + retained assurance.
+  const fg = { schema_version: 1, kind: E2E_FULL_GATE_KIND, repository: REPO,
+    workflow: E2E_SELECTED_WORKFLOW, run_id: 12, run_attempt: 1, sha, mode: 'all',
+    provisions: 1, selector_verified: true, selected_report_verified: true };
+  validateE2eFullGateReceipt(fg);
+  const fgRun = { ...run, event: 'push' };
+  const fgJob = { ...job, steps: [{ name: E2E_FULL_GATE_STEP, conclusion: 'success' }] };
+  assert.equal(attestE2eFullGateReceipt(fg, fgRun, fgJob)
+    .at_most_one_full_stack_provision, true);
+  reject(() => attestE2eFullGateReceipt(fg, { ...fgRun, event: 'pull_request' }, fgJob), /mismatch/);
+  reject(() => attestE2eFullGateReceipt(fg, fgRun,
+    { ...fgJob, steps: [{ name: E2E_FULL_GATE_STEP, conclusion: 'failure' }] }), /mismatch/);
+  reject(() => validateE2eFullGateReceipt({ ...fg, provisions: 2 }), /invalid/);
+  reject(() => validateE2eFullGateReceipt({ ...fg, selector_verified: false }), /invalid/);
+  reject(() => validateE2eFullGateReceipt({ ...fg, extra: 1 }), /unexpected/);
+  const fgLine = 'x\n' + E2E_FULL_GATE_LOG_PREFIX + JSON.stringify(fg) + '\n';
+  assert.equal(parseE2eFullGateLog(fgLine).provisions, 1);
+  assert.equal(parseE2eFullGateLog(line), null);
   console.log('e2e-selected-run-receipt self-test passed');
 }
 

@@ -54,6 +54,30 @@ gate_check() {
       "$(wc -l < "$provision_log" | tr -d ' ')" "${GITHUB_SHA:-unknown}" \
       >> "$GITHUB_STEP_SUMMARY"
   fi
+  # #1866 SC-03: the Acceptance harness compacts evidence to run metadata and
+  # never reads artifacts or step summaries. Emit the measured facts into the
+  # job log so a trusted collector can attest at-most-one provision and the
+  # retained selector/canary assurance at the exact push SHA.
+  if [ -n "${GITHUB_REPOSITORY:-}" ]; then
+    gate_run_invariant node -e '
+      const provisions = Number(process.argv[1]);
+      const sha = String(process.argv[2] || "");
+      const runId = Number(process.env.GITHUB_RUN_ID);
+      const runAttempt = Number(process.env.GITHUB_RUN_ATTEMPT);
+      if (!/^[0-9a-f]{40}$/.test(sha) || provisions !== 1 ||
+          !Number.isSafeInteger(runId) || runId < 1 ||
+          !Number.isSafeInteger(runAttempt) || runAttempt < 1) {
+        console.error("full Gate receipt requires an exact SHA, one provision and a run identity");
+        process.exit(1);
+      }
+      process.stdout.write("E2E_FULL_GATE_PROVISION_V1 " + JSON.stringify({
+        schema_version: 1, kind: "e2e_full_gate",
+        repository: process.env.GITHUB_REPOSITORY, workflow: ".github/workflows/e2e-tests.yml",
+        run_id: runId, run_attempt: runAttempt, sha, mode: "all", provisions,
+        selector_verified: true, selected_report_verified: true,
+      }) + "\n");
+    ' "$(wc -l < "$provision_log" | tr -d ' ')" "${GITHUB_SHA:-}"
+  fi
 }
 
 gate_main "$@"
