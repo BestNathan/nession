@@ -28,6 +28,7 @@ export const CATALOG = [
   ['e2e-scenario-ingest', 'e2e-run-ingest.yml', 'E2E Run Ingest', 'e2e-scenario-ingest.yml', 'E2E / Scenario Ingest', 'e2e'],
   ['e2e-test-ingest', 'e2e-test-run-ingest.yml', 'E2E Test Run Ingest', 'e2e-test-ingest.yml', 'E2E / Test Ingest', 'e2e'],
   ['ci-quality', 'quality.yml', 'Quality Gate', 'ci-quality.yml', 'CI / Quality Gate', 'ci'],
+  ['ci-web-dist-reuse-proof', 'ci-web-dist-reuse-proof.yml', 'CI / Web Dist Reuse Proof', 'ci-web-dist-reuse-proof.yml', 'CI / Web Dist Reuse Proof', 'ci'],
   ['ci-run-store-integrity-audit', 'ci-run-store-integrity-audit.yml', 'CI / Run Store Integrity Audit', 'ci-run-store-integrity-audit.yml', 'CI / Run Store Integrity Audit', 'ci'],
   ['ci-run-store-fixture-evidence', 'ci-run-store-fixture-evidence.yml', 'CI / Run Store Fixture Evidence', 'ci-run-store-fixture-evidence.yml', 'CI / Run Store Fixture Evidence', 'ci'],
   ['ci-pages', 'ci-pages.yml', 'CI / Pages', 'ci-pages.yml', 'CI / Pages', 'ci'],
