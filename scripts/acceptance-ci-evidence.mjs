@@ -458,10 +458,12 @@ export async function collectAncestryReceipts(repo,sourceAncestry,targetSha,
 // mixing scopes.
 export function computeReuseComparison({targetSha,acceptanceBatchReceipts=[],
   extraBatchReceipts=[],fullGateProvisionReceipts=[],selectedRunReceipts=[],
-  targetPushE2eRuns=[]}){
+  extraSelectedRunReceipts=[],targetPushE2eRuns=[]}){
   if(!/^[a-f0-9]{40}$/.test(targetSha))throw Error('invalid reuse comparison target');
   const full=fullGateProvisionReceipts[0]??null;
-  const selected=selectedRunReceipts[0]??null;
+  // The target of a merged evaluation has no pull_request run of its own, so
+  // fall back to the associated PR head's authenticated selected-run receipt.
+  const selected=selectedRunReceipts[0]??extraSelectedRunReceipts[0]??null;
   // Batch receipts from associated PR heads are included so a shared-runtime
   // decision is comparable even on a merge SHA whose own Cases are isolated.
   const seen=new Set();
@@ -1282,6 +1284,7 @@ async function collectCommand(workspace, outFile) {
   const reuseComparison = computeReuseComparison({ targetSha: sha,
     acceptanceBatchReceipts,
     extraBatchReceipts: [...batchReceiptsBySha.values()].flat(),
+    extraSelectedRunReceipts: [...selectedRunReceiptsBySha.values()].flat(),
     fullGateProvisionReceipts, selectedRunReceipts, targetPushE2eRuns });
   const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls,
     pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts, replayDenials, storePolicyObservability, ancestryRuns, acceptanceBatchReceipts, selectedRunReceiptsBySha, selectedRunReceipts, notRequiredRunReceiptsBySha, notRequiredRunReceipts, fullGateProvisionReceipts, exactHeadStepsBySha, batchReceiptsBySha, ancestryReceipts, reuseComparison });
