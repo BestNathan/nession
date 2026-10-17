@@ -45,7 +45,28 @@ export async function assertLiveTranscriptMatrix(
   await viewport.hover();
   await page.mouse.wheel(0, -420);
   await expect.poll(() => bottomGap(viewport)).toBeGreaterThan(150);
-  const readerTop = await viewport.evaluate((el) => el.scrollTop);
+  // #1876: Wait for the *real wheel gesture* to settle before sampling its
+  // reader-owned baseline. Checking only bottomGap > 150 is insufficient:
+  // Playwright's 39048247935/1 trace measured scrollTop=1388 immediately
+  // after that check, then 1111 (~31ms later) as the wheel animation finished.
+  // A streaming update in between falsely looked like a 277px auto-follow
+  // regression. We do not set scrollTop, change the <6px preservation
+  // assertion below, hide flaky results, or modify production scroll logic.
+  //
+  // Polling for two consecutive unchanged readings works with page.clock's
+  // frozen timer (unlike browser-side setTimeout) and bounds hangs to 5s.
+  let lastTop: number | null = null;
+  let settledSamples = 0;
+  await expect.poll(async () => {
+    const top = await viewport.evaluate((el) => el.scrollTop);
+    settledSamples = lastTop !== null && Math.abs(top - lastTop) < 1
+      ? settledSamples + 1
+      : 0;
+    lastTop = top;
+    return settledSamples;
+  }, { timeout: 5_000, intervals: [100, 150, 200, 250] })
+    .toBeGreaterThanOrEqual(2);
+  const readerTop = lastTop as number;
 
   await page.clock.fastForward(3100);
 

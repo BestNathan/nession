@@ -34,14 +34,26 @@ function assertSource(event, run, workflow) {
   assert.ok(Number.isFinite(Date.parse(run.created_at)));
   assert.equal(run.head_commit?.id, run.head_sha);
 }
-function requireArtifact(raw, run) {
+// GitHub Action artifacts are indexed by Run, NOT by Attempt. A valid exact-SHA
+// rerun leaves the failed attempt's "playwright-report" alongside the new
+// success artifact with an identical name. Authenticate the exact Attempt's
+// completed producer Job first, then select by its GitHub-issued clock window.
+// Do not use array order, "newest artifact", or mutable logs as authority.
+function requireArtifact(raw, run, job) {
   assert.equal(raw.name, 'playwright-report');
   assert.ok(positive(raw.id) && positive(raw.size_in_bytes));
   assert.ok(raw.size_in_bytes <= 1024 * 1024 * 1024, 'oversized artifact');
   assert.equal(raw.expired, false, 'artifact already expired');
   assert.match(raw.digest, /^sha256:[a-f0-9]{64}$/, 'artifact digest not verified');
+  assert.equal(raw.workflow_run?.id, run.id, 'foreign artifact run');
+  assert.equal(raw.workflow_run?.head_sha, run.head_sha, 'foreign artifact SHA');
+  const created = Date.parse(raw.created_at);
+  assert.ok(Number.isFinite(created), 'artifact creation timestamp required');
+  assert.ok(created >= Date.parse(job.started_at) &&
+    created <= Date.parse(job.completed_at),
+    'artifact was not created during exact successful producer Attempt');
   assert.ok(Number.isFinite(Date.parse(raw.expires_at)));
-  assert.ok(Date.parse(raw.expires_at) > Date.parse(run.created_at));
+  assert.ok(Date.parse(raw.expires_at) > created);
   return { artifact_id: raw.id, name: raw.name, size_bytes: raw.size_in_bytes,
     sha256: raw.digest.slice(7), expires_at: raw.expires_at,
     durability: 'GitHub Actions artifact; time-limited, not indefinitely archived' };
@@ -50,19 +62,31 @@ function requireJob(jobs, run) {
   const matches = jobs.filter(j => j.name === 'e2e' && j.run_id === run.id);
   assert.equal(matches.length, 1, 'missing or duplicate exact E2E job');
   const job = matches[0];
+  assert.ok(positive(job.id));
+  assert.equal(job.run_attempt, run.run_attempt, 'foreign E2E Attempt');
+  assert.equal(job.head_sha, run.head_sha, 'foreign E2E Job SHA');
   assert.equal(job.status, 'completed');
   assert.equal(job.conclusion, 'success');
-  return { job_id: job.id, name: 'e2e', conclusion: 'success' };
+  const start = Date.parse(job.started_at), end = Date.parse(job.completed_at);
+  assert.ok(Number.isFinite(start) && Number.isFinite(end) &&
+    start >= Date.parse(run.created_at) && end >= start,
+    'invalid exact Attempt producer Job time interval');
+  return job;
 }
 function recordFor(event, run, workflow, tree, jobs, artifacts) {
   assertSource(event, run, workflow);
   assert.match(tree.sha, HEX40);
   const sourceTree = tree.tree.find(x => x.path === 'e2e/tests/browser' && x.type === 'tree');
   assert.ok(sourceTree && HEX40.test(sourceTree.sha), 'missing authentic Playwright source tree');
-  const proof = requireJob(jobs, run);
-  const found = artifacts.filter(x => x.name === 'playwright-report');
-  assert.equal(found.length, 1, 'missing or ambiguous report artifact');
-  const artifact = requireArtifact(found[0], run);
+  const job = requireJob(jobs, run);
+  const found = artifacts.filter(x => x.name === 'playwright-report' &&
+    Number.isFinite(Date.parse(x.created_at)) &&
+    Date.parse(x.created_at) >= Date.parse(job.started_at) &&
+    Date.parse(x.created_at) <= Date.parse(job.completed_at));
+  assert.equal(found.length, 1, 'missing or ambiguous exact-Attempt report artifact');
+  const artifact = requireArtifact(found[0], run, job);
+  const proof = { job_id: job.id, name: job.name, conclusion: job.conclusion,
+    run_attempt: job.run_attempt };
   const date = run.created_at.slice(0, 10);
   assert.match(date, /^\d{4}-\d{2}-\d{2}$/);
   const name = run.id + '-' + run.run_attempt;
@@ -104,7 +128,8 @@ async function create(eventFile, recordFile, indexFile, outputFile) {
   const [run, workflow, jobs, artifacts] = await Promise.all([
     github('/actions/runs/' + id),
     github('/actions/workflows/e2e-tests.yml'),
-    github('/actions/runs/' + id + '/jobs?per_page=100'),
+    github('/actions/runs/' + id + '/attempts/' + event.workflow_run.run_attempt +
+      '/jobs?per_page=100'),
     github('/actions/runs/' + id + '/artifacts?per_page=100'),
   ]);
   assertSource(event, run, workflow);
@@ -133,11 +158,14 @@ function selfTest() {
   const workflow = { id: 5, path: '.github/workflows/e2e-tests.yml' };
   const tree = { sha: commitTree, tree: [{ type: 'tree',
     path: 'e2e/tests/browser', sha: sourceTree }] };
-  const jobs = [{ name: 'e2e', run_id: 120, id: 66,
+  const jobs = [{ name: 'e2e', run_id: 120, run_attempt: 2, id: 66,
+    head_sha: sha, started_at: '2026-10-10T01:01:00Z',
+    completed_at: '2026-10-10T01:10:00Z',
     status: 'completed', conclusion: 'success' }];
   const artifacts = [{ id: 33, name: 'playwright-report', size_in_bytes: 1024,
     digest: 'sha256:' + 'd'.repeat(64), expires_at: '2026-10-17T01:00:00Z',
-    expired: false }];
+    created_at: '2026-10-10T01:09:00Z',
+    workflow_run: { id: 120, head_sha: sha }, expired: false }];
   const result = recordFor(event, run, workflow, tree, jobs, artifacts);
   assert.match(result.recordPath, /^runs\/2026-10-10\/120-2\/test\/playwright.json$/);
   assert.ok(result.indexPath.includes('/test/120-2-playwright.json'));
@@ -146,6 +174,28 @@ function selfTest() {
   assert.equal(record.evidence.sha256, 'd'.repeat(64));
   assert.equal(JSON.parse(result.indexBytes).record_sha256, sha256(result.recordBytes));
   assert.deepEqual(recordFor(event, run, workflow, tree, jobs, artifacts), result);
+  // Real GitHub Actions rerun semantics: the failed Attempt's same-name
+  // artifact remains listed by Run. It must NEVER invalidate the new successful
+  // Attempt, nor can newest/first ordering substitute for identity checks.
+  const staleArtifact = { ...artifacts[0], id: 31,
+    created_at: '2026-10-10T01:00:30Z' };
+  const currentWithStale = [staleArtifact, ...artifacts];
+  assert.deepEqual(recordFor(event, run, workflow, tree, jobs, currentWithStale), result);
+  assert.deepEqual(recordFor(event, run, workflow, tree, jobs, [...currentWithStale].reverse()), result);
+  for (const invalid of [
+    [event, run, workflow, tree, jobs, [staleArtifact]],
+    [event, run, workflow, tree, jobs, [...artifacts, { ...artifacts[0], id: 34 }]],
+    [event, run, workflow, tree, [{ ...jobs[0], run_attempt: 1 }], artifacts],
+    [event, run, workflow, tree, [{ ...jobs[0], head_sha: 'f'.repeat(40) }], artifacts],
+    [event, run, workflow, tree, jobs,
+      [{ ...artifacts[0], workflow_run: { id: 120, head_sha: 'f'.repeat(40) } }]],
+    [event, run, workflow, tree, jobs,
+      [{ ...artifacts[0], workflow_run: { id: 121, head_sha: sha } }]],
+    [event, run, workflow, tree, jobs,
+      [{ ...artifacts[0], created_at: '2026-10-10T01:10:01Z' }]],
+  ]) assert.throws(() => recordFor(...invalid));
+  // These are additional negatives over the original eight.
+
   // Producer/consumer reachability is part of the security contract: a green
   // PR-only E2E is NOT real post-merge main Push Test evidence.
   const sourceWorkflowYml=fs.readFileSync(new URL('../.github/workflows/e2e-tests.yml',import.meta.url),'utf8');
@@ -170,7 +220,7 @@ function selfTest() {
     [event,run,workflow,tree,jobs,[{...artifacts[0],digest:'sha256:bad'}]],
     [event,run,workflow,tree,jobs,[{...artifacts[0],expired:true}]],
   ]) assert.throws(() => recordFor(ev,r,wf,tr,js,as));
-  console.log('trusted E2E Test Run Ingest: immutable SHA/tree, GitHub source, artifact digest and 8 negative fixtures passed');
+  console.log('trusted E2E Test Run Ingest: immutable SHA/tree, exact run-attempt job/artifact provenance, GitHub digest and 15 negative fixtures passed');
 }
 if (process.argv[2] === 'self-test') selfTest();
 else if (process.argv[2] === 'create') {
