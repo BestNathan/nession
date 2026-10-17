@@ -112,7 +112,7 @@ function compactRuns(runs, expectedSha) {
   return retainedRuns(runs, expectedSha).runs.map(compactRun);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], replayDenials = [], storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [], exactHeadStepsBySha = new Map(), batchReceiptsBySha = new Map() }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], replayDenials = [], storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [], exactHeadStepsBySha = new Map(), batchReceiptsBySha = new Map(), ancestryReceipts = [], reuseComparison = null }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -149,6 +149,8 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     verified_metrics_replay_denials: replayDenials,
     store_policy_observability: storePolicyObservability,
     ancestry_runs: ancestryRuns,
+    ancestry_receipts: ancestryReceipts,
+    reuse_comparison_measurements: reuseComparison,
     acceptance_batch_receipts: acceptanceBatchReceipts,
     e2e_selected_run_receipts: selectedRunReceipts,
     e2e_not_required_receipts: notRequiredRunReceipts,
@@ -415,6 +417,91 @@ export async function collectFullGateProvisionReceipts(repo,sha,runs,
     evidence.push(attestE2eFullGateReceipt(receipt,run,matches[0]));
   }
   return evidence;
+}
+
+// #1866 SC-01/SC-02: a merged target carries only ONE pull_request, so a
+// `not-required` PR and a `selected` PR can never be associated with the same
+// merge SHA. Both proofs are still reachable: the Issue names exact ancestor
+// SHAs, git proves each is an ancestor of the target, and the same
+// authenticated collectors re-read each ancestor's own job logs and history.
+const ANCESTRY_RECEIPT_TARGETS=8;
+export async function collectAncestryReceipts(repo,sourceAncestry,targetSha,
+  runsForSha=workflowRunsForSha,request=githubGet,getText=githubJobLog){
+  if(repo!=='BestNathan/nession'||!/^[a-f0-9]{40}$/.test(targetSha)||
+     !Array.isArray(sourceAncestry))throw Error('invalid ancestry receipt scope');
+  const evidence=[];
+  for(const entry of sourceAncestry.slice(0,ANCESTRY_RECEIPT_TARGETS)){
+    if(entry?.is_ancestor!==true||entry.ancestor_sha===targetSha)continue;
+    const sha=entry.ancestor_sha;
+    if(!/^[a-f0-9]{40}$/.test(sha??''))continue;
+    const runs=await runsForSha(repo,sha);
+    if(!Array.isArray(runs))throw Error('invalid ancestry receipt runs');
+    // Per-ID assertion history for the PR whose head is this ancestor.
+    const pulls=await request('/repos/'+repo+'/commits/'+sha+'/pulls?per_page=10');
+    const pull=(Array.isArray(pulls)?pulls:[]).find(p=>p?.head?.sha===sha);
+    const historical=pull?await collectHistoricalE2EForPull(repo,pull,request):[];
+    evidence.push({
+      sha,
+      historical_e2e_runs:historical,
+      e2e_not_required_receipts:await collectNotRequiredE2eReceipts(repo,sha,runs,request,getText),
+      e2e_selected_run_receipts:await collectSelectedE2eRunReceipts(repo,sha,runs,request,getText),
+      acceptance_batch_receipts:await collectAcceptanceBatchReceipts(repo,sha,runs,request,getText),
+    });
+  }
+  return evidence;
+}
+
+// #1866 SC-08: an equivalent-scope comparison from the receipts themselves.
+// The per-case path is the default strategy (one owned runtime per Case); the
+// measured path is the job-scoped batch at the same SHA. Both counts come from
+// the same GitHub-attested receipt, so the comparison cannot be inflated by
+// mixing scopes.
+export function computeReuseComparison({targetSha,acceptanceBatchReceipts=[],
+  extraBatchReceipts=[],fullGateProvisionReceipts=[],selectedRunReceipts=[],
+  targetPushE2eRuns=[]}){
+  if(!/^[a-f0-9]{40}$/.test(targetSha))throw Error('invalid reuse comparison target');
+  const full=fullGateProvisionReceipts[0]??null;
+  const selected=selectedRunReceipts[0]??null;
+  // Batch receipts from associated PR heads are included so a shared-runtime
+  // decision is comparable even on a merge SHA whose own Cases are isolated.
+  const seen=new Set();
+  const batches=[...acceptanceBatchReceipts,...extraBatchReceipts].filter(batch=>{
+    const key=batch?.run_id+':'+batch?.sha;
+    if(seen.has(key))return false;
+    seen.add(key);return true;
+  });
+  const comparisons=batches.map(batch=>{
+    const cases=Array.isArray(batch.cases)?batch.cases:[];
+    const isolated=cases.filter(item=>item.isolation==='isolated').length;
+    const measured=(batch.shared_ready_runtimes??0)+isolated;
+    return {
+      source_run_id:batch.run_id??null,
+      sha:batch.sha??null,
+      executed_cases:cases.length,
+      baseline_case_owned_runtimes:cases.length,
+      measured_runtimes:measured,
+      runtimes_saved:Math.max(0,cases.length-measured),
+      shared_cases:cases.filter(item=>item.isolation==='shared').length,
+      fallback_cases:isolated,
+    };
+  });
+  if(comparisons.length===0&&!full&&!selected)return null;
+  return {
+    kind:'authenticated_reuse_comparison',
+    target_sha:targetSha,
+    baseline_path:'per-case default (one owned runtime per Case)',
+    measured_path:'job-scoped batch',
+    comparisons,
+    full_gate_provisions:full?.provisions??null,
+    selected_run:selected?{
+      selected_ids:selected.selected_ids,
+      selected_count:selected.selected_count,
+      provisioned_runtimes:selected.provisioned_runtimes,
+    }:null,
+    main_push_full_e2e_success:targetPushE2eRuns.some(run=>
+      run.status==='completed'&&run.conclusion==='success'),
+    provenance:'computed by the trusted collector from GitHub-attested receipts at the exact target SHA',
+  };
 }
 
 async function githubJobLog(path,maxBytes=1048576){
@@ -1081,6 +1168,7 @@ async function collectCommand(workspace, outFile) {
   const fullGateProvisionReceipts = await collectFullGateProvisionReceipts(repo, sha, directRuns);
   const sourceAncestry = await collectSourceAncestry(repo, workspace, sha);
   const ancestryRuns = await collectAncestryRuns(repo, sourceAncestry, sha);
+  const ancestryReceipts = await collectAncestryReceipts(repo, sourceAncestry, sha);
   const targetMergeProof = sourceAncestry.length && process.env.ACCEPTANCE_STAGE === 'post-merge'
     ? checkGitMergeCommit(workspace, sha, sourceAncestry.map(x=>x.ancestor_sha))
     : null;
@@ -1191,8 +1279,12 @@ async function collectCommand(workspace, outFile) {
         relatedBugCompletion=await collectRelatedBugCompletion(repo,currentIssue,sha,githubGet);
     }
   }
+  const reuseComparison = computeReuseComparison({ targetSha: sha,
+    acceptanceBatchReceipts,
+    extraBatchReceipts: [...batchReceiptsBySha.values()].flat(),
+    fullGateProvisionReceipts, selectedRunReceipts, targetPushE2eRuns });
   const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls,
-    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts, replayDenials, storePolicyObservability, ancestryRuns, acceptanceBatchReceipts, selectedRunReceiptsBySha, selectedRunReceipts, notRequiredRunReceiptsBySha, notRequiredRunReceipts, fullGateProvisionReceipts, exactHeadStepsBySha, batchReceiptsBySha });
+    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts, replayDenials, storePolicyObservability, ancestryRuns, acceptanceBatchReceipts, selectedRunReceiptsBySha, selectedRunReceipts, notRequiredRunReceiptsBySha, notRequiredRunReceipts, fullGateProvisionReceipts, exactHeadStepsBySha, batchReceiptsBySha, ancestryReceipts, reuseComparison });
   fs.writeFileSync(outFile, JSON.stringify(evidence, null, 2) + '\n');
   console.log(
     'collected acceptance CI evidence for ' + sha +
@@ -1559,6 +1651,59 @@ async function selfTest() {
     fgRequest,async()=>''),[]);
   assert.equal(normalizeCiEvidence({targetSha:fgSha,
     fullGateProvisionReceipts:fullGate}).e2e_full_gate_provision_receipts.length,1);
+
+  // #1866 SC-01/SC-02: a merged target carries one pull_request, so the
+  // not-required and selected proofs are reached through named ancestor SHAs.
+  const ancNrSha='4'.repeat(40);
+  const ancNrReceipt=makeE2eNotRequiredReceipt({env:{GITHUB_REPOSITORY:denialRepo,
+    GITHUB_RUN_ID:'917',GITHUB_RUN_ATTEMPT:'1'},sha:ancNrSha,
+    steps:{rust_toolchain:'skipped',cargo_build:'skipped',tmux:'skipped',
+      design_gate:'success'}});
+  const ancNrRun={...selRun,id:917,head_sha:ancNrSha,conclusion:'success'};
+  const ancNrJobs={jobs:[{name:'e2e',id:405,run_id:917,run_attempt:1,head_sha:ancNrSha,
+    status:'completed',conclusion:'success',
+    steps:[{name:'Install Rust toolchain',conclusion:'skipped'},
+      {name:'Build Rust binaries',conclusion:'skipped'},
+      {name:'Install tmux',conclusion:'skipped'},
+      {name:'Run canonical browser design gate',conclusion:'success'}]}]};
+  const ancRequest=async p=>{
+    if(p.endsWith('/actions/runs/917'))return ancNrRun;
+    if(p.endsWith('/actions/runs/917/attempts/1/jobs?per_page=100'))return ancNrJobs;
+    if(p.endsWith('/commits/'+ancNrSha+'/pulls?per_page=10'))return [];
+    throw Error('unexpected ancestry API: '+p);
+  };
+  const ancestralRuns=async(_repo,lookup)=>lookup===ancNrSha?[ancNrRun]:[];
+  const ancLog=async p=>p.endsWith('/actions/jobs/405/logs')
+    ?E2E_NOT_REQUIRED_LOG_PREFIX+JSON.stringify(ancNrReceipt)+'\n':'';
+  const ancestry=await collectAncestryReceipts(denialRepo,
+    [{ancestor_sha:ancNrSha,is_ancestor:true},
+     {ancestor_sha:'9'.repeat(40),is_ancestor:false}],
+    'b'.repeat(40),ancestralRuns,ancRequest,ancLog);
+  assert.equal(ancestry.length,1);
+  assert.equal(ancestry[0].sha,ancNrSha);
+  assert.equal(ancestry[0].e2e_not_required_receipts.length,1);
+  assert.deepEqual(ancestry[0].historical_e2e_runs,[]);
+  assert.deepEqual(await collectAncestryReceipts(denialRepo,
+    [{ancestor_sha:ancNrSha,is_ancestor:false}],'b'.repeat(40),
+    ancestralRuns,ancRequest,ancLog),[]);
+
+  // SC-08: the equivalent-scope comparison is computed from the receipts.
+  const reuseComparisonFixture=computeReuseComparison({targetSha:'b'.repeat(40),
+    acceptanceBatchReceipts:[{run_id:1,sha:'b'.repeat(40),shared_ready_runtimes:1,
+      cases:[{issue:1,criterion:'SC-01',isolation:'shared'},
+        {issue:2,criterion:'SC-01',isolation:'shared'},
+        {issue:3,criterion:'SC-01',isolation:'isolated'}]}],
+    fullGateProvisionReceipts:[{provisions:1}],
+    selectedRunReceipts:[{selected_ids:['login','terminal-io'],selected_count:2,
+      provisioned_runtimes:1}],
+    targetPushE2eRuns:[{status:'completed',conclusion:'success'}]});
+  assert.equal(reuseComparisonFixture.comparisons[0].baseline_case_owned_runtimes,3);
+  assert.equal(reuseComparisonFixture.comparisons[0].measured_runtimes,2);
+  assert.equal(reuseComparisonFixture.comparisons[0].runtimes_saved,1);
+  assert.equal(reuseComparisonFixture.full_gate_provisions,1);
+  assert.equal(reuseComparisonFixture.selected_run.provisioned_runtimes,1);
+  assert.equal(reuseComparisonFixture.main_push_full_e2e_success,true);
+  assert.equal(computeReuseComparison({targetSha:'b'.repeat(40)}),null);
 
   // Exact-head runs for an ancestor SHA named by the criterion must be reachable
   // even though `pulls` only returns PRs containing the TARGET commit.
