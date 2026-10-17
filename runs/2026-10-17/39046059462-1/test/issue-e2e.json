@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "2e37f16932b66109f51cc3f8fb2dfededdbf1a4b",
+  "run_id": 39046059462,
+  "run_attempt": 1,
+  "plan_digest": "b86eb071eb6da37041cdd9444084b965c3050818402632368a9a4a1d2eef89f4",
+  "artifact_digest": "sha256:821c38dbd744369e6c560b6f675cc4d96113e5e9d7e68c7e277151fe3e706a0d",
+  "results": [
+    {
+      "id": "design-renderer-boundary",
+      "result": "Pass",
+      "discovered": 1,
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 11
+    },
+    {
+      "id": "login",
+      "result": "Pass",
+      "discovered": 1,
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 2
+    },
+    {
+      "id": "session-lifecycle",
+      "result": "Pending",
+      "discovered": 1,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 1,
+      "assertions": 35
+    },
+    {
+      "id": "terminal-io",
+      "result": "Pass",
+      "discovered": 16,
+      "passed": 16,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 525
+    },
+    {
+      "id": "ui-contract-assertions",
+      "result": "Pass",
+      "discovered": 19,
+      "passed": 19,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 56
+    },
+    {
+      "id": "ui-contract-matrix",
+      "result": "Pass",
+      "discovered": 72,
+      "passed": 72,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 640
+    },
+    {
+      "id": "ui-contract-web",
+      "result": "Pass",
+      "discovered": 30,
+      "passed": 30,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 381
+    }
+  ]
+}
