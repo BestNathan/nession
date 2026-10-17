@@ -90,6 +90,7 @@ export async function executeAcceptanceBatches({
   resultsDir,
   contractsDir,
   runtimeFactory = null,
+  runCaseImpl = runCase,
   log = () => {},
 }) {
   const records = [];
@@ -119,7 +120,35 @@ export async function executeAcceptanceBatches({
         log('batch ' + index + ': one runtime for ' + batch.cases.length +
           ' Case(s) at profile ' + batch.profile);
       }
+    } catch (error) {
+      // A batch whose shared runtime cannot become ready must not suppress the
+      // evidence of the batches after it — the previous per-Case loop kept
+      // going too. Each Case it would have run is reported as an error; no
+      // record is invented, and `startFullStackRuntime` has already reaped its
+      // own partial processes.
+      const message = error instanceof Error ? error.message : String(error);
       for (const entry of batch.cases) {
+        errors.push({issue: Number(entry.issue), criterion: entry.criterion,
+          message: 'batch runtime: ' + message});
+        log('case ' + entry.issue + '/' + entry.criterion +
+          ': ERROR batch runtime ' + message);
+      }
+      if (runtime) {
+        try {
+          await runtime.stop();
+        } catch (stopError) {
+          log('batch ' + index + ' teardown failed: ' +
+            (stopError instanceof Error ? stopError.message : String(stopError)));
+        }
+      }
+      continue;
+    }
+    try {
+      for (const entry of batch.cases) {
+        // A workflow may select Cases for more than one stage in one job (the
+        // PR smoke plan does). The batch's stage is the default; a Case's own
+        // declared stage wins and is what its record carries.
+        const caseStage = entry.stage ?? stage;
         const issue = JSON.parse(
           (await import('node:fs')).readFileSync(
             path.join(contractsDir, entry.issue + '.json'), 'utf8',
@@ -127,12 +156,12 @@ export async function executeAcceptanceBatches({
         );
         let record;
         try {
-          record = await runCase({
+          record = await runCaseImpl({
             repoRoot,
             issue,
             issueNumber: Number(entry.issue),
             criterion: entry.criterion,
-            stage,
+            stage: caseStage,
             targetSha,
             runId,
             runAttempt,

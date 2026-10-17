@@ -14,6 +14,8 @@ import {parsePolicyObservabilityLog,attestPolicyObservability,makePolicyObservab
   POLICY_WORKFLOW,POLICY_WORKFLOW_NAME,POLICY_OBSERVE_JOB,POLICY_TRIGGER_EVENTS,
   POLICY_OBSERVABILITY_LOG_PREFIX} from './run-store-policy-observability-receipt.mjs';
 import {GOVERNED_REFS,UNOBSERVABLE_CAPABILITIES} from './run-store-policy.mjs';
+import {parseAcceptanceBatchLog,attestAcceptanceBatchReceipt,makeAcceptanceBatchReceipt,
+  ACCEPTANCE_BATCH_WORKFLOWS,ACCEPTANCE_BATCH_LOG_PREFIX} from '../e2e/runner/acceptance-batch-receipt.mjs';
 import {historicalCaseEvidence,selfTestHistoricalCase} from './acceptance-historical-case-replay.mjs';
 import { collectAuthenticatedCaseReadbacks, selfTestCaseReceipts } from './acceptance-case-readback-evidence.mjs';
 import os from 'node:os';
@@ -104,7 +106,7 @@ function compactRuns(runs, expectedSha) {
   return retainedRuns(runs, expectedSha).runs.map(compactRun);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], replayDenials = [], storePolicyObservability = [], ancestryRuns = [] }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], replayDenials = [], storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [] }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -134,6 +136,7 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     verified_metrics_replay_denials: replayDenials,
     store_policy_observability: storePolicyObservability,
     ancestry_runs: ancestryRuns,
+    acceptance_batch_receipts: acceptanceBatchReceipts,
     target_push_e2e_runs: targetPushE2eRuns,
     authenticated_post_e2e_wake_receipts: postE2eWakeReceipts,
     exact_head_e2e_steps: exactHeadE2eSteps,
@@ -283,7 +286,7 @@ export async function collectStorePolicyObservability(repo,sha,runs,
   return evidence;
 }
 
-async function githubJobLog(path){
+async function githubJobLog(path,maxBytes=1048576){
   const token=process.env.GITHUB_TOKEN??process.env.GH_TOKEN;
   if(!token)throw Error('historical Case read requires GitHub token');
   const response=await fetch('https://api.github.com'+path,{
@@ -292,8 +295,57 @@ async function githubJobLog(path){
     signal:AbortSignal.timeout(30000)});
   if(!response.ok)throw Error('GitHub historical Case logs HTTP '+response.status);
   const body=await response.text();
-  if(body.length>=1048576)throw Error('historical Case log too large');
+  if(body.length>=maxBytes)throw Error('historical Case log too large');
   return body;
+}
+
+// #1866 SC-04: the batch decision is written into the job log by the batch CLI,
+// because artifacts never reach an evaluator. The producer runs as target code,
+// so the receipt is untrusted until this collector re-reads the completed
+// canonical workflow's own job log and binds it to the exact Run/Attempt/SHA.
+// Only `push` (Acceptance / Cases) and `pull_request` (Acceptance / Case Smoke)
+// runs of the canonical workflows at the exact target SHA are candidates.
+const MAX_ACCEPTANCE_BATCH_RUNS=4, ACCEPTANCE_BATCH_LOG_BYTES=8388608;
+function canonicalBatchWorkflow(run){
+  const workflowPath=String(run?.path??'').replace(/@refs\/[^\s]+$/,'');
+  return ACCEPTANCE_BATCH_WORKFLOWS.find(entry=>entry.workflow===workflowPath&&
+    entry.name===run?.name)??null;
+}
+export async function collectAcceptanceBatchReceipts(repo,sha,runs,
+  request=githubGet,getText=githubJobLog){
+  if(repo!=='BestNathan/nession'||!/^[a-f0-9]{40}$/.test(sha)||!Array.isArray(runs))
+    throw Error('invalid Acceptance Case batch receipt scope');
+  const candidates=runs.filter(run=>{
+    const workflow=canonicalBatchWorkflow(run);
+    return workflow!==null&&workflow.events.includes(run?.event)&&
+      run.head_sha===sha&&run.status==='completed'&&
+      ['success','failure'].includes(run.conclusion);
+  }).sort((a,b)=>b.id-a.id).slice(0,MAX_ACCEPTANCE_BATCH_RUNS);
+  const evidence=[];
+  for(const candidate of candidates){
+    const workflow=canonicalBatchWorkflow(candidate);
+    const run=await request('/repos/'+repo+'/actions/runs/'+candidate.id);
+    if(run?.id!==candidate.id||run.head_sha!==sha||
+       !Number.isSafeInteger(run.run_attempt)||run.run_attempt<1||
+       !['success','failure'].includes(run.conclusion))
+      throw Error('unverified Acceptance Case batch receipt selection');
+    const jobs=await request('/repos/'+repo+'/actions/runs/'+candidate.id+
+      '/attempts/'+run.run_attempt+'/jobs?per_page=100');
+    if(!Array.isArray(jobs?.jobs)||jobs.jobs.length>100)
+      throw Error('unverified Acceptance Case batch receipt jobs');
+    const matches=jobs.jobs.filter(job=>job?.name===workflow.job);
+    if(matches.length!==1)continue;
+    let log;
+    try{log=await getText('/repos/'+repo+'/actions/jobs/'+matches[0].id+'/logs',
+      ACCEPTANCE_BATCH_LOG_BYTES);}
+    catch{continue;} // Missing/expired log cannot be counted as evidence.
+    let receipt;
+    // The producer is target code: malformed framing is ignored, never fatal.
+    try{receipt=parseAcceptanceBatchLog(log);}catch{continue;}
+    if(!receipt)continue; // Runs that did not execute a batch prove nothing.
+    evidence.push(attestAcceptanceBatchReceipt(receipt,run,matches[0]));
+  }
+  return evidence;
 }
 
 // Global /actions/runs?head_sha is noisy on main (Orchestrator/Waker), and
@@ -846,6 +898,9 @@ async function collectCommand(workspace, outFile) {
     ?await collectStorePolicyObservability(repo,sha,directRuns):[];
   const targetPushE2eRuns=process.env.ACCEPTANCE_STAGE==='post-merge'
     ? await collectTargetPushE2eRuns(repo,sha) : [];
+  // #1866 SC-04: job-log batch receipts are readable at every stage; the
+  // collector itself is bounded to canonical workflow runs at the exact SHA.
+  const acceptanceBatchReceipts=await collectAcceptanceBatchReceipts(repo,sha,directRuns);
   // A post-E2E Agent cannot prove its own Waker has completed. Read the
   // bounded, exact-attempt, SHA256-bound prior cycle independently instead.
   const postE2eWakeReceipts=process.env.ACCEPTANCE_STAGE==='post-merge'&&
@@ -986,7 +1041,7 @@ async function collectCommand(workspace, outFile) {
     }
   }
   const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls,
-    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts, replayDenials, storePolicyObservability, ancestryRuns });
+    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts, replayDenials, storePolicyObservability, ancestryRuns, acceptanceBatchReceipts });
   fs.writeFileSync(outFile, JSON.stringify(evidence, null, 2) + '\n');
   console.log(
     'collected acceptance CI evidence for ' + sha +
@@ -1123,6 +1178,90 @@ async function selfTest() {
     [{...policyRun,id:911}],async p=>p.includes('/jobs?')
       ?{jobs:policyJobs.jobs.map(j=>({...j,conclusion:'success'}))}:policyRequest(p),
     async()=>policyLog),[]);
+
+  // #1866 SC-04: "two Cases shared one job-owned runtime" is written into the
+  // job log because the harness never reads artifacts. The receipt is unstrusted
+  // target output until the collector rebinds it to the exact Run/Attempt/SHA.
+  const batchSha='7'.repeat(40);
+  const batchEnv={GITHUB_REPOSITORY:denialRepo,GITHUB_RUN_ID:'912',GITHUB_RUN_ATTEMPT:'1',
+    GITHUB_WORKFLOW_REF:denialRepo+'/.github/workflows/acceptance-cases.yml@refs/heads/main'};
+  const batchRecord=(issue,criterion,id)=>({issue,criterion,result:'Pass',
+    runtime_profile:'full-stack-local',execution_id:id,contract_sha256:'c'.repeat(64),
+    case_tree_sha:batchSha});
+  const batchReceipt=makeAcceptanceBatchReceipt({env:batchEnv,runId:912,runAttempt:1,
+    sha:batchSha,stage:'post-merge',selectionCount:2,
+    records:[batchRecord(1474,'SC-09','1'.repeat(64)),batchRecord(1474,'SC-10','2'.repeat(64))],
+    errors:[],sharedRuntimeCount:1,placement:new Map([
+      ['1474|SC-09',{batch_index:0,isolation:'shared',profile:'full-stack-local'}],
+      ['1474|SC-10',{batch_index:0,isolation:'shared',profile:'full-stack-local'}],
+    ])});
+  const batchRun={id:912,run_attempt:1,head_sha:batchSha,head_branch:'main',event:'push',
+    status:'completed',conclusion:'success',name:'Acceptance / Cases',
+    path:'.github/workflows/acceptance-cases.yml',repository:denialFull,
+    head_repository:denialFull};
+  const batchJobs={jobs:[{name:'execute',id:400,run_id:912,run_attempt:1,
+    head_sha:batchSha,status:'completed',conclusion:'success'}]};
+  const batchRequest=async p=>{
+    if(p.endsWith('/actions/runs/912'))return batchRun;
+    if(p.endsWith('/actions/runs/912/attempts/1/jobs?per_page=100'))return batchJobs;
+    throw Error('unexpected Acceptance batch API: '+p);
+  };
+  const batchLog='2026-10-17T06:00:00Z '+ACCEPTANCE_BATCH_LOG_PREFIX+
+    JSON.stringify(batchReceipt)+'\n';
+  const batchEvidence=await collectAcceptanceBatchReceipts(denialRepo,batchSha,
+    [batchRun],batchRequest,async()=>batchLog);
+  assert.equal(batchEvidence.length,1);
+  assert.equal(batchEvidence[0].shared_ready_runtimes,1);
+  assert.equal(batchEvidence[0].cases_sharing_one_runtime,2);
+  assert.equal(batchEvidence[0].independent_case_records,true);
+  // Another SHA, a non-canonical workflow, an undeclared event, or a
+  // non-canonical job is not evidence.
+  assert.deepEqual(await collectAcceptanceBatchReceipts(denialRepo,batchSha,
+    [{...batchRun,head_sha:'8'.repeat(40)}],batchRequest,async()=>batchLog),[]);
+  assert.deepEqual(await collectAcceptanceBatchReceipts(denialRepo,batchSha,
+    [{...batchRun,name:'CI / Quality Gate',path:'.github/workflows/ci-quality.yml'}],
+    batchRequest,async()=>batchLog),[]);
+  assert.deepEqual(await collectAcceptanceBatchReceipts(denialRepo,batchSha,
+    [{...batchRun,event:'workflow_dispatch'}],batchRequest,async()=>batchLog),[]);
+  assert.deepEqual(await collectAcceptanceBatchReceipts(denialRepo,batchSha,
+    [batchRun],async p=>p.includes('/jobs?')
+      ?{jobs:[{...batchJobs.jobs[0],name:'publish'}]}:batchRequest(p),
+    async()=>batchLog),[]);
+  // An absent/expired log or an absent receipt is not evidence and must not throw.
+  assert.deepEqual(await collectAcceptanceBatchReceipts(denialRepo,batchSha,
+    [batchRun],batchRequest,async()=>''),[]);
+  // A mutated receipt is target-produced input: it is ignored (no evidence),
+  // never trusted and never downgraded into partial evidence.
+  assert.deepEqual(await collectAcceptanceBatchReceipts(denialRepo,batchSha,
+    [batchRun],batchRequest,async()=>ACCEPTANCE_BATCH_LOG_PREFIX+
+      JSON.stringify({...batchReceipt,shared_ready_runtimes:0})+'\n'),[]);
+  // The PR smoke workflow is a canonical producer with its own job/event.
+  const smokeEnv={...batchEnv,GITHUB_RUN_ID:'913',GITHUB_WORKFLOW_REF:denialRepo+
+    '/.github/workflows/acceptance-case-smoke.yml@refs/heads/feat/x'};
+  const smokeReceipt=makeAcceptanceBatchReceipt({env:smokeEnv,runId:913,runAttempt:1,
+    sha:batchSha,stage:'pre-merge',selectionCount:2,
+    records:[batchRecord(7,'SC-02','3'.repeat(64)),batchRecord(2,'SC-03','4'.repeat(64))],
+    errors:[],sharedRuntimeCount:1,placement:new Map([
+      ['7|SC-02',{batch_index:0,isolation:'shared',profile:'full-stack-local'}],
+      ['2|SC-03',{batch_index:0,isolation:'shared',profile:'full-stack-local'}],
+    ])});
+  const smokeRun={...batchRun,id:913,event:'pull_request',head_branch:'feat/x',
+    name:'Acceptance / Case Smoke',path:'.github/workflows/acceptance-case-smoke.yml'};
+  const smokeJobs={jobs:[{name:'case-smoke',id:401,run_id:913,run_attempt:1,
+    head_sha:batchSha,status:'completed',conclusion:'success'}]};
+  const smokeRequest=async p=>{
+    if(p.endsWith('/actions/runs/913'))return smokeRun;
+    if(p.endsWith('/actions/runs/913/attempts/1/jobs?per_page=100'))return smokeJobs;
+    throw Error('unexpected smoke batch API: '+p);
+  };
+  const smokeEvidence=await collectAcceptanceBatchReceipts(denialRepo,batchSha,
+    [smokeRun],smokeRequest,async()=>ACCEPTANCE_BATCH_LOG_PREFIX+
+      JSON.stringify(smokeReceipt)+'\n');
+  assert.equal(smokeEvidence.length,1);
+  assert.equal(smokeEvidence[0].event,'pull_request');
+  assert.deepEqual(smokeEvidence[0].stages,['pre-merge']);
+  assert.deepEqual(normalizeCiEvidence({targetSha:batchSha,
+    acceptanceBatchReceipts:batchEvidence}).acceptance_batch_receipts,batchEvidence);
 
   // Exact-head runs for an ancestor SHA named by the criterion must be reachable
   // even though `pulls` only returns PRs containing the TARGET commit.
