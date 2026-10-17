@@ -16,6 +16,9 @@ import {parsePolicyObservabilityLog,attestPolicyObservability,makePolicyObservab
 import {GOVERNED_REFS,UNOBSERVABLE_CAPABILITIES} from './run-store-policy.mjs';
 import {parseAcceptanceBatchLog,attestAcceptanceBatchReceipt,makeAcceptanceBatchReceipt,
   ACCEPTANCE_BATCH_WORKFLOWS,ACCEPTANCE_BATCH_LOG_PREFIX} from '../e2e/runner/acceptance-batch-receipt.mjs';
+import {parseE2eSelectedRunLog,attestE2eSelectedRunReceipt,makeE2eSelectedRunReceipt,
+  E2E_SELECTED_RUN_LOG_PREFIX,E2E_SELECTED_WORKFLOW,E2E_SELECTED_WORKFLOW_NAME,
+  E2E_SELECTED_JOB,E2E_SELECTED_EVENTS} from './e2e-selected-run-receipt.mjs';
 import {historicalCaseEvidence,selfTestHistoricalCase} from './acceptance-historical-case-replay.mjs';
 import { collectAuthenticatedCaseReadbacks, selfTestCaseReceipts } from './acceptance-case-readback-evidence.mjs';
 import os from 'node:os';
@@ -106,7 +109,7 @@ function compactRuns(runs, expectedSha) {
   return retainedRuns(runs, expectedSha).runs.map(compactRun);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], replayDenials = [], storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [] }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], replayDenials = [], storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [] }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -122,6 +125,7 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
         head_sha: headSha,
         html_url: String(pull.html_url ?? ''),
         runs: compactRuns(pullRunsBySha.get(headSha) ?? [], headSha),
+        e2e_selected_run_receipts: selectedRunReceiptsBySha.get(headSha) ?? [],
         historical_e2e_runs: historicalE2EByPr.get(Number(pull.number)) ?? [],
       };
     });
@@ -137,6 +141,7 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     store_policy_observability: storePolicyObservability,
     ancestry_runs: ancestryRuns,
     acceptance_batch_receipts: acceptanceBatchReceipts,
+    e2e_selected_run_receipts: selectedRunReceipts,
     target_push_e2e_runs: targetPushE2eRuns,
     authenticated_post_e2e_wake_receipts: postE2eWakeReceipts,
     exact_head_e2e_steps: exactHeadE2eSteps,
@@ -282,6 +287,46 @@ export async function collectStorePolicyObservability(repo,sha,runs,
     const receipt=parsePolicyObservabilityLog(log);
     if(!receipt)continue; // Runs predating the receipt are not proof of anything.
     evidence.push(attestPolicyObservability(receipt,run,matches[0]));
+  }
+  return evidence;
+}
+
+// #1866 SC-02: the selected PR E2E job measures its own full-stack provisions
+// and writes the count into the job log, because the harness never reads the
+// assertion artifact. Untrusted target output until this collector rebinds it
+// to the exact Run/Attempt/SHA and to the completed `Run E2E tests` step.
+const MAX_SELECTED_RUN_RECEIPTS=2, SELECTED_RUN_LOG_BYTES=4194304;
+export async function collectSelectedE2eRunReceipts(repo,sha,runs,
+  request=githubGet,getText=githubJobLog){
+  if(repo!=='BestNathan/nession'||!/^[a-f0-9]{40}$/.test(sha)||!Array.isArray(runs))
+    throw Error('invalid selected E2E run receipt scope');
+  const candidates=runs.filter(run=>run?.name===E2E_SELECTED_WORKFLOW_NAME&&
+    String(run.path??'').replace(/@refs\/[^\s]+$/,'')===E2E_SELECTED_WORKFLOW&&
+    E2E_SELECTED_EVENTS.includes(run.event)&&run.head_sha===sha&&
+    run.status==='completed'&&run.conclusion==='success')
+    .sort((a,b)=>b.id-a.id).slice(0,MAX_SELECTED_RUN_RECEIPTS);
+  const evidence=[];
+  for(const candidate of candidates){
+    const run=await request('/repos/'+repo+'/actions/runs/'+candidate.id);
+    if(run?.id!==candidate.id||run.head_sha!==sha||
+       !Number.isSafeInteger(run.run_attempt)||run.run_attempt<1||
+       run.conclusion!=='success')
+      throw Error('unverified selected E2E run receipt selection');
+    const jobs=await request('/repos/'+repo+'/actions/runs/'+candidate.id+
+      '/attempts/'+run.run_attempt+'/jobs?per_page=100');
+    if(!Array.isArray(jobs?.jobs)||jobs.jobs.length>100)
+      throw Error('unverified selected E2E run receipt jobs');
+    const matches=jobs.jobs.filter(job=>job?.name===E2E_SELECTED_JOB);
+    if(matches.length!==1)continue;
+    let log;
+    try{log=await getText('/repos/'+repo+'/actions/jobs/'+matches[0].id+'/logs',
+      SELECTED_RUN_LOG_BYTES);}
+    catch{continue;} // Missing/expired log cannot be counted as evidence.
+    let receipt;
+    // The producer is target code: malformed framing is ignored, never fatal.
+    try{receipt=parseE2eSelectedRunLog(log);}catch{continue;}
+    if(!receipt)continue; // Runs that measured nothing prove nothing.
+    evidence.push(attestE2eSelectedRunReceipt(receipt,run,matches[0]));
   }
   return evidence;
 }
@@ -928,6 +973,15 @@ async function collectCommand(workspace, outFile) {
       pullRunsBySha.set(headSha, await workflowRunsForSha(repo, headSha));
     }
   }
+  // SC-02 is evaluated at a merged target, but its selected-PR run lives on
+  // the PR head. Re-read each head's own job log so the one-runtime
+  // measurement is reachable from that boundary.
+  const selectedRunReceiptsBySha = new Map();
+  for (const [headSha, runs] of pullRunsBySha) {
+    selectedRunReceiptsBySha.set(headSha,
+      await collectSelectedE2eRunReceipts(repo, headSha, runs));
+  }
+  const selectedRunReceipts = await collectSelectedE2eRunReceipts(repo, sha, directRuns);
   const sourceAncestry = await collectSourceAncestry(repo, workspace, sha);
   const ancestryRuns = await collectAncestryRuns(repo, sourceAncestry, sha);
   const targetMergeProof = sourceAncestry.length && process.env.ACCEPTANCE_STAGE === 'post-merge'
@@ -1041,7 +1095,7 @@ async function collectCommand(workspace, outFile) {
     }
   }
   const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls,
-    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts, replayDenials, storePolicyObservability, ancestryRuns, acceptanceBatchReceipts });
+    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts, replayDenials, storePolicyObservability, ancestryRuns, acceptanceBatchReceipts, selectedRunReceiptsBySha, selectedRunReceipts });
   fs.writeFileSync(outFile, JSON.stringify(evidence, null, 2) + '\n');
   console.log(
     'collected acceptance CI evidence for ' + sha +
@@ -1262,6 +1316,61 @@ async function selfTest() {
   assert.deepEqual(smokeEvidence[0].stages,['pre-merge']);
   assert.deepEqual(normalizeCiEvidence({targetSha:batchSha,
     acceptanceBatchReceipts:batchEvidence}).acceptance_batch_receipts,batchEvidence);
+
+  // #1866 SC-02: the selected PR E2E job measures its own full-stack
+  // provisions. The receipt is target output until Run/Attempt/SHA/job/step
+  // are rebound, and it is reachable from a merged target through the PR head.
+  const selSha='9'.repeat(40);
+  const selEnv={GITHUB_REPOSITORY:denialRepo,GITHUB_RUN_ID:'914',GITHUB_RUN_ATTEMPT:'1'};
+  const selReceipt=makeE2eSelectedRunReceipt({env:selEnv,sha:selSha,
+    selectedIds:['login','session-lifecycle','terminal-io'],provisions:1});
+  const selRun={id:914,run_attempt:1,head_sha:selSha,head_branch:'feat/x',
+    event:'pull_request',status:'completed',conclusion:'success',name:'E2E / Tests',
+    path:'.github/workflows/e2e-tests.yml',repository:denialFull,
+    head_repository:denialFull};
+  const selJobs={jobs:[{name:'e2e',id:402,run_id:914,run_attempt:1,head_sha:selSha,
+    status:'completed',conclusion:'success',
+    steps:[{name:'Run E2E tests',conclusion:'success'}]}]};
+  const selRequest=async p=>{
+    if(p.endsWith('/actions/runs/914'))return selRun;
+    if(p.endsWith('/actions/runs/914/attempts/1/jobs?per_page=100'))return selJobs;
+    throw Error('unexpected selected E2E API: '+p);
+  };
+  const selLog='2026-10-17T07:00:00Z '+E2E_SELECTED_RUN_LOG_PREFIX+
+    JSON.stringify(selReceipt)+'\n';
+  const selectedReceipts=await collectSelectedE2eRunReceipts(denialRepo,selSha,[selRun],
+    selRequest,async()=>selLog);
+  assert.equal(selectedReceipts.length,1);
+  assert.equal(selectedReceipts[0].one_runtime_for_selected_run,true);
+  assert.deepEqual(selectedReceipts[0].selected_ids,
+    ['login','session-lifecycle','terminal-io']);
+  // Another SHA, an unrelated workflow, a push run, a failed run or a failed
+  // `Run E2E tests` step is not evidence, and an absent log must not throw.
+  assert.deepEqual(await collectSelectedE2eRunReceipts(denialRepo,selSha,
+    [{...selRun,head_sha:'a'.repeat(40)}],selRequest,async()=>selLog),[]);
+  assert.deepEqual(await collectSelectedE2eRunReceipts(denialRepo,selSha,
+    [{...selRun,name:'CI / Quality Gate',path:'.github/workflows/ci-quality.yml'}],
+    selRequest,async()=>selLog),[]);
+  assert.deepEqual(await collectSelectedE2eRunReceipts(denialRepo,selSha,
+    [{...selRun,event:'push'}],selRequest,async()=>selLog),[]);
+  assert.deepEqual(await collectSelectedE2eRunReceipts(denialRepo,selSha,
+    [{...selRun,conclusion:'failure'}],selRequest,async()=>selLog),[]);
+  // A successful run whose own `Run E2E tests` step says failure is a
+  // data-integrity inconsistency, not ordinary missing evidence: surface it.
+  await assert.rejects(()=>collectSelectedE2eRunReceipts(denialRepo,selSha,[selRun],
+    async p=>p.includes('/jobs?')?{jobs:[{...selJobs.jobs[0],
+      steps:[{name:'Run E2E tests',conclusion:'failure'}]}]}:selRequest(p),
+    async()=>selLog),/mismatch/);
+  assert.deepEqual(await collectSelectedE2eRunReceipts(denialRepo,selSha,[selRun],
+    selRequest,async()=>''),[]);
+  const selNormalized=normalizeCiEvidence({targetSha:'b'.repeat(40),
+    pulls:[{number:1,state:'closed',merged_at:'2026-10-17T00:00:00Z',
+      head:{sha:selSha,ref:'feat/x'},base:{ref:'main'},html_url:'https://example.invalid'}],
+    pullRunsBySha:new Map([[selSha,[selRun]]]),
+    selectedRunReceiptsBySha:new Map([[selSha,selectedReceipts]]),
+    selectedRunReceipts:selectedReceipts});
+  assert.equal(selNormalized.pull_requests[0].e2e_selected_run_receipts.length,1);
+  assert.equal(selNormalized.e2e_selected_run_receipts.length,1);
 
   // Exact-head runs for an ancestor SHA named by the criterion must be reachable
   // even though `pulls` only returns PRs containing the TARGET commit.
