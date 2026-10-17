@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "kind": "agent_execution_trace",
+  "identity": {
+    "workflow_id": "agent-provider-smoke",
+    "github_run_id": 39028527589,
+    "github_run_attempt": 1,
+    "unique_run_name": "39028527589-1-issue-1556-staging-claude-code",
+    "repository": "BestNathan/nession"
+  },
+  "task": {
+    "id": "issue-1556-staging",
+    "type": "acceptance",
+    "issue": 1556,
+    "target_sha": "5f43fdd00a1770a9cc63aa29291714a89222a743"
+  },
+  "agent": {
+    "id": "legacy-acceptance-claude-code",
+    "role": "acceptor",
+    "provider": "claude-code",
+    "harness_sha256": null
+  },
+  "timing": {
+    "started_at": "2026-10-17T11:23:56.493Z",
+    "finished_at": "2026-10-17T11:24:10.963Z"
+  },
+  "coverage": {
+    "model": "unobserved",
+    "tools": "unobserved",
+    "skills": "unobserved",
+    "mcp": "unobserved"
+  },
+  "events": []
+}
