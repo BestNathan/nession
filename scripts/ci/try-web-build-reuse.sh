@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # #1876: best-effort artifact transport, never evidence for a Gate/SC Pass.
-# Call only on a trusted main push step with GH_TOKEN; never in untrusted PR code.
+# Call only on a trusted main push or exact-current-main dispatch with GH_TOKEN;
+# never in untrusted PR code. GITHUB_SHA must equal checked-out target SHA.
 set -euo pipefail
 root="$(cd "$1" && pwd -P)"
 sha="$2"
 output="$GITHUB_OUTPUT"
 echo 'hit=false' >> "$output"
-if [[ "$GITHUB_EVENT_NAME" != push || "$GITHUB_REF" != refs/heads/main ||
+if [[ ( "$GITHUB_EVENT_NAME" != push && "$GITHUB_EVENT_NAME" != workflow_dispatch ) || "$GITHUB_REF" != refs/heads/main ||
       "$GITHUB_REPOSITORY" != BestNathan/nession || "$GITHUB_SHA" != "$sha" ||
       ! "$sha" =~ ^[a-f0-9]{40}$ ]]; then
   echo 'WEB_BUILD_REUSE_V1 {"status":"miss","reason":"not_trusted_main_push"}'
