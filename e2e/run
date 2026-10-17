@@ -311,7 +311,27 @@ function tests(args) {
     // a JSON report for `--all`/`--suite` too. The html report is kept so
     // failure artifacts are unchanged; the config's single-reporter default is
     // only overridden when a caller explicitly asked for a machine-readable one.
-    reporters = ['--reporter=json,html'];
+    //
+    // #1876 Phase A: the coalesced Browser Design verdict also needs executed
+    // assertion counts from that same run. The built-in JSON reporter omits
+    // TestResult.steps, so when an assertion receipt path is requested we add
+    // the assertion-only reporter along with json+html. Trusted main code wins
+    // when present; the checked-in owner is the fallback for non-PR runs.
+    const assertionsFile = process.env.NESSION_E2E_ASSERTIONS_OUTPUT_FILE;
+    if (assertionsFile) {
+      if (!path.isAbsolute(assertionsFile)) {
+        throw new Error('full E2E assertion receipt output path must be absolute');
+      }
+      const reporter = [
+        at('trusted', 'scripts', 'issue-e2e-assertion-reporter.cjs'),
+        at('scripts', 'issue-e2e-assertion-reporter.cjs'),
+      ].find((candidate) =>
+        fs.existsSync(candidate) && !fs.lstatSync(candidate).isSymbolicLink());
+      if (!reporter) throw new Error('canonical Playwright assertion reporter is required');
+      reporters = ['--reporter=json,' + reporter + ',html'];
+    } else {
+      reporters = ['--reporter=json,html'];
+    }
   }
   return execute('npx', ['playwright', 'test', ...selected, ...(suite ? [suite] : []),
     ...reporters,

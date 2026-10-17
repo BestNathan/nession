@@ -21,8 +21,18 @@ gate_check() {
   gate_require_command node "Install Node.js and rerun the E2E gate." || return $?
   gate_require_path "./e2e/run" "Restore the canonical E2E runner." || return $?
   local list_file="${RUNNER_TEMP:-/tmp}/e2e-playwright-list-${GITHUB_RUN_ID:-local}.txt"
-  local full_report="${RUNNER_TEMP:-/tmp}/e2e-playwright-full-${GITHUB_RUN_ID:-local}.json"
+  local full_report="${E2E_PLAYWRIGHT_REPORT_FILE:-${RUNNER_TEMP:-/tmp}/e2e-playwright-full-${GITHUB_RUN_ID:-local}.json}"
+  local assertions="${E2E_PLAYWRIGHT_ASSERTIONS_FILE:-${full_report%.json}-assertions.json}"
   local provision_log="${RUNNER_TEMP:-/tmp}/e2e-playwright-provisions-${GITHUB_RUN_ID:-local}.jsonl"
+  # #1876 Phase A: the independent Browser Design verdict is derived from these
+  # exact files after this Gate returns. They are part of this Gate's evidence,
+  # so a missing pair fails here too rather than leaving the next step to
+  # discover an empty directory.
+  if [[ "$full_report" != /* || "$assertions" != /* ]]; then
+    gate_runtime_error "Full E2E report paths must be absolute" \
+      "set E2E_PLAYWRIGHT_REPORT_FILE and E2E_PLAYWRIGHT_ASSERTIONS_FILE to absolute paths" || return $?
+  fi
+  rm -f "$full_report" "$assertions"
   : > "$provision_log"
   # Playwright list-only discovery has no full-stack startup; verify it matches file-ID catalog.
   gate_run_invariant bash -c 'cd e2e && npx playwright test --list > "$1"' _ "$list_file"
@@ -36,7 +46,11 @@ gate_check() {
   gate_run_invariant node e2e/runner/verify-e2e-selector.cjs login session-lifecycle
   # Exactly one full-stack provision for this Gate invocation. Measured, not
   # assumed: the shared runtime appends one line per real provision.
-  gate_run_invariant bash -c 'cd e2e && CI=true E2E_RUNTIME_PROVISION_LOG="$2" PLAYWRIGHT_JSON_OUTPUT_FILE="$1" ./run test --all' _ "$full_report" "$provision_log"
+  gate_run_invariant bash -c 'cd e2e && CI=true E2E_RUNTIME_PROVISION_LOG="$3" PLAYWRIGHT_JSON_OUTPUT_FILE="$1" NESSION_E2E_ASSERTIONS_OUTPUT_FILE="$2" ./run test --all' _ "$full_report" "$assertions" "$provision_log"
+  if [ ! -s "$full_report" ] || [ ! -s "$assertions" ]; then
+    gate_invariant_failure "Full E2E did not produce the report and assertion receipt required for an independent design verdict" \
+      "restore the canonical Playwright reporters; a run without executed assertion evidence is not a Pass" || return $?
+  fi
   gate_run_invariant bash -c '
     count=$(wc -l < "$1" | tr -d " ")
     if [ "$count" -ne 1 ]; then
