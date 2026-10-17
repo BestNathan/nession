@@ -104,7 +104,7 @@ function compactRuns(runs, expectedSha) {
   return retainedRuns(runs, expectedSha).runs.map(compactRun);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], replayDenials = [], storePolicyObservability = [] }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], replayDenials = [], storePolicyObservability = [], ancestryRuns = [] }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -133,6 +133,7 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     direct_runs_dropped: directRunsAtSha.dropped,
     verified_metrics_replay_denials: replayDenials,
     store_policy_observability: storePolicyObservability,
+    ancestry_runs: ancestryRuns,
     target_push_e2e_runs: targetPushE2eRuns,
     authenticated_post_e2e_wake_receipts: postE2eWakeReceipts,
     exact_head_e2e_steps: exactHeadE2eSteps,
@@ -392,6 +393,46 @@ async function workflowRunsForSha(repo, sha) {
   const query = new URLSearchParams({ head_sha: sha, per_page: '100' });
   const payload = await githubGet('/repos/' + repo + '/actions/runs?' + query.toString());
   return payload.workflow_runs ?? [];
+}
+
+// Exact-head runs for Git-verified ancestor SHAs named by the criterion.
+//
+// `pulls` comes from /commits/{targetSha}/pulls, so it only ever returns PRs
+// containing the TARGET commit. An Issue that correctly names its original
+// delivery SHA therefore could never be evidenced at a later post-merge target:
+// direct_runs are pinned to the target, and the original exact-head runs were
+// unreachable — the same "evidence exists but cannot be reached" defect as the
+// report artifact and the receipt channel. Every SHA here is already proven an
+// ancestor of the trusted target by git, and every run is re-read from GitHub
+// with head_sha pinned to that ancestor.
+const ANCESTRY_RUNS_PER_SHA=12, ANCESTRY_RUNS_TOTAL=48;
+export async function collectAncestryRuns(repo,sourceAncestry,targetSha,
+  runsForSha=workflowRunsForSha){
+  if(repo!=='BestNathan/nession'||!/^[a-f0-9]{40}$/.test(targetSha)||
+     !Array.isArray(sourceAncestry))throw Error('invalid ancestry run scope');
+  const evidence=[];
+  for(const entry of sourceAncestry.slice(0,8)){
+    if(entry?.is_ancestor!==true||!/^[a-f0-9]{40}$/.test(entry?.ancestor_sha??'')||
+       entry.ancestor_sha===targetSha)continue;
+    if(evidence.length>=ANCESTRY_RUNS_TOTAL)break;
+    const runs=await runsForSha(repo,entry.ancestor_sha);
+    if(!Array.isArray(runs))throw Error('invalid ancestry run response');
+    // Newest per ancestor, bounded: this reaches an evaluator's context, so it
+    // must never scale with an ancestor's whole run history.
+    const newest=[...runs].sort((a,b)=>Number(b?.id??0)-Number(a?.id??0))
+      .slice(0,ANCESTRY_RUNS_PER_SHA);
+    for(const run of newest){
+      if(evidence.length>=ANCESTRY_RUNS_TOTAL)break;
+      // Identity is re-bound here, never trusted from the ancestor list.
+      if(run?.head_sha!==entry.ancestor_sha||
+         run?.head_repository?.full_name!==repo||
+         run?.repository?.full_name!==repo||run?.status!=='completed'||
+         !Number.isSafeInteger(Number(run?.run_attempt))||Number(run.run_attempt)<1)continue;
+      evidence.push({ancestor_sha:entry.ancestor_sha,...compactRun(run),
+        run_attempt:Number(run.run_attempt)});
+    }
+  }
+  return evidence;
 }
 
 // Exact ancestor SHAs may be declared only in the Issue Success Criteria.
@@ -833,6 +874,7 @@ async function collectCommand(workspace, outFile) {
     }
   }
   const sourceAncestry = await collectSourceAncestry(repo, workspace, sha);
+  const ancestryRuns = await collectAncestryRuns(repo, sourceAncestry, sha);
   const targetMergeProof = sourceAncestry.length && process.env.ACCEPTANCE_STAGE === 'post-merge'
     ? checkGitMergeCommit(workspace, sha, sourceAncestry.map(x=>x.ancestor_sha))
     : null;
@@ -944,7 +986,7 @@ async function collectCommand(workspace, outFile) {
     }
   }
   const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls,
-    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts, replayDenials, storePolicyObservability });
+    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts, replayDenials, storePolicyObservability, ancestryRuns });
   fs.writeFileSync(outFile, JSON.stringify(evidence, null, 2) + '\n');
   console.log(
     'collected acceptance CI evidence for ' + sha +
@@ -1081,6 +1123,39 @@ async function selfTest() {
     [{...policyRun,id:911}],async p=>p.includes('/jobs?')
       ?{jobs:policyJobs.jobs.map(j=>({...j,conclusion:'success'}))}:policyRequest(p),
     async()=>policyLog),[]);
+
+  // Exact-head runs for an ancestor SHA named by the criterion must be reachable
+  // even though `pulls` only returns PRs containing the TARGET commit.
+  const ancSha='1'.repeat(40),tgtSha='2'.repeat(40),foreignRepo='attacker/x';
+  const ancRuns=await collectAncestryRuns(denialRepo,[
+    {ancestor_sha:ancSha,is_ancestor:true},
+    {ancestor_sha:tgtSha,is_ancestor:true},
+    {ancestor_sha:'4'.repeat(40),is_ancestor:false},
+  ],tgtSha,async(_repo,lookup)=>lookup===ancSha?[
+    {id:901,run_attempt:1,name:'CI / Quality Gate',
+      path:'.github/workflows/ci-quality.yml',event:'pull_request',status:'completed',
+      conclusion:'success',head_sha:ancSha,head_branch:'feature',
+      repository:{full_name:denialRepo},head_repository:{full_name:denialRepo}},
+    {id:902,run_attempt:1,status:'completed',conclusion:'success',head_sha:'5'.repeat(40),
+      repository:{full_name:denialRepo},head_repository:{full_name:denialRepo}},
+    {id:903,run_attempt:1,status:'in_progress',conclusion:null,head_sha:ancSha,
+      repository:{full_name:denialRepo},head_repository:{full_name:denialRepo}},
+    {id:904,run_attempt:1,status:'completed',conclusion:'success',head_sha:ancSha,
+      repository:{full_name:foreignRepo},head_repository:{full_name:foreignRepo}},
+    {id:905,run_attempt:0,status:'completed',conclusion:'success',head_sha:ancSha,
+      repository:{full_name:denialRepo},head_repository:{full_name:denialRepo}},
+  ]:[]);
+  assert.equal(ancRuns.length,1,'only the verified completed same-repo ancestor run is evidence');
+  assert.equal(ancRuns[0].ancestor_sha,ancSha);
+  assert.equal(ancRuns[0].id,901);
+  assert.equal(ancRuns[0].run_attempt,1);
+  await assert.rejects(()=>collectAncestryRuns(foreignRepo,[],tgtSha,async()=>[]),
+    /invalid ancestry run scope/);
+  await assert.rejects(()=>collectAncestryRuns(denialRepo,[],'short',async()=>[]),
+    /invalid ancestry run scope/);
+  await assert.rejects(()=>collectAncestryRuns(denialRepo,
+    [{ancestor_sha:ancSha,is_ancestor:true}],tgtSha,async()=>({})),
+    /invalid ancestry run response/);
 
   // Positive rerun: original pull_request HEAD unchanged; trusted-main repair
   // is merged into exact acceptance target before attempt 3 starts.
