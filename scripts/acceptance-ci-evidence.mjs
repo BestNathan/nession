@@ -100,6 +100,17 @@ function retainedRuns(runs, expectedSha) {
     seenPath.add(path);
     chosen.set(keyOf(run), run);
   }
+  // The newest run of a path can be the evaluator's OWN in-progress run. Keep
+  // that path's newest completed run too: "in progress" is not "never
+  // completed", and a completed outcome is what an evaluator can judge.
+  const seenCompletedPath = new Set();
+  for (const run of atSha) {
+    if (String(run?.status ?? '') !== 'completed') continue;
+    const path = String(run?.path ?? '');
+    if (seenCompletedPath.has(path)) continue;
+    seenCompletedPath.add(path);
+    chosen.set(keyOf(run), run);
+  }
   for (const run of atSha.slice(0, MAX_RUNS_PER_SHA)) {
     if (!chosen.has(keyOf(run))) chosen.set(keyOf(run), run);
   }
@@ -2039,6 +2050,21 @@ async function selfTest() {
   assert.equal(capBundle.direct_runs_dropped, capRuns.length - capBundle.direct_runs.length);
   assert.ok(capBundle.direct_runs_dropped > 0,
     'an over-cap SHA must report dropped runs instead of hiding them');
+  // A path whose newest run is the evaluator's own in-progress run must still
+  // expose that path's newest COMPLETED run at the same SHA.
+  const liveSha='e'.repeat(40);
+  const liveRun=(id,status,conclusion,createdAt)=>({
+    id,path:'.github/workflows/agent-provider-smoke.yml',event:'push',status,conclusion,
+    head_branch:'main',head_sha:liveSha,html_url:'https://example.invalid/'+id,
+    created_at:createdAt,updated_at:createdAt});
+  const liveBundle=normalizeCiEvidence({targetSha:liveSha,directRuns:[
+    liveRun(10,'completed','success','2026-10-17T00:00:00Z'),
+    liveRun(11,'in_progress',null,'2026-10-17T01:00:00Z'),
+  ]});
+  const liveIds=liveBundle.direct_runs.map(run=>run.id);
+  assert.ok(liveIds.includes(10),
+    'the newest completed run of a path must survive an in-progress successor');
+  assert.ok(liveIds.includes(11));
   assert.deepEqual(evidence.pull_requests[0].runs.map((run) => run.id), [4]);
   const lineage = normalizeCiEvidence({
     targetSha: 'c'.repeat(40),
