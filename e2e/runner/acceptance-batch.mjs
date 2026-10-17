@@ -19,7 +19,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 
-import { runCase, selectedCase } from './acceptance-case.mjs';
+import { runCase, selectedCase } from '../acceptance/evaluator/run-case.mjs';
 
 const require = createRequire(import.meta.url);
 const { allocateLoopbackPort, startFullStackRuntime } = require('./runtime/full-stack.js');
@@ -93,6 +93,7 @@ export async function executeAcceptanceBatches({
   log = () => {},
 }) {
   const records = [];
+  const errors = [];
   let sharedRuntimeCount = 0;
 
   for (const [index, batch] of batches.entries()) {
@@ -124,18 +125,35 @@ export async function executeAcceptanceBatches({
             path.join(contractsDir, entry.issue + '.json'), 'utf8',
           ),
         );
-        const record = await runCase({
-          repoRoot,
-          issue,
-          issueNumber: Number(entry.issue),
-          criterion: entry.criterion,
-          stage,
-          targetSha,
-          runId,
-          runAttempt,
-          output: path.join(resultsDir, entry.issue + '-' + entry.criterion + '.case.json'),
-          runtime,
-        });
+        let record;
+        try {
+          record = await runCase({
+            repoRoot,
+            issue,
+            issueNumber: Number(entry.issue),
+            criterion: entry.criterion,
+            stage,
+            targetSha,
+            runId,
+            runAttempt,
+            output: path.join(resultsDir, entry.issue + '-' + entry.criterion + '.case.json'),
+            runtime,
+          });
+        } catch (error) {
+          // A Case that cannot even be prepared (unknown Case, contract mismatch,
+          // wrong SHA) must not abort the rest of the batch — the previous
+          // per-Case loop continued too. No partial record is fabricated: an
+          // invented record would be rejected by ingestion and would imply
+          // evidence that does not exist. It is reported as a batch error.
+          errors.push({
+            issue: Number(entry.issue),
+            criterion: entry.criterion,
+            message: error instanceof Error ? error.message : String(error),
+          });
+          log('case ' + entry.issue + '/' + entry.criterion + ': ERROR ' +
+            (error instanceof Error ? error.message : String(error)));
+          continue;
+        }
         records.push(record);
         log('case ' + entry.issue + '/' + entry.criterion + ': ' + record.result);
       }
@@ -151,5 +169,5 @@ export async function executeAcceptanceBatches({
     }
   }
 
-  return { records, sharedRuntimeCount };
+  return { records, errors, sharedRuntimeCount };
 }

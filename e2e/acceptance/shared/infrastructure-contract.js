@@ -78,13 +78,23 @@ function verifySc11() {
   must(workflow, /runtime_profile="\$\{INPUT_RUNTIME\}"/, 'manual runtime selection');
   // Both manual workflow_dispatch and automatic pushes flow through the same
   // canonical E2E CLI; legacy --target-sha is intentionally retired.
-  must(workflow, /args=\(acceptance --issue-json/, 'shared canonical Case CLI argument array');
-  must(workflow, /args\+=\(--issue "\${issue}" --sc "\${criterion}" --stage "\${ACCEPTANCE_STAGE}"\)/,
-    'shared Issue/SC/stage selector');
-  must(workflow, /args\+=\(--sha "\${TARGET_SHA}" --profile "\${profile}" --output "\${output}"\)/,
-    'manual and automatic paths share exact SHA and runtime profile');
-  must(workflow, /node workspace\/e2e\/run "\${args\[@\]}"/,
-    'shared canonical Case runner entrypoint');
+  //
+  // #1866 Phase B: the workflow no longer builds a per-Case `acceptance` argument
+  // array. It invokes the canonical CLI ONCE for the selected batch, and each
+  // Case still produces its own record at the same exact SHA and its own runtime
+  // profile (resolved by the trusted selector). The criterion this verifies —
+  // a manual run can select Issue/SC/SHA/stage/profile and produce reproducible
+  // evidence — is unchanged; only the dispatch shape is.
+  must(workflow, /node workspace\/e2e\/run acceptance-batch/,
+    'shared canonical Case batch entrypoint');
+  must(workflow, /--selection "\$\{RUNNER_TEMP\}\/selected-cases\.json"/,
+    'trusted selector output feeds the batch');
+  must(workflow, /--sha "\$\{TARGET_SHA\}"/,
+    'manual and automatic paths share the exact SHA');
+  must(workflow, /--stage "\$\{ACCEPTANCE_STAGE\}"/,
+    'manual and automatic paths share the same stage');
+  must(workflow, /--results-dir "\$\{results\}"/,
+    'every Case record lands in the same reproducible results directory');
   return result(
     'Manual dispatch selects Issue, SC, exact SHA, stage and runtime profile through the same deterministic Case runner.',
     [

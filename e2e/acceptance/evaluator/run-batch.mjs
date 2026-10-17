@@ -52,7 +52,7 @@ async function main() {
   const selection = JSON.parse(fs.readFileSync(selectionPath, 'utf8'));
   fs.mkdirSync(resultsDir, { recursive: true });
   const batches = planAcceptanceBatches({ repoRoot, cases: selection });
-  const { records, sharedRuntimeCount } = await executeAcceptanceBatches({
+  const { records, errors, sharedRuntimeCount } = await executeAcceptanceBatches({
     repoRoot,
     batches,
     stage,
@@ -70,9 +70,10 @@ async function main() {
   // Bounded, non-sensitive measurement (#1866 SC-08): how many runtimes a batch
   // of N Cases actually needed.
   process.stderr.write('[acceptance-batch] summary cases=' + records.length +
-    ' shared_runtimes=' + sharedRuntimeCount + ' failed=' + failed.length + '\n');
+    ' shared_runtimes=' + sharedRuntimeCount + ' failed=' + failed.length +
+    ' errors=' + errors.length + '\n');
 
-  if (failed.some((record) => record.result === 'Error')) process.exitCode = 2;
+  if (errors.length || failed.some((record) => record.result === 'Error')) process.exitCode = 2;
   else if (failed.length) process.exitCode = 1;
 }
 
