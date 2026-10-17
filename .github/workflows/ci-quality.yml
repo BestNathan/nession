@@ -70,7 +70,7 @@ jobs:
       # #1876: The Quality Gate remains independently blocking; a dist artifact
       # is transport only, and is published only for a validated main push.
       - name: Verify Web artifact integrity and negative fixtures
-        run: node scripts/ci/web-build-artifact.mjs self-test
+        run: ./gates/run web-build-artifact-selftest
       - name: Build verified main Web dist
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: cd web && npm run build
