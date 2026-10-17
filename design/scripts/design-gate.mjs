@@ -433,8 +433,13 @@ function writeBrowserReceipt(result, filename = process.env.DESIGN_BROWSER_RECEI
 
 function runBrowserProfile() {
   const dir = mkdtempSync(join(tmpdir(), 'nession-design-browser-'));
-  const reportFile = join(dir, 'playwright.json');
-  const assertionsFile = join(dir, 'assertions.json');
+  // A caller may ask for the raw evidence (the workflow proves fail-closed
+  // behavior against the SAME report the standalone verdict used). Explicit
+  // *_OUT paths are caller-owned and survive this run; temp paths do not.
+  const reportOut = process.env.DESIGN_BROWSER_REPORT_OUT;
+  const assertionsOut = process.env.DESIGN_BROWSER_ASSERTIONS_OUT;
+  const reportFile = reportOut || join(dir, 'playwright.json');
+  const assertionsFile = assertionsOut || join(dir, 'assertions.json');
   const reporter = join(ROOT, 'scripts', 'issue-e2e-assertion-reporter.cjs');
   try {
     const [spec] = BROWSER_COMMANDS;

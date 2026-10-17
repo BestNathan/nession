@@ -26,6 +26,8 @@ the coalesced Full E2E verdict consume it instead of restating spec paths.
 `design/scripts/verify-browser-design-report.mjs` derives the independent
 design verdict from an already-executed Playwright report and assertion
 receipt; missing, skipped, flaky, zero-assertion or foreign-SHA evidence fails
-closed.
+closed. `design/scripts/prove-browser-design-fail-closed.mjs` runs inside the
+real E2E job and proves those mutations are rejected against that job's own
+evidence.
 
 When adding a design rule, name the invariant, owner, expected state, and repair path. Prefer executable contracts over prose-only restrictions.

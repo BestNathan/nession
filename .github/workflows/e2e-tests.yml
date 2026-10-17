@@ -174,13 +174,16 @@ jobs:
           E2E_RUNTIME_WEB_ONLY: '1'
           E2E_RUNTIME_PROVISION_LOG: ${{ runner.temp }}/issue-e2e/design-provision.log
           DESIGN_BROWSER_RECEIPT_FILE: ${{ runner.temp }}/issue-e2e/browser-design-receipt.jsonl
+          DESIGN_BROWSER_REPORT_OUT: ${{ runner.temp }}/issue-e2e/standalone-design-report.json
+          DESIGN_BROWSER_ASSERTIONS_OUT: ${{ runner.temp }}/issue-e2e/standalone-design-assertions.json
+          DESIGN_BROWSER_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
           # On a push event the trusted selection (which creates this dir) does
           # not run, so the directory must exist before the runtime's
           # best-effort counter appends to it.
           mkdir -p "$(dirname "$E2E_RUNTIME_PROVISION_LOG")"
-          rm -f "$DESIGN_BROWSER_RECEIPT_FILE"
+          rm -f "$DESIGN_BROWSER_RECEIPT_FILE" "$DESIGN_BROWSER_REPORT_OUT" "$DESIGN_BROWSER_ASSERTIONS_OUT"
           ./gates/run design-system-browser
           # Every runtime the design gate resolves must be web-only: that is
           # the parity proof that lets a `not-required` plan skip the Rust
@@ -197,6 +200,13 @@ jobs:
             exit 1
           fi
           cat "$DESIGN_BROWSER_RECEIPT_FILE" >&2
+          # SC-04: the same real evidence must reject every mutated shape —
+          # missing spec, skipped/flaky test, zero assertions, foreign SHA,
+          # corrupt/missing report and a mismatched assertion receipt.
+          node design/scripts/prove-browser-design-fail-closed.mjs \
+            --report "$DESIGN_BROWSER_REPORT_OUT" \
+            --assertions "$DESIGN_BROWSER_ASSERTIONS_OUT" \
+            --sha "$DESIGN_BROWSER_SHA"
 
       # ── Run E2E ───────────────────────────────────────────────────────
       - name: Run E2E tests
@@ -328,6 +338,19 @@ jobs:
           rm -f "$DESIGN_BROWSER_RECEIPT_FILE"
           ./gates/run design-system-browser
           cat "$DESIGN_BROWSER_RECEIPT_FILE" >&2
+
+      - name: Prove coalesced Browser Design evidence fails closed
+        if: ${{ !cancelled() && !(github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots == true) && steps.selection.outputs.mode != 'not-required' }}
+        env:
+          DESIGN_BROWSER_REPORT: ${{ runner.temp }}/issue-e2e/playwright-run.json
+          DESIGN_BROWSER_ASSERTIONS: ${{ runner.temp }}/issue-e2e/playwright-run-assertions.json
+          DESIGN_BROWSER_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          node design/scripts/prove-browser-design-fail-closed.mjs \
+            --report "$DESIGN_BROWSER_REPORT" \
+            --assertions "$DESIGN_BROWSER_ASSERTIONS" \
+            --sha "$DESIGN_BROWSER_SHA"
 
       - name: Normalize selected per-file results even on failure
         if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.selected-capability.outputs.available == 'true' && steps.selection.outcome == 'success' }}
