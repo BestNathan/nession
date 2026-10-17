@@ -1283,8 +1283,10 @@ async function collectCommand(workspace, outFile) {
   }
   const reuseComparison = computeReuseComparison({ targetSha: sha,
     acceptanceBatchReceipts,
-    extraBatchReceipts: [...batchReceiptsBySha.values()].flat(),
-    extraSelectedRunReceipts: [...selectedRunReceiptsBySha.values()].flat(),
+    extraBatchReceipts: [...batchReceiptsBySha.values()].flat()
+      .concat(ancestryReceipts.flatMap(entry => entry.acceptance_batch_receipts)),
+    extraSelectedRunReceipts: [...selectedRunReceiptsBySha.values()].flat()
+      .concat(ancestryReceipts.flatMap(entry => entry.e2e_selected_run_receipts)),
     fullGateProvisionReceipts, selectedRunReceipts, targetPushE2eRuns });
   const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls,
     pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts, replayDenials, storePolicyObservability, ancestryRuns, acceptanceBatchReceipts, selectedRunReceiptsBySha, selectedRunReceipts, notRequiredRunReceiptsBySha, notRequiredRunReceipts, fullGateProvisionReceipts, exactHeadStepsBySha, batchReceiptsBySha, ancestryReceipts, reuseComparison });
