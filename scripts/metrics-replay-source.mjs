@@ -9,6 +9,8 @@ import fs from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 import {makeDenialReceipt,DENIAL_LOG_PREFIX} from './metrics-replay-denial-receipt.mjs';
+import {verifyRepositoryMetricsTrustedSource,assertWriterGroupIsJobScoped}
+  from './lib/metrics-repository-contract.mjs';
 
 export const REPO='BestNathan/nession';
 export const REQUEST_PATH='.github/workflows/metrics-replay-request.yml';
@@ -143,19 +145,21 @@ function selfTest(){
   assert.match(request,/^permissions:\s*\n  contents: read\s*$/m);
   assert.doesNotMatch(request,/contents: write|RUN_STORE_WRITER_APP_PRIVATE_KEY|actions\/create-github-app-token|repository_dispatch:/);
   const writer=fs.readFileSync('.github/workflows/metrics-repository.yml','utf8');
-  assert.match(writer,/workflow_run:\s*\n    workflows: \["Metrics \/ Replay Request"\]\s*\n    types: \[completed\]/);
-  assert.doesNotMatch(writer,/^  workflow_dispatch:\s*$/m);
-  assert.match(writer,/needs: \[authorize-replay, rust-health, web-health, e2e-health\]/);
-  // Invariant: the shared Store writer group may only be joined by a *job*.
-  // GitHub cancels every previously pending job or workflow in a group as soon
-  // as a newer one queues, even with `cancel-in-progress: false`. Run-level
-  // membership made a one-shot replay wake evictable by ordinary `metrics-writer`
-  // traffic before `authorize-replay` was ever scheduled, so the request was
-  // neither authorized nor denied and no denial receipt existed (#1690 SC-09).
-  const assertWriterGroupIsJobScoped=(file,yaml)=>{
-    assert.doesNotMatch(yaml,/^concurrency:/m,
-      file+': run-level metrics-writer membership can evict a pending replay authorization');
-  };
+  // Structural contract, shared with run-store-integrity's fixtures. The old
+  // check here matched text and banned `workflow_dispatch` by name, so an added
+  // `push:`/`pull_request_target:` trigger or an extra write job would have
+  // passed BOTH checks. This consumes the single owner instead of a second copy.
+  verifyRepositoryMetricsTrustedSource(writer);
+  // Negative fixtures: prove the shared contract is reached from THIS detector,
+  // not only from the other Gate's fixtures.
+  assert.throws(()=>verifyRepositoryMetricsTrustedSource(
+    writer.replace(/^  schedule:/m,'  push:\n  schedule:')),/attested-only/,
+  'an added push trigger must be rejected here too');
+  assert.throws(()=>verifyRepositoryMetricsTrustedSource(
+    writer.replace(/^  publish:\s*$/m,
+      '  extra-writer:\n    runs-on: ubuntu-latest\n  publish:')),/unsafe Metrics source/,
+  'an added job must be rejected here too');
+  // The writer-group invariant is likewise owned by that module.
   assertWriterGroupIsJobScoped('metrics-repository.yml',writer);
   assertWriterGroupIsJobScoped('metrics-agent-telemetry.yml',
     fs.readFileSync('.github/workflows/metrics-agent-telemetry.yml','utf8'));
