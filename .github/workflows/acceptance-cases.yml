@@ -182,6 +182,10 @@ jobs:
         if: steps.select.outputs.count != '0' && steps.web-dist.outputs.hit != 'true'
         run: cd workspace/web && npm run build
 
+      - name: Verify runnable Web preview and proxy parity
+        if: steps.select.outputs.count != '0'
+        run: node workspace/scripts/ci/web-preview-parity.mjs workspace
+
       - name: Build Rust runtime
         if: steps.select.outputs.count != '0'
         run: cd workspace && cargo build -p nession-server -p nession-agent
