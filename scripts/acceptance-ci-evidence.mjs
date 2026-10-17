@@ -426,7 +426,7 @@ export async function collectFullGateProvisionReceipts(repo,sha,runs,
     let receipt;
     try{receipt=parseE2eFullGateLog(log);}catch{continue;}
     if(!receipt)continue;
-    const attested=attestE2eFullGateReceipt(receipt,run,matches[0]);
+    let attested=attestE2eFullGateReceipt(receipt,run,matches[0]);
     // #1876: this per-file proof is emitted only after a real push Full E2E
     // run. Bind the producer's bounded counters to GitHub's independently
     // read Run/Attempt/SHA, and the exact successful verifier job step.
@@ -437,7 +437,7 @@ export async function collectFullGateProvisionReceipts(repo,sha,runs,
     if(rows.length===1){
       const raw=rows[0].slice(rows[0].indexOf(prefix)+prefix.length).trim();
       const perId=JSON.parse(raw);
-      attested.full_per_id=attestFullReceipt(perId,run,matches[0]);
+      attested={...attested,full_per_id:attestFullReceipt(perId,run,matches[0])};
     }
     evidence.push(attested);
   }
