@@ -1,0 +1,73 @@
+name: Store / Agent Bootstrap
+
+# Trusted main-only initial creation of the dedicated encrypted Agent Store.
+# Never force-push or rewrite an existing branch. No model tools execute here.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/agent-store-bootstrap.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: store-agent-bootstrap
+  cancel-in-progress: false
+
+jobs:
+  bootstrap:
+    if: github.repository == 'BestNathan/nession' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout trusted main-only bootstrap code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Require no-force orphan bootstrap and negative fixtures
+        run: |
+          set -euo pipefail
+          node scripts/lib/agent/store/bootstrap.mjs self-test
+          ./gates/run run-store-integrity
+      - name: Require existing scoped writer App configuration
+        env:
+          WRITER_ID: ${{ vars.RUN_STORE_WRITER_APP_ID }}
+        run: |
+          set -euo pipefail
+          [[ "$WRITER_ID" =~ ^[1-9][0-9]*$ ]] || {
+            echo "::error::Existing scoped RUN_STORE_WRITER_APP_ID must be configured"
+            exit 1
+          }
+      - name: Mint repository-scoped Store writer identity
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        id: writer
+        with:
+          app-id: ${{ vars.RUN_STORE_WRITER_APP_ID }}
+          private-key: ${{ secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY }}
+          repositories: nession
+          permission-contents: write
+      - name: Create or verify dedicated agent-store orphan ref
+        env:
+          STORE_APP_TOKEN: ${{ steps.writer.outputs.token }}
+        run: |
+          set -euo pipefail
+          test -n "$STORE_APP_TOKEN"
+          export AGENT_STORE_BOOTSTRAP_REMOTE="https://x-access-token:${STORE_APP_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          node scripts/lib/agent/store/bootstrap.mjs --apply > "$RUNNER_TEMP/agent-store-bootstrap.json"
+          unset AGENT_STORE_BOOTSTRAP_REMOTE STORE_APP_TOKEN
+          result="$(jq -r .changed "$RUNNER_TEMP/agent-store-bootstrap.json")"
+          sha="$(jq -er .head_sha "$RUNNER_TEMP/agent-store-bootstrap.json")"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          {
+            echo "## Dedicated agent-store bootstrap"
+            echo "- Result: $result"
+            echo "- Verified ref: \`refs/heads/agent-store\`"
+            echo "- Verified SHA: \`$sha\`"
+            echo "- Threat model: trusted contributors; no external WORM anchor is claimed"
+          } >> "$GITHUB_STEP_SUMMARY"
