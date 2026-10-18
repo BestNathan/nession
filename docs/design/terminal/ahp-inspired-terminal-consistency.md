@@ -1,6 +1,6 @@
 # Terminal Buffer Consistency & Recovery — RFC v2
 
-> Parent Requirement: [#1645](https://github.com/BestNathan/nession/issues/1645) · Design-only successor to [Draft PR #1646](https://github.com/BestNathan/nession/pull/1646) · Architecture review: 2026-10-18.
+> Parent Requirement: [#1645](https://github.com/BestNathan/nession/issues/1645) · [Design Requirement #1927](https://github.com/BestNathan/nession/issues/1927) · Canonical [RFC v2 PR #1922](https://github.com/BestNathan/nession/pull/1922) **supersedes closed Draft PR #1646** · Architecture review: 2026-10-18.
 >
 > **Scope:** Terminal only. This document decides stream consistency, parser-applied acknowledgement, checkpoint recovery, slow-client isolation and P2P/Relay parity. It does not ship the runtime implementation.
 >
@@ -199,6 +199,8 @@ Default UX stays quiet (VISION.md / PRINCIPLE.md). Show status only if recovery 
 ## 9. Staged implementation and exact-SHA acceptance
 
 **P0: completed** in #1648 / PR #1647: do not clear history gap on attach; only current, non-truncated bootstrap parser callback can mark that P0 repair done; Relay disconnect conservatively requests bootstrap. This did NOT solve the atomic checkpoint cut.
+
+**Implementation issue tracking:** [P1 #1924](https://github.com/BestNathan/nession/issues/1924) (renderer/writer/ACK), [P2 #1925](https://github.com/BestNathan/nession/issues/1925) (Agent checkpoint/replay/subscriber credit), [P3 #1926](https://github.com/BestNathan/nession/issues/1926) (Relay parity/E2E). The first independently shippable P1-A slice is [#1931](https://github.com/BestNathan/nession/issues/1931). The parent [#1645](https://github.com/BestNathan/nession/issues/1645) remains open for runtime evidence.
 
 **P1: renderer correctness**
 
