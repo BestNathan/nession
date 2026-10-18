@@ -52,14 +52,21 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/seed-artifacts.json"
           node scripts/lib/agent/providers/cursor-resume-fixture.mjs verify-source \
             "$RUNNER_TEMP/seed-run.json" "$RUNNER_TEMP/seed-artifacts.json" \
-            "$SOURCE_RUN_ID" "$SOURCE_RUN_ATTEMPT" "$SOURCE_SHA" > "$RUNNER_TEMP/seed-artifact-digest"
-      - name: Download exact single encrypted seed Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: cursor-resume-seed-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
-          run-id: ${{ github.event.workflow_run.id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          path: ${{ runner.temp }}/cursor-resume-input
+            "$SOURCE_RUN_ID" "$SOURCE_RUN_ATTEMPT" "$SOURCE_SHA" > "$RUNNER_TEMP/seed-artifact-authority.json"
+      - name: Download ZIP by authenticated artifact ID and verify exact digest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          artifact_id="$(jq -er .artifact_id "$RUNNER_TEMP/seed-artifact-authority.json")"
+          expected_digest="$(jq -er .digest "$RUNNER_TEMP/seed-artifact-authority.json")"
+          [[ "$artifact_id" =~ ^[1-9][0-9]*$ ]] || exit 1
+          # GitHub CLI follows the one-minute API redirect and emits ZIP bytes.
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" \
+            > "$RUNNER_TEMP/cursor-seed-verified.zip"
+          python3 scripts/lib/agent/providers/cursor-resume-zip.py \
+            "$RUNNER_TEMP/cursor-seed-verified.zip" "$expected_digest" \
+            "$RUNNER_TEMP/cursor-resume-input"
       - name: Install matching native SDK
         run: |
           set -euo pipefail
