@@ -5,6 +5,7 @@
 import {createHash} from 'node:crypto';
 import {sealCheckpoint,unsealCheckpoint} from '../store/checkpoint.mjs';
 import {openClaudeNativeSession} from './claude-native-store.mjs';
+import {publishEncryptedAgentCheckpoint,fetchEncryptedAgentCheckpoint} from '../store/remote.mjs';
 
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][0-9a-f]{3}-[a-f0-9]{12}$/i;
 const HEX=/^[a-f0-9]{64}$/;
@@ -56,4 +57,46 @@ export function unwrapClaudeNativeCheckpoint({identity,record,storeKey,
     return openClaudeNativeSession({record:sealed,privateKeyPem,
       expected:expectedMetadata,configDir});
   }finally{plaintext.fill(0);}
+}
+
+// Must be called from an authenticated trusted-main Ingest, NEVER the model
+// executor. The remote publisher enforces source Registry, immutable records,
+// sequence head and no-force CAS. This function does not grant GitHub auth.
+export function publishClaudeNativeCheckpoint({
+  remote,source,nativeEnvelope,registry,storeKey,expectedVersion,
+}) {
+  if(source?.role!=='developer'&&source?.role!=='reviewer'&&source?.role!=='acceptor')
+    fail('unsupported Claude Agent checkpoint role');
+  const identity={role:source.role,agent_id:source.agent_id,issue:source.issue};
+  const sealed=wrapClaudeNativeCheckpoint({identity,version:expectedVersion+1,
+    nativeEnvelope,storeKey});
+  return publishEncryptedAgentCheckpoint({
+    remote,source,sealed,registry,key:storeKey,expectedVersion,
+  });
+}
+
+export function restoreClaudeNativeCheckpoint({
+  remote,identity,storeKey,privateKeyPem,expectedMetadata,configDir,
+}) {
+  if(!expectedMetadata||!expectedMetadata.harness_digest||!expectedMetadata.source_sha)
+    fail('expected exact Session and Harness identity required');
+  const remoteValue=fetchEncryptedAgentCheckpoint({
+    remote,identity,key:storeKey,expected:{
+      provider:'claude-code',
+      source_sha:expectedMetadata.source_sha,
+      harness_digest:expectedMetadata.harness_digest,
+    },
+  });
+  const bytes=remoteValue.native_bytes;
+  try{
+    let envelope;
+    try{envelope=JSON.parse(bytes.toString('utf8'));}
+    catch{fail('corrupt native ciphertext from trusted remote Store');}
+    const metadata=metaOf(envelope);
+    if(metadata.session_id!==expectedMetadata.session_id)
+      fail('remote Store has a different native Session UUID');
+    const restored=openClaudeNativeSession({record:envelope,privateKeyPem,
+      expected:expectedMetadata,configDir});
+    return {...restored,head:remoteValue.head,commit_sha:remoteValue.commit_sha};
+  }finally{bytes.fill(0);}
 }
