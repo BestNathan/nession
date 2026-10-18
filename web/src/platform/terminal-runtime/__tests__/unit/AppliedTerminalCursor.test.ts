@@ -11,7 +11,7 @@ describe('AppliedTerminalCursor (#1953)', () => {
     expect(tracker.snapshot({ generation: 0, streamEpoch: 7 })).toBeNull();
     expect(tracker.recordParsed({ generation: 0, streamEpoch: 7 }, pos(1))).toBe('stale');
     expect(() => tracker.beginFromVerifiedBaseline({
-      kind: 'unverified' as 'verified', streamEpoch: 7, appliedThrough: 9,
+      kind: 'unverified' as never, streamEpoch: 7, appliedThrough: 9,
     })).toThrow(RangeError);
   });
 
