@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_projection_receipt",
+  "outcome": "applied",
+  "issue": 1964,
+  "run_id": 39147247295,
+  "run_attempt": 1,
+  "target_sha": "cef51ebd3b10f55f76fa47384875906054d171af",
+  "plan_digest": "0401c6e30cb3d3c81410e0ff569c13b075877a0d74cc34191551f0b976c953e6",
+  "artifact_digest": "sha256:f07d206f125f1ab6ae23c94573bc8deed9513f14c44a86ded1edd4e0906878d0",
+  "ingest_run_id": 39147635257,
+  "ingest_attempt": 1,
+  "declaration_digest": "f5a170d6739952be9f56b58b931f9c6d85eec590fac62d015b0a86aba98a01f5",
+  "before_body_sha256": "a2af94c19b93b296d4169492136c0eeb7d924fec135c84c51bb54288ffe4f4b2",
+  "body_sha256": "76d2ebee8a616c448fb37b87a23d4f9139cf5bfb1e118a32a8df8607dc09bd89",
+  "readback_body": "## Requirements: fail-closed authenticated v2 Agent Store result reader\n\n**Parent:** #1906 / #1664, delivery independent of #1946 Pages E2E window fixes and #1690 live Store governance.\n\n### Scope\n- Create an independent `pages/scripts/` **read-only** source adapter for immutable agent-store `workflows/issues/<issue>/results/<run>-<attempt>-<action>.json`. Pin the checkout to an explicitly supplied Git commit SHA; fail closed on checkout drift/dirty tree/symlinks/nonregular or oversize files, unsupported paths, duplicates or ambiguous attempts. Restrict to selected public Issue+PR window and bounded file/day/byte scans.\n- Parse the original canonical v1/v2 `authenticated_agent_task_result` fields **without** treating an in-record `verified:true` as trust. Preserve v1 as Unlinked, v2 only as a *candidate* historical attestation-time PR edge; original `implementing_pr.number` and SHA are producer metadata, not proof of independent authorized writer.\n- A future **independent** origin binder must verify exact GitHub Controller/Developer/Reviewer Run+Attempt, result artifact digest and real no-force protected Store CAS writer/readback source (with the #1690 protected origin requirement for strong provenance) against the canonical record. Until both the writer anchor and original producer proof are independently attested, **never pass any v2 candidate into `projectLineage(attested)`**. This child intentionally does not claim that the empty `agent-store` is source-ready or that a logical Slice is attested.\n- Deterministic negative tests use a local real Git checkout with v1/v2 fixtures: source drift, forged Issue/PR/repo/target SHA, renamed/tampered record, duplicate exact identity, symlink, private field leakage, token-like payload and empty source. Existing Pages CI `node --test` picks up tests automatically.\n- No GitHub Actions Workflow, secret, permission, writer, product `web/`, browser fetch or claim of live Verified evidence. Parent #1906 stays Open pending one *real* independently verified v2 producer result, authenticated logical Slice and Acceptance SC source.\n\n### Success Criteria\n- [ ] SC-01 Pinned read-only scanner deterministically extracts bounded, minimal v1/v2 **unverified candidate** identities with strict path/JSON/source consistency; on empty/missing/untrusted Store returns explicit unavailable coverage.\n- [ ] SC-02 Security tests reject forged fields, foreign repo, bad SHA, duplicate/ambiguous Run+Attempt, dirty/unpinned checkout, unsafe path/symlink and raw-private record exports.\n- [ ] SC-03 A separately tested trust gate rejects all candidate-to-public verified lineage promotion without independent authenticated producer/writer receipts and exact PR HEAD; no implicit Action→Slice mapping.\n- [ ] SC-04 Exact-head Pages CI, Quality Gate, Case Smoke, selected E2E and canonical read-only Agent acceptance pass; workflow remains an external merge gate rather than a self-referential SC.\n\n## Acceptance Plan\n```yaml\nacceptance:\n  SC-01:\n    when: pr\n    method: agent\n  SC-02:\n    when: pr\n    method: agent\n  SC-03:\n    when: pr\n    method: agent\n  SC-04:\n    when: pr\n    method: agent\n```\n\n## Acceptance Report\n| Criterion | Stage | Result | Evidence |\n|---|---|---|---|\n| SC-01 | pre-merge | Pending | - |\n| SC-02 | pre-merge | Pending | - |\n| SC-03 | pre-merge | Pending | - |\n| SC-04 | pre-merge | Pending | - |\n\n## E2E Verification\n### New\n- none: read-only source adapter only; no new browser ID.\n### Regression\n- pages-overview\n- pages-evidence\n\n## E2E Report\n\n| ID | Type | Result | Evidence |\n|---|---|---|---|\n| pages-evidence | Regression | Pass | run 39147247295/1, SHA cef51ebd3b10f55f76fa47384875906054d171af, contract f5a170d6739952be9f56b58b931f9c6d85eec590fac62d015b0a86aba98a01f5, plan 0401c6e30cb3d3c81410e0ff569c13b075877a0d74cc34191551f0b976c953e6, tests 3/3 (https://github.com/BestNathan/nession/actions/runs/39147247295) |\n| pages-overview | Regression | Pass | run 39147247295/1, SHA cef51ebd3b10f55f76fa47384875906054d171af, contract f5a170d6739952be9f56b58b931f9c6d85eec590fac62d015b0a86aba98a01f5, plan 0401c6e30cb3d3c81410e0ff569c13b075877a0d74cc34191551f0b976c953e6, tests 4/4 (https://github.com/BestNathan/nession/actions/runs/39147247295) |\n\n## Constraints\n- [x] Standalone `pages/`, no product `web/` dependency\n- [x] No new writer or producer; no raw Agent payload in public JSON\n- [x] `agent-store` empty is **not** proof of lineage, protected CAS, or SC Pass\n\n## Product alignment\n\n- [ ] Does this move Nession toward VISION.md?\n- [ ] Does it obey PRINCIPLE.md?\n- [ ] Were relevant docs/design/* sources checked?\n- [ ] Is any deviation explicit?\n\n---\n**Status:** Approved",
+  "patch_updated_at": "2026-10-18T17:01:26Z",
+  "readback_updated_at": "2026-10-18T17:01:26Z",
+  "rows": [
+    {
+      "id": "pages-evidence",
+      "result": "Pass",
+      "evidence": "run 39147247295/1, SHA cef51ebd3b10f55f76fa47384875906054d171af, contract f5a170d6739952be9f56b58b931f9c6d85eec590fac62d015b0a86aba98a01f5, plan 0401c6e30cb3d3c81410e0ff569c13b075877a0d74cc34191551f0b976c953e6, tests 3/3 (https://github.com/BestNathan/nession/actions/runs/39147247295)"
+    },
+    {
+      "id": "pages-overview",
+      "result": "Pass",
+      "evidence": "run 39147247295/1, SHA cef51ebd3b10f55f76fa47384875906054d171af, contract f5a170d6739952be9f56b58b931f9c6d85eec590fac62d015b0a86aba98a01f5, plan 0401c6e30cb3d3c81410e0ff569c13b075877a0d74cc34191551f0b976c953e6, tests 4/4 (https://github.com/BestNathan/nession/actions/runs/39147247295)"
+    }
+  ]
+}
