@@ -8,6 +8,7 @@ import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {sealCheckpoint} from './checkpoint.mjs';
 import {publishEncryptedAgentCheckpoint,fetchEncryptedAgentCheckpoint} from './remote.mjs';
+import {startDevelopment} from '../orchestration/outbox.mjs';
 
 const registry=JSON.parse(fs.readFileSync('automation/agents/registry.json','utf8'));
 const identity={role:'developer',agent_id:'dev-cursor-01',issue:1664};
@@ -44,10 +45,22 @@ function test() {
     git(seed,'push','origin','HEAD:refs/heads/agent-store');
     const baseline=git(seed,'rev-parse','HEAD');
     const first=envelope(1,'secret native session v1');
+    const initialState=startDevelopment(registry,{
+      issue:1664,sha:source.target_sha,developer:'dev-cursor-01',
+      reviewer:'review-cursor-01',acceptor:'accept-cursor-01',
+    },{repository:'BestNathan/nession',event:'workflow_dispatch',
+      permission:'write',ref:'refs/heads/main',run_id:source.run_id});
     const published=publishEncryptedAgentCheckpoint({
       remote,source,sealed:first,registry,key,expectedVersion:0,
+      workflowState:initialState,expectedWorkflowVersion:0,
     });
     assert.equal(published.version,1);
+    assert.equal(published.workflow_version,1);
+    git(seed,'fetch','origin','refs/heads/agent-store');
+    const stateHead=JSON.parse(git(seed,'show',
+      'FETCH_HEAD:workflows/issues/1664/head.json'));
+    assert.equal(stateHead.version,1,'Workflow head and checkpoint were committed together');
+    assert.equal(JSON.parse(git(seed,'show','FETCH_HEAD:'+stateHead.path)).issue,1664);
     assert.equal(published.replayed,false);
     assert.notEqual(published.commit_sha,baseline);
     const restored=fetchEncryptedAgentCheckpoint({remote,identity,key,
@@ -58,7 +71,20 @@ function test() {
     restored.native_bytes.fill(0);
     assert.deepEqual(publishEncryptedAgentCheckpoint({
       remote,source,sealed:first,registry,key,expectedVersion:0,
+      workflowState:initialState,expectedWorkflowVersion:0,
     }).replayed,true);
+    assert.throws(()=>publishEncryptedAgentCheckpoint({
+      remote,source:{...source,run_id:43222},sealed:envelope(2,'bad workflow'),
+      registry,key,expectedVersion:1,workflowState:{...initialState,version:99},
+      expectedWorkflowVersion:1,
+    }),/noncontiguous workflow state/);
+    assert.throws(()=>publishEncryptedAgentCheckpoint({
+      remote,source:{...source,run_id:43222},sealed:envelope(2,'cross issue'),
+      registry,key,expectedVersion:1,workflowState:{...initialState,issue:999},
+      expectedWorkflowVersion:1,
+    }),/different Issue/);
+    assert.equal(git(seed,'ls-remote','origin','refs/heads/agent-store').split('\t')[0],
+      published.commit_sha,'failed atomic staging must not mutate remote ref');
     assert.throws(()=>publishEncryptedAgentCheckpoint({
       remote,source:{...source,run_id:999},sealed:first,registry,key,expectedVersion:0,
     }),/stale Store CAS/);
