@@ -12,7 +12,7 @@ try{
   assert.match(workflow,/schedule:\s*\n\s+- cron:/);
   assert.match(workflow,/group: acceptance-pr-reconcile/);
   assert.equal((orchestrator.match(/group: acceptance-pr-reconcile/g)||[]).length,2);
-  assert.match(canonical,/const MAX=4;/);
+  assert.match(canonical,/MAX=4(?:,|;)/);
   assert.match(canonical,/current\.run_attempt!==run\.run_attempt/);
 
   const test=spawnSync(process.execPath,['scripts/acceptance-quota-recovery.mjs','self-test'],{
