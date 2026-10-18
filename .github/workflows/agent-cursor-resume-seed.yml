@@ -1,0 +1,68 @@
+name: Agent / Cursor Resume Seed
+
+# Opt-in D1 synthetic native-session continuity, never PR-head or a real Issue writer.
+# A push to main exercises this only after a fixture public encryption key is configured.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/agent-cursor-resume-seed.yml
+      - .github/workflows/agent-cursor-resume-verify.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-cursor-resume-seed-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  seed:
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.ref == 'refs/heads/main' &&
+      vars.CURSOR_RESUME_PUBLIC_KEY_B64 != ''
+    runs-on: ubuntu-latest
+    environment: cursor
+    timeout-minutes: 15
+    env:
+      CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+      CURSOR_MODEL: ${{ vars.CURSOR_MODEL || 'composer-2.5' }}
+      CURSOR_MODEL_FAST: ${{ vars.CURSOR_MODEL_FAST || 'true' }}
+      CURSOR_SDK_VERSION: ${{ vars.CURSOR_SDK_VERSION || 'latest' }}
+    steps:
+      - name: Checkout authenticated main source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify native snapshot and fail-closed SDK contracts
+        run: |
+          set -euo pipefail
+          node scripts/lib/agent/providers/cursor-resume-selftest.mjs
+      - name: Install Cursor SDK (exact actual version recorded)
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/cursor-sdk"
+          npm install --prefix "$RUNNER_TEMP/cursor-sdk" "@cursor/sdk@$CURSOR_SDK_VERSION"
+          echo "CURSOR_SDK_ROOT=$RUNNER_TEMP/cursor-sdk" >> "$GITHUB_ENV"
+      - name: Run synthetic no-tool Cursor seed and seal native checkpoint
+        env:
+          CURSOR_RESUME_PUBLIC_KEY_B64: ${{ vars.CURSOR_RESUME_PUBLIC_KEY_B64 }}
+        run: |
+          set -euo pipefail
+          node scripts/lib/agent/providers/cursor-resume-fixture.mjs seed "$RUNNER_TEMP/cursor-resume-artifact"
+      - name: Publish only ciphertext, hash proof and sanitized telemetry
+        uses: actions/upload-artifact@v4
+        with:
+          name: cursor-resume-seed-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/cursor-resume-artifact/ciphertext.json
+            ${{ runner.temp }}/cursor-resume-artifact/proof.json
+            ${{ runner.temp }}/cursor-resume-artifact/agent-telemetry.json
+          if-no-files-found: error
+          retention-days: 7
