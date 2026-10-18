@@ -190,10 +190,18 @@ jobs:
             scratch/metadata/artifacts.json scratch/metadata/artifact.json
           artifact_id="$(jq -r .id scratch/metadata/artifact.json)"
           [[ "$artifact_id" =~ ^[1-9][0-9]*$ ]] || exit 1
-          # Exact artifact ID avoids gh run download --name ambiguity across
-          # reruns; never consume or project another Attempt's bytes.
-          gh run download "$run_id" --repo "$GITHUB_REPOSITORY" \
-            --archive "$artifact_id" --dir scratch/artifact
+          # gh run download has no artifact-ID selection flag. Download the
+          # *exact* authenticated GitHub REST artifact ID, follow its signed
+          # redirect, and check the immutable ZIP digest before extraction.
+          curl --fail --silent --show-error --location \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" \
+            --output scratch/issue-e2e.zip
+          artifact_sha256="$(jq -r '.digest | sub("^sha256:";"")' scratch/metadata/artifact.json)"
+          [[ "$artifact_sha256" =~ ^[0-9a-f]{64}$ ]] || exit 1
+          echo "$artifact_sha256  scratch/issue-e2e.zip" | sha256sum --check --status
+          unzip -q scratch/issue-e2e.zip -d scratch/artifact
           [[ -s scratch/artifact/plan.json && -s scratch/artifact/results.json ]] || exit 1
           echo "$pr" > scratch/metadata/pr-number
       - name: Independently validate and project per-ID results
