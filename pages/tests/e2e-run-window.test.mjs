@@ -34,6 +34,14 @@ test('full 100+100 workflow windows retain the 100th Test/Ingest receipt',()=>{
    {total_count:1,workflow_runs:[ingestRun(9000)]}]);
  assert.equal(partial.truncated,true);
 });
+test('real E2E workflow includes main push events that never themselves attest PR HEAD',()=>{
+ const push={...testRun(96),event:'push',head_branch:'main'};
+ const result=selectScopedE2ERuns(payload([testRun(95),push],[ingestRun(111)]));
+ assert.equal(result.runs.length,3);
+ assert.ok(result.runs.some(x=>x.id===96&&x.event==='push'));
+ assert.equal(selectScopedE2ERuns(payload([
+   {...testRun(95),event:'workflow_dispatch'}],[ingestRun(111)])),null);
+});
 test('missing, invalid and duplicated source cannot become trusted evidence',()=>{
  const clean=payload([testRun(95)],[ingestRun(111)]);
  const bads=[
