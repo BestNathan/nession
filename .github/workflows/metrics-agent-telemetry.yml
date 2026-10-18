@@ -2,7 +2,8 @@ name: Metrics / Agent Telemetry Ingest
 
 on:
   # A cancelled pending workflow_run is not retried by GitHub automatically.
-  # A bounded main-owned scan recovers missing canonical Agent telemetry.
+  # Scheduled-only recovery: empty producer events never fan out into six
+  # historical Workflow Run scans.
   schedule:
     - cron: '*/5 * * * *'
   workflow_run:
@@ -79,19 +80,9 @@ jobs:
 
       # The same existing writer owns event and scheduled recovery. No user-
       # controlled workflow_dispatch or source-ref-selected privileged code.
-      - name: Checkout metrics history
-        uses: actions/checkout@v4
-        with:
-          ref: metrics
-          path: metrics-store
-          fetch-depth: 0
-          persist-credentials: false
-
-      # Read-only preflight: when an authenticated producer emitted no
-      # telemetry, reuse this already-running trusted Metrics writer to
-      # recover the oldest missed run instead of awaiting GitHub cron.
-      # If it did emit telemetry, preserve the original event delivery.
-      - name: Detect empty source telemetry
+      # One attempt-scoped artifact query. A source without Agent telemetry
+      # is a no-op; the five-minute scheduled scan owns missed-run replay.
+      - name: Detect source Agent telemetry
         if: github.event_name == 'workflow_run'
         id: event_artifacts
         env:
@@ -107,15 +98,25 @@ jobs:
           count="$(node trusted/scripts/agent-telemetry-reconcile.mjs artifact-count \
             "${RUNNER_TEMP}/event-source-artifacts.json" "${EVENT_RUN_ID}" "${EVENT_RUN_ATTEMPT}")"
           echo "count=${count}" >> "${GITHUB_OUTPUT}"
+          if [[ "${count}" -eq 0 ]]; then
+            echo "No Agent telemetry on source attempt; scheduled recovery covers missed events" >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
+      - name: Checkout metrics history
+        if: github.event_name == 'schedule' || steps.event_artifacts.outputs.count != '0'
+        uses: actions/checkout@v4
+        with:
+          ref: metrics
+          path: metrics-store
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Select missed trusted Agent telemetry source
-        if: github.event_name == 'schedule' || (github.event_name == 'workflow_run' && steps.event_artifacts.outputs.count == '0')
+        if: github.event_name == 'schedule'
         id: reconcile
         working-directory: trusted
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RECOVERY_EVENT_RUN_ID: ${{ github.event.workflow_run.id }}
-          RECOVERY_EMPTY_SOURCE_COUNT: ${{ steps.event_artifacts.outputs.count }}
         run: |
           set -euo pipefail
           node scripts/agent-telemetry-reconcile.mjs select \
@@ -125,11 +126,11 @@ jobs:
           if [[ -n "${run_id}" ]]; then
             echo "Recovered an authenticated missing source run (id=${run_id})" >> "${GITHUB_STEP_SUMMARY}"
           else
-            echo "No missing authenticated Agent telemetry in bounded recovery window" >> "${GITHUB_STEP_SUMMARY}"
+            echo "No missing authenticated Agent telemetry in bounded scheduled recovery" >> "${GITHUB_STEP_SUMMARY}"
           fi
 
       - name: Resolve source run
-        if: github.event_name == 'workflow_run' || steps.reconcile.outputs.run_id != ''
+        if: (github.event_name == 'workflow_run' && steps.event_artifacts.outputs.count != '0') || steps.reconcile.outputs.run_id != ''
         id: source
         env:
           EVENT_RUN_ID: ${{ github.event.workflow_run.id }}
@@ -176,10 +177,19 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN_ID: ${{ steps.source.outputs.run_id }}
           RUN_ATTEMPT: ${{ steps.source.outputs.run_attempt }}
+          EVENT_RUN_ID: ${{ github.event.workflow_run.id }}
+          EVENT_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
         run: |
           set -euo pipefail
-          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/artifacts?per_page=100" \
-            > "${RUNNER_TEMP}/source-artifacts.json"
+          # Reuse the event listing ONLY if the run and attempt still match.
+          if [[ "${RUN_ID}" == "${EVENT_RUN_ID}" &&
+                "${RUN_ATTEMPT}" == "${EVENT_RUN_ATTEMPT}" &&
+                -f "${RUNNER_TEMP}/event-source-artifacts.json" ]]; then
+            cp "${RUNNER_TEMP}/event-source-artifacts.json" "${RUNNER_TEMP}/source-artifacts.json"
+          else
+            gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/artifacts?per_page=100" \
+              > "${RUNNER_TEMP}/source-artifacts.json"
+          fi
           count="$(node trusted/scripts/agent-telemetry-reconcile.mjs artifact-count \
             "${RUNNER_TEMP}/source-artifacts.json" "${RUN_ID}" "${RUN_ATTEMPT}")"
           echo "count=${count}" >> "${GITHUB_OUTPUT}"

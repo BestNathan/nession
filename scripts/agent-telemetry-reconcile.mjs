@@ -133,11 +133,7 @@ export function validateReconciliationContext(env){
      env.GITHUB_REF!=='refs/heads/main')
     fail('reconciler must execute only on trusted main');
   if(env.GITHUB_EVENT_NAME==='schedule')return 'schedule';
-  if(env.GITHUB_EVENT_NAME==='workflow_run' &&
-     /^[1-9][0-9]*$/.test(env.RECOVERY_EVENT_RUN_ID??'') &&
-     positive(Number(env.RECOVERY_EVENT_RUN_ID)) &&
-     env.RECOVERY_EMPTY_SOURCE_COUNT==='0')return 'empty-source-event';
-  fail('reconciliation denied: only main schedule or empty authenticated workflow_run');
+  fail('reconciliation denied: only main schedule may scan history');
 }
 async function select(store){
   validateReconciliationContext(process.env);
@@ -174,11 +170,16 @@ export function validateRecoveryRouting(workflow){
   if(!workflow.includes('node scripts/agent-telemetry-reconcile.mjs select')||
      !workflow.includes('run-store-integrity.mjs"'))
     fail('trusted reconciliation or immutable Store Gate omitted');
-  if(!job.includes("steps.event_artifacts.outputs.count == '0'")||
-     !job.includes('RECOVERY_EMPTY_SOURCE_COUNT: ${{ steps.event_artifacts.outputs.count }}')||
-     !job.includes('RECOVERY_EVENT_RUN_ID: ${{ github.event.workflow_run.id }}')||
+  if(!job.includes("- name: Select missed trusted Agent telemetry source\n        if: github.event_name == 'schedule'")||
+     !job.includes("- name: Checkout metrics history\n        if: github.event_name == 'schedule' || steps.event_artifacts.outputs.count != '0'")||
+     !job.includes("if: (github.event_name == 'workflow_run' && steps.event_artifacts.outputs.count != '0') || steps.reconcile.outputs.run_id != ''")||
+     job.includes("steps.event_artifacts.outputs.count == '0'")||
      !job.includes('run_id="${RECOVERY_RUN_ID:-${EVENT_RUN_ID:-}}"'))
-    fail('empty authenticated producer fallback or recovered run precedence missing');
+    fail('empty telemetry events must skip history and scheduled recovery; retain source precedence');
+  if(!job.includes('"${RUN_ID}" == "${EVENT_RUN_ID}"')||
+     !job.includes('"${RUN_ATTEMPT}" == "${EVENT_RUN_ATTEMPT}"')||
+     !job.includes('cp "${RUNNER_TEMP}/event-source-artifacts.json" "${RUNNER_TEMP}/source-artifacts.json"'))
+    fail('attempt-pinned event artifact listing reuse missing');
   // A schedule scan can legitimately discover no missing run. Skipped
   // source/artifact steps produce empty strings, not the literal '0'.
   // Every consumer must guard both cases; otherwise an empty scan tries to
@@ -223,8 +224,6 @@ function selfTest(){
   ),/failed Provider evidence/);
     const mainEnv={GITHUB_REPOSITORY:REPO,GITHUB_REF:'refs/heads/main'};
   assert.equal(validateReconciliationContext({...mainEnv,GITHUB_EVENT_NAME:'schedule'}),'schedule');
-  assert.equal(validateReconciliationContext({...mainEnv,GITHUB_EVENT_NAME:'workflow_run',
-    RECOVERY_EVENT_RUN_ID:'321',RECOVERY_EMPTY_SOURCE_COUNT:'0'}),'empty-source-event');
   for(const invalid of [
     {...mainEnv,GITHUB_EVENT_NAME:'workflow_dispatch'},
     {...mainEnv,GITHUB_EVENT_NAME:'workflow_run',RECOVERY_EVENT_RUN_ID:'321',RECOVERY_EMPTY_SOURCE_COUNT:'1'},
@@ -235,8 +234,17 @@ function selfTest(){
     {...mainEnv,GITHUB_EVENT_NAME:'schedule',GITHUB_REPOSITORY:'attacker/fork'},
   ])assert.throws(()=>validateReconciliationContext(invalid),/reconciliation denied|trusted main/);
   assert.throws(()=>validateRecoveryRouting(workflow.replace(
-    "steps.event_artifacts.outputs.count == '0'","steps.event_artifacts.outputs.count != '0'"
-  )),/empty authenticated/);
+    "- name: Select missed trusted Agent telemetry source\n        if: github.event_name == 'schedule'",
+    "- name: Select missed trusted Agent telemetry source\n        if: github.event_name == 'workflow_run'"
+  )),/empty telemetry events/);
+  assert.throws(()=>validateRecoveryRouting(workflow.replace(
+    "github.event_name == 'schedule' || steps.event_artifacts.outputs.count != '0'",
+    "github.event_name == 'schedule' || steps.event_artifacts.outputs.count == '0'"
+  )),/empty telemetry events/);
+  assert.throws(()=>validateRecoveryRouting(workflow.replace(
+    '"${RUN_ATTEMPT}" == "${EVENT_RUN_ATTEMPT}"',
+    '"${RUN_ATTEMPT}" != "${EVENT_RUN_ATTEMPT}"'
+  )),/attempt-pinned/);
   assert.throws(()=>validateRecoveryRouting(workflow.replace(
     "steps.artifacts.outputs.count != '' && steps.artifacts.outputs.count != '0'",
     "steps.artifacts.outputs.count != '0'"
