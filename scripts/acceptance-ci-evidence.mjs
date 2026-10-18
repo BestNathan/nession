@@ -778,6 +778,13 @@ export function pinnedHistoricalOrchestratorIds(body) {
   const ids=[];
   for(const line of section.split('\n')) {
     if(!/^- \[[ x]\] SC-\d+\b/.test(line))continue;
+    // These independent collectors own their own GitHub Run IDs:
+    // cancelled Provider replay is a repository_dispatch at a recovery SHA,
+    // and SC-05 observations span several main ancestors. Neither is a
+    // main-push Orchestrator on an ordinary two-parent merge commit.
+    if(line.includes('Historical recovery discovery constraint:')||
+       line.includes('Historical workflow regression discovery constraint:'))
+      continue;
     for(const m of line.matchAll(/\bOrchestrator Run\s+\x60?([1-9]\d*)\x60?(?=\s|[.,;]|$)/g)){
       const id=Number(m[1]);
       if(!Number.isSafeInteger(id))throw Error('invalid historical Run ID');
@@ -2240,6 +2247,13 @@ async function selfTest() {
   assert.equal(pins.issue_number,1715);
   assert.equal(pins.orchestrator_attempt,2);
   assert.deepEqual(pinnedHistoricalProviderChains('### Success Criteria\n- [ ] SC-01 no pins'),[]);
+  const specialized='### Success Criteria\n- [ ] SC-04 Historical recovery discovery constraint: Wake Orchestrator Run 38521026828.\n'+
+    '- [ ] SC-05 Historical workflow regression discovery constraint: Orchestrator Run 39116474380.\n'+
+    '- [ ] SC-06 Historical evidence discovery constraint: Orchestrator Run 38397558926.\n## Acceptance Report';
+  assert.deepEqual(pinnedHistoricalOrchestratorIds(specialized),[38397558926]);
+  assert.deepEqual(pinnedHistoricalOrchestratorIds(specialized.replace(
+    'Historical evidence discovery constraint:',
+    'Historical recovery discovery constraint:')),[]);
   assert.throws(()=>pinnedHistoricalProviderChains(sc.replace('Metrics Ingest Run','Untrusted Run')),
     /incomplete historical/);
   const sourceMeta={repository:{full_name:'BestNathan/nession'},
