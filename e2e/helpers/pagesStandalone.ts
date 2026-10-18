@@ -13,6 +13,7 @@ const fixture={
     '30d':{providers:{available:true,items:[{name:'cursor',count:10},{name:'claude-code',count:4}]},workflows:{available:true,items:[{name:'issue-audit',count:14}]}}
   },roster:[{id:'dev-qwen-01',role:'developer',provider:'claude-code',observed_7d:3},{id:'review-cursor-01',role:'reviewer',provider:'cursor',observed_7d:null}],summary:{runs_7d:3,runs_30d:14,tokens_7d:45000,tokens_observed_runs:2,tools_7d:20,tools_observed_runs:3,cost_7d:null}},
  work:{issues_status:'available',pulls_status:'available',agent_run_source:'available',
+   agent_store_readiness:{status:'empty',sha:'d'.repeat(40),url:'https://github.com/BestNathan/nession/tree/agent-store'},
    lineage:{schema_version:1,status:'unavailable',edges:[],truncated:false},
    acceptance_e2e:{status:'available',source_sha:'c'.repeat(40),records:[
      {issue:1782,id:'pages-overview',result:'Pass',run_id:42,attempt:1,
