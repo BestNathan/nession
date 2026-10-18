@@ -98,7 +98,7 @@ function validateProof(proof){
     fail('invalid prior-run proof');
   return proof.metadata;
 }
-function verifySource(run,artifacts,id,attempt,sha) {
+export function verifyCursorSeedSource(run,artifacts,id,attempt,sha) {
   const expectedName='cursor-resume-seed-'+id+'-'+attempt;
   if(run?.id!==id||run.run_attempt!==attempt||run.name!=='Agent / Cursor Resume Seed'||
     run.path!=='.github/workflows/agent-cursor-resume-seed.yml'||
@@ -165,7 +165,7 @@ async function main(){
   if(action==='seed'&&args.length===1)return seed(args[0]);
   if(action==='verify-source'&&args.length===5){
     const [run,artifacts,id,attempt,sha]=args;
-    return console.log(verifySource(readJson(run),readJson(artifacts),Number(id),Number(attempt),sha));
+    return console.log(verifyCursorSeedSource(readJson(run),readJson(artifacts),Number(id),Number(attempt),sha));
   }
   if(action==='unseal'&&args.length===2)return unseal(...args);
   if(action==='resume'&&args.length===3)return resume(...args);
