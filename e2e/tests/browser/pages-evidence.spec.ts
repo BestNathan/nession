@@ -27,6 +27,9 @@ test.describe('standalone Pages evidence',()=>{
    await expect(page.getByRole('link',{name:/pages-overview · Pass · Run 42 \/ attempt 1/}))
      .toHaveAttribute('href','https://github.com/BestNathan/nession/actions/runs/42');
    await expect(page.getByRole('link',{name:/pages-evidence · Fail · Run 42 \/ attempt 1/})).toBeVisible();
+   await expect(page.getByText('Agent Store source readiness: empty',{exact:false})).toBeVisible();
+   await expect(page.getByRole('link',{name:/Pinned Agent Store source dddddddddddd/})).toHaveAttribute('href',
+     'https://github.com/BestNathan/nession/tree/agent-store');
    await expect(page.getByText('Trusted Acceptance SC: Unknown / Not independently observed.')).toBeVisible();
    await expect(page.getByText('Implementing PR / logical Slice: Unknown / Unlinked')).toBeVisible();
    await page.reload();
