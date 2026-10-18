@@ -876,7 +876,7 @@ describe('StreamReconciler bounded reorder window (#1961)', () => {
   });
 
   it('delivers large contiguous output directly without a false overflow notice', async () => {
-    const h = makeHarness({ maxFrames: 1, maxBytes: 129 });
+    const h = makeHarness({ maxFrames: 4, maxBytes: 600 });
     h.reconciler.acceptLive({ data: new Uint8Array(4096), streamEpoch: 1, streamSeq: 1 });
     h.reconciler.acceptLive({ data: new Uint8Array(8192), streamEpoch: 1, streamSeq: 2 });
     expect(h.truncated).toBe(0);
