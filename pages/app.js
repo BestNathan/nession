@@ -328,6 +328,16 @@ function renderWorkDetail(kind, number){
   }
   if(proof.status==='truncated')panel.append(node('p','',
     'E2E source truncated · older or additional runs may exist.'));
+  const store=snapshot.work?.agent_store_readiness;
+  const status=store?.status||'unavailable';
+  const explanation={
+    missing:'Agent Store branch not found',
+    empty:'Branch exists but has no published source entries',
+    present_unverified:'Source tree exists; no v2 receipt or writer origin has been independently authenticated',
+    unavailable:'Unable to verify pinned Agent Store snapshot'
+  }[status]||'Source not authenticated';
+  panel.append(node('p','', 'Agent Store source readiness: '+status+' · '+explanation));
+  if(store?.sha)panel.append(ext('Pinned Agent Store source '+store.sha.slice(0,12)+' ↗',store.url));
   panel.append(node('p','', 'Trusted Acceptance SC: Unknown / Not independently observed.'));
   panel.append(node('p','', 'Implementing PR / logical Slice: '+
     (snapshot.work?.lineage?.status==='unavailable'?'Unknown / Unlinked':'Source-gated; inspect each independently attested edge.')));
