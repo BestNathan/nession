@@ -94,6 +94,22 @@ function installCapturingResizeObserver(): () => void {
   };
 }
 
+/** Manually complete xterm parser callbacks instead of assuming write() is synchronous. */
+function delayedParser(controller: TerminalController) {
+  const callbacks: Array<() => void> = [];
+  const spy = vi.spyOn(controller.terminal!, 'write').mockImplementation(
+    ((_data: unknown, callback?: () => void) => {
+      if (callback) { callbacks.push(callback); }
+    }) as never,
+  );
+  const finish = () => {
+    const callback = callbacks.shift();
+    expect(callback).toBeDefined();
+    callback!();
+  };
+  return { callbacks, spy, finish };
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 describe('TerminalController', () => {
@@ -299,78 +315,70 @@ describe('TerminalController', () => {
     expect(writeSpy).toHaveBeenCalledWith(new Uint8Array([104, 105]), expect.any(Function));
   });
 
-  it('writes transport output to the terminal in arrival order', () => {
+  it('writes transport output to the terminal in parser order', () => {
     const transport = makeTransport();
     const controller = new TerminalController(makeSession(), () => transport);
     controller.attach(host());
-
-    // Capture writes by spying on the terminal (the agent sends captured
-    // scrollback as the FIRST output, so arrival order must be preserved).
-    const writeSpy = vi.spyOn(controller.terminal!, 'write');
+    const h = delayedParser(controller);
     transport.onOutput!(new Uint8Array([1]));
     transport.onOutput!(new Uint8Array([2]));
-
-    expect(writeSpy).toHaveBeenCalledTimes(2);
-    expect(writeSpy).toHaveBeenNthCalledWith(1, new Uint8Array([1]), expect.any(Function));
-    expect(writeSpy).toHaveBeenNthCalledWith(2, new Uint8Array([2]), expect.any(Function));
-    writeSpy.mockRestore();
-    controller.detach();
+    expect(h.spy).toHaveBeenCalledTimes(1);
+    expect(h.spy).toHaveBeenNthCalledWith(1, new Uint8Array([1]), expect.any(Function));
+    h.finish();
+    expect(h.spy).toHaveBeenCalledTimes(2);
+    expect(h.spy).toHaveBeenNthCalledWith(2, new Uint8Array([2]), expect.any(Function));
+    h.finish();
+    h.spy.mockRestore();
+    controller.dispose();
   });
 
   it('wipes the buffer before a bootstrap, and only its own modes survive', () => {
     const transport = makeTransport();
     const controller = new TerminalController(makeSession(), () => transport);
     controller.attach(host());
-
-    const writeSpy = vi.spyOn(controller.terminal!, 'write');
+    const h = delayedParser(controller);
     const resetSpy = vi.spyOn(controller.terminal!, 'reset');
     transport.onOutput!(new Uint8Array([104, 105]), { requestedLines: 5000, truncated: false });
-
-    // Erase display, erase scrollback, cursor home — in that order, before the
-    // snapshot itself, so the history it carries is all the buffer holds.
-    expect(writeSpy).toHaveBeenNthCalledWith(1, '\x1b[2J\x1b[3J\x1b[H');
-    expect(writeSpy).toHaveBeenNthCalledWith(2, new Uint8Array([104, 105]), expect.any(Function));
-    // `reset()` would leave the alternate screen and clear modes the
-    // application set — a TUI's pane would come back normal-buffered.
+    expect(h.spy).toHaveBeenNthCalledWith(1, '\x1b[2J\x1b[3J\x1b[H', expect.any(Function));
+    expect(h.spy).toHaveBeenCalledTimes(1);
+    h.finish();
+    expect(h.spy).toHaveBeenNthCalledWith(2, new Uint8Array([104, 105]), expect.any(Function));
     expect(resetSpy).not.toHaveBeenCalled();
-    writeSpy.mockRestore();
+    h.finish();
+    h.spy.mockRestore();
     resetSpy.mockRestore();
-    controller.detach();
+    controller.dispose();
   });
 
   it('keeps the scrollback when the snapshot the agent sent was cut short (#1305)', () => {
     const transport = makeTransport();
     const controller = new TerminalController(makeSession(), () => transport);
     controller.attach(host());
-
-    const writeSpy = vi.spyOn(controller.terminal!, 'write');
+    const h = delayedParser(controller);
     transport.onOutput!(new Uint8Array([104, 105]), { requestedLines: 5000, truncated: true });
-
-    // Erase the display and home the cursor, but leave the scrollback: the
-    // agent's ceiling drops the *oldest* history, and this client holds up to
-    // 50k lines against a 512 KiB capture — so the snapshot cannot stand in
-    // for what `\x1b[3J` would have destroyed. The screen it *can* restore is
-    // still replaced, which is why the display wipe stays.
-    expect(writeSpy).toHaveBeenNthCalledWith(1, '\x1b[2J\x1b[H');
-    expect(writeSpy).toHaveBeenNthCalledWith(2, new Uint8Array([104, 105]), expect.any(Function));
-    writeSpy.mockRestore();
-    controller.detach();
+    expect(h.spy).toHaveBeenNthCalledWith(1, '\x1b[2J\x1b[H', expect.any(Function));
+    expect(h.spy).toHaveBeenCalledTimes(1);
+    h.finish();
+    expect(h.spy).toHaveBeenNthCalledWith(2, new Uint8Array([104, 105]), expect.any(Function));
+    h.finish();
+    h.spy.mockRestore();
+    controller.dispose();
   });
 
   it('appends, without wiping, when the frame carries no marker', () => {
     const transport = makeTransport();
     const controller = new TerminalController(makeSession(), () => transport);
     controller.attach(host());
-
-    const writeSpy = vi.spyOn(controller.terminal!, 'write');
+    const h = delayedParser(controller);
     transport.onOutput!(new Uint8Array([1]));
     transport.onOutput!(new Uint8Array([2]), undefined);
-
-    expect(writeSpy).toHaveBeenCalledTimes(2);
-    expect(writeSpy).toHaveBeenNthCalledWith(1, new Uint8Array([1]), expect.any(Function));
-    expect(writeSpy).toHaveBeenNthCalledWith(2, new Uint8Array([2]), expect.any(Function));
-    writeSpy.mockRestore();
-    controller.detach();
+    expect(h.spy).toHaveBeenCalledTimes(1);
+    h.finish();
+    expect(h.spy).toHaveBeenNthCalledWith(1, new Uint8Array([1]), expect.any(Function));
+    expect(h.spy).toHaveBeenNthCalledWith(2, new Uint8Array([2]), expect.any(Function));
+    h.finish();
+    h.spy.mockRestore();
+    controller.dispose();
   });
 
   it('reports hasSessionOutput only once output has arrived, bootstrap included', async () => {
@@ -403,7 +411,7 @@ describe('TerminalController', () => {
         originalWrite(data, callback
           ? () => {
             callback();
-            signalParsed();
+            if (data instanceof Uint8Array) { signalParsed(); }
           }
           : undefined);
       }) as never,
@@ -431,32 +439,22 @@ describe('TerminalController', () => {
     controller.detach();
   });
 
-  it('ignores a superseded snapshot when it finally lands (#1491)', async () => {
+  it('ignores a superseded snapshot when it finally lands (#1491)', () => {
     const transport = makeTransport();
     const controller = new TerminalController(makeSession(), () => transport);
     controller.attach(host());
-
-    // Two snapshots in flight — a re-attach arriving while the first is still
-    // parsing, which is what a large history plus a rewire produces. The first
-    // callback describes a buffer the second one has since erased, so it must
-    // not lift the flag; only the newest snapshot speaks for the buffer.
-    const writes: Array<() => void> = [];
-    const writeSpy = vi.spyOn(controller.terminal!, 'write').mockImplementation(
-      ((_data: unknown, callback?: () => void) => { if (callback) { writes.push(callback); } }) as never,
-    );
-
+    const h = delayedParser(controller);
     transport.onOutput!(new Uint8Array([49]), { requestedLines: 5000, truncated: false });
     transport.onOutput!(new Uint8Array([50]), { requestedLines: 5000, truncated: false });
-    expect(writes).toHaveLength(2);
-
-    writes[0]!();  // the superseded snapshot lands
+    expect(h.spy).toHaveBeenCalledTimes(1);
+    h.finish(); // first reset parsed
+    h.finish(); // first snapshot parsed, but superseded
     expect(controller.hasSessionOutput).toBe(false);
-
-    writes[1]!();  // the one the buffer actually holds
+    h.finish(); // second reset
+    h.finish(); // latest snapshot
     expect(controller.hasSessionOutput).toBe(true);
-
-    writeSpy.mockRestore();
-    controller.detach();
+    h.spy.mockRestore();
+    controller.dispose();
   });
 
   it('reports bootstrap applied only after the latest COMPLETE snapshot parses (#1645)', () => {
@@ -467,25 +465,22 @@ describe('TerminalController', () => {
       events: { onBootstrapApplied },
     });
     controller.attach(host());
-
-    const callbacks: Array<() => void> = [];
-    const spy = vi.spyOn(controller.terminal!, 'write').mockImplementation(
-      ((_data: unknown, callback?: () => void) => {
-        if (callback) { callbacks.push(callback); }
-      }) as never,
-    );
+    const h = delayedParser(controller);
     transport.onOutput!(new Uint8Array([49]), { requestedLines: 5000, truncated: false });
     transport.onOutput!(new Uint8Array([50]), { requestedLines: 5000, truncated: false });
     expect(onBootstrapApplied).not.toHaveBeenCalled();
-    callbacks[0]!(); // Superseded by a newer snapshot
+    h.finish(); // old reset
+    h.finish(); // old snapshot
     expect(onBootstrapApplied).not.toHaveBeenCalled();
-    callbacks[1]!();
+    h.finish(); // latest reset
+    expect(onBootstrapApplied).not.toHaveBeenCalled();
+    h.finish(); // latest snapshot
     expect(onBootstrapApplied).toHaveBeenCalledTimes(1);
-
     transport.onOutput!(new Uint8Array([51]), { requestedLines: 5000, truncated: true });
-    callbacks[2]!(); // A truncated capture cannot repair a missing history range
+    h.finish(); // truncated reset
+    h.finish(); // truncated capture cannot repair the missing history
     expect(onBootstrapApplied).toHaveBeenCalledTimes(1);
-    spy.mockRestore();
+    h.spy.mockRestore();
     controller.dispose();
   });
 
@@ -499,19 +494,13 @@ describe('TerminalController', () => {
       events: { onBootstrapApplied },
     });
     controller.attach(host());
-
-    let oldCallback: (() => void) | undefined;
-    const spy = vi.spyOn(controller.terminal!, 'write').mockImplementation(
-      ((_data: unknown, callback?: () => void) => {
-        if (callback) { oldCallback = callback; }
-      }) as never,
-    );
+    const h = delayedParser(controller);
     first.onOutput!(new Uint8Array([49]), { requestedLines: 5000, truncated: false });
-    controller.attach(host()); // Viewport reparent replaces transport, not xterm
-    expect(oldCallback).toBeDefined();
-    oldCallback!();
+    h.finish(); // first transport reset; its snapshot is now in flight
+    controller.attach(host()); // same xterm, new transport
+    h.finish(); // old transport's snapshot parse callback
     expect(onBootstrapApplied).not.toHaveBeenCalled();
-    spy.mockRestore();
+    h.spy.mockRestore();
     controller.dispose();
   });
 

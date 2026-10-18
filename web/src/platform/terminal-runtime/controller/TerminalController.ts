@@ -17,6 +17,7 @@ import { AIInputHandler } from '../input/AIInputHandler';
 import { CustomInputHandler } from '../input/CustomInputHandler';
 import { CapsuleOcclusionScroll } from '../capsule/occlusionScroll';
 import { TerminalInstance } from '../instance/TerminalInstance';
+import { SerializedTerminalWriter } from './SerializedTerminalWriter';
 import { MobileImeInput } from '../input/MobileImeInput';
 import {
   TerminalInteractionController,
@@ -116,6 +117,8 @@ export class TerminalController {
 
   private _terminal: Terminal | null = null;
   private instance: TerminalInstance;
+  /** FIFO parser ordering survives a transport rewire along with TerminalInstance. */
+  private readonly writer: SerializedTerminalWriter;
   private transportFactory: () => TerminalTransport;
   private transport: TerminalTransport | null = null;
   private resizeController: ResizeController | null = null;
@@ -172,6 +175,7 @@ export class TerminalController {
     this.session = session;
     this.transportFactory = transportFactory;
     this.instance = new TerminalInstance(options);
+    this.writer = new SerializedTerminalWriter(this.instance.terminal);
     this._terminal = this.instance.terminal;
     this.inputSourceManager = new InputSourceManager();
     this.useMobileIme = shouldUseMobileIme(options.deviceProfile);
@@ -276,7 +280,7 @@ export class TerminalController {
       // the third one — it is not a history that can stand in for what the
       // client already has (#1305).
       if (bootstrap) {
-        terminal.write(bootstrap.truncated ? BOOTSTRAP_SCREEN_RESET : BOOTSTRAP_BUFFER_RESET);
+        this.writer.write(bootstrap.truncated ? BOOTSTRAP_SCREEN_RESET : BOOTSTRAP_BUFFER_RESET);
       }
       const follow = this.capsuleOcclusionScroll?.snapshotFollowing() ?? false;
       // A snapshot is this buffer's *history*, and handing it to xterm is not
@@ -292,7 +296,7 @@ export class TerminalController {
       // for a callback there would report "no session output" for every
       // session that never sends a bootstrap.
       const bootstrapSeq = bootstrap ? ++this.bootstrapSequence : null;
-      terminal.write(data, () => {
+      this.writer.write(data, () => {
         if (bootstrapSeq !== null
           && bootstrapSeq === this.bootstrapSequence
           && this._terminal === terminal
@@ -310,7 +314,7 @@ export class TerminalController {
       });
       if (bootstrapSeq === null) { this.markSessionOutput(); }
     };
-    transport.onResize = (cols: number, rows: number) => { terminal.resize(cols, rows); };
+    transport.onResize = (cols: number, rows: number) => { this.writer.resize(cols, rows); };
     transport.onError = (err: Error) => { this.onError?.(err); };
     this.events?.onTransportReady?.(true);
   }
@@ -454,6 +458,7 @@ export class TerminalController {
     this.transportBindingUnsub?.();
     this.transportBindingUnsub = null;
     this.detach();
+    this.writer.dispose();
     this.instance.dispose();
   }
 
@@ -468,7 +473,8 @@ export class TerminalController {
    */
   write(data: string | Uint8Array): void {
     const follow = this.capsuleOcclusionScroll?.snapshotFollowing() ?? false;
-    this._terminal?.write(data, () => {
+    if (!this._terminal) { return; }
+    this.writer.write(data, () => {
       if (follow) {
         this.capsuleOcclusionScroll?.afterOutputWhileFollowing();
       }
