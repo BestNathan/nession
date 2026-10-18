@@ -10,6 +10,9 @@ on:
       - .github/workflows/agent-cursor-resume-seed.yml
       - .github/workflows/agent-cursor-resume-verify.yml
 
+env:
+  NSESSION_AGENT_WORKFLOW_ID: agent-cursor-resume-seed
+
 permissions:
   contents: read
 
@@ -56,6 +59,13 @@ jobs:
         run: |
           set -euo pipefail
           node scripts/lib/agent/providers/cursor-resume-fixture.mjs seed "$RUNNER_TEMP/cursor-resume-artifact"
+      - name: Upload canonical Agent telemetry for existing trusted Metrics Ingest
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-telemetry-cursor-resume-seed-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/cursor-resume-artifact/agent-telemetry.json
+          if-no-files-found: error
+          retention-days: 14
       - name: Publish only ciphertext, hash proof and sanitized telemetry
         uses: actions/upload-artifact@v4
         with:
