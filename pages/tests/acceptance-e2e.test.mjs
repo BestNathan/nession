@@ -68,6 +68,21 @@ test('pinned selected E2E result must match original exact-SHA Run and trusted I
      meta:{acceptance_results_sha:x.head}}));
    assert.equal(publicPayload.work.acceptance_e2e.records.length,2);
    assert.equal(publicPayload.work.lineage.status,'unavailable');
+   const filler=Array.from({length:198},(_,i)=>({
+     id:100000+i,run_attempt:1,head_sha:'f'.repeat(40),
+     name:'E2E / Tests',path:'.github/workflows/e2e-tests.yml',
+     event:'pull_request',repository:{full_name:repo},
+     head_repository:{full_name:repo},status:'completed',conclusion:'failure'
+   }));
+   const fullWindows=await collect({...x,workflowRuns:[...filler,...actions]});
+   assert.equal(fullWindows.records.length,2,
+     'trusted Test Ingest at offset >100 remains independently checked');
+   const cap=await loadPinnedE2E({root:x.root,expectedSha:x.head,
+     prHeads:[sha],workflowRuns:[...filler,...actions],at,runWindowTruncated:true});
+   assert.equal(cap.status,'truncated');
+   assert.equal(cap.records.length,2);
+   assert.equal((await loadPinnedE2E({root:x.root,expectedSha:x.head,
+     prHeads:[sha],workflowRuns:null,at})).status,'unavailable');
    const noProducer=await collect({...x,workflowRuns:[actions[0]]});
    assert.equal(noProducer.records.length,0); // GitHub E2E alone is not an ingested per-ID receipt.
    const stale=await collect({...x,prHeads:['f'.repeat(40)]});

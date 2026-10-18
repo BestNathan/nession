@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { makeProjection, validateProjection } from './project.mjs';
 import { loadIssueRunObservations } from './issue-runs.mjs';
 import { loadPinnedE2E } from './acceptance-e2e.mjs';
+import {selectScopedE2ERuns,scopedE2EPaths} from './e2e-run-window.mjs';
 
 const repo = 'BestNathan/nession';
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -76,6 +77,18 @@ async function optionalRuns(){
     return Array.isArray(result?.workflow_runs)?result.workflow_runs:null;
   }catch(error){console.error('Public CI Run snapshot unavailable:',error.message);return null;}
 }
+async function optionalScopedE2ERuns(){
+  const responses=await Promise.all(scopedE2EPaths.map(async path=>{
+    try { return await api('/actions/workflows/'+path.split('/').at(-1)+'/runs?per_page=100'); }
+    catch(error){
+      console.error('Optional trusted E2E Run window unavailable:',path,error.message);
+      return null;
+    }
+  }));
+  const scoped=selectScopedE2ERuns(responses);
+  if(!scoped)console.error('Independent E2E/Test Ingest Run identity window unavailable');
+  return scoped;
+}
 async function optionalRef(branch) {
   try {
     const result=await api('/git/ref/heads/'+encodeURIComponent(branch));
@@ -97,14 +110,16 @@ const selectedIssueNumbers=Array.isArray(issues)?issues
   .filter(x=>Number.isSafeInteger(x?.number)&&x.number>0&&!x.pull_request)
   .sort((a,b)=>String(b.updated_at||'').localeCompare(String(a.updated_at||''))||a.number-b.number)
   .slice(0,12).map(x=>x.number):[];
-const [issueTimelines,prReviews,issueRunSource,acceptanceE2E]=await Promise.all([
+const [issueTimelines,prReviews,issueRunSource,scopedE2ERuns]=await Promise.all([
   optionalIssueTimelines(issues),optionalPrReviews(pulls),
   loadIssueRunObservations({root:metrics,expectedSha:process.env.METRICS_SHA,
     issues:selectedIssueNumbers,at:generatedAt}),
-  loadPinnedE2E({root:acceptance,expectedSha:acceptanceSha,
-    prHeads:Array.isArray(pulls)?pulls.slice(0,12).map(x=>x.head?.sha).filter(Boolean):[],
-    workflowRuns:Array.isArray(workflowRuns)?workflowRuns:[],at:generatedAt}),
+  optionalScopedE2ERuns(),
 ]);
+const acceptanceE2E=await loadPinnedE2E({root:acceptance,expectedSha:acceptanceSha,
+  prHeads:Array.isArray(pulls)?pulls.slice(0,12).map(x=>x.head?.sha).filter(Boolean):[],
+  workflowRuns:scopedE2ERuns?.runs??null,
+  runWindowTruncated:scopedE2ERuns?.truncated??false,at:generatedAt});
 const refs=Object.fromEntries(['metrics','acceptance-results','task-results','agent-store'].map((name,index)=>[name,allRefs[index]]));
 const result=validateProjection(makeProjection({
   repository,agent,registry,issues,pulls,workflowRuns,issueTimelines,prReviews,
