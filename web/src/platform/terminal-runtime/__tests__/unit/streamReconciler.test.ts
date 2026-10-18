@@ -32,7 +32,7 @@ interface Harness {
   readonly truncated: number;
 }
 
-function makeHarness(): Harness {
+function makeHarness(limits: { maxBytes?: number; maxFrames?: number } = {}): Harness {
   const requests: PendingRequest[] = [];
   const out: string[] = [];
   const resizes: Array<[number, number]> = [];
@@ -49,6 +49,7 @@ function makeHarness(): Harness {
         seen.truncated += 1;
       },
     },
+    limits,
   );
   return {
     reconciler,
@@ -851,5 +852,85 @@ describe('StreamReconciler Agent position forwarding (#1938)', () => {
       { kind: 'output', seq: 7, epoch: 11 },
     ]);
     reconciler.dispose();
+  });
+});
+
+
+describe('StreamReconciler bounded reorder window (#1961)', () => {
+  it('drops retained gap and announces degraded continuity at event-count budget', async () => {
+    const h = makeHarness({ maxFrames: 2, maxBytes: 1024 });
+    live(h, 1, 'one');
+    live(h, 4, 'four');
+    live(h, 5, 'five');
+    expect(h.reconciler.pendingUsage).toEqual({ frames: 2, bytes: 128 * 2 + 8 });
+    expect(h.out).toEqual(['one']);
+    live(h, 6, 'six'); // would retain the third waiting frame
+    expect(h.truncated).toBe(1);
+    expect(h.out).toEqual(['one', 'six']);
+    expect(h.reconciler.pendingUsage).toEqual({ frames: 0, bytes: 0 });
+    // A late replay of the old gap cannot apply to the invalidated generation.
+    h.requests[0].resolve(reply([output(2), output(3), output(4), output(5)]));
+    await flushMicrotasks();
+    expect(h.out).toEqual(['one', 'six']);
+    h.reconciler.dispose();
+  });
+
+  it('bounds bytes and treats one oversized event as degraded live without retention', () => {
+    const h = makeHarness({ maxFrames: 8, maxBytes: 130 });
+    live(h, 1, 'a');
+    live(h, 3, 'b');
+    expect(h.reconciler.pendingUsage).toEqual({ frames: 1, bytes: 129 });
+    live(h, 4, 'c');
+    expect(h.truncated).toBe(1);
+    expect(h.reconciler.pendingUsage).toEqual({ frames: 0, bytes: 0 });
+    expect(h.out).toEqual(['a', 'c']);
+    h.reconciler.acceptLive({
+      streamEpoch: 1, streamSeq: 7, data: new Uint8Array(2048),
+    });
+    expect(h.truncated).toBe(2);
+    expect(h.reconciler.pendingUsage).toEqual({ frames: 0, bytes: 0 });
+    expect(h.out).toHaveLength(3);
+    h.reconciler.dispose();
+  });
+
+  it('bounds replay bursts, deduplicates, and isolates an unaffected subscriber', async () => {
+    const slow = makeHarness({ maxFrames: 2, maxBytes: 400 });
+    const healthy = makeHarness({ maxFrames: 2, maxBytes: 400 });
+    live(slow, 1, 'one');
+    live(slow, 6, 'six');
+    live(healthy, 1, 'one');
+    live(healthy, 2, 'two');
+    live(healthy, 3, 'three');
+    slow.requests[0].resolve(reply([2, 3, 4, 5, 6].map((n) => output(n))));
+    await flushMicrotasks();
+    expect(slow.truncated).toBeGreaterThan(0);
+    expect(slow.reconciler.pendingUsage.frames).toBeLessThanOrEqual(2);
+    expect(slow.reconciler.pendingUsage.bytes).toBeLessThanOrEqual(400);
+    expect(healthy.truncated).toBe(0);
+    expect(healthy.out).toEqual(['one', 'two', 'three']);
+    slow.reconciler.dispose();
+    healthy.reconciler.dispose();
+  });
+
+  it('reclaims frame accounting on normal drain and epoch reset', async () => {
+    const h = makeHarness({ maxFrames: 2, maxBytes: 300 });
+    live(h, 1, 'one');
+    live(h, 3, 'three');
+    expect(h.reconciler.pendingUsage.frames).toBe(1);
+    live(h, 2, 'two');
+    expect(h.out).toEqual(['one', 'two', 'three']);
+    expect(h.reconciler.pendingUsage).toEqual({ frames: 0, bytes: 0 });
+    live(h, 5, 'five');
+    expect(h.reconciler.pendingUsage.frames).toBe(1);
+    live(h, 1, 'epoch-new', 2);
+    expect(h.reconciler.pendingUsage).toEqual({ frames: 0, bytes: 0 });
+    h.reconciler.dispose();
+  });
+
+  it('rejects invalid resource limits rather than silently disabling backpressure', () => {
+    for (const invalid of [0, -1, 0.25, Number.POSITIVE_INFINITY]) {
+      expect(() => makeHarness({ maxFrames: invalid })).toThrow(RangeError);
+      expect(() => makeHarness({ maxBytes: invalid })).toThrow(RangeError);
+    }
   });
 });
