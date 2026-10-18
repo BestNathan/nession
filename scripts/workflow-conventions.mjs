@@ -46,6 +46,7 @@ export const CATALOG = [
   ['store-governance-audit', 'store-governance-audit.yml', 'Store / Governance Audit', 'store-governance-audit.yml', 'Store / Governance Audit', 'store'],
   ['store-five-mode-readback', 'store-five-mode-readback.yml', 'Store / Five-Mode Readback', 'store-five-mode-readback.yml', 'Store / Five-Mode Readback', 'store'],
   ['store-app-writer-smoke', 'store-app-writer-smoke.yml', 'Store / App Writer Smoke', 'store-app-writer-smoke.yml', 'Store / App Writer Smoke', 'store'],
+  ['store-agent-bootstrap', 'store-agent-bootstrap.yml', 'Store / Agent Bootstrap', 'store-agent-bootstrap.yml', 'Store / Agent Bootstrap', 'store'],
   ['store-receipt-readback', 'store-receipt-readback.yml', 'Store / Receipt Readback', 'store-receipt-readback.yml', 'Store / Receipt Readback', 'store'],
 ];
 
