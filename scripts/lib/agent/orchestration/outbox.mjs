@@ -11,7 +11,9 @@ const SOURCE_WORKFLOW = Object.freeze({
   acceptance: { path: '.github/workflows/acceptance-orchestrator.yml', name: 'Acceptance / Orchestrator' },
 });
 const ACTION_TYPES = new Set(['dispatch','verify','notify']);
-const STATUSES = new Set(['pending','dispatched']);
+const STATUSES = new Set(['pending','dispatched','yielded']);
+const MAX_SLICES = 64;
+const HEX64 = /^[a-f0-9]{64}$/;
 const MAX_OUTBOX = 128;
 const MAX_ATTEMPTS = 5;
 
@@ -75,7 +77,20 @@ export function validateDevelopmentState(state) {
       reject('invalid/duplicate outbox entry');
     }
     ids.add(item.id);
-    onlyKeys(item.task, ['type','role','task','sha','resume','gate','when','reason','agent_id'], 'outbox action');
+    onlyKeys(item.task, ['type','role','task','sha','resume','gate','when','reason','agent_id',
+      'continuation'], 'outbox action');
+    if (item.task.continuation != null) {
+      const c=item.task.continuation;
+      onlyKeys(c,['parent_action_id','ordinal','checkpoint_version','checkpoint_commit_sha',
+        'ciphertext_sha256'], 'Slice continuation');
+      if(item.task.type!=='dispatch'||item.task.resume!==true||
+          !HEX64.test(c.parent_action_id??'')||!positive(c.ordinal)||c.ordinal>MAX_SLICES||
+          !positive(c.checkpoint_version)||!SHA.test(c.checkpoint_commit_sha??'')||
+          !HEX64.test(c.ciphertext_sha256??'') ||
+          !state.outbox.some(x=>x.id===c.parent_action_id && x.status==='yielded')) {
+        reject('unbound or invalid Slice continuation');
+      }
+    }
     if (!ACTION_TYPES.has(item.task.type)) reject('unknown action');
     if (item.status === 'dispatched') {
       if (!item.receipt || !plain(item.receipt) ||
@@ -83,6 +98,16 @@ export function validateDevelopmentState(state) {
           item.receipt.dispatch_id !== item.id ||
           (item.receipt.status === 'verified' && !positive(item.receipt.source_run_id))) {
         reject('missing acknowledged dispatch receipt');
+      }
+    } else if (item.status === 'yielded') {
+      const c=item.receipt;
+      onlyKeys(c,['status','dispatch_id','source_run_id','source_attempt',
+        'checkpoint_version','checkpoint_commit_sha','ciphertext_sha256'], 'yield receipt');
+      if(c.status!=='yielded'||c.dispatch_id!==item.id||
+          !positive(c.source_run_id)||!positive(c.source_attempt)||
+          !positive(c.checkpoint_version)||!SHA.test(c.checkpoint_commit_sha??'')||
+          !HEX64.test(c.ciphertext_sha256??'')||item.task.type!=='dispatch') {
+        reject('invalid committed Slice yield receipt');
       }
     } else if (item.receipt !== null) reject('unacknowledged item has receipt');
   }
@@ -192,6 +217,7 @@ export function recordDispatch(state, expectedVersion, actionId, receipt) {
     if (JSON.stringify(old.receipt) !== JSON.stringify(receipt)) reject('conflicting receipt');
     return state; // repeat confirmation of the same dispatch is idempotent
   }
+  if (old.status !== 'pending') reject('cannot dispatch a yielded or nonpending action');
   if (old.attempts >= MAX_ATTEMPTS) reject('retry limit reached');
   return validateDevelopmentState({
     ...state,version: state.version+1,
@@ -200,6 +226,68 @@ export function recordDispatch(state, expectedVersion, actionId, receipt) {
     } : item),
   });
 }
+
+// A bounded Worker may end at a Provider-safe checkpoint without declaring the
+// Issue task complete. Caller MUST authenticate GitHub Run/Attempt/Artifact and
+// verify that the checkpoint has already been committed at the remote Store SHA.
+// This pure transition never writes a ref or mints a workflow dispatch token.
+export function recordSliceYield(state,expectedVersion,actionId,checkpoint,source) {
+  validateDevelopmentState(state);
+  if (state.version!==expectedVersion) reject('stale state CAS');
+  const old=state.outbox.find(item=>item.id===actionId);
+  if (!old || old.task.type!=='dispatch') reject('Slice action absent or is not an Agent dispatch');
+  onlyKeys(checkpoint,['version','commit_sha','ciphertext_sha256'], 'checkpoint receipt');
+  onlyKeys(source,['verified','repository','workflow_path','workflow_name','role','agent_id',
+    'issue','run_id','attempt','action_id','input_sha'], 'authenticated Slice source');
+  if(!positive(checkpoint.version)||!SHA.test(checkpoint.commit_sha??'')||
+      !HEX64.test(checkpoint.ciphertext_sha256??'')) reject('invalid committed checkpoint identity');
+  const expected=SOURCE_WORKFLOW[old.task.role];
+  if(source.verified!==true||source.repository!=='BestNathan/nession'||
+      source.workflow_path!==expected?.path||source.workflow_name!==expected?.name||
+      source.role!==old.task.role||source.agent_id!==old.task.agent_id||
+      source.issue!==state.issue||source.action_id!==actionId||
+      source.input_sha!==old.task.sha||!positive(source.run_id)||!positive(source.attempt))
+    reject('untrusted or mismatched Slice source');
+  if(old.receipt?.status==='verified' && old.receipt.source_run_id!==source.run_id)
+    reject('Slice is not the acknowledged dispatched Run');
+  const receipt={
+    status:'yielded',dispatch_id:actionId,source_run_id:source.run_id,
+    source_attempt:source.attempt,checkpoint_version:checkpoint.version,
+    checkpoint_commit_sha:checkpoint.commit_sha,
+    ciphertext_sha256:checkpoint.ciphertext_sha256,
+  };
+  // A lost acknowledgement can be adopted by the original authenticated Run.
+  // Divergent or stale attempts must never spawn another continuation.
+  if(old.status==='yielded'){
+    if(JSON.stringify(old.receipt)!==JSON.stringify(receipt))
+      reject('conflicting committed Slice yield');
+    return state;
+  }
+  if(old.status!=='dispatched'||!['accepted','verified'].includes(old.receipt?.status))
+    reject('Slice must yield from an acknowledged dispatch');
+  const prior=old.task.continuation;
+  const ordinal=(prior?.ordinal??0)+1;
+  if(ordinal>MAX_SLICES||
+      checkpoint.version!==(prior?.checkpoint_version??0)+1)
+    reject('noncontiguous or exhausted Slice checkpoint');
+  if(state.outbox.length>=MAX_OUTBOX)reject('outbox size limit exceeded');
+  const continuation={
+    parent_action_id:actionId,ordinal,checkpoint_version:checkpoint.version,
+    checkpoint_commit_sha:checkpoint.commit_sha,
+    ciphertext_sha256:checkpoint.ciphertext_sha256,
+  };
+  const nextId=hash([actionId,checkpoint.version,ordinal,checkpoint.commit_sha]);
+  if(state.outbox.some(item=>item.id===nextId))reject('duplicate Slice continuation identity');
+  const next={
+    id:nextId,task:{...old.task,resume:true,continuation},
+    status:'pending',attempts:0,receipt:null,
+  };
+  return validateDevelopmentState({
+    ...state,version:state.version+1,
+    outbox:[...state.outbox.map(item=>item.id===actionId?{...item,status:'yielded',receipt}:item),next],
+  });
+}
+
 export function failedDispatch(state, expectedVersion, actionId) {
   validateDevelopmentState(state);
   if (state.version !== expectedVersion) reject('stale state CAS');
@@ -214,5 +302,6 @@ export function reconcileOutbox(state) {
     pending:state.outbox.filter(x => x.status === 'pending' && x.attempts < MAX_ATTEMPTS),
     exhausted:state.outbox.filter(x => x.status === 'pending' && x.attempts >= MAX_ATTEMPTS),
     awaiting_evidence:state.outbox.filter(x => x.status === 'dispatched'),
+    yielded:state.outbox.filter(x => x.status === 'yielded'),
   };
 }
