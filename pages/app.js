@@ -306,6 +306,32 @@ function renderWorkDetail(kind, number){
     pane.append(node('p','', 'Acceptance SC verdict: Not independently observed here.'));
     proof.append(pane);root.append(proof);
   }
+  const proof=snapshot.work?.acceptance_e2e||{status:'unavailable',records:[]};
+  const isSource=proof.status==='available'||proof.status==='truncated';
+  const evidence=section('TEST EVIDENCE · NOT ACCEPTANCE SC',
+    'Source-bound per-ID E2E receipts',
+    'Results come from a bounded pinned acceptance-results checkout and independent GitHub Run/Attempt and Ingest checks. An E2E Pass does NOT mean an Acceptance SC Pass.');
+  const panel=node('article','panel');
+  const matching=(proof.records||[]).filter(r=>isIssue
+    ?r.issue===number:r.target_sha===item.workflow?.head_sha).slice(0,12);
+  panel.append(node('p','', 'Canonical test source: '+proof.status+
+    ' · pinned ref '+(proof.source_sha?.slice(0,12)||'unavailable')));
+  if(!isSource)panel.append(node('p','', 'Trusted E2E source unavailable. No verdict inferred.'));
+  else if(!matching.length)panel.append(node('p','', 'No verified per-ID E2E in the sampled source window.'));
+  for(const row of matching){
+    const line=node('div','issue-pr-evidence');
+    line.append(ext(row.id+' · '+row.result+' · Run '+row.run_id+
+       ' / attempt '+row.attempt+' ↗',row.url));
+    line.append(node('span','mono','Evidence target SHA '+row.target_sha+
+       ' · E2E only, not a Success Criterion verdict'));
+    panel.append(line);
+  }
+  if(proof.status==='truncated')panel.append(node('p','',
+    'E2E source truncated · older or additional runs may exist.'));
+  panel.append(node('p','', 'Trusted Acceptance SC: Unknown / Not independently observed.'));
+  panel.append(node('p','', 'Implementing PR / logical Slice: '+
+    (snapshot.work?.lineage?.status==='unavailable'?'Unknown / Unlinked':'Source-gated; inspect each independently attested edge.')));
+  evidence.append(panel);root.append(evidence);
   root.append(node('div','callout',
     'No unverified Issue → implementing PR → Agent/Slice causality or orphan-store integrity is presented as established.'));
 }
