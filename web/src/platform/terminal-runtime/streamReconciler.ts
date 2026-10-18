@@ -384,6 +384,15 @@ export class StreamReconciler {
       // missing.
       return;
     }
+    // Contiguous data does not enter the reorder queue. Large *in-order*
+    // output is not a gap or an overflow and must not become a false resync.
+    if (this.pending.size === 0
+      && (this.frontier === null || seq === this.frontier + 1)) {
+      this.frontier = seq;
+      apply();
+      this.recover();
+      return;
+    }
     if (!this.pending.has(seq)) {
       this.keepFrame({ seq, kind, superseded: false, apply, bytes });
     }
@@ -433,14 +442,21 @@ export class StreamReconciler {
       if (this.frontier !== null && event.streamSeq <= this.frontier) {
         continue;
       }
-      if (!this.pending.has(event.streamSeq)) {
+      if (this.pending.size === 0 && this.frontier !== null
+        && event.streamSeq === this.frontier + 1) {
+        this.frontier = event.streamSeq;
+        applyTerminalStreamEvents([event], this.handlers);
+      } else if (!this.pending.has(event.streamSeq)) {
         this.keepFrame({
           seq: event.streamSeq,
           kind: event.kind,
           superseded: false,
-          bytes: event.kind === 'output' ? event.data.length * 2 + PENDING_FRAME_OVERHEAD : PENDING_FRAME_OVERHEAD,
+          bytes: event.kind === 'output'
+            ? event.data.length * 2 + PENDING_FRAME_OVERHEAD
+            : PENDING_FRAME_OVERHEAD,
           apply: () => applyTerminalStreamEvents([event], this.handlers),
         });
+        this.drain();
       }
     }
 
