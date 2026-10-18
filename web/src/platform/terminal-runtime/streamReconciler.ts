@@ -106,6 +106,11 @@ export class StreamReconciler {
     };
   }
 
+  /** Diagnostic-only resource snapshot; never a parser-applied or ACK cursor. */
+  get pendingUsage(): { frames: number; bytes: number } {
+    return { frames: this.pending.size, bytes: this.pendingBytes };
+  }
+
   /**
    * A frame from the live transport.
    *
