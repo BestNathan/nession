@@ -918,7 +918,7 @@ describe('StreamReconciler bounded reorder window (#1961)', () => {
     live(healthy, 1, 'one');
     live(healthy, 2, 'two');
     live(healthy, 3, 'three');
-    slow.requests[0].resolve(reply([2, 3, 4, 5, 6].map((n) => output(n))));
+    slow.requests[0].resolve(reply([4, 5, 6].map((n) => output(n)), 1, { firstAvailableSeq: 4, complete: false }));
     await flushMicrotasks();
     expect(slow.truncated).toBeGreaterThan(0);
     expect(slow.reconciler.pendingUsage.frames).toBeLessThanOrEqual(2);
