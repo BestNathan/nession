@@ -22,8 +22,7 @@ jobs:
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.head_branch == 'main' &&
       github.event.workflow_run.repository.full_name == 'BestNathan/nession' &&
-      github.event.workflow_run.head_repository.full_name == 'BestNathan/nession' &&
-      vars.CURSOR_RESUME_PUBLIC_KEY_B64 != ''
+      github.event.workflow_run.head_repository.full_name == 'BestNathan/nession'
     runs-on: ubuntu-latest
     environment: cursor
     timeout-minutes: 15
