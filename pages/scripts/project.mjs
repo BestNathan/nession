@@ -125,25 +125,28 @@ function prWorkflowEvidence(raw,allRuns){
 // Per-Issue source-bound Agent run observation; never an implementing-PR join.
 // Only an independent exact GitHub Workflow Run match certifies Run identity.
 const AGENT_RUN_WORKFLOWS=Object.freeze({
-  'issue-audit':{name:'Agent / Issue Audit',path:'.github/workflows/issue-audit.yml'},
-  'requirement-acceptance':{name:'Acceptance / Orchestrator',path:'.github/workflows/acceptance-orchestrator.yml'},
-  'agent-provider-smoke':{name:'Agent / Provider Smoke',path:'.github/workflows/agent-provider-smoke.yml'},
+  'issue-audit':{'Agent / Issue Audit':'.github/workflows/issue-audit.yml'},
+  'requirement-acceptance':{
+    'Acceptance / Orchestrator':'.github/workflows/acceptance-orchestrator.yml',
+    'Agent / SC Acceptance':'.github/workflows/agent-sc-acceptance.yml',
+  },
+  'agent-provider-smoke':{'Agent / Provider Smoke':'.github/workflows/agent-provider-smoke.yml'},
 });
 function issueAgentObservations(number, source, allRuns) {
   if(!['available','truncated'].includes(source?.status)||!Array.isArray(source?.records))
     return [];
   const actions=Array.isArray(allRuns)?allRuns.slice(0,100):[];
   return source.records.filter(r=>r.issue===number).slice(0,3).map(r=>{
-    const workflow=AGENT_RUN_WORKFLOWS[r.workflow];
+    const workflowPath=AGENT_RUN_WORKFLOWS[r.workflow]?.[r.github_workflow];
     const run=actions.find(x=>x.id===r.run_id);
-    const verified=!!(workflow && run &&
+    const verified=!!(workflowPath && run &&
       run.id===r.run_id && run.run_attempt===r.attempt &&
-      run.name===workflow.name &&
-      run.path?.replace(/@refs\/heads\/[^\s]+$/,'')===workflow.path &&
+      run.name===r.github_workflow &&
+      run.path?.replace(/@refs\/heads\/[^\s]+$/,'')===workflowPath &&
       run.repository?.full_name===REPO && run.head_repository?.full_name===REPO &&
       run.event===r.event && (!r.target_sha||run.head_sha===r.target_sha));
     return {
-      run_id:r.run_id,attempt:r.attempt,workflow:r.workflow,
+      run_id:r.run_id,attempt:r.attempt,workflow:r.workflow,github_workflow:r.github_workflow,
       target_sha:r.target_sha,agent_id:r.agent_id,role:r.role,provider:r.provider,
       tokens_total:r.tokens_total,duration_ms:r.duration_ms,
       observed_at:r.observed_at,verification:verified?'github_run_verified':'not_independently_verified',
@@ -330,9 +333,10 @@ export function validateProjection(p) {
     if(p.work.agent_run_source==='unavailable' && item.agent_runs.length)
       throw Error('unavailable Agent source cannot produce runs');
     for(const r of item.agent_runs){
-      allowedFields(r,['run_id','attempt','workflow','target_sha','agent_id','role','provider','tokens_total','duration_ms','observed_at','verification','pr_linkage','url'],'Issue Agent event');
+      allowedFields(r,['run_id','attempt','workflow','github_workflow','target_sha','agent_id','role','provider','tokens_total','duration_ms','observed_at','verification','pr_linkage','url'],'Issue Agent event');
       if(!Number.isSafeInteger(r.run_id)||r.run_id<=0||!Number.isSafeInteger(r.attempt)||r.attempt<=0||
          !Object.hasOwn(AGENT_RUN_WORKFLOWS,r.workflow)||
+         !Object.hasOwn(AGENT_RUN_WORKFLOWS[r.workflow],r.github_workflow)||
          (r.target_sha!==null&&!safeSha(r.target_sha))||
          (r.agent_id!==null&&!/^[a-z][a-z0-9-]{0,62}$/.test(r.agent_id))||
          (r.role!==null&&!['developer','reviewer','acceptor','auditor'].includes(r.role))||
