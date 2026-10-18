@@ -116,8 +116,8 @@ async function test(){
     digest:'sha256:'+'c'.repeat(64),
     workflow_run:{id:812,head_sha:'a'.repeat(40)}};
   const catalog={total_count:1,artifacts:[sourceArtifact]};
-  assert.equal(verifyCursorSeedSource(sourceRun,catalog,812,1,'a'.repeat(40)),
-    sourceArtifact.digest);
+  assert.deepEqual(verifyCursorSeedSource(sourceRun,catalog,812,1,'a'.repeat(40)),
+    {artifact_id:sourceArtifact.id,digest:sourceArtifact.digest});
   assert.throws(()=>verifyCursorSeedSource({...sourceRun,head_branch:'feature'},catalog,
     812,1,'a'.repeat(40)),/untrusted/);
   assert.throws(()=>verifyCursorSeedSource({...sourceRun,run_attempt:2},catalog,
