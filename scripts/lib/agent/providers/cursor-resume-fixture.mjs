@@ -166,7 +166,7 @@ async function main(){
   if(action==='seed'&&args.length===1)return seed(args[0]);
   if(action==='verify-source'&&args.length===5){
     const [run,artifacts,id,attempt,sha]=args;
-    return console.log(verifyCursorSeedSource(readJson(run),readJson(artifacts),Number(id),Number(attempt),sha));
+    return console.log(JSON.stringify(verifyCursorSeedSource(readJson(run),readJson(artifacts),Number(id),Number(attempt),sha)));
   }
   if(action==='unseal'&&args.length===2)return unseal(...args);
   if(action==='resume'&&args.length===3)return resume(...args);
