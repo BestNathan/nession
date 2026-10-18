@@ -76,17 +76,49 @@ try {
   assert.equal(next.task.continuation.checkpoint_version,1);
   assert.equal(next.task.continuation.checkpoint_commit_sha,ck1.commit_sha);
   assert.notEqual(next.id,first.id,'continuation must get a new stable action ID');
-  assert.deepEqual(validateDevelopmentState({...state,
+  assert.throws(()=>validateDevelopmentState({...state,
     outbox:state.outbox.map(x=>x.id===next.id?{...x,task:{...x.task,
       continuation:{...x.task.continuation,checkpoint_commit_sha:'f'.repeat(40)}}}:x)}),
-    undefined,'tampered continuation must not validate');
-} catch(error) {
-  // Keep both positive and malicious fixtures, but never swallow failures.
-  if(error?.code==='ERR_ASSERTION' && /tampered continuation/.test(error.message)){
-    // Placeholder for explicit assert.throws below; a valid state can NEVER
-    // satisfy a fabricated upstream checkpoint hash.
-  } else { throw error; }
+    /unbound or invalid Slice continuation/);
+  assert.equal(beforeYield.outbox.length,1,'prior immutable state must remain unchanged');
+  persist(recordDispatch(state,state.version,next.id,{
+    status:'verified',dispatch_id:next.id,source_run_id:2002,
+  }));
+  assert.throws(()=>recordSliceYield(state,state.version,next.id,
+    committedCheckpoint(3),source(next,2002)),/noncontiguous/);
+  const ck2=committedCheckpoint(2);
+  persist(recordSliceYield(state,state.version,next.id,ck2,source(next,2002)));
+  assert.equal(reconcileOutbox(state).yielded.length,2);
+  const third=reconcileOutbox(state).pending[0];
+  assert.equal(third.task.continuation.ordinal,2);
+  assert.equal(third.task.continuation.checkpoint_version,2);
+  assert.equal(third.task.continuation.parent_action_id,next.id);
+  assert.equal(third.task.agent_id,first.task.agent_id);
+  assert.equal(state.phase,'ready','two yields may not imply implementation readiness');
+  persist(recordDispatch(state,state.version,third.id,{
+    status:'verified',dispatch_id:third.id,source_run_id:3003,
+  }));
+  const outputSha='b'.repeat(40);
+  const finalResult={kind:'developer',issue,run_id:3003,run_attempt:1,
+    target_sha:outputSha,outcome:'implementation_ready',task_id:third.id};
+  const resultSource={repository:'BestNathan/nession',
+    path:'.github/workflows/agent-develop.yml',name:'Agent / Development',
+    run_id:3003,attempt:1,event:'workflow_dispatch',ref:'refs/heads/main',
+    issue,task_id:third.id,agent_id:'dev-cursor-01',
+    input_sha:target,output_sha:outputSha,verified:true,
+  };
+  assert.throws(()=>acceptTaskResult(state,state.version,finalResult,
+    {...resultSource,run_id:3002},registry),/untrusted/);
+  persist(acceptTaskResult(state,state.version,finalResult,resultSource,registry));
+  assert.equal(state.phase,'review');
+  assert.equal(state.target_sha,outputSha);
+  assert.equal(state.outbox.some(x=>x.status==='yielded'),false);
+  assert.equal(state.outbox.length,1,'finished Slice lineage pruned from current state');
+  assert.equal(reconcileOutbox(state).pending[0].task.role,'reviewer');
+  assert.throws(()=>acceptTaskResult(state,state.version,finalResult,resultSource,registry),
+    /not been dispatched|stale/);
 } finally {
   rmSync(root,{recursive:true,force:true});
 }
+
 console.log('agent Outbox Slice yield fixtures: checked');
