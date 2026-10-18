@@ -89,10 +89,23 @@ export function verifyHistoricalE2ERun(run,record,prNumber,commitPulls=[],prHead
 }
 
 export function verifyHistoricalArtifact(run,record,metadata) {
+  // GitHub indexes artifacts by workflow RUN, not by run ATTEMPT. A completed
+  // retry retains the failed attempt's same-named ZIP. The trusted main ingest
+  // has already pinned the exact source attempt, SHA and ZIP SHA256 digest in
+  // the immutable Run Record. Require ONE live GitHub artifact matching that
+  // cryptographic digest instead of rejecting all retries because their Run
+  // has multiple same-named artifacts (#1900/#1902).
+  //
+  // Never choose "latest" by list order or timestamp, and never accept a
+  // second artifact with the same digest (identity ambiguity remains fatal).
   const matches=(metadata?.artifacts??[]).filter(x=>
-    x.name==='issue-e2e-verification' && x.expired===false);
+    x.name==='issue-e2e-verification' && x.expired===false &&
+    x.digest===record?.artifact_digest);
   if(matches.length!==1 || !goodInt(matches[0].id) ||
-     matches[0].digest!==record.artifact_digest) {
+     matches[0].workflow_run?.id!==run?.id ||
+     matches[0].workflow_run?.head_sha!==run?.head_sha ||
+     !goodInt(record?.run_attempt) || record.run_attempt!==run?.run_attempt ||
+     record.target_sha!==run?.head_sha) {
     throw Error('source artifact digest does not authenticate orphan Run Record');
   }
   return matches[0].id;
@@ -613,10 +626,10 @@ async function selfTest() {
       {encoding:'base64',content:Buffer.from(JSON.stringify(rec(current,'Pass'))).toString('base64')}],
     ['/repos/'+REPO+'/actions/runs/10/artifacts?per_page=100',{artifacts:[{
       name:'issue-e2e-verification',expired:false,id:101,
-      digest:rec(old,'Fail').artifact_digest}]}],
+      digest:rec(old,'Fail').artifact_digest,workflow_run:{id:old.id,head_sha:old.head_sha}}]}],
     ['/repos/'+REPO+'/actions/runs/20/artifacts?per_page=100',{artifacts:[{
       name:'issue-e2e-verification',expired:false,id:202,
-      digest:rec(current,'Pass').artifact_digest}]}],
+      digest:rec(current,'Pass').artifact_digest,workflow_run:{id:current.id,head_sha:current.head_sha}}]}],
   ]);
   const get=async path=>{if(!map.has(path))throw Error('unexpected request '+path);return map.get(path)};
   const readPlan=async(_repo,artifact)=>fixturePlan(artifact.id===101?old:current);
@@ -698,6 +711,32 @@ async function selfTest() {
   assert.throws(()=>verifyHistoricalArtifact(current,rec(current,'Pass'),{
     artifacts:[{name:'issue-e2e-verification',expired:false,id:202,digest:'sha256:'+'0'.repeat(64)}],
   }),/source artifact digest/);
+
+  // Retried E2E run: the former attempt's artifact remains in the same Run
+  // listing. Select solely by the immutable Run Record digest; ordering of
+  // unrelated same-name artifacts cannot influence source authentication.
+  const currentArtifact={name:'issue-e2e-verification',expired:false,id:202,
+    digest:rec(current,'Pass').artifact_digest,
+    workflow_run:{id:current.id,head_sha:current.head_sha}};
+  const oldAttemptArtifact={...currentArtifact,id:201,digest:'sha256:'+'e'.repeat(64)};
+  const twoArtifacts={artifacts:[oldAttemptArtifact,currentArtifact]};
+  assert.equal(verifyHistoricalArtifact(current,rec(current,'Pass'),twoArtifacts),202);
+  assert.equal(verifyHistoricalArtifact(current,rec(current,'Pass'),{
+    artifacts:[...twoArtifacts.artifacts].reverse(),
+  }),202);
+  for(const artifacts of [
+    [oldAttemptArtifact],
+    [currentArtifact,{...currentArtifact,id:203}],
+    [{...currentArtifact,workflow_run:{id:20,head_sha:a}}],
+    [{...currentArtifact,workflow_run:{id:99,head_sha:b}}],
+    [{...currentArtifact,expired:true}],
+    [{...currentArtifact,digest:'sha256:'+'0'.repeat(64)}],
+  ]) assert.throws(()=>verifyHistoricalArtifact(current,rec(current,'Pass'),
+    {artifacts}),/source artifact digest/);
+  assert.throws(()=>verifyHistoricalArtifact(current,{
+    ...rec(current,'Pass'),run_attempt:2},{artifacts:[currentArtifact]}),
+    /source artifact digest/);
+
   assert.throws(()=>verifyHistoricalE2ERun({...old,head_sha:b},rec(old,'Fail'),1718),/provenance/);
   assert.throws(()=>verifyHistoricalE2ERun({...old,pull_requests:[{number:1719}]},rec(old,'Fail'),1718),/untrusted/);
   assert.throws(()=>verifyHistoricalE2ERun(current,rec(current,'Fail'),1718),/non-Pass/);
