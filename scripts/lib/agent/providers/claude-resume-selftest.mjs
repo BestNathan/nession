@@ -25,11 +25,11 @@ try{
     prompt:'What was the earlier marker?',model:'test-model',maxTurns:2,
     allowedTools:'',disallowedTools:'Edit,Write,Bash',cwd:root,configDir:seed,
     restricted:true,tools:'',...options,
-    spawn:(cmd,args,opts)=>{
+    spawn:options.spawn??((cmd,args,opts)=>{
       calls.push({cmd,args,opts});
       return {status:0,stdout:JSON.stringify({type:'result',is_error:false,
         session_id:options?.resumeSessionId??options?.sessionId??session,result:'ok'})};
-    },
+    }),
   });
   const started=execute({sessionId:session});
   assert.equal(started.parsed.session_id,session);
