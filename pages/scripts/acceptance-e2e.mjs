@@ -83,10 +83,12 @@ function recordProof(raw,projections,prHeads,runList){
  }
  return [...byTest.values()].sort((a,b)=>a.issue-b.issue||a.id.localeCompare(b.id));
 }
-export async function loadPinnedE2E({root,expectedSha,prHeads,workflowRuns,at,maxDirs=110}){
+export async function loadPinnedE2E({root,expectedSha,prHeads,workflowRuns,
+ runWindowTruncated=false,at,maxDirs=110}){
  const unavailable={status:'unavailable',source_sha:null,records:[]};
  if(!SHA.test(expectedSha??'')||!Array.isArray(prHeads)||prHeads.length>12||
     prHeads.some(s=>!SHA.test(s))||!Array.isArray(workflowRuns)||
+    workflowRuns.length>200||typeof runWindowTruncated!=='boolean'||
     !Number.isSafeInteger(maxDirs)||maxDirs<1||maxDirs>300||
     typeof at!=='string'||!Number.isFinite(Date.parse(at)))return unavailable;
  try{
@@ -139,7 +141,7 @@ export async function loadPinnedE2E({root,expectedSha,prHeads,workflowRuns,at,ma
            projections.push((await fileJson(join(projectionPath,row.name),110000)).value);
          }
        }catch(err){if(err.code!=='ENOENT')throw err;}
-       const proof=recordProof(raw,projections,prHeads,workflowRuns.slice(0,100));
+       const proof=recordProof(raw,projections,prHeads,workflowRuns);
        if(!proof)continue;
        for(const r of proof){
          const id=r.issue+':'+r.id+':'+r.run_id+':'+r.attempt;
@@ -151,7 +153,7 @@ export async function loadPinnedE2E({root,expectedSha,prHeads,workflowRuns,at,ma
    records.sort((a,b)=>a.issue-b.issue||a.id.localeCompare(b.id)||
      b.run_id-a.run_id||b.attempt-a.attempt);
    if(records.length>24)truncated=true;
-   return {status:truncated?'truncated':'available',source_sha:expectedSha,
+   return {status:truncated||runWindowTruncated?'truncated':'available',source_sha:expectedSha,
      records:records.slice(0,24)};
  }catch{return unavailable;} // Source failure can never become a Pass.
 }
