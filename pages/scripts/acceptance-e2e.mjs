@@ -30,7 +30,10 @@ function actionsRun(r,id,attempt,sha){
 }
 function ingestRun(r,id,attempt){
  return r?.id===id&&r.run_attempt===attempt&&
-   r.name==='E2E / Test Ingest'&&r.repository?.full_name===REPO&&
+   r.name==='E2E / Test Ingest'&&
+   wfPath(r)==='.github/workflows/e2e-test-ingest.yml'&&
+   r.head_branch==='main'&&r.repository?.full_name===REPO&&
+   r.head_repository?.full_name===REPO&&
    r.status==='completed'&&r.conclusion==='success'&&
    r.event==='workflow_run';
 }
