@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_projection_receipt",
+  "outcome": "applied",
+  "issue": 1930,
+  "run_id": 39134690742,
+  "run_attempt": 1,
+  "target_sha": "8d1ab4925ff754ecd6940e97f3fe7cc618da1592",
+  "plan_digest": "0cacb56321b739e23eaa689fc2ae5987e95e03eaf3f72c827be79db17b24561b",
+  "artifact_digest": "sha256:9e157d1393505843c1be13b511f0386f322743ad193512a441d7c8ba87755e44",
+  "ingest_run_id": 39135079481,
+  "ingest_attempt": 1,
+  "declaration_digest": "2e2bfbf58eff29a12d867b5f937ff540c3fe841ea466bef6ba7854b61fc825ea",
+  "before_body_sha256": "ea614ad3259f8e240f44dcd2bc37e8989c85d8b7bc5c25da59bdc250e51c5a0f",
+  "body_sha256": "5364cbedb98ba3cb7fb503f4cd2e138017f153f6409fb34837a739934a8ac45e",
+  "readback_body": "## Requirements: independent trusted Pages Acceptance source checkout\n\n**Companion:** #1923, parent #1906/#1782. This is a dedicated trusted-workflow activation PR required by `.github/AGENTS.md` and `nession-cicd`. The separate Pages application/parser lives in a different PR. No product `web/` changes.\n\n### Scope\n- In `.github/workflows/deploy-pages.yml` only, add `actions/checkout@v4` read-only `acceptance-results` orphan checkout with `persist-credentials:false` and dedicated `acceptance-store` path, strictly in the trusted main-only Pages build.\n- Pin `ACCEPTANCE_RESULTS_SHA` to actual Git HEAD and pass `ACCEPTANCE_RESULTS_DIR` to the existing standalone Pages build, verifying exported metadata matches the pinned ref.\n- No browser token, no permission escalation, no additional orphan writer, no routing to product `web/`, no staging feature coupling. Same Pages deployment integrity, digest and anonymous HTTPS checks stay intact.\n- This workflow PR is main-based and merged with merge-commit, not squash/rebase. Deploy may require the companion main PR to be present before running source-reader validation.\n\n### Success Criteria\n- [ ] SC-01 Trusted main-only workflow checks out read-only pinned canonical Acceptance Store and binds exact source HEAD without exposing privileged browser data.\n- [ ] SC-02 Workflow review/security fixtures preserve deployment permissions, independent Pages/Web isolation, pinned artifact and public HTTPS integrity checks; exact PR HEAD gates pass.\n- [ ] SC-03 Exact PR HEAD Quality, Case Smoke and selected E2E have independently authenticated successful workflow evidence; the separate feature PR #1929 owns Pages CI (the workflow-only PR does not match Pages CI path filters). Read-only Agent acceptance and final acceptance-pr-gate remain external merge controls, not self-referential SC evidence.\n\n## Acceptance Plan\n```yaml\nacceptance:\n  SC-01:\n    when: pr\n    method: agent\n  SC-02:\n    when: pr\n    method: agent\n  SC-03:\n    when: pr\n    method: agent\n```\n\n## Acceptance Report\n| Criterion | Stage | Result | Evidence |\n|---|---|---|---|\n| SC-01 | pre-merge | Pending | - |\n| SC-02 | pre-merge | Pending | - |\n| SC-03 | pre-merge | Pending | - |\n\n## E2E Verification\n### New\n- none: no new test case from this workflow-only change.\n### Regression\n- pages-overview\n- pages-evidence\n\n## E2E Report\n\n| ID | Type | Result | Evidence |\n|---|---|---|---|\n| pages-evidence | Regression | Pass | run 39134690742/1, SHA 8d1ab4925ff754ecd6940e97f3fe7cc618da1592, contract 2e2bfbf58eff29a12d867b5f937ff540c3fe841ea466bef6ba7854b61fc825ea, plan 0cacb56321b739e23eaa689fc2ae5987e95e03eaf3f72c827be79db17b24561b, tests 2/2 (https://github.com/BestNathan/nession/actions/runs/39134690742) |\n| pages-overview | Regression | Pass | run 39134690742/1, SHA 8d1ab4925ff754ecd6940e97f3fe7cc618da1592, contract 2e2bfbf58eff29a12d867b5f937ff540c3fe841ea466bef6ba7854b61fc825ea, plan 0cacb56321b739e23eaa689fc2ae5987e95e03eaf3f72c827be79db17b24561b, tests 4/4 (https://github.com/BestNathan/nession/actions/runs/39134690742) |\n\n## Product alignment\n\n- [x] Does this move Nession toward VISION.md? Trusted CI/Pages boundaries support delivery infrastructure without changing user-facing product scope.\n- [x] Does it obey PRINCIPLE.md? Read-only pinned acceptance checkout avoids privileged browser data in the Pages build path.\n- [x] Were relevant docs/design/* sources checked? Instruction owners `.github/AGENTS.md` and `nession-cicd` apply; no `web/` product edits in scope.\n- [x] Is any deviation explicit? Workflow-only PR; companion #1923 and parent threads own separate Pages application/parser work.\n\n---\n**Status:** Approved",
+  "patch_updated_at": "2026-10-18T14:15:57Z",
+  "readback_updated_at": "2026-10-18T14:15:57Z",
+  "rows": [
+    {
+      "id": "pages-evidence",
+      "result": "Pass",
+      "evidence": "run 39134690742/1, SHA 8d1ab4925ff754ecd6940e97f3fe7cc618da1592, contract 2e2bfbf58eff29a12d867b5f937ff540c3fe841ea466bef6ba7854b61fc825ea, plan 0cacb56321b739e23eaa689fc2ae5987e95e03eaf3f72c827be79db17b24561b, tests 2/2 (https://github.com/BestNathan/nession/actions/runs/39134690742)"
+    },
+    {
+      "id": "pages-overview",
+      "result": "Pass",
+      "evidence": "run 39134690742/1, SHA 8d1ab4925ff754ecd6940e97f3fe7cc618da1592, contract 2e2bfbf58eff29a12d867b5f937ff540c3fe841ea466bef6ba7854b61fc825ea, plan 0cacb56321b739e23eaa689fc2ae5987e95e03eaf3f72c827be79db17b24561b, tests 4/4 (https://github.com/BestNathan/nession/actions/runs/39134690742)"
+    }
+  ]
+}
