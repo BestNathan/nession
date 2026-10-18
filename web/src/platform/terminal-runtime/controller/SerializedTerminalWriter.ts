@@ -16,7 +16,7 @@ export interface TerminalWriteTarget {
 
 type TerminalWriteOperation =
   | { kind: 'write'; data: string | Uint8Array; onParsed?: () => void }
-  | { kind: 'resize'; cols: number; rows: number };
+  | { kind: 'resize'; cols: number; rows: number; onApplied?: () => void };
 
 /**
  * The writer is tied to the TerminalInstance, not to its (replaceable) socket.
@@ -37,9 +37,9 @@ export class SerializedTerminalWriter {
     this.drain();
   }
 
-  resize(cols: number, rows: number): void {
+  resize(cols: number, rows: number, onApplied?: () => void): void {
     if (this.disposed) { return; }
-    this.operations.push({ kind: 'resize', cols, rows });
+    this.operations.push({ kind: 'resize', cols, rows, onApplied });
     this.drain();
   }
 
@@ -58,6 +58,9 @@ export class SerializedTerminalWriter {
         const item = this.operations.shift()!;
         if (item.kind === 'resize') {
           this.terminal.resize(item.cols, item.rows);
+          // Resize is synchronous but cannot overtake the prior parser write.
+          // This callback is an event-level fact, never a cumulative ACK.
+          item.onApplied?.();
           continue;
         }
         this.parsePending = true;

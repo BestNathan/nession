@@ -87,6 +87,32 @@ describe('SerializedTerminalWriter (#1931)', () => {
     expect(parsed).not.toHaveBeenCalled();
   });
 
+  it('reports sequenced resize only after prior xterm write parsing, not on enqueue', () => {
+    const h = harness();
+    const applied: string[] = [];
+    h.writer.write('before', () => applied.push('write:1'));
+    h.writer.resize(120, 30, () => applied.push('resize:2'));
+    h.writer.write('after', () => applied.push('write:3'));
+    expect(h.called).toEqual(['before']);
+    expect(applied).toEqual([]);
+    h.callbacks.shift()!();
+    expect(h.called).toEqual(['before', 'resize:120x30', 'after']);
+    expect(applied).toEqual(['write:1', 'resize:2']);
+    h.callbacks.shift()!();
+    expect(applied).toEqual(['write:1', 'resize:2', 'write:3']);
+  });
+
+  it('cannot acknowledge a resize dropped when its writer is disposed', () => {
+    const h = harness();
+    const applied = vi.fn();
+    h.writer.write('blocking');
+    h.writer.resize(70, 20, applied);
+    h.writer.dispose();
+    h.callbacks.shift()!();
+    expect(applied).not.toHaveBeenCalled();
+    expect(h.called).toEqual(['blocking']);
+  });
+
   it('does not treat call-to-write as parser completion', () => {
     const h = harness();
     let applied = 0;

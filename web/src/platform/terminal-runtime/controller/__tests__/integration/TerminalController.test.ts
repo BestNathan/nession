@@ -332,6 +332,75 @@ describe('TerminalController', () => {
     controller.dispose();
   });
 
+  it('reports sequenced Agent events after FIFO xterm parse, not when delivered (#1950)', () => {
+    const transport = makeTransport();
+    const onStreamEventParsed = vi.fn();
+    const controller = new TerminalController(makeSession(), () => transport, {
+      rendererType: 'canvas', events: { onStreamEventParsed },
+    });
+    controller.attach(host());
+    const h = delayedParser(controller);
+    // jsdom has no xterm render dimensions. The real resize schedules a
+    // viewport timer that can fire after teardown and throw asynchronously.
+    // Assert FIFO resize completion with a synchronous spy, not that timer.
+    const resizeSpy = vi.spyOn(controller.terminal!, 'resize').mockImplementation(() => {});
+    const first = { streamEpoch: 7, streamSeq: 10 };
+    const resized = { streamEpoch: 7, streamSeq: 11 };
+    const last = { streamEpoch: 7, streamSeq: 12 };
+    transport.onOutput!(new Uint8Array([65]), undefined, first);
+    transport.onResize!(120, 30, resized);
+    transport.onOutput!(new Uint8Array([66]), undefined, last);
+    expect(onStreamEventParsed).not.toHaveBeenCalled();
+    expect(h.spy).toHaveBeenCalledTimes(1);
+    h.finish();
+    expect(onStreamEventParsed.mock.calls.map((call) => call[0])).toEqual([first, resized]);
+    expect(h.spy).toHaveBeenCalledTimes(2);
+    h.finish();
+    expect(onStreamEventParsed.mock.calls.map((call) => call[0])).toEqual([first, resized, last]);
+
+    // Legacy frames and local display bytes are not Agent timeline events.
+    transport.onOutput!(new Uint8Array([67]));
+    transport.onResize!(100, 25);
+    controller.write('local');
+    h.finish();
+    h.finish();
+    expect(onStreamEventParsed).toHaveBeenCalledTimes(3);
+    expect(resizeSpy).toHaveBeenCalledWith(120, 30);
+    resizeSpy.mockRestore();
+    h.spy.mockRestore();
+    controller.dispose();
+  });
+
+  it('does not report bootstrap parsing or late transport callbacks as current Agent events (#1950)', () => {
+    const first = makeTransport();
+    const second = makeTransport();
+    const transports = [first, second];
+    const onStreamEventParsed = vi.fn();
+    const controller = new TerminalController(makeSession(), () => transports.shift()!, {
+      rendererType: 'canvas', events: { onStreamEventParsed },
+    });
+    controller.attach(host());
+    const h = delayedParser(controller);
+    first.onOutput!(new Uint8Array([49]), { requestedLines: 5000, truncated: false });
+    h.finish(); // snapshot reset
+    h.finish(); // snapshot bytes
+    expect(onStreamEventParsed).not.toHaveBeenCalled();
+
+    first.onOutput!(new Uint8Array([50]), undefined, { streamEpoch: 7, streamSeq: 2 });
+    controller.attach(host()); // old subscriber no longer owns current delivery
+    h.finish(); // old frame parsed but callback cannot certify the new subscription
+    expect(onStreamEventParsed).not.toHaveBeenCalled();
+    second.onOutput!(new Uint8Array([51]), undefined, { streamEpoch: 7, streamSeq: 3 });
+    h.finish();
+    expect(onStreamEventParsed).toHaveBeenCalledOnce();
+    expect(onStreamEventParsed).toHaveBeenCalledWith({ streamEpoch: 7, streamSeq: 3 });
+    second.onOutput!(new Uint8Array([52]), undefined, { streamEpoch: 7, streamSeq: 4 });
+    controller.dispose();
+    h.finish(); // disposed instance ignores even a previously queued callback
+    expect(onStreamEventParsed).toHaveBeenCalledOnce();
+    h.spy.mockRestore();
+  });
+
   it('wipes the buffer before a bootstrap, and only its own modes survive', () => {
     const transport = makeTransport();
     const controller = new TerminalController(makeSession(), () => transport);

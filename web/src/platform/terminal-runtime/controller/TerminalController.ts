@@ -8,6 +8,7 @@ import type {
 } from '../types';
 import type { TerminalTransport } from '../transport/TerminalTransport';
 import type { TerminalBootstrap } from '../bootstrap';
+import type { TerminalStreamPosition } from '../streamApply';
 import { InputRouter } from '../input/InputRouter';
 import { InputSourceManager } from '../input/InputSourceManager';
 import { TerminalInputHandler } from '../input/TerminalInputHandler';
@@ -54,6 +55,9 @@ export interface TerminalControllerEvents {
   onTransportReady?: (ready: boolean) => void;
   /** A complete remote history snapshot has finished xterm parsing (#1645). */
   onBootstrapApplied?: () => void;
+  /** An individual Agent event is now parsed/applied by the current xterm.
+   * Not a cumulative applied cursor, nor an output ACK (#1950). */
+  onStreamEventParsed?: (position: TerminalStreamPosition) => void;
   onInputModeChange?: (sessionId: string, mode: InputMode) => void;
   onResize?: (sessionId: string, cols: number, rows: number) => void;
   onTitleChange?: (sessionId: string, title: string) => void;
@@ -264,7 +268,7 @@ export class TerminalController {
     this.teardownTransport();
     const transport = this.transportFactory();
     this.transport = transport;
-    transport.onOutput = (data: Uint8Array, bootstrap?: TerminalBootstrap) => {
+    transport.onOutput = (data: Uint8Array, bootstrap?: TerminalBootstrap, position?: TerminalStreamPosition) => {
       // A bootstrap is the session's history, not more output: it **replaces**
       // this buffer instead of appending to it, which is the whole reason the
       // agent can re-send history on every attach that needs one without the
@@ -308,13 +312,23 @@ export class TerminalController {
             this.events?.onBootstrapApplied?.();
           }
         }
+        if (bootstrapSeq === null && position
+          && this._terminal === terminal && this.transport === transport) {
+          this.events?.onStreamEventParsed?.(position);
+        }
         if (follow) {
           this.capsuleOcclusionScroll?.afterOutputWhileFollowing();
         }
       });
       if (bootstrapSeq === null) { this.markSessionOutput(); }
     };
-    transport.onResize = (cols: number, rows: number) => { this.writer.resize(cols, rows); };
+    transport.onResize = (cols: number, rows: number, position?: TerminalStreamPosition) => {
+      this.writer.resize(cols, rows, () => {
+        if (position && this._terminal === terminal && this.transport === transport) {
+          this.events?.onStreamEventParsed?.(position);
+        }
+      });
+    };
     transport.onError = (err: Error) => { this.onError?.(err); };
     this.events?.onTransportReady?.(true);
   }
