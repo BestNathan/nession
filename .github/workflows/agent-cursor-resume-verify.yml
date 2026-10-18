@@ -8,6 +8,9 @@ on:
       - Agent / Cursor Resume Seed
     types: [completed]
 
+env:
+  NSESSION_AGENT_WORKFLOW_ID: agent-cursor-resume-verify
+
 permissions:
   contents: read
   actions: read
@@ -77,6 +80,13 @@ jobs:
           node scripts/lib/agent/providers/cursor-resume-fixture.mjs resume \
             "$RUNNER_TEMP/cursor-resume-input" "$RUNNER_TEMP/cursor-resume-store" \
             "$RUNNER_TEMP/cursor-resume-verification"
+      - name: Upload canonical Agent telemetry for existing trusted Metrics Ingest
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-telemetry-cursor-resume-verify-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/cursor-resume-verification/agent-telemetry.json
+          if-no-files-found: error
+          retention-days: 14
       - name: Upload sanitized continuity proof (no native session bytes)
         uses: actions/upload-artifact@v4
         with:
