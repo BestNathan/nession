@@ -22,6 +22,7 @@ export const CATALOG = [
   ['agent-cursor-resume-verify', 'agent-cursor-resume-verify.yml', 'Agent / Cursor Resume Verify', 'agent-cursor-resume-verify.yml', 'Agent / Cursor Resume Verify', 'agent'],
   ['acceptance-orchestrator', 'requirement-acceptance.yml', 'Requirement Acceptance', 'acceptance-orchestrator.yml', 'Acceptance / Orchestrator', 'acceptance'],
   ['acceptance-postrun-waker', 'acceptance-postrun-waker.yml', 'Acceptance / Post-Run Waker', 'acceptance-postrun-waker.yml', 'Acceptance / Post-Run Waker', 'acceptance'],
+  ['acceptance-quota-recovery', 'acceptance-quota-recovery.yml', 'Acceptance / Quota Recovery', 'acceptance-quota-recovery.yml', 'Acceptance / Quota Recovery', 'acceptance'],
   ['acceptance-cases', 'acceptance-cases.yml', 'Acceptance Cases', 'acceptance-cases.yml', 'Acceptance / Cases', 'acceptance'],
   ['acceptance-case-ingest', 'acceptance-case-ingest.yml', 'Acceptance Case Ingest', 'acceptance-case-ingest.yml', 'Acceptance / Case Ingest', 'acceptance'],
   ['acceptance-case-smoke', 'acceptance-case-smoke.yml', 'Acceptance Case Smoke', 'acceptance-case-smoke.yml', 'Acceptance / Case Smoke', 'acceptance'],
