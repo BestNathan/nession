@@ -28,6 +28,8 @@ test.describe('standalone Pages overview',()=>{
   await expect(page.getByText('GitHub Timeline · PR cross-references (not ownership or SC proof)')).toBeVisible();
   await expect(page.getByText('Quality · success · run 42 / attempt 1')).toBeVisible();
   await expect(page.getByText('E2E: Not observed')).toBeVisible();
+  await expect(page.getByText('PR Review · observed exact-HEAD event, not overall approval')).toBeVisible();
+  await expect(page.getByRole('link',{name:'Review · changes requested · review 89 · HEAD aaaaaaaaaaaa'})).toHaveAttribute('href','https://github.com/BestNathan/nession/pull/1787#pullrequestreview-89');
   await page.reload();
   await expect(page.getByRole('heading',{name:'Work in progress.'})).toBeVisible();
  });

@@ -68,6 +68,31 @@ function timelineReferences(issueId,source){
   }));
   return {status:status==='truncated'||source.events.length>=100?'truncated':'available',prs};
 }
+// A HEAD-bound review is an observed event, not an overall PR approval verdict.
+// Historical APPROVED reviews on older commits must not be shown as current.
+function reviewProof(raw, headSha, prNumber) {
+  const id=raw?.id;
+  if (!Number.isSafeInteger(id) || id<=0 ||
+      raw.commit_id!==headSha ||
+      raw.pull_request_url!=='https://api.github.com/repos/'+REPO+'/pulls/'+prNumber ||
+      raw.html_url!==GH+'/pull/'+prNumber+'#pullrequestreview-'+id ||
+      !['APPROVED','CHANGES_REQUESTED','COMMENTED','DISMISSED'].includes(raw.state) ||
+      !safeDate(raw.submitted_at))return null;
+  return {review_id:id,commit_sha:headSha,state:raw.state.toLowerCase(),
+    submitted_at:safeDate(raw.submitted_at),url:GH+'/pull/'+prNumber+'#pullrequestreview-'+id};
+}
+function prReviewEvidence(pr, source) {
+  const sha=safeSha(pr?.head?.sha);
+  if(!sha||pr?.head?.repo?.full_name!==REPO||
+     !Number.isSafeInteger(pr?.number)||pr.number<=0 ||
+     !['available','truncated'].includes(source?.status) ||
+     !Array.isArray(source?.items))return {status:'unavailable',latest:null};
+  const items=source.items.slice(0,100);
+  const latest=items.map(x=>reviewProof(x,sha,pr.number)).filter(Boolean)
+    .sort((a,b)=>b.submitted_at.localeCompare(a.submitted_at)||b.review_id-a.review_id)[0]||null;
+  return {status:source.status==='truncated'||source.items.length>=100?'truncated':'available',latest};
+}
+
 const WORKFLOWS = Object.freeze({
   ci:{name:'CI / Quality Gate',path:'.github/workflows/ci-quality.yml'},
   e2e:{name:'E2E / Tests',path:'.github/workflows/e2e-tests.yml'},
@@ -132,7 +157,7 @@ function rosterFrom(registry, agentWindow) {
     observed_7d: Object.hasOwn(usage,id) ? number(usage[id]) : null,
   })).sort((a,b)=>a.role.localeCompare(b.role)||a.id.localeCompare(b.id));
 }
-export function makeProjection({ repository, agent, registry, issues, pulls, workflowRuns, issueTimelines, refs={}, meta={} }) {
+export function makeProjection({ repository, agent, registry, issues, pulls, workflowRuns, issueTimelines, prReviews, refs={}, meta={} }) {
   const r = repository?.schema_version === 2 ? repository : null;
   const a = agent?.schema_version === 1 && agent?.kind === 'agent_metrics_aggregate' ? agent : null;
   const current = r?.repository || {}, efficiency = r?.efficiency || {};
@@ -211,7 +236,7 @@ export function makeProjection({ repository, agent, registry, issues, pulls, wor
       })),
       pulls:list(pulls,'pr').map(x=>{
         const source=Array.isArray(pulls)?pulls.find(p=>p.number===x.number):null;
-        return {...x,workflow:prWorkflowEvidence(source,workflowRuns)};
+        return {...x,workflow:prWorkflowEvidence(source,workflowRuns),review:prReviewEvidence(source,prReviews?.[String(x.number)])};
       }),
     },
     evidence:{ stores:stores.map(([name,purpose])=>record(name,purpose)) },
@@ -262,7 +287,7 @@ export function validateProjection(p) {
      p.agents.roster.length>40||p.evidence.stores.length>4)
     throw Error('unbounded public data');
   const issueFields=['number','title','url','state','updated_at','observed_agent_runs_7d','pr_references'];
-  const prFields=['number','title','url','state','updated_at','workflow'];
+  const prFields=['number','title','url','state','updated_at','workflow','review'];
   for(const item of p.work.issues){
     allowedFields(item,issueFields,'issue');
     allowedFields(item.pr_references,['status','prs'],'issue references');
@@ -274,6 +299,20 @@ export function validateProjection(p) {
     item.pr_references.prs.forEach(ref=>allowedFields(ref,['number','url','relation'],'Issue PR source'));
   }
   for(const item of p.work.pulls){
+    allowedFields(item.review,['status','latest'],'PR review');
+    if(!['available','truncated','unavailable'].includes(item.review.status))throw Error('invalid review source status');
+    if(item.review.status==='unavailable'&&item.review.latest!==null)
+      throw Error('unavailable review source cannot certify an event');
+    if(item.review.latest!==null){
+      const review=item.review.latest;
+      allowedFields(review,['review_id','commit_sha','state','submitted_at','url'],'PR review event');
+      if(!Number.isSafeInteger(review.review_id)||review.review_id<=0||
+        !['approved','changes_requested','commented','dismissed'].includes(review.state)||
+        !safeDate(review.submitted_at) ||
+        !safeSha(review.commit_sha)||review.commit_sha!==item.workflow.head_sha||
+        review.url!==GH+'/pull/'+item.number+'#pullrequestreview-'+review.review_id)
+          throw Error('invalid exact-HEAD review proof');
+    }
     allowedFields(item.workflow,['head_sha','ci','e2e'],'PR workflow');
     for(const key of ['ci','e2e'])if(item.workflow[key]!==null)
       allowedFields(item.workflow[key],['run_id','attempt','head_sha','status','updated_at','url'],'workflow Run');
@@ -287,7 +326,7 @@ export function validateProjection(p) {
       serializedBytes+=Buffer.byteLength(data);
       if(serializedBytes>128*1024)throw Error('public projection exceeds release limit');
       if(PRIVATE_TEXT.test(data)||SENSITIVE_MARKER.test(data))throw Error('private field value in public projection');
-      if(key==='url'&&!/^https:\/\/github\.com\/BestNathan\/nession\/(?:issues\/[1-9]\d*|pull\/[1-9]\d*|actions\/runs\/[1-9]\d*|tree\/(?:metrics|acceptance-results|task-results|agent-store))$/.test(data))
+      if(key==='url'&&!/^https:\/\/github\.com\/BestNathan\/nession\/(?:issues\/[1-9]\d*|pull\/[1-9]\d*|actions\/runs\/[1-9]\d*|pull\/[1-9]\d*#pullrequestreview-[1-9]\d*|tree\/(?:metrics|acceptance-results|task-results|agent-store))$/.test(data))
         throw Error('untrusted public URL');
     } else if(Array.isArray(data))data.forEach(x=>scan(x,key));
     else if(typeof data==='object'){

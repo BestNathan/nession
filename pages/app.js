@@ -177,6 +177,16 @@ function renderWork(){
           ' / attempt '+run.attempt,run.url));
         else pane.append(node('span','',label+': Not observed'));
       }
+      const reviews=x.review||{},event=reviews.latest;
+      pane.append(node('span','issue-pr-source','PR Review · observed exact-HEAD event, not overall approval'));
+      if(reviews.status==='unavailable')pane.append(node('span','', 'Review source unavailable'));
+      else {
+        if(event)pane.append(ext('Review · '+event.state.replaceAll('_',' ')+
+          ' · review '+event.review_id+' · HEAD '+event.commit_sha.slice(0,12),event.url));
+        else pane.append(node('span','', 'Review: Not observed at current HEAD'));
+        if(reviews.status==='truncated')
+          pane.append(node('span','', 'Reviews truncated · current-HEAD event may be missing'));
+      }
       row.querySelector?.('.entry-main')?.append(pane);
       return row;
     };

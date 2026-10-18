@@ -214,3 +214,82 @@ test('public release gate rejects arbitrary fields, unsafe links and invalid val
  const unsafe=initial();unsafe.work.issues[0].title='/home/person/secret.txt';
  assert.throws(()=>validateProjection(unsafe),/private field value/);
 });
+
+
+test('public PR review event is exactly HEAD-bound, source verified and deterministic',()=>{
+ const head='a'.repeat(40),old='b'.repeat(40);
+ const pr={number:5,title:'PR',state:'open',head:{sha:head,repo:{full_name:'BestNathan/nession'}}};
+ const review=(id,commit_id,state='APPROVED',submitted_at='2026-10-14T12:00:00Z')=>({
+   id,commit_id,state,submitted_at,
+   pull_request_url:'https://api.github.com/repos/BestNathan/nession/pulls/5',
+   html_url:'https://github.com/BestNathan/nession/pull/5#pullrequestreview-'+id,
+   body:'Private Agent prompt never for public export',
+   user:{login:'sensitive-user'},
+ });
+ const p=validateProjection(makeProjection({...base,pulls:[pr],
+   prReviews:{'5':{status:'available',items:[
+     review(302,old,'APPROVED','2026-10-16T12:00:00Z'),
+     review(111,head,'COMMENTED','2026-10-14T12:00:00Z'),
+     review(222,head,'CHANGES_REQUESTED','2026-10-15T12:00:00Z'),
+     review(222,head,'CHANGES_REQUESTED','2026-10-15T12:00:00Z'),
+   ]}}
+ }));
+ assert.deepEqual(p.work.pulls[0].review,{status:'available',latest:{
+   review_id:222,commit_sha:head,state:'changes_requested',
+   submitted_at:'2026-10-15T12:00:00.000Z',
+   url:'https://github.com/BestNathan/nession/pull/5#pullrequestreview-222'
+ }});
+ const serialized=JSON.stringify(p);
+ assert.ok(!serialized.includes('sensitive-user'));
+ assert.ok(!serialized.includes('Private Agent prompt'));
+ assert.ok(!serialized.includes('302'));
+});
+test('PR reviews cannot promote old approvals, forged links, invalid IDs or dismissals to Pass',()=>{
+ const head='a'.repeat(40),old='b'.repeat(40);
+ const pr={number:5,title:'PR',head:{sha:head,repo:{full_name:'BestNathan/nession'}}};
+ const baseReview={
+   id:42,commit_id:head,state:'APPROVED',submitted_at:'2026-10-14T12:00:00Z',
+   pull_request_url:'https://api.github.com/repos/BestNathan/nession/pulls/5',
+   html_url:'https://github.com/BestNathan/nession/pull/5#pullrequestreview-42',
+ };
+ const invalid=[
+   {...baseReview,commit_id:old},
+   {...baseReview,html_url:'https://evil.example/pull/5'},
+   {...baseReview,html_url:'https://github.com/BestNathan/nession/pull/6#pullrequestreview-42'},
+   {...baseReview,id:0},{...baseReview,id:1.2},
+   {...baseReview,state:'PENDING'},
+   {...baseReview,pull_request_url:'https://api.github.com/repos/other/repo/pulls/5'},
+   {...baseReview,submitted_at:'not-a-date'}
+ ];
+ const input={...base,pulls:[pr],prReviews:{'5':{status:'available',items:invalid}}};
+ assert.equal(validateProjection(makeProjection(input)).work.pulls[0].review.latest,null);
+ const older={...baseReview,commit_id:old};
+ assert.equal(makeProjection({...base,pulls:[pr],prReviews:{'5':{status:'available',items:[older]}}}).work.pulls[0].review.latest,null);
+ const dismissed=makeProjection({...base,pulls:[pr],prReviews:{'5':{status:'available',items:[{...baseReview,state:'DISMISSED'}]}}});
+ assert.equal(dismissed.work.pulls[0].review.latest.state,'dismissed');
+ assert.equal(makeProjection({...base,pulls:[pr],prReviews:null}).work.pulls[0].review.status,'unavailable');
+ assert.equal(makeProjection({...base,pulls:[{...pr,head:{sha:head,repo:{full_name:'other/repo'}}}],prReviews:{'5':{status:'available',items:[baseReview]}}}).work.pulls[0].review.latest,null);
+});
+test('bounded and partial PR review windows never imply exhaustive approval',()=>{
+ const head='a'.repeat(40),pr={number:5,head:{sha:head,repo:{full_name:'BestNathan/nession'}}};
+ const mk=id=>({id,commit_id:head,state:'COMMENTED',submitted_at:now,
+   pull_request_url:'https://api.github.com/repos/BestNathan/nession/pulls/5',
+   html_url:'https://github.com/BestNathan/nession/pull/5#pullrequestreview-'+id});
+ const p=validateProjection(makeProjection({...base,pulls:[pr],prReviews:{'5':{
+   status:'available',items:Array.from({length:130},(_,i)=>mk(100+i))
+ }}}));
+ assert.equal(p.work.pulls[0].review.status,'truncated');
+ assert.equal(p.work.pulls[0].review.latest.review_id,199);
+ const unavailable=makeProjection({...base,pulls:[pr],prReviews:{'5':{status:'unavailable',items:[mk(1)]}}});
+ assert.equal(unavailable.work.pulls[0].review.latest,null);
+ assert.equal(unavailable.work.pulls[0].review.status,'unavailable');
+ const injected=validateProjection(makeProjection({...base,pulls:[pr],prReviews:{'5':{status:'available',items:[mk(9)]}}}));
+ injected.work.pulls[0].review.latest.secret='leak';
+ assert.throws(()=>validateProjection(injected),/disallowed public field/);
+ delete injected.work.pulls[0].review.latest.secret;
+ injected.work.pulls[0].review.latest.commit_sha='b'.repeat(40);
+ assert.throws(()=>validateProjection(injected),/invalid exact-HEAD review proof/);
+ const unavailableProof=makeProjection({...base,pulls:[pr],prReviews:{'5':{status:'available',items:[mk(7)]}}});
+ unavailableProof.work.pulls[0].review.status='unavailable';
+ assert.throws(()=>validateProjection(unavailableProof),/unavailable review source cannot certify an event/);
+});
