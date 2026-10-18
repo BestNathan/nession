@@ -11,6 +11,8 @@ on:
       - Acceptance / Orchestrator
       - Agent / Issue Audit
       - Agent / Provider Smoke
+      - Agent / Cursor Resume Seed
+      - Agent / Cursor Resume Verify
     types: [completed]
 permissions:
   actions: read
@@ -38,6 +40,13 @@ jobs:
           (
             (github.event.workflow_run.name == 'Agent / Provider Smoke' &&
              (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch')) ||
+            (github.event.workflow_run.name == 'Agent / Cursor Resume Seed' &&
+             github.event.workflow_run.head_branch == 'main' &&
+             (github.event.workflow_run.event == 'push' ||
+              github.event.workflow_run.event == 'workflow_dispatch')) ||
+            (github.event.workflow_run.name == 'Agent / Cursor Resume Verify' &&
+             github.event.workflow_run.event == 'workflow_run' &&
+             github.event.workflow_run.head_branch == 'main') ||
             (github.event.workflow_run.name == 'Agent / SC Acceptance' &&
              github.event.workflow_run.event == 'workflow_dispatch') ||
             (github.event.workflow_run.name == 'Agent / Issue Audit' &&
