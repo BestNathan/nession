@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "8335fda532b3b09366a88511e1e1491ee2868ef4cbbce698ae0d35cc15db3581",
+  "run_id": 39146308034,
+  "run_attempt": 1,
+  "issue": 1957,
+  "criterion": "SC-01",
+  "criterion_text": "Scheduled recovery replays only if the **exact latest run attempt** has an authenticated, completed, failed `prepare-pre-merge` job, with no other failed job in that attempt; current PR head, exact Quality/E2E and source Run identity are revalidated before POST.",
+  "stage": "post-merge",
+  "target_sha": "a00b2deb451b9731f59a7ffd03bb7ca1903da789",
+  "contract_sha256": "e3648479dcfb596d45c8ee1c286842383de53f25c24d445cb9a9b969db9e6f37",
+  "case_revision": "a00b2deb451b9731f59a7ffd03bb7ca1903da789",
+  "case_tree_sha": "7233a77ab23dd62a52cf7278f9fd828c2322d23d",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-18T16:46:07.620Z",
+  "finished_at": "2026-10-18T16:46:07.722Z",
+  "duration_ms": 102,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "The canonical scheduled reconciliation now requires the exact attempt's failed prepare-pre-merge job before requesting a replay.",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "Canonical exact-head recovery and negative-fixture self-test passed on checked-out merged target SHA"
+        }
+      ],
+      "duration_ms": 81,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 39146308034,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "a00b2deb451b9731f59a7ffd03bb7ca1903da789",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/39146308034",
+    "record_path": "runs/2026-10-18/39146308034-1/1957/SC-01.json",
+    "source_result_sha256": "249487b2f5ddb12856c63c27e8b07f9876def105872c8f5aeeb85b6862c59c10"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-39146308034-1",
+    "sha256": "249487b2f5ddb12856c63c27e8b07f9876def105872c8f5aeeb85b6862c59c10",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/39146308034",
+    "durability": "time-limited; object archival not configured"
+  }
+}
