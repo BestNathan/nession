@@ -45,6 +45,9 @@ function cloneRoot(remote){
   }
 }
 function commitCandidate(checkout,message){
+  // Local Store helpers write to a disposable checkout, not to Git's index.
+  // Explicitly stage before evaluating the canonical Run Store policy.
+  git(checkout,['add','-A']);
   const staged=auditStagedRunStore(checkout,REF);
   if(staged.checked_changes===0)return false;
   git(checkout,['-c','user.name=nession-store-writer',
