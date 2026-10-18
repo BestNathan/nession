@@ -134,7 +134,8 @@ function unseal(input,destination){
 }
 async function resume(input,store,output){
   const proof=readJson(path.join(input,'proof.json')),meta=validateProof(proof);
-  identityEnv(); // Verify current recipient Run is trusted main; checkpoint targets source SHA.
+  const {runId:currentRunId}=identityEnv(); // Current recipient must be trusted main.
+  if(meta.run_id===currentRunId) fail('same GitHub Run cannot prove cross-Run continuity');
   const sha=process.env.SOURCE_SHA;
   if(!SHA.test(sha??'')||meta.source_sha!==sha||meta.sdk_version!==sdkVersion()||
     meta.harness_digest!==harnessDigest(sha,sdkVersion(),model()))
