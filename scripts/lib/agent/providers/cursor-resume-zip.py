@@ -6,6 +6,7 @@ independently authenticated main-owned Run. Never extract an unverified ZIP.
 """
 import hashlib
 import json
+import tempfile
 import os
 from pathlib import Path
 import stat
@@ -67,10 +68,49 @@ def unpack(archive, expected_digest, destination):
             stream.write(data)
 
 
+def self_test():
+    with tempfile.TemporaryDirectory(prefix="cursor-d1-zip-test-") as root:
+        root = Path(root)
+        archive = root / "source.zip"
+        payload = {name: json.dumps({"fixture": name}).encode("utf-8") for name in EXPECTED}
+
+        def make(names):
+            with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as z:
+                for name in names:
+                    z.writestr(name, payload.get(name, b"{}"))
+            return "sha256:" + hashlib.sha256(archive.read_bytes()).hexdigest()
+
+        digest = make(sorted(EXPECTED))
+        unpack(archive, digest, root / "restored")
+        for name, data in payload.items():
+            assert (root / "restored" / name).read_bytes() == data
+
+        def rejected(expected, destination, phrase):
+            try:
+                unpack(archive, expected, destination)
+            except ValueError as error:
+                assert phrase in str(error), error
+            else:
+                raise AssertionError("bad ZIP was accepted: " + phrase)
+
+        rejected(digest, root / "restored", "already exists")
+        rejected("sha256:" + "a" * 64, root / "tampered", "does not match")
+        digest = make(["ciphertext.json", "proof.json", "proof.json"])
+        rejected(digest, root / "duplicate", "duplicate")
+        digest = make(["../escape.json", "proof.json", "ciphertext.json"])
+        rejected(digest, root / "traversal", "unexpected")
+        digest = make(["ciphertext.json", "proof.json", "extra.json"])
+        rejected(digest, root / "unexpected", "unexpected")
+    print("Cursor D1 source ZIP: digest, cardinality, overwrite and traversal fixtures passed")
+
+
 if __name__ == "__main__":
-    if len(sys.argv) != 4:
-        sys.exit("usage: cursor-resume-zip.py ARCHIVE SHA256_HEX_FROM_API DESTINATION")
     try:
-        unpack(sys.argv[1], sys.argv[2], sys.argv[3])
+        if len(sys.argv) == 2 and sys.argv[1] == "self-test":
+            self_test()
+        elif len(sys.argv) == 4:
+            unpack(sys.argv[1], sys.argv[2], sys.argv[3])
+        else:
+            sys.exit("usage: cursor-resume-zip.py self-test | ARCHIVE SHA256 DESTINATION")
     except (ValueError, OSError, zipfile.BadZipFile) as error:
         sys.exit(str(error))
