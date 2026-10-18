@@ -91,6 +91,11 @@ test('pinned selected E2E result must match original exact-SHA Run and trusted I
    assert.equal(wrongAttempt.records.length,0);
    const crossRepo=await collect({...x,workflowRuns:[{...actions[0],repository:{full_name:'evil/repo'}},actions[1]]});
    assert.equal(crossRepo.records.length,0);
+   // A legitimate main-push E2E Run may share a SHA, but can never stand
+   // in for a pull_request Run in trusted per-PR evidence.
+   const mainPush=await collect({...x,workflowRuns:[
+     {...actions[0],event:'push',head_branch:'main'},actions[1]]});
+   assert.equal(mainPush.records.length,0);
    const forgedIngest=await collect({...x,workflowRuns:[
       actions[0],{...actions[1],path:'.github/workflows/untrusted.yml'}]});
    assert.equal(forgedIngest.records.length,0);
