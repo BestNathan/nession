@@ -2,8 +2,10 @@
 // repo-level Runs cannot attest per-ID E2E + trusted Ingest at an older PR SHA.
 const REPO='BestNathan/nession';
 const SPECS=Object.freeze([
-  {path:'.github/workflows/e2e-tests.yml',name:'E2E / Tests',event:'pull_request'},
-  {path:'.github/workflows/e2e-test-ingest.yml',name:'E2E / Test Ingest',event:'workflow_run'},
+  // E2E / Tests legitimately fires on both PRs and main pushes. Only the
+  // PR event can later certify a sampled PR HEAD in the pinned proof reader.
+  {path:'.github/workflows/e2e-tests.yml',name:'E2E / Tests',events:['pull_request','push']},
+  {path:'.github/workflows/e2e-test-ingest.yml',name:'E2E / Test Ingest',events:['workflow_run']},
 ]);
 const sha=/^[a-f0-9]{40}$/;
 const positive=n=>Number.isSafeInteger(n)&&n>0;
@@ -21,7 +23,7 @@ export function selectScopedE2ERuns(raw){
     for(const r of list){
       if(!positive(r?.id)||!positive(r.run_attempt)||!sha.test(r.head_sha??'')||
          r.name!==spec.name||pathOf(r)!==spec.path||
-         r.event!==spec.event||r.repository?.full_name!==REPO||
+         !spec.events.includes(r.event)||r.repository?.full_name!==REPO||
          (r.head_repository?.full_name!==REPO&&r.head_repository?.full_name!=null)||
          !['completed','queued','in_progress','waiting','pending','requested'].includes(r.status)||
          (r.status==='completed'&&
