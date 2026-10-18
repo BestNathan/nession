@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "5131ad6d3137e89966ff4cbb4239ff32a8807fa72b398d76e9e5d72daa37c865",
+  "run_id": 39144156934,
+  "run_attempt": 1,
+  "issue": 1945,
+  "criterion": "SC-03",
+  "criterion_text": "Concurrent event-driven reconcilers serialize rerun decisions; the scheduled replay is finite (max four candidates per tick, fixed request bounds) and uses the canonical workflow and Issue updater without new writer.",
+  "stage": "post-merge",
+  "target_sha": "eaf6dd62b7f750af6ce82b30d3658a8acf046ffe",
+  "contract_sha256": "577e267495ab1d552a8b9df5fe799e2c3ca194110dbea8ec49940805a38f0389",
+  "case_revision": "eaf6dd62b7f750af6ce82b30d3658a8acf046ffe",
+  "case_tree_sha": "6fb2ca1bb34b4871059e8f23b5a0a81883458b05",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-18T16:17:51.073Z",
+  "finished_at": "2026-10-18T16:17:51.161Z",
+  "duration_ms": 88,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "The event wakers serialize under one concurrency group and scheduled fallback retains four-candidate finite budgeting.",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "Canonical recovery self-test passed at checked-out exact target SHA; quota, stale-attempt and burst negative fixtures verified"
+        }
+      ],
+      "duration_ms": 74,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 39144156934,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "eaf6dd62b7f750af6ce82b30d3658a8acf046ffe",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/39144156934",
+    "record_path": "runs/2026-10-18/39144156934-1/1945/SC-03.json",
+    "source_result_sha256": "7dc8a00b92414ac3d8433c03027981bbab168570ea79e403253f153cbaa8ad93"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-39144156934-1",
+    "sha256": "7dc8a00b92414ac3d8433c03027981bbab168570ea79e403253f153cbaa8ad93",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/39144156934",
+    "durability": "time-limited; object archival not configured"
+  }
+}
