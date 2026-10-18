@@ -120,6 +120,9 @@ export async function loadPinnedE2E({root,expectedSha,prHeads,workflowRuns,at,ma
          if(err.code==='ENOENT')continue;throw err;}
        if(raw.run_id!==runId||raw.run_attempt!==attempt)
          throw Error('inconsistent E2E source path');
+       // Do not let an unrelated old Issue/PR or oversized readback poison
+       // the selected exact-head evidence window.
+       if(!prHeads.includes(raw.target_sha))continue;
        const projectionPath=join(testDir,'projections');
        const projections=[];
        try{
