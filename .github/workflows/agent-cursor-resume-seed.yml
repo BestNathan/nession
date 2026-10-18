@@ -1,7 +1,7 @@
 name: Agent / Cursor Resume Seed
 
 # Opt-in D1 synthetic native-session continuity, never PR-head or a real Issue writer.
-# A push to main exercises this only after a fixture public encryption key is configured.
+# A trusted main push verifies the dedicated cursor Environment encryption secret.
 on:
   workflow_dispatch:
   push:
@@ -24,8 +24,7 @@ jobs:
   seed:
     if: >-
       github.repository == 'BestNathan/nession' &&
-      github.ref == 'refs/heads/main' &&
-      vars.CURSOR_RESUME_PUBLIC_KEY_B64 != ''
+      github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: cursor
     timeout-minutes: 15
@@ -43,6 +42,42 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - name: Validate Cursor credentials and expose public-only sealing key
+        env:
+          CURSOR_RESUME_PRIVATE_KEY_B64: ${{ secrets.CURSOR_RESUME_PRIVATE_KEY_B64 }}
+          CONFIGURED_PUBLIC_KEY_B64: ${{ vars.CURSOR_RESUME_PUBLIC_KEY_B64 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${CURSOR_API_KEY:-}" ]]; then
+            echo "::error::cursor Environment lacks CURSOR_API_KEY (Provider authentication)"
+            exit 1
+          fi
+          if [[ -z "${CURSOR_RESUME_PRIVATE_KEY_B64:-}" ]]; then
+            echo "::error::cursor Environment lacks CURSOR_RESUME_PRIVATE_KEY_B64 (native Session encryption). This is separate from CURSOR_API_KEY."
+            exit 1
+          fi
+          # Private key exists ONLY in this trusted preflight step. Export
+          # the derived public key to later steps; never forward private bytes.
+          node --input-type=module <<'NODE'
+          import {createPrivateKey,createPublicKey} from 'node:crypto';
+          import {appendFileSync} from 'node:fs';
+          try {
+            const privatePem=Buffer.from(process.env.CURSOR_RESUME_PRIVATE_KEY_B64,'base64').toString('utf8');
+            const privateKey=createPrivateKey(privatePem);
+            if(privateKey.asymmetricKeyType!=='rsa' || (privateKey.asymmetricKeyDetails?.modulusLength??0)<2048)
+              throw Error('expected supported RSA private key');
+            const publicPem=createPublicKey(privateKey).export({format:'pem',type:'spki'});
+            const derived=Buffer.from(publicPem).toString('base64');
+            const configured=process.env.CONFIGURED_PUBLIC_KEY_B64;
+            if(configured && configured!==derived) throw Error('configured public key disagrees with cursor Environment private key');
+            appendFileSync(process.env.GITHUB_ENV,'CURSOR_RESUME_PUBLIC_KEY_B64='+derived+'\n');
+            console.log('Cursor D1: dedicated native Session secret present; public sealing key derived without exposing private material');
+          } catch {
+            console.error('::error::cursor Environment RSA Session key missing, malformed, or incompatible with configured public key');
+            process.exitCode=1;
+          }
+          NODE
       - name: Verify native snapshot and fail-closed SDK contracts
         run: |
           set -euo pipefail
@@ -54,8 +89,6 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/cursor-sdk" "@cursor/sdk@$CURSOR_SDK_VERSION"
           echo "CURSOR_SDK_ROOT=$RUNNER_TEMP/cursor-sdk" >> "$GITHUB_ENV"
       - name: Run synthetic no-tool Cursor seed and seal native checkpoint
-        env:
-          CURSOR_RESUME_PUBLIC_KEY_B64: ${{ vars.CURSOR_RESUME_PUBLIC_KEY_B64 }}
         run: |
           set -euo pipefail
           node scripts/lib/agent/providers/cursor-resume-fixture.mjs seed "$RUNNER_TEMP/cursor-resume-artifact"
