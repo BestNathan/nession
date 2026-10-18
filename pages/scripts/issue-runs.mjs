@@ -57,6 +57,8 @@ export async function loadIssueRunObservations({root,expectedSha,issues,at,maxFi
     const dirty=execFileSync('git',['-C',abs,'status','--porcelain','--untracked-files=all','--','raw/workflows'],
       {encoding:'utf8',timeout:5000}).trim();
     if(dirty)throw Error('dirty metrics input');
+    const rawSt=await lstat(join(abs,'raw'));
+    if(rawSt.isSymbolicLink()||!rawSt.isDirectory())throw Error('untrusted raw directory');
     const base=join(abs,'raw','workflows');
     const baseSt=await lstat(base);
     if(baseSt.isSymbolicLink()||!baseSt.isDirectory())throw Error('untrusted metrics hierarchy');
@@ -96,6 +98,6 @@ export async function loadIssueRunObservations({root,expectedSha,issues,at,maxFi
     }
     if(!hasSource)return unavailable;
     records.sort((a,b)=>b.observed_at.localeCompare(a.observed_at)||b.run_id-a.run_id||b.attempt-a.attempt);
-    return {status:truncated?'truncated':'available',records:records.slice(0,80)};
+    return {status:truncated||records.length>80?'truncated':'available',records:records.slice(0,80)};
   }catch{return unavailable;} // Never export partially trusted source bytes.
 }
