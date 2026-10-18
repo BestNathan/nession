@@ -8,6 +8,7 @@ import {buildClaudeCliArgs,runClaudeCli} from './claude-code.mjs';
 import {sealClaudeNativeSession,openClaudeNativeSession,discoverClaudeNativeProject}
   from './claude-native-store.mjs';
 import {verifyClaudeSeedSource} from './claude-resume-fixture.mjs';
+import {wrapClaudeNativeCheckpoint,unwrapClaudeNativeCheckpoint} from './claude-store-bridge.mjs';
 
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'claude-resume-v1-'));
 const session='550e8400-e29b-41d4-a716-446655440000';
@@ -66,6 +67,30 @@ try{
   const body=JSON.stringify(sealed);
   assert.ok(!body.includes('SECRET-CONTEXT-MARKER'),'plaintext leaked in ciphertext artifact');
   assert.ok(!body.includes('foreign'),'other project sessions not exported');
+  // In the real trusted Ingest, this same RSA ciphertext becomes a versioned
+  // encrypted_agent_checkpoint consumed by the existing remote CAS Store writer.
+  const identity={role:'developer',agent_id:'dev-qwen-01',issue:1664};
+  const storeKey=Buffer.alloc(32,72);
+  const wrapped=wrapClaudeNativeCheckpoint({identity,version:1,
+    nativeEnvelope:sealed,storeKey});
+  assert.equal(wrapped.kind,'encrypted_agent_checkpoint');
+  assert.equal(wrapped.metadata.session_id,session);
+  assert.ok(!JSON.stringify(wrapped).includes('SECRET-CONTEXT-MARKER'));
+  const storeRestored=path.join(root,'from-agent-store');
+  const fromStore=unwrapClaudeNativeCheckpoint({identity,record:wrapped,
+    storeKey,privateKeyPem:privateKey,expectedMetadata:metadata,
+    configDir:storeRestored});
+  assert.equal(fromStore.session_id,session);
+  assert.equal(fs.readFileSync(path.join(storeRestored,'projects',key,session+'.jsonl'),'utf8'),
+    nativeLine);
+  assert.throws(()=>unwrapClaudeNativeCheckpoint({identity,
+    record:wrapped,storeKey:Buffer.alloc(32,9),
+    privateKeyPem:privateKey,expectedMetadata:metadata,
+    configDir:path.join(root,'wrong-store-key')}),/authentication/);
+  assert.throws(()=>unwrapClaudeNativeCheckpoint({identity:{...identity,issue:1665},
+    record:wrapped,storeKey,privateKeyPem:privateKey,expectedMetadata:metadata,
+    configDir:path.join(root,'wrong-agent')}),/identity/);
+  storeKey.fill(0);
   const restored=path.join(root,'restored');
   const value=openClaudeNativeSession({record:sealed,privateKeyPem:privateKey,
     expected:metadata,configDir:restored});
