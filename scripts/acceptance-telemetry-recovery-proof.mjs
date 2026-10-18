@@ -75,6 +75,13 @@ export function attestRecovery(pins,o,metricsRoot,ancestry,wakeVerifier=verifyWa
        ts(c.updated_at)>ts(s.updated_at))
       fail('scheduled writer and cancelled pending ingest did not overlap');
   }
+  // A cancellation within the schedule interval alone cannot prove the
+  // pending-slot replacement mechanism. At least one cancelled run must
+  // have been evicted before GitHub ever created a job.
+  if(!Array.isArray(o.cancelledJobs)||o.cancelledJobs.length!==2||
+     o.cancelledJobs.some(j=>!Array.isArray(j?.jobs)||j.jobs.length>100)||
+     !o.cancelledJobs.some(j=>j.jobs.length===0))
+    fail('pending cancellation requires a jobless cancelled Ingest run');
   const r=expectRun(o.recovered,pins.recovered,'Metrics / Agent Telemetry Ingest',
     'metrics-agent-telemetry.yml','workflow_run','success');
   const w=expectRun(o.wake,pins.wake,'Acceptance / Orchestrator',
@@ -129,7 +136,11 @@ export async function collectHistoricalRecovery({repo,issue,stage,targetSha,work
   if(!pins)return null;
   const ids=[pins.provider,pins.scheduled,...pins.cancelled,pins.recovered,pins.wake];
   const runs=await Promise.all(ids.map(id=>request('/repos/'+repo+'/actions/runs/'+id)));
-  const [recoveryJobs,wakeJobs]=await Promise.all([
+  const [cancelJobs1,cancelJobs2,recoveryJobs,wakeJobs]=await Promise.all([
+    request('/repos/'+repo+'/actions/runs/'+pins.cancelled[0]+
+      '/attempts/'+runs[2].run_attempt+'/jobs?per_page=100'),
+    request('/repos/'+repo+'/actions/runs/'+pins.cancelled[1]+
+      '/attempts/'+runs[3].run_attempt+'/jobs?per_page=100'),
     request('/repos/'+repo+'/actions/runs/'+pins.recovered+
       '/attempts/'+runs[4].run_attempt+'/jobs?per_page=100'),
     request('/repos/'+repo+'/actions/runs/'+pins.wake+
@@ -149,6 +160,7 @@ export async function collectHistoricalRecovery({repo,issue,stage,targetSha,work
   };
   return attestRecovery(pins,{provider:runs[0],scheduled:runs[1],
     cancelled:[runs[2],runs[3]],recovered:runs[4],wake:runs[5],
+    cancelledJobs:[cancelJobs1,cancelJobs2],
     recoveryJobs,wakeJobs,recoveryLog,wakeLog},metricsRoot,ancestry);
 }
 export function selfTestHistoricalRecovery(){
@@ -197,6 +209,7 @@ export function selfTestHistoricalRecovery(){
     '2026-10-14T01:00:48Z   SOURCE_SHA: '+old+'\n'+
     '2026-10-14T01:00:49Z {"run_id":321,"attempt":1,"target_sha":"'+old+'","matches":4}\n';
   const o={provider:source,scheduled,cancelled,recovered,wake,
+    cancelledJobs:[{jobs:[]},{jobs:[]}],
     recoveryJobs,wakeJobs,recoveryLog,wakeLog};
   const validate=(data=o,ancestry={provider:true,recovery:true})=>
     attestRecovery(pins,data,'/tmp',ancestry,()=>({matches:4}));
@@ -204,6 +217,7 @@ export function selfTestHistoricalRecovery(){
   assert.throws(()=>validate(o,{provider:false,recovery:true}),/ancestry/);
   assert.throws(()=>validate({...o,provider:{...source,event:'pull_request'}}),/untrusted/);
   assert.throws(()=>validate({...o,cancelled:[{...cancelled[0],conclusion:'success'},cancelled[1]]}),/untrusted/);
+  assert.throws(()=>validate({...o,cancelledJobs:[{jobs:[{id:1}]},{jobs:[{id:2}]}]}),/jobless/);
   assert.throws(()=>validate({...o,recoveryLog:recoveryLog.replace('RECOVERY_RUN_ID: 321','RECOVERY_RUN_ID: 999')}),/RECOVERY_RUN_ID/);
   assert.throws(()=>validate({...o,recoveryLog:recoveryLog.replace('HEAD -> metrics','no commit')}),/push/);
   assert.throws(()=>validate({...o,wakeLog:wakeLog.replace('"matches":4','"matches":0')}),/wake/);
