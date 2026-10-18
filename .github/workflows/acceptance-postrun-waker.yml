@@ -8,6 +8,10 @@ on:
   workflow_run:
     # Keep E2E completion independent of Issue/PR mutable comments.
     workflows: ["Acceptance / Orchestrator", "CI / Run Store Fixture Evidence", "E2E / Tests"]
+    # Only successful main-push sources can authorize post-merge verification.
+    # Filtering the event here prevents thousands of PR completion no-op runs,
+    # rather than creating a downstream run solely to skip its select job.
+    branches: [main]
     types: [completed]
 
 permissions:

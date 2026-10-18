@@ -27,6 +27,8 @@ assert.match(yaml,/uses: BestNathan\/nession\/\.github\/workflows\/agent-sc-acce
 assert.match(yaml,/issue_number: \$\{\{ matrix\.issue_number \}\}/);
 assert.match(yaml,/target_ref: \$\{\{ needs\.select\.outputs\.target_sha \}\}/);
 assert.match(yaml,/types: \[completed\]/);
+assert.match(yaml,/workflow_run:\s*\n(?:[^\n]*\n)*?\s+branches: \[main\]/,
+  'subscribe only to main upstream runs, not PR completion events');
 assert.match(yaml,/workflows: \["Acceptance \/ Orchestrator", "CI \/ Run Store Fixture Evidence", "E2E \/ Tests"\]/);
 assert.match(yaml,/ref: main/);
 assert.match(yaml,/persist-credentials: false/);
