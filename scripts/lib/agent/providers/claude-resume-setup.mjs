@@ -14,8 +14,9 @@ function gh(args,input){
     env:{...process.env,GH_PROMPT_DISABLED:'1'}}).trim();
   }catch(error){fail('GitHub CLI settings operation failed ('+(error.status??'missing auth')+')');}
 }
-export function applyClaudeResumeKey({values=generateSetupValues(),execute=gh}={}){
-  if(process.env.GITHUB_ACTIONS==='true'||process.env.CI==='true')
+export function applyClaudeResumeKey({values=generateSetupValues(),execute=gh,fixture=false}={}){
+  if(fixture && execute===gh)fail('fixture must use an injected no-network mock');
+  if((process.env.GITHUB_ACTIONS==='true'||process.env.CI==='true')&&!fixture)
     fail('private Environment key provisioning requires an authorized local operator');
   if(process.env.GITHUB_REPOSITORY && process.env.GITHUB_REPOSITORY!==REPO)
     fail('repository mismatch');
@@ -28,7 +29,7 @@ export function applyClaudeResumeKey({values=generateSetupValues(),execute=gh}={
 function selfTest(){
   const observed=[];
   applyClaudeResumeKey({values:{privateValue:'secret-sentinel',publicValue:'public-sentinel'},
-    execute:(args,input)=>{observed.push({args,input});}});
+    execute:(args,input)=>{observed.push({args,input});},fixture:true});
   if(observed.length!==2||observed[0].args[0]!=='secret'||
       observed[0].args.includes('--body')||observed[0].input!=='secret-sentinel'||
       observed[1].args[0]!=='variable'||observed[1].args.at(-1)!=='public-sentinel')
@@ -36,9 +37,15 @@ function selfTest(){
   const failed=[];
   let rejected=false;
   try {applyClaudeResumeKey({values:{privateValue:'x',publicValue:'y'},
-    execute:(args)=>{failed.push(args[0]);if(args[0]==='secret')throw Error('denied');}});}
+    execute:(args)=>{failed.push(args[0]);if(args[0]==='secret')throw Error('denied');},fixture:true});}
   catch{rejected=true;}
   if(!rejected||failed.join(',')!=='secret')fail('must not enable public key after secret failure');
+  if(process.env.CI==='true'||process.env.GITHUB_ACTIONS==='true'){
+    let blocked=false;
+    try{applyClaudeResumeKey({values:{privateValue:'no',publicValue:'no'},
+      execute:()=>{throw Error('must never run');}});}catch(e){blocked=/authorized local/.test(e.message);}
+    if(!blocked)fail('CI must not be permitted to configure live Session secrets');
+  }
   console.log('Claude D1 setup: operator-only, secret-first and fail-closed fixtures passed');
 }
 if(process.argv[1]&&fileURLToPath(import.meta.url)===path.resolve(process.argv[1])){
