@@ -22,7 +22,8 @@ jobs:
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.head_branch == 'main' &&
       github.event.workflow_run.repository.full_name == 'BestNathan/nession' &&
-      github.event.workflow_run.head_repository.full_name == 'BestNathan/nession'
+      github.event.workflow_run.head_repository.full_name == 'BestNathan/nession' &&
+      vars.CURSOR_RESUME_PUBLIC_KEY_B64 != ''
     runs-on: ubuntu-latest
     environment: cursor
     timeout-minutes: 15
@@ -96,7 +97,7 @@ jobs:
             ${{ runner.temp }}/cursor-resume-verification/agent-telemetry.json
           if-no-files-found: error
           retention-days: 14
-      - name: Shred ephemeral native Store after run
+      - name: Remove ephemeral native Store after run
         if: always()
         run: |
           # Deletes local ephemeral files only; the encrypted source Artifact remains
