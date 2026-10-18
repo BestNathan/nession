@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     concurrency:
-      group: acceptance-pr-reconcile
+      group: acceptance-quota-scan
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4

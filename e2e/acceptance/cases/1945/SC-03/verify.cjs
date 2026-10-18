@@ -10,7 +10,7 @@ try{
   const workflow=fs.readFileSync(path.join(root,'.github/workflows/acceptance-quota-recovery.yml'),'utf8');
   const orchestrator=fs.readFileSync(path.join(root,'.github/workflows/acceptance-orchestrator.yml'),'utf8');
   assert.match(workflow,/schedule:\s*\n\s+- cron:/);
-  assert.match(workflow,/group: acceptance-pr-reconcile/);
+  assert.match(workflow,/group: acceptance-quota-scan/);
   assert.equal((orchestrator.match(/group: acceptance-pr-reconcile/g)||[]).length,2);
   assert.match(canonical,/MAX=4(?:,|;)/);
   assert.match(canonical,/current\.run_attempt!==run\.run_attempt/);
