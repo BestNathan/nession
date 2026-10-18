@@ -340,6 +340,10 @@ describe('TerminalController', () => {
     });
     controller.attach(host());
     const h = delayedParser(controller);
+    // jsdom has no xterm render dimensions. The real resize schedules a
+    // viewport timer that can fire after teardown and throw asynchronously.
+    // Assert FIFO resize completion with a synchronous spy, not that timer.
+    const resizeSpy = vi.spyOn(controller.terminal!, 'resize').mockImplementation(() => {});
     const first = { streamEpoch: 7, streamSeq: 10 };
     const resized = { streamEpoch: 7, streamSeq: 11 };
     const last = { streamEpoch: 7, streamSeq: 12 };
@@ -361,6 +365,8 @@ describe('TerminalController', () => {
     h.finish();
     h.finish();
     expect(onStreamEventParsed).toHaveBeenCalledTimes(3);
+    expect(resizeSpy).toHaveBeenCalledWith(120, 30);
+    resizeSpy.mockRestore();
     h.spy.mockRestore();
     controller.dispose();
   });
