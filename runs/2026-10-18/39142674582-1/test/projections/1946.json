@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_projection_receipt",
+  "outcome": "applied",
+  "issue": 1946,
+  "run_id": 39142674582,
+  "run_attempt": 1,
+  "target_sha": "f4a94654de45fd996de2949fd03c49aebb8c0be3",
+  "plan_digest": "5a4afde20c7e84f85e98d111508b1da3b1abb79a947e7af57b0779f2ece2540c",
+  "artifact_digest": "sha256:6b51d59b0d9bfa7c461958df32c7ddb179eaf0d657bed1abf844bb1908a6be2f",
+  "ingest_run_id": 39142947444,
+  "ingest_attempt": 1,
+  "declaration_digest": "0c29b2b741f4b7035b512a584e9331aca83ae19ba81af7f62d5351a83bead116",
+  "before_body_sha256": "ec7c5a4eb1e33f0419f310d6d5814cd10fdaf558f4c2668fdf75be0918366a59",
+  "body_sha256": "d9ab3e6d525eabb2b888dc3d5fa608cb3ce9b7da29b35b474fab23092785a8e9",
+  "readback_body": "## Requirements: trusted Pages E2E proof coverage despite the 100-run mixed-workflow window\n\n**Parent:** #1906 / #1782. Follow-up to #1923 Closed and the independent workflow activation #1930 Closed.\n\n### Real production symptom\nAt main merge SHA `8a6d579eea2ff580ab00deeab5da6f8d969ca8ba`, public [Pages deployment Run 39141427257](https://github.com/BestNathan/nession/actions/runs/39141427257) succeeded with pinned Acceptance Store, `acceptance_e2e=truncated`, **`published_e2e_ids=0`**. The reader was fed only the first 100 *mixed* repository Actions Runs, which can be saturated by unrelated workflows before a matching `E2E / Tests` or `E2E / Test Ingest` Run appears. The canonical Store contains valid exact-SHA Issue Test/Ingest receipts (e.g., PR #1929 run `39134974690/1` and trusted ingest `39135344379`) but the current mixed window does not suffice to certify them.\n\n### Contract\n- Build-time read-only, bounded workflow-specific Actions windows for **both** `e2e-tests.yml` and `e2e-test-ingest.yml`. The browser receives neither GitHub token nor raw response. Fail closed to `unavailable` when either independent workflow window cannot be loaded, never silently publish 0 as an independently verified source.\n- Preserve full independent Run/Attempt identity for both sets (up to 100 per workflow), exact trusted workflow paths, repository/origin and completed-success state. Protect against duplicate IDs, ambiguity and 100-result truncation. Data still only qualifies if it is independently verified against the canonical pinned Issue E2E Run and Test Ingest receipt with same plan/artifact digest and matching current PR HEAD.\n- Unit test mixed-window starvation, replay, duplicate, missing/failing source, old/foreign paths, stale HEAD and the 100+100 boundary. Keep existing Pages standalone and mobile E2E; no new writer, claim of SC Pass or incorrect PR/Agent lineage attribution. A legitimately missing current PR HEAD still remains no observed proof.\n\n### Success Criteria\n- [ ] SC-01 Source build uses independently bounded E2E Tests + Test Ingest workflow-specific queries; a missing/rejected source fails closed and dedupe/order are deterministic.\n- [ ] SC-02 Canonical pinned per-ID reader uses the complete bounded two-workflow Run identities and cannot lose Ingest provenance at a mixed 100-run cutoff, reject mismatch/ambiguous/foreign/stale records.\n- [ ] SC-03 Negative/unit regression and exact-head Pages CI, Quality Gate, Case Smoke, selected E2E plus read-only Agent evaluation Pass. Full Acceptance workflow success remains external merge gate.\n\n## Acceptance Plan\n```yaml\nacceptance:\n  SC-01:\n    when: pr\n    method: agent\n  SC-02:\n    when: pr\n    method: agent\n  SC-03:\n    when: pr\n    method: agent\n```\n\n## Acceptance Report\n| Criterion | Stage | Result | Evidence |\n|---|---|---|---|\n| SC-01 | pre-merge | Pending | - |\n| SC-02 | pre-merge | Pending | - |\n| SC-03 | pre-merge | Pending | - |\n\n## E2E Verification\n### New\n- none: canonical existing Pages E2E IDs cover the UI.\n### Regression\n- pages-overview\n- pages-evidence\n\n## E2E Report\n\n| ID | Type | Result | Evidence |\n|---|---|---|---|\n| pages-evidence | Regression | Pass | run 39142674582/1, SHA f4a94654de45fd996de2949fd03c49aebb8c0be3, contract 0c29b2b741f4b7035b512a584e9331aca83ae19ba81af7f62d5351a83bead116, plan 5a4afde20c7e84f85e98d111508b1da3b1abb79a947e7af57b0779f2ece2540c, tests 3/3 (https://github.com/BestNathan/nession/actions/runs/39142674582) |\n| pages-overview | Regression | Pass | run 39142674582/1, SHA f4a94654de45fd996de2949fd03c49aebb8c0be3, contract 0c29b2b741f4b7035b512a584e9331aca83ae19ba81af7f62d5351a83bead116, plan 5a4afde20c7e84f85e98d111508b1da3b1abb79a947e7af57b0779f2ece2540c, tests 4/4 (https://github.com/BestNathan/nession/actions/runs/39142674582) |\n\n## Product alignment\n- [x] Read-only `pages/`, no product `web/` components.\n- [x] No new result writer, SC projector or browser GitHub API/token.\n- [x] Missing live producer keeps full Lineage Unlinked, no E2E-to-SC promotion.\n\n---\n**Status:** Approved",
+  "patch_updated_at": "2026-10-18T15:59:49Z",
+  "readback_updated_at": "2026-10-18T15:59:49Z",
+  "rows": [
+    {
+      "id": "pages-evidence",
+      "result": "Pass",
+      "evidence": "run 39142674582/1, SHA f4a94654de45fd996de2949fd03c49aebb8c0be3, contract 0c29b2b741f4b7035b512a584e9331aca83ae19ba81af7f62d5351a83bead116, plan 5a4afde20c7e84f85e98d111508b1da3b1abb79a947e7af57b0779f2ece2540c, tests 3/3 (https://github.com/BestNathan/nession/actions/runs/39142674582)"
+    },
+    {
+      "id": "pages-overview",
+      "result": "Pass",
+      "evidence": "run 39142674582/1, SHA f4a94654de45fd996de2949fd03c49aebb8c0be3, contract 0c29b2b741f4b7035b512a584e9331aca83ae19ba81af7f62d5351a83bead116, plan 5a4afde20c7e84f85e98d111508b1da3b1abb79a947e7af57b0779f2ece2540c, tests 4/4 (https://github.com/BestNathan/nession/actions/runs/39142674582)"
+    }
+  ]
+}
