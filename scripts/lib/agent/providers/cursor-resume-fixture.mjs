@@ -114,7 +114,7 @@ export function verifyCursorSeedSource(run,artifacts,id,attempt,sha) {
     exact[0].workflow_run?.id!==id||exact[0].workflow_run?.head_sha!==sha||
     !/^sha256:[a-f0-9]{64}$/.test(exact[0].digest??''))
     fail('missing/duplicate/unverified encrypted artifact');
-  return exact[0].digest;
+  return {artifact_id:exact[0].id,digest:exact[0].digest};
 }
 function unseal(input,destination){
   const proof=readJson(path.join(input,'proof.json')),sealed=readJson(path.join(input,'ciphertext.json'));
