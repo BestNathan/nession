@@ -162,6 +162,28 @@ function renderWork(){
         for(const item of items)pane.append(ext('PR #'+item.number+' · GitHub cross-reference',item.url));
         if(refs.status==='truncated')pane.append(node('span','', 'Timeline truncated · other references may be missing'));
       }
+      pane.append(node('span','issue-pr-source','Pinned Metrics · Issue Agent Runs · PR linkage: Unlinked'));
+      const observed=Array.isArray(x.agent_runs)?x.agent_runs:[];
+      if(w.agent_run_source==='unavailable'){
+        pane.append(node('span','', 'Issue Agent source unavailable · no run verified'));
+      } else if(!observed.length){
+        pane.append(node('span','', 'Agent runs: Not observed in bounded source window'));
+      } else {
+        for(const item of observed){
+          const agent=item.agent_id||'Unknown Agent', role=item.role||'Unknown role';
+          const label='Agent '+role+' / '+agent+' · '+item.workflow+
+            ' · run '+item.run_id+' / attempt '+item.attempt;
+          pane.append(ext(label,item.url));
+          pane.append(node('span','mono',
+            'Target '+(item.target_sha?.slice(0,12)||'unknown')+
+            ' · '+(item.verification==='github_run_verified'
+              ?'GitHub Run identity verified':'Not independently verified')+
+            ' · tokens '+fmt(item.tokens_total)+
+            ' · duration '+(item.duration_ms===null?'N/A':item.duration_ms+'ms')));
+        }
+      }
+      if(w.agent_run_source==='truncated')
+        pane.append(node('span','', 'Agent source truncated · other runs may be missing'));
       row.querySelector?.('.entry-main')?.append(pane);
       return row;
     };
