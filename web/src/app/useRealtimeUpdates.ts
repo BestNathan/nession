@@ -25,13 +25,13 @@ export function useRealtimeUpdates(
   sessionData: SessionDataReturn,
 ) {
   const { fetchAgents, applyAgentUpdate } = agentData;
-  const { setSessions, fetchSessions } = sessionData;
+  const { applyRealtimeSessions, fetchSessions } = sessionData;
 
   useEffect(() => {
     const u1 = agentsApi.onAgentsChanged(applyAgentUpdate);
-    const u2 = sessionsApi.onSessionsChanged(setSessions);
+    const u2 = sessionsApi.onSessionsChanged(applyRealtimeSessions);
     return () => { u1(); u2(); };
-  }, [wsService, applyAgentUpdate, setSessions]);
+  }, [wsService, applyAgentUpdate, applyRealtimeSessions]);
 
   useEffect(() => {
     const fetchIfConnected = () => {
