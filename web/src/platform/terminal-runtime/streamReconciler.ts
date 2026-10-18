@@ -127,9 +127,11 @@ export class StreamReconciler {
       streamEpoch: frame.streamEpoch,
       streamSeq: frame.streamSeq,
     };
-    this.accept(frame.streamEpoch, frame.streamSeq, 'output', () =>
-      this.sink.onOutput(frame.data, frame.bootstrap, position),
-    , frame.data.byteLength + PENDING_FRAME_OVERHEAD);
+    this.accept(
+      frame.streamEpoch, frame.streamSeq, 'output',
+      () => this.sink.onOutput(frame.data, frame.bootstrap, position),
+      frame.data.byteLength + PENDING_FRAME_OVERHEAD,
+    );
   }
 
   /**
@@ -150,9 +152,11 @@ export class StreamReconciler {
       return;
     }
     const { streamEpoch, streamSeq, cols, rows } = frame;
-    this.accept(streamEpoch, streamSeq, 'resize', () =>
-      this.sink.onResize(cols, rows, { streamEpoch, streamSeq }),
-    , PENDING_FRAME_OVERHEAD);
+    this.accept(
+      streamEpoch, streamSeq, 'resize',
+      () => this.sink.onResize(cols, rows, { streamEpoch, streamSeq }),
+      PENDING_FRAME_OVERHEAD,
+    );
   }
 
   /**
@@ -311,7 +315,10 @@ export class StreamReconciler {
    * regard the skipped segment as a synchronized terminal checkpoint.
    */
   private keepFrame(frame: PendingFrame): void {
-    if (this.pending.has(frame.seq)) { return; }
+    if (this.pending.has(frame.seq)
+      || (this.frontier !== null && frame.seq <= this.frontier)) {
+      return;
+    }
     if (this.pending.size >= this.limits.maxFrames
       || this.pendingBytes + frame.bytes > this.limits.maxBytes) {
       this.sink.onStreamTruncated();
@@ -322,13 +329,13 @@ export class StreamReconciler {
       this.wantHistory = false;
       this.attemptsFor = -1;
       this.attempts = 0;
-      this.frontier = frame.seq - 1;
+      this.frontier = Math.max(this.frontier ?? 0, frame.seq - 1);
     }
     if (frame.bytes > this.limits.maxBytes) {
       // A single oversized event does not live in the reorder map. It may
       // still be displayed as degraded output, exactly once.
       frame.apply();
-      this.frontier = frame.seq;
+      this.frontier = Math.max(this.frontier ?? 0, frame.seq);
       return;
     }
     this.pending.set(frame.seq, frame);
