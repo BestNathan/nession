@@ -2,6 +2,7 @@ import {
   applyTerminalStreamEvents,
   type StreamApplyHandlers,
   type TerminalStreamEvent,
+  type TerminalStreamPosition,
 } from './streamApply';
 import type { TerminalBootstrap } from './bootstrap';
 
@@ -89,8 +90,8 @@ export class StreamReconciler {
     private readonly sink: StreamSink,
   ) {
     this.handlers = {
-      onOutput: (data) => this.sink.onOutput(data),
-      onResize: (cols, rows) => this.sink.onResize(cols, rows),
+      onOutput: (data, position) => this.sink.onOutput(data, undefined, position),
+      onResize: (cols, rows, position) => this.sink.onResize(cols, rows, position),
     };
   }
 
@@ -111,8 +112,12 @@ export class StreamReconciler {
       this.sink.onOutput(frame.data, frame.bootstrap);
       return;
     }
+    const position: TerminalStreamPosition = {
+      streamEpoch: frame.streamEpoch,
+      streamSeq: frame.streamSeq,
+    };
     this.accept(frame.streamEpoch, frame.streamSeq, 'output', () =>
-      this.sink.onOutput(frame.data, frame.bootstrap),
+      this.sink.onOutput(frame.data, frame.bootstrap, position),
     );
   }
 
@@ -134,7 +139,9 @@ export class StreamReconciler {
       return;
     }
     const { streamEpoch, streamSeq, cols, rows } = frame;
-    this.accept(streamEpoch, streamSeq, 'resize', () => this.sink.onResize(cols, rows));
+    this.accept(streamEpoch, streamSeq, 'resize', () =>
+      this.sink.onResize(cols, rows, { streamEpoch, streamSeq }),
+    );
   }
 
   /**
@@ -640,8 +647,12 @@ export interface ResumeReply {
 
 /** Where committed frames go — the consumer's write path. */
 export interface StreamSink {
-  onOutput: (data: Uint8Array, bootstrap?: TerminalBootstrap) => void;
-  onResize: (cols: number, rows: number) => void;
+  onOutput: (
+    data: Uint8Array,
+    bootstrap?: TerminalBootstrap,
+    position?: TerminalStreamPosition,
+  ) => void;
+  onResize: (cols: number, rows: number, position?: TerminalStreamPosition) => void;
   /**
    * The consumer's buffer now has a hole in it that no later request can
    * fill (#1304).

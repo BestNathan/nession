@@ -159,9 +159,9 @@ export class ConnectionManager implements TerminalTransport {
    * it: P2P from the frame the agent API decoded, relay from the payload the
    * Server forwarded verbatim.
    */
-  onOutput: ((data: Uint8Array, bootstrap?: TerminalBootstrap) => void) | null = null;
+  onOutput: TerminalTransport['onOutput'] = null;
   onError: ((error: Error) => void) | null = null;
-  onResize: ((cols: number, rows: number) => void) | null = null;
+  onResize: TerminalTransport['onResize'] = null;
 
   constructor(options: ConnectionOptions) {
     this.mode = options.mode;
@@ -180,8 +180,22 @@ export class ConnectionManager implements TerminalTransport {
     this.reconciler = new StreamReconciler(
       (epoch, afterSeq) => this.resumeStream(epoch, afterSeq),
       {
-        onOutput: (data, bootstrap) => this.onOutput?.(data, bootstrap),
-        onResize: (cols, rows) => this.onResize?.(cols, rows),
+        // A legacy unpositioned event preserves the historical callback arity.
+        // A known Agent sequence is forwarded intact; neither says "parsed".
+        onOutput: (data, bootstrap, position) => {
+          if (position === undefined) {
+            this.onOutput?.(data, bootstrap);
+          } else {
+            this.onOutput?.(data, bootstrap, position);
+          }
+        },
+        onResize: (cols, rows, position) => {
+          if (position === undefined) {
+            this.onResize?.(cols, rows);
+          } else {
+            this.onResize?.(cols, rows, position);
+          }
+        },
         // Only the reconciler can tell a buffer that is whole from one with a
         // stretch given up on, and only this class holds the session's owner.
         // It carries the fact up; what repair that implies is not the
