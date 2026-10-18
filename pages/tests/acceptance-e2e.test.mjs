@@ -28,7 +28,9 @@ const actions=[
    repository:{full_name:repo},head_repository:{full_name:repo},
    status:'completed',conclusion:'success'},
  {id:111,run_attempt:1,name:'E2E / Test Ingest',event:'workflow_run',
-   repository:{full_name:repo},status:'completed',conclusion:'success'},
+   path:'.github/workflows/e2e-test-ingest.yml',head_branch:'main',
+   repository:{full_name:repo},head_repository:{full_name:repo},
+   status:'completed',conclusion:'success'},
 ];
 async function fixture(run){
  const root=await mkdtemp(join(tmpdir(),'pages-acceptance-'));
@@ -74,6 +76,12 @@ test('pinned selected E2E result must match original exact-SHA Run and trusted I
    assert.equal(wrongAttempt.records.length,0);
    const crossRepo=await collect({...x,workflowRuns:[{...actions[0],repository:{full_name:'evil/repo'}},actions[1]]});
    assert.equal(crossRepo.records.length,0);
+   const forgedIngest=await collect({...x,workflowRuns:[
+      actions[0],{...actions[1],path:'.github/workflows/untrusted.yml'}]});
+   assert.equal(forgedIngest.records.length,0);
+   const forkIngest=await collect({...x,workflowRuns:[
+      actions[0],{...actions[1],head_repository:{full_name:'evil/repo'}}]});
+   assert.equal(forkIngest.records.length,0);
  });
 });
 test('pinned SHA drift, dirty input, unsafe symlink, forged counters and duplicate ID fail closed',async()=>{
