@@ -76,7 +76,7 @@ async function seed(outdir){
   try{
     // Only this bounded synthetic memory prompt is allowed. Absolutely no shell / file tools.
     const {result,meta}=await runCursorSession({apiKey:process.env.CURSOR_API_KEY,
-      name:'nession-cursor-resume-d1',requestedModel:request,workspace:work,storePath:store,
+      name:'nession-cursor-resume-d1',requestedModel:request,workspace:process.env.GITHUB_WORKSPACE,storePath:store,
       tools:[],prompt:'This is a two-run persistence verification. Remember this private hex marker '+
         'for the next turn: '+marker+'. Respond with ACK only. Do not repeat the marker.'});
     if(result?.status!=='finished'||!/^agent-[a-zA-Z0-9-]{4,100}$/.test(meta.agent_id??''))
@@ -134,8 +134,9 @@ function unseal(input,destination){
 }
 async function resume(input,store,output){
   const proof=readJson(path.join(input,'proof.json')),meta=validateProof(proof);
-  const {sha}=identityEnv();
-  if(meta.source_sha!==sha||meta.sdk_version!==sdkVersion()||
+  identityEnv(); // Verify current recipient Run is trusted main; checkpoint targets source SHA.
+  const sha=process.env.SOURCE_SHA;
+  if(!SHA.test(sha??'')||meta.source_sha!==sha||meta.sdk_version!==sdkVersion()||
     meta.harness_digest!==harnessDigest(sha,sdkVersion(),model()))
     fail('source/Harness changed during native resume');
   if(!process.env.CURSOR_API_KEY)fail('Cursor key missing');
