@@ -162,6 +162,9 @@ jobs:
           else
             echo 'available=false' >> "$GITHUB_OUTPUT"
           fi
+      - name: Verify exact-Attempt Issue E2E artifact selector
+        if: steps.capability.outputs.available == 'true'
+        run: node trusted/scripts/issue-e2e-attempt-artifact.mjs self-test
       - name: Fetch authenticated run and Playwright evidence
         if: steps.capability.outputs.available == 'true'
         env:
@@ -174,10 +177,23 @@ jobs:
           pr="$(jq -r '.pull_requests[0].number // empty' scratch/metadata/run.json)"
           [[ "$pr" =~ ^[1-9][0-9]*$ ]] || { echo 'No verified source PR'; exit 1; }
           gh api "repos/$GITHUB_REPOSITORY/pulls/$pr" > scratch/metadata/pr.json
+          # GitHub artifacts belong to a Run, not an Attempt. A rerun may
+          # leave TWO same-name verification ZIPs; the trusted selector ties
+          # the one consumed to this exact successful/failed source E2E job,
+          # attempt, SHA, producer interval and GitHub artifact SHA256.
+          attempt="$(jq -r .run_attempt scratch/metadata/run.json)"
+          [[ "$attempt" =~ ^[1-9][0-9]*$ ]] || exit 1
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/attempts/$attempt/jobs?per_page=100" > scratch/metadata/jobs.json
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts?per_page=100" > scratch/metadata/artifacts.json
-          jq -e '[.artifacts[] | select(.name=="issue-e2e-verification" and .expired==false)] | length==1' scratch/metadata/artifacts.json
-          jq '.artifacts[] | select(.name=="issue-e2e-verification")' scratch/metadata/artifacts.json > scratch/metadata/artifact.json
-          gh run download "$run_id" --repo "$GITHUB_REPOSITORY" --name issue-e2e-verification --dir scratch/artifact
+          node trusted/scripts/issue-e2e-attempt-artifact.mjs select \
+            scratch/metadata/run.json scratch/metadata/jobs.json \
+            scratch/metadata/artifacts.json scratch/metadata/artifact.json
+          artifact_id="$(jq -r .id scratch/metadata/artifact.json)"
+          [[ "$artifact_id" =~ ^[1-9][0-9]*$ ]] || exit 1
+          # Exact artifact ID avoids gh run download --name ambiguity across
+          # reruns; never consume or project another Attempt's bytes.
+          gh run download "$run_id" --repo "$GITHUB_REPOSITORY" \
+            --archive "$artifact_id" --dir scratch/artifact
           [[ -s scratch/artifact/plan.json && -s scratch/artifact/results.json ]] || exit 1
           echo "$pr" > scratch/metadata/pr-number
       - name: Independently validate and project per-ID results
