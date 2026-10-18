@@ -1,5 +1,6 @@
 // Strictly allowlisted, read-only public projection. No raw Agent events or private IDs.
 import {projectLineage,validateLineageProjection} from './lineage.mjs';
+import {validateAgentStoreReadiness} from './agent-store-readiness.mjs';
 import {validatePublicE2E} from './acceptance-e2e.mjs';
 const REPO = 'BestNathan/nession';
 const GH = 'https://github.com/' + REPO;
@@ -192,7 +193,7 @@ function rosterFrom(registry, agentWindow) {
     observed_7d: Object.hasOwn(usage,id) ? number(usage[id]) : null,
   })).sort((a,b)=>a.role.localeCompare(b.role)||a.id.localeCompare(b.id));
 }
-export function makeProjection({ repository, agent, registry, issues, pulls, workflowRuns, issueTimelines, prReviews, issueRunSource, acceptanceE2E, lineageEvidence, refs={}, meta={} }) {
+export function makeProjection({ repository, agent, registry, issues, pulls, workflowRuns, issueTimelines, prReviews, issueRunSource, acceptanceE2E, agentStoreSource, lineageEvidence, refs={}, meta={} }) {
   const r = repository?.schema_version === 2 ? repository : null;
   const a = agent?.schema_version === 1 && agent?.kind === 'agent_metrics_aggregate' ? agent : null;
   const current = r?.repository || {}, efficiency = r?.efficiency || {};
@@ -272,6 +273,8 @@ export function makeProjection({ repository, agent, registry, issues, pulls, wor
           head_sha:pulls?.find(p=>p.number===x.number)?.head?.sha})),
         attested:lineageEvidence}),
       acceptance_e2e:acceptanceE2E||{status:'unavailable',source_sha:null,records:[]},
+      agent_store_readiness:validateAgentStoreReadiness(agentStoreSource||
+        {status:'unavailable',sha:null,url:GH+'/tree/agent-store'}),
       issues:list(issues,'issue').map(x=>({
         ...x, observed_agent_runs_7d:observedIssueCount(aw,x.number),
         pr_references:timelineReferences(x.number,issueTimelines?.[String(x.number)]),
@@ -306,8 +309,12 @@ export function validateProjection(p) {
   allowedFields(p.source,['repository','main_sha','metrics_sha','acceptance_results_sha','issues_status','pulls_status','workflow_runs_status'],'source');
   allowedFields(p.repository,['available','sha','generated_at','freshness','current','efficiency'],'repository');
   allowedFields(p.agents,['available','generated_at','freshness','roster','distribution','summary'],'agents');
-  allowedFields(p.work,['issues_status','pulls_status','workflow_runs_status','agent_run_source','lineage','acceptance_e2e','issues','pulls'],'work');
+  allowedFields(p.work,['issues_status','pulls_status','workflow_runs_status','agent_run_source','lineage','acceptance_e2e','agent_store_readiness','issues','pulls'],'work');
   validateLineageProjection(p.work.lineage);
+  validateAgentStoreReadiness(p.work.agent_store_readiness);
+  // Readiness of an orphan ref is never a verified causal producer.
+  if(p.work.agent_store_readiness.status==='empty'&&p.work.lineage.edges.length)
+    throw Error('empty Agent Store cannot provide verified lineage');
   validatePublicE2E(p.work.acceptance_e2e);
   if(p.work.acceptance_e2e.status!=='unavailable'&&
      p.work.acceptance_e2e.source_sha!==p.source.acceptance_results_sha)
