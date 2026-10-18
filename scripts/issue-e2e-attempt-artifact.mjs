@@ -98,12 +98,14 @@ function selfTest() {
     [run, jobs, { total_count: 2, artifacts: [old, { ...artifact, workflow_run: { id: 200, head_sha: 'c'.repeat(40) } }] }],
     [run, { total_count: 101, jobs: [job] }, arts],
     [run, jobs, { total_count: 3, artifacts: [old, artifact] }],
+    [run, jobs, { total_count: 2, artifacts: [old, { ...artifact, expired: true }] }],
+    [run, jobs, { total_count: 2, artifacts: [old, { ...artifact, created_at: '2026-10-18T02:25:01Z' }] }],
   ];
   for (const args of bad) {
     assert.throws(() => selectExactAttemptIssueArtifact(...args),
       'attempt or artifact mutation unexpectedly accepted');
   }
-  console.log('PR Issue-E2E artifact selector: stale attempt tolerated, 12 fail-closed negatives pass');
+  console.log('PR Issue-E2E artifact selector: stale attempt tolerated, 14 fail-closed negatives pass');
 }
 
 if (process.argv[1]?.endsWith('issue-e2e-attempt-artifact.mjs')) {
