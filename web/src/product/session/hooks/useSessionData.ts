@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import type { Session } from '@/types';
 import { sessionsApi } from '@/product/session';
@@ -21,10 +21,33 @@ export function useSessionData() {
    *  still shown, flagged as possibly out of date. */
   const [staleAgents, setStaleAgents] = useState<string[]>([]);
 
+  // #1900: an already-in-flight server.session.list response can describe an
+  // older registry snapshot than an intervening server.sessions.changed push.
+  // "last promise to resolve wins" was replacing the real foreground command
+  // with the old unknown value and made session-lifecycle flaky. Fence old
+  // request results by the local event order instead of guessing that a
+  // non-null foreground_command must win (a later push can legitimately clear
+  // it). A newer refresh also supersedes an older refresh.
+  const realtimeRevision = useRef(0);
+  const requestSequence = useRef(0);
+  const applyRealtimeSessions = useCallback((incoming: Session[]) => {
+    realtimeRevision.current += 1;
+    setSessions(incoming);
+  }, []);
+
   const fetchSessions = useCallback(async (opts: FetchSessionsOptions = {}) => {
+    const sequence = ++requestSequence.current;
+    const revisionAtStart = realtimeRevision.current;
     setLoadingSessions(true);
     try {
       const response = await sessionsApi.fetchSessions(opts);
+      // The response is older than a push received after the request started,
+      // or than a later refresh. Do not replace that newer session snapshot,
+      // nor overwrite its stale-agent metadata with an obsolete response.
+      if (sequence !== requestSequence.current ||
+          revisionAtStart !== realtimeRevision.current) {
+        return;
+      }
       setSessions(response.sessions);
       const stale = response.stale_agents ?? [];
       setStaleAgents(stale);
@@ -34,11 +57,19 @@ export function useSessionData() {
         );
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to fetch sessions';
-      toast.error(msg);
+      if (sequence === requestSequence.current &&
+          revisionAtStart === realtimeRevision.current) {
+        const msg = err instanceof Error ? err.message : 'Failed to fetch sessions';
+        toast.error(msg);
+      }
     } finally {
-      setLoadingSessions(false);
-      setSessionsLoaded(true);
+      // An obsolete request cannot reset the loading indicator for a newer
+      // in-flight refresh. A completed latest request still settles loading
+      // even when an intervening realtime push superseded its response.
+      if (sequence === requestSequence.current) {
+        setLoadingSessions(false);
+        setSessionsLoaded(true);
+      }
     }
   }, []);
 
@@ -62,6 +93,7 @@ export function useSessionData() {
 
   return {
     sessions, setSessions,
+    applyRealtimeSessions,
     insertSession,
     loadingSessions,
     sessionsLoaded,
