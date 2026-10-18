@@ -47,6 +47,25 @@ async function optionalIssueTimelines(sourceIssues){
   }));
   return Object.fromEntries(entries);
 }
+async function optionalPrReviews(sourcePulls){
+  if(!Array.isArray(sourcePulls))return null;
+  // Only the same 12 most recently updated public PRs shown in the projection.
+  const selected=sourcePulls.filter(x=>Number.isSafeInteger(x?.number)&&x.number>0)
+    .sort((a,b)=>String(b.updated_at||'').localeCompare(String(a.updated_at||''))||a.number-b.number)
+    .slice(0,12);
+  const entries=await Promise.all(selected.map(async pr=>{
+    try{
+      const items=await api('/pulls/'+pr.number+'/reviews?per_page=100');
+      return [String(pr.number),Array.isArray(items)
+        ? {status:items.length>=100?'truncated':'available',items:items.slice(0,100)}
+        : {status:'unavailable',items:[]}];
+    }catch(err){
+      console.error('Optional PR reviews unavailable:',pr.number,err.message);
+      return [String(pr.number),{status:'unavailable',items:[]}];
+    }
+  }));
+  return Object.fromEntries(entries);
+}
 async function optionalRuns(){
   try{
     const result=await api('/actions/runs?per_page=100');
@@ -69,10 +88,10 @@ const [repository,agent,registry,issues,pulls,workflowRuns,allRefs] = await Prom
   optionalRuns(),
   Promise.all(['metrics','acceptance-results','task-results','agent-store'].map(optionalRef))
 ]);
-const issueTimelines=await optionalIssueTimelines(issues);
+const [issueTimelines,prReviews]=await Promise.all([optionalIssueTimelines(issues),optionalPrReviews(pulls)]);
 const refs=Object.fromEntries(['metrics','acceptance-results','task-results','agent-store'].map((name,index)=>[name,allRefs[index]]));
 const result=validateProjection(makeProjection({
-  repository,agent,registry,issues,pulls,workflowRuns,issueTimelines,refs,
+  repository,agent,registry,issues,pulls,workflowRuns,issueTimelines,prReviews,refs,
   meta:{ generated_at:new Date().toISOString(),main_sha:process.env.SOURCE_MAIN_SHA,metrics_sha:process.env.METRICS_SHA }
 }));
 await mkdir(join(out,'data'),{recursive:true});
