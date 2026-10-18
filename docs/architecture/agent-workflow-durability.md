@@ -141,11 +141,13 @@ Reconciler polls completed/cancelled/failed Runs, expired leases, pending Outbox
 
 | Slice | Change owner | Real deliverable / proof |
 | --- | --- | --- |
-| **D1. Provider-native resume spike** | `providers/*`, Harness self-tests | Real two-run Cursor resume of same session + current capability reapplication; incompatible digest negative. Claude native file/session discovery and separate resume proof. No Publisher. |
+| **D1. Provider-native resume spike** | `providers/*`, Harness self-tests | Real two-run Cursor resume of same session via a **disposable ciphertext-only cross-Run Artifact handoff** (authenticated Run/Attempt/Artifact ID+digest, bounded retention, trusted isolated restore); current capability reapplication and incompatible digest negative. Claude native file/session discovery and separate resume proof. No Publisher and **not a durable long-lived Store claim**. |
 | **D2. Live encrypted Store** | `store/*`, trusted Store Ingest | Real `agent-store` orphan ref, encryption-before-artifact, trusted restore, remote CAS and fenced stale-worker rejection; no external WORM dependency. |
 | **D3. Bounded Worker & Controller** | `orchestration/*`, thin Workflows | Issue Outbox continuation/yield receipts, trusted Dispatch → Worker → Ingest, missed/duplicate Run replay, periodic recovery, no duplicate result ingestion. |
 | **D4. Trusted Publisher and Issue handoff** | `publisher/*`, `issue-thread.mjs` | Exact-SHA scratch patch application, deterministic PR/comment intent/receipt, Reviewer changes-requested then *same* Developer resumes and consumes Issue updates. |
 | **D5. Controlled full-chain fixture** | `e2e/acceptance/cases/1664/*`, existing Acceptance/Metrics | Separate fixture Issue/PR, real two-run native resume, Reviewer/repair, exact SHA Quality/eligible Acceptance, cancelled-post-publication dedupe and source-aligned telemetry. |
+
+D1 intentionally comes **before** real orphan Store activation: it uses a disposable encrypted fixture Artifact transferred between two distinct authenticated Runs, not a plaintext Artifact or the final `agent-store` ref. Authenticate the producer and exact digest before restore; expiration must fail visibly. D2 replaces the fixture transport with the versioned remote Store. This keeps the native-resume discovery exercise independent of ref-rollout work without weakening ciphertext-only policy.
 
 Workflows that **invoke models** use `agent-*` and emit existing canonical telemetry. Trusted deterministic Controller/Store/Publisher operations belong to the existing Acceptance/Task execution boundary, **not** a second `Agent /` model-running workflow. Add new workflow paths/display names to all authoritative allowlists and workflow-conventions Gates before enabling dispatch. Workflow changes receive their own direct-to-main PR per `.github/AGENTS.md`.
 
