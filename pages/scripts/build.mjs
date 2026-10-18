@@ -3,11 +3,14 @@ import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makeProjection, validateProjection } from './project.mjs';
 import { loadIssueRunObservations } from './issue-runs.mjs';
+import { loadPinnedE2E } from './acceptance-e2e.mjs';
 
 const repo = 'BestNathan/nession';
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const out = resolve(process.env.PAGES_OUT_DIR || join(root,'dist'));
 const metrics = resolve(process.env.METRICS_DIR || join(root,'../metrics-store'));
+const acceptance = resolve(process.env.ACCEPTANCE_RESULTS_DIR || join(root,'../acceptance-store'));
+const acceptanceSha = process.env.ACCEPTANCE_RESULTS_SHA;
 const token = process.env.GITHUB_TOKEN || '';
 async function optionalJson(file){
   try { return JSON.parse(await readFile(file,'utf8')); }
@@ -94,15 +97,20 @@ const selectedIssueNumbers=Array.isArray(issues)?issues
   .filter(x=>Number.isSafeInteger(x?.number)&&x.number>0&&!x.pull_request)
   .sort((a,b)=>String(b.updated_at||'').localeCompare(String(a.updated_at||''))||a.number-b.number)
   .slice(0,12).map(x=>x.number):[];
-const [issueTimelines,prReviews,issueRunSource]=await Promise.all([
+const [issueTimelines,prReviews,issueRunSource,acceptanceE2E]=await Promise.all([
   optionalIssueTimelines(issues),optionalPrReviews(pulls),
   loadIssueRunObservations({root:metrics,expectedSha:process.env.METRICS_SHA,
     issues:selectedIssueNumbers,at:generatedAt}),
+  loadPinnedE2E({root:acceptance,expectedSha:acceptanceSha,
+    prHeads:Array.isArray(pulls)?pulls.slice(0,12).map(x=>x.head?.sha).filter(Boolean):[],
+    workflowRuns:Array.isArray(workflowRuns)?workflowRuns:[],at:generatedAt}),
 ]);
 const refs=Object.fromEntries(['metrics','acceptance-results','task-results','agent-store'].map((name,index)=>[name,allRefs[index]]));
 const result=validateProjection(makeProjection({
-  repository,agent,registry,issues,pulls,workflowRuns,issueTimelines,prReviews,issueRunSource,refs,
-  meta:{ generated_at:generatedAt,main_sha:process.env.SOURCE_MAIN_SHA,metrics_sha:process.env.METRICS_SHA }
+  repository,agent,registry,issues,pulls,workflowRuns,issueTimelines,prReviews,
+  issueRunSource,acceptanceE2E,refs,
+  meta:{ generated_at:generatedAt,main_sha:process.env.SOURCE_MAIN_SHA,metrics_sha:process.env.METRICS_SHA,
+    acceptance_results_sha:acceptanceSha }
 }));
 await mkdir(join(out,'data'),{recursive:true});
 for(const name of ['index.html','styles.css','app.js','favicon.svg']) await copyFile(join(root,name),join(out,name));
@@ -114,5 +122,8 @@ console.log(JSON.stringify({
   repository:result.repository.available, agents:result.agents.available,
   issues:result.work.issues_status,pulls:result.work.pulls_status,
   agent_run_observation:result.work.agent_run_source,
+  acceptance_e2e:result.work.acceptance_e2e.status,
+  published_e2e_ids:result.work.acceptance_e2e.records.length,
+  lineage_status:result.work.lineage.status,
   stores:result.evidence.stores.map(x=>[x.name,x.state])
 }));

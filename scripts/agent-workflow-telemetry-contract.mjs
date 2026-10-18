@@ -35,6 +35,17 @@ const TRUSTED_TELEMETRY_SOURCES = new Map([
     events: new Set(['push', 'workflow_dispatch']),
     workflow_dispatch_main_only: true,
   }],
+  ['.github/workflows/agent-cursor-resume-seed.yml', {
+    workflow_id: 'agent-cursor-resume-seed',
+    events: new Set(['push', 'workflow_dispatch']),
+    workflow_dispatch_main_only: true,
+  }],
+  ['.github/workflows/agent-cursor-resume-verify.yml', {
+    workflow_id: 'agent-cursor-resume-verify',
+    events: new Set(['workflow_run']),
+    workflow_dispatch_main_only: false,
+    allowed_workflow_run_branches: new Set(['main']),
+  }],
 ]);
 
 export function validateTelemetrySourceRun(run, repository = process.env.GITHUB_REPOSITORY) {
@@ -53,6 +64,10 @@ export function validateTelemetrySourceRun(run, repository = process.env.GITHUB_
   }
   if (event === 'push' && source.allowed_push_branches && !source.allowed_push_branches.has(headBranch)) {
     throw new Error('untrusted telemetry source push branch for ' + path + ': ' + headBranch);
+  }
+  if (event === 'workflow_run' && source.allowed_workflow_run_branches &&
+      !source.allowed_workflow_run_branches.has(headBranch)) {
+    throw new Error('untrusted telemetry source workflow_run branch for ' + path + ': ' + headBranch);
   }
   if (source.workflow_dispatch_main_only && (event === 'workflow_dispatch' || event === 'push') && headBranch !== 'main') {
     throw new Error('workflow_dispatch telemetry is trusted only from main: ' + path + ' @ ' + headBranch);

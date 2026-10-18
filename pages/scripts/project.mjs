@@ -1,4 +1,6 @@
 // Strictly allowlisted, read-only public projection. No raw Agent events or private IDs.
+import {projectLineage,validateLineageProjection} from './lineage.mjs';
+import {validatePublicE2E} from './acceptance-e2e.mjs';
 const REPO = 'BestNathan/nession';
 const GH = 'https://github.com/' + REPO;
 const stores = [
@@ -190,7 +192,7 @@ function rosterFrom(registry, agentWindow) {
     observed_7d: Object.hasOwn(usage,id) ? number(usage[id]) : null,
   })).sort((a,b)=>a.role.localeCompare(b.role)||a.id.localeCompare(b.id));
 }
-export function makeProjection({ repository, agent, registry, issues, pulls, workflowRuns, issueTimelines, prReviews, issueRunSource, refs={}, meta={} }) {
+export function makeProjection({ repository, agent, registry, issues, pulls, workflowRuns, issueTimelines, prReviews, issueRunSource, acceptanceE2E, lineageEvidence, refs={}, meta={} }) {
   const r = repository?.schema_version === 2 ? repository : null;
   const a = agent?.schema_version === 1 && agent?.kind === 'agent_metrics_aggregate' ? agent : null;
   const current = r?.repository || {}, efficiency = r?.efficiency || {};
@@ -213,6 +215,7 @@ export function makeProjection({ repository, agent, registry, issues, pulls, wor
       repository:REPO,
       main_sha:safeSha(meta.main_sha),
       metrics_sha:safeSha(meta.metrics_sha),
+      acceptance_results_sha:safeSha(meta.acceptance_results_sha),
       issues_status:Array.isArray(issues)?'available':'unavailable',
       pulls_status:Array.isArray(pulls)?'available':'unavailable',
       workflow_runs_status:Array.isArray(workflowRuns)?'available':'unavailable',
@@ -264,6 +267,11 @@ export function makeProjection({ repository, agent, registry, issues, pulls, wor
       pulls_status:Array.isArray(pulls)?'available':'unavailable',
       workflow_runs_status:Array.isArray(workflowRuns)?'available':'unavailable',
       agent_run_source:['available','truncated'].includes(issueRunSource?.status)?issueRunSource.status:'unavailable',
+      lineage:projectLineage({issueNumbers:list(issues,'issue').map(x=>x.number),
+        pulls:list(pulls,'pr').map(x=>({number:x.number,
+          head_sha:pulls?.find(p=>p.number===x.number)?.head?.sha})),
+        attested:lineageEvidence}),
+      acceptance_e2e:acceptanceE2E||{status:'unavailable',source_sha:null,records:[]},
       issues:list(issues,'issue').map(x=>({
         ...x, observed_agent_runs_7d:observedIssueCount(aw,x.number),
         pr_references:timelineReferences(x.number,issueTimelines?.[String(x.number)]),
@@ -295,10 +303,15 @@ export function validateProjection(p) {
   if (!Array.isArray(p.agents?.roster) || !Array.isArray(p.evidence?.stores)) throw new Error('missing sections');
   // Schema is constructed by an allowlist. These keys would imply an accidental raw-data leak.
   allowedFields(p,['schema_version','generated_at','source','repository','agents','work','evidence'],'root');
-  allowedFields(p.source,['repository','main_sha','metrics_sha','issues_status','pulls_status','workflow_runs_status'],'source');
+  allowedFields(p.source,['repository','main_sha','metrics_sha','acceptance_results_sha','issues_status','pulls_status','workflow_runs_status'],'source');
   allowedFields(p.repository,['available','sha','generated_at','freshness','current','efficiency'],'repository');
   allowedFields(p.agents,['available','generated_at','freshness','roster','distribution','summary'],'agents');
-  allowedFields(p.work,['issues_status','pulls_status','workflow_runs_status','agent_run_source','issues','pulls'],'work');
+  allowedFields(p.work,['issues_status','pulls_status','workflow_runs_status','agent_run_source','lineage','acceptance_e2e','issues','pulls'],'work');
+  validateLineageProjection(p.work.lineage);
+  validatePublicE2E(p.work.acceptance_e2e);
+  if(p.work.acceptance_e2e.status!=='unavailable'&&
+     p.work.acceptance_e2e.source_sha!==p.source.acceptance_results_sha)
+    throw Error('E2E source checkout SHA mismatch');
   allowedFields(p.evidence,['stores'],'evidence');
   allowedFields(p.repository.current,['loc','files','tests','rust_coverage','web_coverage','protocol_units','unit_pass'],'repository.current');
   allowedFields(p.repository.efficiency,['commits_7d','additions_7d','deletions_7d','merged_7d','open_issues','open_prs'],'repository.efficiency');
