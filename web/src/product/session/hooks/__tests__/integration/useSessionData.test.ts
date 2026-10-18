@@ -149,4 +149,122 @@ describe('useSessionData', () => {
     expect(result.current.sessions[0].status).toBe('active');
     expect(result.current.sessions[0].window_count).toBe(3);
   });
+  // #1900: The server may finish a session.list request AFTER broadcasting a
+  // newer session report; an old unknown snapshot must not erase that report.
+  it('keeps a newer realtime bash command when an older list resolves unknown', async () => {
+    let resolveList!: (value: { sessions: Session[]; stale_agents?: string[] }) => void;
+    sessionsApiMock.fetchSessions.mockImplementation(() => new Promise((resolve) => {
+      resolveList = resolve;
+    }));
+    const { result } = renderHook(() => useSessionData());
+    let request!: Promise<void>;
+    act(() => { request = result.current.fetchSessions(); });
+
+    // Distinguish "no push" from "push seen but overwritten": the callback
+    // actually updates the hook to bash before the stale response resolves.
+    act(() => {
+      result.current.applyRealtimeSessions([makeSession({ foreground_command: 'bash' })]);
+    });
+    expect(result.current.sessions[0].foreground_command).toBe('bash');
+
+    await act(async () => {
+      resolveList({ sessions: [makeSession({ foreground_command: null })], stale_agents: ['a1'] });
+      await request;
+    });
+    expect(result.current.sessions[0].foreground_command).toBe('bash');
+    expect(result.current.staleAgents).toEqual([]);
+    expect(toast.warning).not.toHaveBeenCalled();
+    expect(result.current.loadingSessions).toBe(false);
+    expect(result.current.sessionsLoaded).toBe(true);
+  });
+
+  it('still accepts a list when no newer push arrived (not a missing-push workaround)', async () => {
+    sessionsApiMock.fetchSessions.mockResolvedValue({
+      sessions: [makeSession({ foreground_command: null })],
+    });
+    const { result } = renderHook(() => useSessionData());
+    await act(async () => { await result.current.fetchSessions(); });
+    expect(result.current.sessions[0].foreground_command).toBeNull();
+  });
+
+  it('allows subsequent server truth to clear bash back to unknown', () => {
+    const { result } = renderHook(() => useSessionData());
+    act(() => {
+      result.current.applyRealtimeSessions([makeSession({ foreground_command: 'bash' })]);
+    });
+    expect(result.current.sessions[0].foreground_command).toBe('bash');
+    act(() => {
+      result.current.applyRealtimeSessions([makeSession({ foreground_command: null })]);
+    });
+    expect(result.current.sessions[0].foreground_command).toBeNull();
+    // Full list replacements also have legitimate deletion authority.
+    act(() => { result.current.applyRealtimeSessions([]); });
+    expect(result.current.sessions).toEqual([]);
+  });
+
+  it('lets an explicitly later fetch update workload after the earlier push', async () => {
+    const { result } = renderHook(() => useSessionData());
+    act(() => {
+      result.current.applyRealtimeSessions([makeSession({ foreground_command: 'bash' })]);
+    });
+    sessionsApiMock.fetchSessions.mockResolvedValue({
+      sessions: [makeSession({ foreground_command: null })],
+    });
+    await act(async () => { await result.current.fetchSessions({ force: true }); });
+    expect(result.current.sessions[0].foreground_command).toBeNull();
+  });
+
+  it('ignores an older concurrent list even when it resolves after the later fetch', async () => {
+    const resolves: Array<(value: { sessions: Session[]; stale_agents?: string[] }) => void> = [];
+    sessionsApiMock.fetchSessions.mockImplementation(() => new Promise((resolve) => {
+      resolves.push(resolve);
+    }));
+    const { result } = renderHook(() => useSessionData());
+    let first!: Promise<void>, second!: Promise<void>;
+    act(() => {
+      first = result.current.fetchSessions();
+      second = result.current.fetchSessions({ force: true });
+    });
+    await act(async () => {
+      resolves[1]({ sessions: [makeSession({ foreground_command: 'bash' })] });
+      await second;
+    });
+    expect(result.current.sessions[0].foreground_command).toBe('bash');
+    await act(async () => {
+      resolves[0]({ sessions: [makeSession({ foreground_command: null })], stale_agents: ['a1'] });
+      await first;
+    });
+    expect(result.current.sessions[0].foreground_command).toBe('bash');
+    expect(result.current.staleAgents).toEqual([]);
+    expect(result.current.loadingSessions).toBe(false);
+  });
+
+  it('does not allow a pre-create request to erase a new authoritative ACK row', async () => {
+    let resolveList!: (value: { sessions: Session[] }) => void;
+    sessionsApiMock.fetchSessions.mockImplementation(() => new Promise((resolve) => {
+      resolveList = resolve;
+    }));
+    const { result } = renderHook(() => useSessionData());
+    let pending!: Promise<void>;
+    act(() => { pending = result.current.fetchSessions(); });
+    act(() => { result.current.insertSession(makeSession({ session_id: 'a1:acked' })); });
+    await act(async () => { resolveList({ sessions: [] }); await pending; });
+    expect(result.current.sessions.map(s => s.session_id)).toEqual(['a1:acked']);
+  });
+
+  it('does not surface a stale request error after newer realtime success', async () => {
+    let rejectList!: (error: Error) => void;
+    sessionsApiMock.fetchSessions.mockImplementation(() => new Promise((_, reject) => {
+      rejectList = reject;
+    }));
+    const { result } = renderHook(() => useSessionData());
+    let pending!: Promise<void>;
+    act(() => { pending = result.current.fetchSessions(); });
+    act(() => { result.current.applyRealtimeSessions([makeSession({ foreground_command: 'bash' })]); });
+    await act(async () => { rejectList(new Error('superseded request')); await pending; });
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(result.current.sessions[0].foreground_command).toBe('bash');
+    expect(result.current.loadingSessions).toBe(false);
+  });
+
 });
