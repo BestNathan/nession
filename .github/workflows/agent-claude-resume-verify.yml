@@ -1,0 +1,105 @@
+name: Agent / Claude Resume Verify
+
+# Distinct second authenticated GitHub Run, using exact source SHA and ZIP digest.
+on:
+  workflow_run:
+    workflows:
+      - Agent / Claude Resume Seed
+    types: [completed]
+
+env:
+  NSESSION_AGENT_WORKFLOW_ID: agent-claude-resume-verify
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  resume:
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.repository.full_name == 'BestNathan/nession' &&
+      github.event.workflow_run.head_repository.full_name == 'BestNathan/nession'
+    runs-on: ubuntu-latest
+    environment: dev-claude-qwen
+    timeout-minutes: 15
+    env:
+      ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
+      ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
+      ACCEPTANCE_CLAUDE_MODEL: ${{ vars.ACCEPTANCE_CLAUDE_MODEL || vars.ANTHROPIC_MODEL }}
+      CLAUDE_CODE_VERSION: ${{ vars.CLAUDE_CODE_VERSION || 'latest' }}
+      SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+      SOURCE_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+      SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - name: Checkout the exact authenticated Seed main SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Authenticate source Run and unique encrypted Artifact
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID" > "$RUNNER_TEMP/claude-source-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/claude-source-artifacts.json"
+          node scripts/lib/agent/providers/claude-resume-fixture.mjs verify-source \
+            "$RUNNER_TEMP/claude-source-run.json" "$RUNNER_TEMP/claude-source-artifacts.json" \
+            "$SOURCE_RUN_ID" "$SOURCE_RUN_ATTEMPT" "$SOURCE_SHA" > "$RUNNER_TEMP/claude-authorized-artifact.json"
+      - name: Fetch exact authenticated ZIP and verify bytes before extraction
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          artifact_id="$(jq -er .artifact_id "$RUNNER_TEMP/claude-authorized-artifact.json")"
+          digest="$(jq -er .digest "$RUNNER_TEMP/claude-authorized-artifact.json")"
+          [[ "$artifact_id" =~ ^[1-9][0-9]*$ ]] || exit 1
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" \
+            > "$RUNNER_TEMP/claude-seed.zip"
+          python3 scripts/lib/agent/providers/cursor-resume-zip.py \
+            "$RUNNER_TEMP/claude-seed.zip" "$digest" "$RUNNER_TEMP/claude-source-input"
+      - name: Install matching native Claude CLI
+        run: |
+          set -euo pipefail
+          npm install -g "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION"
+          claude --version
+      - name: Restore Session without model execution or gateway token
+        env:
+          CLAUDE_RESUME_PRIVATE_KEY_B64: ${{ secrets.CLAUDE_RESUME_PRIVATE_KEY_B64 }}
+        run: |
+          set -euo pipefail
+          node scripts/lib/agent/providers/claude-resume-fixture.mjs unseal \
+            "$RUNNER_TEMP/claude-source-input" "$RUNNER_TEMP/claude-native-config"
+      - name: Native --resume with fresh restricted tool policy and retained-context proof
+        run: |
+          set -euo pipefail
+          node scripts/lib/agent/providers/claude-resume-fixture.mjs resume \
+            "$RUNNER_TEMP/claude-source-input" "$RUNNER_TEMP/claude-native-config" \
+            "$RUNNER_TEMP/claude-resume-output"
+      - name: Publish canonical Agent telemetry
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-telemetry-claude-resume-verify-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/claude-resume-output/agent-telemetry.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Publish sanitized real cross-Run native Session continuity proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-resume-verification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/claude-resume-output/verification.json
+            ${{ runner.temp }}/claude-resume-output/agent-telemetry.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Clear ephemeral decrypted native Session
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/claude-native-config"
