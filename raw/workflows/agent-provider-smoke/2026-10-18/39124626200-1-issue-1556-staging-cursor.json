@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "kind": "agent_workflow_run",
+  "identity": {
+    "workflow_id": "agent-provider-smoke",
+    "github_workflow": "Agent / Provider Smoke",
+    "github_run_id": 39124626200,
+    "github_run_attempt": 1,
+    "job": "execute",
+    "repository": "BestNathan/nession",
+    "event": "push",
+    "unique_run_name": "39124626200-1-issue-1556-staging-cursor"
+  },
+  "task": {
+    "id": "issue-1556-staging",
+    "type": "acceptance",
+    "issue": 1556,
+    "stage": "staging",
+    "target_ref": "ab35bd44bcdc8ce2035d260c86eee585dea219d6",
+    "deployment": null
+  },
+  "agent": {
+    "provider": "cursor",
+    "id": "legacy-acceptance-cursor",
+    "role": "acceptor",
+    "harness_sha256": null,
+    "checkpoint_id": null,
+    "model": {
+      "id": "composer-2.5",
+      "fast": true,
+      "params": [
+        {
+          "id": "fast",
+          "value": "true"
+        }
+      ]
+    },
+    "run_id": "run-0474ba7d-2ae0-4083-95be-b18b225765b5",
+    "request_id": "5e8e259d-6a80-4446-bef6-3a3f67f712de",
+    "status": "finished",
+    "prompt": {
+      "id": "acceptance",
+      "version": "v1",
+      "sha256": "2c49bb25da2180d1f5a1ee837b5364dca2851452305e4e9e904ee99ccc6ddb01"
+    }
+  },
+  "execution": {
+    "turns": 1,
+    "model_requests": 1,
+    "tools": {
+      "observed": true,
+      "total": 0,
+      "unique": 0,
+      "by_name": {}
+    }
+  },
+  "tokens": {
+    "input": 5539,
+    "output": 669,
+    "cache_read": 1504,
+    "cache_write": 0,
+    "reasoning": null,
+    "total": 7712
+  },
+  "cost": {
+    "raw_usd": null,
+    "charged_usd": null,
+    "estimated_usd": null
+  },
+  "timing": {
+    "started_at": "2026-10-18T11:47:16.980Z",
+    "finished_at": "2026-10-18T11:47:21.851Z",
+    "agent_duration_ms": 4749,
+    "workflow_duration_ms": null
+  },
+  "result": {
+    "status": "completed",
+    "pass": 0,
+    "pending": 1,
+    "fail": 0,
+    "na": 0
+  }
+}

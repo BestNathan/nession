@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "kind": "agent_execution_trace",
+  "identity": {
+    "workflow_id": "agent-provider-smoke",
+    "github_run_id": 39124626200,
+    "github_run_attempt": 1,
+    "unique_run_name": "39124626200-1-issue-1556-staging-cursor",
+    "repository": "BestNathan/nession"
+  },
+  "task": {
+    "id": "issue-1556-staging",
+    "type": "acceptance",
+    "issue": 1556,
+    "target_sha": "ab35bd44bcdc8ce2035d260c86eee585dea219d6"
+  },
+  "agent": {
+    "id": "legacy-acceptance-cursor",
+    "role": "acceptor",
+    "provider": "cursor",
+    "harness_sha256": null
+  },
+  "timing": {
+    "started_at": "2026-10-18T11:47:16.980Z",
+    "finished_at": "2026-10-18T11:47:21.851Z"
+  },
+  "coverage": {
+    "model": "observed",
+    "tools": "unobserved",
+    "skills": "unobserved",
+    "mcp": "unobserved"
+  },
+  "events": [
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "model.usage",
+      "sequence": 0,
+      "identity": {
+        "agent_id": "legacy-acceptance-cursor",
+        "role": "acceptor",
+        "issue": 1556,
+        "github_run_id": 39124626200,
+        "github_run_attempt": 1
+      },
+      "data": {
+        "usage": {
+          "input": 5539,
+          "output": 669,
+          "cache_read": 1504,
+          "cache_write": 0,
+          "reasoning": null
+        },
+        "request_id": null,
+        "observation": "native-event"
+      }
+    }
+  ]
+}
