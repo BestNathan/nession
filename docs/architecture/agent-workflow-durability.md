@@ -147,6 +147,31 @@ Reconciler polls completed/cancelled/failed Runs, expired leases, pending Outbox
 | **D4. Trusted Publisher and Issue handoff** | `publisher/*`, `issue-thread.mjs` | Exact-SHA scratch patch application, deterministic PR/comment intent/receipt, Reviewer changes-requested then *same* Developer resumes and consumes Issue updates. |
 | **D5. Controlled full-chain fixture** | `e2e/acceptance/cases/1664/*`, existing Acceptance/Metrics | Separate fixture Issue/PR, real two-run native resume, Reviewer/repair, exact SHA Quality/eligible Acceptance, cancelled-post-publication dedupe and source-aligned telemetry. |
 
+### Operator activation of the synthetic D1 workflow
+
+The first main push after merging the D1 workflow demonstrated **skipped**, not
+successful, Seed/Verify runs when the public-key variable is absent. This is
+intentional fail-closed behavior and is not acceptance evidence.
+
+An authorized repository operator can provision the extra D1 **fixture** RSA
+keypair locally using an authenticated GitHub CLI, without writing a private key
+to a file or pasting it into a GitHub Issue:
+
+```sh
+node scripts/lib/agent/providers/cursor-resume-setup.mjs --apply
+```
+
+The script stores `CURSOR_RESUME_PRIVATE_KEY_B64` in the `cursor` GitHub
+Environment secret scope and `CURSOR_RESUME_PUBLIC_KEY_B64` in Repository
+Actions Variables, in that order. This is separate from the owner-deferred
+#1690 administrative Ruleset / external-anchor requirements. It only protects
+sensitive native conversation bytes while transferring between GitHub Runs.
+Operators must have GitHub settings permissions and a valid `gh auth` session;
+the Agent workflow or model must not execute this script. A subsequent main
+`workflow_dispatch` for `Agent / Cursor Resume Seed` performs the real
+verification. Two successful, independently authenticated Run IDs and a
+matching source Artifact checksum are required before D1 can be marked passed.
+
 D1 intentionally comes **before** real orphan Store activation: it uses a disposable encrypted fixture Artifact transferred between two distinct authenticated Runs, not a plaintext Artifact or the final `agent-store` ref. Authenticate the producer and exact digest before restore; expiration must fail visibly. D2 replaces the fixture transport with the versioned remote Store. This keeps the native-resume discovery exercise independent of ref-rollout work without weakening ciphertext-only policy.
 
 Workflows that **invoke models** use `agent-*` and emit existing canonical telemetry. Trusted deterministic Controller/Store/Publisher operations belong to the existing Acceptance/Task execution boundary, **not** a second `Agent /` model-running workflow. Add new workflow paths/display names to all authoritative allowlists and workflow-conventions Gates before enabling dispatch. Workflow changes receive their own direct-to-main PR per `.github/AGENTS.md`.
