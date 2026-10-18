@@ -241,6 +241,11 @@ function selfTest(){
     "github.event_name == 'schedule' || steps.event_artifacts.outputs.count != '0'",
     "github.event_name == 'schedule' || steps.event_artifacts.outputs.count == '0'"
   )),/empty telemetry events/);
+  // Empty telemetry must not proceed through source resolution after preflight.
+  assert.throws(()=>validateRecoveryRouting(workflow.replace(
+    "if: (github.event_name == 'workflow_run' && steps.event_artifacts.outputs.count != '0') || steps.reconcile.outputs.run_id != ''",
+    "if: github.event_name == 'workflow_run' || steps.reconcile.outputs.run_id != ''"
+  )),/empty telemetry events/);
   assert.throws(()=>validateRecoveryRouting(workflow.replace(
     '"${RUN_ATTEMPT}" == "${EVENT_RUN_ATTEMPT}"',
     '"${RUN_ATTEMPT}" != "${EVENT_RUN_ATTEMPT}"'
