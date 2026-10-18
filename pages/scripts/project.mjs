@@ -301,6 +301,8 @@ export function validateProjection(p) {
   for(const item of p.work.pulls){
     allowedFields(item.review,['status','latest'],'PR review');
     if(!['available','truncated','unavailable'].includes(item.review.status))throw Error('invalid review source status');
+    if(item.review.status==='unavailable'&&item.review.latest!==null)
+      throw Error('unavailable review source cannot certify an event');
     if(item.review.latest!==null){
       const review=item.review.latest;
       allowedFields(review,['review_id','commit_sha','state','submitted_at','url'],'PR review event');
