@@ -80,6 +80,18 @@ describe('AppliedTerminalCursor (#1953)', () => {
     expect(tracker.recordParsed(next, pos(Number.MAX_SAFE_INTEGER + 1))).toBe('invalid');
   });
 
+  it('revokes the old binding even when a requested new baseline is invalid', () => {
+    const tracker = new AppliedTerminalCursor();
+    const old = tracker.beginFromVerifiedBaseline(baseline(7, 4));
+    expect(tracker.snapshot(old)?.appliedSeq).toBe(4);
+    expect(() => tracker.beginFromVerifiedBaseline(baseline(0, 0))).toThrow(RangeError);
+    expect(tracker.snapshot(old)).toBeNull();
+    expect(tracker.recordParsed(old, pos(5))).toBe('stale');
+    const fresh = tracker.beginFromVerifiedBaseline(baseline(8, 0));
+    expect(fresh.generation).toBeGreaterThan(old.generation);
+    expect(tracker.recordParsed(fresh, pos(1, 8))).toBe('advanced');
+  });
+
   it('does not collapse a high safe sequence or manufacture the next event', () => {
     const tracker = new AppliedTerminalCursor();
     const through = Number.MAX_SAFE_INTEGER - 3;
