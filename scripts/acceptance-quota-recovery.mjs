@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Trusted main, bounded scheduled replay of stranded Acceptance failed jobs.
 import assert from 'node:assert/strict';
-const REPO='BestNathan/nession',SHA=/^[a-f0-9]{40}$/,MAX=4;
+const REPO='BestNathan/nession',SHA=/^[a-f0-9]{40}$/,MAX=4,MAX_ATTEMPTS=3;
 const ACCEPT='.github/workflows/acceptance-orchestrator.yml';
 const SOURCES=[['ci-quality.yml','CI / Quality Gate'],['e2e-tests.yml','E2E / Tests']];
 function ok(v,m){if(!v)throw Error('acceptance quota recovery: '+m)}
@@ -29,7 +29,8 @@ export function candidates(runs,pulls){
   }
   const eligible=[];
   for(const r of latest.values()){
-    if(r.status!=='completed'||r.conclusion!=='failure')continue;
+    if(r.status!=='completed'||r.conclusion!=='failure'||
+      r.run_attempt>=MAX_ATTEMPTS)continue;
     const matches=pulls.filter(p=>p.state==='open'&&id(p.number)&&
       p.head?.sha===r.head_sha&&p.head?.ref===r.head_branch&&
       p.head?.repo?.full_name===REPO&&['main','staging'].includes(p.base?.ref));
@@ -77,7 +78,8 @@ export async function reconcile(request,log=()=>{}){
       prLive.head?.ref!==run.head_branch||prLive.head?.repo?.full_name!==REPO||
       prLive.base?.ref!==pr.base.ref||!source(current)||current.id!==run.id||
       current.head_sha!==run.head_sha||current.head_branch!==run.head_branch||
-      current.run_attempt!==run.run_attempt||current.status!=='completed'||
+      current.run_attempt!==run.run_attempt||
+      current.run_attempt>=MAX_ATTEMPTS||current.status!=='completed'||
       current.conclusion!=='failure')continue;
     await request(root+'actions/runs/'+run.id+'/rerun-failed-jobs','POST');
     retried++;
@@ -126,6 +128,8 @@ async function selfTest(){
   assert.equal(candidates([run()],[pull(),pull()]).length,0);
   assert.equal(candidates([run(),run({id:10,created_at:'2026-10-18T12:01:00Z',
     status:'queued',conclusion:null})],[pull()]).length,0);
+  assert.equal(candidates([run({run_attempt:3})],[pull()]).length,0);
+  assert.equal(candidates([run({run_attempt:4})],[pull()]).length,0);
   for(const [file,name] of SOURCES){
     assert.equal(proof([check(file,name)],file,name,'a'.repeat(40),7,'fix/a'),true);
     assert.equal(proof([check(file,name,{pull_requests:[]})],file,name,'a'.repeat(40),7,'fix/a'),true);
@@ -159,6 +163,7 @@ async function selfTest(){
   assert.ok(seen.length<=7);
   seen.length=0;
   assert.equal((await reconcile(mocked({live:run({run_attempt:2})}))).retried,0);
+  assert.equal((await reconcile(mocked({live:run({run_attempt:3})}))).retried,0);
   assert.equal(seen.filter(x=>x.startsWith('POST ')).length,0);
   assert.equal((await reconcile(mocked({badProof:true}))).retried,0);
   assert.equal((await reconcile(mocked({freshPR:pull({state:'closed'})}))).retried,0);
@@ -170,7 +175,7 @@ async function selfTest(){
   assert.ok(!(classify(403,{},'permission denied') instanceof RateLimited));
   assert.ok(candidates(Array.from({length:100},(_,i)=>run({id:100+i,
     head_branch:'b'+i,head_sha:(i.toString(16).padStart(40,'a')).slice(-40)})),[]).length<=MAX);
-  console.log('Acceptance quota recovery: exact SHA, stale attempt, exhausted quota, wrong proof, idempotency and bounded bursts passed');
+  console.log('Acceptance quota recovery: exact SHA, stale attempt, capped retry budget, exhausted quota, wrong proof, idempotency and bounded bursts passed');
 }
 async function main(){
   if(process.argv[2]==='self-test')return selfTest();

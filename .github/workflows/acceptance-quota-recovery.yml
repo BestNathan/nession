@@ -4,7 +4,7 @@ name: Acceptance / Quota Recovery
 # Bounded historical discovery; never fabricates an Acceptance verdict.
 on:
   schedule:
-    - cron: '17,47 * * * *'
+    - cron: '7,22,37,52 * * * *'
 
 permissions:
   contents: read
