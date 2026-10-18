@@ -212,7 +212,13 @@ export function attestE2eNotRequiredReceipt(receipt, run, job) {
   validateE2eNotRequiredReceipt(receipt);
   const steps = Array.isArray(job?.steps) ? job.steps : [];
   for (const [key, name, expected] of E2E_NOT_REQUIRED_STEPS) {
-    const matches = steps.filter((step) => step?.name === name);
+    // Canonical E2E renamed this step to "(standalone)" when selected
+    // plans were introduced. Verify exactly one recognized step, not an
+    // arbitrary or missing step, and still require GitHub's success verdict.
+    const expectedNames = key === 'design_gate'
+      ? [name, 'Run canonical browser design gate (standalone)']
+      : [name];
+    const matches = steps.filter((step) => expectedNames.includes(step?.name));
     // The job API must agree with the receipt's claimed outcome, and the
     // required design gate must actually have run and passed.
     if (matches.length !== 1 || matches[0].conclusion !== expected ||
@@ -457,6 +463,22 @@ function selfTest() {
   assert.deepEqual(nrAttested.skipped_e2e_only_steps,
     ['rust_toolchain', 'cargo_build', 'tmux']);
   assert.equal(nrAttested.design_gate, 'success');
+  // The real selected-plan E2E workflow now runs a standalone canonical
+  // browser design gate; old receipts are still accepted only if GitHub
+  // authenticates the exact legacy step, never on a missing/false result.
+  const standaloneJob = {...nrJob, steps:nrJob.steps.map(s=>
+    s.name==='Run canonical browser design gate'
+      ? {...s,name:'Run canonical browser design gate (standalone)'} : s)};
+  assert.equal(attestE2eNotRequiredReceipt(nr, run, standaloneJob).design_gate,
+    'success');
+  reject(()=>attestE2eNotRequiredReceipt(nr, run, {...standaloneJob,
+    steps:[...standaloneJob.steps,
+      {name:'Run canonical browser design gate',conclusion:'success'}]}),
+    /provenance mismatch/);
+  reject(()=>attestE2eNotRequiredReceipt(nr, run, {...standaloneJob,
+    steps:standaloneJob.steps.map(s=>
+      s.name==='Run canonical browser design gate (standalone)'
+        ? {...s,conclusion:'skipped'} : s)}),/provenance mismatch/);
   // The design gate must have RUN: a skipped design gate is not a Pass.
   assert.equal(makeE2eNotRequiredReceipt({ env, sha,
     steps: { ...nrSteps, design_gate: 'skipped' } }), null);
