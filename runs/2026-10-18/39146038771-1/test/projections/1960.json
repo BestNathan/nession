@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_projection_receipt",
+  "outcome": "applied",
+  "issue": 1960,
+  "run_id": 39146038771,
+  "run_attempt": 1,
+  "target_sha": "e6118c05e655bb2aad57b2062158bac7606fc488",
+  "plan_digest": "358fb129fdc5db740768c6e957a12b1cad446214ad4cce0a1fc9c04d8e4abc5f",
+  "artifact_digest": "sha256:37b05f92eca58d8b5908d11df2beb1cbbf0318abb653ee0e0dc07037d4fdc5b0",
+  "ingest_run_id": 39146461064,
+  "ingest_attempt": 1,
+  "declaration_digest": "545939685ebf231c2c81fa6d31d9f7864ece983ab79f8e40ae1f1b81bf5855b6",
+  "before_body_sha256": "02bc6b34aa19d284646888f2ec3cb476fe50f0b6281fb26713ec6fd49062068a",
+  "body_sha256": "9c825821e37cdd179b4b95b471734752f847fd823eab75bd276da01d0f7d571b",
+  "readback_body": "## Requirements: Public Pages canonical Agent Store source readiness, fail closed\n\n**Parents:** #1906, #1664. The real `agent-store` ref is now present but its root is empty as of this issue; this is distinct from a missing ref, an authenticated v2 receipt, and an independently audited store.\n\n### Scope\n- At trusted Pages build time, use bounded read-only GitHub REST checks against **only** `refs/heads/agent-store`; pin the branch commit SHA already resolved from GitHub and query its root `contents?ref=<exact commit SHA>` (not a moving branch reference). Explicitly classify `missing`, `empty`, `candidate_unverified`, `unavailable`. Reject foreign repository links, invalid SHA/root shape, pagination/oversized or malformed entries, API errors and ref drift fail closed.\n- `empty` requires a verified branch SHA + exactly empty root listing. `candidate_unverified` requires a source-tree entry but **never** authenticates v2 or infers current PR/Slice/SC causality. Present count null rather than claimed zero for unknown/truncated sources.\n- Export only metadata status, exact source SHA and canonical GitHub ref URL in the standalone Pages versioned allowlist. Public Work/evidence drilldown says why PR/Slice is Unlinked and what external source must appear.\n- No privileged browser API, local `agent-store` writer, secrets, raw Agent data, new permission, product `web/` coupling. Keep current `work.lineage.status=unavailable` until a separately authenticated v2 producer+writer receipt is actually verified.\n- Deterministic negative fixtures include stale pinned SHA, invalid entries, GitHub errors, absent/empty and forged candidate flags. Existing Pages CI/E2E and canonical Acceptance gates must pass.\n\n### Success Criteria\n- [ ] SC-01 Read-only exact-source-sha Agent Store readiness correctly distinguishes missing / empty / candidate unverified / unavailable without asserting ownership or completeness.\n- [ ] SC-02 Public Pages source-safe schema and UI preserve Unlinked causality and SC Unknown, sanitize metadata and reject malformed/extra fields.\n- [ ] SC-03 Negative tests and existing `pages-overview`/`pages-evidence` regressions pass with standalone Pages CI, Quality Gate, Case Smoke and read-only Agent evaluation (final Acceptance separately gates merge).\n\n## Acceptance Plan\n```yaml\nacceptance:\n  SC-01:\n    when: pr\n    method: agent\n  SC-02:\n    when: pr\n    method: agent\n  SC-03:\n    when: pr\n    method: agent\n```\n\n## Acceptance Report\n| Criterion | Stage | Result | Evidence |\n|---|---|---|---|\n| SC-01 | pre-merge | Pending | - |\n| SC-02 | pre-merge | Pending | - |\n| SC-03 | pre-merge | Pending | - |\n\n## E2E Verification\n### New\n- none: extend existing Pages tests.\n### Regression\n- pages-overview\n- pages-evidence\n\n## E2E Report\n\n| ID | Type | Result | Evidence |\n|---|---|---|---|\n| pages-evidence | Regression | Pass | run 39146038771/1, SHA e6118c05e655bb2aad57b2062158bac7606fc488, contract 545939685ebf231c2c81fa6d31d9f7864ece983ab79f8e40ae1f1b81bf5855b6, plan 358fb129fdc5db740768c6e957a12b1cad446214ad4cce0a1fc9c04d8e4abc5f, tests 3/3 (https://github.com/BestNathan/nession/actions/runs/39146038771) |\n| pages-overview | Regression | Pass | run 39146038771/1, SHA e6118c05e655bb2aad57b2062158bac7606fc488, contract 545939685ebf231c2c81fa6d31d9f7864ece983ab79f8e40ae1f1b81bf5855b6, plan 358fb129fdc5db740768c6e957a12b1cad446214ad4cce0a1fc9c04d8e4abc5f, tests 4/4 (https://github.com/BestNathan/nession/actions/runs/39146038771) |\n\n## Product alignment\n\n- [ ] Does this move Nession toward VISION.md?\n- [ ] Does it obey PRINCIPLE.md?\n- [ ] Were relevant docs/design/* sources checked?\n- [ ] Is any deviation explicit?\n\n---\n**Status:** Approved",
+  "patch_updated_at": "2026-10-18T16:45:49Z",
+  "readback_updated_at": "2026-10-18T16:45:49Z",
+  "rows": [
+    {
+      "id": "pages-evidence",
+      "result": "Pass",
+      "evidence": "run 39146038771/1, SHA e6118c05e655bb2aad57b2062158bac7606fc488, contract 545939685ebf231c2c81fa6d31d9f7864ece983ab79f8e40ae1f1b81bf5855b6, plan 358fb129fdc5db740768c6e957a12b1cad446214ad4cce0a1fc9c04d8e4abc5f, tests 3/3 (https://github.com/BestNathan/nession/actions/runs/39146038771)"
+    },
+    {
+      "id": "pages-overview",
+      "result": "Pass",
+      "evidence": "run 39146038771/1, SHA e6118c05e655bb2aad57b2062158bac7606fc488, contract 545939685ebf231c2c81fa6d31d9f7864ece983ab79f8e40ae1f1b81bf5855b6, plan 358fb129fdc5db740768c6e957a12b1cad446214ad4cce0a1fc9c04d8e4abc5f, tests 4/4 (https://github.com/BestNathan/nession/actions/runs/39146038771)"
+    }
+  ]
+}
