@@ -7,6 +7,6 @@
   "scripts": {
     "test": "node --test tests/*.test.mjs",
     "build": "node scripts/build.mjs",
-    "check": "node --check app.js && node --check scripts/project.mjs && node --check scripts/build.mjs && npm test"
+    "check": "node --check app.js && node --check scripts/project.mjs && node --check scripts/lineage.mjs && node --check scripts/acceptance-e2e.mjs && node --check scripts/build.mjs && npm test"
   }
 }
