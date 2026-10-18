@@ -1,0 +1,289 @@
+{
+  "schema_version": 1,
+  "kind": "agent_execution_trace",
+  "identity": {
+    "workflow_id": "requirement-acceptance",
+    "github_run_id": 39133972983,
+    "github_run_attempt": 2,
+    "unique_run_name": "39133972983-2-issue-1927-pre-merge",
+    "repository": "BestNathan/nession"
+  },
+  "task": {
+    "id": "issue-1927-pre-merge",
+    "type": "acceptance",
+    "issue": 1927,
+    "target_sha": "a3ab97999743ed0c1a7889169fc7348d17efabb3"
+  },
+  "agent": {
+    "id": "legacy-acceptance-cursor",
+    "role": "acceptor",
+    "provider": "cursor",
+    "harness_sha256": null
+  },
+  "timing": {
+    "started_at": "2026-10-18T14:10:52.992Z",
+    "finished_at": "2026-10-18T14:11:05.208Z"
+  },
+  "coverage": {
+    "model": "observed",
+    "tools": "partial",
+    "skills": "unobserved",
+    "mcp": "unobserved"
+  },
+  "events": [
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "tool.started",
+      "sequence": 0,
+      "identity": {
+        "agent_id": "legacy-acceptance-cursor",
+        "role": "acceptor",
+        "issue": 1927,
+        "github_run_id": 39133972983,
+        "github_run_attempt": 2
+      },
+      "data": {
+        "call_id": "tool_0f0c1eb5-1f4b-499b-990b-c44f95458ff",
+        "tool": {
+          "id": "repo.read",
+          "native_name": "read",
+          "observed": true
+        },
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "tool.started",
+      "sequence": 1,
+      "identity": {
+        "agent_id": "legacy-acceptance-cursor",
+        "role": "acceptor",
+        "issue": 1927,
+        "github_run_id": 39133972983,
+        "github_run_attempt": 2
+      },
+      "data": {
+        "call_id": "tool_e50b7e5f-de33-49c4-984f-adaf60aaf80",
+        "tool": {
+          "id": "repo.search",
+          "native_name": "glob",
+          "observed": true
+        },
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "tool.started",
+      "sequence": 2,
+      "identity": {
+        "agent_id": "legacy-acceptance-cursor",
+        "role": "acceptor",
+        "issue": 1927,
+        "github_run_id": 39133972983,
+        "github_run_attempt": 2
+      },
+      "data": {
+        "call_id": "tool_2ccff68a-d8e2-4f75-a0b9-c7793ba2207",
+        "tool": {
+          "id": "repo.search",
+          "native_name": "grep",
+          "observed": true
+        },
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "tool.completed",
+      "sequence": 3,
+      "identity": {
+        "agent_id": "legacy-acceptance-cursor",
+        "role": "acceptor",
+        "issue": 1927,
+        "github_run_id": 39133972983,
+        "github_run_attempt": 2
+      },
+      "data": {
+        "call_id": "tool_e50b7e5f-de33-49c4-984f-adaf60aaf80",
+        "tool": {
+          "id": "repo.search",
+          "native_name": "glob",
+          "observed": true
+        },
+        "status": "completed",
+        "duration_ms": null,
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "tool.completed",
+      "sequence": 4,
+      "identity": {
+        "agent_id": "legacy-acceptance-cursor",
+        "role": "acceptor",
+        "issue": 1927,
+        "github_run_id": 39133972983,
+        "github_run_attempt": 2
+      },
+      "data": {
+        "call_id": "tool_2ccff68a-d8e2-4f75-a0b9-c7793ba2207",
+        "tool": {
+          "id": "repo.search",
+          "native_name": "grep",
+          "observed": true
+        },
+        "status": "completed",
+        "duration_ms": null,
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "tool.completed",
+      "sequence": 5,
+      "identity": {
+        "agent_id": "legacy-acceptance-cursor",
+        "role": "acceptor",
+        "issue": 1927,
+        "github_run_id": 39133972983,
+        "github_run_attempt": 2
+      },
+      "data": {
+        "call_id": "tool_0f0c1eb5-1f4b-499b-990b-c44f95458ff",
+        "tool": {
+          "id": "repo.read",
+          "native_name": "read",
+          "observed": true
+        },
+        "status": "completed",
+        "duration_ms": null,
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "tool.started",
+      "sequence": 6,
+      "identity": {
+        "agent_id": "legacy-acceptance-cursor",
+        "role": "acceptor",
+        "issue": 1927,
+        "github_run_id": 39133972983,
+        "github_run_attempt": 2
+      },
+      "data": {
+        "call_id": "tool_006ea109-88e9-462f-b689-6411b1e51b8",
+        "tool": {
+          "id": "repo.read",
+          "native_name": "read",
+          "observed": true
+        },
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "tool.completed",
+      "sequence": 7,
+      "identity": {
+        "agent_id": "legacy-acceptance-cursor",
+        "role": "acceptor",
+        "issue": 1927,
+        "github_run_id": 39133972983,
+        "github_run_attempt": 2
+      },
+      "data": {
+        "call_id": "tool_006ea109-88e9-462f-b689-6411b1e51b8",
+        "tool": {
+          "id": "repo.read",
+          "native_name": "read",
+          "observed": true
+        },
+        "status": "completed",
+        "duration_ms": null,
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "tool.started",
+      "sequence": 8,
+      "identity": {
+        "agent_id": "legacy-acceptance-cursor",
+        "role": "acceptor",
+        "issue": 1927,
+        "github_run_id": 39133972983,
+        "github_run_attempt": 2
+      },
+      "data": {
+        "call_id": "tool_c3d8b3cf-4f14-4e49-81ba-7355df8c488",
+        "tool": {
+          "id": "repo.search",
+          "native_name": "grep",
+          "observed": true
+        },
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "tool.completed",
+      "sequence": 9,
+      "identity": {
+        "agent_id": "legacy-acceptance-cursor",
+        "role": "acceptor",
+        "issue": 1927,
+        "github_run_id": 39133972983,
+        "github_run_attempt": 2
+      },
+      "data": {
+        "call_id": "tool_c3d8b3cf-4f14-4e49-81ba-7355df8c488",
+        "tool": {
+          "id": "repo.search",
+          "native_name": "grep",
+          "observed": true
+        },
+        "status": "completed",
+        "duration_ms": null,
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "model.usage",
+      "sequence": 10,
+      "identity": {
+        "agent_id": "legacy-acceptance-cursor",
+        "role": "acceptor",
+        "issue": 1927,
+        "github_run_id": 39133972983,
+        "github_run_attempt": 2
+      },
+      "data": {
+        "usage": {
+          "input": 59837,
+          "output": 2616,
+          "cache_read": 47264,
+          "cache_write": 0,
+          "reasoning": null
+        },
+        "request_id": null,
+        "observation": "native-event"
+      }
+    }
+  ]
+}
