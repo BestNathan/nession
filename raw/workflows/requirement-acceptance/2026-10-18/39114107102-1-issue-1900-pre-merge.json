@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "kind": "agent_workflow_run",
+  "identity": {
+    "workflow_id": "requirement-acceptance",
+    "github_workflow": "Acceptance / Orchestrator",
+    "github_run_id": 39114107102,
+    "github_run_attempt": 1,
+    "job": "execute",
+    "repository": "BestNathan/nession",
+    "event": "pull_request_target",
+    "unique_run_name": "39114107102-1-issue-1900-pre-merge"
+  },
+  "task": {
+    "id": "issue-1900-pre-merge",
+    "type": "acceptance",
+    "issue": 1900,
+    "stage": "pre-merge",
+    "target_ref": "36a4a8f7a12620a51c8cf5fc1963dbc38886a3af",
+    "deployment": null
+  },
+  "agent": {
+    "provider": "cursor",
+    "id": "legacy-acceptance-cursor",
+    "role": "acceptor",
+    "harness_sha256": null,
+    "checkpoint_id": null,
+    "model": {
+      "id": "composer-2.5",
+      "fast": true,
+      "params": [
+        {
+          "id": "fast",
+          "value": "true"
+        }
+      ]
+    },
+    "run_id": "run-7aca8f0f-90b9-41cc-877a-5f598df61a8e",
+    "request_id": "9da23563-626a-45c4-b7da-723af9b1cb51",
+    "status": "finished",
+    "prompt": {
+      "id": "acceptance",
+      "version": "v1",
+      "sha256": "2c49bb25da2180d1f5a1ee837b5364dca2851452305e4e9e904ee99ccc6ddb01"
+    }
+  },
+  "execution": {
+    "turns": 1,
+    "model_requests": 1,
+    "tools": {
+      "observed": true,
+      "total": 10,
+      "unique": 3,
+      "by_name": {
+        "glob": 2,
+        "grep": 1,
+        "read": 7
+      }
+    }
+  },
+  "tokens": {
+    "input": 120334,
+    "output": 2229,
+    "cache_read": 94720,
+    "cache_write": 0,
+    "reasoning": null,
+    "total": 217283
+  },
+  "cost": {
+    "raw_usd": null,
+    "charged_usd": null,
+    "estimated_usd": null
+  },
+  "timing": {
+    "started_at": "2026-10-18T09:08:19.855Z",
+    "finished_at": "2026-10-18T09:08:33.780Z",
+    "agent_duration_ms": 13834,
+    "workflow_duration_ms": null
+  },
+  "result": {
+    "status": "completed",
+    "pass": 2,
+    "pending": 0,
+    "fail": 0,
+    "na": 0
+  }
+}
