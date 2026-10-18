@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_projection_receipt",
+  "outcome": "applied",
+  "issue": 1916,
+  "run_id": 39129536381,
+  "run_attempt": 1,
+  "target_sha": "f13f6230512fe5cbd35d35089f6990ef620276ef",
+  "plan_digest": "7457708ba9ffedf8e7af4606e1e9f8625df01f3697cd864c04f10dd186c35658",
+  "artifact_digest": "sha256:6e8db1d46f42b90da69b0e790649bb3fbf18e86d857dec073c9868b597ba78a3",
+  "ingest_run_id": 39129831944,
+  "ingest_attempt": 1,
+  "declaration_digest": "79e696f530eeb3fa5e73c1ce8915b49429800bef598b37c96517bdc956ba811a",
+  "before_body_sha256": "e151b2c1c9fe22d1b0fe6350bda5de99d3ef9210c602991762eb48787e0f274f",
+  "body_sha256": "33685e486cb8aaf16ab22930b0a59a135fc6be8d6d04b6fb352675beda22bd91",
+  "readback_body": "## Requirements: standalone Pages bounded evidence deep links\n\n**Parent:** #1906 / #1782. Deliver practical hash-deep-link read-only Issue/PR evidence views from **already verified** standalone `pages/` source records. This must **not** pretend the missing #1664 implementing-PR/Slice publisher contract exists.\n\n### Scope\n- Support `#/work/issue/<number>` and `#/work/pr/<number>` for an Issue or PR **only if present in the bounded published snapshot**, plus back links; refresh/mobile render, invalid/unknown identifiers fail to explicit unavailable (not home or a false empty success).\n- Issue view: canonical GitHub issue link, source timestamp, explicitly labeled GitHub Timeline cross-reference **mention, not implementation**, bounded previously validated Agent Run/Attempt identity with optional roles/target SHA/status and `PR linkage: Unlinked`, coverage warning for truncated/unavailable source.\n- PR view: canonical PR link, exact observed HEAD, corresponding source-backed CI/E2E Run/Attempt and Review event at that HEAD only; **no overall approval or SC Pass**. Include sampled-workflow coverage and an **Unknown / Unlinked** Issue/Agent cause note. No joining on shared numbers, workflow names or Timeline mentions.\n- No new backend, privileged client API, token, raw telemetry, orphan store writes, product `web/` design or components. Reuse existing versioned schema and allowlist; avoid any raw URL construction from untrusted snapshot fields.\n- Deterministic negative/browser tests cover bad route identifiers, missing bounded snapshot members, XSS Issue text, exact HEAD, old approval not Pass, mobile direct reload and source link safety.\n\n### Success Criteria\n- [ ] SC-01 Direct, refresh-safe, bounded Issue/PR evidence routes use existing source-validated projection and reject malformed, unbounded and unknown identities fail-closed.\n- [ ] SC-02 Partial evidence drilldown clearly separates independent Issue mention, Agent Run observation, exact HEAD Review/CI/E2E; never promotes Unlinked to proven ownership, stale Pass or orphan integrity.\n- [ ] SC-03 Browser regression `pages-overview` and `pages-evidence` covers deep links, mobile/reload, malicious text and missing-source negative states; standalone `pages/` remains independent from product Web.\n- [ ] SC-04 Exact PR HEAD Pages CI, Quality Gate, Case Smoke, selected E2E and canonical Agent Acceptance Pass.\n\n## Acceptance Plan\n```yaml\nacceptance:\n  SC-01:\n    when: pr\n    method: agent\n  SC-02:\n    when: pr\n    method: agent\n  SC-03:\n    when: pr\n    method: agent\n  SC-04:\n    when: pr\n    method: agent\n```\n\n## Acceptance Report\n| Criterion | Stage | Result | Evidence |\n|---|---|---|---|\n| SC-01 | pre-merge | Pending | awaiting exact PR head SHA Agent proof |\n| SC-02 | pre-merge | Pending | awaiting exact PR head SHA Agent proof |\n| SC-03 | pre-merge | Pending | awaiting exact PR head SHA Agent proof |\n| SC-04 | pre-merge | Pending | awaiting exact PR head SHA Agent proof |\n\n## E2E Verification\n### New\n- none: the existing Pages browser cases own navigation and source rendering.\n### Regression\n- pages-overview\n- pages-evidence\n\n## E2E Report\n\n| ID | Type | Result | Evidence |\n|---|---|---|---|\n| pages-evidence | Regression | Pass | run 39129536381/1, SHA f13f6230512fe5cbd35d35089f6990ef620276ef, contract 79e696f530eeb3fa5e73c1ce8915b49429800bef598b37c96517bdc956ba811a, plan 7457708ba9ffedf8e7af4606e1e9f8625df01f3697cd864c04f10dd186c35658, tests 2/2 (https://github.com/BestNathan/nession/actions/runs/39129536381) |\n| pages-overview | Regression | Pass | run 39129536381/1, SHA f13f6230512fe5cbd35d35089f6990ef620276ef, contract 79e696f530eeb3fa5e73c1ce8915b49429800bef598b37c96517bdc956ba811a, plan 7457708ba9ffedf8e7af4606e1e9f8625df01f3697cd864c04f10dd186c35658, tests 4/4 (https://github.com/BestNathan/nession/actions/runs/39129536381) |\n\n## Product alignment\n- [x] Read-only independent `pages/` with no `web/` dependency.\n- [x] No duplicate Writer/Controller/SC projector.\n- [x] No causal claim without authenticated producer.\n- [x] #1906 retains the upstream #1664 producer binding and separate parent acceptance.\n\n---\n**Status:** Approved",
+  "patch_updated_at": "2026-10-18T13:03:02Z",
+  "readback_updated_at": "2026-10-18T13:03:02Z",
+  "rows": [
+    {
+      "id": "pages-evidence",
+      "result": "Pass",
+      "evidence": "run 39129536381/1, SHA f13f6230512fe5cbd35d35089f6990ef620276ef, contract 79e696f530eeb3fa5e73c1ce8915b49429800bef598b37c96517bdc956ba811a, plan 7457708ba9ffedf8e7af4606e1e9f8625df01f3697cd864c04f10dd186c35658, tests 2/2 (https://github.com/BestNathan/nession/actions/runs/39129536381)"
+    },
+    {
+      "id": "pages-overview",
+      "result": "Pass",
+      "evidence": "run 39129536381/1, SHA f13f6230512fe5cbd35d35089f6990ef620276ef, contract 79e696f530eeb3fa5e73c1ce8915b49429800bef598b37c96517bdc956ba811a, plan 7457708ba9ffedf8e7af4606e1e9f8625df01f3697cd864c04f10dd186c35658, tests 4/4 (https://github.com/BestNathan/nession/actions/runs/39129536381)"
+    }
+  ]
+}
