@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_projection_receipt",
+  "outcome": "applied",
+  "issue": 1904,
+  "run_id": 39114119539,
+  "run_attempt": 2,
+  "target_sha": "1ae4258699da03ee15207b54c368b82d44301136",
+  "plan_digest": "af3f2ca7fc897dfcb89997e7e9bbe36e7e381e9d4b49a99dbdd846f329c5f069",
+  "artifact_digest": "sha256:279a36e8dfa72bd17bb484b5dc59162454b7e637fdc3ac359fd5b5943a334345",
+  "ingest_run_id": 39114529066,
+  "ingest_attempt": 2,
+  "declaration_digest": "b40875f5f1149d5e4001a2b58df958b90f6ca3e691ca0e4486d78b4ad5e82bf7",
+  "before_body_sha256": "0c54dabe8711f4f40826bc742e15d75f7432f50347610bbea56feec485edfb6d",
+  "body_sha256": "9c2d8b8e4471ac946c599bcd39e0c9d987553eab63d6152165aa8e4ded692999",
+  "readback_body": "## Requirements: Pages exact-HEAD PR review observation (Phase 2-B4 of #1782)\n\nThe standalone public Pages already validates current PR HEAD → CI/E2E GitHub Actions Run+attempt (#1834), and it displays bounded Issue Timeline PR cross-references (#1837). However, **Review** is absent. This slice adds a conservative source-backed review event, not the full Issue → implementing PR → Agent lineage.\n\n- During trusted read-only build, fetch at most 100 GitHub PR reviews per displayed open PR (at most 12 PRs); no browser token or private APIs. Fail closed on API errors, truncation, malformed values, and source drift.\n- Publish only a bounded, allowlisted **latest observed review event whose `commit_id` matches the exact current PR HEAD SHA**; validate same-repository PR identity and canonical GitHub source review link. Do not infer aggregate approval/merge readiness from one review event. Dismissed/COMMENTED reviews are **not** Pass; past-HEAD APPROVED reviews are not current approvals.\n- Show source status `available / truncated / unavailable`, exact HEAD prefix and review state or `Not observed` on the independent `#/work` view; do not confuse an incomplete snapshot with no historical reviews.\n- Deterministic positive/negative fixtures cover old SHA approvals, forged review links, invalid IDs, review states, missing/truncated responses, duplicate/out-of-order events, and leaked user/private data.\n- Preserve `pages/` ↔ `web/` absolute isolation, read-only orphan access, and existing `pages-overview` / `pages-evidence` regression. Parent #1782 SCs remain pending until separate canonical acceptance; this slice does not claim Agent causality, SC Acceptance, or #1690 Run Store integrity.\n\n### Success Criteria\n- [ ] SC-01 Build-only bounded same-repo PR Review API ingestion with exact PR HEAD SHA binding, canonical review URL, stable deterministic event choice and honest unavailable/truncated coverage.\n- [ ] SC-02 Independent Pages Work UI shows the latest observed exact-head review event or Not observed, never claims historical APPROVED as current Pass or overall PR approval.\n- [ ] SC-03 Versioned allowlist/export release gate and deterministic negative security/drift/order/cap fixtures reject forged/malformed data and private fields.\n- [ ] SC-04 Standalone Pages CI, Quality, Case Smoke, selected E2E and exact-head Acceptance all pass; no product `web/` coupling or privileged writer changes.\n\n## Acceptance Plan\n```yaml\nacceptance:\n  SC-01:\n    when: pr\n    method: agent\n  SC-02:\n    when: pr\n    method: agent\n  SC-03:\n    when: pr\n    method: agent\n  SC-04:\n    when: pr\n    method: agent\n```\n\n## Acceptance Report\n| Criterion | Result | Evidence |\n|---|---|---|\n| SC-01 | Pending | Await exact PR HEAD Agent proof |\n| SC-02 | Pending | Await exact PR HEAD Agent proof |\n| SC-03 | Pending | Await exact PR HEAD Agent proof |\n| SC-04 | Pending | Await CI, selected E2E and Agent proof |\n\n## E2E Verification\n### New\n- none: reuse existing Pages browser regression IDs; no new E2E cases are introduced.\n### Regression\n- pages-overview\n- pages-evidence\n## E2E Report\n\n| ID | Type | Result | Evidence |\n|---|---|---|---|\n| pages-evidence | Regression | Pass | run 39114119539/2, SHA 1ae4258699da03ee15207b54c368b82d44301136, contract b40875f5f1149d5e4001a2b58df958b90f6ca3e691ca0e4486d78b4ad5e82bf7, plan af3f2ca7fc897dfcb89997e7e9bbe36e7e381e9d4b49a99dbdd846f329c5f069, tests 2/2 (https://github.com/BestNathan/nession/actions/runs/39114119539) |\n| pages-overview | Regression | Pass | run 39114119539/2, SHA 1ae4258699da03ee15207b54c368b82d44301136, contract b40875f5f1149d5e4001a2b58df958b90f6ca3e691ca0e4486d78b4ad5e82bf7, plan af3f2ca7fc897dfcb89997e7e9bbe36e7e381e9d4b49a99dbdd846f329c5f069, tests 2/2 (https://github.com/BestNathan/nession/actions/runs/39114119539) |\n\n## Product alignment\n- [x] Independent public presentation, not Nession runtime Web.\n- [x] Source-only verified observation; no inferred Agent identity/Acceptance/immutable Run Store claim.\n\n---\n**Status:** Draft",
+  "patch_updated_at": "2026-10-18T09:17:45Z",
+  "readback_updated_at": "2026-10-18T09:17:45Z",
+  "rows": [
+    {
+      "id": "pages-evidence",
+      "result": "Pass",
+      "evidence": "run 39114119539/2, SHA 1ae4258699da03ee15207b54c368b82d44301136, contract b40875f5f1149d5e4001a2b58df958b90f6ca3e691ca0e4486d78b4ad5e82bf7, plan af3f2ca7fc897dfcb89997e7e9bbe36e7e381e9d4b49a99dbdd846f329c5f069, tests 2/2 (https://github.com/BestNathan/nession/actions/runs/39114119539)"
+    },
+    {
+      "id": "pages-overview",
+      "result": "Pass",
+      "evidence": "run 39114119539/2, SHA 1ae4258699da03ee15207b54c368b82d44301136, contract b40875f5f1149d5e4001a2b58df958b90f6ca3e691ca0e4486d78b4ad5e82bf7, plan af3f2ca7fc897dfcb89997e7e9bbe36e7e381e9d4b49a99dbdd846f329c5f069, tests 2/2 (https://github.com/BestNathan/nession/actions/runs/39114119539)"
+    }
+  ]
+}
