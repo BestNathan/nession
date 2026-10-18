@@ -132,11 +132,11 @@ export class StreamReconciler {
       streamEpoch: frame.streamEpoch,
       streamSeq: frame.streamSeq,
     };
-    this.accept(
-      frame.streamEpoch, frame.streamSeq, 'output',
-      () => this.sink.onOutput(frame.data, frame.bootstrap, position),
-      frame.data.byteLength + PENDING_FRAME_OVERHEAD,
-    );
+    this.accept(frame.streamEpoch, frame.streamSeq, {
+      kind: 'output',
+      apply: () => this.sink.onOutput(frame.data, frame.bootstrap, position),
+      bytes: frame.data.byteLength + PENDING_FRAME_OVERHEAD,
+    });
   }
 
   /**
@@ -157,11 +157,11 @@ export class StreamReconciler {
       return;
     }
     const { streamEpoch, streamSeq, cols, rows } = frame;
-    this.accept(
-      streamEpoch, streamSeq, 'resize',
-      () => this.sink.onResize(cols, rows, { streamEpoch, streamSeq }),
-      PENDING_FRAME_OVERHEAD,
-    );
+    this.accept(streamEpoch, streamSeq, {
+      kind: 'resize',
+      apply: () => this.sink.onResize(cols, rows, { streamEpoch, streamSeq }),
+      bytes: PENDING_FRAME_OVERHEAD,
+    });
   }
 
   /**
@@ -360,7 +360,12 @@ export class StreamReconciler {
     return this.attemptsFor === position ? this.attempts : 0;
   }
 
-  private accept(epoch: number, seq: number, kind: PendingKind, apply: () => void, bytes: number): void {
+  private accept(
+    epoch: number,
+    seq: number,
+    frame: Pick<PendingFrame, 'kind' | 'apply' | 'bytes'>,
+  ): void {
+    const { kind, apply, bytes } = frame;
     if (this.disposed) {
       return;
     }
@@ -375,7 +380,8 @@ export class StreamReconciler {
     // a position the frontier has not passed is applied, and the rest is a
     // duplicate by construction.
     const anchors = this.epoch === null || this.frontier === null;
-    if (anchors || epoch !== this.epoch) {
+    const epochChanged = this.epoch !== null && epoch !== this.epoch;
+    if (anchors || epochChanged) {
       this.reset(epoch);
     }
     if (this.frontier !== null && seq <= this.frontier) {
@@ -386,7 +392,7 @@ export class StreamReconciler {
     }
     // Contiguous data does not enter the reorder queue. Large *in-order*
     // output is not a gap or an overflow and must not become a false resync.
-    if (this.pending.size === 0
+    if (!epochChanged && this.pending.size === 0
       && (this.frontier === null || seq === this.frontier + 1)) {
       this.frontier = seq;
       apply();
