@@ -7,7 +7,7 @@ import path from 'node:path';
 import {startDevelopment,recordDispatch,acceptTaskResult,reconcileOutbox} from './outbox.mjs';
 import {issueDispatchTicket} from './github-dispatch.mjs';
 import {decodeResultZip,parseAgentResult,createGitHubResultArtifactReader,
-  ingestAgentResult,appendAuthenticatedResult} from './result-artifact.mjs';
+  ingestAgentResult,appendAuthenticatedResult,validateAuthenticatedAgentReceipt} from './result-artifact.mjs';
 
 const sha=data=>createHash('sha256').update(data).digest('hex');
 function crc32(data){
@@ -111,6 +111,35 @@ const options={state,action_id:action.id,reader,artifactReader,registry,keyring,
   dispatch_ticket:ticket,pr_number:43,verified_main_sha:main,now:now+30000};
 const evidence=await ingestAgentResult(options);
 assert.equal(evidence.kind,'authenticated_agent_task_result');
+assert.equal(evidence.schema_version,2);
+assert.deepEqual(evidence.implementing_pr,{
+  repository:repo,number:43,head_sha_at_attestation:outputSha,
+  relation:'trusted_pr_head_at_result_attestation'
+});
+// The model output never contains (or may choose) a trusted PR number.
+assert.equal(Object.hasOwn(result,'implementing_pr'),false);
+assert.equal(validateAuthenticatedAgentReceipt(evidence),evidence);
+const legacy={...evidence,schema_version:1};
+delete legacy.implementing_pr;
+assert.equal(validateAuthenticatedAgentReceipt(legacy),legacy);
+const negativeReceipts=[
+  {...legacy,implementing_pr:evidence.implementing_pr},
+  {...evidence,schema_version:1},
+  {...evidence,implementing_pr:{...evidence.implementing_pr,number:0}},
+  {...evidence,implementing_pr:{...evidence.implementing_pr,repository:'other/repo'}},
+  {...evidence,implementing_pr:{...evidence.implementing_pr,head_sha_at_attestation:'d'.repeat(40)}},
+  {...evidence,implementing_pr:{...evidence.implementing_pr,relation:'github_cross_reference'}},
+  {...evidence,implementing_pr:{...evidence.implementing_pr,slice_id:'forged'}},
+  {...evidence,source:{...evidence.source,agent_id:'other-agent'} ,artifact:{...evidence.artifact,source_run_id:0}},
+  {...evidence,source:{...evidence.source,output_sha:'d'.repeat(40)}},
+  {...evidence,source:{...evidence.source,run_id:999}},
+  {...evidence,source:{...evidence.source,verified:false}},
+  {...evidence,result:{...evidence.result,run_attempt:2}},
+  {...evidence,artifact:{...evidence.artifact,json_sha256:'fake'}},
+  {...evidence,checkpoint_bytes:'secret'},
+];
+for(const bad of negativeReceipts)
+  assert.throws(()=>validateAuthenticatedAgentReceipt(bad),/untrusted|invalid authenticated/);
 assert.equal(evidence.artifact.digest,'sha256:'+sha(zip));
 assert.equal(evidence.artifact.json_sha256,sha(Buffer.from(JSON.stringify(result))));
 assert.equal(evidence.acceptance_result,null);
@@ -118,6 +147,8 @@ assert.equal(acceptTaskResult(state,state.version,evidence.result,evidence.sourc
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'nession-agent-artifact-'));
 try{
   assert.equal(appendAuthenticatedResult(root,evidence).changed,true);
+  // Historical v1 result records remain valid and lack any inferred PR edge.
+  assert.equal(validateAuthenticatedAgentReceipt(legacy),legacy);
   assert.equal(appendAuthenticatedResult(root,evidence).changed,false);
   assert.throws(()=>appendAuthenticatedResult(root,{...evidence,artifact:{
     ...evidence.artifact,digest:'sha256:'+'f'.repeat(64)}}),/collision/);
@@ -149,6 +180,11 @@ await denyDocument({...result,task_id:'e'.repeat(64)},/Artifact not bound/);
 await denyDocument({...result,kind:'reviewer',outcome:'approved'},/Artifact not bound/);
 await denyDocument({...result,target_sha:'d'.repeat(40)},/PR head/);
 await denyDocument({...result,raw_prompt:'private'},/privilege-bearing/);
+await denyDocument({...result,implementing_pr:43},/privilege-bearing/);
+await denied(()=>{prRecord={...pr,base:{repo:{full_name:'other/repo'}}}},/PR head/);
+await denied(()=>{prRecord={...pr,head:{...pr.head,repo:{full_name:'other/repo'}}}},/PR head/);
+await denied(()=>{prRecord={...pr,head:{...pr.head,ref:'unauthorized/topic'}}},/PR head/);
+await denied(()=>{prRecord={...pr,number:44}},/PR head/);
 const fetched=[];
 const client=createGitHubResultArtifactReader('ghReadOnlyToken1234',{
   fetchFn:async(url,opts)=>{
