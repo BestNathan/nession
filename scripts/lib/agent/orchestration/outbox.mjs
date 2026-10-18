@@ -91,7 +91,14 @@ export function validateDevelopmentState(state) {
           c.ordinal!==(parent.task.continuation?.ordinal??0)+1 ||
           c.checkpoint_version!==parent.receipt.checkpoint_version ||
           c.checkpoint_commit_sha!==parent.receipt.checkpoint_commit_sha ||
-          c.ciphertext_sha256!==parent.receipt.ciphertext_sha256) {
+          c.ciphertext_sha256!==parent.receipt.ciphertext_sha256 ||
+          item.task.role!==parent.task.role ||
+          item.task.agent_id!==parent.task.agent_id ||
+          item.task.task!==parent.task.task ||
+          item.task.sha!==parent.task.sha ||
+          item.id!==hash([c.parent_action_id,c.checkpoint_version,
+            c.ordinal,c.checkpoint_commit_sha]) ||
+          state.outbox.filter(x=>x.task.continuation?.parent_action_id===parent.id).length!==1) {
         reject('unbound or invalid Slice continuation');
       }
     }
