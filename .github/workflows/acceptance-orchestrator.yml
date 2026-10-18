@@ -426,6 +426,9 @@ jobs:
   # completed run. A dispatch, unlike GITHUB_TOKEN PR edits, can wake Actions.
   # Rerun only the failed Acceptance jobs; no polling or fabricated Pass.
   reconcile-issue-e2e:
+    concurrency:
+      group: acceptance-pr-reconcile
+      cancel-in-progress: false
     if: github.event_name == 'repository_dispatch' && github.event.action == 'nession-issue-e2e-projected'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -525,6 +528,9 @@ jobs:
   # Source Quality/E2E workflow_run completion is the waker for a previously
   # failed (not yet ready) Acceptance run. A single SHA check replaces polling.
   reconcile-completed-quality-e2e:
+    concurrency:
+      group: acceptance-pr-reconcile
+      cancel-in-progress: false
     if: >-
       ${{ github.event_name == 'workflow_run' &&
           github.event.workflow_run.event == 'pull_request' &&
@@ -602,8 +608,9 @@ jobs:
              ([.pull_requests[].number] | index($pr) != null))] |
             sort_by(.created_at) | last | .id // empty' "$RUNNER_TEMP/acceptance-runs.json")" || exit 0
           [[ "$id" =~ ^[1-9][0-9]*$ ]] || exit 0
-          status="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id" --jq .status)"
-          conclusion="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id" --jq .conclusion)"
+          run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id")"
+          status="$(jq -r .status <<< "$run_json")"
+          conclusion="$(jq -r '.conclusion // ""' <<< "$run_json")"
           if [[ "$status" == completed && "$conclusion" == failure ]]; then
             gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/rerun-failed-jobs"
             echo "Replayed failed Acceptance after both Quality/E2E completion events" >> "$GITHUB_STEP_SUMMARY"
