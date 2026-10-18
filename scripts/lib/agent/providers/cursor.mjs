@@ -51,20 +51,39 @@ export function normalizeCursorCost(value) {
 /** Run a Cursor session with task-supplied capability selection. */
 export async function runCursorSession({
   sdkLoader = loadCursorSdk, apiKey, name, requestedModel,
-  workspace, storePath, tools, customTools, prompt,
+  workspace, storePath, tools, customTools, prompt, resumeAgentId = null,
 }) {
   if (!apiKey) throw new Error('Cursor API key is required');
   const sdk = await sdkLoader();
   const selected = selectCursorModel(await sdk.Cursor.models.list(), requestedModel);
-  const agent = await sdk.Agent.create({
-    apiKey, name, model: selected, tools,
+  // The exact same SDK-native JSONL store must be restored before resuming.
+  // Re-declare model/tool policy on every call: SDK tool allowlists, custom tools,
+  // and inline capabilities are not persisted with the session.
+  if (!Array.isArray(tools) || tools.some(tool => typeof tool !== 'string')) {
+    throw new Error('Cursor requires an explicit tool allowlist on create and resume');
+  }
+  if (resumeAgentId != null && !/^agent-[a-zA-Z0-9-]{4,100}$/.test(resumeAgentId)) {
+    throw new Error('Invalid local Cursor native resume agent ID');
+  }
+  const nativeOptions = {
+    apiKey, model: selected, tools,
     local: {
       cwd: workspace,
       settingSources: [],
       store: new sdk.JsonlLocalAgentStore(storePath),
       ...(customTools ? { customTools } : {}),
     },
-  });
+  };
+  if (resumeAgentId && typeof sdk.Agent.resume !== 'function') {
+    throw new Error('Cursor SDK has no native resume API; refusing fresh-session fallback');
+  }
+  const agent = resumeAgentId
+    ? await sdk.Agent.resume(resumeAgentId, nativeOptions)
+    : await sdk.Agent.create({ ...nativeOptions, name });
+  if (resumeAgentId && agent.agentId !== resumeAgentId) {
+    try { await agent.close?.(); } catch {}
+    throw new Error('Cursor resumed a different native agent ID');
+  }
   const started = new Date();
   try {
     const run = await agent.send(prompt);
@@ -101,6 +120,7 @@ export async function runCursorSession({
       meta: {
         model: { id: selected.id, fast: requestedModel.fast, params: selected.params ?? [] },
         agent_id: agent.agentId ?? null,
+        resumed: resumeAgentId !== null,
         run_id: result.id ?? run.id ?? null,
         request_id: result.requestId ?? run.requestId ?? null,
         turns, available_tools: availableTools, tool_calls: toolCalls, native_events: nativeEvents,
