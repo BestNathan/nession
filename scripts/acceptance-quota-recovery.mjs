@@ -38,12 +38,16 @@ export function candidates(runs,pulls){
   return eligible.sort((a,b)=>String(b.run.created_at).localeCompare(String(a.run.created_at)))
     .slice(0,MAX);
 }
-export function proof(runs,file,name,sha,pr){
+export function proof(runs,file,name,sha,pr,headBranch){
   ok(Array.isArray(runs)&&runs.length<=15,'unbounded proof');
   const accepted=runs.filter(r=>r.head_sha===sha&&r.event==='pull_request'&&
     r.path==='.github/workflows/'+file&&r.name===name&&id(r.id)&&id(r.run_attempt)&&
     r.repository?.full_name===REPO&&r.head_repository?.full_name===REPO&&
-    Array.isArray(r.pull_requests)&&r.pull_requests.some(p=>p.number===pr))
+    // GitHub sometimes omits pull_requests for pull_request-triggered Runs.
+    // Exact SHA + same-repo head branch are still required in that case.
+    (Array.isArray(r.pull_requests)&&r.pull_requests.length>0
+      ? r.pull_requests.some(p=>p.number===pr)
+      : r.head_branch===headBranch))
     .sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at))||b.id-a.id);
   return accepted[0]?.status==='completed'&&accepted[0]?.conclusion==='success';
 }
@@ -62,7 +66,7 @@ export async function reconcile(request,log=()=>{}){
       const data=await request(root+'actions/workflows/'+file+'/runs?event=pull_request&head_sha='+
         run.head_sha+'&per_page=15');
       ok(data&&Array.isArray(data.workflow_runs),'missing exact-head proof');
-      if(!proof(data.workflow_runs,file,name,run.head_sha,pr.number)){valid=false;break}
+      if(!proof(data.workflow_runs,file,name,run.head_sha,pr.number,pr.head.ref)){valid=false;break}
     }
     if(!valid)continue;
     // Re-read both authoritative objects after the list queries. No queued,
@@ -107,7 +111,7 @@ function pull(extra={}){
 }
 function check(file,name,extra={}){
   return {id:file==='ci-quality.yml'?12:13,run_attempt:1,
-    name,path:'.github/workflows/'+file,event:'pull_request',
+    name,path:'.github/workflows/'+file,event:'pull_request',head_branch:'fix/a',
     head_sha:'a'.repeat(40),created_at:'2026-10-18T12:00:00Z',
     status:'completed',conclusion:'success',pull_requests:[{number:7}],
     repository:{full_name:REPO},head_repository:{full_name:REPO},...extra};
@@ -123,16 +127,18 @@ async function selfTest(){
   assert.equal(candidates([run(),run({id:10,created_at:'2026-10-18T12:01:00Z',
     status:'queued',conclusion:null})],[pull()]).length,0);
   for(const [file,name] of SOURCES){
-    assert.equal(proof([check(file,name)],file,name,'a'.repeat(40),7),true);
+    assert.equal(proof([check(file,name)],file,name,'a'.repeat(40),7,'fix/a'),true);
+    assert.equal(proof([check(file,name,{pull_requests:[]})],file,name,'a'.repeat(40),7,'fix/a'),true);
+    assert.equal(proof([check(file,name,{pull_requests:[],head_branch:'fork/other'})],file,name,'a'.repeat(40),7,'fix/a'),false);
     for(const invalid of [
       {run_attempt:0},{conclusion:'failure'},{event:'push'},
       {head_sha:'b'.repeat(40)},{pull_requests:[{number:8}]},
       {path:'.github/workflows/evil.yml'},
       {head_repository:{full_name:'evil/repo'}},
-    ])assert.equal(proof([check(file,name,invalid)],file,name,'a'.repeat(40),7),false);
+    ])assert.equal(proof([check(file,name,invalid)],file,name,'a'.repeat(40),7,'fix/a'),false);
     assert.equal(proof([check(file,name),check(file,name,{id:14,
       created_at:'2026-10-18T12:02:00Z',status:'in_progress',conclusion:null})],
-    file,name,'a'.repeat(40),7),false);
+    file,name,'a'.repeat(40),7,'fix/a'),false);
   }
   const seen=[];
   function mocked({live=run(),freshPR=pull(),badProof=false}={}){
