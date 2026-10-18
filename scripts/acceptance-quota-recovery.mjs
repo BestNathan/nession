@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Trusted main, bounded scheduled replay of stranded Acceptance failed jobs.
 import assert from 'node:assert/strict';
-const REPO='BestNathan/nession',SHA=/^[a-f0-9]{40}$/,MAX=4,MAX_ATTEMPTS=3;
+const REPO='BestNathan/nession',SHA=/^[a-f0-9]{40}$/,MAX=4,MAX_ATTEMPTS=3,MAX_REQUESTS=26;
 const ACCEPT='.github/workflows/acceptance-orchestrator.yml';
 const SOURCES=[['ci-quality.yml','CI / Quality Gate'],['e2e-tests.yml','E2E / Tests']];
 function ok(v,m){if(!v)throw Error('acceptance quota recovery: '+m)}
@@ -52,19 +52,37 @@ export function proof(runs,file,name,sha,pr,headBranch){
     .sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at))||b.id-a.id);
   return accepted[0]?.status==='completed'&&accepted[0]?.conclusion==='success';
 }
+export function recoverablePrepareJobs(result,run){
+  // Read jobs for this exact run_attempt, not the latest general Jobs listing.
+  // A failed PR/SC/Agent gate is not a quota-recoverable prepare failure.
+  if(!result||!Array.isArray(result.jobs)||result.jobs.length>100||
+    !Number.isSafeInteger(result.total_count)||
+    result.total_count!==result.jobs.length||result.total_count>100||
+    !source(run))return false;
+  if(result.jobs.some(j=>j.run_id!==run.id||j.run_attempt!==run.run_attempt||
+      !id(j.id)))return false;
+  const failures=result.jobs.filter(j=>j.conclusion==='failure');
+  return failures.length===1&&failures[0].name==='prepare-pre-merge'&&
+    failures[0].status==='completed';
+}
 export async function reconcile(request,log=()=>{}){
   const root='repos/'+REPO+'/';
-  const response=await request(root+'actions/workflows/acceptance-orchestrator.yml/runs?event=pull_request_target&per_page=100');
+  let calls=0;
+  const bounded=async(path,method='GET')=>{
+    ok(++calls<=MAX_REQUESTS,'GitHub API request budget exceeded');
+    return request(path,method);
+  };
+  const response=await bounded(root+'actions/workflows/acceptance-orchestrator.yml/runs?event=pull_request_target&per_page=100');
   ok(Array.isArray(response.workflow_runs)&&response.workflow_runs.length<=100,'invalid run list');
   if(!response.workflow_runs.some(r=>source(r)&&r.conclusion==='failure'))
-    return {candidates:0,retried:0};
-  const pulls=await request(root+'pulls?state=open&per_page=100');
+    return {candidates:0,retried:0,api_calls:calls};
+  const pulls=await bounded(root+'pulls?state=open&per_page=100');
   const selected=candidates(response.workflow_runs,pulls);
   let retried=0;
   for(const {run,pr} of selected){
     let valid=true;
     for(const [file,name] of SOURCES){
-      const data=await request(root+'actions/workflows/'+file+'/runs?event=pull_request&head_sha='+
+      const data=await bounded(root+'actions/workflows/'+file+'/runs?event=pull_request&head_sha='+
         run.head_sha+'&per_page=15');
       ok(data&&Array.isArray(data.workflow_runs),'missing exact-head proof');
       if(!proof(data.workflow_runs,file,name,run.head_sha,pr.number,pr.head.ref)){valid=false;break}
@@ -72,8 +90,8 @@ export async function reconcile(request,log=()=>{}){
     if(!valid)continue;
     // Re-read both authoritative objects after the list queries. No queued,
     // superseded, stale, successful, forged or wrong-attempt run may be replayed.
-    const prLive=await request(root+'pulls/'+pr.number);
-    const current=await request(root+'actions/runs/'+run.id);
+    const prLive=await bounded(root+'pulls/'+pr.number);
+    const current=await bounded(root+'actions/runs/'+run.id);
     if(prLive.state!=='open'||prLive.head?.sha!==run.head_sha||
       prLive.head?.ref!==run.head_branch||prLive.head?.repo?.full_name!==REPO||
       prLive.base?.ref!==pr.base.ref||!source(current)||current.id!==run.id||
@@ -81,12 +99,18 @@ export async function reconcile(request,log=()=>{}){
       current.run_attempt!==run.run_attempt||
       current.run_attempt>=MAX_ATTEMPTS||current.status!=='completed'||
       current.conclusion!=='failure')continue;
-    await request(root+'actions/runs/'+run.id+'/rerun-failed-jobs','POST');
+    const jobs=await bounded(root+'actions/runs/'+run.id+'/attempts/'+
+      run.run_attempt+'/jobs?per_page=100');
+    if(!recoverablePrepareJobs(jobs,run)){
+      log('Skip non-preparation or stale failed-job evidence for PR #'+pr.number);
+      continue;
+    }
+    await bounded(root+'actions/runs/'+run.id+'/rerun-failed-jobs','POST');
     retried++;
     log('Requested failed jobs replay; PR #'+pr.number+' sha '+run.head_sha+
       ' original run '+run.id+' attempt '+run.run_attempt);
   }
-  return {candidates:selected.length,retried};
+  return {candidates:selected.length,retried,api_calls:calls};
 }
 async function api(path,method='GET'){
   const token=process.env.GITHUB_TOKEN||process.env.GH_TOKEN;
@@ -110,6 +134,10 @@ function run(extra={}){
 function pull(extra={}){
   return {number:7,state:'open',head:{sha:'a'.repeat(40),ref:'fix/a',
     repo:{full_name:REPO}},base:{ref:'main'},...extra};
+}
+function job(extra={}){
+  return {id:77,run_id:9,run_attempt:1,
+    name:'prepare-pre-merge',status:'completed',conclusion:'failure',...extra};
 }
 function check(file,name,extra={}){
   return {id:file==='ci-quality.yml'?12:13,run_attempt:1,
@@ -145,7 +173,7 @@ async function selfTest(){
     file,name,'a'.repeat(40),7,'fix/a'),false);
   }
   const seen=[];
-  function mocked({live=run(),freshPR=pull(),badProof=false}={}){
+  function mocked({live=run(),freshPR=pull(),badProof=false,jobs={jobs:[job()],total_count:1}}={}){
     return async(path,method='GET')=>{
       seen.push(method+' '+path);
       if(method==='POST')return {};
@@ -153,6 +181,7 @@ async function selfTest(){
       if(path.includes('/pulls?'))return [pull()];
       if(path.endsWith('pulls/7'))return freshPR;
       if(path.endsWith('actions/runs/9'))return live;
+      if(path.includes('/actions/runs/9/attempts/1/jobs?'))return jobs;
       const found=SOURCES.find(([f])=>path.includes('/'+f+'/runs?'));
       if(found)return {workflow_runs:[check(...found,badProof?{conclusion:'failure'}:{})]};
       throw Error('unexpected mock path '+path);
@@ -160,12 +189,31 @@ async function selfTest(){
   }
   assert.equal((await reconcile(mocked())).retried,1);
   assert.equal(seen.filter(x=>x.startsWith('POST ')).length,1);
-  assert.ok(seen.length<=7);
+  assert.ok(seen.length<=MAX_REQUESTS);
+  assert.equal((await reconcile(mocked())).api_calls,8);
   seen.length=0;
   assert.equal((await reconcile(mocked({live:run({run_attempt:2})}))).retried,0);
   assert.equal((await reconcile(mocked({live:run({run_attempt:3})}))).retried,0);
   assert.equal(seen.filter(x=>x.startsWith('POST ')).length,0);
   assert.equal((await reconcile(mocked({badProof:true}))).retried,0);
+  assert.equal(recoverablePrepareJobs({jobs:[job()],total_count:1},run()),true);
+  const rejected=[
+    {jobs:[],total_count:0},
+    {jobs:[job({run_attempt:2})],total_count:1},
+    {jobs:[job({run_id:999})],total_count:1},
+    {jobs:[job({status:'queued'})],total_count:1},
+    {jobs:[job({conclusion:'cancelled'})],total_count:1},
+    {jobs:[job({name:'pre-merge-gate'})],total_count:1},
+    {jobs:[job(),job({id:78,name:'pre-merge-gate'})],total_count:2},
+    {jobs:[job()],total_count:200},
+    {jobs:[job()],total_count:2},
+  ];
+  for(const result of rejected){
+    assert.equal(recoverablePrepareJobs(result,run()),false);
+    seen.length=0;
+    assert.equal((await reconcile(mocked({jobs:result}))).retried,0);
+    assert.equal(seen.filter(x=>x.startsWith('POST ')).length,0);
+  }
   assert.equal((await reconcile(mocked({freshPR:pull({state:'closed'})}))).retried,0);
   for(const code of [403,429]){
     const err=classify(code,{'retry-after':'90'},'rate limit exceeded');
@@ -175,7 +223,7 @@ async function selfTest(){
   assert.ok(!(classify(403,{},'permission denied') instanceof RateLimited));
   assert.ok(candidates(Array.from({length:100},(_,i)=>run({id:100+i,
     head_branch:'b'+i,head_sha:(i.toString(16).padStart(40,'a')).slice(-40)})),[]).length<=MAX);
-  console.log('Acceptance quota recovery: exact SHA, stale attempt, capped retry budget, exhausted quota, wrong proof, idempotency and bounded bursts passed');
+  console.log('Acceptance quota recovery: exact SHA, stale attempt, failed-prepare-only replay, finite API request budget, capped retry budget, exhausted quota, wrong proof, idempotency and bounded bursts passed');
 }
 async function main(){
   if(process.argv[2]==='self-test')return selfTest();
