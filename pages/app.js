@@ -184,6 +184,7 @@ function renderWork(){
       }
       if(w.agent_run_source==='truncated')
         pane.append(node('span','', 'Agent source truncated · other runs may be missing'));
+      pane.append(local('Inspect bounded Issue evidence  ↗','/work/issue/'+x.number,'source-link'));
       row.querySelector?.('.entry-main')?.append(pane);
       return row;
     };
@@ -209,6 +210,7 @@ function renderWork(){
         if(reviews.status==='truncated')
           pane.append(node('span','', 'Reviews truncated · current-HEAD event may be missing'));
       }
+      pane.append(local('Inspect exact-HEAD PR evidence  ↗','/work/pr/'+x.number,'source-link'));
       row.querySelector?.('.entry-main')?.append(pane);
       return row;
     };
@@ -224,6 +226,88 @@ function renderWork(){
     ? 'Run evidence is sampled from the 100 most recent GitHub Actions runs. Not observed does not imply no historical run.'
     : 'CI/E2E workflow source unavailable; missing evidence is not a successful or failed run.'));
   root.append(node('div','callout','The trusted Issue → PR → Agent run/attempt → exact-SHA Acceptance graph is not yet publicly projected. Until that data is verified, it is intentionally not presented as complete.'));
+}
+// Evidence-only drilldown uses the already-validated, bounded public JSON.
+// A GitHub Timeline mention or observed Issue Run is NEVER a causal PR edge.
+function renderWorkDetail(kind, number){
+  root.append(local('← All recent work','/work','source-link'));
+  const issues=snapshot.work?.issues||[],pulls=snapshot.work?.pulls||[];
+  const isIssue=kind==='issue',source=isIssue?issues:pulls;
+  const sourceState=isIssue?snapshot.work?.issues_status:snapshot.work?.pulls_status;
+  const item=sourceState==='available'&&source.find(x=>x.number===number);
+  if(!item){
+    root.append(empty('Evidence unavailable in this bounded snapshot',
+      'The requested '+(isIssue?'Issue':'PR')+' is not among the recent public records. This is not evidence that it does not exist or was accepted.'));
+    return;
+  }
+  root.append(pageHead(isIssue?'ISSUE EVIDENCE':'PR EVIDENCE',
+    '#'+item.number+' · '+item.title,
+    'Public source observations only · updated '+date(item.updated_at)+
+    ' · site snapshot '+date(snapshot.generated_at)));
+  const origin=section('CANONICAL SOURCE','GitHub record','Open authoritative source for the current state.');
+  const header=node('article','panel');
+  attach(header,ext((isIssue?'Issue':'PR')+' #'+number+' · '+item.state+' ↗',item.url),
+    node('p','', 'This record is sampled from a bounded build-time GitHub snapshot. Owner, stage and SC approval are not inferred.'));
+  origin.append(header);root.append(origin);
+  if(isIssue){
+    const rel=section('ISSUE REFERENCES','PR mentions only',
+      'A GitHub cross-reference is NOT verified implementing PR ownership or Agent causality.');
+    const pane=node('article','panel');
+    const refs=item.pr_references,linked=refs?.prs||[];
+    if(refs?.status==='unavailable')pane.append(node('p','', 'Timeline source unavailable'));
+    else{
+      if(!linked.length)pane.append(node('p','', 'No PR mention observed in the bounded Timeline window.'));
+      for(const ref of linked)pane.append(ext('GitHub cross-reference · PR #'+ref.number+' ↗',ref.url));
+      if(refs?.status==='truncated')pane.append(node('p','', 'Timeline truncated · references may be missing.'));
+    }
+    pane.append(node('p','', 'Implementation relationship: Unknown / Unlinked'));
+    rel.append(pane);root.append(rel);
+    const runs=section('METRICS SOURCE','Observed Agent Runs',
+      'Canonical workflow Run/Attempt is independent of implementing PR/SC Acceptance.');
+    const observations=node('article','panel');
+    const sourceState=snapshot.work?.agent_run_source;
+    if(sourceState==='unavailable')observations.append(node('p','', 'Source unavailable · do not infer zero Agent runs.'));
+    else if(!item.agent_runs?.length)observations.append(node('p','', 'No Agent Run observed in the bounded window.'));
+    for(const run of item.agent_runs||[]){
+      const block=node('div','issue-pr-evidence');
+      block.append(ext('Run '+run.run_id+' / attempt '+run.attempt+' ↗',run.url));
+      block.append(node('span','',
+        'Role '+(run.role||'Unknown')+' · Agent '+(run.agent_id||'Unknown')+
+        ' · Provider '+(run.provider||'Unknown')+' · workflow '+run.github_workflow));
+      block.append(node('span','mono','Target SHA '+(run.target_sha||'Unknown')+
+        ' · '+(run.verification==='github_run_verified'?'Run identity verified':'Not independently verified')));
+      block.append(node('span','',
+        'Tokens '+fmt(run.tokens_total)+' · duration '+fmt(run.duration_ms)+'ms · PR linkage: Unlinked'));
+      observations.append(block);
+    }
+    if(sourceState==='truncated')observations.append(node('p','',
+      'Source truncated · more runs may exist beyond the sampled window.'));
+    runs.append(observations);root.append(runs);
+  }else{
+    const head=item.workflow?.head_sha;
+    const proof=section('EXACT HEAD','Workflow and Review evidence',
+      'Only observed PR HEAD runs/events at the recorded SHA. No overall approval, SC verdict or implementation attribution.');
+    const pane=node('article','panel');
+    pane.append(node('p','mono', 'Observed HEAD: '+(head||'Unavailable')));
+    for(const [key,label] of [['ci','Quality'],['e2e','E2E']]){
+      const run=item.workflow?.[key];
+      pane.append(run?ext(label+' · '+run.status+
+          ' · Run '+run.run_id+' / attempt '+run.attempt+' ↗',run.url)
+        :node('p','',label+': Not observed in sampled Actions window'));
+    }
+    const reviews=item.review||{};
+    if(reviews.latest)pane.append(ext('Review event '+reviews.latest.state.replaceAll('_',' ')+
+       ' · HEAD '+reviews.latest.commit_sha+' · review '+reviews.latest.review_id+' ↗',reviews.latest.url));
+    else pane.append(node('p','',reviews.status==='unavailable'
+      ? 'Review source unavailable':'No same-HEAD Review observed'));
+    if(reviews.status==='truncated')pane.append(node('p','',
+      'Review source truncated · additional reviews may exist.'));
+    pane.append(node('p','', 'Issue implementation/Agent Slice: Unknown / Unlinked'));
+    pane.append(node('p','', 'Acceptance SC verdict: Not independently observed here.'));
+    proof.append(pane);root.append(proof);
+  }
+  root.append(node('div','callout',
+    'No unverified Issue → implementing PR → Agent/Slice causality or orphan-store integrity is presented as established.'));
 }
 function renderRepository(){
   root.append(pageHead('ENGINEERING SIGNALS','Built in the open.','Repository health and engineering throughput come from the existing canonical metrics pipeline. Measured SHA and age remain visible.'));
@@ -260,15 +344,24 @@ function renderEvidence(){
 }
 function render(){
   const raw=location.hash.replace(/^#/,'')||'/';
-  const route=routes.has(raw)?raw:'/';
+  const match=raw.match(/^\/work\/(issue|pr)\/([1-9][0-9]{0,8})$/);
+  const detail=raw.startsWith('/work/')&&!routes.has(raw);
+  const route=match?'/work':routes.has(raw)?raw:detail?'/work':raw==='/'
+    ?'/':'/missing';
   document.querySelectorAll('[data-route]').forEach(link=>{
     if(link.dataset.route===route)link.setAttribute('aria-current','page');
     else link.removeAttribute('aria-current');
   });
   root.replaceChildren();
   try {
-    ({'/':renderHome,'/agents':renderAgents,'/work':renderWork,'/repository':renderRepository,'/evidence':renderEvidence}[route])();
-    document.title=(route==='/'?'Overview':route.slice(1).replace(/^\w/, x=>x.toUpperCase()))+' — Nession';
+    if(match)renderWorkDetail(match[1],Number(match[2]));
+    else if(detail) {
+      root.append(local('← All recent work','/work'));
+      root.append(empty('Invalid evidence reference',
+        'This address does not identify a bounded public Issue or PR. No source has been verified.'));
+    }else if(route==='/missing')root.append(empty('Route unavailable','The requested public page does not exist.'));
+    else ({'/':renderHome,'/agents':renderAgents,'/work':renderWork,'/repository':renderRepository,'/evidence':renderEvidence}[route])();
+    document.title=(detail?'Evidence':route==='/'?'Overview':route==='/missing'?'Unavailable':route.slice(1).replace(/^\w/, x=>x.toUpperCase()))+' — Nession';
   } catch(error){
     console.error('Pages render failure',error);
     root.append(node('p','failure','The public snapshot could not be rendered. See the source repository for authoritative information.'));
