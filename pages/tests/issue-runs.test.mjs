@@ -98,7 +98,7 @@ test('conflicting duplicates, bad target SHA and malformed version are never pub
 });
 test('record caps distinguish truncated coverage; malicious fields never leave the public allowlist',()=>{
  const rows=Array.from({length:7},(_,i)=>({
-   issue:6,run_id:95+i,attempt:1,workflow:'issue-audit',event:'issues',
+   issue:6,run_id:95+i,attempt:1,workflow:'issue-audit',github_workflow:'Agent / Issue Audit',event:'issues',
    target_sha:null,role:null,agent_id:null,provider:null,
    tokens_total:null,duration_ms:null,observed_at:now,
    prompt:'PRIVATE AGENT PROMPT',host:'10.1.2.3',
@@ -117,4 +117,32 @@ test('record caps distinguish truncated coverage; malicious fields never leave t
  falsified.work.issues[0].agent_runs[0].pr_linkage='unlinked';
  falsified.work.issues[0].agent_runs[0].checkpoint_bytes='secret';
  assert.throws(()=>validateProjection(falsified),/disallowed public field/);
+});
+
+test('mixed legacy producer names and unrelated malformed historical runs do not suppress valid Issues',async()=>{
+ await testCheckout(async({root,dir,commit})=>{
+  // A legacy workflow_dispatch was the canonical Acceptance producer before
+  // the Orchestrator refactor. It must not poison the current Issue snapshot.
+  const legacy={...run,identity:{...run.identity,github_workflow:'Agent / SC Acceptance',
+    event:'workflow_dispatch',github_run_id:96,github_run_attempt:1,
+    unique_run_name:'96-1-issue-6-legacy'},
+    task:{...run.task,id:'issue-6-legacy'}};
+  await writeFile(join(dir,'96-1-issue-6-legacy.json'),JSON.stringify(legacy));
+  const unrelated={...legacy,schema_version:99,identity:{...legacy.identity,
+    unique_run_name:'97-1-issue-1866',github_run_id:97},
+    task:{...legacy.task,id:'issue-1866',issue:1866}};
+  await writeFile(join(dir,'97-1-issue-1866.json'),JSON.stringify(unrelated));
+  const head=commit();
+  const source=await loadIssueRunObservations({root,expectedSha:head,at:now,issues:[6]});
+  assert.equal(source.status,'available');
+  assert.equal(source.records.length,2);
+  assert.ok(source.records.some(x=>x.github_workflow==='Agent / SC Acceptance'));
+  const legacyProof={...action,id:96,run_attempt:1,name:'Agent / SC Acceptance',
+    path:'.github/workflows/agent-sc-acceptance.yml',event:'workflow_dispatch'};
+  const projected=project(source.records,[action,legacyProof]);
+  const record=projected.work.issues[0].agent_runs.find(x=>x.run_id===96);
+  assert.equal(record.verification,'github_run_verified');
+  assert.equal(record.github_workflow,'Agent / SC Acceptance');
+  assert.equal(record.pr_linkage,'unlinked');
+ });
 });

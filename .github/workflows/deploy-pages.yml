@@ -26,6 +26,9 @@ jobs:
       pull-requests: read
     outputs:
       active: ${{ steps.detect.outputs.active }}
+      public_data_sha256: ${{ steps.public_data.outputs.sha256 }}
+      public_agent_source: ${{ steps.public_data.outputs.source }}
+      public_agent_runs: ${{ steps.public_data.outputs.observed_runs }}
     steps:
       - name: Checkout trusted main
         uses: actions/checkout@v4
@@ -71,6 +74,26 @@ jobs:
           test -s pages/dist/index.html
           test -s pages/dist/data/site.json
           node -e "const d=require('./pages/dist/data/site.json'); if(d.schema_version!==1 || d.source.main_sha!==process.env.SOURCE_MAIN_SHA || d.source.metrics_sha!==process.env.METRICS_SHA) process.exit(1)"
+      - name: Capture exact static public evidence digest and coverage
+        if: steps.detect.outputs.active == 'true'
+        id: public_data
+        shell: bash
+        run: |
+          set -euo pipefail
+          file=pages/dist/data/site.json
+          jq -e '
+            (.work.agent_run_source == "available" or .work.agent_run_source == "truncated" or .work.agent_run_source == "unavailable")
+            and (.work.issues | type == "array")
+            and ([.work.issues[]?.agent_runs[]?] | all(.[]; 
+              (.run_id | type == "number") and (.run_id > 0)
+              and (.attempt | type == "number") and (.attempt > 0)
+              and (.pr_linkage == "unlinked")
+              and (.url == ("https://github.com/BestNathan/nession/actions/runs/" + (.run_id | tostring)))
+            ))
+          ' "$file" >/dev/null
+          echo "sha256=$(sha256sum "$file" | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "source=$(jq -r .work.agent_run_source "$file")" >> "$GITHUB_OUTPUT"
+          echo "observed_runs=$(jq '[.work.issues[]?.agent_runs[]?] | length' "$file")" >> "$GITHUB_OUTPUT"
       - name: Configure GitHub Pages
         if: steps.detect.outputs.active == 'true'
         uses: actions/configure-pages@v5
@@ -99,6 +122,9 @@ jobs:
         env:
           PUBLISHED_URL: ${{ steps.publication.outputs.page_url }}
           EXPECTED_SHA: ${{ github.sha }}
+          EXPECTED_DATA_SHA256: ${{ needs.build.outputs.public_data_sha256 }}
+          EXPECTED_AGENT_SOURCE: ${{ needs.build.outputs.public_agent_source }}
+          EXPECTED_AGENT_RUNS: ${{ needs.build.outputs.public_agent_runs }}
         shell: bash
         run: |
           set -euo pipefail
@@ -129,10 +155,31 @@ jobs:
             echo "::error::Deployed public site did not serve the expected SHA and HTML"
             exit 1
           }
+          # Compare *anonymous HTTPS bytes* to the exact SHA-pinned build
+          # artifact; never infer public observations from build logs alone.
+          digest="$(sha256sum "$json" | cut -d ' ' -f1)"
+          source="$(jq -r .work.agent_run_source "$json")"
+          observed="$(jq '[.work.issues[]?.agent_runs[]?] | length' "$json")"
+          [[ "$EXPECTED_DATA_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+          [[ "$EXPECTED_AGENT_RUNS" =~ ^[0-9]+$ ]] || exit 1
+          if [[ "$digest" != "$EXPECTED_DATA_SHA256" ||
+                "$source" != "$EXPECTED_AGENT_SOURCE" ||
+                "$observed" != "$EXPECTED_AGENT_RUNS" ]]; then
+            echo "::error::Published data drifted from trusted build: digest/source/observation count"
+            exit 1
+          fi
+          status=not_observed
+          if [[ "$source" != unavailable && "$observed" -gt 0 ]]; then
+            status=source_backed_observation
+          fi
+          echo "Public Issue Agent Run observation: $status (source=$source, runs=$observed, digest=$digest)"
           {
             echo "## Public Pages verified"
             echo
             echo "- Public HTTPS URL: $url/"
             echo "- Exact deployed main SHA: \`$EXPECTED_SHA\`"
             echo "- Checked: HTTP static HTML and schema-v1 sanitized /data/site.json"
+            echo "- Exact published JSON SHA-256: \`$digest\` (matches pinned build artifact)"
+            echo "- Issue Agent Run observation: $status · source $source · visible runs $observed"
+            echo "- PR ownership / SC Acceptance / orphan integrity: not inferred"
           } >> "$GITHUB_STEP_SUMMARY"
