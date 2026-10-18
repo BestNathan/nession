@@ -19,4 +19,21 @@ test.describe('standalone Pages evidence',()=>{
   await expect(page.getByText('Ref not verified / unavailable')).toBeVisible();
   await expect(page.getByRole('link',{name:'View public branch',exact:false})).toHaveCount(1);
  });
+ test('independently attested per-ID E2E never becomes an SC verdict or PR linkage',async({page})=>{
+   await page.setViewportSize({width:390,height:844});
+   await page.goto(site.origin+'/#/work/issue/1782');
+   await expect(page.getByRole('heading',{name:'Source-bound per-ID E2E receipts'})).toBeVisible();
+   await expect(page.getByText('Canonical test source: available · pinned ref cccccccccccc')).toBeVisible();
+   await expect(page.getByRole('link',{name:/pages-overview · Pass · Run 42 \/ attempt 1/}))
+     .toHaveAttribute('href','https://github.com/BestNathan/nession/actions/runs/42');
+   await expect(page.getByRole('link',{name:/pages-evidence · Fail · Run 42 \/ attempt 1/})).toBeVisible();
+   await expect(page.getByText('Trusted Acceptance SC: Unknown / Not independently observed.')).toBeVisible();
+   await expect(page.getByText('Implementing PR / logical Slice: Unknown / Unlinked')).toBeVisible();
+   await page.reload();
+   await expect(page.getByText('Trusted Acceptance SC: Unknown / Not independently observed.')).toBeVisible();
+   await page.goto(site.origin+'/#/work/pr/1787');
+   await expect(page.getByText('Trusted Acceptance SC: Unknown / Not independently observed.')).toBeVisible();
+   await expect(page.getByText('Issue implementation/Agent Slice: Unknown / Unlinked')).toBeVisible();
+ });
+
 });
