@@ -411,7 +411,7 @@ impl SessionStreamState {
     /// Lowest available sequence after *all* event, byte and age limits.
     /// An oversized event may advance the stream without ever entering replay,
     /// so the ring may be empty even after output was emitted. In that case the
-    /// first available position is next_seq (or 1 on a brand-new stream).
+    /// first available position is the last issued seq + 1 (or 1 before any event).
     ///
     /// Age is enforced on reads as well as inserts: an idle stream must not
     /// claim that old bytes are replayable just because no new output evicted
@@ -421,7 +421,7 @@ impl SessionStreamState {
         self.events
             .iter()
             .find(|entry| now.duration_since(entry.inserted_at) < self.max_age)
-            .map_or_else(|| self.next_seq.max(1), |entry| stream_seq(&entry.event))
+            .map_or_else(|| self.next_seq.saturating_add(1), |entry| stream_seq(&entry.event))
     }
 
     /// Everything after `after_seq` that is still retained, and whether that is
@@ -441,8 +441,10 @@ impl SessionStreamState {
         let events = self
             .events
             .iter()
-            .filter(|entry| stream_seq(&entry.event) >= first_available_seq
-                && stream_seq(&entry.event) > after_seq)
+            .filter(|entry| {
+                stream_seq(&entry.event) >= first_available_seq
+                    && stream_seq(&entry.event) > after_seq
+            })
             .map(|entry| entry.event.clone())
             .collect();
         Some(StreamReplay {
@@ -460,9 +462,9 @@ impl SessionStreamState {
     /// event structure, rather than counting frames or decoded PTY bytes only.
     fn retained_size(event: &TerminalStreamEventPayload) -> usize {
         let allocated = match event {
-            TerminalStreamEventPayload::Output { session_name, data, .. } => {
-                session_name.capacity().saturating_add(data.capacity())
-            }
+            TerminalStreamEventPayload::Output {
+                session_name, data, ..
+            } => session_name.capacity().saturating_add(data.capacity()),
             TerminalStreamEventPayload::Resize { session_name, .. } => session_name.capacity(),
         };
         allocated.saturating_add(std::mem::size_of::<RetainedEvent>())
@@ -476,9 +478,11 @@ impl SessionStreamState {
 
     fn push_event(&mut self, event: TerminalStreamEventPayload) {
         let now = Instant::now();
-        while self.events.front().is_some_and(|entry| {
-            now.duration_since(entry.inserted_at) >= self.max_age
-        }) {
+        while self
+            .events
+            .front()
+            .is_some_and(|entry| now.duration_since(entry.inserted_at) >= self.max_age)
+        {
             self.pop_front();
         }
 
@@ -623,14 +627,15 @@ mod tests {
 
         // Switch to a nonzero age and install an explicitly expired timestamp.
         stream.max_age = Duration::from_secs(60);
-        stream.events.front_mut().unwrap().inserted_at =
-            Instant::now() - Duration::from_secs(120);
+        stream.events.front_mut().unwrap().inserted_at = Instant::now() - Duration::from_secs(120);
         stream.record_output("s", "new".to_owned());
         assert_eq!(stream.events.len(), 1);
         assert_eq!(stream.first_available_seq(), 2);
-        assert_eq!(seqs(&stream.replay_since(epoch, 1).unwrap().events), vec![2]);
+        assert_eq!(
+            seqs(&stream.replay_since(epoch, 1).unwrap().events),
+            vec![2]
+        );
     }
-
 
     /// The boundary of the retained window, from the side that has lost
     /// nothing: a cursor one below the floor is asking for exactly what the
