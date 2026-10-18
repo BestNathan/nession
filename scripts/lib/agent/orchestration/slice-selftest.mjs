@@ -80,6 +80,16 @@ try {
     outbox:state.outbox.map(x=>x.id===next.id?{...x,task:{...x.task,
       continuation:{...x.task.continuation,checkpoint_commit_sha:'f'.repeat(40)}}}:x)}),
     /unbound or invalid Slice continuation/);
+  const alteredContinuation=(patch)=>({...state,outbox:state.outbox.map(x=>
+    x.id===next.id?{...x,...patch,task:{...x.task,...patch.task}}:x)});
+  assert.throws(()=>validateDevelopmentState(alteredContinuation({
+    task:{agent_id:'review-cursor-01'}})),/unbound or invalid Slice continuation/);
+  assert.throws(()=>validateDevelopmentState(alteredContinuation({
+    task:{role:'reviewer'}})),/unbound or invalid Slice continuation/);
+  assert.throws(()=>validateDevelopmentState(alteredContinuation({
+    id:'f'.repeat(64)})),/unbound or invalid Slice continuation/);
+  assert.throws(()=>validateDevelopmentState({...state,outbox:[...state.outbox,
+    {...next,id:'e'.repeat(64)}]}),/unbound or invalid Slice continuation/);
   assert.equal(beforeYield.outbox.length,1,'prior immutable state must remain unchanged');
   persist(recordDispatch(state,state.version,next.id,{
     status:'verified',dispatch_id:next.id,source_run_id:2002,
