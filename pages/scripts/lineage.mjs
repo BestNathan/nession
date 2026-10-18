@@ -44,7 +44,9 @@ export function projectLineage({issueNumbers=[],pulls=[],attested=null}={}){
     pulls.some(p=>!positive(p?.number)||!exact(p.head_sha)))return unavailable;
  if(!attested||!['verified','truncated'].includes(attested.status)||
     !exact(attested.source_ref_sha)||!Array.isArray(attested.records))return unavailable;
- if(attested.records.length>48)return unavailable;
+ if(attested.records.length>48 ||
+    new Set(issueNumbers).size!==issueNumbers.length||
+    new Set(pulls.map(p=>p.number)).size!==pulls.length)return unavailable;
  const issueSet=new Set(issueNumbers),prs=new Map(pulls.map(p=>[p.number,p.head_sha]));
  const output=[],byKey=new Map();
  try{
