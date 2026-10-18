@@ -52,6 +52,13 @@ jobs:
           ref: metrics
           path: metrics-store
           persist-credentials: false
+      - name: Checkout pinned read-only Acceptance results
+        if: steps.detect.outputs.active == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: acceptance-results
+          path: acceptance-store
+          persist-credentials: false
       - name: Setup standalone Node toolchain
         if: steps.detect.outputs.active == 'true'
         uses: actions/setup-node@v4
@@ -66,14 +73,16 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           SOURCE_MAIN_SHA: ${{ github.sha }}
           METRICS_DIR: ${{ github.workspace }}/metrics-store
+          ACCEPTANCE_RESULTS_DIR: ${{ github.workspace }}/acceptance-store
         shell: bash
         run: |
           set -euo pipefail
           export METRICS_SHA="$(git -C metrics-store rev-parse HEAD)"
+          export ACCEPTANCE_RESULTS_SHA="$(git -C acceptance-store rev-parse HEAD)"
           node pages/scripts/build.mjs
           test -s pages/dist/index.html
           test -s pages/dist/data/site.json
-          node -e "const d=require('./pages/dist/data/site.json'); if(d.schema_version!==1 || d.source.main_sha!==process.env.SOURCE_MAIN_SHA || d.source.metrics_sha!==process.env.METRICS_SHA) process.exit(1)"
+          node -e "const d=require('./pages/dist/data/site.json'); if(d.schema_version!==1 || d.source.main_sha!==process.env.SOURCE_MAIN_SHA || d.source.metrics_sha!==process.env.METRICS_SHA || d.source.acceptance_results_sha!==process.env.ACCEPTANCE_RESULTS_SHA) process.exit(1)"
       - name: Capture exact static public evidence digest and coverage
         if: steps.detect.outputs.active == 'true'
         id: public_data
