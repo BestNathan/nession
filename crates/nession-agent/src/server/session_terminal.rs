@@ -3,11 +3,14 @@
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use nession_protocol::contracts::terminal::v1::TerminalStreamEventPayload;
 
 const DEFAULT_STREAM_EVENTS: usize = 4096;
+/// A session cannot retain 4096 arbitrarily large base64 output chunks.
+const DEFAULT_STREAM_BYTES: usize = 512 * 1024;
+const DEFAULT_STREAM_AGE: Duration = Duration::from_secs(300);
 
 /// Hands out an epoch no client can already be holding.
 ///
@@ -340,11 +343,22 @@ pub struct StreamReplay {
 }
 
 #[derive(Debug, Clone)]
+struct RetainedEvent {
+    event: TerminalStreamEventPayload,
+    inserted_at: Instant,
+    retained_bytes: usize,
+}
+
+/// A bounded per-session *contiguous* replay suffix, not durable history.
+#[derive(Debug, Clone)]
 pub struct SessionStreamState {
     pub epoch: u64,
     next_seq: u64,
-    events: VecDeque<TerminalStreamEventPayload>,
+    events: VecDeque<RetainedEvent>,
+    retained_bytes: usize,
     max_events: usize,
+    max_bytes: usize,
+    max_age: Duration,
 }
 
 impl SessionStreamState {
@@ -356,7 +370,10 @@ impl SessionStreamState {
             epoch: next_epoch(),
             next_seq: 0,
             events: VecDeque::new(),
+            retained_bytes: 0,
             max_events: DEFAULT_STREAM_EVENTS,
+            max_bytes: DEFAULT_STREAM_BYTES,
+            max_age: DEFAULT_STREAM_AGE,
         }
     }
 
@@ -391,26 +408,20 @@ impl SessionStreamState {
         (self.epoch, seq)
     }
 
-    /// The lowest sequence number this stream can still hand back (#1304).
+    /// Lowest available sequence after *all* event, byte and age limits.
+    /// An oversized event may advance the stream without ever entering replay,
+    /// so the ring may be empty even after output was emitted. In that case the
+    /// first available position is next_seq (or 1 on a brand-new stream).
     ///
-    /// The front of the ring, because that is exactly what eviction decides: a
-    /// full ring drops the front on the next push, so every number below it is
-    /// unreachable by any later request. Nothing else bounds what a replay can
-    /// return — the ring holds a contiguous run, and `next_seq` only ever moves
-    /// forward — so this one number is the whole of the retained window's lower
-    /// edge.
-    ///
-    /// With nothing retained it is the number the next event will take. An
-    /// empty ring is a stream that has issued nothing, so a caller at any
-    /// cursor is level with it and has missed nothing; answering with the *next*
-    /// position rather than with a zero is what makes that fall out of the same
-    /// comparison as every other case instead of needing a special one.
-    /// (Reachable only before the first event: the ring is capped at a positive
-    /// number of events, so it cannot be pushed empty again.)
+    /// Age is enforced on reads as well as inserts: an idle stream must not
+    /// claim that old bytes are replayable just because no new output evicted
+    /// them. Expired storage is physically reclaimed on the next insertion.
     pub fn first_available_seq(&self) -> u64 {
+        let now = Instant::now();
         self.events
-            .front()
-            .map_or_else(|| self.next_seq.saturating_add(1), stream_seq)
+            .iter()
+            .find(|entry| now.duration_since(entry.inserted_at) < self.max_age)
+            .map_or_else(|| self.next_seq.max(1), |entry| stream_seq(&entry.event))
     }
 
     /// Everything after `after_seq` that is still retained, and whether that is
@@ -430,8 +441,9 @@ impl SessionStreamState {
         let events = self
             .events
             .iter()
-            .filter(|ev| stream_seq(ev) > after_seq)
-            .cloned()
+            .filter(|entry| stream_seq(&entry.event) >= first_available_seq
+                && stream_seq(&entry.event) > after_seq)
+            .map(|entry| entry.event.clone())
             .collect();
         Some(StreamReplay {
             first_available_seq,
@@ -444,11 +456,52 @@ impl SessionStreamState {
         })
     }
 
-    fn push_event(&mut self, event: TerminalStreamEventPayload) {
-        if self.events.len() >= self.max_events {
-            self.events.pop_front();
+    /// Account for actual string allocation capacities and the retained
+    /// event structure, rather than counting frames or decoded PTY bytes only.
+    fn retained_size(event: &TerminalStreamEventPayload) -> usize {
+        let allocated = match event {
+            TerminalStreamEventPayload::Output { session_name, data, .. } => {
+                session_name.capacity().saturating_add(data.capacity())
+            }
+            TerminalStreamEventPayload::Resize { session_name, .. } => session_name.capacity(),
+        };
+        allocated.saturating_add(std::mem::size_of::<RetainedEvent>())
+    }
+
+    fn pop_front(&mut self) {
+        if let Some(front) = self.events.pop_front() {
+            self.retained_bytes = self.retained_bytes.saturating_sub(front.retained_bytes);
         }
-        self.events.push_back(event);
+    }
+
+    fn push_event(&mut self, event: TerminalStreamEventPayload) {
+        let now = Instant::now();
+        while self.events.front().is_some_and(|entry| {
+            now.duration_since(entry.inserted_at) >= self.max_age
+        }) {
+            self.pop_front();
+        }
+
+        let size = Self::retained_size(&event);
+        while !self.events.is_empty()
+            && (self.events.len() >= self.max_events
+                || self.retained_bytes.saturating_add(size) > self.max_bytes)
+        {
+            self.pop_front();
+        }
+
+        // The sequence was already assigned by the producer. A single
+        // oversized frame is never partially retained or silently skipped:
+        // callers behind its seq get complete=false and the new replay floor.
+        if self.max_events == 0 || size > self.max_bytes {
+            return;
+        }
+        self.retained_bytes = self.retained_bytes.saturating_add(size);
+        self.events.push_back(RetainedEvent {
+            event,
+            inserted_at: now,
+            retained_bytes: size,
+        });
     }
 }
 
@@ -520,6 +573,64 @@ mod tests {
     fn seqs(events: &[TerminalStreamEventPayload]) -> Vec<u64> {
         events.iter().map(stream_seq).collect()
     }
+
+    /// A byte budget must evict a *whole event*, even when the event-count
+    /// limit would still allow both entries.
+    #[test]
+    fn replay_byte_budget_evicts_old_events_and_preserves_floor() {
+        let mut stream = SessionStreamState::new();
+        let epoch = stream.epoch;
+        stream.record_output("s", "one".to_owned());
+        let first_size = stream.events.front().unwrap().retained_bytes;
+        stream.max_bytes = first_size.saturating_add(1);
+        stream.record_output("s", "two".to_owned());
+        assert_eq!(stream.events.len(), 1);
+        assert_eq!(stream.first_available_seq(), 2);
+        assert!(stream.retained_bytes <= stream.max_bytes);
+        let reply = stream.replay_since(epoch, 0).unwrap();
+        assert!(!reply.complete);
+        assert_eq!(seqs(&reply.events), vec![2]);
+    }
+
+    /// The producer must still advance seq when a single frame is too large
+    /// for its retained replay window.
+    #[test]
+    fn oversized_event_is_never_partially_retained_or_claimed_complete() {
+        let mut stream = SessionStreamState::new();
+        let epoch = stream.epoch;
+        stream.max_bytes = 1;
+        stream.record_output("s", "very-large".to_owned());
+        assert!(stream.events.is_empty());
+        assert_eq!(stream.cursor(), 1);
+        assert_eq!(stream.first_available_seq(), 2);
+        let lost = stream.replay_since(epoch, 0).unwrap();
+        assert!(!lost.complete);
+        assert!(lost.events.is_empty());
+        let current = stream.replay_since(epoch, 1).unwrap();
+        assert!(current.complete);
+    }
+
+    #[test]
+    fn age_expiry_applies_on_idle_replay_and_insert_reclaims_storage() {
+        let mut stream = SessionStreamState::new();
+        let epoch = stream.epoch;
+        stream.record_output("s", "old".to_owned());
+        stream.max_age = Duration::ZERO;
+        // No new producer event: read-side expiry must still reject seq 1.
+        assert_eq!(stream.first_available_seq(), 2);
+        assert!(!stream.replay_since(epoch, 0).unwrap().complete);
+        assert!(stream.replay_since(epoch, 0).unwrap().events.is_empty());
+
+        // Switch to a nonzero age and install an explicitly expired timestamp.
+        stream.max_age = Duration::from_secs(60);
+        stream.events.front_mut().unwrap().inserted_at =
+            Instant::now() - Duration::from_secs(120);
+        stream.record_output("s", "new".to_owned());
+        assert_eq!(stream.events.len(), 1);
+        assert_eq!(stream.first_available_seq(), 2);
+        assert_eq!(seqs(&stream.replay_since(epoch, 1).unwrap().events), vec![2]);
+    }
+
 
     /// The boundary of the retained window, from the side that has lost
     /// nothing: a cursor one below the floor is asking for exactly what the
