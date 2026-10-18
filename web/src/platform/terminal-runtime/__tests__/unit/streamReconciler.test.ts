@@ -783,3 +783,73 @@ describe('StreamReconciler', () => {
     expect(h.requests).toHaveLength(0);
   });
 });
+
+
+describe('StreamReconciler Agent position forwarding (#1938)', () => {
+  const encode = (text: string) => new TextEncoder().encode(text);
+
+  it('preserves the sequenced live output/resize identity, but not bootstrap or level identity', () => {
+    const outputs: Array<{ payload: string; position?: { streamEpoch: number; streamSeq: number } }> = [];
+    const resizes: Array<{ cols: number; position?: { streamEpoch: number; streamSeq: number } }> = [];
+    const reconciler = new StreamReconciler(
+      async () => reply([], 11),
+      {
+        onOutput: (data, _bootstrap, position) => outputs.push({
+          payload: new TextDecoder().decode(data),
+          position,
+        }),
+        onResize: (cols, _rows, position) => resizes.push({ cols, position }),
+        onStreamTruncated: vi.fn(),
+      },
+    );
+    reconciler.acceptLive({ data: encode('live'), streamEpoch: 11, streamSeq: 30 });
+    reconciler.acceptLiveResize({ cols: 100, rows: 30, streamEpoch: 11, streamSeq: 31 });
+    reconciler.acceptLive({ data: encode('bootstrap'), bootstrap: { requestedLines: 50, truncated: false } });
+    reconciler.acceptLevelResize(120, 40);
+
+    expect(outputs).toEqual([
+      { payload: 'live', position: { streamEpoch: 11, streamSeq: 30 } },
+      { payload: 'bootstrap', position: undefined },
+    ]);
+    expect(resizes).toEqual([
+      { cols: 100, position: { streamEpoch: 11, streamSeq: 31 } },
+      { cols: 120, position: undefined },
+    ]);
+    reconciler.dispose();
+  });
+
+  it('preserves replay positions and deduplicates a live/replay overlap without renumbering', async () => {
+    const events: Array<{ kind: string; seq?: number; epoch?: number }> = [];
+    let answer: ((value: ResumeReply) => void) | undefined;
+    const reconciler = new StreamReconciler(
+      () => new Promise<ResumeReply>((resolve) => { answer = resolve; }),
+      {
+        onOutput: (_data, _bootstrap, position) => events.push({
+          kind: 'output', seq: position?.streamSeq, epoch: position?.streamEpoch,
+        }),
+        onResize: (_cols, _rows, position) => events.push({
+          kind: 'resize', seq: position?.streamSeq, epoch: position?.streamEpoch,
+        }),
+        onStreamTruncated: vi.fn(),
+      },
+    );
+    reconciler.acceptLive({ data: encode('4'), streamEpoch: 11, streamSeq: 4 });
+    reconciler.acceptLive({ data: encode('7'), streamEpoch: 11, streamSeq: 7 });
+    expect(events).toEqual([{ kind: 'output', seq: 4, epoch: 11 }]);
+    expect(answer).toBeTypeOf('function');
+
+    answer!(reply([
+      { kind: 'output', streamEpoch: 11, streamSeq: 5, data: btoa('5') },
+      { kind: 'resize', streamEpoch: 11, streamSeq: 6, cols: 90, rows: 20 },
+      { kind: 'output', streamEpoch: 11, streamSeq: 7, data: btoa('7-replay') },
+    ], 11, { firstAvailableSeq: 4, complete: true }));
+    await flushMicrotasks();
+    expect(events).toEqual([
+      { kind: 'output', seq: 4, epoch: 11 },
+      { kind: 'output', seq: 5, epoch: 11 },
+      { kind: 'resize', seq: 6, epoch: 11 },
+      { kind: 'output', seq: 7, epoch: 11 },
+    ]);
+    reconciler.dispose();
+  });
+});
