@@ -51,7 +51,7 @@ function identityEnv(){
 }
 function telemetry(out,meta,sha,phase,verified){
   const input={
-    workflow_id:'agent-cursor-resume-'+phase,
+    workflow_id:phase==='resume'?'agent-cursor-resume-verify':'agent-cursor-resume-seed',
     github_workflow:process.env.GITHUB_WORKFLOW,
     job:phase, task:{id:'cursor-resume-d1',type:'provider-fixture',target_ref:sha},
     agent:{id:'cursor-resume-fixture',role:'auditor',provider:'cursor',
