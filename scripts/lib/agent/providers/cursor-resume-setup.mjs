@@ -55,6 +55,17 @@ function selfTest() {
   if(mock.length!==2||mock[0].input!=='PRIVATE'||mock[1].args.at(-1)!=='PUBLIC')
     fail('setup ordering or value forwarding self-test');
   if(result.environment!=='cursor')fail('wrong Environment');
+  const failCalls=[];
+  let interrupted=false;
+  try{
+    provision({values,run:(args,input)=>{
+      failCalls.push(args[0]);
+      if(args[0]==='secret') throw Error('simulated settings API failure');
+    }});
+  }catch{interrupted=true;}
+  if(!interrupted||failCalls.join(',')!=='secret'){
+    fail('public activation variable must not be written after private-secret failure');
+  }
   for(const env of [{GITHUB_ACTIONS:'true'},{CI:'true'},{GITHUB_REPOSITORY:'other/repo'}]){
     let rejected=false;
     try{validateSetupContext(env);}catch{rejected=true;}
