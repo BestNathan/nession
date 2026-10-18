@@ -2,6 +2,7 @@ import { readFile, mkdir, writeFile, copyFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makeProjection, validateProjection } from './project.mjs';
+import { loadIssueRunObservations } from './issue-runs.mjs';
 
 const repo = 'BestNathan/nession';
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -88,11 +89,20 @@ const [repository,agent,registry,issues,pulls,workflowRuns,allRefs] = await Prom
   optionalRuns(),
   Promise.all(['metrics','acceptance-results','task-results','agent-store'].map(optionalRef))
 ]);
-const [issueTimelines,prReviews]=await Promise.all([optionalIssueTimelines(issues),optionalPrReviews(pulls)]);
+const generatedAt=new Date().toISOString();
+const selectedIssueNumbers=Array.isArray(issues)?issues
+  .filter(x=>Number.isSafeInteger(x?.number)&&x.number>0&&!x.pull_request)
+  .sort((a,b)=>String(b.updated_at||'').localeCompare(String(a.updated_at||''))||a.number-b.number)
+  .slice(0,12).map(x=>x.number):[];
+const [issueTimelines,prReviews,issueRunSource]=await Promise.all([
+  optionalIssueTimelines(issues),optionalPrReviews(pulls),
+  loadIssueRunObservations({root:metrics,expectedSha:process.env.METRICS_SHA,
+    issues:selectedIssueNumbers,at:generatedAt}),
+]);
 const refs=Object.fromEntries(['metrics','acceptance-results','task-results','agent-store'].map((name,index)=>[name,allRefs[index]]));
 const result=validateProjection(makeProjection({
-  repository,agent,registry,issues,pulls,workflowRuns,issueTimelines,prReviews,refs,
-  meta:{ generated_at:new Date().toISOString(),main_sha:process.env.SOURCE_MAIN_SHA,metrics_sha:process.env.METRICS_SHA }
+  repository,agent,registry,issues,pulls,workflowRuns,issueTimelines,prReviews,issueRunSource,refs,
+  meta:{ generated_at:generatedAt,main_sha:process.env.SOURCE_MAIN_SHA,metrics_sha:process.env.METRICS_SHA }
 }));
 await mkdir(join(out,'data'),{recursive:true});
 for(const name of ['index.html','styles.css','app.js','favicon.svg']) await copyFile(join(root,name),join(out,name));
@@ -103,5 +113,6 @@ console.log(JSON.stringify({
   metrics_sha:result.source.metrics_sha,
   repository:result.repository.available, agents:result.agents.available,
   issues:result.work.issues_status,pulls:result.work.pulls_status,
+  agent_run_observation:result.work.agent_run_source,
   stores:result.evidence.stores.map(x=>[x.name,x.state])
 }));

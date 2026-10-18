@@ -122,6 +122,36 @@ function prWorkflowEvidence(raw,allRuns){
   return {head_sha:head.sha,ci:pick('ci'),e2e:pick('e2e')};
 }
 
+// Per-Issue source-bound Agent run observation; never an implementing-PR join.
+// Only an independent exact GitHub Workflow Run match certifies Run identity.
+const AGENT_RUN_WORKFLOWS=Object.freeze({
+  'issue-audit':{name:'Agent / Issue Audit',path:'.github/workflows/issue-audit.yml'},
+  'requirement-acceptance':{name:'Acceptance / Orchestrator',path:'.github/workflows/acceptance-orchestrator.yml'},
+  'agent-provider-smoke':{name:'Agent / Provider Smoke',path:'.github/workflows/agent-provider-smoke.yml'},
+});
+function issueAgentObservations(number, source, allRuns) {
+  if(!['available','truncated'].includes(source?.status)||!Array.isArray(source?.records))
+    return [];
+  const actions=Array.isArray(allRuns)?allRuns.slice(0,100):[];
+  return source.records.filter(r=>r.issue===number).slice(0,3).map(r=>{
+    const workflow=AGENT_RUN_WORKFLOWS[r.workflow];
+    const run=actions.find(x=>x.id===r.run_id);
+    const verified=!!(workflow && run &&
+      run.id===r.run_id && run.run_attempt===r.attempt &&
+      run.name===workflow.name &&
+      run.path?.replace(/@refs\/heads\/[^\s]+$/,'')===workflow.path &&
+      run.repository?.full_name===REPO && run.head_repository?.full_name===REPO &&
+      run.event===r.event && (!r.target_sha||run.head_sha===r.target_sha));
+    return {
+      run_id:r.run_id,attempt:r.attempt,workflow:r.workflow,
+      target_sha:r.target_sha,agent_id:r.agent_id,role:r.role,provider:r.provider,
+      tokens_total:r.tokens_total,duration_ms:r.duration_ms,
+      observed_at:r.observed_at,verification:verified?'github_run_verified':'not_independently_verified',
+      pr_linkage:'unlinked',url:GH+'/actions/runs/'+r.run_id,
+    };
+  });
+}
+
 // Canonical aggregate metrics are not exact-SHA Issue/PR/Agent-Run proofs.
 // Strictly allowlist public category names and bounded integer counts.
 function observedCount(value) {
@@ -157,7 +187,7 @@ function rosterFrom(registry, agentWindow) {
     observed_7d: Object.hasOwn(usage,id) ? number(usage[id]) : null,
   })).sort((a,b)=>a.role.localeCompare(b.role)||a.id.localeCompare(b.id));
 }
-export function makeProjection({ repository, agent, registry, issues, pulls, workflowRuns, issueTimelines, prReviews, refs={}, meta={} }) {
+export function makeProjection({ repository, agent, registry, issues, pulls, workflowRuns, issueTimelines, prReviews, issueRunSource, refs={}, meta={} }) {
   const r = repository?.schema_version === 2 ? repository : null;
   const a = agent?.schema_version === 1 && agent?.kind === 'agent_metrics_aggregate' ? agent : null;
   const current = r?.repository || {}, efficiency = r?.efficiency || {};
@@ -230,9 +260,11 @@ export function makeProjection({ repository, agent, registry, issues, pulls, wor
       issues_status:Array.isArray(issues)?'available':'unavailable',
       pulls_status:Array.isArray(pulls)?'available':'unavailable',
       workflow_runs_status:Array.isArray(workflowRuns)?'available':'unavailable',
+      agent_run_source:['available','truncated'].includes(issueRunSource?.status)?issueRunSource.status:'unavailable',
       issues:list(issues,'issue').map(x=>({
         ...x, observed_agent_runs_7d:observedIssueCount(aw,x.number),
         pr_references:timelineReferences(x.number,issueTimelines?.[String(x.number)]),
+        agent_runs:issueAgentObservations(x.number,issueRunSource,workflowRuns),
       })),
       pulls:list(pulls,'pr').map(x=>{
         const source=Array.isArray(pulls)?pulls.find(p=>p.number===x.number):null;
@@ -263,7 +295,7 @@ export function validateProjection(p) {
   allowedFields(p.source,['repository','main_sha','metrics_sha','issues_status','pulls_status','workflow_runs_status'],'source');
   allowedFields(p.repository,['available','sha','generated_at','freshness','current','efficiency'],'repository');
   allowedFields(p.agents,['available','generated_at','freshness','roster','distribution','summary'],'agents');
-  allowedFields(p.work,['issues_status','pulls_status','workflow_runs_status','issues','pulls'],'work');
+  allowedFields(p.work,['issues_status','pulls_status','workflow_runs_status','agent_run_source','issues','pulls'],'work');
   allowedFields(p.evidence,['stores'],'evidence');
   allowedFields(p.repository.current,['loc','files','tests','rust_coverage','web_coverage','protocol_units','unit_pass'],'repository.current');
   allowedFields(p.repository.efficiency,['commits_7d','additions_7d','deletions_7d','merged_7d','open_issues','open_prs'],'repository.efficiency');
@@ -286,11 +318,31 @@ export function validateProjection(p) {
      !Array.isArray(p.work.pulls)||p.work.pulls.length>12||
      p.agents.roster.length>40||p.evidence.stores.length>4)
     throw Error('unbounded public data');
-  const issueFields=['number','title','url','state','updated_at','observed_agent_runs_7d','pr_references'];
+  const issueFields=['number','title','url','state','updated_at','observed_agent_runs_7d','pr_references','agent_runs'];
+  if(!['available','truncated','unavailable'].includes(p.work.agent_run_source))
+    throw Error('invalid Issue Agent source status');
   const prFields=['number','title','url','state','updated_at','workflow','review'];
   for(const item of p.work.issues){
     allowedFields(item,issueFields,'issue');
     allowedFields(item.pr_references,['status','prs'],'issue references');
+    if(!Array.isArray(item.agent_runs)||item.agent_runs.length>3)
+      throw Error('unbounded public Agent runs');
+    if(p.work.agent_run_source==='unavailable' && item.agent_runs.length)
+      throw Error('unavailable Agent source cannot produce runs');
+    for(const r of item.agent_runs){
+      allowedFields(r,['run_id','attempt','workflow','target_sha','agent_id','role','provider','tokens_total','duration_ms','observed_at','verification','pr_linkage','url'],'Issue Agent event');
+      if(!Number.isSafeInteger(r.run_id)||r.run_id<=0||!Number.isSafeInteger(r.attempt)||r.attempt<=0||
+         !Object.hasOwn(AGENT_RUN_WORKFLOWS,r.workflow)||
+         (r.target_sha!==null&&!safeSha(r.target_sha))||
+         (r.agent_id!==null&&!/^[a-z][a-z0-9-]{0,62}$/.test(r.agent_id))||
+         (r.role!==null&&!['developer','reviewer','acceptor','auditor'].includes(r.role))||
+         (r.provider!==null&&!/^[a-z][a-z0-9_-]{0,31}$/.test(r.provider))||
+         !safeDate(r.observed_at)||
+         !['github_run_verified','not_independently_verified'].includes(r.verification)||
+         r.pr_linkage!=='unlinked'||r.url!==GH+'/actions/runs/'+r.run_id||
+         [r.tokens_total,r.duration_ms].some(n=>n!==null&&(!Number.isSafeInteger(n)||n<0)))
+        throw Error('invalid Issue Agent source evidence');
+    }
     if(!Array.isArray(item.pr_references.prs)||item.pr_references.prs.length>6)
       throw Error('unbounded public Issue links');
   }

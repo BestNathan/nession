@@ -25,6 +25,9 @@ test.describe('standalone Pages overview',()=>{
   await expect(page.locator('img[src="x"]')).toHaveCount(0);
   await expect(page.getByText('observed Agent runs (7d): 2', {exact:false})).toBeVisible();
   await expect(page.getByRole('link',{name:'PR #1787 · GitHub cross-reference'})).toBeVisible();
+  await expect(page.getByText('Pinned Metrics · Issue Agent Runs · PR linkage: Unlinked')).toBeVisible();
+  await expect(page.getByRole('link',{name:'Agent acceptor / review-cursor-01 · requirement-acceptance · run 81 / attempt 2'})).toHaveAttribute('href','https://github.com/BestNathan/nession/actions/runs/81');
+  await expect(page.getByText('GitHub Run identity verified',{exact:false})).toBeVisible();
   await expect(page.getByText('GitHub Timeline · PR cross-references (not ownership or SC proof)')).toBeVisible();
   await expect(page.getByText('Quality · success · run 42 / attempt 1')).toBeVisible();
   await expect(page.getByText('E2E: Not observed')).toBeVisible();
