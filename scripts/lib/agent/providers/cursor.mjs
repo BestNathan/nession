@@ -134,6 +134,6 @@ export async function runCursorSession({
     };
   } finally {
     if (typeof agent[Symbol.asyncDispose] === 'function') await agent[Symbol.asyncDispose]();
-    else agent.close?.();
+    else await agent.close?.();
   }
 }
