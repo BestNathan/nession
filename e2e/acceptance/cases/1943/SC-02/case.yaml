@@ -1,0 +1,11 @@
+schema_version: 1
+issue: 1943
+criterion: SC-02
+stage: pre-merge
+runtime: full-stack-local
+# Only read-only canonical routing tests; no browser/secret-dependent runtime.
+isolation: shared
+verifiers:
+  - type: runtime
+    entry: verify.cjs
+result_policy: all-pass
