@@ -7,6 +7,7 @@ import path from 'node:path';
 import { generateKeyPairSync } from 'node:crypto';
 import { runCursorSession } from './cursor.mjs';
 import { sealCursorNativeStore, openCursorNativeStore } from './cursor-native-store.mjs';
+import { verifyCursorSeedSource } from './cursor-resume-fixture.mjs';
 
 const dir=fs.mkdtempSync(path.join(os.tmpdir(),'nession-cursor-native-'));
 const model={id:'composer-2.5',parameters:[]};
@@ -105,6 +106,28 @@ async function test(){
   fs.symlinkSync(path.join(store,'agents.ndjson'),path.join(store,'checkpoints.ndjson'));
   assert.throws(()=>sealCursorNativeStore({directory:store,metadata,publicKeyPem:publicKey}),
     /unsafe native store file/);
+  const sourceRun={id:812,run_attempt:1,name:'Agent / Cursor Resume Seed',
+    path:'.github/workflows/agent-cursor-resume-seed.yml',
+    repository:{full_name:'BestNathan/nession'},
+    head_repository:{full_name:'BestNathan/nession'},
+    head_branch:'main',head_sha:'a'.repeat(40),event:'workflow_dispatch',
+    status:'completed',conclusion:'success'};
+  const sourceArtifact={id:1,name:'cursor-resume-seed-812-1',expired:false,
+    digest:'sha256:'+'c'.repeat(64),
+    workflow_run:{id:812,head_sha:'a'.repeat(40)}};
+  const catalog={total_count:1,artifacts:[sourceArtifact]};
+  assert.equal(verifyCursorSeedSource(sourceRun,catalog,812,1,'a'.repeat(40)),
+    sourceArtifact.digest);
+  assert.throws(()=>verifyCursorSeedSource({...sourceRun,head_branch:'feature'},catalog,
+    812,1,'a'.repeat(40)),/untrusted/);
+  assert.throws(()=>verifyCursorSeedSource({...sourceRun,run_attempt:2},catalog,
+    812,1,'a'.repeat(40)),/untrusted/);
+  assert.throws(()=>verifyCursorSeedSource({...sourceRun,head_repository:{full_name:'attacker/repo'}},
+    catalog,812,1,'a'.repeat(40)),/untrusted/);
+  assert.throws(()=>verifyCursorSeedSource(sourceRun,{total_count:2,artifacts:[sourceArtifact,
+    {...sourceArtifact,id:2}]},812,1,'a'.repeat(40)),/duplicate/);
+  assert.throws(()=>verifyCursorSeedSource(sourceRun,{total_count:1,
+    artifacts:[{...sourceArtifact,digest:'invalid'}]},812,1,'a'.repeat(40)),/unverified/);
   console.log('Cursor native resume and encrypted JSONL fixture: positive and negative tests passed');
 }
 try {await test();} finally {fs.rmSync(dir,{recursive:true,force:true});}
