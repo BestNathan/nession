@@ -20,6 +20,8 @@ export const CATALOG = [
   ['agent-provider-smoke', 'agent-provider-smoke.yml', 'AI Agent Provider Smoke', 'agent-provider-smoke.yml', 'Agent / Provider Smoke', 'agent'],
   ['agent-cursor-resume-seed', 'agent-cursor-resume-seed.yml', 'Agent / Cursor Resume Seed', 'agent-cursor-resume-seed.yml', 'Agent / Cursor Resume Seed', 'agent'],
   ['agent-cursor-resume-verify', 'agent-cursor-resume-verify.yml', 'Agent / Cursor Resume Verify', 'agent-cursor-resume-verify.yml', 'Agent / Cursor Resume Verify', 'agent'],
+  ['agent-claude-resume-seed', 'agent-claude-resume-seed.yml', 'Agent / Claude Resume Seed', 'agent-claude-resume-seed.yml', 'Agent / Claude Resume Seed', 'agent'],
+  ['agent-claude-resume-verify', 'agent-claude-resume-verify.yml', 'Agent / Claude Resume Verify', 'agent-claude-resume-verify.yml', 'Agent / Claude Resume Verify', 'agent'],
   ['acceptance-orchestrator', 'requirement-acceptance.yml', 'Requirement Acceptance', 'acceptance-orchestrator.yml', 'Acceptance / Orchestrator', 'acceptance'],
   ['acceptance-postrun-waker', 'acceptance-postrun-waker.yml', 'Acceptance / Post-Run Waker', 'acceptance-postrun-waker.yml', 'Acceptance / Post-Run Waker', 'acceptance'],
   ['acceptance-quota-recovery', 'acceptance-quota-recovery.yml', 'Acceptance / Quota Recovery', 'acceptance-quota-recovery.yml', 'Acceptance / Quota Recovery', 'acceptance'],
