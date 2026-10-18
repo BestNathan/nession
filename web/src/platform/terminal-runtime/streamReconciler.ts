@@ -56,6 +56,8 @@ export class StreamReconciler {
    * live copy is the one that carries the bootstrap marker.
    */
   private pending = new Map<number, PendingFrame>();
+  private pendingBytes = 0;
+  private readonly limits: PendingLimits;
   /**
    * Identifies the current stream generation. Every reset bumps it, so a reply
    * that was in flight across an epoch change or a dispose is recognised and
@@ -88,7 +90,16 @@ export class StreamReconciler {
   constructor(
     private readonly resume: (epoch: number, afterSeq: number) => Promise<ResumeReply>,
     private readonly sink: StreamSink,
+    limits: Partial<PendingLimits> = {},
   ) {
+    this.limits = {
+      maxBytes: limits.maxBytes ?? DEFAULT_PENDING_MAX_BYTES,
+      maxFrames: limits.maxFrames ?? DEFAULT_PENDING_MAX_FRAMES,
+    };
+    if (!Number.isSafeInteger(this.limits.maxBytes) || this.limits.maxBytes < 1
+      || !Number.isSafeInteger(this.limits.maxFrames) || this.limits.maxFrames < 1) {
+      throw new RangeError('reorder limits must be positive safe integers');
+    }
     this.handlers = {
       onOutput: (data, position) => this.sink.onOutput(data, undefined, position),
       onResize: (cols, rows, position) => this.sink.onResize(cols, rows, position),
@@ -118,7 +129,7 @@ export class StreamReconciler {
     };
     this.accept(frame.streamEpoch, frame.streamSeq, 'output', () =>
       this.sink.onOutput(frame.data, frame.bootstrap, position),
-    );
+    , frame.data.byteLength + PENDING_FRAME_OVERHEAD);
   }
 
   /**
@@ -141,7 +152,7 @@ export class StreamReconciler {
     const { streamEpoch, streamSeq, cols, rows } = frame;
     this.accept(streamEpoch, streamSeq, 'resize', () =>
       this.sink.onResize(cols, rows, { streamEpoch, streamSeq }),
-    );
+    , PENDING_FRAME_OVERHEAD);
   }
 
   /**
@@ -277,11 +288,51 @@ export class StreamReconciler {
     this.epoch = epoch;
     this.frontier = null;
     this.pending.clear();
+    this.pendingBytes = 0;
     this.attemptsFor = -1;
     this.attempts = 0;
     this.wantHistory = false;
     this.inFlight = null;
     this.generation += 1;
+  }
+
+  /** Drop a retained frame and its byte charge together, on every path. */
+  private forgetFrame(seq: number): void {
+    const frame = this.pending.get(seq);
+    if (frame) {
+      this.pendingBytes -= frame.bytes;
+      this.pending.delete(seq);
+    }
+  }
+
+  /**
+   * Make pressure an explicit discontinuity rather than silently holding
+   * unbounded output. The renderer may continue *degraded live*, but cannot
+   * regard the skipped segment as a synchronized terminal checkpoint.
+   */
+  private keepFrame(frame: PendingFrame): void {
+    if (this.pending.has(frame.seq)) { return; }
+    if (this.pending.size >= this.limits.maxFrames
+      || this.pendingBytes + frame.bytes > this.limits.maxBytes) {
+      this.sink.onStreamTruncated();
+      this.pending.clear();
+      this.pendingBytes = 0;
+      this.generation += 1; // invalidate any reply for the discarded gap
+      this.inFlight = null;
+      this.wantHistory = false;
+      this.attemptsFor = -1;
+      this.attempts = 0;
+      this.frontier = frame.seq - 1;
+    }
+    if (frame.bytes > this.limits.maxBytes) {
+      // A single oversized event does not live in the reorder map. It may
+      // still be displayed as degraded output, exactly once.
+      frame.apply();
+      this.frontier = frame.seq;
+      return;
+    }
+    this.pending.set(frame.seq, frame);
+    this.pendingBytes += frame.bytes;
   }
 
   private noteAttempt(position: number): void {
@@ -297,7 +348,7 @@ export class StreamReconciler {
     return this.attemptsFor === position ? this.attempts : 0;
   }
 
-  private accept(epoch: number, seq: number, kind: PendingKind, apply: () => void): void {
+  private accept(epoch: number, seq: number, kind: PendingKind, apply: () => void, bytes: number): void {
     if (this.disposed) {
       return;
     }
@@ -322,7 +373,7 @@ export class StreamReconciler {
       return;
     }
     if (!this.pending.has(seq)) {
-      this.pending.set(seq, { seq, kind, superseded: false, apply });
+      this.keepFrame({ seq, kind, superseded: false, apply, bytes });
     }
     if (anchors) {
       this.anchor();
@@ -371,10 +422,11 @@ export class StreamReconciler {
         continue;
       }
       if (!this.pending.has(event.streamSeq)) {
-        this.pending.set(event.streamSeq, {
+        this.keepFrame({
           seq: event.streamSeq,
           kind: event.kind,
           superseded: false,
+          bytes: event.kind === 'output' ? event.data.length * 2 + PENDING_FRAME_OVERHEAD : PENDING_FRAME_OVERHEAD,
           apply: () => applyTerminalStreamEvents([event], this.handlers),
         });
       }
@@ -584,7 +636,7 @@ export class StreamReconciler {
     if (this.frontier !== null) {
       for (const seq of [...this.pending.keys()]) {
         if (seq <= this.frontier) {
-          this.pending.delete(seq);
+          this.forgetFrame(seq);
         }
       }
     }
@@ -594,7 +646,7 @@ export class StreamReconciler {
       if (!frame) {
         return;
       }
-      this.pending.delete(seq);
+      this.forgetFrame(seq);
       this.frontier = seq;
       if (!frame.superseded) {
         frame.apply();
@@ -676,6 +728,16 @@ export interface StreamSink {
   onStreamTruncated: () => void;
 }
 
+interface PendingLimits {
+  maxBytes: number;
+  maxFrames: number;
+}
+
+/** Replay strings are charged conservatively at two bytes per JS code unit. */
+const DEFAULT_PENDING_MAX_BYTES = 2 * 1024 * 1024;
+const DEFAULT_PENDING_MAX_FRAMES = 1024;
+const PENDING_FRAME_OVERHEAD = 128;
+
 interface PendingFrame {
   seq: number;
   /**
@@ -691,6 +753,8 @@ interface PendingFrame {
    * anything. See {@link StreamReconciler.acceptLevelResize}.
    */
   superseded: boolean;
+  /** Conservative retained footprint, including payload and frame metadata. */
+  bytes: number;
   apply: () => void;
 }
 
