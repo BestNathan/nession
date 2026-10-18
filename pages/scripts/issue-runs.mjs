@@ -9,7 +9,7 @@ const REPO='BestNathan/nession';
 const SHA=/^[a-f0-9]{40}$/;
 const WORKFLOWS=Object.freeze({
   'issue-audit':{name:'Agent / Issue Audit',path:'.github/workflows/issue-audit.yml',events:['issues','workflow_dispatch']},
-  'requirement-acceptance':{name:'Acceptance / Orchestrator',path:'.github/workflows/acceptance-orchestrator.yml',events:['pull_request_target','push','workflow_run','issues']},
+  'requirement-acceptance':{names:['Acceptance / Orchestrator','Agent / SC Acceptance'],events:['pull_request_target','push','workflow_run','issues','workflow_dispatch']},
   'agent-provider-smoke':{name:'Agent / Provider Smoke',path:'.github/workflows/agent-provider-smoke.yml',events:['push','workflow_dispatch']},
 });
 const validPositive=n=>Number.isSafeInteger(n)&&n>0;
@@ -17,9 +17,12 @@ const count=n=>Number.isSafeInteger(n)&&n>=0?n:null;
 const date=s=>typeof s==='string'&&!Number.isNaN(Date.parse(s))?new Date(s).toISOString():null;
 const value=(s,re)=>typeof s==='string'&&re.test(s)?s:null;
 function normalize(row,workflow,day,file,allowed){
+  // Unrelated historical workflows cannot invalidate the selected public
+  // Issue window; attest all candidate source bytes BEFORE projecting them.
+  if(!validPositive(row?.task?.issue)||!allowed.has(row.task.issue))return null;
   validateAgentWorkflowTelemetry(row); // canonical owner; no parallel telemetry schema.
   const identity=row.identity||{}, task=row.task||{}, agent=row.agent||{};
-  if(identity.workflow_id!==workflow || identity.github_workflow!==WORKFLOWS[workflow].name ||
+  if(identity.workflow_id!==workflow || !(WORKFLOWS[workflow].names||[WORKFLOWS[workflow].name]).includes(identity.github_workflow) ||
      identity.repository!==REPO||!WORKFLOWS[workflow].events.includes(identity.event)||
      !validPositive(identity.github_run_id)||!validPositive(identity.github_run_attempt)||
      !value(identity.unique_run_name,/^[a-z0-9][a-z0-9._-]{0,119}$/)||
@@ -32,7 +35,7 @@ function normalize(row,workflow,day,file,allowed){
   if(!observed)throw Error('unknown observation time');
   return {
     issue:task.issue,run_id:identity.github_run_id,attempt:identity.github_run_attempt,
-    workflow, event:identity.event,target_sha:value(task.target_ref,SHA),
+    workflow,github_workflow:identity.github_workflow,event:identity.event,target_sha:value(task.target_ref,SHA),
     role:value(agent.role,/^(developer|reviewer|acceptor|auditor)$/),
     agent_id:value(agent.id,/^[a-z][a-z0-9-]{0,62}$/),
     provider:value(agent.provider,/^[a-z][a-z0-9_-]{0,31}$/),
