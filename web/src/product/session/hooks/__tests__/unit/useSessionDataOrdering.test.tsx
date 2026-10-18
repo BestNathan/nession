@@ -34,10 +34,10 @@ const state: DomainState = {
   session: { channel: 'active', copy: null },
   attachment: { channel: 'detached', copy: null },
 };
-function row(foreground_command: string | null): Session {
+function row(foregroundCommand: string | null): Session {
   return {
     session_id: 'node:live', agent_id: 'node', session_name: 'live',
-    foreground_command, status: 'detached', window_count: 1,
+    foreground_command: foregroundCommand, status: 'detached', window_count: 1,
     attached_clients: 0, last_activity: '2026-10-18T00:00:00Z',
   };
 }
@@ -76,7 +76,7 @@ afterEach(() => {
 
 function push(sessions: Session[]) {
   expect(fake.listeners.size).toBe(1); // proves the push had a subscriber
-  act(() => { for (const cb of fake.listeners) cb(sessions); });
+  act(() => { for (const cb of fake.listeners) { cb(sessions); } });
 }
 
 describe('#1900 SessionItem live report/list ordering (real DOM)', () => {
