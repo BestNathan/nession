@@ -60,6 +60,7 @@ test('public projector prevents forged lineage, private spill and missing source
  assert.deepEqual(p.work.lineage.edges,[]);
  assert.equal(p.work.lineage.status,'unavailable');
  assert.equal(p.work.acceptance_e2e.status,'unavailable');
- p.work.lineage.edges=[{...projectLineage(fixture()).edges[0],checkpoint_bytes:'secret'}];
+ p.work.lineage=projectLineage(fixture());
+ p.work.lineage.edges[0].checkpoint_bytes='secret';
  assert.throws(()=>validateProjection(p),/invalid public causal edge/);
 });
