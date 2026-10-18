@@ -180,8 +180,8 @@ export class ConnectionManager implements TerminalTransport {
     this.reconciler = new StreamReconciler(
       (epoch, afterSeq) => this.resumeStream(epoch, afterSeq),
       {
-        onOutput: (data, bootstrap) => this.onOutput?.(data, bootstrap),
-        onResize: (cols, rows) => this.onResize?.(cols, rows),
+        onOutput: (data, bootstrap, position) => this.onOutput?.(data, bootstrap, position),
+        onResize: (cols, rows, position) => this.onResize?.(cols, rows, position),
         // Only the reconciler can tell a buffer that is whole from one with a
         // stretch given up on, and only this class holds the session's owner.
         // It carries the fact up; what repair that implies is not the
