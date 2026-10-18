@@ -3,6 +3,7 @@ import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makeProjection, validateProjection } from './project.mjs';
 import { loadIssueRunObservations } from './issue-runs.mjs';
+import {agentStoreReadiness} from './agent-store-readiness.mjs';
 import { loadPinnedE2E } from './acceptance-e2e.mjs';
 import {selectScopedE2ERuns,scopedE2EPaths} from './e2e-run-window.mjs';
 
@@ -105,6 +106,22 @@ const [repository,agent,registry,issues,pulls,workflowRuns,allRefs] = await Prom
   optionalRuns(),
   Promise.all(['metrics','acceptance-results','task-results','agent-store'].map(optionalRef))
 ]);
+// Pin the public Git tree to the exact original ref SHA, then re-read that
+// ref before classification. This is source-readiness ONLY (not writer trust).
+async function optionalAgentStoreReadiness(ref) {
+  if(ref?.state==='missing')return agentStoreReadiness(ref,null,null);
+  if(ref?.state!=='present')return agentStoreReadiness(ref,null,null);
+  try {
+    if(!/^[a-f0-9]{40}$/.test(ref.sha||''))return agentStoreReadiness(ref,null,null);
+    const entries=await api('/contents?ref='+ref.sha);
+    const again=await optionalRef('agent-store');
+    return agentStoreReadiness(ref,entries,again);
+  } catch (error) {
+    console.error('Pinned agent-store source unavailable:',error.message);
+    return agentStoreReadiness(ref,null,null);
+  }
+}
+const agentStoreSource=await optionalAgentStoreReadiness(allRefs[3]);
 const generatedAt=new Date().toISOString();
 const selectedIssueNumbers=Array.isArray(issues)?issues
   .filter(x=>Number.isSafeInteger(x?.number)&&x.number>0&&!x.pull_request)
@@ -123,7 +140,7 @@ const acceptanceE2E=await loadPinnedE2E({root:acceptance,expectedSha:acceptanceS
 const refs=Object.fromEntries(['metrics','acceptance-results','task-results','agent-store'].map((name,index)=>[name,allRefs[index]]));
 const result=validateProjection(makeProjection({
   repository,agent,registry,issues,pulls,workflowRuns,issueTimelines,prReviews,
-  issueRunSource,acceptanceE2E,refs,
+  issueRunSource,acceptanceE2E,agentStoreSource,refs,
   meta:{ generated_at:generatedAt,main_sha:process.env.SOURCE_MAIN_SHA,metrics_sha:process.env.METRICS_SHA,
     acceptance_results_sha:acceptanceSha }
 }));
@@ -140,5 +157,6 @@ console.log(JSON.stringify({
   acceptance_e2e:result.work.acceptance_e2e.status,
   published_e2e_ids:result.work.acceptance_e2e.records.length,
   lineage_status:result.work.lineage.status,
+  agent_store_readiness:result.work.agent_store_readiness.status,
   stores:result.evidence.stores.map(x=>[x.name,x.state])
 }));
