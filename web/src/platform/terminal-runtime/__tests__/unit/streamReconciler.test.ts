@@ -939,7 +939,9 @@ describe('StreamReconciler bounded reorder window (#1961)', () => {
     expect(h.reconciler.pendingUsage).toEqual({ frames: 0, bytes: 0 });
     live(h, 5, 'five');
     expect(h.reconciler.pendingUsage.frames).toBe(1);
-    live(h, 1, 'epoch-new', 2);
+    // A fresh authoritative seed discards the retired epoch's pending bytes.
+    // A *live* different-epoch frame deliberately waits for replay (#1303).
+    h.reconciler.seed(2, 0);
     expect(h.reconciler.pendingUsage).toEqual({ frames: 0, bytes: 0 });
     h.reconciler.dispose();
   });
