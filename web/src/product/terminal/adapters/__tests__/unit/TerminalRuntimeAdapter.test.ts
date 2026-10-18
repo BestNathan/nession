@@ -9,6 +9,7 @@ function makeRuntime() {
   return {
     setTransportReady: vi.fn<(ready: boolean) => void>(),
     updateViewportSize: vi.fn<(size: { cols: number; rows: number }) => void>(),
+    noteStreamEventParsed: vi.fn(),
   } as unknown as SessionRuntime;
 }
 
