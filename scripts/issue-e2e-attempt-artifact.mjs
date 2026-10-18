@@ -38,7 +38,7 @@ export function selectExactAttemptIssueArtifact(run, jobs, artifacts) {
   assert.ok(positive(job.id) && job.status === 'completed' &&
     job.conclusion === run.conclusion, 'job outcome differs from source Run');
   const begin = when(job.started_at), end = when(job.completed_at);
-  assert.ok(end >= begin && begin >= when(run.created_at), 'invalid source Job time interval');
+  assert.ok(end > begin && begin >= when(run.created_at), 'invalid source Job time interval');
   assert.ok(Array.isArray(artifacts?.artifacts) &&
     Number.isSafeInteger(artifacts?.total_count) &&
     artifacts.total_count <= 100 && artifacts.artifacts.length === artifacts.total_count,
