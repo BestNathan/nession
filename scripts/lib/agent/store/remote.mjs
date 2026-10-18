@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { ingestEncryptedCheckpoint, restoreEncryptedCheckpoint } from './ingest.mjs';
+import { writeIssueWorkflowState } from '../orchestration/state-store.mjs';
 import { auditStagedRunStore } from '../../../run-store-integrity.mjs';
 import { publish as publishGitCAS } from '../../../run-store-cas-push.mjs';
 
@@ -70,14 +71,27 @@ function validatedInput({source,expectedVersion,key}){
 // Existing run-store-cas-push is the sole remote publisher (normal, no force).
 export function publishEncryptedAgentCheckpoint({
   remote,source,sealed,registry,key,expectedVersion,
-  onCandidate=null,
+  workflowState=null,expectedWorkflowVersion=null,onCandidate=null,
 }) {
   validatedInput({source,expectedVersion,key});
+  if ((workflowState===null)!==(expectedWorkflowVersion===null)) {
+    fail('workflow state and expected version must be supplied together');
+  }
+  if(workflowState!==null && (
+      workflowState.issue!==source.issue||
+      !Number.isSafeInteger(expectedWorkflowVersion)||expectedWorkflowVersion<0)) {
+    fail('workflow state belongs to a different Issue or invalid CAS version');
+  }
   const {checkout,parent}=cloneRoot(remote);
   try{
     const stage=ingestEncryptedCheckpoint(
       checkout,source,sealed,registry,key,expectedVersion);
+    // Optional deterministic Workflow state is written to the *same* disposable
+    // checkout before git add/commit. It cannot be independently acknowledged.
+    const stateResult=workflowState===null?null:
+      writeIssueWorkflowState(checkout,workflowState,expectedWorkflowVersion);
     if(stage.idempotent){
+      if(stateResult?.changed)fail('partial replay would split checkpoint and Workflow state');
       return {replayed:true,version:stage.version,commit_sha:git(checkout,['rev-parse','HEAD'])};
     }
     if(!commitCandidate(checkout,
@@ -93,6 +107,7 @@ export function publishEncryptedAgentCheckpoint({
     const published=publishGitCAS(REF,checkout,4);
     if(!HEX40.test(published.commit_sha))fail('unverifiable remote commit');
     return {replayed:published.replayed,version:stage.version,
+      workflow_version:stateResult?.version??null,
       commit_sha:published.commit_sha,attempts:published.attempt};
   }finally{fs.rmSync(parent,{recursive:true,force:true});}
 }
