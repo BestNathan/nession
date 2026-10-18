@@ -83,11 +83,15 @@ export function validateDevelopmentState(state) {
       const c=item.task.continuation;
       onlyKeys(c,['parent_action_id','ordinal','checkpoint_version','checkpoint_commit_sha',
         'ciphertext_sha256'], 'Slice continuation');
+      const parent=state.outbox.find(x=>x.id===c.parent_action_id && x.status==='yielded');
       if(item.task.type!=='dispatch'||item.task.resume!==true||
           !HEX64.test(c.parent_action_id??'')||!positive(c.ordinal)||c.ordinal>MAX_SLICES||
           !positive(c.checkpoint_version)||!SHA.test(c.checkpoint_commit_sha??'')||
-          !HEX64.test(c.ciphertext_sha256??'') ||
-          !state.outbox.some(x=>x.id===c.parent_action_id && x.status==='yielded')) {
+          !HEX64.test(c.ciphertext_sha256??'') || !parent ||
+          c.ordinal!==(parent.task.continuation?.ordinal??0)+1 ||
+          c.checkpoint_version!==parent.receipt.checkpoint_version ||
+          c.checkpoint_commit_sha!==parent.receipt.checkpoint_commit_sha ||
+          c.ciphertext_sha256!==parent.receipt.ciphertext_sha256) {
         reject('unbound or invalid Slice continuation');
       }
     }
@@ -187,7 +191,20 @@ export function acceptTaskResult(state, expectedVersion, result, source, registr
   const advanced = advanceWorkflow(state,result,attest);
   if (advanced.duplicate) reject('duplicate event with inconsistent task correlation');
   const version = state.version + 1;
-  const outbox = advanced.state.outbox.filter(x => x.id !== task.id);
+  // Immutable previous workflow states retain the audit trail. Once an
+  // authenticated final Task result is consumed, prune its bounded chain of
+  // yielded Slices so it cannot fill the Outbox or leave stale continuations.
+  const completed = new Set([task.id]);
+  let parentId=task.task.continuation?.parent_action_id;
+  for(let i=0;parentId && i<MAX_SLICES;i++){
+    const parent=state.outbox.find(x=>x.id===parentId);
+    if(!parent || parent.status!=='yielded'||completed.has(parentId))
+      reject('broken prior Slice lineage');
+    completed.add(parentId);
+    parentId=parent.task.continuation?.parent_action_id;
+  }
+  if(parentId)reject('exhausted Slice lineage');
+  const outbox = advanced.state.outbox.filter(x => !completed.has(x.id));
   if (outbox.length + advanced.actions.length > MAX_OUTBOX) reject('outbox size limit exceeded');
   const spawned = advanced.actions.map((a,i) => {
     const entry = makeAction(state.issue,version,a,state.assignments,i);
