@@ -180,8 +180,22 @@ export class ConnectionManager implements TerminalTransport {
     this.reconciler = new StreamReconciler(
       (epoch, afterSeq) => this.resumeStream(epoch, afterSeq),
       {
-        onOutput: (data, bootstrap, position) => this.onOutput?.(data, bootstrap, position),
-        onResize: (cols, rows, position) => this.onResize?.(cols, rows, position),
+        // A legacy unpositioned event preserves the historical callback arity.
+        // A known Agent sequence is forwarded intact; neither says "parsed".
+        onOutput: (data, bootstrap, position) => {
+          if (position === undefined) {
+            this.onOutput?.(data, bootstrap);
+          } else {
+            this.onOutput?.(data, bootstrap, position);
+          }
+        },
+        onResize: (cols, rows, position) => {
+          if (position === undefined) {
+            this.onResize?.(cols, rows);
+          } else {
+            this.onResize?.(cols, rows, position);
+          }
+        },
         // Only the reconciler can tell a buffer that is whole from one with a
         // stretch given up on, and only this class holds the session's owner.
         // It carries the fact up; what repair that implies is not the
