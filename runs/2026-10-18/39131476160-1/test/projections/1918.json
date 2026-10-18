@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_projection_receipt",
+  "outcome": "applied",
+  "issue": 1918,
+  "run_id": 39131476160,
+  "run_attempt": 1,
+  "target_sha": "da50e0bc88f8f9a50c729474ddba59ab9956f1cb",
+  "plan_digest": "5390a39a662b85d19358142b031d4ce9e6631cdaab1254980e70383f7672f709",
+  "artifact_digest": "sha256:aa6e4914490c5d5c32945f472e063bc864c00705a036c9b475b26d13dc13041d",
+  "ingest_run_id": 39131862367,
+  "ingest_attempt": 1,
+  "declaration_digest": "b769320d202d23781b706341be37fb51f2bf786f2d9f2bec14757d4773625d69",
+  "before_body_sha256": "b7508369dcfebabbed85e5da808e76be8cacf40677136bcf7d34a2f36a869fb7",
+  "body_sha256": "1a442e8c788eb6e52c3732a07420a70da303d008e6d0678b90542a0c5be4c3e6",
+  "readback_body": "## Requirements: durable authenticated implementing-PR binding for future Pages lineage\n\n**Owners:** #1664 canonical trusted Controller/Publisher/ingester; consumer #1906 and parent #1782. This is a bounded source-contract slice, **not** a declaration that the real `agent-store` is deployed or audited.\n\n### Verified existing behavior\nThe trusted `attestAgentOutcome` checks an authorized HMAC dispatch ticket, persisted Outbox and source workflow Run/Attempt, main Controller SHA, GitHub PR head repository, `agent/issue-<issue>-` branch prefix and `result.target_sha`. `ingestAgentResult` then appends `authenticated_agent_task_result` with `source` and a verified Artifact digest, **but omits the verified implementing PR number**. Public Pages cannot reconstruct this relationship from an Issue mention or coincidentally equal SHA.\n\n### Contract\n1. Extend the **existing authenticated producer** (not model-provided result JSON) to include a small, explicitly typed `implementing_pr` binding: repository, positive PR number, `head_sha_at_attestation`, and an accurate relation `trusted_pr_head_at_result_attestation`. Source `action_id`, `source.agent_id`, workflow `run_id/attempt` remain separately typed. Do not conflate Action ID with Slice ID and do not imply current PR HEAD when it moves.\n2. Existing v1 canonical Agent results remain readable and acceptable with **`implementing_pr` absent → Unlinked**, never automatically reconstructed. Preserve immutable source receipt path and create-once semantics.\n3. On persistence, fail closed for forged/mismatched relation, invalid PR ID, foreign repository, changed SHA, altered agent/source/artifact, unknown fields and duplicate immutable-record collision. Only allow this PR identity from the already authenticated `attestAgentOutcome` GitHub reader; no PR/Agent self-attestation or browser tokens.\n4. Publish no public causal Pass by this change alone. #1906 may consume only *real* producer receipts with independent Store origin/integrity and exact SHA/attempt/SC source validation. `slice_id` remains Unknown absent an authenticated Slice receipt. #1690 owns live orphan permissions.\n\n### Success Criteria\n- [ ] SC-01 Existing trusted PR-head attestation persists the explicit authenticated `implementing_pr` identity without granting Agent a way to select it; separate action/role/agent/run/attempt identities remain unchanged.\n- [ ] SC-02 Strict persisted-record validator fails closed on spoofed PR, stale/mismatched SHA, cross-repo, duplicate/collision, source tampering and unsafe extra fields while accepting legacy v1 Unlinked records.\n- [ ] SC-03 Existing trusted CI Quality/Acceptance contract fixtures pass; no separate writer/store, unrelated Pages export, privileged browser code or implicit Slice ownership.\n- [ ] SC-04 Exact PR HEAD Quality, Case Smoke and selected E2E have authenticated successful Run/Attempt receipts; read-only Agent evaluation normalizes independently. The canonical Acceptance Orchestrator and final PR gate remain external merge gates, not a self-referential criterion.\n\n## Acceptance Plan\n```yaml\nacceptance:\n  SC-01:\n    when: pr\n    method: agent\n  SC-02:\n    when: pr\n    method: agent\n  SC-03:\n    when: pr\n    method: agent\n  SC-04:\n    when: pr\n    method: agent\n```\n\n## Acceptance Report\n| Criterion | Stage | Result | Evidence |\n|---|---|---|---|\n| SC-01 | pre-merge | Pending | - |\n| SC-02 | pre-merge | Pending | - |\n| SC-03 | pre-merge | Pending | - |\n| SC-04 | pre-merge | Pending | - |\n\n## E2E Verification\n### New\n- none: no new browser or runtime E2E ID; source-only contract.\n### Regression\n- pages-overview\n- pages-evidence\n\n## E2E Report\n\n| ID | Type | Result | Evidence |\n|---|---|---|---|\n| pages-evidence | Regression | Pass | run 39131476160/1, SHA da50e0bc88f8f9a50c729474ddba59ab9956f1cb, contract b769320d202d23781b706341be37fb51f2bf786f2d9f2bec14757d4773625d69, plan 5390a39a662b85d19358142b031d4ce9e6631cdaab1254980e70383f7672f709, tests 2/2 (https://github.com/BestNathan/nession/actions/runs/39131476160) |\n| pages-overview | Regression | Pass | run 39131476160/1, SHA da50e0bc88f8f9a50c729474ddba59ab9956f1cb, contract b769320d202d23781b706341be37fb51f2bf786f2d9f2bec14757d4773625d69, plan 5390a39a662b85d19358142b031d4ce9e6631cdaab1254980e70383f7672f709, tests 4/4 (https://github.com/BestNathan/nession/actions/runs/39131476160) |\n\n## Product alignment\n- [x] Reuse #1664 trusted GitHub Artifact ingester only.\n- [x] No extra orphan branch, result writer, Pages API or SC projector.\n- [x] Missing Slice and unprovisioned agent-store remain Unknown/Unlinked; no claim of full #1906 completion.\n\n---\n**Status:** Approved",
+  "patch_updated_at": "2026-10-18T13:30:58Z",
+  "readback_updated_at": "2026-10-18T13:30:58Z",
+  "rows": [
+    {
+      "id": "pages-evidence",
+      "result": "Pass",
+      "evidence": "run 39131476160/1, SHA da50e0bc88f8f9a50c729474ddba59ab9956f1cb, contract b769320d202d23781b706341be37fb51f2bf786f2d9f2bec14757d4773625d69, plan 5390a39a662b85d19358142b031d4ce9e6631cdaab1254980e70383f7672f709, tests 2/2 (https://github.com/BestNathan/nession/actions/runs/39131476160)"
+    },
+    {
+      "id": "pages-overview",
+      "result": "Pass",
+      "evidence": "run 39131476160/1, SHA da50e0bc88f8f9a50c729474ddba59ab9956f1cb, contract b769320d202d23781b706341be37fb51f2bf786f2d9f2bec14757d4773625d69, plan 5390a39a662b85d19358142b031d4ce9e6631cdaab1254980e70383f7672f709, tests 4/4 (https://github.com/BestNathan/nession/actions/runs/39131476160)"
+    }
+  ]
+}
