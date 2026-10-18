@@ -80,7 +80,7 @@ export class AppliedTerminalCursor {
 
   /** A cursor exists only while the same binding's continuity proof holds. */
   snapshot(binding: AppliedCursorBinding): AppliedCursorSnapshot | null {
-    if (!this.active(binding)) return null;
+    if (!this.active(binding)) { return null; }
     return {
       streamEpoch: this.epoch!,
       generation: this.generation,
@@ -90,7 +90,7 @@ export class AppliedTerminalCursor {
   }
 
   recordParsed(binding: AppliedCursorBinding, position: TerminalStreamPosition): ParseOutcome {
-    if (!this.active(binding)) return 'stale';
+    if (!this.active(binding)) { return 'stale'; }
     if (!validSeq(position.streamEpoch, false)
       || !validSeq(position.streamSeq, false)
       || position.streamEpoch !== this.epoch) {
@@ -99,12 +99,12 @@ export class AppliedTerminalCursor {
     }
 
     const seq = position.streamSeq;
-    if (seq <= this.applied! || this.pending.has(seq)) return 'duplicate';
+    if (seq <= this.applied! || this.pending.has(seq)) { return 'duplicate'; }
 
     if (seq === this.applied! + 1) {
       this.applied = seq;
       // A completed event at N does not cover N-1 unless N-1 was proved.
-      while (this.pending.delete(this.applied + 1)) this.applied += 1;
+      while (this.pending.delete(this.applied + 1)) { this.applied += 1; }
       return 'advanced';
     }
 
@@ -125,7 +125,7 @@ export class AppliedTerminalCursor {
     if (!this.active(binding)
       || !validSeq(seq, true)
       || seq > this.applied!
-      || seq < this.ackSent) return false;
+      || seq < this.ackSent) { return false; }
     this.ackSent = seq;
     return true;
   }
