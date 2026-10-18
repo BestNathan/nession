@@ -421,7 +421,10 @@ impl SessionStreamState {
         self.events
             .iter()
             .find(|entry| now.duration_since(entry.inserted_at) < self.max_age)
-            .map_or_else(|| self.next_seq.saturating_add(1), |entry| stream_seq(&entry.event))
+            .map_or_else(
+                || self.next_seq.saturating_add(1),
+                |entry| stream_seq(&entry.event),
+            )
     }
 
     /// Everything after `after_seq` that is still retained, and whether that is
@@ -603,9 +606,9 @@ mod tests {
         let mut stream = SessionStreamState::new();
         let epoch = stream.epoch;
         stream.max_bytes = 1;
-        stream.record_output("s", "very-large".to_owned());
+        let (_, issued_seq) = stream.record_output("s", "very-large".to_owned());
         assert!(stream.events.is_empty());
-        assert_eq!(stream.cursor(), 1);
+        assert_eq!(issued_seq, 1);
         assert_eq!(stream.first_available_seq(), 2);
         let lost = stream.replay_since(epoch, 0).unwrap();
         assert!(!lost.complete);
