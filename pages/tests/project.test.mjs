@@ -289,4 +289,7 @@ test('bounded and partial PR review windows never imply exhaustive approval',()=
  delete injected.work.pulls[0].review.latest.secret;
  injected.work.pulls[0].review.latest.commit_sha='b'.repeat(40);
  assert.throws(()=>validateProjection(injected),/invalid exact-HEAD review proof/);
+ const unavailableProof=makeProjection({...base,pulls:[pr],prReviews:{'5':{status:'available',items:[mk(7)]}}});
+ unavailableProof.work.pulls[0].review.status='unavailable';
+ assert.throws(()=>validateProjection(unavailableProof),/unavailable review source cannot certify an event/);
 });
