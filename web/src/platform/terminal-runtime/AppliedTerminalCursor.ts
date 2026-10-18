@@ -64,12 +64,15 @@ export class AppliedTerminalCursor {
   }
 
   beginFromVerifiedBaseline(baseline: VerifiedTerminalBaseline): AppliedCursorBinding {
+    // A failed rebind must revoke the *previous* binding. Otherwise a caller
+    // that attempted to switch to an invalid/unknown checkpoint could keep
+    // acknowledging output on the old stream while believing it reattached.
+    this.reset();
     if (baseline.kind !== 'verified'
       || !validSeq(baseline.streamEpoch, false)
       || !validSeq(baseline.appliedThrough, true)) {
       throw new RangeError('a valid verified Terminal stream baseline is required');
     }
-    this.reset();
     this.epoch = baseline.streamEpoch;
     this.applied = baseline.appliedThrough;
     return { generation: this.generation, streamEpoch: baseline.streamEpoch };
