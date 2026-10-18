@@ -8,7 +8,7 @@ try{
   const source=fs.readFileSync(path.join(root,'scripts/acceptance-quota-recovery.mjs'),'utf8');
   assert.match(source,/recoverablePrepareJobs\(jobs,run\)/);
   assert.match(source,/MAX_REQUESTS=26/);
-  assert.match(source,/\/attempts\/.*\+run\.run_attempt\+.*\/jobs\?per_page=100/);
+  assert.match(source,/run\.run_attempt\+'\/jobs\?per_page=100'/);
   const result=spawnSync(process.execPath,['scripts/acceptance-quota-recovery.mjs','self-test'],{
     cwd:root,encoding:'utf8',timeout:90000,
     env:{...process.env,GITHUB_TOKEN:'',GH_TOKEN:''},
