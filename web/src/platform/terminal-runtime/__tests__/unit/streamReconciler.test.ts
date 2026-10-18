@@ -875,6 +875,23 @@ describe('StreamReconciler bounded reorder window (#1961)', () => {
     h.reconciler.dispose();
   });
 
+  it('delivers large contiguous output directly without a false overflow notice', async () => {
+    const h = makeHarness({ maxFrames: 1, maxBytes: 129 });
+    h.reconciler.acceptLive({ data: new Uint8Array(4096), streamEpoch: 1, streamSeq: 1 });
+    h.reconciler.acceptLive({ data: new Uint8Array(8192), streamEpoch: 1, streamSeq: 2 });
+    expect(h.truncated).toBe(0);
+    expect(h.reconciler.pendingUsage).toEqual({ frames: 0, bytes: 0 });
+    expect(h.out).toHaveLength(2);
+
+    live(h, 5, 'gap');
+    expect(h.reconciler.pendingUsage.frames).toBe(1);
+    h.requests[0].resolve(reply([output(3), output(4)]));
+    await flushMicrotasks();
+    expect(h.truncated).toBe(0); // replay fills the gap in time
+    expect(h.reconciler.pendingUsage).toEqual({ frames: 0, bytes: 0 });
+    h.reconciler.dispose();
+  });
+
   it('bounds bytes and treats one oversized event as degraded live without retention', () => {
     const h = makeHarness({ maxFrames: 8, maxBytes: 130 });
     live(h, 1, 'a');
