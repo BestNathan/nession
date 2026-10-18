@@ -84,6 +84,9 @@ export function useSessionData() {
    * ahead), the existing row wins and nothing is overwritten.
    */
   const insertSession = useCallback((session: Session) => {
+    // A create ACK is newer than an outstanding list request too. It must not
+    // be silently undone by a stale pre-create list response.
+    realtimeRevision.current += 1;
     setSessions((prev) =>
       prev.some((existing) => existing.session_id === session.session_id)
         ? prev
