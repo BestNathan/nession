@@ -159,9 +159,9 @@ export class ConnectionManager implements TerminalTransport {
    * it: P2P from the frame the agent API decoded, relay from the payload the
    * Server forwarded verbatim.
    */
-  onOutput: ((data: Uint8Array, bootstrap?: TerminalBootstrap) => void) | null = null;
+  onOutput: TerminalTransport['onOutput'] = null;
   onError: ((error: Error) => void) | null = null;
-  onResize: ((cols: number, rows: number) => void) | null = null;
+  onResize: TerminalTransport['onResize'] = null;
 
   constructor(options: ConnectionOptions) {
     this.mode = options.mode;
