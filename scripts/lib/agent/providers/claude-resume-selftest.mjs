@@ -7,6 +7,7 @@ import {generateKeyPairSync} from 'node:crypto';
 import {buildClaudeCliArgs,runClaudeCli} from './claude-code.mjs';
 import {sealClaudeNativeSession,openClaudeNativeSession,discoverClaudeNativeProject}
   from './claude-native-store.mjs';
+import {verifyClaudeSeedSource} from './claude-resume-fixture.mjs';
 
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'claude-resume-v1-'));
 const session='550e8400-e29b-41d4-a716-446655440000';
@@ -84,6 +85,24 @@ try{
     metadata:{...metadata,source_sha:'d'.repeat(40)}},
     privateKeyPem:privateKey,expected:{...metadata,source_sha:'d'.repeat(40)},
     configDir:path.join(root,'forged-aad')}),/authentication/);
+  const sourceRun={id:401,run_attempt:1,name:'Agent / Claude Resume Seed',
+    path:'.github/workflows/agent-claude-resume-seed.yml',
+    repository:{full_name:'BestNathan/nession'},
+    head_repository:{full_name:'BestNathan/nession'},
+    head_branch:'main',head_sha:source,event:'workflow_dispatch',
+    status:'completed',conclusion:'success'};
+  const artifact={id:1001,name:'claude-resume-seed-401-1',expired:false,
+    digest:'sha256:'+'d'.repeat(64),workflow_run:{id:401,head_sha:source}};
+  assert.deepEqual(verifyClaudeSeedSource(sourceRun,{artifacts:[artifact]},401,1,source),
+    {artifact_id:1001,digest:artifact.digest});
+  assert.throws(()=>verifyClaudeSeedSource({...sourceRun,head_branch:'fork'},
+    {artifacts:[artifact]},401,1,source),/untrusted upstream/);
+  assert.throws(()=>verifyClaudeSeedSource(sourceRun,{artifacts:[artifact,artifact]},
+    401,1,source),/ambiguous/);
+  assert.throws(()=>verifyClaudeSeedSource({...sourceRun,run_attempt:2},{artifacts:[artifact]},
+    401,1,source),/untrusted upstream/);
+  assert.throws(()=>verifyClaudeSeedSource({...sourceRun,head_repository:{full_name:'other/fork'}},
+    {artifacts:[artifact]},401,1,source),/untrusted upstream/);
   const otherKeys=generateKeyPairSync('rsa',{modulusLength:2048,
     publicKeyEncoding:{format:'pem',type:'spki'},privateKeyEncoding:{format:'pem',type:'pkcs8'}});
   assert.throws(()=>openClaudeNativeSession({record:sealed,privateKeyPem:otherKeys.privateKey,
