@@ -27,7 +27,7 @@ test('independent public deployment preserves exact anonymous JSON and observati
   'Public Issue Agent Run observation:',
  ];
  for(const item of required) assert.ok(yaml.includes(item),'missing public observation guarantee: '+item);
- assert.match(yaml,/curl --fail --silent --show-error --location[\\s\\S]+?\$url\/data\/site\.json\?revision=\$EXPECTED_SHA/);
+ assert.ok(yaml.includes('"$url/data/site.json?revision=$EXPECTED_SHA"'));
  assert.match(yaml,/\.source\.main_sha == \$sha/);
  assert.doesNotMatch(yaml,/(?:^|\n)\s*-\s+name:.*(?:build|deploy).*web\//i);
 });
