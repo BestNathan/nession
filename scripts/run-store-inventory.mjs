@@ -48,6 +48,47 @@ export function checkInventory(manifest,workflows){
     if(store.ref==='agent-store'&&store.lifecycle==='planned'&&
        !String(store.rollout_blocker??'').includes('Ruleset'))
       fail('private Agent Store deployment blocker must be explicit');
+    // A deployable, but not yet live-proven, candidate Store writer MUST be
+    // inventoried separately from active writers; a raw manual dispatch must
+    // never be granted App credentials regardless of its main-only job guard.
+    if(store.ref==='agent-store'&&store.controller_rollout){
+      const rollout=store.controller_rollout;
+      const requestPath='.github/workflows/acceptance-agent-controller.yml';
+      const writerPath='.github/workflows/store-agent-controller-ingest.yml';
+      if(store.lifecycle!=='planned'||store.writers.length!==0||
+          rollout.phase!=='candidate-not-live-verified'||
+          rollout.request_workflow!==requestPath||
+          rollout.trusted_writer_workflow!==writerPath)
+        fail('unreviewed Controller Store rollout status');
+      const request=workflows.get(requestPath),writer=workflows.get(writerPath);
+      if(typeof request!=='string'||typeof writer!=='string'||
+         !/^name: Acceptance \/ Agent Controller$/m.test(request)||
+         !/^  workflow_dispatch:$/m.test(request)||
+         !request.includes("github.ref == 'refs/heads/main'")||
+         !request.includes("github.actor == 'BestNathan'")||
+         !/^  contents: read$/m.test(request)||
+         !/^  issues: read$/m.test(request)||
+         !request.includes('node scripts/lib/agent/orchestration/controller-request.mjs prepare')||
+         /RUN_STORE_WRITER_APP_|actions\/create-github-app-token|permission-contents: write|^\s+contents: write$|^\s+issues: write$/m.test(request))
+        fail('Controller manual request must be unprivileged owner/main-only');
+      if(!/^name: Store \/ Agent Controller Ingest$/m.test(writer)||
+         !/^  workflow_run:$/m.test(writer)||
+         /^  (workflow_dispatch|repository_dispatch):$/m.test(writer)||
+         !writer.includes('workflows: ["Acceptance / Agent Controller"]')||
+         !writer.includes('    branches: [main]')||
+         !writer.includes("github.event.workflow_run.actor.login == 'BestNathan'")||
+         !writer.includes('ref: main')||
+         !writer.includes('persist-credentials: false')||
+         !writer.includes('node scripts/lib/agent/orchestration/controller-request.mjs verify-source')||
+         !writer.includes('node scripts/lib/agent/orchestration/controller-request.mjs consume')||
+         !writer.includes('node scripts/lib/agent/orchestration/controller-start.mjs')||
+         !writer.includes('actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349')||
+         !writer.includes('permission-contents: write')||
+         !writer.includes('vars.RUN_STORE_WRITER_APP_ID')||
+         !writer.includes('secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY')||
+         !writer.includes('STORE_APP_TOKEN: ${{ steps.writer.outputs.token }}'))
+        fail('Controller Store ingester is not authenticated main-owned scoped App writer');
+    }
     for(const writer of store.writers){
       if(!/^\.github\/workflows\/[a-z0-9-]+\.yml$/.test(writer.workflow)||
          writer.source!=='github-actions GITHUB_TOKEN (legacy) or scoped GitHub App installation token (app rollout)'||
@@ -188,6 +229,29 @@ function selfTest(){
     {...trusted,GITHUB_EVENT_NAME:'push',GITHUB_SHA:'main'},
   ]) assert.throws(()=>assertTrustedLiveContext(invalid),/trusted main/);
   assert.equal(success.writers,6);
+  const controllerRequest='.github/workflows/acceptance-agent-controller.yml';
+  const controllerWriter='.github/workflows/store-agent-controller-ingest.yml';
+  const unsafeControllerRequest=new Map(sources);
+  unsafeControllerRequest.set(controllerRequest,unsafeControllerRequest.get(controllerRequest)
+    .replace('  contents: read','  contents: write'));
+  assert.throws(()=>checkInventory(manifest,unsafeControllerRequest),
+    /Controller manual request must be unprivileged/);
+  const unsafeControllerActor=new Map(sources);
+  unsafeControllerActor.set(controllerRequest,unsafeControllerActor.get(controllerRequest)
+    .replace("github.actor == 'BestNathan'","github.actor == 'anyone'"));
+  assert.throws(()=>checkInventory(manifest,unsafeControllerActor),
+    /Controller manual request must be unprivileged/);
+  const unsafeControllerWriter=new Map(sources);
+  unsafeControllerWriter.set(controllerWriter,unsafeControllerWriter.get(controllerWriter)
+    .replace(/^  workflow_run:$/m,'  workflow_dispatch:'));
+  assert.throws(()=>checkInventory(manifest,unsafeControllerWriter),
+    /Controller Store ingester is not authenticated/);
+  const unsafeControllerCheckout=new Map(sources);
+  unsafeControllerCheckout.set(controllerWriter,unsafeControllerCheckout.get(controllerWriter)
+    .replace('          ref: main','          ref: ${{ github.event.workflow_run.head_sha }}'));
+  assert.throws(()=>checkInventory(manifest,unsafeControllerCheckout),
+    /Controller Store ingester is not authenticated/);
+
   const bypass=new Map(sources);
   const scenario='.github/workflows/e2e-scenario-ingest.yml';
   bypass.set(scenario,bypass.get(scenario).replace(
