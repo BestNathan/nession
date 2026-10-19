@@ -29,7 +29,7 @@ assert.match(yaml,/target_ref: \$\{\{ needs\.select\.outputs\.target_sha \}\}/);
 assert.match(yaml,/types: \[completed\]/);
 assert.match(yaml,/workflow_run:\s*\n(?:[^\n]*\n)*?\s+branches: \[main\]/,
   'subscribe only to main upstream runs, not PR completion events');
-assert.match(yaml,/workflows: \["Acceptance \/ Orchestrator", "CI \/ Run Store Fixture Evidence", "E2E \/ Tests"\]/);
+assert.match(yaml,/workflows: \["Acceptance \/ Orchestrator", "CI \/ Run Store Fixture Evidence", "E2E \/ Tests", "Deploy \/ Public Pages"\]/);
 assert.match(yaml,/ref: main/);
 assert.match(yaml,/persist-credentials: false/);
 
@@ -37,6 +37,7 @@ const sources=[
   ['Acceptance / Orchestrator','.github/workflows/acceptance-orchestrator.yml'],
   ['CI / Run Store Fixture Evidence','.github/workflows/ci-run-store-fixture-evidence.yml'],
   ['E2E / Tests','.github/workflows/e2e-tests.yml'],
+  ['Deploy / Public Pages','.github/workflows/deploy-pages.yml'],
 ];
 function source(name,route) {
   return {id:123456,run_attempt:2,name,path:route,
@@ -102,5 +103,5 @@ try {
   assert.notEqual(spawnSync('git',['-C',dir,'merge-base','--is-ancestor',second,first]).status,0);
   assert.notEqual(spawnSync('git',['-C',dir,'merge-base','--is-ancestor','f'.repeat(40),second]).status,0);
 } finally { fs.rmSync(dir,{recursive:true,force:true}); }
-console.log('post-run E2E wake policy: '+passes+' authorized workflow fixtures, '+rejections+
+console.log('post-run E2E/Pages wake policy: '+passes+' authorized workflow fixtures, '+rejections+
   ' rejected identities, exact SHA ancestry tests and trusted evaluator path passed');
