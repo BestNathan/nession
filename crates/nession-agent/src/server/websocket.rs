@@ -171,6 +171,14 @@ fn fan_out(subscribers: &mut Vec<mpsc::Sender<OutputChunk>>, chunk: OutputChunk)
     detached
 }
 
+fn release_subscriber_bytes(queued: &AtomicUsize, bytes: usize) {
+    // A disconnected raw-test sender may have skipped reservations; never
+    // underflow. Production's only fan-out writer reserves before try_send.
+    let _ = queued.fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+        Some(n.saturating_sub(bytes))
+    });
+}
+
 fn fan_out_peers(peers: &mut Vec<SessionPeer>, chunk: OutputChunk) -> usize {
     let mut detached = 0usize;
     peers.retain(|peer| {
@@ -330,11 +338,7 @@ fn spawn_output_forwarder(
         while let Some((bytes, stream_epoch, stream_seq)) = rx.recv().await {
             // Receiving relinquishes the mpsc queue's buffered byte charge.
             // The downstream socket has an independent bounded terminal lane.
-            queued_bytes.fetch_update(
-                Ordering::AcqRel,
-                Ordering::Acquire,
-                |n| Some(n.saturating_sub(bytes.len())),
-            ).ok();
+            release_subscriber_bytes(&queued_bytes, bytes.len());
             use base64::Engine;
             let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
             let output = TerminalOutputPayload {
