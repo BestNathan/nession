@@ -35,6 +35,12 @@ test('fail closed on foreign, corrupt, conflicting, replay and model-derived lin
     source_url:'https://github.com/BestNathan/nession/actions/runs/72'}},
   {...edge,origin:{...source,producer_attempt:1}},
   {...edge,origin:{...source,producer_run_id:21,producer_attempt:3}},
+  // The edge cannot silently switch to a different valid run or attempt
+  // while preserving a previously plausible source URL.
+  {...edge,run_id:72},
+  {...edge,attempt:3},
+  {...edge,origin:{...source,
+    source_url:'https://github.com/BestNathan/nession/actions/runs/72'}},
 
   {...edge,origin:{...source,writer_receipt_digest:'fake'}},
   {...edge,origin:{...source,source_url:'https://evil.com/run'}},
