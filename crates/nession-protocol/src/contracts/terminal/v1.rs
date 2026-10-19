@@ -309,6 +309,18 @@ pub struct TerminalStreamResumePayload {
 /// their last position is the head — and an answer with no events is one whose
 /// caller is already there, which `complete` states rather than leaving to be
 /// inferred.
+/// Explicit Agent disposition for resuming a contiguous terminal timeline.
+/// A missing field is an older provider, never implicit success.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TerminalResumeRecovery {
+    Complete,
+    CheckpointRequired,
+    Unavailable,
+}
+
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -346,5 +358,11 @@ pub struct TerminalStreamResumeResponse {
     /// that ambiguity off the wire.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub complete: Option<bool>,
+    /// Source-side recovery verdict. A same-epoch evicted ring requires a
+    /// checkpoint rather than handing an unsafe suffix to the caller. Epoch
+    /// mismatch cannot be answered by the current session at all.
+    /// Omitted only by legacy providers; it must never mean `complete`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery: Option<TerminalResumeRecovery>,
     pub events: Vec<TerminalStreamEventPayload>,
 }
