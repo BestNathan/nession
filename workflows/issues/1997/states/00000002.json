@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "issue": 1997,
+  "version": 2,
+  "phase": "ready",
+  "target_sha": null,
+  "repair_attempts": 0,
+  "transitions": [],
+  "assignments": {
+    "developer": "dev-cursor-01",
+    "reviewer": "review-cursor-01",
+    "acceptor": "accept-cursor-01"
+  },
+  "outbox": [
+    {
+      "id": "95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae",
+      "task": {
+        "type": "dispatch",
+        "role": "developer",
+        "task": "implement",
+        "sha": "220266b9233ec97b1beacbc54e5cc7f82d3cece2",
+        "agent_id": "dev-cursor-01"
+      },
+      "status": "dispatching",
+      "attempts": 1,
+      "receipt": {
+        "status": "prepared",
+        "dispatch_id": "95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae",
+        "issuer_run_id": 39267610213,
+        "ticket_sha256": "2658fb87d68f415c6d8da207ad7094298acc1f5e1928d0d04d8ff20f7ec021b5"
+      }
+    }
+  ]
+}
