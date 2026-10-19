@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "35bbb2e669e00bc2f09b0aaabf7e7bf905261185e38c467c90e55a24ed940e0d",
+  "run_id": 39192681792,
+  "run_attempt": 1,
+  "issue": 1978,
+  "criterion": "SC-02",
+  "criterion_text": "PR-origin, fork, stale/wrong ID/attempt/SHA, failed or cancelled source, unauthorized ref, and rate-limited source reads cannot authorize a replay; no recursive workflow wakeup or unbounded API use. Independent source-aligned merged-main Cases and repository Quality/E2E/Case Smoke gates verify the behavior.",
+  "stage": "post-merge",
+  "target_sha": "8551d083d91224f0a21add1dbaf570f659fc7122",
+  "contract_sha256": "b7b149f7f36757f0bfcbe3b24c3a385d9dc54334baeb52f1014a332cf0a8a0d0",
+  "case_revision": "8551d083d91224f0a21add1dbaf570f659fc7122",
+  "case_tree_sha": "39e9a088999925485e7fa00a9c775feb0dfcd402",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-19T03:03:46.186Z",
+  "finished_at": "2026-10-19T03:03:46.272Z",
+  "duration_ms": 86,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Forged or PR-origin source identity and rate-limit failures cannot authorize an event wake or SC verdict.",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "Production recovery authorizer + workflow trigger + negative fixtures passed on checked-out exact target SHA"
+        }
+      ],
+      "duration_ms": 75,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 39192681792,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "8551d083d91224f0a21add1dbaf570f659fc7122",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/39192681792",
+    "record_path": "runs/2026-10-19/39192681792-1/1978/SC-02.json",
+    "source_result_sha256": "cc0ca006f695ad3ea318e7748a85c1bcbd48d14f04e4a613f55623516772af90"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-39192681792-1",
+    "sha256": "cc0ca006f695ad3ea318e7748a85c1bcbd48d14f04e4a613f55623516772af90",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/39192681792",
+    "durability": "time-limited; object archival not configured"
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "aff3fbb5dbebfa01abc00233e8712a6e5b8d50f953012f04744d93bd933fc76e",
+  "run_id": 39192681792,
+  "run_attempt": 1,
+  "issue": 1978,
+  "criterion": "SC-01",
+  "criterion_text": "A successful **main-push** `CI / Quality Gate` completion independently wakes the **same** trusted bounded recovery script (no new Issue/SC writer), and only authenticated source Run ID/Attempt/SHA/branch/repository/name/path/events/conclusion can authorize an event wake. Scheduled and manually dispatched main-branch recovery remain supported.",
+  "stage": "post-merge",
+  "target_sha": "8551d083d91224f0a21add1dbaf570f659fc7122",
+  "contract_sha256": "b7b149f7f36757f0bfcbe3b24c3a385d9dc54334baeb52f1014a332cf0a8a0d0",
+  "case_revision": "8551d083d91224f0a21add1dbaf570f659fc7122",
+  "case_tree_sha": "21a4af2a359082a6c80677154d58446c80f95afb",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-19T03:03:46.084Z",
+  "finished_at": "2026-10-19T03:03:46.185Z",
+  "duration_ms": 100,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Authenticated CI main-push completion runs the same bounded scheduled recovery with exact source attestation.",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "Production recovery authorizer + workflow trigger + negative fixtures passed on checked-out exact target SHA"
+        }
+      ],
+      "duration_ms": 78,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 39192681792,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "8551d083d91224f0a21add1dbaf570f659fc7122",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/39192681792",
+    "record_path": "runs/2026-10-19/39192681792-1/1978/SC-01.json",
+    "source_result_sha256": "3e41bba2fb420c64d6a7927dcde7c8d0e068fb5167187cd49332e1d8abd1483d"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-39192681792-1",
+    "sha256": "3e41bba2fb420c64d6a7927dcde7c8d0e068fb5167187cd49332e1d8abd1483d",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/39192681792",
+    "durability": "time-limited; object archival not configured"
+  }
+}
