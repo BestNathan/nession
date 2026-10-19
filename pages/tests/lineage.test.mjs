@@ -41,6 +41,10 @@ test('fail closed on foreign, corrupt, conflicting, replay and model-derived lin
   {...edge,attempt:3},
   {...edge,origin:{...source,
     source_url:'https://github.com/BestNathan/nession/actions/runs/72'}},
+  {...edge,origin:{...source,
+    source_url:'https://github.com/BestNathan/nession/actions/runs/21?revision='+sha}},
+  {...edge,origin:{...source,
+    source_url:'https://github.com/BestNathan/nession/actions/runs/021'}},
 
   {...edge,origin:{...source,writer_receipt_digest:'fake'}},
   {...edge,origin:{...source,source_url:'https://evil.com/run'}},
