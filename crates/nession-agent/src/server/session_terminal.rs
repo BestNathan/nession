@@ -447,6 +447,17 @@ impl SessionStreamState {
             return None;
         }
         let first_available_seq = self.first_available_seq();
+        // A cursor ahead of the latest *issued* event can never be a proven
+        // prefix of this stream, even when its epoch happens to match.
+        // Returning complete=true with no events would falsely synchronize
+        // a client holding an impossible/forged resume position.
+        if after_seq > self.cursor() {
+            return Some(StreamReplay {
+                first_available_seq,
+                complete: false,
+                events: Vec::new(),
+            });
+        }
         let events = self
             .events
             .iter()
@@ -567,6 +578,62 @@ mod tests {
         assert_eq!(s2, 2);
         let tail = stream.replay_since(epoch, 0).expect("same epoch");
         assert_eq!(tail.events.len(), 2);
+    }
+
+    #[test]
+    fn future_resume_cursor_is_not_a_complete_stream_prefix() {
+        let mut stream = SessionStreamState::new();
+        let epoch = stream.epoch;
+        // The fresh, empty stream has an exact empty head at zero only.
+        let empty = stream.replay_since(epoch, 0).unwrap();
+        assert!(empty.complete);
+        assert!(empty.events.is_empty());
+        let future = stream.replay_since(epoch, 1).unwrap();
+        assert!(!future.complete);
+        assert!(future.events.is_empty());
+        assert_eq!(future.first_available_seq, 1);
+
+        stream.record_output("s", "one".to_owned());
+        stream.record_resize("s", 80, 24);
+        assert_eq!(stream.cursor(), 2);
+        let head = stream.replay_since(epoch, 2).unwrap();
+        assert!(head.complete);
+        assert!(head.events.is_empty());
+
+        for after in [3_u64, 10_000, u64::MAX] {
+            let invalid = stream.replay_since(epoch, after).unwrap();
+            assert!(!invalid.complete);
+            assert!(invalid.events.is_empty());
+            assert_eq!(invalid.first_available_seq, 1);
+        }
+
+        let from_one = stream.replay_since(epoch, 1).unwrap();
+        assert!(from_one.complete);
+        assert_eq!(seqs(&from_one.events), vec![2]);
+        // Epoch mismatch stays a separate negative result.
+        assert!(stream.replay_since(epoch.wrapping_add(1), 0).is_none());
+    }
+
+    #[test]
+    fn future_cursor_remains_incomplete_when_replay_window_has_expired() {
+        let mut stream = SessionStreamState::new();
+        let epoch = stream.epoch;
+        stream.record_output("s", "old".to_owned());
+        stream.max_age = Duration::ZERO;
+        assert_eq!(stream.first_available_seq(), 2);
+
+        let from_head = stream.replay_since(epoch, 1).unwrap();
+        assert!(from_head.complete);
+        assert!(from_head.events.is_empty());
+
+        let future = stream.replay_since(epoch, 2).unwrap();
+        assert!(!future.complete);
+        assert_eq!(future.first_available_seq, 2);
+        assert!(future.events.is_empty());
+
+        let old = stream.replay_since(epoch, 0).unwrap();
+        assert!(!old.complete);
+        assert!(old.events.is_empty());
     }
 
     #[test]
