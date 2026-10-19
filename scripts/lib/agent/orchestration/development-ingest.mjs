@@ -16,6 +16,7 @@ import {createGitHubRunReader} from './github-dispatch.mjs';
 import {deriveDispatchKey} from './controller-dispatch.mjs';
 import {commitAttestedSliceYield} from './dispatch-store.mjs';
 import {readIssueWorkflowState} from './state-store.mjs';
+import {failedDeveloperRetryActionId} from './outbox.mjs';
 import {sealCheckpoint} from '../store/checkpoint.mjs';
 import {publishEncryptedAgentCheckpoint,verifyCommittedCheckpoint} from '../store/remote.mjs';
 import {openCursorNativeStore} from '../providers/cursor-native-store.mjs';
@@ -167,7 +168,12 @@ async function main(){
   try{
     const verified=await verifyWorkerClaimForAck({run,claim,key:rootKey,reader});
     if(verified.source_run_id!==run.id||verified.issue!==1997||
-        verified.action_id!=='95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae')
+        ![
+          '95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae',
+          failedDeveloperRetryActionId(1997,
+            '95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae',
+            39267659650),
+        ].includes(verified.action_id))
       fail('Developer scope not yet authorized outside #1997 fixture');
     const store=env.AGENT_STORE_CONTROLLER_REMOTE;
     const admission=readConfirmedDevelopmentState(store,claim,run);
