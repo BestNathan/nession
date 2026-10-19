@@ -15,6 +15,9 @@ const PROVIDERS = {
 };
 const BODY_FIELDS = ['schema_version','repository','issue','action_id','state_version',
   'role','agent_id','task','input_sha','issuer_run_id','issued_at','expires_at','key_id'];
+const CONTINUATION_FIELDS = ['parent_action_id','ordinal','checkpoint_version',
+  'checkpoint_commit_sha','ciphertext_sha256'];
+const STORE_REF='refs/heads/agent-store';
 const RESULT_FIELDS = ['kind','issue','run_id','run_attempt','target_sha','outcome','task_id'];
 const SOURCE_FIELDS = ['repository','path','name','run_id','attempt','event','ref',
   'issue','task_id','agent_id','input_sha','output_sha','verified'];
@@ -35,9 +38,23 @@ function canonical(value) {
 function mac(key, value) {
   return createHmac('sha256',keyBytes(key)).update(value).digest();
 }
+function validContinuation(value) {
+  if (!own(value,CONTINUATION_FIELDS)||
+      Object.keys(value).length!==CONTINUATION_FIELDS.length||
+      !HEX64.test(value.parent_action_id??'')||
+      !positive(value.ordinal)||value.ordinal>64||
+      !positive(value.checkpoint_version)||
+      !HEX40.test(value.checkpoint_commit_sha??'')||
+      !HEX64.test(value.ciphertext_sha256??'')) {
+    reject('invalid signed native Session continuation');
+  }
+  return value;
+}
 function validBody(body) {
-  if (!own(body,BODY_FIELDS) || Object.keys(body).length !== BODY_FIELDS.length ||
-      body.schema_version !== 1 || body.repository !== REPOSITORY || !positive(body.issue) ||
+  const resumed=body?.schema_version===2;
+  const allowed=resumed?[...BODY_FIELDS,'resume_from']:BODY_FIELDS;
+  if (!own(body,allowed) || Object.keys(body).length !== allowed.length ||
+      ![1,2].includes(body.schema_version) || body.repository !== REPOSITORY || !positive(body.issue) ||
       !HEX64.test(body.action_id ?? '') || !positive(body.state_version) ||
       !PROVIDERS[body.role]?.tasks.includes(body.task) || !ID.test(body.agent_id ?? '') ||
       !HEX40.test(body.input_sha ?? '') || !positive(body.issuer_run_id) ||
@@ -45,6 +62,7 @@ function validBody(body) {
       !Number.isSafeInteger(body.expires_at) ||
       body.expires_at <= body.issued_at ||
       body.expires_at - body.issued_at > MAX_TTL_MS) reject('invalid dispatch ticket body');
+  if(resumed)validContinuation(body.resume_from);
   return body;
 }
 function decodeTicket(ticket) {
@@ -81,9 +99,11 @@ export function issueDispatchTicket(state,actionId,registry,{key,key_id,issuer_r
       !Number.isSafeInteger(ttl_ms) || ttl_ms<1000 || ttl_ms>MAX_TTL_MS) {
     reject('invalid ticket signer identity or TTL');
   }
-  const body=validBody({schema_version:1,repository:REPOSITORY,issue:state.issue,
+  const continuation=t.continuation==null?null:validContinuation(t.continuation);
+  const body=validBody({schema_version:continuation?2:1,repository:REPOSITORY,issue:state.issue,
     action_id:action.id,state_version:state.version,role:t.role,agent_id:t.agent_id,
-    task:t.task,input_sha:t.sha,issuer_run_id,issued_at:now,expires_at:now+ttl_ms,key_id});
+    task:t.task,input_sha:t.sha,issuer_run_id,issued_at:now,expires_at:now+ttl_ms,key_id,
+    ...(continuation?{resume_from:continuation}:{})});
   const encoded=Buffer.from(canonical(body)).toString('base64url');
   return {ticket:encoded+'.'+mac(key,encoded).toString('base64url'),body};
 }
@@ -109,7 +129,9 @@ export function planGitHubDispatch(state,actionId,registry,signer) {
     repository:REPOSITORY,workflow_id:spec.workflow,ref:'main',
     return_run_details:true,
     inputs:{action_id:body.action_id,issue_number:String(body.issue),agent_id:body.agent_id,
-      task:body.task,input_sha:body.input_sha,dispatch_ticket:ticket},
+      task:body.task,input_sha:body.input_sha,dispatch_ticket:ticket,
+      ...(body.schema_version===2?{resume_from:Buffer.from(canonical(body.resume_from))
+        .toString('base64url')}:{})},
   };
 }
 // Call only from a trusted GitHub API reader, not from Agent-provided JSON.
@@ -142,8 +164,10 @@ export function createGitHubDispatchClient(token,{api='https://api.github.com',f
   return async function dispatch(plan) {
     if (!plan || plan.repository!==REPOSITORY || plan.ref!=='main' ||
         !plan.return_run_details || !Object.values(PROVIDERS).some(x=>x.workflow===plan.workflow_id) ||
-        !own(plan.inputs,['action_id','issue_number','agent_id','task','input_sha','dispatch_ticket']) ||
-        Object.keys(plan.inputs).length!==6 || !HEX64.test(plan.inputs.action_id??'')) {
+        !own(plan.inputs,['action_id','issue_number','agent_id','task','input_sha',
+          'dispatch_ticket','resume_from']) ||
+        ![6,7].includes(Object.keys(plan.inputs).length) ||
+        !HEX64.test(plan.inputs.action_id??'')) {
       reject('invalid or unapproved GitHub dispatch plan');
     }
     const body=verifyDispatchTicket(plan.inputs.dispatch_ticket,keyring,{now});
@@ -151,7 +175,10 @@ export function createGitHubDispatchClient(token,{api='https://api.github.com',f
         plan.inputs.action_id!==body.action_id ||
         plan.inputs.issue_number!==String(body.issue) ||
         plan.inputs.agent_id!==body.agent_id || plan.inputs.task!==body.task ||
-        plan.inputs.input_sha!==body.input_sha) {
+        plan.inputs.input_sha!==body.input_sha ||
+        (body.schema_version===2 ?
+          plan.inputs.resume_from!==Buffer.from(canonical(body.resume_from)).toString('base64url') :
+          Object.hasOwn(plan.inputs,'resume_from'))) {
       reject('dispatch plan does not match the signed Outbox ticket');
     }
     const response=await fetchFn(api+'/repos/'+REPOSITORY+'/actions/workflows/'+
@@ -214,7 +241,11 @@ export async function attestAgentOutcome({
       pending.task.agent_id!==body.agent_id || pending.task.sha!==body.input_sha ||
       pending.receipt?.dispatch_id!==body.action_id ||
       pending.receipt.status!=='verified' ||
-      pending.receipt.source_run_id!==result.run_id) {
+      pending.receipt.source_run_id!==result.run_id ||
+      (pending.task.continuation ?
+        body.schema_version!==2 ||
+          canonical(body.resume_from)!==canonical(pending.task.continuation) :
+        body.schema_version!==1)) {
     reject('ticket has no trusted run-bound dispatch receipt');
   }
   const issuer=await reader.getRun(body.issuer_run_id);
