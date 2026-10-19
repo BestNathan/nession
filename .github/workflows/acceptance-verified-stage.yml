@@ -1,0 +1,38 @@
+name: Acceptance / Verified Issue Stage
+
+# Trusted owner-only trigger for an existing staged requirement after its
+# independently authenticated live Worker/Store evidence becomes available.
+# The shared read-only Agent and deterministic Issue updater remain the ONLY
+# authority to project Success Criteria; comments never supply verdicts.
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+concurrency:
+  group: verified-issue-stage-${{ github.event.issue.number }}-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  accept:
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'BestNathan' &&
+      github.event.action == 'created' &&
+      github.event.issue.number == 2010 &&
+      !github.event.issue.pull_request &&
+      github.event.comment.user.login == 'BestNathan' &&
+      github.event.comment.body == '/nession accept staging issue=2010'
+    uses: ./.github/workflows/agent-sc-acceptance.yml
+    with:
+      issue_number: '2010'
+      stage: staging
+      provider: cursor
+      target_ref: ${{ github.sha }}
+      deployment: controlled-live-1997
+    secrets: inherit

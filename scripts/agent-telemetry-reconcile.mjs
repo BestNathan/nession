@@ -31,6 +31,8 @@ const SOURCES=Object.freeze([
     events:['issues','workflow_dispatch'],branches:['main']},
   {file:'acceptance-orchestrator.yml',name:'Acceptance / Orchestrator',id:'requirement-acceptance',
     events:['pull_request_target','push','issues'],branches:['main','staging']},
+  {file:'acceptance-verified-stage.yml',name:'Acceptance / Verified Issue Stage',id:'requirement-acceptance',
+    events:['issue_comment'],branches:['main']},
 ]);
 function fail(message){throw Error('Agent telemetry reconciliation: '+message);}
 function positive(n){return Number.isSafeInteger(n)&&n>0;}
