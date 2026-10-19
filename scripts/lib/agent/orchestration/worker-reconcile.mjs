@@ -26,7 +26,7 @@ export function authenticateWorkerClaimRun(run,artifacts){
       run?.event!=='workflow_dispatch'||run?.head_branch!=='main'||
       run?.repository?.full_name!==REPO||
       run?.head_repository?.full_name!==REPO||
-      run?.actor?.login!=='BestNathan'||!HEX40.test(run.head_sha??'')||
+      run?.actor?.login!=='github-actions[bot]'||!HEX40.test(run.head_sha??'')||
       run?.status!=='completed'||!['success','failure'].includes(run.conclusion)||
       !Number.isFinite(Date.parse(run.created_at??'')))
     fail('untrusted Worker GitHub Run');
@@ -51,7 +51,7 @@ export function inspectWorkerClaimZip(zip,digest,run) {
   catch{fail('invalid bounded Worker claim Artifact');}
   const context={repository:REPO,ref:'refs/heads/main',
     event:'workflow_dispatch',workflow:'Agent / Development',
-    actor:'BestNathan',head_sha:run.head_sha,
+    actor:'github-actions[bot]',head_sha:run.head_sha,
     run_id:run.id,attempt:run.run_attempt};
   const canonical=createWorkerClaim(claim?.inputs,context);
   if(!equal(claim,canonical))fail('claim identity diverged from authenticated GitHub Run');
@@ -112,7 +112,7 @@ async function main(){
   if(event.action!=='completed'||source?.path!==PATH||
       source?.repository?.full_name!==REPO||
       source?.head_repository?.full_name!==REPO||
-      source?.actor?.login!=='BestNathan')
+      source?.actor?.login!=='github-actions[bot]')
     fail('untrusted workflow_run source');
   const reader=createGitHubRunReader(env.ACTIONS_DISPATCH_TOKEN);
   // Independent API read, never use payload-controlled claim as GitHub evidence.
