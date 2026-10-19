@@ -853,6 +853,79 @@ fn tmux_capture_fidelity(truncated: bool, modes_complete: bool) -> TerminalCheck
     }
 }
 
+/// Build a contiguous prefix exclusively from the Agent's *ordered* stream
+/// ring. No tmux capture occurs here, so a current-head cut and the new
+/// subscriber's live queue can be activated under the same SessionMap lock.
+///
+/// This proves stream continuity only. It cannot restore terminal history
+/// preceding the Agent reader, nor replay resize/emulator state as full VT.
+/// Missing, expired or oversized prefixes must take the unverified fallback.
+fn atomic_output_prefix(
+    stream: &session_terminal::SessionStreamState,
+) -> Option<Vec<u8>> {
+    use base64::Engine;
+    let replay = stream.replay_since(stream.epoch, 0)?;
+    if !replay.complete || replay.events.is_empty() {
+        return None;
+    }
+    let mut raw = Vec::new();
+    for event in replay.events {
+        match event {
+            TerminalStreamEventPayload::Output { data, .. } => {
+                let decoded = base64::engine::general_purpose::STANDARD
+                    .decode(data)
+                    .ok()?;
+                let size = raw.len().checked_add(decoded.len())?;
+                if size > crate::server::bootstrap::BOOTSTRAP_MAX_BYTES {
+                    return None;
+                }
+                raw.extend_from_slice(&decoded);
+            }
+            // A resize is a real sequenced event, but not a byte sequence.
+            // The baseline is marked Partial even when output replay is whole.
+            TerminalStreamEventPayload::Resize { .. } => {}
+        }
+    }
+    (!raw.is_empty()).then_some(raw)
+}
+
+/// A stream-log cut is atomic with its live queue *only* when both are
+/// selected under the same SessionMap lock. No unproven tmux cut is promoted.
+async fn send_atomic_output_prefix(
+    outbound: &P2pOutbound,
+    session_name: &str,
+    bytes: &[u8],
+) -> bool {
+    use base64::Engine;
+    let payload = TerminalOutputPayload {
+        session_name: session_name.to_string(),
+        data: base64::engine::general_purpose::STANDARD.encode(bytes),
+        stream_epoch: None,
+        stream_seq: None,
+        bootstrap: Some(TerminalBootstrapPayload {
+            requested_lines: crate::tmux::HISTORY_LIMIT_LINES,
+            truncated: false,
+            cut_consistency: Some(TerminalCheckpointCutConsistency::Atomic),
+            // This is raw Agent output since stream epoch began, not a
+            // verified VT/screen snapshot from tmux's whole lifetime.
+            fidelity: Some(TerminalCheckpointFidelity::Partial),
+        }),
+    };
+    let msg = new_message(msg_types::TERMINAL_OUTPUT, payload);
+    let Ok(json) = serde_json::to_string(&msg) else {
+        return false;
+    };
+    match outbound.send_terminal(WsMessage::Text(json)).await {
+        Ok(()) => true,
+        Err(OutboundError::Stalled) => {
+            warn!("stream cut: client stalled on atomic prefix for {session_name}");
+            outbound.close();
+            false
+        }
+        Err(_) => false,
+    }
+}
+
 async fn send_bootstrap(
     outbound: &P2pOutbound,
     tmux: &crate::tmux::ops::TmuxDep,
