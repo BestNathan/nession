@@ -3732,6 +3732,98 @@ mod tests {
         assert!(stale.events.is_empty());
     }
 
+    #[test]
+    fn bounded_stream_prefix_is_an_atomic_cut_not_a_full_vt_checkpoint() {
+        use base64::Engine;
+        let mut stream = session_terminal::SessionStreamState::new();
+        let encode = |n| {
+            base64::engine::general_purpose::STANDARD.encode(format!("GAP-{n:03}\\r\\n"))
+        };
+        for i in 1..=18 {
+            stream.record_output("demo", encode(i));
+        }
+        let cursor_at_cut = stream.cursor();
+        let raw = atomic_output_prefix(&stream).expect("contiguous event history");
+        let expected = (1..=18)
+            .map(|i| format!("GAP-{i:03}\\r\\n"))
+            .collect::<String>();
+        assert_eq!(raw, expected.into_bytes());
+        let payload = atomic_prefix_payload("demo", &raw);
+        assert_eq!(
+            payload.bootstrap.as_ref().and_then(|b| b.cut_consistency),
+            Some(TerminalCheckpointCutConsistency::Atomic)
+        );
+        assert_eq!(
+            payload.bootstrap.as_ref().and_then(|b| b.fidelity),
+            Some(TerminalCheckpointFidelity::Partial),
+            "a replay from the Agent's start omits earlier tmux/VT state"
+        );
+        assert!(payload.stream_seq.is_none());
+        assert!(payload.stream_epoch.is_none());
+        assert_eq!(cursor_at_cut, 18);
+    }
+
+    #[test]
+    fn atomic_prefix_fails_closed_for_missing_oversized_and_malformed_ring() {
+        use base64::Engine;
+        let mut stream = session_terminal::SessionStreamState::new();
+        assert!(atomic_output_prefix(&stream).is_none());
+        stream.record_output("demo", "%%%".to_string());
+        assert!(atomic_output_prefix(&stream).is_none(), "invalid base64 must not become history");
+
+        let mut oversized = session_terminal::SessionStreamState::new();
+        oversized.record_output(
+            "demo",
+            base64::engine::general_purpose::STANDARD
+                .encode(vec![b'x'; crate::server::bootstrap::BOOTSTRAP_MAX_BYTES + 1]),
+        );
+        assert!(atomic_output_prefix(&oversized).is_none(), "never silently truncate an atomic cut");
+
+        let mut evicted = session_terminal::SessionStreamState::new();
+        evicted.record_output("demo", "x".repeat(5_000_000));
+        evicted.record_output(
+            "demo",
+            base64::engine::general_purpose::STANDARD.encode(b"new"),
+        );
+        assert!(atomic_output_prefix(&evicted).is_none(), "missing seq 1 cannot be proven atomic");
+    }
+
+    #[test]
+    fn atomic_prefix_and_live_subscriber_queue_have_no_gap_or_duplicate() {
+        use base64::Engine;
+        let mut stream = session_terminal::SessionStreamState::new();
+        let before = base64::engine::general_purpose::STANDARD.encode(b"GAP-001\\r\\n");
+        stream.record_output("demo", before);
+        // A resize consumes a sequence but cannot be reconstructed as a VT
+        // reset; we still recover the full ordered OUTPUT prefix, Partial.
+        stream.record_resize("demo", 120, 30);
+        let prefix = atomic_output_prefix(&stream).expect("prefix complete");
+        let cut = stream.cursor();
+        assert_eq!(prefix, b"GAP-001\\r\\n");
+
+        let (tx, mut rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
+        let (outbound, _) = P2pOutbound::new();
+        let mut peers = vec![SessionPeer {
+            client_id: "observer".to_owned(),
+            peer_token: Arc::new(()),
+            output_ack: test_output_ack(),
+            outbound,
+            output_tx: Some(tx),
+            queued_bytes: Arc::new(AtomicUsize::new(0)),
+            detached_for_not_draining: Arc::new(AtomicBool::new(false)),
+        }];
+        let live = b"GAP-002\\r\\n".to_vec();
+        let (epoch, seq) = stream.record_output(
+            "demo",
+            base64::engine::general_purpose::STANDARD.encode(&live),
+        );
+        assert_eq!(seq, cut + 1);
+        assert_eq!(fan_out_peers(&mut peers, (live.clone(), epoch, seq)), 0);
+        let queued = rx.try_recv().expect("post-cut output is held for forwarder");
+        assert_eq!(queued, (live, epoch, cut + 1));
+        assert!(rx.try_recv().is_err(), "no duplicated next event");
+    }
+
     fn test_output_ack() -> SubscriberOutputAck {
         SubscriberOutputAck::new(OutputAckBinding {
             subscriber_generation: 1,
