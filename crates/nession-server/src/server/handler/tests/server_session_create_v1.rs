@@ -81,19 +81,23 @@ async fn session_create_success_preserves_agent_report_that_arrived_first() {
         let request_id = request["payload"]["request_id"].as_str().unwrap();
 
         let now = chrono::Utc::now();
-        registry.update_session(SessionInfo {
-            session_id: "a1:fast-reported".to_string(),
-            agent_id: "a1".to_string(),
-            session_name: "fast-reported".to_string(),
-            status: SessionStatus::Active,
-            window_count: 1,
-            attached_clients: 0,
-            foreground_command: Some("bash".to_string()),
-            working_dir: Some("/srv".to_string()),
-            created_at: now,
-            last_activity: now,
-        }).await;
-        broker.resolve_command("a1", request_id, json!({ "success": true })).await;
+        registry
+            .update_session(SessionInfo {
+                session_id: "a1:fast-reported".to_string(),
+                agent_id: "a1".to_string(),
+                session_name: "fast-reported".to_string(),
+                status: SessionStatus::Active,
+                window_count: 1,
+                attached_clients: 0,
+                foreground_command: Some("bash".to_string()),
+                working_dir: Some("/srv".to_string()),
+                created_at: now,
+                last_activity: now,
+            })
+            .await;
+        broker
+            .resolve_command("a1", request_id, json!({ "success": true }))
+            .await;
     };
     let (action, ()) = tokio::join!(create, report_then_ack);
     let response = parse_reply(action.unwrap());
