@@ -819,12 +819,12 @@ async fn capture_for_bootstrap(
 
 /// Send `session`'s history to one connection, marked as a **bootstrap** (#321).
 ///
-/// Awaited, and in order, before the caller starts live forwarding. That
-/// ordering *is* the barrier on the send side: the live producer does not
-/// exist yet and the outbound queue is FIFO, so nothing the session produces
-/// can overtake the snapshot — there is no gap to close and nothing to
-/// reconcile afterwards. The alternative, a cursor plus a reconciliation
-/// pass, is the shape #1148 measured going wrong.
+/// Awaited before the caller starts its live forwarder. The subscriber's
+/// bounded queue is already active (#2024), so Agent output produced during
+/// this asynchronous tmux capture is retained and sent *after* the snapshot.
+/// This establishes outbound send order, NOT snapshot/stream cut atomicity:
+/// racing output may also be present inside tmux's screen capture. Such
+/// snapshots remain explicitly unverified and must never seed parser ACKs.
 ///
 /// `capture` is the snapshot, and where it came from is the barrier's other
 /// half (#1228): the Control arm's is taken **on the control channel**
@@ -3917,7 +3917,7 @@ mod tests {
             // point, and only THEN spawns the live queue forwarder.
         });
         capture_started_rx.await.expect("subscribed before capture");
-        let live = b"GAP-019\\r\\n".to_vec();
+        let live = b"GAP-019\r\n".to_vec();
         let expected_position = {
             let mut state = shared.lock().unwrap();
             let (stream, peers) = &mut *state;
