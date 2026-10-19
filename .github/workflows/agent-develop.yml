@@ -54,6 +54,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - name: Publish non-authoritative Worker Run claim before any model call
+        run: |
+          set -euo pipefail
+          node scripts/lib/agent/orchestration/worker-claim.mjs \
+            prepare "$RUNNER_TEMP/development-worker-claim.json"
+      - name: Upload Worker claim for independent HMAC and Store reconciliation
+        uses: actions/upload-artifact@v4
+        with:
+          name: development-worker-claim-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/development-worker-claim.json
+          if-no-files-found: error
+          retention-days: 3
       - name: Require exact authenticated Run ID from immutable Store receipt
         shell: bash
         run: |
