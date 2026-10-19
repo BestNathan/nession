@@ -1,0 +1,112 @@
+// #1664: Trusted Controller-only Git transaction boundary around workflow_dispatch.
+// Repository scope, HMAC signing key, and Git writer token MUST be supplied
+// by the independently authenticated Controller/Ingester, never by Provider
+// scripts or a PR-head checkout.
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {execFileSync} from 'node:child_process';
+import {readIssueWorkflowState,writeIssueWorkflowState} from './state-store.mjs';
+import {reconcileOutbox,recordDispatch} from './outbox.mjs';
+import {prepareGitHubDispatch,verifyPersistedDispatchIntent}
+  from './github-dispatch.mjs';
+import {auditStagedRunStore} from '../../../run-store-integrity.mjs';
+import {publish} from '../../../run-store-cas-push.mjs';
+
+const REF='agent-store';
+function fail(message){throw Error('trusted dispatch Store: '+message);}
+function git(dir,args){
+  try{return execFileSync('git',['-C',dir,...args],{
+    encoding:'utf8',stdio:['ignore','pipe','pipe'],timeout:45000,
+    maxBuffer:2*1024*1024,env:{...process.env,
+      GIT_TERMINAL_PROMPT:'0',GIT_NO_REPLACE_OBJECTS:'1'},
+  }).trim();}catch(e){fail('Git operation '+args[0]+' failed ('+(e.status??'unknown')+')');}
+}
+function withStore(remote,perform) {
+  if(typeof remote!=='string'||!remote||remote.length>2000||/\s/.test(remote))
+    fail('invalid scoped remote');
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'trusted-dispatch-store-'));
+  const checkout=path.join(dir,'agent-store');
+  try{
+    try{execFileSync('git',['clone','--no-tags','--single-branch',
+      '--branch',REF,'--',remote,checkout],{
+      encoding:'utf8',stdio:['ignore','pipe','pipe'],timeout:45000,
+      maxBuffer:2*1024*1024,env:{...process.env,
+        GIT_TERMINAL_PROMPT:'0',GIT_NO_REPLACE_OBJECTS:'1'},
+    });}catch(e){fail('preinitialized Store checkout failed ('+(e.status??'unknown')+')');}
+    if(git(checkout,['symbolic-ref','--short','HEAD'])!==REF)
+      fail('untrusted Store branch');
+    return perform(checkout);
+  }finally{fs.rmSync(dir,{recursive:true,force:true});}
+}
+function persist(dir,state,previousVersion,issue) {
+  writeIssueWorkflowState(dir,state,previousVersion);
+  git(dir,['add','-A']);
+  const audit=auditStagedRunStore(dir,REF);
+  if(audit.checked_changes!==2)fail('expected one immutable state and one CAS head');
+  git(dir,['-c','user.name=nession-agent-controller',
+    '-c','user.email=nession-agent-controller@users.noreply.github.com',
+    'commit','-m','agent-store: Issue '+issue+' dispatch state v'+state.version]);
+  return publish(REF,dir,4);
+}
+// Begin the exact external side effect ONLY after this function returns
+// status='committed'. If it returns 'reconcile', never repeat HTTP POST.
+// The persistent intent is an immutable no-redelivery fence after a crash.
+export function commitDispatchIntent({remote,issue,actionId,registry,signer}) {
+  if(!Number.isSafeInteger(issue)||issue<1||
+      !/^[a-f0-9]{64}$/.test(actionId??''))fail('invalid Issue/Action identity');
+  return withStore(remote,dir=>{
+    const previous=readIssueWorkflowState(dir,issue);
+    if(!previous.state)fail('Controller Issue has not been initialized');
+    const state=previous.state;
+    const candidate=state.outbox.find(x=>x.id===actionId);
+    if(!candidate)fail('action absent from authenticated Issue');
+    if(candidate.status!=='pending'){
+      // Crucially do not return a usable signed POST plan to a restarted Run.
+      return {status:'reconcile',issue,action_id:actionId,
+        action_status:candidate.status,state_version:previous.version,
+        store_commit_sha:git(dir,['rev-parse','HEAD'])};
+    }
+    const {plan,prepared}=prepareGitHubDispatch(state,actionId,registry,signer);
+    const published=persist(dir,prepared,previous.version,issue);
+    if(published.replayed)fail('newly prepared intent unexpectedly replayed');
+    return {status:'committed',issue,action_id:actionId,
+      state_version:prepared.version,store_commit_sha:published.commit_sha,
+      plan};
+  });
+}
+// Only a trusted GitHub API reader/dispatcher with a verified HTTP 200
+// response may acknowledge the intent. A 204/timeout is ambiguous, not a
+// failure that licenses redelivery.
+export function acknowledgeCommittedDispatch({
+  remote,issue,actionId,ticketSha256,receipt,
+}) {
+  if(!Number.isSafeInteger(issue)||issue<1||
+      !/^[a-f0-9]{64}$/.test(actionId??'')||
+      !/^[a-f0-9]{64}$/.test(ticketSha256??'')||
+      receipt?.status!=='verified'||receipt?.dispatch_id!==actionId||
+      !Number.isSafeInteger(receipt?.source_run_id)||receipt.source_run_id<1)
+    fail('missing authenticated HTTP 200 Run receipt or dispatch identity');
+  return withStore(remote,dir=>{
+    const read=readIssueWorkflowState(dir,issue);
+    if(!read.state)fail('Controller Issue unavailable');
+    const action=read.state.outbox.find(x=>x.id===actionId);
+    if(!action)fail('unknown prepared action');
+    if(action.status==='dispatched'){
+      if(action.receipt?.status!=='verified'||
+          action.receipt.source_run_id!==receipt.source_run_id)
+        fail('conflicting acknowledged source Run');
+      return {status:'replayed',issue,action_id:actionId,
+        source_run_id:receipt.source_run_id,state_version:read.version,
+        store_commit_sha:git(dir,['rev-parse','HEAD'])};
+    }
+    if(action.status!=='dispatching'||action.receipt?.ticket_sha256!==ticketSha256)
+      fail('missing or mismatched persisted write-ahead intent');
+    const advanced=recordDispatch(read.state,read.version,actionId,receipt);
+    const published=persist(dir,advanced,read.version,issue);
+    if(published.replayed)fail('unexpected replay during first Run acknowledgement');
+    return {status:'acknowledged',issue,action_id:actionId,
+      source_run_id:receipt.source_run_id,state_version:advanced.version,
+      store_commit_sha:published.commit_sha};
+  });
+}
