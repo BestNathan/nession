@@ -891,13 +891,9 @@ fn atomic_output_prefix(
 
 /// A stream-log cut is atomic with its live queue *only* when both are
 /// selected under the same SessionMap lock. No unproven tmux cut is promoted.
-async fn send_atomic_output_prefix(
-    outbound: &P2pOutbound,
-    session_name: &str,
-    bytes: &[u8],
-) -> bool {
+fn atomic_prefix_payload(session_name: &str, bytes: &[u8]) -> TerminalOutputPayload {
     use base64::Engine;
-    let payload = TerminalOutputPayload {
+    TerminalOutputPayload {
         session_name: session_name.to_string(),
         data: base64::engine::general_purpose::STANDARD.encode(bytes),
         stream_epoch: None,
@@ -910,8 +906,18 @@ async fn send_atomic_output_prefix(
             // verified VT/screen snapshot from tmux's whole lifetime.
             fidelity: Some(TerminalCheckpointFidelity::Partial),
         }),
-    };
-    let msg = new_message(msg_types::TERMINAL_OUTPUT, payload);
+    }
+}
+
+async fn send_atomic_output_prefix(
+    outbound: &P2pOutbound,
+    session_name: &str,
+    bytes: &[u8],
+) -> bool {
+    let msg = new_message(
+        msg_types::TERMINAL_OUTPUT,
+        atomic_prefix_payload(session_name, bytes),
+    );
     let Ok(json) = serde_json::to_string(&msg) else {
         return false;
     };
