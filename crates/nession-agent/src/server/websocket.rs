@@ -680,7 +680,7 @@ pub use nession_protocol::contracts::terminal::v1::{
     TerminalControlAcquirePayload, TerminalControlAcquireResponse, TerminalControlChangedPayload,
     TerminalInputAckPayload, TerminalInputPayload, TerminalOutputAppliedPayload,
     TerminalOutputPayload, TerminalResizePayload, TerminalResumeRecovery,
-    TerminalStreamResumePayload, TerminalStreamResumeResponse,
+    TerminalStreamEventPayload, TerminalStreamResumePayload, TerminalStreamResumeResponse,
 };
 
 // --- Protocol helpers ---
