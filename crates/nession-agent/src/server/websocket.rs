@@ -3137,10 +3137,6 @@ impl AgentServer {
             sessions,
             client_id,
             peer_token: Arc::new(()),
-            output_ack: SubscriberOutputAck::new(OutputAckBinding {
-                subscriber_generation: 1,
-                stream_epoch: 9,
-            }).expect("test ACK binding"),
             outbound,
             default_working_dir,
             file_ops,
@@ -3419,6 +3415,14 @@ impl AgentServer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_output_ack() -> SubscriberOutputAck {
+        SubscriberOutputAck::new(OutputAckBinding {
+            subscriber_generation: 1,
+            stream_epoch: 9,
+        }).expect("test ACK binding")
+    }
+
     use crate::fs::ops::FileData;
     use crate::test_support::TestSession;
     use base64::Engine;
@@ -3758,10 +3762,7 @@ mod tests {
             SessionPeer {
                 client_id: "slow".to_owned(),
                 peer_token: Arc::new(()),
-            output_ack: SubscriberOutputAck::new(OutputAckBinding {
-                subscriber_generation: 1,
-                stream_epoch: 9,
-            }).expect("test ACK binding"),
+            output_ack: test_output_ack(),
                 outbound: slow_outbound,
                 output_tx: Some(slow_tx),
                 queued_bytes: Arc::clone(&slow_bytes),
@@ -3770,10 +3771,7 @@ mod tests {
             SessionPeer {
                 client_id: "fast".to_owned(),
                 peer_token: Arc::new(()),
-            output_ack: SubscriberOutputAck::new(OutputAckBinding {
-                subscriber_generation: 1,
-                stream_epoch: 9,
-            }).expect("test ACK binding"),
+            output_ack: test_output_ack(),
                 outbound: fast_outbound,
                 output_tx: Some(fast_tx),
                 queued_bytes: Arc::clone(&fast_bytes),
@@ -3817,10 +3815,7 @@ mod tests {
         let mut peers = vec![SessionPeer {
             client_id: "big".to_owned(),
             peer_token: Arc::new(()),
-            output_ack: SubscriberOutputAck::new(OutputAckBinding {
-                subscriber_generation: 1,
-                stream_epoch: 9,
-            }).expect("test ACK binding"),
+            output_ack: test_output_ack(),
             outbound,
             output_tx: Some(tx),
             queued_bytes: Arc::clone(&queued_bytes),
@@ -3844,10 +3839,7 @@ mod tests {
         let mut peers = vec![SessionPeer {
             client_id: "closed".to_owned(),
             peer_token: Arc::new(()),
-            output_ack: SubscriberOutputAck::new(OutputAckBinding {
-                subscriber_generation: 1,
-                stream_epoch: 9,
-            }).expect("test ACK binding"),
+            output_ack: test_output_ack(),
             outbound,
             output_tx: Some(tx),
             queued_bytes: Arc::clone(&queued_bytes),
@@ -3869,10 +3861,7 @@ mod tests {
         let mut peers = vec![SessionPeer {
             client_id: "test-client".to_string(),
             peer_token: Arc::new(()),
-            output_ack: SubscriberOutputAck::new(OutputAckBinding {
-                subscriber_generation: 1,
-                stream_epoch: 9,
-            }).expect("test ACK binding"),
+            output_ack: test_output_ack(),
             outbound: peer_outbound,
             output_tx: Some(tx.clone()),
             detached_for_not_draining: Arc::clone(&detached_for_not_draining),
