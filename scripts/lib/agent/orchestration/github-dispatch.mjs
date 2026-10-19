@@ -1,6 +1,6 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, createHash, timingSafeEqual } from 'node:crypto';
 import { resolveIdentity } from '../harness/contract.mjs';
-import { validateDevelopmentState,recordSliceYield } from './outbox.mjs';
+import { validateDevelopmentState,recordSliceYield,recordDispatchIntent } from './outbox.mjs';
 import { verifyCommittedCheckpoint } from '../store/remote.mjs';
 
 const HEX40 = /^[a-f0-9]{40}$/;
@@ -135,6 +135,60 @@ export function planGitHubDispatch(state,actionId,registry,signer) {
         .toString('base64url')}:{})},
   };
 }
+
+// Create a signed dispatch plan while the Outbox item is pending, then save a
+// write-ahead intent in the canonical state (via Store CAS) BEFORE POST.
+// The ticket's issuer and hash are committed; resuming a prepared state must
+// reconcile GitHub evidence and MUST NOT call workflow_dispatch a second time.
+export function prepareGitHubDispatch(state,actionId,registry,signer) {
+  const plan=planGitHubDispatch(state,actionId,registry,signer);
+  const verified=verifyDispatchTicket(plan.inputs.dispatch_ticket,{
+    [signer.key_id]:signer.key,
+  },{now:signer.now??Date.now()});
+  const intent={status:'prepared',dispatch_id:actionId,
+    issuer_run_id:verified.issuer_run_id,
+    ticket_sha256:createHash('sha256').update(plan.inputs.dispatch_ticket).digest('hex')};
+  const prepared=recordDispatchIntent(state,state.version,actionId,intent);
+  return {plan,prepared,intent};
+}
+export function verifyPersistedDispatchIntent({state,plan,keyring,now=Date.now()}) {
+  validateDevelopmentState(state);
+  if(!plan||plan.repository!==REPOSITORY||plan.ref!=='main'||
+      !plan.return_run_details||!plan.inputs)
+    reject('invalid prepared dispatch plan');
+  const body=verifyDispatchTicket(plan.inputs.dispatch_ticket,keyring,{now});
+  const action=state.outbox.find(x=>x.id===body.action_id);
+  if(!action||action.status!=='dispatching'||action.task.type!=='dispatch'||
+      action.receipt?.status!=='prepared'||
+      action.receipt.dispatch_id!==body.action_id||
+      action.receipt.issuer_run_id!==body.issuer_run_id||
+      action.receipt.ticket_sha256!==
+        createHash('sha256').update(plan.inputs.dispatch_ticket).digest('hex')||
+      action.task.role!==body.role||action.task.agent_id!==body.agent_id||
+      action.task.task!==body.task||action.task.sha!==body.input_sha||
+      state.assignments[body.role]!==body.agent_id||
+      body.state_version>=state.version||
+      (action.task.continuation?
+        body.schema_version!==2||
+          canonical(action.task.continuation)!==canonical(body.resume_from):
+        body.schema_version!==1)) {
+    reject('dispatch intent not persisted at a newer Store state');
+  }
+  if(plan.workflow_id!==PROVIDERS[body.role].workflow||
+      plan.inputs.action_id!==body.action_id||
+      plan.inputs.issue_number!==String(body.issue)||
+      plan.inputs.agent_id!==body.agent_id||
+      plan.inputs.task!==body.task||
+      plan.inputs.input_sha!==body.input_sha||
+      (body.schema_version===2?
+        plan.inputs.resume_from!==Buffer.from(canonical(body.resume_from)).toString('base64url'):
+        Object.hasOwn(plan.inputs,'resume_from'))) {
+    reject('plan diverges from persisted dispatch intent');
+  }
+  return Object.freeze({action_id:body.action_id,issuer_run_id:body.issuer_run_id,
+    ticket_sha256:action.receipt.ticket_sha256,state_version:state.version});
+}
+
 // Call only from a trusted GitHub API reader, not from Agent-provided JSON.
 // Supports dependency injection for deterministic GitHub API fixtures.
 export function createGitHubRunReader(token,{api='https://api.github.com',fetchFn=fetch}={}) {
@@ -291,7 +345,7 @@ export function authorizeNativeContinuation({
   if(body.issue!==state.issue||state.assignments[body.role]!==body.agent_id)
     reject('resumed ticket belongs to another Issue/Agent');
   const action=state.outbox.find(x=>x.id===body.action_id &&
-    ['pending','dispatched'].includes(x.status));
+    ['pending','dispatching','dispatched'].includes(x.status));
   if(!action||action.task.type!=='dispatch'||action.task.resume!==true||
       action.task.role!==body.role||action.task.agent_id!==body.agent_id||
       action.task.task!==body.task||action.task.sha!==body.input_sha||
