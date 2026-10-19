@@ -390,8 +390,7 @@ function submitTerminalResize(
   surface: PluginSurface,
   lease: ControlLease,
   sessionName: string,
-  cols: number,
-  rows: number,
+  size: { cols: number; rows: number },
 ): void {
   if (lease.getControlState(sessionName).role === 'observer') {
     return;
@@ -399,8 +398,8 @@ function submitTerminalResize(
   const generation = lease.generationFor(sessionName);
   surface.send(TERMINAL_RESIZE_WIRE, {
     session_name: sessionName,
-    cols,
-    rows,
+    cols: size.cols,
+    rows: size.rows,
     ...(generation !== undefined ? { control_generation: generation } : {}),
   });
 }
@@ -443,7 +442,7 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
       submitOutputApplied(surface, sessionName, ack),
 
     sendResize: (sessionName, cols, rows) =>
-      submitTerminalResize(surface, lease, sessionName, cols, rows),
+      submitTerminalResize(surface, lease, sessionName, { cols, rows }),
 
     getControlState: (sessionName: string): TerminalControlState =>
       lease.getControlState(sessionName),
