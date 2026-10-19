@@ -123,11 +123,46 @@ async function api(token,endpoint){
   if(!r.ok)fail('independent source GitHub API rejected request: '+r.status);
   return r.json();
 }
+const PINNED_RECOVERY_SOURCE_RUN=39288961865;
+const PINNED_RECOVERY_COMMAND='/nession ingest issue=1997 worker_run=39288961865';
+// The lack of a workflow_run delivery must not allow a result to be promoted
+// by editing a Store file or by supplying an arbitrary Run ID. This manual
+// recovery still re-reads GitHub, both Artifact digests, the HMAC Ticket and
+// the original committed Store Run receipt before any writer operation.
+export function resolveTrustedIngestSource({environment,event}){
+  if(environment?.GITHUB_ACTIONS!=='true'||
+      environment.GITHUB_REPOSITORY!==REPO||
+      environment.GITHUB_REF!=='refs/heads/main'||
+      environment.GITHUB_WORKFLOW!=='Store / Agent Development Ingest'||
+      !HEX40.test(environment.GITHUB_SHA??''))
+    fail('invalid main-owned trusted Ingest authority');
+  if(environment.GITHUB_EVENT_NAME==='workflow_run'){
+    const source=event?.workflow_run;
+    if(event.action!=='completed'||source?.conclusion!=='success'||
+        !Number.isSafeInteger(source?.id)||source.id<1)
+      fail('only completed successful Worker may publish a checkpoint');
+    return {run_id:source.id,source};
+  }
+  if(environment.GITHUB_EVENT_NAME==='issue_comment'){
+    if(environment.GITHUB_ACTOR!=='BestNathan'||
+        event?.action!=='created'||
+        event.repository?.full_name!==REPO||
+        event.issue?.number!==1997||
+        event.issue?.pull_request||
+        event.comment?.user?.login!=='BestNathan'||
+        event.comment?.body!==PINNED_RECOVERY_COMMAND||
+        !Number.isSafeInteger(event.comment.id)||event.comment.id<1)
+      fail('manual checkpoint recovery requires exact owner/main Issue comment');
+    return {run_id:PINNED_RECOVERY_SOURCE_RUN,source:null};
+  }
+  fail('unsupported Ingest trigger');
+}
+
 async function main(){
   if(process.argv.length!==5||process.argv[2]!=='ingest')fail('usage: ingest CLAIM_ZIP RESULT_ZIP');
   const env=process.env,token=env.ACTIONS_READ_TOKEN;
   if(env.GITHUB_ACTIONS!=='true'||env.GITHUB_REPOSITORY!==REPO||
-      env.GITHUB_EVENT_NAME!=='workflow_run'||
+      !['workflow_run','issue_comment'].includes(env.GITHUB_EVENT_NAME)||
       env.GITHUB_WORKFLOW!=='Store / Agent Development Ingest'||
       env.GITHUB_REF!=='refs/heads/main'||
       !HEX40.test(env.GITHUB_SHA??'')||
@@ -136,13 +171,19 @@ async function main(){
       typeof env.STORE_WRITER_PRIVATE_KEY!=='string'||!env.CURSOR_RESUME_PRIVATE_KEY_B64)
     fail('independent main-owned Store checkpoint Ingest required');
   const event=JSON.parse(fs.readFileSync(env.GITHUB_EVENT_PATH,'utf8'));
-  if(event.action!=='completed'||event.workflow_run?.conclusion!=='success')
-    fail('only completed successful Worker may publish a checkpoint');
+  const authority=resolveTrustedIngestSource({environment:env,event});
   const reader=createGitHubRunReader(token);
-  const run=await reader.getRun(event.workflow_run.id);
-  if(run.id!==event.workflow_run.id||run.run_attempt!==event.workflow_run.run_attempt||
-      run.head_sha!==event.workflow_run.head_sha)
+  const run=await reader.getRun(authority.run_id);
+  if(authority.source &&
+     (run.id!==authority.source.id||
+      run.run_attempt!==authority.source.run_attempt||
+      run.head_sha!==authority.source.head_sha))
     fail('GitHub webhook/source Run mismatch');
+  if(!authority.source &&
+      (run.id!==PINNED_RECOVERY_SOURCE_RUN||run.run_attempt!==1||
+       run.head_sha!=='e6e64eb84663f2bb935b9c0628d9ab787523186b'||
+       run.conclusion!=='success'||run.status!=='completed'))
+    fail('manual replay is not the exact successful isolated Worker');
   const artifacts=await api(token,'/actions/runs/'+run.id+'/artifacts?per_page=100');
   const verifiedClaim=authenticateWorkerClaimRun(run,artifacts);
   const matching=artifacts.artifacts.filter(a=>a.name===
