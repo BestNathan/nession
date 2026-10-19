@@ -946,6 +946,11 @@ pub struct ClientAttachResponse {
     pub stream_epoch: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stream_cursor: Option<u64>,
+    /// Issued by the Agent on every attach/replacement, unrelated to the
+    /// controller's ControlLease generation. Absent for legacy providers.
+    /// This value is *not* evidence of a parsed stream/checkpoint cut.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subscriber_generation: Option<u64>,
     /// The agent's input epoch and applied cursor, stated on attach (#1307).
     ///
     /// This is the **reconcile**, and it is here rather than on a wire of its
