@@ -236,6 +236,65 @@ describe('createTerminalAgentApi', () => {
       });
     });
 
+    it('does not deliver a retained suffix when a checkpoint is required (#2012)', async () => {
+      const pending = api.resumeStream('work', 7, 1);
+      surface.resolveNext('agent.terminal.stream.resume', {
+        session_name: 'work', stream_epoch: 7,
+        epoch_match: true, first_available_seq: 4, complete: false,
+        recovery: 'checkpoint-required',
+        events: [{ kind: 'output', session_name: 'work',
+          stream_epoch: 7, stream_seq: 4, data: 'eA==' }],
+      });
+      const result = await pending;
+      expect(result).toMatchObject({
+        epochMatch: true, firstAvailableSeq: 4,
+        complete: false, recovery: 'checkpoint-required', events: [],
+      });
+    });
+
+    it('rejects contradictory complete and unavailable recovery claims (#2012)', async () => {
+      const event = { kind: 'output', session_name: 'work',
+        stream_epoch: 7, stream_seq: 3, data: 'eA==' };
+      const pending = api.resumeStream('work', 7, 1);
+      surface.resolveNext('agent.terminal.stream.resume', {
+        session_name: 'work', stream_epoch: 7, epoch_match: true,
+        complete: false, recovery: 'complete', events: [event],
+      });
+      const contradictory = await pending;
+      expect(contradictory).toMatchObject({
+        epochMatch: false, complete: false, recovery: 'unavailable', events: [],
+      });
+      const missing = api.resumeStream('work', 7, 1);
+      surface.resolveNext('agent.terminal.stream.resume', {
+        session_name: 'work', stream_epoch: 8, epoch_match: false,
+        recovery: 'unavailable', events: [event],
+      });
+      expect(await missing).toMatchObject({
+        epochMatch: false, recovery: 'unavailable', events: [],
+      });
+    });
+
+    it('permits complete replay but rejects an incomplete legacy suffix (#2012)', async () => {
+      const event = { kind: 'output', session_name: 'work',
+        stream_epoch: 7, stream_seq: 2, data: 'eA==' };
+      const good = api.resumeStream('work', 7, 1);
+      surface.resolveNext('agent.terminal.stream.resume', {
+        session_name: 'work', stream_epoch: 7, epoch_match: true,
+        complete: true, recovery: 'complete', events: [event],
+      });
+      expect(await good).toMatchObject({
+        epochMatch: true, complete: true, recovery: 'complete',
+        events: [{ kind: 'output', streamEpoch: 7, streamSeq: 2 }],
+      });
+
+      const legacy = api.resumeStream('work', 7, 1);
+      surface.resolveNext('agent.terminal.stream.resume', {
+        session_name: 'work', stream_epoch: 7, epoch_match: true,
+        complete: false, events: [event],
+      });
+      expect(await legacy).toMatchObject({ complete: false, events: [] });
+    });
+
     it('reads an agent that states nothing as stating nothing, not as zero (#1304)', async () => {
       // Absence is the contract's word for "no position". A decode that
       // defaulted `first_available_seq` — `Number(undefined)` is 0, and 0 is
