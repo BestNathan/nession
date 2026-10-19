@@ -8,7 +8,7 @@ import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {readIssueWorkflowState,writeIssueWorkflowState,issueStatePath} from './state-store.mjs';
 import {reconcileOutbox,recordDispatch} from './outbox.mjs';
-import {prepareGitHubDispatch,verifyPersistedDispatchIntent,createGitHubDispatchClient}
+import {prepareGitHubDispatch,verifyPersistedDispatchIntent,createGitHubDispatchClient,acceptAttestedSliceYield}
   from './github-dispatch.mjs';
 import {auditStagedRunStore} from '../../../run-store-integrity.mjs';
 import {publish} from '../../../run-store-cas-push.mjs';
@@ -52,7 +52,7 @@ function persist(dir,state,previousVersion,issue) {
 // Begin the exact external side effect ONLY after this function returns
 // status='committed'. If it returns 'reconcile', never repeat HTTP POST.
 // The persistent intent is an immutable no-redelivery fence after a crash.
-export function commitDispatchIntent({remote,issue,actionId,registry,signer}) {
+export function commitDispatchIntent({remote,issue,actionId,registry,signer,sourceVerifier=null}) {
   if(!Number.isSafeInteger(issue)||issue<1||
       !/^[a-f0-9]{64}$/.test(actionId??''))fail('invalid Issue/Action identity');
   return withStore(remote,dir=>{
@@ -66,6 +66,10 @@ export function commitDispatchIntent({remote,issue,actionId,registry,signer}) {
       return {status:'reconcile',issue,action_id:actionId,
         action_status:candidate.status,state_version:previous.version,
         store_commit_sha:git(dir,['rev-parse','HEAD'])};
+    }
+    if(sourceVerifier!==null){
+      if(typeof sourceVerifier!=='function')fail('invalid main SHA source verifier');
+      sourceVerifier(candidate.task.sha);
     }
     const {plan,prepared}=prepareGitHubDispatch(state,actionId,registry,signer);
     const published=persist(dir,prepared,previous.version,issue);
@@ -138,9 +142,43 @@ export function acknowledgeCommittedDispatch({
 // Provider agents never call this. Its Store credential is scoped to the
 // trusted Ingest; actionsToken is independent of Store/App and only supports
 // the Actions workflow dispatch endpoint. No secret enters the Worker plan.
+// A separate trusted result ingester uses this AFTER checkpoint Store CAS.
+// It never grants the Worker any writer token or accepts model-authored source
+// identity. authenticate/verify the actual GitHub Run and encrypted commit
+// with acceptAttestedSliceYield before publishing the next Outbox action.
+export async function commitAttestedSliceYield({
+  remote,issue,dispatchTicket,keyring,reader,
+  checkpoint,verifiedMainSha,now=Date.now(),
+}) {
+  if(!Number.isSafeInteger(issue)||issue<1||
+      !Number.isSafeInteger(checkpoint?.run_id)||checkpoint.run_id<1||
+      !Number.isSafeInteger(checkpoint?.attempt)||checkpoint.attempt<1)
+    fail('invalid attested Slice source');
+  // Read without retaining a disposable checkout across an await. The writer
+  // must recheck the EXACT version under a fresh Git CAS after attestation.
+  const prior=withStore(remote,dir=>readIssueWorkflowState(dir,issue));
+  if(!prior.state)fail('authenticated Worker Issue is absent');
+  const advanced=await acceptAttestedSliceYield({
+    state:prior.state,dispatch_ticket:dispatchTicket,keyring,reader,
+    remote,checkpoint,verified_main_sha:verifiedMainSha,now,
+  });
+  return withStore(remote,dir=>{
+    const latest=readIssueWorkflowState(dir,issue);
+    if(latest.version!==prior.version)
+      fail('stale checkpoint acceptance; reread trusted Store evidence');
+    if(advanced===prior.state) {
+      return {status:'replayed',issue,state_version:prior.version,
+        store_commit_sha:git(dir,['rev-parse','HEAD'])};
+    }
+    const published=persist(dir,advanced,prior.version,issue);
+    return {status:'yielded',issue,state_version:advanced.version,
+      store_commit_sha:published.commit_sha};
+  });
+}
+
 export async function executeDurableAgentDispatch({
   remote,issue,actionId,registry,signer,actionsToken,now=Date.now(),
-  fetchFn=null,
+  fetchFn=null,sourceVerifier=null,
 }) {
   if(typeof actionsToken!=='string'||actionsToken.length<8)
     fail('trusted Actions dispatch token required');
@@ -149,7 +187,7 @@ export async function executeDurableAgentDispatch({
     fail('trusted Controller HMAC signer required');
   if(fetchFn!==null&&(process.env.NODE_ENV!=='test'||typeof fetchFn!=='function'))
     fail('mock Actions client unavailable outside fixture tests');
-  const issued=commitDispatchIntent({remote,issue,actionId,registry,signer});
+  const issued=commitDispatchIntent({remote,issue,actionId,registry,signer,sourceVerifier});
   if(issued.status!=='committed')return issued;
   const keyring={[signer.key_id]:signer.key};
   const verified=withStore(remote,dir=>{

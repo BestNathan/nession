@@ -22,6 +22,8 @@ const api={
     async create(options){
       created++;
       assert.deepEqual(options.tools,[]);
+      if(created===2)assert.deepEqual(options.local.sandboxOptions,{enabled:true});
+      else assert.equal(options.local.sandboxOptions,undefined);
       return fakeAgent();
     },
     async resume(id,options){
@@ -52,15 +54,18 @@ async function test(){
   const first=await runCursorSession(common);
   assert.equal(first.meta.agent_id,agentId);
   assert.equal(first.meta.resumed,false);
+  const sandboxed=await runCursorSession({...common,sandbox:true,prompt:'sandbox'});
+  assert.equal(sandboxed.meta.status,'finished');
   const second=await runCursorSession({...common,resumeAgentId:agentId,prompt:'second turn'});
   assert.equal(second.meta.agent_id,agentId);
   assert.equal(second.meta.resumed,true);
-  assert.equal(created,1);
+  assert.equal(created,2);
   assert.equal(resumed,1);
-  assert.deepEqual(commands,['hello','second turn']);
+  assert.deepEqual(commands,['hello','sandbox','second turn']);
   await assert.rejects(runCursorSession({...common,resumeAgentId:'bc-foreign'}),
     /Invalid local Cursor native resume/);
   await assert.rejects(runCursorSession({...common,tools:null}),/explicit tool allowlist/);
+  await assert.rejects(runCursorSession({...common,sandbox:'unsafe'}),/sandbox flag/);
   const noResume={...api,Agent:{create:api.Agent.create}};
   await assert.rejects(runCursorSession({...common,sdkLoader:async()=>noResume,resumeAgentId:agentId}),
     /no native resume API/);

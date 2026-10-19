@@ -165,6 +165,7 @@ function main(){
       process.env.GITHUB_EVENT_NAME!=='workflow_dispatch'||
       !expectedRole)deny('not a trusted main Worker workflow_dispatch');
   const input=JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH,'utf8')).inputs;
+  if(input?.resume_from==='')delete input.resume_from;
   const registry=JSON.parse(fs.readFileSync('automation/agents/registry.json','utf8'));
   const result=authorizeWorkerFromStore({
     remote:'https://github.com/BestNathan/nession.git',registry,

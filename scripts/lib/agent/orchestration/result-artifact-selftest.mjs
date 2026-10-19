@@ -83,6 +83,7 @@ assert.throws(()=>decodeResultZip(incorrectCRC),/descriptor mismatch|CRC/);
 assert.throws(()=>decodeResultZip(Buffer.alloc(256*1024+1)),/archive size/);
 const issuer={id:222,path:'.github/workflows/acceptance-agent-controller.yml',
   name:'Acceptance / Agent Controller',event:'workflow_dispatch',head_branch:'main',
+  actor:{login:'BestNathan'},run_attempt:1,head_repository:{full_name:repo},
   head_sha:main,repository:{full_name:repo}};
 const worker={id:333,run_attempt:1,
   path:'.github/workflows/agent-develop.yml',name:'Agent / Development',

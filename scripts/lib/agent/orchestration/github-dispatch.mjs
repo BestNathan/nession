@@ -256,6 +256,22 @@ export function createGitHubDispatchClient(token,{api='https://api.github.com',f
   };
 }
 
+function authenticatedTicketIssuer(run,mainSha) {
+  // The original Controller initializer and the new isolated dispatcher are
+  // both main-owned authorities. Never accept worker code, PR/fork runs or
+  // user-provided result JSON as issuer provenance.
+  const allowed = new Map([
+    ['.github/workflows/acceptance-agent-controller.yml','Acceptance / Agent Controller'],
+    ['.github/workflows/agent-controller-dispatch.yml','Agent / Controller Dispatch'],
+  ]);
+  return run?.name===allowed.get(run?.path)&&
+    ['workflow_dispatch','issue_comment'].includes(run?.event)&&run?.head_branch==='main'&&
+    run?.actor?.login==='BestNathan'&&
+    run?.repository?.full_name===REPOSITORY&&
+    run?.head_repository?.full_name===REPOSITORY&&
+    run?.head_sha===mainSha&&positive(run?.id)&&positive(run?.run_attempt);
+}
+
 function compareSource(run,body,result) {
   const spec=PROVIDERS[body.role];
   if (!run || run.id!==result.run_id || run.run_attempt!==result.run_attempt ||
@@ -305,10 +321,7 @@ export async function attestAgentOutcome({
   }
   const issuer=await reader.getRun(body.issuer_run_id);
   if (issuer.id!==body.issuer_run_id ||
-      issuer.path!=='.github/workflows/acceptance-agent-controller.yml' ||
-      issuer.name!=='Acceptance / Agent Controller' ||
-      issuer.repository?.full_name!==REPOSITORY || issuer.event!=='workflow_dispatch' ||
-      issuer.head_branch!=='main' || issuer.head_sha!==verified_main_sha) {
+      !authenticatedTicketIssuer(issuer,verified_main_sha)) {
     reject('dispatch ticket issuer is not the trusted Controller');
   }
   const run=await reader.getRun(result.run_id);
@@ -404,12 +417,7 @@ export async function acceptAttestedSliceYield({
   }
   const issuer=await reader.getRun(body.issuer_run_id);
   if(issuer.id!==body.issuer_run_id||
-      issuer.path!=='.github/workflows/acceptance-agent-controller.yml'||
-      issuer.name!=='Acceptance / Agent Controller'||
-      issuer.event!=='workflow_dispatch'||issuer.head_branch!=='main'||
-      issuer.repository?.full_name!==REPOSITORY||
-      issuer.head_repository?.full_name!==REPOSITORY||
-      issuer.head_sha!==verified_main_sha) {
+      !authenticatedTicketIssuer(issuer,verified_main_sha)) {
     reject('Slice issuer is not the trusted Controller Run');
   }
   const run=await reader.getRun(checkpoint.run_id);

@@ -1,0 +1,102 @@
+name: Agent / Controller Dispatch
+
+# #2010. Trusted, owner/main-only entrypoint. Provider never executes in this
+# workflow; the Store writer private key and Actions writer token are NEVER
+# available to any Developer/Reviewer model process.
+on:
+  # A one-shot, exact owner-authenticated #1997 command permits bootstrap even
+  # where connected GitHub apps cannot call the Actions dispatch endpoint.
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Existing initialized open Issue
+        required: true
+        type: number
+      action_id:
+        description: Exact pending 64-char Outbox action ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: write
+  issues: read
+
+concurrency:
+  group: agent-controller-dispatch-${{ inputs.issue_number }}-${{ inputs.action_id }}
+  cancel-in-progress: false
+
+jobs:
+  trusted-dispatch:
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'BestNathan' &&
+      github.run_attempt == 1 &&
+      (
+        github.event_name == 'workflow_dispatch' ||
+        (github.event_name == 'issue_comment' &&
+         github.event.action == 'created' &&
+         github.event.issue.number == 1997 &&
+         github.event.comment.user.login == 'BestNathan' &&
+         github.event.comment.body == '/nession dispatch issue=1997 action=95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae')
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout authenticated main code, never PR code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify ticket, CAS and Worker admission negative contracts
+        run: |
+          set -euo pipefail
+          node scripts/lib/agent/orchestration/controller-dispatch-selftest.mjs
+          node scripts/lib/agent/orchestration/dispatch-intent-selftest.mjs
+          node scripts/lib/agent/orchestration/worker-preflight-selftest.mjs
+          ./gates/run run-store-integrity
+      - name: Verify existing least-privilege Store Writer App
+        env:
+          APP_ID: ${{ vars.RUN_STORE_WRITER_APP_ID }}
+        run: |
+          set -euo pipefail
+          [[ "$APP_ID" =~ ^[1-9][0-9]*$ ]]
+      - name: Mint existing repository-scoped Store App token
+        id: writer
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.RUN_STORE_WRITER_APP_ID }}
+          private-key: ${{ secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY }}
+          repositories: nession
+          permission-contents: write
+      - name: Verify exact live Controller authority and CAS before one POST
+        env:
+          ACTIONS_DISPATCH_TOKEN: ${{ github.token }}
+          STORE_APP_TOKEN: ${{ steps.writer.outputs.token }}
+          STORE_WRITER_PRIVATE_KEY: ${{ secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$STORE_APP_TOKEN"
+          export AGENT_STORE_CONTROLLER_REMOTE="https://x-access-token:${STORE_APP_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          node scripts/lib/agent/orchestration/controller-dispatch.mjs dispatch |
+            tee "$RUNNER_TEMP/agent-controller-dispatch-receipt.json"
+          jq -e '.issue > 0 and (.status == "dispatched" or
+            .status == "ambiguous" or .status == "reconcile")' \
+            "$RUNNER_TEMP/agent-controller-dispatch-receipt.json" >/dev/null
+          {
+            echo "## Authenticated Developer dispatch"
+            echo "- Controller: $GITHUB_RUN_ID / attempt $GITHUB_RUN_ATTEMPT"
+            echo "- Issue: #$(jq -r .issue "$RUNNER_TEMP/agent-controller-dispatch-receipt.json")"
+            echo "- Action: $(jq -r .action_id "$RUNNER_TEMP/agent-controller-dispatch-receipt.json")"
+            echo "- Outcome: $(jq -r .status "$RUNNER_TEMP/agent-controller-dispatch-receipt.json")"
+            echo "- Worker Run ID: $(jq -r '.run_id // "NOT VERIFIED"' "$RUNNER_TEMP/agent-controller-dispatch-receipt.json")"
+            echo "- No re-POST allowed for ambiguous/reconcile; no Provider ran here."
+          } >> "$GITHUB_STEP_SUMMARY"
