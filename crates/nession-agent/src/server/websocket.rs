@@ -860,7 +860,15 @@ fn tmux_capture_fidelity(truncated: bool, modes_complete: bool) -> TerminalCheck
 /// This proves stream continuity only. It cannot restore terminal history
 /// preceding the Agent reader, nor replay resize/emulator state as full VT.
 /// Missing, expired or oversized prefixes must take the unverified fallback.
-fn atomic_output_prefix(stream: &session_terminal::SessionStreamState) -> Option<Vec<u8>> {
+struct AtomicOutputPrefix {
+    bytes: Vec<u8>,
+    stream_epoch: u64,
+    through_seq: u64,
+}
+
+fn atomic_output_prefix(
+    stream: &session_terminal::SessionStreamState,
+) -> Option<AtomicOutputPrefix> {
     use base64::Engine;
     let replay = stream.replay_since(stream.epoch, 0)?;
     if !replay.complete || replay.events.is_empty() {
@@ -884,16 +892,20 @@ fn atomic_output_prefix(stream: &session_terminal::SessionStreamState) -> Option
             TerminalStreamEventPayload::Resize { .. } => {}
         }
     }
-    (!raw.is_empty()).then_some(raw)
+    (!raw.is_empty()).then_some(AtomicOutputPrefix {
+        bytes: raw,
+        stream_epoch: stream.epoch,
+        through_seq: stream.cursor(),
+    })
 }
 
 /// A stream-log cut is atomic with its live queue *only* when both are
 /// selected under the same SessionMap lock. No unproven tmux cut is promoted.
-fn atomic_prefix_payload(session_name: &str, bytes: &[u8]) -> TerminalOutputPayload {
+fn atomic_prefix_payload(session_name: &str, prefix: &AtomicOutputPrefix) -> TerminalOutputPayload {
     use base64::Engine;
     TerminalOutputPayload {
         session_name: session_name.to_string(),
-        data: base64::engine::general_purpose::STANDARD.encode(bytes),
+        data: base64::engine::general_purpose::STANDARD.encode(&prefix.bytes),
         stream_epoch: None,
         stream_seq: None,
         bootstrap: Some(TerminalBootstrapPayload {
@@ -903,6 +915,8 @@ fn atomic_prefix_payload(session_name: &str, bytes: &[u8]) -> TerminalOutputPayl
             // This is raw Agent output since stream epoch began, not a
             // verified VT/screen snapshot from tmux's whole lifetime.
             fidelity: Some(TerminalCheckpointFidelity::Partial),
+            stream_epoch: Some(prefix.stream_epoch),
+            through_seq: Some(prefix.through_seq),
         }),
     }
 }
@@ -910,11 +924,11 @@ fn atomic_prefix_payload(session_name: &str, bytes: &[u8]) -> TerminalOutputPayl
 async fn send_atomic_output_prefix(
     outbound: &P2pOutbound,
     session_name: &str,
-    bytes: &[u8],
+    prefix: &AtomicOutputPrefix,
 ) -> bool {
     let msg = new_message(
         msg_types::TERMINAL_OUTPUT,
-        atomic_prefix_payload(session_name, bytes),
+        atomic_prefix_payload(session_name, prefix),
     );
     let Ok(json) = serde_json::to_string(&msg) else {
         return false;
@@ -987,6 +1001,8 @@ async fn send_bootstrap(
             cut_consistency: Some(TerminalCheckpointCutConsistency::Unverified),
             // Even a complete pane capture is text/modes, not full VT.
             fidelity: Some(tmux_capture_fidelity(bounded.truncated, modes_complete)),
+            stream_epoch: None,
+            through_seq: None,
         }),
     };
     let msg = new_message(msg_types::TERMINAL_OUTPUT, payload);
@@ -3744,7 +3760,9 @@ mod tests {
         let expected = (1..=18)
             .map(|i| format!("GAP-{i:03}\\r\\n"))
             .collect::<String>();
-        assert_eq!(raw, expected.into_bytes());
+        assert_eq!(raw.bytes, expected.into_bytes());
+        assert_eq!(raw.stream_epoch, stream.epoch);
+        assert_eq!(raw.through_seq, cursor_at_cut);
         let payload = atomic_prefix_payload("demo", &raw);
         assert_eq!(
             payload.bootstrap.as_ref().and_then(|b| b.cut_consistency),
@@ -3754,6 +3772,14 @@ mod tests {
             payload.bootstrap.as_ref().and_then(|b| b.fidelity),
             Some(TerminalCheckpointFidelity::Partial),
             "a replay from the Agent's start omits earlier tmux/VT state"
+        );
+        assert_eq!(
+            payload.bootstrap.as_ref().and_then(|b| b.stream_epoch),
+            Some(stream.epoch)
+        );
+        assert_eq!(
+            payload.bootstrap.as_ref().and_then(|b| b.through_seq),
+            Some(cursor_at_cut)
         );
         assert!(payload.stream_seq.is_none());
         assert!(payload.stream_epoch.is_none());
@@ -3808,7 +3834,9 @@ mod tests {
         stream.record_resize("demo", 120, 30);
         let prefix = atomic_output_prefix(&stream).expect("prefix complete");
         let cut = stream.cursor();
-        assert_eq!(prefix, b"GAP-001\\r\\n");
+        assert_eq!(prefix.bytes, b"GAP-001\\r\\n");
+        assert_eq!(prefix.through_seq, cut);
+        assert_eq!(prefix.stream_epoch, stream.epoch);
 
         let (tx, mut rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
         let (outbound, _) = P2pOutbound::new();
