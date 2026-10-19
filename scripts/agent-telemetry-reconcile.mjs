@@ -13,10 +13,10 @@ const REPO='BestNathan/nession';
 const SHA=/^[a-f0-9]{40}$/;
 const MAX_RUNS=100, MAX_ARTIFACTS=100, MAX_BYTES=1024*1024;
 const SOURCES=Object.freeze([
-  {file:'agent-develop.yml',name:'Agent / Development',id:'agent-develop',
-    events:['workflow_dispatch'],branches:['main']},
   {file:'agent-provider-smoke.yml',name:'Agent / Provider Smoke',id:'agent-provider-smoke',
     events:['push','workflow_dispatch'],branches:['main']},
+  {file:'agent-develop.yml',name:'Agent / Development',id:'agent-develop',
+    events:['workflow_dispatch'],branches:['main']},
   {file:'agent-cursor-resume-seed.yml',name:'Agent / Cursor Resume Seed',id:'agent-cursor-resume-seed',
     events:['push','workflow_dispatch'],branches:['main']},
   {file:'agent-cursor-resume-verify.yml',name:'Agent / Cursor Resume Verify',id:'agent-cursor-resume-verify',
