@@ -1,0 +1,113 @@
+name: Agent / Development
+
+# #2010. Bounded real Developer slice. NO Store writer, Controller HMAC,
+# Actions writer, Publisher credential or PR publication capability in Worker.
+on:
+  workflow_dispatch:
+    inputs:
+      action_id:
+        required: true
+        type: string
+      issue_number:
+        required: true
+        type: string
+      agent_id:
+        required: true
+        type: string
+      task:
+        required: true
+        type: string
+      input_sha:
+        required: true
+        type: string
+      dispatch_ticket:
+        required: true
+        type: string
+      resume_from:
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: development-${{ inputs.issue_number }}-${{ inputs.action_id }}
+  cancel-in-progress: false
+
+jobs:
+  developer:
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'workflow_dispatch' &&
+      github.actor == 'BestNathan'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: cursor
+    steps:
+      - name: Checkout trusted main-owned Worker code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Require exact authenticated Run ID from immutable Store receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A Worker may start before the trusted Controller's HTTP-200 ACK
+          # CAS finishes. Poll READ-ONLY: never claim or mutate the Store here.
+          for attempt in {1..12}; do
+            if node scripts/lib/agent/orchestration/worker-preflight.mjs \
+              verify "$RUNNER_TEMP/development-admission.json"; then
+              exit 0
+            fi
+            if [[ "$attempt" == 12 ]]; then
+              echo "::error::No authenticated Run-bound Store receipt; fail closed"
+              exit 1
+            fi
+            sleep 5
+          done
+      - name: Require pinned Cursor Provider and public-only Session sealing key
+        env:
+          CURSOR_SDK_VERSION: ${{ vars.CURSOR_SDK_VERSION }}
+          CURSOR_RESUME_PUBLIC_KEY_B64: ${{ vars.CURSOR_RESUME_PUBLIC_KEY_B64 }}
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CURSOR_API_KEY"
+          test -n "$CURSOR_RESUME_PUBLIC_KEY_B64"
+          [[ "$CURSOR_SDK_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]] || {
+            echo "::error::Worker requires pinned numeric CURSOR_SDK_VERSION (not latest)"
+            exit 1
+          }
+          mkdir -p "$RUNNER_TEMP/development-sdk"
+          npm install --prefix "$RUNNER_TEMP/development-sdk" \
+            --ignore-scripts --no-audit --no-fund "@cursor/sdk@$CURSOR_SDK_VERSION"
+          echo "CURSOR_SDK_ROOT=$RUNNER_TEMP/development-sdk" >> "$GITHUB_ENV"
+      - name: Execute authenticated bounded real Developer slice
+        env:
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+          CURSOR_MODEL: ${{ vars.CURSOR_MODEL || 'composer-2.5' }}
+          CURSOR_MODEL_FAST: ${{ vars.CURSOR_MODEL_FAST || 'true' }}
+          CURSOR_RESUME_PUBLIC_KEY_B64: ${{ vars.CURSOR_RESUME_PUBLIC_KEY_B64 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/lib/agent/orchestration/development-worker.mjs \
+            "$RUNNER_TEMP/development-admission.json" \
+            "$RUNNER_TEMP/development-output"
+      - name: Upload only encrypted native Session and bounded sanitized result
+        uses: actions/upload-artifact@v4
+        with:
+          name: development-worker-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/development-output/ciphertext.json
+            ${{ runner.temp }}/development-output/proof.json
+            ${{ runner.temp }}/development-output/result.json
+          if-no-files-found: error
+          retention-days: 3
