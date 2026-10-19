@@ -386,6 +386,25 @@ function submitOutputApplied(
   }
 }
 
+function submitTerminalResize(
+  surface: PluginSurface,
+  lease: ControlLease,
+  sessionName: string,
+  cols: number,
+  rows: number,
+): void {
+  if (lease.getControlState(sessionName).role === 'observer') {
+    return;
+  }
+  const generation = lease.generationFor(sessionName);
+  surface.send(TERMINAL_RESIZE_WIRE, {
+    session_name: sessionName,
+    cols,
+    rows,
+    ...(generation !== undefined ? { control_generation: generation } : {}),
+  });
+}
+
 export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi {
   const lease = createAgentControlLease(surface);
 
@@ -423,19 +442,8 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
     sendOutputApplied: (sessionName, ack) =>
       submitOutputApplied(surface, sessionName, ack),
 
-    sendResize: (sessionName: string, cols: number, rows: number): void => {
-      const state = lease.getControlState(sessionName);
-      if (state.role === 'observer') {
-        return;
-      }
-      const generation = lease.generationFor(sessionName);
-      surface.send(TERMINAL_RESIZE_WIRE, {
-        session_name: sessionName,
-        cols,
-        rows,
-        ...(generation !== undefined ? { control_generation: generation } : {}),
-      });
-    },
+    sendResize: (sessionName, cols, rows) =>
+      submitTerminalResize(surface, lease, sessionName, cols, rows),
 
     getControlState: (sessionName: string): TerminalControlState =>
       lease.getControlState(sessionName),
