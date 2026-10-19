@@ -5,7 +5,8 @@ import fs from 'node:fs';
 import {startDevelopment} from './outbox.mjs';
 import {planGitHubDispatch} from './github-dispatch.mjs';
 import {createWorkerClaim} from './worker-claim.mjs';
-import {authenticateWorkerClaimRun,inspectWorkerClaimZip,verifyWorkerClaimForAck}
+import {authenticateWorkerClaimRun,inspectWorkerClaimZip,verifyWorkerClaimForAck,
+  eligiblePreflightRerun}
   from './worker-reconcile.mjs';
 
 const registry=JSON.parse(fs.readFileSync('automation/agents/registry.json','utf8'));
@@ -71,4 +72,31 @@ await assert.rejects(()=>verifyWorkerClaimForAck({...valid,run:{
   ...run,created_at:new Date(now+1000000).toISOString()}}),/window/);
 await assert.rejects(()=>verifyWorkerClaimForAck({...valid,claim:{
   ...claim,inputs:{...claim.inputs,agent_id:'dev-qwen-01'}}}),/claim/);
+const failed={...run,conclusion:'failure',run_attempt:1};
+const gateName='Require exact authenticated Run ID from immutable Store receipt';
+const claimName='Upload Worker claim for independent HMAC and Store reconciliation';
+const modelName='Execute authenticated bounded real Developer slice';
+const beforeModel={total_count:1,jobs:[{run_id:run.id,name:'developer',
+  status:'completed',conclusion:'failure',steps:[
+    {name:claimName,conclusion:'success'},
+    {name:gateName,conclusion:'failure'},
+    {name:modelName,conclusion:'skipped'},
+  ]}]};
+assert.equal(eligiblePreflightRerun(failed,beforeModel),true);
+for(const bad of [
+  {run:{...failed,run_attempt:2}},
+  {run:{...failed,conclusion:'success'}},
+  {jobs:{...beforeModel,total_count:2}},
+  {jobs:{jobs:[{...beforeModel.jobs[0],name:'unexpected'}],total_count:1}},
+  {jobs:{jobs:[{...beforeModel.jobs[0],steps:[
+    {name:claimName,conclusion:'success'},
+    {name:gateName,conclusion:'failure'},
+    {name:modelName,conclusion:'success'},
+  ]}],total_count:1}},
+  {jobs:{jobs:[{...beforeModel.jobs[0],steps:[
+    {name:claimName,conclusion:'success'},
+    {name:gateName,conclusion:'success'},
+    {name:modelName,conclusion:'failure'},
+  ]}],total_count:1}},
+])assert.equal(eligiblePreflightRerun(bad.run??failed,bad.jobs??beforeModel),false);
 console.log('Worker reconciliation: signed claim, original issuer, unique Run, fork and tamper denial passed');
