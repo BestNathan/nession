@@ -118,6 +118,15 @@ export interface TerminalStreamResumeResult {
  * the PTY, and it means "everything at or below this chunk is applied". It is
  * not paired with any request — see {@link TerminalAgentApi.onInputAck}.
  */
+/** Browser -> Agent ACK of cumulative verified xterm parser progress.
+ * No ACK is allowed from an ordinary attach cursor or tmux capture. */
+export interface TerminalOutputAppliedAck {
+  subscriberGeneration: number;
+  streamEpoch: number;
+  rendererGeneration: number;
+  appliedThrough: number;
+}
+
 export interface TerminalInputAck {
   sessionName: string;
   inputEpoch: number;
@@ -178,6 +187,9 @@ export interface TerminalAgentApi {
    * one-way keystroke it always was.
    */
   sendInput(sessionName: string, data: string, sequence?: TerminalInputSequence): void;
+  /** P2P-only Output Applied ACK. `true` means submitted, not Agent accepted.
+   * Optional for old test/provider implementations. Never input ACK (#1307). */
+  sendOutputApplied?(sessionName: string, ack: TerminalOutputAppliedAck): boolean;
   /** Resize the remote PTY (controller only). */
   sendResize(sessionName: string, cols: number, rows: number): void;
   /** Current control lease for a session (#1095). */
@@ -273,6 +285,7 @@ async function attachToSession(
       controllerClientId: fields.controllerClientId,
       streamEpoch: fields.streamEpoch,
       streamCursor: fields.streamCursor,
+      subscriberGeneration: fields.subscriberGeneration,
       inputEpoch: fields.inputEpoch,
       inputAppliedThrough: fields.inputAppliedThrough,
     };
@@ -375,6 +388,32 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
             }
           : {}),
       });
+    },
+
+    sendOutputApplied: (sessionName: string, ack: TerminalOutputAppliedAck): boolean => {
+      const values = [
+        ack.subscriberGeneration, ack.streamEpoch,
+        ack.rendererGeneration, ack.appliedThrough,
+      ];
+      if (!values.every(Number.isSafeInteger)
+        || ack.subscriberGeneration <= 0 || ack.streamEpoch <= 0
+        || ack.rendererGeneration <= 0 || ack.appliedThrough < 0) {
+        return false;
+      }
+      try {
+        // This is an operation with an Agent provider descriptor, not the
+        // Agent->client input ACK notification or a transport receipt.
+        surface.send('agent.terminal.output.applied', {
+          session_name: sessionName,
+          subscriber_generation: ack.subscriberGeneration,
+          stream_epoch: ack.streamEpoch,
+          renderer_generation: ack.rendererGeneration,
+          applied_through: ack.appliedThrough,
+        });
+        return true;
+      } catch {
+        return false;
+      }
     },
 
     sendResize: (sessionName: string, cols: number, rows: number): void => {
