@@ -1801,7 +1801,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                         let detached_for_not_draining = Arc::new(AtomicBool::new(false));
                             let queued_bytes = Arc::new(AtomicUsize::new(0));
                         let wants_bootstrap = payload.needs_bootstrap.unwrap_or(false);
-                        let resp = {
+                        let (resp, atomic_prefix) = {
                             let mut guard = sessions_lock(ctx.sessions);
                             let Some(shared) = guard.get_mut(&session_name) else {
                                 return ctx.err("not_attached", "session ended during attach");
@@ -1811,12 +1811,19 @@ p2p_routes! { ctx, msg_type, payload_value;
                             // quietly instead of closing the connection this
                             // attach is about to answer on (#1226).
                             shared.peers.retain(|p| p.client_id != client_id);
-                            // When a bootstrap is coming, leave `output_tx` unset
-                            // until the snapshot is on the wire. The broadcast
-                            // task is already running and would otherwise queue
-                            // live bytes that the capture also covers — the
-                            // duplicate window #1228 measured on subsequent attach
-                            // (#321 SC4).
+                            // Decide the exact stream cut under the *same* map
+                            // lock used by the producer for record/fan-out.
+                            // Only a complete bounded prefix can join to a
+                            // pre-enabled live queue without a silent gap.
+                            let atomic_prefix = if wants_bootstrap {
+                                atomic_output_prefix(&shared.stream)
+                            } else {
+                                None
+                            };
+                            // For an atomic ring prefix, turn the queue on
+                            // NOW, under the stream producer's lock. Only
+                            // unverified async tmux capture keeps it disabled
+                            // until the snapshot has been sent (#1925).
                             let output_ack = match new_output_ack(shared.stream.epoch) {
                                 Ok(ack) => ack,
                                 Err(_) => return ctx.err("invalid_stream_identity", "output ACK identity unavailable"),
@@ -1826,7 +1833,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 peer_token: Arc::clone(ctx.peer_token),
                                 outbound: ctx.outbound.clone(),
                                 output_ack,
-                                output_tx: if wants_bootstrap {
+                                output_tx: if wants_bootstrap && atomic_prefix.is_none() {
                                     None
                                 } else {
                                     Some(tx.clone())
@@ -1836,7 +1843,10 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 ),
                                 queued_bytes: Arc::clone(&queued_bytes),
                             });
-                            client_attach_response(payload.session_name.clone(), shared, &client_id)
+                            (
+                                client_attach_response(payload.session_name.clone(), shared, &client_id),
+                                atomic_prefix,
+                            )
                         };
 
                         // The session's history, before the live forwarder
@@ -1852,30 +1862,46 @@ p2p_routes! { ctx, msg_type, payload_value;
                         // holds nothing). Absent means "the backend is attached,
                         // so no" — the behaviour an older client already has.
                         if wants_bootstrap {
-                            let bootstrap_tmux = ctx.tmux.tmux_dep();
-                            let capture = capture_for_bootstrap(
-                                &bootstrap_tmux,
-                                &session_name,
-                                crate::tmux::HISTORY_LIMIT_LINES,
-                            )
-                            .await;
-                            if !send_bootstrap(ctx.outbound, &bootstrap_tmux, &session_name, capture)
-                                .await
-                            {
-                                return ctx.err(
-                                    "bootstrap_stalled",
-                                    "the client stalled while its history was being sent",
-                                );
-                            }
-                            {
+                            if let Some(ref prefix) = atomic_prefix {
+                                // The queue was activated at precisely the
+                                // prefix's stream cursor; live chunks collected
+                                // while this await runs remain queued behind it.
+                                if !send_atomic_output_prefix(
+                                    ctx.outbound, &session_name, prefix,
+                                ).await {
+                                    return ctx.err(
+                                        "bootstrap_stalled",
+                                        "the client stalled while its ordered history was being sent",
+                                    );
+                                }
+                            } else {
+                                // No complete event-log prefix: older tmux text
+                                // capture is explicitly unverified, not an
+                                // atomic checkpoint. Preserve legacy fallback.
+                                let bootstrap_tmux = ctx.tmux.tmux_dep();
+                                let capture = capture_for_bootstrap(
+                                    &bootstrap_tmux,
+                                    &session_name,
+                                    crate::tmux::HISTORY_LIMIT_LINES,
+                                ).await;
+                                if !send_bootstrap(
+                                    ctx.outbound, &bootstrap_tmux, &session_name, capture,
+                                ).await {
+                                    return ctx.err(
+                                        "bootstrap_stalled",
+                                        "the client stalled while its history was being sent",
+                                    );
+                                }
+                                // A reattach of the same client ID can occur
+                                // while awaiting tmux; never enable a *new*
+                                // socket's queue on the old connection's token.
                                 let mut guard = sessions_lock(ctx.sessions);
                                 if let Some(shared) = guard.get_mut(&session_name) {
-                                    if let Some(peer) = shared
-                                        .peers
-                                        .iter_mut()
-                                        .find(|p| p.client_id == client_id)
-                                    {
-                                        peer.output_tx = Some(tx);
+                                    if let Some(peer) = shared.peers.iter_mut().find(|p| {
+                                        p.client_id == client_id
+                                            && Arc::ptr_eq(&p.peer_token, ctx.peer_token)
+                                    }) {
+                                        peer.output_tx = Some(tx.clone());
                                     }
                                 }
                             }
