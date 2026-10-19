@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "kind": "agent_workflow_run",
+  "identity": {
+    "workflow_id": "agent-cursor-resume-verify",
+    "github_workflow": "Agent / Cursor Resume Verify",
+    "github_run_id": 39189834637,
+    "github_run_attempt": 1,
+    "job": "resume",
+    "repository": "BestNathan/nession",
+    "event": "workflow_run",
+    "unique_run_name": "39189834637-1-cursor-resume-d1"
+  },
+  "task": {
+    "id": "cursor-resume-d1",
+    "type": "provider-fixture",
+    "target_ref": "4234e77bc2118bbfc57e067d0a843d99d8d465d2"
+  },
+  "agent": {
+    "provider": "cursor",
+    "id": "cursor-resume-fixture",
+    "role": "auditor",
+    "harness_sha256": null,
+    "checkpoint_id": null,
+    "model": {
+      "id": "composer-2.5",
+      "fast": true,
+      "params": [
+        {
+          "id": "fast",
+          "value": "true"
+        }
+      ]
+    },
+    "run_id": "run-b6e1fe20-fa38-45aa-8019-d53876e9b017",
+    "request_id": null,
+    "status": "finished",
+    "prompt": null
+  },
+  "execution": {
+    "turns": 1,
+    "model_requests": 1,
+    "tools": {
+      "observed": true,
+      "total": 0,
+      "unique": 0,
+      "by_name": {}
+    }
+  },
+  "tokens": {
+    "input": 3472,
+    "output": 82,
+    "cache_read": 416,
+    "cache_write": 0,
+    "reasoning": null,
+    "total": 3970
+  },
+  "cost": {
+    "raw_usd": null,
+    "charged_usd": null,
+    "estimated_usd": null
+  },
+  "timing": {
+    "started_at": "2026-10-19T02:24:59.129Z",
+    "finished_at": "2026-10-19T02:25:01.545Z",
+    "agent_duration_ms": 2285,
+    "workflow_duration_ms": null
+  },
+  "result": {
+    "status": "verified-resume"
+  }
+}
