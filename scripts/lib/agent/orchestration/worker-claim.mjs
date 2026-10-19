@@ -29,7 +29,7 @@ export function createWorkerClaim(input,context){
       (input.resume_from!=null&&!/^[A-Za-z0-9_-]{1,600}$/.test(input.resume_from))||
       context.repository!==REPO||context.ref!=='refs/heads/main'||
       context.event!=='workflow_dispatch'||context.workflow!=='Agent / Development'||
-      context.actor!=='BestNathan'||!HEX40.test(context.head_sha??'')||
+      context.actor!=='github-actions[bot]'||!HEX40.test(context.head_sha??'')||
       !positive(context.run_id)||!positive(context.attempt))
     fail('invalid Developer claim identity or workflow context');
   return {schema_version:1,kind:'agent_developer_claim',repository:REPO,
