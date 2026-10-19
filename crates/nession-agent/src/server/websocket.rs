@@ -46,7 +46,7 @@ use nession_runtime::lane::{KeyedLane, Work};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, Mutex};
@@ -79,6 +79,8 @@ struct SessionPeer {
     outbound: P2pOutbound,
     /// PTY multi-client fan-out; `None` for control-mode (direct outbound).
     output_tx: Option<mpsc::Sender<OutputChunk>>,
+    /** Pending bytes charged per subscriber, never shared across peers. */
+    queued_bytes: Arc<AtomicUsize>,
     /// Set by [`fan_out_peers`] when it drops this peer for a full queue.
     ///
     /// The forwarder's receiver ends for several reasons — the session ended,
@@ -141,6 +143,8 @@ struct AttachedSession {
 /// the Server reaches for a relayed client (`server::outbound::send_terminal`),
 /// applied where the terminal is actually served.
 const SUBSCRIBER_QUEUE_SLOTS: usize = 64;
+/// Independent byte cap for the per-subscriber mpsc queue (#1983).
+const SUBSCRIBER_QUEUE_BYTES: usize = 2 * 1024 * 1024;
 
 /// Fan one chunk of terminal output out to every subscriber of a session.
 ///
@@ -173,18 +177,32 @@ fn fan_out_peers(peers: &mut Vec<SessionPeer>, chunk: OutputChunk) -> usize {
         let Some(tx) = &peer.output_tx else {
             return true;
         };
+        // Reserve before delivery; the receiver can immediately dequeue and
+        // release its charge on another task. One oversized frame is enough
+        // to evict this peer but cannot stall or evict a healthy observer.
+        let bytes = chunk.0.len();
+        let reserved = peer.queued_bytes.fetch_update(
+            Ordering::AcqRel,
+            Ordering::Acquire,
+            |queued| queued.checked_add(bytes).filter(|n| *n <= SUBSCRIBER_QUEUE_BYTES),
+        );
+        if reserved.is_err() {
+            peer.detached_for_not_draining.store(true, Ordering::Release);
+            detached += 1;
+            return false;
+        }
         match tx.try_send(chunk.clone()) {
             Ok(()) => true,
             Err(mpsc::error::TrySendError::Full(_)) => {
-                // Tell the forwarder *why* its channel is ending before the
-                // drop ends it — the one cause that must reach the client as
-                // a closed connection (#1226).
-                peer.detached_for_not_draining
-                    .store(true, Ordering::Release);
+                peer.queued_bytes.fetch_sub(bytes, Ordering::AcqRel);
+                peer.detached_for_not_draining.store(true, Ordering::Release);
                 detached += 1;
                 false
             }
-            Err(mpsc::error::TrySendError::Closed(_)) => false,
+            Err(mpsc::error::TrySendError::Closed(_)) => {
+                peer.queued_bytes.fetch_sub(bytes, Ordering::AcqRel);
+                false
+            }
         }
     });
     detached
@@ -306,9 +324,17 @@ fn spawn_output_forwarder(
     outbound: P2pOutbound,
     session_name: String,
     detached_for_not_draining: Arc<AtomicBool>,
+    queued_bytes: Arc<AtomicUsize>,
 ) {
     tokio::spawn(async move {
         while let Some((bytes, stream_epoch, stream_seq)) = rx.recv().await {
+            // Receiving relinquishes the mpsc queue's buffered byte charge.
+            // The downstream socket has an independent bounded terminal lane.
+            queued_bytes.fetch_update(
+                Ordering::AcqRel,
+                Ordering::Acquire,
+                |n| Some(n.saturating_sub(bytes.len())),
+            ).ok();
             use base64::Engine;
             let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
             let output = TerminalOutputPayload {
