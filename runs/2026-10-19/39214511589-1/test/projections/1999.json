@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_projection_receipt",
+  "outcome": "applied",
+  "issue": 1999,
+  "run_id": 39214511589,
+  "run_attempt": 1,
+  "target_sha": "24897b7b167773166a00a16226bd9ceafd30ab3a",
+  "plan_digest": "47cbd15929ce6fdb61f08283dfb8e323eaf67dbe03dabdf9a0b59e79898cb2d6",
+  "artifact_digest": "sha256:8927da3a0f96572f4b035822afbbe5ce0c3d9da61fe0d82120168c758b7560a5",
+  "ingest_run_id": 39214929259,
+  "ingest_attempt": 1,
+  "declaration_digest": "a70cf6b7601f7b0208031ff20a75cb7b62961a9c0ad6d4e7663e37fd7355aa97",
+  "before_body_sha256": "46a7a2ca2f8946302b255ea8baec5278cb096edddfdfc62f966b9f7643afca38",
+  "body_sha256": "998c95352a9fffcc579252af5f5121dc0b41db3e7cf1e2df0f3dad0fb4069438",
+  "readback_body": "## Requirements: public source-gated Issue/PR lineage detail without invented causal links\n\nParent: #1906, then #1782. Producer dependency: #1974. **This is a standalone read-only Pages UI slice**. The real `agent-store` is empty and Pages builder intentionally has no independent authenticated Lineage producer; therefore current production must remain `unavailable`, not Verified.\n\n### Scope\n- In existing `pages/app.js` Work Issue and PR drilldowns, consume **only already-validated** `snapshot.work.lineage` edges for the requested Issue/PR; do not join via Timeline, aggregate Agent counts, shared Issue names, or inferred Slice IDs.\n- Show canonical Issue/PR, historical PR HEAD SHA, developer/reviewer agent ID, exact GitHub Run/Attempt, source-ref SHA, and an **explicit logical Slice Unlinked** and SC Unknown. Render a safe source link that identifies that exact Run ID; do not claim current PR approval or orphan integrity. Display source window state (`verified`/`truncated`/unavailable) and bounded-count caveats.\n- For no source, show standalone source-unavailable panel; never display fake zero links or a speculative verified edge. For a verified but zero-match window, describe `No matching authenticated edges in this bounded window` rather than no historical work.\n- Bound rendering to validated edges, no privileged browser calls, no `innerHTML`, keep `pages/` independent of `web/`.\n- Positive and negative fixtures for source-gated DOM source code and project metadata without weakening build-time projection validation.\n\n### Success Criteria\n- [ ] SC-01 Existing Issue and PR Work drilldowns show only exact-identity, source-gated historical Agent/Run/Attempt information, with true Unlinked logical Slice and Unknown SC.\n- [ ] SC-02 Unavailable, stale, or unmatched source emits transparent Unknown/Unlinked with no fabricated historical relationship, unsafe external URL or private data; standalone Pages dependency boundary intact.\n- [ ] SC-03 Exact PR HEAD Pages CI, Quality, Case Smoke and selected `pages-overview`/`pages-evidence` E2E pass. Canonical Agent Acceptance and PR gates remain mandatory external delivery gates, not self-evidence of this SC.\n\n## Acceptance Plan\n```yaml\nacceptance:\n  SC-01:\n    when: pr\n    method: agent\n  SC-02:\n    when: pr\n    method: agent\n  SC-03:\n    when: pr\n    method: agent\n```\n\n## Acceptance Report\n| Criterion | Result | Evidence |\n|---|---|---|\n| SC-01 | Pending | Await implementation and verified exact-head tests |\n| SC-02 | Pending | Await bounded safety/negative fixtures |\n| SC-03 | Pending | Await completed independent PR-head CI and E2E |\n\n## E2E Verification\n### New\n- none: reuse existing Pages browser regressions\n### Regression\n- pages-overview\n- pages-evidence\n\n## E2E Report\n\n| ID | Type | Result | Evidence |\n|---|---|---|---|\n| pages-evidence | Regression | Pass | run 39214511589/1, SHA 24897b7b167773166a00a16226bd9ceafd30ab3a, contract a70cf6b7601f7b0208031ff20a75cb7b62961a9c0ad6d4e7663e37fd7355aa97, plan 47cbd15929ce6fdb61f08283dfb8e323eaf67dbe03dabdf9a0b59e79898cb2d6, tests 3/3 (https://github.com/BestNathan/nession/actions/runs/39214511589) |\n| pages-overview | Regression | Pass | run 39214511589/1, SHA 24897b7b167773166a00a16226bd9ceafd30ab3a, contract a70cf6b7601f7b0208031ff20a75cb7b62961a9c0ad6d4e7663e37fd7355aa97, plan 47cbd15929ce6fdb61f08283dfb8e323eaf67dbe03dabdf9a0b59e79898cb2d6, tests 4/4 (https://github.com/BestNathan/nession/actions/runs/39214511589) |\n\n## Product alignment\n- [x] Independent anonymous `pages/` and source-only public metadata\n- [x] No inferred causal relationship, SC success, or orphan integrity\n- [x] No product `web/` UI dependency\n\n---\n**Status:** Approved",
+  "patch_updated_at": "2026-10-19T07:16:45Z",
+  "readback_updated_at": "2026-10-19T07:16:45Z",
+  "rows": [
+    {
+      "id": "pages-evidence",
+      "result": "Pass",
+      "evidence": "run 39214511589/1, SHA 24897b7b167773166a00a16226bd9ceafd30ab3a, contract a70cf6b7601f7b0208031ff20a75cb7b62961a9c0ad6d4e7663e37fd7355aa97, plan 47cbd15929ce6fdb61f08283dfb8e323eaf67dbe03dabdf9a0b59e79898cb2d6, tests 3/3 (https://github.com/BestNathan/nession/actions/runs/39214511589)"
+    },
+    {
+      "id": "pages-overview",
+      "result": "Pass",
+      "evidence": "run 39214511589/1, SHA 24897b7b167773166a00a16226bd9ceafd30ab3a, contract a70cf6b7601f7b0208031ff20a75cb7b62961a9c0ad6d4e7663e37fd7355aa97, plan 47cbd15929ce6fdb61f08283dfb8e323eaf67dbe03dabdf9a0b59e79898cb2d6, tests 4/4 (https://github.com/BestNathan/nession/actions/runs/39214511589)"
+    }
+  ]
+}
