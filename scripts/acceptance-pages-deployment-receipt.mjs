@@ -11,7 +11,7 @@ const CAPTURE='Capture exact static public evidence digest and coverage';
 const OBSERVED=/^\d{4}-\d{2}-\d{2}T[^\s]+Z Public Issue Agent Run observation: (source_backed_observation|not_observed) \(source=(available|truncated|unavailable), runs=(\d+), digest=([a-f0-9]{64})\)$/;
 const positive=n=>Number.isSafeInteger(n)&&n>0;
 
-export function attestPublicPagesObservation(repo,sha,run,jobs,log) {
+export function attestPagesDeployment(repo,sha,run,jobs,log) {
   if(repo!==REPO||!SHA.test(sha)||!positive(run?.id)||
     run?.name!==NAME||run?.path!==WORKFLOW||
     run?.event!=='push'||run?.head_branch!=='main'||run?.head_sha!==sha||
@@ -41,19 +41,25 @@ export function attestPublicPagesObservation(repo,sha,run,jobs,log) {
     (source==='unavailable'||count===0))throw Error('forged Pages observation success');
   if(status==='not_observed'&&source!=='unavailable'&&count>0)
     throw Error('ambiguous Pages observation outcome');
-  if(status!=='source_backed_observation')return null; // Explicit lack of evidence is not a Pass.
+  return {run_id:run.id,run_attempt:run.run_attempt,build_job_id:build[0].id,
+    publish_job_id:publish[0].id,status,source,count,digest};
+}
+export function attestPublicPagesObservation(repo,sha,run,jobs,log) {
+  const proof=attestPagesDeployment(repo,sha,run,jobs,log);
+  if(proof.status!=='source_backed_observation')return null;
   return {
     kind:'verified_public_pages_agent_observation',schema_version:1,
-    target_sha:sha,run_id:run.id,run_attempt:run.run_attempt,
-    build_job_id:build[0].id,publish_job_id:publish[0].id,
-    source,observed_issue_agent_runs:count,
-    public_json_sha256:digest,
+    target_sha:sha,run_id:proof.run_id,run_attempt:proof.run_attempt,
+    build_job_id:proof.build_job_id,publish_job_id:proof.publish_job_id,
+    source:proof.source,observed_issue_agent_runs:proof.count,
+    public_json_sha256:proof.digest,
     public_url:'https://bestnathan.github.io/nession/data/site.json',
-    source_url:'https://github.com/'+repo+'/actions/runs/'+run.id,
+    source_url:'https://github.com/'+repo+'/actions/runs/'+proof.run_id,
     verified_by:'GitHub REST exact Run/Attempt/Jobs and completed HTTPS/digest verification job log',
     implements_pr_linkage:false,establishes_sc_verdict:false,
   };
 }
+
 export async function collectPublicPagesObservation(repo,sha,runs,
   request,readJobLog) {
   if(repo!==REPO||!SHA.test(sha)||!Array.isArray(runs))throw Error('invalid Pages evidence request');
