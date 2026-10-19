@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "c1ba7e9eaf2e1028602dfd903751ae6dfbc03ae7",
+  "run_id": 39212699016,
+  "run_attempt": 1,
+  "plan_digest": "b25867093153c065cbfeebe66cca3d525d4c828c85d171063b78fe4fb55dccc1",
+  "artifact_digest": "sha256:349a6e63f5d058d42ab61276750dd573efdf6403abebf80fed6918f6268c7640",
+  "results": [
+    {
+      "id": "pages-evidence",
+      "result": "Pass",
+      "discovered": 3,
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 20
+    },
+    {
+      "id": "pages-overview",
+      "result": "Pass",
+      "discovered": 4,
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 49
+    }
+  ]
+}
