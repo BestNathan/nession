@@ -40,7 +40,7 @@ jobs:
       github.repository == 'BestNathan/nession' &&
       github.ref == 'refs/heads/main' &&
       github.event_name == 'workflow_dispatch' &&
-      github.actor == 'BestNathan'
+      github.actor == 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: cursor
