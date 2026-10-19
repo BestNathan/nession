@@ -326,7 +326,17 @@ async function main(){
     const source=await authorizeInvocation(process.env,api);
     console.log('Acceptance quota recovery: authorized trigger '+source);
     const out=await reconcile(api,console.log);
-    console.log('Acceptance quota recovery: '+JSON.stringify(out));
+    // Include the authenticated event-source GET in whole-invocation cost;
+    // reconcile.api_calls keeps its existing strict 26-request loop budget.
+    const source_api_calls=source==='trusted-main-quality'?1:0;
+    const evidence={...out,source_api_calls,
+      total_api_calls:out.api_calls+source_api_calls,trigger:source};
+    if(source_api_calls){
+      evidence.source_run_id=Number(process.env.SOURCE_RUN_ID);
+      evidence.source_attempt=Number(process.env.SOURCE_ATTEMPT);
+      evidence.source_sha=process.env.SOURCE_SHA;
+    }
+    console.log('Acceptance quota recovery: '+JSON.stringify(evidence));
   }catch(e){
     if(e instanceof RateLimited){
       console.log(e.message+'; no verdict created, defer until a later scheduled execution');
