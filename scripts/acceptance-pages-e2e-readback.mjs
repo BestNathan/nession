@@ -146,6 +146,15 @@ export async function selfTestPublicPagesE2E(){
   assert.equal(result.published_e2e_ids,0);
   assert.equal(result.establishes_sc_verdict,false);
   assert.equal(result.establishes_e2e_pass,false);
+  // A trustworthy *available* source may legitimately have no matching
+  // current PR-head IDs. The source is observed, not a fabricated Test Pass.
+  const available={...json,work:{acceptance_e2e:{status:'available',source_sha:src,records:[]}}};
+  const availableDigest=createHash('sha256').update(JSON.stringify(available)).digest('hex');
+  const availableProof=prove(available,run,jobs,log.replace(digest,availableDigest));
+  assert.equal(availableProof.e2e_source_status,'available');
+  assert.equal(availableProof.published_e2e_ids,0);
+  assert.equal(availableProof.establishes_sc_verdict,false);
+
   assert.equal(prove({...json,work:{acceptance_e2e:{status:'unavailable',source_sha:null,records:[]}}},
     run,jobs,log.replace(digest,createHash('sha256').update(JSON.stringify(
       {...json,work:{acceptance_e2e:{status:'unavailable',source_sha:null,records:[]}}})).digest('hex'))),null);
