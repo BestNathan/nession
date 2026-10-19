@@ -8,7 +8,7 @@ import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {readIssueWorkflowState,writeIssueWorkflowState,issueStatePath} from './state-store.mjs';
 import {reconcileOutbox,recordDispatch} from './outbox.mjs';
-import {prepareGitHubDispatch,verifyPersistedDispatchIntent,createGitHubDispatchClient}
+import {prepareGitHubDispatch,verifyPersistedDispatchIntent,createGitHubDispatchClient,acceptAttestedSliceYield}
   from './github-dispatch.mjs';
 import {auditStagedRunStore} from '../../../run-store-integrity.mjs';
 import {publish} from '../../../run-store-cas-push.mjs';
@@ -142,6 +142,35 @@ export function acknowledgeCommittedDispatch({
 // Provider agents never call this. Its Store credential is scoped to the
 // trusted Ingest; actionsToken is independent of Store/App and only supports
 // the Actions workflow dispatch endpoint. No secret enters the Worker plan.
+// A separate trusted result ingester uses this AFTER checkpoint Store CAS.
+// It never grants the Worker any writer token or accepts model-authored source
+// identity. authenticate/verify the actual GitHub Run and encrypted commit
+// with acceptAttestedSliceYield before publishing the next Outbox action.
+export async function commitAttestedSliceYield({
+  remote,issue,dispatchTicket,keyring,reader,
+  checkpoint,verifiedMainSha,now=Date.now(),
+}) {
+  if(!Number.isSafeInteger(issue)||issue<1||
+      !Number.isSafeInteger(checkpoint?.run_id)||checkpoint.run_id<1||
+      !Number.isSafeInteger(checkpoint?.attempt)||checkpoint.attempt<1)
+    fail('invalid attested Slice source');
+  return withStore(remote,async dir=>{
+    const previous=readIssueWorkflowState(dir,issue);
+    if(!previous.state)fail('authenticated Worker Issue is absent');
+    const advanced=await acceptAttestedSliceYield({
+      state:previous.state,dispatch_ticket:dispatchTicket,keyring,reader,
+      remote,checkpoint,verified_main_sha:verifiedMainSha,now,
+    });
+    if(advanced===previous.state){
+      return {status:'replayed',issue,state_version:previous.version,
+        store_commit_sha:git(dir,['rev-parse','HEAD'])};
+    }
+    const published=persist(dir,advanced,previous.version,issue);
+    return {status:'yielded',issue,state_version:advanced.version,
+      store_commit_sha:published.commit_sha};
+  });
+}
+
 export async function executeDurableAgentDispatch({
   remote,issue,actionId,registry,signer,actionsToken,now=Date.now(),
   fetchFn=null,sourceVerifier=null,
