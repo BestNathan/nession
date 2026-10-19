@@ -146,6 +146,14 @@ jobs:
           json="$(mktemp)"
           html="$(mktemp)"
           trap 'rm -f "$json" "$html"' EXIT
+          # Main SHA alone is not a publication identity: consecutive
+          # scheduled builds from the same SHA contain different store snapshots.
+          # A CDN response for the previous deployment can have the right SHA
+          # but stale bytes. Retry only during the existing bounded readback
+          # window, accepting the *exact artifact* rather than the ref.
+          [[ "$EXPECTED_DATA_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+          [[ "$EXPECTED_AGENT_RUNS" =~ ^[0-9]+$ ]] || exit 1
+          [[ "$EXPECTED_AGENT_SOURCE" =~ ^(available|truncated|unavailable)$ ]] || exit 1
           matched=false
           for attempt in {1..18}; do
             if curl --fail --silent --show-error --location --connect-timeout 10 --max-time 20 \
@@ -155,28 +163,27 @@ jobs:
               && curl --fail --silent --show-error --location --connect-timeout 10 --max-time 20 \
                 -H 'Cache-Control: no-cache' "$url/?revision=$EXPECTED_SHA" -o "$html" \
               && grep -Fq '<title>Nession' "$html"; then
-              matched=true
-              break
+              # Compare anonymous HTTPS bytes with the exact build outputs
+              # BEFORE ending the readiness loop (not after a same-SHA match).
+              digest="$(sha256sum "$json" | cut -d ' ' -f1)"
+              source="$(jq -r .work.agent_run_source "$json")"
+              observed="$(jq '[.work.issues[]?.agent_runs[]?] | length' "$json")"
+              if [[ "$digest" == "$EXPECTED_DATA_SHA256" &&
+                    "$source" == "$EXPECTED_AGENT_SOURCE" &&
+                    "$observed" == "$EXPECTED_AGENT_RUNS" ]]; then
+                matched=true
+                break
+              fi
             fi
             sleep 5
           done
           [[ "$matched" == true ]] || {
-            echo "::error::Deployed public site did not serve the expected SHA and HTML"
+            echo "::error::Public Pages did not serve the exact build SHA-256/source/count during bounded HTTPS polling"
             exit 1
           }
-          # Compare *anonymous HTTPS bytes* to the exact SHA-pinned build
-          # artifact; never infer public observations from build logs alone.
-          digest="$(sha256sum "$json" | cut -d ' ' -f1)"
-          source="$(jq -r .work.agent_run_source "$json")"
-          observed="$(jq '[.work.issues[]?.agent_runs[]?] | length' "$json")"
-          [[ "$EXPECTED_DATA_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
-          [[ "$EXPECTED_AGENT_RUNS" =~ ^[0-9]+$ ]] || exit 1
-          if [[ "$digest" != "$EXPECTED_DATA_SHA256" ||
-                "$source" != "$EXPECTED_AGENT_SOURCE" ||
-                "$observed" != "$EXPECTED_AGENT_RUNS" ]]; then
-            echo "::error::Published data drifted from trusted build: digest/source/observation count"
-            exit 1
-          fi
+          # This is only source observation; never infer SC acceptance or PR
+          # lineage from matching bytes. The existing trusted attester rechecks
+          # the published SHA-256 against the exact GitHub Run/Attempt.
           status=not_observed
           if [[ "$source" != unavailable && "$observed" -gt 0 ]]; then
             status=source_backed_observation
