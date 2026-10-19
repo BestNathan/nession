@@ -98,11 +98,15 @@ export async function collectRoutingProof({repo=REPO,sha,get,getText,issue=2018}
     }
   }
   const pr_receivers=[];
-  let inspected=0, unattributed_active=0, skipped=0;
-  for(const w of receivers.workflow_runs.filter(x=>identity(x,ORCH,'workflow_run',sha)).slice(0,15)){
+  let inspected=0, unattributed_active=0;
+  const recent=receivers.workflow_runs.filter(x=>identity(x,ORCH,'workflow_run',sha)).slice(0,15);
+  // A skipped job has no executed source log. Count it honestly but do not
+  // burn Actions API quota fetching every cancelled/ignored PR completion.
+  const skipped=recent.filter(x=>x.conclusion==='skipped').length;
+  for(const w of recent.filter(x=>x.conclusion==='success')){
     const jobs=await get('/repos/'+repo+'/actions/runs/'+w.id+'/attempts/'+w.run_attempt+'/jobs?per_page=20');
     const reconcile=job(jobs,'reconcile-completed-quality-e2e',w);
-    if(!reconcile){skipped++;continue}
+    if(!reconcile){unattributed_active++;continue}
     inspected++;
     const log=await getText('/repos/'+repo+'/actions/jobs/'+reconcile.id+'/logs');
     const sourceId=Number(parseInjected(log,'SOURCE_RUN_ID'));
