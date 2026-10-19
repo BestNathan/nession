@@ -819,12 +819,12 @@ async fn capture_for_bootstrap(
 
 /// Send `session`'s history to one connection, marked as a **bootstrap** (#321).
 ///
-/// Awaited, and in order, before the caller starts live forwarding. That
-/// ordering *is* the barrier on the send side: the live producer does not
-/// exist yet and the outbound queue is FIFO, so nothing the session produces
-/// can overtake the snapshot — there is no gap to close and nothing to
-/// reconcile afterwards. The alternative, a cursor plus a reconciliation
-/// pass, is the shape #1148 measured going wrong.
+/// Awaited before the caller starts its live forwarder. The subscriber's
+/// bounded queue is already active (#2024), so Agent output produced during
+/// this asynchronous tmux capture is retained and sent *after* the snapshot.
+/// This establishes outbound send order, NOT snapshot/stream cut atomicity:
+/// racing output may also be present inside tmux's screen capture. Such
+/// snapshots remain explicitly unverified and must never seed parser ACKs.
 ///
 /// `capture` is the snapshot, and where it came from is the barrier's other
 /// half (#1228): the Control arm's is taken **on the control channel**
@@ -897,6 +897,38 @@ fn atomic_output_prefix(
         stream_epoch: stream.epoch,
         through_seq: stream.cursor(),
     })
+}
+
+/// Register a new subscriber and its bounded queue at one Agent stream cut.
+///
+/// The caller MUST hold the SessionMap producer lock, which also protects
+/// stream.record_output + fan_out_peers. A complete ring prefix therefore
+/// joins the live queue exactly at `through_seq`. For an incomplete ring, the
+/// external tmux capture is still **unverified**: output may overlap that
+/// snapshot, but it is no longer silently discarded while capture awaits.
+///
+/// Queue activation is mandatory even on the unverified fallback. In
+/// particular, do not defer `output_tx = Some(..)` until after capture: that
+/// leaves an unbounded loss window for concurrently recorded Agent output.
+fn subscribe_at_stream_cut(
+    peers: &mut Vec<SessionPeer>,
+    stream: &session_terminal::SessionStreamState,
+    mut peer: SessionPeer,
+    live_tx: &mpsc::Sender<OutputChunk>,
+    needs_bootstrap: bool,
+) -> Option<AtomicOutputPrefix> {
+    // A replaced peer's queue must not receive subsequent output; its
+    // detached_for_not_draining flag remains false (not a slow-peer eviction).
+    peers.retain(|current| current.client_id != peer.client_id);
+    let prefix = if needs_bootstrap {
+        atomic_output_prefix(stream)
+    } else {
+        None
+    };
+    // This is under the same lock as the producer, *before* any await.
+    peer.output_tx = Some(live_tx.clone());
+    peers.push(peer);
+    prefix
 }
 
 /// A stream-log cut is atomic with its live queue *only* when both are
@@ -1826,43 +1858,30 @@ p2p_routes! { ctx, msg_type, payload_value;
                             let Some(shared) = guard.get_mut(&session_name) else {
                                 return ctx.err("not_attached", "session ended during attach");
                             };
-                            // The peer this drops is *replaced*, not evicted:
-                            // its flag stays unset, so its forwarder ends
-                            // quietly instead of closing the connection this
-                            // attach is about to answer on (#1226).
-                            shared.peers.retain(|p| p.client_id != client_id);
-                            // Decide the exact stream cut under the *same* map
-                            // lock used by the producer for record/fan-out.
-                            // Only a complete bounded prefix can join to a
-                            // pre-enabled live queue without a silent gap.
-                            let atomic_prefix = if wants_bootstrap {
-                                atomic_output_prefix(&shared.stream)
-                            } else {
-                                None
-                            };
-                            // For an atomic ring prefix, turn the queue on
-                            // NOW, under the stream producer's lock. Only
-                            // unverified async tmux capture keeps it disabled
-                            // until the snapshot has been sent (#1925).
+                            // The subscription and its stream cut are
+                            // installed atomically with producer record/fan-out,
+                            // including the unverified tmux fallback (#2024).
                             let output_ack = match new_output_ack(shared.stream.epoch) {
                                 Ok(ack) => ack,
                                 Err(_) => return ctx.err("invalid_stream_identity", "output ACK identity unavailable"),
                             };
-                            shared.peers.push(SessionPeer {
-                                client_id: client_id.clone(),
-                                peer_token: Arc::clone(ctx.peer_token),
-                                outbound: ctx.outbound.clone(),
-                                output_ack,
-                                output_tx: if wants_bootstrap && atomic_prefix.is_none() {
-                                    None
-                                } else {
-                                    Some(tx.clone())
+                            let atomic_prefix = subscribe_at_stream_cut(
+                                &mut shared.peers,
+                                &shared.stream,
+                                SessionPeer {
+                                    client_id: client_id.clone(),
+                                    peer_token: Arc::clone(ctx.peer_token),
+                                    outbound: ctx.outbound.clone(),
+                                    output_ack,
+                                    output_tx: None, // enabled by subscribe_at_stream_cut
+                                    detached_for_not_draining: Arc::clone(
+                                        &detached_for_not_draining,
+                                    ),
+                                    queued_bytes: Arc::clone(&queued_bytes),
                                 },
-                                detached_for_not_draining: Arc::clone(
-                                    &detached_for_not_draining,
-                                ),
-                                queued_bytes: Arc::clone(&queued_bytes),
-                            });
+                                &tx,
+                                wants_bootstrap,
+                            );
                             (
                                 client_attach_response(payload.session_name.clone(), shared, &client_id),
                                 atomic_prefix,
@@ -1895,9 +1914,13 @@ p2p_routes! { ctx, msg_type, payload_value;
                                     );
                                 }
                             } else {
-                                // No complete event-log prefix: older tmux text
-                                // capture is explicitly unverified, not an
-                                // atomic checkpoint. Preserve legacy fallback.
+                                // No complete event-log prefix: external tmux
+                                // text capture is explicitly unverified, not an
+                                // atomic checkpoint. The bounded live queue was
+                                // activated BEFORE capture. Its post-registration
+                                // output drains only after the snapshot is sent,
+                                // possibly overlapping capture content (never
+                                // treat this as a parser-applied baseline).
                                 let bootstrap_tmux = ctx.tmux.tmux_dep();
                                 let capture = capture_for_bootstrap(
                                     &bootstrap_tmux,
@@ -1911,18 +1934,6 @@ p2p_routes! { ctx, msg_type, payload_value;
                                         "bootstrap_stalled",
                                         "the client stalled while its history was being sent",
                                     );
-                                }
-                                // A reattach of the same client ID can occur
-                                // while awaiting tmux; never enable a *new*
-                                // socket's queue on the old connection's token.
-                                let mut guard = sessions_lock(ctx.sessions);
-                                if let Some(shared) = guard.get_mut(&session_name) {
-                                    if let Some(peer) = shared.peers.iter_mut().find(|p| {
-                                        p.client_id == client_id
-                                            && Arc::ptr_eq(&p.peer_token, ctx.peer_token)
-                                    }) {
-                                        peer.output_tx = Some(tx.clone());
-                                    }
                                 }
                             }
                         }
@@ -3861,6 +3872,74 @@ mod tests {
             .expect("post-cut output is held for forwarder");
         assert_eq!(queued, (live, epoch, cut + 1));
         assert!(rx.try_recv().is_err(), "no duplicated next event");
+    }
+
+    /// #2024: hold the external capture open while a second client joins an
+    /// already-attached session with a *missing* event-log prefix. Previously
+    /// that subscriber's output_tx was None until capture completed, so
+    /// GAP-019 was recorded and sent to other clients but lost for this one.
+    #[tokio::test]
+    async fn concurrent_unverified_capture_buffers_producer_output_without_a_blackhole() {
+        use base64::Engine;
+        let shared = Arc::new(std::sync::Mutex::new((
+            session_terminal::SessionStreamState::new(),
+            Vec::<SessionPeer>::new(),
+        )));
+        let (tx, mut rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
+        let (outbound, _) = P2pOutbound::new();
+        let queued_bytes = Arc::new(AtomicUsize::new(0));
+        let (capture_started_tx, capture_started_rx) = tokio::sync::oneshot::channel();
+        let (release_capture_tx, release_capture_rx) = tokio::sync::oneshot::channel();
+        let attach_state = Arc::clone(&shared);
+        let peer = SessionPeer {
+            client_id: "late-observer".to_owned(),
+            peer_token: Arc::new(()),
+            output_ack: test_output_ack(),
+            outbound,
+            output_tx: None,
+            queued_bytes: Arc::clone(&queued_bytes),
+            detached_for_not_draining: Arc::new(AtomicBool::new(false)),
+        };
+
+        let attach = tokio::spawn(async move {
+            let prefix = {
+                let mut state = attach_state.lock().unwrap();
+                let (stream, peers) = &mut *state;
+                // Force the incomplete-ring fallback without requiring tmux.
+                stream.record_output("demo", "invalid-base64%%%".to_owned());
+                subscribe_at_stream_cut(peers, stream, peer, &tx, true)
+            };
+            assert!(prefix.is_none(), "cannot claim an atomic tmux cut");
+            capture_started_tx.send(()).unwrap();
+            // Deterministic fault injection: async capture has yielded here.
+            release_capture_rx.await.unwrap();
+            // Production sends its explicitly unverified snapshot at this
+            // point, and only THEN spawns the live queue forwarder.
+        });
+        capture_started_rx.await.expect("subscribed before capture");
+        let live = b"GAP-019\r\n".to_vec();
+        let expected_position = {
+            let mut state = shared.lock().unwrap();
+            let (stream, peers) = &mut *state;
+            let (epoch, seq) = stream.record_output(
+                "demo",
+                base64::engine::general_purpose::STANDARD.encode(&live),
+            );
+            assert_eq!(fan_out_peers(peers, (live.clone(), epoch, seq)), 0);
+            (epoch, seq)
+        };
+        assert_eq!(queued_bytes.load(Ordering::Acquire), live.len());
+        release_capture_tx.send(()).unwrap();
+        attach.await.expect("async capture completes");
+        assert_eq!(
+            rx.try_recv()
+                .expect("post-subscription output must be retained"),
+            (live, expected_position.0, expected_position.1)
+        );
+        assert!(
+            rx.try_recv().is_err(),
+            "a post-subscription event is queued once"
+        );
     }
 
     fn test_output_ack() -> SubscriberOutputAck {
