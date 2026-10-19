@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "kind": "agent_workflow_run",
+  "identity": {
+    "workflow_id": "agent-develop",
+    "github_workflow": "Agent / Development",
+    "github_run_id": 39288961865,
+    "github_run_attempt": 1,
+    "job": "developer",
+    "repository": "BestNathan/nession",
+    "event": "workflow_dispatch",
+    "unique_run_name": "39288961865-1-issue-1997-development"
+  },
+  "task": {
+    "id": "issue-1997-development",
+    "type": "development",
+    "issue": 1997,
+    "target_ref": "220266b9233ec97b1beacbc54e5cc7f82d3cece2",
+    "action_id": "85b69a9de06b02eb78f8a3a15d14b58a43ffc83ee6b1f5db11b9b541cfec9656"
+  },
+  "agent": {
+    "provider": "cursor",
+    "id": "dev-cursor-01",
+    "role": "developer",
+    "harness_sha256": "ba54d9fb8b8ab9ec6ca2ac17727b02db21176437a2258123b753977fd32bbf68",
+    "checkpoint_id": null,
+    "model": {
+      "id": "composer-2.5",
+      "fast": true,
+      "params": [
+        {
+          "id": "fast",
+          "value": "true"
+        }
+      ]
+    },
+    "run_id": "run-3b7946c3-fedf-434b-b691-223b95b11205",
+    "request_id": null,
+    "status": "finished",
+    "prompt": null
+  },
+  "execution": {
+    "turns": 1,
+    "model_requests": 1,
+    "tools": {
+      "observed": true,
+      "total": 3,
+      "unique": 2,
+      "by_name": {
+        "edit": 2,
+        "read": 1
+      }
+    }
+  },
+  "tokens": {
+    "input": 15184,
+    "output": 285,
+    "cache_read": 7680,
+    "cache_write": 0,
+    "reasoning": null,
+    "total": 23149
+  },
+  "cost": {
+    "raw_usd": null,
+    "charged_usd": null,
+    "estimated_usd": null
+  },
+  "timing": {
+    "started_at": "2026-10-19T16:51:17.739Z",
+    "finished_at": "2026-10-19T16:51:31.616Z",
+    "agent_duration_ms": 13471,
+    "workflow_duration_ms": null
+  },
+  "result": {
+    "status": "native-checkpoint-proposed"
+  }
+}
