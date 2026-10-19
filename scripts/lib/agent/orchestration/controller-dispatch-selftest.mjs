@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // #2010 main-owned trusted dispatch authority, key separation and fail-closed tests.
 import assert from 'node:assert/strict';
-import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey}
+import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey,CONTROLLED_DISPATCH_COMMENT}
   from './controller-dispatch.mjs';
 
 const sha='a'.repeat(40),actionId='b'.repeat(64),issue=1997,runId=12345;
@@ -21,6 +21,25 @@ const run={id:runId,run_attempt:1,event:'workflow_dispatch',
   head_repository:{full_name:'BestNathan/nession'}};
 const valid={environment,event,run,issue,actionId};
 assert.equal(assertDispatchAuthority(valid).issuer_run_id,runId);
+const commentEnvironment={...environment,GITHUB_EVENT_NAME:'issue_comment'};
+const commentEvent={
+  action:'created',repository:{full_name:'BestNathan/nession'},
+  issue:{number:1997},
+  comment:{id:98765,user:{login:'BestNathan'},body:CONTROLLED_DISPATCH_COMMENT},
+};
+const commentValid={...valid,environment:commentEnvironment,event:commentEvent,
+  issue:1997,actionId:'95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae',
+  run:{...run,event:'issue_comment'}};
+assert.equal(assertDispatchAuthority(commentValid).issue,1997);
+for(const event of [
+  {...commentEvent,action:'edited'},
+  {...commentEvent,issue:{number:2010}},
+  {...commentEvent,issue:{number:1997,pull_request:{url:'https://evil'}}},
+  {...commentEvent,comment:{...commentEvent.comment,user:{login:'fork'}}},
+  {...commentEvent,comment:{...commentEvent.comment,body:'/nession dispatch issue=1998'}},
+])assert.throws(()=>assertDispatchAuthority({...commentValid,event}),/authenticated owner\\/main/);
+assert.throws(()=>assertDispatchAuthority({...commentValid,
+  environment:{...commentEnvironment,GITHUB_ACTOR:'fork'}}),/authenticated owner\\/main/);
 const denied=[
   {environment:{...environment,GITHUB_REF:'refs/pull/12/merge'}},
   {environment:{...environment,GITHUB_ACTOR:'attacker'}},
