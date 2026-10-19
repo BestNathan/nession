@@ -17,7 +17,7 @@ function fail(text){throw new Error('agent-store remote: '+text);}
 function git(dir,args){
   try {
     return execFileSync('git',['-C',dir,...args],{
-      encoding:'utf8',stdio:['ignore','pipe','pipe'],maxBuffer:8*1024*1024,
+      encoding:'utf8',stdio:['ignore','pipe','pipe'],maxBuffer:32*1024*1024,
       timeout:45000,
       env:{...process.env,GIT_TERMINAL_PROMPT:'0',GIT_NO_REPLACE_OBJECTS:'1'},
     }).trim();
