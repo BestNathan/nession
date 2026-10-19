@@ -3572,6 +3572,49 @@ mod tests {
         );
     }
 
+    #[test]
+    fn terminal_resume_never_returns_noncontiguous_suffix_after_retention_loss() {
+        let mut stream = session_terminal::SessionStreamState::new();
+        let epoch = stream.epoch;
+        stream.record_output("demo", "one".to_owned());
+        let request = |epoch, after_seq| TerminalStreamResumePayload {
+            session_name: "demo".to_owned(),
+            stream_epoch: epoch,
+            after_seq,
+        };
+        let complete = build_terminal_resume_response(&request(epoch, 0), &stream);
+        assert_eq!(complete.recovery, Some(TerminalResumeRecovery::Complete));
+        assert_eq!(complete.complete, Some(true));
+        assert_eq!(complete.events.len(), 1);
+        let at_head = build_terminal_resume_response(&request(epoch, 1), &stream);
+        assert_eq!(at_head.recovery, Some(TerminalResumeRecovery::Complete));
+        assert!(at_head.events.is_empty());
+
+        // A frame too large for the bounded ring is issued but not replayed.
+        // A subsequent small frame is retained; the original API returned
+        // that suffix even though the requested prefix could never arrive.
+        stream.record_output("demo", "x".repeat(700_000));
+        stream.record_output("demo", "new-tail".to_owned());
+        let incomplete = build_terminal_resume_response(&request(epoch, 1), &stream);
+        assert_eq!(incomplete.recovery, Some(TerminalResumeRecovery::CheckpointRequired));
+        assert_eq!(incomplete.complete, Some(false));
+        assert!(incomplete.events.is_empty(), "never deliver an unsafe suffix");
+        assert_eq!(incomplete.first_available_seq, Some(3));
+        assert_eq!(serde_json::to_value(&incomplete).unwrap()["recovery"], "checkpoint-required");
+
+        let future = build_terminal_resume_response(&request(epoch, 20), &stream);
+        assert_eq!(future.recovery, Some(TerminalResumeRecovery::CheckpointRequired));
+        assert_eq!(future.complete, Some(false));
+        assert!(future.events.is_empty());
+
+        let stale = build_terminal_resume_response(&request(epoch.wrapping_add(1), 0), &stream);
+        assert_eq!(stale.recovery, Some(TerminalResumeRecovery::Unavailable));
+        assert!(!stale.epoch_match);
+        assert!(stale.first_available_seq.is_none());
+        assert!(stale.complete.is_none());
+        assert!(stale.events.is_empty());
+    }
+
     fn test_output_ack() -> SubscriberOutputAck {
         SubscriberOutputAck::new(OutputAckBinding {
             subscriber_generation: 1,
