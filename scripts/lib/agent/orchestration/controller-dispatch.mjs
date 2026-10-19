@@ -11,28 +11,37 @@ import {executeDurableAgentDispatch} from './dispatch-store.mjs';
 
 const REPO='BestNathan/nession';
 const WORKFLOW='.github/workflows/agent-controller-dispatch.yml';
+export const CONTROLLED_DISPATCH_COMMENT='/nession dispatch issue=1997 action=95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae';
 const HEX40=/^[a-f0-9]{40}$/,HEX64=/^[a-f0-9]{64}$/;
 const positive=n=>Number.isSafeInteger(n)&&n>0;
 function fail(s){throw Error('trusted Controller dispatch: '+s);}
 export function assertDispatchAuthority({environment,event,run,issue,actionId}) {
+  const commanded=environment.GITHUB_EVENT_NAME==='issue_comment';
+  const permitted=commanded
+    ?(event?.action==='created'&&event?.issue?.number===1997&&
+       !event?.issue?.pull_request&&event?.comment?.user?.login==='BestNathan'&&
+       event?.comment?.body===CONTROLLED_DISPATCH_COMMENT&&
+       Number.isSafeInteger(event?.comment?.id)&&event.comment.id>0&&
+       issue===1997&&actionId==='95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae')
+    :(environment.GITHUB_EVENT_NAME==='workflow_dispatch'&&
+       event?.ref==='refs/heads/main'&&
+       Number(event?.inputs?.issue_number)===issue&&
+       event?.inputs?.action_id===actionId&&
+       Object.keys(event?.inputs??{}).sort().join(',')==='action_id,issue_number');
   if(environment.GITHUB_ACTIONS!=='true'||
       environment.GITHUB_REPOSITORY!==REPO||
       environment.GITHUB_REF!=='refs/heads/main'||
       environment.GITHUB_WORKFLOW!=='Agent / Controller Dispatch'||
-      environment.GITHUB_EVENT_NAME!=='workflow_dispatch'||
+      !permitted||
       environment.GITHUB_ACTOR!=='BestNathan'||
       !HEX40.test(environment.GITHUB_SHA??'')||
       !positive(Number(environment.GITHUB_RUN_ID))||
       Number(environment.GITHUB_RUN_ATTEMPT)!==1||
       !positive(issue)||!HEX64.test(actionId??'')||
       event?.repository?.full_name!==REPO||
-      event?.ref!=='refs/heads/main'||
-      Number(event?.inputs?.issue_number)!==issue||
-      event?.inputs?.action_id!==actionId||
-      Object.keys(event?.inputs??{}).sort().join(',')!=='action_id,issue_number'||
       run?.id!==Number(environment.GITHUB_RUN_ID)||
       run?.run_attempt!==1||
-      run?.event!=='workflow_dispatch'||
+      run?.event!==environment.GITHUB_EVENT_NAME||
       run?.path!==WORKFLOW||
       run?.name!=='Agent / Controller Dispatch'||
       run?.actor?.login!=='BestNathan'||
@@ -82,7 +91,9 @@ async function main(){
   let event;
   try{event=JSON.parse(fs.readFileSync(env.GITHUB_EVENT_PATH,'utf8'));}
   catch{fail('unavailable trusted GitHub workflow event');}
-  const issue=Number(event?.inputs?.issue_number),actionId=event?.inputs?.action_id;
+  const commanded=env.GITHUB_EVENT_NAME==='issue_comment';
+  const issue=commanded?1997:Number(event?.inputs?.issue_number);
+  const actionId=commanded?'95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae':event?.inputs?.action_id;
   if(!positive(issue)||!HEX64.test(actionId??''))fail('invalid Issue/Action');
   const token=env.ACTIONS_DISPATCH_TOKEN;
   if(typeof token!=='string'||token.length<8)fail('missing trusted Actions credential');
