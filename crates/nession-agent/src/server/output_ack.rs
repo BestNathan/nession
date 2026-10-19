@@ -132,7 +132,10 @@ mod tests {
     use super::*;
 
     fn binding(generation: u64, epoch: u64) -> OutputAckBinding {
-        OutputAckBinding { subscriber_generation: generation, stream_epoch: epoch }
+        OutputAckBinding {
+            subscriber_generation: generation,
+            stream_epoch: epoch,
+        }
     }
 
     #[test]
@@ -141,12 +144,20 @@ mod tests {
         let mut a = SubscriberOutputAck::new(id).unwrap();
         let mut b = SubscriberOutputAck::new(binding(12, 37)).unwrap();
         assert_eq!(a.observe(id, 0, 0), OutputAckVerdict::Duplicate);
-        assert_eq!(a.observe(id, 1, 3), OutputAckVerdict::Advanced {
-            previous: 0, applied_through: 1,
-        });
-        assert_eq!(a.observe(id, 3, 3), OutputAckVerdict::Advanced {
-            previous: 1, applied_through: 3,
-        });
+        assert_eq!(
+            a.observe(id, 1, 3),
+            OutputAckVerdict::Advanced {
+                previous: 0,
+                applied_through: 1,
+            }
+        );
+        assert_eq!(
+            a.observe(id, 3, 3),
+            OutputAckVerdict::Advanced {
+                previous: 1,
+                applied_through: 3,
+            }
+        );
         assert_eq!(a.observe(id, 3, 3), OutputAckVerdict::Duplicate);
         assert_eq!(a.applied_through(), 3);
         assert_eq!(b.applied_through(), 0);
@@ -159,12 +170,27 @@ mod tests {
         let id = binding(13, 39);
         let mut a = SubscriberOutputAck::new(id).unwrap();
         assert_eq!(a.observe(id, 4, 3), OutputAckVerdict::BeyondIssuedHead);
-        assert_eq!(a.observe(binding(99, 39), 2, 3), OutputAckVerdict::StaleSubscriber);
-        assert_eq!(a.observe(binding(13, 40), 2, 3), OutputAckVerdict::StaleEpoch);
-        assert_eq!(a.observe(id, u64::MAX, 3), OutputAckVerdict::UnsafeWireInteger);
-        assert_eq!(a.observe(id, 1, u64::MAX), OutputAckVerdict::UnsafeWireInteger);
+        assert_eq!(
+            a.observe(binding(99, 39), 2, 3),
+            OutputAckVerdict::StaleSubscriber
+        );
+        assert_eq!(
+            a.observe(binding(13, 40), 2, 3),
+            OutputAckVerdict::StaleEpoch
+        );
+        assert_eq!(
+            a.observe(id, u64::MAX, 3),
+            OutputAckVerdict::UnsafeWireInteger
+        );
+        assert_eq!(
+            a.observe(id, 1, u64::MAX),
+            OutputAckVerdict::UnsafeWireInteger
+        );
         assert_eq!(a.applied_through(), 0);
-        assert!(matches!(a.observe(id, 2, 3), OutputAckVerdict::Advanced { .. }));
+        assert!(matches!(
+            a.observe(id, 2, 3),
+            OutputAckVerdict::Advanced { .. }
+        ));
         assert_eq!(a.observe(id, 1, 3), OutputAckVerdict::Regressive);
         assert_eq!(a.observe(id, 3, 2), OutputAckVerdict::BeyondIssuedHead);
         assert_eq!(a.applied_through(), 2);
@@ -176,7 +202,10 @@ mod tests {
         let new_peer = binding(16, 41);
         let new_epoch = binding(16, 42);
         let mut cursor = SubscriberOutputAck::new(old).unwrap();
-        assert!(matches!(cursor.observe(old, 3, 3), OutputAckVerdict::Advanced { .. }));
+        assert!(matches!(
+            cursor.observe(old, 3, 3),
+            OutputAckVerdict::Advanced { .. }
+        ));
         assert_eq!(cursor.replace(old), Err(OutputAckVerdict::Duplicate));
         assert_eq!(cursor.applied_through(), 3);
         cursor.replace(new_peer).unwrap();
@@ -184,22 +213,35 @@ mod tests {
         assert_eq!(cursor.observe(old, 4, 4), OutputAckVerdict::StaleSubscriber);
         cursor.replace(new_epoch).unwrap();
         assert_eq!(cursor.observe(new_peer, 4, 4), OutputAckVerdict::StaleEpoch);
-        assert_eq!(cursor.observe(new_epoch, 1, 1), OutputAckVerdict::Advanced {
-            previous: 0, applied_through: 1,
-        });
+        assert_eq!(
+            cursor.observe(new_epoch, 1, 1),
+            OutputAckVerdict::Advanced {
+                previous: 0,
+                applied_through: 1,
+            }
+        );
     }
 
     #[test]
     fn reject_non_roundtrippable_wire_identity_without_dropping_old_binding() {
-        assert_eq!(SubscriberOutputAck::new(binding(0, 7)), Err(OutputAckVerdict::UnsafeWireInteger));
-        assert_eq!(SubscriberOutputAck::new(binding(7, 0)), Err(OutputAckVerdict::UnsafeWireInteger));
+        assert_eq!(
+            SubscriberOutputAck::new(binding(0, 7)),
+            Err(OutputAckVerdict::UnsafeWireInteger)
+        );
+        assert_eq!(
+            SubscriberOutputAck::new(binding(7, 0)),
+            Err(OutputAckVerdict::UnsafeWireInteger)
+        );
         assert_eq!(
             SubscriberOutputAck::new(binding(MAX_SAFE_WIRE_INTEGER + 1, 7)),
             Err(OutputAckVerdict::UnsafeWireInteger)
         );
         let old = binding(1, 2);
         let mut cursor = SubscriberOutputAck::new(old).unwrap();
-        assert_eq!(cursor.replace(binding(3, u64::MAX)), Err(OutputAckVerdict::UnsafeWireInteger));
+        assert_eq!(
+            cursor.replace(binding(3, u64::MAX)),
+            Err(OutputAckVerdict::UnsafeWireInteger)
+        );
         assert_eq!(cursor.binding(), old);
         assert_eq!(cursor.applied_through(), 0);
     }
