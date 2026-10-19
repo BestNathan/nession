@@ -252,14 +252,79 @@ async function selfTest(){
   assert.ok(!(classify(403,{},'permission denied') instanceof RateLimited));
   assert.ok(candidates(Array.from({length:100},(_,i)=>run({id:100+i,
     head_branch:'b'+i,head_sha:(i.toString(16).padStart(40,'a')).slice(-40)})),[]).length<=MAX);
+  const env={GITHUB_REPOSITORY:REPO,GITHUB_REF:'refs/heads/main'};
+  const sourceEnv={...env,GITHUB_EVENT_NAME:'workflow_run',SOURCE_RUN_ID:'70',
+    SOURCE_ATTEMPT:'2',SOURCE_SHA:'a'.repeat(40)};
+  const trustedSource={id:70,run_attempt:2,head_sha:'a'.repeat(40),
+    head_branch:'main',name:'CI / Quality Gate',
+    path:'.github/workflows/ci-quality.yml',
+    event:'push',status:'completed',conclusion:'success',
+    repository:{full_name:REPO},head_repository:{full_name:REPO}};
+  let sourceReads=0;
+  const sourceRequest=async path=>{
+    assert.equal(path,'repos/'+REPO+'/actions/runs/70');
+    sourceReads++;
+    return trustedSource;
+  };
+  assert.equal(await authorizeInvocation({...env,GITHUB_EVENT_NAME:'schedule'},
+    async()=>{throw Error('schedule must not read source')}),'scheduled');
+  assert.equal(await authorizeInvocation({...env,GITHUB_EVENT_NAME:'workflow_dispatch'},
+    async()=>{throw Error('manual must not read source')}),'manual');
+  assert.equal(await authorizeInvocation(sourceEnv,sourceRequest),'trusted-main-quality');
+  assert.equal(sourceReads,1);
+  for(const bad of [
+    {id:71},{run_attempt:3},{head_sha:'b'.repeat(40)},
+    {head_branch:'feature/bad'},{name:'Other workflow'},
+    {path:'.github/workflows/other.yml'},{event:'pull_request'},
+    {event:'workflow_run'},{status:'queued',conclusion:null},
+    {status:'completed',conclusion:'failure'},
+    {status:'completed',conclusion:'cancelled'},
+    {repository:{full_name:'attacker/repo'}},
+    {head_repository:{full_name:'attacker/repo'}},
+  ]){
+    await assert.rejects(()=>authorizeInvocation(sourceEnv,async()=>({...trustedSource,...bad})),
+      /unauthenticated/);
+  }
+  for(const envDelta of [
+    {GITHUB_REPOSITORY:'attacker/repo'},{GITHUB_REF:'refs/heads/feature'},
+    {GITHUB_EVENT_NAME:'pull_request_target'},{SOURCE_RUN_ID:'0'},
+    {SOURCE_ATTEMPT:'0'},{SOURCE_SHA:'invalid'},
+  ])await assert.rejects(()=>authorizeInvocation({...sourceEnv,...envDelta},sourceRequest));
+  const quota=new RateLimited('HTTP 403 rate limit');
+  await assert.rejects(()=>authorizeInvocation(sourceEnv,async()=>{throw quota}),RateLimited);
+  console.log('Acceptance quota recovery: main-only source-attested event wake, 403 fail-closed and no-loop fixtures passed');
   console.log('Acceptance quota recovery: exact SHA, stale attempt, failed-prepare-only replay, finite API request budget, capped retry budget, exhausted quota, wrong proof, idempotency and bounded bursts passed');
 }
+export async function authorizeInvocation(env,request){
+  // Runs always execute trusted default-branch code. A workflow_run payload
+  // is merely a locator; the Action API's live source identity is authority.
+  ok(env.GITHUB_REPOSITORY===REPO&&env.GITHUB_REF==='refs/heads/main',
+    'only trusted main may execute recovery');
+  if(env.GITHUB_EVENT_NAME==='schedule')return 'scheduled';
+  if(env.GITHUB_EVENT_NAME==='workflow_dispatch')return 'manual';
+  ok(env.GITHUB_EVENT_NAME==='workflow_run','unsupported recovery trigger');
+  const sourceId=Number(env.SOURCE_RUN_ID),attempt=Number(env.SOURCE_ATTEMPT);
+  ok(id(sourceId)&&id(attempt)&&SHA.test(env.SOURCE_SHA??''),
+    'invalid source Run ID, attempt or SHA');
+  const source=await request('repos/'+REPO+'/actions/runs/'+sourceId);
+  ok(source&&source.id===sourceId&&source.run_attempt===attempt&&
+    source.head_sha===env.SOURCE_SHA&&source.head_branch==='main'&&
+    source.name==='CI / Quality Gate'&&
+    source.path==='.github/workflows/ci-quality.yml'&&
+    source.event==='push'&&source.status==='completed'&&
+    source.conclusion==='success'&&
+    source.repository?.full_name===REPO&&
+    source.head_repository?.full_name===REPO,
+    'unauthenticated or non-main Quality completion');
+  return 'trusted-main-quality';
+}
+
 async function main(){
   if(process.argv[2]==='self-test')return selfTest();
   ok(process.argv[2]==='run','usage self-test | run');
-  ok(process.env.GITHUB_REPOSITORY===REPO&&process.env.GITHUB_REF==='refs/heads/main'&&
-    process.env.GITHUB_EVENT_NAME==='schedule','only trusted main schedule may recover');
   try{
+    const source=await authorizeInvocation(process.env,api);
+    console.log('Acceptance quota recovery: authorized trigger '+source);
     const out=await reconcile(api,console.log);
     console.log('Acceptance quota recovery: '+JSON.stringify(out));
   }catch(e){
