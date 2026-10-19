@@ -401,13 +401,16 @@ describe('TerminalController', () => {
     h.spy.mockRestore();
   });
 
-  it('wipes the buffer before a bootstrap, and only its own modes survive', () => {
+  it('replaces scrollback only for an atomic full-VT complete checkpoint (#2008)', () => {
     const transport = makeTransport();
     const controller = new TerminalController(makeSession(), () => transport);
     controller.attach(host());
     const h = delayedParser(controller);
     const resetSpy = vi.spyOn(controller.terminal!, 'reset');
-    transport.onOutput!(new Uint8Array([104, 105]), { requestedLines: 5000, truncated: false });
+    transport.onOutput!(new Uint8Array([104, 105]), {
+      requestedLines: 5000, truncated: false,
+      cutConsistency: 'atomic', fidelity: 'full-vt',
+    });
     expect(h.spy).toHaveBeenNthCalledWith(1, '\x1b[2J\x1b[3J\x1b[H', expect.any(Function));
     expect(h.spy).toHaveBeenCalledTimes(1);
     h.finish();
@@ -416,6 +419,27 @@ describe('TerminalController', () => {
     h.finish();
     h.spy.mockRestore();
     resetSpy.mockRestore();
+    controller.dispose();
+  });
+
+  it('keeps existing scrollback and recovery gap when a complete tmux capture is unverified (#2008)', () => {
+    const transport = makeTransport();
+    const onBootstrapApplied = vi.fn();
+    const controller = new TerminalController(makeSession(), () => transport, {
+      rendererType: 'canvas', events: { onBootstrapApplied },
+    });
+    controller.attach(host());
+    const h = delayedParser(controller);
+    transport.onOutput!(new Uint8Array([104, 105]), {
+      requestedLines: 5000, truncated: false,
+      cutConsistency: 'unverified', fidelity: 'screen-only',
+    });
+    expect(h.spy).toHaveBeenNthCalledWith(1, '\\x1b[2J\\x1b[H', expect.any(Function));
+    h.finish(); // screen-only reset
+    h.finish(); // parsed tmux text, not atomic stream cut
+    expect(controller.hasSessionOutput).toBe(true);
+    expect(onBootstrapApplied).not.toHaveBeenCalled();
+    h.spy.mockRestore();
     controller.dispose();
   });
 
@@ -526,7 +550,7 @@ describe('TerminalController', () => {
     controller.dispose();
   });
 
-  it('reports bootstrap applied only after the latest COMPLETE snapshot parses (#1645)', () => {
+  it('reports bootstrap applied only after the latest atomic/full-VT snapshot parses (#2008)', () => {
     const transport = makeTransport();
     const onBootstrapApplied = vi.fn();
     const controller = new TerminalController(makeSession(), () => transport, {
@@ -535,8 +559,12 @@ describe('TerminalController', () => {
     });
     controller.attach(host());
     const h = delayedParser(controller);
-    transport.onOutput!(new Uint8Array([49]), { requestedLines: 5000, truncated: false });
-    transport.onOutput!(new Uint8Array([50]), { requestedLines: 5000, truncated: false });
+    transport.onOutput!(new Uint8Array([49]), {
+      requestedLines: 5000, truncated: false, cutConsistency: 'atomic', fidelity: 'full-vt',
+    });
+    transport.onOutput!(new Uint8Array([50]), {
+      requestedLines: 5000, truncated: false, cutConsistency: 'atomic', fidelity: 'full-vt',
+    });
     expect(onBootstrapApplied).not.toHaveBeenCalled();
     h.finish(); // old reset
     h.finish(); // old snapshot
