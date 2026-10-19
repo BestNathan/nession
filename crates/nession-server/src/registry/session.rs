@@ -109,6 +109,43 @@ impl SessionRegistry {
         }
     }
 
+    /// Register only the create-time placeholder, without overwriting an
+    /// authoritative Agent report that may have raced ahead of the command
+    /// acknowledgement (#2021). The presence check and insert MUST share
+    /// one write lock: `get()` followed by `update_session()` would recreate
+    /// the same read/insert race.
+    ///
+    /// Return false when the row already exists; creation still succeeded,
+    /// and the caller may broadcast the existing authoritative row.
+    pub async fn insert_session_if_absent(&self, session: SessionInfo) -> bool {
+        let inserted = {
+            let mut sessions = self.sessions.write().await;
+            match sessions.entry(session.session_id.clone()) {
+                std::collections::hash_map::Entry::Vacant(v) => {
+                    v.insert(session.clone());
+                    true
+                }
+                std::collections::hash_map::Entry::Occupied(_) => false,
+            }
+        };
+        if inserted {
+            // The DB is the recovery cache, never the serving authority.
+            // Like update_session, do not hold a map write lock during I/O.
+            if let Err(e) = self
+                .db
+                .insert_session(&session, status_str(&session.status))
+                .await
+            {
+                tracing::error!(
+                    "Failed to persist new session {}: {:#}",
+                    session.session_id,
+                    e
+                );
+            }
+        }
+        inserted
+    }
+
     pub async fn get(&self, session_id: &str) -> Option<SessionInfo> {
         let sessions = self.sessions.read().await;
         sessions.get(session_id).cloned()
