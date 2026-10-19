@@ -46,6 +46,17 @@ const TRUSTED_TELEMETRY_SOURCES = new Map([
     workflow_dispatch_main_only: false,
     allowed_workflow_run_branches: new Set(['main']),
   }],
+  ['.github/workflows/agent-claude-resume-seed.yml', {
+    workflow_id: 'agent-claude-resume-seed',
+    events: new Set(['push', 'workflow_dispatch']),
+    workflow_dispatch_main_only: true,
+  }],
+  ['.github/workflows/agent-claude-resume-verify.yml', {
+    workflow_id: 'agent-claude-resume-verify',
+    events: new Set(['workflow_run']),
+    workflow_dispatch_main_only: false,
+    allowed_workflow_run_branches: new Set(['main']),
+  }],
 ]);
 
 export function validateTelemetrySourceRun(run, repository = process.env.GITHUB_REPOSITORY) {
