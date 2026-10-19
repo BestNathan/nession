@@ -8,7 +8,8 @@ import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {startDevelopment,recordDispatch,recordSliceYield,reconcileOutbox} from './outbox.mjs';
 import {issueDispatchTicket,verifyDispatchTicket,planGitHubDispatch,
-  createGitHubDispatchClient,authorizeNativeContinuation} from './github-dispatch.mjs';
+  createGitHubDispatchClient,authorizeNativeContinuation,
+  acceptAttestedSliceYield} from './github-dispatch.mjs';
 import {sealCheckpoint} from '../store/checkpoint.mjs';
 import {publishEncryptedAgentCheckpoint,verifyCommittedCheckpoint} from '../store/remote.mjs';
 
@@ -64,14 +65,36 @@ try{
     commit_sha:published.commit_sha,version:1,
     ciphertext_sha256:checkpoint.ciphertext_sha256});
   assert.equal(proven.current_store_sha,published.commit_sha);
-  state=recordSliceYield(state,state.version,first.id,{
-    version:1,commit_sha:published.commit_sha,ciphertext_sha256:checkpoint.ciphertext_sha256,
-  },{
-    verified:true,repository:'BestNathan/nession',
-    workflow_path:developer.path,workflow_name:developer.workflow_name,
-    role:'developer',agent_id:'dev-cursor-01',issue,
-    run_id:501,attempt:1,action_id:first.id,input_sha:sha,
-  });
+  const controllerRun={id:124,path:'.github/workflows/acceptance-agent-controller.yml',
+    name:'Acceptance / Agent Controller',event:'workflow_dispatch',head_branch:'main',
+    head_sha:main,repository:{full_name:'BestNathan/nession'},
+    head_repository:{full_name:'BestNathan/nession'}};
+  const workerRun={id:501,run_attempt:1,path:developer.path,
+    name:developer.workflow_name,event:'workflow_dispatch',head_branch:'main',
+    head_sha:main,repository:{full_name:'BestNathan/nession'},
+    head_repository:{full_name:'BestNathan/nession'},status:'completed',
+    conclusion:'success',created_at:new Date(now+5000).toISOString()};
+  const sources=new Map([[124,controllerRun],[501,workerRun]]);
+  const reader={getRun:async id=>structuredClone(sources.get(id))};
+  const attestedParams={state,dispatch_ticket:v1.inputs.dispatch_ticket,keyring,reader,
+    remote,now,verified_main_sha:main,
+    checkpoint:{version:1,commit_sha:published.commit_sha,
+      ciphertext_sha256:checkpoint.ciphertext_sha256,run_id:501,attempt:1}};
+  await assert.rejects(()=>acceptAttestedSliceYield({...attestedParams,
+    checkpoint:{...attestedParams.checkpoint,run_id:777}}),/run-bound dispatch/);
+  await assert.rejects(()=>acceptAttestedSliceYield({...attestedParams,
+    checkpoint:{...attestedParams.checkpoint,commit_sha:'f'.repeat(40)}}),/git merge-base|failed/);
+  sources.set(501,{...workerRun,head_repository:{full_name:'untrusted/fork'}});
+  await assert.rejects(()=>acceptAttestedSliceYield(attestedParams),/Worker did not execute/);
+  sources.set(501,workerRun);
+  sources.set(124,{...controllerRun,path:'.github/workflows/evil.yml'});
+  await assert.rejects(()=>acceptAttestedSliceYield(attestedParams),/not the trusted Controller/);
+  sources.set(124,controllerRun);
+  state=await acceptAttestedSliceYield(attestedParams);
+  assert.equal(state.phase,'ready');
+  assert.equal(reconcileOutbox(state).yielded.length,1);
+  assert.equal(await acceptAttestedSliceYield({...attestedParams,state}),state,
+    'identical authenticated Store/Run Yield is an idempotent acknowledgement');
   const next=reconcileOutbox(state).pending[0];
   const signed=issueDispatchTicket(state,next.id,registry,issuer);
   assert.equal(signed.body.schema_version,2);
