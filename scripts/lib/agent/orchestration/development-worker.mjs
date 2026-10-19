@@ -79,7 +79,7 @@ async function main(){
     const {result,meta}=await runCursorSession({
       apiKey:process.env.CURSOR_API_KEY,name:'nession-issue-1997-real-developer',
       requestedModel:model,workspace,storePath:nativeStore,
-      tools:['read','grep','edit'],prompt,
+      tools:['read','grep','edit'],sandbox:true,prompt,
     });
     if(result?.status!=='finished'||meta.status!=='finished'||
         !/^agent-[a-zA-Z0-9-]{4,100}$/.test(meta.agent_id??'')||
