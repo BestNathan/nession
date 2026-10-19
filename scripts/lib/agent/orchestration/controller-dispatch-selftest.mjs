@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // #2010 main-owned trusted dispatch authority, key separation and fail-closed tests.
 import assert from 'node:assert/strict';
-import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey,CONTROLLED_DISPATCH_COMMENT}
+import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey,CONTROLLED_DISPATCH_COMMENT,CONTROLLED_RECOVERY_COMMENT}
   from './controller-dispatch.mjs';
 
 const sha='a'.repeat(40),actionId='b'.repeat(64),issue=1997,runId=12345;
@@ -31,6 +31,18 @@ const commentValid={...valid,environment:commentEnvironment,event:commentEvent,
   issue:1997,actionId:'95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae',
   run:{...run,event:'issue_comment'}};
 assert.equal(assertDispatchAuthority(commentValid).issue,1997);
+const actualAction=await import('./outbox.mjs').then(m=>
+  m.failedDeveloperRetryActionId(1997,
+  '95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae',
+  39267659650));
+const recovery={...commentValid,actionId:actualAction,
+  event:{...commentEvent,comment:{...commentEvent.comment,body:CONTROLLED_RECOVERY_COMMENT}}};
+assert.equal(assertDispatchAuthority(recovery).action_id,actualAction);
+assert.throws(()=>assertDispatchAuthority({...recovery,
+  actionId:commentValid.actionId}),/authenticated owner\/main/);
+assert.throws(()=>assertDispatchAuthority({...recovery,
+  event:{...recovery.event,comment:{...recovery.event.comment,body:CONTROLLED_RECOVERY_COMMENT+' '}}}),/authenticated owner\/main/);
+
 for(const event of [
   {...commentEvent,action:'edited'},
   {...commentEvent,issue:{number:2010}},
