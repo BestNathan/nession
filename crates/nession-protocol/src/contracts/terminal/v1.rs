@@ -223,6 +223,16 @@ pub struct TerminalBootstrapPayload {
     /// means unknown/partial; the reader must not default to `FullVt`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fidelity: Option<TerminalCheckpointFidelity>,
+    /// The Agent stream epoch this checkpoint's atomic cut belongs to.
+    /// Together with through_seq, this must be issued under the same session
+    /// producer lock; absence means no independently testable cut identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream_epoch: Option<u64>,
+    /// Cumulative issued stream position included in the checkpoint.
+    /// Distinct from TerminalOutputPayload.stream_seq: the checkpoint itself
+    /// is not a replayable event and consumes no stream sequence number.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub through_seq: Option<u64>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
