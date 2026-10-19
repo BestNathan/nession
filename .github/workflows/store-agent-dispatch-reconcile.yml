@@ -24,7 +24,7 @@ jobs:
       github.repository == 'BestNathan/nession' &&
       github.event.workflow_run.event == 'workflow_dispatch' &&
       github.event.workflow_run.head_branch == 'main' &&
-      github.event.workflow_run.actor.login == 'BestNathan' &&
+      github.event.workflow_run.actor.login == 'github-actions[bot]' &&
       github.event.workflow_run.repository.full_name == 'BestNathan/nession' &&
       github.event.workflow_run.head_repository.full_name == 'BestNathan/nession'
     runs-on: ubuntu-latest
@@ -62,7 +62,7 @@ jobs:
             .path == ".github/workflows/agent-develop.yml" and
             .name == "Agent / Development" and .event == "workflow_dispatch" and
             .status == "completed" and (.conclusion == "success" or .conclusion == "failure") and
-            .head_branch == "main" and .actor.login == "BestNathan" and
+            .head_branch == "main" and .actor.login == "github-actions[bot]" and
             .repository.full_name == "BestNathan/nession" and
             .head_repository.full_name == "BestNathan/nession"
           ' "$RUNNER_TEMP/worker-run.json" >/dev/null
