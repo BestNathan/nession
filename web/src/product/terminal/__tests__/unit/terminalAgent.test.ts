@@ -264,6 +264,14 @@ describe('createTerminalAgentApi', () => {
       expect(contradictory).toMatchObject({
         epochMatch: false, complete: false, recovery: 'unavailable', events: [],
       });
+      const legacyMismatch = api.resumeStream('work', 7, 1);
+      surface.resolveNext('agent.terminal.stream.resume', {
+        session_name: 'work', stream_epoch: 8, epoch_match: false,
+        complete: true, events: [event],
+      });
+      expect(await legacyMismatch).toMatchObject({
+        epochMatch: false, complete: false, events: [],
+      });
       const missing = api.resumeStream('work', 7, 1);
       surface.resolveNext('agent.terminal.stream.resume', {
         session_name: 'work', stream_epoch: 8, epoch_match: false,
