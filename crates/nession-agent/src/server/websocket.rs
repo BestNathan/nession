@@ -3932,10 +3932,14 @@ mod tests {
         release_capture_tx.send(()).unwrap();
         attach.await.expect("async capture completes");
         assert_eq!(
-            rx.try_recv().expect("post-subscription output must be retained"),
+            rx.try_recv()
+                .expect("post-subscription output must be retained"),
             (live, expected_position.0, expected_position.1)
         );
-        assert!(rx.try_recv().is_err(), "a post-subscription event is queued once");
+        assert!(
+            rx.try_recv().is_err(),
+            "a post-subscription event is queued once"
+        );
     }
 
     fn test_output_ack() -> SubscriberOutputAck {
