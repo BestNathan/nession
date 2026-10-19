@@ -127,7 +127,7 @@ jobs:
             --ignore-scripts --no-audit --no-fund "@cursor/sdk@$CURSOR_SDK_VERSION"
           echo "CURSOR_SDK_ROOT=$RUNNER_TEMP/development-sdk" >> "$GITHUB_ENV"
           echo "CURSOR_SDK_VERSION=$CURSOR_SDK_VERSION" >> "$GITHUB_ENV"
-      - name: Execute authenticated bounded real Developer slice
+      - name: Execute real Developer in isolated Docker with no host credentials
         env:
           CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
           CURSOR_MODEL: ${{ vars.CURSOR_MODEL || 'composer-2.5' }}
@@ -135,9 +135,34 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node scripts/lib/agent/orchestration/development-worker.mjs \
-            "$RUNNER_TEMP/development-admission.json" \
-            "$RUNNER_TEMP/development-output"
+          # Clone the exact trusted checkout into an unprivileged disposable Git
+          # repository. Docker never mounts the runner's .git or credential dir.
+          git clone --no-hardlinks --local "$GITHUB_WORKSPACE" \
+            "$RUNNER_TEMP/development-checkout"
+          git -C "$RUNNER_TEMP/development-checkout" remote remove origin
+          mkdir -p "$RUNNER_TEMP/development-output"
+          chmod 0700 "$RUNNER_TEMP/development-output"
+          docker run --rm --read-only \
+            --cap-drop=ALL --security-opt=no-new-privileges \
+            --pids-limit=256 --memory=4g --cpus=2 \
+            --network=bridge --tmpfs /tmp:rw,nosuid,nodev,size=2g \
+            --user "$(id -u):$(id -g)" --workdir /trusted-code \
+            -v "$GITHUB_WORKSPACE:/trusted-code:ro" \
+            -v "$RUNNER_TEMP/development-checkout:/workspace:rw" \
+            -v "$RUNNER_TEMP/development-sdk:/sdk:ro" \
+            -v "$RUNNER_TEMP/development-admission.json:/admission.json:ro" \
+            -v "$RUNNER_TEMP/development-output:/output:rw" \
+            -e NESSION_DEVELOPER_ISOLATED=docker-v1 \
+            -e GITHUB_ACTIONS -e GITHUB_REPOSITORY -e GITHUB_RUN_ID \
+            -e GITHUB_RUN_ATTEMPT -e GITHUB_EVENT_NAME -e GITHUB_WORKFLOW \
+            -e GITHUB_REF -e CURSOR_API_KEY -e CURSOR_MODEL \
+            -e CURSOR_MODEL_FAST -e CURSOR_RESUME_PUBLIC_KEY_B64 \
+            -e CURSOR_SDK_VERSION \
+            -e GITHUB_WORKSPACE=/workspace -e RUNNER_TEMP=/tmp \
+            -e CURSOR_SDK_ROOT=/sdk -e HOME=/tmp \
+            node:24-bookworm \
+            node scripts/lib/agent/orchestration/development-worker.mjs \
+              /admission.json /output
       - name: Upload canonical immutable Agent telemetry
         uses: actions/upload-artifact@v4
         with:

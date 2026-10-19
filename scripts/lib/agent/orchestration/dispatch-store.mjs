@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {readIssueWorkflowState,writeIssueWorkflowState,issueStatePath} from './state-store.mjs';
-import {reconcileOutbox,recordDispatch} from './outbox.mjs';
+import {reconcileOutbox,recordDispatch,recordAttestedDeveloperFailure,failedDeveloperRetryActionId} from './outbox.mjs';
 import {prepareGitHubDispatch,verifyPersistedDispatchIntent,createGitHubDispatchClient,acceptAttestedSliceYield}
   from './github-dispatch.mjs';
 import {auditStagedRunStore} from '../../../run-store-integrity.mjs';
@@ -146,6 +146,53 @@ export function acknowledgeCommittedDispatch({
 // It never grants the Worker any writer token or accepts model-authored source
 // identity. authenticate/verify the actual GitHub Run and encrypted commit
 // with acceptAttestedSliceYield before publishing the next Outbox action.
+// Exact, one-off security recovery for the FIRST real #1997 Worker Run.
+// No retry of original POST. Only authenticated completed failed Worker Run,
+// known SDK-isolation incompatibility, absent model artifact/checkpoint and a
+// matching immutable Store Run ID can create a NEW bounded dispatch action.
+// Caller performs independent GitHub REST Run + job-step + artifact attestation
+// before passing the verified source flag.
+export function recoverConfirmedFailedDeveloperDispatch({
+  remote,issue,actionId,runId,verified,
+}) {
+  if(issue!==1997||
+      actionId!=='95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae'||
+      runId!==39267659650||verified!==true)
+    fail('only independently attested #1997 native SDK failure is recoverable');
+  return withStore(remote,dir=>{
+    const old=readIssueWorkflowState(dir,issue);
+    if(!old.state)fail('missing trusted Issue head');
+    const action=old.state.outbox.find(x=>x.id===actionId);
+    if(action?.status==='failed'){
+      const nextId=failedDeveloperRetryActionId(issue,actionId,runId);
+      const next=old.state.outbox.find(x=>x.id===nextId);
+      if(!next||!['pending','dispatching','dispatched','yielded'].includes(next.status))
+        fail('conflicting recovery replay');
+      return {status:'replayed',issue,action_id:nextId,state_version:old.version,
+        store_commit_sha:git(dir,['rev-parse','HEAD'])};
+    }
+    if(old.version!==3||action?.status!=='dispatched'||
+        action.receipt?.status!=='verified'||
+        action.receipt.source_run_id!==runId||
+        action.task.role!=='developer'||action.task.task!=='implement'||
+        action.task.agent_id!=='dev-cursor-01'||
+        action.task.sha!=='220266b9233ec97b1beacbc54e5cc7f82d3cece2')
+      fail('original authenticated Store dispatch has diverged');
+    const dirPrefix='roles/developer/dev-cursor-01/issues/1997';
+    const runObject=path.join(dir,dirPrefix+'/runs/'+runId+'-1.json');
+    if(fs.existsSync(runObject)||fs.existsSync(path.join(dir,dirPrefix+'/head.json')))
+      fail('cannot recover Worker that has a committed checkpoint');
+    const next=recordAttestedDeveloperFailure(old.state,old.version,actionId,{
+      verified:true,issue,run_id:runId,attempt:1,
+      failure_code:'native_sdk_sandbox_unavailable',
+    });
+    const published=persist(dir,next,old.version,issue);
+    return {status:'recovered',issue,
+      action_id:failedDeveloperRetryActionId(issue,actionId,runId),
+      state_version:next.version,store_commit_sha:published.commit_sha};
+  });
+}
+
 export async function commitAttestedSliceYield({
   remote,issue,dispatchTicket,keyring,reader,
   checkpoint,verifiedMainSha,now=Date.now(),

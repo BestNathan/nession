@@ -7,11 +7,16 @@ import {hkdfSync} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
-import {executeDurableAgentDispatch} from './dispatch-store.mjs';
+import {executeDurableAgentDispatch,recoverConfirmedFailedDeveloperDispatch} from './dispatch-store.mjs';
+import {failedDeveloperRetryActionId} from './outbox.mjs';
+import {CONTROLLED_FAILED_RUN,verifyKnownFailureLive} from './failed-worker-recover.mjs';
 
 const REPO='BestNathan/nession';
 const WORKFLOW='.github/workflows/agent-controller-dispatch.yml';
 export const CONTROLLED_DISPATCH_COMMENT='/nession dispatch issue=1997 action=95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae';
+export const CONTROLLED_RECOVERY_COMMENT='/nession recover issue=1997 failed_run=39267659650';
+const ORIGINAL_ACTION='95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae';
+const RECOVERY_ACTION=failedDeveloperRetryActionId(1997,ORIGINAL_ACTION,CONTROLLED_FAILED_RUN);
 const HEX40=/^[a-f0-9]{40}$/,HEX64=/^[a-f0-9]{64}$/;
 const positive=n=>Number.isSafeInteger(n)&&n>0;
 function fail(s){throw Error('trusted Controller dispatch: '+s);}
@@ -20,9 +25,10 @@ export function assertDispatchAuthority({environment,event,run,issue,actionId}) 
   const permitted=commanded
     ?(event?.action==='created'&&event?.issue?.number===1997&&
        !event?.issue?.pull_request&&event?.comment?.user?.login==='BestNathan'&&
-       event?.comment?.body===CONTROLLED_DISPATCH_COMMENT&&
+       ((event?.comment?.body===CONTROLLED_DISPATCH_COMMENT&&actionId===ORIGINAL_ACTION)||
+        (event?.comment?.body===CONTROLLED_RECOVERY_COMMENT&&actionId===RECOVERY_ACTION))&&
        Number.isSafeInteger(event?.comment?.id)&&event.comment.id>0&&
-       issue===1997&&actionId==='95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae')
+       issue===1997)
     :(environment.GITHUB_EVENT_NAME==='workflow_dispatch'&&
        event?.ref==='refs/heads/main'&&
        Number(event?.inputs?.issue_number)===issue&&
@@ -93,7 +99,8 @@ async function main(){
   catch{fail('unavailable trusted GitHub workflow event');}
   const commanded=env.GITHUB_EVENT_NAME==='issue_comment';
   const issue=commanded?1997:Number(event?.inputs?.issue_number);
-  const actionId=commanded?'95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae':event?.inputs?.action_id;
+  const recovering=commanded&&event?.comment?.body===CONTROLLED_RECOVERY_COMMENT;
+  const actionId=commanded?(recovering?RECOVERY_ACTION:ORIGINAL_ACTION):event?.inputs?.action_id;
   if(!positive(issue)||!HEX64.test(actionId??''))fail('invalid Issue/Action');
   const token=env.ACTIONS_DISPATCH_TOKEN;
   if(typeof token!=='string'||token.length<8)fail('missing trusted Actions credential');
@@ -114,6 +121,14 @@ async function main(){
   // No additional secret setup; this key and the App private key never enter Worker.
   const key=deriveDispatchKey(env.STORE_WRITER_PRIVATE_KEY);
   try{
+    if(recovering){
+      const verified=await verifyKnownFailureLive(token);
+      const recovery=recoverConfirmedFailedDeveloperDispatch({
+        remote:storeRemote,issue:1997,actionId:ORIGINAL_ACTION,
+        runId:verified.run_id,verified:verified.verified});
+      if(recovery.action_id!==actionId||!['recovered','replayed'].includes(recovery.status))
+        fail('recovery action is not the independently verified CAS successor');
+    }
     const signer={key,key_id:'main-controller',
       issuer_run_id:run.id,now:Date.now(),ttl_ms:600000};
     // Source ancestry is rechecked against the persisted pending Outbox

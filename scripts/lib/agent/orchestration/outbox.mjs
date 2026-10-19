@@ -11,7 +11,7 @@ const SOURCE_WORKFLOW = Object.freeze({
   acceptance: { path: '.github/workflows/acceptance-orchestrator.yml', name: 'Acceptance / Orchestrator' },
 });
 const ACTION_TYPES = new Set(['dispatch','verify','notify']);
-const STATUSES = new Set(['pending','dispatching','dispatched','yielded']);
+const STATUSES = new Set(['pending','dispatching','dispatched','yielded','failed']);
 const MAX_SLICES = 64;
 const HEX64 = /^[a-f0-9]{64}$/;
 const MAX_OUTBOX = 128;
@@ -130,6 +130,15 @@ export function validateDevelopmentState(state) {
           !HEX64.test(c.ciphertext_sha256??'')||item.task.type!=='dispatch') {
         reject('invalid committed Slice yield receipt');
       }
+    } else if(item.status==='failed') {
+      const r=item.receipt;
+      onlyKeys(r,['status','dispatch_id','source_run_id','source_attempt',
+        'failure_code'],'attested failed Run');
+      if(Object.keys(r).length!==5||r.status!=='failed'||
+          r.dispatch_id!==item.id||r.failure_code!=='native_sdk_sandbox_unavailable'||
+          !positive(r.source_run_id)||!positive(r.source_attempt)||
+          item.task.type!=='dispatch'||item.task.role!=='developer')
+        reject('invalid authenticated failure receipt');
     } else if (item.receipt !== null) reject('unacknowledged item has receipt');
   }
   return state;
@@ -352,6 +361,44 @@ export function recordSliceYield(state,expectedVersion,actionId,checkpoint,sourc
   });
 }
 
+// A conclusively FAILED Worker may be retried only as a NEW Action ID with
+// immutable old Run evidence retained. A 204, timeout, in-progress or unknown
+// result must never use this path. Caller independently authenticates the
+// original GitHub Run, exact failed step, absence of checkpoint and identity.
+export function failedDeveloperRetryActionId(issue,actionId,runId) {
+  if(!isIssue(issue)||!HEX64.test(actionId??'')||!positive(runId))
+    reject('invalid failed Run deterministic retry identity');
+  return hash([issue,actionId,runId,'native-sdk-sandbox-isolation-retry-v1']);
+}
+
+export function recordAttestedDeveloperFailure(state,expectedVersion,actionId,source) {
+  validateDevelopmentState(state);
+  if(state.version!==expectedVersion)reject('stale failed-Run recovery CAS');
+  onlyKeys(source,['verified','issue','run_id','attempt','failure_code'],
+    'authenticated failed Developer source');
+  const old=state.outbox.find(x=>x.id===actionId);
+  if(source.verified!==true||source.issue!==state.issue||
+      source.failure_code!=='native_sdk_sandbox_unavailable'||
+      !positive(source.run_id)||source.attempt!==1||
+      old?.task.type!=='dispatch'||old.task.role!=='developer'||
+      old.status!=='dispatched'||old.receipt?.status!=='verified'||
+      old.receipt.source_run_id!==source.run_id||old.attempts>=MAX_ATTEMPTS)
+    reject('failure recovery requires exactly the authenticated failed Worker Run');
+  const nextId=failedDeveloperRetryActionId(state.issue,actionId,source.run_id);
+  if(state.outbox.length>=MAX_OUTBOX||
+      state.outbox.some(x=>x.id===nextId)||
+      state.outbox.some(x=>x.id!==actionId&&x.status==='pending'&&
+        x.task.type==='dispatch'&&x.task.role==='developer'))
+    reject('retry already scheduled, collision or bounded Outbox exhausted');
+  const failed={...old,status:'failed',receipt:{
+    status:'failed',dispatch_id:old.id,source_run_id:source.run_id,
+    source_attempt:source.attempt,failure_code:source.failure_code,
+  }};
+  const next={id:nextId,task:{...old.task},status:'pending',attempts:0,receipt:null};
+  return validateDevelopmentState({...state,version:state.version+1,
+    outbox:[...state.outbox.map(x=>x.id===actionId?failed:x),next]});
+}
+
 export function failedDispatch(state, expectedVersion, actionId) {
   validateDevelopmentState(state);
   if (state.version !== expectedVersion) reject('stale state CAS');
@@ -368,5 +415,6 @@ export function reconcileOutbox(state) {
     awaiting_evidence:state.outbox.filter(x => x.status === 'dispatched'),
     awaiting_dispatch_receipt:state.outbox.filter(x => x.status === 'dispatching'),
     yielded:state.outbox.filter(x => x.status === 'yielded'),
+    failed:state.outbox.filter(x => x.status === 'failed'),
   };
 }

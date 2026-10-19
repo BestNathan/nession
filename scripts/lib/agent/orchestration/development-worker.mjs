@@ -10,6 +10,7 @@ import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {runCursorSession} from '../providers/cursor.mjs';
+import {failedDeveloperRetryActionId} from './outbox.mjs';
 import {sealCursorNativeStore} from '../providers/cursor-native-store.mjs';
 import {buildAgentWorkflowTelemetry,writeAgentWorkflowTelemetry} from '../../../agent-workflow-telemetry.mjs';
 
@@ -24,8 +25,13 @@ function readAdmission(file){
   const a=JSON.parse(fs.readFileSync(file,'utf8'));
   if(a?.authorized!==true||a.role!=='developer'||a.task!=='implement'||
       a.provider!=='cursor'||a.agent_id!=='dev-cursor-01'||
-      a.issue!==1997||a.action_id!==
-        '95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae'||
+      a.issue!==1997||
+      ![
+        '95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae',
+        failedDeveloperRetryActionId(1997,
+          '95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae',
+          39267659650),
+      ].includes(a.action_id)||
       !HEX40.test(a.input_sha??'')||a.input_sha!=='220266b9233ec97b1beacbc54e5cc7f82d3cece2'||
       Number(process.env.GITHUB_RUN_ID)!==a.run_id||
       process.env.GITHUB_REPOSITORY!==REPO||
@@ -42,6 +48,16 @@ async function main(){
       process.env.ACTIONS_DISPATCH_TOKEN||process.env.GITHUB_TOKEN||
       process.env.GH_TOKEN||process.env.AGENT_STORE_CONTROLLER_REMOTE)
     fail('privileged credential leaked into model-execution Worker');
+  // The SDK's local.sandboxOptions is unsupported on GitHub runners.
+  // The sole production execution route is now an OS-isolated Docker process:
+  // separate disposable Git checkout, read-only program/SDK mounts, no host
+  // runner credentials, no capabilities, no writable root, bounded resources.
+  if(process.env.NESSION_DEVELOPER_ISOLATED!=='docker-v1'||
+     process.env.GITHUB_WORKSPACE!=='/workspace'||
+     process.env.CURSOR_SDK_ROOT!=='/sdk'||
+     process.env.RUNNER_TEMP!=='/tmp'||
+     !fs.existsSync('/.dockerenv'))
+    fail('OS-isolated Docker worker is mandatory, not local SDK sandbox');
   const a=readAdmission(process.argv[2]);
   if(!process.env.CURSOR_API_KEY||!process.env.CURSOR_SDK_ROOT)
     fail('missing pinned real Cursor Provider');
@@ -79,7 +95,7 @@ async function main(){
     const {result,meta}=await runCursorSession({
       apiKey:process.env.CURSOR_API_KEY,name:'nession-issue-1997-real-developer',
       requestedModel:model,workspace,storePath:nativeStore,
-      tools:['read','grep','edit'],sandbox:true,prompt,
+      tools:['read','grep','edit'],sandbox:false,prompt,
     });
     if(result?.status!=='finished'||meta.status!=='finished'||
         !/^agent-[a-zA-Z0-9-]{4,100}$/.test(meta.agent_id??'')||
