@@ -68,6 +68,7 @@ try{
   assert.equal(proven.current_store_sha,published.commit_sha);
   const controllerRun={id:124,path:'.github/workflows/acceptance-agent-controller.yml',
     name:'Acceptance / Agent Controller',event:'workflow_dispatch',head_branch:'main',
+    actor:{login:'BestNathan'},run_attempt:1,
     head_sha:main,repository:{full_name:'BestNathan/nession'},
     head_repository:{full_name:'BestNathan/nession'}};
   const workerRun={id:501,run_attempt:1,path:developer.path,
