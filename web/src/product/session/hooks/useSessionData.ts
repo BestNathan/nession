@@ -58,46 +58,44 @@ export function useSessionData() {
 
   const fetchSessions = useCallback(async (opts: FetchSessionsOptions = {}) => {
     const sequence = ++requestSequence.current;
+    let revisionAtStart = realtimeRevision.current;
     setLoadingSessions(true);
     try {
       // At most one reconciliation request. No loops tied to heartbeat rate
       // and no direct adoption of a response that a newer push superseded.
       for (let attempt = 0; attempt < 2; attempt += 1) {
-        const revisionAtStart = realtimeRevision.current;
-        try {
-          const response = await sessionsApi.fetchSessions(opts);
-          if (sequence !== requestSequence.current) {
-            return; // A newer explicit refresh owns the answer.
-          }
-          if (revisionAtStart !== realtimeRevision.current) {
-            // A correlated list reply may contain a report the newer push
-            // omitted. Retry the authoritative list once, without accepting
-            // possibly stale commands or overwriting the newer push (#1986).
-            if (attempt === 0 && hasUnprojectedForegroundReport(
-              response.sessions, visibleSessions.current,
-            )) {
-              continue;
-            }
-            return;
-          }
-          visibleSessions.current = response.sessions;
-          setSessions(response.sessions);
-          const stale = response.stale_agents ?? [];
-          setStaleAgents(stale);
-          if (stale.length > 0) {
-            toast.warning(
-              `${stale.length} agent(s) did not respond — their sessions may be out of date`,
-            );
-          }
-          return;
-        } catch (err) {
-          if (sequence === requestSequence.current &&
-              revisionAtStart === realtimeRevision.current) {
-            const msg = err instanceof Error ? err.message : 'Failed to fetch sessions';
-            toast.error(msg);
+        revisionAtStart = realtimeRevision.current;
+        const response = await sessionsApi.fetchSessions(opts);
+        if (sequence !== requestSequence.current) {
+          return; // A newer explicit refresh owns the answer.
+        }
+        if (revisionAtStart !== realtimeRevision.current) {
+          // Correlated list replies never reach SessionsPlugin subscribers.
+          // A racing push may have suppressed the only command-bearing reply;
+          // ask the current server state again instead of applying stale data.
+          if (attempt === 0 && hasUnprojectedForegroundReport(
+            response.sessions, visibleSessions.current,
+          )) {
+            continue;
           }
           return;
         }
+        visibleSessions.current = response.sessions;
+        setSessions(response.sessions);
+        const stale = response.stale_agents ?? [];
+        setStaleAgents(stale);
+        if (stale.length > 0) {
+          toast.warning(
+            `${stale.length} agent(s) did not respond — their sessions may be out of date`,
+          );
+        }
+        return;
+      }
+    } catch (err) {
+      if (sequence === requestSequence.current &&
+          revisionAtStart === realtimeRevision.current) {
+        const msg = err instanceof Error ? err.message : 'Failed to fetch sessions';
+        toast.error(msg);
       }
     } finally {
       if (sequence === requestSequence.current) {
