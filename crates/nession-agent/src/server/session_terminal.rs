@@ -377,8 +377,14 @@ impl SessionStreamState {
         }
     }
 
+    /// Highest recorded event sequence (zero before the first output).
+    ///
+    /// `record_output` and `record_resize` increment next_seq *before*
+    /// recording/publishing; next_seq is the last issued number, not the
+    /// number to be issued next. Subtracting one makes attach's cursor lag
+    /// behind the Agent timeline and contradicts the replay window floor.
     pub fn cursor(&self) -> u64 {
-        self.next_seq.saturating_sub(1)
+        self.next_seq
     }
 
     pub fn record_output(&mut self, session_name: &str, data: String) -> (u64, u64) {
@@ -561,6 +567,37 @@ mod tests {
         assert_eq!(s2, 2);
         let tail = stream.replay_since(epoch, 0).expect("same epoch");
         assert_eq!(tail.events.len(), 2);
+    }
+
+    #[test]
+    fn attach_cursor_is_exactly_the_last_issued_stream_event() {
+        let mut stream = SessionStreamState::new();
+        let epoch = stream.epoch;
+        assert_eq!(stream.cursor(), 0);
+        let (_, first) = stream.record_output("s", "first".to_owned());
+        assert_eq!(first, 1);
+        assert_eq!(stream.cursor(), first);
+        let (_, second) = stream.record_resize("s", 120, 30);
+        assert_eq!(second, 2);
+        assert_eq!(stream.cursor(), second);
+        let from_head = stream.replay_since(epoch, stream.cursor()).unwrap();
+        assert!(from_head.complete);
+        assert!(from_head.events.is_empty());
+        assert_eq!(stream.first_available_seq(), 1);
+    }
+
+    #[test]
+    fn unretained_oversized_event_still_advances_attach_cursor() {
+        let mut stream = SessionStreamState::new();
+        let epoch = stream.epoch;
+        stream.max_bytes = 1;
+        let (_, seq) = stream.record_output("s", "too-big".to_owned());
+        assert_eq!(stream.cursor(), seq);
+        assert_eq!(stream.first_available_seq(), seq + 1);
+        assert!(!stream.replay_since(epoch, seq - 1).unwrap().complete);
+        let fresh = stream.replay_since(epoch, seq).unwrap();
+        assert!(fresh.complete);
+        assert!(fresh.events.is_empty());
     }
 
     /// A stream whose ring keeps `capacity` events, with `n` outputs recorded
