@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
-import {decodeResultZip} from './result-artifact.mjs';
+import {readWorkerZipMember} from './worker-zip.mjs';
 import {createWorkerClaim} from './worker-claim.mjs';
 import {verifyDispatchTicket,createGitHubRunReader} from './github-dispatch.mjs';
 import {acknowledgeCommittedDispatch} from './dispatch-store.mjs';
@@ -47,7 +47,7 @@ export function inspectWorkerClaimZip(zip,digest,run) {
     fail('claim ZIP SHA-256 does not match authenticated Artifact digest');
   let claim;
   try{claim=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(
-    decodeResultZip(zip,'development-worker-claim.json')));}
+    readWorkerZipMember(zip,'development-worker-claim.json')));}
   catch{fail('invalid bounded Worker claim Artifact');}
   const context={repository:REPO,ref:'refs/heads/main',
     event:'workflow_dispatch',workflow:'Agent / Development',
