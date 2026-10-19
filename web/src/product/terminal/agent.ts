@@ -361,15 +361,23 @@ function subscribeInputAck(
 /** The Agent's replay status is authoritative, but all fields must agree.
  * A mismatched or incomplete prefix is never passed on as ordinary events.
  * Legacy providers keep their existing epoch/complete interpretation. */
+function parseResumeRecovery(value: unknown): TerminalStreamResumeResult['recovery'] {
+  switch (value) {
+    case 'complete':
+    case 'checkpoint-required':
+    case 'unavailable':
+      return value;
+    default:
+      return undefined;
+  }
+}
+
 function readResumeReply(reply: unknown, requestedEpoch: number): TerminalStreamResumeResult {
   const r = reply as Record<string, unknown>;
   const firstAvailableSeq = r.first_available_seq;
   const complete = r.complete;
   const epochMatch = r.epoch_match === true;
-  const recovery = r.recovery;
-  const declaredRecovery = recovery === 'complete'
-    || recovery === 'checkpoint-required' || recovery === 'unavailable'
-    ? recovery : undefined;
+  const declaredRecovery = parseResumeRecovery(r.recovery);
   const provenComplete = epochMatch && complete === true
     && (declaredRecovery === undefined || declaredRecovery === 'complete');
   // A new provider claiming "complete" while its epoch/complete flags
