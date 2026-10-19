@@ -8,6 +8,11 @@ import {fileURLToPath} from 'node:url';
 const REPO='BestNathan/nession',HEX40=/^[a-f0-9]{40}$/,HEX64=/^[a-f0-9]{64}$/;
 function fail(x){throw Error('Agent Worker claim: '+x);}
 export function createWorkerClaim(input,context){
+  // GitHub may expose an omitted optional workflow_dispatch input as "".
+  // Normalize only that empty optional field, not any signed identity.
+  if(input&&typeof input==='object'&&!Array.isArray(input)&&input.resume_from===''){
+    input={...input};delete input.resume_from;
+  }
   const fields=['action_id','issue_number','agent_id','task','input_sha',
     'dispatch_ticket','resume_from'];
   const positive=n=>Number.isSafeInteger(n)&&n>0;
