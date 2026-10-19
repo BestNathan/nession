@@ -10,6 +10,7 @@ import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {runCursorSession} from '../providers/cursor.mjs';
+import {failedDeveloperRetryActionId} from './outbox.mjs';
 import {sealCursorNativeStore} from '../providers/cursor-native-store.mjs';
 import {buildAgentWorkflowTelemetry,writeAgentWorkflowTelemetry} from '../../../agent-workflow-telemetry.mjs';
 
@@ -24,8 +25,13 @@ function readAdmission(file){
   const a=JSON.parse(fs.readFileSync(file,'utf8'));
   if(a?.authorized!==true||a.role!=='developer'||a.task!=='implement'||
       a.provider!=='cursor'||a.agent_id!=='dev-cursor-01'||
-      a.issue!==1997||a.action_id!==
-        '95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae'||
+      a.issue!==1997||
+      ![
+        '95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae',
+        failedDeveloperRetryActionId(1997,
+          '95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae',
+          39267659650),
+      ].includes(a.action_id)||
       !HEX40.test(a.input_sha??'')||a.input_sha!=='220266b9233ec97b1beacbc54e5cc7f82d3cece2'||
       Number(process.env.GITHUB_RUN_ID)!==a.run_id||
       process.env.GITHUB_REPOSITORY!==REPO||
