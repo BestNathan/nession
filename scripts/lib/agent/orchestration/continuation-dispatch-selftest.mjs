@@ -11,7 +11,8 @@ import {issueDispatchTicket,verifyDispatchTicket,planGitHubDispatch,
   createGitHubDispatchClient,authorizeNativeContinuation,
   acceptAttestedSliceYield} from './github-dispatch.mjs';
 import {sealCheckpoint} from '../store/checkpoint.mjs';
-import {publishEncryptedAgentCheckpoint,verifyCommittedCheckpoint} from '../store/remote.mjs';
+import {publishEncryptedAgentCheckpoint,verifyCommittedCheckpoint,
+  fetchEncryptedAgentCheckpoint} from '../store/remote.mjs';
 
 const registry=JSON.parse(fs.readFileSync('automation/agents/registry.json','utf8'));
 const issue=1664,sha='b'.repeat(40),main='a'.repeat(40);
@@ -160,6 +161,12 @@ try{
   assert.equal(authorizeNativeContinuation({
     state,dispatch_ticket:plan.inputs.dispatch_ticket,keyring,remote,now,
   }).current_store_sha,other.commit_sha);
+  const exactRestore=fetchEncryptedAgentCheckpoint({remote,identity,
+    expected:{provider:'cursor',source_sha:sha,harness_digest:'c'.repeat(64)},
+    key:storeKey,commitment:{commit_sha:published.commit_sha,version:1,
+      ciphertext_sha256:checkpoint.ciphertext_sha256}});
+  assert.equal(exactRestore.native_bytes.toString(),'synthetic native cursor checkpoint');
+  exactRestore.native_bytes.fill(0);
 
   // Same Agent's newer checkpoint makes the signed old state stale.
   const advanced=sealCheckpoint(identity,2,Buffer.from('new cursor checkpoint'),storeKey,
@@ -170,6 +177,10 @@ try{
   assert.throws(()=>authorizeNativeContinuation({
     state,dispatch_ticket:plan.inputs.dispatch_ticket,keyring,remote,now,
   }),/checkpoint advanced/);
+  assert.throws(()=>fetchEncryptedAgentCheckpoint({remote,identity,
+    expected:{provider:'cursor',source_sha:sha,harness_digest:'c'.repeat(64)},
+    key:storeKey,commitment:{commit_sha:published.commit_sha,version:1,
+      ciphertext_sha256:checkpoint.ciphertext_sha256}}),/checkpoint advanced/);
   assert.throws(()=>verifyCommittedCheckpoint({remote,identity,
     commit_sha:'f'.repeat(40),version:1,
     ciphertext_sha256:checkpoint.ciphertext_sha256}),/git merge-base|failed/);
