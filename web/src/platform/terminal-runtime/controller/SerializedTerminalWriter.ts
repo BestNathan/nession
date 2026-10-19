@@ -51,6 +51,8 @@ export class SerializedTerminalWriter {
   private disposed = false;
   private halted = false;
   private pendingBytes = 0;
+  /** Tracks bytes held by an uncancellable xterm parser callback. */
+  private activeBytes = 0;
   private deadline: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
@@ -86,6 +88,7 @@ export class SerializedTerminalWriter {
     this.halted = true;
     this.operations.length = 0;
     this.pendingBytes = 0;
+    this.activeBytes = 0;
     if (this.deadline !== null) { clearTimeout(this.deadline); }
     this.deadline = null;
     // A pending xterm callback cannot be cancelled. It checks the halted flag
@@ -108,7 +111,9 @@ export class SerializedTerminalWriter {
     if (this.disposed || this.halted) { return; }
     this.halted = true;
     this.operations.length = 0;
-    this.pendingBytes = 0;
+    // A pending parser input may still be held by xterm; don't falsely
+    // report it released before its late callback actually returns.
+    this.pendingBytes = this.activeBytes;
     if (this.deadline !== null) { clearTimeout(this.deadline); }
     this.deadline = null;
     // Do not silently resume after a hole: only a replacement xterm/baseline
@@ -130,12 +135,21 @@ export class SerializedTerminalWriter {
           continue;
         }
         this.parsePending = true;
+        this.activeBytes = item.bytes;
         this.deadline = setTimeout(() => this.degrade('parser-stalled'), this.limits.maxParseMs);
         this.terminal.write(item.data, () => {
-          if (this.disposed || this.halted) { return; }
+          if (this.disposed) { return; }
+          if (this.halted) {
+            // Release the retained bytes, but not a fake parser-applied fact.
+            this.parsePending = false;
+            this.activeBytes = 0;
+            this.pendingBytes = 0;
+            return;
+          }
           if (this.deadline !== null) { clearTimeout(this.deadline); }
           this.deadline = null;
           this.parsePending = false;
+          this.activeBytes = 0;
           this.pendingBytes -= item.bytes;
           try {
             item.onParsed?.();
