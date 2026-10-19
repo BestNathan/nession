@@ -42,6 +42,16 @@ async function main(){
       process.env.ACTIONS_DISPATCH_TOKEN||process.env.GITHUB_TOKEN||
       process.env.GH_TOKEN||process.env.AGENT_STORE_CONTROLLER_REMOTE)
     fail('privileged credential leaked into model-execution Worker');
+  // The SDK's local.sandboxOptions is unsupported on GitHub runners.
+  // The sole production execution route is now an OS-isolated Docker process:
+  // separate disposable Git checkout, read-only program/SDK mounts, no host
+  // runner credentials, no capabilities, no writable root, bounded resources.
+  if(process.env.NESSION_DEVELOPER_ISOLATED!=='docker-v1'||
+     process.env.GITHUB_WORKSPACE!=='/workspace'||
+     process.env.CURSOR_SDK_ROOT!=='/sdk'||
+     process.env.RUNNER_TEMP!=='/tmp'||
+     !fs.existsSync('/.dockerenv'))
+    fail('OS-isolated Docker worker is mandatory, not local SDK sandbox');
   const a=readAdmission(process.argv[2]);
   if(!process.env.CURSOR_API_KEY||!process.env.CURSOR_SDK_ROOT)
     fail('missing pinned real Cursor Provider');
@@ -79,7 +89,7 @@ async function main(){
     const {result,meta}=await runCursorSession({
       apiKey:process.env.CURSOR_API_KEY,name:'nession-issue-1997-real-developer',
       requestedModel:model,workspace,storePath:nativeStore,
-      tools:['read','grep','edit'],sandbox:true,prompt,
+      tools:['read','grep','edit'],sandbox:false,prompt,
     });
     if(result?.status!=='finished'||meta.status!=='finished'||
         !/^agent-[a-zA-Z0-9-]{4,100}$/.test(meta.agent_id??'')||
