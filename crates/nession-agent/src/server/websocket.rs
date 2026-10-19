@@ -69,9 +69,30 @@ use tracing::{debug, error, info, warn};
 ///
 /// The `backend` is either a plain PTY or a control-mode session, hidden
 /// behind [`TmuxSession`] so callers dispatch input/resize/close uniformly.
-/// `subscribers` fans terminal output out to every attached client; the
-/// control-mode path forwards output directly and leaves this empty.
+/// Per-peer fan-out uses the same FIFO for sequenced output and authoritative
+/// resize, regardless of which tmux backend produced the event (#2028).
 type OutputChunk = (Vec<u8>, u64, u64);
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum SubscriberEvent {
+    Output(OutputChunk),
+    Resize {
+        cols: u16,
+        rows: u16,
+        stream_epoch: u64,
+        stream_seq: u64,
+    },
+}
+
+impl SubscriberEvent {
+    fn queued_bytes(&self) -> usize {
+        match self {
+            Self::Output((bytes, _, _)) => bytes.len(),
+            // Resize consumes a slot and a sequence but carries no PTY bytes.
+            Self::Resize { .. } => 0,
+        }
+    }
+}
 
 #[derive(Clone)]
 struct SessionPeer {
@@ -80,8 +101,9 @@ struct SessionPeer {
     /// Fresh for each attach, independent of ControlLease/queue dequeue.
     output_ack: SubscriberOutputAck,
     outbound: P2pOutbound,
-    /// PTY multi-client fan-out; `None` for control-mode (direct outbound).
-    output_tx: Option<mpsc::Sender<OutputChunk>>,
+    /// Sequenced output + authoritative resize share this per-peer FIFO.
+    /// A legacy backend without a forwarder may leave it absent.
+    output_tx: Option<mpsc::Sender<SubscriberEvent>>,
     /** Pending bytes charged per subscriber, never shared across peers. */
     queued_bytes: Arc<AtomicUsize>,
     /// Set by [`fan_out_peers`] when it drops this peer for a full queue.
@@ -183,6 +205,30 @@ fn release_subscriber_bytes(queued: &AtomicUsize, bytes: usize) {
 }
 
 fn fan_out_peers(peers: &mut Vec<SessionPeer>, chunk: OutputChunk) -> usize {
+    fan_out_session_event(peers, SubscriberEvent::Output(chunk))
+}
+
+fn fan_out_recorded_resize(
+    peers: &mut Vec<SessionPeer>,
+    cols: u16,
+    rows: u16,
+    stream_epoch: u64,
+    stream_seq: u64,
+) -> usize {
+    fan_out_session_event(
+        peers,
+        SubscriberEvent::Resize {
+            cols,
+            rows,
+            stream_epoch,
+            stream_seq,
+        },
+    )
+}
+
+/// Called in the same producer lock after recording *either* event type.
+/// Every subscriber gets the identical sequence in the same FIFO order.
+fn fan_out_session_event(peers: &mut Vec<SessionPeer>, event: SubscriberEvent) -> usize {
     let mut detached = 0usize;
     peers.retain(|peer| {
         let Some(tx) = &peer.output_tx else {
@@ -191,7 +237,7 @@ fn fan_out_peers(peers: &mut Vec<SessionPeer>, chunk: OutputChunk) -> usize {
         // Reserve before delivery; the receiver can immediately dequeue and
         // release its charge on another task. One oversized frame is enough
         // to evict this peer but cannot stall or evict a healthy observer.
-        let bytes = chunk.0.len();
+        let bytes = event.queued_bytes();
         let reserved =
             peer.queued_bytes
                 .fetch_update(Ordering::AcqRel, Ordering::Acquire, |queued| {
@@ -205,7 +251,7 @@ fn fan_out_peers(peers: &mut Vec<SessionPeer>, chunk: OutputChunk) -> usize {
             detached += 1;
             return false;
         }
-        match tx.try_send(chunk.clone()) {
+        match tx.try_send(event.clone()) {
             Ok(()) => true,
             Err(mpsc::error::TrySendError::Full(_)) => {
                 peer.queued_bytes.fetch_sub(bytes, Ordering::AcqRel);
@@ -407,30 +453,39 @@ async fn notify_control_changed(peers: &[SessionPeer], payload: TerminalControlC
 /// It used to be one task per subscriber inline in the attach arms, twice, and
 /// the only difference between the two was which names the locals had.
 fn spawn_output_forwarder(
-    mut rx: mpsc::Receiver<OutputChunk>,
+    mut rx: mpsc::Receiver<SubscriberEvent>,
     outbound: P2pOutbound,
     session_name: String,
     detached_for_not_draining: Arc<AtomicBool>,
     queued_bytes: Arc<AtomicUsize>,
 ) {
     tokio::spawn(async move {
-        while let Some((bytes, stream_epoch, stream_seq)) = rx.recv().await {
-            // Receiving relinquishes the mpsc queue's buffered byte charge.
-            // The downstream socket has an independent bounded terminal lane.
-            release_subscriber_bytes(&queued_bytes, bytes.len());
-            use base64::Engine;
-            let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
-            let output = TerminalOutputPayload {
-                session_name: session_name.clone(),
-                data: encoded,
-                stream_epoch: Some(stream_epoch),
-                stream_seq: Some(stream_seq),
-                // Live output, not the session's history: the bootstrap
-                // marker lands here in S4b (#321).
-                bootstrap: None,
+        while let Some(event) = rx.recv().await {
+            // The one FIFO protects both event types from overtaking a
+            // preceding xterm write. Only output uses the byte budget;
+            // authoritative resize still consumes a bounded queue slot.
+            release_subscriber_bytes(&queued_bytes, event.queued_bytes());
+            let json = match event {
+                SubscriberEvent::Output((bytes, stream_epoch, stream_seq)) => {
+                    use base64::Engine;
+                    let output = TerminalOutputPayload {
+                        session_name: session_name.clone(),
+                        data: base64::engine::general_purpose::STANDARD.encode(&bytes),
+                        stream_epoch: Some(stream_epoch),
+                        stream_seq: Some(stream_seq),
+                        bootstrap: None,
+                    };
+                    serde_json::to_string(&new_message(msg_types::TERMINAL_OUTPUT, output)).ok()
+                }
+                SubscriberEvent::Resize { cols, rows, stream_epoch, stream_seq } => {
+                    terminal_resize_frame(
+                        &session_name, cols, rows, Some((stream_epoch, stream_seq)),
+                    )
+                }
             };
-            let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
-            if let Ok(json) = serde_json::to_string(&msg) {
+            if let Some(json) = json {
+                // Both output and sequenced resize use the non-dropping terminal
+                // lane, unlike legacy unsequenced/level resize.
                 // Terminal output goes on the terminal lane, which waits for
                 // room and gives up at the stall grace. A verdict there is not
                 // this forwarder's to act on twice — another session's
@@ -914,7 +969,7 @@ fn subscribe_at_stream_cut(
     peers: &mut Vec<SessionPeer>,
     stream: &session_terminal::SessionStreamState,
     mut peer: SessionPeer,
-    live_tx: &mpsc::Sender<OutputChunk>,
+    live_tx: &mpsc::Sender<SubscriberEvent>,
     needs_bootstrap: bool,
 ) -> Option<AtomicOutputPrefix> {
     // A replaced peer's queue must not receive subsequent output; its
@@ -2693,13 +2748,40 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 let recorded = sessions_lock(ctx.sessions)
                                     .get_mut(&payload.session_name)
                                     .map(|session| {
-                                        session.stream.record_resize(
+                                        let position = session.stream.record_resize(
                                             &payload.session_name,
                                             payload.cols,
                                             payload.rows,
-                                        )
+                                        );
+                                        // Record and enqueue within the SAME lock
+                                        // as record_output + fan-out. A resize
+                                        // cannot overtake output in any attached
+                                        // subscriber's FIFO (#2028).
+                                        let has_subscriber_queue = session
+                                            .peers
+                                            .iter()
+                                            .any(|peer| peer.output_tx.is_some());
+                                        let detached = fan_out_recorded_resize(
+                                            &mut session.peers,
+                                            payload.cols,
+                                            payload.rows,
+                                            position.0,
+                                            position.1,
+                                        );
+                                        if detached > 0 {
+                                            warn!(
+                                                "session {}: detached {detached} subscriber(s) on sequenced resize",
+                                                payload.session_name,
+                                            );
+                                        }
+                                        (position, has_subscriber_queue)
                                     });
-                                if let Some(position) = recorded {
+                                // Compatibility only: an old attachment with
+                                // no sequenced forwarder retains the original
+                                // single-connection delivery. Never duplicate
+                                // a resize already dispatched to subscriber
+                                // FIFOs, including the requesting controller.
+                                if let Some((position, false)) = recorded {
                                     send_recorded_resize_msg(
                                         ctx.outbound,
                                         &payload.session_name,
