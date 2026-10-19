@@ -4,6 +4,10 @@ name: Store / Agent Development Ingest
 # RSA private key and Store Writer App only exist in this main-owned job, NEVER
 # in the model process. Checkpoint and Slice Yield use orphan Store CAS.
 on:
+  # Recover an authenticated successful Worker if GitHub suppresses or loses
+  # workflow_run delivery. Owner/main-only; no arbitrary Run ID accepted.
+  issue_comment:
+    types: [created]
   workflow_run:
     workflows: ["Agent / Development"]
     branches: [main]
@@ -22,18 +26,28 @@ jobs:
   ingest:
     if: >-
       github.repository == 'BestNathan/nession' &&
-      github.event.workflow_run.event == 'workflow_dispatch' &&
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.head_branch == 'main' &&
-      github.event.workflow_run.actor.login == 'github-actions[bot]' &&
-      github.event.workflow_run.repository.full_name == 'BestNathan/nession' &&
-      github.event.workflow_run.head_repository.full_name == 'BestNathan/nession'
+      (
+        (github.event_name == 'workflow_run' &&
+         github.event.workflow_run.event == 'workflow_dispatch' &&
+         github.event.workflow_run.conclusion == 'success' &&
+         github.event.workflow_run.head_branch == 'main' &&
+         github.event.workflow_run.actor.login == 'github-actions[bot]' &&
+         github.event.workflow_run.repository.full_name == 'BestNathan/nession' &&
+         github.event.workflow_run.head_repository.full_name == 'BestNathan/nession') ||
+        (github.event_name == 'issue_comment' &&
+         github.ref == 'refs/heads/main' &&
+         github.actor == 'BestNathan' &&
+         github.event.action == 'created' &&
+         github.event.issue.number == 1997 &&
+         github.event.comment.user.login == 'BestNathan' &&
+         github.event.comment.body == '/nession ingest issue=1997 worker_run=39288961865')
+      )
     runs-on: ubuntu-latest
     environment: cursor
     timeout-minutes: 15
     env:
-      SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
-      SOURCE_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+      SOURCE_RUN_ID: ${{ github.event.workflow_run.id || 39288961865 }}
+      SOURCE_ATTEMPT: ${{ github.event.workflow_run.run_attempt || 1 }}
     steps:
       - name: Checkout only trusted current main ingestion code
         uses: actions/checkout@v4
