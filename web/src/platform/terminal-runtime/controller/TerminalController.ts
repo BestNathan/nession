@@ -55,6 +55,8 @@ export interface TerminalControllerEvents {
   onTransportReady?: (ready: boolean) => void;
   /** A complete remote history snapshot has finished xterm parsing (#1645). */
   onBootstrapApplied?: () => void;
+  /** Parser writer pressure/stall invalidates synchronized output. */
+  onStreamTruncated?: () => void;
   /** An individual Agent event is now parsed/applied by the current xterm.
    * Not a cumulative applied cursor, nor an output ACK (#1950). */
   onStreamEventParsed?: (position: TerminalStreamPosition) => void;
@@ -179,7 +181,9 @@ export class TerminalController {
     this.session = session;
     this.transportFactory = transportFactory;
     this.instance = new TerminalInstance(options);
-    this.writer = new SerializedTerminalWriter(this.instance.terminal);
+    this.writer = new SerializedTerminalWriter(this.instance.terminal, () => {
+      this.events?.onStreamTruncated?.();
+    });
     this._terminal = this.instance.terminal;
     this.inputSourceManager = new InputSourceManager();
     this.useMobileIme = shouldUseMobileIme(options.deviceProfile);

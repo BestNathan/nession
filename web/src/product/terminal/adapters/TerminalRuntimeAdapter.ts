@@ -32,6 +32,9 @@ export function createTerminalRuntimeAdapter(runtime: SessionRuntime): TerminalC
     onStreamEventParsed: (position) => {
       runtime.noteStreamEventParsed(position);
     },
+    onStreamTruncated: () => {
+      runtime.noteStreamTruncated();
+    },
     onInputModeChange: (sid, mode) => {
       store.set(inputModeAtomFamily(sid), mode);
     },

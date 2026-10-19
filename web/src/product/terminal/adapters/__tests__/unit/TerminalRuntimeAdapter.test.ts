@@ -10,6 +10,7 @@ function makeRuntime() {
     setTransportReady: vi.fn<(ready: boolean) => void>(),
     updateViewportSize: vi.fn<(size: { cols: number; rows: number }) => void>(),
     noteStreamEventParsed: vi.fn(),
+    noteStreamTruncated: vi.fn(),
   } as unknown as SessionRuntime;
 }
 
@@ -23,12 +24,14 @@ describe('TerminalRuntimeAdapter', () => {
     events.onInputModeChange?.('sess-1', { type: 'command' });
     events.onResize?.('sess-1', 120, 40);
     events.onStreamEventParsed?.({ streamEpoch: 7, streamSeq: 8 });
+    events.onStreamTruncated?.();
 
     // Readiness and size have exactly one sink — the runtime. The Jotai atoms
     // they used to round-trip through are gone.
     expect(runtime.setTransportReady).toHaveBeenCalledWith(true);
     expect(runtime.updateViewportSize).toHaveBeenCalledWith({ cols: 120, rows: 40 });
     expect(runtime.noteStreamEventParsed).toHaveBeenCalledWith({ streamEpoch: 7, streamSeq: 8 });
+    expect(runtime.noteStreamTruncated).toHaveBeenCalledOnce();
     expect(store.get(inputModeAtomFamily('sess-1'))).toEqual({ type: 'command' });
   });
 });
