@@ -4,6 +4,10 @@ name: Agent / Controller Dispatch
 # workflow; the Store writer private key and Actions writer token are NEVER
 # available to any Developer/Reviewer model process.
 on:
+  # A one-shot, exact owner-authenticated #1997 command permits bootstrap even
+  # where connected GitHub apps cannot call the Actions dispatch endpoint.
+  issue_comment:
+    types: [created]
   workflow_dispatch:
     inputs:
       issue_number:
@@ -30,7 +34,15 @@ jobs:
       github.repository == 'BestNathan/nession' &&
       github.ref == 'refs/heads/main' &&
       github.actor == 'BestNathan' &&
-      github.run_attempt == 1
+      github.run_attempt == 1 &&
+      (
+        github.event_name == 'workflow_dispatch' ||
+        (github.event_name == 'issue_comment' &&
+         github.event.action == 'created' &&
+         github.event.issue.number == 1997 &&
+         github.event.comment.user.login == 'BestNathan' &&
+         github.event.comment.body == '/nession dispatch issue=1997 action=95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae')
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
