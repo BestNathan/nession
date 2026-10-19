@@ -648,10 +648,11 @@ pub use nession_protocol::contracts::file::v1::{
     FileWritePayload, FileWriteResponse,
 };
 pub use nession_protocol::contracts::terminal::v1::{
-    TerminalBootstrapPayload, TerminalControlAcquirePayload, TerminalControlAcquireResponse,
-    TerminalControlChangedPayload, TerminalInputAckPayload, TerminalInputPayload,
-    TerminalOutputAppliedPayload, TerminalOutputPayload, TerminalResizePayload,
-    TerminalStreamResumePayload, TerminalStreamResumeResponse,
+    TerminalBootstrapPayload, TerminalCheckpointCutConsistency, TerminalCheckpointFidelity,
+    TerminalControlAcquirePayload, TerminalControlAcquireResponse, TerminalControlChangedPayload,
+    TerminalInputAckPayload, TerminalInputPayload, TerminalOutputAppliedPayload,
+    TerminalOutputPayload, TerminalResizePayload, TerminalStreamResumePayload,
+    TerminalStreamResumeResponse,
 };
 
 // --- Protocol helpers ---
@@ -815,6 +816,15 @@ async fn capture_for_bootstrap(
 /// requested — a client with no history is a client with an empty screen,
 /// which is the state every attach was in before this existed. No frame is
 /// sent and the attach proceeds.
+/// `capture-pane` always projects text/modes, never a full VT checkpoint.
+fn tmux_capture_fidelity(truncated: bool, modes_complete: bool) -> TerminalCheckpointFidelity {
+    if truncated || !modes_complete {
+        TerminalCheckpointFidelity::Partial
+    } else {
+        TerminalCheckpointFidelity::ScreenOnly
+    }
+}
+
 async fn send_bootstrap(
     outbound: &P2pOutbound,
     tmux: &crate::tmux::ops::TmuxDep,
@@ -830,11 +840,11 @@ async fn send_bootstrap(
     // fails costs the modes and not the history: a client with the session's
     // text and default modes is strictly better off than one with nothing, and
     // that is the same judgement the capture failure above makes.
-    let modes = match tmux.ops().pane_mode_flags(session_name).await {
-        Ok(flags) => crate::server::bootstrap::mode_escapes(&flags),
+    let (modes, modes_complete) = match tmux.ops().pane_mode_flags(session_name).await {
+        Ok(flags) => (crate::server::bootstrap::mode_escapes(&flags), true),
         Err(e) => {
             warn!("bootstrap: pane modes for {session_name} failed: {e:#}");
-            Vec::new()
+            (Vec::new(), false)
         }
     };
     // The pane's unwritten screen is dropped before anything else, so what
@@ -867,6 +877,11 @@ async fn send_bootstrap(
         bootstrap: Some(TerminalBootstrapPayload {
             requested_lines: lines,
             truncated: bounded.truncated,
+            // Pane capture runs outside the ordered Agent output producer.
+            // Sending it first does not establish a true checkpoint cut.
+            cut_consistency: Some(TerminalCheckpointCutConsistency::Unverified),
+            // Even a complete pane capture is text/modes, not full VT.
+            fidelity: Some(tmux_capture_fidelity(bounded.truncated, modes_complete)),
         }),
     };
     let msg = new_message(msg_types::TERMINAL_OUTPUT, payload);
@@ -3523,6 +3538,26 @@ mod tests {
         assert_eq!(b.binding().stream_epoch, 10);
         assert_eq!(next_epoch.binding().stream_epoch, 11);
         assert_eq!(a.applied_through(), 0);
+    }
+
+    #[test]
+    fn tmux_capture_never_claims_full_vt_and_degrades_on_mode_loss_or_truncation() {
+        assert_eq!(
+            tmux_capture_fidelity(false, true),
+            TerminalCheckpointFidelity::ScreenOnly
+        );
+        assert_eq!(
+            tmux_capture_fidelity(true, true),
+            TerminalCheckpointFidelity::Partial
+        );
+        assert_eq!(
+            tmux_capture_fidelity(false, false),
+            TerminalCheckpointFidelity::Partial
+        );
+        assert_eq!(
+            tmux_capture_fidelity(true, false),
+            TerminalCheckpointFidelity::Partial
+        );
     }
 
     fn test_output_ack() -> SubscriberOutputAck {

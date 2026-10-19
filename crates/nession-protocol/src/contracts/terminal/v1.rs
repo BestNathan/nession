@@ -178,6 +178,30 @@ pub struct TerminalOutputPayload {
 /// what the client asked for, and whether it got all of it. Nothing here says
 /// how to apply it — that is the client's, and it is one line (`replace the
 /// buffer`) because absence of the marker is the only other case.
+/// Whether a checkpoint was taken at a proven output-stream boundary.
+/// A tmux capture-pane is asynchronous to the Agent stream: it is Unverified
+/// even when its text is complete and its xterm write callback has fired.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TerminalCheckpointCutConsistency {
+    Atomic,
+    Unverified,
+}
+
+/// The representation a capture can restore, independently of its cut.
+/// A tmux pane's text/modes cannot be a full VT/emulator checkpoint.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TerminalCheckpointFidelity {
+    FullVt,
+    ScreenOnly,
+    Partial,
+}
+
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -191,6 +215,14 @@ pub struct TerminalBootstrapPayload {
     /// received all of it are different states, and only one of them should
     /// read as "this is the history".
     pub truncated: bool,
+    /// Independent of fidelity: only `Atomic` is a verified stream cut.
+    /// Absent means legacy/unverified, not a successful cut.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cut_consistency: Option<TerminalCheckpointCutConsistency>,
+    /// The VT representation that the checkpoint actually preserves. Absent
+    /// means unknown/partial; the reader must not default to `FullVt`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fidelity: Option<TerminalCheckpointFidelity>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]

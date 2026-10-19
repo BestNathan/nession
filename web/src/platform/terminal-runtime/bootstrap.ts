@@ -30,6 +30,21 @@ export interface TerminalBootstrap {
    * claims to be.
    */
   truncated: boolean;
+  /** A separately proven snapshot/output-stream cut; legacy absence is unverified. */
+  cutConsistency?: 'atomic' | 'unverified';
+  /** VT representation. Even a complete text capture is never full-vt. */
+  fidelity?: 'full-vt' | 'screen-only' | 'partial';
+}
+
+/**
+ * Parser completion is not proof of a checkpoint. A partial or unverified
+ * capture can repaint visible text but cannot erase the recovery gap.
+ * Future atomic cut support can make this true only with full VT fidelity.
+ */
+export function provesVerifiedBootstrapRepair(bootstrap: TerminalBootstrap | undefined): boolean {
+  return bootstrap?.cutConsistency === 'atomic'
+    && bootstrap.fidelity === 'full-vt'
+    && !bootstrap.truncated;
 }
 
 /**
@@ -51,5 +66,10 @@ export function decodeBootstrapMarker(raw: unknown): TerminalBootstrap | undefin
   return {
     requestedLines: typeof payload.requested_lines === 'number' ? payload.requested_lines : 0,
     truncated: payload.truncated !== false,
+    ...(payload.cut_consistency === 'atomic' || payload.cut_consistency === 'unverified'
+      ? { cutConsistency: payload.cut_consistency } : {}),
+    ...(payload.fidelity === 'full-vt'
+      || payload.fidelity === 'screen-only' || payload.fidelity === 'partial'
+      ? { fidelity: payload.fidelity } : {}),
   };
 }

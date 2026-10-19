@@ -147,6 +147,8 @@ fn a_bootstrap_carries_what_was_asked_for_and_whether_it_was_cut() {
         bootstrap: Some(TerminalBootstrapPayload {
             requested_lines: 5000,
             truncated: true,
+            cut_consistency: Some(TerminalCheckpointCutConsistency::Unverified),
+            fidelity: Some(TerminalCheckpointFidelity::Partial),
         }),
     };
     let back: TerminalOutputPayload =
@@ -154,6 +156,51 @@ fn a_bootstrap_carries_what_was_asked_for_and_whether_it_was_cut() {
     let bootstrap = back.bootstrap.expect("the marker survives a round trip");
     assert_eq!(bootstrap.requested_lines, 5000);
     assert!(bootstrap.truncated);
+}
+
+#[test]
+fn bootstrap_cut_consistency_is_independent_of_screen_fidelity() {
+    let marker = TerminalBootstrapPayload {
+        requested_lines: 5000,
+        truncated: false,
+        cut_consistency: Some(TerminalCheckpointCutConsistency::Unverified),
+        fidelity: Some(TerminalCheckpointFidelity::ScreenOnly),
+    };
+    let wire = serde_json::to_value(&marker).unwrap();
+    assert_eq!(wire["cut_consistency"], "unverified");
+    assert_eq!(wire["fidelity"], "screen-only");
+    assert!(
+        wire.get("through_seq").is_none(),
+        "unverified text capture cannot name a stream cut"
+    );
+    let back: TerminalBootstrapPayload = serde_json::from_value(wire).unwrap();
+    assert!(matches!(
+        back.cut_consistency,
+        Some(TerminalCheckpointCutConsistency::Unverified)
+    ));
+    assert!(matches!(
+        back.fidelity,
+        Some(TerminalCheckpointFidelity::ScreenOnly)
+    ));
+}
+
+#[test]
+fn legacy_bootstrap_marker_never_defaults_to_atomic_or_full_vt() {
+    let legacy = serde_json::json!({"requested_lines": 5000, "truncated": false});
+    let parsed: TerminalBootstrapPayload = serde_json::from_value(legacy.clone()).unwrap();
+    assert!(parsed.cut_consistency.is_none());
+    assert!(parsed.fidelity.is_none());
+    assert_eq!(serde_json::to_value(parsed).unwrap(), legacy);
+    assert!(
+        serde_json::from_value::<TerminalBootstrapPayload>(serde_json::json!({
+            "requested_lines": 5000,
+            "truncated": false,
+            "cut_consistency": "verified",
+            "fidelity": "full-vt"
+        }))
+        .is_err(),
+        "unknown cut vocabulary must fail closed"
+    );
 }
 
 /// A frame with no sequence is **byte-identical** to the frame this contract
