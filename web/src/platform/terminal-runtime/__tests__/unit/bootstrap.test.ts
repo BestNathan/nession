@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { decodeBootstrapMarker } from '@/platform/terminal-runtime/bootstrap';
+import { decodeBootstrapMarker, provesVerifiedBootstrapRepair } from '@/platform/terminal-runtime/bootstrap';
 
 describe('decodeBootstrapMarker', () => {
   it('reads what the agent said about the snapshot', () => {
@@ -39,5 +39,40 @@ describe('decodeBootstrapMarker', () => {
       requestedLines: 0,
       truncated: true,
     });
+  });
+});
+
+describe('P2 checkpoint cut and fidelity cannot be conflated (#2008)', () => {
+  it('keeps both facts independently when the agent declares an unverified screen-only capture', () => {
+    const snapshot = decodeBootstrapMarker({
+      requested_lines: 5000, truncated: false,
+      cut_consistency: 'unverified', fidelity: 'screen-only',
+    });
+    expect(snapshot).toEqual({
+      requestedLines: 5000, truncated: false,
+      cutConsistency: 'unverified', fidelity: 'screen-only',
+    });
+    expect(provesVerifiedBootstrapRepair(snapshot)).toBe(false);
+  });
+
+  it('does not clear a gap from legacy, malformed, truncated or partial captures', () => {
+    const marker = (extra: Record<string, unknown>) => decodeBootstrapMarker({
+      requested_lines: 100, truncated: false, ...extra,
+    });
+    expect(provesVerifiedBootstrapRepair(marker({}))).toBe(false);
+    expect(provesVerifiedBootstrapRepair(marker({ cut_consistency: 'verified', fidelity: 'full-vt' }))).toBe(false);
+    expect(provesVerifiedBootstrapRepair(marker({ cut_consistency: 'atomic', fidelity: 'unknown' }))).toBe(false);
+    expect(provesVerifiedBootstrapRepair(marker({ cut_consistency: 'atomic', fidelity: 'partial' }))).toBe(false);
+    expect(provesVerifiedBootstrapRepair(marker({
+      cut_consistency: 'atomic', fidelity: 'full-vt', truncated: true,
+    }))).toBe(false);
+  });
+
+  it('permits a callback to prove recovery only for a future atomic full-VT untruncated cut', () => {
+    const snapshot = decodeBootstrapMarker({
+      requested_lines: 5000, truncated: false,
+      cut_consistency: 'atomic', fidelity: 'full-vt',
+    });
+    expect(provesVerifiedBootstrapRepair(snapshot)).toBe(true);
   });
 });
