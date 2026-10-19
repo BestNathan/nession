@@ -13,7 +13,7 @@ import {prepareGitHubDispatch,verifyPersistedDispatchIntent,
   createGitHubDispatchClient,planGitHubDispatch} from './github-dispatch.mjs';
 import {readIssueWorkflowState,writeIssueWorkflowState} from './state-store.mjs';
 import {publish} from '../../../run-store-cas-push.mjs';
-import {commitDispatchIntent,acknowledgeCommittedDispatch} from './dispatch-store.mjs';
+import {commitDispatchIntent,acknowledgeCommittedDispatch,executeDurableAgentDispatch} from './dispatch-store.mjs';
 
 const registry=JSON.parse(fs.readFileSync('automation/agents/registry.json','utf8'));
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'agent-writeahead-outbox-'));
@@ -148,6 +148,118 @@ try {
   assert.equal(final.state.outbox[0].attempts,1);
   // No-op retry does not create a second Git commit or API call.
   assert.equal(posts,1);
+  // Complete one-shot Driver flow on the SAME real bare remote. The HTTP fake
+  // is allowed only in fixture test mode and checks independent Store readback.
+  const previousLocal=local;
+  const beforeNodeEnv=process.env.NODE_ENV;
+  process.env.NODE_ENV='test';
+  const seedIndependent=(fixtureIssue)=>{
+    local=clone('init-'+fixtureIssue);
+    const req={...request,issue:fixtureIssue};
+    const fresh=startDevelopment(registry,req,authority);
+    commit(fresh,0,'initialize independently controlled Issue '+fixtureIssue);
+    return fresh.outbox[0].id;
+  };
+  try{
+    const runIssue=3002,runAction=seedIndependent(runIssue);
+    let driverPosts=0;
+    const success=await executeDurableAgentDispatch({
+      remote,issue:runIssue,actionId:runAction,registry,signer,now,
+      actionsToken:'trustedActionsWriter',
+      fetchFn:async(url,options)=>{
+        driverPosts++;
+        assert.ok(url.endsWith('/actions/workflows/agent-develop.yml/dispatches'));
+        const checkpoint=readIssueWorkflowState(clone('driver-post-check-'+driverPosts),runIssue);
+        assert.equal(checkpoint.version,2,
+          'the remote CAS intent must exist BEFORE the first GitHub API POST');
+        assert.equal(checkpoint.state.outbox[0].status,'dispatching');
+        assert.equal(options.method,'POST');
+        return {status:200,json:async()=>({workflow_run_id:7002,
+          run_url:'https://api.github.com/repos/BestNathan/nession/actions/runs/7002'})};
+      },
+    });
+    assert.equal(success.status,'dispatched');
+    assert.equal(success.source_run_id,7002);
+    assert.equal(driverPosts,1);
+    const replay=await executeDurableAgentDispatch({
+      remote,issue:runIssue,actionId:runAction,registry,signer,now,
+      actionsToken:'trustedActionsWriter',
+      fetchFn:async()=>{throw Error('must not dispatch again');},
+    });
+    assert.equal(replay.status,'reconcile');
+    assert.equal(replay.action_status,'dispatched');
+    assert.equal(replay.store_commit_sha,success.store_commit_sha);
+    assert.equal(driverPosts,1);
+    assert.equal(readIssueWorkflowState(clone('driver-success-readback'),runIssue)
+      .state.outbox[0].receipt.source_run_id,7002);
+
+    const ambiguousIssue=3003,ambiguousAction=seedIndependent(ambiguousIssue);
+    let ambiguousPosts=0;
+    const ambiguous=await executeDurableAgentDispatch({
+      remote,issue:ambiguousIssue,actionId:ambiguousAction,registry,signer,now,
+      actionsToken:'trustedActionsWriter',
+      fetchFn:async()=>{ambiguousPosts++;return {status:204};},
+    });
+    assert.equal(ambiguous.status,'ambiguous');
+    assert.equal(ambiguousPosts,1);
+    const uncertain=await executeDurableAgentDispatch({
+      remote,issue:ambiguousIssue,actionId:ambiguousAction,registry,signer,now,
+      actionsToken:'trustedActionsWriter',
+      fetchFn:async()=>{ambiguousPosts++;throw Error('unexpected repeated POST');},
+    });
+    assert.equal(uncertain.status,'reconcile');
+    assert.equal(uncertain.action_status,'dispatching');
+    assert.equal(ambiguousPosts,1);
+    assert.equal(readIssueWorkflowState(clone('driver-204-readback'),ambiguousIssue)
+      .state.outbox[0].status,'dispatching');
+
+    const offlineIssue=3004,offlineAction=seedIndependent(offlineIssue);
+    let offlinePosts=0;
+    await assert.rejects(()=>executeDurableAgentDispatch({
+      remote,issue:offlineIssue,actionId:offlineAction,registry,signer,now,
+      actionsToken:'trustedActionsWriter',
+      fetchFn:async()=>{offlinePosts++;throw Error('timeout-after-GitHub-POST');},
+    }),/timeout-after-GitHub-POST/);
+    assert.equal(offlinePosts,1);
+    const offline=await executeDurableAgentDispatch({
+      remote,issue:offlineIssue,actionId:offlineAction,registry,signer,now,
+      actionsToken:'trustedActionsWriter',
+      fetchFn:async()=>{offlinePosts++;throw Error('forbidden redelivery');},
+    });
+    assert.equal(offline.status,'reconcile');
+    assert.equal(offlinePosts,1);
+    assert.equal(readIssueWorkflowState(clone('driver-offline-readback'),offlineIssue)
+      .state.outbox[0].status,'dispatching');
+
+    const rejectedIssue=3006,rejectedAction=seedIndependent(rejectedIssue);
+    let rejectedPosts=0;
+    await assert.rejects(()=>executeDurableAgentDispatch({
+      remote,issue:rejectedIssue,actionId:rejectedAction,registry,signer,now,
+      actionsToken:'trustedActionsWriter',
+      fetchFn:async()=>{rejectedPosts++;return {status:503};},
+    }),/workflow_dispatch failed: 503/);
+    assert.equal(rejectedPosts,1);
+    assert.equal((await executeDurableAgentDispatch({
+      remote,issue:rejectedIssue,actionId:rejectedAction,registry,signer,now,
+      actionsToken:'trustedActionsWriter',
+      fetchFn:async()=>{rejectedPosts++;throw Error('forbidden redelivery');},
+    })).status,'reconcile');
+    assert.equal(rejectedPosts,1);
+    assert.equal(readIssueWorkflowState(clone('driver-http-error-readback'),rejectedIssue)
+      .state.outbox[0].status,'dispatching');
+
+    // Mock endpoints must never be injectable by a production Controller.
+    delete process.env.NODE_ENV;
+    await assert.rejects(()=>executeDurableAgentDispatch({
+      remote,issue:3005,actionId:runAction,registry,signer,now,
+      actionsToken:'trustedActionsWriter',fetchFn:async()=>({status:200}),
+    }),/mock Actions client unavailable outside fixture/);
+  }finally{
+    local=previousLocal;
+    if(beforeNodeEnv===undefined)delete process.env.NODE_ENV;
+    else process.env.NODE_ENV=beforeNodeEnv;
+  }
+
   console.log('Write-ahead dispatch: real Git CAS, pending->prepared->acknowledged, crash/no-redelivery, exact HMAC ticket and replay denial passed');
 }finally{
   key.fill(0);
