@@ -223,12 +223,11 @@ fn fan_out_peers(peers: &mut Vec<SessionPeer>, chunk: OutputChunk) -> usize {
     detached
 }
 
-fn new_output_ack(stream_epoch: u64) -> SubscriberOutputAck {
+fn new_output_ack(stream_epoch: u64) -> Result<SubscriberOutputAck, OutputAckVerdict> {
     SubscriberOutputAck::new(OutputAckBinding {
         subscriber_generation: session_terminal::next_subscriber_generation(),
         stream_epoch,
     })
-    .expect("Agent-issued stream/subscriber identity must be JS-safe")
 }
 
 /// Socket identity and per-attach subscription generation are both required.
@@ -1701,7 +1700,10 @@ p2p_routes! { ctx, msg_type, payload_value;
                             // live bytes that the capture also covers — the
                             // duplicate window #1228 measured on subsequent attach
                             // (#321 SC4).
-                            let output_ack = new_output_ack(shared.stream.epoch);
+                            let output_ack = match new_output_ack(shared.stream.epoch) {
+                                Ok(ack) => ack,
+                                Err(_) => return ctx.err("invalid_stream_identity", "output ACK identity unavailable"),
+                            };
                             shared.peers.push(SessionPeer {
                                 client_id: client_id.clone(),
                                 peer_token: Arc::clone(ctx.peer_token),
@@ -1817,12 +1819,16 @@ p2p_routes! { ctx, msg_type, payload_value;
                             control.ensure_controller(&client_id);
                             let stream = session_terminal::SessionStreamState::new();
                             let input = session_terminal::SessionInputState::new();
+                            let output_ack = match new_output_ack(stream.epoch) {
+                                Ok(ack) => ack,
+                                Err(_) => return ctx.err("invalid_stream_identity", "output ACK identity unavailable"),
+                            };
                             let attached = AttachedSession {
                                 backend: Arc::new(Mutex::new(Box::new(pty_session))),
                                 peers: vec![SessionPeer {
                                     client_id: client_id.clone(),
                                     peer_token: Arc::clone(ctx.peer_token),
-                                    output_ack: new_output_ack(stream.epoch),
+                                    output_ack,
                                     outbound: ctx.outbound.clone(),
                                     output_tx: Some(tx),
                                     detached_for_not_draining: Arc::clone(
@@ -1989,12 +1995,16 @@ p2p_routes! { ctx, msg_type, payload_value;
                             let (tx, rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
                             let detached_for_not_draining = Arc::new(AtomicBool::new(false));
                             let queued_bytes = Arc::new(AtomicUsize::new(0));
+                            let output_ack = match new_output_ack(stream.epoch) {
+                                Ok(ack) => ack,
+                                Err(_) => return ctx.err("invalid_stream_identity", "output ACK identity unavailable"),
+                            };
                             let attached = AttachedSession {
                                 backend: Arc::new(Mutex::new(Box::new(session))),
                                 peers: vec![SessionPeer {
                                     client_id: client_id.clone(),
                                     peer_token: Arc::clone(ctx.peer_token),
-                                    output_ack: new_output_ack(stream.epoch),
+                                    output_ack,
                                     outbound: ctx.outbound.clone(),
                                     output_tx: Some(tx),
                                     detached_for_not_draining: Arc::clone(
@@ -3493,9 +3503,9 @@ mod tests {
 
     #[test]
     fn every_attach_mints_a_new_subscription_generation() {
-        let a = new_output_ack(10);
-        let b = new_output_ack(10);
-        let next_epoch = new_output_ack(11);
+        let a = new_output_ack(10).unwrap();
+        let b = new_output_ack(10).unwrap();
+        let next_epoch = new_output_ack(11).unwrap();
         assert_ne!(a.binding().subscriber_generation, b.binding().subscriber_generation);
         assert_ne!(b.binding().subscriber_generation, next_epoch.binding().subscriber_generation);
         assert_eq!(a.binding().stream_epoch, 10);
@@ -5520,6 +5530,7 @@ mod tests {
         msg_types::TERMINAL_RESIZE,
         msg_types::TERMINAL_CONTROL_ACQUIRE,
         msg_types::TERMINAL_STREAM_RESUME,
+        msg_types::TERMINAL_OUTPUT_APPLIED,
         msg_types::CLIENT_AUTH,
         msg_types::CLIENT_SESSIONS_LIST,
         msg_types::CLIENT_SESSION_ATTACH,
