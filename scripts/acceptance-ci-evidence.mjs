@@ -8,6 +8,7 @@ import { parseIssueE2E } from './issue-e2e-contract.mjs';
 import { collectCrossIssueAcceptance } from './acceptance-cross-issue-receipt.mjs';
 import { collectRelatedBugCompletion } from './acceptance-bug-bootstrap-receipt.mjs';
 import { collectE2eWakeReceipts } from './acceptance-postrun-e2e-receipt.mjs';
+import { collectRoutingProof } from './acceptance-routing-proof.mjs';
 import { verifyWake } from './agent-evidence-waker.mjs';
 import {collectHistoricalRecovery,selfTestHistoricalRecovery} from './acceptance-telemetry-recovery-proof.mjs';
 import {collectWorkflowRegressions,selfTestRegressions} from './acceptance-telemetry-regression-proof.mjs';
@@ -130,7 +131,7 @@ function compactRuns(runs, expectedSha) {
   return retainedRuns(runs, expectedSha).runs.map(compactRun);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], historicalRecovery = null, historicalRegressions = null, exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], replayDenials = [], storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [], verifiedCiCostStudy = null, historicalBrowserDesignProof = null, exactHeadStepsBySha = new Map(), batchReceiptsBySha = new Map(), ancestryReceipts = [], reuseComparison = null, publicPagesObservations = [], publicPagesE2EObservations = [] }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], historicalRecovery = null, historicalRegressions = null, exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], acceptanceRoutingProof = null, replayDenials = [], storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [], verifiedCiCostStudy = null, historicalBrowserDesignProof = null, exactHeadStepsBySha = new Map(), batchReceiptsBySha = new Map(), ancestryReceipts = [], reuseComparison = null, publicPagesObservations = [], publicPagesE2EObservations = [] }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -179,6 +180,7 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     historical_browser_design_regressions: historicalBrowserDesignProof,
     target_push_e2e_runs: targetPushE2eRuns,
     authenticated_post_e2e_wake_receipts: postE2eWakeReceipts,
+    authenticated_acceptance_route_observations: acceptanceRoutingProof,
     exact_head_e2e_steps: exactHeadE2eSteps,
     related_issue_acceptance_receipts: relatedAcceptance,
     related_bug_completion_evidence: relatedBugCompletion,
@@ -1200,6 +1202,11 @@ async function collectCommand(workspace, outFile) {
   const postE2eWakeReceipts=process.env.ACCEPTANCE_STAGE==='post-merge'&&
     String(process.env.ISSUE_NUMBER??'')==='1850'
     ? await collectE2eWakeReceipts({repo,sha,issue:1850,get:githubGet,getText:githubJobLog}) : [];
+  // #2018: bounded independent source routing proof. The historical #1850
+  // SC-03-specific receipt is not applicable to this issue.
+  const acceptanceRoutingProof=process.env.ACCEPTANCE_STAGE==='post-merge'&&
+    String(process.env.ISSUE_NUMBER??'')==='2018'
+      ?await collectRoutingProof({repo,sha,get:githubGet,getText:githubJobLog}) : null;
   // Independently bound Git-byte Case receipts only, never green no-op success.
   const verifiedCaseReceipts = process.env.ACCEPTANCE_STAGE === 'post-merge'
     ? await collectAuthenticatedCaseReadbacks({repo,targetSha:sha,runs:directRuns,request:githubGet})
@@ -1388,7 +1395,7 @@ async function collectCommand(workspace, outFile) {
       .concat(ancestryReceipts.flatMap(entry => entry.e2e_selected_run_receipts)),
     fullGateProvisionReceipts, selectedRunReceipts, targetPushE2eRuns });
   const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls,
-    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, historicalRecovery, historicalRegressions, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts, replayDenials, storePolicyObservability, ancestryRuns, acceptanceBatchReceipts, selectedRunReceiptsBySha, selectedRunReceipts, notRequiredRunReceiptsBySha, notRequiredRunReceipts, fullGateProvisionReceipts, verifiedCiCostStudy, historicalBrowserDesignProof, exactHeadStepsBySha, batchReceiptsBySha, ancestryReceipts, reuseComparison, publicPagesObservations, publicPagesE2EObservations });
+    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, historicalRecovery, historicalRegressions, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts, acceptanceRoutingProof, replayDenials, storePolicyObservability, ancestryRuns, acceptanceBatchReceipts, selectedRunReceiptsBySha, selectedRunReceipts, notRequiredRunReceiptsBySha, notRequiredRunReceipts, fullGateProvisionReceipts, verifiedCiCostStudy, historicalBrowserDesignProof, exactHeadStepsBySha, batchReceiptsBySha, ancestryReceipts, reuseComparison, publicPagesObservations, publicPagesE2EObservations });
   fs.writeFileSync(outFile, JSON.stringify(evidence, null, 2) + '\n');
   console.log(
     'collected acceptance CI evidence for ' + sha +
