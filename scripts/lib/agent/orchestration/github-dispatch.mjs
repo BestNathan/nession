@@ -265,7 +265,7 @@ function authenticatedTicketIssuer(run,mainSha) {
     ['.github/workflows/agent-controller-dispatch.yml','Agent / Controller Dispatch'],
   ]);
   return run?.name===allowed.get(run?.path)&&
-    run?.event==='workflow_dispatch'&&run?.head_branch==='main'&&
+    ['workflow_dispatch','issue_comment'].includes(run?.event)&&run?.head_branch==='main'&&
     run?.actor?.login==='BestNathan'&&
     run?.repository?.full_name===REPOSITORY&&
     run?.head_repository?.full_name===REPOSITORY&&
