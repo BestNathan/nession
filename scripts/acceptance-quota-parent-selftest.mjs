@@ -143,7 +143,12 @@ async function SC03(){
   const wf=readFileSync(resolve(ROOT,'.github/workflows/acceptance-quota-recovery.yml'),'utf8');
   assert.match(wf,/group: acceptance-quota-scan/);
   assert.match(wf,/workflows: \["CI \/ Quality Gate"\]/);
-  return '100 candidate burst limited to 4 PRs and 6 REST calls, 0 POST; attempt cap 3 and no recursive wake';
+  const production=readFileSync(resolve(ROOT,'scripts/acceptance-quota-recovery.mjs'),'utf8');
+  assert.match(production,/total_api_calls:out\.api_calls\+source_api_calls/);
+  assert.match(production,/source_run_id=Number\(process\.env\.SOURCE_RUN_ID\)/);
+  assert.match(production,/source_attempt=Number\(process\.env\.SOURCE_ATTEMPT\)/);
+  assert.match(production,/source_sha=process\.env\.SOURCE_SHA/);
+  return '100 candidate burst limited to 4 PRs and 6 loop reads, no replay, attestation GET counted separately, no recursive wake';
 }
 async function SC04(){
   for(const [status,headers,body,needle] of [
