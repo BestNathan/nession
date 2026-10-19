@@ -87,6 +87,30 @@ export async function verifyWorkerClaimForAck({run,claim,key,reader}) {
     ticket_sha256:sha256(claim.inputs.dispatch_ticket),
     source_run_id:run.id,attempt:run.run_attempt});
 }
+// A failure after model execution must NEVER trigger another model call.
+// Only the exact pre-model admission gate failure can safely rerun the SAME
+// GitHub Run ID (attempt 2), after its Store Run receipt has been committed.
+export function eligiblePreflightRerun(run,jobs) {
+  if(run?.conclusion!=='failure'||run?.run_attempt!==1||
+      jobs?.total_count!==1||!Array.isArray(jobs?.jobs)||
+      jobs.jobs.length!==1)return false;
+  const job=jobs.jobs[0],steps=job?.steps;
+  if(job?.run_id!==run.id||job.status!=='completed'||
+      job.conclusion!=='failure'||job.name!=='developer'||
+      !Array.isArray(steps))return false;
+  const exact=name=>steps.filter(s=>s.name===name);
+  const gate=exact('Require exact authenticated Run ID from immutable Store receipt');
+  const claim=exact('Upload Worker claim for independent HMAC and Store reconciliation');
+  const model=exact('Execute authenticated bounded real Developer slice');
+  if(gate.length!==1||gate[0].conclusion!=='failure'||
+      claim.length!==1||claim[0].conclusion!=='success'||
+      model.length>1)return false;
+  // A denied preflight is the only condition eligible for retry. Never rerun
+  // a Run that started the model, uploaded an outcome, or reached checkpoint IO.
+  if(model.length===1 && ![null,'skipped'].includes(model[0].conclusion))
+    return false;
+  return true;
+}
 async function api(token,resource){
   const r=await fetch('https://api.github.com/repos/'+REPO+resource,{
     headers:{Authorization:'Bearer '+token,Accept:'application/vnd.github+json',
@@ -135,8 +159,10 @@ async function main(){
       receipt:{status:'verified',dispatch_id:attested.action_id,
         source_run_id:attested.source_run_id},
     });
-    const mayRerun=result.status==='acknowledged'&&run.run_attempt===1&&
-      run.conclusion==='failure';
+    const jobs=run.conclusion==='failure'&&run.run_attempt===1
+      ?await api(env.ACTIONS_DISPATCH_TOKEN,
+        '/actions/runs/'+run.id+'/jobs?per_page=100'):null;
+    const mayRerun=eligiblePreflightRerun(run,jobs);
     console.log(JSON.stringify({status:result.status,issue:attested.issue,
       action_id:attested.action_id,run_id:run.id,attempt:run.run_attempt,
       state_version:result.state_version,
