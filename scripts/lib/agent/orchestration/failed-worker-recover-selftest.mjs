@@ -20,7 +20,7 @@ const failStep={name:'Execute authenticated bounded real Developer slice',
   conclusion:'failure'};
 const end={name:'Upload only encrypted native Session and bounded sanitized result',
   conclusion:'skipped'};
-const job={run_id:id,run_attempt:1,name:'developer',status:'completed',
+const job={id:118111376604,run_id:id,run_attempt:1,name:'developer',status:'completed',
   conclusion:'failure',steps:[...passed,failStep,end]};
 const jobs={total_count:1,jobs:[job]};
 const artifact={name:'development-worker-claim-'+id+'-1',
@@ -42,6 +42,7 @@ rejects({...run,head_sha:'b'.repeat(40)});
 rejects({...run,actor:{login:'attacker'}});
 rejects({...run,head_repository:{full_name:'fork/nession'}});
 rejects(run,{total_count:2,jobs:[job,job]});
+rejects(run,{total_count:1,jobs:[{...job,id:118111376605}]});
 rejects(run,{total_count:1,jobs:[{...job,conclusion:'success'}]});
 rejects(run,{total_count:1,jobs:[{...job,steps:[...passed,
   {...failStep,conclusion:'success'},end]}]});
