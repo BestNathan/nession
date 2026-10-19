@@ -333,6 +333,7 @@ export async function acceptAttestedSliceYield({
   if(!old||old.task.type!=='dispatch'||old.task.role!==body.role||
       old.task.task!==body.task||old.task.agent_id!==body.agent_id||
       old.task.sha!==body.input_sha||body.issue!==state.issue||
+      body.state_version>state.version||
       state.assignments[body.role]!==body.agent_id||
       old.receipt?.dispatch_id!==body.action_id||
       (old.status==='dispatched'&&
