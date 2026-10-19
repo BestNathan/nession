@@ -34,6 +34,17 @@ test('full 100+100 workflow windows retain the 100th Test/Ingest receipt',()=>{
    {total_count:1,workflow_runs:[ingestRun(9000)]}]);
  assert.equal(partial.truncated,true);
 });
+test('main push is a valid source observation but not a PR-head attestation',()=>{
+ const push={...testRun(96),event:'push',head_branch:'main'};
+ const result=selectScopedE2ERuns(payload([testRun(95),push],[ingestRun(111)]));
+ assert.deepEqual(result.runs.map(x=>x.id),[111,96,95]);
+ assert.equal(result.truncated,false);
+ // Only the source window is relaxed: noncanonical events and foreign origins still fail.
+ assert.equal(selectScopedE2ERuns(payload([
+   {...testRun(95),event:'workflow_dispatch'}],[ingestRun(111)])),null);
+ assert.equal(selectScopedE2ERuns(payload([
+   {...push,repository:{full_name:'other/repo'}}],[ingestRun(111)])),null);
+});
 test('missing, invalid and duplicated source cannot become trusted evidence',()=>{
  const clean=payload([testRun(95)],[ingestRun(111)]);
  const bads=[
