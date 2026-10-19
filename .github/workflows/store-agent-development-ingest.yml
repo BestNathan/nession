@@ -1,0 +1,116 @@
+name: Store / Agent Development Ingest
+
+# #2010. Independently attest a successful Worker Run and both immutable ZIPs;
+# RSA private key and Store Writer App only exist in this main-owned job, NEVER
+# in the model process. Checkpoint and Slice Yield use orphan Store CAS.
+on:
+  workflow_run:
+    workflows: ["Agent / Development"]
+    branches: [main]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+  issues: read
+
+concurrency:
+  group: store-agent-development-ingest
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.event.workflow_run.event == 'workflow_dispatch' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.actor.login == 'github-actions[bot]' &&
+      github.event.workflow_run.repository.full_name == 'BestNathan/nession' &&
+      github.event.workflow_run.head_repository.full_name == 'BestNathan/nession'
+    runs-on: ubuntu-latest
+    environment: cursor
+    timeout-minutes: 15
+    env:
+      SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+      SOURCE_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+    steps:
+      - name: Checkout only trusted current main ingestion code
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Require negative Run and Artifact verification
+        run: |
+          set -euo pipefail
+          node scripts/lib/agent/orchestration/worker-reconcile-selftest.mjs
+          node scripts/lib/agent/orchestration/worker-preflight-selftest.mjs
+          node scripts/lib/agent/store/remote-selftest.mjs
+          ./gates/run run-store-integrity
+      - name: Independently fetch exact successful Worker and two Artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID" \
+            > "$RUNNER_TEMP/development-source.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID/artifacts?per_page=100" \
+            > "$RUNNER_TEMP/development-artifacts.json"
+          jq -e --argjson id "$SOURCE_RUN_ID" --argjson attempt "$SOURCE_ATTEMPT" '
+            .id == $id and .run_attempt == $attempt and
+            .path == ".github/workflows/agent-develop.yml" and
+            .name == "Agent / Development" and .event == "workflow_dispatch" and
+            .status == "completed" and .conclusion == "success" and
+            .head_branch == "main" and .actor.login == "github-actions[bot]" and
+            .repository.full_name == "BestNathan/nession" and
+            .head_repository.full_name == "BestNathan/nession"
+          ' "$RUNNER_TEMP/development-source.json" >/dev/null
+          for artifact in development-worker-claim development-worker; do
+            name="${artifact}-${SOURCE_RUN_ID}-${SOURCE_ATTEMPT}"
+            id="$(jq -er --arg name "$name" '
+              [.artifacts[] | select(.name==$name and .expired==false)] |
+              if length==1 then .[0].id else empty end
+            ' "$RUNNER_TEMP/development-artifacts.json")"
+            [[ "$id" =~ ^[1-9][0-9]*$ ]]
+            gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$id/zip" \
+              > "$RUNNER_TEMP/$artifact.zip"
+          done
+      - name: Mint existing repository-scoped Store Writer App separately
+        id: writer
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.RUN_STORE_WRITER_APP_ID }}
+          private-key: ${{ secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY }}
+          repositories: nession
+          permission-contents: write
+      - name: Verify native ciphertext and publish committed Checkpoint and Yield
+        env:
+          ACTIONS_READ_TOKEN: ${{ github.token }}
+          STORE_APP_TOKEN: ${{ steps.writer.outputs.token }}
+          STORE_WRITER_PRIVATE_KEY: ${{ secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY }}
+          CURSOR_RESUME_PRIVATE_KEY_B64: ${{ secrets.CURSOR_RESUME_PRIVATE_KEY_B64 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$STORE_APP_TOKEN"
+          test -n "$CURSOR_RESUME_PRIVATE_KEY_B64"
+          export AGENT_STORE_CONTROLLER_REMOTE="https://x-access-token:${STORE_APP_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          node scripts/lib/agent/orchestration/development-ingest.mjs ingest \
+            "$RUNNER_TEMP/development-worker-claim.zip" \
+            "$RUNNER_TEMP/development-worker.zip" \
+            > "$RUNNER_TEMP/development-ingest-receipt.json"
+          jq -e '.status == "yielded" or .status == "replayed"' \
+            "$RUNNER_TEMP/development-ingest-receipt.json" >/dev/null
+          {
+            echo "## Authenticated real Developer native Session checkpoint"
+            echo "- Worker Run: $(jq -r .run_id "$RUNNER_TEMP/development-ingest-receipt.json")"
+            echo "- Result: $(jq -r .status "$RUNNER_TEMP/development-ingest-receipt.json")"
+            echo "- Committed Store Checkpoint: $(jq -r '.checkpoint_commit_sha // "already committed"' "$RUNNER_TEMP/development-ingest-receipt.json")"
+            echo "- Workflow State version: $(jq -r '.workflow_state_version // .state_version' "$RUNNER_TEMP/development-ingest-receipt.json")"
+            echo "- No publisher/PR actions were granted to the model."
+          } >> "$GITHUB_STEP_SUMMARY"
