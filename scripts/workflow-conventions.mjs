@@ -15,6 +15,10 @@ const WORKFLOW_DIR = path.join(ROOT, '.github/workflows');
 // Never silently drop a workflow from this inventory. Remove a retired entry
 // only with replacement/provenance/required-check evidence in the owning PR.
 export const CATALOG = [
+  ['agent-controller-dispatch', 'agent-controller-dispatch.yml', 'Agent / Controller Dispatch', 'agent-controller-dispatch.yml', 'Agent / Controller Dispatch', 'agent'],
+  ['agent-develop', 'agent-develop.yml', 'Agent / Development', 'agent-develop.yml', 'Agent / Development', 'agent'],
+  ['store-agent-dispatch-reconcile', 'store-agent-dispatch-reconcile.yml', 'Store / Agent Dispatch Reconcile', 'store-agent-dispatch-reconcile.yml', 'Store / Agent Dispatch Reconcile', 'store'],
+  ['store-agent-development-ingest', 'store-agent-development-ingest.yml', 'Store / Agent Development Ingest', 'store-agent-development-ingest.yml', 'Store / Agent Development Ingest', 'store'],
   ['agent-sc-acceptance', 'acceptance.yml', 'Acceptance', 'agent-sc-acceptance.yml', 'Agent / SC Acceptance', 'agent'],
   ['agent-issue-audit', 'issue-audit.yml', 'Issue Audit Agent', 'agent-issue-audit.yml', 'Agent / Issue Audit', 'agent'],
   ['agent-provider-smoke', 'agent-provider-smoke.yml', 'AI Agent Provider Smoke', 'agent-provider-smoke.yml', 'Agent / Provider Smoke', 'agent'],
