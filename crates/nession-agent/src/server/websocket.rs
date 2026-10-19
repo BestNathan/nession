@@ -189,13 +189,16 @@ fn fan_out_peers(peers: &mut Vec<SessionPeer>, chunk: OutputChunk) -> usize {
         // release its charge on another task. One oversized frame is enough
         // to evict this peer but cannot stall or evict a healthy observer.
         let bytes = chunk.0.len();
-        let reserved = peer.queued_bytes.fetch_update(
-            Ordering::AcqRel,
-            Ordering::Acquire,
-            |queued| queued.checked_add(bytes).filter(|n| *n <= SUBSCRIBER_QUEUE_BYTES),
-        );
+        let reserved =
+            peer.queued_bytes
+                .fetch_update(Ordering::AcqRel, Ordering::Acquire, |queued| {
+                    queued
+                        .checked_add(bytes)
+                        .filter(|n| *n <= SUBSCRIBER_QUEUE_BYTES)
+                });
         if reserved.is_err() {
-            peer.detached_for_not_draining.store(true, Ordering::Release);
+            peer.detached_for_not_draining
+                .store(true, Ordering::Release);
             detached += 1;
             return false;
         }
@@ -203,7 +206,8 @@ fn fan_out_peers(peers: &mut Vec<SessionPeer>, chunk: OutputChunk) -> usize {
             Ok(()) => true,
             Err(mpsc::error::TrySendError::Full(_)) => {
                 peer.queued_bytes.fetch_sub(bytes, Ordering::AcqRel);
-                peer.detached_for_not_draining.store(true, Ordering::Release);
+                peer.detached_for_not_draining
+                    .store(true, Ordering::Release);
                 detached += 1;
                 false
             }
@@ -3687,7 +3691,10 @@ mod tests {
             },
         ];
         let payload_bytes = SUBSCRIBER_QUEUE_BYTES / 2 + 1;
-        assert_eq!(fan_out_peers(&mut peers, (vec![b'x'; payload_bytes], 1, 1)), 0);
+        assert_eq!(
+            fan_out_peers(&mut peers, (vec![b'x'; payload_bytes], 1, 1)),
+            0
+        );
         assert_eq!(slow_bytes.load(Ordering::Acquire), payload_bytes);
         assert_eq!(fast_bytes.load(Ordering::Acquire), payload_bytes);
 
@@ -3696,7 +3703,10 @@ mod tests {
         release_subscriber_bytes(&fast_bytes, delivered.len());
         assert_eq!(fast_bytes.load(Ordering::Acquire), 0);
 
-        assert_eq!(fan_out_peers(&mut peers, (vec![b'y'; payload_bytes], 1, 2)), 1);
+        assert_eq!(
+            fan_out_peers(&mut peers, (vec![b'y'; payload_bytes], 1, 2)),
+            1
+        );
         assert_eq!(peers.len(), 1);
         assert_eq!(peers[0].client_id, "fast");
         assert!(slow_flag.load(Ordering::Acquire));
@@ -3756,7 +3766,7 @@ mod tests {
         let (outbound, _rx) = P2pOutbound::new();
         let (tx, rx) = mpsc::channel::<OutputChunk>(SUBSCRIBER_QUEUE_SLOTS);
         let detached_for_not_draining = Arc::new(AtomicBool::new(false));
-                            let queued_bytes = Arc::new(AtomicUsize::new(0));
+        let queued_bytes = Arc::new(AtomicUsize::new(0));
         let (peer_outbound, _) = P2pOutbound::new();
         let mut peers = vec![SessionPeer {
             client_id: "test-client".to_string(),
