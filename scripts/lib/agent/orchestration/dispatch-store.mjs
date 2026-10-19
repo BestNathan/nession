@@ -154,18 +154,23 @@ export async function commitAttestedSliceYield({
       !Number.isSafeInteger(checkpoint?.run_id)||checkpoint.run_id<1||
       !Number.isSafeInteger(checkpoint?.attempt)||checkpoint.attempt<1)
     fail('invalid attested Slice source');
-  return withStore(remote,async dir=>{
-    const previous=readIssueWorkflowState(dir,issue);
-    if(!previous.state)fail('authenticated Worker Issue is absent');
-    const advanced=await acceptAttestedSliceYield({
-      state:previous.state,dispatch_ticket:dispatchTicket,keyring,reader,
-      remote,checkpoint,verified_main_sha:verifiedMainSha,now,
-    });
-    if(advanced===previous.state){
-      return {status:'replayed',issue,state_version:previous.version,
+  // Read without retaining a disposable checkout across an await. The writer
+  // must recheck the EXACT version under a fresh Git CAS after attestation.
+  const prior=withStore(remote,dir=>readIssueWorkflowState(dir,issue));
+  if(!prior.state)fail('authenticated Worker Issue is absent');
+  const advanced=await acceptAttestedSliceYield({
+    state:prior.state,dispatch_ticket:dispatchTicket,keyring,reader,
+    remote,checkpoint,verified_main_sha:verifiedMainSha,now,
+  });
+  return withStore(remote,dir=>{
+    const latest=readIssueWorkflowState(dir,issue);
+    if(latest.version!==prior.version)
+      fail('stale checkpoint acceptance; reread trusted Store evidence');
+    if(advanced===prior.state) {
+      return {status:'replayed',issue,state_version:prior.version,
         store_commit_sha:git(dir,['rev-parse','HEAD'])};
     }
-    const published=persist(dir,advanced,previous.version,issue);
+    const published=persist(dir,advanced,prior.version,issue);
     return {status:'yielded',issue,state_version:advanced.version,
       store_commit_sha:published.commit_sha};
   });
