@@ -1627,6 +1627,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                         let client_id = connection_client_id(ctx.client_id).await;
                         let (tx, rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
                         let detached_for_not_draining = Arc::new(AtomicBool::new(false));
+                            let queued_bytes = Arc::new(AtomicUsize::new(0));
                         let wants_bootstrap = payload.needs_bootstrap.unwrap_or(false);
                         let resp = {
                             let mut guard = sessions_lock(ctx.sessions);
@@ -1656,6 +1657,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 detached_for_not_draining: Arc::clone(
                                     &detached_for_not_draining,
                                 ),
+                                queued_bytes: Arc::clone(&queued_bytes),
                             });
                             client_attach_response(payload.session_name.clone(), shared, &client_id)
                         };
@@ -1707,6 +1709,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                             ctx.outbound.clone(),
                             session_name.clone(),
                             detached_for_not_draining,
+                            queued_bytes,
                         );
 
                         return serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
@@ -1751,6 +1754,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                             let client_id = connection_client_id(ctx.client_id).await;
                             let (tx, rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
                             let detached_for_not_draining = Arc::new(AtomicBool::new(false));
+                            let queued_bytes = Arc::new(AtomicUsize::new(0));
                             let mut control = session_terminal::SessionControlState::new();
                             control.ensure_controller(&client_id);
                             let stream = session_terminal::SessionStreamState::new();
@@ -1765,6 +1769,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                     detached_for_not_draining: Arc::clone(
                                         &detached_for_not_draining,
                                     ),
+                                    queued_bytes: Arc::clone(&queued_bytes),
                                 }],
                                 control,
                                 stream,
@@ -1822,6 +1827,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 ctx.outbound.clone(),
                                 session_name.clone(),
                                 detached_for_not_draining,
+                                queued_bytes,
                             );
 
                             // Spawn ONE broadcast task for this session.
@@ -1923,6 +1929,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                             let input = session_terminal::SessionInputState::new();
                             let (tx, rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
                             let detached_for_not_draining = Arc::new(AtomicBool::new(false));
+                            let queued_bytes = Arc::new(AtomicUsize::new(0));
                             let attached = AttachedSession {
                                 backend: Arc::new(Mutex::new(Box::new(session))),
                                 peers: vec![SessionPeer {
@@ -1933,6 +1940,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                     detached_for_not_draining: Arc::clone(
                                         &detached_for_not_draining,
                                     ),
+                                    queued_bytes: Arc::clone(&queued_bytes),
                                 }],
                                 control,
                                 stream,
@@ -1975,6 +1983,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 ctx.outbound.clone(),
                                 session_name.clone(),
                                 detached_for_not_draining,
+                                queued_bytes,
                             );
                             let session_name_clone = session_name.clone();
                             let sessions_for_output = Arc::clone(ctx.sessions);
@@ -3650,6 +3659,7 @@ mod tests {
         let (outbound, _rx) = P2pOutbound::new();
         let (tx, rx) = mpsc::channel::<OutputChunk>(SUBSCRIBER_QUEUE_SLOTS);
         let detached_for_not_draining = Arc::new(AtomicBool::new(false));
+                            let queued_bytes = Arc::new(AtomicUsize::new(0));
         let (peer_outbound, _) = P2pOutbound::new();
         let mut peers = vec![SessionPeer {
             client_id: "test-client".to_string(),
@@ -3657,6 +3667,7 @@ mod tests {
             outbound: peer_outbound,
             output_tx: Some(tx.clone()),
             detached_for_not_draining: Arc::clone(&detached_for_not_draining),
+            queued_bytes: Arc::clone(&queued_bytes),
         }];
 
         spawn_output_forwarder(
@@ -3664,6 +3675,7 @@ mod tests {
             outbound.clone(),
             "s1".to_string(),
             detached_for_not_draining,
+            queued_bytes,
         );
 
         // Saturate the subscriber queue, then let one more chunk evict it —
