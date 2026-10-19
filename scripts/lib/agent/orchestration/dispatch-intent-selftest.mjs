@@ -13,6 +13,7 @@ import {prepareGitHubDispatch,verifyPersistedDispatchIntent,
   createGitHubDispatchClient,planGitHubDispatch} from './github-dispatch.mjs';
 import {readIssueWorkflowState,writeIssueWorkflowState} from './state-store.mjs';
 import {publish} from '../../../run-store-cas-push.mjs';
+import {commitDispatchIntent,acknowledgeCommittedDispatch} from './dispatch-store.mjs';
 
 const registry=JSON.parse(fs.readFileSync('automation/agents/registry.json','utf8'));
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'agent-writeahead-outbox-'));
@@ -81,8 +82,16 @@ try {
     /not pending/);
 
   // A real Git push must happen before any external GitHub POST.
-  const written=commit(prepared,1,'write ahead dispatch intent, BEFORE GitHub API');
-  assert.equal(written.replayed,false);
+  const written=commitDispatchIntent({remote,issue,actionId:next.id,registry,signer});
+  assert.equal(written.status,'committed');
+  assert.deepEqual(written.plan,plan);
+  assert.match(written.store_commit_sha,/^[a-f0-9]{40}$/);
+  const blocked=commitDispatchIntent({remote,issue,actionId:next.id,registry,signer});
+  assert.equal(blocked.status,'reconcile');
+  assert.equal(blocked.action_status,'dispatching');
+  assert.equal(blocked.store_commit_sha,written.store_commit_sha);
+  assert.equal(Object.hasOwn(blocked,'plan'),false,
+    'a restarted trusted Controller must never get a second POST plan');
   const resumed=clone('recover-from-new-controller-run');
   const loaded=readIssueWorkflowState(resumed,issue);
   assert.equal(loaded.version,2);
@@ -117,9 +126,20 @@ try {
   assert.throws(()=>recordDispatch(acknowledged,acknowledged.version,next.id,
     {...answer,source_run_id:5002}),/conflicting/);
 
-  const old=local;local=resumed;
-  try{commit(acknowledged,2,'source-bound GitHub Run 5001 receipt');}
-  finally{local=old;}
+  const ack=acknowledgeCommittedDispatch({remote,issue,actionId:next.id,
+    ticketSha256:intent.ticket_sha256,receipt:answer});
+  assert.equal(ack.status,'acknowledged');
+  assert.equal(ack.state_version,3);
+  const ackReplay=acknowledgeCommittedDispatch({remote,issue,actionId:next.id,
+    ticketSha256:intent.ticket_sha256,receipt:answer});
+  assert.equal(ackReplay.status,'replayed');
+  assert.equal(ackReplay.store_commit_sha,ack.store_commit_sha);
+  assert.throws(()=>acknowledgeCommittedDispatch({remote,issue,actionId:next.id,
+    ticketSha256:intent.ticket_sha256,receipt:{...answer,source_run_id:5002}}),
+    /conflicting/);
+  assert.throws(()=>acknowledgeCommittedDispatch({remote,issue,actionId:next.id,
+    ticketSha256:'0'.repeat(64),receipt:{status:'accepted',dispatch_id:next.id}}),
+    /missing authenticated/);
   const final=readIssueWorkflowState(clone('third-reader'),issue);
   assert.equal(final.version,3);
   assert.equal(final.state.outbox[0].receipt.source_run_id,5001);
