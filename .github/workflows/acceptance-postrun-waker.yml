@@ -1,13 +1,14 @@
 name: Acceptance / Post-Run Waker
 
 # A post-merge Agent cannot attest its own Orchestrator's completion while
-# running. Both fixture evidence and the exact-main-SHA E2E tests may finish
-# AFTER the Agent. Re-evaluate after independently verified completion,
+# running. Fixture evidence, exact-main-SHA E2E and public Pages deployment
+# may finish AFTER the Agent. Re-evaluate after independently verified completion,
 # using the same trusted evaluator and Issue updater, not a second projector.
 on:
   workflow_run:
-    # Keep E2E completion independent of Issue/PR mutable comments.
-    workflows: ["Acceptance / Orchestrator", "CI / Run Store Fixture Evidence", "E2E / Tests"]
+    # Include the independently HTTPS-verified main Pages publication as a waker;
+    # never infer SC Pass from merely receiving this notification.
+    workflows: ["Acceptance / Orchestrator", "CI / Run Store Fixture Evidence", "E2E / Tests", "Deploy / Public Pages"]
     # Only successful main-push sources can authorize post-merge verification.
     # Filtering the event here prevents thousands of PR completion no-op runs,
     # rather than creating a downstream run solely to skip its select job.
@@ -76,7 +77,9 @@ jobs:
               (.name == "CI / Run Store Fixture Evidence" and
                .path == ".github/workflows/ci-run-store-fixture-evidence.yml") or
               (.name == "E2E / Tests" and
-               .path == ".github/workflows/e2e-tests.yml")
+               .path == ".github/workflows/e2e-tests.yml") or
+              (.name == "Deploy / Public Pages" and
+               .path == ".github/workflows/deploy-pages.yml")
             ) and
             .event == "push" and .head_branch == "main" and
             .head_sha == $sha and .status == "completed" and
