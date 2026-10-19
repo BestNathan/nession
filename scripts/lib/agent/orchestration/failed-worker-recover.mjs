@@ -14,7 +14,7 @@ export function verifyKnownFailure(run,jobs,artifacts) {
     run?.head_repository?.full_name!==REPO)deny('not the exact completed trusted Worker');
   if(jobs?.total_count!==1||jobs?.jobs?.length!==1)deny('ambiguous job list');
   const job=jobs.jobs[0];
-  if(job.run_id!==run.id||job.run_attempt!==1||
+  if(job.id!==118111376604||job.run_id!==run.id||job.run_attempt!==1||
     job.name!=='developer'||job.status!=='completed'||job.conclusion!=='failure')
     deny('invalid failed job identity');
   const step=name=>job.steps?.filter(s=>s.name===name);
@@ -52,5 +52,18 @@ export async function verifyKnownFailureLive(token,fetchFn=fetch) {
   const run=await json('/actions/runs/'+CONTROLLED_FAILED_RUN);
   const jobs=await json('/actions/runs/'+CONTROLLED_FAILED_RUN+'/jobs?per_page=100');
   const artifacts=await json('/actions/runs/'+CONTROLLED_FAILED_RUN+'/artifacts?per_page=100');
-  return verifyKnownFailure(run,jobs,artifacts);
+  const verified=verifyKnownFailure(run,jobs,artifacts);
+  const response=await fetchFn('https://api.github.com/repos/'+REPO+
+    '/actions/jobs/118111376604/logs',{
+    headers:{Authorization:'Bearer '+token,
+      Accept:'application/vnd.github+json'}});
+  if(!response.ok)deny('source Worker log unavailable');
+  const reportedSize=Number(response.headers?.get?.('content-length'));
+  if(Number.isFinite(reportedSize)&&reportedSize>1024*1024)
+    deny('source Worker log exceeds bound');
+  const text=await response.text();
+  if(text.length>1024*1024||
+    !text.includes('Local SDK sandboxing was requested, but sandboxing is not supported in this environment.'))
+    deny('source Worker did not fail with the independently observed SDK isolation incompatibility');
+  return verified;
 }
