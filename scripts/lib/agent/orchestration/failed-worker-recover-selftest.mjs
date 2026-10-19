@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
-import {verifyKnownFailure,CONTROLLED_FAILED_RUN,CONTROLLED_FAILED_SHA}
+import {verifyKnownFailure,verifyKnownFailureLive,CONTROLLED_FAILED_RUN,CONTROLLED_FAILED_SHA}
   from './failed-worker-recover.mjs';
 const sha=CONTROLLED_FAILED_SHA,id=CONTROLLED_FAILED_RUN;
 const run={id,run_attempt:1,head_sha:sha,head_branch:'main',
@@ -55,4 +55,21 @@ rejects(run,undefined,{total_count:1,artifacts:[
   {...artifact,name:'development-worker-result-'+id+'-1'}]});
 rejects(run,undefined,{total_count:1,artifacts:[
   {...artifact,workflow_run:{id:id+1,head_sha:sha}}]});
+const request=async (url)=>{
+  const data=url.endsWith('/jobs?per_page=100')?jobs:
+    url.endsWith('/artifacts?per_page=100')?artifacts:
+    url.endsWith('/logs')?'Local SDK sandboxing was requested, but sandboxing is not supported in this environment.':run;
+  return {ok:true,status:200,headers:{get:()=>null},
+    json:async()=>data,text:async()=>data};
+};
+assert.equal((await verifyKnownFailureLive('test-token',request)).verified,true);
+await assert.rejects(()=>verifyKnownFailureLive('test-token',async url=>{
+  if(url.endsWith('/logs'))
+    return {ok:true,headers:{get:()=>null},text:async()=>'unrelated error'};
+  return request(url);
+}),/source Worker did not fail/);
+await assert.rejects(()=>verifyKnownFailureLive('test-token',async url=>{
+  if(url.endsWith('/logs'))return {ok:false,status:403};
+  return request(url);
+}),/log unavailable/);
 console.log('Trusted failed-run recovery: exact native Run, job stage, claim, fork/duplicate and model-outcome denial passed');
