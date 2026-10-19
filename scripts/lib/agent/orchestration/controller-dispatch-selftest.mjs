@@ -37,9 +37,9 @@ for(const event of [
   {...commentEvent,issue:{number:1997,pull_request:{url:'https://evil'}}},
   {...commentEvent,comment:{...commentEvent.comment,user:{login:'fork'}}},
   {...commentEvent,comment:{...commentEvent.comment,body:'/nession dispatch issue=1998'}},
-])assert.throws(()=>assertDispatchAuthority({...commentValid,event}),/authenticated owner\\/main/);
+])assert.throws(()=>assertDispatchAuthority({...commentValid,event}),/authenticated owner\/main/);
 assert.throws(()=>assertDispatchAuthority({...commentValid,
-  environment:{...commentEnvironment,GITHUB_ACTOR:'fork'}}),/authenticated owner\\/main/);
+  environment:{...commentEnvironment,GITHUB_ACTOR:'fork'}}),/authenticated owner\/main/);
 const denied=[
   {environment:{...environment,GITHUB_REF:'refs/pull/12/merge'}},
   {environment:{...environment,GITHUB_ACTOR:'attacker'}},
