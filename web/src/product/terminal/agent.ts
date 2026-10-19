@@ -356,6 +356,36 @@ function subscribeInputAck(
   });
 }
 
+function submitOutputApplied(
+  surface: PluginSurface,
+  sessionName: string,
+  ack: TerminalOutputAppliedAck,
+): boolean {
+  const values = [
+    ack.subscriberGeneration, ack.streamEpoch,
+    ack.rendererGeneration, ack.appliedThrough,
+  ];
+  if (!values.every(Number.isSafeInteger)
+    || ack.subscriberGeneration <= 0 || ack.streamEpoch <= 0
+    || ack.rendererGeneration <= 0 || ack.appliedThrough < 0) {
+    return false;
+  }
+  try {
+    // An independent client->Agent operation, never the input ACK.
+    // Submitting only records a claimed parser prefix, not a credit receipt.
+    surface.send('agent.terminal.output.applied', {
+      session_name: sessionName,
+      subscriber_generation: ack.subscriberGeneration,
+      stream_epoch: ack.streamEpoch,
+      renderer_generation: ack.rendererGeneration,
+      applied_through: ack.appliedThrough,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi {
   const lease = createAgentControlLease(surface);
 
@@ -390,31 +420,8 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
       });
     },
 
-    sendOutputApplied: (sessionName: string, ack: TerminalOutputAppliedAck): boolean => {
-      const values = [
-        ack.subscriberGeneration, ack.streamEpoch,
-        ack.rendererGeneration, ack.appliedThrough,
-      ];
-      if (!values.every(Number.isSafeInteger)
-        || ack.subscriberGeneration <= 0 || ack.streamEpoch <= 0
-        || ack.rendererGeneration <= 0 || ack.appliedThrough < 0) {
-        return false;
-      }
-      try {
-        // This is an operation with an Agent provider descriptor, not the
-        // Agent->client input ACK notification or a transport receipt.
-        surface.send('agent.terminal.output.applied', {
-          session_name: sessionName,
-          subscriber_generation: ack.subscriberGeneration,
-          stream_epoch: ack.streamEpoch,
-          renderer_generation: ack.rendererGeneration,
-          applied_through: ack.appliedThrough,
-        });
-        return true;
-      } catch {
-        return false;
-      }
-    },
+    sendOutputApplied: (sessionName, ack) =>
+      submitOutputApplied(surface, sessionName, ack),
 
     sendResize: (sessionName: string, cols: number, rows: number): void => {
       const state = lease.getControlState(sessionName);
