@@ -52,7 +52,7 @@ function persist(dir,state,previousVersion,issue) {
 // Begin the exact external side effect ONLY after this function returns
 // status='committed'. If it returns 'reconcile', never repeat HTTP POST.
 // The persistent intent is an immutable no-redelivery fence after a crash.
-export function commitDispatchIntent({remote,issue,actionId,registry,signer}) {
+export function commitDispatchIntent({remote,issue,actionId,registry,signer,sourceVerifier=null}) {
   if(!Number.isSafeInteger(issue)||issue<1||
       !/^[a-f0-9]{64}$/.test(actionId??''))fail('invalid Issue/Action identity');
   return withStore(remote,dir=>{
@@ -66,6 +66,10 @@ export function commitDispatchIntent({remote,issue,actionId,registry,signer}) {
       return {status:'reconcile',issue,action_id:actionId,
         action_status:candidate.status,state_version:previous.version,
         store_commit_sha:git(dir,['rev-parse','HEAD'])};
+    }
+    if(sourceVerifier!==null){
+      if(typeof sourceVerifier!=='function')fail('invalid main SHA source verifier');
+      sourceVerifier(candidate.task.sha);
     }
     const {plan,prepared}=prepareGitHubDispatch(state,actionId,registry,signer);
     const published=persist(dir,prepared,previous.version,issue);
@@ -140,7 +144,7 @@ export function acknowledgeCommittedDispatch({
 // the Actions workflow dispatch endpoint. No secret enters the Worker plan.
 export async function executeDurableAgentDispatch({
   remote,issue,actionId,registry,signer,actionsToken,now=Date.now(),
-  fetchFn=null,
+  fetchFn=null,sourceVerifier=null,
 }) {
   if(typeof actionsToken!=='string'||actionsToken.length<8)
     fail('trusted Actions dispatch token required');
@@ -149,7 +153,7 @@ export async function executeDurableAgentDispatch({
     fail('trusted Controller HMAC signer required');
   if(fetchFn!==null&&(process.env.NODE_ENV!=='test'||typeof fetchFn!=='function'))
     fail('mock Actions client unavailable outside fixture tests');
-  const issued=commitDispatchIntent({remote,issue,actionId,registry,signer});
+  const issued=commitDispatchIntent({remote,issue,actionId,registry,signer,sourceVerifier});
   if(issued.status!=='committed')return issued;
   const keyring={[signer.key_id]:signer.key};
   const verified=withStore(remote,dir=>{
