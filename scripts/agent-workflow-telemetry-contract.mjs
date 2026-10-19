@@ -19,6 +19,11 @@ const TRUSTED_TELEMETRY_SOURCES = new Map([
     events: new Set(['workflow_dispatch']),
     workflow_dispatch_main_only: true,
   }],
+  ['.github/workflows/acceptance-verified-stage.yml', {
+    workflow_id: 'requirement-acceptance',
+    events: new Set(['issue_comment']),
+    workflow_dispatch_main_only: true,
+  }],
   ['.github/workflows/agent-sc-acceptance.yml', {
     workflow_id: 'requirement-acceptance',
     events: new Set(['workflow_dispatch']),
