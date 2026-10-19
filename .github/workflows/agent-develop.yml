@@ -111,7 +111,7 @@ jobs:
           NODE
       - name: Require pinned Cursor Provider and public-only Session sealing key
         env:
-          CURSOR_SDK_VERSION: ${{ vars.CURSOR_SDK_VERSION }}
+          CURSOR_SDK_VERSION: ${{ vars.CURSOR_SDK_VERSION || '1.0.37' }}
           CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
         shell: bash
         run: |
