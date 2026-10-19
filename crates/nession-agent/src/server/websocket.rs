@@ -46,7 +46,7 @@ use nession_runtime::lane::{KeyedLane, Work};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, Mutex};
@@ -79,6 +79,8 @@ struct SessionPeer {
     outbound: P2pOutbound,
     /// PTY multi-client fan-out; `None` for control-mode (direct outbound).
     output_tx: Option<mpsc::Sender<OutputChunk>>,
+    /** Pending bytes charged per subscriber, never shared across peers. */
+    queued_bytes: Arc<AtomicUsize>,
     /// Set by [`fan_out_peers`] when it drops this peer for a full queue.
     ///
     /// The forwarder's receiver ends for several reasons — the session ended,
@@ -141,6 +143,8 @@ struct AttachedSession {
 /// the Server reaches for a relayed client (`server::outbound::send_terminal`),
 /// applied where the terminal is actually served.
 const SUBSCRIBER_QUEUE_SLOTS: usize = 64;
+/// Independent byte cap for the per-subscriber mpsc queue (#1983).
+const SUBSCRIBER_QUEUE_BYTES: usize = 2 * 1024 * 1024;
 
 /// Fan one chunk of terminal output out to every subscriber of a session.
 ///
@@ -167,24 +171,50 @@ fn fan_out(subscribers: &mut Vec<mpsc::Sender<OutputChunk>>, chunk: OutputChunk)
     detached
 }
 
+fn release_subscriber_bytes(queued: &AtomicUsize, bytes: usize) {
+    // A disconnected raw-test sender may have skipped reservations; never
+    // underflow. Production's only fan-out writer reserves before try_send.
+    let _ = queued.fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+        Some(n.saturating_sub(bytes))
+    });
+}
+
 fn fan_out_peers(peers: &mut Vec<SessionPeer>, chunk: OutputChunk) -> usize {
     let mut detached = 0usize;
     peers.retain(|peer| {
         let Some(tx) = &peer.output_tx else {
             return true;
         };
+        // Reserve before delivery; the receiver can immediately dequeue and
+        // release its charge on another task. One oversized frame is enough
+        // to evict this peer but cannot stall or evict a healthy observer.
+        let bytes = chunk.0.len();
+        let reserved =
+            peer.queued_bytes
+                .fetch_update(Ordering::AcqRel, Ordering::Acquire, |queued| {
+                    queued
+                        .checked_add(bytes)
+                        .filter(|n| *n <= SUBSCRIBER_QUEUE_BYTES)
+                });
+        if reserved.is_err() {
+            peer.detached_for_not_draining
+                .store(true, Ordering::Release);
+            detached += 1;
+            return false;
+        }
         match tx.try_send(chunk.clone()) {
             Ok(()) => true,
             Err(mpsc::error::TrySendError::Full(_)) => {
-                // Tell the forwarder *why* its channel is ending before the
-                // drop ends it — the one cause that must reach the client as
-                // a closed connection (#1226).
+                peer.queued_bytes.fetch_sub(bytes, Ordering::AcqRel);
                 peer.detached_for_not_draining
                     .store(true, Ordering::Release);
                 detached += 1;
                 false
             }
-            Err(mpsc::error::TrySendError::Closed(_)) => false,
+            Err(mpsc::error::TrySendError::Closed(_)) => {
+                peer.queued_bytes.fetch_sub(bytes, Ordering::AcqRel);
+                false
+            }
         }
     });
     detached
@@ -306,9 +336,13 @@ fn spawn_output_forwarder(
     outbound: P2pOutbound,
     session_name: String,
     detached_for_not_draining: Arc<AtomicBool>,
+    queued_bytes: Arc<AtomicUsize>,
 ) {
     tokio::spawn(async move {
         while let Some((bytes, stream_epoch, stream_seq)) = rx.recv().await {
+            // Receiving relinquishes the mpsc queue's buffered byte charge.
+            // The downstream socket has an independent bounded terminal lane.
+            release_subscriber_bytes(&queued_bytes, bytes.len());
             use base64::Engine;
             let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
             let output = TerminalOutputPayload {
@@ -1601,6 +1635,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                         let client_id = connection_client_id(ctx.client_id).await;
                         let (tx, rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
                         let detached_for_not_draining = Arc::new(AtomicBool::new(false));
+                            let queued_bytes = Arc::new(AtomicUsize::new(0));
                         let wants_bootstrap = payload.needs_bootstrap.unwrap_or(false);
                         let resp = {
                             let mut guard = sessions_lock(ctx.sessions);
@@ -1630,6 +1665,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 detached_for_not_draining: Arc::clone(
                                     &detached_for_not_draining,
                                 ),
+                                queued_bytes: Arc::clone(&queued_bytes),
                             });
                             client_attach_response(payload.session_name.clone(), shared, &client_id)
                         };
@@ -1681,6 +1717,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                             ctx.outbound.clone(),
                             session_name.clone(),
                             detached_for_not_draining,
+                            queued_bytes,
                         );
 
                         return serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
@@ -1725,6 +1762,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                             let client_id = connection_client_id(ctx.client_id).await;
                             let (tx, rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
                             let detached_for_not_draining = Arc::new(AtomicBool::new(false));
+                            let queued_bytes = Arc::new(AtomicUsize::new(0));
                             let mut control = session_terminal::SessionControlState::new();
                             control.ensure_controller(&client_id);
                             let stream = session_terminal::SessionStreamState::new();
@@ -1739,6 +1777,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                     detached_for_not_draining: Arc::clone(
                                         &detached_for_not_draining,
                                     ),
+                                    queued_bytes: Arc::clone(&queued_bytes),
                                 }],
                                 control,
                                 stream,
@@ -1796,6 +1835,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 ctx.outbound.clone(),
                                 session_name.clone(),
                                 detached_for_not_draining,
+                                queued_bytes,
                             );
 
                             // Spawn ONE broadcast task for this session.
@@ -1897,6 +1937,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                             let input = session_terminal::SessionInputState::new();
                             let (tx, rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
                             let detached_for_not_draining = Arc::new(AtomicBool::new(false));
+                            let queued_bytes = Arc::new(AtomicUsize::new(0));
                             let attached = AttachedSession {
                                 backend: Arc::new(Mutex::new(Box::new(session))),
                                 peers: vec![SessionPeer {
@@ -1907,6 +1948,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                     detached_for_not_draining: Arc::clone(
                                         &detached_for_not_draining,
                                     ),
+                                    queued_bytes: Arc::clone(&queued_bytes),
                                 }],
                                 control,
                                 stream,
@@ -1949,6 +1991,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 ctx.outbound.clone(),
                                 session_name.clone(),
                                 detached_for_not_draining,
+                                queued_bytes,
                             );
                             let session_name_clone = session_name.clone();
                             let sessions_for_output = Arc::clone(ctx.sessions);
@@ -3620,10 +3663,110 @@ mod tests {
     /// the *verdict*, and `P2pOutbound::close` is where a verdict becomes a
     /// connection ending.
     #[tokio::test]
+    async fn byte_pressure_detaches_only_the_slow_terminal_subscriber() {
+        let (slow_tx, _slow_rx) = mpsc::channel::<OutputChunk>(SUBSCRIBER_QUEUE_SLOTS);
+        let (fast_tx, mut fast_rx) = mpsc::channel::<OutputChunk>(SUBSCRIBER_QUEUE_SLOTS);
+        let slow_bytes = Arc::new(AtomicUsize::new(0));
+        let fast_bytes = Arc::new(AtomicUsize::new(0));
+        let slow_flag = Arc::new(AtomicBool::new(false));
+        let fast_flag = Arc::new(AtomicBool::new(false));
+        let (slow_outbound, _) = P2pOutbound::new();
+        let (fast_outbound, _) = P2pOutbound::new();
+        let mut peers = vec![
+            SessionPeer {
+                client_id: "slow".to_owned(),
+                peer_token: Arc::new(()),
+                outbound: slow_outbound,
+                output_tx: Some(slow_tx),
+                queued_bytes: Arc::clone(&slow_bytes),
+                detached_for_not_draining: Arc::clone(&slow_flag),
+            },
+            SessionPeer {
+                client_id: "fast".to_owned(),
+                peer_token: Arc::new(()),
+                outbound: fast_outbound,
+                output_tx: Some(fast_tx),
+                queued_bytes: Arc::clone(&fast_bytes),
+                detached_for_not_draining: Arc::clone(&fast_flag),
+            },
+        ];
+        let payload_bytes = SUBSCRIBER_QUEUE_BYTES / 2 + 1;
+        assert_eq!(
+            fan_out_peers(&mut peers, (vec![b'x'; payload_bytes], 1, 1)),
+            0
+        );
+        assert_eq!(slow_bytes.load(Ordering::Acquire), payload_bytes);
+        assert_eq!(fast_bytes.load(Ordering::Acquire), payload_bytes);
+
+        // The healthy client's receiver drains; the slow client's does not.
+        let (delivered, _, _) = fast_rx.try_recv().expect("healthy frame");
+        release_subscriber_bytes(&fast_bytes, delivered.len());
+        assert_eq!(fast_bytes.load(Ordering::Acquire), 0);
+
+        assert_eq!(
+            fan_out_peers(&mut peers, (vec![b'y'; payload_bytes], 1, 2)),
+            1
+        );
+        assert_eq!(peers.len(), 1);
+        assert_eq!(peers[0].client_id, "fast");
+        assert!(slow_flag.load(Ordering::Acquire));
+        assert!(!fast_flag.load(Ordering::Acquire));
+        assert_eq!(fast_bytes.load(Ordering::Acquire), payload_bytes);
+        let (_, epoch, seq) = fast_rx.try_recv().expect("healthy client progresses");
+        assert_eq!((epoch, seq), (1, 2));
+        release_subscriber_bytes(&fast_bytes, payload_bytes);
+        assert_eq!(fast_bytes.load(Ordering::Acquire), 0);
+    }
+
+    #[tokio::test]
+    async fn oversized_frame_eviction_is_bounded_even_below_slot_capacity() {
+        let (tx, mut rx) = mpsc::channel::<OutputChunk>(SUBSCRIBER_QUEUE_SLOTS);
+        let queued_bytes = Arc::new(AtomicUsize::new(0));
+        let detached_for_not_draining = Arc::new(AtomicBool::new(false));
+        let (outbound, _) = P2pOutbound::new();
+        let mut peers = vec![SessionPeer {
+            client_id: "big".to_owned(),
+            peer_token: Arc::new(()),
+            outbound,
+            output_tx: Some(tx),
+            queued_bytes: Arc::clone(&queued_bytes),
+            detached_for_not_draining: Arc::clone(&detached_for_not_draining),
+        }];
+        let oversized = vec![b'x'; SUBSCRIBER_QUEUE_BYTES + 1];
+        assert_eq!(fan_out_peers(&mut peers, (oversized, 9, 10)), 1);
+        assert!(peers.is_empty());
+        assert_eq!(queued_bytes.load(Ordering::Acquire), 0);
+        assert!(detached_for_not_draining.load(Ordering::Acquire));
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn closed_subscriber_refunds_queued_byte_reservation() {
+        let (tx, rx) = mpsc::channel::<OutputChunk>(SUBSCRIBER_QUEUE_SLOTS);
+        drop(rx);
+        let queued_bytes = Arc::new(AtomicUsize::new(0));
+        let detached_for_not_draining = Arc::new(AtomicBool::new(false));
+        let (outbound, _) = P2pOutbound::new();
+        let mut peers = vec![SessionPeer {
+            client_id: "closed".to_owned(),
+            peer_token: Arc::new(()),
+            outbound,
+            output_tx: Some(tx),
+            queued_bytes: Arc::clone(&queued_bytes),
+            detached_for_not_draining: Arc::clone(&detached_for_not_draining),
+        }];
+        assert_eq!(fan_out_peers(&mut peers, (b"hello".to_vec(), 1, 1)), 0);
+        assert!(peers.is_empty());
+        assert_eq!(queued_bytes.load(Ordering::Acquire), 0);
+        assert!(!detached_for_not_draining.load(Ordering::Acquire));
+    }
+
+    #[tokio::test]
     async fn a_detached_subscriber_closes_the_connection() {
         let (outbound, _rx) = P2pOutbound::new();
         let (tx, rx) = mpsc::channel::<OutputChunk>(SUBSCRIBER_QUEUE_SLOTS);
         let detached_for_not_draining = Arc::new(AtomicBool::new(false));
+        let queued_bytes = Arc::new(AtomicUsize::new(0));
         let (peer_outbound, _) = P2pOutbound::new();
         let mut peers = vec![SessionPeer {
             client_id: "test-client".to_string(),
@@ -3631,6 +3774,7 @@ mod tests {
             outbound: peer_outbound,
             output_tx: Some(tx.clone()),
             detached_for_not_draining: Arc::clone(&detached_for_not_draining),
+            queued_bytes: Arc::clone(&queued_bytes),
         }];
 
         spawn_output_forwarder(
@@ -3638,6 +3782,7 @@ mod tests {
             outbound.clone(),
             "s1".to_string(),
             detached_for_not_draining,
+            queued_bytes,
         );
 
         // Saturate the subscriber queue, then let one more chunk evict it —
@@ -3685,6 +3830,7 @@ mod tests {
             outbound.clone(),
             "s1".to_string(),
             Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicUsize::new(0)),
         );
 
         // `already_attached` drops the old peer's sender without setting the
@@ -3734,6 +3880,7 @@ mod tests {
             outbound.clone(),
             "s1".to_string(),
             Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicUsize::new(0)),
         );
 
         tx.send((b"chunk".to_vec(), 1, 1))
