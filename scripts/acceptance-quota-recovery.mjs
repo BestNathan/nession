@@ -80,6 +80,16 @@ export async function reconcile(request,log=()=>{}){
   const selected=candidates(response.workflow_runs,pulls);
   let retried=0;
   for(const {run,pr} of selected){
+    // Exact-attempt Jobs are immutable evidence. Reject non-preparation
+    // failures *before* expensive CI/E2E and PR/Run lookups. This does not
+    // grant replay authority: live PR, exact-head sources and Run are still
+    // authenticated below, immediately before the POST.
+    const jobs=await bounded(root+'actions/runs/'+run.id+'/attempts/'+
+      run.run_attempt+'/jobs?per_page=100');
+    if(!recoverablePrepareJobs(jobs,run)){
+      log('Skip non-preparation or stale failed-job evidence for PR #'+pr.number);
+      continue;
+    }
     let valid=true;
     for(const [file,name] of SOURCES){
       const data=await bounded(root+'actions/workflows/'+file+'/runs?event=pull_request&head_sha='+
@@ -99,12 +109,6 @@ export async function reconcile(request,log=()=>{}){
       current.run_attempt!==run.run_attempt||
       current.run_attempt>=MAX_ATTEMPTS||current.status!=='completed'||
       current.conclusion!=='failure')continue;
-    const jobs=await bounded(root+'actions/runs/'+run.id+'/attempts/'+
-      run.run_attempt+'/jobs?per_page=100');
-    if(!recoverablePrepareJobs(jobs,run)){
-      log('Skip non-preparation or stale failed-job evidence for PR #'+pr.number);
-      continue;
-    }
     await bounded(root+'actions/runs/'+run.id+'/rerun-failed-jobs','POST');
     retried++;
     log('Requested failed jobs replay; PR #'+pr.number+' sha '+run.head_sha+
@@ -214,6 +218,31 @@ async function selfTest(){
     assert.equal((await reconcile(mocked({jobs:result}))).retried,0);
     assert.equal(seen.filter(x=>x.startsWith('POST ')).length,0);
   }
+  // Three failed downstream-gate attempts must use only the one run-list,
+  // one open-PR list and three exact-attempt Jobs reads: 5 API requests,
+  // never CI/E2E lookups, live PR lookups or rerun POSTs.
+  const burstRuns=[run(),run({id:10,head_sha:'b'.repeat(40),head_branch:'fix/b'}),
+    run({id:11,head_sha:'c'.repeat(40),head_branch:'fix/c'})];
+  const burstPRs=[pull(),pull({number:8,head:{sha:'b'.repeat(40),ref:'fix/b',repo:{full_name:REPO}}}),
+    pull({number:9,head:{sha:'c'.repeat(40),ref:'fix/c',repo:{full_name:REPO}}})];
+  const burstPaths=[];
+  const burstResult=await reconcile(async(path,method='GET')=>{
+    burstPaths.push(method+' '+path);
+    if(method==='POST')throw Error('unexpected non-prepare replay');
+    if(path.includes('acceptance-orchestrator.yml/runs'))
+      return {workflow_runs:burstRuns};
+    if(path.includes('/pulls?'))return burstPRs;
+    if(path.includes('/attempts/1/jobs?')){
+      const idMatch=path.match(/actions\/runs\/(\d+)\/attempts\/1\/jobs/);
+      assert.ok(idMatch,'untrusted jobs path');
+      return {total_count:1,jobs:[job({run_id:Number(idMatch[1]),
+        name:'pre-merge-gate'})]};
+    }
+    throw Error('non-prepare failure must not look up '+path);
+  });
+  assert.deepEqual(burstResult,{candidates:3,retried:0,api_calls:5});
+  assert.equal(burstPaths.length,5);
+  assert.equal(burstPaths.filter(x=>x.includes('/attempts/1/jobs?')).length,3);
   assert.equal((await reconcile(mocked({freshPR:pull({state:'closed'})}))).retried,0);
   for(const code of [403,429]){
     const err=classify(code,{'retry-after':'90'},'rate limit exceeded');
