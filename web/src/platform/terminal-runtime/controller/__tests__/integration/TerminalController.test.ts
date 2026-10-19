@@ -434,7 +434,7 @@ describe('TerminalController', () => {
       requestedLines: 5000, truncated: false,
       cutConsistency: 'unverified', fidelity: 'screen-only',
     });
-    expect(h.spy).toHaveBeenNthCalledWith(1, '\\x1b[2J\\x1b[H', expect.any(Function));
+    expect(h.spy).toHaveBeenNthCalledWith(1, '\x1b[2J\x1b[H', expect.any(Function));
     h.finish(); // screen-only reset
     h.finish(); // parsed tmux text, not atomic stream cut
     expect(controller.hasSessionOutput).toBe(true);
