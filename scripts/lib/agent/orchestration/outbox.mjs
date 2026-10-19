@@ -365,6 +365,12 @@ export function recordSliceYield(state,expectedVersion,actionId,checkpoint,sourc
 // immutable old Run evidence retained. A 204, timeout, in-progress or unknown
 // result must never use this path. Caller independently authenticates the
 // original GitHub Run, exact failed step, absence of checkpoint and identity.
+export function failedDeveloperRetryActionId(issue,actionId,runId) {
+  if(!isIssue(issue)||!HEX64.test(actionId??'')||!positive(runId))
+    reject('invalid failed Run deterministic retry identity');
+  return hash([issue,actionId,runId,'native-sdk-sandbox-isolation-retry-v1']);
+}
+
 export function recordAttestedDeveloperFailure(state,expectedVersion,actionId,source) {
   validateDevelopmentState(state);
   if(state.version!==expectedVersion)reject('stale failed-Run recovery CAS');
@@ -378,8 +384,7 @@ export function recordAttestedDeveloperFailure(state,expectedVersion,actionId,so
       old.status!=='dispatched'||old.receipt?.status!=='verified'||
       old.receipt.source_run_id!==source.run_id||old.attempts>=MAX_ATTEMPTS)
     reject('failure recovery requires exactly the authenticated failed Worker Run');
-  const nextId=hash([state.issue,actionId,source.run_id,
-    'native-sdk-sandbox-isolation-retry-v1']);
+  const nextId=failedDeveloperRetryActionId(state.issue,actionId,source.run_id);
   if(state.outbox.length>=MAX_OUTBOX||
       state.outbox.some(x=>x.id===nextId)||
       state.outbox.some(x=>x.id!==actionId&&x.status==='pending'&&
