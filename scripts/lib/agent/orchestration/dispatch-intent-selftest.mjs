@@ -135,6 +135,8 @@ try {
   assert.equal(ackReplay.status,'replayed');
   assert.equal(ackReplay.store_commit_sha,ack.store_commit_sha);
   assert.throws(()=>acknowledgeCommittedDispatch({remote,issue,actionId:next.id,
+    ticketSha256:'f'.repeat(64),receipt:answer}),/unmatched immutable/);
+  assert.throws(()=>acknowledgeCommittedDispatch({remote,issue,actionId:next.id,
     ticketSha256:intent.ticket_sha256,receipt:{...answer,source_run_id:5002}}),
     /conflicting/);
   assert.throws(()=>acknowledgeCommittedDispatch({remote,issue,actionId:next.id,
