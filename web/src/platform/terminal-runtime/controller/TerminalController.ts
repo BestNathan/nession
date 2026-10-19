@@ -7,7 +7,7 @@ import type {
   TerminalSession,
 } from '../types';
 import type { TerminalTransport } from '../transport/TerminalTransport';
-import type { TerminalBootstrap } from '../bootstrap';
+import { provesVerifiedBootstrapRepair, type TerminalBootstrap } from '../bootstrap';
 import type { TerminalStreamPosition } from '../streamApply';
 import { InputRouter } from '../input/InputRouter';
 import { InputSourceManager } from '../input/InputSourceManager';
@@ -53,7 +53,7 @@ const BOOTSTRAP_SCREEN_RESET = '\x1b[2J\x1b[H';
 
 export interface TerminalControllerEvents {
   onTransportReady?: (ready: boolean) => void;
-  /** A complete remote history snapshot has finished xterm parsing (#1645). */
+  /** A cut-proven, full-VT snapshot has finished xterm parsing (#2008). */
   onBootstrapApplied?: () => void;
   /** Parser writer pressure/stall invalidates synchronized output. */
   onStreamTruncated?: () => void;
@@ -312,7 +312,7 @@ export class TerminalController {
           this.markSessionOutput();
           // A truncated pane capture can repaint the current screen, but
           // cannot establish that the missing history was recovered.
-          if (!bootstrap?.truncated) {
+          if (provesVerifiedBootstrapRepair(bootstrap)) {
             this.events?.onBootstrapApplied?.();
           }
         }
