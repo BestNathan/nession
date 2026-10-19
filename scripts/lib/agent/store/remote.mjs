@@ -113,10 +113,16 @@ export function publishEncryptedAgentCheckpoint({
 }
 // Restore only within a trusted caller that keeps the AES key out of the
 // model executor. The returned Buffer must be explicitly zeroed by its caller.
-export function fetchEncryptedAgentCheckpoint({remote,identity,expected,key}){
+export function fetchEncryptedAgentCheckpoint({
+  remote,identity,expected,key,commitment=null,
+}){
   if(!Buffer.isBuffer(key)||key.length!==32)fail('invalid restore key');
   const {checkout,parent}=cloneRoot(remote);
   try{
+    // Re-verify inside THIS immutable checkout immediately before decrypt.
+    // A separate preflight read does not guard against a changed head between
+    // two clones; commit-pinning prevents restoring the wrong native Session.
+    if(commitment!==null)inspectCommittedCheckpoint(checkout,{identity,...commitment});
     const result=restoreEncryptedCheckpoint(checkout,identity,expected,key);
     return {head:result.head,native_bytes:result.native_bytes,
       commit_sha:git(checkout,['rev-parse','HEAD'])};
@@ -129,8 +135,8 @@ export function fetchEncryptedAgentCheckpoint({remote,identity,expected,key}){
 // identity's immutable head must still match, or resume fails closed.
 // This only attests an encrypted Git object. Private-key decryption is still a
 // separate trusted restore operation before the model executor starts.
-export function verifyCommittedCheckpoint({
-  remote,identity,commit_sha,version,ciphertext_sha256,
+function inspectCommittedCheckpoint(checkout,{
+  identity,commit_sha,version,ciphertext_sha256,
 }) {
   if(!HEX40.test(commit_sha??'')||!Number.isSafeInteger(version)||version<1||
       !/^[a-f0-9]{64}$/.test(ciphertext_sha256??'')||
@@ -139,8 +145,7 @@ export function verifyCommittedCheckpoint({
       !Number.isSafeInteger(identity?.issue)||identity.issue<1) {
     fail('invalid signed checkpoint commitment');
   }
-  const {checkout,parent}=cloneRoot(remote);
-  try {
+  {
     const headSha=git(checkout,['rev-parse','HEAD']);
     if(!HEX40.test(headSha))fail('invalid current Store SHA');
     git(checkout,['merge-base','--is-ancestor',commit_sha,headSha]);
@@ -171,5 +176,15 @@ export function verifyCommittedCheckpoint({
     }
     return {store_ref:'refs/heads/'+REF,commit_sha,version,ciphertext_sha256,
       current_store_sha:headSha};
+  }
+}
+export function verifyCommittedCheckpoint({
+  remote,identity,commit_sha,version,ciphertext_sha256,
+}) {
+  const {checkout,parent}=cloneRoot(remote);
+  try {
+    return inspectCommittedCheckpoint(checkout,{
+      identity,commit_sha,version,ciphertext_sha256,
+    });
   }finally{fs.rmSync(parent,{recursive:true,force:true});}
 }
