@@ -232,6 +232,34 @@ fn new_output_ack(stream_epoch: u64) -> Result<SubscriberOutputAck, OutputAckVer
 
 /// Socket identity and per-attach subscription generation are both required.
 /// Nothing here grants credit for queued/dequeued bytes.
+/// Never hand a caller the retained *tail* of an incomplete ring: it is
+/// not a contiguous suffix of the requested cursor. A failed replay requires
+/// a future verified checkpoint (or an explicit degraded/unavailable state).
+fn build_terminal_resume_response(
+    request: &TerminalStreamResumePayload,
+    stream: &session_terminal::SessionStreamState,
+) -> TerminalStreamResumeResponse {
+    let replay = stream.replay_since(request.stream_epoch, request.after_seq);
+    let recovery = match replay.as_ref() {
+        None => TerminalResumeRecovery::Unavailable,
+        Some(r) if r.complete => TerminalResumeRecovery::Complete,
+        Some(_) => TerminalResumeRecovery::CheckpointRequired,
+    };
+    TerminalStreamResumeResponse {
+        session_name: request.session_name.clone(),
+        stream_epoch: stream.epoch,
+        epoch_match: replay.is_some(),
+        first_available_seq: replay.as_ref().map(|r| r.first_available_seq),
+        complete: replay.as_ref().map(|r| r.complete),
+        recovery: Some(recovery),
+        events: if recovery == TerminalResumeRecovery::Complete {
+            replay.map_or_else(Vec::new, |r| r.events)
+        } else {
+            Vec::new()
+        },
+    }
+}
+
 fn accept_output_ack(
     peers: &mut [SessionPeer],
     client_id: &str,
@@ -652,7 +680,7 @@ pub use nession_protocol::contracts::terminal::v1::{
     TerminalControlAcquirePayload, TerminalControlAcquireResponse, TerminalControlChangedPayload,
     TerminalInputAckPayload, TerminalInputPayload, TerminalOutputAppliedPayload,
     TerminalOutputPayload, TerminalResizePayload, TerminalStreamResumePayload,
-    TerminalStreamResumeResponse,
+    TerminalResumeRecovery, TerminalStreamResumeResponse,
 };
 
 // --- Protocol helpers ---
@@ -2314,23 +2342,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                             &format!("not attached to session: {}", payload.session_name),
                         );
                     };
-                    // One call decides everything the answer says (#1304): the
-                    // replay is `None` exactly when the request is about another
-                    // stream, so `epoch_match` is derived from it rather than
-                    // asked alongside it. Two sources for the same fact is how
-                    // they come to disagree — an answer with a matching epoch
-                    // and no window, or the reverse.
-                    let replay = session
-                        .stream
-                        .replay_since(payload.stream_epoch, payload.after_seq);
-                    TerminalStreamResumeResponse {
-                        session_name: payload.session_name.clone(),
-                        stream_epoch: session.stream.epoch,
-                        epoch_match: replay.is_some(),
-                        first_available_seq: replay.as_ref().map(|r| r.first_available_seq),
-                        complete: replay.as_ref().map(|r| r.complete),
-                        events: replay.map_or_else(Vec::new, |r| r.events),
-                    }
+                    build_terminal_resume_response(&payload, &session.stream)
                 };
                 serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                     .unwrap_or_default()
