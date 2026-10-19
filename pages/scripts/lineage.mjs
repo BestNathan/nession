@@ -22,6 +22,11 @@ function canonicalEdge(raw){
     raw.verification!=='authenticated_at_attestation'||!fields(raw.origin,originKeys)||
     raw.origin.repository!==REPO||!exact(raw.origin.source_ref_sha)||
     !positive(raw.origin.producer_run_id)||!positive(raw.origin.producer_attempt)||
+    // The claimed original Producer Run/Attempt must be the SAME Agent Run
+    // this public causal edge names. An unrelated (even valid) GitHub Run
+    // cannot authenticate a different Agent's output.
+    raw.origin.producer_run_id!==raw.run_id||
+    raw.origin.producer_attempt!==raw.attempt||
     !originDigest.test(raw.origin.result_digest)||!originDigest.test(raw.origin.writer_receipt_digest)||
     raw.origin.source_url!=='https://github.com/'+REPO+'/actions/runs/'+raw.origin.producer_run_id)
   throw Error('unverified lineage source identity');
@@ -82,8 +87,9 @@ export function validateLineageProjection(v){
      !['developer','reviewer'].includes(e.role)||!validAgent(e.agent_id)||
      !positive(e.run_id)||!positive(e.attempt)||!validAction(e.action_id)||
      e.slice_id!==null||e.verification!=='authenticated_at_attestation'||
-     !exact(e.source_ref_sha)||e.source_url!=='https://github.com/'+REPO+'/actions/runs/'+e.run_id&&
-       !/^https:\/\/github\.com\/BestNathan\/nession\/actions\/runs\/[1-9][0-9]*$/.test(e.source_url))
+     // Every public source link must identify THIS Agent Run, not merely
+     // another syntactically valid Actions run in the same repository.
+     !exact(e.source_ref_sha)||e.source_url!=='https://github.com/'+REPO+'/actions/runs/'+e.run_id)
      throw Error('invalid public causal edge');
    if(seen.has(edgeId(e)))throw Error('duplicate public causal edge');
    seen.add(edgeId(e));
