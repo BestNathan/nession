@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_projection_receipt",
+  "outcome": "applied",
+  "issue": 1995,
+  "run_id": 39212699016,
+  "run_attempt": 1,
+  "target_sha": "c1ba7e9eaf2e1028602dfd903751ae6dfbc03ae7",
+  "plan_digest": "b25867093153c065cbfeebe66cca3d525d4c828c85d171063b78fe4fb55dccc1",
+  "artifact_digest": "sha256:349a6e63f5d058d42ab61276750dd573efdf6403abebf80fed6918f6268c7640",
+  "ingest_run_id": 39213193368,
+  "ingest_attempt": 1,
+  "declaration_digest": "27a100790a0224090c87ac8941d357ee0223e565e652df34fd29ac71eeffa2a3",
+  "before_body_sha256": "3d673313c122380e8bdc77616f8898d537fc9cf355dc0dc664d23d02bc877193",
+  "body_sha256": "d0504550bd5baa5cff9b674d5d68508363fc45c1e9f6dcd897883cae5a9f1fad",
+  "readback_body": "## Requirements: Strict Agent/Producer Run identity in public lineage schema\n\n**Parent:** #1906; **upstream dependency:** #1974. Bounded, independently deliverable **fail-closed reader/contract hardening** — not a claim of a real certified Developer/Reviewer producer. `agent-store` root was independently rechecked empty on 2026-10-19 and main HEAD `b54358fbb13a48c8952b07ac864d3c882fce9cba`.\n\n### Problem\n\nPublic lineage ingestion in `pages/scripts/lineage.mjs` binds `origin.source_url` to `origin.producer_run_id` on input, but does **not** require `origin.producer_run_id` / `origin.producer_attempt` to match the public edge's `run_id` / `attempt`. In `validateLineageProjection()`, output validation accepts **any** numeric GitHub Actions run URL from this repository when it does not match `e.run_id` (see ```85:86:pages/scripts/lineage.mjs```), rather than requiring equality with the edge's Run ID. A fabricated source can pair a plausible same-repo run URL with a different Agent Run/Attempt while appearing schema-valid. **Live impact:** no production attested source is attached (build passes `attested=null`); public Lineage must remain `unavailable` until hardening lands.\n\n### Constraints and design\n\n- Bind `origin.producer_run_id` and `producer_attempt` to the edge's actual `run_id` / `attempt`. Preserve distinct `action_id` versus logical `slice_id=null`; do not assume an action is a Slice.\n- Public `source_url` validator must strictly equal `https://github.com/BestNathan/nession/actions/runs/<edge.run_id>`; refuse other well-formed run URLs.\n- Exercise positive fixture plus negative mismatches: same-repo other Run ID, wrong attempt, forged/foreign URL, cross-source revision, conflicting duplicate, stale PR HEAD, malicious extra fields.\n- Do not wire unverified in-record `verified` flags, `agent-store` Git JSON, or Timeline cross-ref into a public `verified` status; no new Writer.\n- Keep `pages/` standalone, unchanged `web/`, source links pinned, no claims of orphan immutability.\n\n**Does not fulfill #1906 SC-01.** Full lineage remains blocked on a real independently authenticated producer and Writer receipt from #1974.\n\n### Success Criteria\n\n- [ ] SC-01 Exact source Producer Run/Attempt identity is required at ingestion and source URL equals public edge Run ID, with source-ref and current PR HEAD boundaries unchanged.\n- [ ] SC-02 Strict output schema and deterministic negative fixtures reject plausible same-repo unrelated Run URLs, attempt swaps, forged provenance and stale PR revisions without turning unavailable into verified.\n- [ ] SC-03 Exact PR-head Pages CI, Quality, Case Smoke, selected E2E and canonical Acceptance gates independently succeed; no manual parent SC checkbox or unverified real producer claim.\n\n## Acceptance Plan\n\n```yaml\nacceptance:\n  SC-01:\n    when: pr\n    method: agent\n  SC-02:\n    when: pr\n    method: agent\n  SC-03:\n    when: pr\n    method: agent\n```\n\n## Acceptance Report\n\n| Criterion | Result | Evidence |\n|---|---|---|\n| SC-01 | Pending | Await patch and exact-SHA CI |\n| SC-02 | Pending | Await source identity negative Cases |\n| SC-03 | Pending | Await exact HEAD mandatory gates |\n\n## E2E Verification\n\n### New\n\n- none: reuse the existing Pages browser regression IDs; this change adds no new E2E ID.\n\n### Regression\n\n- pages-overview\n- pages-evidence\n\n## E2E Report\n\n| ID | Type | Result | Evidence |\n|---|---|---|---|\n| pages-evidence | Regression | Pass | run 39212699016/1, SHA c1ba7e9eaf2e1028602dfd903751ae6dfbc03ae7, contract 27a100790a0224090c87ac8941d357ee0223e565e652df34fd29ac71eeffa2a3, plan b25867093153c065cbfeebe66cca3d525d4c828c85d171063b78fe4fb55dccc1, tests 3/3 (https://github.com/BestNathan/nession/actions/runs/39212699016) |\n| pages-overview | Regression | Pass | run 39212699016/1, SHA c1ba7e9eaf2e1028602dfd903751ae6dfbc03ae7, contract 27a100790a0224090c87ac8941d357ee0223e565e652df34fd29ac71eeffa2a3, plan b25867093153c065cbfeebe66cca3d525d4c828c85d171063b78fe4fb55dccc1, tests 4/4 (https://github.com/BestNathan/nession/actions/runs/39212699016) |\n\n## Product alignment\n\n- [ ] Does this move Nession toward VISION.md?\n- [ ] Does it obey PRINCIPLE.md?\n- [ ] Were relevant docs/design/* sources checked?\n- [ ] Is any deviation explicit?\n\n---\n**Status:** Draft\n",
+  "patch_updated_at": "2026-10-19T07:00:23Z",
+  "readback_updated_at": "2026-10-19T07:00:23Z",
+  "rows": [
+    {
+      "id": "pages-evidence",
+      "result": "Pass",
+      "evidence": "run 39212699016/1, SHA c1ba7e9eaf2e1028602dfd903751ae6dfbc03ae7, contract 27a100790a0224090c87ac8941d357ee0223e565e652df34fd29ac71eeffa2a3, plan b25867093153c065cbfeebe66cca3d525d4c828c85d171063b78fe4fb55dccc1, tests 3/3 (https://github.com/BestNathan/nession/actions/runs/39212699016)"
+    },
+    {
+      "id": "pages-overview",
+      "result": "Pass",
+      "evidence": "run 39212699016/1, SHA c1ba7e9eaf2e1028602dfd903751ae6dfbc03ae7, contract 27a100790a0224090c87ac8941d357ee0223e565e652df34fd29ac71eeffa2a3, plan b25867093153c065cbfeebe66cca3d525d4c828c85d171063b78fe4fb55dccc1, tests 4/4 (https://github.com/BestNathan/nession/actions/runs/39212699016)"
+    }
+  ]
+}
