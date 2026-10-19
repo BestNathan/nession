@@ -67,6 +67,12 @@ env_snapshots: Array<EnvSnapshot>,
 needs_bootstrap?: boolean | null, };
 export type ClientAttachResponse = { session_name: string, control_generation?: number | null, control_role?: string | null, controller_client_id?: string | null, stream_epoch?: number | null, stream_cursor?: number | null, 
 /**
+ * Issued by the Agent on every attach/replacement, unrelated to the
+ * controller's ControlLease generation. Absent for legacy providers.
+ * This value is *not* evidence of a parsed stream/checkpoint cut.
+ */
+subscriber_generation?: number | null, 
+/**
  * The agent's input epoch and applied cursor, stated on attach (#1307).
  *
  * This is the **reconcile**, and it is here rather than on a wire of its
@@ -150,6 +156,12 @@ needs_bootstrap?: boolean | null, };
 
 /** The payload the provider answers with. */
 export type ClientAttachReply = { session_name: string, control_generation?: number | null, control_role?: string | null, controller_client_id?: string | null, stream_epoch?: number | null, stream_cursor?: number | null, 
+/**
+ * Issued by the Agent on every attach/replacement, unrelated to the
+ * controller's ControlLease generation. Absent for legacy providers.
+ * This value is *not* evidence of a parsed stream/checkpoint cut.
+ */
+subscriber_generation?: number | null, 
 /**
  * The agent's input epoch and applied cursor, stated on attach (#1307).
  *

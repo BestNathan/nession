@@ -287,6 +287,7 @@ export class SessionRuntime {
     streamEpoch?: number;
     streamCursor?: number;
     preserveAppliedCursor?: boolean;
+    subscriberGeneration?: number;
     inputEpoch?: number;
     inputAppliedThrough?: number;
     controlGeneration?: number;
@@ -460,6 +461,7 @@ export class SessionRuntime {
   getP2pAttachSeed(): {
     streamEpoch?: number;
     streamCursor?: number;
+    subscriberGeneration?: number;
     inputEpoch?: number;
     inputAppliedThrough?: number;
     controlGeneration?: number;
@@ -541,9 +543,38 @@ export class SessionRuntime {
   noteStreamEventParsed(position: TerminalStreamPosition): void {
     const binding = this.terminalAppliedBinding;
     if (this.disposed || !binding) { return; }
-    this.terminalAppliedCursor.recordParsed(binding, position);
-    if (!this.terminalAppliedCursor.snapshot(binding)) {
+    const outcome = this.terminalAppliedCursor.recordParsed(binding, position);
+    const snapshot = this.terminalAppliedCursor.snapshot(binding);
+    if (!snapshot) {
       this.terminalAppliedBinding = null;
+      return;
+    }
+    // Never turn a delivered frame, attach cursor, unverified tmux capture,
+    // duplicate parser callback or Relay event into an output ACK. The *only*
+    // entry is a contiguous parser advance on the current renderer binding.
+    const seed = this.p2pAttachSeed;
+    const api = this.agentTerminalApi;
+    const subscriberGeneration = seed?.subscriberGeneration;
+    if (outcome !== 'advanced'
+      || snapshot.appliedSeq <= snapshot.ackSentSeq
+      || this.effectiveForcedRelay
+      || this.attachState.phase !== 'attached'
+      || this.attachedTransportGeneration !== this.transportGeneration
+      || this.liveTransportGeneration !== this.transportGeneration
+      || !api?.sendOutputApplied
+      || !Number.isSafeInteger(subscriberGeneration) || !subscriberGeneration
+      || !seed?.streamEpoch || seed.streamEpoch !== snapshot.streamEpoch) {
+      return;
+    }
+    // ACK submission is not delivery confirmation or byte-credit release.
+    // On a rejected send, retain ackSentSeq so the source is not forged.
+    if (api.sendOutputApplied(this.config.sessionName, {
+      subscriberGeneration,
+      streamEpoch: snapshot.streamEpoch,
+      rendererGeneration: snapshot.generation,
+      appliedThrough: snapshot.appliedSeq,
+    })) {
+      this.terminalAppliedCursor.recordAckSubmitted(binding, snapshot.appliedSeq);
     }
   }
 
@@ -698,6 +729,7 @@ export class SessionRuntime {
         this.p2pAttachSeed = {
           streamEpoch: result.streamEpoch,
           streamCursor: result.streamCursor,
+          subscriberGeneration: result.subscriberGeneration,
           preserveAppliedCursor,
           inputEpoch: result.inputEpoch,
           inputAppliedThrough: result.inputAppliedThrough,

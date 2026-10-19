@@ -32,6 +32,7 @@ use crate::server::execution::ExecutionPolicy::{Inline, Key, Ordered, Query};
 use crate::server::execution::{
     ExecutionLanes, ResourceKey, DEFAULT_MUTATIONS_IN_FLIGHT, SHUTDOWN_GRACE,
 };
+use crate::server::output_ack::{OutputAckBinding, OutputAckVerdict, SubscriberOutputAck};
 use crate::server::session_terminal::{self, InputSequence, InputVerdict};
 // The lanes' boxed work is the shared type, and the constructors take this
 // socket's own bounds — see `nession_runtime::lane`.
@@ -76,6 +77,8 @@ type OutputChunk = (Vec<u8>, u64, u64);
 struct SessionPeer {
     client_id: String,
     peer_token: Arc<()>,
+    /// Fresh for each attach, independent of ControlLease/queue dequeue.
+    output_ack: SubscriberOutputAck,
     outbound: P2pOutbound,
     /// PTY multi-client fan-out; `None` for control-mode (direct outbound).
     output_tx: Option<mpsc::Sender<OutputChunk>>,
@@ -220,6 +223,45 @@ fn fan_out_peers(peers: &mut Vec<SessionPeer>, chunk: OutputChunk) -> usize {
     detached
 }
 
+fn new_output_ack(stream_epoch: u64) -> Result<SubscriberOutputAck, OutputAckVerdict> {
+    SubscriberOutputAck::new(OutputAckBinding {
+        subscriber_generation: session_terminal::next_subscriber_generation(),
+        stream_epoch,
+    })
+}
+
+/// Socket identity and per-attach subscription generation are both required.
+/// Nothing here grants credit for queued/dequeued bytes.
+fn accept_output_ack(
+    peers: &mut [SessionPeer],
+    client_id: &str,
+    peer_token: &Arc<()>,
+    payload: &TerminalOutputAppliedPayload,
+    issued_head: u64,
+) -> Result<OutputAckVerdict, &'static str> {
+    let Some(peer) = peers
+        .iter_mut()
+        .find(|peer| peer.client_id == client_id && Arc::ptr_eq(&peer.peer_token, peer_token))
+    else {
+        return Err("not_current_subscriber");
+    };
+    if !(1..=(1_u64 << 53) - 1).contains(&payload.renderer_generation) {
+        return Err("invalid_renderer_generation");
+    }
+    let verdict = peer.output_ack.observe(
+        OutputAckBinding {
+            subscriber_generation: payload.subscriber_generation,
+            stream_epoch: payload.stream_epoch,
+        },
+        payload.applied_through,
+        issued_head,
+    );
+    match verdict {
+        OutputAckVerdict::Advanced { .. } | OutputAckVerdict::Duplicate => Ok(verdict),
+        _ => Err("invalid_output_ack"),
+    }
+}
+
 async fn connection_client_id(client_id: &Arc<Mutex<Option<String>>>) -> String {
     client_id
         .lock()
@@ -248,6 +290,11 @@ fn client_attach_response(
         controller_client_id: session.control.controller_client_id.clone(),
         stream_epoch: Some(session.stream.epoch),
         stream_cursor: Some(session.stream.cursor()),
+        subscriber_generation: session
+            .peers
+            .iter()
+            .find(|peer| peer.client_id == client_id)
+            .map(|peer| peer.output_ack.binding().subscriber_generation),
         // Stated on every attach, including a re-attach to a session this
         // agent already holds — which is the case they are for. A client whose
         // transport was rebuilt does not know what became of the input it had
@@ -492,6 +539,7 @@ pub mod msg_types {
     pub const TERMINAL_RESIZE: &str = "agent.terminal.resize";
     pub const TERMINAL_CONTROL_ACQUIRE: &str = "agent.terminal.control.acquire";
     pub const TERMINAL_STREAM_RESUME: &str = "agent.terminal.stream.resume";
+    pub const TERMINAL_OUTPUT_APPLIED: &str = "agent.terminal.output.applied";
 
     // Web UI → Agent (compatibility layer)
     pub const CLIENT_AUTH: &str = "client.auth";
@@ -602,8 +650,8 @@ pub use nession_protocol::contracts::file::v1::{
 pub use nession_protocol::contracts::terminal::v1::{
     TerminalBootstrapPayload, TerminalControlAcquirePayload, TerminalControlAcquireResponse,
     TerminalControlChangedPayload, TerminalInputAckPayload, TerminalInputPayload,
-    TerminalOutputPayload, TerminalResizePayload, TerminalStreamResumePayload,
-    TerminalStreamResumeResponse,
+    TerminalOutputAppliedPayload, TerminalOutputPayload, TerminalResizePayload,
+    TerminalStreamResumePayload, TerminalStreamResumeResponse,
 };
 
 // --- Protocol helpers ---
@@ -1653,10 +1701,15 @@ p2p_routes! { ctx, msg_type, payload_value;
                             // live bytes that the capture also covers — the
                             // duplicate window #1228 measured on subsequent attach
                             // (#321 SC4).
+                            let output_ack = match new_output_ack(shared.stream.epoch) {
+                                Ok(ack) => ack,
+                                Err(_) => return ctx.err("invalid_stream_identity", "output ACK identity unavailable"),
+                            };
                             shared.peers.push(SessionPeer {
                                 client_id: client_id.clone(),
                                 peer_token: Arc::clone(ctx.peer_token),
                                 outbound: ctx.outbound.clone(),
+                                output_ack,
                                 output_tx: if wants_bootstrap {
                                     None
                                 } else {
@@ -1767,11 +1820,16 @@ p2p_routes! { ctx, msg_type, payload_value;
                             control.ensure_controller(&client_id);
                             let stream = session_terminal::SessionStreamState::new();
                             let input = session_terminal::SessionInputState::new();
+                            let output_ack = match new_output_ack(stream.epoch) {
+                                Ok(ack) => ack,
+                                Err(_) => return ctx.err("invalid_stream_identity", "output ACK identity unavailable"),
+                            };
                             let attached = AttachedSession {
                                 backend: Arc::new(Mutex::new(Box::new(pty_session))),
                                 peers: vec![SessionPeer {
                                     client_id: client_id.clone(),
                                     peer_token: Arc::clone(ctx.peer_token),
+                                    output_ack,
                                     outbound: ctx.outbound.clone(),
                                     output_tx: Some(tx),
                                     detached_for_not_draining: Arc::clone(
@@ -1938,11 +1996,16 @@ p2p_routes! { ctx, msg_type, payload_value;
                             let (tx, rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
                             let detached_for_not_draining = Arc::new(AtomicBool::new(false));
                             let queued_bytes = Arc::new(AtomicUsize::new(0));
+                            let output_ack = match new_output_ack(stream.epoch) {
+                                Ok(ack) => ack,
+                                Err(_) => return ctx.err("invalid_stream_identity", "output ACK identity unavailable"),
+                            };
                             let attached = AttachedSession {
                                 backend: Arc::new(Mutex::new(Box::new(session))),
                                 peers: vec![SessionPeer {
                                     client_id: client_id.clone(),
                                     peer_token: Arc::clone(ctx.peer_token),
+                                    output_ack,
                                     outbound: ctx.outbound.clone(),
                                     output_tx: Some(tx),
                                     detached_for_not_draining: Arc::clone(
@@ -2256,6 +2319,32 @@ p2p_routes! { ctx, msg_type, payload_value;
                 };
                 serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                     .unwrap_or_default()
+            }
+            "agent.terminal.output.applied" => "agent.terminal.output.applied" => 1 => terminal_scope(payload_value) => Key(session_named(payload_value)) => {
+                let payload: TerminalOutputAppliedPayload = match serde_json::from_value(payload_value) {
+                    Ok(p) => p,
+                    Err(e) => return ctx.err("parse_error", &e.to_string()),
+                };
+                let client_id = connection_client_id(ctx.client_id).await;
+                let verdict = {
+                    let mut guard = sessions_lock(ctx.sessions);
+                    let Some(session) = guard.get_mut(&payload.session_name) else {
+                        return ctx.err("not_attached", "session not attached");
+                    };
+                    let head = session.stream.cursor();
+                    accept_output_ack(
+                        &mut session.peers,
+                        &client_id,
+                        ctx.peer_token,
+                        &payload,
+                        head,
+                    )
+                };
+                match verdict {
+                    Ok(_) => serde_json::to_string(&make_ok(ctx.id, "output applied"))
+                        .unwrap_or_default(),
+                    Err(reason) => ctx.err("output_ack_rejected", reason),
+                }
             }
             "agent.terminal.input" => "agent.terminal.input" => 1 => terminal_scope(payload_value) => Key(session_named(payload_value)) => {
                 let payload: TerminalInputPayload = match serde_json::from_value(payload_value) {
@@ -3337,6 +3426,113 @@ impl AgentServer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn output_ack_requires_exact_attached_socket_and_current_subscription() {
+        let old_socket = Arc::new(());
+        let new_socket = Arc::new(());
+        let (outbound, _) = P2pOutbound::new();
+        let (tx, _) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
+        let mut peers = vec![SessionPeer {
+            client_id: "observer".to_string(),
+            peer_token: Arc::clone(&new_socket),
+            output_ack: SubscriberOutputAck::new(OutputAckBinding {
+                subscriber_generation: 88,
+                stream_epoch: 9,
+            })
+            .unwrap(),
+            outbound,
+            output_tx: Some(tx),
+            queued_bytes: Arc::new(AtomicUsize::new(0)),
+            detached_for_not_draining: Arc::new(AtomicBool::new(false)),
+        }];
+        let mut payload = TerminalOutputAppliedPayload {
+            session_name: "demo".into(),
+            subscriber_generation: 88,
+            stream_epoch: 9,
+            renderer_generation: 7,
+            applied_through: 2,
+        };
+        assert_eq!(
+            accept_output_ack(&mut peers, "observer", &old_socket, &payload, 3),
+            Err("not_current_subscriber"),
+        );
+        assert_eq!(
+            accept_output_ack(&mut peers, "other", &new_socket, &payload, 3),
+            Err("not_current_subscriber"),
+        );
+        assert_eq!(peers[0].output_ack.applied_through(), 0);
+        payload.subscriber_generation = 87;
+        assert_eq!(
+            accept_output_ack(&mut peers, "observer", &new_socket, &payload, 3),
+            Err("invalid_output_ack"),
+        );
+        payload.subscriber_generation = 88;
+        payload.stream_epoch = 10;
+        assert_eq!(
+            accept_output_ack(&mut peers, "observer", &new_socket, &payload, 3),
+            Err("invalid_output_ack"),
+        );
+        payload.stream_epoch = 9;
+        payload.renderer_generation = 0;
+        assert_eq!(
+            accept_output_ack(&mut peers, "observer", &new_socket, &payload, 3),
+            Err("invalid_renderer_generation"),
+        );
+        payload.renderer_generation = 7;
+        payload.applied_through = 4;
+        assert_eq!(
+            accept_output_ack(&mut peers, "observer", &new_socket, &payload, 3),
+            Err("invalid_output_ack"),
+        );
+        assert_eq!(peers[0].output_ack.applied_through(), 0);
+        payload.applied_through = 2;
+        assert_eq!(
+            accept_output_ack(&mut peers, "observer", &new_socket, &payload, 3),
+            Ok(OutputAckVerdict::Advanced {
+                previous: 0,
+                applied_through: 2
+            }),
+        );
+        assert_eq!(
+            accept_output_ack(&mut peers, "observer", &new_socket, &payload, 3),
+            Ok(OutputAckVerdict::Duplicate),
+        );
+        payload.applied_through = 1;
+        assert_eq!(
+            accept_output_ack(&mut peers, "observer", &new_socket, &payload, 3),
+            Err("invalid_output_ack"),
+        );
+        assert_eq!(peers[0].output_ack.applied_through(), 2);
+    }
+
+    #[test]
+    fn every_attach_mints_a_new_subscription_generation() {
+        let a = new_output_ack(10).unwrap();
+        let b = new_output_ack(10).unwrap();
+        let next_epoch = new_output_ack(11).unwrap();
+        assert_ne!(
+            a.binding().subscriber_generation,
+            b.binding().subscriber_generation
+        );
+        assert_ne!(
+            b.binding().subscriber_generation,
+            next_epoch.binding().subscriber_generation
+        );
+        assert_eq!(a.binding().stream_epoch, 10);
+        assert_eq!(b.binding().stream_epoch, 10);
+        assert_eq!(next_epoch.binding().stream_epoch, 11);
+        assert_eq!(a.applied_through(), 0);
+    }
+
+    fn test_output_ack() -> SubscriberOutputAck {
+        SubscriberOutputAck::new(OutputAckBinding {
+            subscriber_generation: 1,
+            stream_epoch: 9,
+        })
+        .expect("test ACK binding")
+    }
+
     use crate::fs::ops::FileData;
     use crate::test_support::TestSession;
     use base64::Engine;
@@ -3676,6 +3872,7 @@ mod tests {
             SessionPeer {
                 client_id: "slow".to_owned(),
                 peer_token: Arc::new(()),
+                output_ack: test_output_ack(),
                 outbound: slow_outbound,
                 output_tx: Some(slow_tx),
                 queued_bytes: Arc::clone(&slow_bytes),
@@ -3684,6 +3881,7 @@ mod tests {
             SessionPeer {
                 client_id: "fast".to_owned(),
                 peer_token: Arc::new(()),
+                output_ack: test_output_ack(),
                 outbound: fast_outbound,
                 output_tx: Some(fast_tx),
                 queued_bytes: Arc::clone(&fast_bytes),
@@ -3727,6 +3925,7 @@ mod tests {
         let mut peers = vec![SessionPeer {
             client_id: "big".to_owned(),
             peer_token: Arc::new(()),
+            output_ack: test_output_ack(),
             outbound,
             output_tx: Some(tx),
             queued_bytes: Arc::clone(&queued_bytes),
@@ -3750,6 +3949,7 @@ mod tests {
         let mut peers = vec![SessionPeer {
             client_id: "closed".to_owned(),
             peer_token: Arc::new(()),
+            output_ack: test_output_ack(),
             outbound,
             output_tx: Some(tx),
             queued_bytes: Arc::clone(&queued_bytes),
@@ -3771,6 +3971,7 @@ mod tests {
         let mut peers = vec![SessionPeer {
             client_id: "test-client".to_string(),
             peer_token: Arc::new(()),
+            output_ack: test_output_ack(),
             outbound: peer_outbound,
             output_tx: Some(tx.clone()),
             detached_for_not_draining: Arc::clone(&detached_for_not_draining),
@@ -5341,6 +5542,7 @@ mod tests {
         msg_types::TERMINAL_RESIZE,
         msg_types::TERMINAL_CONTROL_ACQUIRE,
         msg_types::TERMINAL_STREAM_RESUME,
+        msg_types::TERMINAL_OUTPUT_APPLIED,
         msg_types::CLIENT_AUTH,
         msg_types::CLIENT_SESSIONS_LIST,
         msg_types::CLIENT_SESSION_ATTACH,

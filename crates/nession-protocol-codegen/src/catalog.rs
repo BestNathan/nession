@@ -1707,6 +1707,26 @@ wires: &["server.commands.update"],
         },
         Unit {
             owner: "core",
+            id: "agent.terminal.output.applied",
+            version: 1,
+            wires: &["agent.terminal.output.applied"],
+            // One-way parser cursor submission. The Agent validates the
+            // current socket/subscriber generation and updates only the
+            // peer's cursor; no input acknowledgement or credit is inferred.
+            decls: vec![
+                decl_of::<nession_protocol::contracts::terminal::v1::TerminalOutputAppliedPayload>(
+                    cfg,
+                ),
+            ],
+            request: Some((
+                "TerminalOutputAppliedCall",
+                nession_protocol::contracts::terminal::v1::TerminalOutputAppliedPayload::inline,
+                schema_of::<nession_protocol::contracts::terminal::v1::TerminalOutputAppliedPayload>,
+            )),
+            response: None,
+        },
+        Unit {
+            owner: "core",
             id: "agent.terminal.input",
             version: 1,
             wires: &["agent.terminal.input"],

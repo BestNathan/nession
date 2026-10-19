@@ -20,6 +20,7 @@ export type AttachResult =
       controllerClientId?: string;
       streamEpoch?: number;
       streamCursor?: number;
+      subscriberGeneration?: number;
       /** The agent's input run and applied cursor (#1307). Absent when unstated. */
       inputEpoch?: number;
       inputAppliedThrough?: number;

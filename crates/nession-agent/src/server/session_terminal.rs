@@ -59,6 +59,14 @@ const JS_SAFE_INTEGER: u64 = (1 << 53) - 1;
 /// before it walks into the range a browser rounds.
 const EPOCH_SEED_CEILING: u64 = JS_SAFE_INTEGER - 1_000_000;
 
+/// Mint a fresh JS-safe generation for each terminal output subscription.
+/// Separate from ControlLease: observer attach also replaces the subscription.
+/// The shared epoch issuer prevents a restarted Agent from reissuing a
+/// generation that a still-connected browser might retain (#2006).
+pub fn next_subscriber_generation() -> u64 {
+    next_epoch()
+}
+
 fn next_epoch() -> u64 {
     NEXT_EPOCH
         .get_or_init(|| {

@@ -118,6 +118,15 @@ export interface TerminalStreamResumeResult {
  * the PTY, and it means "everything at or below this chunk is applied". It is
  * not paired with any request — see {@link TerminalAgentApi.onInputAck}.
  */
+/** Browser -> Agent ACK of cumulative verified xterm parser progress.
+ * No ACK is allowed from an ordinary attach cursor or tmux capture. */
+export interface TerminalOutputAppliedAck {
+  subscriberGeneration: number;
+  streamEpoch: number;
+  rendererGeneration: number;
+  appliedThrough: number;
+}
+
 export interface TerminalInputAck {
   sessionName: string;
   inputEpoch: number;
@@ -178,6 +187,9 @@ export interface TerminalAgentApi {
    * one-way keystroke it always was.
    */
   sendInput(sessionName: string, data: string, sequence?: TerminalInputSequence): void;
+  /** P2P-only Output Applied ACK. `true` means submitted, not Agent accepted.
+   * Optional for old test/provider implementations. Never input ACK (#1307). */
+  sendOutputApplied?(sessionName: string, ack: TerminalOutputAppliedAck): boolean;
   /** Resize the remote PTY (controller only). */
   sendResize(sessionName: string, cols: number, rows: number): void;
   /** Current control lease for a session (#1095). */
@@ -273,6 +285,7 @@ async function attachToSession(
       controllerClientId: fields.controllerClientId,
       streamEpoch: fields.streamEpoch,
       streamCursor: fields.streamCursor,
+      subscriberGeneration: fields.subscriberGeneration,
       inputEpoch: fields.inputEpoch,
       inputAppliedThrough: fields.inputAppliedThrough,
     };
@@ -343,6 +356,54 @@ function subscribeInputAck(
   });
 }
 
+function submitOutputApplied(
+  surface: PluginSurface,
+  sessionName: string,
+  ack: TerminalOutputAppliedAck,
+): boolean {
+  const values = [
+    ack.subscriberGeneration, ack.streamEpoch,
+    ack.rendererGeneration, ack.appliedThrough,
+  ];
+  if (!values.every(Number.isSafeInteger)
+    || ack.subscriberGeneration <= 0 || ack.streamEpoch <= 0
+    || ack.rendererGeneration <= 0 || ack.appliedThrough < 0) {
+    return false;
+  }
+  try {
+    // An independent client->Agent operation, never the input ACK.
+    // Submitting only records a claimed parser prefix, not a credit receipt.
+    surface.send('agent.terminal.output.applied', {
+      session_name: sessionName,
+      subscriber_generation: ack.subscriberGeneration,
+      stream_epoch: ack.streamEpoch,
+      renderer_generation: ack.rendererGeneration,
+      applied_through: ack.appliedThrough,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function submitTerminalResize(
+  surface: PluginSurface,
+  lease: ControlLease,
+  sessionName: string,
+  size: { cols: number; rows: number },
+): void {
+  if (lease.getControlState(sessionName).role === 'observer') {
+    return;
+  }
+  const generation = lease.generationFor(sessionName);
+  surface.send(TERMINAL_RESIZE_WIRE, {
+    session_name: sessionName,
+    cols: size.cols,
+    rows: size.rows,
+    ...(generation !== undefined ? { control_generation: generation } : {}),
+  });
+}
+
 export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi {
   const lease = createAgentControlLease(surface);
 
@@ -377,19 +438,11 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
       });
     },
 
-    sendResize: (sessionName: string, cols: number, rows: number): void => {
-      const state = lease.getControlState(sessionName);
-      if (state.role === 'observer') {
-        return;
-      }
-      const generation = lease.generationFor(sessionName);
-      surface.send(TERMINAL_RESIZE_WIRE, {
-        session_name: sessionName,
-        cols,
-        rows,
-        ...(generation !== undefined ? { control_generation: generation } : {}),
-      });
-    },
+    sendOutputApplied: (sessionName, ack) =>
+      submitOutputApplied(surface, sessionName, ack),
+
+    sendResize: (sessionName, cols, rows) =>
+      submitTerminalResize(surface, lease, sessionName, { cols, rows }),
 
     getControlState: (sessionName: string): TerminalControlState =>
       lease.getControlState(sessionName),

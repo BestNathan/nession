@@ -1,5 +1,24 @@
 use serde::{Deserialize, Serialize};
 
+/// Browser -> Agent cumulative xterm parser-applied output ACK (#2006).
+///
+/// The Agent authenticates the socket peer and its *current* attached
+/// subscriber generation before accepting this claimed parsed prefix.
+/// Renderer generation is the locally bound xterm/writer identity; no claim
+/// is allowed from an unverified capture or attach cursor. The ACK records
+/// progress only: it does NOT release subscriber bytes/credit in this version.
+/// Independent from the Agent -> browser terminal *input* ACK (#1307).
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TerminalOutputAppliedPayload {
+    pub session_name: String,
+    pub subscriber_generation: u64,
+    pub stream_epoch: u64,
+    pub renderer_generation: u64,
+    pub applied_through: u64,
+}
+
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
