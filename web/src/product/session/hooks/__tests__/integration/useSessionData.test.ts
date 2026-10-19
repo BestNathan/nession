@@ -178,6 +178,91 @@ describe('useSessionData', () => {
     expect(result.current.sessionsLoaded).toBe(true);
   });
 
+  it('refetches a correlated bash report discarded after an unknown push (#1986)', async () => {
+    const pending: Array<(data: { sessions: Session[] }) => void> = [];
+    sessionsApiMock.fetchSessions.mockImplementation(() => new Promise((resolve) => {
+      pending.push(resolve);
+    }));
+    const { result } = renderHook(() => useSessionData());
+    let fetching!: Promise<void>;
+    act(() => { fetching = result.current.fetchSessions(); });
+
+    // A push arrives after the request started, but before its reply.
+    act(() => {
+      result.current.applyRealtimeSessions([makeSession({ foreground_command: null })]);
+    });
+    await act(async () => {
+      pending[0]({ sessions: [makeSession({ foreground_command: 'bash' })] });
+      await Promise.resolve();
+    });
+    // Request correlation consumed the reported bash; the hook must not
+    // overwrite the newer push with it, but must query the latest registry.
+    expect(result.current.sessions[0].foreground_command).toBeNull();
+    expect(sessionsApiMock.fetchSessions).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      pending[1]({ sessions: [makeSession({ foreground_command: 'bash' })] });
+      await fetching;
+    });
+    expect(result.current.sessions[0].foreground_command).toBe('bash');
+    expect(result.current.loadingSessions).toBe(false);
+    expect(result.current.sessionsLoaded).toBe(true);
+  });
+
+  it('does not resurrect bash from a stale reply after a newer explicit clear (#1986)', async () => {
+    const pending: Array<(data: { sessions: Session[] }) => void> = [];
+    sessionsApiMock.fetchSessions.mockImplementation(() => new Promise((resolve) => {
+      pending.push(resolve);
+    }));
+    const { result } = renderHook(() => useSessionData());
+    act(() => result.current.applyRealtimeSessions([
+      makeSession({ foreground_command: 'bash' }),
+    ]));
+    let fetching!: Promise<void>;
+    act(() => { fetching = result.current.fetchSessions(); });
+    act(() => result.current.applyRealtimeSessions([
+      makeSession({ foreground_command: null }),
+    ]));
+    await act(async () => {
+      pending[0]({ sessions: [makeSession({ foreground_command: 'bash' })] });
+      await Promise.resolve();
+    });
+    expect(result.current.sessions[0].foreground_command).toBeNull();
+    expect(sessionsApiMock.fetchSessions).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      pending[1]({ sessions: [makeSession({ foreground_command: null })] });
+      await fetching;
+    });
+    expect(result.current.sessions[0].foreground_command).toBeNull();
+  });
+
+  it('caps reconciliation at one retry under continual newer pushes (#1986)', async () => {
+    const pending: Array<(data: { sessions: Session[] }) => void> = [];
+    sessionsApiMock.fetchSessions.mockImplementation(() => new Promise((resolve) => {
+      pending.push(resolve);
+    }));
+    const { result } = renderHook(() => useSessionData());
+    let fetching!: Promise<void>;
+    act(() => { fetching = result.current.fetchSessions(); });
+    act(() => result.current.applyRealtimeSessions([
+      makeSession({ foreground_command: null }),
+    ]));
+    await act(async () => {
+      pending[0]({ sessions: [makeSession({ foreground_command: 'bash' })] });
+      await Promise.resolve();
+    });
+    act(() => result.current.applyRealtimeSessions([
+      makeSession({ foreground_command: 'zsh' }),
+    ]));
+    await act(async () => {
+      pending[1]({ sessions: [makeSession({ foreground_command: 'bash' })] });
+      await fetching;
+    });
+    expect(result.current.sessions[0].foreground_command).toBe('zsh');
+    expect(sessionsApiMock.fetchSessions).toHaveBeenCalledTimes(2);
+    expect(result.current.loadingSessions).toBe(false);
+  });
+
   it('still accepts a list when no newer push arrived (not a missing-push workaround)', async () => {
     sessionsApiMock.fetchSessions.mockResolvedValue({
       sessions: [makeSession({ foreground_command: null })],
