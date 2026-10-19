@@ -32,8 +32,8 @@ use crate::server::execution::ExecutionPolicy::{Inline, Key, Ordered, Query};
 use crate::server::execution::{
     ExecutionLanes, ResourceKey, DEFAULT_MUTATIONS_IN_FLIGHT, SHUTDOWN_GRACE,
 };
-use crate::server::session_terminal::{self, InputSequence, InputVerdict};
 use crate::server::output_ack::{OutputAckBinding, OutputAckVerdict, SubscriberOutputAck};
+use crate::server::session_terminal::{self, InputSequence, InputVerdict};
 // The lanes' boxed work is the shared type, and the constructors take this
 // socket's own bounds — see `nession_runtime::lane`.
 use crate::server::outbound::{self, OutboundError, P2pOutbound};
@@ -239,9 +239,10 @@ fn accept_output_ack(
     payload: &TerminalOutputAppliedPayload,
     issued_head: u64,
 ) -> Result<OutputAckVerdict, &'static str> {
-    let Some(peer) = peers.iter_mut().find(|peer| {
-        peer.client_id == client_id && Arc::ptr_eq(&peer.peer_token, peer_token)
-    }) else {
+    let Some(peer) = peers
+        .iter_mut()
+        .find(|peer| peer.client_id == client_id && Arc::ptr_eq(&peer.peer_token, peer_token))
+    else {
         return Err("not_current_subscriber");
     };
     if !(1..=(1_u64 << 53) - 1).contains(&payload.renderer_generation) {
@@ -649,8 +650,8 @@ pub use nession_protocol::contracts::file::v1::{
 pub use nession_protocol::contracts::terminal::v1::{
     TerminalBootstrapPayload, TerminalControlAcquirePayload, TerminalControlAcquireResponse,
     TerminalControlChangedPayload, TerminalInputAckPayload, TerminalInputPayload,
-    TerminalOutputAppliedPayload, TerminalOutputPayload, TerminalResizePayload, TerminalStreamResumePayload,
-    TerminalStreamResumeResponse,
+    TerminalOutputAppliedPayload, TerminalOutputPayload, TerminalResizePayload,
+    TerminalStreamResumePayload, TerminalStreamResumeResponse,
 };
 
 // --- Protocol helpers ---
@@ -3438,7 +3439,8 @@ mod tests {
             output_ack: SubscriberOutputAck::new(OutputAckBinding {
                 subscriber_generation: 88,
                 stream_epoch: 9,
-            }).unwrap(),
+            })
+            .unwrap(),
             outbound,
             output_tx: Some(tx),
             queued_bytes: Arc::new(AtomicUsize::new(0)),
@@ -3487,7 +3489,10 @@ mod tests {
         payload.applied_through = 2;
         assert_eq!(
             accept_output_ack(&mut peers, "observer", &new_socket, &payload, 3),
-            Ok(OutputAckVerdict::Advanced { previous: 0, applied_through: 2 }),
+            Ok(OutputAckVerdict::Advanced {
+                previous: 0,
+                applied_through: 2
+            }),
         );
         assert_eq!(
             accept_output_ack(&mut peers, "observer", &new_socket, &payload, 3),
@@ -3506,8 +3511,14 @@ mod tests {
         let a = new_output_ack(10).unwrap();
         let b = new_output_ack(10).unwrap();
         let next_epoch = new_output_ack(11).unwrap();
-        assert_ne!(a.binding().subscriber_generation, b.binding().subscriber_generation);
-        assert_ne!(b.binding().subscriber_generation, next_epoch.binding().subscriber_generation);
+        assert_ne!(
+            a.binding().subscriber_generation,
+            b.binding().subscriber_generation
+        );
+        assert_ne!(
+            b.binding().subscriber_generation,
+            next_epoch.binding().subscriber_generation
+        );
         assert_eq!(a.binding().stream_epoch, 10);
         assert_eq!(b.binding().stream_epoch, 10);
         assert_eq!(next_epoch.binding().stream_epoch, 11);
@@ -3518,7 +3529,8 @@ mod tests {
         SubscriberOutputAck::new(OutputAckBinding {
             subscriber_generation: 1,
             stream_epoch: 9,
-        }).expect("test ACK binding")
+        })
+        .expect("test ACK binding")
     }
 
     use crate::fs::ops::FileData;
@@ -3860,7 +3872,7 @@ mod tests {
             SessionPeer {
                 client_id: "slow".to_owned(),
                 peer_token: Arc::new(()),
-            output_ack: test_output_ack(),
+                output_ack: test_output_ack(),
                 outbound: slow_outbound,
                 output_tx: Some(slow_tx),
                 queued_bytes: Arc::clone(&slow_bytes),
@@ -3869,7 +3881,7 @@ mod tests {
             SessionPeer {
                 client_id: "fast".to_owned(),
                 peer_token: Arc::new(()),
-            output_ack: test_output_ack(),
+                output_ack: test_output_ack(),
                 outbound: fast_outbound,
                 output_tx: Some(fast_tx),
                 queued_bytes: Arc::clone(&fast_bytes),
