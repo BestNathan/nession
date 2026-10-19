@@ -108,6 +108,8 @@ export interface TerminalStreamResumeResult {
    * already at the head. `undefined` again means the agent said nothing.
    */
   complete?: boolean;
+  /** Trusted Agent recovery verdict; legacy missing field is never proof. */
+  recovery?: 'complete' | 'checkpoint-required' | 'unavailable';
   events: import('@/platform/terminal-runtime/streamApply').TerminalStreamEvent[];
 }
 
@@ -356,6 +358,51 @@ function subscribeInputAck(
   });
 }
 
+/** The Agent's replay status is authoritative, but all fields must agree.
+ * A mismatched or incomplete prefix is never passed on as ordinary events.
+ * Legacy providers keep their existing epoch/complete interpretation. */
+function parseResumeRecovery(value: unknown): TerminalStreamResumeResult['recovery'] {
+  switch (value) {
+    case 'complete':
+    case 'checkpoint-required':
+    case 'unavailable':
+      return value;
+    default:
+      return undefined;
+  }
+}
+
+function readResumeReply(reply: unknown, requestedEpoch: number): TerminalStreamResumeResult {
+  const r = reply as Record<string, unknown>;
+  const firstAvailableSeq = r.first_available_seq;
+  const complete = r.complete;
+  const epochMatch = r.epoch_match === true;
+  const declaredRecovery = parseResumeRecovery(r.recovery);
+  const provenComplete = epochMatch && complete === true
+    && (declaredRecovery === undefined || declaredRecovery === 'complete');
+  // A new provider claiming "complete" while its epoch/complete flags
+  // contradict it cannot recover. Treat the contradiction as unavailable.
+  const effectiveRecovery = declaredRecovery === 'complete' && !provenComplete
+    ? 'unavailable' : declaredRecovery;
+  const safeToApply = epochMatch && (
+    provenComplete || (declaredRecovery === undefined && complete === undefined)
+  );
+  return {
+    streamEpoch:
+      typeof r.stream_epoch === 'number' ? r.stream_epoch : requestedEpoch,
+    epochMatch: effectiveRecovery === 'unavailable' ? false : epochMatch,
+    firstAvailableSeq:
+      typeof firstAvailableSeq === 'number' ? firstAvailableSeq : undefined,
+    // Even legacy replies cannot report completion for a different epoch.
+    complete: typeof complete === 'boolean'
+      ? complete && epochMatch
+        && (declaredRecovery === undefined || declaredRecovery === 'complete')
+      : effectiveRecovery !== undefined ? false : undefined,
+    recovery: effectiveRecovery,
+    events: safeToApply ? parseStreamEvents(r.events) : [],
+  };
+}
+
 function submitOutputApplied(
   surface: PluginSurface,
   sessionName: string,
@@ -487,22 +534,7 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
         stream_epoch: streamEpoch,
         after_seq: afterSeq,
       });
-      const r = reply as Record<string, unknown>;
-      // Both read by type and left `undefined` otherwise: the wire omits them
-      // when the agent has nothing to state, and a coercion here (`Number(x)`
-      // on a missing field is 0) would invent the position the contract
-      // forbids — 0 is below every sequence a stream can have (#1304).
-      const firstAvailableSeq = r.first_available_seq;
-      const complete = r.complete;
-      return {
-        streamEpoch:
-          typeof r.stream_epoch === 'number' ? r.stream_epoch : streamEpoch,
-        epochMatch: r.epoch_match === true,
-        firstAvailableSeq:
-          typeof firstAvailableSeq === 'number' ? firstAvailableSeq : undefined,
-        complete: typeof complete === 'boolean' ? complete : undefined,
-        events: parseStreamEvents(r.events),
-      };
+      return readResumeReply(reply, streamEpoch);
     },
 
     onResize: (cb: (frame: TerminalResizeFrame) => void): (() => void) => {

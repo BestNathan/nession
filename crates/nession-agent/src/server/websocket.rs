@@ -230,6 +230,34 @@ fn new_output_ack(stream_epoch: u64) -> Result<SubscriberOutputAck, OutputAckVer
     })
 }
 
+/// Never hand a caller the retained *tail* of an incomplete ring: it is
+/// not a contiguous suffix of the requested cursor. A failed replay requires
+/// a future verified checkpoint (or an explicit degraded/unavailable state).
+fn build_terminal_resume_response(
+    request: &TerminalStreamResumePayload,
+    stream: &session_terminal::SessionStreamState,
+) -> TerminalStreamResumeResponse {
+    let replay = stream.replay_since(request.stream_epoch, request.after_seq);
+    let recovery = match replay.as_ref() {
+        None => TerminalResumeRecovery::Unavailable,
+        Some(r) if r.complete => TerminalResumeRecovery::Complete,
+        Some(_) => TerminalResumeRecovery::CheckpointRequired,
+    };
+    TerminalStreamResumeResponse {
+        session_name: request.session_name.clone(),
+        stream_epoch: stream.epoch,
+        epoch_match: replay.is_some(),
+        first_available_seq: replay.as_ref().map(|r| r.first_available_seq),
+        complete: replay.as_ref().map(|r| r.complete),
+        recovery: Some(recovery),
+        events: if recovery == TerminalResumeRecovery::Complete {
+            replay.map_or_else(Vec::new, |r| r.events)
+        } else {
+            Vec::new()
+        },
+    }
+}
+
 /// Socket identity and per-attach subscription generation are both required.
 /// Nothing here grants credit for queued/dequeued bytes.
 fn accept_output_ack(
@@ -651,8 +679,8 @@ pub use nession_protocol::contracts::terminal::v1::{
     TerminalBootstrapPayload, TerminalCheckpointCutConsistency, TerminalCheckpointFidelity,
     TerminalControlAcquirePayload, TerminalControlAcquireResponse, TerminalControlChangedPayload,
     TerminalInputAckPayload, TerminalInputPayload, TerminalOutputAppliedPayload,
-    TerminalOutputPayload, TerminalResizePayload, TerminalStreamResumePayload,
-    TerminalStreamResumeResponse,
+    TerminalOutputPayload, TerminalResizePayload, TerminalResumeRecovery,
+    TerminalStreamResumePayload, TerminalStreamResumeResponse,
 };
 
 // --- Protocol helpers ---
@@ -2314,23 +2342,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                             &format!("not attached to session: {}", payload.session_name),
                         );
                     };
-                    // One call decides everything the answer says (#1304): the
-                    // replay is `None` exactly when the request is about another
-                    // stream, so `epoch_match` is derived from it rather than
-                    // asked alongside it. Two sources for the same fact is how
-                    // they come to disagree — an answer with a matching epoch
-                    // and no window, or the reverse.
-                    let replay = session
-                        .stream
-                        .replay_since(payload.stream_epoch, payload.after_seq);
-                    TerminalStreamResumeResponse {
-                        session_name: payload.session_name.clone(),
-                        stream_epoch: session.stream.epoch,
-                        epoch_match: replay.is_some(),
-                        first_available_seq: replay.as_ref().map(|r| r.first_available_seq),
-                        complete: replay.as_ref().map(|r| r.complete),
-                        events: replay.map_or_else(Vec::new, |r| r.events),
-                    }
+                    build_terminal_resume_response(&payload, &session.stream)
                 };
                 serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                     .unwrap_or_default()
@@ -3558,6 +3570,61 @@ mod tests {
             tmux_capture_fidelity(true, false),
             TerminalCheckpointFidelity::Partial
         );
+    }
+
+    #[test]
+    fn terminal_resume_never_returns_noncontiguous_suffix_after_retention_loss() {
+        let mut stream = session_terminal::SessionStreamState::new();
+        let epoch = stream.epoch;
+        stream.record_output("demo", "one".to_owned());
+        let request = |epoch, after_seq| TerminalStreamResumePayload {
+            session_name: "demo".to_owned(),
+            stream_epoch: epoch,
+            after_seq,
+        };
+        let complete = build_terminal_resume_response(&request(epoch, 0), &stream);
+        assert_eq!(complete.recovery, Some(TerminalResumeRecovery::Complete));
+        assert_eq!(complete.complete, Some(true));
+        assert_eq!(complete.events.len(), 1);
+        let at_head = build_terminal_resume_response(&request(epoch, 1), &stream);
+        assert_eq!(at_head.recovery, Some(TerminalResumeRecovery::Complete));
+        assert!(at_head.events.is_empty());
+
+        // A frame too large for the bounded ring is issued but not replayed.
+        // A subsequent small frame is retained; the original API returned
+        // that suffix even though the requested prefix could never arrive.
+        stream.record_output("demo", "x".repeat(700_000));
+        stream.record_output("demo", "new-tail".to_owned());
+        let incomplete = build_terminal_resume_response(&request(epoch, 1), &stream);
+        assert_eq!(
+            incomplete.recovery,
+            Some(TerminalResumeRecovery::CheckpointRequired)
+        );
+        assert_eq!(incomplete.complete, Some(false));
+        assert!(
+            incomplete.events.is_empty(),
+            "never deliver an unsafe suffix"
+        );
+        assert_eq!(incomplete.first_available_seq, Some(3));
+        assert_eq!(
+            serde_json::to_value(&incomplete).unwrap()["recovery"],
+            "checkpoint-required"
+        );
+
+        let future = build_terminal_resume_response(&request(epoch, 20), &stream);
+        assert_eq!(
+            future.recovery,
+            Some(TerminalResumeRecovery::CheckpointRequired)
+        );
+        assert_eq!(future.complete, Some(false));
+        assert!(future.events.is_empty());
+
+        let stale = build_terminal_resume_response(&request(epoch.wrapping_add(1), 0), &stream);
+        assert_eq!(stale.recovery, Some(TerminalResumeRecovery::Unavailable));
+        assert!(!stale.epoch_match);
+        assert!(stale.first_available_seq.is_none());
+        assert!(stale.complete.is_none());
+        assert!(stale.events.is_empty());
     }
 
     fn test_output_ack() -> SubscriberOutputAck {

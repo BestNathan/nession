@@ -1786,6 +1786,9 @@ wires: &["server.commands.update"],
                 decl_of::<nession_protocol::contracts::terminal::v1::TerminalStreamResumeResponse>(
                     cfg,
                 ),
+                decl_of::<nession_protocol::contracts::terminal::v1::TerminalResumeRecovery>(
+                    cfg,
+                ),
                 decl_of::<nession_protocol::contracts::terminal::v1::TerminalStreamEventPayload>(
                     cfg,
                 ),
