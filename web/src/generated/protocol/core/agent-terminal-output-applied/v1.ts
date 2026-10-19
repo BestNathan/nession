@@ -31,4 +31,3 @@ export type TerminalOutputAppliedCall = { session_name: string, subscriber_gener
 /**
  * No response alias: the catalog declares no response shape for this unit.
  */
-
