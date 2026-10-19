@@ -207,7 +207,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          node scripts/acceptance-reuse.mjs select "${RUNNER_TEMP}/acceptance-context.json"
+          # Caller-supplied deterministic results must preserve their full selection.
+          if [[ -z "${DETERMINISTIC_RESULT_JSON}" ]]; then
+            node scripts/acceptance-reuse.mjs select "${RUNNER_TEMP}/acceptance-context.json"
+          fi
           count="$(jq '.criteria | length' "${RUNNER_TEMP}/acceptance-context.json")"
           echo "criteria_count=${count}" >> "${GITHUB_OUTPUT}"
           echo "has_criteria=$([[ "${count}" -gt 0 ]] && echo true || echo false)" >> "${GITHUB_OUTPUT}"
