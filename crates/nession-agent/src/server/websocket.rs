@@ -648,7 +648,8 @@ pub use nession_protocol::contracts::file::v1::{
     FileWritePayload, FileWriteResponse,
 };
 pub use nession_protocol::contracts::terminal::v1::{
-    TerminalBootstrapPayload, TerminalControlAcquirePayload, TerminalControlAcquireResponse,
+    TerminalBootstrapPayload, TerminalCheckpointCutConsistency, TerminalCheckpointFidelity,
+    TerminalControlAcquirePayload, TerminalControlAcquireResponse,
     TerminalControlChangedPayload, TerminalInputAckPayload, TerminalInputPayload,
     TerminalOutputAppliedPayload, TerminalOutputPayload, TerminalResizePayload,
     TerminalStreamResumePayload, TerminalStreamResumeResponse,
@@ -830,11 +831,11 @@ async fn send_bootstrap(
     // fails costs the modes and not the history: a client with the session's
     // text and default modes is strictly better off than one with nothing, and
     // that is the same judgement the capture failure above makes.
-    let modes = match tmux.ops().pane_mode_flags(session_name).await {
-        Ok(flags) => crate::server::bootstrap::mode_escapes(&flags),
+    let (modes, modes_complete) = match tmux.ops().pane_mode_flags(session_name).await {
+        Ok(flags) => (crate::server::bootstrap::mode_escapes(&flags), true),
         Err(e) => {
             warn!("bootstrap: pane modes for {session_name} failed: {e:#}");
-            Vec::new()
+            (Vec::new(), false)
         }
     };
     // The pane's unwritten screen is dropped before anything else, so what
@@ -867,6 +868,15 @@ async fn send_bootstrap(
         bootstrap: Some(TerminalBootstrapPayload {
             requested_lines: lines,
             truncated: bounded.truncated,
+            // Pane capture runs outside the ordered Agent output producer.
+            // Sending it first does not establish a true checkpoint cut.
+            cut_consistency: Some(TerminalCheckpointCutConsistency::Unverified),
+            // Even a complete pane capture is text/modes, not full VT.
+            fidelity: Some(if bounded.truncated || !modes_complete {
+                TerminalCheckpointFidelity::Partial
+            } else {
+                TerminalCheckpointFidelity::ScreenOnly
+            }),
         }),
     };
     let msg = new_message(msg_types::TERMINAL_OUTPUT, payload);
