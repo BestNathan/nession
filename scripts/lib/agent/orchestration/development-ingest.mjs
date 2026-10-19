@@ -32,7 +32,7 @@ function readJsonFromZip(zip,name,max=32*1024*1024) {
   if(!doc||typeof doc!=='object'||Array.isArray(doc))fail('invalid Artifact schema');
   return doc;
 }
-function matchingResult(result,proof,sealed,claim,run) {
+export function matchingResult(result,proof,sealed,claim,run) {
   const ticket=claim.inputs;
   const valid=doc=>doc?.issue===Number(ticket.issue_number)&&
     doc.action_id===ticket.action_id&&doc.source_sha===ticket.input_sha&&
