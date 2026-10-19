@@ -3952,8 +3952,109 @@ mod tests {
         let queued = rx
             .try_recv()
             .expect("post-cut output is held for forwarder");
-        assert_eq!(queued, (live, epoch, cut + 1));
+        assert_eq!(queued, SubscriberEvent::Output((live, epoch, cut + 1)));
         assert!(rx.try_recv().is_err(), "no duplicated next event");
+    }
+
+    /// #2028: two clients share the *same* sequence for PTY bytes and
+    /// authoritative resize. No separate direct controller send may race
+    /// the FIFO, and no observer can silently skip the resize's ordinal.
+    #[test]
+    fn authoritative_resize_is_ordered_with_output_for_both_subscribers() {
+        use base64::Engine;
+        let mut stream = session_terminal::SessionStreamState::new();
+        let (controller_tx, mut controller_rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
+        let (observer_tx, mut observer_rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
+        let (controller_outbound, _) = P2pOutbound::new();
+        let (observer_outbound, _) = P2pOutbound::new();
+        let peer = |client_id: &str, outbound: P2pOutbound, tx| SessionPeer {
+            client_id: client_id.to_owned(),
+            peer_token: Arc::new(()),
+            output_ack: test_output_ack(),
+            outbound,
+            output_tx: Some(tx),
+            queued_bytes: Arc::new(AtomicUsize::new(0)),
+            detached_for_not_draining: Arc::new(AtomicBool::new(false)),
+        };
+        let mut peers = vec![
+            peer("controller", controller_outbound, controller_tx),
+            peer("observer", observer_outbound, observer_tx),
+        ];
+        let first = b"BEFORE-RESIZE".to_vec();
+        let (epoch, seq1) = stream.record_output(
+            "demo",
+            base64::engine::general_purpose::STANDARD.encode(&first),
+        );
+        assert_eq!(fan_out_peers(&mut peers, (first.clone(), epoch, seq1)), 0);
+        let (resize_epoch, seq2) = stream.record_resize("demo", 132, 40);
+        assert_eq!(resize_epoch, epoch);
+        assert_eq!(seq2, seq1 + 1);
+        assert_eq!(fan_out_recorded_resize(&mut peers, 132, 40, resize_epoch, seq2), 0);
+        let last = b"AFTER-RESIZE".to_vec();
+        let (last_epoch, seq3) = stream.record_output(
+            "demo",
+            base64::engine::general_purpose::STANDARD.encode(&last),
+        );
+        assert_eq!(seq3, seq2 + 1);
+        assert_eq!(fan_out_peers(&mut peers, (last.clone(), last_epoch, seq3)), 0);
+        let expected = vec![
+            SubscriberEvent::Output((first, epoch, seq1)),
+            SubscriberEvent::Resize {
+                cols: 132, rows: 40, stream_epoch: epoch, stream_seq: seq2,
+            },
+            SubscriberEvent::Output((last, last_epoch, seq3)),
+        ];
+        for rx in [&mut controller_rx, &mut observer_rx] {
+            assert_eq!(
+                (0..3).map(|_| rx.try_recv().expect("event missing")).collect::<Vec<_>>(),
+                expected,
+                "both peers must see the same full ordered stream"
+            );
+            assert!(rx.try_recv().is_err(), "no duplicate direct resize");
+        }
+    }
+
+    #[test]
+    fn resize_slot_pressure_detaches_only_slow_observer() {
+        let (slow_tx, _slow_rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
+        let (fast_tx, mut fast_rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
+        let (slow_outbound, _) = P2pOutbound::new();
+        let (fast_outbound, _) = P2pOutbound::new();
+        let slow_flag = Arc::new(AtomicBool::new(false));
+        let fast_flag = Arc::new(AtomicBool::new(false));
+        let mut peers = vec![
+            SessionPeer {
+                client_id: "slow".into(), peer_token: Arc::new(()),
+                output_ack: test_output_ack(), outbound: slow_outbound,
+                output_tx: Some(slow_tx), queued_bytes: Arc::new(AtomicUsize::new(0)),
+                detached_for_not_draining: Arc::clone(&slow_flag),
+            },
+            SessionPeer {
+                client_id: "fast".into(), peer_token: Arc::new(()),
+                output_ack: test_output_ack(), outbound: fast_outbound,
+                output_tx: Some(fast_tx), queued_bytes: Arc::new(AtomicUsize::new(0)),
+                detached_for_not_draining: Arc::clone(&fast_flag),
+            },
+        ];
+        for seq in 1..=SUBSCRIBER_QUEUE_SLOTS {
+            assert_eq!(fan_out_peers(&mut peers, (vec![b'x'], 7, seq as u64)), 0);
+            assert!(matches!(fast_rx.try_recv(), Ok(SubscriberEvent::Output(_))));
+        }
+        assert_eq!(
+            fan_out_recorded_resize(&mut peers, 90, 30, 7, SUBSCRIBER_QUEUE_SLOTS as u64 + 1),
+            1,
+        );
+        assert_eq!(peers.len(), 1);
+        assert_eq!(peers[0].client_id, "fast");
+        assert!(slow_flag.load(Ordering::Acquire));
+        assert!(!fast_flag.load(Ordering::Acquire));
+        assert_eq!(
+            fast_rx.try_recv().expect("healthy subscriber must receive resize"),
+            SubscriberEvent::Resize {
+                cols: 90, rows: 30, stream_epoch: 7,
+                stream_seq: SUBSCRIBER_QUEUE_SLOTS as u64 + 1,
+            }
+        );
     }
 
     /// #2024: hold the external capture open while a second client joins an
@@ -4016,7 +4117,7 @@ mod tests {
         assert_eq!(
             rx.try_recv()
                 .expect("post-subscription output must be retained"),
-            (live, expected_position.0, expected_position.1)
+            SubscriberEvent::Output((live, expected_position.0, expected_position.1))
         );
         assert!(
             rx.try_recv().is_err(),
@@ -4359,8 +4460,8 @@ mod tests {
     /// connection ending.
     #[tokio::test]
     async fn byte_pressure_detaches_only_the_slow_terminal_subscriber() {
-        let (slow_tx, _slow_rx) = mpsc::channel::<OutputChunk>(SUBSCRIBER_QUEUE_SLOTS);
-        let (fast_tx, mut fast_rx) = mpsc::channel::<OutputChunk>(SUBSCRIBER_QUEUE_SLOTS);
+        let (slow_tx, _slow_rx) = mpsc::channel::<SubscriberEvent>(SUBSCRIBER_QUEUE_SLOTS);
+        let (fast_tx, mut fast_rx) = mpsc::channel::<SubscriberEvent>(SUBSCRIBER_QUEUE_SLOTS);
         let slow_bytes = Arc::new(AtomicUsize::new(0));
         let fast_bytes = Arc::new(AtomicUsize::new(0));
         let slow_flag = Arc::new(AtomicBool::new(false));
@@ -4396,7 +4497,9 @@ mod tests {
         assert_eq!(fast_bytes.load(Ordering::Acquire), payload_bytes);
 
         // The healthy client's receiver drains; the slow client's does not.
-        let (delivered, _, _) = fast_rx.try_recv().expect("healthy frame");
+        let SubscriberEvent::Output((delivered, _, _)) = fast_rx.try_recv().expect("healthy frame") else {
+            panic!("a live chunk must remain output");
+        };
         release_subscriber_bytes(&fast_bytes, delivered.len());
         assert_eq!(fast_bytes.load(Ordering::Acquire), 0);
 
@@ -4409,7 +4512,9 @@ mod tests {
         assert!(slow_flag.load(Ordering::Acquire));
         assert!(!fast_flag.load(Ordering::Acquire));
         assert_eq!(fast_bytes.load(Ordering::Acquire), payload_bytes);
-        let (_, epoch, seq) = fast_rx.try_recv().expect("healthy client progresses");
+        let SubscriberEvent::Output((_, epoch, seq)) = fast_rx.try_recv().expect("healthy client progresses") else {
+            panic!("a live chunk must remain output");
+        };
         assert_eq!((epoch, seq), (1, 2));
         release_subscriber_bytes(&fast_bytes, payload_bytes);
         assert_eq!(fast_bytes.load(Ordering::Acquire), 0);
@@ -4417,7 +4522,7 @@ mod tests {
 
     #[tokio::test]
     async fn oversized_frame_eviction_is_bounded_even_below_slot_capacity() {
-        let (tx, mut rx) = mpsc::channel::<OutputChunk>(SUBSCRIBER_QUEUE_SLOTS);
+        let (tx, mut rx) = mpsc::channel::<SubscriberEvent>(SUBSCRIBER_QUEUE_SLOTS);
         let queued_bytes = Arc::new(AtomicUsize::new(0));
         let detached_for_not_draining = Arc::new(AtomicBool::new(false));
         let (outbound, _) = P2pOutbound::new();
@@ -4440,7 +4545,7 @@ mod tests {
 
     #[tokio::test]
     async fn closed_subscriber_refunds_queued_byte_reservation() {
-        let (tx, rx) = mpsc::channel::<OutputChunk>(SUBSCRIBER_QUEUE_SLOTS);
+        let (tx, rx) = mpsc::channel::<SubscriberEvent>(SUBSCRIBER_QUEUE_SLOTS);
         drop(rx);
         let queued_bytes = Arc::new(AtomicUsize::new(0));
         let detached_for_not_draining = Arc::new(AtomicBool::new(false));
@@ -4463,7 +4568,7 @@ mod tests {
     #[tokio::test]
     async fn a_detached_subscriber_closes_the_connection() {
         let (outbound, _rx) = P2pOutbound::new();
-        let (tx, rx) = mpsc::channel::<OutputChunk>(SUBSCRIBER_QUEUE_SLOTS);
+        let (tx, rx) = mpsc::channel::<SubscriberEvent>(SUBSCRIBER_QUEUE_SLOTS);
         let detached_for_not_draining = Arc::new(AtomicBool::new(false));
         let queued_bytes = Arc::new(AtomicUsize::new(0));
         let (peer_outbound, _) = P2pOutbound::new();
@@ -4488,7 +4593,7 @@ mod tests {
         // Saturate the subscriber queue, then let one more chunk evict it —
         // the production trigger, not a re-enactment of it.
         for n in 0..SUBSCRIBER_QUEUE_SLOTS {
-            tx.try_send((b"chunk".to_vec(), 1, n as u64))
+            tx.try_send(SubscriberEvent::Output((b"chunk".to_vec(), 1, n as u64)))
                 .expect("room before the bound");
         }
         assert_eq!(
@@ -4523,7 +4628,7 @@ mod tests {
     #[tokio::test]
     async fn a_superseded_forwarder_leaves_the_connection_open() {
         let (outbound, _rx) = P2pOutbound::new();
-        let (tx, rx) = mpsc::channel::<OutputChunk>(SUBSCRIBER_QUEUE_SLOTS);
+        let (tx, rx) = mpsc::channel::<SubscriberEvent>(SUBSCRIBER_QUEUE_SLOTS);
 
         spawn_output_forwarder(
             rx,
@@ -4574,7 +4679,7 @@ mod tests {
             "the whole byte budget is one frame's worth"
         );
 
-        let (tx, rx) = mpsc::channel::<OutputChunk>(SUBSCRIBER_QUEUE_SLOTS);
+        let (tx, rx) = mpsc::channel::<SubscriberEvent>(SUBSCRIBER_QUEUE_SLOTS);
         spawn_output_forwarder(
             rx,
             outbound.clone(),
@@ -4583,7 +4688,7 @@ mod tests {
             Arc::new(AtomicUsize::new(0)),
         );
 
-        tx.send((b"chunk".to_vec(), 1, 1))
+        tx.send(SubscriberEvent::Output((b"chunk".to_vec(), 1, 1)))
             .await
             .expect("the chunk is sent");
         let closed = tokio::time::timeout(Duration::from_secs(5), async {
