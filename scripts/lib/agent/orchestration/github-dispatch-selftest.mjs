@@ -68,7 +68,9 @@ await assert.rejects(()=>api200({...plan,inputs:{...plan.inputs,dispatch_ticket:
 
 const issuer={id:222,path:'.github/workflows/acceptance-agent-controller.yml',
   name:'Acceptance / Agent Controller',event:'workflow_dispatch',head_branch:'main',
-  repository:{full_name:'BestNathan/nession'},head_sha:main};
+  actor:{login:'BestNathan'},run_attempt:1,
+  repository:{full_name:'BestNathan/nession'},
+  head_repository:{full_name:'BestNathan/nession'},head_sha:main};
 const devRun={id:333,run_attempt:1,path:'.github/workflows/agent-develop.yml',
   name:'Agent / Development',event:'workflow_dispatch',head_branch:'main',
   head_sha:main,repository:{full_name:'BestNathan/nession'},status:'completed',
