@@ -16,6 +16,13 @@ import { SessionAttachController } from '@/platform/attach/SessionAttachControll
 import type { ConnectionOptions } from '@/platform/terminal-runtime/types';
 import type { TerminalTransport } from '@/platform/terminal-runtime/transport/TerminalTransport';
 import type { InputDrop } from '@/platform/terminal-runtime/inputQueue';
+import {
+  AppliedTerminalCursor,
+  type AppliedCursorBinding,
+  type AppliedCursorSnapshot,
+  type VerifiedTerminalBaseline,
+} from '@/platform/terminal-runtime/AppliedTerminalCursor';
+import type { TerminalStreamPosition } from '@/platform/terminal-runtime/streamApply';
 // Types only. The capability *factories* are injected through
 // SessionRuntimeConfig instead of imported, because `platform` sits below
 // `product` and `capabilities` and may not import either — while the runtime is
@@ -235,6 +242,11 @@ export class SessionRuntime {
    */
   private attachedSize: { cols: number; rows: number } | null = null;
   private transportReady = false;
+  /** A parser-completed stream position is distinct from attach/stream receipt.
+   * Null until an externally verified baseline is explicitly supplied (#1965).
+   * No network ACK or recovery claim is generated here. */
+  private readonly terminalAppliedCursor = new AppliedTerminalCursor();
+  private terminalAppliedBinding: AppliedCursorBinding | null = null;
   /**
    * Runtime-owned dynamic relay fallback: every P2P candidate failed, so the
    * session continues through the server. Deliberately NOT part of the config
@@ -388,6 +400,11 @@ export class SessionRuntime {
       return;
     }
     this.transportReady = ready;
+    if (!ready) {
+      // Replacing a transport can replace its xterm binding; retained stream
+      // receipt is never proof that the *new* renderer parsed those bytes.
+      this.resetTerminalAppliedCursor();
+    }
     if (ready) {
       if (this.effectiveForcedRelay && this.attachState.phase === 'idle') {
         this.attachController.dispatch({ type: 'SESSION_SELECTED' });
@@ -502,6 +519,39 @@ export class SessionRuntime {
    * and only from the currently bound Terminal transport. A successful
    * attach response alone is insufficient (#1645).
    */
+  /**
+   * Only a source that actually proves its checkpoint/empty-renderer cut may
+   * call this. Not agent.attach cursor, not a plain tmux capture, not an
+   * onBootstrapApplied boolean. A failed rebind invalidates the old cursor.
+   */
+  setVerifiedTerminalBaseline(baseline: VerifiedTerminalBaseline): void {
+    this.terminalAppliedBinding = null;
+    this.terminalAppliedCursor.reset();
+    if (this.disposed) { return; }
+    this.terminalAppliedBinding = this.terminalAppliedCursor.beginFromVerifiedBaseline(baseline);
+  }
+
+  /** Current renderer's parser-applied *proof*, never transport receipt. */
+  get terminalAppliedSnapshot(): AppliedCursorSnapshot | null {
+    const binding = this.terminalAppliedBinding;
+    return binding ? this.terminalAppliedCursor.snapshot(binding) : null;
+  }
+
+  /** TerminalController only emits this after its xterm callback / FIFO resize. */
+  noteStreamEventParsed(position: TerminalStreamPosition): void {
+    const binding = this.terminalAppliedBinding;
+    if (this.disposed || !binding) { return; }
+    this.terminalAppliedCursor.recordParsed(binding, position);
+    if (!this.terminalAppliedCursor.snapshot(binding)) {
+      this.terminalAppliedBinding = null;
+    }
+  }
+
+  private resetTerminalAppliedCursor(): void {
+    this.terminalAppliedBinding = null;
+    this.terminalAppliedCursor.reset();
+  }
+
   noteBootstrapApplied(): void {
     if (!this.bootstrapRepairPending) {
       return;
@@ -531,6 +581,7 @@ export class SessionRuntime {
    * is still on screen.
    */
   noteStreamTruncated(): void {
+    this.resetTerminalAppliedCursor();
     this.historyMayHaveGap = true;
     // A newly discovered hole invalidates a repair that was in flight
     // before the loss was reported, even if its parser callback is late.
@@ -712,6 +763,7 @@ export class SessionRuntime {
   }
 
   private emitTransportSwap(): void {
+    this.resetTerminalAppliedCursor();
     for (const listener of this.transportSwapListeners) {
       listener();
     }
@@ -774,6 +826,7 @@ export class SessionRuntime {
 
   dispose(): void {
     this.disposed = true;
+    this.resetTerminalAppliedCursor();
     // End the server-side relay forwarding loop with the runtime that began
     // it (#1309 SC-08). Disposal covers every leave — disconnect, session
     // switch, unmount — so this is the one place an endRelay can never be

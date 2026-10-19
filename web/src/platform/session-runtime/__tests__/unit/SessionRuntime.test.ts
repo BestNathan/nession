@@ -319,6 +319,51 @@ describe('SessionRuntime', () => {
     globalThis.WebSocket = OriginalWebSocket;
   });
 
+  it('never infers a parser-applied cursor from a socket, bootstrap, or untrusted event (#1965)', () => {
+    const rt = new SessionRuntime(makeConfig({ attachInfo: null, addressUrls: [] }));
+    expect(rt.terminalAppliedSnapshot).toBeNull();
+    rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 1 });
+    rt.noteBootstrapApplied();
+    expect(rt.terminalAppliedSnapshot).toBeNull();
+    rt.dispose();
+  });
+
+  it('advances parsed output only from an explicit verified epoch baseline (#1965)', () => {
+    const rt = new SessionRuntime(makeConfig({ attachInfo: null, addressUrls: [] }));
+    rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 4 });
+    rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 6 });
+    expect(rt.terminalAppliedSnapshot?.appliedSeq).toBe(4);
+    rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 5 });
+    expect(rt.terminalAppliedSnapshot?.appliedSeq).toBe(6);
+    rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 5 });
+    expect(rt.terminalAppliedSnapshot?.appliedSeq).toBe(6);
+    expect(rt.terminalAppliedSnapshot?.ackSentSeq).toBe(0); // no network output ACK
+    rt.dispose();
+  });
+
+  it('invalidates parser proof on a gap, transport loss or invalid rebind (#1965)', () => {
+    const rt = new SessionRuntime(makeConfig({ attachInfo: null, addressUrls: [] }));
+    rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 1 });
+    rt.noteStreamTruncated();
+    expect(rt.terminalAppliedSnapshot).toBeNull();
+    rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 2 });
+    expect(rt.terminalAppliedSnapshot).toBeNull();
+
+    rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 8, appliedThrough: 0 });
+    rt.setTransportReady(true);
+    rt.setTransportReady(false);
+    expect(rt.terminalAppliedSnapshot).toBeNull();
+
+    rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 9, appliedThrough: 0 });
+    expect(() => rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 0, appliedThrough: 0 })).toThrow(RangeError);
+    expect(rt.terminalAppliedSnapshot).toBeNull();
+
+    rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 10, appliedThrough: 0 });
+    rt.dispose();
+    rt.noteStreamEventParsed({ streamEpoch: 10, streamSeq: 1 });
+    expect(rt.terminalAppliedSnapshot).toBeNull();
+  });
+
   it('selects its session at construction — idle promotes to connecting with no React driver (#1309 SC-01)', () => {
     const rt = new SessionRuntime(makeConfig());
     // The dispatch is synchronous in the constructor: a runtime that outlives
