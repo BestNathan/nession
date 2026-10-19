@@ -1,6 +1,7 @@
 pub mod bootstrap;
 pub mod execution;
 pub mod outbound;
+pub mod output_ack;
 pub mod resize;
 pub mod session_terminal;
 pub mod websocket;
