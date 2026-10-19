@@ -69,6 +69,18 @@ try{
   assert.equal(second.created,true);
   assert.equal(concurrent.created,true);
   assert.notEqual(concurrent.commit_sha,second.commit_sha);
+  // A later CAS commit for a DIFFERENT Issue does not mutate the original
+  // Writer identity returned by an exact idempotent replay.
+  const replay3001=initializeIssueController({remote,registry,
+    request:request(3001),authority:{...authority,run_id:249}});
+  const replay3002=initializeIssueController({remote,registry,
+    request:request(3002),authority:{...authority,run_id:250}});
+  assert.equal(replay3001.commit_sha,first.commit_sha);
+  assert.equal(replay3002.commit_sha,second.commit_sha);
+  assert.notEqual(replay3001.commit_sha,second.commit_sha);
+  assert.equal(replay3001.replayed,true);
+  assert.equal(replay3002.replayed,true);
+
   git(seed,'fetch','origin','refs/heads/agent-store');
   const committed=git(seed,'rev-parse','FETCH_HEAD');
   assert.equal(committed,second.commit_sha);
@@ -104,9 +116,21 @@ try{
     authority}),/already initialized or advanced/);
   const finalSha=git(seed,'ls-remote','origin','refs/heads/agent-store').split('\t')[0];
   assert.notEqual(finalSha,second.commit_sha);
-  assert.equal(initializeIssueController({remote,registry,request:request(3002),
-    authority}).replayed,true);
-  console.log('Agent Controller initialization: real orphan CAS, exact replay, disjoint race, scope/role and advanced-state denial passed');
+  const replayAfterAdvance=initializeIssueController({remote,registry,
+    request:request(3002),authority});
+  assert.equal(replayAfterAdvance.replayed,true);
+  assert.equal(replayAfterAdvance.commit_sha,second.commit_sha);
+  assert.notEqual(replayAfterAdvance.commit_sha,finalSha);
+  // The reported origin really introduced THIS Issue's immutable v1 state,
+  // and still exists in the linear Store ancestry after unrelated updates.
+  assert.equal(git(seed,'show',second.commit_sha+':workflows/issues/3002/head.json')
+    .includes('"version": 1'),true);
+  // The bare remote has advanced, but this test clone has only the older
+  // fetched ref. Fetch the exact newer Store tip before Git ancestry checks.
+  git(seed,'fetch','origin','refs/heads/agent-store');
+  assert.equal(git(seed,'rev-parse','FETCH_HEAD'),finalSha);
+  assert.equal(git(seed,'merge-base','--is-ancestor',second.commit_sha,'FETCH_HEAD'),'');
+  console.log('Agent Controller initialization: real orphan CAS, original-commit replay across unrelated writes, disjoint race, scope/role and advanced-state denial passed');
 }finally{
   fs.rmSync(temp,{recursive:true,force:true});
 }
