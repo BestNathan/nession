@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { resolveIdentity } from '../harness/contract.mjs';
-import { validateDevelopmentState } from './outbox.mjs';
+import { validateDevelopmentState,recordSliceYield } from './outbox.mjs';
 import { verifyCommittedCheckpoint } from '../store/remote.mjs';
 
 const HEX40 = /^[a-f0-9]{40}$/;
@@ -310,4 +310,72 @@ export function authorizeNativeContinuation({
     ciphertext_sha256:confirmed.ciphertext_sha256,
     store_ref:confirmed.store_ref,
     current_store_sha:confirmed.current_store_sha});
+}
+
+// Trusted Controller/Ingester admission for a completed bounded Worker Slice.
+// The only trusted sources are: persisted run-bound Dispatch receipt, independently
+// fetched GitHub issuer + Worker Runs, a verified HMAC, and the real remote Git
+// checkpoint object. Neither Agent JSON nor comments can set "verified".
+export async function acceptAttestedSliceYield({
+  state,dispatch_ticket,keyring,reader,remote,checkpoint,
+  verified_main_sha,now=Date.now(),
+}) {
+  validateDevelopmentState(state);
+  const body=verifyDispatchTicket(dispatch_ticket,keyring,{now,allowExpired:true});
+  if(!HEX40.test(verified_main_sha??'')||
+      !own(checkpoint,['version','commit_sha','ciphertext_sha256','run_id','attempt'])||
+      Object.keys(checkpoint).length!==5||
+      !positive(checkpoint.run_id)||!positive(checkpoint.attempt)) {
+    reject('invalid trusted Slice attestation request');
+  }
+  const old=state.outbox.find(x=>x.id===body.action_id &&
+    ['dispatched','yielded'].includes(x.status));
+  if(!old||old.task.type!=='dispatch'||old.task.role!==body.role||
+      old.task.task!==body.task||old.task.agent_id!==body.agent_id||
+      old.task.sha!==body.input_sha||body.issue!==state.issue||
+      state.assignments[body.role]!==body.agent_id||
+      old.receipt?.dispatch_id!==body.action_id||
+      (old.status==='dispatched'&&
+        (old.receipt.status!=='verified'||
+         old.receipt.source_run_id!==checkpoint.run_id))||
+      (old.status==='yielded'&&
+        (old.receipt.source_run_id!==checkpoint.run_id||
+         old.receipt.source_attempt!==checkpoint.attempt))||
+      (old.task.continuation ?
+        body.schema_version!==2 ||
+          canonical(old.task.continuation)!==canonical(body.resume_from) :
+        body.schema_version!==1)) {
+    reject('Slice lacks an authenticated run-bound dispatch or signed lineage');
+  }
+  const issuer=await reader.getRun(body.issuer_run_id);
+  if(issuer.id!==body.issuer_run_id||
+      issuer.path!=='.github/workflows/acceptance-agent-controller.yml'||
+      issuer.name!=='Acceptance / Agent Controller'||
+      issuer.event!=='workflow_dispatch'||issuer.head_branch!=='main'||
+      issuer.repository?.full_name!==REPOSITORY||
+      issuer.head_repository?.full_name!==REPOSITORY||
+      issuer.head_sha!==verified_main_sha) {
+    reject('Slice issuer is not the trusted Controller Run');
+  }
+  const run=await reader.getRun(checkpoint.run_id);
+  compareSource(run,body,{kind:body.role,issue:body.issue,
+    run_id:checkpoint.run_id,run_attempt:checkpoint.attempt,
+    target_sha:body.input_sha,task_id:body.action_id});
+  if(run.head_repository?.full_name!==REPOSITORY||
+      run.head_sha!==verified_main_sha) {
+    reject('Slice Worker did not execute authenticated main code');
+  }
+  verifyCommittedCheckpoint({remote,
+    identity:{role:body.role,agent_id:body.agent_id,issue:body.issue},
+    commit_sha:checkpoint.commit_sha,version:checkpoint.version,
+    ciphertext_sha256:checkpoint.ciphertext_sha256});
+  return recordSliceYield(state,state.version,body.action_id,{
+    version:checkpoint.version,commit_sha:checkpoint.commit_sha,
+    ciphertext_sha256:checkpoint.ciphertext_sha256,
+  },{
+    verified:true,repository:REPOSITORY,
+    workflow_path:run.path,workflow_name:run.name,role:body.role,
+    agent_id:body.agent_id,issue:body.issue,run_id:run.id,
+    attempt:run.run_attempt,action_id:body.action_id,input_sha:body.input_sha,
+  });
 }
