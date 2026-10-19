@@ -149,6 +149,8 @@ fn a_bootstrap_carries_what_was_asked_for_and_whether_it_was_cut() {
             truncated: true,
             cut_consistency: Some(TerminalCheckpointCutConsistency::Unverified),
             fidelity: Some(TerminalCheckpointFidelity::Partial),
+            stream_epoch: None,
+            through_seq: None,
         }),
     };
     let back: TerminalOutputPayload =
@@ -159,12 +161,32 @@ fn a_bootstrap_carries_what_was_asked_for_and_whether_it_was_cut() {
 }
 
 #[test]
+fn atomic_bootstrap_is_bound_to_a_specific_stream_epoch_and_cut() {
+    let marker = TerminalBootstrapPayload {
+        requested_lines: 5000,
+        truncated: false,
+        cut_consistency: Some(TerminalCheckpointCutConsistency::Atomic),
+        fidelity: Some(TerminalCheckpointFidelity::Partial),
+        stream_epoch: Some(17),
+        through_seq: Some(42),
+    };
+    let value = serde_json::to_value(&marker).unwrap();
+    assert_eq!(value["stream_epoch"], 17);
+    assert_eq!(value["through_seq"], 42);
+    let decoded: TerminalBootstrapPayload = serde_json::from_value(value).unwrap();
+    assert_eq!(decoded.stream_epoch, Some(17));
+    assert_eq!(decoded.through_seq, Some(42));
+}
+
+#[test]
 fn bootstrap_cut_consistency_is_independent_of_screen_fidelity() {
     let marker = TerminalBootstrapPayload {
         requested_lines: 5000,
         truncated: false,
         cut_consistency: Some(TerminalCheckpointCutConsistency::Unverified),
         fidelity: Some(TerminalCheckpointFidelity::ScreenOnly),
+        stream_epoch: None,
+        through_seq: None,
     };
     let wire = serde_json::to_value(&marker).unwrap();
     assert_eq!(wire["cut_consistency"], "unverified");

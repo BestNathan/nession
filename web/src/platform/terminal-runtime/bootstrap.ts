@@ -34,6 +34,9 @@ export interface TerminalBootstrap {
   cutConsistency?: 'atomic' | 'unverified';
   /** VT representation. Even a complete text capture is never full-vt. */
   fidelity?: 'full-vt' | 'screen-only' | 'partial';
+  /** Optional, explicit identity of an actual Agent stream cut. */
+  streamEpoch?: number;
+  throughSeq?: number;
 }
 
 /**
@@ -44,7 +47,9 @@ export interface TerminalBootstrap {
 export function provesVerifiedBootstrapRepair(bootstrap: TerminalBootstrap | undefined): boolean {
   return bootstrap?.cutConsistency === 'atomic'
     && bootstrap.fidelity === 'full-vt'
-    && !bootstrap.truncated;
+    && !bootstrap.truncated
+    && Number.isSafeInteger(bootstrap.streamEpoch) && (bootstrap.streamEpoch ?? 0) > 0
+    && Number.isSafeInteger(bootstrap.throughSeq) && (bootstrap.throughSeq ?? -1) >= 0;
 }
 
 /**
@@ -71,5 +76,9 @@ export function decodeBootstrapMarker(raw: unknown): TerminalBootstrap | undefin
     ...(payload.fidelity === 'full-vt'
       || payload.fidelity === 'screen-only' || payload.fidelity === 'partial'
       ? { fidelity: payload.fidelity } : {}),
+    ...(Number.isSafeInteger(payload.stream_epoch) && (payload.stream_epoch as number) > 0
+      ? { streamEpoch: payload.stream_epoch as number } : {}),
+    ...(Number.isSafeInteger(payload.through_seq) && (payload.through_seq as number) >= 0
+      ? { throughSeq: payload.through_seq as number } : {}),
   };
 }

@@ -68,11 +68,29 @@ describe('P2 checkpoint cut and fidelity cannot be conflated (#2008)', () => {
     }))).toBe(false);
   });
 
+  it('rejects atomic/full-VT markers with missing, invalid, or unsafe cut identities', () => {
+    const valid = { requested_lines: 20, truncated: false,
+      cut_consistency: 'atomic', fidelity: 'full-vt' };
+    expect(provesVerifiedBootstrapRepair(decodeBootstrapMarker(valid))).toBe(false);
+    expect(provesVerifiedBootstrapRepair(decodeBootstrapMarker({
+      ...valid, stream_epoch: 5, through_seq: Number.MAX_SAFE_INTEGER + 1,
+    }))).toBe(false);
+    expect(provesVerifiedBootstrapRepair(decodeBootstrapMarker({
+      ...valid, stream_epoch: -1, through_seq: 4,
+    }))).toBe(false);
+    expect(provesVerifiedBootstrapRepair(decodeBootstrapMarker({
+      ...valid, stream_epoch: 5, through_seq: 0,
+    }))).toBe(true);
+  });
+
   it('permits a callback to prove recovery only for a future atomic full-VT untruncated cut', () => {
     const snapshot = decodeBootstrapMarker({
       requested_lines: 5000, truncated: false,
       cut_consistency: 'atomic', fidelity: 'full-vt',
+      stream_epoch: 9, through_seq: 71,
     });
     expect(provesVerifiedBootstrapRepair(snapshot)).toBe(true);
+    expect(snapshot?.streamEpoch).toBe(9);
+    expect(snapshot?.throughSeq).toBe(71);
   });
 });

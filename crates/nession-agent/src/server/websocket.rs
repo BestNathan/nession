@@ -680,7 +680,7 @@ pub use nession_protocol::contracts::terminal::v1::{
     TerminalControlAcquirePayload, TerminalControlAcquireResponse, TerminalControlChangedPayload,
     TerminalInputAckPayload, TerminalInputPayload, TerminalOutputAppliedPayload,
     TerminalOutputPayload, TerminalResizePayload, TerminalResumeRecovery,
-    TerminalStreamResumePayload, TerminalStreamResumeResponse,
+    TerminalStreamEventPayload, TerminalStreamResumePayload, TerminalStreamResumeResponse,
 };
 
 // --- Protocol helpers ---
@@ -853,6 +853,97 @@ fn tmux_capture_fidelity(truncated: bool, modes_complete: bool) -> TerminalCheck
     }
 }
 
+/// Build a contiguous prefix exclusively from the Agent's *ordered* stream
+/// ring. No tmux capture occurs here, so a current-head cut and the new
+/// subscriber's live queue can be activated under the same SessionMap lock.
+///
+/// This proves stream continuity only. It cannot restore terminal history
+/// preceding the Agent reader, nor replay resize/emulator state as full VT.
+/// Missing, expired or oversized prefixes must take the unverified fallback.
+struct AtomicOutputPrefix {
+    bytes: Vec<u8>,
+    stream_epoch: u64,
+    through_seq: u64,
+}
+
+fn atomic_output_prefix(
+    stream: &session_terminal::SessionStreamState,
+) -> Option<AtomicOutputPrefix> {
+    use base64::Engine;
+    let replay = stream.replay_since(stream.epoch, 0)?;
+    if !replay.complete || replay.events.is_empty() {
+        return None;
+    }
+    let mut raw = Vec::new();
+    for event in replay.events {
+        match event {
+            TerminalStreamEventPayload::Output { data, .. } => {
+                let decoded = base64::engine::general_purpose::STANDARD
+                    .decode(data)
+                    .ok()?;
+                let size = raw.len().checked_add(decoded.len())?;
+                if size > crate::server::bootstrap::BOOTSTRAP_MAX_BYTES {
+                    return None;
+                }
+                raw.extend_from_slice(&decoded);
+            }
+            // A resize is a real sequenced event, but not a byte sequence.
+            // The baseline is marked Partial even when output replay is whole.
+            TerminalStreamEventPayload::Resize { .. } => {}
+        }
+    }
+    (!raw.is_empty()).then_some(AtomicOutputPrefix {
+        bytes: raw,
+        stream_epoch: stream.epoch,
+        through_seq: stream.cursor(),
+    })
+}
+
+/// A stream-log cut is atomic with its live queue *only* when both are
+/// selected under the same SessionMap lock. No unproven tmux cut is promoted.
+fn atomic_prefix_payload(session_name: &str, prefix: &AtomicOutputPrefix) -> TerminalOutputPayload {
+    use base64::Engine;
+    TerminalOutputPayload {
+        session_name: session_name.to_string(),
+        data: base64::engine::general_purpose::STANDARD.encode(&prefix.bytes),
+        stream_epoch: None,
+        stream_seq: None,
+        bootstrap: Some(TerminalBootstrapPayload {
+            requested_lines: crate::tmux::HISTORY_LIMIT_LINES,
+            truncated: false,
+            cut_consistency: Some(TerminalCheckpointCutConsistency::Atomic),
+            // This is raw Agent output since stream epoch began, not a
+            // verified VT/screen snapshot from tmux's whole lifetime.
+            fidelity: Some(TerminalCheckpointFidelity::Partial),
+            stream_epoch: Some(prefix.stream_epoch),
+            through_seq: Some(prefix.through_seq),
+        }),
+    }
+}
+
+async fn send_atomic_output_prefix(
+    outbound: &P2pOutbound,
+    session_name: &str,
+    prefix: &AtomicOutputPrefix,
+) -> bool {
+    let msg = new_message(
+        msg_types::TERMINAL_OUTPUT,
+        atomic_prefix_payload(session_name, prefix),
+    );
+    let Ok(json) = serde_json::to_string(&msg) else {
+        return false;
+    };
+    match outbound.send_terminal(WsMessage::Text(json)).await {
+        Ok(()) => true,
+        Err(OutboundError::Stalled) => {
+            warn!("stream cut: client stalled on atomic prefix for {session_name}");
+            outbound.close();
+            false
+        }
+        Err(_) => false,
+    }
+}
+
 async fn send_bootstrap(
     outbound: &P2pOutbound,
     tmux: &crate::tmux::ops::TmuxDep,
@@ -910,6 +1001,8 @@ async fn send_bootstrap(
             cut_consistency: Some(TerminalCheckpointCutConsistency::Unverified),
             // Even a complete pane capture is text/modes, not full VT.
             fidelity: Some(tmux_capture_fidelity(bounded.truncated, modes_complete)),
+            stream_epoch: None,
+            through_seq: None,
         }),
     };
     let msg = new_message(msg_types::TERMINAL_OUTPUT, payload);
@@ -1728,7 +1821,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                         let detached_for_not_draining = Arc::new(AtomicBool::new(false));
                             let queued_bytes = Arc::new(AtomicUsize::new(0));
                         let wants_bootstrap = payload.needs_bootstrap.unwrap_or(false);
-                        let resp = {
+                        let (resp, atomic_prefix) = {
                             let mut guard = sessions_lock(ctx.sessions);
                             let Some(shared) = guard.get_mut(&session_name) else {
                                 return ctx.err("not_attached", "session ended during attach");
@@ -1738,12 +1831,19 @@ p2p_routes! { ctx, msg_type, payload_value;
                             // quietly instead of closing the connection this
                             // attach is about to answer on (#1226).
                             shared.peers.retain(|p| p.client_id != client_id);
-                            // When a bootstrap is coming, leave `output_tx` unset
-                            // until the snapshot is on the wire. The broadcast
-                            // task is already running and would otherwise queue
-                            // live bytes that the capture also covers — the
-                            // duplicate window #1228 measured on subsequent attach
-                            // (#321 SC4).
+                            // Decide the exact stream cut under the *same* map
+                            // lock used by the producer for record/fan-out.
+                            // Only a complete bounded prefix can join to a
+                            // pre-enabled live queue without a silent gap.
+                            let atomic_prefix = if wants_bootstrap {
+                                atomic_output_prefix(&shared.stream)
+                            } else {
+                                None
+                            };
+                            // For an atomic ring prefix, turn the queue on
+                            // NOW, under the stream producer's lock. Only
+                            // unverified async tmux capture keeps it disabled
+                            // until the snapshot has been sent (#1925).
                             let output_ack = match new_output_ack(shared.stream.epoch) {
                                 Ok(ack) => ack,
                                 Err(_) => return ctx.err("invalid_stream_identity", "output ACK identity unavailable"),
@@ -1753,7 +1853,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 peer_token: Arc::clone(ctx.peer_token),
                                 outbound: ctx.outbound.clone(),
                                 output_ack,
-                                output_tx: if wants_bootstrap {
+                                output_tx: if wants_bootstrap && atomic_prefix.is_none() {
                                     None
                                 } else {
                                     Some(tx.clone())
@@ -1763,7 +1863,10 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 ),
                                 queued_bytes: Arc::clone(&queued_bytes),
                             });
-                            client_attach_response(payload.session_name.clone(), shared, &client_id)
+                            (
+                                client_attach_response(payload.session_name.clone(), shared, &client_id),
+                                atomic_prefix,
+                            )
                         };
 
                         // The session's history, before the live forwarder
@@ -1779,30 +1882,46 @@ p2p_routes! { ctx, msg_type, payload_value;
                         // holds nothing). Absent means "the backend is attached,
                         // so no" — the behaviour an older client already has.
                         if wants_bootstrap {
-                            let bootstrap_tmux = ctx.tmux.tmux_dep();
-                            let capture = capture_for_bootstrap(
-                                &bootstrap_tmux,
-                                &session_name,
-                                crate::tmux::HISTORY_LIMIT_LINES,
-                            )
-                            .await;
-                            if !send_bootstrap(ctx.outbound, &bootstrap_tmux, &session_name, capture)
-                                .await
-                            {
-                                return ctx.err(
-                                    "bootstrap_stalled",
-                                    "the client stalled while its history was being sent",
-                                );
-                            }
-                            {
+                            if let Some(ref prefix) = atomic_prefix {
+                                // The queue was activated at precisely the
+                                // prefix's stream cursor; live chunks collected
+                                // while this await runs remain queued behind it.
+                                if !send_atomic_output_prefix(
+                                    ctx.outbound, &session_name, prefix,
+                                ).await {
+                                    return ctx.err(
+                                        "bootstrap_stalled",
+                                        "the client stalled while its ordered history was being sent",
+                                    );
+                                }
+                            } else {
+                                // No complete event-log prefix: older tmux text
+                                // capture is explicitly unverified, not an
+                                // atomic checkpoint. Preserve legacy fallback.
+                                let bootstrap_tmux = ctx.tmux.tmux_dep();
+                                let capture = capture_for_bootstrap(
+                                    &bootstrap_tmux,
+                                    &session_name,
+                                    crate::tmux::HISTORY_LIMIT_LINES,
+                                ).await;
+                                if !send_bootstrap(
+                                    ctx.outbound, &bootstrap_tmux, &session_name, capture,
+                                ).await {
+                                    return ctx.err(
+                                        "bootstrap_stalled",
+                                        "the client stalled while its history was being sent",
+                                    );
+                                }
+                                // A reattach of the same client ID can occur
+                                // while awaiting tmux; never enable a *new*
+                                // socket's queue on the old connection's token.
                                 let mut guard = sessions_lock(ctx.sessions);
                                 if let Some(shared) = guard.get_mut(&session_name) {
-                                    if let Some(peer) = shared
-                                        .peers
-                                        .iter_mut()
-                                        .find(|p| p.client_id == client_id)
-                                    {
-                                        peer.output_tx = Some(tx);
+                                    if let Some(peer) = shared.peers.iter_mut().find(|p| {
+                                        p.client_id == client_id
+                                            && Arc::ptr_eq(&p.peer_token, ctx.peer_token)
+                                    }) {
+                                        peer.output_tx = Some(tx.clone());
                                     }
                                 }
                             }
@@ -3625,6 +3744,123 @@ mod tests {
         assert!(stale.first_available_seq.is_none());
         assert!(stale.complete.is_none());
         assert!(stale.events.is_empty());
+    }
+
+    #[test]
+    fn bounded_stream_prefix_is_an_atomic_cut_not_a_full_vt_checkpoint() {
+        use base64::Engine;
+        let mut stream = session_terminal::SessionStreamState::new();
+        let encode =
+            |n| base64::engine::general_purpose::STANDARD.encode(format!("GAP-{n:03}\\r\\n"));
+        for i in 1..=18 {
+            stream.record_output("demo", encode(i));
+        }
+        let cursor_at_cut = stream.cursor();
+        let raw = atomic_output_prefix(&stream).expect("contiguous event history");
+        let expected = (1..=18)
+            .map(|i| format!("GAP-{i:03}\\r\\n"))
+            .collect::<String>();
+        assert_eq!(raw.bytes, expected.into_bytes());
+        assert_eq!(raw.stream_epoch, stream.epoch);
+        assert_eq!(raw.through_seq, cursor_at_cut);
+        let payload = atomic_prefix_payload("demo", &raw);
+        assert_eq!(
+            payload.bootstrap.as_ref().and_then(|b| b.cut_consistency),
+            Some(TerminalCheckpointCutConsistency::Atomic)
+        );
+        assert_eq!(
+            payload.bootstrap.as_ref().and_then(|b| b.fidelity),
+            Some(TerminalCheckpointFidelity::Partial),
+            "a replay from the Agent's start omits earlier tmux/VT state"
+        );
+        assert_eq!(
+            payload.bootstrap.as_ref().and_then(|b| b.stream_epoch),
+            Some(stream.epoch)
+        );
+        assert_eq!(
+            payload.bootstrap.as_ref().and_then(|b| b.through_seq),
+            Some(cursor_at_cut)
+        );
+        assert!(payload.stream_seq.is_none());
+        assert!(payload.stream_epoch.is_none());
+        assert_eq!(cursor_at_cut, 18);
+    }
+
+    #[test]
+    fn atomic_prefix_fails_closed_for_missing_oversized_and_malformed_ring() {
+        use base64::Engine;
+        let mut stream = session_terminal::SessionStreamState::new();
+        assert!(atomic_output_prefix(&stream).is_none());
+        stream.record_output("demo", "%%%".to_string());
+        assert!(
+            atomic_output_prefix(&stream).is_none(),
+            "invalid base64 must not become history"
+        );
+
+        let mut oversized = session_terminal::SessionStreamState::new();
+        oversized.record_output(
+            "demo",
+            base64::engine::general_purpose::STANDARD.encode(vec![
+                b'x';
+                crate::server::bootstrap::BOOTSTRAP_MAX_BYTES
+                    + 1
+            ]),
+        );
+        assert!(
+            atomic_output_prefix(&oversized).is_none(),
+            "never silently truncate an atomic cut"
+        );
+
+        let mut evicted = session_terminal::SessionStreamState::new();
+        evicted.record_output("demo", "x".repeat(5_000_000));
+        evicted.record_output(
+            "demo",
+            base64::engine::general_purpose::STANDARD.encode(b"new"),
+        );
+        assert!(
+            atomic_output_prefix(&evicted).is_none(),
+            "missing seq 1 cannot be proven atomic"
+        );
+    }
+
+    #[test]
+    fn atomic_prefix_and_live_subscriber_queue_have_no_gap_or_duplicate() {
+        use base64::Engine;
+        let mut stream = session_terminal::SessionStreamState::new();
+        let before = base64::engine::general_purpose::STANDARD.encode(b"GAP-001\\r\\n");
+        stream.record_output("demo", before);
+        // A resize consumes a sequence but cannot be reconstructed as a VT
+        // reset; we still recover the full ordered OUTPUT prefix, Partial.
+        stream.record_resize("demo", 120, 30);
+        let prefix = atomic_output_prefix(&stream).expect("prefix complete");
+        let cut = stream.cursor();
+        assert_eq!(prefix.bytes, b"GAP-001\\r\\n");
+        assert_eq!(prefix.through_seq, cut);
+        assert_eq!(prefix.stream_epoch, stream.epoch);
+
+        let (tx, mut rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
+        let (outbound, _) = P2pOutbound::new();
+        let mut peers = vec![SessionPeer {
+            client_id: "observer".to_owned(),
+            peer_token: Arc::new(()),
+            output_ack: test_output_ack(),
+            outbound,
+            output_tx: Some(tx),
+            queued_bytes: Arc::new(AtomicUsize::new(0)),
+            detached_for_not_draining: Arc::new(AtomicBool::new(false)),
+        }];
+        let live = b"GAP-002\\r\\n".to_vec();
+        let (epoch, seq) = stream.record_output(
+            "demo",
+            base64::engine::general_purpose::STANDARD.encode(&live),
+        );
+        assert_eq!(seq, cut + 1);
+        assert_eq!(fan_out_peers(&mut peers, (live.clone(), epoch, seq)), 0);
+        let queued = rx
+            .try_recv()
+            .expect("post-cut output is held for forwarder");
+        assert_eq!(queued, (live, epoch, cut + 1));
+        assert!(rx.try_recv().is_err(), "no duplicated next event");
     }
 
     fn test_output_ack() -> SubscriberOutputAck {

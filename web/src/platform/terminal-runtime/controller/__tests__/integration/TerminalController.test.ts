@@ -409,7 +409,7 @@ describe('TerminalController', () => {
     const resetSpy = vi.spyOn(controller.terminal!, 'reset');
     transport.onOutput!(new Uint8Array([104, 105]), {
       requestedLines: 5000, truncated: false,
-      cutConsistency: 'atomic', fidelity: 'full-vt',
+      cutConsistency: 'atomic', fidelity: 'full-vt', streamEpoch: 9, throughSeq: 7,
     });
     expect(h.spy).toHaveBeenNthCalledWith(1, '\x1b[2J\x1b[3J\x1b[H', expect.any(Function));
     expect(h.spy).toHaveBeenCalledTimes(1);
@@ -560,10 +560,10 @@ describe('TerminalController', () => {
     controller.attach(host());
     const h = delayedParser(controller);
     transport.onOutput!(new Uint8Array([49]), {
-      requestedLines: 5000, truncated: false, cutConsistency: 'atomic', fidelity: 'full-vt',
+      requestedLines: 5000, truncated: false, cutConsistency: 'atomic', fidelity: 'full-vt', streamEpoch: 9, throughSeq: 7,
     });
     transport.onOutput!(new Uint8Array([50]), {
-      requestedLines: 5000, truncated: false, cutConsistency: 'atomic', fidelity: 'full-vt',
+      requestedLines: 5000, truncated: false, cutConsistency: 'atomic', fidelity: 'full-vt', streamEpoch: 9, throughSeq: 7,
     });
     expect(onBootstrapApplied).not.toHaveBeenCalled();
     h.finish(); // old reset
