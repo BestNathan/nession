@@ -5,6 +5,11 @@ name: Acceptance / Quota Recovery
 on:
   schedule:
     - cron: '7,22,37,52 * * * *'
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["CI / Quality Gate"]
+    branches: [main]
+    types: [completed]
 
 permissions:
   contents: read
@@ -13,7 +18,15 @@ permissions:
 
 jobs:
   recover:
-    if: github.repository == 'BestNathan/nession' && github.ref == 'refs/heads/main'
+    if: >-
+      ${{ github.repository == 'BestNathan/nession' &&
+          github.ref == 'refs/heads/main' &&
+          (github.event_name == 'schedule' ||
+           github.event_name == 'workflow_dispatch' ||
+           (github.event_name == 'workflow_run' &&
+            github.event.workflow_run.event == 'push' &&
+            github.event.workflow_run.head_branch == 'main' &&
+            github.event.workflow_run.conclusion == 'success')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     concurrency:
@@ -32,4 +45,7 @@ jobs:
       - name: Bounded authenticated failed-job reconciliation
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+          SOURCE_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
         run: node scripts/acceptance-quota-recovery.mjs run
