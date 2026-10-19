@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "4626946e67f686617b920aa769d91258682163581218104859612ae7e46b3a67",
+  "run_id": 39199175442,
+  "run_attempt": 1,
+  "issue": 1940,
+  "criterion": "SC-02",
+  "criterion_text": "All rate-limit fallback paths fail closed on unverified/forged/stale checks and cannot advance Issue SC or allow merge.",
+  "stage": "post-merge",
+  "target_sha": "6dc66a38b9ed475b367c914b7c2565bf020cc5cb",
+  "contract_sha256": "fa85594b14cf9cd305f8353c0b56aa9a2b20cd059bfb77615c922ec8f0d2609f",
+  "case_revision": "6dc66a38b9ed475b367c914b7c2565bf020cc5cb",
+  "case_tree_sha": "3cca9ec7301e5c0377c025479694a3a594686e12",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-19T04:24:48.229Z",
+  "finished_at": "2026-10-19T04:24:48.290Z",
+  "duration_ms": 61,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "invalid jobs, stale live PR/run, forged source workflow, cancelled attempt and unverified Quality cannot produce replay POST",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "Independent deterministic Issue #1940 SC-02 proof passed on the checked-out target tree"
+        }
+      ],
+      "duration_ms": 50,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 39199175442,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "6dc66a38b9ed475b367c914b7c2565bf020cc5cb",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/39199175442",
+    "record_path": "runs/2026-10-19/39199175442-1/1940/SC-02.json",
+    "source_result_sha256": "692c514f49bbe2211c44f121b3505f276f144d4a9a52d172ebaea9627f7ea862"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-39199175442-1",
+    "sha256": "692c514f49bbe2211c44f121b3505f276f144d4a9a52d172ebaea9627f7ea862",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/39199175442",
+    "durability": "time-limited; object archival not configured"
+  }
+}

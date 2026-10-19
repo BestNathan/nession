@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "5dd6635bcde00d33171c96bb4f0ffaa621e38e13f2764aa63ac5721f468e19d5",
+  "run_id": 39199175442,
+  "run_attempt": 1,
+  "issue": 1940,
+  "criterion": "SC-01",
+  "criterion_text": "**Measurable API reduction and reliable wakeup:** for the same three non-recoverable Acceptance candidates, recovery needs at most **8 GitHub API requests** (baseline **17**, improvement ≥50%), evidenced by executable same-load fixture and at least one post-change real run validating the per-candidate query model. An authenticated `main` Quality-success event or scheduled trusted wakeup runs without manual PR edits; a real 403 is **not** required.",
+  "stage": "post-merge",
+  "target_sha": "6dc66a38b9ed475b367c914b7c2565bf020cc5cb",
+  "contract_sha256": "fa85594b14cf9cd305f8353c0b56aa9a2b20cd059bfb77615c922ec8f0d2609f",
+  "case_revision": "6dc66a38b9ed475b367c914b7c2565bf020cc5cb",
+  "case_tree_sha": "bd5b18e79fa9257f4a60b7c8d9b0b94e60226260",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-19T04:24:48.151Z",
+  "finished_at": "2026-10-19T04:24:48.229Z",
+  "duration_ms": 78,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "17 to 5 REST calls for three identical nonrecoverable candidates (-70.6%); trusted main Quality event requires one additional source GET",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "Independent deterministic Issue #1940 SC-01 proof passed on the checked-out target tree"
+        }
+      ],
+      "duration_ms": 61,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 39199175442,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "6dc66a38b9ed475b367c914b7c2565bf020cc5cb",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/39199175442",
+    "record_path": "runs/2026-10-19/39199175442-1/1940/SC-01.json",
+    "source_result_sha256": "4e1f9e89a86a6bc8ad235cc31c60731361d7ffb01802b0d628a52c35291266bc"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-39199175442-1",
+    "sha256": "4e1f9e89a86a6bc8ad235cc31c60731361d7ffb01802b0d628a52c35291266bc",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/39199175442",
+    "durability": "time-limited; object archival not configured"
+  }
+}
