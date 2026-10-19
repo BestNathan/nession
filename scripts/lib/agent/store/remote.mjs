@@ -122,3 +122,54 @@ export function fetchEncryptedAgentCheckpoint({remote,identity,expected,key}){
       commit_sha:git(checkout,['rev-parse','HEAD'])};
   }finally{fs.rmSync(parent,{recursive:true,force:true});}
 }
+
+// Validate the EXACT signed checkpoint commit against the currently reachable
+// trusted orphan branch without requiring the AES restore key. Other Agent
+// checkpoints may have advanced the branch since this commit; the selected
+// identity's immutable head must still match, or resume fails closed.
+// This only attests an encrypted Git object. Private-key decryption is still a
+// separate trusted restore operation before the model executor starts.
+export function verifyCommittedCheckpoint({
+  remote,identity,commit_sha,version,ciphertext_sha256,
+}) {
+  if(!HEX40.test(commit_sha??'')||!Number.isSafeInteger(version)||version<1||
+      !/^[a-f0-9]{64}$/.test(ciphertext_sha256??'')||
+      !['developer','reviewer','acceptor'].includes(identity?.role)||
+      !/^[a-z][a-z0-9-]{1,80}$/.test(identity?.agent_id??'')||
+      !Number.isSafeInteger(identity?.issue)||identity.issue<1) {
+    fail('invalid signed checkpoint commitment');
+  }
+  const {checkout,parent}=cloneRoot(remote);
+  try {
+    const headSha=git(checkout,['rev-parse','HEAD']);
+    if(!HEX40.test(headSha))fail('invalid current Store SHA');
+    git(checkout,['merge-base','--is-ancestor',commit_sha,headSha]);
+    const prefix='roles/'+identity.role+'/'+identity.agent_id+'/issues/'+identity.issue;
+    const location=prefix+'/checkpoints/'+String(version).padStart(8,'0')+'.json';
+    const read=(rev,filename)=>{
+      let raw;
+      try{raw=git(checkout,['show',rev+':'+filename]);}
+      catch{fail('checkpoint commitment object missing');}
+      try{return JSON.parse(raw);}catch{fail('corrupt committed checkpoint object');}
+    };
+    const currentHead=read(headSha,prefix+'/head.json');
+    const committedHead=read(commit_sha,prefix+'/head.json');
+    if(currentHead.version!==version||currentHead.checkpoint_path!==location||
+        currentHead.ciphertext_sha256!==ciphertext_sha256||
+        committedHead.version!==version||committedHead.checkpoint_path!==location||
+        committedHead.ciphertext_sha256!==ciphertext_sha256) {
+      fail('checkpoint advanced or signed head mismatched');
+    }
+    const record=read(commit_sha,location);
+    if(record.schema_version!==1||record.kind!=='encrypted_agent_checkpoint'||
+        record.version!==version||record.path!==location||
+        record.identity?.role!==identity.role||
+        record.identity?.agent_id!==identity.agent_id||
+        record.identity?.issue!==identity.issue||
+        record.ciphertext_sha256!==ciphertext_sha256) {
+      fail('signed checkpoint record mismatch');
+    }
+    return {store_ref:'refs/heads/'+REF,commit_sha,version,ciphertext_sha256,
+      current_store_sha:headSha};
+  }finally{fs.rmSync(parent,{recursive:true,force:true});}
+}
