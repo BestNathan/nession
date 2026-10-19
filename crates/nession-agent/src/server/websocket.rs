@@ -649,10 +649,10 @@ pub use nession_protocol::contracts::file::v1::{
 };
 pub use nession_protocol::contracts::terminal::v1::{
     TerminalBootstrapPayload, TerminalCheckpointCutConsistency, TerminalCheckpointFidelity,
-    TerminalControlAcquirePayload, TerminalControlAcquireResponse,
-    TerminalControlChangedPayload, TerminalInputAckPayload, TerminalInputPayload,
-    TerminalOutputAppliedPayload, TerminalOutputPayload, TerminalResizePayload,
-    TerminalStreamResumePayload, TerminalStreamResumeResponse,
+    TerminalControlAcquirePayload, TerminalControlAcquireResponse, TerminalControlChangedPayload,
+    TerminalInputAckPayload, TerminalInputPayload, TerminalOutputAppliedPayload,
+    TerminalOutputPayload, TerminalResizePayload, TerminalStreamResumePayload,
+    TerminalStreamResumeResponse,
 };
 
 // --- Protocol helpers ---
@@ -3542,10 +3542,22 @@ mod tests {
 
     #[test]
     fn tmux_capture_never_claims_full_vt_and_degrades_on_mode_loss_or_truncation() {
-        assert_eq!(tmux_capture_fidelity(false, true), TerminalCheckpointFidelity::ScreenOnly);
-        assert_eq!(tmux_capture_fidelity(true, true), TerminalCheckpointFidelity::Partial);
-        assert_eq!(tmux_capture_fidelity(false, false), TerminalCheckpointFidelity::Partial);
-        assert_eq!(tmux_capture_fidelity(true, false), TerminalCheckpointFidelity::Partial);
+        assert_eq!(
+            tmux_capture_fidelity(false, true),
+            TerminalCheckpointFidelity::ScreenOnly
+        );
+        assert_eq!(
+            tmux_capture_fidelity(true, true),
+            TerminalCheckpointFidelity::Partial
+        );
+        assert_eq!(
+            tmux_capture_fidelity(false, false),
+            TerminalCheckpointFidelity::Partial
+        );
+        assert_eq!(
+            tmux_capture_fidelity(true, false),
+            TerminalCheckpointFidelity::Partial
+        );
     }
 
     fn test_output_ack() -> SubscriberOutputAck {
