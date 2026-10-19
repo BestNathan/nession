@@ -8,7 +8,7 @@ import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {readIssueWorkflowState,writeIssueWorkflowState,issueStatePath} from './state-store.mjs';
 import {reconcileOutbox,recordDispatch} from './outbox.mjs';
-import {prepareGitHubDispatch,verifyPersistedDispatchIntent}
+import {prepareGitHubDispatch,verifyPersistedDispatchIntent,createGitHubDispatchClient}
   from './github-dispatch.mjs';
 import {auditStagedRunStore} from '../../../run-store-integrity.mjs';
 import {publish} from '../../../run-store-cas-push.mjs';
@@ -122,4 +122,63 @@ export function acknowledgeCommittedDispatch({
       source_run_id:receipt.source_run_id,state_version:advanced.version,
       store_commit_sha:published.commit_sha};
   });
+}
+
+// Single trusted Driver entrypoint for an authorized pending action.
+// Step 1: use the existing Store CAS to commit a new immutable write-ahead
+//         intent BEFORE any external workflow_dispatch.
+// Step 2: clone the remote ref again and attest that exact signed Ticket
+//         belongs to the newly committed persisted state.
+// Step 3: issue exactly ONE GitHub POST. A crash, network error or HTTP 204
+//         preserves the dispatching state; subsequent calls return reconcile
+//         WITHOUT a POST. Never "compensate" by blindly redispatching.
+// Step 4: only GitHub's HTTP 200 downstream Run ID can be acknowledged by
+//         another CAS commit. Worker result ingestion remains a separate step.
+//
+// Provider agents never call this. Its Store credential is scoped to the
+// trusted Ingest; actionsToken is independent of Store/App and only supports
+// the Actions workflow dispatch endpoint. No secret enters the Worker plan.
+export async function executeDurableAgentDispatch({
+  remote,issue,actionId,registry,signer,actionsToken,now=Date.now(),
+  fetchFn=null,
+}) {
+  if(typeof actionsToken!=='string'||actionsToken.length<8)
+    fail('trusted Actions dispatch token required');
+  if(!signer||!Buffer.isBuffer(signer.key)||signer.key.length<32||
+      typeof signer.key_id!=='string')
+    fail('trusted Controller HMAC signer required');
+  if(fetchFn!==null&&(process.env.NODE_ENV!=='test'||typeof fetchFn!=='function'))
+    fail('mock Actions client unavailable outside fixture tests');
+  const issued=commitDispatchIntent({remote,issue,actionId,registry,signer});
+  if(issued.status!=='committed')return issued;
+  const keyring={[signer.key_id]:signer.key};
+  const verified=withStore(remote,dir=>{
+    const current=readIssueWorkflowState(dir,issue);
+    if(!current.state)fail('prepared Issue vanished from remote Store');
+    return verifyPersistedDispatchIntent({
+      state:current.state,plan:issued.plan,keyring,now,
+    });
+  });
+  if(verified.action_id!==actionId||
+      verified.state_version!==issued.state_version)
+    fail('committed intent version mismatch');
+  const dispatch=createGitHubDispatchClient(actionsToken,{
+    keyring,now,...(fetchFn?{fetchFn}:{})
+  });
+  // DO NOT add a retry loop here, even for HTTP 429 or network failure.
+  const response=await dispatch(issued.plan);
+  if(response.status!=='verified'){
+    return {status:'ambiguous',issue,action_id:actionId,
+      state_version:issued.state_version,
+      store_commit_sha:issued.store_commit_sha,
+      reason:'GitHub accepted dispatch without authenticated downstream Run ID'};
+  }
+  const acknowledged=acknowledgeCommittedDispatch({
+    remote,issue,actionId,ticketSha256:verified.ticket_sha256,
+    receipt:response,
+  });
+  return {status:'dispatched',issue,action_id:actionId,
+    source_run_id:response.source_run_id,
+    store_commit_sha:acknowledged.store_commit_sha,
+    state_version:acknowledged.state_version};
 }
