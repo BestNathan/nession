@@ -136,6 +136,22 @@ function fixture() {
   assert.deepEqual(good.reused, ['SC-01', 'SC-03']);
   assert.deepEqual(good.criteria.map(c => c.criterion), ['SC-02']);
   assert.equal(fetches, 1);
+  // A fully satisfied stage has no model work and no Issue projection.
+  const completed = selectOutstanding({ ...context,
+    requirement_body: context.requirement_body.replace('- [ ] SC-02', '- [x] SC-02'),
+    criteria: context.criteria.filter(c => c.criterion !== 'SC-02'),
+  }, () => proof);
+  assert.deepEqual(completed.criteria, []);
+  assert.deepEqual(completed.reused, ['SC-01', 'SC-03']);
+  assert.equal(selectOutstanding(context, () => ({
+    ...proof, result: { ...proof.result, issue: 41 },
+  })).reused.length, 0);
+  assert.equal(selectOutstanding(context, () => ({
+    ...proof, result: { ...proof.result, stage: 'post-merge' },
+  })).reused.length, 0);
+  assert.equal(selectOutstanding(context, () => ({
+    ...proof, run: { ...proof.run, conclusion: 'failure' },
+  })).reused.length, 0);
   assert.equal(selectOutstanding(context, () => null).reused.length, 0);
   assert.equal(selectOutstanding(context, () => { throw Error('403'); }).reused.length, 0);
   assert.equal(selectOutstanding({ ...context, target_ref: 'c'.repeat(40) },
