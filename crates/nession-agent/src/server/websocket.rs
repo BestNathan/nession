@@ -230,8 +230,6 @@ fn new_output_ack(stream_epoch: u64) -> Result<SubscriberOutputAck, OutputAckVer
     })
 }
 
-/// Socket identity and per-attach subscription generation are both required.
-/// Nothing here grants credit for queued/dequeued bytes.
 /// Never hand a caller the retained *tail* of an incomplete ring: it is
 /// not a contiguous suffix of the requested cursor. A failed replay requires
 /// a future verified checkpoint (or an explicit degraded/unavailable state).
@@ -260,6 +258,8 @@ fn build_terminal_resume_response(
     }
 }
 
+/// Socket identity and per-attach subscription generation are both required.
+/// Nothing here grants credit for queued/dequeued bytes.
 fn accept_output_ack(
     peers: &mut [SessionPeer],
     client_id: &str,
@@ -679,8 +679,8 @@ pub use nession_protocol::contracts::terminal::v1::{
     TerminalBootstrapPayload, TerminalCheckpointCutConsistency, TerminalCheckpointFidelity,
     TerminalControlAcquirePayload, TerminalControlAcquireResponse, TerminalControlChangedPayload,
     TerminalInputAckPayload, TerminalInputPayload, TerminalOutputAppliedPayload,
-    TerminalOutputPayload, TerminalResizePayload, TerminalStreamResumePayload,
-    TerminalResumeRecovery, TerminalStreamResumeResponse,
+    TerminalOutputPayload, TerminalResizePayload, TerminalResumeRecovery,
+    TerminalStreamResumePayload, TerminalStreamResumeResponse,
 };
 
 // --- Protocol helpers ---
@@ -3596,14 +3596,26 @@ mod tests {
         stream.record_output("demo", "x".repeat(700_000));
         stream.record_output("demo", "new-tail".to_owned());
         let incomplete = build_terminal_resume_response(&request(epoch, 1), &stream);
-        assert_eq!(incomplete.recovery, Some(TerminalResumeRecovery::CheckpointRequired));
+        assert_eq!(
+            incomplete.recovery,
+            Some(TerminalResumeRecovery::CheckpointRequired)
+        );
         assert_eq!(incomplete.complete, Some(false));
-        assert!(incomplete.events.is_empty(), "never deliver an unsafe suffix");
+        assert!(
+            incomplete.events.is_empty(),
+            "never deliver an unsafe suffix"
+        );
         assert_eq!(incomplete.first_available_seq, Some(3));
-        assert_eq!(serde_json::to_value(&incomplete).unwrap()["recovery"], "checkpoint-required");
+        assert_eq!(
+            serde_json::to_value(&incomplete).unwrap()["recovery"],
+            "checkpoint-required"
+        );
 
         let future = build_terminal_resume_response(&request(epoch, 20), &stream);
-        assert_eq!(future.recovery, Some(TerminalResumeRecovery::CheckpointRequired));
+        assert_eq!(
+            future.recovery,
+            Some(TerminalResumeRecovery::CheckpointRequired)
+        );
         assert_eq!(future.complete, Some(false));
         assert!(future.events.is_empty());
 
