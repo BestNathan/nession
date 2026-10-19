@@ -143,7 +143,15 @@
       "lifecycle": "planned",
       "privacy": "encrypted-only",
       "writers": [],
-      "rollout_blocker": "Separate authorized ref/App identity, Ruleset, independent cryptographic anchor and encrypted native checkpoints required by #1690/#1664. Never write plaintext into public Git."
+      "rollout_blocker": "Controller writer is candidate-only until real owner/main Run and orphan CAS readback. Ruleset and independent cryptographic anchor remain separately deferred per #1690; public Git never stores sensitive native Session plaintext.",
+      "controller_rollout": {
+        "phase": "candidate-not-live-verified",
+        "request_workflow": ".github/workflows/acceptance-agent-controller.yml",
+        "trusted_writer_workflow": ".github/workflows/store-agent-controller-ingest.yml",
+        "trigger": "owner/main manual request -> authenticated main-owned workflow_run",
+        "boundaries": "manual request read-only; new scoped App token minted after Run/Artifact verification",
+        "acceptance_blocker": "live source Run, orphan CAS readback and complete Worker lifecycle still pending"
+      }
     }
   ],
   "governance": {
