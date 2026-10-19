@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "5990dcdc129db56ed41cccc41775adc4f42920be91f540bac6dca6762a5ae3ff",
+  "run_id": 39190617002,
+  "run_attempt": 1,
+  "issue": 1970,
+  "criterion": "SC-02",
+  "criterion_text": "All positive replay fixtures and negative stale run/attempt, wrong job, fork, unresolved Quality/E2E, 403/429 and malformed jobs still fail closed. Exact PR + source Run identities and completed Quality/E2E remain mandatory before a POST.",
+  "stage": "post-merge",
+  "target_sha": "dfb51da62fe935da1af2e1a6accdeb13addc96e9",
+  "contract_sha256": "18be805aa91dacbdb408d1347c426b783d9208b102a3471840256de916d18358",
+  "case_revision": "dfb51da62fe935da1af2e1a6accdeb13addc96e9",
+  "case_tree_sha": "0f787496dd3e4c098cf93afc269f9db92045fd85",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-19T02:37:17.524Z",
+  "finished_at": "2026-10-19T02:37:17.613Z",
+  "duration_ms": 89,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Canonical recovery negative fixtures still reject stale SHA/attempt, forged or downstream-gate evidence and quota-exhausted operations.",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "Canonical bounded recovery and exact-attempt negative fixtures executed on target SHA"
+        }
+      ],
+      "duration_ms": 78,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 39190617002,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "dfb51da62fe935da1af2e1a6accdeb13addc96e9",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/39190617002",
+    "record_path": "runs/2026-10-19/39190617002-1/1970/SC-02.json",
+    "source_result_sha256": "83e556802006f5fcf4e9baec25b9fcbf02f28e1d32d2713e8a96cb3fe7d86f4d"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-39190617002-1",
+    "sha256": "83e556802006f5fcf4e9baec25b9fcbf02f28e1d32d2713e8a96cb3fe7d86f4d",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/39190617002",
+    "durability": "time-limited; object archival not configured"
+  }
+}

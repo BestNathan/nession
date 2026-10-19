@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "55fe18228874a1623429863f3654c1c38ef1e9c4388af887c546253c3c0bfede",
+  "run_id": 39190617002,
+  "run_attempt": 1,
+  "issue": 1970,
+  "criterion": "SC-01",
+  "criterion_text": "On a three-candidate non-recoverable burst, zero reruns and **at most five** Github API reads (one bounded run list, one open PR list, one exact-attempt Jobs read per candidate), with concrete deterministic request-count test and real run evidence after deployment.",
+  "stage": "post-merge",
+  "target_sha": "dfb51da62fe935da1af2e1a6accdeb13addc96e9",
+  "contract_sha256": "18be805aa91dacbdb408d1347c426b783d9208b102a3471840256de916d18358",
+  "case_revision": "dfb51da62fe935da1af2e1a6accdeb13addc96e9",
+  "case_tree_sha": "103e52a4bfcc7f6ce7aa8f7ff42e57939358a4fc",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-19T02:37:17.420Z",
+  "finished_at": "2026-10-19T02:37:17.523Z",
+  "duration_ms": 103,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Three authenticated non-preparation failures use exactly five GitHub API reads, request zero replay actions and avoid all Quality/E2E queries.",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "Canonical bounded recovery and exact-attempt negative fixtures executed on target SHA"
+        }
+      ],
+      "duration_ms": 80,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 39190617002,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "dfb51da62fe935da1af2e1a6accdeb13addc96e9",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/39190617002",
+    "record_path": "runs/2026-10-19/39190617002-1/1970/SC-01.json",
+    "source_result_sha256": "5c27ba04e36caeaf94ae35dee38cb16d4332a4efe2218a03b35a7444d8f26f04"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-39190617002-1",
+    "sha256": "5c27ba04e36caeaf94ae35dee38cb16d4332a4efe2218a03b35a7444d8f26f04",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/39190617002",
+    "durability": "time-limited; object archival not configured"
+  }
+}
