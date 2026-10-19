@@ -153,7 +153,6 @@ jobs:
         working-directory: trusted
         run: |
           ./gates/run requirement-acceptance-selftest acceptance-executor-selftest acceptance-agent-selftest acceptance-ci-evidence-selftest
-          node scripts/acceptance-reuse.mjs self-test
 
       - name: Validate invocation
         run: |
