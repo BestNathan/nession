@@ -81,7 +81,18 @@ function makeCommit(root,remote,changes,message){
     const tree=git(root,['write-tree'],{env});
     const oldTree=git(root,['rev-parse',remote+'^{tree}']);
     if(tree===oldTree)return null;
-    const commit=git(root,['commit-tree',tree,'-p',remote,'-m',message]);
+    // Commit-tree bypasses git commit's configured author identity. A clean
+    // GHA checkout may have no user.name/email when concurrent Store writers
+    // require a linear CAS rebase. Use fixed automation identity rather than
+    // inherited host Git config or a Worker-controlled author.
+    const writerIdentity={
+      GIT_AUTHOR_NAME:'nession-store-writer',
+      GIT_AUTHOR_EMAIL:'nession-store-writer@users.noreply.github.com',
+      GIT_COMMITTER_NAME:'nession-store-writer',
+      GIT_COMMITTER_EMAIL:'nession-store-writer@users.noreply.github.com',
+    };
+    const commit=git(root,['commit-tree',tree,'-p',remote,'-m',message],
+      {env:writerIdentity});
     if(!HEX40.test(commit))fail('invalid generated commit');
     return commit;
   }finally{fs.rmSync(directory,{force:true,recursive:true});}
