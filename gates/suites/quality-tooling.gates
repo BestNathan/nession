@@ -4,6 +4,7 @@ gate-runtime-contract
 agent-workflow-telemetry
 workflow-conventions
 requirement-acceptance-selftest
+acceptance-agent-selftest
 acceptance-case-ingest-selftest
 run-record-artifact-evidence-selftest
 run-record-index-contract-selftest

@@ -8,6 +8,10 @@ on:
     types: [nession-issue-e2e-projected, nession-agent-telemetry-ingested]
   workflow_run:
     workflows: ["CI / Quality Gate", "E2E / Tests"]
+    # PR-only source reconciliation. Main push completion belongs to the
+    # separate Acceptance / Post-Run Waker, not this PR retry workflow.
+    # Filter at event delivery, not with a no-op job after run creation.
+    branches-ignore: [main]
     types: [completed]
   issues:
     types: [closed]
