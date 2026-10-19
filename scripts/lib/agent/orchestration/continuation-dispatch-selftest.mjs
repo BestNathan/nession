@@ -167,6 +167,11 @@ try{
       ciphertext_sha256:checkpoint.ciphertext_sha256}});
   assert.equal(exactRestore.native_bytes.toString(),'synthetic native cursor checkpoint');
   exactRestore.native_bytes.fill(0);
+  assert.throws(()=>fetchEncryptedAgentCheckpoint({remote,identity,
+    expected:{provider:'cursor',source_sha:sha,harness_digest:'c'.repeat(64)},
+    key:storeKey,commitment:{commit_sha:published.commit_sha,version:1,
+      ciphertext_sha256:checkpoint.ciphertext_sha256,
+      identity:{...identity,issue:1665}}}),/invalid restore commitment fields/);
 
   // Same Agent's newer checkpoint makes the signed old state stale.
   const advanced=sealCheckpoint(identity,2,Buffer.from('new cursor checkpoint'),storeKey,
