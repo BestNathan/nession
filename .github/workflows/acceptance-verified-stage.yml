@@ -11,7 +11,7 @@ on:
 permissions:
   contents: read
   actions: read
-  issues: read
+  issues: write
 
 concurrency:
   group: verified-issue-stage-${{ github.event.issue.number }}-${{ github.sha }}
