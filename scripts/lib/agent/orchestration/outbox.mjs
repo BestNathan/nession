@@ -11,7 +11,7 @@ const SOURCE_WORKFLOW = Object.freeze({
   acceptance: { path: '.github/workflows/acceptance-orchestrator.yml', name: 'Acceptance / Orchestrator' },
 });
 const ACTION_TYPES = new Set(['dispatch','verify','notify']);
-const STATUSES = new Set(['pending','dispatched','yielded']);
+const STATUSES = new Set(['pending','dispatching','dispatched','yielded']);
 const MAX_SLICES = 64;
 const HEX64 = /^[a-f0-9]{64}$/;
 const MAX_OUTBOX = 128;
@@ -103,7 +103,17 @@ export function validateDevelopmentState(state) {
       }
     }
     if (!ACTION_TYPES.has(item.task.type)) reject('unknown action');
-    if (item.status === 'dispatched') {
+    if (item.status === 'dispatching') {
+      const receipt=item.receipt;
+      onlyKeys(receipt,['status','dispatch_id','issuer_run_id',
+        'ticket_sha256'], 'write-ahead dispatch intent');
+      if(Object.keys(receipt).length!==4||receipt.status!=='prepared'||
+          receipt.dispatch_id!==item.id||!positive(receipt.issuer_run_id)||
+          !HEX64.test(receipt.ticket_sha256??'')||
+          item.task.type!=='dispatch'||item.attempts<1) {
+        reject('invalid persisted dispatch intent');
+      }
+    } else if (item.status === 'dispatched') {
       if (!item.receipt || !plain(item.receipt) ||
           !['accepted','verified'].includes(item.receipt.status) ||
           item.receipt.dispatch_id !== item.id ||
@@ -224,6 +234,34 @@ export function acceptTaskResult(state, expectedVersion, result, source, registr
     ...advanced.state, schema_version:1, version, outbox:[...outbox,...spawned],
   });
 }
+// Persist this transition *before* any non-idempotent workflow_dispatch API
+// call. A crash after GitHub accepts but before its HTTP response is ambiguous:
+// reconciliation must authenticate the original downstream Run, NEVER replay
+// the POST from a write-ahead intent. Immutable prior state versions preserve
+// the original unsigned pending action and its signed ticket hash.
+export function recordDispatchIntent(state,expectedVersion,actionId,intent) {
+  validateDevelopmentState(state);
+  if(expectedVersion!==state.version)reject('stale state CAS');
+  onlyKeys(intent,['status','dispatch_id','issuer_run_id','ticket_sha256'],
+    'write-ahead intent');
+  if(Object.keys(intent).length!==4||intent.status!=='prepared'||
+      intent.dispatch_id!==actionId||!positive(intent.issuer_run_id)||
+      !HEX64.test(intent.ticket_sha256??''))reject('invalid write-ahead intent');
+  const item=state.outbox.find(x=>x.id===actionId);
+  if(!item||item.task.type!=='dispatch')reject('write-ahead action missing');
+  if(item.status==='dispatching'){
+    if(JSON.stringify(item.receipt)!==JSON.stringify(intent))
+      reject('conflicting write-ahead dispatch intent');
+    return state;
+  }
+  if(item.status!=='pending')reject('write-ahead action not pending');
+  if(item.attempts>=MAX_ATTEMPTS)reject('retry limit reached');
+  return validateDevelopmentState({...state,version:state.version+1,
+    outbox:state.outbox.map(x=>x.id===actionId?{
+      ...x,status:'dispatching',attempts:x.attempts+1,receipt:intent,
+    }:x)});
+}
+
 export function recordDispatch(state, expectedVersion, actionId, receipt) {
   validateDevelopmentState(state);
   if (expectedVersion !== state.version) reject('stale state CAS');
@@ -241,12 +279,14 @@ export function recordDispatch(state, expectedVersion, actionId, receipt) {
     if (JSON.stringify(old.receipt) !== JSON.stringify(receipt)) reject('conflicting receipt');
     return state; // repeat confirmation of the same dispatch is idempotent
   }
-  if (old.status !== 'pending') reject('cannot dispatch a yielded or nonpending action');
-  if (old.attempts >= MAX_ATTEMPTS) reject('retry limit reached');
+  if (!['pending','dispatching'].includes(old.status))
+    reject('cannot dispatch a yielded or nonpending action');
+  if (old.attempts >= MAX_ATTEMPTS && old.status==='pending')
+    reject('retry limit reached');
   return validateDevelopmentState({
     ...state,version: state.version+1,
     outbox:state.outbox.map(item => item.id === actionId ? {
-      ...item,status:'dispatched',attempts:item.attempts+1,receipt,
+      ...item,status:'dispatched',attempts:item.attempts+(item.status==='pending'?1:0),receipt,
     } : item),
   });
 }
@@ -326,6 +366,7 @@ export function reconcileOutbox(state) {
     pending:state.outbox.filter(x => x.status === 'pending' && x.attempts < MAX_ATTEMPTS),
     exhausted:state.outbox.filter(x => x.status === 'pending' && x.attempts >= MAX_ATTEMPTS),
     awaiting_evidence:state.outbox.filter(x => x.status === 'dispatched'),
+    awaiting_dispatch_receipt:state.outbox.filter(x => x.status === 'dispatching'),
     yielded:state.outbox.filter(x => x.status === 'yielded'),
   };
 }

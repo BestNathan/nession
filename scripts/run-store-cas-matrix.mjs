@@ -50,9 +50,23 @@ async function publish(cwd,store,opts={}){
     GITHUB_SHA:'a'.repeat(40),GITHUB_WORKFLOW_REF:REPO+'/.github/workflows/test.yml@refs/heads/main',
     RUN_STORE_RECEIPT_DIR:opts.receipts,
   };
-  const {stdout}=await exec(process.execPath,[publisher,store,cwd],{
-    env,timeout:50000,maxBuffer:1024*1024,encoding:'utf8'});
-  return JSON.parse(stdout.trim());
+  // The actual publisher fails closed when the remote HEAD changes during
+  // fetch. These two test processes intentionally race that HEAD; exercise
+  // the publisher's documented external-retry path instead of interpreting
+  // an expected transient CAS preflight rejection as a fixture failure.
+  // Only this specific fail-closed race is retried, at most three times.
+  for(let attempt=0;attempt<4;attempt++){
+    try {
+      const {stdout}=await exec(process.execPath,[publisher,store,cwd],{
+        env,timeout:50000,maxBuffer:1024*1024,encoding:'utf8'});
+      return JSON.parse(stdout.trim());
+    }catch(error) {
+      if(attempt===3||
+          !/remote head moved while fetching; retry externally/.test(
+            String(error.stderr??error.message)))throw error;
+      await new Promise(resolve=>setTimeout(resolve,25*(attempt+1)));
+    }
+  }
 }
 function expectedFailure(promise,re){
   return assert.rejects(promise,e=>re.test(String(e.stderr||e.message)),String(re));
