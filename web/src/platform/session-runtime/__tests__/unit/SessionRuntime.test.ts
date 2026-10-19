@@ -341,6 +341,63 @@ describe('SessionRuntime', () => {
     rt.dispose();
   });
 
+  it('submits P2P output ACK only after verified contiguous parser callbacks (#2006)', async () => {
+    const rt = new SessionRuntime(makeConfig({ hasSessionOutput: () => true }));
+    rt.setTransportReady(true);
+    rt.buildTransport();
+    await openWs();
+    await flushMicrotasks();
+    answerPending('agent.attach', 'ok', {
+      stream_epoch: 7, stream_cursor: 3, subscriber_generation: 41,
+    });
+    await flushMicrotasks();
+    expect(rt.attachState.phase).toBe('attached');
+    const outputAcks = () => sentFrames()
+      .filter((frame) => frame.msg_type === 'agent.terminal.output.applied');
+    // Socket receipt and an attach cursor cannot establish parser progress.
+    rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 1 });
+    expect(outputAcks()).toHaveLength(0);
+    rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 0 });
+    rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 2 }); // gap, do not ACK
+    expect(outputAcks()).toHaveLength(0);
+    rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 1 });
+    expect(outputAcks()).toHaveLength(1);
+    expect(outputAcks()[0].payload).toEqual({
+      session_name: 's1',
+      subscriber_generation: 41,
+      stream_epoch: 7,
+      renderer_generation: rt.terminalAppliedSnapshot?.generation,
+      applied_through: 2,
+    });
+    expect(rt.terminalAppliedSnapshot?.ackSentSeq).toBe(2);
+    rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 2 }); // duplicate
+    expect(outputAcks()).toHaveLength(1);
+    rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 3 });
+    expect(outputAcks()).toHaveLength(2);
+    expect(rt.terminalAppliedSnapshot?.ackSentSeq).toBe(3);
+    rt.noteStreamTruncated(); // revoked proof, no phantom future ACK
+    rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 4 });
+    expect(outputAcks()).toHaveLength(2);
+    rt.dispose();
+    rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 5 });
+    expect(outputAcks()).toHaveLength(2);
+  });
+
+  it('legacy P2P attach without subscriber generation never sends output ACK (#2006)', async () => {
+    const rt = new SessionRuntime(makeConfig({ hasSessionOutput: () => true }));
+    rt.setTransportReady(true);
+    rt.buildTransport();
+    await openWs();
+    await flushMicrotasks();
+    answerPending('agent.attach', 'ok', { stream_epoch: 7, stream_cursor: 1 });
+    await flushMicrotasks();
+    rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 0 });
+    rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 1 });
+    expect(sentFrames().filter((f) => f.msg_type === 'agent.terminal.output.applied')).toHaveLength(0);
+    expect(rt.terminalAppliedSnapshot?.ackSentSeq).toBe(0);
+    rt.dispose();
+  });
+
   it('invalidates parser proof on a gap, transport loss or invalid rebind (#1965)', () => {
     const rt = new SessionRuntime(makeConfig({ attachInfo: null, addressUrls: [] }));
     rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 1 });
