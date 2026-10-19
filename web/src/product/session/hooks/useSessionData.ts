@@ -11,6 +11,23 @@ export interface FetchSessionsOptions {
   force?: boolean;
 }
 
+/**
+ * A request reply with a real pane command can be observed by a raw socket
+ * watcher without ever reaching the Session row: request-correlation consumes
+ * the message before SessionsPlugin's listeners see it. If an intervening push
+ * superseded that reply but lacks its command, we need another authoritative
+ * list, not the stale reply itself. Never reconcile by copying non-null fields
+ * from an out-of-order reply: newer events can intentionally clear them.
+ */
+function hasUnprojectedForegroundReport(reply: Session[], visible: Session[]): boolean {
+  const byId = new Map(visible.map((session) => [session.session_id, session]));
+  return reply.some((session) => {
+    const reported = session.foreground_command;
+    return Boolean(reported && byId.has(session.session_id)
+      && byId.get(session.session_id)?.foreground_command !== reported);
+  });
+}
+
 /** Sessions data: state, fetch, realtime apply. */
 export function useSessionData() {
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -30,31 +47,49 @@ export function useSessionData() {
   // it). A newer refresh also supersedes an older refresh.
   const realtimeRevision = useRef(0);
   const requestSequence = useRef(0);
+  // Synchronously tracks the last authoritative projection for network
+  // callbacks, without depending on a React render completing in between.
+  const visibleSessions = useRef<Session[]>([]);
   const applyRealtimeSessions = useCallback((incoming: Session[]) => {
     realtimeRevision.current += 1;
+    visibleSessions.current = incoming;
     setSessions(incoming);
   }, []);
 
   const fetchSessions = useCallback(async (opts: FetchSessionsOptions = {}) => {
     const sequence = ++requestSequence.current;
-    const revisionAtStart = realtimeRevision.current;
+    let revisionAtStart = realtimeRevision.current;
     setLoadingSessions(true);
     try {
-      const response = await sessionsApi.fetchSessions(opts);
-      // The response is older than a push received after the request started,
-      // or than a later refresh. Do not replace that newer session snapshot,
-      // nor overwrite its stale-agent metadata with an obsolete response.
-      if (sequence !== requestSequence.current ||
-          revisionAtStart !== realtimeRevision.current) {
+      // At most one reconciliation request. No loops tied to heartbeat rate
+      // and no direct adoption of a response that a newer push superseded.
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        revisionAtStart = realtimeRevision.current;
+        const response = await sessionsApi.fetchSessions(opts);
+        if (sequence !== requestSequence.current) {
+          return; // A newer explicit refresh owns the answer.
+        }
+        if (revisionAtStart !== realtimeRevision.current) {
+          // Correlated list replies never reach SessionsPlugin subscribers.
+          // A racing push may have suppressed the only command-bearing reply;
+          // ask the current server state again instead of applying stale data.
+          if (attempt === 0 && hasUnprojectedForegroundReport(
+            response.sessions, visibleSessions.current,
+          )) {
+            continue;
+          }
+          return;
+        }
+        visibleSessions.current = response.sessions;
+        setSessions(response.sessions);
+        const stale = response.stale_agents ?? [];
+        setStaleAgents(stale);
+        if (stale.length > 0) {
+          toast.warning(
+            `${stale.length} agent(s) did not respond — their sessions may be out of date`,
+          );
+        }
         return;
-      }
-      setSessions(response.sessions);
-      const stale = response.stale_agents ?? [];
-      setStaleAgents(stale);
-      if (stale.length > 0) {
-        toast.warning(
-          `${stale.length} agent(s) did not respond — their sessions may be out of date`,
-        );
       }
     } catch (err) {
       if (sequence === requestSequence.current &&
@@ -63,9 +98,6 @@ export function useSessionData() {
         toast.error(msg);
       }
     } finally {
-      // An obsolete request cannot reset the loading indicator for a newer
-      // in-flight refresh. A completed latest request still settles loading
-      // even when an intervening realtime push superseded its response.
       if (sequence === requestSequence.current) {
         setLoadingSessions(false);
         setSessionsLoaded(true);
@@ -87,11 +119,12 @@ export function useSessionData() {
     // A create ACK is newer than an outstanding list request too. It must not
     // be silently undone by a stale pre-create list response.
     realtimeRevision.current += 1;
-    setSessions((prev) =>
-      prev.some((existing) => existing.session_id === session.session_id)
-        ? prev
-        : [session, ...prev],
-    );
+    const prev = visibleSessions.current;
+    if (!prev.some((existing) => existing.session_id === session.session_id)) {
+      const next = [session, ...prev];
+      visibleSessions.current = next;
+      setSessions(next);
+    }
   }, []);
 
   return {
