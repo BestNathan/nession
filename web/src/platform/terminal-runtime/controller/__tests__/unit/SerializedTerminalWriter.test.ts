@@ -139,9 +139,11 @@ describe('SerializedTerminalWriter bounded parser queue (#1975)', () => {
     writer.write('queued', parsed);
     expect(writer.pendingUsage.events).toBe(2);
     writer.write('overflow', parsed);
-    expect(degraded).toHaveBeenCalledExactlyOnceWith('overflow');
-    expect(writer.pendingUsage).toEqual({ bytes: 0, events: 1, halted: true });
+    expect(degraded).toHaveBeenCalledOnce();
+    expect(degraded).toHaveBeenCalledWith('overflow');
+    expect(writer.pendingUsage).toEqual({ bytes: 138, events: 1, halted: true });
     h.callbacks.shift()!(); // late callback of the in-flight write
+    expect(writer.pendingUsage).toEqual({ bytes: 0, events: 0, halted: true });
     writer.resize(100, 30, parsed);
     writer.write('after', parsed);
     expect(parsed).not.toHaveBeenCalled();
@@ -176,7 +178,8 @@ describe('SerializedTerminalWriter bounded parser queue (#1975)', () => {
       writer.write('never-parsed', parsed);
       writer.write('queued', parsed);
       vi.advanceTimersByTime(15);
-      expect(degraded).toHaveBeenCalledExactlyOnceWith('parser-stalled');
+      expect(degraded).toHaveBeenCalledOnce();
+      expect(degraded).toHaveBeenCalledWith('parser-stalled');
       h.callbacks.shift()!();
       expect(parsed).not.toHaveBeenCalled();
       expect(h.called).toEqual(['never-parsed']);
