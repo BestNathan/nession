@@ -3659,6 +3659,99 @@ mod tests {
     /// the *verdict*, and `P2pOutbound::close` is where a verdict becomes a
     /// connection ending.
     #[tokio::test]
+    async fn byte_pressure_detaches_only_the_slow_terminal_subscriber() {
+        let (slow_tx, _slow_rx) = mpsc::channel::<OutputChunk>(SUBSCRIBER_QUEUE_SLOTS);
+        let (fast_tx, mut fast_rx) = mpsc::channel::<OutputChunk>(SUBSCRIBER_QUEUE_SLOTS);
+        let slow_bytes = Arc::new(AtomicUsize::new(0));
+        let fast_bytes = Arc::new(AtomicUsize::new(0));
+        let slow_flag = Arc::new(AtomicBool::new(false));
+        let fast_flag = Arc::new(AtomicBool::new(false));
+        let (slow_outbound, _) = P2pOutbound::new();
+        let (fast_outbound, _) = P2pOutbound::new();
+        let mut peers = vec![
+            SessionPeer {
+                client_id: "slow".to_owned(),
+                peer_token: Arc::new(()),
+                outbound: slow_outbound,
+                output_tx: Some(slow_tx),
+                queued_bytes: Arc::clone(&slow_bytes),
+                detached_for_not_draining: Arc::clone(&slow_flag),
+            },
+            SessionPeer {
+                client_id: "fast".to_owned(),
+                peer_token: Arc::new(()),
+                outbound: fast_outbound,
+                output_tx: Some(fast_tx),
+                queued_bytes: Arc::clone(&fast_bytes),
+                detached_for_not_draining: Arc::clone(&fast_flag),
+            },
+        ];
+        let payload_bytes = SUBSCRIBER_QUEUE_BYTES / 2 + 1;
+        assert_eq!(fan_out_peers(&mut peers, (vec![b'x'; payload_bytes], 1, 1)), 0);
+        assert_eq!(slow_bytes.load(Ordering::Acquire), payload_bytes);
+        assert_eq!(fast_bytes.load(Ordering::Acquire), payload_bytes);
+
+        // The healthy client's receiver drains; the slow client's does not.
+        let (delivered, _, _) = fast_rx.try_recv().expect("healthy frame");
+        release_subscriber_bytes(&fast_bytes, delivered.len());
+        assert_eq!(fast_bytes.load(Ordering::Acquire), 0);
+
+        assert_eq!(fan_out_peers(&mut peers, (vec![b'y'; payload_bytes], 1, 2)), 1);
+        assert_eq!(peers.len(), 1);
+        assert_eq!(peers[0].client_id, "fast");
+        assert!(slow_flag.load(Ordering::Acquire));
+        assert!(!fast_flag.load(Ordering::Acquire));
+        assert_eq!(fast_bytes.load(Ordering::Acquire), payload_bytes);
+        let (_, epoch, seq) = fast_rx.try_recv().expect("healthy client progresses");
+        assert_eq!((epoch, seq), (1, 2));
+        release_subscriber_bytes(&fast_bytes, payload_bytes);
+        assert_eq!(fast_bytes.load(Ordering::Acquire), 0);
+    }
+
+    #[tokio::test]
+    async fn oversized_frame_eviction_is_bounded_even_below_slot_capacity() {
+        let (tx, mut rx) = mpsc::channel::<OutputChunk>(SUBSCRIBER_QUEUE_SLOTS);
+        let queued_bytes = Arc::new(AtomicUsize::new(0));
+        let detached_for_not_draining = Arc::new(AtomicBool::new(false));
+        let (outbound, _) = P2pOutbound::new();
+        let mut peers = vec![SessionPeer {
+            client_id: "big".to_owned(),
+            peer_token: Arc::new(()),
+            outbound,
+            output_tx: Some(tx),
+            queued_bytes: Arc::clone(&queued_bytes),
+            detached_for_not_draining: Arc::clone(&detached_for_not_draining),
+        }];
+        let oversized = vec![b'x'; SUBSCRIBER_QUEUE_BYTES + 1];
+        assert_eq!(fan_out_peers(&mut peers, (oversized, 9, 10)), 1);
+        assert!(peers.is_empty());
+        assert_eq!(queued_bytes.load(Ordering::Acquire), 0);
+        assert!(detached_for_not_draining.load(Ordering::Acquire));
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn closed_subscriber_refunds_queued_byte_reservation() {
+        let (tx, rx) = mpsc::channel::<OutputChunk>(SUBSCRIBER_QUEUE_SLOTS);
+        drop(rx);
+        let queued_bytes = Arc::new(AtomicUsize::new(0));
+        let detached_for_not_draining = Arc::new(AtomicBool::new(false));
+        let (outbound, _) = P2pOutbound::new();
+        let mut peers = vec![SessionPeer {
+            client_id: "closed".to_owned(),
+            peer_token: Arc::new(()),
+            outbound,
+            output_tx: Some(tx),
+            queued_bytes: Arc::clone(&queued_bytes),
+            detached_for_not_draining: Arc::clone(&detached_for_not_draining),
+        }];
+        assert_eq!(fan_out_peers(&mut peers, (b"hello".to_vec(), 1, 1)), 0);
+        assert!(peers.is_empty());
+        assert_eq!(queued_bytes.load(Ordering::Acquire), 0);
+        assert!(!detached_for_not_draining.load(Ordering::Acquire));
+    }
+
+    #[tokio::test]
     async fn a_detached_subscriber_closes_the_connection() {
         let (outbound, _rx) = P2pOutbound::new();
         let (tx, rx) = mpsc::channel::<OutputChunk>(SUBSCRIBER_QUEUE_SLOTS);
