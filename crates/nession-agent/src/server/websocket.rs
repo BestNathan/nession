@@ -477,11 +477,17 @@ fn spawn_output_forwarder(
                     };
                     serde_json::to_string(&new_message(msg_types::TERMINAL_OUTPUT, output)).ok()
                 }
-                SubscriberEvent::Resize { cols, rows, stream_epoch, stream_seq } => {
-                    terminal_resize_frame(
-                        &session_name, cols, rows, Some((stream_epoch, stream_seq)),
-                    )
-                }
+                SubscriberEvent::Resize {
+                    cols,
+                    rows,
+                    stream_epoch,
+                    stream_seq,
+                } => terminal_resize_frame(
+                    &session_name,
+                    cols,
+                    rows,
+                    Some((stream_epoch, stream_seq)),
+                ),
             };
             if let Some(json) = json {
                 // Both output and sequenced resize use the non-dropping terminal
@@ -3989,24 +3995,35 @@ mod tests {
         let (resize_epoch, seq2) = stream.record_resize("demo", 132, 40);
         assert_eq!(resize_epoch, epoch);
         assert_eq!(seq2, seq1 + 1);
-        assert_eq!(fan_out_recorded_resize(&mut peers, 132, 40, resize_epoch, seq2), 0);
+        assert_eq!(
+            fan_out_recorded_resize(&mut peers, 132, 40, resize_epoch, seq2),
+            0
+        );
         let last = b"AFTER-RESIZE".to_vec();
         let (last_epoch, seq3) = stream.record_output(
             "demo",
             base64::engine::general_purpose::STANDARD.encode(&last),
         );
         assert_eq!(seq3, seq2 + 1);
-        assert_eq!(fan_out_peers(&mut peers, (last.clone(), last_epoch, seq3)), 0);
+        assert_eq!(
+            fan_out_peers(&mut peers, (last.clone(), last_epoch, seq3)),
+            0
+        );
         let expected = vec![
             SubscriberEvent::Output((first, epoch, seq1)),
             SubscriberEvent::Resize {
-                cols: 132, rows: 40, stream_epoch: epoch, stream_seq: seq2,
+                cols: 132,
+                rows: 40,
+                stream_epoch: epoch,
+                stream_seq: seq2,
             },
             SubscriberEvent::Output((last, last_epoch, seq3)),
         ];
         for rx in [&mut controller_rx, &mut observer_rx] {
             assert_eq!(
-                (0..3).map(|_| rx.try_recv().expect("event missing")).collect::<Vec<_>>(),
+                (0..3)
+                    .map(|_| rx.try_recv().expect("event missing"))
+                    .collect::<Vec<_>>(),
                 expected,
                 "both peers must see the same full ordered stream"
             );
@@ -4024,15 +4041,21 @@ mod tests {
         let fast_flag = Arc::new(AtomicBool::new(false));
         let mut peers = vec![
             SessionPeer {
-                client_id: "slow".into(), peer_token: Arc::new(()),
-                output_ack: test_output_ack(), outbound: slow_outbound,
-                output_tx: Some(slow_tx), queued_bytes: Arc::new(AtomicUsize::new(0)),
+                client_id: "slow".into(),
+                peer_token: Arc::new(()),
+                output_ack: test_output_ack(),
+                outbound: slow_outbound,
+                output_tx: Some(slow_tx),
+                queued_bytes: Arc::new(AtomicUsize::new(0)),
                 detached_for_not_draining: Arc::clone(&slow_flag),
             },
             SessionPeer {
-                client_id: "fast".into(), peer_token: Arc::new(()),
-                output_ack: test_output_ack(), outbound: fast_outbound,
-                output_tx: Some(fast_tx), queued_bytes: Arc::new(AtomicUsize::new(0)),
+                client_id: "fast".into(),
+                peer_token: Arc::new(()),
+                output_ack: test_output_ack(),
+                outbound: fast_outbound,
+                output_tx: Some(fast_tx),
+                queued_bytes: Arc::new(AtomicUsize::new(0)),
                 detached_for_not_draining: Arc::clone(&fast_flag),
             },
         ];
@@ -4049,9 +4072,13 @@ mod tests {
         assert!(slow_flag.load(Ordering::Acquire));
         assert!(!fast_flag.load(Ordering::Acquire));
         assert_eq!(
-            fast_rx.try_recv().expect("healthy subscriber must receive resize"),
+            fast_rx
+                .try_recv()
+                .expect("healthy subscriber must receive resize"),
             SubscriberEvent::Resize {
-                cols: 90, rows: 30, stream_epoch: 7,
+                cols: 90,
+                rows: 30,
+                stream_epoch: 7,
                 stream_seq: SUBSCRIBER_QUEUE_SLOTS as u64 + 1,
             }
         );
@@ -4497,7 +4524,8 @@ mod tests {
         assert_eq!(fast_bytes.load(Ordering::Acquire), payload_bytes);
 
         // The healthy client's receiver drains; the slow client's does not.
-        let SubscriberEvent::Output((delivered, _, _)) = fast_rx.try_recv().expect("healthy frame") else {
+        let SubscriberEvent::Output((delivered, _, _)) = fast_rx.try_recv().expect("healthy frame")
+        else {
             panic!("a live chunk must remain output");
         };
         release_subscriber_bytes(&fast_bytes, delivered.len());
@@ -4512,7 +4540,9 @@ mod tests {
         assert!(slow_flag.load(Ordering::Acquire));
         assert!(!fast_flag.load(Ordering::Acquire));
         assert_eq!(fast_bytes.load(Ordering::Acquire), payload_bytes);
-        let SubscriberEvent::Output((_, epoch, seq)) = fast_rx.try_recv().expect("healthy client progresses") else {
+        let SubscriberEvent::Output((_, epoch, seq)) =
+            fast_rx.try_recv().expect("healthy client progresses")
+        else {
             panic!("a live chunk must remain output");
         };
         assert_eq!((epoch, seq), (1, 2));
