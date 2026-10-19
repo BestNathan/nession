@@ -5,6 +5,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {loadPinnedE2E,validatePublicE2E} from '../scripts/acceptance-e2e.mjs';
+import {selectScopedE2ERuns} from '../scripts/e2e-run-window.mjs';
 import {makeProjection,validateProjection} from '../scripts/project.mjs';
 const sha='a'.repeat(40),at='2026-10-18T15:00:00Z',repo='BestNathan/nession';
 const artifact='sha256:'+'b'.repeat(64),plan='c'.repeat(64);
@@ -137,5 +138,53 @@ test('unknown source, unobserved zero, injected fields and source revision misma
    const bound=makeProjection({acceptanceE2E:await collect(x),meta:{
      acceptance_results_sha:'f'.repeat(40)}});
    assert.throws(()=>validateProjection(bound),/E2E source checkout SHA mismatch/);
+ });
+});
+
+test('mixed main push and PR-head sources retain exact verified per-ID Ingest, never borrowing push proof',async()=>{
+ await fixture(async x=>{
+   // A same-SHA main push is legitimate within the public E2E *discovery*
+   // window. Its successful Run is not a PR HEAD and cannot replace the
+   // authentic pull_request Run 95/2 named in the pinned Store receipt.
+   const mainPush={...actions[0],id:196,run_attempt:1,event:'push',head_branch:'main'};
+   const ingest={...actions[1],head_sha:sha};
+   const payload=(tests)=>[
+      {total_count:101,workflow_runs:tests},
+      {total_count:1,workflow_runs:[ingest]},
+   ];
+   const mixed=selectScopedE2ERuns(payload([mainPush,actions[0]]));
+   assert.ok(mixed,'independent Test+Ingest source windows must accept main pushes');
+   assert.equal(mixed.truncated,true,'bounded window never claims complete history');
+   assert.deepEqual(mixed.runs.map(r=>r.id),[196,111,95]);
+   const verified=validatePublicE2E(await loadPinnedE2E({
+      root:x.root,expectedSha:x.head,prHeads:[sha],
+      workflowRuns:mixed.runs,runWindowTruncated:mixed.truncated,at,
+   }));
+   assert.equal(verified.status,'truncated');
+   assert.equal(verified.source_sha,x.head);
+   assert.equal(verified.records.length,2);
+   assert.equal(verified.records[0].result,'Fail','stored Fail cannot be promoted');
+   assert.equal(verified.records[1].result,'Pass');
+   assert.ok(verified.records.every(r=>r.run_id===95&&r.attempt===2));
+
+   // The PR-head Run disappears but a successful same-SHA main push remains.
+   // A valid discovery window is *not* proof of any matching current PR.
+   const onlyPush=selectScopedE2ERuns(payload([mainPush]));
+   assert.ok(onlyPush);
+   const noPr=validatePublicE2E(await loadPinnedE2E({
+      root:x.root,expectedSha:x.head,prHeads:[sha],
+      workflowRuns:onlyPush.runs,runWindowTruncated:onlyPush.truncated,at,
+   }));
+   assert.equal(noPr.status,'truncated');
+   assert.equal(noPr.records.length,0,'no verified PR-head record, not an E2E Pass');
+   const swapped=selectScopedE2ERuns(payload([
+     {...actions[0],event:'push',head_branch:'main'},
+   ]));
+   assert.ok(swapped);
+   assert.equal((await collect({...x,workflowRuns:swapped.runs})).records.length,0,
+     'same Run ID on a push cannot fulfill pull_request provenance');
+   assert.equal(selectScopedE2ERuns(payload([
+     {...mainPush,event:'workflow_dispatch'}
+   ])),null,'untrusted event must invalidate the whole discovery source');
  });
 });
