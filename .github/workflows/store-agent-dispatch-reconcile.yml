@@ -1,0 +1,120 @@
+name: Store / Agent Dispatch Reconcile
+
+# #2010. Independently authenticate the completed Worker Run claim artifact,
+# verify the original HMAC Ticket and exact Store write-ahead digest, then CAS
+# the Run ID. The Worker NEVER receives this App credential or signing root.
+on:
+  workflow_run:
+    workflows: ["Agent / Development"]
+    branches: [main]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: write
+  issues: read
+
+concurrency:
+  group: store-agent-dispatch-reconcile
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.event.workflow_run.event == 'workflow_dispatch' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.actor.login == 'BestNathan' &&
+      github.event.workflow_run.repository.full_name == 'BestNathan/nession' &&
+      github.event.workflow_run.head_repository.full_name == 'BestNathan/nession'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+      SOURCE_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+    steps:
+      - name: Checkout only trusted current main reconciliation code
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Require negative HMAC and Run-identity fixtures
+        run: |
+          set -euo pipefail
+          node scripts/lib/agent/orchestration/worker-reconcile-selftest.mjs
+          node scripts/lib/agent/orchestration/dispatch-intent-selftest.mjs
+      - name: Download exact source Run's canonical claim Artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID" \
+            > "$RUNNER_TEMP/worker-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID/artifacts?per_page=100" \
+            > "$RUNNER_TEMP/worker-artifacts.json"
+          jq -e --argjson id "$SOURCE_RUN_ID" --argjson attempt "$SOURCE_ATTEMPT" '
+            .id == $id and .run_attempt == $attempt and
+            .path == ".github/workflows/agent-develop.yml" and
+            .name == "Agent / Development" and .event == "workflow_dispatch" and
+            .status == "completed" and (.conclusion == "success" or .conclusion == "failure") and
+            .head_branch == "main" and .actor.login == "BestNathan" and
+            .repository.full_name == "BestNathan/nession" and
+            .head_repository.full_name == "BestNathan/nession"
+          ' "$RUNNER_TEMP/worker-run.json" >/dev/null
+          name="development-worker-claim-${SOURCE_RUN_ID}-${SOURCE_ATTEMPT}"
+          id="$(jq -er --arg name "$name" '
+            [.artifacts[] | select(.name==$name and .expired==false)] |
+            if length==1 then .[0].id else empty end
+          ' "$RUNNER_TEMP/worker-artifacts.json")"
+          [[ "$id" =~ ^[1-9][0-9]*$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$id/zip" \
+            > "$RUNNER_TEMP/development-worker-claim.zip"
+      - name: Mint existing scoped Store Writer App outside Worker
+        id: writer
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.RUN_STORE_WRITER_APP_ID }}
+          private-key: ${{ secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY }}
+          repositories: nession
+          permission-contents: write
+      - name: Verify HMAC, GitHub Run and immutable intent then CAS-acknowledge
+        env:
+          ACTIONS_DISPATCH_TOKEN: ${{ github.token }}
+          STORE_APP_TOKEN: ${{ steps.writer.outputs.token }}
+          STORE_WRITER_PRIVATE_KEY: ${{ secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$STORE_APP_TOKEN"
+          export AGENT_STORE_CONTROLLER_REMOTE="https://x-access-token:${STORE_APP_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          node scripts/lib/agent/orchestration/worker-reconcile.mjs reconcile \
+            "$RUNNER_TEMP/development-worker-claim.zip" \
+            > "$RUNNER_TEMP/worker-reconcile-result.json"
+          jq -e '.status == "acknowledged" or .status == "replayed"' \
+            "$RUNNER_TEMP/worker-reconcile-result.json" >/dev/null
+          {
+            echo "## Authenticated Agent Worker reconciliation"
+            echo "- Worker Run: $(jq -r .run_id "$RUNNER_TEMP/worker-reconcile-result.json")"
+            echo "- Attempt: $(jq -r .attempt "$RUNNER_TEMP/worker-reconcile-result.json")"
+            echo "- Outbox: $(jq -r .status "$RUNNER_TEMP/worker-reconcile-result.json")"
+            echo "- Store CAS commit: $(jq -r .store_commit_sha "$RUNNER_TEMP/worker-reconcile-result.json")"
+            echo "- No second workflow_dispatch POST was sent."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Resume the SAME authenticated Run after 204/timeout admission failure
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if jq -e '.needs_rerun == true' "$RUNNER_TEMP/worker-reconcile-result.json" >/dev/null; then
+            [[ "$SOURCE_ATTEMPT" == "1" ]]
+            # No second workflow_dispatch: GitHub reruns failed jobs with the
+            # same Run ID and signed inputs after Store Run-ID CAS has committed.
+            gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID/rerun-failed-jobs" >/dev/null
+          fi
