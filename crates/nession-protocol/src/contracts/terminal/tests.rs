@@ -294,3 +294,34 @@ fn an_input_acknowledgement_states_its_cursor() {
     assert_eq!(back.applied_through, 12);
     assert_eq!(back.control_generation, Some(3));
 }
+
+#[test]
+fn resume_recovery_verdict_is_additive_and_legacy_response_stays_byte_identical() {
+    let legacy = serde_json::json!({
+        "session_name": "work",
+        "stream_epoch": 7,
+        "epoch_match": true,
+        "first_available_seq": 1,
+        "complete": true,
+        "events": []
+    });
+    let reply: TerminalStreamResumeResponse = serde_json::from_value(legacy.clone()).unwrap();
+    assert!(reply.recovery.is_none(), "omitted never means recovered");
+    assert_eq!(serde_json::to_value(&reply).unwrap(), legacy);
+    let mut complete = reply;
+    complete.recovery = Some(TerminalResumeRecovery::Complete);
+    assert_eq!(
+        serde_json::to_value(&complete).unwrap()["recovery"],
+        "complete"
+    );
+    complete.recovery = Some(TerminalResumeRecovery::CheckpointRequired);
+    assert_eq!(
+        serde_json::to_value(&complete).unwrap()["recovery"],
+        "checkpoint-required"
+    );
+    complete.recovery = Some(TerminalResumeRecovery::Unavailable);
+    assert_eq!(
+        serde_json::to_value(&complete).unwrap()["recovery"],
+        "unavailable"
+    );
+}
