@@ -92,12 +92,11 @@ jobs:
           if(process.env.CONFIGURED_PUBLIC_KEY_B64 &&
               process.env.CONFIGURED_PUBLIC_KEY_B64!==encoded)
             throw Error('configured sealing public key differs from cursor Environment');
-          appendFileSync(process.env.GITHUB_ENV,'CURSOR_RESUME_PUBLIC_KEY_B64='+encoded+'\\n');
+          appendFileSync(process.env.GITHUB_ENV,'CURSOR_RESUME_PUBLIC_KEY_B64='+encoded+'\n');
           NODE
       - name: Require pinned Cursor Provider and public-only Session sealing key
         env:
           CURSOR_SDK_VERSION: ${{ vars.CURSOR_SDK_VERSION }}
-          CURSOR_RESUME_PUBLIC_KEY_B64: ${{ vars.CURSOR_RESUME_PUBLIC_KEY_B64 }}
           CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
         shell: bash
         run: |
