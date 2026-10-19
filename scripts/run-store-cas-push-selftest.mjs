@@ -9,6 +9,13 @@ import {execFileSync} from 'node:child_process';
 import {publish} from './run-store-cas-push.mjs';
 
 const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'run-store-cas-test-'));
+// Runtime workflow_run/issue/PR events are intentionally NOT a fixture source.
+// The CAS receipt test fabricates run_id=1234 below. If inherited
+// GITHUB_EVENT_PATH is left set, receipt() correctly favors the real Run event,
+// making a formerly local deterministic test fail only inside trusted Actions.
+// The publisher's real provenance handling remains unchanged.
+const originalEventPath=process.env.GITHUB_EVENT_PATH;
+delete process.env.GITHUB_EVENT_PATH;
 const git=(cwd,...args)=>execFileSync('git',['-C',cwd,...args],{
   encoding:'utf8',stdio:['ignore','pipe','pipe'],maxBuffer:4*1024*1024,
 }).trim();
@@ -98,6 +105,8 @@ try{
   assert.throws(()=>publish('task-results',missing),/remote ref missing/);
   console.log('Run Store CAS Gate: concurrent appends, replay, immutable/index collision, stale metrics CAS, receipts and ref deletion rejection passed');
 }finally{
+  if(originalEventPath===undefined)delete process.env.GITHUB_EVENT_PATH;
+  else process.env.GITHUB_EVENT_PATH=originalEventPath;
   delete process.env.RUN_STORE_RECEIPT_DIR;
   fs.rmSync(tmp,{recursive:true,force:true});
 }
