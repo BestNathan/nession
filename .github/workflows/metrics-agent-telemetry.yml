@@ -10,6 +10,7 @@ on:
     workflows:
       - Agent / SC Acceptance
       - Acceptance / Orchestrator
+      - Acceptance / Verified Issue Stage
       - Agent / Issue Audit
       - Agent / Provider Smoke
       - Agent / Development
@@ -65,6 +66,9 @@ jobs:
              github.event.workflow_run.event == 'workflow_dispatch') ||
             (github.event.workflow_run.name == 'Agent / Issue Audit' &&
              (github.event.workflow_run.event == 'issues' || github.event.workflow_run.event == 'workflow_dispatch')) ||
+            (github.event.workflow_run.name == 'Acceptance / Verified Issue Stage' &&
+             github.event.workflow_run.event == 'issue_comment' &&
+             github.event.workflow_run.head_branch == 'main') ||
             (github.event.workflow_run.name == 'Acceptance / Orchestrator' &&
              (github.event.workflow_run.event == 'pull_request_target' ||
               github.event.workflow_run.event == 'issues' ||
