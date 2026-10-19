@@ -86,37 +86,53 @@ export function initializeIssueController({
       first_action_id:expected.outbox[0].id};
   }finally{fs.rmSync(temp,{recursive:true,force:true});}
 }
-function validatedEvent(){
+function validatedAttestedRequest(filename){
   if(process.env.GITHUB_ACTIONS!=='true'||
       process.env.GITHUB_REPOSITORY!==REPO||
       process.env.GITHUB_REF!=='refs/heads/main'||
-      process.env.GITHUB_EVENT_NAME!=='workflow_dispatch'||
-      process.env.GITHUB_WORKFLOW!=='Acceptance / Agent Controller'||
-      !SHA.test(process.env.GITHUB_SHA??'')||
-      !Number.isSafeInteger(Number(process.env.GITHUB_RUN_ID))||
-      Number(process.env.GITHUB_RUN_ID)<1)fail('trusted main-only GitHub Controller required');
-  let event;
-  try{event=JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH,'utf8'));}
-  catch{fail('trusted workflow_dispatch event unavailable');}
-  if(!event||typeof event.inputs!=='object'||!event.inputs)fail('invalid Controller input event');
-  const raw=event.inputs;
-  const allowed=['issue_number','input_sha','developer','reviewer','acceptor'];
-  if(Object.keys(raw).some(x=>!allowed.includes(x)))fail('unexpected dispatch input');
-  const issue=Number(raw.issue_number);
-  if(!Number.isSafeInteger(issue)||issue<1||!SHA.test(raw.input_sha??''))
-    fail('invalid Issue or source SHA');
-  if(!['developer','reviewer','acceptor'].every(x=>typeof raw[x]==='string'&&
-       /^[a-z][a-z0-9-]{1,80}$/.test(raw[x])))fail('invalid Agent assignment');
-  return {request:{issue,sha:raw.input_sha,
-      developer:raw.developer,reviewer:raw.reviewer,acceptor:raw.acceptor},
-    authority:{repository:REPO,event:'workflow_dispatch',
-      permission:'write',ref:'refs/heads/main',run_id:Number(process.env.GITHUB_RUN_ID)}};
+      process.env.GITHUB_EVENT_NAME!=='workflow_run'||
+      process.env.GITHUB_WORKFLOW!=='Store / Agent Controller Ingest'||
+      !SHA.test(process.env.GITHUB_SHA??'')) {
+    fail('trusted main-only Store Ingest required');
+  }
+  let event,document;
+  try{
+    event=JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH,'utf8'));
+    const stat=fs.lstatSync(filename);
+    if(!stat.isFile()||stat.isSymbolicLink()||stat.size>32768)fail('unsafe authenticated request file');
+    document=JSON.parse(fs.readFileSync(filename,'utf8'));
+  }catch(e){
+    if(e.message?.startsWith('Agent Controller start:'))throw e;
+    fail('authenticated Controller request unavailable');
+  }
+  const source=event?.workflow_run;
+  const run=document?.run;
+  if(document.schema_version!==1||
+      document.kind!=='agent_controller_start_request'||
+      !run||run.repository!==REPO||
+      run.workflow!=='Acceptance / Agent Controller'||
+      run.workflow_path!=='.github/workflows/acceptance-agent-controller.yml'||
+      run.event!=='workflow_dispatch'||run.ref!=='refs/heads/main'||
+      run.actor!=='BestNathan'||!SHA.test(run.head_sha??'')||
+      source?.id!==run.run_id||source?.run_attempt!==run.attempt||
+      source?.head_sha!==run.head_sha||
+      source?.head_repository?.full_name!==REPO||
+      source?.repository?.full_name!==REPO||
+      source?.head_branch!=='main'||source?.conclusion!=='success') {
+    fail('untrusted Controller source Run/Attempt/Issue context');
+  }
+  const input=document.request;
+  if(!input||!Number.isSafeInteger(input.issue)||input.issue<1||
+      !SHA.test(input.sha??''))fail('invalid authenticated Issue/source SHA');
+  return {request:input,authority:{repository:REPO,event:'workflow_dispatch',
+    permission:'write',ref:'refs/heads/main',run_id:run.run_id}};
 }
+
 if(process.argv[1]&&fileURLToPath(import.meta.url)===path.resolve(process.argv[1])){
   try {
-    if(process.argv[2]!=='--apply'||process.argv.length!==3)
-      fail('usage: --apply (trusted main workflow_dispatch only)');
-    const {request,authority}=validatedEvent();
+    if(process.argv[2]!=='--apply'||process.argv.length!==4)
+      fail('usage: --apply AUTHENTICATED_REQUEST_JSON (trusted main workflow_run only)');
+    const {request,authority}=validatedAttestedRequest(process.argv[3]);
     const registry=JSON.parse(fs.readFileSync('automation/agents/registry.json','utf8'));
     const remote=process.env.AGENT_STORE_CONTROLLER_REMOTE;
     const result=initializeIssueController({remote,registry,request,authority});
