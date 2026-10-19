@@ -71,6 +71,29 @@ jobs:
             fi
             sleep 5
           done
+      - name: Derive only the public RSA sealing key in isolated pre-model step
+        env:
+          CURSOR_RESUME_PRIVATE_KEY_B64: ${{ secrets.CURSOR_RESUME_PRIVATE_KEY_B64 }}
+          CONFIGURED_PUBLIC_KEY_B64: ${{ vars.CURSOR_RESUME_PUBLIC_KEY_B64 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import {createPrivateKey,createPublicKey} from 'node:crypto';
+          import {appendFileSync} from 'node:fs';
+          const source=process.env.CURSOR_RESUME_PRIVATE_KEY_B64;
+          if(!source)throw Error('existing cursor Environment native Session key is required');
+          const key=createPrivateKey(Buffer.from(source,'base64').toString('utf8'));
+          if(key.asymmetricKeyType!=='rsa'||
+              (key.asymmetricKeyDetails?.modulusLength??0)<2048)
+            throw Error('unsupported native Session private key');
+          const pem=createPublicKey(key).export({format:'pem',type:'spki'});
+          const encoded=Buffer.from(pem).toString('base64');
+          if(process.env.CONFIGURED_PUBLIC_KEY_B64 &&
+              process.env.CONFIGURED_PUBLIC_KEY_B64!==encoded)
+            throw Error('configured sealing public key differs from cursor Environment');
+          appendFileSync(process.env.GITHUB_ENV,'CURSOR_RESUME_PUBLIC_KEY_B64='+encoded+'\\n');
+          NODE
       - name: Require pinned Cursor Provider and public-only Session sealing key
         env:
           CURSOR_SDK_VERSION: ${{ vars.CURSOR_SDK_VERSION }}
@@ -89,12 +112,12 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/development-sdk" \
             --ignore-scripts --no-audit --no-fund "@cursor/sdk@$CURSOR_SDK_VERSION"
           echo "CURSOR_SDK_ROOT=$RUNNER_TEMP/development-sdk" >> "$GITHUB_ENV"
+          echo "CURSOR_SDK_VERSION=$CURSOR_SDK_VERSION" >> "$GITHUB_ENV"
       - name: Execute authenticated bounded real Developer slice
         env:
           CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
           CURSOR_MODEL: ${{ vars.CURSOR_MODEL || 'composer-2.5' }}
           CURSOR_MODEL_FAST: ${{ vars.CURSOR_MODEL_FAST || 'true' }}
-          CURSOR_RESUME_PUBLIC_KEY_B64: ${{ vars.CURSOR_RESUME_PUBLIC_KEY_B64 }}
         shell: bash
         run: |
           set -euo pipefail
