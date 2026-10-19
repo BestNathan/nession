@@ -125,7 +125,11 @@ try{
   // and still exists in the linear Store ancestry after unrelated updates.
   assert.equal(git(seed,'show',second.commit_sha+':workflows/issues/3002/head.json')
     .includes('"version": 1'),true);
-  assert.equal(git(seed,'merge-base','--is-ancestor',second.commit_sha,finalSha),'');
+  // The bare remote has advanced, but this test clone has only the older
+  // fetched ref. Fetch the exact newer Store tip before Git ancestry checks.
+  git(seed,'fetch','origin','refs/heads/agent-store');
+  assert.equal(git(seed,'rev-parse','FETCH_HEAD'),finalSha);
+  assert.equal(git(seed,'merge-base','--is-ancestor',second.commit_sha,'FETCH_HEAD'),'');
   console.log('Agent Controller initialization: real orphan CAS, original-commit replay across unrelated writes, disjoint race, scope/role and advanced-state denial passed');
 }finally{
   fs.rmSync(temp,{recursive:true,force:true});
