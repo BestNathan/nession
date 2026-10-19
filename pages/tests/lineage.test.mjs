@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import {projectLineage,validateLineageProjection} from '../scripts/lineage.mjs';
 import {makeProjection,validateProjection} from '../scripts/project.mjs';
 const sha='a'.repeat(40),store='b'.repeat(40),digest='c'.repeat(64),action='d'.repeat(64);
-const source={repository:'BestNathan/nession',source_ref_sha:store,producer_run_id:72,
+const source={repository:'BestNathan/nession',source_ref_sha:store,producer_run_id:21,
  producer_attempt:2,result_digest:digest,writer_receipt_digest:'e'.repeat(64),
- source_url:'https://github.com/BestNathan/nession/actions/runs/72'};
+ source_url:'https://github.com/BestNathan/nession/actions/runs/21'};
 const edge={issue:6,pr_number:7,pr_head_sha:sha,role:'developer',
  agent_id:'dev-cursor-01',run_id:21,attempt:2,action_id:action,slice_id:null,
  origin:source,verification:'authenticated_at_attestation'};
@@ -31,6 +31,21 @@ test('fail closed on foreign, corrupt, conflicting, replay and model-derived lin
   {...edge,origin:{...source,repository:'other/repo'}},
   {...edge,origin:{...source,source_ref_sha:'f'.repeat(40)}},
   {...edge,origin:{...source,producer_run_id:0}},
+  {...edge,origin:{...source,producer_run_id:72,
+    source_url:'https://github.com/BestNathan/nession/actions/runs/72'}},
+  {...edge,origin:{...source,producer_attempt:1}},
+  {...edge,origin:{...source,producer_run_id:21,producer_attempt:3}},
+  // The edge cannot silently switch to a different valid run or attempt
+  // while preserving a previously plausible source URL.
+  {...edge,run_id:72},
+  {...edge,attempt:3},
+  {...edge,origin:{...source,
+    source_url:'https://github.com/BestNathan/nession/actions/runs/72'}},
+  {...edge,origin:{...source,
+    source_url:'https://github.com/BestNathan/nession/actions/runs/21?revision='+sha}},
+  {...edge,origin:{...source,
+    source_url:'https://github.com/BestNathan/nession/actions/runs/021'}},
+
   {...edge,origin:{...source,writer_receipt_digest:'fake'}},
   {...edge,origin:{...source,source_url:'https://evil.com/run'}},
   {...edge,pr_head_sha:'g'.repeat(40)},
@@ -61,6 +76,19 @@ test('public projector prevents forged lineage, private spill and missing source
  assert.equal(p.work.lineage.status,'unavailable');
  assert.equal(p.work.acceptance_e2e.status,'unavailable');
  p.work.lineage=projectLineage(fixture());
+ assert.equal(p.work.lineage.edges[0].source_url,
+   'https://github.com/BestNathan/nession/actions/runs/21');
+ // Different well-formed GitHub Run links are not sufficient evidence of
+ // this Agent's own Run/Attempt, even when the same repository owns both.
+ const swapped=structuredClone(p);
+ swapped.work.lineage.edges[0].source_url='https://github.com/BestNathan/nession/actions/runs/72';
+ assert.throws(()=>validateProjection(swapped),/invalid public causal edge/);
+ const foreign=structuredClone(p);
+ foreign.work.lineage.edges[0].source_url='https://github.com/other/repo/actions/runs/21';
+ assert.throws(()=>validateProjection(foreign),/invalid public causal edge/);
+ const unrelatedAttempt=projectLineage(fixture({attested:{status:'verified',
+   source_ref_sha:store,records:[{...edge,origin:{...source,producer_attempt:1}}]}}));
+ assert.equal(unrelatedAttempt.status,'unavailable');
  p.work.lineage.edges[0].checkpoint_bytes='secret';
  assert.throws(()=>validateProjection(p),/invalid public causal edge/);
 });
