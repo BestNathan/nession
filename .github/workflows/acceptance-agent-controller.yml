@@ -1,53 +1,48 @@
 name: Acceptance / Agent Controller
 
-# Owner-initiated trusted Controller root: one immutable Issue state + Outbox
-# action in the pre-bootstrapped agent-store orphan ref. No Provider/model runs.
+# Unprivileged MANUAL REQUEST ONLY. This workflow cannot write agent-store,
+# issue comments or PRs; the separate verified workflow_run receiver owns App.
 on:
   workflow_dispatch:
     inputs:
       issue_number:
-        description: 'Existing OPEN Issue to initialize (use a separate fixture Issue)'
+        description: 'Existing OPEN Issue (use a separate fixture Issue, not #1664)'
         required: true
         type: number
       input_sha:
-        description: 'Exact main-ancestor SHA of the intended development input'
+        description: 'Exact main-ancestor development SHA'
         required: true
         type: string
       developer:
-        description: 'Registered Developer Agent ID'
+        description: 'Registered Developer ID'
         required: true
         default: dev-cursor-01
         type: string
       reviewer:
-        description: 'Registered Reviewer Agent ID'
+        description: 'Registered Reviewer ID'
         required: true
         default: review-cursor-01
         type: string
       acceptor:
-        description: 'Registered Acceptor Agent ID'
+        description: 'Registered Acceptor ID'
         required: true
         default: accept-cursor-01
         type: string
 
 permissions:
   contents: read
-  actions: read
   issues: read
 
-concurrency:
-  group: acceptance-agent-controller-initialize
-  cancel-in-progress: false
-
 jobs:
-  initialize:
+  request:
     if: >-
       github.repository == 'BestNathan/nession' &&
       github.ref == 'refs/heads/main' &&
-      github.event_name == 'workflow_dispatch'
+      github.actor == 'BestNathan'
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 10
     steps:
-      - name: Checkout authenticated main Controller code
+      - name: Checkout trusted main request contract
         uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
@@ -56,12 +51,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Verify Controller, immutable Store and negative-case contracts
+      - name: Verify request and Controller Store contracts without credentials
         run: |
           set -euo pipefail
           node scripts/lib/agent/orchestration/controller-start-selftest.mjs
-          ./gates/run run-store-integrity
-      - name: Verify explicit Issue and exact main-ancestor SHA before issuing writer token
+          node scripts/lib/agent/orchestration/controller-request-selftest.mjs
+      - name: Confirm exact SHA and open native Issue
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ inputs.issue_number }}
@@ -69,60 +64,25 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$ISSUE_NUMBER" =~ ^[1-9][0-9]*$ ]] || {
-            echo "::error::Positive Issue number required"; exit 1;
-          }
-          [[ "$INPUT_SHA" =~ ^[a-f0-9]{40}$ ]] || {
-            echo "::error::Exact source commit SHA required"; exit 1;
-          }
+          [[ "$ISSUE_NUMBER" =~ ^[1-9][0-9]*$ ]]
+          [[ "$INPUT_SHA" =~ ^[a-f0-9]{40}$ ]]
           git cat-file -e "$INPUT_SHA^{commit}"
-          git merge-base --is-ancestor "$INPUT_SHA" HEAD || {
-            echo "::error::Source SHA must be reachable from checked-out main"; exit 1;
-          }
+          git merge-base --is-ancestor "$INPUT_SHA" HEAD
           gh api "repos/$GITHUB_REPOSITORY/issues/$ISSUE_NUMBER" |
-            jq -e --argjson number "$ISSUE_NUMBER" '
-              .number == $number and .state == "open" and
-              (.pull_request | not) and .repository_url ==
-              ("https://api.github.com/repos/" + env.GITHUB_REPOSITORY)
-            ' >/dev/null || {
-              echo "::error::Selected Issue must be an open native repository Issue"; exit 1;
-            }
-          echo "Authenticated main SHA and explicit open Issue #$ISSUE_NUMBER" >> "$GITHUB_STEP_SUMMARY"
-      - name: Require existing scoped Run Store App
-        env:
-          APP_ID: ${{ vars.RUN_STORE_WRITER_APP_ID }}
+            jq -e --argjson n "$ISSUE_NUMBER" '
+              .number == $n and .state == "open" and
+              (.pull_request | not) and
+              .repository_url == ("https://api.github.com/repos/" + env.GITHUB_REPOSITORY)
+            ' >/dev/null
+      - name: Export validated sanitized request (no Store private key)
         run: |
           set -euo pipefail
-          [[ "$APP_ID" =~ ^[1-9][0-9]*$ ]] || {
-            echo "::error::Existing RUN_STORE_WRITER_APP_ID is required"; exit 1;
-          }
-      - name: Mint Store-scoped privileged writer identity
-        id: writer
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+          mkdir -p "$RUNNER_TEMP/controller-request"
+          node scripts/lib/agent/orchestration/controller-request.mjs prepare             "$RUNNER_TEMP/controller-request/controller-request.json"
+      - name: Publish only owner/main-bound Controller request
+        uses: actions/upload-artifact@v4
         with:
-          app-id: ${{ vars.RUN_STORE_WRITER_APP_ID }}
-          private-key: ${{ secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY }}
-          repositories: nession
-          permission-contents: write
-      - name: Atomically initialize Issue state and pending Developer action
-        env:
-          STORE_APP_TOKEN: ${{ steps.writer.outputs.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ -n "$STORE_APP_TOKEN" ]] || exit 1
-          export AGENT_STORE_CONTROLLER_REMOTE="https://x-access-token:${STORE_APP_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          node scripts/lib/agent/orchestration/controller-start.mjs --apply > "$RUNNER_TEMP/controller-start.json"
-          unset AGENT_STORE_CONTROLLER_REMOTE STORE_APP_TOKEN
-          jq -e '.issue > 0 and .version == 1 and
-            (.commit_sha | test("^[a-f0-9]{40}$")) and
-            (.first_action_id | test("^[a-f0-9]{64}$"))' "$RUNNER_TEMP/controller-start.json" >/dev/null
-          {
-            echo "## Issue Controller durable initialization"
-            echo "- Issue: #$(jq -r .issue "$RUNNER_TEMP/controller-start.json")"
-            echo "- Created: $(jq -r .created "$RUNNER_TEMP/controller-start.json")"
-            echo "- Replayed existing v1 state: $(jq -r .replayed "$RUNNER_TEMP/controller-start.json")"
-            echo "- Store commit: $(jq -r .commit_sha "$RUNNER_TEMP/controller-start.json")"
-            echo "- Pending action: $(jq -r .first_action_id "$RUNNER_TEMP/controller-start.json")"
-            echo "- Worker dispatch: not performed; no model had Store credentials"
-          } >> "$GITHUB_STEP_SUMMARY"
+          name: agent-controller-request-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/controller-request/controller-request.json
+          if-no-files-found: error
+          retention-days: 2
