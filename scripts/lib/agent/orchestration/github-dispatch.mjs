@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { resolveIdentity } from '../harness/contract.mjs';
 import { validateDevelopmentState } from './outbox.mjs';
+import { verifyCommittedCheckpoint } from '../store/remote.mjs';
 
 const HEX40 = /^[a-f0-9]{40}$/;
 const HEX64 = /^[a-f0-9]{64}$/;
@@ -275,4 +276,38 @@ export async function attestAgentOutcome({
     issue:body.issue,task_id:body.action_id,agent_id:body.agent_id,
     input_sha:body.input_sha,output_sha:result.target_sha,verified:true,
   };
+}
+
+// Trusted pre-model continuation preflight. The Store checkout and Git ancestry
+// are independently verified here; model-provided JSON cannot substitute a
+// remote checkpoint commitment. This returns PUBLIC metadata only. Decryption
+// and Provider-native Session restoration occur in a separate trusted step.
+export function authorizeNativeContinuation({
+  state,dispatch_ticket,keyring,remote,now=Date.now(),
+}) {
+  validateDevelopmentState(state);
+  const body=verifyDispatchTicket(dispatch_ticket,keyring,{now});
+  if(body.schema_version!==2)reject('native resume requires a signed v2 ticket');
+  if(body.issue!==state.issue||state.assignments[body.role]!==body.agent_id)
+    reject('resumed ticket belongs to another Issue/Agent');
+  const action=state.outbox.find(x=>x.id===body.action_id &&
+    ['pending','dispatched'].includes(x.status));
+  if(!action||action.task.type!=='dispatch'||action.task.resume!==true||
+      action.task.role!==body.role||action.task.agent_id!==body.agent_id||
+      action.task.task!==body.task||action.task.sha!==body.input_sha||
+      canonical(action.task.continuation)!==canonical(body.resume_from))
+    reject('signed continuation differs from persisted Outbox');
+  const c=body.resume_from;
+  const confirmed=verifyCommittedCheckpoint({remote,
+    identity:{role:body.role,agent_id:body.agent_id,issue:body.issue},
+    commit_sha:c.checkpoint_commit_sha,version:c.checkpoint_version,
+    ciphertext_sha256:c.ciphertext_sha256});
+  return Object.freeze({issue:body.issue,agent_id:body.agent_id,role:body.role,
+    action_id:body.action_id,input_sha:body.input_sha,
+    parent_action_id:c.parent_action_id,ordinal:c.ordinal,
+    checkpoint_version:confirmed.version,
+    checkpoint_commit_sha:confirmed.commit_sha,
+    ciphertext_sha256:confirmed.ciphertext_sha256,
+    store_ref:confirmed.store_ref,
+    current_store_sha:confirmed.current_store_sha});
 }
