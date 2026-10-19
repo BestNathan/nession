@@ -10,6 +10,13 @@ const SHA=/^[a-f0-9]{40}$/;
 const PUBLIC='https://bestnathan.github.io/nession/data/site.json';
 const MAX_BYTES=2*1024*1024;
 const safePositive=n=>Number.isSafeInteger(n)&&n>0;
+const SUPPORTED_POST_MERGE_ISSUES=new Set(['1946','1977']);
+// Only the source-owning parent and this same source-attester child consume
+// the real published observation. No PR-stage or arbitrary Issue may claim it.
+export function shouldCollectPublicPagesE2E(stage,issue) {
+  return stage==='post-merge'&&SUPPORTED_POST_MERGE_ISSUES.has(String(issue));
+}
+
 
 // Never send the GitHub token to a public (possibly redirected) endpoint.
 async function fetchAnonymousPublic(sha) {
@@ -106,6 +113,10 @@ export async function collectPublicPagesE2E(repo,sha,runs,
 }
 
 export async function selfTestPublicPagesE2E(){
+  assert.equal(shouldCollectPublicPagesE2E('post-merge','1946'),true);
+  assert.equal(shouldCollectPublicPagesE2E('post-merge','1977'),true);
+  assert.equal(shouldCollectPublicPagesE2E('pre-merge','1977'),false);
+  assert.equal(shouldCollectPublicPagesE2E('post-merge','1906'),false);
   const sha='a'.repeat(40),src='b'.repeat(40);
   const run={id:81,run_attempt:2,name:'Deploy / Public Pages',
     path:'.github/workflows/deploy-pages.yml',event:'push',head_branch:'main',
