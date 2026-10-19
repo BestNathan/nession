@@ -173,17 +173,22 @@ async function SC04(){
 async function SC05(){
   const here=execFileSync('git',['rev-parse','HEAD'],{cwd:ROOT,encoding:'utf8'}).trim();
   assert.match(here,/^[a-f0-9]{40}$/);
+  if(process.env.NESSION_ACCEPTANCE_TARGET_SHA)
+    assert.equal(here,process.env.NESSION_ACCEPTANCE_TARGET_SHA,
+      'Case must execute the exact trusted acceptance target SHA');
   if(process.env.GITHUB_EVENT_NAME==='push'&&process.env.GITHUB_REF==='refs/heads/main'){
     assert.equal(here,process.env.GITHUB_SHA,'Case must use exact merged main SHA');
+    assert.equal(process.env.GITHUB_REF_PROTECTED,'true',
+      'GitHub Actions must attest that the target main ref is protected');
   }
   const workflow=readFileSync(resolve(ROOT,'.github/workflows/acceptance-cases.yml'),'utf8');
   assert.match(workflow,/push:\s*\n\s+branches: \[staging, main\]/);
   assert.match(workflow,/ref: \$\{\{ steps\.target\.outputs\.target_sha \}\}/);
   const recovery=readFileSync(resolve(ROOT,'.github/workflows/acceptance-quota-recovery.yml'),'utf8');
   assert.match(recovery,/github\.ref == 'refs\/heads\/main'/);
-  // Branch protection is an *independent* GitHub API proof; this check does
-  // not claim to be able to read repository settings or certify policy rules.
-  return 'Case executed on exact repository commit, with main-only trusted recovery and exact target checkout; branch protection and green CI are externally verified';
+  // GitHub supplies ref_protected for push runs. This does not expose the
+  // policy's individual required checks; audit exact-head CI independently.
+  return 'Exact checked-out target SHA, protected main ref attestation on push, and main-only trusted recovery verified; independent Quality/E2E/Acceptance run conclusions still required';
 }
 const handlers={ 'SC-01':SC01, 'SC-02':SC02, 'SC-03':SC03,'SC-04':SC04,'SC-05':SC05 };
 const target=process.argv[2];
