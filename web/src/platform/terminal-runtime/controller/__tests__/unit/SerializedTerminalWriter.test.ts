@@ -125,3 +125,96 @@ describe('SerializedTerminalWriter (#1931)', () => {
     expect(applied).toBe(2);
   });
 });
+
+
+describe('SerializedTerminalWriter bounded parser queue (#1975)', () => {
+  it('halts on event-count pressure and never acknowledges dropped or pending output', () => {
+    const h = harness();
+    const degraded = vi.fn();
+    const writer = new SerializedTerminalWriter(h.terminal, degraded, {
+      maxEvents: 2, maxBytes: 4096, maxParseMs: 30_000,
+    });
+    const parsed = vi.fn();
+    writer.write('first', parsed); // xterm is parsing this one
+    writer.write('queued', parsed);
+    expect(writer.pendingUsage.events).toBe(2);
+    writer.write('overflow', parsed);
+    expect(degraded).toHaveBeenCalledExactlyOnceWith('overflow');
+    expect(writer.pendingUsage).toEqual({ bytes: 0, events: 1, halted: true });
+    h.callbacks.shift()!(); // late callback of the in-flight write
+    writer.resize(100, 30, parsed);
+    writer.write('after', parsed);
+    expect(parsed).not.toHaveBeenCalled();
+    expect(h.called).toEqual(['first']);
+    writer.dispose();
+  });
+
+  it('charges actual output retention and rejects an oversized event', () => {
+    const h = harness();
+    const degraded = vi.fn();
+    const writer = new SerializedTerminalWriter(h.terminal, degraded, {
+      maxEvents: 4, maxBytes: 140, maxParseMs: 30_000,
+    });
+    writer.write('small');
+    expect(writer.pendingUsage.bytes).toBe(138);
+    writer.write(new Uint8Array(8192));
+    expect(degraded).toHaveBeenCalledWith('overflow');
+    expect(writer.pendingUsage.halted).toBe(true);
+    expect(h.called).toEqual(['small']);
+    writer.dispose();
+  });
+
+  it('treats a stalled parser as loss of proof and ignores its late callback', () => {
+    vi.useFakeTimers();
+    try {
+      const h = harness();
+      const degraded = vi.fn();
+      const parsed = vi.fn();
+      const writer = new SerializedTerminalWriter(h.terminal, degraded, {
+        maxEvents: 8, maxBytes: 4096, maxParseMs: 15,
+      });
+      writer.write('never-parsed', parsed);
+      writer.write('queued', parsed);
+      vi.advanceTimersByTime(15);
+      expect(degraded).toHaveBeenCalledExactlyOnceWith('parser-stalled');
+      h.callbacks.shift()!();
+      expect(parsed).not.toHaveBeenCalled();
+      expect(h.called).toEqual(['never-parsed']);
+      writer.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('releases byte/event charges on callback and preserves healthy FIFO', () => {
+    const h = harness();
+    const degraded = vi.fn();
+    const writer = new SerializedTerminalWriter(h.terminal, degraded, {
+      maxEvents: 3, maxBytes: 600, maxParseMs: 30_000,
+    });
+    const parsed: string[] = [];
+    writer.write('first', () => parsed.push('first'));
+    writer.resize(110, 32, () => parsed.push('resize'));
+    writer.write('last', () => parsed.push('last'));
+    expect(writer.pendingUsage.events).toBe(3);
+    h.callbacks.shift()!();
+    expect(parsed).toEqual(['first', 'resize']);
+    h.callbacks.shift()!();
+    expect(parsed).toEqual(['first', 'resize', 'last']);
+    expect(writer.pendingUsage).toEqual({ bytes: 0, events: 0, halted: false });
+    expect(degraded).not.toHaveBeenCalled();
+    writer.dispose();
+  });
+
+  it('validates byte/event/stall limits rather than disabling them', () => {
+    const h = harness();
+    for (const invalid of [0, -1, Number.NaN, 1.5, Number.POSITIVE_INFINITY]) {
+      expect(() => new SerializedTerminalWriter(h.terminal, undefined, { maxBytes: invalid }))
+        .toThrow(RangeError);
+      expect(() => new SerializedTerminalWriter(h.terminal, undefined, { maxEvents: invalid }))
+        .toThrow(RangeError);
+      expect(() => new SerializedTerminalWriter(h.terminal, undefined, { maxParseMs: invalid }))
+        .toThrow(RangeError);
+    }
+  });
+});
