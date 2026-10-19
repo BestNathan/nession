@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { resolveIdentity } from '../harness/contract.mjs';
-import { validateDevelopmentState } from './outbox.mjs';
+import { validateDevelopmentState,recordSliceYield } from './outbox.mjs';
+import { verifyCommittedCheckpoint } from '../store/remote.mjs';
 
 const HEX40 = /^[a-f0-9]{40}$/;
 const HEX64 = /^[a-f0-9]{64}$/;
@@ -15,6 +16,9 @@ const PROVIDERS = {
 };
 const BODY_FIELDS = ['schema_version','repository','issue','action_id','state_version',
   'role','agent_id','task','input_sha','issuer_run_id','issued_at','expires_at','key_id'];
+const CONTINUATION_FIELDS = ['parent_action_id','ordinal','checkpoint_version',
+  'checkpoint_commit_sha','ciphertext_sha256'];
+const STORE_REF='refs/heads/agent-store';
 const RESULT_FIELDS = ['kind','issue','run_id','run_attempt','target_sha','outcome','task_id'];
 const SOURCE_FIELDS = ['repository','path','name','run_id','attempt','event','ref',
   'issue','task_id','agent_id','input_sha','output_sha','verified'];
@@ -35,9 +39,23 @@ function canonical(value) {
 function mac(key, value) {
   return createHmac('sha256',keyBytes(key)).update(value).digest();
 }
+function validContinuation(value) {
+  if (!own(value,CONTINUATION_FIELDS)||
+      Object.keys(value).length!==CONTINUATION_FIELDS.length||
+      !HEX64.test(value.parent_action_id??'')||
+      !positive(value.ordinal)||value.ordinal>64||
+      !positive(value.checkpoint_version)||
+      !HEX40.test(value.checkpoint_commit_sha??'')||
+      !HEX64.test(value.ciphertext_sha256??'')) {
+    reject('invalid signed native Session continuation');
+  }
+  return value;
+}
 function validBody(body) {
-  if (!own(body,BODY_FIELDS) || Object.keys(body).length !== BODY_FIELDS.length ||
-      body.schema_version !== 1 || body.repository !== REPOSITORY || !positive(body.issue) ||
+  const resumed=body?.schema_version===2;
+  const allowed=resumed?[...BODY_FIELDS,'resume_from']:BODY_FIELDS;
+  if (!own(body,allowed) || Object.keys(body).length !== allowed.length ||
+      ![1,2].includes(body.schema_version) || body.repository !== REPOSITORY || !positive(body.issue) ||
       !HEX64.test(body.action_id ?? '') || !positive(body.state_version) ||
       !PROVIDERS[body.role]?.tasks.includes(body.task) || !ID.test(body.agent_id ?? '') ||
       !HEX40.test(body.input_sha ?? '') || !positive(body.issuer_run_id) ||
@@ -45,6 +63,7 @@ function validBody(body) {
       !Number.isSafeInteger(body.expires_at) ||
       body.expires_at <= body.issued_at ||
       body.expires_at - body.issued_at > MAX_TTL_MS) reject('invalid dispatch ticket body');
+  if(resumed)validContinuation(body.resume_from);
   return body;
 }
 function decodeTicket(ticket) {
@@ -81,9 +100,11 @@ export function issueDispatchTicket(state,actionId,registry,{key,key_id,issuer_r
       !Number.isSafeInteger(ttl_ms) || ttl_ms<1000 || ttl_ms>MAX_TTL_MS) {
     reject('invalid ticket signer identity or TTL');
   }
-  const body=validBody({schema_version:1,repository:REPOSITORY,issue:state.issue,
+  const continuation=t.continuation==null?null:validContinuation(t.continuation);
+  const body=validBody({schema_version:continuation?2:1,repository:REPOSITORY,issue:state.issue,
     action_id:action.id,state_version:state.version,role:t.role,agent_id:t.agent_id,
-    task:t.task,input_sha:t.sha,issuer_run_id,issued_at:now,expires_at:now+ttl_ms,key_id});
+    task:t.task,input_sha:t.sha,issuer_run_id,issued_at:now,expires_at:now+ttl_ms,key_id,
+    ...(continuation?{resume_from:continuation}:{})});
   const encoded=Buffer.from(canonical(body)).toString('base64url');
   return {ticket:encoded+'.'+mac(key,encoded).toString('base64url'),body};
 }
@@ -109,7 +130,9 @@ export function planGitHubDispatch(state,actionId,registry,signer) {
     repository:REPOSITORY,workflow_id:spec.workflow,ref:'main',
     return_run_details:true,
     inputs:{action_id:body.action_id,issue_number:String(body.issue),agent_id:body.agent_id,
-      task:body.task,input_sha:body.input_sha,dispatch_ticket:ticket},
+      task:body.task,input_sha:body.input_sha,dispatch_ticket:ticket,
+      ...(body.schema_version===2?{resume_from:Buffer.from(canonical(body.resume_from))
+        .toString('base64url')}:{})},
   };
 }
 // Call only from a trusted GitHub API reader, not from Agent-provided JSON.
@@ -142,8 +165,10 @@ export function createGitHubDispatchClient(token,{api='https://api.github.com',f
   return async function dispatch(plan) {
     if (!plan || plan.repository!==REPOSITORY || plan.ref!=='main' ||
         !plan.return_run_details || !Object.values(PROVIDERS).some(x=>x.workflow===plan.workflow_id) ||
-        !own(plan.inputs,['action_id','issue_number','agent_id','task','input_sha','dispatch_ticket']) ||
-        Object.keys(plan.inputs).length!==6 || !HEX64.test(plan.inputs.action_id??'')) {
+        !own(plan.inputs,['action_id','issue_number','agent_id','task','input_sha',
+          'dispatch_ticket','resume_from']) ||
+        ![6,7].includes(Object.keys(plan.inputs).length) ||
+        !HEX64.test(plan.inputs.action_id??'')) {
       reject('invalid or unapproved GitHub dispatch plan');
     }
     const body=verifyDispatchTicket(plan.inputs.dispatch_ticket,keyring,{now});
@@ -151,7 +176,10 @@ export function createGitHubDispatchClient(token,{api='https://api.github.com',f
         plan.inputs.action_id!==body.action_id ||
         plan.inputs.issue_number!==String(body.issue) ||
         plan.inputs.agent_id!==body.agent_id || plan.inputs.task!==body.task ||
-        plan.inputs.input_sha!==body.input_sha) {
+        plan.inputs.input_sha!==body.input_sha ||
+        (body.schema_version===2 ?
+          plan.inputs.resume_from!==Buffer.from(canonical(body.resume_from)).toString('base64url') :
+          Object.hasOwn(plan.inputs,'resume_from'))) {
       reject('dispatch plan does not match the signed Outbox ticket');
     }
     const response=await fetchFn(api+'/repos/'+REPOSITORY+'/actions/workflows/'+
@@ -214,7 +242,11 @@ export async function attestAgentOutcome({
       pending.task.agent_id!==body.agent_id || pending.task.sha!==body.input_sha ||
       pending.receipt?.dispatch_id!==body.action_id ||
       pending.receipt.status!=='verified' ||
-      pending.receipt.source_run_id!==result.run_id) {
+      pending.receipt.source_run_id!==result.run_id ||
+      (pending.task.continuation ?
+        body.schema_version!==2 ||
+          canonical(body.resume_from)!==canonical(pending.task.continuation) :
+        body.schema_version!==1)) {
     reject('ticket has no trusted run-bound dispatch receipt');
   }
   const issuer=await reader.getRun(body.issuer_run_id);
@@ -244,4 +276,107 @@ export async function attestAgentOutcome({
     issue:body.issue,task_id:body.action_id,agent_id:body.agent_id,
     input_sha:body.input_sha,output_sha:result.target_sha,verified:true,
   };
+}
+
+// Trusted pre-model continuation preflight. The Store checkout and Git ancestry
+// are independently verified here; model-provided JSON cannot substitute a
+// remote checkpoint commitment. This returns PUBLIC metadata only. Decryption
+// and Provider-native Session restoration occur in a separate trusted step.
+export function authorizeNativeContinuation({
+  state,dispatch_ticket,keyring,remote,now=Date.now(),
+}) {
+  validateDevelopmentState(state);
+  const body=verifyDispatchTicket(dispatch_ticket,keyring,{now});
+  if(body.schema_version!==2)reject('native resume requires a signed v2 ticket');
+  if(body.issue!==state.issue||state.assignments[body.role]!==body.agent_id)
+    reject('resumed ticket belongs to another Issue/Agent');
+  const action=state.outbox.find(x=>x.id===body.action_id &&
+    ['pending','dispatched'].includes(x.status));
+  if(!action||action.task.type!=='dispatch'||action.task.resume!==true||
+      action.task.role!==body.role||action.task.agent_id!==body.agent_id||
+      action.task.task!==body.task||action.task.sha!==body.input_sha||
+      canonical(action.task.continuation)!==canonical(body.resume_from))
+    reject('signed continuation differs from persisted Outbox');
+  const c=body.resume_from;
+  const confirmed=verifyCommittedCheckpoint({remote,
+    identity:{role:body.role,agent_id:body.agent_id,issue:body.issue},
+    commit_sha:c.checkpoint_commit_sha,version:c.checkpoint_version,
+    ciphertext_sha256:c.ciphertext_sha256});
+  return Object.freeze({issue:body.issue,agent_id:body.agent_id,role:body.role,
+    action_id:body.action_id,input_sha:body.input_sha,
+    parent_action_id:c.parent_action_id,ordinal:c.ordinal,
+    checkpoint_version:confirmed.version,
+    checkpoint_commit_sha:confirmed.commit_sha,
+    ciphertext_sha256:confirmed.ciphertext_sha256,
+    store_ref:confirmed.store_ref,
+    current_store_sha:confirmed.current_store_sha});
+}
+
+// Trusted Controller/Ingester admission for a completed bounded Worker Slice.
+// The only trusted sources are: persisted run-bound Dispatch receipt, independently
+// fetched GitHub issuer + Worker Runs, a verified HMAC, and the real remote Git
+// checkpoint object. Neither Agent JSON nor comments can set "verified".
+export async function acceptAttestedSliceYield({
+  state,dispatch_ticket,keyring,reader,remote,checkpoint,
+  verified_main_sha,now=Date.now(),
+}) {
+  validateDevelopmentState(state);
+  const body=verifyDispatchTicket(dispatch_ticket,keyring,{now,allowExpired:true});
+  if(!HEX40.test(verified_main_sha??'')||
+      !own(checkpoint,['version','commit_sha','ciphertext_sha256','run_id','attempt'])||
+      Object.keys(checkpoint).length!==5||
+      !positive(checkpoint.run_id)||!positive(checkpoint.attempt)) {
+    reject('invalid trusted Slice attestation request');
+  }
+  const old=state.outbox.find(x=>x.id===body.action_id &&
+    ['dispatched','yielded'].includes(x.status));
+  if(!old||old.task.type!=='dispatch'||old.task.role!==body.role||
+      old.task.task!==body.task||old.task.agent_id!==body.agent_id||
+      old.task.sha!==body.input_sha||body.issue!==state.issue||
+      body.state_version>state.version||
+      state.assignments[body.role]!==body.agent_id||
+      old.receipt?.dispatch_id!==body.action_id||
+      (old.status==='dispatched'&&
+        (old.receipt.status!=='verified'||
+         old.receipt.source_run_id!==checkpoint.run_id))||
+      (old.status==='yielded'&&
+        (old.receipt.source_run_id!==checkpoint.run_id||
+         old.receipt.source_attempt!==checkpoint.attempt))||
+      (old.task.continuation ?
+        body.schema_version!==2 ||
+          canonical(old.task.continuation)!==canonical(body.resume_from) :
+        body.schema_version!==1)) {
+    reject('Slice lacks an authenticated run-bound dispatch or signed lineage');
+  }
+  const issuer=await reader.getRun(body.issuer_run_id);
+  if(issuer.id!==body.issuer_run_id||
+      issuer.path!=='.github/workflows/acceptance-agent-controller.yml'||
+      issuer.name!=='Acceptance / Agent Controller'||
+      issuer.event!=='workflow_dispatch'||issuer.head_branch!=='main'||
+      issuer.repository?.full_name!==REPOSITORY||
+      issuer.head_repository?.full_name!==REPOSITORY||
+      issuer.head_sha!==verified_main_sha) {
+    reject('Slice issuer is not the trusted Controller Run');
+  }
+  const run=await reader.getRun(checkpoint.run_id);
+  compareSource(run,body,{kind:body.role,issue:body.issue,
+    run_id:checkpoint.run_id,run_attempt:checkpoint.attempt,
+    target_sha:body.input_sha,task_id:body.action_id});
+  if(run.head_repository?.full_name!==REPOSITORY||
+      run.head_sha!==verified_main_sha) {
+    reject('Slice Worker did not execute authenticated main code');
+  }
+  verifyCommittedCheckpoint({remote,
+    identity:{role:body.role,agent_id:body.agent_id,issue:body.issue},
+    commit_sha:checkpoint.commit_sha,version:checkpoint.version,
+    ciphertext_sha256:checkpoint.ciphertext_sha256});
+  return recordSliceYield(state,state.version,body.action_id,{
+    version:checkpoint.version,commit_sha:checkpoint.commit_sha,
+    ciphertext_sha256:checkpoint.ciphertext_sha256,
+  },{
+    verified:true,repository:REPOSITORY,
+    workflow_path:run.path,workflow_name:run.name,role:body.role,
+    agent_id:body.agent_id,issue:body.issue,run_id:run.id,
+    attempt:run.run_attempt,action_id:body.action_id,input_sha:body.input_sha,
+  });
 }
