@@ -385,8 +385,11 @@ function readResumeReply(reply: unknown, requestedEpoch: number): TerminalStream
     epochMatch: effectiveRecovery === 'unavailable' ? false : epochMatch,
     firstAvailableSeq:
       typeof firstAvailableSeq === 'number' ? firstAvailableSeq : undefined,
-    complete: effectiveRecovery !== undefined || complete === false
-      ? provenComplete : (typeof complete === 'boolean' ? complete : undefined),
+    // Even legacy replies cannot report completion for a different epoch.
+    complete: typeof complete === 'boolean'
+      ? complete && epochMatch
+        && (declaredRecovery === undefined || declaredRecovery === 'complete')
+      : effectiveRecovery !== undefined ? false : undefined,
     recovery: effectiveRecovery,
     events: safeToApply ? parseStreamEvents(r.events) : [],
   };
