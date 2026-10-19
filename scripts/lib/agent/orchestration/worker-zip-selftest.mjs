@@ -34,7 +34,7 @@ function pack(spec){
     central.writeUInt32LE(compressed.length,20);
     central.writeUInt32LE(value.length,24);
     central.writeUInt16LE(nameBuf.length,28);
-    central.writeUInt32LE(mode<<16,38);
+    central.writeUInt32LE((mode*65536)>>>0,38);
     central.writeUInt32LE(offset,42);
     centers.push(central,nameBuf);
     offset+=30+nameBuf.length+compressed.length;
