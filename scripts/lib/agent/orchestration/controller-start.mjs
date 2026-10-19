@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {startDevelopment,validateDevelopmentState} from './outbox.mjs';
 import {readIssueWorkflowState,writeIssueWorkflowState} from './state-store.mjs';
@@ -51,6 +52,27 @@ function exactRoot(state,expected) {
     JSON.stringify(state.assignments)===JSON.stringify(expected.assignments)&&
     JSON.stringify(state)===JSON.stringify(expected);
 }
+function originalControllerCommit(work,expected){
+  // A replay is evidence of the FIRST immutable Issue initialization, not
+  // whichever unrelated Issue happened to advance agent-store most recently.
+  // git log is read-only; the immutable v1 state path is never overwritten.
+  const file='workflows/issues/'+expected.issue+'/states/00000001.json';
+  const origin=git(work,['log','-1','--format=%H','HEAD','--',file]);
+  if(!SHA.test(origin))fail('immutable Controller origin commit unavailable');
+  let committed,head;
+  try{
+    committed=JSON.parse(git(work,['show',origin+':'+file]));
+    head=JSON.parse(git(work,['show',origin+':workflows/issues/'+expected.issue+'/head.json']));
+  }catch{fail('original Controller commit lacks canonical immutable state/head');}
+  const expectedDigest=createHash('sha256').update(
+    Buffer.from(JSON.stringify(expected,null,2)+'\n')).digest('hex');
+  if(JSON.stringify(committed)!==JSON.stringify(expected)||
+      head?.version!==1||head?.path!==file||
+      head?.sha256!==expectedDigest)
+    fail('original Controller commit differs from authenticated replay state');
+  return origin;
+}
+
 export function initializeIssueController({
   remote,registry,request,authority,onCandidate=null,
 }) {
@@ -61,7 +83,7 @@ export function initializeIssueController({
     if(previous.state!==null){
       if(exactRoot(previous.state,expected)){
         return {created:false,replayed:true,issue:request.issue,
-          version:previous.version,commit_sha:git(work,['rev-parse','HEAD']),
+          version:previous.version,commit_sha:originalControllerCommit(work,expected),
           first_action_id:expected.outbox[0].id};
       }
       fail('Issue already initialized or advanced; never reset an existing workflow');
