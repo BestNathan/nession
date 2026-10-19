@@ -36,7 +36,11 @@ function crc32(bytes) {
 // The only allowed archive is a single regular JSON file, with bounded size.
 // ZIP local+central headers, optional data-descriptor and CRC are all checked.
 // No external unzip, arbitrary path extraction, symlinks, ZIP64 or directory IO.
-export function decodeResultZip(zip) {
+export function decodeResultZip(zip,expectedMember='agent-result.json') {
+  // Reuse the exact same bounded, no-traversal, one-member ZIP parser for the
+  // read-only Controller request Artifact; never allow caller-supplied paths.
+  if(!['agent-result.json','controller-request.json'].includes(expectedMember))
+    fail('unapproved single-member artifact type');
   if(!Buffer.isBuffer(zip)||zip.length<52||zip.length>MAX_ZIP)fail('archive size/type');
   const end=zip.length-22;
   if(zip.readUInt32LE(end)!==0x06054b50 ||zip.readUInt16LE(end+4)!==0||
@@ -56,7 +60,7 @@ export function decodeResultZip(zip) {
     [compressed,length,localOffset].includes(0xffffffff))fail('unsupported ZIP entry');
   if(central+46+nameLen+extraLen+commentLen!==end)fail('ZIP extra entries/trailer');
   const name=zip.subarray(central+46,central+46+nameLen).toString('utf8');
-  if(name!=='agent-result.json'||nameLen!==Buffer.byteLength(name))fail('unexpected ZIP member path');
+  if(name!==expectedMember||nameLen!==Buffer.byteLength(name))fail('unexpected ZIP member path');
   const unixType=(zip.readUInt32LE(central+38)>>>16)&0o170000;
   if(unixType!==0&&unixType!==0o100000)fail('symlink or nonregular ZIP member');
   if(zip.readUInt32LE(0)!==0x04034b50)fail('ZIP local header');
