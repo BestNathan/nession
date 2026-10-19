@@ -30,7 +30,7 @@ import { collectAuthenticatedCaseReadbacks, selfTestCaseReceipts } from './accep
 import {collectHistoricalBrowserDesignProof, selfTestHistoricalBrowserDesign} from './acceptance-browser-design-history.mjs';
 import {collectVerifiedCiCostStudy,selfTestCiCostStudy} from './acceptance-ci-cost-study.mjs';
 import {collectPublicPagesObservation,selfTestPublicPagesObservation} from './acceptance-pages-deployment-receipt.mjs';
-import {collectPublicPagesE2E,selfTestPublicPagesE2E} from './acceptance-pages-e2e-readback.mjs';
+import {collectPublicPagesE2E,selfTestPublicPagesE2E,shouldCollectPublicPagesE2E} from './acceptance-pages-e2e-readback.mjs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -1192,7 +1192,7 @@ async function collectCommand(workspace, outFile) {
   // canonical Pages Run/Attempt, successful Publish and public JSON digest.
   // Coverage only: cannot create a Test/SC Pass or implementing-PR lineage.
   const publicPagesE2EObservations=
-    process.env.ACCEPTANCE_STAGE==='post-merge'&&String(process.env.ISSUE_NUMBER??'')==='1946'
+    shouldCollectPublicPagesE2E(process.env.ACCEPTANCE_STAGE,process.env.ISSUE_NUMBER)
       ?await collectPublicPagesE2E(repo,sha,directRuns,githubGet,githubJobLog)
       :[];
   // A post-E2E Agent cannot prove its own Waker has completed. Read the
