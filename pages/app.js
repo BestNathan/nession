@@ -229,6 +229,47 @@ function renderWork(){
 }
 // Evidence-only drilldown uses the already-validated, bounded public JSON.
 // A GitHub Timeline mention or observed Issue Run is NEVER a causal PR edge.
+// A public causal relationship exists only in the independently attested,
+// allowlisted Lineage projection. Cross-references and metrics are never used
+// to construct or fill a missing edge.
+function renderLineageDetail(kind, number) {
+  const source=snapshot.work?.lineage;
+  const status=['verified','truncated'].includes(source?.status)
+    ?source.status:'unavailable';
+  const sectionEl=section('CAUSAL PROVENANCE','Authenticated historical Agent edges',
+    'Only exact Issue/PR, Agent Run/Attempt and historical PR HEAD bindings from the source-gated public projection.');
+  const panel=node('article','panel');
+  panel.append(node('p','mono','Public Lineage source: '+status+
+    ' · generated '+date(snapshot.generated_at)));
+  const records=status==='unavailable'?[]:(source?.edges||[]).filter(e=>
+    kind==='issue'?e.issue===number:e.pr_number===number).slice(0,12);
+  if(status==='unavailable'){
+    panel.append(node('p','',
+      'Authenticated Producer and Publisher source unavailable. Issue → implementing PR → Agent/Slice: Unknown / Unlinked.'));
+  } else if(!records.length){
+    panel.append(node('p','',
+      'No matching authenticated edges in this bounded source window. Earlier work may exist; no causal link is inferred.'));
+  } else {
+    for(const e of records){
+      const block=node('div','issue-pr-evidence');
+      block.append(ext('PR #'+e.pr_number+' · attested historical HEAD '+e.pr_head_sha.slice(0,12)+' ↗',
+        'https://github.com/BestNathan/nession/pull/'+e.pr_number));
+      block.append(ext('Agent '+e.role+' / '+e.agent_id+
+        ' · Run '+e.run_id+' / attempt '+e.attempt+' ↗',e.source_url));
+      block.append(node('span','mono','Producer source ref '+e.source_ref_sha.slice(0,12)+
+        ' · exact historical PR HEAD '+e.pr_head_sha));
+      block.append(node('span','',
+        'Logical Slice: Unlinked · current PR approval: Unknown · Acceptance SC: Unknown'));
+      panel.append(block);
+    }
+  }
+  if(status==='truncated'||source?.truncated===true)
+    panel.append(node('p','',
+      'Lineage window is truncated; additional historical edges may be absent.'));
+  panel.append(node('p','',
+    'A historical attested PR HEAD does not prove current HEAD, merge approval, successful SC or orphan Store immutability.'));
+  sectionEl.append(panel);root.append(sectionEl);
+}
 function renderWorkDetail(kind, number){
   root.append(local('← All recent work','/work','source-link'));
   const issues=snapshot.work?.issues||[],pulls=snapshot.work?.pulls||[];
@@ -306,6 +347,7 @@ function renderWorkDetail(kind, number){
     pane.append(node('p','', 'Acceptance SC verdict: Not independently observed here.'));
     proof.append(pane);root.append(proof);
   }
+  renderLineageDetail(kind,number);
   const proof=snapshot.work?.acceptance_e2e||{status:'unavailable',records:[]};
   const isSource=proof.status==='available'||proof.status==='truncated';
   const evidence=section('TEST EVIDENCE · NOT ACCEPTANCE SC',
