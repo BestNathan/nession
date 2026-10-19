@@ -71,6 +71,8 @@ jobs:
         run: ./gates/run design-token-boundary-selftest pre-push-diff-base-selftest acceptance-executor-selftest acceptance-agent-selftest
       # #1876: The Quality Gate remains independently blocking; a dist artifact
       # is transport only, and is published only for a validated main push.
+      - name: Verify trusted Acceptance Agent reuse isolation and negatives
+        run: node scripts/acceptance-reuse.mjs self-test
       - name: Verify Web artifact integrity and negative fixtures
         run: ./gates/run web-build-artifact-selftest
       - name: Build verified main Web dist
