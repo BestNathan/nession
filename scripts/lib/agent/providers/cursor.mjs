@@ -52,6 +52,7 @@ export function normalizeCursorCost(value) {
 export async function runCursorSession({
   sdkLoader = loadCursorSdk, apiKey, name, requestedModel,
   workspace, storePath, tools, customTools, prompt, resumeAgentId = null,
+  sandbox = false,
 }) {
   if (!apiKey) throw new Error('Cursor API key is required');
   const sdk = await sdkLoader();
@@ -59,6 +60,7 @@ export async function runCursorSession({
   // The exact same SDK-native JSONL store must be restored before resuming.
   // Re-declare model/tool policy on every call: SDK tool allowlists, custom tools,
   // and inline capabilities are not persisted with the session.
+  if(typeof sandbox!=='boolean') throw new Error('Cursor sandbox flag must be boolean');
   if (!Array.isArray(tools) || tools.some(tool => typeof tool !== 'string')) {
     throw new Error('Cursor requires an explicit tool allowlist on create and resume');
   }
@@ -70,6 +72,7 @@ export async function runCursorSession({
     local: {
       cwd: workspace,
       settingSources: [],
+      ...(sandbox ? {sandboxOptions:{enabled:true}} : {}),
       store: new sdk.JsonlLocalAgentStore(storePath),
       ...(customTools ? { customTools } : {}),
     },
