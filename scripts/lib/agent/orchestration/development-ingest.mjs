@@ -9,7 +9,7 @@ import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {hkdfSync,createHash} from 'node:crypto';
-import {decodeResultZip} from './result-artifact.mjs';
+import {readWorkerZipMember} from './worker-zip.mjs';
 import {authenticateWorkerClaimRun,inspectWorkerClaimZip,
   verifyWorkerClaimForAck} from './worker-reconcile.mjs';
 import {createGitHubRunReader} from './github-dispatch.mjs';
@@ -27,7 +27,7 @@ const hash=x=>createHash('sha256').update(x).digest('hex');
 function readJsonFromZip(zip,name,max=32*1024*1024) {
   if(!Buffer.isBuffer(zip)||zip.length<1||zip.length>max)fail('unsafe Artifact ZIP bytes');
   let raw,doc;
-  try{raw=decodeResultZip(zip,name);doc=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(raw));}
+  try{raw=readWorkerZipMember(zip,name);doc=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(raw));}
   catch{fail('untrusted Artifact JSON: '+name);}
   if(!doc||typeof doc!=='object'||Array.isArray(doc))fail('invalid Artifact schema');
   return doc;
