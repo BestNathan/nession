@@ -231,6 +231,23 @@ try {
     assert.equal(readIssueWorkflowState(clone('driver-offline-readback'),offlineIssue)
       .state.outbox[0].status,'dispatching');
 
+    const rejectedIssue=3006,rejectedAction=seedIndependent(rejectedIssue);
+    let rejectedPosts=0;
+    await assert.rejects(()=>executeDurableAgentDispatch({
+      remote,issue:rejectedIssue,actionId:rejectedAction,registry,signer,now,
+      actionsToken:'trustedActionsWriter',
+      fetchFn:async()=>{rejectedPosts++;return {status:503};},
+    }),/workflow_dispatch failed: 503/);
+    assert.equal(rejectedPosts,1);
+    assert.equal((await executeDurableAgentDispatch({
+      remote,issue:rejectedIssue,actionId:rejectedAction,registry,signer,now,
+      actionsToken:'trustedActionsWriter',
+      fetchFn:async()=>{rejectedPosts++;throw Error('forbidden redelivery');},
+    })).status,'reconcile');
+    assert.equal(rejectedPosts,1);
+    assert.equal(readIssueWorkflowState(clone('driver-http-error-readback'),rejectedIssue)
+      .state.outbox[0].status,'dispatching');
+
     // Mock endpoints must never be injectable by a production Controller.
     delete process.env.NODE_ENV;
     await assert.rejects(()=>executeDurableAgentDispatch({
