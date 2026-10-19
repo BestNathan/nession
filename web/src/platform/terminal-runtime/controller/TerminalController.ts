@@ -284,11 +284,12 @@ export class TerminalController {
       // display, erase scrollback, cursor home: the three things a replaced
       // buffer needs, and nothing else.
       //
-      // A snapshot the agent had to cut short is the one case that does not get
-      // the third one — it is not a history that can stand in for what the
-      // client already has (#1305).
+      // A shortened or unverified capture cannot stand in for the client's
+      // existing scrollback. Repaint the visible screen only; preserve history
+      // unless a proven atomic, full-VT checkpoint justifies replacement.
       if (bootstrap) {
-        this.writer.write(bootstrap.truncated ? BOOTSTRAP_SCREEN_RESET : BOOTSTRAP_BUFFER_RESET);
+        this.writer.write(provesVerifiedBootstrapRepair(bootstrap)
+          ? BOOTSTRAP_BUFFER_RESET : BOOTSTRAP_SCREEN_RESET);
       }
       const follow = this.capsuleOcclusionScroll?.snapshotFollowing() ?? false;
       // A snapshot is this buffer's *history*, and handing it to xterm is not
