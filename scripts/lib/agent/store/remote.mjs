@@ -122,7 +122,12 @@ export function fetchEncryptedAgentCheckpoint({
     // Re-verify inside THIS immutable checkout immediately before decrypt.
     // A separate preflight read does not guard against a changed head between
     // two clones; commit-pinning prevents restoring the wrong native Session.
-    if(commitment!==null)inspectCommittedCheckpoint(checkout,{identity,...commitment});
+    if(commitment!==null){
+      if(typeof commitment!=='object'||Array.isArray(commitment)||
+          Object.keys(commitment).sort().join(',')!==
+          'ciphertext_sha256,commit_sha,version')fail('invalid restore commitment fields');
+      inspectCommittedCheckpoint(checkout,{...commitment,identity});
+    }
     const result=restoreEncryptedCheckpoint(checkout,identity,expected,key);
     return {head:result.head,native_bytes:result.native_bytes,
       commit_sha:git(checkout,['rev-parse','HEAD'])};
