@@ -3,6 +3,7 @@
 // Store CAS writer and Actions dispatch token. NEVER run from a Provider,
 // untrusted checkout, PR head, model tool or Developer environment.
 import fs from 'node:fs';
+import {hkdfSync} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
@@ -51,6 +52,14 @@ export function parseDispatchKey(encoded) {
     fail('HMAC key must contain at least 32 bytes');
   return key;
 }
+export function deriveDispatchKey(privateKey) {
+  if(typeof privateKey!=='string'||privateKey.length<200||
+      !privateKey.includes('-----BEGIN')||!privateKey.includes('PRIVATE KEY-----'))
+    fail('missing Store Writer App private key for domain-separated HMAC');
+  return Buffer.from(hkdfSync('sha256',Buffer.from(privateKey),
+    Buffer.from('BestNathan/nession','utf8'),
+    Buffer.from('nession-agent-controller-dispatch-v1','utf8'),32));
+}
 async function api(token,resource) {
   const r=await fetch('https://api.github.com/repos/'+REPO+resource,{
     headers:{Authorization:'Bearer '+token,Accept:'application/vnd.github+json',
@@ -90,7 +99,9 @@ async function main(){
   if(!storeRemote?.startsWith('https://x-access-token:')||
       !storeRemote.endsWith('@github.com/'+REPO+'.git'))
     fail('expected existing scoped App Store writer remote');
-  const key=parseDispatchKey(env.AGENT_DISPATCH_HMAC_KEY_B64);
+  // Derive a distinct HMAC domain from the existing trusted Store App key.
+  // No additional secret setup; this key and the App private key never enter Worker.
+  const key=deriveDispatchKey(env.STORE_WRITER_PRIVATE_KEY);
   try{
     const signer={key,key_id:'main-controller',
       issuer_run_id:run.id,now:Date.now(),ttl_ms:600000};
