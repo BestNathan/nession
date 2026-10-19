@@ -15,7 +15,7 @@ permissions:
   issues: read
 
 concurrency:
-  group: store-agent-dispatch-reconcile
+  group: store-agent-dispatch-reconcile-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
   cancel-in-progress: false
 
 jobs:
