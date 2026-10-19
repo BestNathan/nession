@@ -1,5 +1,8 @@
 name: Agent / Development
 
+env:
+  NSESSION_AGENT_WORKFLOW_ID: agent-develop
+
 # #2010. Bounded real Developer slice. NO Store writer, Controller HMAC,
 # Actions writer, Publisher credential or PR publication capability in Worker.
 on:
@@ -135,6 +138,13 @@ jobs:
           node scripts/lib/agent/orchestration/development-worker.mjs \
             "$RUNNER_TEMP/development-admission.json" \
             "$RUNNER_TEMP/development-output"
+      - name: Upload canonical immutable Agent telemetry
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-telemetry-developer-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/development-output/agent-telemetry.json
+          if-no-files-found: error
+          retention-days: 14
       - name: Upload only encrypted native Session and bounded sanitized result
         uses: actions/upload-artifact@v4
         with:
