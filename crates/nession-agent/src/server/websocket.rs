@@ -860,9 +860,7 @@ fn tmux_capture_fidelity(truncated: bool, modes_complete: bool) -> TerminalCheck
 /// This proves stream continuity only. It cannot restore terminal history
 /// preceding the Agent reader, nor replay resize/emulator state as full VT.
 /// Missing, expired or oversized prefixes must take the unverified fallback.
-fn atomic_output_prefix(
-    stream: &session_terminal::SessionStreamState,
-) -> Option<Vec<u8>> {
+fn atomic_output_prefix(stream: &session_terminal::SessionStreamState) -> Option<Vec<u8>> {
     use base64::Engine;
     let replay = stream.replay_since(stream.epoch, 0)?;
     if !replay.complete || replay.events.is_empty() {
@@ -3736,9 +3734,8 @@ mod tests {
     fn bounded_stream_prefix_is_an_atomic_cut_not_a_full_vt_checkpoint() {
         use base64::Engine;
         let mut stream = session_terminal::SessionStreamState::new();
-        let encode = |n| {
-            base64::engine::general_purpose::STANDARD.encode(format!("GAP-{n:03}\\r\\n"))
-        };
+        let encode =
+            |n| base64::engine::general_purpose::STANDARD.encode(format!("GAP-{n:03}\\r\\n"));
         for i in 1..=18 {
             stream.record_output("demo", encode(i));
         }
@@ -3769,15 +3766,24 @@ mod tests {
         let mut stream = session_terminal::SessionStreamState::new();
         assert!(atomic_output_prefix(&stream).is_none());
         stream.record_output("demo", "%%%".to_string());
-        assert!(atomic_output_prefix(&stream).is_none(), "invalid base64 must not become history");
+        assert!(
+            atomic_output_prefix(&stream).is_none(),
+            "invalid base64 must not become history"
+        );
 
         let mut oversized = session_terminal::SessionStreamState::new();
         oversized.record_output(
             "demo",
-            base64::engine::general_purpose::STANDARD
-                .encode(vec![b'x'; crate::server::bootstrap::BOOTSTRAP_MAX_BYTES + 1]),
+            base64::engine::general_purpose::STANDARD.encode(vec![
+                b'x';
+                crate::server::bootstrap::BOOTSTRAP_MAX_BYTES
+                    + 1
+            ]),
         );
-        assert!(atomic_output_prefix(&oversized).is_none(), "never silently truncate an atomic cut");
+        assert!(
+            atomic_output_prefix(&oversized).is_none(),
+            "never silently truncate an atomic cut"
+        );
 
         let mut evicted = session_terminal::SessionStreamState::new();
         evicted.record_output("demo", "x".repeat(5_000_000));
@@ -3785,7 +3791,10 @@ mod tests {
             "demo",
             base64::engine::general_purpose::STANDARD.encode(b"new"),
         );
-        assert!(atomic_output_prefix(&evicted).is_none(), "missing seq 1 cannot be proven atomic");
+        assert!(
+            atomic_output_prefix(&evicted).is_none(),
+            "missing seq 1 cannot be proven atomic"
+        );
     }
 
     #[test]
@@ -3819,7 +3828,9 @@ mod tests {
         );
         assert_eq!(seq, cut + 1);
         assert_eq!(fan_out_peers(&mut peers, (live.clone(), epoch, seq)), 0);
-        let queued = rx.try_recv().expect("post-cut output is held for forwarder");
+        let queued = rx
+            .try_recv()
+            .expect("post-cut output is held for forwarder");
         assert_eq!(queued, (live, epoch, cut + 1));
         assert!(rx.try_recv().is_err(), "no duplicated next event");
     }
