@@ -358,6 +358,40 @@ function subscribeInputAck(
   });
 }
 
+/** The Agent's replay status is authoritative, but all fields must agree.
+ * A mismatched or incomplete prefix is never passed on as ordinary events.
+ * Legacy providers keep their existing epoch/complete interpretation. */
+function readResumeReply(reply: unknown, requestedEpoch: number): TerminalStreamResumeResult {
+  const r = reply as Record<string, unknown>;
+  const firstAvailableSeq = r.first_available_seq;
+  const complete = r.complete;
+  const epochMatch = r.epoch_match === true;
+  const recovery = r.recovery;
+  const declaredRecovery = recovery === 'complete'
+    || recovery === 'checkpoint-required' || recovery === 'unavailable'
+    ? recovery : undefined;
+  const provenComplete = epochMatch && complete === true
+    && (declaredRecovery === undefined || declaredRecovery === 'complete');
+  // A new provider claiming "complete" while its epoch/complete flags
+  // contradict it cannot recover. Treat the contradiction as unavailable.
+  const effectiveRecovery = declaredRecovery === 'complete' && !provenComplete
+    ? 'unavailable' : declaredRecovery;
+  const safeToApply = epochMatch && (
+    provenComplete || (declaredRecovery === undefined && complete === undefined)
+  );
+  return {
+    streamEpoch:
+      typeof r.stream_epoch === 'number' ? r.stream_epoch : requestedEpoch,
+    epochMatch: effectiveRecovery === 'unavailable' ? false : epochMatch,
+    firstAvailableSeq:
+      typeof firstAvailableSeq === 'number' ? firstAvailableSeq : undefined,
+    complete: effectiveRecovery !== undefined || complete === false
+      ? provenComplete : (typeof complete === 'boolean' ? complete : undefined),
+    recovery: effectiveRecovery,
+    events: safeToApply ? parseStreamEvents(r.events) : [],
+  };
+}
+
 function submitOutputApplied(
   surface: PluginSurface,
   sessionName: string,
@@ -489,41 +523,7 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
         stream_epoch: streamEpoch,
         after_seq: afterSeq,
       });
-      const r = reply as Record<string, unknown>;
-      // Both read by type and left `undefined` otherwise: the wire omits them
-      // when the agent has nothing to state, and a coercion here (`Number(x)`
-      // on a missing field is 0) would invent the position the contract
-      // forbids — 0 is below every sequence a stream can have (#1304).
-      const firstAvailableSeq = r.first_available_seq;
-      const complete = r.complete;
-      const epochMatch = r.epoch_match === true;
-      const recovery = r.recovery;
-      const declaredRecovery = recovery === 'complete'
-        || recovery === 'checkpoint-required' || recovery === 'unavailable'
-        ? recovery : undefined;
-      // A new provider's three statements must agree. Complete cannot be
-      // inferred from an empty tail, nor from a contradictory success label.
-      const provenComplete = epochMatch && complete === true
-        && (declaredRecovery === undefined || declaredRecovery === 'complete');
-      const failClosed = declaredRecovery !== undefined
-        && !provenComplete && declaredRecovery === 'complete';
-      const effectiveRecovery = failClosed ? 'unavailable' : declaredRecovery;
-      const safeToApply = epochMatch && (
-        provenComplete || (declaredRecovery === undefined && complete === undefined)
-      );
-      return {
-        streamEpoch:
-          typeof r.stream_epoch === 'number' ? r.stream_epoch : streamEpoch,
-        epochMatch: effectiveRecovery === 'unavailable' ? false : epochMatch,
-        firstAvailableSeq:
-          typeof firstAvailableSeq === 'number' ? firstAvailableSeq : undefined,
-        complete: effectiveRecovery !== undefined || complete === false
-          ? provenComplete : (typeof complete === 'boolean' ? complete : undefined),
-        recovery: effectiveRecovery,
-        // Legacy providers may omit the new verdict, but no known missing
-        // segment is ever supplied to the parser as if contiguous.
-        events: safeToApply ? parseStreamEvents(r.events) : [],
-      };
+      return readResumeReply(reply, streamEpoch);
     },
 
     onResize: (cb: (frame: TerminalResizeFrame) => void): (() => void) => {
