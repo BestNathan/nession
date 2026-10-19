@@ -77,7 +77,7 @@ export async function verifyWorkerClaimForAck({run,claim,key,reader}) {
   const issuer=await reader.getRun(ticket.issuer_run_id);
   if(issuer?.id!==ticket.issuer_run_id||
       issuer.path!==ISSUER||issuer.name!=='Agent / Controller Dispatch'||
-      issuer.event!=='workflow_dispatch'||issuer.head_branch!=='main'||
+      !['workflow_dispatch','issue_comment'].includes(issuer.event)||issuer.head_branch!=='main'||
       issuer.actor?.login!=='BestNathan'||issuer.run_attempt!==1||
       issuer.repository?.full_name!==REPO||
       issuer.head_repository?.full_name!==REPO||
