@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "issue": 1997,
+  "version": 5,
+  "phase": "ready",
+  "target_sha": null,
+  "repair_attempts": 0,
+  "transitions": [],
+  "assignments": {
+    "developer": "dev-cursor-01",
+    "reviewer": "review-cursor-01",
+    "acceptor": "accept-cursor-01"
+  },
+  "outbox": [
+    {
+      "id": "95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae",
+      "task": {
+        "type": "dispatch",
+        "role": "developer",
+        "task": "implement",
+        "sha": "220266b9233ec97b1beacbc54e5cc7f82d3cece2",
+        "agent_id": "dev-cursor-01"
+      },
+      "status": "failed",
+      "attempts": 1,
+      "receipt": {
+        "status": "failed",
+        "dispatch_id": "95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae",
+        "source_run_id": 39267659650,
+        "source_attempt": 1,
+        "failure_code": "native_sdk_sandbox_unavailable"
+      }
+    },
+    {
+      "id": "85b69a9de06b02eb78f8a3a15d14b58a43ffc83ee6b1f5db11b9b541cfec9656",
+      "task": {
+        "type": "dispatch",
+        "role": "developer",
+        "task": "implement",
+        "sha": "220266b9233ec97b1beacbc54e5cc7f82d3cece2",
+        "agent_id": "dev-cursor-01"
+      },
+      "status": "dispatching",
+      "attempts": 1,
+      "receipt": {
+        "status": "prepared",
+        "dispatch_id": "85b69a9de06b02eb78f8a3a15d14b58a43ffc83ee6b1f5db11b9b541cfec9656",
+        "issuer_run_id": 39288875904,
+        "ticket_sha256": "61001004c4ba23ec5a0b1afeaa12b518ed17e70f68be6092d03d9395f8670520"
+      }
+    }
+  ]
+}
