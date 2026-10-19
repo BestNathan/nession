@@ -327,7 +327,12 @@ mod tests {
             "duplicate create reply cannot replace an existing row"
         );
         assert_eq!(reg.list().await.len(), 1);
-        assert!(reg.get("a1:race").await.unwrap().foreground_command.is_none());
+        assert!(reg
+            .get("a1:race")
+            .await
+            .unwrap()
+            .foreground_command
+            .is_none());
 
         let mut report = make_session("a1", "race");
         report.foreground_command = Some("bash".to_owned());
