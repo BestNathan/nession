@@ -22,7 +22,7 @@ const inputs=planGitHubDispatch(state,action.id,registry,{
 }).inputs;
 const context={repository:'BestNathan/nession',ref:'refs/heads/main',
   event:'workflow_dispatch',workflow:'Agent / Development',
-  actor:'BestNathan',head_sha:mainSha,run_id:22022,attempt:1};
+  actor:'github-actions[bot]',head_sha:mainSha,run_id:22022,attempt:1};
 const claim=createWorkerClaim(inputs,context);
 assert.equal(claim.source.run_id,22022);
 assert.equal(claim.inputs.action_id,action.id);
@@ -31,7 +31,7 @@ assert.throws(()=>createWorkerClaim(inputs,{...context,actor:'fork-user'}),/clai
 const run={id:22022,run_attempt:1,
   path:'.github/workflows/agent-develop.yml',name:'Agent / Development',
   event:'workflow_dispatch',head_branch:'main',head_sha:mainSha,
-  actor:{login:'BestNathan'},repository:{full_name:'BestNathan/nession'},
+  actor:{login:'github-actions[bot]'},repository:{full_name:'BestNathan/nession'},
   head_repository:{full_name:'BestNathan/nession'},
   status:'completed',conclusion:'failure',
   created_at:new Date(now+1500).toISOString()};
