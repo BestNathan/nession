@@ -3416,6 +3416,94 @@ impl AgentServer {
 mod tests {
     use super::*;
 
+    #[test]
+    fn output_ack_requires_exact_attached_socket_and_current_subscription() {
+        let old_socket = Arc::new(());
+        let new_socket = Arc::new(());
+        let (outbound, _) = P2pOutbound::new();
+        let (tx, _) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
+        let mut peers = vec![SessionPeer {
+            client_id: "observer".to_string(),
+            peer_token: Arc::clone(&new_socket),
+            output_ack: SubscriberOutputAck::new(OutputAckBinding {
+                subscriber_generation: 88,
+                stream_epoch: 9,
+            }).unwrap(),
+            outbound,
+            output_tx: Some(tx),
+            queued_bytes: Arc::new(AtomicUsize::new(0)),
+            detached_for_not_draining: Arc::new(AtomicBool::new(false)),
+        }];
+        let mut payload = TerminalOutputAppliedPayload {
+            session_name: "demo".into(),
+            subscriber_generation: 88,
+            stream_epoch: 9,
+            renderer_generation: 7,
+            applied_through: 2,
+        };
+        assert_eq!(
+            accept_output_ack(&mut peers, "observer", &old_socket, &payload, 3),
+            Err("not_current_subscriber"),
+        );
+        assert_eq!(
+            accept_output_ack(&mut peers, "other", &new_socket, &payload, 3),
+            Err("not_current_subscriber"),
+        );
+        assert_eq!(peers[0].output_ack.applied_through(), 0);
+        payload.subscriber_generation = 87;
+        assert_eq!(
+            accept_output_ack(&mut peers, "observer", &new_socket, &payload, 3),
+            Err("invalid_output_ack"),
+        );
+        payload.subscriber_generation = 88;
+        payload.stream_epoch = 10;
+        assert_eq!(
+            accept_output_ack(&mut peers, "observer", &new_socket, &payload, 3),
+            Err("invalid_output_ack"),
+        );
+        payload.stream_epoch = 9;
+        payload.renderer_generation = 0;
+        assert_eq!(
+            accept_output_ack(&mut peers, "observer", &new_socket, &payload, 3),
+            Err("invalid_renderer_generation"),
+        );
+        payload.renderer_generation = 7;
+        payload.applied_through = 4;
+        assert_eq!(
+            accept_output_ack(&mut peers, "observer", &new_socket, &payload, 3),
+            Err("invalid_output_ack"),
+        );
+        assert_eq!(peers[0].output_ack.applied_through(), 0);
+        payload.applied_through = 2;
+        assert_eq!(
+            accept_output_ack(&mut peers, "observer", &new_socket, &payload, 3),
+            Ok(OutputAckVerdict::Advanced { previous: 0, applied_through: 2 }),
+        );
+        assert_eq!(
+            accept_output_ack(&mut peers, "observer", &new_socket, &payload, 3),
+            Ok(OutputAckVerdict::Duplicate),
+        );
+        payload.applied_through = 1;
+        assert_eq!(
+            accept_output_ack(&mut peers, "observer", &new_socket, &payload, 3),
+            Err("invalid_output_ack"),
+        );
+        assert_eq!(peers[0].output_ack.applied_through(), 2);
+    }
+
+    #[test]
+    fn every_attach_mints_a_new_subscription_generation() {
+        let a = new_output_ack(10);
+        let b = new_output_ack(10);
+        let next_epoch = new_output_ack(11);
+        assert_ne!(a.binding().subscriber_generation, b.binding().subscriber_generation);
+        assert_ne!(b.binding().subscriber_generation, next_epoch.binding().subscriber_generation);
+        assert_eq!(a.binding().stream_epoch, 10);
+        assert_eq!(b.binding().stream_epoch, 10);
+        assert_eq!(next_epoch.binding().stream_epoch, 11);
+        assert_eq!(a.applied_through(), 0);
+    }
+
     fn test_output_ack() -> SubscriberOutputAck {
         SubscriberOutputAck::new(OutputAckBinding {
             subscriber_generation: 1,
