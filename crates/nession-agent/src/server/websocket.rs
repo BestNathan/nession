@@ -3820,6 +3820,7 @@ mod tests {
             outbound.clone(),
             "s1".to_string(),
             Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicUsize::new(0)),
         );
 
         // `already_attached` drops the old peer's sender without setting the
@@ -3869,6 +3870,7 @@ mod tests {
             outbound.clone(),
             "s1".to_string(),
             Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicUsize::new(0)),
         );
 
         tx.send((b"chunk".to_vec(), 1, 1))
