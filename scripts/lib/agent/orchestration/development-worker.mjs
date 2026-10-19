@@ -11,6 +11,7 @@ import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {runCursorSession} from '../providers/cursor.mjs';
 import {sealCursorNativeStore} from '../providers/cursor-native-store.mjs';
+import {buildAgentWorkflowTelemetry,writeAgentWorkflowTelemetry} from '../../../agent-workflow-telemetry.mjs';
 
 const REPO='BestNathan/nession',HEX40=/^[a-f0-9]{40}$/;
 const sha=s=>createHash('sha256').update(s).digest('hex');
@@ -117,6 +118,23 @@ async function main(){
       run_id:a.run_id,attempt:metadata.attempt,
       status:'proposed_not_published',file:candidate,
       content_sha256:sha(expected),native_read_edit_verified:true});
+    const telemetry=buildAgentWorkflowTelemetry({
+      workflow_id:'agent-develop',github_workflow:process.env.GITHUB_WORKFLOW,
+      github_run_id:a.run_id,github_run_attempt:metadata.attempt,
+      repository:REPO,event:'workflow_dispatch',job:'developer',
+      task:{id:'issue-1997-development',type:'development',issue:a.issue,
+        target_ref:a.input_sha,action_id:a.action_id},
+      agent:{provider:'cursor',id:a.agent_id,role:'developer',
+        harness_sha256:harnessDigest,model:meta.model,
+        run_id:meta.run_id,status:meta.status},
+      execution:{turns:meta.turns,model_requests:meta.turns,
+        tool_calls:meta.tool_calls,tools_observed:true},
+      tokens:meta.usage,cost:meta.cost,
+      timing:{started_at:meta.started_at,finished_at:meta.finished_at,
+        agent_duration_ms:meta.duration_ms},
+      result:{status:'native-checkpoint-proposed'},
+    });
+    writeAgentWorkflowTelemetry(path.join(out,'agent-telemetry.json'),telemetry);
     console.log('Real Developer read/edit and encrypted native checkpoint verified; no PR published');
   }finally{
     if(added)try{git('-C',process.env.GITHUB_WORKSPACE,'worktree','remove','--force',workspace);}catch{}
