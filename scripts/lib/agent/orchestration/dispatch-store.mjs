@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
-import {readIssueWorkflowState,writeIssueWorkflowState} from './state-store.mjs';
+import {readIssueWorkflowState,writeIssueWorkflowState,issueStatePath} from './state-store.mjs';
 import {reconcileOutbox,recordDispatch} from './outbox.mjs';
 import {prepareGitHubDispatch,verifyPersistedDispatchIntent}
   from './github-dispatch.mjs';
@@ -93,6 +93,19 @@ export function acknowledgeCommittedDispatch({
     const action=read.state.outbox.find(x=>x.id===actionId);
     if(!action)fail('unknown prepared action');
     if(action.status==='dispatched'){
+      // Check the original committed intent as well: the dispatched receipt
+      // deliberately contains only public Run identity, not a second copy of
+      // the HMAC Ticket. A conflicting request must never be reported as a
+      // successful idempotent replay.
+      if(read.version<2)fail('missing historical write-ahead state');
+      const previous=path.join(dir,issueStatePath(issue,read.version-1));
+      let prepared;
+      try{prepared=JSON.parse(fs.readFileSync(previous,'utf8'));}
+      catch{fail('missing immutable write-ahead history');}
+      const previousAction=prepared.outbox?.find(x=>x.id===actionId);
+      if(previousAction?.status!=='dispatching'||
+          previousAction.receipt?.ticket_sha256!==ticketSha256)
+        fail('unmatched immutable write-ahead receipt history');
       if(action.receipt?.status!=='verified'||
           action.receipt.source_run_id!==receipt.source_run_id)
         fail('conflicting acknowledged source Run');
