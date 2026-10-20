@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "kind": "agent_workflow_run",
+  "identity": {
+    "workflow_id": "requirement-acceptance",
+    "github_workflow": "Acceptance / Verified Issue Stage",
+    "github_run_id": 39367898118,
+    "github_run_attempt": 1,
+    "job": "execute",
+    "repository": "BestNathan/nession",
+    "event": "issue_comment",
+    "unique_run_name": "39367898118-1-issue-2010-staging"
+  },
+  "task": {
+    "id": "issue-2010-staging",
+    "type": "acceptance",
+    "issue": 2010,
+    "stage": "staging",
+    "target_ref": "bed42c4b330f9678505cec66aaf2702e12394188",
+    "deployment": "controlled-live-1997"
+  },
+  "agent": {
+    "provider": "cursor",
+    "id": "legacy-acceptance-cursor",
+    "role": "acceptor",
+    "harness_sha256": null,
+    "checkpoint_id": null,
+    "model": {
+      "id": "composer-2.5",
+      "fast": true,
+      "params": [
+        {
+          "id": "fast",
+          "value": "true"
+        }
+      ]
+    },
+    "run_id": "run-24845144-bc49-47b8-8499-7abc4b2832d5",
+    "request_id": "a9b7dd8c-23da-4551-802d-2c77f2901224",
+    "status": "finished",
+    "prompt": {
+      "id": "acceptance",
+      "version": "v1",
+      "sha256": "2c49bb25da2180d1f5a1ee837b5364dca2851452305e4e9e904ee99ccc6ddb01"
+    }
+  },
+  "execution": {
+    "turns": 1,
+    "model_requests": 1,
+    "tools": {
+      "observed": true,
+      "total": 33,
+      "unique": 3,
+      "by_name": {
+        "glob": 4,
+        "grep": 1,
+        "read": 28
+      }
+    }
+  },
+  "tokens": {
+    "input": 401947,
+    "output": 6361,
+    "cache_read": 371680,
+    "cache_write": 0,
+    "reasoning": null,
+    "total": 779988
+  },
+  "cost": {
+    "raw_usd": null,
+    "charged_usd": null,
+    "estimated_usd": null
+  },
+  "timing": {
+    "started_at": "2026-10-20T04:08:07.752Z",
+    "finished_at": "2026-10-20T04:08:56.854Z",
+    "agent_duration_ms": 48812,
+    "workflow_duration_ms": null
+  },
+  "result": {
+    "status": "completed",
+    "pass": 0,
+    "pending": 3,
+    "fail": 0,
+    "na": 0
+  }
+}
