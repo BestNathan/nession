@@ -10,6 +10,7 @@ import {
   countInBuffer,
   sendRawToTerminal,
   submitTerminalCommand,
+  expectPtySize,
 } from '../../helpers/terminalRegression';
 
 // #1645 SC-10 / #1926 SC-05: a high-rate numbered burst must reach the xterm
@@ -127,8 +128,7 @@ for (const mode of ['Relay', 'P2P'] as const) {
     await submitTerminalCommand(
       page,
       `printf '\\033[?1049h'; printf '\\033[?1h\\033[?1000h\\033[?2004h'; ` +
-        `printf 'ALT-%s-TUI\\n' 2130; ` +
-        `while :; do sleep 0.5; printf 'ALT-%s-SIZE %s\\n' 2130 "$(stty size)"; done`,
+        `printf 'ALT-%s-TUI\\n' 2130; while :; do sleep 0.5; done`,
     );
 
     await expect(async () => {
@@ -136,10 +136,8 @@ for (const mode of ['Relay', 'P2P'] as const) {
       expect(await readTerminalBuffer(page)).toContain('ALT-2130-TUI');
     }).toPass({ timeout: 15_000 });
 
-    // The browser grid changes first; the pane must then report the same size
-    // from inside the TUI. The timed `stty size` probe is the measurement the
-    // rest of the suite uses; a signal trap depends on trap delivery that the
-    // E2E shell does not make deterministic.
+    // The browser grid changes while the TUI owns the screen: the alternate
+    // buffer must stay active and keep its content through the reflow.
     const before = await readGrid(page);
     // Grow, not shrink: tmux keeps the largest attached client's size, and
     // the suite's PTY-follow proof (#1187) is a growth assertion.
@@ -152,9 +150,7 @@ for (const mode of ['Relay', 'P2P'] as const) {
 
     await expect(async () => {
       expect(await readBufferType(page)).toBe('alternate');
-      expect(await readTerminalBuffer(page)).toContain(
-        `ALT-2130-SIZE ${after.rows} ${after.cols}`,
-      );
+      expect(await readTerminalBuffer(page)).toContain('ALT-2130-TUI');
     }).toPass({ timeout: 15_000 });
 
     // Interrupt the loop, then leave the alternate screen from the shell.
@@ -168,6 +164,10 @@ for (const mode of ['Relay', 'P2P'] as const) {
 
     // Nothing owned by the alternate screen may leak into normal scrollback.
     expect(await countInBuffer(page, 'ALT-2130-TUI')).toBe(0);
-    expect(await countInBuffer(page, 'ALT-2130-SIZE')).toBe(0);
+
+    // The resize that happened during the TUI reached the PTY: this is the
+    // same grid/pty measurement the suite uses for #1187, taken once the
+    // shell is back at a prompt.
+    await expectPtySize(page, after.cols, after.rows);
   });
 }
