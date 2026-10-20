@@ -27,6 +27,22 @@ on:
     branches: [staging, main]
   pull_request:
     branches: [staging, main]
+    # Scope PR execution to changes that can affect this validator.
+    # Keep push / manual triggers unchanged for exact-SHA evidence.
+    paths:
+      - '.github/workflows/e2e-tests.yml'
+      - '.github/workflows/ci-quality.yml'
+      - 'crates/**'
+      - 'web/**'
+      - 'design/**'
+      - 'e2e/**'
+      - 'gates/**'
+      - 'scripts/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - '.cargo/**'
+      - 'justfile'
 
 # One run per branch/PR. Superseded runs are useless, so cancel them.
 concurrency:
