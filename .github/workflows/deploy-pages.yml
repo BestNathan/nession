@@ -27,6 +27,9 @@ jobs:
     outputs:
       active: ${{ steps.detect.outputs.active }}
       public_data_sha256: ${{ steps.public_data.outputs.sha256 }}
+      workflow_json_sha256: ${{ steps.public_data.outputs.workflow_json_sha256 }}
+      workflow_html_sha256: ${{ steps.public_data.outputs.workflow_html_sha256 }}
+      workflow_nodes: ${{ steps.public_data.outputs.workflow_nodes }}
       public_agent_source: ${{ steps.public_data.outputs.source }}
       public_agent_runs: ${{ steps.public_data.outputs.observed_runs }}
     steps:
@@ -82,6 +85,8 @@ jobs:
           node pages/scripts/build.mjs
           test -s pages/dist/index.html
           test -s pages/dist/data/site.json
+          test -s pages/dist/workflows.html
+          test -s pages/dist/data/workflows.json
           node -e "const d=require('./pages/dist/data/site.json'); if(d.schema_version!==1 || d.source.main_sha!==process.env.SOURCE_MAIN_SHA || d.source.metrics_sha!==process.env.METRICS_SHA || d.source.acceptance_results_sha!==process.env.ACCEPTANCE_RESULTS_SHA) process.exit(1)"
       - name: Capture exact static public evidence digest and coverage
         if: steps.detect.outputs.active == 'true'
@@ -90,6 +95,21 @@ jobs:
         run: |
           set -euo pipefail
           file=pages/dist/data/site.json
+          workflow_json=pages/dist/data/workflows.json
+          workflow_html=pages/dist/workflows.html
+          jq -e --arg sha "$GITHUB_SHA" '
+            .schema_version == 1 and
+            .source.repository == "BestNathan/nession" and
+            .source.main_sha == $sha and
+            (.groups | length) == 6 and
+            (.nodes | length) == 27 and
+            (.edges | type) == "array" and
+            ([.edges[] | .kind] | all(.[]; . == "workflow_run" or . == "workflow_call"))
+          ' "$workflow_json" >/dev/null
+          grep -Fq '<title>GitHub Workflows' "$workflow_html"
+          echo "workflow_json_sha256=$(sha256sum "$workflow_json" | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "workflow_html_sha256=$(sha256sum "$workflow_html" | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "workflow_nodes=$(jq -r '.nodes | length' "$workflow_json")" >> "$GITHUB_OUTPUT"
           jq -e '
             (.work.agent_run_source == "available" or .work.agent_run_source == "truncated" or .work.agent_run_source == "unavailable")
             and (.work.issues | type == "array")
@@ -132,6 +152,9 @@ jobs:
           PUBLISHED_URL: ${{ steps.publication.outputs.page_url }}
           EXPECTED_SHA: ${{ github.sha }}
           EXPECTED_DATA_SHA256: ${{ needs.build.outputs.public_data_sha256 }}
+          EXPECTED_WORKFLOW_JSON_SHA256: ${{ needs.build.outputs.workflow_json_sha256 }}
+          EXPECTED_WORKFLOW_HTML_SHA256: ${{ needs.build.outputs.workflow_html_sha256 }}
+          EXPECTED_WORKFLOW_NODES: ${{ needs.build.outputs.workflow_nodes }}
           EXPECTED_AGENT_SOURCE: ${{ needs.build.outputs.public_agent_source }}
           EXPECTED_AGENT_RUNS: ${{ needs.build.outputs.public_agent_runs }}
         shell: bash
@@ -145,13 +168,18 @@ jobs:
           }
           json="$(mktemp)"
           html="$(mktemp)"
-          trap 'rm -f "$json" "$html"' EXIT
+          workflow_json="$(mktemp)"
+          workflow_html="$(mktemp)"
+          trap 'rm -f "$json" "$html" "$workflow_json" "$workflow_html"' EXIT
           # Main SHA alone is not a publication identity: consecutive
           # scheduled builds from the same SHA contain different store snapshots.
           # A CDN response for the previous deployment can have the right SHA
           # but stale bytes. Retry only during the existing bounded readback
           # window, accepting the *exact artifact* rather than the ref.
           [[ "$EXPECTED_DATA_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+          [[ "$EXPECTED_WORKFLOW_JSON_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+          [[ "$EXPECTED_WORKFLOW_HTML_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+          [[ "$EXPECTED_WORKFLOW_NODES" == 27 ]] || exit 1
           [[ "$EXPECTED_AGENT_RUNS" =~ ^[0-9]+$ ]] || exit 1
           [[ "$EXPECTED_AGENT_SOURCE" =~ ^(available|truncated|unavailable)$ ]] || exit 1
           matched=false
@@ -162,15 +190,34 @@ jobs:
                 '.schema_version == 1 and .source.repository == "BestNathan/nession" and .source.main_sha == $sha' "$json" >/dev/null \
               && curl --fail --silent --show-error --location --connect-timeout 10 --max-time 20 \
                 -H 'Cache-Control: no-cache' "$url/?revision=$EXPECTED_SHA" -o "$html" \
-              && grep -Fq '<title>Nession' "$html"; then
+              && grep -Fq '<title>Nession' "$html" \
+              && curl --fail --silent --show-error --location --connect-timeout 10 --max-time 20 \
+                -H 'Cache-Control: no-cache' "$url/data/workflows.json?revision=$EXPECTED_SHA" -o "$workflow_json" \
+              && jq -e --arg sha "$EXPECTED_SHA" --argjson count "$EXPECTED_WORKFLOW_NODES" '
+                .schema_version == 1 and
+                .source.repository == "BestNathan/nession" and
+                .source.main_sha == $sha and
+                (.nodes | length) == $count and
+                (.groups | length) == 6 and
+                (.edges | type) == "array"
+              ' "$workflow_json" >/dev/null \
+              && curl --fail --silent --show-error --location --connect-timeout 10 --max-time 20 \
+                -H 'Cache-Control: no-cache' "$url/workflows.html?revision=$EXPECTED_SHA" -o "$workflow_html" \
+              && grep -Fq '<title>GitHub Workflows' "$workflow_html"; then
               # Compare anonymous HTTPS bytes with the exact build outputs
               # BEFORE ending the readiness loop (not after a same-SHA match).
               digest="$(sha256sum "$json" | cut -d ' ' -f1)"
               source="$(jq -r .work.agent_run_source "$json")"
               observed="$(jq '[.work.issues[]?.agent_runs[]?] | length' "$json")"
+              workflow_json_digest="$(sha256sum "$workflow_json" | cut -d ' ' -f1)"
+              workflow_html_digest="$(sha256sum "$workflow_html" | cut -d ' ' -f1)"
+              workflow_nodes="$(jq -r '.nodes | length' "$workflow_json")"
               if [[ "$digest" == "$EXPECTED_DATA_SHA256" &&
                     "$source" == "$EXPECTED_AGENT_SOURCE" &&
-                    "$observed" == "$EXPECTED_AGENT_RUNS" ]]; then
+                    "$observed" == "$EXPECTED_AGENT_RUNS" &&
+                    "$workflow_json_digest" == "$EXPECTED_WORKFLOW_JSON_SHA256" &&
+                    "$workflow_html_digest" == "$EXPECTED_WORKFLOW_HTML_SHA256" &&
+                    "$workflow_nodes" == "$EXPECTED_WORKFLOW_NODES" ]]; then
                 matched=true
                 break
               fi
@@ -178,7 +225,7 @@ jobs:
             sleep 5
           done
           [[ "$matched" == true ]] || {
-            echo "::error::Public Pages did not serve the exact build SHA-256/source/count during bounded HTTPS polling"
+            echo "::error::Public Pages did not serve the exact HTML/JSON artifacts at the merged main SHA during bounded HTTPS polling"
             exit 1
           }
           # This is only source observation; never infer SC acceptance or PR
@@ -189,12 +236,15 @@ jobs:
             status=source_backed_observation
           fi
           echo "Public Issue Agent Run observation: $status (source=$source, runs=$observed, digest=$digest)"
+          echo "Public Workflow topology verified: main_sha=$EXPECTED_SHA, nodes=$workflow_nodes, json_sha256=$workflow_json_digest, html_sha256=$workflow_html_digest"
           {
             echo "## Public Pages verified"
             echo
             echo "- Public HTTPS URL: $url/"
             echo "- Exact deployed main SHA: \`$EXPECTED_SHA\`"
-            echo "- Checked: HTTP static HTML and schema-v1 sanitized /data/site.json"
+            echo "- Checked: exact HTML /, workflows.html and both sanitized JSON artifacts at the deployed SHA"
+            echo "- Workflow topology nodes: $workflow_nodes; exact HTML SHA-256: \`$workflow_html_digest\`"
+            echo "- Workflow topology exact JSON SHA-256: \`$workflow_json_digest\`"
             echo "- Exact published JSON SHA-256: \`$digest\` (matches pinned build artifact)"
             echo "- Issue Agent Run observation: $status · source $source · visible runs $observed"
             echo "- PR ownership / SC Acceptance / orphan integrity: not inferred"
