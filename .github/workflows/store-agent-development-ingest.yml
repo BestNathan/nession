@@ -120,6 +120,10 @@ jobs:
             > "$RUNNER_TEMP/development-ingest-receipt.json"
           jq -e '.status == "yielded" or .status == "replayed"' \
             "$RUNNER_TEMP/development-ingest-receipt.json" >/dev/null
+          # Actual one-line sanitized output, independently authenticated by
+          # the read-only collector; no prompts/native bytes or key material.
+          printf 'AGENT_DEVELOPMENT_INGEST_V1 '
+          jq -c . "$RUNNER_TEMP/development-ingest-receipt.json"
           {
             echo "## Authenticated real Developer native Session checkpoint"
             echo "- Worker Run: $(jq -r .run_id "$RUNNER_TEMP/development-ingest-receipt.json")"
