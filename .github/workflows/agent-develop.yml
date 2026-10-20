@@ -32,27 +32,26 @@ on:
 
 permissions:
   contents: read
+  issues: read
 
 concurrency:
   group: development-${{ inputs.issue_number }}-${{ inputs.action_id }}
   cancel-in-progress: false
 
 jobs:
-  developer:
+  claim:
     if: >-
       github.repository == 'BestNathan/nession' &&
       github.ref == 'refs/heads/main' &&
       github.event_name == 'workflow_dispatch' &&
+      github.run_attempt == 1 &&
       github.actor == 'github-actions[bot]'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    environment: cursor
+    timeout-minutes: 5
     steps:
-      - name: Checkout trusted main-owned Worker code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
@@ -69,6 +68,81 @@ jobs:
           path: ${{ runner.temp }}/development-worker-claim.json
           if-no-files-found: error
           retention-days: 3
+
+  restore:
+    needs: claim
+    # A separate trusted job: no Provider call, no model API key, no App token.
+    # The App private key is used ONLY as the existing checkpoint AES seed.
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'workflow_dispatch' &&
+      github.run_attempt == 1 &&
+      github.actor == 'github-actions[bot]' &&
+      inputs.resume_from != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    environment: cursor
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Authenticate exact resumed Run from the committed Store
+        run: |
+          set -euo pipefail
+          for attempt in {1..12}; do
+            if node scripts/lib/agent/orchestration/worker-preflight.mjs verify "$RUNNER_TEMP/resume-admission.json"; then
+              exit 0
+            fi
+            if [[ "$attempt" == 12 ]]; then exit 1; fi
+            sleep 5
+          done
+      - name: Rewrap committed native checkpoint in trusted isolated process
+        env:
+          STORE_WRITER_PRIVATE_KEY: ${{ secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY }}
+          CURSOR_RESUME_PRIVATE_KEY_B64: ${{ secrets.CURSOR_RESUME_PRIVATE_KEY_B64 }}
+          CURSOR_SDK_VERSION: ${{ vars.CURSOR_SDK_VERSION || '1.0.37' }}
+          CURSOR_MODEL: ${{ vars.CURSOR_MODEL || 'composer-2.5' }}
+          CURSOR_MODEL_FAST: ${{ vars.CURSOR_MODEL_FAST || 'true' }}
+        run: node scripts/lib/agent/orchestration/development-resume.mjs prepare "$RUNNER_TEMP/resume-admission.json" "$RUNNER_TEMP/resume-transfer"
+      - name: Upload encrypted native transfer for the same admitted Run
+        uses: actions/upload-artifact@v4
+        with:
+          name: development-native-transfer-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/resume-transfer/ciphertext.json
+            ${{ runner.temp }}/resume-transfer/resume.json
+          if-no-files-found: error
+          retention-days: 3
+
+  developer:
+    needs: [claim, restore]
+    if: >-
+      !cancelled() &&
+      github.repository == 'BestNathan/nession' &&
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'workflow_dispatch' &&
+      github.run_attempt == 1 &&
+      github.actor == 'github-actions[bot]' &&
+      needs.claim.result == 'success' &&
+      (inputs.resume_from == '' || needs.restore.result == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: cursor
+    steps:
+      - name: Checkout trusted main-owned Worker code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
       - name: Require exact authenticated Run ID from immutable Store receipt
         shell: bash
         run: |
@@ -127,6 +201,31 @@ jobs:
             --ignore-scripts --no-audit --no-fund "@cursor/sdk@$CURSOR_SDK_VERSION"
           echo "CURSOR_SDK_ROOT=$RUNNER_TEMP/development-sdk" >> "$GITHUB_ENV"
           echo "CURSOR_SDK_VERSION=$CURSOR_SDK_VERSION" >> "$GITHUB_ENV"
+      - name: Download only same-Run trusted encrypted native transfer
+        if: inputs.resume_from != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: development-native-transfer-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/resume-transfer
+      - name: Restore native bytes and synchronize live Issue before model
+        env:
+          CURSOR_RESUME_PRIVATE_KEY_B64: ${{ secrets.CURSOR_RESUME_PRIVATE_KEY_B64 }}
+          CURSOR_MODEL: ${{ vars.CURSOR_MODEL || 'composer-2.5' }}
+          CURSOR_MODEL_FAST: ${{ vars.CURSOR_MODEL_FAST || 'true' }}
+          GH_TOKEN: ${{ github.token }}
+          HAS_RESUME: ${{ inputs.resume_from != '' }}
+        run: |
+          set -euo pipefail
+          mkdir -m 700 "$RUNNER_TEMP/development-context"
+          gh api repos/BestNathan/nession/issues/1997 > "$RUNNER_TEMP/development-context/issue.json"
+          gh api 'repos/BestNathan/nession/issues/1997/comments?per_page=100' > "$RUNNER_TEMP/development-context/comments.json"
+          if [[ "$HAS_RESUME" == true ]]; then
+            node scripts/lib/agent/orchestration/development-resume.mjs open \
+              "$RUNNER_TEMP/development-admission.json" "$RUNNER_TEMP/resume-transfer" \
+              "$RUNNER_TEMP/development-native"
+          else
+            mkdir -m 700 "$RUNNER_TEMP/development-native"
+          fi
       - name: Execute real Developer in isolated Docker with no host credentials
         env:
           CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
@@ -152,6 +251,8 @@ jobs:
             -v "$RUNNER_TEMP/development-sdk:/sdk:ro" \
             -v "$RUNNER_TEMP/development-admission.json:/admission.json:ro" \
             -v "$RUNNER_TEMP/development-output:/output:rw" \
+            -v "$RUNNER_TEMP/development-native:/resume:ro" \
+            -v "$RUNNER_TEMP/development-context:/context:ro" \
             -e NESSION_DEVELOPER_ISOLATED=docker-v1 \
             -e GITHUB_ACTIONS -e GITHUB_REPOSITORY -e GITHUB_RUN_ID \
             -e GITHUB_RUN_ATTEMPT -e GITHUB_EVENT_NAME -e GITHUB_WORKFLOW \
@@ -180,3 +281,7 @@ jobs:
             ${{ runner.temp }}/development-output/result.json
           if-no-files-found: error
           retention-days: 3
+      - name: Remove transient native Session and Issue context
+        if: always()
+        run: |
+          rm -rf "$RUNNER_TEMP/development-native" "$RUNNER_TEMP/development-context"

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { renderAgentPrompt } from './prompt/index.mjs';
 import { selfTest as providerSmokeSelfTest } from './provider-smoke.mjs';
 import { renderIssueAuditPrompt, applyIssueAuditProposal, issueAuditTools } from './tasks/issue-audit.mjs';
-import { renderAcceptancePrompt } from './tasks/acceptance.mjs';
+import { renderAcceptancePrompt, acceptanceModelView } from './tasks/acceptance.mjs';
 import { candidateIssue, createIssueUpdateTool } from './tools/gh/issue/update.mjs';
 import { createIssueCommentTool } from './tools/gh/issue/comment.mjs';
 import { createIssueReadTool } from './tools/gh/issue/read.mjs';
@@ -39,6 +39,27 @@ const acceptance = renderAcceptancePrompt({
 assert.match(acceptance.text, /Do not add, remove, rename, rewrite, weaken/);
 assert.match(acceptance.text, /"target_ref": "sha"/);
 assert.equal(acceptance.template_version, 'v2');
+const staleContext={issue:{number:17},stage:'staging',target_ref:'a'.repeat(40),
+  criteria:[{criterion:'SC-01',text:'Observe exact Worker scope',stage:'staging',
+    current_result:'Pending',current_evidence:'obsolete-case-absence-claim'}],
+  requirement_body:'## Requirements: retained\n\n### Success Criteria\n- [x] SC-01 Observe exact Worker scope\n\n'+
+    '## Acceptance Report\n| Criterion | Stage | Result | Evidence |\n'+
+    '| SC-01 | staging | Pending | obsolete-case-absence-claim |\n\n## Product alignment\nkept',
+  ci_evidence:{verified_observation:{worker_run_id:82,conclusion:'success'}}};
+const beforeModelView=structuredClone(staleContext);
+const modelView=acceptanceModelView(staleContext);
+assert.deepEqual(staleContext,beforeModelView,'model serialization cannot mutate the frozen executor/reuse context');
+assert.equal(modelView.criteria[0].text,staleContext.criteria[0].text);
+assert.equal(modelView.criteria[0].stage,'staging');
+assert.equal(modelView.criteria[0].proof_method,'agent');
+assert.equal(modelView.ci_evidence,staleContext.ci_evidence);
+assert.ok(modelView.requirement_body.includes('## Product alignment\nkept'));
+assert.ok(modelView.requirement_body.includes('- [ ] SC-01 Observe exact Worker scope'));
+assert.ok(!JSON.stringify(modelView).includes('obsolete-case-absence-claim'));
+assert.ok(!Object.hasOwn(modelView.criteria[0],'current_result'));
+assert.ok(!Object.hasOwn(modelView.criteria[0],'current_evidence'));
+assert.equal(acceptanceModelView({...staleContext,requirement_body:'no projected report'}).requirement_body,
+  'no projected report');
 const candidate = candidateIssue(issue, 'Bug: fixed', 'body', ['bug', 'ci']);
 assert.deepEqual(candidate.labels.map((value) => value.name).sort(), ['bug', 'ci', 'in-progress']);
 assert.deepEqual(issue.labels.map((value) => value.name), ['bug', 'web', 'in-progress']);

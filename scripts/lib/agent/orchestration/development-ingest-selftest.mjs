@@ -39,3 +39,17 @@ for(const x of [
 ])assert.throws(()=>matchingResult(x.result??result,x.proof??proof,
   x.wrapped??wrapped,claim,x.run??run),/no authentic/);
 console.log('Development ingest: actual bounded outcome contract, encrypted native proof and tampering denial passed');
+
+const resumedClaim={inputs:{...ticket,resume_from:'signed-native-continuation'}};
+const resumedMeta={...metadata,agent_id:'agent-7d5b4a61-1476-4ce7-a38a-82907aa3b1a6'};
+const resumedProof={...proof,metadata:resumedMeta};
+const resumedWrapped={...wrapped,metadata:resumedMeta};
+const resumedResult={...result,native_resumed:true,prior_turn_word_observed:true,
+  parent_checkpoint_commit_sha:'d812e3655c0ad6337b1003aa0c1794c12335adb0',
+  content_sha256:digest('Durable Worker fixture: complete\nPrevious value: pending\n')};
+assert.equal(matchingResult(resumedResult,resumedProof,resumedWrapped,resumedClaim,run).agent_id,resumedMeta.agent_id);
+for(const bad of [{native_resumed:false},{prior_turn_word_observed:false},
+  {parent_checkpoint_commit_sha:'0'.repeat(40)},
+  {content_sha256:result.content_sha256}])
+  assert.throws(()=>matchingResult({...resumedResult,...bad},resumedProof,resumedWrapped,resumedClaim,run));
+assert.throws(()=>matchingResult(resumedResult,proof,wrapped,resumedClaim,run));

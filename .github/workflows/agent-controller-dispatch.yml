@@ -42,7 +42,8 @@ jobs:
          github.event.issue.number == 1997 &&
          github.event.comment.user.login == 'BestNathan' &&
          (github.event.comment.body == '/nession dispatch issue=1997 action=95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae' ||
-          github.event.comment.body == '/nession recover issue=1997 failed_run=39267659650'))
+          github.event.comment.body == '/nession recover issue=1997 failed_run=39267659650' ||
+          github.event.comment.body == '/nession resume issue=1997 checkpoint=1'))
       )
     runs-on: ubuntu-latest
     timeout-minutes: 12

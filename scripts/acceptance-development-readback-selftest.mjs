@@ -118,7 +118,9 @@ export async function selfTestDevelopmentReadback(){
   let calls=0;
   assert.deepEqual(await collectDevelopmentReadback({repo,issue:123,stage:'staging',
     get:()=>{calls++;}}),[]);
-  assert.equal(calls,0,'unrelated Issues must not query historical fixture');
+  assert.deepEqual(await collectDevelopmentReadback({repo,issue:2010,stage:'pre-merge',
+    get:()=>{calls++;}}),[]);
+  assert.equal(calls,0,'unrelated Issues and pre-merge static SCs must not query historical fixture');
   console.log('Developer readback: source/attempt/Artifact/Git-state/continuation binding and forgery negatives passed');
 }
 if(process.argv[1]?.endsWith('/acceptance-development-readback-selftest.mjs'))await selfTestDevelopmentReadback();

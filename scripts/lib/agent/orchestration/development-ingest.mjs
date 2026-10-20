@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {hkdfSync,createHash} from 'node:crypto';
+import {createHash} from 'node:crypto';
 import {readWorkerZipMember} from './worker-zip.mjs';
 import {authenticateWorkerClaimRun,inspectWorkerClaimZip,
   verifyWorkerClaimForAck} from './worker-reconcile.mjs';
@@ -19,6 +19,8 @@ import {readIssueWorkflowState} from './state-store.mjs';
 import {failedDeveloperRetryActionId} from './outbox.mjs';
 import {sealCheckpoint} from '../store/checkpoint.mjs';
 import {publishEncryptedAgentCheckpoint,verifyCommittedCheckpoint} from '../store/remote.mjs';
+import {CONTROLLED_CONTINUATION} from './development-resume.mjs';
+import {deriveStoreAesKey} from './development-checkpoint-key.mjs';
 import {openCursorNativeStore} from '../providers/cursor-native-store.mjs';
 
 const REPO='BestNathan/nession',HEX40=/^[a-f0-9]{40}$/,HEX64=/^[a-f0-9]{64}$/;
@@ -35,6 +37,7 @@ function readJsonFromZip(zip,name,max=32*1024*1024) {
 }
 export function matchingResult(result,proof,sealed,claim,run) {
   const ticket=claim.inputs;
+  const resuming=typeof ticket.resume_from==='string'&&ticket.resume_from.length>0;
   const valid=doc=>doc?.issue===Number(ticket.issue_number)&&
     doc.action_id===ticket.action_id&&doc.source_sha===ticket.input_sha&&
     doc.run_id===run.id&&doc.attempt===run.run_attempt;
@@ -44,7 +47,12 @@ export function matchingResult(result,proof,sealed,claim,run) {
       result.status!=='proposed_not_published'||
       result.native_read_edit_verified!==true||
       result.file!=='e2e/fixtures/agent-development/1997-canary.txt'||
-      result.content_sha256!==hash('Durable Worker fixture: complete\n')||
+      result.content_sha256!==hash(resuming?
+        'Durable Worker fixture: complete\nPrevious value: pending\n':'Durable Worker fixture: complete\n')||
+      (resuming&&(result.native_resumed!==true||result.prior_turn_word_observed!==true||
+        result.parent_checkpoint_commit_sha!=='d812e3655c0ad6337b1003aa0c1794c12335adb0'||
+        proof.metadata?.agent_id!=='agent-7d5b4a61-1476-4ce7-a38a-82907aa3b1a6'))||
+      (!resuming&&result.native_resumed===true)||
       proof.schema_version!==1||
       proof.kind!=='bounded-development-native-session'||
       sealed.schema_version!==1||
@@ -84,7 +92,9 @@ export function readConfirmedDevelopmentState(remote,claim,run) {
       fail('no authenticated exact Run-bound persisted dispatch to ingest');
     const prefix='roles/developer/dev-cursor-01/issues/'+issue;
     const runPath=prefix+'/runs/'+run.id+'-'+run.run_attempt+'.json';
-    const checkpointPath=prefix+'/checkpoints/00000001.json';
+    const previous_version=action.task.continuation?.checkpoint_version??0;
+    const next_version=previous_version+1;
+    const checkpointPath=prefix+'/checkpoints/'+String(next_version).padStart(8,'0')+'.json';
     const runFile=path.join(dir,runPath),checkpointFile=path.join(dir,checkpointPath);
     let existing_checkpoint=null;
     if(fs.existsSync(runFile)||fs.existsSync(checkpointFile)){
@@ -96,25 +106,20 @@ export function readConfirmedDevelopmentState(remote,claim,run) {
           receipt.source_sha!==claim.inputs.input_sha||
           receipt.workflow_sha!==run.head_sha||
           receipt.checkpoint_path!==checkpointPath||
-          receipt.version!==1||sealed.path!==checkpointPath||
+          receipt.version!==next_version||sealed.path!==checkpointPath||
           sealed.ciphertext_sha256!==receipt.ciphertext_sha256)
         fail('conflicting immutable Run checkpoint replay');
       const commit_sha=git('-C',dir,'log','-1','--format=%H',
         'HEAD','--',checkpointPath);
       if(!HEX40.test(commit_sha))fail('checkpoint commit unavailable');
-      existing_checkpoint={version:1,commit_sha,
+      existing_checkpoint={version:next_version,commit_sha,
         ciphertext_sha256:sealed.ciphertext_sha256,
         metadata:sealed.metadata};
     }
-    return {state_version:record.version,store_commit_sha:git('-C',dir,'rev-parse','HEAD'),action,
+    return {state_version:record.version,store_commit_sha:git('-C',dir,'rev-parse','HEAD'),
+      previous_version,next_version,action,
       already_yielded:action.status==='yielded',existing_checkpoint};
   }finally{fs.rmSync(root,{recursive:true,force:true});}
-}
-function deriveStoreAesKey(privateKey) {
-  if(typeof privateKey!=='string'||privateKey.length<200)
-    fail('missing trusted Store key seed');
-  return Buffer.from(hkdfSync('sha256',Buffer.from(privateKey),
-    Buffer.from(REPO),Buffer.from('nession-agent-native-checkpoint-store-v1'),32));
 }
 async function api(token,endpoint){
   const r=await fetch('https://api.github.com/repos/'+REPO+endpoint,{
@@ -178,15 +183,26 @@ export function resolveTrustedIngestSource({environment,event}){
         event.issue?.number!==1997||
         event.issue?.pull_request||
         event.comment?.user?.login!=='BestNathan'||
-        event.comment?.body!==PINNED_RECOVERY_COMMAND||
+        (event.comment?.body!==PINNED_RECOVERY_COMMAND&&
+          !new RegExp('^/nession ingest issue=1997 action='+CONTROLLED_CONTINUATION+' worker_run=[1-9][0-9]{0,14}$').test(event.comment?.body??''))||
         !Number.isSafeInteger(event.comment.id)||event.comment.id<1)
       fail('manual checkpoint recovery requires exact owner/main Issue comment');
-    return {run_id:PINNED_RECOVERY_SOURCE_RUN,source:null};
+    if(event.comment.body===PINNED_RECOVERY_COMMAND)
+      return {run_id:PINNED_RECOVERY_SOURCE_RUN,source:null};
+    const id=Number(event.comment.body.match(/worker_run=([0-9]+)$/)[1]);
+    if(!Number.isSafeInteger(id)||id<=PINNED_RECOVERY_SOURCE_RUN)fail('invalid continuation source Run');
+    return {run_id:id,source:null,continuation:true};
   }
   fail('unsupported Ingest trigger');
 }
 
 async function main(){
+  if(process.argv.length===3&&process.argv[2]==='source'){
+    const event=JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH,'utf8'));
+    const source=resolveTrustedIngestSource({environment:process.env,event});
+    console.log(JSON.stringify({run_id:source.run_id,attempt:source.source?.run_attempt??1}));
+    return;
+  }
   if(process.argv.length!==5||process.argv[2]!=='ingest')fail('usage: ingest CLAIM_ZIP RESULT_ZIP');
   const env=process.env,token=env.ACTIONS_READ_TOKEN;
   if(env.GITHUB_ACTIONS!=='true'||env.GITHUB_REPOSITORY!==REPO||
@@ -207,7 +223,7 @@ async function main(){
       run.run_attempt!==authority.source.run_attempt||
       run.head_sha!==authority.source.head_sha))
     fail('GitHub webhook/source Run mismatch');
-  if(!authority.source &&
+  if(!authority.source && !authority.continuation&&
       (run.id!==PINNED_RECOVERY_SOURCE_RUN||run.run_attempt!==1||
        run.head_sha!=='e6e64eb84663f2bb935b9c0628d9ab787523186b'||
        run.conclusion!=='success'||run.status!=='completed'))
@@ -242,8 +258,11 @@ async function main(){
           failedDeveloperRetryActionId(1997,
             '95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae',
             39267659650),
+          CONTROLLED_CONTINUATION,
         ].includes(verified.action_id))
       fail('Developer scope not yet authorized outside #1997 fixture');
+    if(authority.continuation&&(verified.action_id!==CONTROLLED_CONTINUATION||run.run_attempt!==1))
+      fail('continuation recovery source is not the exact controlled Action/Attempt');
     const store=env.AGENT_STORE_CONTROLLER_REMOTE;
     const admission=readConfirmedDevelopmentState(store,claim,run);
     if(admission.already_yielded) {
@@ -293,7 +312,7 @@ async function main(){
         const checkpointMetadata={provider:'cursor',
           session_id:metadata.agent_id,source_sha:claim.inputs.input_sha,
           harness_digest:metadata.harness_digest};
-        const sealed=sealCheckpoint(identity,1,native,aesKey,checkpointMetadata);
+        const sealed=sealCheckpoint(identity,admission.next_version,native,aesKey,checkpointMetadata);
         const source={repository:REPO,run_id:run.id,attempt:run.run_attempt,
           issue:1997,workflow_sha:run.head_sha,target_sha:claim.inputs.input_sha,
           head_branch:'main',path:run.path,workflow_name:run.name,
@@ -301,7 +320,7 @@ async function main(){
           environment:'agent-dev-cursor-01',provider:'cursor',event:run.event};
         published=publishEncryptedAgentCheckpoint({
           remote:store,source,sealed,registry:JSON.parse(fs.readFileSync(
-            'automation/agents/registry.json','utf8')),key:aesKey,expectedVersion:0});
+            'automation/agents/registry.json','utf8')),key:aesKey,expectedVersion:admission.previous_version});
         encryptedDigest=sealed.ciphertext_sha256;
       }finally{
         if(native)native.fill(0);

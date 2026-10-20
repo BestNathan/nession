@@ -9,6 +9,7 @@ import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 import {executeDurableAgentDispatch,recoverConfirmedFailedDeveloperDispatch} from './dispatch-store.mjs';
 import {failedDeveloperRetryActionId} from './outbox.mjs';
+import {CONTROLLED_CONTINUATION,CONTROLLED_CONTINUATION_COMMENT} from './development-resume.mjs';
 import {CONTROLLED_FAILED_RUN,verifyKnownFailureLive} from './failed-worker-recover.mjs';
 
 const REPO='BestNathan/nession';
@@ -26,7 +27,8 @@ export function assertDispatchAuthority({environment,event,run,issue,actionId}) 
     ?(event?.action==='created'&&event?.issue?.number===1997&&
        !event?.issue?.pull_request&&event?.comment?.user?.login==='BestNathan'&&
        ((event?.comment?.body===CONTROLLED_DISPATCH_COMMENT&&actionId===ORIGINAL_ACTION)||
-        (event?.comment?.body===CONTROLLED_RECOVERY_COMMENT&&actionId===RECOVERY_ACTION))&&
+        (event?.comment?.body===CONTROLLED_RECOVERY_COMMENT&&actionId===RECOVERY_ACTION)||
+        (event?.comment?.body===CONTROLLED_CONTINUATION_COMMENT&&actionId===CONTROLLED_CONTINUATION))&&
        Number.isSafeInteger(event?.comment?.id)&&event.comment.id>0&&
        issue===1997)
     :(environment.GITHUB_EVENT_NAME==='workflow_dispatch'&&
@@ -100,7 +102,9 @@ async function main(){
   const commanded=env.GITHUB_EVENT_NAME==='issue_comment';
   const issue=commanded?1997:Number(event?.inputs?.issue_number);
   const recovering=commanded&&event?.comment?.body===CONTROLLED_RECOVERY_COMMENT;
-  const actionId=commanded?(recovering?RECOVERY_ACTION:ORIGINAL_ACTION):event?.inputs?.action_id;
+  const continuing=commanded&&event?.comment?.body===CONTROLLED_CONTINUATION_COMMENT;
+  const actionId=commanded?(continuing?CONTROLLED_CONTINUATION:
+    recovering?RECOVERY_ACTION:ORIGINAL_ACTION):event?.inputs?.action_id;
   if(!positive(issue)||!HEX64.test(actionId??''))fail('invalid Issue/Action');
   const token=env.ACTIONS_DISPATCH_TOKEN;
   if(typeof token!=='string'||token.length<8)fail('missing trusted Actions credential');

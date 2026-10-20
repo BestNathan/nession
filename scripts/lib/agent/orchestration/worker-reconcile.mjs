@@ -8,6 +8,7 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {readWorkerZipMember} from './worker-zip.mjs';
+import {canonicalJson} from '../harness/contract.mjs';
 import {createWorkerClaim} from './worker-claim.mjs';
 import {verifyDispatchTicket,createGitHubRunReader} from './github-dispatch.mjs';
 import {acknowledgeCommittedDispatch} from './dispatch-store.mjs';
@@ -68,7 +69,9 @@ export async function verifyWorkerClaimForAck({run,claim,key,reader}) {
       ticket.agent_id!==claim.inputs.agent_id||
       ticket.input_sha!==claim.inputs.input_sha||
       ticket.repository!==REPO||
-      ticket.schema_version===2 !== Object.hasOwn(claim.inputs,'resume_from'))
+      ticket.schema_version===2 !== Object.hasOwn(claim.inputs,'resume_from')||
+      (ticket.schema_version===2&&claim.inputs.resume_from!==
+        Buffer.from(canonicalJson(ticket.resume_from)).toString('base64url')))
     fail('claim does not match signed Developer dispatch');
   const created=Date.parse(run.created_at??'');
   if(!Number.isFinite(created)||created<ticket.issued_at-30000||

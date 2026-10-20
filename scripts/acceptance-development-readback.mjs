@@ -184,8 +184,8 @@ export function readbackSourceUnchanged(workspace,from,to,paths,run=execFileSync
 }
 
 export async function collectDevelopmentReadback({repo,issue,stage,targetSha,workspace,get,readLog}) {
-  if(repo!==REPO||![1997,2010,1664].includes(Number(issue))||
-    !['pre-merge','staging','post-merge'].includes(stage))return [];
+  if(repo!==REPO||Number(issue)!==2010||
+    !['staging','post-merge'].includes(stage))return [];
   requireIt(SHA.test(targetSha??''),'invalid target');
   const runs=await get('/repos/'+repo+'/actions/workflows/store-agent-development-ingest.yml/runs?status=success&per_page=10');
   requireIt(Array.isArray(runs.workflow_runs)&&runs.workflow_runs.length<=10,'unbounded discovery');
@@ -271,6 +271,11 @@ export async function collectDevelopmentReadback({repo,issue,stage,targetSha,wor
       verified_dispatch_controller:{run_id:controller.id,attempt:controller.run_attempt,
         sha:controller.head_sha,path:controller.path,conclusion:controller.conclusion},
       target_sha:targetSha,fixture_issue:1997,
+      verified_worker_execution:{run_id:worker.id,attempt:worker.run_attempt,
+        control_sha:worker.head_sha,task_source_sha:r.source_sha,
+        status:worker.status,conclusion:worker.conclusion,
+        real_native_read_edit_verified_by_trusted_ingest:true,
+        scope:'bounded disposable Developer file edit; not PR publication or full Review/repair'},
       native_execution_owners_unchanged:true,source_ancestry_verified:true,
       store_reachable_verified:true,native_resume_verified:false,
       pr_publication_verified:false,full_review_repair_cycle_verified:false,

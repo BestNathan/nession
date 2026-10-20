@@ -117,7 +117,9 @@ export async function runCursorSession({
     }
     const result = await run.wait();
     let billed = null;
-    try { billed = await agent.getUsage(); } catch {}
+    // Agent-level billing can include earlier native runs after resume. It
+    // is not a per-Slice charge; leave cost unobserved rather than double-count.
+    if (!resumeAgentId) try { billed = await agent.getUsage(); } catch {}
     return {
       result,
       meta: {
