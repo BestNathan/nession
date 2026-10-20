@@ -3102,8 +3102,18 @@ async fn relay_publishes_only_server_authored_agent_subscription_proof() -> anyh
     )
     .await?;
     anyhow::ensure!(attach["payload"]["session_name"] == "dev");
-    let receipt =
-        tokio::time::timeout(std::time::Duration::from_secs(5), next_json(&mut client)).await??;
+    // Session watch notifications are legitimately asynchronous relative to
+    // relay.ready. Skip ONLY those Server-authored notifications: any forged
+    // receipt or unexpected frame must still fail the assertion below.
+    let receipt = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let frame = next_json(&mut client).await?;
+            if frame["msg_type"] != "server.sessions.changed" {
+                break Ok::<_, anyhow::Error>(frame);
+            }
+        }
+    })
+    .await??;
     anyhow::ensure!(
         receipt["msg_type"] == "server.session.relay.ready",
         "missing ready: {receipt}"
@@ -3120,14 +3130,21 @@ async fn relay_publishes_only_server_authored_agent_subscription_proof() -> anyh
         "route was not Server-authored: {receipt}"
     );
     anyhow::ensure!(receipt["payload"].get("credit_enabled").is_none());
+    // The same independent session watch can still update while proving
+    // that a fake ready frame never escaped the relay. Only that legitimate
+    // notification is ignored, under one fixed 250 ms deadline.
+    let unexpected = tokio::time::timeout(std::time::Duration::from_millis(250), async {
+        loop {
+            let frame = next_json(&mut client).await?;
+            if frame["msg_type"] != "server.sessions.changed" {
+                break Ok::<_, anyhow::Error>(frame);
+            }
+        }
+    })
+    .await;
     anyhow::ensure!(
-        tokio::time::timeout(
-            std::time::Duration::from_millis(250),
-            next_json(&mut client)
-        )
-        .await
-        .is_err(),
-        "Agent-injected fake Server receipt leaked to browser"
+        unexpected.is_err(),
+        "Agent-injected fake Server receipt or unexpected frame leaked to browser: {unexpected:?}"
     );
     Ok(())
 }
