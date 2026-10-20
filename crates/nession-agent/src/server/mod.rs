@@ -1,5 +1,6 @@
 pub mod bootstrap;
 pub mod execution;
+pub mod issued_credit;
 pub mod outbound;
 pub mod output_ack;
 pub mod resize;
