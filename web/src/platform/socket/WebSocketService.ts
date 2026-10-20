@@ -268,15 +268,26 @@ export class WebSocketService implements PluginSurface {
    * socket is gone or not yet OPEN.
    */
   send(type: string, payload: Record<string, unknown>): void {
+    this.sendWithId(type, payload);
+  }
+
+  /**
+   * Send and return the very same id written on the socket, so asynchronous
+   * Server-originated route receipts can be matched to the originating begin.
+   * The id is never returned if the write fails (#2102).
+   */
+  sendWithId(type: string, payload: Record<string, unknown>): string {
     if (this.disposed) {
       throw new Error('WebSocketService disposed');
     }
+    const id = this.generateMessageId();
     this.sendRaw({
       msg_type: type,
-      id: this.generateMessageId(),
+      id,
       timestamp: Date.now(),
       payload,
     });
+    return id;
   }
 
   request<T>(
