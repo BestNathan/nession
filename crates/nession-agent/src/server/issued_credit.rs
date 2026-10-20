@@ -142,17 +142,21 @@ impl SubscriberIssuedFlow {
     /// outbound writer. Dequeue is *not* the acknowledgement of this event.
     /// Failed sends revoke this subscriber, never credit undelivered output.
     pub fn issue(&mut self, epoch: u64, seq: u64, bytes: usize) -> Result<(), IssuedCreditError> {
-        if epoch == 0 || seq == 0 || self.epoch.is_some_and(|old| old != epoch) {
-            return Err(IssuedCreditError::SequenceGap);
-        }
-        if let Some(last) = self.last_issued {
-            if last.checked_add(1) != Some(seq) {
-                return Err(IssuedCreditError::SequenceGap);
-            }
+        if epoch == 0 || seq == 0 {
+            return if self.credit.is_some() {
+                Err(IssuedCreditError::SequenceGap)
+            } else {
+                Ok(())
+            };
         }
         if let Some(ledger) = &mut self.credit {
+            if self.epoch != Some(epoch) {
+                return Err(IssuedCreditError::SequenceGap);
+            }
             ledger.issue(seq, bytes)?;
         }
+        // The opt-in boundary may be an arbitrary Agent stream cut, and
+        // legacy output has no issued-ledger continuity obligation.
         self.epoch = Some(epoch);
         self.last_issued = Some(seq);
         Ok(())
