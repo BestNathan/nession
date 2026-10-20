@@ -1,6 +1,6 @@
 # GitHub Actions trigger audit — #2095
 
-**Snapshot:** baseline commit `34b2d5674b08bd131173ef5210d69388c233e353` (2026-10-20), with proposed `e2e-scenario-smoke.yml` PR routing described as a **delta** rather than claiming it is merged. The executable `.github/workflows/*.yml` remains the source of truth; this is a reviewed audit snapshot, not a new trigger policy implementation.
+**Audit baseline:** `34b2d5674b08bd131173ef5210d69388c233e353` (2026-10-20). **Verified subsequent changes:** main PR 2097 and PR 2109; staging compatibility PR 2114 (merged as `0987fff9`); main E2E metadata fallback PR 2118 (merged as `65c604e1`). Exact trigger semantics remain owned by the checked-in workflows/scripts; this audit is a reviewed snapshot, not a competing policy engine.
 
 ## Invariants
 
@@ -39,7 +39,7 @@
 | Deploy | `deploy-manual.yml` | manual | environment and SHA inputs | explicit deployment |
 | Deploy | `deploy-pages.yml` | push + schedule + manual | main Pages and registry path filter; 4-hour cron | public Pages publication |
 | E2E | `e2e-scenario-ingest.yml` | workflow_run | Scenario Smoke completed | authenticated terminal Scenario ingestion |
-| E2E | `e2e-scenario-smoke.yml` | PR + push + manual | staging PR paths (this PR); main push same exact inputs | terminal repeated replay, authenticated Ingest |
+| E2E | `e2e-scenario-smoke.yml` | PR + push + manual | main: scoped PR/main push paths (PR 2109); staging: scoped PR paths (PR 2114) | terminal repeated replay, authenticated Ingest |
 | E2E | `e2e-test-ingest.yml` | workflow_run | E2E / Tests completed | exact-SHA E2E evidence ingest |
 | E2E | `e2e-tests.yml` | PR + push + manual | PR: runtime/E2E inputs (#2097); main/staging push unchanged | browser E2E; main exact-SHA Store/Ingest |
 | Metrics | `metrics-agent-telemetry.yml` | workflow_run + schedule | Agent/Acceptance completion; 5-min recovery | telemetry ingestion; #2031 broad fan-out |
@@ -63,7 +63,7 @@
 ## Confirmed defects and changes
 
 1. **Unfiltered expensive PR workflows — fixed in [#2097](https://github.com/BestNathan/nession/pull/2097).** `CI / Quality Gate` now selects Rust, Web and lightweight workflow/security jobs; `E2E / Tests` and `Acceptance / Case Smoke` use native `pull_request.paths` while preserving main-push exact SHA evidence.
-2. **Unfiltered staging PR terminal replay — additional defect in this follow-up.** `e2e-scenario-smoke.yml` previously had `pull_request: branches: [staging]` with no `paths`, so even unrelated staging changes ran two full Scenario replays. The proposed PR adds staging PR path filters aligned with main-push Scenario inputs, correcting obsolete `agent/src/**` and `server/src/**` paths to actual `crates/nession-agent/**`, `crates/nession-server/**`, plus `crates/nession-protocol/**`. Keep this marked **proposed** until merged.
+2. **Unfiltered staging PR terminal replay — fixed on main in PR 2109 and explicitly ported to staging in PR 2114.** `e2e-scenario-smoke.yml` previously ran two full Scenario replays for all staging PRs. Both deployed definitions use native path filters for relevant terminal/Scenario/runtime changes, correcting stale `agent/src/**` and `server/src/**` path references to the real crate roots.
 3. **Unrelated event receiver Runs — tracked in [#2031](https://github.com/BestNathan/nession/issues/2031)** (Orchestrator, Post-Run Waker, Quota Recovery, Store Readback, Metrics). A sample of [#2099](https://github.com/BestNathan/nession/pull/2099) produced one successful Quality PR Run and one skipped `pull_request_target` Orchestrator Run; only the former is a change-driven Quality run.
 4. **Exact-SHA postmerge requirement:** #2097 merged as `34b2d567`. [E2E #39453506889](https://github.com/BestNathan/nession/actions/runs/39453506889), Cases #39453506897, and E2E Test Ingest #39453803251 succeeded. [Quality #39453506977](https://github.com/BestNathan/nession/actions/runs/39453506977) initially failed in Rust integration timing (`missing ready`) and requires verified same-SHA retry before SC-07 can be accepted.
 
@@ -73,11 +73,11 @@
 |---|---|---|---|---|---|
 | Controller workflow only (pre-fix) | [#2087](https://github.com/BestNathan/nession/pull/2087), `a3d9987` | Executed | Executed | Full run #39444999306 | Ran #39444999270 |
 | Controller workflow only (post-fix) | [#2099](https://github.com/BestNathan/nession/pull/2099), `15a664c` | Skipped | Skipped | Not created | Not created |
-| Rust tool config only | [#2104](https://github.com/BestNathan/nession/pull/2104), `318321b` | Applicable | Expected skip | Not created | Not created |
-| Web runtime input only | [#2105](https://github.com/BestNathan/nession/pull/2105), `af694cc` | Expected skip | Applicable | Created | Created |
-| Canonical Case verifier only | [#2107](https://github.com/BestNathan/nession/pull/2107), `c2f2df3` | Expected skip | Applicable | Expected | Expected |
+| Rust tool config only | [PR 2104](https://github.com/BestNathan/nession/pull/2104), `318321b` | Success ([39456061413](https://github.com/BestNathan/nession/actions/runs/39456061413)) | Skipped | Not created | Not created |
+| Web runtime input only | [PR 2105](https://github.com/BestNathan/nession/pull/2105), `af694cc` | Skipped | Success ([39456135453](https://github.com/BestNathan/nession/actions/runs/39456135453)) | Success ([39456135485](https://github.com/BestNathan/nession/actions/runs/39456135485)) | Success ([39456135431](https://github.com/BestNathan/nession/actions/runs/39456135431)) |
+| Canonical Case verifier only | [PR 2107](https://github.com/BestNathan/nession/pull/2107), `c2f2df3` | Skipped | Success ([39456254363](https://github.com/BestNathan/nession/actions/runs/39456254363)) | Success ([39456254155](https://github.com/BestNathan/nession/actions/runs/39456254155)) | Success ([39456254546](https://github.com/BestNathan/nession/actions/runs/39456254546)) |
 
-The last three are **draft, unmerged test PRs**; verify actual job status/event creation and close them without merging. The "Expected" cells are hypotheses until linked to run IDs. Do not count these fixtures as tested/passed merely because the table mentions them.
+All four controlled main-side path probes were closed **unmerged** after their exact-head Actions results were read. Every statement above is bound to an observed job conclusion or explicit absence of a PR workflow run, not merely a guessed route.
 
 ## Branch rules and reliability
 
@@ -86,3 +86,18 @@ At the audit snapshot, `branches/main` metadata returned no enforced required ch
 Coverage of input globs is necessarily conservative; if a new shared runtime/build input appears outside the paths allowlist, update the owning workflow and corresponding regression proof. Avoid centralizing trigger globs in another router.
 
 **Related:** [#2095](https://github.com/BestNathan/nession/issues/2095), [#2031](https://github.com/BestNathan/nession/issues/2031), [#1876](https://github.com/BestNathan/nession/issues/1876), [#1690](https://github.com/BestNathan/nession/issues/1690), [#1702](https://github.com/BestNathan/nession/issues/1702).
+
+## Staging required-check compatibility and live negative probe
+
+Staging branch protection enforces `rust-check` and `web-check` (GitHub Actions app ID 15368), even when the PR changes only docs. Hence the main-only job-level skip mechanism is **not copied verbatim**: staging Quality keeps both required job contexts and only omits heavy steps with explicit `Not Applicable` logs when its trusted exact-PR diff classifier finds no Rust/Web inputs.
+
+- [PR 2114](https://github.com/BestNathan/nession/pull/2114) was merged to staging as `0987fff9caf38e04ee22096cff541a3b834f21c8`. Exact-head Quality [39459082791](https://github.com/BestNathan/nession/actions/runs/39459082791), E2E [39459082759](https://github.com/BestNathan/nession/actions/runs/39459082759), Case Smoke [39459082927](https://github.com/BestNathan/nession/actions/runs/39459082927), Scenario Smoke [39459082718](https://github.com/BestNathan/nession/actions/runs/39459082718) all passed.
+- **Before**: unrelated docs-only staging [PR 2111](https://github.com/BestNathan/nession/pull/2111) created Quality, E2E, Case Smoke and Scenario Smoke PR Runs under the old staging YAML.
+- **After**: unmerged docs-only staging [PR 2117](https://github.com/BestNathan/nession/pull/2117) created **only** Quality [39460348578](https://github.com/BestNathan/nession/actions/runs/39460348578), with `scope` success; required `rust-check` and `web-check` success only via their explicit Not Applicable steps; no Rust/Web builds. A separately triggered `Acceptance / Orchestrator` `pull_request_target` Run was skipped (event fan-out scope #2031).
+- Staging-specific compatibility is a targeted backport because workflow definitions are evaluated from the PR base branch and `staging` has diverged substantially from `main`; merging the entire main history into staging was neither required nor attempted.
+
+## Legacy E2E planner fail-closed correction
+
+[PR 2118](https://github.com/BestNathan/nession/pull/2118) updates the trusted `scripts/issue-e2e-selection-entry.mjs`: when Issue E2E metadata is missing, an **exact-head Git diff** must positively prove that all changed paths are unrelated Markdown/Workflow metadata before returning `not-required`. Runtime code, changed E2E/Case workflows, unknown paths, an unavailable base, an incorrect checkout and a runtime-to-docs rename all preserve the full fallback. `ci-quality.yml` YAML-only edits no longer start PR E2E by themselves. The `issue-e2e-plan-selftest` Gate owns this invariant with real Git-history positive/negative fixtures. Main `push` exact-SHA full E2E/Store ingestion triggers are unchanged.
+
+The event-receiver fan-out across `workflow_run` / `issue_comment` and scheduled recovery remains in [Issue 2031](https://github.com/BestNathan/nession/issues/2031), without a competing CI router.
