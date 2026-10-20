@@ -2452,6 +2452,25 @@ fn is_relay_request(value: &serde_json::Value) -> bool {
     )
 }
 
+/// Return the Agent's *reply* contract, not its request wire. The Server
+/// now requires an exact 'ok' response plus matching session_name before the
+/// relay can begin forwarding (#2081). Old fixtures echoed "agent.attach",
+/// accidentally teaching tests that unknown replies were a valid attach.
+/// Missing subscriber-generation is intentional legacy/non-credit coverage.
+fn mock_agent_relay_reply(request: &serde_json::Value) -> serde_json::Value {
+    let requested_wire = request.get("msg_type").and_then(serde_json::Value::as_str);
+    serde_json::json!({
+        "msg_type": if requested_wire == Some("agent.attach") {
+            "ok"
+        } else {
+            requested_wire.unwrap_or("")
+        },
+        "id": request.get("id").cloned().unwrap_or(serde_json::Value::Null),
+        "timestamp": current_timestamp(),
+        "payload": request.get("payload").cloned().unwrap_or(serde_json::Value::Null),
+    })
+}
+
 async fn start_mock_agent_endpoint() -> anyhow::Result<MockAgentEndpoint> {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let addr = listener.local_addr()?;
@@ -2482,21 +2501,10 @@ async fn start_mock_agent_endpoint() -> anyhow::Result<MockAgentEndpoint> {
                     // forwards anything at all, and since #1429 it opens with
                     // `client.auth` before the attach. Echoing the request's own
                     // wire name back is what the real Agent does for
-                    // `agent.attach`, and the relay pairs replies by `id`, not
-                    // by name.
+                    // `agent.attach` reply as `ok`, and the relay pairs replies
+                    // by `id`, not by request wire name.
                     if is_relay_request(&parsed) {
-                        let answer = serde_json::json!({
-                            "msg_type": parsed
-                                .get("msg_type")
-                                .cloned()
-                                .unwrap_or(serde_json::Value::Null),
-                            "id": parsed.get("id").cloned().unwrap_or(serde_json::Value::Null),
-                            "timestamp": current_timestamp(),
-                            "payload": parsed
-                                .get("payload")
-                                .cloned()
-                                .unwrap_or(serde_json::Value::Null),
-                        });
+                        let answer = mock_agent_relay_reply(&parsed);
                         if sink
                             .send(tokio_tungstenite::tungstenite::Message::Text(
                                 answer.to_string(),
@@ -2565,18 +2573,7 @@ async fn start_streaming_mock_agent_endpoint(
                     let wire = parsed.get("msg_type").and_then(serde_json::Value::as_str);
                     attached = wire == Some("agent.attach");
                     if is_relay_request(&parsed) {
-                        let answer = serde_json::json!({
-                            "msg_type": parsed
-                                .get("msg_type")
-                                .cloned()
-                                .unwrap_or(serde_json::Value::Null),
-                            "id": parsed.get("id").cloned().unwrap_or(serde_json::Value::Null),
-                            "timestamp": current_timestamp(),
-                            "payload": parsed
-                                .get("payload")
-                                .cloned()
-                                .unwrap_or(serde_json::Value::Null),
-                        });
+                        let answer = mock_agent_relay_reply(&parsed);
                         if sink
                             .send(tokio_tungstenite::tungstenite::Message::Text(
                                 answer.to_string(),
@@ -2848,21 +2845,7 @@ async fn start_bootstrapping_mock_agent_endpoint() -> anyhow::Result<MockAgentEn
                         // `client.auth` and waits for its answer before it
                         // will send one.
                         if is_relay_request(&parsed) {
-                            let answer = serde_json::json!({
-                                "msg_type": parsed
-                                    .get("msg_type")
-                                    .cloned()
-                                    .unwrap_or(serde_json::Value::Null),
-                                "id": parsed
-                                    .get("id")
-                                    .cloned()
-                                    .unwrap_or(serde_json::Value::Null),
-                                "timestamp": current_timestamp(),
-                                "payload": parsed
-                                    .get("payload")
-                                    .cloned()
-                                    .unwrap_or(serde_json::Value::Null),
-                            });
+                            let answer = mock_agent_relay_reply(&parsed);
                             if sink
                                 .send(tokio_tungstenite::tungstenite::Message::Text(
                                     answer.to_string(),
@@ -2908,15 +2891,7 @@ async fn start_bootstrapping_mock_agent_endpoint() -> anyhow::Result<MockAgentEn
                         return;
                     }
 
-                    let answer = serde_json::json!({
-                        "msg_type": "agent.attach",
-                        "id": parsed.get("id").cloned().unwrap_or(serde_json::Value::Null),
-                        "timestamp": current_timestamp(),
-                        "payload": parsed
-                            .get("payload")
-                            .cloned()
-                            .unwrap_or(serde_json::Value::Null),
-                    });
+                    let answer = mock_agent_relay_reply(&parsed);
                     if sink
                         .send(tokio_tungstenite::tungstenite::Message::Text(
                             answer.to_string(),
