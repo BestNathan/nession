@@ -279,6 +279,8 @@ function selfTest() {
   const withE2E = { ...requirement, body: requirement.body +
     '\n\n## E2E Verification\n### New\n- none: no new test\n### Regression\n- none: documentation only\n\n## E2E Report\n| ID | Type | Result | Evidence |\n|---|---|---|---|\n' };
   assert.equal(auditIssue(withE2E).ok, true);
+  assert.equal(auditIssue({ ...withE2E,body:withE2E.body.replace('- none: no new test','- pages-workflows').replace('## E2E Report\n| ID','## E2E Report\n| pages-workflows | New | Pending | missing CI evidence |\n| ID') }).ok,false);
+
   assert.equal(auditIssue({ ...withE2E, body: withE2E.body.replace('- none: documentation only', '') }).ok, false);
   console.log('issue-contract self-test: 12 cases passed');
 }

@@ -50,11 +50,11 @@ function selfTest(){
     '| ID | Type | Result | Evidence |','|---|---|---|---|'];
   const body0=prefix.concat(['| terminal-attach | Regression | Pending | - |']).join('\n');
   const decl=parseIssueE2E(body0);
-  const pass=body0.replace('| Pending | - |','| Pass | run 1/1, SHA '+sha+', contract '+decl.digest+', plan '+'b'.repeat(64)+', tests 1/1 |');
+  const pass=body0.replace('| Pending | - |','| Pass | run 1/1, SHA '+sha+', contract '+decl.digest+', plan '+'b'.repeat(64)+', tests 1/1 (https://github.com/BestNathan/nession/actions/runs/1) |');
   assert.equal(verifyIssueE2EGate({body:pass},sha).ok,true);
   assert.equal(verifyIssueE2EGate({body:body0},sha).ok,false);
   assert.equal(verifyIssueE2EGate({body:pass},'b'.repeat(40)).ok,false);
-  assert.equal(verifyIssueE2EGate({body:pass.replace('contract '+decl.digest, 'contract '+'0'.repeat(64))},sha).ok,false);
+  assert.throws(()=>verifyIssueE2EGate({body:pass.replace('contract '+decl.digest, 'contract '+'0'.repeat(64))},sha),/invalid E2E declaration/);
   const none=['## E2E Verification','### New','- none: no new tests',
     '### Regression','- none: no affected E2E','## E2E Report',
     '| ID | Type | Result | Evidence |','|---|---|---|---|'].join('\n');

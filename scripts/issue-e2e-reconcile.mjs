@@ -4,21 +4,9 @@ import { pathToFileURL } from 'node:url';
 // The higher-privilege caller must independently attest the source artifact.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { parseIssueE2E } from './issue-e2e-contract.mjs';
+import { parseIssueE2E, parseE2EEvidence } from './issue-e2e-contract.mjs';
 
 const SHA = /^[a-f0-9]{40}$/;
-const RECEIPT = /^run ([1-9]\d*)\/([1-9]\d*), SHA ([a-f0-9]{40}), contract ([a-f0-9]{64}), plan ([a-f0-9]{64}), tests (\d+)\/(\d+) \(https:\/\/github\.com\/BestNathan\/nession\/actions\/runs\/([1-9]\d*)\)$/;
-
-function evidence(row, digest) {
-  if (row.result === 'Pending' && row.evidence === '-') return null;
-  const match = row.evidence.match(RECEIPT);
-  if (!match || match[1] !== match[8] || match[4] !== digest)
-    throw Error('Issue E2E Report contains unauthenticated or mismatched evidence');
-  const run = Number(match[1]), attempt = Number(match[2]);
-  if (!Number.isSafeInteger(run) || !Number.isSafeInteger(attempt))
-    throw Error('unsafe run identity in Issue E2E Report');
-  return { run, attempt, sha: match[3], contract: match[4], plan: match[5] };
-}
 function outsideReport(body) {
   const lines = String(body ?? '').replace(/\r\n?/g, '\n').split('\n');
   const first = lines.findIndex(x => x.trim() === '## E2E Report');
@@ -43,12 +31,12 @@ export function decideIssueE2EProjection(currentBody, candidateBody, { runId, at
     throw Error('Issue E2E declaration mutated or invalid');
   if (outsideReport(currentBody) !== outsideReport(candidateBody))
     throw Error('projection attempted to rewrite non-E2E Issue content');
-  const newReceipts = next.selectedIds.map(id => evidence(next.rows.get(id), next.digest));
+  const newReceipts = next.selectedIds.map(id => parseE2EEvidence(next.rows.get(id), next.digest));
   if (newReceipts.some(x => !x || x.run !== runId || x.attempt !== attempt || x.sha !== targetSha))
     throw Error('projected result is missing current run/SHA evidence');
   if (new Set(newReceipts.map(x => x.plan)).size !== 1)
     throw Error('inconsistent plan digest in E2E Report');
-  const oldReceipts = old.selectedIds.map(id => evidence(old.rows.get(id), old.digest)).filter(Boolean);
+  const oldReceipts = old.selectedIds.map(id => parseE2EEvidence(old.rows.get(id), old.digest)).filter(Boolean);
   if (!oldReceipts.length) return 'apply';
   if (new Set(oldReceipts.map(x => x.run + '/' + x.attempt)).size !== 1)
     throw Error('mixed current run attempts in E2E Report');
