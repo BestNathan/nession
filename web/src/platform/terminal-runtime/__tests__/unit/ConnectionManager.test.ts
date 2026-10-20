@@ -1071,16 +1071,19 @@ describe('ConnectionManager', () => {
       });
       const truncated = vi.fn();
       const displayed = vi.fn();
+      const resized = vi.fn();
       const cm = new ConnectionManager({
         mode: 'relay', sessionName: 'test', sessionId: 'a:test',
         serverConnection: ws, onStreamTruncated: truncated, ...attached,
       });
       cm.onOutput = displayed;
+      cm.onResize = resized;
 
       output(new Uint8Array([1]), undefined, { streamEpoch: 9, streamSeq: 10 });
       resize(100, 40, { streamEpoch: 9, streamSeq: 11 });
       output(new Uint8Array([2]), undefined, { streamEpoch: 9, streamSeq: 13 });
       expect(truncated).toHaveBeenCalledTimes(1);
+      expect(resized).toHaveBeenCalledWith(100, 40);
       output(new Uint8Array([3]), undefined, { streamEpoch: 9, streamSeq: 14 });
       output(new Uint8Array([4]), undefined, { streamEpoch: 9, streamSeq: 13 });
       expect(truncated).toHaveBeenCalledTimes(1);
