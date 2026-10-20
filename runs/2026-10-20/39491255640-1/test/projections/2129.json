@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_projection_receipt",
+  "outcome": "applied",
+  "issue": 2129,
+  "run_id": 39491255640,
+  "run_attempt": 1,
+  "target_sha": "c04e698837918108b9d78a4962c5ac035b667c50",
+  "plan_digest": "685dc5f6cd77fa84ad5907b94a1e9ca47693adbc6f0906c763987fdeab4c8272",
+  "artifact_digest": "sha256:1fb01eceb080bc7a10556a231f4a050cd1827d7c514767d4a1d807cde18d4597",
+  "ingest_run_id": 39491873525,
+  "ingest_attempt": 1,
+  "declaration_digest": "d7e2026ee3586fdb77047a001dc8f562685f983a8114a2d46d3c95e684db1070",
+  "before_body_sha256": "6522363dca9437addead0fc40b89e597cf3b56f7c5f54415a116affc67111954",
+  "body_sha256": "0f20152460e035875ec76a837c3450588b077f66c4272fe0d7247d3481baee2b",
+  "readback_body": "Parent #1926 / #1645 (SC-10 fault injection; SC-03/06 anti-continuity). Scoped child landing the first deterministic browser fault element and the route-flip cursor fence.\n\n## Requirements: Deterministic high-volume delivery and no pseudo-continuity across a route change\n\n### Problem\n\nThe staging fault matrix has no browser-level high-volume witness: nothing submits a burst large enough to cross many frames and queues and then checks the parser's buffer for a hole or a duplicate. Separately, the transport-swap tests pin swap ordering but never assert what happens to the parser-applied cursor when the route changes; carrying it across transports would report synchronization nobody proved.\n\n### Scope\n\n- A 5k-line numbered burst over **both** Relay and P2P: the echoed command must not match the number pattern; readiness waits for the last numbered line (proof that every earlier byte was applied); the check asserts no duplicate anywhere retained and no missing line in the tail window.\n- Poll the buffer tail while streaming so the witness does not block the page's WebSocket drain; read the full buffer once after completion.\n- A unit test: P2P→Relay flip revokes `terminalAppliedSnapshot`, and a late parser callback from the old binding cannot revive it.\n- Register the new canonical spec in the E2E migration-parity inventory (declared count + approved post-migration list).\n- No runtime behavior change.\n\n### Success Criteria\n\n- [ ] SC-01 A 5k numbered burst reaches the xterm parser over Relay and P2P with zero duplicated lines and zero missing lines in the retained tail window, deterministically at the exact PR head SHA.\n- [ ] SC-02 A P2P→Relay flip revokes the parser-applied cursor; a late callback bound to the old subscription cannot revive it.\n- [ ] SC-03 Exact PR HEAD Quality / E2E / Case Smoke / trusted Acceptance, and exact merge-SHA Quality / E2E / Cases / Orchestrator Pass.\n\n## Acceptance Plan\n\n```yaml\nacceptance:\n  SC-01:\n    when: pr\n    method: agent\n  SC-02:\n    when: pr\n    method: agent\n  SC-03:\n    when: merged\n    branch: main\n    method: agent\n```\n\n## E2E Verification\n\n### New\n- terminal-consistency-faults\n\n### Regression\n- terminal-attach-bootstrap\n\n## E2E Report\n\n| ID | Type | Result | Evidence |\n|---|---|---|---|\n| terminal-attach-bootstrap | Regression | Pass | run 39491255640/1, SHA c04e698837918108b9d78a4962c5ac035b667c50, contract d7e2026ee3586fdb77047a001dc8f562685f983a8114a2d46d3c95e684db1070, plan 685dc5f6cd77fa84ad5907b94a1e9ca47693adbc6f0906c763987fdeab4c8272, tests 3/3 (https://github.com/BestNathan/nession/actions/runs/39491255640) |\n| terminal-consistency-faults | New | Pass | run 39491255640/1, SHA c04e698837918108b9d78a4962c5ac035b667c50, contract d7e2026ee3586fdb77047a001dc8f562685f983a8114a2d46d3c95e684db1070, plan 685dc5f6cd77fa84ad5907b94a1e9ca47693adbc6f0906c763987fdeab4c8272, tests 2/2 (https://github.com/BestNathan/nession/actions/runs/39491255640) |\n\n## Acceptance Report\n\n| Criterion | Result | Evidence |\n|---|---|---|\n| SC-01 | Pending | awaiting exact PR head SHA Agent proof |\n| SC-02 | Pending | awaiting exact PR head SHA Agent proof |\n| SC-03 | Pending | awaiting merged main SHA Agent proof |\n\n## Product alignment\n\n- [ ] Does this move Nession toward VISION.md?\n- [ ] Does it obey PRINCIPLE.md?\n- [ ] Were relevant docs/design/* sources checked?\n- [ ] Is any deviation explicit?\n\n---\n**Status:** Approved\n",
+  "patch_updated_at": "2026-10-20T20:25:58Z",
+  "readback_updated_at": "2026-10-20T20:25:58Z",
+  "rows": [
+    {
+      "id": "terminal-attach-bootstrap",
+      "result": "Pass",
+      "evidence": "run 39491255640/1, SHA c04e698837918108b9d78a4962c5ac035b667c50, contract d7e2026ee3586fdb77047a001dc8f562685f983a8114a2d46d3c95e684db1070, plan 685dc5f6cd77fa84ad5907b94a1e9ca47693adbc6f0906c763987fdeab4c8272, tests 3/3 (https://github.com/BestNathan/nession/actions/runs/39491255640)"
+    },
+    {
+      "id": "terminal-consistency-faults",
+      "result": "Pass",
+      "evidence": "run 39491255640/1, SHA c04e698837918108b9d78a4962c5ac035b667c50, contract d7e2026ee3586fdb77047a001dc8f562685f983a8114a2d46d3c95e684db1070, plan 685dc5f6cd77fa84ad5907b94a1e9ca47693adbc6f0906c763987fdeab4c8272, tests 2/2 (https://github.com/BestNathan/nession/actions/runs/39491255640)"
+    }
+  ]
+}
