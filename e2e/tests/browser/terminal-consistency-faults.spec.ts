@@ -48,6 +48,8 @@ async function readBufferTail(
 for (const mode of ['Relay', 'P2P'] as const) {
   test(`high-volume numbered output reaches the parser exactly once over ${mode}`, async ({ page }, testInfo) => {
     test.skip(!process.env.CI, 'real stack available in CI only');
+    // Session creation/attach plus the burst. The readiness wait below is the
+    // real bound; a stall is a finding, not a reason to extend the timeout.
     test.setTimeout(180_000);
 
     const sessionName = `e2e-consistency-hv-${mode.toLowerCase()}-${testInfo.retry}-${Date.now()}`;
