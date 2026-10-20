@@ -138,6 +138,7 @@ jobs:
     needs: [build]
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       pages: write
       id-token: write
     environment:
@@ -147,6 +148,16 @@ jobs:
       - name: Deploy GitHub Pages
         id: publication
         uses: actions/deploy-pages@v4
+      # Read only the exact trusted main code that owns the publication
+      # receipt grammar; GitHub Pages deployment permissions are not reused
+      # for untrusted PR code or any mutable Issue text.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
       - name: Verify public site URL and exact deployed main SHA
         env:
           PUBLISHED_URL: ${{ steps.publication.outputs.page_url }}
@@ -236,7 +247,7 @@ jobs:
             status=source_backed_observation
           fi
           echo "Public Issue Agent Run observation: $status (source=$source, runs=$observed, digest=$digest)"
-          echo "Public Workflow topology verified: main_sha=$EXPECTED_SHA, nodes=$workflow_nodes, json_sha256=$workflow_json_digest, html_sha256=$workflow_html_digest"
+          node pages/scripts/publication-receipt.mjs emit "$EXPECTED_SHA" "$workflow_nodes" "$workflow_json_digest" "$workflow_html_digest"
           {
             echo "## Public Pages verified"
             echo
