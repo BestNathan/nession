@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "kind": "agent_workflow_run",
+  "identity": {
+    "workflow_id": "agent-develop",
+    "github_workflow": "Agent / Development",
+    "github_run_id": 39448549052,
+    "github_run_attempt": 1,
+    "job": "developer",
+    "repository": "BestNathan/nession",
+    "event": "workflow_dispatch",
+    "unique_run_name": "39448549052-1-issue-1997-development"
+  },
+  "task": {
+    "id": "issue-1997-development",
+    "type": "development",
+    "issue": 1997,
+    "target_ref": "220266b9233ec97b1beacbc54e5cc7f82d3cece2",
+    "action_id": "dac10d570c30557fe629b8605ecb44d33335eb967e24a52931467ac7b93b5e31",
+    "native_session_id": "agent-7d5b4a61-1476-4ce7-a38a-82907aa3b1a6",
+    "native_resumed": true,
+    "restored_checkpoint_version": 2,
+    "restored_checkpoint_commit_sha": "f9abdeca3cc26780fb0a7b2ed7000d2dd28cf142"
+  },
+  "agent": {
+    "provider": "cursor",
+    "id": "dev-cursor-01",
+    "role": "developer",
+    "harness_sha256": "ba54d9fb8b8ab9ec6ca2ac17727b02db21176437a2258123b753977fd32bbf68",
+    "checkpoint_id": "agent-store:f9abdeca3cc26780fb0a7b2ed7000d2dd28cf142:v2",
+    "model": {
+      "id": "composer-2.5",
+      "fast": true,
+      "params": [
+        {
+          "id": "fast",
+          "value": "true"
+        }
+      ]
+    },
+    "run_id": "run-ebfb5e08-35a3-4c08-a637-7aba9f4f3def",
+    "request_id": null,
+    "status": "finished",
+    "prompt": null
+  },
+  "execution": {
+    "turns": 1,
+    "model_requests": 1,
+    "tools": {
+      "observed": true,
+      "total": 3,
+      "unique": 2,
+      "by_name": {
+        "edit": 2,
+        "read": 1
+      }
+    }
+  },
+  "tokens": {
+    "input": 29111,
+    "output": 525,
+    "cache_read": 12736,
+    "cache_write": 0,
+    "reasoning": null,
+    "total": 42372
+  },
+  "cost": {
+    "raw_usd": null,
+    "charged_usd": null,
+    "estimated_usd": null
+  },
+  "timing": {
+    "started_at": "2026-10-20T15:28:20.494Z",
+    "finished_at": "2026-10-20T15:28:30.302Z",
+    "agent_duration_ms": 9797,
+    "workflow_duration_ms": null
+  },
+  "result": {
+    "status": "native-resume-checkpoint-proposed"
+  }
+}
