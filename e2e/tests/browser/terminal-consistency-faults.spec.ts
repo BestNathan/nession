@@ -5,6 +5,10 @@ import {
   attachToSession,
   waitForInteractiveShell,
   readTerminalBuffer,
+  readBufferType,
+  readGrid,
+  countInBuffer,
+  sendRawToTerminal,
   submitTerminalCommand,
 } from '../../helpers/terminalRegression';
 
@@ -93,5 +97,68 @@ for (const mode of ['Relay', 'P2P'] as const) {
 
     expect(duplicated, 'a line was delivered more than once').toEqual([]);
     expect(missingTail, 'a line in the tail window never reached the parser').toEqual([]);
+  });
+}
+
+// #2130 / #1926 SC-07: a screen that owns the terminal. The alternate screen
+// must stay the active buffer through an authoritative resize, receive the
+// same size the browser grid reports, and leave no TUI content in normal
+// scrollback when it exits. Markers are built from printf arguments so the
+// command line the PTY echoes never contains the resolved marker.
+for (const mode of ['Relay', 'P2P'] as const) {
+  test(`alternate screen survives an authoritative resize and exits cleanly over ${mode}`, async ({ page }, testInfo) => {
+    test.skip(!process.env.CI, 'real stack available in CI only');
+    test.setTimeout(120_000);
+
+    const sessionName = `e2e-consistency-tui-${mode.toLowerCase()}-${testInfo.retry}-${Date.now()}`;
+    await page.goto(
+      '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
+    );
+    await waitForShell(page);
+    await createSession(page, sessionName);
+    await attachToSession(page, sessionName, mode);
+    await waitForInteractiveShell(page);
+
+    await submitTerminalCommand(
+      page,
+      `printf '\\033[?1049h'; printf '\\033[?1h\\033[?1000h\\033[?2004h'; ` +
+        `trap 'printf "ALT-%s-REDRAW %s %s\\n" 2130 "$(stty size)"' WINCH; ` +
+        `printf 'ALT-%s-TUI\\n' 2130; while :; do sleep 0.2; done`,
+    );
+
+    await expect(async () => {
+      expect(await readBufferType(page)).toBe('alternate');
+      expect(await readTerminalBuffer(page)).toContain('ALT-2130-TUI');
+    }).toPass({ timeout: 15_000 });
+
+    // The browser grid changes first; the PTY must then report the same size
+    // from inside the TUI, which is what the WINCH trap measures.
+    const before = await readGrid(page);
+    await page.setViewportSize({ width: 1024, height: 768 });
+    let after = before;
+    await expect(async () => {
+      after = await readGrid(page);
+      expect(after).not.toEqual(before);
+    }).toPass({ timeout: 15_000 });
+
+    await expect(async () => {
+      expect(await readBufferType(page)).toBe('alternate');
+      expect(await readTerminalBuffer(page)).toContain(
+        `ALT-2130-REDRAW ${after.rows} ${after.cols}`,
+      );
+    }).toPass({ timeout: 15_000 });
+
+    // Interrupt the loop, then leave the alternate screen from the shell.
+    await sendRawToTerminal(page, '\x03');
+    await submitTerminalCommand(page, `printf '\\033[?1049l'; echo ALT-2130-BACK`);
+
+    await expect(async () => {
+      expect(await readBufferType(page)).toBe('normal');
+      expect(await readTerminalBuffer(page)).toContain('ALT-2130-BACK');
+    }).toPass({ timeout: 15_000 });
+
+    // Nothing owned by the alternate screen may leak into normal scrollback.
+    expect(await countInBuffer(page, 'ALT-2130-TUI')).toBe(0);
+    expect(await countInBuffer(page, 'ALT-2130-REDRAW')).toBe(0);
   });
 }
