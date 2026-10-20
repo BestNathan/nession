@@ -16,6 +16,9 @@ const MAX_SLICES = 64;
 const HEX64 = /^[a-f0-9]{64}$/;
 const MAX_OUTBOX = 128;
 const MAX_ATTEMPTS = 5;
+const NATIVE_FAILED_RESUME='3f4abb86785d41dbb771edbab1c400841d3d0e60335358332307b75e1d36c1c8';
+const NATIVE_FAILED_RUN=39376331942;
+const NATIVE_FAILURE_CODE='native_cursor_agent_not_found_before_send';
 
 function reject(message) { throw new Error('agent outbox: ' + message); }
 function isIssue(value) { return Number.isSafeInteger(value) && value > 0; }
@@ -96,9 +99,9 @@ export function validateDevelopmentState(state) {
           item.task.agent_id!==parent.task.agent_id ||
           item.task.task!==parent.task.task ||
           item.task.sha!==parent.task.sha ||
-          item.id!==hash([c.parent_action_id,c.checkpoint_version,
-            c.ordinal,c.checkpoint_commit_sha]) ||
-          state.outbox.filter(x=>x.task.continuation?.parent_action_id===parent.id).length!==1) {
+          !validNativeRecoveryLineage(state,item) ||
+          state.outbox.filter(x=>x.task.continuation?.parent_action_id===parent.id &&
+            x.status!=='failed').length!==1) {
         reject('unbound or invalid Slice continuation');
       }
     }
@@ -135,7 +138,11 @@ export function validateDevelopmentState(state) {
       onlyKeys(r,['status','dispatch_id','source_run_id','source_attempt',
         'failure_code'],'attested failed Run');
       if(Object.keys(r).length!==5||r.status!=='failed'||
-          r.dispatch_id!==item.id||r.failure_code!=='native_sdk_sandbox_unavailable'||
+          r.dispatch_id!==item.id||
+          !['native_sdk_sandbox_unavailable',NATIVE_FAILURE_CODE].includes(r.failure_code)||
+          (r.failure_code===NATIVE_FAILURE_CODE &&
+            (item.id!==NATIVE_FAILED_RESUME||r.source_run_id!==NATIVE_FAILED_RUN||
+             item.task.continuation?.checkpoint_version!==1))||
           !positive(r.source_run_id)||!positive(r.source_attempt)||
           item.task.type!=='dispatch'||item.task.role!=='developer')
         reject('invalid authenticated failure receipt');
@@ -298,6 +305,54 @@ export function recordDispatch(state, expectedVersion, actionId, receipt) {
       ...item,status:'dispatched',attempts:item.attempts+(item.status==='pending'?1:0),receipt,
     } : item),
   });
+}
+
+// A terminal failed continuation may have one replacement, but NEVER a second
+// live sibling. Only this exact historically attested #1997 Run is eligible.
+export function nativeResumeSuccessorId(issue,actionId,runId){
+  if(issue!==1997||actionId!==NATIVE_FAILED_RESUME||runId!==NATIVE_FAILED_RUN)
+    reject('unsupported native Resume recovery');
+  return hash([issue,actionId,runId,'native-cursor-resume-lookup-recovery-v1']);
+}
+function validNativeRecoveryLineage(state,item){
+  const c=item.task.continuation;
+  const ordinary=hash([c.parent_action_id,c.checkpoint_version,c.ordinal,c.checkpoint_commit_sha]);
+  if(item.id===ordinary)return true;
+  if(state.issue!==1997||ordinary!==NATIVE_FAILED_RESUME||item.status==='failed')return false;
+  const failed=state.outbox.find(x=>x.id===ordinary&&x.status==='failed'&&
+    x.receipt?.failure_code===NATIVE_FAILURE_CODE&&x.receipt.source_run_id===NATIVE_FAILED_RUN);
+  return Boolean(failed&&item.id===nativeResumeSuccessorId(state.issue,ordinary,NATIVE_FAILED_RUN)&&
+    JSON.stringify(item.task)===JSON.stringify(failed.task));
+}
+// The Controller must attest the historical Run independently before this call.
+// Pure state mutation: no Provider invocation, no GitHub POST.
+export function recordAttestedNativeResumeFailure(state,expectedVersion,actionId,source){
+  validateDevelopmentState(state);
+  if(state.version!==expectedVersion)reject('stale native recovery CAS');
+  onlyKeys(source,['verified','issue','run_id','attempt','failure_code'],
+    'attested native Resume failure');
+  const old=state.outbox.find(x=>x.id===actionId);
+  if(source.verified!==true||source.issue!==1997||state.issue!==1997||
+    source.run_id!==NATIVE_FAILED_RUN||source.attempt!==1||
+    source.failure_code!==NATIVE_FAILURE_CODE||actionId!==NATIVE_FAILED_RESUME||
+    old?.status!=='dispatched'||old.receipt?.status!=='verified'||
+    old.receipt.source_run_id!==NATIVE_FAILED_RUN||old.attempts!==1||
+    old.task.role!=='developer'||old.task.agent_id!=='dev-cursor-01'||
+    old.task.task!=='implement'||old.task.resume!==true||
+    old.task.sha!=='220266b9233ec97b1beacbc54e5cc7f82d3cece2'||
+    old.task.continuation?.checkpoint_commit_sha!=='d812e3655c0ad6337b1003aa0c1794c12335adb0'||
+    old.task.continuation?.checkpoint_version!==1||
+    state.outbox.some(x=>x.id!==actionId&&x.task.continuation?.parent_action_id===
+      old.task.continuation.parent_action_id))
+    reject('unverified, conflicting or already recovered native Resume');
+  const id=nativeResumeSuccessorId(state.issue,actionId,NATIVE_FAILED_RUN);
+  if(state.outbox.length>=MAX_OUTBOX||state.outbox.some(x=>x.id===id))
+    reject('native recovery action collision or Outbox exhausted');
+  const failed={...old,status:'failed',receipt:{status:'failed',dispatch_id:old.id,
+    source_run_id:NATIVE_FAILED_RUN,source_attempt:1,failure_code:NATIVE_FAILURE_CODE}};
+  const successor={id,task:{...old.task},status:'pending',attempts:0,receipt:null};
+  return validateDevelopmentState({...state,version:state.version+1,
+    outbox:[...state.outbox.map(x=>x.id===actionId?failed:x),successor]});
 }
 
 // A bounded Worker may end at a Provider-safe checkpoint without declaring the
