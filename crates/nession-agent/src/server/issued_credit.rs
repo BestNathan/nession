@@ -135,7 +135,11 @@ impl SubscriberIssuedFlow {
     const MAX_UNACKED_BYTES: usize = 2 * 1024 * 1024;
 
     pub fn new() -> Self {
-        Self { epoch: None, last_issued: None, credit: None }
+        Self {
+            epoch: None,
+            last_issued: None,
+            credit: None,
+        }
     }
 
     /// Called immediately BEFORE offering an event to the serialized
@@ -169,11 +173,17 @@ impl SubscriberIssuedFlow {
     ///
     /// It must not be used with an unverified attach cursor or transport
     /// delivery receipt. Replay outside this live lane does not mint credit.
-    pub fn parser_ack(&mut self, epoch: u64, parsed_through: u64) -> Result<usize, IssuedCreditError> {
+    pub fn parser_ack(
+        &mut self,
+        epoch: u64,
+        parsed_through: u64,
+    ) -> Result<usize, IssuedCreditError> {
         if self.epoch != Some(epoch) || parsed_through == 0 {
             return Ok(0);
         }
-        let Some(last_issued) = self.last_issued else { return Ok(0) };
+        let Some(last_issued) = self.last_issued else {
+            return Ok(0);
+        };
         match &mut self.credit {
             Some(ledger) => {
                 // Old parser callbacks may precede the opt-in cut. They must
@@ -197,7 +207,9 @@ impl SubscriberIssuedFlow {
     }
 
     pub fn outstanding_bytes(&self) -> usize {
-        self.credit.as_ref().map_or(0, IssuedByteCredit::outstanding_bytes)
+        self.credit
+            .as_ref()
+            .map_or(0, IssuedByteCredit::outstanding_bytes)
     }
 
     pub fn last_issued(&self) -> Option<u64> {
@@ -210,7 +222,9 @@ impl SubscriberIssuedFlow {
 }
 
 impl Default for SubscriberIssuedFlow {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[cfg(test)]
@@ -314,7 +328,10 @@ mod tests {
         assert_eq!(flow.parser_ack(17, 3), Err(IssuedCreditError::BeyondIssued));
         assert_eq!(flow.outstanding_bytes(), 6);
         assert_eq!(flow.parser_ack(17, 2), Ok(6));
-        assert_eq!(flow.issue(18, 3), Err(IssuedCreditError::SequenceGap));
+        assert_eq!(
+            flow.issue(18, 3, 1),
+            Err(IssuedCreditError::SequenceGap)
+        );
     }
 
     #[test]
@@ -334,7 +351,10 @@ mod tests {
         }
         assert!(!slow.credit_enabled());
         assert_eq!(slow.outstanding_bytes(), 0);
-        assert_eq!(fast.issue(7, 1026, 1), Err(IssuedCreditError::CapacityExceeded));
+        assert_eq!(
+            fast.issue(7, 1026, 1),
+            Err(IssuedCreditError::CapacityExceeded)
+        );
         assert_eq!(fast.last_issued(), Some(1025));
         assert_eq!(fast.outstanding_bytes(), 1024);
     }
