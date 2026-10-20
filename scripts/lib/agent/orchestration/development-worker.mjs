@@ -55,7 +55,7 @@ export function originalCursorWorkspace(agentsJsonl,agentId){
   if(!/^agent-[a-zA-Z0-9-]{4,100}$/.test(agentId)||
       typeof agentsJsonl!=='string'||Buffer.byteLength(agentsJsonl)>16*1024*1024)
     fail('invalid native Agent workspace manifest');
-  const rows=agentsJsonl.split(/\\r?\\n/).filter(Boolean);
+  const rows=agentsJsonl.split(/\r?\n/).filter(Boolean);
   if(!rows.length||rows.length>10000)fail('empty or unbounded native Agent workspace manifest');
   const candidates=new Set();
   function scan(node,depth,values,paths){
@@ -82,7 +82,7 @@ export function originalCursorWorkspace(agentsJsonl,agentId){
   }
   if(candidates.size!==1)fail('native Agent workspace identity not unique');
   const cwd=[...candidates][0];
-  if(!/^\\/tmp\\/nession-dev-slice-[A-Za-z0-9]{6}\\/source$/.test(cwd)||
+  if(!/^\/tmp\/nession-dev-slice-[A-Za-z0-9]{6}\/source$/.test(cwd)||
       path.resolve(cwd)!==cwd||path.normalize(cwd)!==cwd)
     fail('native Agent workspace outside isolated fixture namespace');
   return cwd;
