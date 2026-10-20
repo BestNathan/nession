@@ -366,6 +366,13 @@ function selfTest(){
   assert.notEqual(directAgentPush.get(agentIngest),sources.get(agentIngest));
   assert.throws(()=>checkInventory(manifest,directAgentPush),
     /agent-store writer bypasses bounded CAS/);
+  const directAgentPushWithGitC=new Map(sources);
+  directAgentPushWithGitC.set(agentIngest,directAgentPushWithGitC.get(agentIngest).replace(
+    '          node scripts/lib/agent/orchestration/development-ingest.mjs ingest',
+    '          git -C agent-store push origin HEAD:agent-store\n          node scripts/lib/agent/orchestration/development-ingest.mjs ingest'));
+  assert.notEqual(directAgentPushWithGitC.get(agentIngest),sources.get(agentIngest));
+  assert.throws(()=>checkInventory(manifest,directAgentPushWithGitC),
+    /agent-store writer bypasses bounded CAS/);
   const untrustedExtraCheckout=new Map(sources);
   untrustedExtraCheckout.set(agentIngest,untrustedExtraCheckout.get(agentIngest).replace(
     '      - uses: actions/setup-node@v4',
