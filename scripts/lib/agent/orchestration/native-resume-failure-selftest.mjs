@@ -40,6 +40,13 @@ const head={version:1,
 const clone=x=>structuredClone(x),verify=(r=run,j=jobs,a=artifacts,l=log,h=head)=>
   verifyNativeResumeFailure(r,j,a,l,h);
 assert.equal(verify().verified,true);
+const githubJobPayload=clone(jobs);
+githubJobPayload.jobs.forEach(job=>delete job.run_attempt);
+assert.equal(verify(run,githubJobPayload).verified,true,
+  'GitHub job endpoints omit run_attempt; exact Run ID and fixed job IDs bind identity');
+const wrongAttempt=clone(jobs);
+wrongAttempt.jobs[0].run_attempt=2;
+assert.throws(()=>verify(run,wrongAttempt),/job topology/);
 for(const patch of [{head_sha:'f'.repeat(40)},{run_attempt:2},
   {actor:{login:'fork'}},{conclusion:'success'},{head_branch:'staging'}])
   assert.throws(()=>verify({...run,...patch}),/Run\/commit/);
