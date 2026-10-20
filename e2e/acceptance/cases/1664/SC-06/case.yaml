@@ -1,0 +1,12 @@
+schema_version: 1
+issue: 1664
+criterion: SC-06
+stage: post-merge
+runtime: full-stack-local
+# Read-only live orphan Store inspection and ephemeral bare-Git negative fixtures.
+# No model, provider secret, Store writer or remote mutation is required.
+isolation: shared
+verifiers:
+  - type: runtime
+    entry: verify.js
+result_policy: all-pass
