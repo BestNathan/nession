@@ -67,7 +67,9 @@ export type RelayServerTransport = RelayServerHandle &
     | 'onRelayResize'
     | 'onRelayInputAck'
     | 'resumeRelayStream'
-  >;
+  > &
+  // Existing injected test/legacy handles do not advertise verified identity.
+  Partial<Pick<TerminalServerApi, 'onRelaySubscriptionReady'>>;
 
 /**
  * Build a relay handle for a server WebSocket service. Transport state
@@ -118,6 +120,16 @@ export function relayServerHandle(
     onRelayInputAck: (sessionName, cb) => {
       if (stale()) { return () => {}; }
       return terminalServerApi.onRelayInputAck(sessionName, cb);
+    },
+    onRelaySubscriptionReady: (sessionName, cb) => {
+      if (stale()) { return () => {}; }
+      return terminalServerApi.onRelaySubscriptionReady(sessionName, (proof) => {
+        // A live singleton may have been rebound to a newer service. Never
+        // deliver a proof to a stale handle/renderer (#2102).
+        if (!stale() && service.connectionState === 'connected') {
+          cb(proof);
+        }
+      });
     },
     resumeRelayStream: (sessionName, epoch, afterSeq) => {
       if (stale() || service.connectionState !== 'connected') {
