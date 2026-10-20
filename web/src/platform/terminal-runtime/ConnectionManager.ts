@@ -611,22 +611,23 @@ export class ConnectionManager implements TerminalTransport {
   }
 
   /**
-   * Ask the agent for the events after a cursor (#1094), on the reconciler's
-   * behalf — it decides when a replay is worth asking for and what to do with
-   * the answer.
+   * Ask the same Agent stream owner for a complete-only replay. The Server's
+   * Relay tunnel forwards this wire unchanged; it never allocates a cursor.
+   * Missing/dead routes reject rather than pretending an empty replay, and
+   * the reconciler owns all gap/expiry decisions.
    *
-   * Only P2P has a stream to resume: relay frames carry no sequence numbers, so
-   * nothing on that path ever asks. A refusal is a rejection rather than an
-   * empty answer, because the reconciler reads "no events after your cursor"
-   * as a cursor that is up to date, and a request that never happened must not
-   * look like one that did.
+   * The Relay observed-only detector still reports degraded output until a
+   * provable subscribe/baseline cutover exists (#2050); exposing this request
+   * alone does NOT establish a synchronized Relay renderer or parser ACK.
    */
   private resumeStream(epoch: number, afterSeq: number): Promise<ResumeReply> {
-    const api = this.agentApi;
-    if (this.mode !== 'p2p' || !api) {
-      return Promise.reject(new Error('terminal stream resume is P2P-only'));
+    if (this.mode === 'p2p' && this.agentApi) {
+      return this.agentApi.resumeStream(this.sessionName, epoch, afterSeq);
     }
-    return api.resumeStream(this.sessionName, epoch, afterSeq);
+    if (this.mode === 'relay' && this.serverConnection?.isReady()) {
+      return this.serverConnection.resumeRelayStream(this.sessionName, epoch, afterSeq);
+    }
+    return Promise.reject(new Error('terminal stream resume unavailable on current transport'));
   }
 
   /**

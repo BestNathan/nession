@@ -372,7 +372,8 @@ function parseResumeRecovery(value: unknown): TerminalStreamResumeResult['recove
   }
 }
 
-function readResumeReply(reply: unknown, requestedEpoch: number): TerminalStreamResumeResult {
+/** Shared authoritative Agent resume decoder; direct and Relay cannot drift. */
+export function readResumeReply(reply: unknown, requestedEpoch: number): TerminalStreamResumeResult {
   const r = reply as Record<string, unknown>;
   const firstAvailableSeq = r.first_available_seq;
   const complete = r.complete;

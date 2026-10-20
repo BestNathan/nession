@@ -116,6 +116,47 @@ describe('TerminalServerPlugin', () => {
     });
   });
 
+  describe('Agent Relay stream resume', () => {
+    it('passes the original Agent resume wire and preserves a complete reply (#2050)', async () => {
+      const pending = plugin.resumeRelayStream('work', 31, 4);
+      expect(surface.requests[0]).toMatchObject({
+        type: 'agent.terminal.stream.resume',
+        payload: { session_name: 'work', stream_epoch: 31, after_seq: 4 },
+      });
+      expect(surface.resolveNext('agent.terminal.stream.resume', {
+        stream_epoch: 31,
+        epoch_match: true,
+        first_available_seq: 5,
+        complete: true,
+        recovery: 'complete',
+        events: [{ kind: 'resize', stream_epoch: 31, stream_seq: 5, cols: 120, rows: 40 }],
+      })).toBe(true);
+      await expect(pending).resolves.toMatchObject({
+        streamEpoch: 31, epochMatch: true, complete: true,
+        recovery: 'complete',
+        events: [{ kind: 'resize', streamEpoch: 31, streamSeq: 5, cols: 120, rows: 40 }],
+      });
+    });
+
+    it('refuses contradictory and incomplete Relay recovery without leaking retained suffix (#2050)', async () => {
+      const pending = plugin.resumeRelayStream('work', 31, 4);
+      surface.resolveNext('agent.terminal.stream.resume', {
+        stream_epoch: 31,
+        epoch_match: true,
+        complete: false,
+        recovery: 'complete',
+        events: [{ kind: 'output', stream_epoch: 31, stream_seq: 9, data: 'aGk=' }],
+      });
+      const result = await pending;
+      expect(result.recovery).toBe('unavailable');
+      expect(result.epochMatch).toBe(false);
+      expect(result.events).toEqual([]);
+      await expect(plugin.resumeRelayStream('work', 0, 0)).rejects.toThrow('invalid Relay stream cursor');
+      await expect(plugin.resumeRelayStream('work', 31, -1)).rejects.toThrow('invalid Relay stream cursor');
+      expect(surface.requests).toHaveLength(1);
+    });
+  });
+
   describe('onRelayOutput', () => {
     it('routes relay frames per session_name and decodes base64 to raw bytes', () => {
       const cbWork = vi.fn();
