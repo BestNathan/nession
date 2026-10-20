@@ -13,6 +13,7 @@ import type { TransportPlugin, PluginSurface } from '@/platform/socket/types';
 // type-only import across the layer boundary, which the rule allows — and the
 // alternative (each side declaring its own) is how the two would drift.
 import type { RelayBeginOptions } from '@/platform/attach/relayServerConnection';
+import type { TerminalStreamPosition } from '@/platform/terminal-runtime/streamApply';
 
 /**
  * A relay output frame. `bootstrap` is present when the bytes are the
@@ -24,8 +25,8 @@ import type { RelayBeginOptions } from '@/platform/attach/relayServerConnection'
  * marker carries the agent's metadata about the snapshot, including whether a
  * byte ceiling cut it short (#1305).
  */
-type RelayOutputCallback = (data: Uint8Array, bootstrap?: TerminalBootstrap) => void;
-type RelayResizeCallback = (cols: number, rows: number) => void;
+type RelayOutputCallback = (data: Uint8Array, bootstrap?: TerminalBootstrap, position?: TerminalStreamPosition) => void;
+type RelayResizeCallback = (cols: number, rows: number, position?: TerminalStreamPosition) => void;
 type RelayInputAckCallback = (ack: InputAckFields) => void;
 
 /**
@@ -54,6 +55,23 @@ interface GenerationEntry<T> {
  */
 function getSessionId(payload: Record<string, unknown>): string {
   return (payload.session_name ?? payload.session_id) as string;
+}
+
+/**
+ * Relay must not erase a sequence the Agent actually issued (#2043).
+ * A half-stated or unsafe pair is never interpreted as an Agent position:
+ * absence is legacy/unverified, not a made-up recovery cursor. Bootstrap
+ * is outside the ordered event timeline regardless of its metadata.
+ */
+function readAgentStreamPosition(payload: Record<string, unknown>): TerminalStreamPosition | undefined {
+  const epoch = payload.stream_epoch;
+  const seq = payload.stream_seq;
+  if (typeof epoch !== 'number' || typeof seq !== 'number'
+    || !Number.isSafeInteger(epoch) || epoch <= 0
+    || !Number.isSafeInteger(seq) || seq <= 0) {
+    return undefined;
+  }
+  return { streamEpoch: epoch, streamSeq: seq };
 }
 
 /**
@@ -265,7 +283,11 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
     const callbacks = this.outputCallbacks.get(sessionId);
     if (callbacks) {
       for (const entry of callbacks) {
-        entry.cb(data, bootstrap);
+        entry.cb(
+          data,
+          bootstrap,
+          Object.prototype.hasOwnProperty.call(payload, 'bootstrap') ? undefined : readAgentStreamPosition(payload),
+        );
       }
     }
   }
@@ -278,7 +300,7 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
     const callbacks = this.resizeCallbacks.get(sessionId);
     if (callbacks) {
       for (const entry of callbacks) {
-        entry.cb(cols, rows);
+        entry.cb(cols, rows, readAgentStreamPosition(payload));
       }
     }
   }

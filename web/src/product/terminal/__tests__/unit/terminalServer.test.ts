@@ -132,6 +132,40 @@ describe('TerminalServerPlugin', () => {
       expect(cbOther.mock.calls[0]?.[0]).toEqual(new Uint8Array([104, 105]));
     });
 
+    it('retains only complete safe Agent-assigned output positions on Relay (#2043)', () => {
+      const cb = vi.fn();
+      plugin.onRelayOutput('work', cb);
+      surface.pushMessage('agent.terminal.output', {
+        session_name: 'work', data: 'YQ==', stream_epoch: 31, stream_seq: 1,
+      });
+      surface.pushMessage('agent.terminal.output', {
+        session_name: 'work', data: 'Yg==', stream_epoch: 31,
+      });
+      surface.pushMessage('agent.terminal.output', {
+        session_name: 'work', data: 'Yw==', stream_epoch: 31, stream_seq: Number.MAX_SAFE_INTEGER + 1,
+      });
+      surface.pushMessage('agent.terminal.output', { session_name: 'work', data: 'ZA==' });
+      surface.pushMessage('agent.terminal.output', {
+        session_name: 'work', data: 'ZQ==', stream_epoch: 31, stream_seq: 5,
+        bootstrap: { requested_lines: 10, truncated: false },
+      });
+
+      surface.pushMessage('agent.terminal.output', {
+        session_name: 'work', data: 'Zg==', stream_epoch: 31, stream_seq: 6,
+        bootstrap: { requested_lines: 'invalid', truncated: false },
+      });
+
+      expect(cb.mock.calls[0]?.[2]).toEqual({ streamEpoch: 31, streamSeq: 1 });
+      expect(cb.mock.calls[1]?.[2]).toBeUndefined();
+      expect(cb.mock.calls[2]?.[2]).toBeUndefined();
+      expect(cb.mock.calls[3]?.[2]).toBeUndefined();
+      // A checkpoint marker is not a stream event even if malformed metadata
+      // contains a pair: never promote it to parser-applied sequence.
+      expect(cb.mock.calls[4]?.[2]).toBeUndefined();
+      expect(cb.mock.calls[5]?.[2]).toBeUndefined();
+      expect(cb.mock.calls[0]?.[0]).toEqual(new TextEncoder().encode('a'));
+    });
+
     it('routes by session_id when the frame carries no session_name (non-relay decode)', () => {
       const cb = vi.fn();
       plugin.onRelayOutput('direct', cb);
@@ -246,6 +280,28 @@ describe('TerminalServerPlugin', () => {
 
       expect(cb).toHaveBeenCalledWith(0, 0);
     });
+  });
+
+  it('preserves sequenced authoritative resize but not legacy levels or invalid pairs (#2043)', () => {
+    const cb = vi.fn();
+    plugin.onRelayResize('work', cb);
+    surface.pushMessage('agent.terminal.resize', {
+      session_name: 'work', cols: 100, rows: 30, stream_epoch: 31, stream_seq: 2,
+    });
+    surface.pushMessage('agent.terminal.resize', {
+      session_name: 'work', cols: 101, rows: 30, stream_epoch: 31,
+    });
+    surface.pushMessage('agent.terminal.resize', {
+      session_name: 'work', cols: 102, rows: 30, stream_epoch: -1, stream_seq: 3,
+    });
+    surface.pushMessage('agent.terminal.resize', {
+      session_name: 'work', cols: 103, rows: 30,
+    });
+
+    expect(cb.mock.calls[0]).toEqual([100, 30, { streamEpoch: 31, streamSeq: 2 }]);
+    for (const call of cb.mock.calls.slice(1)) {
+      expect(call[2]).toBeUndefined();
+    }
   });
 
   describe('onRelayInputAck', () => {
