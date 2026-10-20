@@ -140,6 +140,7 @@ describe('TerminalServerPlugin', () => {
 
     it('refuses contradictory and incomplete Relay recovery without leaking retained suffix (#2050)', async () => {
       const pending = plugin.resumeRelayStream('work', 31, 4);
+      expect(surface.requests).toHaveLength(1);
       surface.resolveNext('agent.terminal.stream.resume', {
         stream_epoch: 31,
         epoch_match: true,
@@ -153,7 +154,6 @@ describe('TerminalServerPlugin', () => {
       expect(result.events).toEqual([]);
       await expect(plugin.resumeRelayStream('work', 0, 0)).rejects.toThrow('invalid Relay stream cursor');
       await expect(plugin.resumeRelayStream('work', 31, -1)).rejects.toThrow('invalid Relay stream cursor');
-      expect(surface.requests).toHaveLength(1);
     });
   });
 
