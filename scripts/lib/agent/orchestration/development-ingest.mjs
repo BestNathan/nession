@@ -16,7 +16,7 @@ import {createGitHubRunReader} from './github-dispatch.mjs';
 import {deriveDispatchKey} from './controller-dispatch.mjs';
 import {commitAttestedSliceYield} from './dispatch-store.mjs';
 import {readIssueWorkflowState} from './state-store.mjs';
-import {failedDeveloperRetryActionId} from './outbox.mjs';
+import {failedDeveloperRetryActionId,nativeResumeSuccessorId} from './outbox.mjs';
 import {sealCheckpoint} from '../store/checkpoint.mjs';
 import {publishEncryptedAgentCheckpoint,verifyCommittedCheckpoint} from '../store/remote.mjs';
 import {CONTROLLED_CONTINUATION} from './development-resume.mjs';
@@ -158,6 +158,10 @@ export function developmentIngestReceipt({status,run,claim,metadata,claimArtifac
 
 const PINNED_RECOVERY_SOURCE_RUN=39288961865;
 const PINNED_RECOVERY_COMMAND='/nession ingest issue=1997 worker_run=39288961865';
+export const NATIVE_RECOVERY_ACTION=nativeResumeSuccessorId(1997,CONTROLLED_CONTINUATION,39376331942);
+export const NATIVE_RECOVERY_RUN=39396836009;
+export const NATIVE_RECOVERY_SHA='2f75869833fb43ec54e88b560226f8913a6beac3';
+export const NATIVE_RECOVERY_INGEST_COMMAND='/nession ingest issue=1997 action='+NATIVE_RECOVERY_ACTION+' worker_run='+NATIVE_RECOVERY_RUN;
 // The lack of a workflow_run delivery must not allow a result to be promoted
 // by editing a Store file or by supplying an arbitrary Run ID. This manual
 // recovery still re-reads GitHub, both Artifact digests, the HMAC Ticket and
@@ -184,7 +188,179 @@ export function resolveTrustedIngestSource({environment,event}){
         event.issue?.pull_request||
         event.comment?.user?.login!=='BestNathan'||
         (event.comment?.body!==PINNED_RECOVERY_COMMAND&&
-          !new RegExp('^/nession ingest issue=1997 action='+CONTROLLED_CONTINUATION+' worker_run=[1-9][0-9]{0,14}$').test(event.comment?.body??''))||
+          !new RegExp('^/nession ingest issue=1997 action='+CONTROLLED_CONTINUATION+' worker_run=[1-9][0-9]{0,14}
+        !Number.isSafeInteger(event.comment.id)||event.comment.id<1)
+      fail('manual checkpoint recovery requires exact owner/main Issue comment');
+    if(event.comment.body===PINNED_RECOVERY_COMMAND)
+      return {run_id:PINNED_RECOVERY_SOURCE_RUN,source:null};
+    const id=Number(event.comment.body.match(/worker_run=([0-9]+)$/)[1]);
+    if(!Number.isSafeInteger(id)||id<=PINNED_RECOVERY_SOURCE_RUN)fail('invalid continuation source Run');
+    return {run_id:id,source:null,continuation:true,
+      ...(event.comment.body===NATIVE_RECOVERY_INGEST_COMMAND?{native_recovery:true}:{})};
+  }
+  fail('unsupported Ingest trigger');
+}
+
+async function main(){
+  if(process.argv.length===3&&process.argv[2]==='source'){
+    const event=JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH,'utf8'));
+    const source=resolveTrustedIngestSource({environment:process.env,event});
+    console.log(JSON.stringify({run_id:source.run_id,attempt:source.source?.run_attempt??1}));
+    return;
+  }
+  if(process.argv.length!==5||process.argv[2]!=='ingest')fail('usage: ingest CLAIM_ZIP RESULT_ZIP');
+  const env=process.env,token=env.ACTIONS_READ_TOKEN;
+  if(env.GITHUB_ACTIONS!=='true'||env.GITHUB_REPOSITORY!==REPO||
+      !['workflow_run','issue_comment'].includes(env.GITHUB_EVENT_NAME)||
+      env.GITHUB_WORKFLOW!=='Store / Agent Development Ingest'||
+      env.GITHUB_REF!=='refs/heads/main'||
+      !HEX40.test(env.GITHUB_SHA??'')||
+      typeof token!=='string'||token.length<8||
+      !env.AGENT_STORE_CONTROLLER_REMOTE?.startsWith('https://x-access-token:')||
+      typeof env.STORE_WRITER_PRIVATE_KEY!=='string'||!env.CURSOR_RESUME_PRIVATE_KEY_B64)
+    fail('independent main-owned Store checkpoint Ingest required');
+  const event=JSON.parse(fs.readFileSync(env.GITHUB_EVENT_PATH,'utf8'));
+  const authority=resolveTrustedIngestSource({environment:env,event});
+  const reader=createGitHubRunReader(token);
+  const run=await reader.getRun(authority.run_id);
+  if(authority.source &&
+     (run.id!==authority.source.id||
+      run.run_attempt!==authority.source.run_attempt||
+      run.head_sha!==authority.source.head_sha))
+    fail('GitHub webhook/source Run mismatch');
+  if(!authority.source && !authority.continuation&&
+      (run.id!==PINNED_RECOVERY_SOURCE_RUN||run.run_attempt!==1||
+       run.head_sha!=='e6e64eb84663f2bb935b9c0628d9ab787523186b'||
+       run.conclusion!=='success'||run.status!=='completed'))
+    fail('manual replay is not the exact successful isolated Worker');
+  if(authority.native_recovery &&
+     (run.id!==NATIVE_RECOVERY_RUN||run.run_attempt!==1||
+      run.head_sha!==NATIVE_RECOVERY_SHA||
+      run.status!=='completed'||run.conclusion!=='success'))
+    fail('manual native recovery is not the exact successful Worker SHA/Run');
+  const artifacts=await api(token,'/actions/runs/'+run.id+'/artifacts?per_page=100');
+  const verifiedClaim=authenticateWorkerClaimRun(run,artifacts);
+  const matching=artifacts.artifacts.filter(a=>a.name===
+    'development-worker-'+run.id+'-'+run.run_attempt);
+  if(matching.length!==1||matching[0].expired!==false||
+      matching[0].workflow_run?.id!==run.id||
+      matching[0].workflow_run?.head_sha!==run.head_sha||
+      !/^sha256:[a-f0-9]{64}$/.test(matching[0].digest??'')||
+      matching[0].size_in_bytes<=0||
+      matching[0].size_in_bytes>32*1024*1024)
+    fail('missing/duplicate/unsafe encrypted Worker Artifact');
+  const claimZip=fs.readFileSync(process.argv[3]);
+  const claim=inspectWorkerClaimZip(claimZip,verifiedClaim.digest,run);
+  const resultZip=fs.readFileSync(process.argv[4]);
+  if(matching[0].digest!=='sha256:'+hash(resultZip))
+    fail('encrypted Worker Artifact ZIP digest mismatch');
+  const result=readJsonFromZip(resultZip,'result.json');
+  const proof=readJsonFromZip(resultZip,'proof.json');
+  const wrapped=readJsonFromZip(resultZip,'ciphertext.json');
+  const metadata=matchingResult(result,proof,wrapped,claim,run);
+  const rootKey=deriveDispatchKey(env.STORE_WRITER_PRIVATE_KEY);
+  const aesKey=deriveStoreAesKey(env.STORE_WRITER_PRIVATE_KEY);
+  try{
+    const verified=await verifyWorkerClaimForAck({run,claim,key:rootKey,reader});
+    if(verified.source_run_id!==run.id||verified.issue!==1997||
+        ![
+          '95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae',
+          failedDeveloperRetryActionId(1997,
+            '95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae',
+            39267659650),
+          CONTROLLED_CONTINUATION,
+          NATIVE_RECOVERY_ACTION,
+        ].includes(verified.action_id))
+      fail('Developer scope not yet authorized outside #1997 fixture');
+    if(authority.continuation&&(
+         ![CONTROLLED_CONTINUATION,NATIVE_RECOVERY_ACTION].includes(verified.action_id)||
+         run.run_attempt!==1||
+         (authority.native_recovery&&verified.action_id!==NATIVE_RECOVERY_ACTION)||
+         (!authority.native_recovery&&verified.action_id!==CONTROLLED_CONTINUATION)))
+      fail('continuation recovery source is not the exact controlled Action/Attempt');
+    const store=env.AGENT_STORE_CONTROLLER_REMOTE;
+    const admission=readConfirmedDevelopmentState(store,claim,run);
+    if(admission.already_yielded) {
+      const receipt=admission.action.receipt;
+      if(receipt?.source_run_id!==run.id||
+          receipt.source_attempt!==run.run_attempt)fail('conflicting Slice replay');
+      verifyCommittedCheckpoint({remote:store,
+        identity:{role:'developer',agent_id:'dev-cursor-01',issue:1997},
+        commit_sha:receipt.checkpoint_commit_sha,
+        version:receipt.checkpoint_version,
+        ciphertext_sha256:receipt.ciphertext_sha256});
+      if(!admission.existing_checkpoint)fail('yielded Slice lacks immutable checkpoint');
+      console.log(JSON.stringify(developmentIngestReceipt({
+        status:'replayed',run,claim,metadata,claimArtifact:verifiedClaim,
+        resultArtifact:matching[0],checkpoint:admission.existing_checkpoint,
+        stateVersion:admission.state_version,storeCommit:admission.store_commit_sha,
+        environment:env})));
+      return;
+    }
+    let published,encryptedDigest;
+    const identity={role:'developer',agent_id:'dev-cursor-01',issue:1997};
+    if(admission.existing_checkpoint) {
+      // Recover a crash after checkpoint CAS but before Yield CAS WITHOUT
+      // generating a new ciphertext or forging a new committed Run.
+      const prior=admission.existing_checkpoint;
+      if(prior.metadata?.provider!=='cursor'||
+          prior.metadata.session_id!==metadata.agent_id||
+          prior.metadata.source_sha!==claim.inputs.input_sha||
+          prior.metadata.harness_digest!==metadata.harness_digest)
+        fail('replayed Artifact conflicts with immutable native Session identity');
+      verifyCommittedCheckpoint({remote:store,identity,
+        commit_sha:prior.commit_sha,version:prior.version,
+        ciphertext_sha256:prior.ciphertext_sha256});
+      published={version:prior.version,commit_sha:prior.commit_sha};
+      encryptedDigest=prior.ciphertext_sha256;
+    }else{
+      const temp=fs.mkdtempSync(path.join(os.tmpdir(),'trusted-development-unseal-'));
+      let native;
+      try{
+        const nativeDir=path.join(temp,'native');
+        const pem=Buffer.from(env.CURSOR_RESUME_PRIVATE_KEY_B64,'base64').toString('utf8');
+        openCursorNativeStore({record:wrapped,expected:metadata,
+          privateKeyPem:pem,directory:nativeDir});
+        native=Buffer.from(JSON.stringify({schema_version:1,kind:'cursor-native-files',
+          files:Object.fromEntries(FILES.map(name=>[
+            name,fs.readFileSync(path.join(nativeDir,name)).toString('base64')]))}));
+        const checkpointMetadata={provider:'cursor',
+          session_id:metadata.agent_id,source_sha:claim.inputs.input_sha,
+          harness_digest:metadata.harness_digest};
+        const sealed=sealCheckpoint(identity,admission.next_version,native,aesKey,checkpointMetadata);
+        const source={repository:REPO,run_id:run.id,attempt:run.run_attempt,
+          issue:1997,workflow_sha:run.head_sha,target_sha:claim.inputs.input_sha,
+          head_branch:'main',path:run.path,workflow_name:run.name,
+          role:'developer',agent_id:'dev-cursor-01',task:'implement',
+          environment:'agent-dev-cursor-01',provider:'cursor',event:run.event};
+        published=publishEncryptedAgentCheckpoint({
+          remote:store,source,sealed,registry:JSON.parse(fs.readFileSync(
+            'automation/agents/registry.json','utf8')),key:aesKey,expectedVersion:admission.previous_version});
+        encryptedDigest=sealed.ciphertext_sha256;
+      }finally{
+        if(native)native.fill(0);
+        fs.rmSync(temp,{recursive:true,force:true});
+      }
+    }
+      // Second CAS advances canonical state only after the committed checkpoint
+      // is independently verified against the remote Git commit.
+      const advanced=await commitAttestedSliceYield({remote:store,issue:1997,
+        dispatchTicket:claim.inputs.dispatch_ticket,keyring:{'main-controller':rootKey},
+        reader,checkpoint:{version:published.version,commit_sha:published.commit_sha,
+          ciphertext_sha256:encryptedDigest,run_id:run.id,
+          attempt:run.run_attempt},verifiedMainSha:run.head_sha});
+      console.log(JSON.stringify(developmentIngestReceipt({
+        status:advanced.status,run,claim,metadata,claimArtifact:verifiedClaim,
+        resultArtifact:matching[0],checkpoint:{version:published.version,
+          commit_sha:published.commit_sha,ciphertext_sha256:encryptedDigest},
+        stateVersion:advanced.state_version,storeCommit:advanced.store_commit_sha,
+        environment:env})));
+  }finally{rootKey.fill(0);aesKey.fill(0);}
+}
+if(process.argv[1]&&fileURLToPath(import.meta.url)===path.resolve(process.argv[1]))
+  main().catch(e=>{console.error('::error::'+e.message);process.exitCode=1;});
+).test(event.comment?.body??'')&&
+          event.comment?.body!==NATIVE_RECOVERY_INGEST_COMMAND)||
         !Number.isSafeInteger(event.comment.id)||event.comment.id<1)
       fail('manual checkpoint recovery requires exact owner/main Issue comment');
     if(event.comment.body===PINNED_RECOVERY_COMMAND)
