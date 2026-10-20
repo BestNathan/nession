@@ -47,6 +47,47 @@ function readAdmission(file){
   else if(Object.hasOwn(a,'resume_from'))fail('initial Slice cannot claim native restore');
   return a;
 }
+// Cursor SDK 1.0.37 indexes local Agents by both agent ID and local.cwd.
+// Never rewrite authenticated native JSONL to make a new random worktree match.
+// Recover the exact old disposable workspace *identity* from the sealed Agent
+// record, and recreate the signed source worktree at that path in fresh Docker.
+export function originalCursorWorkspace(agentsJsonl,agentId){
+  if(!/^agent-[a-zA-Z0-9-]{4,100}$/.test(agentId)||
+      typeof agentsJsonl!=='string'||Buffer.byteLength(agentsJsonl)>16*1024*1024)
+    fail('invalid native Agent workspace manifest');
+  const rows=agentsJsonl.split(/\\r?\\n/).filter(Boolean);
+  if(!rows.length||rows.length>10000)fail('empty or unbounded native Agent workspace manifest');
+  const candidates=new Set();
+  function scan(node,depth,values,paths){
+    if(depth>24)fail('native workspace document too deep');
+    if(node===null||typeof node!=='object')return;
+    if(Array.isArray(node)){
+      for(const v of node)scan(v,depth+1,values,paths);
+      return;
+    }
+    for(const [k,v] of Object.entries(node)){
+      if(v===agentId)values.add(agentId);
+      if(['cwd','workingDirectory','working_directory'].includes(k)&&typeof v==='string')paths.add(v);
+      if(v!==null&&typeof v==='object')scan(v,depth+1,values,paths);
+    }
+  }
+  for(const line of rows){
+    let row;
+    try{row=JSON.parse(line);}catch{fail('malformed native Agent workspace record');}
+    const values=new Set(),paths=new Set();
+    scan(row,0,values,paths);
+    if(!values.has(agentId))continue;
+    if(paths.size!==1)fail('missing or ambiguous native workspace identity');
+    candidates.add([...paths][0]);
+  }
+  if(candidates.size!==1)fail('native Agent workspace identity not unique');
+  const cwd=[...candidates][0];
+  if(!/^\\/tmp\\/nession-dev-slice-[A-Za-z0-9]{6}\\/source$/.test(cwd)||
+      path.resolve(cwd)!==cwd||path.normalize(cwd)!==cwd)
+    fail('native Agent workspace outside isolated fixture namespace');
+  return cwd;
+}
+
 export function assertUnprivilegedDeveloperEnvironment(env){
   for(const key of ['STORE_APP_TOKEN','STORE_WRITER_PRIVATE_KEY','ACTIONS_DISPATCH_TOKEN',
     'GITHUB_TOKEN','GH_TOKEN','AGENT_STORE_CONTROLLER_REMOTE','CURSOR_RESUME_PRIVATE_KEY_B64'])
@@ -77,7 +118,8 @@ async function main(){
   const model={id:process.env.CURSOR_MODEL||'composer-2.5',
     fast:(process.env.CURSOR_MODEL_FAST||'true')!=='false'};
   const root=fs.mkdtempSync(path.join(process.env.RUNNER_TEMP||os.tmpdir(),'nession-dev-slice-'));
-  const workspace=path.join(root,'source'),nativeStore=path.join(root,'native-store');
+  let workspace=path.join(root,'source');
+  const nativeStore=path.join(root,'native-store');
   const out=path.resolve(process.argv[3]);
   const candidate='e2e/fixtures/agent-development/1997-canary.txt';
   const complete='Durable Worker fixture: complete\n';
@@ -85,14 +127,6 @@ async function main(){
   const expected=resuming?complete+'Previous value: pending\n':complete;
   let added=false;
   try{
-    git('-C',process.env.GITHUB_WORKSPACE,'worktree','add','--detach',workspace,a.input_sha);
-    added=true;
-    if(git('-C',workspace,'rev-parse','HEAD')!==a.input_sha)
-      fail('workspace is not exact signed source SHA');
-    const target=path.join(workspace,candidate);
-    fs.mkdirSync(path.dirname(target),{recursive:true});
-    if(fs.existsSync(target))fail('fixture unexpectedly exists in source checkout');
-    fs.writeFileSync(target,initial,{flag:'wx'});
     if(resuming){
       const names=['agents.ndjson','checkpoints.ndjson','runs.ndjson','run_events.ndjson'];
       if(fs.readdirSync('/resume').sort().join(',')!==names.sort().join(','))
@@ -103,7 +137,22 @@ async function main(){
         if(!stat.isFile()||stat.isSymbolicLink()||stat.size>16*1024*1024)fail('unsafe native file');
         fs.copyFileSync(source,path.join(nativeStore,name),fs.constants.COPYFILE_EXCL);
       }
+      // Only a committed, authenticated native Agent document can select cwd.
+      // This exact path no longer exists in the fresh disposable container.
+      workspace=originalCursorWorkspace(fs.readFileSync(path.join(nativeStore,'agents.ndjson'),'utf8'),
+        'agent-7d5b4a61-1476-4ce7-a38a-82907aa3b1a6');
+      if(fs.existsSync(path.dirname(workspace))||fs.existsSync(workspace))
+        fail('original native workspace path is already occupied');
+      fs.mkdirSync(path.dirname(workspace),{mode:0o700});
     }else fs.mkdirSync(nativeStore,{mode:0o700});
+    git('-C',process.env.GITHUB_WORKSPACE,'worktree','add','--detach',workspace,a.input_sha);
+    added=true;
+    if(git('-C',workspace,'rev-parse','HEAD')!==a.input_sha)
+      fail('workspace is not exact signed source SHA');
+    const target=path.join(workspace,candidate);
+    fs.mkdirSync(path.dirname(target),{recursive:true});
+    if(fs.existsSync(target))fail('fixture unexpectedly exists in source checkout');
+    fs.writeFileSync(target,initial,{flag:'wx'});
     const issue=JSON.parse(fs.readFileSync('/context/issue.json','utf8'));
     const comments=JSON.parse(fs.readFileSync('/context/comments.json','utf8'));
     if(issue.number!==1997||issue.state!=='open'||issue.pull_request||
