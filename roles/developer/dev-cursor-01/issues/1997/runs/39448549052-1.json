@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "kind": "agent_checkpoint_run",
+  "role": "developer",
+  "agent_id": "dev-cursor-01",
+  "issue": 1997,
+  "run_id": 39448549052,
+  "attempt": 1,
+  "source_sha": "220266b9233ec97b1beacbc54e5cc7f82d3cece2",
+  "workflow_sha": "271b48e494b6bd54843403b831709d6365f30530",
+  "workflow": ".github/workflows/agent-develop.yml",
+  "checkpoint_path": "roles/developer/dev-cursor-01/issues/1997/checkpoints/00000003.json",
+  "version": 3,
+  "ciphertext_sha256": "7afed3f229d371b850fda3fcc77fb0f601f2c588ccab6210d878b2f7501321a0",
+  "harness_digest": "ba54d9fb8b8ab9ec6ca2ac17727b02db21176437a2258123b753977fd32bbf68"
+}
