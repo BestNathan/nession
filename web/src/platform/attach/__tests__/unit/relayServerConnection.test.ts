@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { relayServerHandle, type RelayServerTransport } from '@/platform/attach/relayServerConnection';
 import { WebSocketService } from '@/platform/socket/WebSocketService';
 import { terminalServerApi } from '@/product/terminal';
@@ -13,6 +13,7 @@ function frames(socket: MockWebSocket): SocketMessage[] {
 }
 
 describe('relayServerHandle', () => {
+  beforeEach(() => { MockWebSocket.instances = []; });
   afterEach(() => {
     vi.unstubAllGlobals();
     globalThis.WebSocket = OriginalWebSocket;
