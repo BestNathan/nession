@@ -136,11 +136,13 @@ for (const mode of ['Relay', 'P2P'] as const) {
     // rest of the suite uses; a signal trap depends on trap delivery that the
     // E2E shell does not make deterministic.
     const before = await readGrid(page);
-    await page.setViewportSize({ width: 1024, height: 768 });
+    // Grow, not shrink: tmux keeps the largest attached client's size, and
+    // the suite's PTY-follow proof (#1187) is a growth assertion.
+    await page.setViewportSize({ width: 1600, height: 1000 });
     let after = before;
     await expect(async () => {
       after = await readGrid(page);
-      expect(after).not.toEqual(before);
+      expect(after.rows).toBeGreaterThan(before.rows);
     }).toPass({ timeout: 15_000 });
 
     await expect(async () => {
