@@ -9,7 +9,8 @@ import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {runCursorSession} from '../providers/cursor.mjs';
-import {assertControlledContinuation,assertCurrentDevelopmentCapabilities,developmentHarnessDigest} from './development-resume.mjs';
+import {assertControlledContinuation,assertCurrentDevelopmentCapabilities,developmentHarnessDigest,
+  CONTROLLED_V2_CONTINUATION} from './development-resume.mjs';
 import {failedDeveloperRetryActionId,nativeResumeSuccessorId} from './outbox.mjs';
 import {sealCursorNativeStore} from '../providers/cursor-native-store.mjs';
 import {buildAgentWorkflowTelemetry,writeAgentWorkflowTelemetry} from '../../../agent-workflow-telemetry.mjs';
@@ -39,6 +40,7 @@ function readAdmission(file){
         '3f4abb86785d41dbb771edbab1c400841d3d0e60335358332307b75e1d36c1c8',
         nativeResumeSuccessorId(1997,
           '3f4abb86785d41dbb771edbab1c400841d3d0e60335358332307b75e1d36c1c8',39376331942),
+        CONTROLLED_V2_CONTINUATION,
       ].includes(a.action_id)||
       !HEX40.test(a.input_sha??'')||a.input_sha!=='220266b9233ec97b1beacbc54e5cc7f82d3cece2'||
       Number(process.env.GITHUB_RUN_ID)!==a.run_id||

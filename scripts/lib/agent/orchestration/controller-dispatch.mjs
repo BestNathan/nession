@@ -11,7 +11,8 @@ import {executeDurableAgentDispatch,recoverConfirmedFailedDeveloperDispatch,
   recoverAttestedNativeResumeFailure} from './dispatch-store.mjs';
 import {failedDeveloperRetryActionId,nativeResumeSuccessorId} from './outbox.mjs';
 import {verifyNativeResumeFailureLive} from './native-resume-failure.mjs';
-import {CONTROLLED_CONTINUATION,CONTROLLED_CONTINUATION_COMMENT} from './development-resume.mjs';
+import {CONTROLLED_CONTINUATION,CONTROLLED_CONTINUATION_COMMENT,
+  CONTROLLED_V2_CONTINUATION,CONTROLLED_V2_CONTINUATION_COMMENT} from './development-resume.mjs';
 import {CONTROLLED_FAILED_RUN,verifyKnownFailureLive} from './failed-worker-recover.mjs';
 
 const REPO='BestNathan/nession';
@@ -33,6 +34,7 @@ export function assertDispatchAuthority({environment,event,run,issue,actionId}) 
        ((event?.comment?.body===CONTROLLED_DISPATCH_COMMENT&&actionId===ORIGINAL_ACTION)||
         (event?.comment?.body===CONTROLLED_RECOVERY_COMMENT&&actionId===RECOVERY_ACTION)||
         (event?.comment?.body===CONTROLLED_CONTINUATION_COMMENT&&actionId===CONTROLLED_CONTINUATION)||
+        (event?.comment?.body===CONTROLLED_V2_CONTINUATION_COMMENT&&actionId===CONTROLLED_V2_CONTINUATION)||
         (event?.comment?.body===CONTROLLED_NATIVE_RECOVERY_COMMENT&&actionId===NATIVE_RECOVERY_ACTION))&&
        Number.isSafeInteger(event?.comment?.id)&&event.comment.id>0&&
        issue===1997)
@@ -108,9 +110,11 @@ async function main(){
   const issue=commanded?1997:Number(event?.inputs?.issue_number);
   const recovering=commanded&&event?.comment?.body===CONTROLLED_RECOVERY_COMMENT;
   const continuing=commanded&&event?.comment?.body===CONTROLLED_CONTINUATION_COMMENT;
+  const continuingV2=commanded&&event?.comment?.body===CONTROLLED_V2_CONTINUATION_COMMENT;
   const recoveringNative=commanded&&event?.comment?.body===CONTROLLED_NATIVE_RECOVERY_COMMENT;
-  const actionId=commanded?(continuing?CONTROLLED_CONTINUATION:
-    recoveringNative?NATIVE_RECOVERY_ACTION:recovering?RECOVERY_ACTION:ORIGINAL_ACTION):event?.inputs?.action_id;
+  const actionId=commanded?(continuingV2?CONTROLLED_V2_CONTINUATION:
+    continuing?CONTROLLED_CONTINUATION:recoveringNative?NATIVE_RECOVERY_ACTION:
+    recovering?RECOVERY_ACTION:ORIGINAL_ACTION):event?.inputs?.action_id;
   if(!positive(issue)||!HEX64.test(actionId??''))fail('invalid Issue/Action');
   const token=env.ACTIONS_DISPATCH_TOKEN;
   if(typeof token!=='string'||token.length<8)fail('missing trusted Actions credential');

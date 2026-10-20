@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey,CONTROLLED_DISPATCH_COMMENT,CONTROLLED_RECOVERY_COMMENT,CONTROLLED_NATIVE_RECOVERY_COMMENT}
   from './controller-dispatch.mjs';
+import {CONTROLLED_V2_CONTINUATION,CONTROLLED_V2_CONTINUATION_COMMENT} from './development-resume.mjs';
 
 const sha='a'.repeat(40),actionId='b'.repeat(64),issue=1997,runId=12345;
 const environment={
@@ -56,6 +57,20 @@ const continuation={...commentValid,
   actionId:'3f4abb86785d41dbb771edbab1c400841d3d0e60335358332307b75e1d36c1c8',
   event:{...commentEvent,comment:{...commentEvent.comment,body:'/nession resume issue=1997 checkpoint=1'}}};
 assert.equal(assertDispatchAuthority(continuation).action_id,continuation.actionId);
+const continuationV2={...continuation,actionId:CONTROLLED_V2_CONTINUATION,
+  event:{...commentEvent,comment:{...commentEvent.comment,body:CONTROLLED_V2_CONTINUATION_COMMENT}}};
+assert.equal(assertDispatchAuthority(continuationV2).action_id,CONTROLLED_V2_CONTINUATION);
+for(const bad of [
+  {actionId:continuation.actionId},
+  {event:{...continuationV2.event,comment:{...continuationV2.event.comment,
+    body:'/nession resume issue=1997 checkpoint=3'}}},
+  {event:{...continuationV2.event,comment:{...continuationV2.event.comment,
+    body:CONTROLLED_V2_CONTINUATION_COMMENT+' '}}},
+  {event:{...continuationV2.event,comment:{...continuationV2.event.comment,
+    user:{login:'fork'}}}},
+  {issue:1998},
+])assert.throws(()=>assertDispatchAuthority({...continuationV2,...bad}),
+  /authenticated owner\/main/);
 for(const patch of [{actionId:actualAction},
   {event:{...continuation.event,comment:{...continuation.event.comment,body:'/nession resume issue=1997 checkpoint=2'}}},
   {event:{...continuation.event,comment:{...continuation.event.comment,user:{login:'fork'}}}},
