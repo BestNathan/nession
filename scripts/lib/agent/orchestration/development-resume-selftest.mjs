@@ -7,7 +7,8 @@ import {hkdfSync} from 'node:crypto';
 import {assertUnprivilegedDeveloperEnvironment,originalCursorWorkspace,
   CURSOR_LOCAL_ROOT,CURSOR_WORKSPACE_PATH,CURSOR_JSONL_PATH} from './development-worker.mjs';
 import {deriveStoreAesKey} from './development-checkpoint-key.mjs';
-import {assertControlledContinuation,assertCurrentDevelopmentCapabilities,CONTROLLED_CONTINUATION,writeNativeBundle,
+import {assertControlledContinuation,assertCurrentDevelopmentCapabilities,CONTROLLED_CONTINUATION,
+  CONTROLLED_V2_CONTINUATION,controlledCheckpointSourceRun,writeNativeBundle,
   developmentHarnessDigest} from './development-resume.mjs';
 
 // The native Agent index is workspace scoped; moved SDK JSONL alone is not
@@ -47,6 +48,26 @@ const admission={authorized:true,issue:1997,role:'developer',task:'implement',pr
     checkpoint_commit_sha:'d812e3655c0ad6337b1003aa0c1794c12335adb0',
     ciphertext_sha256:'a42220e24ed5ff587ed6173b662a75856f62e5a16561274cb616325b150f4107'}};
 assert.equal(assertControlledContinuation(admission).checkpoint_version,1);
+assert.equal(controlledCheckpointSourceRun(admission.resume_from),39288961865);
+const v2={...admission,action_id:CONTROLLED_V2_CONTINUATION,
+  resume_from:{ordinal:2,checkpoint_version:2,
+    parent_action_id:'6a84244ca028a93f8c057ab23852bb21c3906d485e4c16ccab661104c31d750e',
+    checkpoint_commit_sha:'f9abdeca3cc26780fb0a7b2ed7000d2dd28cf142',
+    ciphertext_sha256:'ae089e6b7b1743a9afdb78814ba716be024ccde9da0a1ddfbc965601f2691f1e'}};
+assert.deepEqual(assertControlledContinuation(v2),v2.resume_from);
+assert.equal(controlledCheckpointSourceRun(v2.resume_from),39396836009);
+assert.throws(()=>assertControlledContinuation({...v2,action_id:CONTROLLED_CONTINUATION}),
+  /committed controlled/);
+assert.throws(()=>assertControlledContinuation({...admission,action_id:CONTROLLED_V2_CONTINUATION}),
+  /committed controlled/);
+for(const bad of [
+  {ordinal:1},{checkpoint_version:1},{checkpoint_version:3},
+  {checkpoint_commit_sha:'a'.repeat(40)},{ciphertext_sha256:'b'.repeat(64)},
+  {parent_action_id:'c'.repeat(64)},{fencing_token:1},
+])assert.throws(()=>assertControlledContinuation({...v2,
+  resume_from:{...v2.resume_from,...bad}}),/committed controlled/);
+assert.throws(()=>controlledCheckpointSourceRun({...v2.resume_from,checkpoint_version:3}),
+  /unknown committed/);
 for(const bad of [
   {authorized:false},{issue:1998},{role:'reviewer'},{task:'repair'},
   {action_id:'0'.repeat(64)},{input_sha:'a'.repeat(40)},
