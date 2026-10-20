@@ -13,17 +13,17 @@ import {assertControlledContinuation,assertCurrentDevelopmentCapabilities,CONTRO
 // sufficient. Do not edit the saved store or fabricate a fresh Agent session.
 const id='agent-7d5b4a61-1476-4ce7-a38a-82907aa3b1a6';
 const cwd='/tmp/nession-dev-slice-Ab12cD/source';
-const row=(value)=>JSON.stringify({op:'put',agent:{agentId:id,workspace:{cwd:value}}})+'\\n';
+const row=(value)=>JSON.stringify({op:'put',agent:{agentId:id,workspace:{cwd:value}}})+'\n';
 assert.equal(originalCursorWorkspace(row(cwd),id),cwd);
 assert.equal(originalCursorWorkspace(row(cwd)+row(cwd),id),cwd);
 for(const bad of [
-  JSON.stringify({agentId:'agent-other-1234',workspace:{cwd}})+'\\n',
+  JSON.stringify({agentId:'agent-other-1234',workspace:{cwd}})+'\n',
   row('/tmp/nession-dev-slice-Ab12cD/../source'),
   row('/workspace'),
   row('/tmp/nession-dev-slice-Ab12cD/source/extra'),
   row(cwd)+row('/tmp/nession-dev-slice-Hg34Jk/source'),
-  JSON.stringify({agentId:id,workspace:{cwd,workingDirectory:'/tmp/nession-dev-slice-Hg34Jk/source'}})+'\\n',
-  'not-json\\n',
+  JSON.stringify({agentId:id,workspace:{cwd,workingDirectory:'/tmp/nession-dev-slice-Hg34Jk/source'}})+'\n',
+  'not-json\n',
 ])assert.throws(()=>originalCursorWorkspace(bad,id),/bounded Developer:/);
 assert.doesNotThrow(()=>assertUnprivilegedDeveloperEnvironment({CURSOR_API_KEY:'provider-key'}));
 for(const key of ['STORE_APP_TOKEN','STORE_WRITER_PRIVATE_KEY','ACTIONS_DISPATCH_TOKEN',
