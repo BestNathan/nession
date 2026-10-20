@@ -18,6 +18,8 @@ use nession_agent::sync::session_watcher::SessionWatcher;
 use nession_agent::tmux::manager::SessionManager;
 use nession_common::config::ServerConfig;
 use nession_protocol::contracts::agent::v1::AgentMetadata;
+use nession_protocol::contracts::p2p::agent_url_with_credential;
+use nession_protocol::contracts::p2p::v1::{CredentialScope, P2pGrantPayload};
 use nession_server::db::Database;
 use nession_server::server::WebSocketServer;
 use std::sync::Arc;
@@ -1392,4 +1394,379 @@ async fn relay_output_applied_ack_is_admitted_only_for_the_agent_minted_subscrip
     client_handle.shutdown().await.ok();
     agent_handle.shutdown().await.ok();
     server_handle.abort();
+}
+
+// ---------------------------------------------------------------------------
+// #2126: one Agent timeline, observed through both routes
+// ---------------------------------------------------------------------------
+
+type ParityStream = futures_util::stream::SplitStream<
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+>;
+
+#[derive(Default)]
+struct RouteObservations {
+    /// (stream epoch, stream seq, decoded text) for positioned output.
+    outputs: Vec<(u64, u64, String)>,
+    /// (stream epoch, stream seq) of authoritative resizes.
+    resizes: Vec<(u64, u64)>,
+}
+
+fn marker_event<'a>(
+    observations: &'a RouteObservations,
+    marker: &str,
+) -> Option<&'a (u64, u64, String)> {
+    observations
+        .outputs
+        .iter()
+        .find(|(_, _, text)| text.contains(marker))
+}
+
+/// Read one route until `done`, recording Agent positions. Frames without a
+/// position (legacy output, bootstraps) cannot be compared and are skipped.
+async fn collect_route(
+    stream: &mut ParityStream,
+    deadline: tokio::time::Instant,
+    done: impl Fn(&RouteObservations) -> bool,
+) -> anyhow::Result<RouteObservations> {
+    let mut observations = RouteObservations::default();
+    while tokio::time::Instant::now() < deadline {
+        match tokio::time::timeout(Duration::from_millis(500), stream.next()).await {
+            Ok(Some(Ok(WsMessage::Text(text)))) => {
+                let frame: serde_json::Value = serde_json::from_str(&text)?;
+                let msg_type = frame
+                    .get("msg_type")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("");
+                let payload = frame.get("payload");
+                match msg_type {
+                    "agent.terminal.output" => {
+                        let Some(payload) = payload else { continue };
+                        // A bootstrap is history, not an event in the stream.
+                        if payload.get("bootstrap").is_some() {
+                            continue;
+                        }
+                        if let (Some(epoch), Some(seq)) = (
+                            payload
+                                .get("stream_epoch")
+                                .and_then(serde_json::Value::as_u64),
+                            payload
+                                .get("stream_seq")
+                                .and_then(serde_json::Value::as_u64),
+                        ) {
+                            let bytes = base64::engine::general_purpose::STANDARD
+                                .decode(
+                                    payload
+                                        .get("data")
+                                        .and_then(serde_json::Value::as_str)
+                                        .unwrap_or(""),
+                                )
+                                .unwrap_or_default();
+                            observations.outputs.push((
+                                epoch,
+                                seq,
+                                String::from_utf8_lossy(&bytes).to_string(),
+                            ));
+                        }
+                    }
+                    "agent.terminal.resize" => {
+                        let payload = payload.unwrap_or(&serde_json::Value::Null);
+                        if let (Some(epoch), Some(seq)) = (
+                            payload
+                                .get("stream_epoch")
+                                .and_then(serde_json::Value::as_u64),
+                            payload
+                                .get("stream_seq")
+                                .and_then(serde_json::Value::as_u64),
+                        ) {
+                            observations.resizes.push((epoch, seq));
+                        }
+                    }
+                    "error" => anyhow::bail!("route error while observing: {frame}"),
+                    _ => {}
+                }
+                if done(&observations) {
+                    return Ok(observations);
+                }
+            }
+            Ok(Some(Ok(_))) => continue,
+            Ok(Some(Err(e))) => return Err(e.into()),
+            Ok(None) => anyhow::bail!("route closed before the expected event"),
+            Err(_) => continue,
+        }
+    }
+    Ok(observations)
+}
+
+/// #2126 SC-01/SC-02: a direct P2P subscriber and a Server-Relay subscriber on
+/// the same Session observe one Agent-assigned timeline.
+///
+/// The two routes are genuinely distinct: the P2P client dials the Agent's own
+/// WebSocket, while the Relay client dials the Server, which opens its own
+/// authenticated Agent socket and forwards frames. Both must report the same
+/// `(streamEpoch, streamSeq)` and the same bytes for the same output event, and
+/// one authoritative resize must consume the same shared ordinal on both.
+///
+/// A Server that renumbered, minted a second sequence, or rewrote the frame
+/// would fail the position equality; a route that dropped or reordered the
+/// shared ordinal would fail the output → resize → output assertion.
+#[tokio::test]
+async fn p2p_and_relay_observe_one_agent_stream_timeline() -> anyhow::Result<()> {
+    const AGENT_ID: &str = "route-parity-agent";
+    const P2P_ID: &str = "p2p-parity-browser";
+    const RELAY_ID: &str = "relay-parity-browser";
+    const MARKER: &str = "ROUTE-PARITY-MARKER-2126";
+    const AFTER: &str = "ROUTE-PARITY-AFTER-2126";
+
+    let session_name = unique_session_name("route-parity");
+    SessionManager::new().kill_session(&session_name).await.ok();
+
+    let (server_addr, server_handle, _db_dir) = start_server("test-token").await?;
+    let (agent_addr, agent_handle, agent_credentials, agent_mutations) =
+        start_agent(AGENT_ID).await?;
+
+    let tmux = SessionManager::new();
+    tmux.create_session(&session_name, 80, 24, "/tmp", &[])
+        .await?;
+
+    let client_handle = register_agent(
+        server_addr,
+        AGENT_ID,
+        "test-token",
+        agent_addr.port(),
+        Arc::clone(&agent_credentials),
+        Arc::clone(&agent_mutations),
+    )
+    .await?;
+
+    let heartbeat = HeartbeatLoop::new(client_handle.clone(), SessionManager::new(), 1);
+    let heartbeat_shutdown = heartbeat.shutdown_handle();
+    tokio::spawn(async move {
+        let _ = heartbeat.run().await;
+    });
+    let watcher = SessionWatcher::new(client_handle.clone(), SessionManager::new(), 1);
+    let watcher_shutdown = watcher.shutdown_handle();
+    tokio::spawn(async move {
+        let _ = watcher.run().await;
+    });
+
+    // ── Direct P2P subscriber ────────────────────────────────────────────
+    let credential = format!("route-parity-credential-{session_name}");
+    let grant = P2pGrantPayload {
+        request_id: "route-parity".to_string(),
+        credential: credential.clone(),
+        agent_id: AGENT_ID.to_string(),
+        session_id: format!("{AGENT_ID}:{session_name}"),
+        scope: CredentialScope::for_attach(&session_name),
+        expires_at: "2999-01-01T00:00:00Z".to_string(),
+    };
+    agent_credentials
+        .grant(AGENT_ID, &grant)
+        .map_err(|refusal| anyhow::anyhow!("agent refused the test grant: {refusal:?}"))?;
+    let p2p_url = agent_url_with_credential(&format!("ws://{agent_addr}"), &credential);
+    let (p2p_ws, _) = connect_async(&p2p_url).await?;
+    let (mut p2p_sink, mut p2p_stream) = p2p_ws.split();
+
+    let auth = msg(
+        "client.auth",
+        "p2p-auth",
+        serde_json::json!({ "auth_token": "", "client_id": P2P_ID }),
+    );
+    let reply = send_and_recv(&mut p2p_sink, &mut p2p_stream, &auth).await?;
+    anyhow::ensure!(reply["msg_type"] == "ok", "p2p auth failed: {reply}");
+
+    let attach = msg(
+        "agent.attach",
+        "p2p-attach",
+        serde_json::json!({
+            "session_name": session_name,
+            "width": 80,
+            "height": 24,
+            "size_known": null,
+            "env_snapshots": [],
+            "needs_bootstrap": true,
+        }),
+    );
+    let attached = send_and_recv(&mut p2p_sink, &mut p2p_stream, &attach).await?;
+    anyhow::ensure!(
+        attached["msg_type"] == "ok",
+        "p2p attach failed: {attached}"
+    );
+    let p2p_epoch = attached["payload"]["stream_epoch"]
+        .as_u64()
+        .ok_or_else(|| anyhow::anyhow!("p2p attach did not state a stream epoch: {attached}"))?;
+
+    // ── Relay subscriber through the Server ──────────────────────────────
+    let (relay_ws, _) = connect_async(format!("ws://{server_addr}")).await?;
+    let (mut relay_sink, mut relay_stream) = relay_ws.split();
+    let auth = msg(
+        "server.auth",
+        "relay-auth",
+        serde_json::json!({ "auth_token": "test-token", "client_id": RELAY_ID }),
+    );
+    let reply = send_and_recv(&mut relay_sink, &mut relay_stream, &auth).await?;
+    anyhow::ensure!(
+        reply["payload"]["status"] == "success",
+        "relay auth failed: {reply}"
+    );
+
+    let session_id = format!("{AGENT_ID}:{session_name}");
+    wait_for_discovered_session(
+        &mut relay_sink,
+        &mut relay_stream,
+        AGENT_ID,
+        &session_id,
+        Duration::from_secs(20),
+        "started (1s session watcher polling)",
+    )
+    .await?;
+
+    let attach = msg(
+        "server.session.attach",
+        "relay-attach",
+        serde_json::json!({ "session_id": session_id, "preferred_mode": "relay" }),
+    );
+    let reply = send_and_recv(&mut relay_sink, &mut relay_stream, &attach).await?;
+    anyhow::ensure!(
+        reply["payload"]["status"] == "success",
+        "relay attach failed: {reply}"
+    );
+
+    let begin = msg(
+        "server.session.relay.begin",
+        "relay-begin",
+        serde_json::json!({ "session_id": session_id }),
+    );
+    relay_sink.send(WsMessage::Text(begin.to_string())).await?;
+    let proof = await_wire(&mut relay_stream, "server.session.relay.ready")
+        .await
+        .ok_or_else(|| anyhow::anyhow!("relay ready receipt did not arrive"))?;
+    let relay_epoch = proof["payload"]["stream_epoch"]
+        .as_u64()
+        .ok_or_else(|| anyhow::anyhow!("relay receipt did not state a stream epoch: {proof}"))?;
+    anyhow::ensure!(
+        relay_epoch == p2p_epoch,
+        "routes disagree on the session stream epoch: p2p={p2p_epoch} relay={relay_epoch}"
+    );
+
+    // Output produced only after both routes are subscribed.
+    let input = msg(
+        "agent.terminal.input",
+        "parity-input",
+        serde_json::json!({
+            "session_name": session_name,
+            "data": base64::engine::general_purpose::STANDARD
+                .encode(format!("echo {MARKER}\n")),
+        }),
+    );
+    p2p_sink.send(WsMessage::Text(input.to_string())).await?;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let p2p_obs = collect_route(&mut p2p_stream, deadline, |o| {
+        marker_event(o, MARKER).is_some()
+    })
+    .await?;
+    let relay_obs = collect_route(&mut relay_stream, deadline, |o| {
+        marker_event(o, MARKER).is_some()
+    })
+    .await?;
+    let p2p_marker = marker_event(&p2p_obs, MARKER).expect("p2p never saw the marker");
+    let relay_marker = marker_event(&relay_obs, MARKER).expect("relay never saw the marker");
+    anyhow::ensure!(
+        (p2p_marker.0, p2p_marker.1) == (relay_marker.0, relay_marker.1),
+        "routes disagree on the same output event's Agent position: \
+         p2p={:?} relay={:?}",
+        (p2p_marker.0, p2p_marker.1),
+        (relay_marker.0, relay_marker.1)
+    );
+    anyhow::ensure!(
+        p2p_marker.2 == relay_marker.2,
+        "routes delivered different bytes for the same Agent event"
+    );
+
+    // Every ordinal both routes saw carries identical bytes: the Server
+    // neither renumbers nor rewrites what the Agent assigned.
+    for (epoch, seq, text) in &p2p_obs.outputs {
+        if let Some((_, _, relay_text)) = relay_obs
+            .outputs
+            .iter()
+            .find(|(seen_epoch, seen_seq, _)| seen_epoch == epoch && seen_seq == seq)
+        {
+            anyhow::ensure!(
+                relay_text == text,
+                "seq {seq} differs across routes: p2p vs relay"
+            );
+        }
+    }
+
+    // ── One authoritative resize, one shared ordinal ─────────────────────
+    let resize = msg(
+        "agent.terminal.resize",
+        "parity-resize",
+        serde_json::json!({ "session_name": session_name, "cols": 100, "rows": 30 }),
+    );
+    p2p_sink.send(WsMessage::Text(resize.to_string())).await?;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let p2p_obs = collect_route(&mut p2p_stream, deadline, |o| !o.resizes.is_empty()).await?;
+    let relay_obs = collect_route(&mut relay_stream, deadline, |o| !o.resizes.is_empty()).await?;
+    let p2p_resize = p2p_obs
+        .resizes
+        .first()
+        .copied()
+        .expect("p2p never saw the recorded resize");
+    let relay_resize = relay_obs
+        .resizes
+        .first()
+        .copied()
+        .expect("relay never saw the recorded resize");
+    anyhow::ensure!(
+        p2p_resize == relay_resize,
+        "routes disagree on the resize's Agent position: p2p={p2p_resize:?} relay={relay_resize:?}"
+    );
+    anyhow::ensure!(
+        p2p_resize.1 > p2p_marker.1,
+        "the resize must be ordered after the preceding output"
+    );
+
+    // Output after the resize advances past its ordinal on both routes.
+    let input = msg(
+        "agent.terminal.input",
+        "parity-after",
+        serde_json::json!({
+            "session_name": session_name,
+            "data": base64::engine::general_purpose::STANDARD
+                .encode(format!("echo {AFTER}\n")),
+        }),
+    );
+    p2p_sink.send(WsMessage::Text(input.to_string())).await?;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let p2p_obs = collect_route(&mut p2p_stream, deadline, |o| {
+        marker_event(o, AFTER).is_some()
+    })
+    .await?;
+    let relay_obs = collect_route(&mut relay_stream, deadline, |o| {
+        marker_event(o, AFTER).is_some()
+    })
+    .await?;
+    let p2p_after = marker_event(&p2p_obs, AFTER).expect("p2p never saw the post-resize output");
+    let relay_after =
+        marker_event(&relay_obs, AFTER).expect("relay never saw the post-resize output");
+    anyhow::ensure!(
+        (p2p_after.0, p2p_after.1) == (relay_after.0, relay_after.1),
+        "routes disagree on the post-resize event position: p2p={:?} relay={:?}",
+        (p2p_after.0, p2p_after.1),
+        (relay_after.0, relay_after.1)
+    );
+    anyhow::ensure!(
+        p2p_after.1 > p2p_resize.1,
+        "output after the resize must advance past its ordinal"
+    );
+
+    heartbeat_shutdown.shutdown().await.ok();
+    watcher_shutdown.shutdown().await.ok();
+    tmux.kill_session(&session_name).await.ok();
+    client_handle.shutdown().await.ok();
+    agent_handle.shutdown().await.ok();
+    server_handle.abort();
+    Ok(())
 }
