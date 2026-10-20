@@ -19,6 +19,9 @@ assert.equal(nativeReadbackEligible(2010,'staging'),true);
 assert.equal(nativeReadbackEligible(2045,'post-merge'),true);
 assert.equal(nativeReadbackEligible(2038,'post-merge'),true);
 assert.equal(nativeReadbackEligible(2041,'post-merge'),true);
+assert.equal(nativeReadbackEligible(2063,'post-merge'),true);
+assert.equal(nativeReadbackEligible(2063,'staging'),false);
+assert.equal(nativeReadbackEligible(2063,'pr'),false);
 for(const x of [[1997,'post-merge'],[2045,'staging'],[2041,'pr'],[2053,'post-merge'],[1664,'post-merge'],[2010,'pr']])
   assert.equal(nativeReadbackEligible(...x),false);
 const sha='a'.repeat(40),sources=['b'.repeat(40),'c'.repeat(40),'d'.repeat(40)];

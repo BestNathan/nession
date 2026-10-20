@@ -253,7 +253,7 @@ export function attestNativeRecoveryReadback({receipt:r,store,failedRun,jobs,art
 
 export function nativeReadbackEligible(issue,stage){
   return (Number(issue)===2010&&['staging','post-merge'].includes(stage))||
-    ([2038,2041,2045].includes(Number(issue))&&stage==='post-merge');
+    ([2038,2041,2045,2063].includes(Number(issue))&&stage==='post-merge');
 }
 export function nativeReadbackAncestryReady(workspace,targetSha,sources,run=execFileSync){
   requireIt(SHA.test(targetSha??'')&&Array.isArray(sources)&&sources.length===3&&
