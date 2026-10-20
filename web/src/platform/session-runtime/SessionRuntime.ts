@@ -1,7 +1,7 @@
 import type { AttachInfo } from '@/types';
 import type { RelayServerTransport } from '@/platform/attach/relayServerConnection';
 import { buildAgentWsUrl, WebSocketService } from '@/platform/socket';
-import type { ConnectionState, HandshakeSurface } from '@/platform/socket/types';
+import type { ConnectionState, HandshakeSurface, SentSocketMessage } from '@/platform/socket/types';
 import { getOrCreateClientId } from '@/platform/socket/clientId';
 import { WIRE as CLIENT_AUTH_WIRE, type AuthResponsePayload } from '@/generated/protocol/core/client-auth/v1';
 import { AddressAttachPolicy } from '@/platform/attach/AddressAttachPolicy';
@@ -31,7 +31,7 @@ import type { TerminalStreamPosition } from '@/platform/terminal-runtime/streamA
 // the constraint is the same one, and it is why the type-only imports below are
 // legal while a value import of the same modules would not be.
 import type { FilesPlugin } from '@/capabilities/files';
-import type { TerminalAgentApi } from '@/product/terminal';
+import type { TerminalAgentApi, RelaySubscriptionProof } from '@/product/terminal';
 
 export interface SessionRuntimeConfig {
   sessionId: string;
@@ -318,6 +318,11 @@ export class SessionRuntime {
   /** Guards against re-entrant / duplicate terminal-disconnect handling. */
   private disconnectHandling = false;
   private relayServerUnsub: (() => void) | null = null;
+  private relayReadyUnsub: (() => void) | null = null;
+  /** Exact begin envelope, scoped to its physical Server socket. */
+  private relayBeginWire: SentSocketMessage | null = null;
+  /** Informational only: no verified renderer baseline or ACK credit. */
+  private relayProof: RelaySubscriptionProof | null = null;
   private disposed = false;
   private snapshot: SessionRuntimeSnapshot;
   private readonly snapshotListeners = new Set<() => void>();
@@ -620,6 +625,7 @@ export class SessionRuntime {
   }
 
   updateContext(next: Partial<SessionRuntimeConfig>): RuntimeMirrorSnapshot {
+    const previousServerConnection = this.config.serverConnection;
     const previousRelay = this.effectiveForcedRelay;
     const routeChanged =
       next.routeIntentEpoch !== undefined
@@ -628,6 +634,10 @@ export class SessionRuntime {
       next.addressUrls !== undefined
       && next.addressUrls.join('|') !== this.config.addressUrls.join('|');
     this.config = { ...this.config, ...next };
+    if (previousServerConnection !== this.config.serverConnection
+      || routeChanged || planUrlsChanged || previousRelay !== this.effectiveForcedRelay) {
+      this.revokeRelayProof();
+    }
     if (next.routeIntentEpoch !== undefined) {
       this.routeIntentEpoch = next.routeIntentEpoch;
     }
@@ -679,6 +689,7 @@ export class SessionRuntime {
     if (this.effectiveForcedRelay) {
       return;
     }
+    this.revokeRelayProof();
     this.forcedRelayFallback = true;
     this.addressPolicy.update({ forcedRelay: true });
     this.attachedTransportGeneration = null;
@@ -694,6 +705,7 @@ export class SessionRuntime {
   }
 
   private handleRouteIntentChange(): void {
+    this.revokeRelayProof();
     this.attachedTransportGeneration = null;
     this.attachController.cancelActiveAttach();
     this.attachController.dispatch({ type: 'DISCONNECT' });
@@ -872,6 +884,7 @@ export class SessionRuntime {
 
   dispose(): void {
     this.disposed = true;
+    this.revokeRelayProof();
     this.resetTerminalAppliedCursor();
     // End the server-side relay forwarding loop with the runtime that began
     // it (#1309 SC-08). Disposal covers every leave — disconnect, session
@@ -1108,9 +1121,22 @@ export class SessionRuntime {
     }
   }
 
+  /** Non-credit evidence only; not a synchronized cursor. */
+  get relaySubscriptionProofSnapshot(): RelaySubscriptionProof | null {
+    return !this.disposed && this.effectiveForcedRelay && this.attachState.phase === 'attached'
+      && this.config.serverConnection?.isReady() ? this.relayProof : null;
+  }
+
+  private revokeRelayProof(): void {
+    this.relayBeginWire = null;
+    this.relayProof = null;
+  }
+
   private teardownRelayServerHandler(): void {
     this.relayServerUnsub?.();
     this.relayServerUnsub = null;
+    this.relayReadyUnsub?.();
+    this.relayReadyUnsub = null;
   }
 
   private wireRelayServerHandler(): void {
@@ -1120,7 +1146,23 @@ export class SessionRuntime {
       return;
     }
 
+    this.relayReadyUnsub = conn.onRelayReady?.(this.config.sessionName, (proof, physicalGeneration) => {
+      const sent = this.relayBeginWire;
+      if (this.disposed || !this.effectiveForcedRelay || !conn.isReady()
+        || this.attachState.phase !== 'attached' || !sent || this.relayProof
+        || sent.id !== proof.relayRequestId
+        || sent.physicalGeneration !== physicalGeneration
+        || this.config.sessionName !== proof.sessionName
+        || proof.browserClientId !== getOrCreateClientId()) {
+        return; // stale route, foreign browser, missing begin, duplicate or legacy
+      }
+      this.relayProof = proof;
+    }) ?? null;
+
     this.relayServerUnsub = conn.onConnectionStateChange((state: ConnectionState) => {
+      if (state !== 'connected') {
+        this.revokeRelayProof();
+      }
       // Any loss of the server transport ends the server-side relay forwarding
       // loop: 'connecting' (first connect / handshake pending), 'reconnecting'
       // (recoverable intra-budget drop — the new transport surfaces this
@@ -1181,11 +1223,18 @@ export class SessionRuntime {
       return;
     }
     const resize = this.lastResize;
-    conn.beginRelay(this.sessionId, {
+    this.revokeRelayProof();
+    const opts = {
       cols: resize?.cols,
       rows: resize?.rows,
       needsBootstrap: this.requestBootstrapForAttach(),
-    });
+    };
+    // Legacy continues non-credit; never fabricate an envelope id.
+    if (conn.beginRelayTracked) {
+      this.relayBeginWire = conn.beginRelayTracked(this.sessionId, opts);
+    } else {
+      conn.beginRelay(this.sessionId, opts);
+    }
     const result = this.attachController.dispatch({ type: 'RELAY_BEGIN_OK' });
     this.emitRuntimeEvent({ type: 'route-intent-changed', phase: result.phase });
   }
