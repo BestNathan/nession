@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // #2010 main-owned trusted dispatch authority, key separation and fail-closed tests.
 import assert from 'node:assert/strict';
-import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey,CONTROLLED_DISPATCH_COMMENT,CONTROLLED_RECOVERY_COMMENT}
+import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey,CONTROLLED_DISPATCH_COMMENT,CONTROLLED_RECOVERY_COMMENT,CONTROLLED_NATIVE_RECOVERY_COMMENT}
   from './controller-dispatch.mjs';
 
 const sha='a'.repeat(40),actionId='b'.repeat(64),issue=1997,runId=12345;
@@ -60,6 +60,15 @@ for(const patch of [{actionId:actualAction},
   {event:{...continuation.event,comment:{...continuation.event.comment,body:'/nession resume issue=1997 checkpoint=2'}}},
   {event:{...continuation.event,comment:{...continuation.event.comment,user:{login:'fork'}}}},
 ])assert.throws(()=>assertDispatchAuthority({...continuation,...patch}),/authenticated owner\/main/);
+const nativeId=await import('./outbox.mjs').then(m=>m.nativeResumeSuccessorId(1997,
+  continuation.actionId,39376331942));
+const nativeRecovery={...continuation,actionId:nativeId,
+  event:{...continuation.event,comment:{...continuation.event.comment,
+    body:CONTROLLED_NATIVE_RECOVERY_COMMENT}}};
+assert.equal(assertDispatchAuthority(nativeRecovery).action_id,nativeId);
+assert.throws(()=>assertDispatchAuthority({...nativeRecovery,actionId:continuation.actionId}),/authenticated owner\/main/);
+assert.throws(()=>assertDispatchAuthority({...nativeRecovery,event:{...nativeRecovery.event,
+  comment:{...nativeRecovery.event.comment,body:CONTROLLED_NATIVE_RECOVERY_COMMENT+' '}}}),/authenticated owner\/main/);
 const denied=[
   {environment:{...environment,GITHUB_REF:'refs/pull/12/merge'}},
   {environment:{...environment,GITHUB_ACTOR:'attacker'}},

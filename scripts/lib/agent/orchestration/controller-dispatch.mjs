@@ -7,8 +7,10 @@ import {hkdfSync} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
-import {executeDurableAgentDispatch,recoverConfirmedFailedDeveloperDispatch} from './dispatch-store.mjs';
-import {failedDeveloperRetryActionId} from './outbox.mjs';
+import {executeDurableAgentDispatch,recoverConfirmedFailedDeveloperDispatch,
+  recoverAttestedNativeResumeFailure} from './dispatch-store.mjs';
+import {failedDeveloperRetryActionId,nativeResumeSuccessorId} from './outbox.mjs';
+import {verifyNativeResumeFailureLive} from './native-resume-failure.mjs';
 import {CONTROLLED_CONTINUATION,CONTROLLED_CONTINUATION_COMMENT} from './development-resume.mjs';
 import {CONTROLLED_FAILED_RUN,verifyKnownFailureLive} from './failed-worker-recover.mjs';
 
@@ -16,8 +18,10 @@ const REPO='BestNathan/nession';
 const WORKFLOW='.github/workflows/agent-controller-dispatch.yml';
 export const CONTROLLED_DISPATCH_COMMENT='/nession dispatch issue=1997 action=95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae';
 export const CONTROLLED_RECOVERY_COMMENT='/nession recover issue=1997 failed_run=39267659650';
+export const CONTROLLED_NATIVE_RECOVERY_COMMENT='/nession recover-native issue=1997 failed_run=39376331942';
 const ORIGINAL_ACTION='95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae';
 const RECOVERY_ACTION=failedDeveloperRetryActionId(1997,ORIGINAL_ACTION,CONTROLLED_FAILED_RUN);
+const NATIVE_RECOVERY_ACTION=nativeResumeSuccessorId(1997,CONTROLLED_CONTINUATION,39376331942);
 const HEX40=/^[a-f0-9]{40}$/,HEX64=/^[a-f0-9]{64}$/;
 const positive=n=>Number.isSafeInteger(n)&&n>0;
 function fail(s){throw Error('trusted Controller dispatch: '+s);}
@@ -28,7 +32,8 @@ export function assertDispatchAuthority({environment,event,run,issue,actionId}) 
        !event?.issue?.pull_request&&event?.comment?.user?.login==='BestNathan'&&
        ((event?.comment?.body===CONTROLLED_DISPATCH_COMMENT&&actionId===ORIGINAL_ACTION)||
         (event?.comment?.body===CONTROLLED_RECOVERY_COMMENT&&actionId===RECOVERY_ACTION)||
-        (event?.comment?.body===CONTROLLED_CONTINUATION_COMMENT&&actionId===CONTROLLED_CONTINUATION))&&
+        (event?.comment?.body===CONTROLLED_CONTINUATION_COMMENT&&actionId===CONTROLLED_CONTINUATION)||
+        (event?.comment?.body===CONTROLLED_NATIVE_RECOVERY_COMMENT&&actionId===NATIVE_RECOVERY_ACTION))&&
        Number.isSafeInteger(event?.comment?.id)&&event.comment.id>0&&
        issue===1997)
     :(environment.GITHUB_EVENT_NAME==='workflow_dispatch'&&
@@ -103,8 +108,9 @@ async function main(){
   const issue=commanded?1997:Number(event?.inputs?.issue_number);
   const recovering=commanded&&event?.comment?.body===CONTROLLED_RECOVERY_COMMENT;
   const continuing=commanded&&event?.comment?.body===CONTROLLED_CONTINUATION_COMMENT;
+  const recoveringNative=commanded&&event?.comment?.body===CONTROLLED_NATIVE_RECOVERY_COMMENT;
   const actionId=commanded?(continuing?CONTROLLED_CONTINUATION:
-    recovering?RECOVERY_ACTION:ORIGINAL_ACTION):event?.inputs?.action_id;
+    recoveringNative?NATIVE_RECOVERY_ACTION:recovering?RECOVERY_ACTION:ORIGINAL_ACTION):event?.inputs?.action_id;
   if(!positive(issue)||!HEX64.test(actionId??''))fail('invalid Issue/Action');
   const token=env.ACTIONS_DISPATCH_TOKEN;
   if(typeof token!=='string'||token.length<8)fail('missing trusted Actions credential');
@@ -132,6 +138,12 @@ async function main(){
         runId:verified.run_id,verified:verified.verified});
       if(recovery.action_id!==actionId||!['recovered','replayed'].includes(recovery.status))
         fail('recovery action is not the independently verified CAS successor');
+    }
+    if(recoveringNative){
+      const verified=await verifyNativeResumeFailureLive(token);
+      const recovery=recoverAttestedNativeResumeFailure({remote:storeRemote,source:verified});
+      if(recovery.action_id!==actionId||!['recovered','replayed'].includes(recovery.status))
+        fail('native recovery action is not the verified CAS successor');
     }
     const signer={key,key_id:'main-controller',
       issuer_run_id:run.id,now:Date.now(),ttl_ms:600000};

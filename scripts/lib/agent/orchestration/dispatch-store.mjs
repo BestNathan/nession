@@ -7,7 +7,8 @@ import os from 'node:os';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {readIssueWorkflowState,writeIssueWorkflowState,issueStatePath} from './state-store.mjs';
-import {reconcileOutbox,recordDispatch,recordAttestedDeveloperFailure,failedDeveloperRetryActionId} from './outbox.mjs';
+import {reconcileOutbox,recordDispatch,recordAttestedDeveloperFailure,failedDeveloperRetryActionId,
+  recordAttestedNativeResumeFailure,nativeResumeSuccessorId} from './outbox.mjs';
 import {prepareGitHubDispatch,verifyPersistedDispatchIntent,createGitHubDispatchClient,acceptAttestedSliceYield}
   from './github-dispatch.mjs';
 import {auditStagedRunStore} from '../../../run-store-integrity.mjs';
@@ -190,6 +191,49 @@ export function recoverConfirmedFailedDeveloperDispatch({
     return {status:'recovered',issue,
       action_id:failedDeveloperRetryActionId(issue,actionId,runId),
       state_version:next.version,store_commit_sha:published.commit_sha};
+  });
+}
+
+// One exact historical native Resume recovery. Independent GitHub proof
+// precedes this privileged Store-only CAS; absence of Checkpoint v2 is
+// independently rechecked within the same checkout before mutation.
+export function recoverAttestedNativeResumeFailure({remote,source}){
+  if(source?.verified!==true||source.issue!==1997||
+    source.run_id!==39376331942||source.attempt!==1||
+    source.failure_code!=='native_cursor_agent_not_found_before_send')
+    fail('unauthenticated native Cursor Resume failure');
+  const original='3f4abb86785d41dbb771edbab1c400841d3d0e60335358332307b75e1d36c1c8';
+  return withStore(remote,dir=>{
+    const read=readIssueWorkflowState(dir,1997);
+    if(!read.state)fail('native Resume Issue missing');
+    const action=read.state.outbox.find(x=>x.id===original);
+    const successorId=nativeResumeSuccessorId(1997,original,source.run_id);
+    if(action?.status==='failed'){
+      const next=read.state.outbox.find(x=>x.id===successorId);
+      if(action.receipt?.source_run_id!==source.run_id||
+         action.receipt?.failure_code!==source.failure_code||
+         !next||!['pending','dispatching','dispatched','yielded'].includes(next.status))
+        fail('conflicting recovery replay');
+      return {status:'replayed',issue:1997,action_id:successorId,
+        state_version:read.version,store_commit_sha:git(dir,['rev-parse','HEAD'])};
+    }
+    if(read.version!==9||action?.status!=='dispatched')
+      fail('native Resume Store changed since verified failure');
+    const prefix='roles/developer/dev-cursor-01/issues/1997';
+    const headFile=path.join(dir,prefix,'head.json');
+    let head;
+    try{head=JSON.parse(fs.readFileSync(headFile,'utf8'));}catch{fail('native checkpoint Store HEAD absent');}
+    if(head.version!==1||
+      head.checkpoint_path!==prefix+'/checkpoints/00000001.json'||
+      head.ciphertext_sha256!=='a42220e24ed5ff587ed6173b662a75856f62e5a16561274cb616325b150f4107'||
+      fs.existsSync(path.join(dir,prefix,'runs/39376331942-1.json'))||
+      fs.existsSync(path.join(dir,prefix,'checkpoints/00000002.json')))
+      fail('checkpoint v2 exists or authenticated v1 changed');
+    const next=recordAttestedNativeResumeFailure(read.state,read.version,original,source);
+    const pushed=persist(dir,next,read.version,1997);
+    if(pushed.replayed)fail('new recovery CAS unexpectedly replayed');
+    return {status:'recovered',issue:1997,action_id:successorId,
+      state_version:next.version,store_commit_sha:pushed.commit_sha};
   });
 }
 

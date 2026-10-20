@@ -10,7 +10,7 @@ import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {runCursorSession} from '../providers/cursor.mjs';
 import {assertControlledContinuation,assertCurrentDevelopmentCapabilities,developmentHarnessDigest} from './development-resume.mjs';
-import {failedDeveloperRetryActionId} from './outbox.mjs';
+import {failedDeveloperRetryActionId,nativeResumeSuccessorId} from './outbox.mjs';
 import {sealCursorNativeStore} from '../providers/cursor-native-store.mjs';
 import {buildAgentWorkflowTelemetry,writeAgentWorkflowTelemetry} from '../../../agent-workflow-telemetry.mjs';
 
@@ -37,6 +37,8 @@ function readAdmission(file){
           '95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae',
           39267659650),
         '3f4abb86785d41dbb771edbab1c400841d3d0e60335358332307b75e1d36c1c8',
+        nativeResumeSuccessorId(1997,
+          '3f4abb86785d41dbb771edbab1c400841d3d0e60335358332307b75e1d36c1c8',39376331942),
       ].includes(a.action_id)||
       !HEX40.test(a.input_sha??'')||a.input_sha!=='220266b9233ec97b1beacbc54e5cc7f82d3cece2'||
       Number(process.env.GITHUB_RUN_ID)!==a.run_id||
@@ -46,7 +48,7 @@ function readAdmission(file){
       process.env.GITHUB_EVENT_NAME!=='workflow_dispatch'||
       Number(process.env.GITHUB_RUN_ATTEMPT)!==1)
     fail('only authenticated disposable #1997 Cursor slices are enabled');
-  const continuation=a.action_id==='3f4abb86785d41dbb771edbab1c400841d3d0e60335358332307b75e1d36c1c8';
+  const continuation=Object.hasOwn(a,'resume_from');
   if(continuation)assertControlledContinuation(a);
   else if(Object.hasOwn(a,'resume_from'))fail('initial Slice cannot claim native restore');
   return a;

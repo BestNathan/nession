@@ -10,6 +10,7 @@ import {resolveIdentity,resolveProviderPlan} from '../harness/contract.mjs';
 import {fetchEncryptedAgentCheckpoint} from '../store/remote.mjs';
 import {sealCursorNativeStore,openCursorNativeStore} from '../providers/cursor-native-store.mjs';
 import {deriveStoreAesKey} from './development-checkpoint-key.mjs';
+import {nativeResumeSuccessorId} from './outbox.mjs';
 
 export const CONTROLLED_CONTINUATION='3f4abb86785d41dbb771edbab1c400841d3d0e60335358332307b75e1d36c1c8';
 export const CONTROLLED_CONTINUATION_COMMENT='/nession resume issue=1997 checkpoint=1';
@@ -29,7 +30,8 @@ export function assertControlledContinuation(a) {
   const c=a?.resume_from;
   if(a?.authorized!==true||a.issue!==1997||a.role!=='developer'||
     a.agent_id!=='dev-cursor-01'||a.task!=='implement'||a.provider!=='cursor'||
-    a.action_id!==CONTROLLED_CONTINUATION||a.input_sha!==SOURCE||
+    ![CONTROLLED_CONTINUATION,nativeResumeSuccessorId(1997,CONTROLLED_CONTINUATION,39376331942)]
+      .includes(a.action_id)||a.input_sha!==SOURCE||
     !c||Object.keys(c).sort().join(',')!==
       'checkpoint_commit_sha,checkpoint_version,ciphertext_sha256,ordinal,parent_action_id'||
     c.ordinal!==1||c.parent_action_id!==PARENT||c.checkpoint_version!==1||
