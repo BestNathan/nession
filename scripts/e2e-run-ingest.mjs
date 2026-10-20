@@ -242,6 +242,21 @@ function selfTest() {
     'a change to this workflow must exercise the real scenario');
   assert.match(ingesterYml,/workflows: \["E2E \/ Scenario Smoke"\]/,
     'trusted Scenario Ingest must follow the canonical producer');
+  const eligibleGate=ingesterYml.split('  ingest-scenario:')[1]?.split('    runs-on:')[0]??'';
+  assert.match(eligibleGate,/github\.event\.workflow_run\.status == 'completed'/,
+    'Scenario ingester must ignore incomplete/cancelled upstream sources');
+  assert.match(eligibleGate,/github\.event\.workflow_run\.conclusion == 'success'/);
+  assert.match(eligibleGate,/github\.event\.workflow_run\.conclusion == 'failure'/,
+    'Scenario failure observations remain eligible and non-evaluative');
+  assert.match(eligibleGate,/github\.event\.workflow_run\.repository\.full_name == github\.repository/);
+  assert.match(eligibleGate,/github\.event\.workflow_run\.head_repository\.full_name == github\.repository/);
+  assert.doesNotMatch(eligibleGate,/head_branch == 'main'|event == 'push'/,
+    'do not suppress eligible PR/dispatch Scenario observations');
+  assert.equal(sourceIdentity({...event,workflow_run:{...event.workflow_run,conclusion:'failure'}},
+    'BestNathan/nession').conclusion,'failure');
+  for(const conclusion of ['cancelled','skipped','timed_out',null])
+    assert.throws(()=>sourceIdentity({...event,workflow_run:{...event.workflow_run,conclusion}},
+      'BestNathan/nession'),/not a completed/);
   const mainEvent={workflow_run:{...event.workflow_run,
     event:'push',head_branch:'main'}};
   assert.equal(sourceIdentity(mainEvent,'BestNathan/nession').event,'push');
