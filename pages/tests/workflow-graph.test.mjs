@@ -55,4 +55,10 @@ test('public projection rejects forged routes, injected fields and duplicate top
   const q=projectWorkflowGraph(await definitions(),sha);
   q.edges.push({...q.edges[0]});
   assert.throws(()=>validateWorkflowGraph(q),/Invalid workflow projection edge/);
+  const injected=projectWorkflowGraph(await definitions(),sha);
+  injected.nodes[0].raw_log='private source data';
+  assert.throws(()=>validateWorkflowGraph(injected),/Unexpected public workflow node fields/);
+  const extra=projectWorkflowGraph(await definitions(),sha);
+  extra.source.auth_token='not allowed';
+  assert.throws(()=>validateWorkflowGraph(extra),/Unexpected public workflow projection fields/);
 });
