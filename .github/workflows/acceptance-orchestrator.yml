@@ -628,9 +628,11 @@ jobs:
             sort_by(.created_at) | last | .id // empty' "$RUNNER_TEMP/acceptance-runs.json")" || exit 0
           [[ "$id" =~ ^[1-9][0-9]*$ ]] || exit 0
           run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id")"
-          status="$(jq -r .status <<< "$run_json")"
-          conclusion="$(jq -r '.conclusion // ""' <<< "$run_json")"
-          if [[ "$status" == completed && "$conclusion" == failure ]]; then
+          printf '%s\n' "$verdict" > "$RUNNER_TEMP/dependency-barrier.json"
+          printf '%s\n' "$run_json" > "$RUNNER_TEMP/acceptance-target-run.json"
+          replay="$(node scripts/acceptance-dependency-state.mjs replay \
+            "$RUNNER_TEMP/dependency-barrier.json" "$RUNNER_TEMP/acceptance-target-run.json" "$TARGET_SHA")"
+          if [[ "$replay" == true ]]; then
             gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/rerun-failed-jobs"
             echo "Replayed failed Acceptance after both Quality/E2E completion events" >> "$GITHUB_STEP_SUMMARY"
           fi
