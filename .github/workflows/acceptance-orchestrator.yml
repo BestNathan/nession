@@ -582,7 +582,7 @@ jobs:
           # Only an exact-head, newest-run pair of completed successes can
           # authorize the existing failed-only Acceptance rerun. Pending is
           # not Pass; failed and superseded dependencies do not wake an Agent.
-          node scripts/acceptance-dependency-state.mjs self-test
+          ./gates/run acceptance-postrun-waker-selftest
           for workflow in ci-quality.yml e2e-tests.yml; do
             file="$(basename "$workflow" .yml)"
             gh run list --repo "$GITHUB_REPOSITORY" --workflow "$workflow" \
