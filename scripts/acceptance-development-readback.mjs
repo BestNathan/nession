@@ -170,6 +170,19 @@ export function attestOriginalDispatchHistory(history,sourceSha,oldRun,actionId)
 }
 // Only the existing controlled initial #1997 fixture is supported. Extending
 // proofs to another action/provider requires its independently tested contract.
+// A changed proof owner is NOT a collector failure and NOT a reusable execution.
+// git diff --quiet: 0 identical, 1 changed; all other failures are untrusted.
+export function readbackSourceUnchanged(workspace,from,to,paths,run=execFileSync){
+  try{
+    run('git',['-C',workspace,'diff','--quiet',from,to,'--',...paths],
+      {stdio:'pipe',timeout:10000});
+    return true;
+  }catch(e){
+    if(e?.status===1)return false;
+    throw Error('Developer Acceptance readback: source comparison unavailable');
+  }
+}
+
 export async function collectDevelopmentReadback({repo,issue,stage,targetSha,workspace,get,readLog}) {
   if(repo!==REPO||![1997,2010,1664].includes(Number(issue))||
     !['pre-merge','staging','post-merge'].includes(stage))return [];
@@ -201,11 +214,11 @@ export async function collectDevelopmentReadback({repo,issue,stage,targetSha,wor
       'scripts/lib/agent/orchestration/outbox.mjs','scripts/lib/agent/orchestration/github-dispatch.mjs',
       'scripts/lib/agent/orchestration/state-store.mjs',
       'automation/agents/registry.json'];
-    execFileSync('git',['-C',workspace,'diff','--quiet',r.worker_sha,targetSha,'--',...owners],
-      {stdio:'pipe',timeout:10000});
-    execFileSync('git',['-C',workspace,'diff','--quiet',r.ingester_sha,targetSha,'--',
-      INGEST,'scripts/lib/agent/orchestration/development-ingest.mjs'],
-      {stdio:'pipe',timeout:10000});
+    // Do not reuse an old Provider or Ingest result after its proof owners
+    // changed. Keep formal SC Pending; never crash the whole CI collector.
+    if(!readbackSourceUnchanged(workspace,r.worker_sha,targetSha,owners)||
+       !readbackSourceUnchanged(workspace,r.ingester_sha,targetSha,
+         [INGEST,'scripts/lib/agent/orchestration/development-ingest.mjs']))continue;
     const reachable=await get('/repos/'+repo+'/compare/'+r.workflow_commit_sha+'...agent-store');
     const checkpointReachable=await get('/repos/'+repo+'/compare/'+r.checkpoint_commit_sha+'...'+r.workflow_commit_sha);
     requireIt(['ahead','identical'].includes(reachable.status)&&

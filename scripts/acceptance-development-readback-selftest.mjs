@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {createHash} from 'node:crypto';
 import {parseDevelopmentReceipt,attestDevelopmentReceipt,attestDevelopmentStore,
-  DEVELOPMENT_RECEIPT_PREFIX,collectDevelopmentReadback,attestOriginalDispatchHistory} from './acceptance-development-readback.mjs';
+  DEVELOPMENT_RECEIPT_PREFIX,collectDevelopmentReadback,attestOriginalDispatchHistory,readbackSourceUnchanged} from './acceptance-development-readback.mjs';
 import {startDevelopment,recordDispatchIntent,recordDispatch,recordSliceYield} from './lib/agent/orchestration/outbox.mjs';
 import {developmentIngestReceipt} from './lib/agent/orchestration/development-ingest.mjs';
 
@@ -105,6 +105,16 @@ export async function selfTestDevelopmentReadback(){
     {checkpoint:{...store.checkpoint,plaintext:'forbidden'}},
     {prepared:pending},{dispatched:prepared},
   ])assert.throws(()=>attestDevelopmentStore(receipt,{...store,...bad}));
+  // A legitimate owner change is a non-reusable historical Worker, never
+  // a collector crash or false SC Pass. A Git invocation error still denies.
+  const compare=(status)=>()=>{
+    if(status===0)return;
+    const e=new Error('git diff exit '+status);e.status=status;throw e;
+  };
+  assert.equal(readbackSourceUnchanged('/repo',sha,source,['worker.mjs'],compare(0)),true);
+  assert.equal(readbackSourceUnchanged('/repo',sha,source,['worker.mjs'],compare(1)),false);
+  assert.throws(()=>readbackSourceUnchanged('/repo',sha,source,['worker.mjs'],compare(128)),
+    /source comparison unavailable/);
   let calls=0;
   assert.deepEqual(await collectDevelopmentReadback({repo,issue:123,stage:'staging',
     get:()=>{calls++;}}),[]);
