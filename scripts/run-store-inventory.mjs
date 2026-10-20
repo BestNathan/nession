@@ -638,8 +638,18 @@ function selfTest(){
   // Unknown privileged workflows are not allowed to quietly gain a
   // dynamic-ref Git Store writer identity outside the canonical inventory.
   const unclassifiedWriter=new Map(sources);
-  unclassifiedWriter.set('.github/workflows/unclassified-writer.yml',
-    'name: Unclassified Writer\\non:\\n  push:\\npermissions:\\n  contents: write\\njobs:\\n  write:\\n    steps:\\n      - run: git push origin "HEAD:${target_ref}"\\n'.replaceAll('\\n','\n'));
+  unclassifiedWriter.set('.github/workflows/unclassified-writer.yml',[
+    'name: Unclassified Writer',
+    'on:',
+    '  push:',
+    'permissions:',
+    '  contents: write',
+    'jobs:',
+    '  write:',
+    '    steps:',
+    '      - run: git push origin "HEAD:${target_ref}"',
+    '',
+  ].join('\n'));
   assert.throws(()=>checkInventory(manifest,unclassifiedWriter),
     /unclassified direct Git push in privileged Workflow/);
   const unclassifiedRelease=new Map(sources);
