@@ -565,27 +565,7 @@ export class SessionRuntime {
     }
 
     if (this.effectiveForcedRelay) {
-      const conn = this.config.serverConnection;
-      const proof = this.relayProof;
-      const sent = this.relayBeginWire;
-      if (!conn?.isReady() || !conn.sendRelayOutputApplied || !proof || !sent
-        || proof.streamEpoch !== snapshot.streamEpoch
-        || proof.sessionName !== this.config.sessionName
-        || proof.browserClientId !== getOrCreateClientId()) {
-        return; // unverified/legacy/stale route is permanently non-credit
-      }
-      // The stored proof was accepted only after exact begin-ID + physical
-      // generation + current browser checks; reconnect and route switch revoke
-      // it before the next Agent attach may bind. The Agent independently
-      // verifies its current peer token, generation, epoch and issued bytes.
-      if (conn.sendRelayOutputApplied(this.config.sessionName, {
-        subscriberGeneration: proof.subscriberGeneration,
-        streamEpoch: snapshot.streamEpoch,
-        rendererGeneration: snapshot.generation,
-        appliedThrough: snapshot.appliedSeq,
-      })) {
-        this.terminalAppliedCursor.recordAckSubmitted(binding, snapshot.appliedSeq);
-      }
+      this.sendVerifiedRelayOutputAck(binding, snapshot);
       return;
     }
 
@@ -601,6 +581,34 @@ export class SessionRuntime {
     // Sending an ACK does not prove that Agent accepted or credited it.
     if (api.sendOutputApplied(this.config.sessionName, {
       subscriberGeneration,
+      streamEpoch: snapshot.streamEpoch,
+      rendererGeneration: snapshot.generation,
+      appliedThrough: snapshot.appliedSeq,
+    })) {
+      this.terminalAppliedCursor.recordAckSubmitted(binding, snapshot.appliedSeq);
+    }
+  }
+
+  /** Separate current-route proof admission from parser prefix accounting.
+   * A Server receipt alone is never a parser baseline or issued-byte credit.
+   */
+  private sendVerifiedRelayOutputAck(
+    binding: AppliedCursorBinding,
+    snapshot: AppliedCursorSnapshot,
+  ): void {
+    const conn = this.config.serverConnection;
+    const proof = this.relayProof;
+    const sent = this.relayBeginWire;
+    if (!conn?.isReady() || !conn.sendRelayOutputApplied || !proof || !sent
+      || proof.streamEpoch !== snapshot.streamEpoch
+      || proof.sessionName !== this.config.sessionName
+      || proof.browserClientId !== getOrCreateClientId()) {
+      return; // unverified/legacy/stale routes have no credit
+    }
+    // The proof was accepted only on the exact begin+physical socket. Agent
+    // rechecks peer token, stream generation/epoch and the issued frontier.
+    if (conn.sendRelayOutputApplied(this.config.sessionName, {
+      subscriberGeneration: proof.subscriberGeneration,
       streamEpoch: snapshot.streamEpoch,
       rendererGeneration: snapshot.generation,
       appliedThrough: snapshot.appliedSeq,
