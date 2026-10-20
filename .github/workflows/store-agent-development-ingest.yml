@@ -42,7 +42,8 @@ jobs:
          github.event.comment.user.login == 'BestNathan' &&
          (github.event.comment.body == '/nession ingest issue=1997 worker_run=39288961865' ||
           startsWith(github.event.comment.body, '/nession ingest issue=1997 action=3f4abb86785d41dbb771edbab1c400841d3d0e60335358332307b75e1d36c1c8 worker_run=') ||
-          github.event.comment.body == '/nession ingest issue=1997 action=6a84244ca028a93f8c057ab23852bb21c3906d485e4c16ccab661104c31d750e worker_run=39396836009'))
+          github.event.comment.body == '/nession ingest issue=1997 action=6a84244ca028a93f8c057ab23852bb21c3906d485e4c16ccab661104c31d750e worker_run=39396836009' ||
+          github.event.comment.body == '/nession ingest issue=1997 action=dac10d570c30557fe629b8605ecb44d33335eb967e24a52931467ac7b93b5e31 worker_run=39448549052'))
       )
     runs-on: ubuntu-latest
     environment: cursor
