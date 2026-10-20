@@ -10,7 +10,7 @@ import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {runCursorSession} from '../providers/cursor.mjs';
-import {assertControlledContinuation,developmentHarnessDigest} from './development-resume.mjs';
+import {assertControlledContinuation,assertCurrentDevelopmentCapabilities,developmentHarnessDigest} from './development-resume.mjs';
 import {failedDeveloperRetryActionId} from './outbox.mjs';
 import {sealCursorNativeStore} from '../providers/cursor-native-store.mjs';
 import {buildAgentWorkflowTelemetry,writeAgentWorkflowTelemetry} from '../../../agent-workflow-telemetry.mjs';
@@ -66,6 +66,7 @@ async function main(){
      !fs.existsSync('/.dockerenv'))
     fail('OS-isolated Docker worker is mandatory, not local SDK sandbox');
   const a=readAdmission(process.argv[2]),resuming=Object.hasOwn(a,'resume_from');
+  assertCurrentDevelopmentCapabilities(a,JSON.parse(fs.readFileSync('automation/agents/registry.json','utf8')));
   if(!process.env.CURSOR_API_KEY||!process.env.CURSOR_SDK_ROOT)
     fail('missing pinned real Cursor Provider');
   const sdkPkg=JSON.parse(fs.readFileSync(path.join(
@@ -175,9 +176,14 @@ async function main(){
       github_run_id:a.run_id,github_run_attempt:metadata.attempt,
       repository:REPO,event:'workflow_dispatch',job:'developer',
       task:{id:'issue-1997-development',type:'development',issue:a.issue,
-        target_ref:a.input_sha,action_id:a.action_id},
+        target_ref:a.input_sha,action_id:a.action_id,native_session_id:meta.agent_id,
+        native_resumed:meta.resumed,
+        restored_checkpoint_version:resuming?a.resume_from.checkpoint_version:null,
+        restored_checkpoint_commit_sha:resuming?a.resume_from.checkpoint_commit_sha:null},
       agent:{provider:'cursor',id:a.agent_id,role:'developer',
-        harness_sha256:harnessDigest,model:meta.model,
+        harness_sha256:harnessDigest,
+        checkpoint_id:resuming?'agent-store:'+a.resume_from.checkpoint_commit_sha+':v'+a.resume_from.checkpoint_version:null,
+        model:meta.model,
         run_id:meta.run_id,status:meta.status},
       execution:{turns:meta.turns,model_requests:meta.turns,
         tool_calls:meta.tool_calls,tools_observed:true},

@@ -43,7 +43,7 @@ function fakeAgent(){
       return {id:'fake-run',async *stream(){yield {type:'usage',usage:{inputTokens:2}};},
         async wait(){return {id:'fake-run',status:'finished',result:'ok',usage:{inputTokens:2}};}};
     },
-    async getUsage(){return null;},
+    async getUsage(){return {cost:{rawCostCents:250,chargedCents:250}};},
     async close(){},
   };
 }
@@ -54,11 +54,14 @@ async function test(){
   const first=await runCursorSession(common);
   assert.equal(first.meta.agent_id,agentId);
   assert.equal(first.meta.resumed,false);
+  assert.equal(first.meta.cost.raw_usd,2.5);
   const sandboxed=await runCursorSession({...common,sandbox:true,prompt:'sandbox'});
   assert.equal(sandboxed.meta.status,'finished');
   const second=await runCursorSession({...common,resumeAgentId:agentId,prompt:'second turn'});
   assert.equal(second.meta.agent_id,agentId);
   assert.equal(second.meta.resumed,true);
+  assert.deepEqual(second.meta.cost,{raw_usd:null,charged_usd:null},
+    'an existing native Session lifetime charge is not the new Slice cost');
   assert.equal(created,2);
   assert.equal(resumed,1);
   assert.deepEqual(commands,['hello','sandbox','second turn']);

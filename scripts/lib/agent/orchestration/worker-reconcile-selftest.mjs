@@ -2,7 +2,7 @@
 // #2010 deterministic attested Worker claim / HMAC / fork / replay boundary.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {startDevelopment} from './outbox.mjs';
+import {startDevelopment,recordDispatch,recordSliceYield} from './outbox.mjs';
 import {planGitHubDispatch} from './github-dispatch.mjs';
 import {createWorkerClaim} from './worker-claim.mjs';
 import {authenticateWorkerClaimRun,inspectWorkerClaimZip,verifyWorkerClaimForAck,
@@ -100,3 +100,20 @@ for(const bad of [
   ]}],total_count:1}},
 ])assert.equal(eligiblePreflightRerun(bad.run??failed,bad.jobs??beforeModel),false);
 console.log('Worker reconciliation: signed claim, original issuer, unique Run, fork and tamper denial passed');
+
+const delivered=recordDispatch(state,state.version,action.id,
+  {status:'verified',dispatch_id:action.id,source_run_id:run.id});
+const yielded=recordSliceYield(delivered,delivered.version,action.id,
+  {version:1,commit_sha:'c'.repeat(40),ciphertext_sha256:'d'.repeat(64)},
+  {verified:true,repository:'BestNathan/nession',workflow_path:run.path,workflow_name:run.name,
+    role:'developer',agent_id:'dev-cursor-01',issue,run_id:run.id,attempt:1,
+    action_id:action.id,input_sha:sha});
+const next=yielded.outbox.find(a=>a.status==='pending');
+const nativePlan=planGitHubDispatch(yielded,next.id,registry,
+  {key,key_id:'main-controller',issuer_run_id:9001,now,ttl_ms:600000});
+const nativeClaim=createWorkerClaim(nativePlan.inputs,{...context,run_id:22023});
+const nativeValid={...valid,run:{...run,id:22023},claim:nativeClaim};
+assert.equal((await verifyWorkerClaimForAck(nativeValid)).source_run_id,22023);
+await assert.rejects(()=>verifyWorkerClaimForAck({...nativeValid,claim:{...nativeClaim,
+  inputs:{...nativeClaim.inputs,resume_from:'e30'}}}),/claim/);
+console.log('Worker reconciliation rejects native resume input that differs from its HMAC-signed commitment');

@@ -6,7 +6,7 @@ import {spawnSync} from 'node:child_process';
 import {hkdfSync} from 'node:crypto';
 import {assertUnprivilegedDeveloperEnvironment} from './development-worker.mjs';
 import {deriveStoreAesKey} from './development-checkpoint-key.mjs';
-import {assertControlledContinuation,CONTROLLED_CONTINUATION,writeNativeBundle,
+import {assertControlledContinuation,assertCurrentDevelopmentCapabilities,CONTROLLED_CONTINUATION,writeNativeBundle,
   developmentHarnessDigest} from './development-resume.mjs';
 
 assert.doesNotThrow(()=>assertUnprivilegedDeveloperEnvironment({CURSOR_API_KEY:'provider-key'}));
@@ -15,7 +15,7 @@ for(const key of ['STORE_APP_TOKEN','STORE_WRITER_PRIVATE_KEY','ACTIONS_DISPATCH
   assert.throws(()=>assertUnprivilegedDeveloperEnvironment({[key]:'must-not-reach-model'}),/privileged credential leaked/);
 const source='220266b9233ec97b1beacbc54e5cc7f82d3cece2';
 const admission={authorized:true,issue:1997,role:'developer',task:'implement',provider:'cursor',
-  agent_id:'dev-cursor-01',action_id:CONTROLLED_CONTINUATION,input_sha:source,
+  environment:'agent-dev-cursor-01',agent_id:'dev-cursor-01',action_id:CONTROLLED_CONTINUATION,input_sha:source,
   resume_from:{checkpoint_version:1,ordinal:1,
     parent_action_id:'85b69a9de06b02eb78f8a3a15d14b58a43ffc83ee6b1f5db11b9b541cfec9656',
     checkpoint_commit_sha:'d812e3655c0ad6337b1003aa0c1794c12335adb0',
@@ -35,6 +35,14 @@ assert.equal(developmentHarnessDigest(source,'1.0.37',{id:'composer-2.5',fast:tr
   'ba54d9fb8b8ab9ec6ca2ac17727b02db21176437a2258123b753977fd32bbf68');
 assert.notEqual(developmentHarnessDigest(source,'1.0.38',{id:'composer-2.5',fast:true}),
   developmentHarnessDigest(source,'1.0.37',{id:'composer-2.5',fast:true}));
+const registry=JSON.parse(fs.readFileSync('automation/agents/registry.json','utf8'));
+assert.doesNotThrow(()=>assertCurrentDevelopmentCapabilities(admission,registry));
+for(const permission of ['repo.read','repo.search','repo.edit','github.issue.read']){
+  const revoked=structuredClone(registry);
+  revoked.roles.developer.capabilities.tools=revoked.roles.developer.capabilities.tools.filter(t=>t!==permission);
+  assert.throws(()=>assertCurrentDevelopmentCapabilities(admission,revoked),/revoked/);
+}
+assert.throws(()=>assertCurrentDevelopmentCapabilities({...admission,environment:'cursor'},registry),/environment/);
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'developer-native-bundle-'));
 try{
   const files=Object.fromEntries(['agents.ndjson','checkpoints.ndjson','runs.ndjson','run_events.ndjson']

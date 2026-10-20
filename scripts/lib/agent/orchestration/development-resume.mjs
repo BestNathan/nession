@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {createHash,createPrivateKey,createPublicKey} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
+import {resolveIdentity,resolveProviderPlan} from '../harness/contract.mjs';
 import {fetchEncryptedAgentCheckpoint} from '../store/remote.mjs';
 import {sealCursorNativeStore,openCursorNativeStore} from '../providers/cursor-native-store.mjs';
 import {deriveStoreAesKey} from './development-checkpoint-key.mjs';
@@ -35,6 +36,14 @@ export function assertControlledContinuation(a) {
     c.checkpoint_commit_sha!==COMMIT||c.ciphertext_sha256!==CIPHERTEXT)
     fail('only the committed controlled #1997 continuation is enabled');
   return c;
+}
+export function assertCurrentDevelopmentCapabilities(a,registry){
+  const identity=resolveIdentity(registry,a.agent_id,a.task,a.environment);
+  const plan=resolveProviderPlan(registry,identity,[]);
+  if(identity.role!=='developer'||identity.provider!=='cursor'||
+    !['read','grep','edit'].every(name=>plan.native_tools.some(tool=>tool.native_name===name))||
+    !plan.canonical_capabilities.tools.includes('github.issue.read'))
+    fail('required native Tool or Issue-read permission was revoked');
 }
 function readJson(file,max=32*1024*1024){
   const s=fs.lstatSync(file);
@@ -80,6 +89,7 @@ function authority(){
 async function prepare(admissionFile,out){
   authority();
   const a=readJson(admissionFile,8192),c=assertControlledContinuation(a);
+  assertCurrentDevelopmentCapabilities(a,JSON.parse(fs.readFileSync('automation/agents/registry.json','utf8')));
   if(a.run_id!==Number(process.env.GITHUB_RUN_ID))fail('wrong restore recipient Run');
   const {version,digest}=parameters();
   const key=deriveStoreAesKey(process.env.STORE_WRITER_PRIVATE_KEY);
@@ -113,6 +123,7 @@ function open(admissionFile,input,destination){
   if(process.env.STORE_WRITER_PRIVATE_KEY||process.env.STORE_APP_TOKEN)
     fail('Store writer key must remain in separate restore job');
   const a=readJson(admissionFile,8192),c=assertControlledContinuation(a);
+  assertCurrentDevelopmentCapabilities(a,JSON.parse(fs.readFileSync('automation/agents/registry.json','utf8')));
   const proof=readJson(path.join(input,'resume.json'),8192);
   const sealed=readJson(path.join(input,'ciphertext.json'));
   const {version,digest}=parameters();
