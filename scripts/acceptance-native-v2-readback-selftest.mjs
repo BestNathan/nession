@@ -40,9 +40,10 @@ assert.throws(()=>nativeReadbackAncestryReady('/repo',sha,sources,runner(128)),
 assert.throws(()=>nativeReadbackAncestryReady('/repo','invalid',sources,runner(0)),/invalid/);
 assert.throws(()=>nativeReadbackAncestryReady('/repo',sha,['bad',...sources],runner(0)),/invalid/);
 assert.equal(verifyNativeV2Lineage({...r,checkpoint_version:1},v13),false);
+assert.equal(verifyNativeV2Lineage({...r,checkpoint_version:3},v13),false);
 assert.equal(verifyNativeV2Lineage(r,v13),true);
 for(const patch of [
-  {checkpoint_version:3},{action_id:'f'.repeat(64)},{run_id:39396836010},
+  {action_id:'f'.repeat(64)},{run_id:39396836010},
   {attempt:2},{worker_sha:'f'.repeat(40)}, {source_sha:'f'.repeat(40)},
   {session_id:'agent-fake'}, {checkpoint_commit_sha:'f'.repeat(40)},
   {ciphertext_sha256:'f'.repeat(64)},
