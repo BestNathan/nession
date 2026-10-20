@@ -43,31 +43,43 @@ export interface TerminalBootstrap {
 
 /**
  * The stream-log cut a bootstrap proves: an atomic, complete prefix of the
- * Agent's ordered output log from seq 1 through `throughSeq`.
+ * Agent's ordered output log from seq 1 through `throughSeq`, or an atomic
+ * checkpoint at the stream's **position 0**.
+ *
+ * A `throughSeq = 0` cut is the control-channel attach barrier (#2124): the
+ * session stream is created with the attach, the capture covers everything
+ * before it, and every live event recorded afterwards is seq 1 or later. It
+ * proves no stream event precedes the cut, so a renderer may start there even
+ * when the capture is truncated or `screen-only` — truncation and fidelity
+ * describe the screen, not the stream position. A `throughSeq > 0` cut is a
+ * complete replay of the event log and must not be truncated.
  *
  * This is **not** a VT/screen checkpoint, and it is not a claim that the
- * client's buffer holds the session's history. `fidelity: partial` states that
- * side explicitly: a capture/replay cannot restore modes, an alternate screen,
- * or history that predates the Agent's reader. It proves exactly one thing:
- * once a renderer reset to empty has parsed this payload, every output byte the
- * Agent's stream issued through `throughSeq` has been applied in order.
+ * client's buffer holds the session's history. It proves exactly one thing:
+ * no output byte the Agent's stream issued at or below the cut is missing from
+ * a renderer that started empty at that position.
  *
- * The caller must therefore reset the renderer **before** writing the payload
- * (the bootstrap writer is serialized, so that reset precedes these bytes) and
- * report the baseline only from the write callback of the current
- * renderer/subscription generation. A screen-only or unverified capture proves
- * none of this and yields `undefined`.
+ * The caller must reset the renderer to the cut before writing a replay
+ * payload (the bootstrap writer is serialized, so that reset precedes these
+ * bytes); an epoch-start cut has no replay to reset for. Report the baseline
+ * only from the write callback of the current renderer/subscription
+ * generation. A screen-only or unverified capture yields `undefined`.
  */
 export function streamBaselineFromBootstrap(
   bootstrap: TerminalBootstrap | undefined,
 ): VerifiedTerminalBaseline | undefined {
-  if (bootstrap?.cutConsistency !== 'atomic' || bootstrap.truncated) {
+  if (bootstrap?.cutConsistency !== 'atomic') {
     return undefined;
   }
   const epoch = bootstrap.streamEpoch;
   const through = bootstrap.throughSeq;
   if (!Number.isSafeInteger(epoch) || (epoch ?? 0) <= 0
     || !Number.isSafeInteger(through) || (through ?? -1) < 0) {
+    return undefined;
+  }
+  // Position 0 has no preceding stream events to apply, so a truncated screen
+  // snapshot cannot make the stream position false. A later cut is a replay.
+  if (through as number > 0 && bootstrap.truncated) {
     return undefined;
   }
   return { kind: 'verified', streamEpoch: epoch as number, appliedThrough: through as number };

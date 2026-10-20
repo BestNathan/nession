@@ -453,6 +453,35 @@ describe('TerminalController', () => {
     controller.dispose();
   });
 
+  it('establishes an epoch-start baseline without wiping scrollback (#2124)', () => {
+    const transport = makeTransport();
+    const onStreamBaseline = vi.fn();
+    const onBootstrapApplied = vi.fn();
+    const controller = new TerminalController(makeSession(), () => transport, {
+      rendererType: 'canvas', events: { onStreamBaseline, onBootstrapApplied },
+    });
+    controller.attach(host());
+    const h = delayedParser(controller);
+    transport.onOutput!(new Uint8Array([104, 105]), {
+      requestedLines: 5000, truncated: true,
+      cutConsistency: 'atomic', fidelity: 'screen-only', streamEpoch: 5, throughSeq: 0,
+    });
+    // Position 0 has no replay to apply, so the scrollback the screen-only
+    // capture cannot restore is preserved.
+    expect(h.spy).toHaveBeenNthCalledWith(1, '\x1b[2J\x1b[H', expect.any(Function));
+    expect(onStreamBaseline).not.toHaveBeenCalled();
+    h.finish(); // screen reset
+    expect(onStreamBaseline).not.toHaveBeenCalled();
+    h.finish(); // capture parsed
+    expect(onStreamBaseline).toHaveBeenCalledOnce();
+    expect(onStreamBaseline).toHaveBeenCalledWith({
+      kind: 'verified', streamEpoch: 5, appliedThrough: 0,
+    });
+    expect(onBootstrapApplied).not.toHaveBeenCalled();
+    h.spy.mockRestore();
+    controller.dispose();
+  });
+
   it('does not establish a baseline from a superseded bootstrap write (#2120)', () => {
     const transport = makeTransport();
     const onStreamBaseline = vi.fn();

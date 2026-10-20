@@ -137,6 +137,8 @@ client applies contiguous events 101, 102, ... with no double-apply
 
 Holding/subscribing first prevents loss but does **not** by itself prove that captured screen excludes post-cut events. Capturing first then subscribing does not prevent loss. If either guarantee cannot be proven with the actual tmux backend, mark cutConsistency=unverified, keep the session in needs-resync/degraded-live, and do not emit throughSeq as a trusted cut. Do **not** ship a nominal atomic checkpoint as a workaround.
 
+The **control-channel first attach** satisfies the first form (#2124): `ControlModeSession::attach` requests the capture on the same control connection that produces `%output`, and `ControlRouter` drops the `%output` its capture covers (those lines are inside the snapshot). The attach's session stream is created after that barrier, so its first recorded event is seq 1 and the snapshot is exactly `(streamEpoch, throughSeq = 0)`. That cut is screen-only: cut atomicity and VT fidelity stay separate fields. `the_bootstrap_capture_and_the_live_stream_join_exactly` proves it against a producer straddling the attach. The separate-process captures and the already-attached fallback described above remain unverified.
+
 Do not assume tmux capture-pane preserves alternate screen, active mouse mode, application cursor mode, bracketed paste or full VT internals. The first implementation may aim for screen-only with deterministic redraw if **cut atomicity** is independently proven. Introducing a headless VT emulator is a separate, evidence-driven follow-up, not a prerequisite.
 
 ## 5. Replay, gap, reset, and degraded live
