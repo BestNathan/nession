@@ -15,6 +15,7 @@ import {makePolicyObservabilityReceipt,POLICY_OBSERVABILITY_LOG_PREFIX}
   from './run-store-policy-observability-receipt.mjs';
 
 const REPO='BestNathan/nession';
+const ACTIVE_AGENT_REF='agent-store',SHA=/^[a-f0-9]{40}$/;
 const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const fail=reason=>{throw Error('run-store-governance-live: '+reason);};
 function api(endpoint){
@@ -72,6 +73,35 @@ function updateRuleParameter(id){
   }
   return typeof value==='boolean'?value:null;
 }
+// The first three stores have a historical baseline; the fourth was
+// provisioned afterwards. A live ref or Ruleset match is not an external anchor.
+export function observeAgentStoreGovernance(branch,rulesets){
+  if(branch?.name!==ACTIVE_AGENT_REF||
+     !SHA.test(branch?.commit?.sha??'')||typeof branch.protected!=='boolean'||
+     !Array.isArray(rulesets))fail('real agent-store ref or Ruleset observation unavailable');
+  const ref='refs/heads/'+ACTIVE_AGENT_REF;
+  const candidates=rulesets.filter(rule=>
+    rule?.source===REPO&&rule?.source_type==='Repository'&&
+    rule?.target==='branch'&&rule?.enforcement==='active'&&
+    Array.isArray(rule?.conditions?.ref_name?.include)&&
+    Array.isArray(rule?.conditions?.ref_name?.exclude)&&
+    rule.conditions.ref_name.include.includes(ref)&&
+    !rule.conditions.ref_name.exclude.includes(ref));
+  return {
+    ref:ACTIVE_AGENT_REF,live_branch_exists:true,
+    observed_head_sha:branch.commit.sha,
+    branch_descriptor_protected:branch.protected,
+    active_ruleset_includes_ref_ids:candidates.map(x=>x.id)
+      .filter(x=>Number.isSafeInteger(x)&&x>0),
+    history_in_2026_10_15_three_store_baseline:false,
+    historical_immutability_audited:false,
+    server_side_app_only_writer_verified:false,
+    authorized_and_denied_write_matrix_verified:false,
+    independent_external_anchor_verified:false,
+    verdict:'UNVERIFIED: real encrypted Store exists; full write authorization and history audit pending',
+  };
+}
+
 export function summarizeGovernance(manifest,rulesets,appId,history){
   validateMigrationBaseline(manifest);
   if(!Array.isArray(rulesets))fail('unavailable GitHub Ruleset details');
@@ -167,6 +197,11 @@ async function live(out){
   });
   const appId=Number(process.env.STORE_WRITER_APP_ID??0);
   const report=summarizeGovernance(manifest,details,appId,history);
+  // The real fourth Store must not silently disappear from the historical
+  // three-store audit. Observe only GitHub API; never mutate the ref.
+  report.provisioned_agent_store=observeAgentStoreGovernance(
+    api('branches/'+ACTIVE_AGENT_REF),details);
+  report.full_four_store_history_audit_proven=false;
   report.observed_at=new Date().toISOString();
   report.trusted_main_sha=process.env.GITHUB_SHA;
   report.audit_run_id=process.env.GITHUB_RUN_ID??null;
@@ -181,7 +216,12 @@ async function live(out){
       (x.configuration_verified?'configured'
         :x.unobservable_capabilities.length>0?'NOT OBSERVABLE HERE'
         :'NOT CONFIGURED')+' |').join('\n')+
-    '\n\n**'+report.result+'**. This is not a true external anchor, writer denial, or SC Pass.\n'+
+    '\n| '+report.provisioned_agent_store.ref+' | NOT AUDITED (no historical baseline) | '+
+      (report.provisioned_agent_store.active_ruleset_includes_ref_ids.length
+        ?'RULESET INCLUSION ONLY; NO APP-ONLY DENIAL PROOF'
+        :'NO ACTIVE EXACT-REF RULESET OBSERVED')+' |'+
+    '\n\n**'+report.result+'**. Full four-Store history audit NOT PROVEN. '+
+    'This is not an external anchor, writer denial, or SC Pass.\n'+
     (report.policy_observability.establishes_neither_presence_nor_absence?
       '\nBounded limitation: '+report.policy_observability.note+'\n':''));
   console.log('Store governance: '+report.result);
@@ -196,7 +236,8 @@ async function live(out){
   // Explicit fail-closed alert status on unprotected branch policies. Caller
   // uploads the report even on failure, with zero write permissions.
   if(!report.actual_history_checked_against_unanchored_baseline||
-     !report.protected_by_server_ruleset)process.exitCode=1;
+      !report.protected_by_server_ruleset||
+      !report.full_four_store_history_audit_proven)process.exitCode=1;
 }
 function selfTest(){
   const sha='a'.repeat(40);
@@ -210,6 +251,31 @@ function selfTest(){
       store,observed:sha,api_ref_verified:true,mode:'anchored-history',
       checked_commits:1,checked_changes:2}))};
   const report=summarizeGovernance(migration,[],0,history);
+  const liveBranch={name:ACTIVE_AGENT_REF,protected:false,commit:{sha}};
+  const unmatched=observeAgentStoreGovernance(liveBranch,[]);
+  assert.equal(unmatched.live_branch_exists,true);
+  assert.equal(unmatched.branch_descriptor_protected,false);
+  assert.equal(unmatched.history_in_2026_10_15_three_store_baseline,false);
+  assert.equal(unmatched.historical_immutability_audited,false);
+  assert.equal(unmatched.server_side_app_only_writer_verified,false);
+  assert.equal(unmatched.independent_external_anchor_verified,false);
+  assert.deepEqual(unmatched.active_ruleset_includes_ref_ids,[]);
+  const scopedAgentRule={id:552244,target:'branch',source_type:'Repository',
+    source:REPO,enforcement:'active',
+    conditions:{ref_name:{include:['refs/heads/agent-store'],exclude:[]}}};
+  const withRule=observeAgentStoreGovernance(liveBranch,[scopedAgentRule]);
+  assert.deepEqual(withRule.active_ruleset_includes_ref_ids,[552244]);
+  assert.equal(withRule.server_side_app_only_writer_verified,false);
+  assert.equal(withRule.historical_immutability_audited,false);
+  assert.deepEqual(observeAgentStoreGovernance(liveBranch,[
+    {...scopedAgentRule,enforcement:'disabled'}]).active_ruleset_includes_ref_ids,[]);
+  assert.deepEqual(observeAgentStoreGovernance(liveBranch,[
+    {...scopedAgentRule,conditions:{ref_name:{include:['~ALL'],exclude:[]}}}
+  ]).active_ruleset_includes_ref_ids,[]);
+  assert.throws(()=>observeAgentStoreGovernance(
+    {...liveBranch,commit:{sha:'not-a-commit'}},[]),/unavailable/);
+  assert.throws(()=>observeAgentStoreGovernance(
+    {...liveBranch,name:'acceptance-results'},[]),/unavailable/);
   assert.equal(report.protected_by_server_ruleset,false);
   assert.equal(report.actual_history_checked_against_unanchored_baseline,true);
   assert.equal(report.externally_controlled_checkpoint_proven,false);
