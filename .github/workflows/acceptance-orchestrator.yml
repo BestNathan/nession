@@ -579,13 +579,28 @@ jobs:
           jq -e --arg sha "$TARGET_SHA" --arg repo "$GITHUB_REPOSITORY" '
             .state == "open" and .head.sha == $sha and .head.repo.full_name == $repo' \
             "$RUNNER_TEMP/pr.json" > /dev/null || exit 0
+          # Only an exact-head, newest-run pair of completed successes can
+          # authorize the existing failed-only Acceptance rerun. Pending is
+          # not Pass; failed and superseded dependencies do not wake an Agent.
+          ./gates/run acceptance-postrun-waker-selftest
           for workflow in ci-quality.yml e2e-tests.yml; do
-            list="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow "$workflow" \
+            file="$(basename "$workflow" .yml)"
+            gh run list --repo "$GITHUB_REPOSITORY" --workflow "$workflow" \
               --commit "$TARGET_SHA" --event pull_request --limit 20 \
-              --json status,conclusion)"
-            jq -e '.[0].status == "completed" and .[0].conclusion == "success"' \
-              <<< "$list" > /dev/null || { echo "Waiting for $workflow completion"; exit 0; }
+              --json databaseId,headSha,event,status,conclusion \
+              > "$RUNNER_TEMP/$file-runs.json"
           done
+          verdict="$(node scripts/acceptance-dependency-state.mjs classify \
+            "$RUNNER_TEMP/ci-quality-runs.json" "$RUNNER_TEMP/e2e-tests-runs.json" "$TARGET_SHA")"
+          state="$(jq -r .state <<< "$verdict")"
+          case "$state" in
+            ready) ;;
+            waiting|blocked|superseded)
+              echo "Acceptance source barrier: $verdict (no premature rerun)" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+              ;;
+            *) echo "::error::Unrecognized dependency barrier state"; exit 1 ;;
+          esac
           node --input-type=module -e '
             import fs from "node:fs";
             import { parsePreMergeIssueNumbers } from "./scripts/requirement-acceptance.mjs";
@@ -613,9 +628,11 @@ jobs:
             sort_by(.created_at) | last | .id // empty' "$RUNNER_TEMP/acceptance-runs.json")" || exit 0
           [[ "$id" =~ ^[1-9][0-9]*$ ]] || exit 0
           run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id")"
-          status="$(jq -r .status <<< "$run_json")"
-          conclusion="$(jq -r '.conclusion // ""' <<< "$run_json")"
-          if [[ "$status" == completed && "$conclusion" == failure ]]; then
+          printf '%s\n' "$verdict" > "$RUNNER_TEMP/dependency-barrier.json"
+          printf '%s\n' "$run_json" > "$RUNNER_TEMP/acceptance-target-run.json"
+          replay="$(node scripts/acceptance-dependency-state.mjs replay \
+            "$RUNNER_TEMP/dependency-barrier.json" "$RUNNER_TEMP/acceptance-target-run.json" "$TARGET_SHA")"
+          if [[ "$replay" == true ]]; then
             gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/rerun-failed-jobs"
             echo "Replayed failed Acceptance after both Quality/E2E completion events" >> "$GITHUB_STEP_SUMMARY"
           fi
