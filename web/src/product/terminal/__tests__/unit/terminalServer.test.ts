@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TerminalServerPlugin, decodeTerminalData, terminalServerApi } from '@/product/terminal';
 import { createMockPluginSurface, type MockPluginSurface } from '@/test/mockPluginSurface';
 
@@ -113,6 +113,114 @@ describe('TerminalServerPlugin', () => {
       expect(surface.sent).toEqual([
         { type: 'agent.terminal.resize', payload: { session_name: 'work', cols: 120, rows: 40 } },
       ]);
+    });
+  });
+
+  describe('Agent-authored Relay route receipts (#2102)', () => {
+    const route = '123e4567-e89b-42d3-a456-426614174000';
+    const valid = (id = 'test_send_1') => ({
+      session_name: 'work',
+      relay_request_id: id,
+      route_id: route,
+      browser_client_id: 'browser-42',
+      subscriber_generation: 21,
+      stream_epoch: 31,
+    });
+    beforeEach(() => {
+      vi.stubGlobal('localStorage', {
+        getItem: () => 'browser-42',
+        setItem: () => {},
+      });
+    });
+    afterEach(() => vi.unstubAllGlobals());
+
+    it('accepts once only the original wire begin ID and Agent-provided pair', () => {
+      const cb = vi.fn();
+      plugin.onRelaySubscriptionReady('work', cb);
+      plugin.beginRelay('agent:work');
+      surface.pushMessage('server.session.relay.ready', valid());
+      surface.pushMessage('server.session.relay.ready', valid());
+      expect(cb).toHaveBeenCalledTimes(1);
+      expect(cb).toHaveBeenCalledWith({
+        sessionName: 'work',
+        relayRequestId: 'test_send_1',
+        routeId: route,
+        browserClientId: 'browser-42',
+        subscriberGeneration: 21,
+        streamEpoch: 31,
+      });
+      // Reading the receipt did NOT send an Agent output ACK / free credit.
+      expect(surface.sent).toHaveLength(1);
+    });
+
+    it('rejects wrong session, request, browser and partial or unsafe Agent identity', () => {
+      const cb = vi.fn();
+      plugin.onRelaySubscriptionReady('work', cb);
+      plugin.beginRelay('agent:work');
+      for (const payload of [
+        { ...valid(), session_name: 'other' },
+        { ...valid(), relay_request_id: 'other-begin' },
+        { ...valid(), browser_client_id: 'other-browser' },
+        { ...valid(), subscriber_generation: undefined },
+        { ...valid(), stream_epoch: undefined },
+        { ...valid(), subscriber_generation: 0 },
+        { ...valid(), stream_epoch: Number.MAX_SAFE_INTEGER + 1 },
+        { ...valid(), stream_epoch: -1 },
+        { ...valid(), route_id: 'bad-uuid' },
+      ]) {
+        surface.pushMessage('server.session.relay.ready', payload);
+      }
+      expect(cb).not.toHaveBeenCalled();
+      surface.pushMessage('server.session.relay.ready', valid());
+      expect(cb).toHaveBeenCalledTimes(1);
+    });
+
+    it('revokes the old begin before a new begin, then on end', () => {
+      const cb = vi.fn();
+      plugin.onRelaySubscriptionReady('work', cb);
+      plugin.beginRelay('agent:work');
+      plugin.beginRelay('agent:work');
+      surface.pushMessage('server.session.relay.ready', valid('test_send_1'));
+      expect(cb).not.toHaveBeenCalled();
+      surface.pushMessage('server.session.relay.ready', valid('test_send_2'));
+      expect(cb).toHaveBeenCalledTimes(1);
+      plugin.beginRelay('agent:work');
+      plugin.endRelay('agent:work');
+      surface.pushMessage('server.session.relay.ready', valid('test_send_3'));
+      expect(cb).toHaveBeenCalledTimes(1);
+    });
+
+    it('revokes pending receipts after physical socket loss and reinstall', () => {
+      const cb = vi.fn();
+      plugin.onRelaySubscriptionReady('work', cb);
+      plugin.beginRelay('agent:work');
+      surface.setConnectionState('reconnecting');
+      surface.setConnectionState('connected');
+      surface.pushMessage('server.session.relay.ready', valid());
+      expect(cb).not.toHaveBeenCalled();
+
+      const newer = createMockPluginSurface();
+      plugin.install(newer);
+      surface.pushMessage('server.session.relay.ready', valid());
+      expect(cb).not.toHaveBeenCalled();
+      const live = vi.fn();
+      plugin.onRelaySubscriptionReady('work', live);
+      plugin.beginRelay('agent:work');
+      newer.pushMessage('server.session.relay.ready', valid());
+      expect(live).toHaveBeenCalledTimes(1);
+      expect(cb).not.toHaveBeenCalled();
+    });
+
+    it('keeps older fire-and-forget plugin surfaces on non-credit Relay', () => {
+      const legacy = createMockPluginSurface();
+      legacy.sendWithId = undefined;
+      plugin.install(legacy);
+      const cb = vi.fn();
+      plugin.onRelaySubscriptionReady('work', cb);
+      plugin.beginRelay('agent:work');
+      expect(legacy.sent).toHaveLength(1);
+      legacy.pushMessage('server.session.relay.ready', valid());
+      expect(cb).not.toHaveBeenCalled();
     });
   });
 
