@@ -11,6 +11,22 @@ env:
 on:
   pull_request:
     branches: [staging, main]
+    # Staging PR validation only for relevant sources (#2095).
+    paths:
+      - '.github/workflows/**'
+      - 'crates/**'
+      - 'web/**'
+      - 'design/**'
+      - 'e2e/**'
+      - 'gates/**'
+      - 'scripts/**'
+      - 'automation/**'
+      - '.cargo/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - 'clippy.toml'
+      - 'justfile'
 
 # One gate run per PR. Superseded runs are useless, so cancel them.
 concurrency:
@@ -18,7 +34,82 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  scope:
+    # PR path selection is intentionally cheap. Main-push always runs both
+    # exact-SHA suites for post-merge Acceptance evidence.
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.changed.outputs.rust }}
+      web: ${{ steps.changed.outputs.web }}
+      workflow: ${{ steps.changed.outputs.workflow }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select impacted checks from the exact PR diff
+        id: changed
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" != pull_request ]]; then
+            echo 'rust=true' >> "$GITHUB_OUTPUT"
+            echo 'web=true' >> "$GITHUB_OUTPUT"
+            echo 'workflow=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Use the same merge-base comparison as PR path filtering; fail
+          # rather than silently marking a missing/unreadable diff as N/A.
+          base="$(git merge-base "$PR_BASE_SHA" "$PR_HEAD_SHA")"
+          git diff --name-only -z "$base" "$PR_HEAD_SHA" > "$RUNNER_TEMP/quality-changed-paths"
+          mapfile -d '' -t changed < "$RUNNER_TEMP/quality-changed-paths"
+          rust=false
+          web=false
+          workflow=false
+          for path in "${changed[@]}"; do
+            case "$path" in
+              crates/*|Cargo.toml|Cargo.lock|rust-toolchain.toml|.cargo/*|clippy.toml|justfile|gates/*|scripts/*|automation/*|.github/workflows/ci-quality.yml) rust=true ;;
+            esac
+            case "$path" in
+              web/*|design/*|e2e/*|justfile|gates/*|scripts/*|automation/*|.github/workflows/ci-quality.yml) web=true ;;
+            esac
+            case "$path" in
+              .github/workflows/*) workflow=true ;;
+            esac
+          done
+          if [[ "$rust" == false && "$web" == false && "$workflow" == false ]]; then
+            echo '::error::PR matched Quality trigger but no applicable checks were found'
+            exit 1
+          fi
+          {
+            echo "rust=$rust"
+            echo "web=$web"
+            echo "workflow=$workflow"
+          } >> "$GITHUB_OUTPUT"
+          echo "Rust applicable: $rust; Web applicable: $web; Workflow contracts applicable: $workflow"
+
+  workflow-check:
+    needs: scope
+    if: github.event_name == 'pull_request' && needs.scope.outputs.workflow == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate workflow taxonomy and references
+        run: ./gates/run workflow-conventions
   rust-check:
+    needs: scope
+    if: needs.scope.outputs.rust == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -39,6 +130,8 @@ jobs:
         run: ./gates/run --suite quality-rust
 
   web-check:
+    needs: scope
+    if: needs.scope.outputs.web == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
