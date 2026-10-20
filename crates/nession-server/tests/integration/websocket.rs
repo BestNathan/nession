@@ -3149,6 +3149,97 @@ async fn relay_publishes_only_server_authored_agent_subscription_proof() -> anyh
     Ok(())
 }
 
+/// The browser's parser-completed ACK is passed through the *same* Relay
+/// socket that returned the Agent-minted subscription pair. The Server neither
+/// rewrites its cursor nor acknowledges credit on the Agent's behalf; the real
+/// Agent validates peer token, client identity, generation and issued frontier.
+#[tokio::test]
+async fn relay_output_applied_reaches_current_attached_agent_without_rewriting_identity(
+) -> anyhow::Result<()> {
+    let (_db_dir, addr, _handle) =
+        start_ownership_server("test_ws_relay_output_applied_2103.db").await?;
+    let mut endpoint = start_mock_agent_endpoint_with_subscription(Some((61, 72))).await?;
+    let mut agent = connect_agent_on_port(addr, "a1", endpoint.addr.port()).await?;
+    send_json(&mut agent, session_update("a1", "dev")).await?;
+
+    let (mut client, _) = connect_async(format!("ws://{addr}")).await?;
+    send_json(
+        &mut client,
+        serde_json::json!({
+            "msg_type": "server.auth", "id": "auth-credit",
+            "timestamp": current_timestamp(),
+            "payload": {"auth_token": "test_token", "client_id": "browser-credit"}
+        }),
+    )
+    .await?;
+    let auth = next_json(&mut client).await?;
+    anyhow::ensure!(auth["payload"]["status"] == "success");
+    wait_for_session(&mut client, "a1:dev").await?;
+    send_json(
+        &mut client,
+        serde_json::json!({
+            "msg_type": "server.session.relay.begin", "id": "begin-credit",
+            "timestamp": current_timestamp(),
+            "payload": {"session_id": "a1:dev", "cols": 80, "rows": 24}
+        }),
+    )
+    .await?;
+    acknowledge_grant(&mut agent).await?;
+    let _attach = expect_frame_of_type(
+        &mut endpoint.frames, "agent.attach", std::time::Duration::from_secs(5),
+    )
+    .await?;
+    let receipt = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let frame = next_json(&mut client).await?;
+            if frame["msg_type"] != "server.sessions.changed" {
+                break Ok::<_, anyhow::Error>(frame);
+            }
+        }
+    })
+    .await??;
+    anyhow::ensure!(
+        receipt["msg_type"] == "server.session.relay.ready"
+            && receipt["payload"]["relay_request_id"] == "begin-credit"
+            && receipt["payload"]["browser_client_id"] == "browser-credit"
+            && receipt["payload"]["subscriber_generation"] == 61
+            && receipt["payload"]["stream_epoch"] == 72,
+        "Relay subscription proof missing/foreign: {receipt}"
+    );
+
+    send_json(
+        &mut client,
+        serde_json::json!({
+            "msg_type": "agent.terminal.output.applied", "id": "parsed-credit",
+            "timestamp": current_timestamp(),
+            "payload": {
+                "session_name": "dev",
+                "subscriber_generation": 61,
+                "stream_epoch": 72,
+                "renderer_generation": 3,
+                "applied_through": 2
+            }
+        }),
+    )
+    .await?;
+    let forwarded = expect_frame_of_type(
+        &mut endpoint.frames,
+        "agent.terminal.output.applied",
+        std::time::Duration::from_secs(5),
+    )
+    .await?;
+    anyhow::ensure!(
+        forwarded["id"] == "parsed-credit"
+            && forwarded["payload"]["session_name"] == "dev"
+            && forwarded["payload"]["subscriber_generation"] == 61
+            && forwarded["payload"]["stream_epoch"] == 72
+            && forwarded["payload"]["renderer_generation"] == 3
+            && forwarded["payload"]["applied_through"] == 2,
+        "Agent output ACK was rewritten or did not use the current Relay peer: {forwarded}"
+    );
+    Ok(())
+}
+
 /// While the relay is on, it owns the connection's **terminal** frames — and
 /// only those. The Server still serves its own units on that connection.
 ///
