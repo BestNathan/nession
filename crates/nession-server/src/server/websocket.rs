@@ -887,7 +887,12 @@ fn is_agent_forged_relay_ready(msg: &tokio_tungstenite::tungstenite::Message) ->
     msg.to_text()
         .ok()
         .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
-        .and_then(|frame| frame.get("msg_type").and_then(serde_json::Value::as_str).map(str::to_owned))
+        .and_then(|frame| {
+            frame
+                .get("msg_type")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        })
         .is_some_and(|wire| wire == RELAY_SUBSCRIPTION_READY_WIRE)
 }
 
@@ -928,7 +933,9 @@ fn agent_attached_relay_ready(
             "stream_epoch": stream_epoch,
         }
     });
-    Some(tokio_tungstenite::tungstenite::Message::Text(frame.to_string()))
+    Some(tokio_tungstenite::tungstenite::Message::Text(
+        frame.to_string(),
+    ))
 }
 
 /// Validate that an Agent really accepted this Relay socket's attach before
@@ -1258,10 +1265,9 @@ where
                 browser_id,
                 relay_request_id,
             ) {
-                sender
-                    .send_reply(receipt)
-                    .await
-                    .map_err(|e| anyhow::anyhow!("Could not publish Relay subscription proof: {e}"))?;
+                sender.send_reply(receipt).await.map_err(|e| {
+                    anyhow::anyhow!("Could not publish Relay subscription proof: {e}")
+                })?;
             }
         }
     }
@@ -2023,8 +2029,14 @@ mod tests {
             agent_attached_relay_ready(&accepted, "other", "browser-a", "begin-123"),
             None
         );
-        assert_eq!(agent_attached_relay_ready(&accepted, "sess", "", "begin-123"), None);
-        assert_eq!(agent_attached_relay_ready(&accepted, "sess", "browser-a", ""), None);
+        assert_eq!(
+            agent_attached_relay_ready(&accepted, "sess", "", "begin-123"),
+            None
+        );
+        assert_eq!(
+            agent_attached_relay_ready(&accepted, "sess", "browser-a", ""),
+            None
+        );
     }
 
     #[test]
@@ -2040,7 +2052,8 @@ mod tests {
             assert!(agent_attached_relay_ready(&reply, "sess", "browser-a", "begin-123").is_none());
         }
         let spoof = tokio_tungstenite::tungstenite::Message::Text(
-            json!({"msg_type":"server.session.relay.ready", "payload":{"route_id":"forged"}}).to_string(),
+            json!({"msg_type":"server.session.relay.ready", "payload":{"route_id":"forged"}})
+                .to_string(),
         );
         assert!(is_agent_forged_relay_ready(&spoof));
         assert!(!is_agent_forged_relay_ready(
