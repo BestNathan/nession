@@ -20,6 +20,31 @@ const COUNT = 20_000;
 // correct behavior, not a stream defect. A hole in the tail is not.
 const TAIL = 5_000;
 
+// Read only the last rows while the burst is still streaming. Serializing the
+// whole 20k-line buffer on every poll blocks the page's event loop long enough
+// that the WebSocket stops draining, which is a property of the witness, not
+// of the stream under test. The full buffer is read once, after the last line.
+async function readBufferTail(
+  page: import('@playwright/test').Page,
+  lines = 40,
+): Promise<string> {
+  return page.evaluate((count) => {
+    const xtermEl = document.querySelector('.xterm');
+    const container = xtermEl?.parentElement;
+    const term = (container as Record<string, unknown>)?.xtermInstance as
+      | { buffer: { active: { length: number; getLine(y: number): { translateToString(): string } | undefined } } }
+      | undefined;
+    if (!term) { return ''; }
+    const buffer = term.buffer.active;
+    const start = Math.max(0, buffer.length - count);
+    const out: string[] = [];
+    for (let i = start; i < buffer.length; i += 1) {
+      out.push(buffer.getLine(i)?.translateToString() ?? '');
+    }
+    return out.join('\n');
+  }, lines);
+}
+
 for (const mode of ['Relay', 'P2P'] as const) {
   test(`high-volume numbered output reaches the parser exactly once over ${mode}`, async ({ page }, testInfo) => {
     test.skip(!process.env.CI, 'real stack available in CI only');
@@ -42,7 +67,7 @@ for (const mode of ['Relay', 'P2P'] as const) {
     await submitTerminalCommand(page, `seq 1 ${COUNT} | sed 's/^/HV-/'`);
 
     await expect(async () => {
-      expect(await readTerminalBuffer(page)).toContain(`HV-${COUNT}`);
+      expect(await readBufferTail(page)).toContain(`HV-${COUNT}`);
     }).toPass({ timeout: 120_000 });
 
     const text = await readTerminalBuffer(page);
