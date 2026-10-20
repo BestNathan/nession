@@ -11,22 +11,9 @@ env:
 on:
   pull_request:
     branches: [staging, main]
-    # Staging PR validation only for relevant sources (#2095).
-    paths:
-      - '.github/workflows/**'
-      - 'crates/**'
-      - 'web/**'
-      - 'design/**'
-      - 'e2e/**'
-      - 'gates/**'
-      - 'scripts/**'
-      - 'automation/**'
-      - '.cargo/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'rust-toolchain.toml'
-      - 'clippy.toml'
-      - 'justfile'
+    # Staging protects rust-check/web-check as required check contexts.
+    # Never filter the WHOLE workflow here: docs-only PRs still need a
+    # cheap successful scope job + truthful skipped heavy job conclusions.
 
 # One gate run per PR. Superseded runs are useless, so cancel them.
 concurrency:
@@ -83,8 +70,7 @@ jobs:
             esac
           done
           if [[ "$rust" == false && "$web" == false && "$workflow" == false ]]; then
-            echo '::error::PR matched Quality trigger but no applicable checks were found'
-            exit 1
+            echo 'No Quality/Workflow tests apply to this PR; required heavy contexts remain explicitly skipped.'
           fi
           {
             echo "rust=$rust"
