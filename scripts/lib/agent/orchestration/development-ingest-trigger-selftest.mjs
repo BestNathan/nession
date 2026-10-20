@@ -2,7 +2,9 @@
 // #2010 exact owner-only independent Ingest replay. Worker code, Issue
 // comments, untrusted Action inputs and forked runs cannot mint receipts.
 import assert from 'node:assert/strict';
-import {resolveTrustedIngestSource} from './development-ingest.mjs';
+import {resolveTrustedIngestSource,NATIVE_RECOVERY_ACTION,
+  NATIVE_RECOVERY_RUN,NATIVE_RECOVERY_SHA,NATIVE_RECOVERY_INGEST_COMMAND}
+  from './development-ingest.mjs';
 const runId=39288961865;
 const environment={
   GITHUB_ACTIONS:'true',GITHUB_REPOSITORY:'BestNathan/nession',
@@ -24,6 +26,29 @@ for(const command of [resumeCommand+' ',resumeCommand.replace('3f4abb','0f4abb')
   resumeCommand.replace('39388961865','1'),resumeCommand.replace('issue=1997','issue=1998')])
   assert.throws(()=>resolveTrustedIngestSource({...resumed,event:{...resumed.event,
     comment:{...resumed.event.comment,body:command}}}));
+const nativeEvent={...event,comment:{...event.comment,body:NATIVE_RECOVERY_INGEST_COMMAND}};
+const nativeGood={environment,event:nativeEvent};
+assert.equal(NATIVE_RECOVERY_RUN,39396836009);
+assert.equal(NATIVE_RECOVERY_SHA,'2f75869833fb43ec54e88b560226f8913a6beac3');
+assert.equal(NATIVE_RECOVERY_ACTION,'6a84244ca028a93f8c057ab23852bb21c3906d485e4c16ccab661104c31d750e');
+assert.deepEqual(resolveTrustedIngestSource(nativeGood),
+  {run_id:NATIVE_RECOVERY_RUN,source:null,continuation:true,native_recovery:true});
+for(const bad of [
+  NATIVE_RECOVERY_INGEST_COMMAND+' ',
+  NATIVE_RECOVERY_INGEST_COMMAND.replace('worker_run=39396836009','worker_run=39396836010'),
+  NATIVE_RECOVERY_INGEST_COMMAND.replace('action='+NATIVE_RECOVERY_ACTION,'action='+'f'.repeat(64)),
+  NATIVE_RECOVERY_INGEST_COMMAND.replace('issue=1997','issue=1998'),
+  NATIVE_RECOVERY_INGEST_COMMAND.replace('ingest','resume')]) {
+  assert.throws(()=>resolveTrustedIngestSource({...nativeGood,event:{...nativeEvent,
+    comment:{...nativeEvent.comment,body:bad}}}),/manual checkpoint recovery/);
+}
+for(const bad of [
+  {environment:{...environment,GITHUB_ACTOR:'fork'}},
+  {environment:{...environment,GITHUB_REF:'refs/heads/staging'}},
+  {event:{...nativeEvent,action:'edited'}},
+  {event:{...nativeEvent,comment:{...nativeEvent.comment,user:{login:'fork'}}}},
+  {event:{...nativeEvent,issue:{number:1997,pull_request:{url:'https://example.org'}}}},
+])assert.throws(()=>resolveTrustedIngestSource({...nativeGood,...bad}),/trusted|manual checkpoint/);
 const denied=[
   {environment:{...environment,GITHUB_ACTOR:'other'}},
   {environment:{...environment,GITHUB_REF:'refs/pull/5/merge'}},
