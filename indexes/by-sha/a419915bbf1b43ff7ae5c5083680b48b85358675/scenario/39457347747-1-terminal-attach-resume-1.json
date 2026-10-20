@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 39457347747,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "test/2095-staging-unrelated-trigger-probe",
+    "target_sha": "a419915bbf1b43ff7ae5c5083680b48b85358675",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/39457347747",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "ec55c337090a7b1a3c703268103b4f7a7c03217ff4de2cfe2ba46daf45088171"
+  },
+  "record": "runs/2026-10-20/39457347747-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "06ff38398422793199825d6e948bd3eb5d35127c97921e643652c700eda4f965"
+}
