@@ -2,6 +2,7 @@ import { readFile, mkdir, writeFile, copyFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makeProjection, validateProjection } from './project.mjs';
+import { WORKFLOW_IDS, projectWorkflowGraph } from './workflow-graph.mjs';
 import { loadIssueRunObservations } from './issue-runs.mjs';
 import {agentStoreReadiness} from './agent-store-readiness.mjs';
 import { loadPinnedE2E } from './acceptance-e2e.mjs';
@@ -144,9 +145,17 @@ const result=validateProjection(makeProjection({
   meta:{ generated_at:generatedAt,main_sha:process.env.SOURCE_MAIN_SHA,metrics_sha:process.env.METRICS_SHA,
     acceptance_results_sha:acceptanceSha }
 }));
+// The topology is derived from exact checked-in YAML definitions, not the mutable
+// Actions API, a guessed diagram, or evidence of successful execution.
+const yamlFiles=await Promise.all(WORKFLOW_IDS.map(async id=>
+  [id,await readFile(join(root,'../.github/workflows',id+'.yml'),'utf8')]));
+const workflowGraph=projectWorkflowGraph(Object.fromEntries(yamlFiles),
+  /^[a-f0-9]{40}$/.test(process.env.SOURCE_MAIN_SHA||'')?process.env.SOURCE_MAIN_SHA:null,
+  generatedAt);
 await mkdir(join(out,'data'),{recursive:true});
-for(const name of ['index.html','styles.css','app.js','favicon.svg']) await copyFile(join(root,name),join(out,name));
+for(const name of ['index.html','styles.css','app.js','favicon.svg','workflows.html','workflows.js','workflows.css']) await copyFile(join(root,name),join(out,name));
 await writeFile(join(out,'data/site.json'),JSON.stringify(result,null,2)+'\n',{mode:0o644});
+await writeFile(join(out,'data/workflows.json'),JSON.stringify(workflowGraph,null,2)+'\n',{mode:0o644});
 console.log('Public Pages artifact:',out);
 console.log(JSON.stringify({
   source_main_sha:result.source.main_sha,

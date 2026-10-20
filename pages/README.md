@@ -24,6 +24,8 @@ GITHUB_TOKEN=<read-only-token> node scripts/build.mjs
 
 If a source is unavailable the snapshot retains \`null\` / \`unavailable\` rather than inventing zero or success. Aggregate tokens and costs are not attributed to individual Agents. Orphan ref presence must not be interpreted as verified append-only protection. All browser links are bounded to the public GitHub repository.
 
+The source-backed Workflow explorer lives at `workflows.html`. The build reads a curated set of actual `.github/workflows/*.yml` files from the checked-out source revision and publishes `dist/data/workflows.json` separately from the evidence snapshot. Solid arrows are derived exclusively from declarative `workflow_run` and reusable `workflow_call` references. Event triggers shown in details are *not* automatically inferred producer→consumer links. Missing/malformed source definitions fail the static build; no browser GitHub token/API, invented runtime status or SC verdict is published. Its tests run with the standalone Pages gate. Source topology follows the deployed main revision (scheduled refresh as a fallback) rather than claiming real-time execution state.
+
 The static UI uses hash navigation (\`#/agents\`, \`#/work\`, etc.) so direct deep links work under the repository's GitHub Pages base path without rewrite rules. Deployment is owned by a **separate, trusted, main-based workflow PR** per \`.github/AGENTS.md\`; it must not build, deploy, or modify \`web/\`.
 
 ## Phase 2-A — public source-backed observations
