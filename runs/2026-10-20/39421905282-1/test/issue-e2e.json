@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "9d2a51fcbe6ea87fd930977ed68929f7e2bc2441",
+  "run_id": 39421905282,
+  "run_attempt": 1,
+  "plan_digest": "c50c3399a7abcf2f39109ada462e2d8c953318a501f60f89d4864ab3d557c866",
+  "artifact_digest": "sha256:07ec9d25ee81188a7501af3c557939ef26894a83637abf7cb1c986834f3cb065",
+  "results": [
+    {
+      "id": "pages-workflows",
+      "result": "Pass",
+      "discovered": 3,
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 19
+    }
+  ]
+}
