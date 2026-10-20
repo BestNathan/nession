@@ -3,6 +3,25 @@ name: E2E / Scenario Smoke
 on:
   pull_request:
     branches: [staging]
+    # Run heavy validation only for changes to its inputs (#2095).
+    paths:
+      - '.github/workflows/e2e-scenario-smoke.yml'
+      - 'e2e/scenarios/**'
+      - 'e2e/run'
+      - 'e2e/runner/**'
+      - 'e2e/package.json'
+      - 'e2e/package-lock.json'
+      - 'web/src/**/terminal/**'
+      - 'web/src/**/Terminal*'
+      - 'web/package.json'
+      - 'web/package-lock.json'
+      - 'web/vite.config.ts'
+      - 'crates/nession-agent/**'
+      - 'crates/nession-server/**'
+      - 'crates/nession-protocol/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
   workflow_dispatch:
 
 permissions:
