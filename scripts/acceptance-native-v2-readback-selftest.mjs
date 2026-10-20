@@ -77,7 +77,7 @@ const failureArtifacts={total_count:2,artifacts:[
   failedArtifact('development-worker-claim-39376331942-1'),
   failedArtifact('development-native-transfer-39376331942-1')]};
 const failureLog='2026-10-20T05:43:22.8572143Z ##[error]Agent '+
-  'agent-7d5b4a61-1476-4ce7-a38a-82907aa3b1a6 not found\\n';
+  'agent-7d5b4a61-1476-4ce7-a38a-82907aa3b1a6 not found\n';
 const originalHead={version:1,
   checkpoint_path:'roles/developer/dev-cursor-01/issues/1997/checkpoints/00000001.json',
   ciphertext_sha256:'a42220e24ed5ff587ed6173b662a75856f62e5a16561274cb616325b150f4107'};
