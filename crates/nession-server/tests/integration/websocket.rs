@@ -3186,7 +3186,9 @@ async fn relay_output_applied_reaches_current_attached_agent_without_rewriting_i
     .await?;
     acknowledge_grant(&mut agent).await?;
     let _attach = expect_frame_of_type(
-        &mut endpoint.frames, "agent.attach", std::time::Duration::from_secs(5),
+        &mut endpoint.frames,
+        "agent.attach",
+        std::time::Duration::from_secs(5),
     )
     .await?;
     let receipt = tokio::time::timeout(std::time::Duration::from_secs(5), async {
