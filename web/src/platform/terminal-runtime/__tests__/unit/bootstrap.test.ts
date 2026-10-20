@@ -139,6 +139,22 @@ describe('a complete Agent stream-log cut is a parser baseline, not a VT repair 
     expect(streamBaselineFromBootstrap(undefined)).toBeUndefined();
   });
 
+  it('accepts a truncated epoch-start cut: the screen is short, the position is exact', () => {
+    // The control-channel attach barrier (#2124): the capture covers
+    // everything before the first stream event. Truncation and screen-only
+    // fidelity describe the snapshot, not the stream position.
+    const snapshot = decodeBootstrapMarker({
+      requested_lines: 5000, truncated: true,
+      cut_consistency: 'atomic', fidelity: 'screen-only',
+      stream_epoch: 5, through_seq: 0,
+    });
+    expect(streamBaselineFromBootstrap(snapshot)).toEqual({
+      kind: 'verified', streamEpoch: 5, appliedThrough: 0,
+    });
+    // It is still not a history repair.
+    expect(provesVerifiedBootstrapRepair(snapshot)).toBe(false);
+  });
+
   it('also accepts an atomic full-VT cut, where both facts hold at once', () => {
     const snapshot = decodeBootstrapMarker({
       requested_lines: 5000, truncated: false,

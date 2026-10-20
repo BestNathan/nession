@@ -298,16 +298,20 @@ export class TerminalController {
       // A shortened or unverified capture cannot stand in for the client's
       // existing scrollback. Repaint the visible screen only; preserve history
       // unless a proven atomic, full-VT checkpoint justifies replacement.
-      // An atomic cut is a complete replay of the Agent's ordered stream log
-      // from seq 1. Resetting the renderer first is what makes "the parser
-      // applied every event through `throughSeq`" true — appending the replay
-      // to bytes a previous subscription already applied would duplicate it.
-      // Fidelity stays whatever the marker states (a raw log replay does not
-      // restore VT state predating the reader), so this is a stream baseline,
-      // not the full-VT history repair `provesVerifiedBootstrapRepair` gates.
+      // An atomic cut beyond position 0 is a complete replay of the Agent's
+      // ordered stream log, so replacing the buffer is what makes "every event
+      // through `throughSeq` was applied" true — appending it to bytes a
+      // previous subscription already applied would duplicate them. An
+      // epoch-start cut (#2124) is only a position: no replay follows, and the
+      // capture may be screen-only/truncated, so the scrollback stays.
+      // Fidelity stays whatever the marker states in both cases; this is a
+      // stream baseline, not the full-VT repair `provesVerifiedBootstrapRepair`
+      // gates.
       const streamBaseline = bootstrap ? streamBaselineFromBootstrap(bootstrap) : undefined;
+      const replayReplacesBuffer = provesVerifiedBootstrapRepair(bootstrap)
+        || (streamBaseline !== undefined && streamBaseline.appliedThrough > 0);
       if (bootstrap) {
-        this.writer.write(provesVerifiedBootstrapRepair(bootstrap) || streamBaseline
+        this.writer.write(replayReplacesBuffer
           ? BOOTSTRAP_BUFFER_RESET : BOOTSTRAP_SCREEN_RESET);
       }
       const follow = this.capsuleOcclusionScroll?.snapshotFollowing() ?? false;

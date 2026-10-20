@@ -918,9 +918,12 @@ async fn capture_for_bootstrap(
 /// Awaited before the caller starts its live forwarder. The subscriber's
 /// bounded queue is already active (#2024), so Agent output produced during
 /// this asynchronous tmux capture is retained and sent *after* the snapshot.
-/// This establishes outbound send order, NOT snapshot/stream cut atomicity:
-/// racing output may also be present inside tmux's screen capture. Such
-/// snapshots remain explicitly unverified and must never seed parser ACKs.
+/// Send order alone proves no cut; `cut` states where the capture came from
+/// (#2124). Only the Control arm's control-channel barrier is an exact stream
+/// cut — it drops the `%output` its capture covers, so the stream created with
+/// the attach starts at 0. The PTY arm's separate-process capture is
+/// unverified: a racing producer can put a line in both snapshot and stream.
+/// An unverified marker must never seed parser ACKs.
 ///
 /// `capture` is the snapshot, and where it came from is the barrier's other
 /// half (#1228): the Control arm's is taken **on the control channel**
@@ -1072,13 +1075,70 @@ async fn send_atomic_output_prefix(
     }
 }
 
+/// Where a bootstrap capture's stream cut came from (#2124).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BootstrapCut {
+    /// The **control-channel attach barrier** (`ControlModeSession::attach`).
+    ///
+    /// The capture is taken on the control channel and `%output` the capture
+    /// covers is dropped from the live stream (`ControlRouter`'s barrier), so
+    /// the session stream created with this attach records only events after
+    /// the snapshot. The cut is therefore exact at stream position 0 — and at
+    /// no other position, because the capture is a screen projection, not a
+    /// replay of the Agent's event log.
+    AtomicEpochStart { stream_epoch: u64 },
+    /// A capture taken outside the ordered producer: the separate-process PTY
+    /// capture and the already-attached fallback. No stream cut is proven.
+    Unverified,
+}
+
+/// Build the bootstrap frame for one capture. Pure so the marker's meaning can
+/// be tested without a transport: an epoch-start cut names the stream epoch
+/// and `throughSeq = 0`, while an unverified capture names neither.
+///
+/// Fidelity and truncation describe the **screen** and remain independent of
+/// the cut: a truncated epoch-start capture still proves that no stream event
+/// precedes it, and never becomes a full-VT claim.
+fn bootstrap_payload(
+    session_name: &str,
+    bytes: Vec<u8>,
+    truncated: bool,
+    fidelity: TerminalCheckpointFidelity,
+    cut: BootstrapCut,
+) -> TerminalOutputPayload {
+    use base64::Engine;
+    let (cut_consistency, stream_epoch, through_seq) = match cut {
+        BootstrapCut::AtomicEpochStart { stream_epoch } => (
+            TerminalCheckpointCutConsistency::Atomic,
+            Some(stream_epoch),
+            Some(0),
+        ),
+        BootstrapCut::Unverified => (TerminalCheckpointCutConsistency::Unverified, None, None),
+    };
+    TerminalOutputPayload {
+        session_name: session_name.to_string(),
+        data: base64::engine::general_purpose::STANDARD.encode(&bytes),
+        stream_epoch: None,
+        stream_seq: None,
+        bootstrap: Some(TerminalBootstrapPayload {
+            requested_lines: crate::tmux::HISTORY_LIMIT_LINES,
+            truncated,
+            cut_consistency: Some(cut_consistency),
+            // Even a complete pane capture is text/modes, not full VT.
+            fidelity: Some(fidelity),
+            stream_epoch,
+            through_seq,
+        }),
+    }
+}
+
 async fn send_bootstrap(
     outbound: &P2pOutbound,
     tmux: &crate::tmux::ops::TmuxDep,
     session_name: &str,
     capture: Option<Vec<u8>>,
+    cut: BootstrapCut,
 ) -> bool {
-    let lines = crate::tmux::HISTORY_LIMIT_LINES;
     let Some(mut capture) = capture else {
         return true;
     };
@@ -1115,24 +1175,13 @@ async fn send_bootstrap(
         bytes,
         truncated: bounded.truncated,
     };
-    use base64::Engine;
-    let payload = TerminalOutputPayload {
-        session_name: session_name.to_string(),
-        data: base64::engine::general_purpose::STANDARD.encode(&bounded.bytes),
-        stream_epoch: None,
-        stream_seq: None,
-        bootstrap: Some(TerminalBootstrapPayload {
-            requested_lines: lines,
-            truncated: bounded.truncated,
-            // Pane capture runs outside the ordered Agent output producer.
-            // Sending it first does not establish a true checkpoint cut.
-            cut_consistency: Some(TerminalCheckpointCutConsistency::Unverified),
-            // Even a complete pane capture is text/modes, not full VT.
-            fidelity: Some(tmux_capture_fidelity(bounded.truncated, modes_complete)),
-            stream_epoch: None,
-            through_seq: None,
-        }),
-    };
+    let payload = bootstrap_payload(
+        session_name,
+        bounded.bytes,
+        bounded.truncated,
+        tmux_capture_fidelity(bounded.truncated, modes_complete),
+        cut,
+    );
     let msg = new_message(msg_types::TERMINAL_OUTPUT, payload);
     let Ok(json) = serde_json::to_string(&msg) else {
         return true;
@@ -2027,6 +2076,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 ).await;
                                 if !send_bootstrap(
                                     ctx.outbound, &bootstrap_tmux, &session_name, capture,
+                                    BootstrapCut::Unverified,
                                 ).await {
                                     return ctx.err(
                                         "bootstrap_stalled",
@@ -2152,7 +2202,11 @@ p2p_routes! { ctx, msg_type, payload_value;
                             } else {
                                 None
                             };
-                            if !send_bootstrap(ctx.outbound, &bootstrap_tmux, &session_name, capture)
+                            // A separate-process capture proves no stream cut.
+                            if !send_bootstrap(
+                                ctx.outbound, &bootstrap_tmux, &session_name, capture,
+                                BootstrapCut::Unverified,
+                            )
                                 .await
                             {
                                 return ctx.err(
@@ -2267,6 +2321,9 @@ p2p_routes! { ctx, msg_type, payload_value;
                             let mut control = session_terminal::SessionControlState::new();
                             control.ensure_controller(&client_id);
                             let stream = session_terminal::SessionStreamState::new();
+                            // The barrier below makes the attach capture an exact
+                            // cut at this epoch's position 0 (#2124).
+                            let stream_epoch = stream.epoch;
                             let input = session_terminal::SessionInputState::new();
                             let (tx, rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
                             let detached_for_not_draining = Arc::new(AtomicBool::new(false));
@@ -2313,9 +2370,13 @@ p2p_routes! { ctx, msg_type, payload_value;
                             // on the control channel: tmux's own wire order
                             // makes it the other half of the barrier (#1228) —
                             // the output stream about to be spawned starts
-                            // exactly where this snapshot ends.
+                            // exactly where this snapshot ends, so the marker
+                            // can name the stream cut at position 0 (#2124).
                             let bootstrap_tmux = ctx.tmux.tmux_dep();
-                            if !send_bootstrap(ctx.outbound, &bootstrap_tmux, &session_name, capture)
+                            if !send_bootstrap(
+                                ctx.outbound, &bootstrap_tmux, &session_name, capture,
+                                BootstrapCut::AtomicEpochStart { stream_epoch },
+                            )
                                 .await
                             {
                                 return ctx.err(
@@ -3980,6 +4041,76 @@ mod tests {
         assert!(payload.stream_seq.is_none());
         assert!(payload.stream_epoch.is_none());
         assert_eq!(cursor_at_cut, 18);
+    }
+
+    #[test]
+    fn control_attach_barrier_names_an_atomic_epoch_start_cut() {
+        let payload = bootstrap_payload(
+            "demo",
+            b"history".to_vec(),
+            false,
+            TerminalCheckpointFidelity::ScreenOnly,
+            BootstrapCut::AtomicEpochStart { stream_epoch: 42 },
+        );
+        // The bootstrap is not itself a stream event: its position lives only
+        // in the marker, while the first live event after it is seq 1.
+        assert!(payload.stream_epoch.is_none());
+        assert!(payload.stream_seq.is_none());
+        let bootstrap = payload.bootstrap.expect("bootstrap marker");
+        assert_eq!(
+            bootstrap.cut_consistency,
+            Some(TerminalCheckpointCutConsistency::Atomic)
+        );
+        assert_eq!(
+            bootstrap.fidelity,
+            Some(TerminalCheckpointFidelity::ScreenOnly),
+            "a pane capture is a screen projection, never full VT"
+        );
+        assert_eq!(bootstrap.stream_epoch, Some(42));
+        assert_eq!(bootstrap.through_seq, Some(0));
+    }
+
+    #[test]
+    fn a_truncated_epoch_start_keeps_the_stream_cut_but_not_full_vt() {
+        let payload = bootstrap_payload(
+            "demo",
+            b"tail".to_vec(),
+            true,
+            TerminalCheckpointFidelity::Partial,
+            BootstrapCut::AtomicEpochStart { stream_epoch: 7 },
+        );
+        let bootstrap = payload.bootstrap.expect("bootstrap marker");
+        // Truncation describes the screen snapshot. No stream event precedes
+        // the cut either way, so the stream position is still exact at 0.
+        assert!(bootstrap.truncated);
+        assert_eq!(
+            bootstrap.cut_consistency,
+            Some(TerminalCheckpointCutConsistency::Atomic)
+        );
+        assert_eq!(
+            bootstrap.fidelity,
+            Some(TerminalCheckpointFidelity::Partial)
+        );
+        assert_eq!(bootstrap.stream_epoch, Some(7));
+        assert_eq!(bootstrap.through_seq, Some(0));
+    }
+
+    #[test]
+    fn external_capture_never_names_a_stream_cut() {
+        let payload = bootstrap_payload(
+            "demo",
+            b"history".to_vec(),
+            false,
+            TerminalCheckpointFidelity::ScreenOnly,
+            BootstrapCut::Unverified,
+        );
+        let bootstrap = payload.bootstrap.expect("bootstrap marker");
+        assert_eq!(
+            bootstrap.cut_consistency,
+            Some(TerminalCheckpointCutConsistency::Unverified)
+        );
+        assert!(bootstrap.stream_epoch.is_none());
+        assert!(bootstrap.through_seq.is_none());
     }
 
     #[test]
