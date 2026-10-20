@@ -54,7 +54,7 @@ function selfTest(){
   assert.equal(verifyIssueE2EGate({body:pass},sha).ok,true);
   assert.equal(verifyIssueE2EGate({body:body0},sha).ok,false);
   assert.equal(verifyIssueE2EGate({body:pass},'b'.repeat(40)).ok,false);
-  assert.equal(verifyIssueE2EGate({body:pass.replace('contract '+decl.digest, 'contract '+'0'.repeat(64))},sha).ok,false);
+  assert.throws(()=>verifyIssueE2EGate({body:pass.replace('contract '+decl.digest, 'contract '+'0'.repeat(64))},sha),/invalid E2E declaration/);
   const none=['## E2E Verification','### New','- none: no new tests',
     '### Regression','- none: no affected E2E','## E2E Report',
     '| ID | Type | Result | Evidence |','|---|---|---|---|'].join('\n');
