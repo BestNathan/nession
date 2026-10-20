@@ -183,6 +183,17 @@ export function checkInventory(manifest,workflows){
               (!/^  workflow_run:\s*$/m.test(triggers)||!/^  issue_comment:\s*$/m.test(triggers)||
                /^  workflow_dispatch:\s*$/m.test(triggers))))
           fail('active agent-store Writer trigger deviates from declared limited-trust profile');
+        // A known App writer is not exempt from the bounded CAS publisher.
+        if(findStorePushes(body).some(push=>
+          push.ref==='agent-store'&&push.kind==='direct'))
+          fail('active agent-store writer bypasses bounded CAS with direct Git push');
+        // Check every privileged checkout. One persist-credentials:false
+        // elsewhere must not mask a second token-bearing checkout.
+        const checkouts=body.split(/^      - /m)
+          .filter(step=>/^\s*(?:name:[^\n]*\n\s*)?uses: actions\/checkout@v4\b/m.test(step));
+        if(checkouts.length===0||checkouts.some(step=>
+          !/^\s*persist-credentials:\s*false\s*$/m.test(step)))
+          fail('active agent-store writer checkout persists credentials');
         if(seen.has(writer.workflow+'|agent-store'))fail('duplicate active agent-store Writer');
         seen.set(writer.workflow+'|agent-store',writer);
         approved.delete(writer.workflow);
@@ -347,6 +358,28 @@ function selfTest(){
     'all requirements passed';
   assert.throws(()=>checkInventory(falselyProtectedAgent,sources),
     /deferred admin proof must be classified honestly/);
+  const directAgentPush=new Map(sources);
+  const agentIngest='.github/workflows/store-agent-development-ingest.yml';
+  directAgentPush.set(agentIngest,directAgentPush.get(agentIngest).replace(
+    '          node scripts/lib/agent/orchestration/development-ingest.mjs ingest',
+    '          git push origin HEAD:agent-store\n          node scripts/lib/agent/orchestration/development-ingest.mjs ingest'));
+  assert.notEqual(directAgentPush.get(agentIngest),sources.get(agentIngest));
+  assert.throws(()=>checkInventory(manifest,directAgentPush),
+    /agent-store writer bypasses bounded CAS/);
+  const directAgentPushWithGitC=new Map(sources);
+  directAgentPushWithGitC.set(agentIngest,directAgentPushWithGitC.get(agentIngest).replace(
+    '          node scripts/lib/agent/orchestration/development-ingest.mjs ingest',
+    '          git -C agent-store push origin HEAD:agent-store\n          node scripts/lib/agent/orchestration/development-ingest.mjs ingest'));
+  assert.notEqual(directAgentPushWithGitC.get(agentIngest),sources.get(agentIngest));
+  assert.throws(()=>checkInventory(manifest,directAgentPushWithGitC),
+    /agent-store writer bypasses bounded CAS/);
+  const untrustedExtraCheckout=new Map(sources);
+  untrustedExtraCheckout.set(agentIngest,untrustedExtraCheckout.get(agentIngest).replace(
+    '      - uses: actions/setup-node@v4',
+    '      - uses: actions/checkout@v4\n        with:\n          ref: ${{ github.event.workflow_run.head_sha }}\n      - uses: actions/setup-node@v4'));
+  assert.notEqual(untrustedExtraCheckout.get(agentIngest),sources.get(agentIngest));
+  assert.throws(()=>checkInventory(manifest,untrustedExtraCheckout),
+    /agent-store writer checkout persists credentials/);
   const leakingAgentWriter=new Map(sources);
   const agentWriter='.github/workflows/agent-controller-dispatch.yml';
   leakingAgentWriter.set(agentWriter,leakingAgentWriter.get(agentWriter)
