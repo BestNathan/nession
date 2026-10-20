@@ -1,4 +1,5 @@
 import { decodeTerminalData, encodeBase64 } from './base64';
+import { getOrCreateClientId } from '@/platform/socket/clientId';
 import { readResumeReply, type TerminalStreamResumeResult } from './agent';
 import { readInputAck, type InputAckFields } from './controlPayload';
 import {
@@ -31,6 +32,37 @@ import { readAgentStreamPosition } from './streamPosition';
 type RelayOutputCallback = (data: Uint8Array, bootstrap?: TerminalBootstrap, position?: TerminalStreamPosition) => void;
 type RelayResizeCallback = (cols: number, rows: number, position?: TerminalStreamPosition) => void;
 type RelayInputAckCallback = (ack: InputAckFields) => void;
+
+/**
+ * Agent-authored subscriber identity copied by the authenticated Server relay.
+ * Informational ONLY: a route receipt is not an xterm parser baseline and
+ * must never by itself enable output.applied or Agent credit (#2060/#2102).
+ */
+export interface RelaySubscriptionProof {
+  sessionName: string;
+  relayRequestId: string;
+  routeId: string;
+  browserClientId: string;
+  subscriberGeneration: number;
+  streamEpoch: number;
+}
+type RelayReadyCallback = (proof: RelaySubscriptionProof) => void;
+
+interface PendingRelayBegin {
+  requestId: string;
+  physicalGeneration: number;
+  installGeneration: number;
+}
+
+function relaySessionName(sessionId: string): string | null {
+  const separator = sessionId.indexOf(':');
+  return separator > 0 && separator + 1 < sessionId.length
+    ? sessionId.slice(separator + 1) : null;
+}
+
+function positiveSafeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+}
 
 /**
  * The position a relay input frame carries (#1307).
@@ -78,6 +110,8 @@ function getSessionId(payload: Record<string, unknown>): string {
 export interface TerminalServerApi {
   beginRelay(sessionId: string, opts?: RelayBeginOptions): void;
   endRelay(sessionId: string): void;
+  /** Validated current-begin Agent subscription receipt; carries NO ACK capability. */
+  onRelaySubscriptionReady(sessionName: string, cb: RelayReadyCallback): () => void;
   /**
    * Relay terminal input — base64-wrapped, mirroring the server wire.
    *
@@ -115,6 +149,8 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
   private outputCallbacks = new Map<string, Array<GenerationEntry<RelayOutputCallback>>>();
   private resizeCallbacks = new Map<string, Array<GenerationEntry<RelayResizeCallback>>>();
   private inputAckCallbacks = new Map<string, Array<GenerationEntry<RelayInputAckCallback>>>();
+  private readyCallbacks = new Map<string, Array<GenerationEntry<RelayReadyCallback>>>();
+  private pendingRelayBegins = new Map<string, PendingRelayBegin>();
 
   /**
    * Bind the plugin to the server connection. A later install replaces an
@@ -132,8 +168,24 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
   install(connection: PluginSurface): () => void {
     const generation = ++this.generation;
     this.connection = connection;
+    // A newly installed socket owner cannot inherit a pending route from an
+    // earlier install (nor may stale teardown delete the newer owner's route).
+    this.pendingRelayBegins.clear();
 
     const unsubs = [
+      connection.onConnectionStateChange((state) => {
+        if (state !== 'connected' && this.connection === connection && this.generation === generation) {
+          this.pendingRelayBegins.clear();
+        }
+      }),
+      connection.subscribe('server.session.relay.ready', (payload) => {
+        if (this.connection !== connection || this.generation !== generation
+            || connection.connectionState !== 'connected'
+            || !payload || typeof payload !== 'object' || Array.isArray(payload)) {
+          return;
+        }
+        this.handleRelayReady(payload as Record<string, unknown>, connection.physicalGeneration ?? 0);
+      }),
       connection.subscribe('agent.terminal.output', (payload) => {
         this.handleRelayOutput(payload as Record<string, unknown>);
       }),
@@ -160,6 +212,8 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
         this.outputCallbacks.clear();
         this.resizeCallbacks.clear();
         this.inputAckCallbacks.clear();
+        this.readyCallbacks.clear();
+        this.pendingRelayBegins.clear();
       } else {
         // Stale release — a newer binding is active. Drop only the
         // registrations this release created; never touch newer ones.
@@ -193,11 +247,75 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
     if (opts?.needsBootstrap !== undefined) {
       payload.needs_bootstrap = opts.needsBootstrap;
     }
-    this.requireConnection().send(RELAY_BEGIN_WIRE, payload);
+    const connection = this.requireConnection();
+    const sessionName = relaySessionName(sessionId);
+    // Invalidate the previous begin BEFORE offering the new one to the socket.
+    if (sessionName) {
+      this.pendingRelayBegins.delete(sessionName);
+    }
+    if (!connection.sendWithId) {
+      // Backward-compatible fire-and-forget relay, but deliberately no route
+      // receipt can be correlated and no subscriber proof is published.
+      connection.send(RELAY_BEGIN_WIRE, payload);
+      return;
+    }
+    const requestId = connection.sendWithId(RELAY_BEGIN_WIRE, payload);
+    if (sessionName && requestId) {
+      this.pendingRelayBegins.set(sessionName, {
+        requestId,
+        installGeneration: this.generation,
+        physicalGeneration: connection.physicalGeneration ?? 0,
+      });
+    }
   }
 
   endRelay(sessionId: string): void {
+    const sessionName = relaySessionName(sessionId);
+    if (sessionName) {
+      this.pendingRelayBegins.delete(sessionName);
+    }
     this.requireConnection().send(RELAY_END_WIRE, { session_id: sessionId });
+  }
+
+  onRelaySubscriptionReady(sessionName: string, cb: RelayReadyCallback): () => void {
+    return this.addMapCallback(this.readyCallbacks, sessionName, cb);
+  }
+
+  private handleRelayReady(payload: Record<string, unknown>, physicalGeneration: number): void {
+    const sessionName = payload.session_name;
+    if (typeof sessionName !== 'string') { return; }
+    const pending = this.pendingRelayBegins.get(sessionName);
+    if (!pending || pending.installGeneration !== this.generation
+      || pending.physicalGeneration !== physicalGeneration
+      || payload.relay_request_id !== pending.requestId
+      || typeof payload.route_id !== 'string'
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(payload.route_id)
+      || !positiveSafeInteger(payload.subscriber_generation)
+      || !positiveSafeInteger(payload.stream_epoch)) {
+      return;
+    }
+    // The browser's stable id is also what Server authenticated via client.auth
+    // before creating the Agent relay. A Server fallback id is NOT a proof.
+    if (typeof localStorage === 'undefined'
+      || payload.browser_client_id !== getOrCreateClientId()) {
+      return;
+    }
+    // Exactly once per begin, even when a server duplicates the notification.
+    // The next begin or physical socket must establish a fresh proof.
+    this.pendingRelayBegins.delete(sessionName);
+    const proof: RelaySubscriptionProof = {
+      sessionName,
+      relayRequestId: pending.requestId,
+      routeId: payload.route_id,
+      browserClientId: payload.browser_client_id,
+      subscriberGeneration: payload.subscriber_generation,
+      streamEpoch: payload.stream_epoch,
+    };
+    for (const entry of this.readyCallbacks.get(sessionName) ?? []) {
+      if (entry.generation === this.generation) {
+        entry.cb(proof);
+      }
+    }
   }
 
   sendRelayInput(sessionName: string, data: string, opts?: RelayInputOptions): void {
@@ -351,6 +469,7 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
     this.dropGenerationFrom(this.outputCallbacks, generation);
     this.dropGenerationFrom(this.resizeCallbacks, generation);
     this.dropGenerationFrom(this.inputAckCallbacks, generation);
+    this.dropGenerationFrom(this.readyCallbacks, generation);
   }
 
   private dropGenerationFrom<T>(
