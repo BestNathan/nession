@@ -4,7 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {hkdfSync} from 'node:crypto';
-import {assertUnprivilegedDeveloperEnvironment,originalCursorWorkspace} from './development-worker.mjs';
+import {assertUnprivilegedDeveloperEnvironment,originalCursorWorkspace,
+  CURSOR_LOCAL_ROOT,CURSOR_WORKSPACE_PATH,CURSOR_JSONL_PATH} from './development-worker.mjs';
 import {deriveStoreAesKey} from './development-checkpoint-key.mjs';
 import {assertControlledContinuation,assertCurrentDevelopmentCapabilities,CONTROLLED_CONTINUATION,writeNativeBundle,
   developmentHarnessDigest} from './development-resume.mjs';
@@ -16,10 +17,19 @@ const cwd='/tmp/nession-dev-slice-Ab12cD/source';
 const row=(value)=>JSON.stringify({op:'put',agent:{agentId:id,workspace:{cwd:value}}})+'\n';
 assert.equal(originalCursorWorkspace(row(cwd),id),cwd);
 assert.equal(originalCursorWorkspace(row(cwd)+row(cwd),id),cwd);
+assert.equal(CURSOR_LOCAL_ROOT,'/tmp/nession-cursor-issue-1997');
+assert.equal(CURSOR_WORKSPACE_PATH,CURSOR_LOCAL_ROOT+'/workspace');
+assert.equal(CURSOR_JSONL_PATH,CURSOR_LOCAL_ROOT+'/jsonl');
+assert.equal(originalCursorWorkspace(row(CURSOR_WORKSPACE_PATH),id),CURSOR_WORKSPACE_PATH);
+assert.throws(()=>originalCursorWorkspace(row(cwd)+row(CURSOR_WORKSPACE_PATH),id),
+  /native Agent workspace identity not unique/);
+
 for(const bad of [
   JSON.stringify({agentId:'agent-other-1234',workspace:{cwd}})+'\n',
   row('/tmp/nession-dev-slice-Ab12cD/../source'),
   row('/workspace'),
+  row('/tmp/nession-cursor-issue-1998/workspace'),
+  row('/tmp/nession-cursor-issue-1997/workspace/../jsonl'),
   row('/tmp/nession-dev-slice-Ab12cD/source/extra'),
   row(cwd)+row('/tmp/nession-dev-slice-Hg34Jk/source'),
   JSON.stringify({agentId:id,workspace:{cwd,workingDirectory:'/tmp/nession-dev-slice-Hg34Jk/source'}})+'\n',
@@ -93,6 +103,12 @@ assert.ok(developer.includes('!cancelled() &&'));
 assert.ok(!developer.includes('      always() &&'));
 assert.ok(developer.includes("needs.restore.result == 'success'"));
 assert.ok(developer.includes('-v "$RUNNER_TEMP/development-native:/resume:ro"'));
+assert.ok(fs.readFileSync('scripts/lib/agent/orchestration/development-worker.mjs','utf8')
+  .includes('const nativeStore=CURSOR_JSONL_PATH;'));
+assert.ok(fs.readFileSync('scripts/lib/agent/orchestration/development-worker.mjs','utf8')
+  .includes('let workspace=CURSOR_WORKSPACE_PATH;'));
+assert.ok(!fs.readFileSync('scripts/lib/agent/orchestration/development-worker.mjs','utf8')
+  .includes("mkdtempSync(path.join(process.env.RUNNER_TEMP"));
 const denied=spawnSync(process.execPath,['scripts/lib/agent/orchestration/development-resume.mjs','prepare','/dev/null','/tmp/no-output'],
   {env:{GITHUB_ACTIONS:'false'},encoding:'utf8',timeout:5000});
 assert.notEqual(denied.status,0);

@@ -13,12 +13,20 @@ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'nession-cursor-native-'));
 const model={id:'composer-2.5',parameters:[]};
 const store=path.join(dir,'native');
 fs.mkdirSync(store);
-let created=0,resumed=0,commands=[];
+let created=0,resumed=0,lookedUp=0,commands=[],lookupStore=null;
 const agentId='agent-fixture-abc123';
 const api={
   Cursor:{models:{async list(){return [model];}}},
   JsonlLocalAgentStore:class {constructor(folder){this.folder=folder;}},
   Agent:{
+    async get(id,options){
+      lookedUp++;
+      assert.equal(id,agentId);
+      assert.equal(options.cwd,dir);
+      assert.equal(options.store.folder,store);
+      lookupStore=options.store;
+      return {agentId:id};
+    },
     async create(options){
       created++;
       assert.deepEqual(options.tools,[]);
@@ -30,6 +38,9 @@ const api={
       assert.equal(id,agentId);
       assert.deepEqual(options.tools,[]);
       assert.equal(options.local.store.folder,store);
+      assert.strictEqual(options.local.store,lookupStore,
+        'lookup and resume must use identical SDK Store instance');
+      assert.equal(options.local.cwd,dir);
       assert.deepEqual(options.local.settingSources,[]);
       resumed++;
       return fakeAgent();
@@ -64,6 +75,7 @@ async function test(){
     'an existing native Session lifetime charge is not the new Slice cost');
   assert.equal(created,2);
   assert.equal(resumed,1);
+  assert.equal(lookedUp,1);
   assert.deepEqual(commands,['hello','sandbox','second turn']);
   await assert.rejects(runCursorSession({...common,resumeAgentId:'bc-foreign'}),
     /Invalid local Cursor native resume/);
@@ -71,7 +83,14 @@ async function test(){
   await assert.rejects(runCursorSession({...common,sandbox:'unsafe'}),/sandbox flag/);
   const noResume={...api,Agent:{create:api.Agent.create}};
   await assert.rejects(runCursorSession({...common,sdkLoader:async()=>noResume,resumeAgentId:agentId}),
-    /no native resume API/);
+    /no local Agent lookup\/resume API/);
+  const missing={...api,Agent:{...api.Agent,async get(){throw Error('not found');}}};
+  await assert.rejects(runCursorSession({...common,sdkLoader:async()=>missing,resumeAgentId:agentId}),
+    /native Agent unavailable in restored JSONL store\/cwd/);
+  const foreign={...api,Agent:{...api.Agent,async get(){return {agentId:'agent-foreign-123'};}}};
+  await assert.rejects(runCursorSession({...common,sdkLoader:async()=>foreign,resumeAgentId:agentId}),
+    /JSONL Agent identity mismatch/);
+  assert.equal(resumed,1,'missing or foreign native Agent must not trigger a model resume');
   const badAgent={...api,Agent:{...api.Agent,async resume(){return {...fakeAgent(),agentId:'agent-other-12345'};}}};
   await assert.rejects(runCursorSession({...common,sdkLoader:async()=>badAgent,resumeAgentId:agentId}),
     /different native agent ID/);
