@@ -140,17 +140,68 @@
     },
     {
       "ref": "agent-store",
-      "lifecycle": "planned",
+      "lifecycle": "active",
       "privacy": "encrypted-only",
-      "writers": [],
-      "rollout_blocker": "Controller writer is candidate-only until real owner/main Run and orphan CAS readback. Ruleset and independent cryptographic anchor remain separately deferred per #1690; public Git never stores sensitive native Session plaintext.",
+      "writers": [
+        {
+          "workflow": ".github/workflows/store-agent-bootstrap.yml",
+          "mode": "bootstrap",
+          "event": "main_push_only",
+          "source": "scoped GitHub App installation token",
+          "credential_boundary": "main-owned privileged job; no model-provided writer token",
+          "app_id_variable": "RUN_STORE_WRITER_APP_ID",
+          "app_private_key_secret": "RUN_STORE_WRITER_APP_PRIVATE_KEY",
+          "app_scope": "nession: contents write"
+        },
+        {
+          "workflow": ".github/workflows/store-agent-controller-ingest.yml",
+          "mode": "controller_initialization",
+          "event": "main_workflow_run",
+          "source": "scoped GitHub App installation token",
+          "credential_boundary": "main-owned privileged job; no model-provided writer token",
+          "app_id_variable": "RUN_STORE_WRITER_APP_ID",
+          "app_private_key_secret": "RUN_STORE_WRITER_APP_PRIVATE_KEY",
+          "app_scope": "nession: contents write"
+        },
+        {
+          "workflow": ".github/workflows/agent-controller-dispatch.yml",
+          "mode": "controller_dispatch",
+          "event": "owner_main_dispatch_or_issue_comment",
+          "source": "scoped GitHub App installation token",
+          "credential_boundary": "main-owned privileged job; no model-provided writer token",
+          "app_id_variable": "RUN_STORE_WRITER_APP_ID",
+          "app_private_key_secret": "RUN_STORE_WRITER_APP_PRIVATE_KEY",
+          "app_scope": "nession: contents write"
+        },
+        {
+          "workflow": ".github/workflows/store-agent-development-ingest.yml",
+          "mode": "encrypted_checkpoint_ingest",
+          "event": "main_workflow_run_or_owner_comment",
+          "source": "scoped GitHub App installation token",
+          "credential_boundary": "main-owned privileged job; no model-provided writer token",
+          "app_id_variable": "RUN_STORE_WRITER_APP_ID",
+          "app_private_key_secret": "RUN_STORE_WRITER_APP_PRIVATE_KEY",
+          "app_scope": "nession: contents write"
+        },
+        {
+          "workflow": ".github/workflows/store-agent-dispatch-reconcile.yml",
+          "mode": "failed_dispatch_reconcile",
+          "event": "main_workflow_run",
+          "source": "scoped GitHub App installation token",
+          "credential_boundary": "main-owned privileged job; no model-provided writer token",
+          "app_id_variable": "RUN_STORE_WRITER_APP_ID",
+          "app_private_key_secret": "RUN_STORE_WRITER_APP_PRIVATE_KEY",
+          "app_scope": "nession: contents write"
+        }
+      ],
+      "rollout_blocker": "Current live limited-trust Writer/CAS use is evidenced by #1664; cross-writer server-side Ruleset authorization for agent-store, independent external/WORM anchoring, and production tamper drills remain deferred and UNPROVEN under #1690. Public Git may contain only sealed native session ciphertext.",
       "controller_rollout": {
-        "phase": "candidate-not-live-verified",
+        "phase": "live-verified-limited-trust",
         "request_workflow": ".github/workflows/acceptance-agent-controller.yml",
         "trusted_writer_workflow": ".github/workflows/store-agent-controller-ingest.yml",
         "trigger": "owner/main manual request -> authenticated main-owned workflow_run",
         "boundaries": "manual request read-only; new scoped App token minted after Run/Artifact verification",
-        "acceptance_blocker": "live source Run, orphan CAS readback and complete Worker lifecycle still pending"
+        "acceptance_blocker": "Owner/main Controller, Worker and encrypted native checkpoint have live readback under #1664; full #1690 server enforcement and external anchor are deferred, not Pass."
       }
     }
   ],
