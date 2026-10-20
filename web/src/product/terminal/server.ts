@@ -283,11 +283,15 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
     const callbacks = this.outputCallbacks.get(sessionId);
     if (callbacks) {
       for (const entry of callbacks) {
-        entry.cb(
-          data,
-          bootstrap,
-          Object.prototype.hasOwnProperty.call(payload, 'bootstrap') ? undefined : readAgentStreamPosition(payload),
-        );
+        const position = Object.prototype.hasOwnProperty.call(payload, 'bootstrap')
+          ? undefined
+          : readAgentStreamPosition(payload);
+        if (position) {
+          entry.cb(data, bootstrap, position);
+        } else {
+          // Legacy subscribers see the exact original callback arity.
+          entry.cb(data, bootstrap);
+        }
       }
     }
   }
@@ -300,7 +304,13 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
     const callbacks = this.resizeCallbacks.get(sessionId);
     if (callbacks) {
       for (const entry of callbacks) {
-        entry.cb(cols, rows, readAgentStreamPosition(payload));
+        const position = readAgentStreamPosition(payload);
+        if (position) {
+          entry.cb(cols, rows, position);
+        } else {
+          // Preserve the historical two-argument Relay level-resize contract.
+          entry.cb(cols, rows);
+        }
       }
     }
   }
