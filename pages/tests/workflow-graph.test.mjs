@@ -45,7 +45,8 @@ test('missing or changed workflow sources fail closed',async()=>{
   const complete=await definitions();
   complete['e2e-tests']=complete['e2e-tests'].replace(/^on:\s*$/m,'events:');
   assert.throws(()=>projectWorkflowGraph(complete,sha),/Missing on mapping/);
-  assert.throws(()=>projectWorkflowGraph(await definitions(),'not-a-commit'),/Invalid source revision/);
+  const valid=await definitions();
+  assert.throws(()=>projectWorkflowGraph(valid,'not-a-commit'),/Invalid source revision/);
 });
 test('public projection rejects forged routes, injected fields and duplicate topology',async()=>{
   const p=projectWorkflowGraph(await definitions(),sha);
