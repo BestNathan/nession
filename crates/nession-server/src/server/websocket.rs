@@ -576,6 +576,9 @@ where
                         // the only party that can recognise its own name
                         // (#1429).
                         client_id: browser_client_id.as_deref().unwrap_or(&client_id),
+                        // A pre-ID legacy browser receives no route proof:
+                        // its Server-generated fallback is not its own identity.
+                        authenticated_browser_id: browser_client_id.as_deref(),
                         env_snapshots: &env_snapshots,
                         cols,
                         rows,
@@ -757,6 +760,9 @@ struct RelayRequest<'a> {
     /// before the attach, so every id the Agent publishes for this session is
     /// one the browser can recognise — see `relay_bidirectional_via_channel`.
     client_id: &'a str,
+    /// The browser-authored authenticated identity, if actually supplied.
+    /// A generated compatibility fallback can attach but cannot obtain proof.
+    authenticated_browser_id: Option<&'a str>,
     /// Resolved env snapshots to inject via the attach.
     env_snapshots: &'a [EnvSnapshot],
     /// Terminal columns for the initial tmux resize.
@@ -993,6 +999,7 @@ where
         session_name,
         relay_request_id,
         client_id,
+        authenticated_browser_id,
         env_snapshots,
         cols,
         rows,
@@ -1244,14 +1251,18 @@ where
     // whose attach reply we just validated. Legacy and partial identity never
     // yield one. It is informational: it does NOT enable ACK or credit.
     if has_agent_subscription_proof {
-        if let Some(receipt) = agent_attached_relay_ready(
-            &attach_response,
-            session_name,
-            client_id,
-            relay_request_id,
-        ) {
-            sender.send_reply(receipt).await
-                .map_err(|e| anyhow::anyhow!("Could not publish Relay subscription proof: {e}"))?;
+        if let Some(browser_id) = authenticated_browser_id {
+            if let Some(receipt) = agent_attached_relay_ready(
+                &attach_response,
+                session_name,
+                browser_id,
+                relay_request_id,
+            ) {
+                sender
+                    .send_reply(receipt)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Could not publish Relay subscription proof: {e}"))?;
+            }
         }
     }
     info!("Relay established for session '{}'", session_name);
