@@ -2496,13 +2496,11 @@ async fn start_mock_agent_endpoint() -> anyhow::Result<MockAgentEndpoint> {
                     let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) else {
                         continue;
                     };
-                    // Every request the Server makes is answered rather than
-                    // only recorded: the relay waits for its answers before it
-                    // forwards anything at all, and since #1429 it opens with
-                    // `client.auth` before the attach. Echoing the request's own
-                    // wire name back is what the real Agent does for
-                    // `agent.attach` reply as `ok`, and the relay pairs replies
-                    // by `id`, not by request wire name.
+                    // Every request the Server makes is answered before
+                    // terminal relay forwarding. The Agent's attach reply is
+                    // `ok` and retains the internal request id; it does NOT
+                    // echo the incoming `agent.attach` wire. The old mock did
+                    // and accidentally hid missing reply-type validation.
                     if is_relay_request(&parsed) {
                         let answer = mock_agent_relay_reply(&parsed);
                         if sink
