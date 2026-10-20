@@ -17,12 +17,12 @@ const positive=n=>Number.isSafeInteger(n)&&n>0;
 const hash=b=>createHash('sha256').update(b).digest('hex');
 function fail(s){throw Error('Developer Acceptance readback: '+s);}
 function requireIt(ok,s){if(!ok)fail(s);}
-function runIdentity(run,path,name,events,actor) {
+function runIdentity(run,path,name,events,actor,conclusions=['success']) {
   requireIt(positive(run?.id)&&positive(run.run_attempt)&&SHA.test(run.head_sha??'')&&
     run.path===path&&run.name===name&&events.includes(run.event)&&
     run.head_branch==='main'&&run.repository?.full_name===REPO&&
     run.head_repository?.full_name===REPO&&run.actor?.login===actor&&
-    run.status==='completed'&&run.conclusion==='success','untrusted Run identity');
+    run.status==='completed'&&conclusions.includes(run.conclusion),'untrusted Run identity');
 }
 export function parseDevelopmentReceipt(log) {
   requireIt(typeof log==='string'&&log.length<2*1024*1024,'unbounded Ingest log');
@@ -134,8 +134,39 @@ export function attestDevelopmentStore(r,{head,state,runRecord,checkpoint,checkp
     'unbound pending/intent/dispatch/yield history');
   const children=s.outbox.filter(a=>a.task.continuation?.parent_action_id===r.action_id);
   requireIt(children.length===1,'missing/ambiguous committed continuation');
-  return {state_version:s.version,recorded_continuation_status:children[0].status,
+  return {state_version:s.version,dispatch_history:{
+      action_id:r.action_id,source_sha:r.source_sha,
+      pending_version:pending.version,dispatching_version:prepared.version,
+      dispatched_version:dispatched.version,yielded_version:s.version,
+      issuer_run_id:intent.receipt.issuer_run_id,ticket_sha256:intent.receipt.ticket_sha256,
+      verified_worker_run_id:dispatch.receipt.source_run_id,worker_attempt:r.attempt,
+      states_and_source_bindings_verified:true},recorded_continuation_status:children[0].status,
     continuation_action_id:children[0].id};
+}
+// Dispatch success and model success are separate facts. The historical
+// original Worker failed before model work; never promote that to model proof.
+export function attestOriginalDispatchHistory(history,sourceSha,oldRun,actionId){
+  requireIt(Array.isArray(history)&&history.length<=16&&DIGEST.test(actionId??''),
+    'invalid bounded original history');
+  for(const s of history)validateDevelopmentState(s);
+  const item=s=>s.outbox.find(a=>a.id===actionId);
+  const find=status=>history.find(s=>item(s)?.status===status);
+  const pending=find('pending'),prepared=find('dispatching'),dispatched=find('dispatched');
+  requireIt(pending&&prepared&&dispatched,'incomplete original dispatch history');
+  runIdentity(oldRun,WORKER,'Agent / Development',['workflow_dispatch'],'github-actions[bot]',['failure']);
+  requireIt(pending.issue===1997&&prepared.issue===1997&&dispatched.issue===1997&&
+    pending.version<prepared.version&&prepared.version<dispatched.version&&
+    [pending,prepared,dispatched].every(s=>item(s).task.sha===sourceSha&&
+      item(s).task.agent_id==='dev-cursor-01'&&item(s).task.role==='developer')&&
+    item(prepared).receipt.status==='prepared'&&DIGEST.test(item(prepared).receipt.ticket_sha256??'')&&
+    item(dispatched).receipt.status==='verified'&&item(dispatched).receipt.source_run_id===oldRun.id,
+    'original dispatch history source binding failed');
+  return {action_id:actionId,pending_version:pending.version,
+    dispatching_version:prepared.version,dispatched_version:dispatched.version,
+    worker_run_id:oldRun.id,worker_attempt:oldRun.run_attempt,worker_control_sha:oldRun.head_sha,
+    issuer_run_id:item(prepared).receipt.issuer_run_id,ticket_sha256:item(prepared).receipt.ticket_sha256,
+    worker_conclusion:oldRun.conclusion,source_sha:sourceSha,
+    dispatch_verified:true,model_success_verified:false};
 }
 // Only the existing controlled initial #1997 fixture is supported. Extending
 // proofs to another action/provider requires its independently tested contract.
@@ -190,16 +221,42 @@ export async function collectDevelopmentReadback({repo,issue,stage,targetSha,wor
     // Bounded immutable predecessor search: at most 16 versions. No polling or
     // head mutation; action identity rather than version assumptions owns proof.
     requireIt(r.workflow_state_version<=64,'unsupported long history');
-    const history=[];
-    for(let v=r.workflow_state_version-1;v>=Math.max(1,r.workflow_state_version-16);v--)
-      history.push(await read(r.workflow_commit_sha,issueStatePath(1997,v)));
+    const history=[],historyObjects=[];
+    for(let v=r.workflow_state_version-1;v>=Math.max(1,r.workflow_state_version-16);v--){
+      const path=issueStatePath(1997,v);
+      const bytes=await read(r.workflow_commit_sha,path,0);
+      const state=JSON.parse(bytes.toString('utf8'));
+      validateDevelopmentState(state);
+      history.push(state);
+      historyObjects.push({version:v,path,sha256:hash(bytes)});
+    }
     const find=status=>history.find(s=>s.outbox?.some(a=>a.id===r.action_id&&a.status===status));
     const store=attestDevelopmentStore(r,{head,state,
       runRecord:await read(r.checkpoint_commit_sha,prefix+'/runs/'+r.run_id+'-'+r.attempt+'.json'),
       checkpoint:await read(r.checkpoint_commit_sha,checkpointPath({role:'developer',agent_id:'dev-cursor-01',issue:1997},r.checkpoint_version),32*1024*1024),
       checkpointHead:await read(r.checkpoint_commit_sha,prefix+'/head.json'),
       prepared:find('dispatching'),dispatched:find('dispatched'),pending:find('pending')});
+    const controller=await get('/repos/'+repo+'/actions/runs/'+store.dispatch_history.issuer_run_id);
+    runIdentity(controller,'.github/workflows/agent-controller-dispatch.yml',
+      'Agent / Controller Dispatch',['issue_comment','workflow_dispatch'],'BestNathan');
+    execFileSync('git',['-C',workspace,'merge-base','--is-ancestor',controller.head_sha,targetSha],
+      {stdio:'pipe',timeout:10000});
+    const originalId='95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae';
+    const oldFind=status=>history.find(s=>s.outbox.some(a=>a.id===originalId&&a.status===status));
+    const oldPending=oldFind('pending'),oldPrepared=oldFind('dispatching'),oldDispatched=oldFind('dispatched');
+    let original_dispatch_history=null;
+    if(oldPending&&oldPrepared&&oldDispatched){
+      const item=s=>s.outbox.find(a=>a.id===originalId);
+      const oldRun=await get('/repos/'+repo+'/actions/runs/'+item(oldDispatched).receipt.source_run_id);
+      original_dispatch_history=attestOriginalDispatchHistory(history,r.source_sha,oldRun,originalId);
+      execFileSync('git',['-C',workspace,'merge-base','--is-ancestor',oldRun.head_sha,targetSha],
+        {stdio:'pipe',timeout:10000});
+
+    }
     return [{...r,...attested,...store,schema_version:1,kind:'verified_development_checkpoint_readback',
+      immutable_state_objects:historyObjects,original_dispatch_history,
+      verified_dispatch_controller:{run_id:controller.id,attempt:controller.run_attempt,
+        sha:controller.head_sha,path:controller.path,conclusion:controller.conclusion},
       target_sha:targetSha,fixture_issue:1997,
       native_execution_owners_unchanged:true,source_ancestry_verified:true,
       store_reachable_verified:true,native_resume_verified:false,

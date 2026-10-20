@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {createHash} from 'node:crypto';
 import {parseDevelopmentReceipt,attestDevelopmentReceipt,attestDevelopmentStore,
-  DEVELOPMENT_RECEIPT_PREFIX,collectDevelopmentReadback} from './acceptance-development-readback.mjs';
+  DEVELOPMENT_RECEIPT_PREFIX,collectDevelopmentReadback,attestOriginalDispatchHistory} from './acceptance-development-readback.mjs';
 import {startDevelopment,recordDispatchIntent,recordDispatch,recordSliceYield} from './lib/agent/orchestration/outbox.mjs';
 import {developmentIngestReceipt} from './lib/agent/orchestration/development-ingest.mjs';
 
@@ -78,7 +78,22 @@ export async function selfTestDevelopmentReadback(){
       identity:{role:'developer',agent_id:'dev-cursor-01',issue:1997},
       metadata:{provider:'cursor',session_id:meta.agent_id,source_sha:source,harness_digest:meta.harness_digest},
       encryption:{algorithm:'aes-256-gcm'},ciphertext:ciphertext.toString('base64'),ciphertext_sha256:cp.ciphertext_sha256}};
-  assert.equal(attestDevelopmentStore(receipt,store).recorded_continuation_status,'pending');
+  const verifiedStore=attestDevelopmentStore(receipt,store);
+  assert.equal(verifiedStore.recorded_continuation_status,'pending');
+  assert.deepEqual([verifiedStore.dispatch_history.pending_version,
+    verifiedStore.dispatch_history.dispatching_version,verifiedStore.dispatch_history.dispatched_version,
+    verifiedStore.dispatch_history.yielded_version],[1,2,3,4]);
+  assert.equal(verifiedStore.dispatch_history.verified_worker_run_id,82);
+  assert.equal(verifiedStore.dispatch_history.states_and_source_bindings_verified,true);
+  const oldRun={...worker,conclusion:'failure'};
+  const oldProof=attestOriginalDispatchHistory([pending,prepared,dispatched],source,oldRun,action);
+  assert.equal(oldProof.dispatch_verified,true);
+  assert.equal(oldProof.model_success_verified,false);
+  for(const badRun of [{...oldRun,id:999},{...oldRun,conclusion:'success'},
+    {...oldRun,actor:{login:'fork'}},{...oldRun,path:'.github/workflows/untrusted.yml'}])
+    assert.throws(()=>attestOriginalDispatchHistory([pending,prepared,dispatched],source,badRun,action));
+  assert.throws(()=>attestOriginalDispatchHistory([pending,dispatched],source,oldRun,action));
+  assert.throws(()=>attestOriginalDispatchHistory([pending,prepared,dispatched],'0'.repeat(40),oldRun,action));
   for(const bad of [
     {head:{...store.head,sha256:'0'.repeat(64)}},
     {state:Buffer.from(JSON.stringify({...yielded,issue:1998},null,2)+'\n')},

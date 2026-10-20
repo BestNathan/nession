@@ -38,7 +38,7 @@ const acceptance = renderAcceptancePrompt({
 });
 assert.match(acceptance.text, /Do not add, remove, rename, rewrite, weaken/);
 assert.match(acceptance.text, /"target_ref": "sha"/);
-assert.equal(acceptance.template_version, 'v1');
+assert.equal(acceptance.template_version, 'v2');
 const candidate = candidateIssue(issue, 'Bug: fixed', 'body', ['bug', 'ci']);
 assert.deepEqual(candidate.labels.map((value) => value.name).sort(), ['bug', 'ci', 'in-progress']);
 assert.deepEqual(issue.labels.map((value) => value.name), ['bug', 'web', 'in-progress']);
