@@ -664,7 +664,8 @@ function selfTest(){
   const unknownWorkflow=new Map(sources);
   unknownWorkflow.set('.github/workflows/unreviewed.yml',
     'on: push\npermissions:\n  contents: write\njobs:\n  writer:\n    steps:\n      - run: git push origin HEAD:metrics\n');
-  assert.throws(()=>checkInventory(manifest,unknownWorkflow),/unknown privileged Store push/);
+  assert.throws(()=>checkInventory(manifest,unknownWorkflow),
+    /unclassified direct Git push in privileged Workflow/);
   const unsupported=new Map(sources);
   unsupported.delete('.github/workflows/e2e-tests.yml');
   assert.throws(()=>checkInventory(manifest,unsupported),/upstream dependency/);
