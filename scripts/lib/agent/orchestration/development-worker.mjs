@@ -4,7 +4,6 @@
 // Provider key, never Git Writer/Controller/Publisher credentials. Untrusted
 // model edits are evidence/proposals, NOT accepted commits or PRs.
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
@@ -16,6 +15,11 @@ import {sealCursorNativeStore} from '../providers/cursor-native-store.mjs';
 import {buildAgentWorkflowTelemetry,writeAgentWorkflowTelemetry} from '../../../agent-workflow-telemetry.mjs';
 
 const REPO='BestNathan/nession',HEX40=/^[a-f0-9]{40}$/;
+// Stable across Docker jobs for the same Issue/Agent, isolated per ephemeral
+// container. Cross-Runner durability still belongs to encrypted agent-store.
+export const CURSOR_LOCAL_ROOT='/tmp/nession-cursor-issue-1997';
+export const CURSOR_WORKSPACE_PATH=path.join(CURSOR_LOCAL_ROOT,'workspace');
+export const CURSOR_JSONL_PATH=path.join(CURSOR_LOCAL_ROOT,'jsonl');
 const sha=s=>createHash('sha256').update(s).digest('hex');
 function fail(s){throw Error('bounded Developer: '+s);}
 function git(...args){return execFileSync('git',args,{encoding:'utf8',timeout:45000,
@@ -82,7 +86,8 @@ export function originalCursorWorkspace(agentsJsonl,agentId){
   }
   if(candidates.size!==1)fail('native Agent workspace identity not unique');
   const cwd=[...candidates][0];
-  if(!/^\/tmp\/nession-dev-slice-[A-Za-z0-9]{6}\/source$/.test(cwd)||
+  if(!(cwd===CURSOR_WORKSPACE_PATH ||
+       /^\/tmp\/nession-dev-slice-[A-Za-z0-9]{6}\/source$/.test(cwd))||
       path.resolve(cwd)!==cwd||path.normalize(cwd)!==cwd)
     fail('native Agent workspace outside isolated fixture namespace');
   return cwd;
@@ -117,9 +122,13 @@ async function main(){
     fail('Cursor SDK digest/version differs from pinned Environment version');
   const model={id:process.env.CURSOR_MODEL||'composer-2.5',
     fast:(process.env.CURSOR_MODEL_FAST||'true')!=='false'};
-  const root=fs.mkdtempSync(path.join(process.env.RUNNER_TEMP||os.tmpdir(),'nession-dev-slice-'));
-  let workspace=path.join(root,'source');
-  const nativeStore=path.join(root,'native-store');
+  // Do not let the SDK index its native Agent under a new random cwd/store
+  // on each Slice. This root is private to one unprivileged Docker run and
+  // must be absent; never merge another action's local native state.
+  if(fs.existsSync(CURSOR_LOCAL_ROOT))fail('fixed Cursor local state root is occupied');
+  fs.mkdirSync(CURSOR_LOCAL_ROOT,{mode:0o700});
+  let workspace=CURSOR_WORKSPACE_PATH;
+  const nativeStore=CURSOR_JSONL_PATH;
   const out=path.resolve(process.argv[3]);
   const candidate='e2e/fixtures/agent-development/1997-canary.txt';
   const complete='Durable Worker fixture: complete\n';
@@ -127,11 +136,11 @@ async function main(){
   const expected=resuming?complete+'Previous value: pending\n':complete;
   let added=false;
   try{
+    fs.mkdirSync(nativeStore,{mode:0o700});
     if(resuming){
       const names=['agents.ndjson','checkpoints.ndjson','runs.ndjson','run_events.ndjson'];
       if(fs.readdirSync('/resume').sort().join(',')!==names.sort().join(','))
         fail('exact trusted restored native store missing');
-      fs.mkdirSync(nativeStore,{mode:0o700});
       for(const name of names){
         const source=path.join('/resume',name),stat=fs.lstatSync(source);
         if(!stat.isFile()||stat.isSymbolicLink()||stat.size>16*1024*1024)fail('unsafe native file');
@@ -141,10 +150,13 @@ async function main(){
       // This exact path no longer exists in the fresh disposable container.
       workspace=originalCursorWorkspace(fs.readFileSync(path.join(nativeStore,'agents.ndjson'),'utf8'),
         'agent-7d5b4a61-1476-4ce7-a38a-82907aa3b1a6');
-      if(fs.existsSync(path.dirname(workspace))||fs.existsSync(workspace))
-        fail('original native workspace path is already occupied');
-      fs.mkdirSync(path.dirname(workspace),{mode:0o700});
-    }else fs.mkdirSync(nativeStore,{mode:0o700});
+      if(fs.existsSync(workspace))fail('restored native workspace path is already occupied');
+      if(workspace!==CURSOR_WORKSPACE_PATH){
+        if(fs.existsSync(path.dirname(workspace)))
+          fail('historical native workspace parent is already occupied');
+        fs.mkdirSync(path.dirname(workspace),{mode:0o700});
+      }
+    }
     git('-C',process.env.GITHUB_WORKSPACE,'worktree','add','--detach',workspace,a.input_sha);
     added=true;
     if(git('-C',workspace,'rev-parse','HEAD')!==a.input_sha)
@@ -245,7 +257,10 @@ async function main(){
     console.log('Real Developer read/edit and encrypted native checkpoint verified; no PR published');
   }finally{
     if(added)try{git('-C',process.env.GITHUB_WORKSPACE,'worktree','remove','--force',workspace);}catch{}
-    fs.rmSync(root,{recursive:true,force:true});
+    fs.rmSync(CURSOR_LOCAL_ROOT,{recursive:true,force:true});
+    if(workspace!==CURSOR_WORKSPACE_PATH){
+      try{fs.rmdirSync(path.dirname(workspace));}catch{}
+    }
   }
 }
 if(process.argv[1]&&fileURLToPath(import.meta.url)===path.resolve(process.argv[1])){
