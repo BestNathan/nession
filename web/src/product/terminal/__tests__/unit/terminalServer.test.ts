@@ -38,6 +38,53 @@ describe('TerminalServerPlugin', () => {
     expect(plugin.name).toBe('terminal-server');
   });
 
+  describe('Agent-authored Relay-ready receipt (#2100)', () => {
+    const routeId = 'aabbccdd-1234-4000-8000-aabbccddeeff';
+    const valid = {
+      session_name: 'work', browser_client_id: 'unit-client',
+      relay_request_id: 'real-wire-id', route_id: routeId,
+      subscriber_generation: 41, stream_epoch: 7,
+    };
+
+    it('returns only the real outgoing envelope id; legacy transport cannot fabricate one', () => {
+      expect(plugin.beginRelayTracked('a:work')).toBeNull();
+      expect(surface.sent).toHaveLength(1);
+      surface.sendTracked = vi.fn((type, payload) => {
+        surface.send(type, payload);
+        return { id: 'real-wire-id', physicalGeneration: 3 };
+      });
+      expect(plugin.beginRelayTracked('a:work')).toEqual({
+        id: 'real-wire-id', physicalGeneration: 3,
+      });
+      expect(surface.sent[1]?.type).toBe('server.session.relay.begin');
+    });
+
+    it('decodes only complete safe Agent pair and route identity, scoped to session', () => {
+      Object.defineProperty(surface, 'physicalGeneration', { value: 3, configurable: true });
+      const cb = vi.fn();
+      plugin.onRelayReady('work', cb);
+      plugin.onRelayReady('other', vi.fn());
+      surface.pushMessage('server.session.relay.ready', valid);
+      expect(cb).toHaveBeenCalledExactlyOnceWith({
+        sessionName: 'work', browserClientId: 'unit-client',
+        relayRequestId: 'real-wire-id', routeId,
+        subscriberGeneration: 41, streamEpoch: 7,
+      }, 3);
+      for (const bad of [
+        { ...valid, subscriber_generation: Number.MAX_SAFE_INTEGER + 1 },
+        { ...valid, stream_epoch: 0 },
+        { ...valid, stream_epoch: undefined },
+        { ...valid, subscriber_generation: undefined },
+        { ...valid, route_id: 'not-a-uuid' },
+        { ...valid, relay_request_id: '' },
+        { ...valid, session_name: 'other' },
+      ]) {
+        surface.pushMessage('server.session.relay.ready', bad);
+      }
+      expect(cb).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('relay lifecycle sends', () => {
     it('beginRelay without columns says so, rather than asking for 80x24', () => {
       plugin.beginRelay('sess-1');

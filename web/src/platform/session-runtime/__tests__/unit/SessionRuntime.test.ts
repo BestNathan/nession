@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createFilesApi } from '@/capabilities/files';
-import { createTerminalAgentApi } from '@/product/terminal';
+import { createTerminalAgentApi, type RelaySubscriptionProof } from '@/product/terminal';
 import { SessionRuntime } from '@/platform/session-runtime/SessionRuntime';
 import { ATTACH_TIMEOUT_MS, P2P_MAX_RECONNECT, type AttachTransitionResult } from '@/platform/attach/AttachStateMachine';
 import { WebSocketService } from '@/platform/socket/WebSocketService';
@@ -702,6 +702,63 @@ describe('SessionRuntime', () => {
       expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
       expect(rt.attachState.phase).toBe('attached');
       rt.dispose();
+    });
+
+    it('accepts only the current Agent-authored receipt on the same physical socket, never ACKs it (#2100)', async () => {
+      const serverConnection = makeRelayServerConnection('connected');
+      const callbacks = new Set<(proof: RelaySubscriptionProof, physicalGeneration: number) => void>();
+      let wireNumber = 0;
+      const conn = Object.assign(serverConnection, {
+        beginRelayTracked: vi.fn(() => ({ id: 'wire-' + ++wireNumber, physicalGeneration: wireNumber + 2 })),
+        onRelayReady: (_session: string, cb: (proof: RelaySubscriptionProof, gen: number) => void) => {
+          callbacks.add(cb);
+          return () => { callbacks.delete(cb); };
+        },
+      });
+      const rt = new SessionRuntime(makeConfig({ forcedRelay: true, serverConnection: conn }));
+      const base: RelaySubscriptionProof = {
+        sessionName: 's1', browserClientId: 'unit-client',
+        relayRequestId: 'wire-1', routeId: 'aabbccdd-1234-4000-8000-aabbccddeeff',
+        subscriberGeneration: 41, streamEpoch: 7,
+      };
+      const publish = (proof: RelaySubscriptionProof, gen = 3) => {
+        for (const cb of callbacks) { cb(proof, gen); }
+      };
+      rt.setTransportReady(true);
+      await flushMicrotasks();
+      expect(conn.beginRelayTracked).toHaveBeenCalledTimes(1);
+      expect(rt.relaySubscriptionProofSnapshot).toBeNull();
+      publish({ ...base, relayRequestId: 'other' });
+      publish({ ...base, browserClientId: 'other' });
+      publish({ ...base, sessionName: 'other' });
+      publish(base, 9);
+      expect(rt.relaySubscriptionProofSnapshot).toBeNull();
+      publish(base);
+      expect(rt.relaySubscriptionProofSnapshot).toEqual(base);
+      publish({ ...base, routeId: 'forged-new-route' }); // cannot replace the first proof
+      expect(rt.relaySubscriptionProofSnapshot?.routeId).toBe(base.routeId);
+
+      // An informational receipt may never release Agent issued-byte credit.
+      rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 0 });
+      rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 1 });
+      expect(sentFrames().filter((m) => m.msg_type === 'agent.terminal.output.applied')).toHaveLength(0);
+
+      serverConnection.emit('connecting');
+      expect(rt.relaySubscriptionProofSnapshot).toBeNull();
+      serverConnection.emit('connected');
+      await flushMicrotasks();
+      expect(conn.beginRelayTracked).toHaveBeenCalledTimes(2);
+      publish(base); // old request + old physical generation
+      publish({ ...base, relayRequestId: 'wire-2' }, 3);
+      expect(rt.relaySubscriptionProofSnapshot).toBeNull();
+      const fresh = { ...base, relayRequestId: 'wire-2', routeId: 'aaaaaaaa-1234-4000-8000-aabbccddeeff' };
+      publish(fresh, 4);
+      expect(rt.relaySubscriptionProofSnapshot).toEqual(fresh);
+      rt.updateContext({ routeIntentEpoch: 1 });
+      expect(rt.relaySubscriptionProofSnapshot).toBeNull();
+      rt.dispose();
+      publish(fresh, 4);
+      expect(rt.relaySubscriptionProofSnapshot).toBeNull();
     });
 
     it('re-begins exactly once across connected -> connecting -> connected (recoverable loss cycle)', async () => {

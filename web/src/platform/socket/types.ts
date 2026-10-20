@@ -9,6 +9,12 @@ export interface SocketMessage {
 
 export type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'reconnecting';
 
+/** Exact wire identity returned only after a tracked send succeeds. */
+export interface SentSocketMessage {
+  id: string;
+  physicalGeneration: number;
+}
+
 export interface RequestOptions {
   timeoutMs?: number;
 }
@@ -23,6 +29,10 @@ export interface HandshakeSurface {
 export interface PluginSurface {
   readonly connectionState: ConnectionState;
   send(type: string, payload: Record<string, unknown>): void;
+  /** Optional on legacy/test surfaces; does not fabricate a correlation ID. */
+  sendTracked?(type: string, payload: Record<string, unknown>): SentSocketMessage;
+  /** Changes for every new physical WebSocket, not merely at plugin installation. */
+  readonly physicalGeneration?: number;
   subscribe(
     type: string,
     handler: (payload: unknown, raw: SocketMessage) => void,

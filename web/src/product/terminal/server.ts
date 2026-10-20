@@ -10,7 +10,7 @@ import { WIRE as RELAY_END_WIRE } from '@/generated/protocol/core/server-session
 import { WIRE as TERMINAL_INPUT_WIRE } from '@/generated/protocol/core/agent-terminal-input/v1';
 import { WIRE as TERMINAL_RESIZE_WIRE } from '@/generated/protocol/core/agent-terminal-resize/v1';
 import { WIRE as TERMINAL_STREAM_RESUME_WIRE } from '@/generated/protocol/core/agent-terminal-stream-resume/v1';
-import type { TransportPlugin, PluginSurface } from '@/platform/socket/types';
+import type { TransportPlugin, PluginSurface, SentSocketMessage } from '@/platform/socket/types';
 // The shared options shape, owned next to the runtime that drives relay. A
 // type-only import across the layer boundary, which the rule allows — and the
 // alternative (each side declaring its own) is how the two would drift.
@@ -31,6 +31,37 @@ import { readAgentStreamPosition } from './streamPosition';
 type RelayOutputCallback = (data: Uint8Array, bootstrap?: TerminalBootstrap, position?: TerminalStreamPosition) => void;
 type RelayResizeCallback = (cols: number, rows: number, position?: TerminalStreamPosition) => void;
 type RelayInputAckCallback = (ack: InputAckFields) => void;
+
+/** Informational proof only: this does NOT authorize parser ACK or Agent credit. */
+export interface RelaySubscriptionProof {
+  sessionName: string;
+  browserClientId: string;
+  relayRequestId: string;
+  routeId: string;
+  subscriberGeneration: number;
+  streamEpoch: number;
+}
+
+function readRelayReady(payload: Record<string, unknown>): RelaySubscriptionProof | null {
+  const { session_name, browser_client_id, relay_request_id, route_id,
+    subscriber_generation, stream_epoch } = payload;
+  if (typeof session_name !== 'string' || !session_name
+    || typeof browser_client_id !== 'string' || !browser_client_id
+    || typeof relay_request_id !== 'string' || !relay_request_id
+    || typeof route_id !== 'string'
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(route_id)
+    || typeof subscriber_generation !== 'number'
+    || !Number.isSafeInteger(subscriber_generation) || subscriber_generation <= 0
+    || typeof stream_epoch !== 'number'
+    || !Number.isSafeInteger(stream_epoch) || stream_epoch <= 0) {
+    return null;
+  }
+  return {
+    sessionName: session_name, browserClientId: browser_client_id,
+    relayRequestId: relay_request_id, routeId: route_id,
+    subscriberGeneration: subscriber_generation, streamEpoch: stream_epoch,
+  };
+}
 
 /**
  * The position a relay input frame carries (#1307).
@@ -77,6 +108,10 @@ function getSessionId(payload: Record<string, unknown>): string {
  */
 export interface TerminalServerApi {
   beginRelay(sessionId: string, opts?: RelayBeginOptions): void;
+  /** Track the exact emitted envelope. Legacy surfaces still send, but return no proof. */
+  beginRelayTracked(sessionId: string, opts?: RelayBeginOptions): SentSocketMessage | null;
+  /** Parsed Server-owned proof, stamped with the receiving physical socket generation. */
+  onRelayReady(sessionName: string, cb: (proof: RelaySubscriptionProof, physicalGeneration: number) => void): () => void;
   endRelay(sessionId: string): void;
   /**
    * Relay terminal input — base64-wrapped, mirroring the server wire.
@@ -115,6 +150,7 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
   private outputCallbacks = new Map<string, Array<GenerationEntry<RelayOutputCallback>>>();
   private resizeCallbacks = new Map<string, Array<GenerationEntry<RelayResizeCallback>>>();
   private inputAckCallbacks = new Map<string, Array<GenerationEntry<RelayInputAckCallback>>>();
+  private readyCallbacks = new Map<string, Array<GenerationEntry<(proof: RelaySubscriptionProof, physicalGeneration: number) => void>>>();
 
   /**
    * Bind the plugin to the server connection. A later install replaces an
@@ -147,6 +183,11 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
       connection.subscribe('agent.terminal.input.ack', (payload) => {
         this.handleRelayInputAck(payload as Record<string, unknown>);
       }),
+      connection.subscribe('server.session.relay.ready', (payload) => {
+        if (payload !== null && typeof payload === 'object' && !Array.isArray(payload)) {
+          this.handleRelayReady(payload as Record<string, unknown>, connection.physicalGeneration ?? -1);
+        }
+      }),
     ];
 
     return () => {
@@ -160,6 +201,7 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
         this.outputCallbacks.clear();
         this.resizeCallbacks.clear();
         this.inputAckCallbacks.clear();
+        this.readyCallbacks.clear();
       } else {
         // Stale release — a newer binding is active. Drop only the
         // registrations this release created; never touch newer ones.
@@ -169,6 +211,24 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
   }
 
   beginRelay(sessionId: string, opts?: RelayBeginOptions): void {
+    this.requireConnection().send(RELAY_BEGIN_WIRE, this.relayBeginPayload(sessionId, opts));
+  }
+
+  beginRelayTracked(sessionId: string, opts?: RelayBeginOptions): SentSocketMessage | null {
+    const connection = this.requireConnection();
+    const payload = this.relayBeginPayload(sessionId, opts);
+    if (!connection.sendTracked) {
+      connection.send(RELAY_BEGIN_WIRE, payload); // legacy, permanently non-credit
+      return null;
+    }
+    return connection.sendTracked(RELAY_BEGIN_WIRE, payload);
+  }
+
+  onRelayReady(sessionName: string, cb: (proof: RelaySubscriptionProof, physicalGeneration: number) => void): () => void {
+    return this.addMapCallback(this.readyCallbacks, sessionName, cb);
+  }
+
+  private relayBeginPayload(sessionId: string, opts?: RelayBeginOptions): Record<string, unknown> {
     const payload: Record<string, unknown> = { session_id: sessionId };
     if (opts?.relayUrl) {
       payload.relay_url = opts.relayUrl;
@@ -193,7 +253,7 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
     if (opts?.needsBootstrap !== undefined) {
       payload.needs_bootstrap = opts.needsBootstrap;
     }
-    this.requireConnection().send(RELAY_BEGIN_WIRE, payload);
+    return payload;
   }
 
   endRelay(sessionId: string): void {
@@ -247,6 +307,16 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
     // The Server tunnel forwards this request to Agent unchanged. Only Agent
     // can judge a complete replay; no Server/Relay-specific cursor exists.
     return readResumeReply(reply, epoch);
+  }
+
+  private handleRelayReady(payload: Record<string, unknown>, physicalGeneration: number): void {
+    const proof = readRelayReady(payload);
+    if (!proof || !Number.isSafeInteger(physicalGeneration) || physicalGeneration < 0) {
+      return;
+    }
+    for (const entry of this.readyCallbacks.get(proof.sessionName) ?? []) {
+      entry.cb(proof, physicalGeneration);
+    }
   }
 
   private handleRelayInputAck(payload: Record<string, unknown>): void {
@@ -351,6 +421,7 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
     this.dropGenerationFrom(this.outputCallbacks, generation);
     this.dropGenerationFrom(this.resizeCallbacks, generation);
     this.dropGenerationFrom(this.inputAckCallbacks, generation);
+    this.dropGenerationFrom(this.readyCallbacks, generation);
   }
 
   private dropGenerationFrom<T>(
