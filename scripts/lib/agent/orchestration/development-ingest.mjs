@@ -16,7 +16,7 @@ import {createGitHubRunReader} from './github-dispatch.mjs';
 import {deriveDispatchKey} from './controller-dispatch.mjs';
 import {commitAttestedSliceYield} from './dispatch-store.mjs';
 import {readIssueWorkflowState} from './state-store.mjs';
-import {failedDeveloperRetryActionId} from './outbox.mjs';
+import {failedDeveloperRetryActionId,nativeResumeSuccessorId} from './outbox.mjs';
 import {sealCheckpoint} from '../store/checkpoint.mjs';
 import {publishEncryptedAgentCheckpoint,verifyCommittedCheckpoint} from '../store/remote.mjs';
 import {CONTROLLED_CONTINUATION} from './development-resume.mjs';
@@ -158,6 +158,10 @@ export function developmentIngestReceipt({status,run,claim,metadata,claimArtifac
 
 const PINNED_RECOVERY_SOURCE_RUN=39288961865;
 const PINNED_RECOVERY_COMMAND='/nession ingest issue=1997 worker_run=39288961865';
+export const NATIVE_RECOVERY_ACTION=nativeResumeSuccessorId(1997,CONTROLLED_CONTINUATION,39376331942);
+export const NATIVE_RECOVERY_RUN=39396836009;
+export const NATIVE_RECOVERY_SHA='2f75869833fb43ec54e88b560226f8913a6beac3';
+export const NATIVE_RECOVERY_INGEST_COMMAND='/nession ingest issue=1997 action='+NATIVE_RECOVERY_ACTION+' worker_run='+NATIVE_RECOVERY_RUN;
 // The lack of a workflow_run delivery must not allow a result to be promoted
 // by editing a Store file or by supplying an arbitrary Run ID. This manual
 // recovery still re-reads GitHub, both Artifact digests, the HMAC Ticket and
@@ -184,14 +188,16 @@ export function resolveTrustedIngestSource({environment,event}){
         event.issue?.pull_request||
         event.comment?.user?.login!=='BestNathan'||
         (event.comment?.body!==PINNED_RECOVERY_COMMAND&&
-          !new RegExp('^/nession ingest issue=1997 action='+CONTROLLED_CONTINUATION+' worker_run=[1-9][0-9]{0,14}$').test(event.comment?.body??''))||
+          !new RegExp('^/nession ingest issue=1997 action='+CONTROLLED_CONTINUATION+' worker_run=[1-9][0-9]{0,14}$').test(event.comment?.body??'')&&
+          event.comment?.body!==NATIVE_RECOVERY_INGEST_COMMAND)||
         !Number.isSafeInteger(event.comment.id)||event.comment.id<1)
       fail('manual checkpoint recovery requires exact owner/main Issue comment');
     if(event.comment.body===PINNED_RECOVERY_COMMAND)
       return {run_id:PINNED_RECOVERY_SOURCE_RUN,source:null};
     const id=Number(event.comment.body.match(/worker_run=([0-9]+)$/)[1]);
     if(!Number.isSafeInteger(id)||id<=PINNED_RECOVERY_SOURCE_RUN)fail('invalid continuation source Run');
-    return {run_id:id,source:null,continuation:true};
+    return {run_id:id,source:null,continuation:true,
+      ...(event.comment.body===NATIVE_RECOVERY_INGEST_COMMAND?{native_recovery:true}:{})};
   }
   fail('unsupported Ingest trigger');
 }
@@ -228,6 +234,11 @@ async function main(){
        run.head_sha!=='e6e64eb84663f2bb935b9c0628d9ab787523186b'||
        run.conclusion!=='success'||run.status!=='completed'))
     fail('manual replay is not the exact successful isolated Worker');
+  if(authority.native_recovery &&
+     (run.id!==NATIVE_RECOVERY_RUN||run.run_attempt!==1||
+      run.head_sha!==NATIVE_RECOVERY_SHA||
+      run.status!=='completed'||run.conclusion!=='success'))
+    fail('manual native recovery is not the exact successful Worker SHA/Run');
   const artifacts=await api(token,'/actions/runs/'+run.id+'/artifacts?per_page=100');
   const verifiedClaim=authenticateWorkerClaimRun(run,artifacts);
   const matching=artifacts.artifacts.filter(a=>a.name===
@@ -259,9 +270,14 @@ async function main(){
             '95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae',
             39267659650),
           CONTROLLED_CONTINUATION,
+          NATIVE_RECOVERY_ACTION,
         ].includes(verified.action_id))
       fail('Developer scope not yet authorized outside #1997 fixture');
-    if(authority.continuation&&(verified.action_id!==CONTROLLED_CONTINUATION||run.run_attempt!==1))
+    if(authority.continuation&&(
+         ![CONTROLLED_CONTINUATION,NATIVE_RECOVERY_ACTION].includes(verified.action_id)||
+         run.run_attempt!==1||
+         (authority.native_recovery&&verified.action_id!==NATIVE_RECOVERY_ACTION)||
+         (!authority.native_recovery&&verified.action_id!==CONTROLLED_CONTINUATION)))
       fail('continuation recovery source is not the exact controlled Action/Attempt');
     const store=env.AGENT_STORE_CONTROLLER_REMOTE;
     const admission=readConfirmedDevelopmentState(store,claim,run);
