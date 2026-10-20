@@ -106,7 +106,7 @@ export function readConfirmedDevelopmentState(remote,claim,run) {
         ciphertext_sha256:sealed.ciphertext_sha256,
         metadata:sealed.metadata};
     }
-    return {state_version:record.version,action,
+    return {state_version:record.version,store_commit_sha:git('-C',dir,'rev-parse','HEAD'),action,
       already_yielded:action.status==='yielded',existing_checkpoint};
   }finally{fs.rmSync(root,{recursive:true,force:true});}
 }
@@ -123,6 +123,34 @@ async function api(token,endpoint){
   if(!r.ok)fail('independent source GitHub API rejected request: '+r.status);
   return r.json();
 }
+// Sanitized facts only. The read-only Acceptance collector authenticates the
+// emitting main-owned Run/Attempt/Job, source Artifact manifests and Git objects
+// independently. This is a transport receipt, never an SC verdict.
+export function developmentIngestReceipt({status,run,claim,metadata,claimArtifact,
+  resultArtifact,checkpoint,stateVersion,storeCommit,environment}) {
+  if(!['yielded','replayed'].includes(status)||!HEX40.test(storeCommit??'')||
+      !HEX40.test(checkpoint?.commit_sha??'')||
+      !HEX64.test(checkpoint?.ciphertext_sha256??'')||
+      !Number.isSafeInteger(stateVersion)||stateVersion<1||
+      !Number.isSafeInteger(Number(environment.GITHUB_RUN_ID))||
+      !Number.isSafeInteger(Number(environment.GITHUB_RUN_ATTEMPT)))
+    fail('invalid sanitized committed Ingest receipt');
+  return {schema_version:1,kind:'authenticated_development_checkpoint_receipt',
+    status,issue:1997,action_id:claim.inputs.action_id,
+    run_id:run.id,attempt:run.run_attempt,worker_sha:run.head_sha,
+    source_sha:claim.inputs.input_sha,
+    ingester_run_id:Number(environment.GITHUB_RUN_ID),
+    ingester_attempt:Number(environment.GITHUB_RUN_ATTEMPT),
+    ingester_sha:environment.GITHUB_SHA,
+    claim_artifact_id:claimArtifact.artifact_id,
+    claim_artifact_digest:claimArtifact.digest,
+    result_artifact_id:resultArtifact.id,result_artifact_digest:resultArtifact.digest,
+    checkpoint_version:checkpoint.version,checkpoint_commit_sha:checkpoint.commit_sha,
+    ciphertext_sha256:checkpoint.ciphertext_sha256,
+    session_id:metadata.agent_id,harness_digest:metadata.harness_digest,
+    workflow_state_version:stateVersion,workflow_commit_sha:storeCommit};
+}
+
 const PINNED_RECOVERY_SOURCE_RUN=39288961865;
 const PINNED_RECOVERY_COMMAND='/nession ingest issue=1997 worker_run=39288961865';
 // The lack of a workflow_run delivery must not allow a result to be promoted
@@ -227,8 +255,12 @@ async function main(){
         commit_sha:receipt.checkpoint_commit_sha,
         version:receipt.checkpoint_version,
         ciphertext_sha256:receipt.ciphertext_sha256});
-      console.log(JSON.stringify({status:'replayed',run_id:run.id,
-        state_version:admission.state_version}));
+      if(!admission.existing_checkpoint)fail('yielded Slice lacks immutable checkpoint');
+      console.log(JSON.stringify(developmentIngestReceipt({
+        status:'replayed',run,claim,metadata,claimArtifact:verifiedClaim,
+        resultArtifact:matching[0],checkpoint:admission.existing_checkpoint,
+        stateVersion:admission.state_version,storeCommit:admission.store_commit_sha,
+        environment:env})));
       return;
     }
     let published,encryptedDigest;
@@ -283,11 +315,12 @@ async function main(){
         reader,checkpoint:{version:published.version,commit_sha:published.commit_sha,
           ciphertext_sha256:encryptedDigest,run_id:run.id,
           attempt:run.run_attempt},verifiedMainSha:run.head_sha});
-      console.log(JSON.stringify({status:advanced.status,run_id:run.id,
-        checkpoint_version:published.version,
-        checkpoint_commit_sha:published.commit_sha,
-        workflow_state_version:advanced.state_version,
-        workflow_commit_sha:advanced.store_commit_sha}));
+      console.log(JSON.stringify(developmentIngestReceipt({
+        status:advanced.status,run,claim,metadata,claimArtifact:verifiedClaim,
+        resultArtifact:matching[0],checkpoint:{version:published.version,
+          commit_sha:published.commit_sha,ciphertext_sha256:encryptedDigest},
+        stateVersion:advanced.state_version,storeCommit:advanced.store_commit_sha,
+        environment:env})));
   }finally{rootKey.fill(0);aesKey.fill(0);}
 }
 if(process.argv[1]&&fileURLToPath(import.meta.url)===path.resolve(process.argv[1]))
