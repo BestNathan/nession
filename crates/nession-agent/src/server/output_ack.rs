@@ -28,6 +28,7 @@ pub enum OutputAckVerdict {
     Duplicate,
     StaleSubscriber,
     StaleEpoch,
+    StaleRenderer,
     Regressive,
     BeyondIssuedHead,
     UnsafeWireInteger,
@@ -42,6 +43,9 @@ pub enum OutputAckVerdict {
 pub struct SubscriberOutputAck {
     binding: OutputAckBinding,
     applied_through: u64,
+    /// Renderer identity is pinned by the first advancing parser ACK. A
+    /// remount must reattach rather than reuse this subscriber generation.
+    renderer_generation: Option<u64>,
 }
 
 fn is_safe_positive(value: u64) -> bool {
@@ -61,6 +65,7 @@ impl SubscriberOutputAck {
         Ok(Self {
             binding,
             applied_through: 0,
+            renderer_generation: None,
         })
     }
 
@@ -70,6 +75,41 @@ impl SubscriberOutputAck {
 
     pub fn applied_through(&self) -> u64 {
         self.applied_through
+    }
+
+    /// The first *advancing* ACK pins the renderer that parsed the bytes.
+    /// An old callback cannot advance this subscription after the client
+    /// switches its renderer while reusing a transport. Binding must be
+    /// renewed with a new subscriber generation after a renderer remount.
+    /// This fences identity only: it does not establish a verified checkpoint
+    /// baseline or release any output byte credit (#2030).
+    pub fn observe_with_renderer(
+        &mut self,
+        claimed: OutputAckBinding,
+        renderer_generation: u64,
+        applied_through: u64,
+        issued_head: u64,
+    ) -> OutputAckVerdict {
+        if claimed.subscriber_generation != self.binding.subscriber_generation {
+            return OutputAckVerdict::StaleSubscriber;
+        }
+        if claimed.stream_epoch != self.binding.stream_epoch {
+            return OutputAckVerdict::StaleEpoch;
+        }
+        if !is_safe_positive(renderer_generation) {
+            return OutputAckVerdict::UnsafeWireInteger;
+        }
+        if self
+            .renderer_generation
+            .is_some_and(|pinned| pinned != renderer_generation)
+        {
+            return OutputAckVerdict::StaleRenderer;
+        }
+        let verdict = self.observe(claimed, applied_through, issued_head);
+        if matches!(verdict, OutputAckVerdict::Advanced { .. }) {
+            self.renderer_generation = Some(renderer_generation);
+        }
+        verdict
     }
 
     /// An Agent-authorized reattach/restart revokes the prior binding.
@@ -220,6 +260,66 @@ mod tests {
                 applied_through: 1,
             }
         );
+    }
+
+    #[test]
+    fn renderer_is_pinned_only_by_advancing_ack_and_reset_on_reattach() {
+        let first = binding(21, 43);
+        let next = binding(22, 43);
+        let mut cursor = SubscriberOutputAck::new(first).unwrap();
+
+        // A speculative or rejected ACK cannot choose the renderer identity.
+        assert_eq!(
+            cursor.observe_with_renderer(first, 7, 5, 4),
+            OutputAckVerdict::BeyondIssuedHead
+        );
+        assert_eq!(
+            cursor.observe_with_renderer(first, 0, 0, 4),
+            OutputAckVerdict::UnsafeWireInteger
+        );
+        assert_eq!(
+            cursor.observe_with_renderer(first, 8, 0, 4),
+            OutputAckVerdict::Duplicate
+        );
+        assert_eq!(
+            cursor.observe_with_renderer(first, 9, 2, 4),
+            OutputAckVerdict::Advanced {
+                previous: 0,
+                applied_through: 2,
+            }
+        );
+        assert_eq!(
+            cursor.observe_with_renderer(first, 8, 3, 4),
+            OutputAckVerdict::StaleRenderer
+        );
+        assert_eq!(cursor.applied_through(), 2);
+        assert_eq!(
+            cursor.observe_with_renderer(first, 9, 3, 4),
+            OutputAckVerdict::Advanced {
+                previous: 2,
+                applied_through: 3,
+            }
+        );
+
+        // Renewing subscriber identity is required after renderer remount.
+        cursor.replace(next).unwrap();
+        assert_eq!(cursor.applied_through(), 0);
+        assert_eq!(
+            cursor.observe_with_renderer(first, 9, 1, 4),
+            OutputAckVerdict::StaleSubscriber
+        );
+        assert_eq!(
+            cursor.observe_with_renderer(next, 10, 1, 4),
+            OutputAckVerdict::Advanced {
+                previous: 0,
+                applied_through: 1,
+            }
+        );
+        assert_eq!(
+            cursor.observe_with_renderer(next, 9, 2, 4),
+            OutputAckVerdict::StaleRenderer
+        );
+        assert_eq!(cursor.applied_through(), 1);
     }
 
     #[test]

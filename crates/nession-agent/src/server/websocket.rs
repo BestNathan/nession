@@ -322,11 +322,12 @@ fn accept_output_ack(
     if !(1..=(1_u64 << 53) - 1).contains(&payload.renderer_generation) {
         return Err("invalid_renderer_generation");
     }
-    let verdict = peer.output_ack.observe(
+    let verdict = peer.output_ack.observe_with_renderer(
         OutputAckBinding {
             subscriber_generation: payload.subscriber_generation,
             stream_epoch: payload.stream_epoch,
         },
+        payload.renderer_generation,
         payload.applied_through,
         issued_head,
     );
@@ -3743,6 +3744,16 @@ mod tests {
             accept_output_ack(&mut peers, "observer", &new_socket, &payload, 3),
             Ok(OutputAckVerdict::Duplicate),
         );
+        // A renderer remount must obtain a fresh subscriber generation;
+        // its old socket/stream alone is not authority for the new renderer.
+        payload.renderer_generation = 8;
+        payload.applied_through = 3;
+        assert_eq!(
+            accept_output_ack(&mut peers, "observer", &new_socket, &payload, 3),
+            Err("invalid_output_ack"),
+        );
+        assert_eq!(peers[0].output_ack.applied_through(), 2);
+        payload.renderer_generation = 7;
         payload.applied_through = 1;
         assert_eq!(
             accept_output_ack(&mut peers, "observer", &new_socket, &payload, 3),
