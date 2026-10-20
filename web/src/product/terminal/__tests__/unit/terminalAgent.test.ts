@@ -207,6 +207,30 @@ describe('createTerminalAgentApi', () => {
       // absence is the only thing that means "append" (#321).
       expect(cb.mock.calls[1]?.[0].bootstrap).toBeUndefined();
     });
+    it('rejects sequenced history even when bootstrap marker is malformed or null (#2067)', () => {
+      const cb = vi.fn();
+      api.onOutput(cb);
+      const send = (extra: Record<string, unknown>) => surface.pushMessage('agent.terminal.output', {
+        session_name: 'work',
+        data: 'YQ==',
+        stream_epoch: 20,
+        stream_seq: 30,
+        ...extra,
+      });
+
+      send({ bootstrap: null });
+      send({ bootstrap: { requested_lines: 'malformed' } });
+      send({ bootstrap: false });
+      send({}); // Only a truly absent history marker can carry a live ordinal.
+
+      expect(cb).toHaveBeenCalledTimes(4);
+      for (const call of cb.mock.calls.slice(0, 3)) {
+        expect(call[0].streamEpoch).toBeUndefined();
+        expect(call[0].streamSeq).toBeUndefined();
+      }
+      expect(cb.mock.calls[3]?.[0]).toMatchObject({ streamEpoch: 20, streamSeq: 30 });
+    });
+
     it('never promotes unsafe, incomplete or bootstrap output positions into a live cursor (#2067)', () => {
       const cb = vi.fn();
       api.onOutput(cb);
