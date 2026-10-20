@@ -1072,3 +1072,324 @@ async fn relay_binds_the_browser_identity_to_the_agent_connection() {
     agent_handle.shutdown().await.ok();
     server_handle.abort();
 }
+
+/// #2060 SC-02 / #2120 SC-02: the **real** Agent admits a parser-applied ACK
+/// only from the exact Relay peer and subscription it minted.
+///
+/// The mock-tunnel test proves the Server forwards the wire; this one runs the
+/// whole chain the product runs — browser → Server relay → real Agent → tmux —
+/// and reads the Agent's own verdict back through the same tunnel.
+///
+/// Every fact is Agent-authored: the ready receipt carries the subscription
+/// generation and stream epoch, the output frame carries the stream position,
+/// and the Agent answers each ACK with `ok` or `output_ack_rejected`. The
+/// negatives are the point of the test: a foreign generation, a foreign epoch,
+/// a second renderer generation after the first pinned it, a regressive
+/// cursor, a cursor past the Agent-issued head, and an unsafe JavaScript
+/// integer must all be refused, so none of them can release issued credit.
+#[tokio::test]
+async fn relay_output_applied_ack_is_admitted_only_for_the_agent_minted_subscription() {
+    const BROWSER_ID: &str = "browser-relay-parser-ack-2060";
+    let session_name = unique_session_name("relay-parser-ack");
+
+    // Pre-clean a tmux session from a previous crashed run.
+    SessionManager::new().kill_session(&session_name).await.ok();
+
+    let (server_addr, server_handle, _db_dir) = start_server("test-token").await.unwrap();
+    let (agent_addr, agent_handle, agent_credentials, agent_mutations) =
+        start_agent("relay-parser-ack-agent").await.unwrap();
+
+    let tmux = SessionManager::new();
+    tmux.create_session(&session_name, 80, 24, "/tmp", &[])
+        .await
+        .expect("create tmux session");
+
+    let client_handle = register_agent(
+        server_addr,
+        "relay-parser-ack-agent",
+        "test-token",
+        agent_addr.port(),
+        Arc::clone(&agent_credentials),
+        Arc::clone(&agent_mutations),
+    )
+    .await
+    .unwrap();
+
+    let heartbeat = HeartbeatLoop::new(client_handle.clone(), SessionManager::new(), 1);
+    let heartbeat_shutdown = heartbeat.shutdown_handle();
+    tokio::spawn(async move {
+        let _ = heartbeat.run().await;
+    });
+
+    let watcher = SessionWatcher::new(client_handle.clone(), SessionManager::new(), 1);
+    let watcher_shutdown = watcher.shutdown_handle();
+    tokio::spawn(async move {
+        let _ = watcher.run().await;
+    });
+
+    let (ws, _) = connect_async(format!("ws://{server_addr}"))
+        .await
+        .expect("client connect");
+    let (mut sink, mut stream) = ws.split();
+
+    // The ready receipt is minted only for a browser that authenticated with
+    // its own stable id (`authenticated_browser_id`); a legacy browser gets no
+    // route proof and must stay on the non-credit lane.
+    let auth_req = msg(
+        "server.auth",
+        "auth-parser-ack",
+        serde_json::json!({ "auth_token": "test-token", "client_id": BROWSER_ID }),
+    );
+    let auth_resp = send_and_recv(&mut sink, &mut stream, &auth_req)
+        .await
+        .unwrap();
+    assert_eq!(
+        auth_resp["payload"]["status"], "success",
+        "auth failed: {auth_resp}"
+    );
+
+    let session_id = format!("relay-parser-ack-agent:{session_name}");
+    wait_for_discovered_session(
+        &mut sink,
+        &mut stream,
+        "relay-parser-ack-agent",
+        &session_id,
+        Duration::from_secs(20),
+        "started (1s session watcher polling)",
+    )
+    .await
+    .expect("target tmux session must be visible in server discovery before relay attach");
+
+    let attach_req = msg(
+        "server.session.attach",
+        "attach-parser-ack",
+        serde_json::json!({ "session_id": session_id, "preferred_mode": "relay" }),
+    );
+    let attach_resp = send_and_recv(&mut sink, &mut stream, &attach_req)
+        .await
+        .unwrap();
+    assert_eq!(
+        attach_resp["payload"]["status"], "success",
+        "attach failed: {attach_resp}"
+    );
+
+    let begin_req = msg(
+        "server.session.relay.begin",
+        "begin-parser-ack",
+        serde_json::json!({ "session_id": session_id }),
+    );
+    sink.send(WsMessage::Text(begin_req.to_string()))
+        .await
+        .expect("send begin");
+
+    // One known Agent output event. Sent immediately after begin for the same
+    // reason as the input-ack test: the Plain PTY attach subprocess fails with
+    // EIO when it idles too long before the first write.
+    let input_msg = msg(
+        "agent.terminal.input",
+        "input-parser-ack",
+        serde_json::json!({
+            "session_name": session_name,
+            "data": base64::engine::general_purpose::STANDARD
+                .encode("echo RELAY_PARSER_ACK_MARKER\n"),
+        }),
+    );
+    sink.send(WsMessage::Text(input_msg.to_string()))
+        .await
+        .expect("send terminal.input");
+
+    // Collect the two Agent-authored facts. Their relative order is not part
+    // of the contract: the attach reply is answered before a stream position
+    // exists, output can arrive while the receipt is still in flight.
+    let mut proof: Option<serde_json::Value> = None;
+    let mut positioned: Option<serde_json::Value> = None;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    while (proof.is_none() || positioned.is_none()) && tokio::time::Instant::now() < deadline {
+        match tokio::time::timeout(Duration::from_millis(500), stream.next()).await {
+            Ok(Some(Ok(WsMessage::Text(text)))) => {
+                let parsed: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
+                match parsed["msg_type"].as_str().unwrap_or("") {
+                    "server.session.relay.ready" => proof = Some(parsed),
+                    "agent.terminal.output" => {
+                        if parsed["payload"]["stream_epoch"].is_u64()
+                            && parsed["payload"]["stream_seq"].is_u64()
+                        {
+                            positioned = Some(parsed);
+                        }
+                    }
+                    "error" => panic!("relay error while waiting for proof/output: {parsed}"),
+                    _ => {}
+                }
+            }
+            Ok(Some(Ok(_))) => continue,
+            Ok(Some(Err(e))) => panic!("WS error: {e}"),
+            Ok(None) => panic!("WS stream closed before proof and output arrived"),
+            Err(_) => continue,
+        }
+    }
+    let proof = proof.expect("the Agent-authored relay ready proof must reach the browser");
+    let positioned = positioned.expect("a positioned Agent output event must reach the browser");
+
+    let generation = proof["payload"]["subscriber_generation"]
+        .as_u64()
+        .expect("ready proof must carry the Agent-minted subscriber generation");
+    let epoch = proof["payload"]["stream_epoch"]
+        .as_u64()
+        .expect("ready proof must carry the Agent stream epoch");
+    assert_eq!(
+        proof["payload"]["browser_client_id"], BROWSER_ID,
+        "the receipt must be scoped to this browser: {proof}"
+    );
+    assert_eq!(proof["payload"]["relay_request_id"], "begin-parser-ack");
+    assert_eq!(proof["payload"]["session_name"], session_name);
+    assert_eq!(
+        positioned["payload"]["stream_epoch"].as_u64(),
+        Some(epoch),
+        "Relay must carry the same Agent stream epoch the proof named: {positioned}"
+    );
+    let applied = positioned["payload"]["stream_seq"]
+        .as_u64()
+        .expect("positioned output must carry a stream seq");
+    assert!(applied > 0, "a positioned output event starts at seq 1");
+
+    let ack = |id: &str, generation: u64, epoch: u64, renderer: u64, through: u64| {
+        msg(
+            "agent.terminal.output.applied",
+            id,
+            serde_json::json!({
+                "session_name": session_name,
+                "subscriber_generation": generation,
+                "stream_epoch": epoch,
+                "renderer_generation": renderer,
+                "applied_through": through,
+            }),
+        )
+    };
+    let rejected = |reply: &serde_json::Value| {
+        reply["msg_type"] == "error" && reply["payload"]["code"] == "output_ack_rejected"
+    };
+
+    // The exact peer, subscription, epoch, renderer and contiguous prefix.
+    let ok = send_and_recv(
+        &mut sink,
+        &mut stream,
+        &ack("ack-valid", generation, epoch, 1, applied),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        ok["msg_type"], "ok",
+        "the real Agent must admit the exact parser-applied prefix: {ok}"
+    );
+
+    // The same position again is idempotent credit, not a second release.
+    let duplicate = send_and_recv(
+        &mut sink,
+        &mut stream,
+        &ack("ack-duplicate", generation, epoch, 1, applied),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        duplicate["msg_type"], "ok",
+        "a duplicate parser position is acknowledged without advancing: {duplicate}"
+    );
+
+    // A generation the Agent did not mint for this peer.
+    let wrong_generation = send_and_recv(
+        &mut sink,
+        &mut stream,
+        &ack("ack-wrong-generation", generation + 1, epoch, 1, applied),
+    )
+    .await
+    .unwrap();
+    assert!(
+        rejected(&wrong_generation),
+        "a foreign subscriber generation must not release credit: {wrong_generation}"
+    );
+
+    // The right subscription, a foreign stream timeline.
+    let wrong_epoch = send_and_recv(
+        &mut sink,
+        &mut stream,
+        &ack("ack-wrong-epoch", generation, epoch + 1, 1, applied),
+    )
+    .await
+    .unwrap();
+    assert!(
+        rejected(&wrong_epoch),
+        "a foreign stream epoch must not release credit: {wrong_epoch}"
+    );
+
+    // The first advancing ACK pinned renderer 1; a remount needs a new
+    // subscription, not a second renderer on this one.
+    let stale_renderer = send_and_recv(
+        &mut sink,
+        &mut stream,
+        &ack("ack-stale-renderer", generation, epoch, 2, applied),
+    )
+    .await
+    .unwrap();
+    assert!(
+        rejected(&stale_renderer),
+        "a new renderer generation cannot advance the pinned subscription: {stale_renderer}"
+    );
+
+    // Past the Agent-issued frontier: no credit exists for bytes it never sent.
+    let beyond_issued = send_and_recv(
+        &mut sink,
+        &mut stream,
+        &ack(
+            "ack-beyond-issued",
+            generation,
+            epoch,
+            1,
+            applied + 1_000_000,
+        ),
+    )
+    .await
+    .unwrap();
+    assert!(
+        rejected(&beyond_issued),
+        "an ACK past the issued head must not release credit: {beyond_issued}"
+    );
+
+    // A cursor that walks backwards cannot re-release a credited prefix.
+    let regressive = send_and_recv(
+        &mut sink,
+        &mut stream,
+        &ack(
+            "ack-regressive",
+            generation,
+            epoch,
+            1,
+            applied.saturating_sub(1),
+        ),
+    )
+    .await
+    .unwrap();
+    assert!(
+        rejected(&regressive),
+        "a regressive parser cursor must not release credit: {regressive}"
+    );
+
+    // JavaScript cannot round-trip this integer, so it is not a position.
+    let unsafe_integer = send_and_recv(
+        &mut sink,
+        &mut stream,
+        &ack("ack-unsafe", generation, epoch, 1, 1_u64 << 53),
+    )
+    .await
+    .unwrap();
+    assert!(
+        rejected(&unsafe_integer),
+        "an unsafe wire integer must not release credit: {unsafe_integer}"
+    );
+
+    heartbeat_shutdown.shutdown().await.ok();
+    watcher_shutdown.shutdown().await.ok();
+    tmux.kill_session(&session_name).await.ok();
+    client_handle.shutdown().await.ok();
+    agent_handle.shutdown().await.ok();
+    server_handle.abort();
+}
