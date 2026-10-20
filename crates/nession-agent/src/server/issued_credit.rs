@@ -120,6 +120,95 @@ impl IssuedByteCredit {
     }
 }
 
+/// Conservative bounded flow-control admission for a single authenticated
+/// subscriber (#2030). Legacy subscribers without a parser-applied ACK remain
+/// on the existing independently bounded outbound/queue policy.
+#[derive(Debug, Clone)]
+pub struct SubscriberIssuedFlow {
+    epoch: Option<u64>,
+    last_issued: Option<u64>,
+    credit: Option<IssuedByteCredit>,
+}
+
+impl SubscriberIssuedFlow {
+    const MAX_UNACKED_EVENTS: usize = 1024;
+    const MAX_UNACKED_BYTES: usize = 2 * 1024 * 1024;
+
+    pub fn new() -> Self {
+        Self { epoch: None, last_issued: None, credit: None }
+    }
+
+    /// Called immediately BEFORE offering an event to the serialized
+    /// outbound writer. Dequeue is *not* the acknowledgement of this event.
+    /// Failed sends revoke this subscriber, never credit undelivered output.
+    pub fn issue(&mut self, epoch: u64, seq: u64, bytes: usize) -> Result<(), IssuedCreditError> {
+        if epoch == 0 || seq == 0 || self.epoch.is_some_and(|old| old != epoch) {
+            return Err(IssuedCreditError::SequenceGap);
+        }
+        if let Some(last) = self.last_issued {
+            if last.checked_add(1) != Some(seq) {
+                return Err(IssuedCreditError::SequenceGap);
+            }
+        }
+        if let Some(ledger) = &mut self.credit {
+            ledger.issue(seq, bytes)?;
+        }
+        self.epoch = Some(epoch);
+        self.last_issued = Some(seq);
+        Ok(())
+    }
+
+    /// Only the already authenticated, renderer-fenced, advancing ACK may
+    /// activate or release credit. The first advancing parser ACK merely
+    /// creates a conservative cut at the *last issued* ordinal: it never
+    /// retroactively credits bytes issued before the opt-in baseline.
+    ///
+    /// It must not be used with an unverified attach cursor or transport
+    /// delivery receipt. Replay outside this live lane does not mint credit.
+    pub fn parser_ack(&mut self, epoch: u64, parsed_through: u64) -> Result<usize, IssuedCreditError> {
+        if self.epoch != Some(epoch) || parsed_through == 0 {
+            return Ok(0);
+        }
+        let Some(last_issued) = self.last_issued else { return Ok(0) };
+        match &mut self.credit {
+            Some(ledger) => {
+                // Old parser callbacks may precede the opt-in cut. They must
+                // not free later bytes or regress the credit cursor.
+                if parsed_through < ledger.credited_through() {
+                    return Ok(0);
+                }
+                ledger.acknowledge(parsed_through)
+            }
+            None => {
+                if parsed_through <= last_issued {
+                    self.credit = Some(IssuedByteCredit::new(
+                        last_issued,
+                        Self::MAX_UNACKED_EVENTS,
+                        Self::MAX_UNACKED_BYTES,
+                    ));
+                }
+                Ok(0)
+            }
+        }
+    }
+
+    pub fn outstanding_bytes(&self) -> usize {
+        self.credit.as_ref().map_or(0, IssuedByteCredit::outstanding_bytes)
+    }
+
+    pub fn last_issued(&self) -> Option<u64> {
+        self.last_issued
+    }
+
+    pub fn credit_enabled(&self) -> bool {
+        self.credit.is_some()
+    }
+}
+
+impl Default for SubscriberIssuedFlow {
+    fn default() -> Self { Self::new() }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -190,6 +279,60 @@ mod tests {
         assert_eq!(healthy.issue(7, 1), Ok(()));
         assert_eq!(healthy.outstanding_bytes(), 1);
         assert_eq!(slow.outstanding_bytes(), 8);
+    }
+
+    #[test]
+    fn live_credit_opt_in_does_not_acknowledge_prebaseline_or_dequeue() {
+        let mut flow = SubscriberIssuedFlow::new();
+        flow.issue(7, 41, 11).unwrap();
+        assert_eq!(flow.outstanding_bytes(), 0);
+        assert!(!flow.credit_enabled());
+        // Simulates a genuine parser ACK, not an outbound queue receipt.
+        assert_eq!(flow.parser_ack(7, 41), Ok(0));
+        assert!(flow.credit_enabled());
+        flow.issue(7, 42, 5).unwrap();
+        flow.issue(7, 43, 0).unwrap();
+        flow.issue(7, 44, 7).unwrap();
+        assert_eq!(flow.outstanding_bytes(), 12);
+        assert_eq!(flow.parser_ack(7, 42), Ok(5));
+        assert_eq!(flow.outstanding_bytes(), 7);
+        assert_eq!(flow.parser_ack(7, 44), Ok(7));
+        assert_eq!(flow.outstanding_bytes(), 0);
+    }
+
+    #[test]
+    fn forged_future_ack_and_epoch_cannot_release_live_credit() {
+        let mut flow = SubscriberIssuedFlow::new();
+        flow.issue(17, 1, 8).unwrap();
+        flow.parser_ack(17, 1).unwrap();
+        flow.issue(17, 2, 6).unwrap();
+        assert_eq!(flow.parser_ack(18, 2), Ok(0));
+        assert_eq!(flow.parser_ack(17, 3), Err(IssuedCreditError::BeyondIssued));
+        assert_eq!(flow.outstanding_bytes(), 6);
+        assert_eq!(flow.parser_ack(17, 2), Ok(6));
+        assert_eq!(flow.issue(18, 3), Err(IssuedCreditError::SequenceGap));
+    }
+
+    #[test]
+    fn legacy_slow_peer_is_independent_and_never_opted_in_by_transport_dequeue() {
+        let mut slow = SubscriberIssuedFlow::new();
+        let mut fast = SubscriberIssuedFlow::new();
+        for peer in [&mut slow, &mut fast] {
+            peer.issue(7, 1, 1).unwrap();
+        }
+        fast.parser_ack(7, 1).unwrap();
+        for seq in 2..=1026 {
+            slow.issue(7, seq, 4096).unwrap();
+            // Legacy policy remains the existing independent bounded queues.
+            if seq <= 1025 {
+                fast.issue(7, seq, 1).unwrap();
+            }
+        }
+        assert!(!slow.credit_enabled());
+        assert_eq!(slow.outstanding_bytes(), 0);
+        assert_eq!(fast.issue(7, 1026, 1), Err(IssuedCreditError::CapacityExceeded));
+        assert_eq!(fast.last_issued(), Some(1025));
+        assert_eq!(fast.outstanding_bytes(), 1024);
     }
 
     #[test]
