@@ -112,6 +112,8 @@ export interface TerminalServerApi {
   endRelay(sessionId: string): void;
   /** Validated current-begin Agent subscription receipt; carries NO ACK capability. */
   onRelaySubscriptionReady(sessionName: string, cb: RelayReadyCallback): () => void;
+  /** Optional for injected older APIs; prevents a live-but-superseded socket handle claiming this singleton. */
+  isBoundTo?(surface: PluginSurface): boolean;
   /**
    * Relay terminal input — base64-wrapped, mirroring the server wire.
    *
@@ -267,6 +269,10 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
         physicalGeneration: connection.physicalGeneration ?? 0,
       });
     }
+  }
+
+  isBoundTo(surface: PluginSurface): boolean {
+    return this.connection === surface;
   }
 
   endRelay(sessionId: string): void {
