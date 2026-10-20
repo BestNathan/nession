@@ -27,11 +27,37 @@ const fixture={
     url:'https://github.com/BestNathan/nession/actions/runs/81'}],pr_references:{status:'available',prs:[{number:1787,url:'https://github.com/BestNathan/nession/pull/1787',relation:'github_cross_reference'}]}}],pulls:[{number:1787,title:'Pages MVP',url:'https://github.com/BestNathan/nession/pull/1787',state:'open',updated_at:'2026-10-14T12:00:00Z',workflow:{head_sha:'a'.repeat(40),ci:{run_id:42,attempt:1,status:'success',url:'https://github.com/BestNathan/nession/actions/runs/42'},e2e:null},review:{status:'available',latest:{review_id:89,commit_sha:'a'.repeat(40),state:'changes_requested',submitted_at:'2026-10-14T12:00:00Z',url:'https://github.com/BestNathan/nession/pull/1787#pullrequestreview-89'}}}]},
  evidence:{stores:[{name:'metrics',purpose:'Repository and Agent telemetry',state:'present',sha:'b'.repeat(40),url:'https://github.com/BestNathan/nession/tree/metrics'},{name:'agent-store',purpose:'Durable Agent checkpoints',state:'missing',sha:null,url:'https://github.com/BestNathan/nession/tree/agent-store'}]}
 };
+// Browser fixture for the independent, source-only workflow definitions UI.
+const topology={
+ schema_version:1,
+ source:{repository:'BestNathan/nession',main_sha:'a'.repeat(40),generated_at:'2026-10-20T12:00:00Z'},
+ groups:[
+  {id:'intake',label:'01 / Intake',detail:'Issue auditing'},
+  {id:'agent',label:'02 / Agent execution',detail:'Trusted reconciliation'},
+  {id:'quality',label:'03 / Quality & E2E',detail:'Independent tests'},
+  {id:'acceptance',label:'04 / Acceptance',detail:'Source verification'},
+  {id:'evidence',label:'05 / Stores & metrics',detail:'Custody and telemetry'},
+  {id:'delivery',label:'06 / Delivery',detail:'Publication'},
+ ],
+ nodes:[
+  {id:'ci-quality',name:'CI / Quality Gate',group:'quality',description:'Revision gates',
+   triggers:['pull_request','push'],
+   url:'https://github.com/BestNathan/nession/blob/'+'a'.repeat(40)+'/.github/workflows/ci-quality.yml'},
+  {id:'acceptance-orchestrator',name:'Acceptance / Orchestrator',group:'acceptance',
+   description:'Evidence-backed acceptance',triggers:['pull_request_target','workflow_run'],
+   url:'https://github.com/BestNathan/nession/blob/'+'a'.repeat(40)+'/.github/workflows/acceptance-orchestrator.yml'},
+  {id:'agent-issue-audit',name:'Agent / Issue Audit',group:'intake',
+   description:'Issue audit only, not direct Developer dispatch',triggers:['issues','workflow_dispatch'],
+   url:'https://github.com/BestNathan/nession/blob/'+'a'.repeat(40)+'/.github/workflows/agent-issue-audit.yml'},
+ ],
+ edges:[{from:'ci-quality',to:'acceptance-orchestrator',kind:'workflow_run'}],
+};
 export async function startPagesFixture(){
- const allowed={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/styles.css':'styles.css','/favicon.svg':'favicon.svg'} as Record<string,string>;
+ const allowed={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/styles.css':'styles.css','/favicon.svg':'favicon.svg','/workflows.html':'workflows.html','/workflows.js':'workflows.js','/workflows.css':'workflows.css'} as Record<string,string>;
  const server=createServer(async(req,res)=>{
   const path=(req.url||'/').split('?')[0];
   if(path==='/data/site.json'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(fixture));return;}
+  if(path==='/data/workflows.json'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(topology));return;}
   if(!Object.hasOwn(allowed,path)){res.writeHead(404);res.end();return;}
   try {const name=allowed[path],content=await readFile(join(root,name));
    res.writeHead(200,{'content-type':name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':name.endsWith('.svg')?'image/svg+xml':'text/html'});
