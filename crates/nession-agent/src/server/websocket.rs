@@ -338,7 +338,10 @@ fn accept_output_ack(
     );
     match verdict {
         OutputAckVerdict::Advanced { .. } => {
-            let mut issued = peer.issued_flow.lock().map_err(|_| "credit_state_unavailable")?;
+            let mut issued = peer
+                .issued_flow
+                .lock()
+                .map_err(|_| "credit_state_unavailable")?;
             issued
                 .parser_ack(payload.stream_epoch, payload.applied_through)
                 .map_err(|_| "invalid_issued_credit_ack")?;
@@ -482,7 +485,11 @@ fn spawn_output_forwarder(
             release_subscriber_bytes(&queued_bytes, event.queued_bytes());
             let (epoch, seq) = match &event {
                 SubscriberEvent::Output((_, epoch, seq)) => (*epoch, *seq),
-                SubscriberEvent::Resize { stream_epoch, stream_seq, .. } => (*stream_epoch, *stream_seq),
+                SubscriberEvent::Resize {
+                    stream_epoch,
+                    stream_seq,
+                    ..
+                } => (*stream_epoch, *stream_seq),
             };
             // Issue before offering to the writer; dequeue is not xterm parse.
             let issued = issued_flow
@@ -3811,7 +3818,10 @@ mod tests {
         payload.applied_through = 3;
         assert_eq!(
             accept_output_ack(&mut peers, "observer", &new_socket, &payload, 5),
-            Ok(OutputAckVerdict::Advanced { previous: 2, applied_through: 3 })
+            Ok(OutputAckVerdict::Advanced {
+                previous: 2,
+                applied_through: 3
+            })
         );
         {
             let mut issued = peers[0].issued_flow.lock().unwrap();
@@ -3830,7 +3840,10 @@ mod tests {
         payload.applied_through = 4;
         assert_eq!(
             accept_output_ack(&mut peers, "observer", &new_socket, &payload, 5),
-            Ok(OutputAckVerdict::Advanced { previous: 3, applied_through: 4 })
+            Ok(OutputAckVerdict::Advanced {
+                previous: 3,
+                applied_through: 4
+            })
         );
         assert_eq!(peers[0].issued_flow.lock().unwrap().outstanding_bytes(), 0);
     }
