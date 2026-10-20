@@ -5,6 +5,8 @@ import { pathToFileURL } from 'node:url';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { buildGitPlan } from './issue-e2e-plan.mjs';
 import { parsePreMergeIssueNumbers } from './requirement-acceptance.mjs';
 
@@ -78,6 +80,48 @@ function selfTest() {
     ['docs/notes.md','crates/nession-agent/src/lib.rs'],
   ]) assert.equal(pathsCannotAffectE2E(paths), false,
     'a runtime or unrecognized input must never suppress full E2E');
+  // Real temporary Git history proves the exact-head diff gate (including a
+  // renamed runtime file), not just the pure path allowlist.
+  const tmp = fs.mkdtempSync(join(tmpdir(), 'nession-issue-e2e-impact-'));
+  try {
+    const git = (...args) => execFileSync('git', args,
+      { cwd:tmp, encoding:'utf8', stdio:['ignore','pipe','ignore'] }).trim();
+    git('init','-q');
+    git('config','user.name','CI Fixture');
+    git('config','user.email','ci@example.invalid');
+    fs.writeFileSync(join(tmp,'README.md'), '# Fixture\\n');
+    git('add','.');
+    git('commit','-qm','baseline');
+    const base = git('rev-parse','HEAD');
+    fs.mkdirSync(join(tmp,'.github','workflows'), { recursive:true });
+    fs.writeFileSync(join(tmp,'.github','workflows','agent-controller-dispatch.yml'),
+      'name: metadata-only fixture\\n');
+    git('add','.');
+    git('commit','-qm','metadata only');
+    const metadataHead = git('rev-parse','HEAD');
+    const withShas = (headSha, baseSha = base) => ({
+      ...event, pull_request:{ ...event.pull_request,
+        base:{sha:baseSha}, head:{ ...event.pull_request.head,sha:headSha } },
+    });
+    assert.equal(prepare(withShas(metadataHead),[],tmp).mode,'not-required');
+    assert.equal(prepare(withShas(metadataHead),[],tmp).reason,'verified-metadata-only-diff');
+    assert.equal(prepare(withShas(base),[],tmp).mode,'full',
+      'checking out a different HEAD must not mark tests unnecessary');
+    fs.mkdirSync(join(tmp,'web','src'),{recursive:true});
+    fs.writeFileSync(join(tmp,'web','src','App.tsx'),'export default null;\\n');
+    git('add','.');
+    git('commit','-qm','runtime changed');
+    const runtimeHead = git('rev-parse','HEAD');
+    assert.equal(prepare(withShas(runtimeHead),[],tmp).mode,'full');
+    fs.mkdirSync(join(tmp,'docs'),{recursive:true});
+    git('mv','web/src/App.tsx','docs/App.md');
+    git('commit','-qm','runtime file moved into docs');
+    const renamedHead = git('rev-parse','HEAD');
+    assert.equal(prepare(withShas(renamedHead,runtimeHead),[],tmp).mode,'full',
+      'runtime-to-docs rename must not be mistaken for docs-only');
+  } finally {
+    fs.rmSync(tmp,{recursive:true,force:true});
+  }
   assert.throws(()=>prepare({...event,pull_request:{...event.pull_request,head:{sha:'x'}}},[],'.'),/identity/);
   assert.throws(()=>prepare(event,[{number:999,body:'',state:'open'}],'.'),/unrelated/);
   assert.equal(prepare(event,[{number:1702,body:'old issue',state:'open'}],'.').mode,'full');
