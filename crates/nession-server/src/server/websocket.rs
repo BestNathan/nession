@@ -1869,7 +1869,10 @@ mod tests {
             "msg_type": "ok",
             "payload": {"status": "success", "message": "ok", "client_id": "browser-a"}
         });
-        assert_eq!(validate_relay_client_auth_reply(&valid, "browser-a"), Ok(()));
+        assert_eq!(
+            validate_relay_client_auth_reply(&valid, "browser-a"),
+            Ok(())
+        );
         assert_eq!(
             validate_relay_client_auth_reply(&valid, "browser-b"),
             Err("agent_auth_wrong_client")
