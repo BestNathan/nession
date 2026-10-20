@@ -14,6 +14,8 @@ import {nativeResumeSuccessorId} from './outbox.mjs';
 
 export const CONTROLLED_CONTINUATION='3f4abb86785d41dbb771edbab1c400841d3d0e60335358332307b75e1d36c1c8';
 export const CONTROLLED_CONTINUATION_COMMENT='/nession resume issue=1997 checkpoint=1';
+export const CONTROLLED_V2_CONTINUATION='dac10d570c30557fe629b8605ecb44d33335eb967e24a52931467ac7b93b5e31';
+export const CONTROLLED_V2_CONTINUATION_COMMENT='/nession resume issue=1997 checkpoint=2';
 const SOURCE='220266b9233ec97b1beacbc54e5cc7f82d3cece2';
 const COMMIT='d812e3655c0ad6337b1003aa0c1794c12335adb0';
 const CIPHERTEXT='a42220e24ed5ff587ed6173b662a75856f62e5a16561274cb616325b150f4107';
@@ -26,18 +28,44 @@ export function developmentHarnessDigest(source,sdkVersion,model){
     sdk_version:sdkVersion,model,tools:['read','grep','edit'],settingSources:[],
     checkpoint_format:'jsonl-v1'}));
 }
+// Pin this disposable fixture to previously authenticated immutable Store
+// commitments. Do not accept model-selected revisions or a bare ordinal.
+const KNOWN_CONTINUATIONS=[
+  {action_id:CONTROLLED_CONTINUATION,ordinal:1,parent_action_id:PARENT,
+    checkpoint_version:1,checkpoint_commit_sha:COMMIT,ciphertext_sha256:CIPHERTEXT},
+  {action_id:nativeResumeSuccessorId(1997,CONTROLLED_CONTINUATION,39376331942),
+    ordinal:1,parent_action_id:PARENT,checkpoint_version:1,
+    checkpoint_commit_sha:COMMIT,ciphertext_sha256:CIPHERTEXT},
+  {action_id:CONTROLLED_V2_CONTINUATION,ordinal:2,
+    parent_action_id:'6a84244ca028a93f8c057ab23852bb21c3906d485e4c16ccab661104c31d750e',
+    checkpoint_version:2,
+    checkpoint_commit_sha:'f9abdeca3cc26780fb0a7b2ed7000d2dd28cf142',
+    ciphertext_sha256:'ae089e6b7b1743a9afdb78814ba716be024ccde9da0a1ddfbc965601f2691f1e'},
+];
 export function assertControlledContinuation(a) {
   const c=a?.resume_from;
+  const known=KNOWN_CONTINUATIONS.find(x=>x.action_id===a?.action_id);
   if(a?.authorized!==true||a.issue!==1997||a.role!=='developer'||
     a.agent_id!=='dev-cursor-01'||a.task!=='implement'||a.provider!=='cursor'||
-    ![CONTROLLED_CONTINUATION,nativeResumeSuccessorId(1997,CONTROLLED_CONTINUATION,39376331942)]
-      .includes(a.action_id)||a.input_sha!==SOURCE||
-    !c||Object.keys(c).sort().join(',')!==
+    a.input_sha!==SOURCE||!known||!c||
+    Object.keys(c).sort().join(',')!==
       'checkpoint_commit_sha,checkpoint_version,ciphertext_sha256,ordinal,parent_action_id'||
-    c.ordinal!==1||c.parent_action_id!==PARENT||c.checkpoint_version!==1||
-    c.checkpoint_commit_sha!==COMMIT||c.ciphertext_sha256!==CIPHERTEXT)
+    ['ordinal','parent_action_id','checkpoint_version','checkpoint_commit_sha','ciphertext_sha256']
+      .some(k=>c[k]!==known[k]))
     fail('only the committed controlled #1997 continuation is enabled');
   return c;
+}
+// These Run IDs were independently authenticated by trusted Ingest before
+// their ciphertext was committed. The restore Job still checks the exact
+// Store commit/head and ciphertext, native ID and current Harness.
+export function controlledCheckpointSourceRun(c) {
+  if(c?.checkpoint_version===1&&c.checkpoint_commit_sha===COMMIT&&
+     c.ciphertext_sha256===CIPHERTEXT)return 39288961865;
+  if(c?.checkpoint_version===2&&
+     c.checkpoint_commit_sha==='f9abdeca3cc26780fb0a7b2ed7000d2dd28cf142'&&
+     c.ciphertext_sha256==='ae089e6b7b1743a9afdb78814ba716be024ccde9da0a1ddfbc965601f2691f1e')
+    return 39396836009;
+  fail('unknown committed native checkpoint origin');
 }
 export function assertCurrentDevelopmentCapabilities(a,registry){
   const identity=resolveIdentity(registry,a.agent_id,a.task,a.environment);
@@ -103,9 +131,9 @@ async function prepare(admissionFile,out){
       expected:{provider:'cursor',source_sha:SOURCE,harness_digest:digest},
       commitment:{commit_sha:c.checkpoint_commit_sha,version:c.checkpoint_version,ciphertext_sha256:c.ciphertext_sha256}});
     native=restored.native_bytes;
-    // Controlled v1 source is the separately verified immutable Worker Run.
+    // Restore from the independently attested immutable Worker Run for the exact checkpoint.
     const meta={agent_id:'agent-7d5b4a61-1476-4ce7-a38a-82907aa3b1a6',
-      source_sha:SOURCE,harness_digest:digest,run_id:39288961865,attempt:1,sdk_version:version};
+      source_sha:SOURCE,harness_digest:digest,run_id:controlledCheckpointSourceRun(c),attempt:1,sdk_version:version};
     const dir=path.join(root,'native');
     writeNativeBundle(native,dir);
     const privateKey=createPrivateKey(Buffer.from(process.env.CURSOR_RESUME_PRIVATE_KEY_B64||'','base64').toString('utf8'));
@@ -134,7 +162,7 @@ function open(admissionFile,input,destination){
     proof.action_id!==a.action_id||JSON.stringify(proof.continuation)!==JSON.stringify(c)||
     proof.metadata?.sdk_version!==version||proof.metadata.harness_digest!==digest||
     proof.metadata.agent_id!=='agent-7d5b4a61-1476-4ce7-a38a-82907aa3b1a6'||
-    proof.metadata.run_id!==39288961865||proof.metadata.attempt!==1||
+    proof.metadata.run_id!==controlledCheckpointSourceRun(c)||proof.metadata.attempt!==1||
     proof.metadata.source_sha!==SOURCE||proof.ciphertext_sha256!==sealed.ciphertext_sha256)
     fail('native transfer source/recipient/Harness mismatch');
   openCursorNativeStore({record:sealed,expected:proof.metadata,
