@@ -12,6 +12,9 @@ on:
   pull_request:
     branches: [staging, main]
 
+# Staging branch protection requires both rust-check and web-check on all PRs.
+# Never add top-level pull_request.paths here: omitted required contexts can
+# remain Pending. Each job explicitly reports Not Applicable for unrelated diffs.
 # One gate run per PR. Superseded runs are useless, so cancel them.
 concurrency:
   group: quality-${{ github.event.pull_request.number }}
