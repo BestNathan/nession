@@ -23,6 +23,14 @@ export interface HandshakeSurface {
 export interface PluginSurface {
   readonly connectionState: ConnectionState;
   send(type: string, payload: Record<string, unknown>): void;
+  /**
+   * Return the actual transmitted envelope id for one-way correlated
+   * notifications. Optional for older plugin surfaces: without this identity,
+   * a consumer MUST NOT accept a Relay subscriber proof (#2102).
+   */
+  sendWithId?(type: string, payload: Record<string, unknown>): string;
+  /** Identity of the current physical socket, renewed on reconnect. */
+  readonly physicalGeneration?: number;
   subscribe(
     type: string,
     handler: (payload: unknown, raw: SocketMessage) => void,
