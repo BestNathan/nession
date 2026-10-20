@@ -35,11 +35,14 @@ for (const mode of ['Relay', 'P2P'] as const) {
     await waitForInteractiveShell(page);
 
     // The echoed command line spells `HV-/` but no `HV-<digits>`, so every
-    // numeric match below comes from the stream output itself.
-    await submitTerminalCommand(page, `seq 1 ${COUNT} | sed 's/^/HV-/' ; echo HV-DONE`);
+    // numeric match below comes from the stream output itself. Waiting for the
+    // LAST line — not a `echo DONE` marker, whose text is echoed at the prompt
+    // the moment the command is submitted — is what makes the buffer read a
+    // complete prefix rather than a mid-stream sample.
+    await submitTerminalCommand(page, `seq 1 ${COUNT} | sed 's/^/HV-/'`);
 
     await expect(async () => {
-      expect(await readTerminalBuffer(page)).toContain('HV-DONE');
+      expect(await readTerminalBuffer(page)).toContain(`HV-${COUNT}`);
     }).toPass({ timeout: 120_000 });
 
     const text = await readTerminalBuffer(page);
