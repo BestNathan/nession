@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
-import {validateDevelopmentState} from './lib/agent/orchestration/outbox.mjs';
+import {validateDevelopmentState,nativeResumeSuccessorId} from './lib/agent/orchestration/outbox.mjs';
 import {issueStatePath} from './lib/agent/orchestration/state-store.mjs';
 import {checkpointPath,checkpointPrefix} from './lib/agent/store/checkpoint.mjs';
 
@@ -14,6 +14,10 @@ const INGEST='.github/workflows/store-agent-development-ingest.yml';
 const WORKER='.github/workflows/agent-develop.yml';
 const STEP='Verify native ciphertext and publish committed Checkpoint and Yield';
 const positive=n=>Number.isSafeInteger(n)&&n>0;
+const NATIVE_OLD='3f4abb86785d41dbb771edbab1c400841d3d0e60335358332307b75e1d36c1c8';
+const NATIVE_V2=nativeResumeSuccessorId(1997,NATIVE_OLD,39376331942);
+const NATIVE_ID='agent-7d5b4a61-1476-4ce7-a38a-82907aa3b1a6';
+const NATIVE_PARENT='85b69a9de06b02eb78f8a3a15d14b58a43ffc83ee6b1f5db11b9b541cfec9656';
 const hash=b=>createHash('sha256').update(b).digest('hex');
 function fail(s){throw Error('Developer Acceptance readback: '+s);}
 function requireIt(ok,s){if(!ok)fail(s);}
@@ -134,7 +138,7 @@ export function attestDevelopmentStore(r,{head,state,runRecord,checkpoint,checkp
     'unbound pending/intent/dispatch/yield history');
   const children=s.outbox.filter(a=>a.task.continuation?.parent_action_id===r.action_id);
   requireIt(children.length===1,'missing/ambiguous committed continuation');
-  return {state_version:s.version,dispatch_history:{
+  return {state_version:s.version,native_resume_verified:verifyNativeV2Lineage(r,s),dispatch_history:{
       action_id:r.action_id,source_sha:r.source_sha,
       pending_version:pending.version,dispatching_version:prepared.version,
       dispatched_version:dispatched.version,yielded_version:s.version,
@@ -143,6 +147,37 @@ export function attestDevelopmentStore(r,{head,state,runRecord,checkpoint,checkp
       states_and_source_bindings_verified:true},recorded_continuation_status:children[0].status,
     continuation_action_id:children[0].id};
 }
+// A native v2 proof is stronger than an ordinary successful Ingest:
+// match the exact failed historical continuation, the independently signed
+// recovery successor, identical native Agent, authenticated v1 parent, and
+// committed Yield. Neither an Issue comment nor a model result can mint it.
+export function verifyNativeV2Lineage(r,state){
+  if(r?.checkpoint_version!==2)return false;
+  validateDevelopmentState(state);
+  const action=state.outbox.find(x=>x.id===NATIVE_V2);
+  const failed=state.outbox.find(x=>x.id===NATIVE_OLD);
+  const parent=state.outbox.find(x=>x.id===NATIVE_PARENT);
+  const c=action?.task.continuation;
+  requireIt(r.action_id===NATIVE_V2 && r.run_id===39396836009 && r.attempt===1 &&
+    r.worker_sha==='2f75869833fb43ec54e88b560226f8913a6beac3' &&
+    r.session_id===NATIVE_ID && r.source_sha==='220266b9233ec97b1beacbc54e5cc7f82d3cece2' &&
+    action?.status==='yielded' && action.receipt?.source_run_id===r.run_id &&
+    action.receipt?.checkpoint_version===2 &&
+    action.receipt?.checkpoint_commit_sha===r.checkpoint_commit_sha &&
+    action.receipt?.ciphertext_sha256===r.ciphertext_sha256 &&
+    c?.parent_action_id===NATIVE_PARENT && c.ordinal===1 && c.checkpoint_version===1 &&
+    c.checkpoint_commit_sha==='d812e3655c0ad6337b1003aa0c1794c12335adb0' &&
+    c.ciphertext_sha256==='a42220e24ed5ff587ed6173b662a75856f62e5a16561274cb616325b150f4107' &&
+    parent?.status==='yielded' && parent.receipt?.checkpoint_version===1 &&
+    parent.receipt?.checkpoint_commit_sha===c.checkpoint_commit_sha &&
+    parent.receipt?.ciphertext_sha256===c.ciphertext_sha256 &&
+    failed?.status==='failed' && failed.receipt?.source_run_id===39376331942 &&
+    failed.receipt?.failure_code==='native_cursor_agent_not_found_before_send' &&
+    JSON.stringify(failed.task)===JSON.stringify(action.task),
+    'native Session v2 is not the verified one-time same-Agent recovery lineage');
+  return true;
+}
+
 // Dispatch success and model success are separate facts. The historical
 // original Worker failed before model work; never promote that to model proof.
 export function attestOriginalDispatchHistory(history,sourceSha,oldRun,actionId){
@@ -168,6 +203,26 @@ export function attestOriginalDispatchHistory(history,sourceSha,oldRun,actionId)
     worker_conclusion:oldRun.conclusion,source_sha:sourceSha,
     dispatch_verified:true,model_success_verified:false};
 }
+// Bounded reusable receipt readback for the original #2010 contract and
+// dependent native recovery requirements. Unrelated Issues cannot opt in via
+// comments, prompt text, or a forged target ref.
+export function nativeReadbackEligible(issue,stage){
+  return (Number(issue)===2010&&['staging','post-merge'].includes(stage))||
+    ([2038,2041,2045].includes(Number(issue))&&stage==='post-merge');
+}
+export function nativeReadbackAncestryReady(workspace,targetSha,sources,run=execFileSync){
+  requireIt(SHA.test(targetSha??'')&&Array.isArray(sources)&&sources.length===3&&
+    sources.every(x=>SHA.test(x??'')),'invalid native readback SHA input');
+  for(const sha of sources){
+    try{run('git',['-C',workspace,'merge-base','--is-ancestor',sha,targetSha],
+      {stdio:'pipe',timeout:10000});}
+    catch(e){
+      if(e?.status===1)return false; // exact negative ancestry, not a proof
+      fail('source ancestry check unavailable');
+    }
+  }
+  return true;
+}
 // Only the existing controlled initial #1997 fixture is supported. Extending
 // proofs to another action/provider requires its independently tested contract.
 // A changed proof owner is NOT a collector failure and NOT a reusable execution.
@@ -184,8 +239,7 @@ export function readbackSourceUnchanged(workspace,from,to,paths,run=execFileSync
 }
 
 export async function collectDevelopmentReadback({repo,issue,stage,targetSha,workspace,get,readLog}) {
-  if(repo!==REPO||Number(issue)!==2010||
-    !['staging','post-merge'].includes(stage))return [];
+  if(repo!==REPO||!nativeReadbackEligible(issue,stage))return [];
   requireIt(SHA.test(targetSha??''),'invalid target');
   const runs=await get('/repos/'+repo+'/actions/workflows/store-agent-development-ingest.yml/runs?status=success&per_page=10');
   requireIt(Array.isArray(runs.workflow_runs)&&runs.workflow_runs.length<=10,'unbounded discovery');
@@ -204,9 +258,8 @@ export async function collectDevelopmentReadback({repo,issue,stage,targetSha,wor
     // An ancestor SHA alone is insufficient when proof-owning code changed.
     // Reusing earlier native execution is valid only with identical Worker,
     // adapter, native transport and current admission code at this target.
-    for(const sha of [r.worker_sha,r.source_sha,r.ingester_sha]) {
-      execFileSync('git',['-C',workspace,'merge-base','--is-ancestor',sha,targetSha],{stdio:'pipe',timeout:10000});
-    }
+    if(!nativeReadbackAncestryReady(workspace,targetSha,
+      [r.worker_sha,r.source_sha,r.ingester_sha]))continue;
     const owners=['.github/workflows/agent-develop.yml',
       'scripts/lib/agent/orchestration/development-worker.mjs',
       'scripts/lib/agent/orchestration/worker-preflight.mjs',
@@ -277,7 +330,7 @@ export async function collectDevelopmentReadback({repo,issue,stage,targetSha,wor
         real_native_read_edit_verified_by_trusted_ingest:true,
         scope:'bounded disposable Developer file edit; not PR publication or full Review/repair'},
       native_execution_owners_unchanged:true,source_ancestry_verified:true,
-      store_reachable_verified:true,native_resume_verified:false,
+      store_reachable_verified:true,native_resume_verified:store.native_resume_verified,
       pr_publication_verified:false,full_review_repair_cycle_verified:false,
       provider_metric_comparability_verified:false,
       establishes_sc_verdict:false}];
