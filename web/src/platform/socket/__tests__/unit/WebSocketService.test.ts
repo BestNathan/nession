@@ -125,6 +125,21 @@ describe('WebSocketService', () => {
     expect(service.connectionState).toBe('connected');
   });
 
+  it('sendWithId exposes the exact transmitted envelope id but not a failed send (#2102)', async () => {
+    const service = new WebSocketService('ws://server/ws');
+    expect(() => service.sendWithId('agent.ping', {})).toThrow('WebSocket not connected');
+    const connected = service.connect();
+    const socket = MockWebSocket.instances[0];
+    socket.open();
+    await connected;
+    const id = service.sendWithId('agent.ping', { challenge: 42 });
+    const sent = frameAt(socket, 0);
+    expect(id).toBe(sent.id);
+    expect(sent.payload).toEqual({ challenge: 42 });
+    service.dispose();
+    expect(() => service.sendWithId('agent.ping', {})).toThrow('WebSocketService disposed');
+  });
+
   it('queues requests behind the readiness gate but allows send() once the socket is OPEN', async () => {
     const gate = controlledHandshake();
     const service = new WebSocketService('ws://server/ws', [], {
