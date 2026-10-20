@@ -1,4 +1,5 @@
 import { decodeBase64Bytes, encodeBase64 } from './base64';
+import { readAgentStreamPosition } from './streamPosition';
 import {
   readAttachControlFields,
   readControlAcquireReply,
@@ -512,11 +513,15 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
         };
         const data = p.data as string | undefined;
         if (data) {
+          // A capture (even with a malformed marker) is not a numbered live
+          // event. P2P and Relay must apply the identical Agent pair proof.
+          const position = Object.prototype.hasOwnProperty.call(p, 'bootstrap')
+            ? undefined
+            : readAgentStreamPosition(p);
           cb({
             data: decodeBase64Bytes(data),
-            streamEpoch:
-              typeof p.stream_epoch === 'number' ? p.stream_epoch : undefined,
-            streamSeq: typeof p.stream_seq === 'number' ? p.stream_seq : undefined,
+            streamEpoch: position?.streamEpoch,
+            streamSeq: position?.streamSeq,
             // Presence is the fact; the contents are the qualification. A
             // snapshot the agent had to cut short is not a history the
             // consumer may replace its buffer with, and collapsing this to a
@@ -550,10 +555,9 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
         // carried only one would be a position nothing can be placed at — so
         // it is read as the level it still is rather than half-applied as an
         // event (#1303).
-        const epoch = p.stream_epoch;
-        const seq = p.stream_seq;
-        if (typeof epoch === 'number' && typeof seq === 'number') {
-          cb({ cols: p.cols, rows: p.rows, streamEpoch: epoch, streamSeq: seq });
+        const position = readAgentStreamPosition(p);
+        if (position) {
+          cb({ cols: p.cols, rows: p.rows, ...position });
           return;
         }
         cb({ cols: p.cols, rows: p.rows });
