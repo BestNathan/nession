@@ -16,6 +16,17 @@ concurrency:
 
 jobs:
   ingest-scenario:
+    # A completed cancellation/skip can still upload partial artifacts, but
+    # it cannot satisfy sourceIdentity (success/failure only). Do not mint
+    # an App writer token or report an ingester failure for ineligible events.
+    # Retain same-repository PR, push and workflow_dispatch observations.
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.event.workflow_run.status == 'completed' &&
+      (github.event.workflow_run.conclusion == 'success' ||
+       github.event.workflow_run.conclusion == 'failure') &&
+      github.event.workflow_run.repository.full_name == github.repository &&
+      github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
