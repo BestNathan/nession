@@ -57,6 +57,59 @@ async fn session_create_survives_an_intervening_agent_message() {
     assert_eq!(reply["payload"]["session_id"], json!("a1:regression-743"));
 }
 
+/// The agent can report its new tmux pane while the create request is still
+/// waiting for its command response. The eventual success ACK must not erase
+/// the authoritative foreground command and turn the UI back to "unknown".
+#[tokio::test]
+async fn session_create_success_preserves_agent_report_that_arrived_first() {
+    use crate::registry::session::{SessionInfo, SessionStatus};
+    let mut h = handler_with_online_agent().await;
+    let registry = Arc::clone(&h.session_registry);
+    let (sender, mut rx) = WsMessageSender::new();
+    let generation = h.command_broker.new_connection_generation();
+    h.command_broker.claim_agent("a1", generation, sender).await;
+
+    let broker = Arc::clone(&h.command_broker);
+    let create = h.handle_message(proto_msg(
+        "server.session.create",
+        json!({ "agent_id": "a1", "name": "fast-reported" }),
+    ));
+    let report_then_ack = async move {
+        let wire = rx.recv().await.expect("Agent received create request");
+        let request: serde_json::Value =
+            serde_json::from_str(wire.message.to_text().unwrap()).unwrap();
+        let request_id = request["payload"]["request_id"].as_str().unwrap();
+
+        let now = chrono::Utc::now();
+        registry
+            .update_session(SessionInfo {
+                session_id: "a1:fast-reported".to_string(),
+                agent_id: "a1".to_string(),
+                session_name: "fast-reported".to_string(),
+                status: SessionStatus::Active,
+                window_count: 1,
+                attached_clients: 0,
+                foreground_command: Some("bash".to_string()),
+                working_dir: Some("/srv".to_string()),
+                created_at: now,
+                last_activity: now,
+            })
+            .await;
+        broker
+            .resolve_command("a1", request_id, json!({ "success": true }))
+            .await;
+    };
+    let (action, ()) = tokio::join!(create, report_then_ack);
+    let response = parse_reply(action.unwrap());
+    assert_eq!(response["payload"]["success"], true);
+    assert_eq!(response["payload"]["session_id"], "a1:fast-reported");
+
+    let persisted = h.session_registry.get("a1:fast-reported").await.unwrap();
+    assert_eq!(persisted.foreground_command.as_deref(), Some("bash"));
+    assert_eq!(persisted.working_dir.as_deref(), Some("/srv"));
+    assert_eq!(persisted.status, SessionStatus::Active);
+}
+
 #[tokio::test]
 async fn session_create_missing_fields() {
     let mut h = test_handler("").await;

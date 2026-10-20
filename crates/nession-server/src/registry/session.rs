@@ -109,6 +109,43 @@ impl SessionRegistry {
         }
     }
 
+    /// Register only the create-time placeholder, without overwriting an
+    /// authoritative Agent report that may have raced ahead of the command
+    /// acknowledgement (#2021). The presence check and insert MUST share
+    /// one write lock: `get()` followed by `update_session()` would recreate
+    /// the same read/insert race.
+    ///
+    /// Return false when the row already exists; creation still succeeded,
+    /// and the caller may broadcast the existing authoritative row.
+    pub async fn insert_session_if_absent(&self, session: SessionInfo) -> bool {
+        let inserted = {
+            let mut sessions = self.sessions.write().await;
+            match sessions.entry(session.session_id.clone()) {
+                std::collections::hash_map::Entry::Vacant(v) => {
+                    v.insert(session.clone());
+                    true
+                }
+                std::collections::hash_map::Entry::Occupied(_) => false,
+            }
+        };
+        if inserted {
+            // The DB is the recovery cache, never the serving authority.
+            // Like update_session, do not hold a map write lock during I/O.
+            if let Err(e) = self
+                .db
+                .insert_session(&session, status_str(&session.status))
+                .await
+            {
+                tracing::error!(
+                    "Failed to persist new session {}: {:#}",
+                    session.session_id,
+                    e
+                );
+            }
+        }
+        inserted
+    }
+
     pub async fn get(&self, session_id: &str) -> Option<SessionInfo> {
         let sessions = self.sessions.read().await;
         sessions.get(session_id).cloned()
@@ -246,6 +283,65 @@ mod tests {
             created_at: Utc::now(),
             last_activity: Utc::now(),
         }
+    }
+
+    /// The Agent's report can race the command's success reply. The reply
+    /// must not write an older synthetic `None` command over an actual pane
+    /// status, working directory or authoritative lifecycle fields (#2021).
+    #[tokio::test]
+    async fn create_placeholder_after_agent_report_preserves_authoritative_session() {
+        let reg = new_registry().await;
+        let mut report = make_session("a1", "race");
+        report.foreground_command = Some("bash".to_owned());
+        report.working_dir = Some("/srv/project".to_owned());
+        report.status = SessionStatus::Active;
+        report.attached_clients = 2;
+        report.window_count = 3;
+        reg.update_session(report.clone()).await;
+
+        let mut stale_placeholder = make_session("a1", "race");
+        stale_placeholder.status = SessionStatus::Detached;
+        assert!(
+            !reg.insert_session_if_absent(stale_placeholder).await,
+            "create success can never replace an earlier Agent report"
+        );
+        let current = reg.get("a1:race").await.unwrap();
+        assert_eq!(current.foreground_command.as_deref(), Some("bash"));
+        assert_eq!(current.working_dir.as_deref(), Some("/srv/project"));
+        assert_eq!(current.status, SessionStatus::Active);
+        assert_eq!(current.attached_clients, 2);
+        assert_eq!(current.window_count, 3);
+        assert_eq!(current.created_at, report.created_at);
+        assert_eq!(current.last_activity, report.last_activity);
+    }
+
+    /// The reverse ordering still shows the session immediately. The later
+    /// Agent report replaces the placeholder as the new actual authority.
+    #[tokio::test]
+    async fn create_placeholder_before_agent_report_remains_visible_and_updates() {
+        let reg = new_registry().await;
+        let placeholder = make_session("a1", "race");
+        assert!(reg.insert_session_if_absent(placeholder.clone()).await);
+        assert!(
+            !reg.insert_session_if_absent(placeholder).await,
+            "duplicate create reply cannot replace an existing row"
+        );
+        assert_eq!(reg.list().await.len(), 1);
+        assert!(reg
+            .get("a1:race")
+            .await
+            .unwrap()
+            .foreground_command
+            .is_none());
+
+        let mut report = make_session("a1", "race");
+        report.foreground_command = Some("bash".to_owned());
+        report.status = SessionStatus::Active;
+        reg.update_session(report).await;
+        let actual = reg.get("a1:race").await.unwrap();
+        assert_eq!(actual.foreground_command.as_deref(), Some("bash"));
+        assert_eq!(actual.status, SessionStatus::Active);
+        assert_eq!(reg.list().await.len(), 1);
     }
 
     /// Sorted session IDs — `list()` iterates a HashMap, so order is arbitrary.
