@@ -25,3 +25,5 @@ cognitive-complexity-threshold = 25
 
 # Max lines per function (use clippy::too_many_lines)
 too-many-lines-threshold = 150
+
+# #2095 temporary Rust-only CI trigger probe; no rule change; do not merge.
