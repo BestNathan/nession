@@ -66,6 +66,7 @@ export type RelayServerTransport = RelayServerHandle &
     | 'onRelayOutput'
     | 'onRelayResize'
     | 'onRelayInputAck'
+    | 'resumeRelayStream'
   >;
 
 /**
@@ -117,6 +118,12 @@ export function relayServerHandle(
     onRelayInputAck: (sessionName, cb) => {
       if (stale()) { return () => {}; }
       return terminalServerApi.onRelayInputAck(sessionName, cb);
+    },
+    resumeRelayStream: (sessionName, epoch, afterSeq) => {
+      if (stale() || service.connectionState !== 'connected') {
+        return Promise.reject(new Error('Relay transport is not attached'));
+      }
+      return terminalServerApi.resumeRelayStream(sessionName, epoch, afterSeq);
     },
   };
 }

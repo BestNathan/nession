@@ -113,6 +113,7 @@ function makeMockWs(): RelayServerTransport {
     onRelayOutput: vi.fn().mockReturnValue(() => {}),
     onRelayResize: vi.fn().mockReturnValue(() => {}),
     onRelayInputAck: vi.fn().mockReturnValue(() => {}),
+    resumeRelayStream: vi.fn().mockRejectedValue(new Error('no Relay stream baseline')),
     onConnectionStateChange: vi.fn().mockReturnValue(() => {}),
     beginRelay: vi.fn(),
     endRelay: vi.fn(),

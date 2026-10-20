@@ -1,4 +1,5 @@
 import { decodeTerminalData, encodeBase64 } from './base64';
+import { readResumeReply, type TerminalStreamResumeResult } from './agent';
 import { readInputAck, type InputAckFields } from './controlPayload';
 import {
   decodeBootstrapMarker,
@@ -8,6 +9,7 @@ import { WIRE as RELAY_BEGIN_WIRE } from '@/generated/protocol/core/server-sessi
 import { WIRE as RELAY_END_WIRE } from '@/generated/protocol/core/server-session-relay-end/v1';
 import { WIRE as TERMINAL_INPUT_WIRE } from '@/generated/protocol/core/agent-terminal-input/v1';
 import { WIRE as TERMINAL_RESIZE_WIRE } from '@/generated/protocol/core/agent-terminal-resize/v1';
+import { WIRE as TERMINAL_STREAM_RESUME_WIRE } from '@/generated/protocol/core/agent-terminal-stream-resume/v1';
 import type { TransportPlugin, PluginSurface } from '@/platform/socket/types';
 // The shared options shape, owned next to the runtime that drives relay. A
 // type-only import across the layer boundary, which the rule allows — and the
@@ -117,6 +119,8 @@ export interface TerminalServerApi {
    * re-sends everything it ever typed.
    */
   onRelayInputAck(sessionName: string, cb: RelayInputAckCallback): () => void;
+  /** Authenticated Relay uses the same Agent-owned complete-only replay as P2P. */
+  resumeRelayStream(sessionName: string, epoch: number, afterSeq: number): Promise<TerminalStreamResumeResult>;
 }
 
 export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi {
@@ -244,6 +248,21 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
 
   onRelayInputAck(sessionName: string, cb: RelayInputAckCallback): () => void {
     return this.addMapCallback(this.inputAckCallbacks, sessionName, cb);
+  }
+
+  async resumeRelayStream(sessionName: string, epoch: number, afterSeq: number): Promise<TerminalStreamResumeResult> {
+    if (!Number.isSafeInteger(epoch) || epoch <= 0
+      || !Number.isSafeInteger(afterSeq) || afterSeq < 0) {
+      throw new RangeError('invalid Relay stream cursor');
+    }
+    const reply = await this.requireConnection().request(TERMINAL_STREAM_RESUME_WIRE, {
+      session_name: sessionName,
+      stream_epoch: epoch,
+      after_seq: afterSeq,
+    });
+    // The Server tunnel forwards this request to Agent unchanged. Only Agent
+    // can judge a complete replay; no Server/Relay-specific cursor exists.
+    return readResumeReply(reply, epoch);
   }
 
   private handleRelayInputAck(payload: Record<string, unknown>): void {
