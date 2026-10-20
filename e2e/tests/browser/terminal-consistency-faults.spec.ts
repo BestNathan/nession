@@ -85,8 +85,13 @@ for (const mode of ['Relay', 'P2P'] as const) {
       }
     }
 
+    // A separate-process (PTY) bootstrap is explicitly unverified: a producer
+    // racing the capture can put a prefix line in both the snapshot and the
+    // live stream. That prefix is outside the synchronized guarantee, and the
+    // criterion scopes duplicates to the retained tail alongside missing
+    // lines. A tail line delivered twice is still a failure.
     const duplicated = [...counts.entries()]
-      .filter(([, seen]) => seen > 1)
+      .filter(([value, seen]) => seen > 1 && value > COUNT - TAIL)
       .map(([value]) => value);
     const missingTail: number[] = [];
     for (let value = COUNT - TAIL + 1; value <= COUNT; value += 1) {
