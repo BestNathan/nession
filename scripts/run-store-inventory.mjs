@@ -341,14 +341,14 @@ function selfTest(){
   assert.throws(()=>checkInventory(unknownAgentWriter,sources),/unclassified active agent-store writer/);
   const missingAgentWriter=JSON.parse(JSON.stringify(manifest));
   missingAgentWriter.stores.find(x=>x.ref==='agent-store').writers.pop();
-  assert.throws(()=>checkInventory(missingAgentWriter,sources),/incomplete live agent-store writer roster/);
+  assert.throws(()=>checkInventory(missingAgentWriter,sources),/incomplete live agent-store writer roster|unreviewed Controller Store rollout status/);
   const falselyProtectedAgent=JSON.parse(JSON.stringify(manifest));
   falselyProtectedAgent.stores.find(x=>x.ref==='agent-store').rollout_blocker=
     'all requirements passed';
   assert.throws(()=>checkInventory(falselyProtectedAgent,sources),
     /deferred admin proof must be classified honestly/);
   const leakingAgentWriter=new Map(sources);
-  const agentWriter='.github/workflows/store-agent-controller-ingest.yml';
+  const agentWriter='.github/workflows/agent-controller-dispatch.yml';
   leakingAgentWriter.set(agentWriter,leakingAgentWriter.get(agentWriter)
     .replace('persist-credentials: false','persist-credentials: true'));
   assert.throws(()=>checkInventory(manifest,leakingAgentWriter),
