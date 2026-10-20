@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 39459082718,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/2095-staging-trigger-compat",
+    "target_sha": "4e330947816f6936f0079d90f98520f8178d0685",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/39459082718",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "a1ef439bb94fafebef1e1c0f0b2ae82d4eaef717640ce2a8c02fc292f2cb5802"
+  },
+  "record": "runs/2026-10-20/39459082718-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "d607ced07a33f318bb06c4e25cc9a2f6de45d38a4c0d39ff205ded566cd96dcd"
+}
