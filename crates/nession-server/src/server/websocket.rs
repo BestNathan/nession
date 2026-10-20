@@ -836,6 +836,54 @@ where
     }
 }
 
+/// A same-ID message cannot prove that the Agent bound the relay's
+/// authenticated browser client identity. A client.auth handler responds with
+/// msg_type "ok" and echoes exactly the client_id it assigned; an error or
+/// any other type/status/id fails closed before the subsequent attach.
+fn validate_relay_agent_auth_response(
+    response: &serde_json::Value,
+    expected_client_id: &str,
+) -> Result<(), &'static str> {
+    if response.get("msg_type").and_then(serde_json::Value::as_str) != Some("ok") {
+        return Err("Relay Agent auth returned the wrong message type");
+    }
+    let payload = response.get("payload");
+    if payload
+        .and_then(|value| value.get("status"))
+        .and_then(serde_json::Value::as_str)
+        != Some("success")
+        || payload
+            .and_then(|value| value.get("client_id"))
+            .and_then(serde_json::Value::as_str)
+            != Some(expected_client_id)
+    {
+        return Err("Relay Agent auth did not bind the expected client identity");
+    }
+    Ok(())
+}
+
+/// Validate the Agent's *correlated* attach response, not merely its ID.
+/// A reply from another handler/session cannot establish this relay's
+/// authenticated subscriber identity (#2077). Legacy Agents may omit newer
+/// stream/subscriber-generation fields, but this never mints those identities.
+fn validate_relay_agent_attach_response(
+    response: &serde_json::Value,
+    session_name: &str,
+) -> Result<(), &'static str> {
+    if response.get("msg_type").and_then(serde_json::Value::as_str) != Some("agent.attach") {
+        return Err("Relay Agent attach returned the wrong message type");
+    }
+    if response
+        .get("payload")
+        .and_then(|payload| payload.get("session_name"))
+        .and_then(serde_json::Value::as_str)
+        != Some(session_name)
+    {
+        return Err("Relay Agent attach returned a different or missing session");
+    }
+    Ok(())
+}
+
 /// Relay mode using the connection's queued outbound path for client writes.
 /// Used when the write sink is managed by a relay task.
 ///
@@ -958,7 +1006,10 @@ where
     )
     .await;
     match auth_response {
-        Ok(Ok(_)) => {}
+        Ok(Ok(response)) => {
+            validate_relay_agent_auth_response(&response, client_id)
+                .map_err(|reason| anyhow::anyhow!("{reason}"))?;
+        }
         Ok(Err(reason)) => {
             error!("{reason}");
             return Err(anyhow::anyhow!("{reason}"));
@@ -1100,6 +1151,11 @@ where
         }
         return Ok(RelayEnd::Ended);
     }
+    // The relay socket's authenticated client identity belongs to this
+    // session only after the Agent's correctly typed, correlated attach
+    // response. Do not enter live forwarding on an unrelated same-ID frame.
+    validate_relay_agent_attach_response(&attach_response, session_name)
+        .map_err(|reason| anyhow::anyhow!("{reason}"))?;
     info!(
         "Agent confirmed attach for session '{}' (msg_type={})",
         session_name, resp_type
@@ -1791,6 +1847,96 @@ mod tests {
     use serde_json::json;
     use std::pin::Pin;
     use std::task::{Context, Poll};
+
+    #[test]
+    fn relay_auth_requires_exact_agent_assigned_client_identity() {
+        let ok = serde_json::json!({
+            "msg_type": "ok",
+            "payload": { "status": "success", "client_id": "browser-1" }
+        });
+        assert_eq!(validate_relay_agent_auth_response(&ok, "browser-1"), Ok(()));
+        assert_eq!(
+            validate_relay_agent_auth_response(&ok, "browser-2"),
+            Err("Relay Agent auth did not bind the expected client identity")
+        );
+        for invalid in [
+            serde_json::json!({"msg_type":"error","payload":{"status":"error","client_id":"browser-1"}}),
+            serde_json::json!({"msg_type":"agent.attach","payload":{"status":"success","client_id":"browser-1"}}),
+            serde_json::json!({"payload":{"status":"success","client_id":"browser-1"}}),
+        ] {
+            assert_eq!(
+                validate_relay_agent_auth_response(&invalid, "browser-1"),
+                Err("Relay Agent auth returned the wrong message type")
+            );
+        }
+        for invalid in [
+            serde_json::json!({"msg_type":"ok","payload":{"status":"error","client_id":"browser-1"}}),
+            serde_json::json!({"msg_type":"ok","payload":{"status":"success"}}),
+            serde_json::json!({"msg_type":"ok","payload":{"status":"success","client_id":123}}),
+        ] {
+            assert_eq!(
+                validate_relay_agent_auth_response(&invalid, "browser-1"),
+                Err("Relay Agent auth did not bind the expected client identity")
+            );
+        }
+    }
+
+    #[test]
+    fn relay_attach_requires_correlated_agent_type_and_exact_session() {
+        let attach = serde_json::json!({
+            "msg_type": "agent.attach",
+            "id": "agent-owned-id",
+            "payload": {
+                "session_name": "work",
+                "subscriber_generation": 9,
+                "stream_epoch": 17
+            }
+        });
+        assert_eq!(
+            validate_relay_agent_attach_response(&attach, "work"),
+            Ok(())
+        );
+        assert_eq!(
+            validate_relay_agent_attach_response(&attach, "other"),
+            Err("Relay Agent attach returned a different or missing session")
+        );
+        for bad in [
+            serde_json::json!({"msg_type":"control.pong","payload":{"session_name":"work"}}),
+            serde_json::json!({"msg_type":"agent.terminal.output","payload":{"session_name":"work"}}),
+            serde_json::json!({"payload":{"session_name":"work"}}),
+        ] {
+            assert_eq!(
+                validate_relay_agent_attach_response(&bad, "work"),
+                Err("Relay Agent attach returned the wrong message type")
+            );
+        }
+        for bad in [
+            serde_json::json!({"msg_type":"agent.attach"}),
+            serde_json::json!({"msg_type":"agent.attach","payload":{}}),
+            serde_json::json!({"msg_type":"agent.attach","payload":{"session_name":0}}),
+        ] {
+            assert_eq!(
+                validate_relay_agent_attach_response(&bad, "work"),
+                Err("Relay Agent attach returned a different or missing session")
+            );
+        }
+    }
+
+    #[test]
+    fn relay_legacy_agent_attach_without_ack_identity_is_allowed_but_not_minted() {
+        let legacy = serde_json::json!({
+            "msg_type": "agent.attach",
+            "payload": { "session_name": "work" }
+        });
+        assert_eq!(
+            validate_relay_agent_attach_response(&legacy, "work"),
+            Ok(())
+        );
+        assert!(legacy["payload"].get("subscriber_generation").is_none());
+        assert!(legacy["payload"].get("stream_epoch").is_none());
+    }
+
+
 
     /// A window no scheduling stall can cross.
     ///
