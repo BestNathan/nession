@@ -2,7 +2,7 @@ import type { WebSocketService } from '@/platform/socket';
 import type { ConnectionState, SentSocketMessage } from '@/platform/socket/types';
 // Type only. The capability singleton is passed in by the caller, which lives
 // above this layer — `platform` may not import a `product` module (#783).
-import type { TerminalServerApi, RelaySubscriptionProof } from '@/product/terminal';
+import type { TerminalServerApi, RelaySubscriptionProof, TerminalOutputAppliedAck } from '@/product/terminal';
 
 /**
  * Everything optional about a relay begin. An object rather than a positional
@@ -50,6 +50,8 @@ export interface RelayServerHandle {
   beginRelayTracked?(sessionId: string, opts?: RelayBeginOptions): SentSocketMessage | null;
   /** Informational Agent-origin proof, never parser ACK/issued-byte authority. */
   onRelayReady?(sessionName: string, cb: (proof: RelaySubscriptionProof, physicalGeneration: number) => void): () => void;
+  /** Optional on legacy handle; Agent ACK credit is strictly guarded by SessionRuntime. */
+  sendRelayOutputApplied?(sessionName: string, ack: TerminalOutputAppliedAck): boolean;
   /** Ask the server to stop relaying terminal traffic for a session. */
   endRelay(sessionId: string): void;
 }
@@ -115,6 +117,10 @@ export function relayServerHandle(
     endRelay: (sessionId) => {
       if (stale()) { return; }
       terminalServerApi.endRelay(sessionId);
+    },
+    sendRelayOutputApplied: (sessionName, ack) => {
+      if (stale() || service.connectionState !== 'connected') { return false; }
+      return terminalServerApi.sendRelayOutputApplied(sessionName, ack);
     },
     sendRelayInput: (sessionName, data, opts) => {
       if (stale()) { return; }
