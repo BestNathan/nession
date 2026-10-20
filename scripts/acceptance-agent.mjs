@@ -229,6 +229,11 @@ function selfTest() {
   assert.match(prompt, /untrusted inputs/);
   assert.match(prompt, /"ci_evidence"/);
   assert.match(prompt, /"id": 42/);
+  assert.match(prompt, /In EVERY stage/);
+  assert.match(prompt, /Never require a producer to set that flag true/);
+  assert.match(prompt, /Agent judgment must NEVER replace a required Case-method/);
+  assert.match(prompt, /not where the old Worker executed/);
+  assert.match(prompt, /never substitutes PR results for a criterion explicitly requiring new execution/);
   assert.deepEqual(parseJsonText('{"criteria":[]}'), { criteria: [] });
   assert.deepEqual(parseJsonText('```json\n{"criteria":[]}\n```'), { criteria: [] });
   const catalog = [{ id: 'composer-2.5', parameters: [{ id: 'fast', values: [{ value: 'true' }] }] }];
