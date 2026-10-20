@@ -384,6 +384,35 @@ describe('SessionRuntime', () => {
     expect(outputAcks()).toHaveLength(2);
   });
 
+  it('defers the atomic-bootstrap ACK until the attach reply states its identity (#2120)', async () => {
+    const rt = new SessionRuntime(makeConfig({ hasSessionOutput: () => true }));
+    rt.setTransportReady(true);
+    rt.buildTransport();
+    await openWs();
+    await flushMicrotasks();
+    // The Agent sends its atomic event-log prefix *before* the attach reply,
+    // so the parser frontier can exist while the subscriber identity does not.
+    rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 3 });
+    const acks = () => sentFrames()
+      .filter((frame) => frame.msg_type === 'agent.terminal.output.applied');
+    expect(acks()).toHaveLength(0);
+    answerPending('agent.attach', 'ok', {
+      stream_epoch: 7, stream_cursor: 3, subscriber_generation: 41,
+    });
+    await flushMicrotasks();
+    expect(rt.attachState.phase).toBe('attached');
+    expect(acks()).toHaveLength(1);
+    expect(acks()[0].payload).toEqual({
+      session_name: 's1',
+      subscriber_generation: 41,
+      stream_epoch: 7,
+      renderer_generation: rt.terminalAppliedSnapshot?.generation,
+      applied_through: 3,
+    });
+    expect(rt.terminalAppliedSnapshot?.ackSentSeq).toBe(3);
+    rt.dispose();
+  });
+
   it('legacy P2P attach without subscriber generation never sends output ACK (#2006)', async () => {
     const rt = new SessionRuntime(makeConfig({ hasSessionOutput: () => true }));
     rt.setTransportReady(true);

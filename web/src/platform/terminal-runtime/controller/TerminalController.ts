@@ -7,7 +7,8 @@ import type {
   TerminalSession,
 } from '../types';
 import type { TerminalTransport } from '../transport/TerminalTransport';
-import { provesVerifiedBootstrapRepair, type TerminalBootstrap } from '../bootstrap';
+import { provesVerifiedBootstrapRepair, streamBaselineFromBootstrap, type TerminalBootstrap } from '../bootstrap';
+import type { VerifiedTerminalBaseline } from '../AppliedTerminalCursor';
 import type { TerminalStreamPosition } from '../streamApply';
 import { InputRouter } from '../input/InputRouter';
 import { InputSourceManager } from '../input/InputSourceManager';
@@ -55,6 +56,16 @@ export interface TerminalControllerEvents {
   onTransportReady?: (ready: boolean) => void;
   /** A cut-proven, full-VT snapshot has finished xterm parsing (#2008). */
   onBootstrapApplied?: () => void;
+  /**
+   * The current renderer parsed an atomic, complete Agent stream-log prefix.
+   *
+   * This is a *stream position*, not a screen/history repair: `fidelity`
+   * partial/screen-only content can still follow it, and the buffer may not
+   * hold history that predates the Agent's reader. Emitted only from the
+   * latest bootstrap's write callback for the current transport/renderer
+   * (#2120).
+   */
+  onStreamBaseline?: (baseline: VerifiedTerminalBaseline) => void;
   /** Parser writer pressure/stall invalidates synchronized output. */
   onStreamTruncated?: () => void;
   /** An individual Agent event is now parsed/applied by the current xterm.
@@ -287,8 +298,16 @@ export class TerminalController {
       // A shortened or unverified capture cannot stand in for the client's
       // existing scrollback. Repaint the visible screen only; preserve history
       // unless a proven atomic, full-VT checkpoint justifies replacement.
+      // An atomic cut is a complete replay of the Agent's ordered stream log
+      // from seq 1. Resetting the renderer first is what makes "the parser
+      // applied every event through `throughSeq`" true — appending the replay
+      // to bytes a previous subscription already applied would duplicate it.
+      // Fidelity stays whatever the marker states (a raw log replay does not
+      // restore VT state predating the reader), so this is a stream baseline,
+      // not the full-VT history repair `provesVerifiedBootstrapRepair` gates.
+      const streamBaseline = bootstrap ? streamBaselineFromBootstrap(bootstrap) : undefined;
       if (bootstrap) {
-        this.writer.write(provesVerifiedBootstrapRepair(bootstrap)
+        this.writer.write(provesVerifiedBootstrapRepair(bootstrap) || streamBaseline
           ? BOOTSTRAP_BUFFER_RESET : BOOTSTRAP_SCREEN_RESET);
       }
       const follow = this.capsuleOcclusionScroll?.snapshotFollowing() ?? false;
@@ -311,6 +330,12 @@ export class TerminalController {
           && this._terminal === terminal
           && this.transport === transport) {
           this.markSessionOutput();
+          // The baseline is a parser-applied stream position, not a claim that
+          // the screen was restored: it comes strictly from an atomic cut and
+          // this write's callback in the current generation.
+          if (streamBaseline) {
+            this.events?.onStreamBaseline?.(streamBaseline);
+          }
           // A truncated pane capture can repaint the current screen, but
           // cannot establish that the missing history was recovered.
           if (provesVerifiedBootstrapRepair(bootstrap)) {

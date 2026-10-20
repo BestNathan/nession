@@ -29,6 +29,13 @@ export function createTerminalRuntimeAdapter(runtime: SessionRuntime): TerminalC
     onBootstrapApplied: () => {
       runtime.noteBootstrapApplied();
     },
+    // The only production source of a verified parser baseline (#2120). The
+    // controller emits it after the current xterm parsed an atomic, complete
+    // Agent stream-log prefix; a screen-only/unverified capture never reaches
+    // this callback.
+    onStreamBaseline: (baseline) => {
+      runtime.setVerifiedTerminalBaseline(baseline);
+    },
     onStreamEventParsed: (position) => {
       runtime.noteStreamEventParsed(position);
     },
