@@ -163,6 +163,32 @@ describe('TerminalServerPlugin', () => {
     });
   });
 
+  describe('Relay parser-applied output ACK (#2103)', () => {
+    it('preserves Agent output.applied contract on the tunneled socket and never sends invalid cursors', () => {
+      const ack = {
+        subscriberGeneration: 41, streamEpoch: 7, rendererGeneration: 3, appliedThrough: 12,
+      };
+      expect(plugin.sendRelayOutputApplied('work', ack)).toBe(true);
+      expect(surface.sent).toEqual([{
+        type: 'agent.terminal.output.applied',
+        payload: {
+          session_name: 'work', subscriber_generation: 41,
+          stream_epoch: 7, renderer_generation: 3, applied_through: 12,
+        },
+      }]);
+      for (const invalid of [
+        { ...ack, subscriberGeneration: 0 },
+        { ...ack, streamEpoch: 0 },
+        { ...ack, rendererGeneration: 0 },
+        { ...ack, appliedThrough: -1 },
+        { ...ack, appliedThrough: Number.MAX_SAFE_INTEGER + 1 },
+      ]) {
+        expect(plugin.sendRelayOutputApplied('work', invalid)).toBe(false);
+      }
+      expect(surface.sent).toHaveLength(1);
+    });
+  });
+
   describe('Agent Relay stream resume', () => {
     it('passes the original Agent resume wire and preserves a complete reply (#2050)', async () => {
       const pending = plugin.resumeRelayStream('work', 31, 4);

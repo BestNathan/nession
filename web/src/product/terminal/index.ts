@@ -8,6 +8,7 @@ export type {
   AgentError,
   TerminalAgentApi,
   TerminalInputAck,
+  TerminalOutputAppliedAck,
   TerminalInputSequence,
   TerminalResizeFrame,
 } from './agent';

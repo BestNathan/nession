@@ -554,27 +554,61 @@ export class SessionRuntime {
       this.terminalAppliedBinding = null;
       return;
     }
-    // Never turn a delivered frame, attach cursor, unverified tmux capture,
-    // duplicate parser callback or Relay event into an output ACK. The *only*
-    // entry is a contiguous parser advance on the current renderer binding.
+    // Only parser-completed, contiguous events in a verified renderer
+    // generation may advance Agent credit. A relay receipt/stream delivery,
+    // screen-only capture or duplicate callback cannot cross this gate.
+    if (outcome !== 'advanced'
+      || snapshot.appliedSeq <= snapshot.ackSentSeq
+      || this.attachState.phase !== 'attached'
+      || this.liveTransportGeneration !== this.transportGeneration) {
+      return;
+    }
+
+    if (this.effectiveForcedRelay) {
+      this.sendVerifiedRelayOutputAck(binding, snapshot);
+      return;
+    }
+
     const seed = this.p2pAttachSeed;
     const api = this.agentTerminalApi;
     const subscriberGeneration = seed?.subscriberGeneration;
-    if (outcome !== 'advanced'
-      || snapshot.appliedSeq <= snapshot.ackSentSeq
-      || this.effectiveForcedRelay
-      || this.attachState.phase !== 'attached'
-      || this.attachedTransportGeneration !== this.transportGeneration
-      || this.liveTransportGeneration !== this.transportGeneration
+    if (this.attachedTransportGeneration !== this.transportGeneration
       || !api?.sendOutputApplied
       || !Number.isSafeInteger(subscriberGeneration) || !subscriberGeneration
       || !seed?.streamEpoch || seed.streamEpoch !== snapshot.streamEpoch) {
       return;
     }
-    // ACK submission is not delivery confirmation or byte-credit release.
-    // On a rejected send, retain ackSentSeq so the source is not forged.
+    // Sending an ACK does not prove that Agent accepted or credited it.
     if (api.sendOutputApplied(this.config.sessionName, {
       subscriberGeneration,
+      streamEpoch: snapshot.streamEpoch,
+      rendererGeneration: snapshot.generation,
+      appliedThrough: snapshot.appliedSeq,
+    })) {
+      this.terminalAppliedCursor.recordAckSubmitted(binding, snapshot.appliedSeq);
+    }
+  }
+
+  /** Separate current-route proof admission from parser prefix accounting.
+   * A Server receipt alone is never a parser baseline or issued-byte credit.
+   */
+  private sendVerifiedRelayOutputAck(
+    binding: AppliedCursorBinding,
+    snapshot: AppliedCursorSnapshot,
+  ): void {
+    const conn = this.config.serverConnection;
+    const proof = this.relayProof;
+    const sent = this.relayBeginWire;
+    if (!conn?.isReady() || !conn.sendRelayOutputApplied || !proof || !sent
+      || proof.streamEpoch !== snapshot.streamEpoch
+      || proof.sessionName !== this.config.sessionName
+      || proof.browserClientId !== getOrCreateClientId()) {
+      return; // unverified/legacy/stale routes have no credit
+    }
+    // The proof was accepted only on the exact begin+physical socket. Agent
+    // rechecks peer token, stream generation/epoch and the issued frontier.
+    if (conn.sendRelayOutputApplied(this.config.sessionName, {
+      subscriberGeneration: proof.subscriberGeneration,
       streamEpoch: snapshot.streamEpoch,
       rendererGeneration: snapshot.generation,
       appliedThrough: snapshot.appliedSeq,

@@ -761,6 +761,57 @@ describe('SessionRuntime', () => {
       expect(rt.relaySubscriptionProofSnapshot).toBeNull();
     });
 
+    it('Relay output ACK requires current Agent proof and verified parser prefix, never a socket receipt (#2103)', async () => {
+      const serverConnection = makeRelayServerConnection('connected');
+      const callbacks = new Set<(proof: RelaySubscriptionProof, gen: number) => void>();
+      const ack = vi.fn(() => true);
+      const conn = Object.assign(serverConnection, {
+        beginRelayTracked: vi.fn(() => ({ id: 'real-begin', physicalGeneration: 3 })),
+        onRelayReady: (_session: string, cb: (proof: RelaySubscriptionProof, gen: number) => void) => {
+          callbacks.add(cb);
+          return () => { callbacks.delete(cb); };
+        },
+        sendRelayOutputApplied: ack,
+      });
+      const rt = new SessionRuntime(makeConfig({ forcedRelay: true, serverConnection: conn }));
+      rt.setTransportReady(true);
+      rt.buildTransport();
+      await flushMicrotasks();
+      const proof: RelaySubscriptionProof = {
+        sessionName: 's1', browserClientId: 'unit-client',
+        relayRequestId: 'real-begin', routeId: 'aabbccdd-1234-4000-8000-aabbccddeeff',
+        subscriberGeneration: 41, streamEpoch: 7,
+      };
+
+      // No verified parser baseline: Agent receipt and a positioned event prove nothing.
+      for (const cb of callbacks) { cb(proof, 3); }
+      rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 1 });
+      expect(ack).not.toHaveBeenCalled();
+
+      rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 0 });
+      rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 2 }); // gap
+      expect(ack).not.toHaveBeenCalled();
+      rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 1 }); // contiguous parser completed
+      expect(ack).toHaveBeenCalledWith('s1', {
+        subscriberGeneration: 41, streamEpoch: 7,
+        rendererGeneration: rt.terminalAppliedSnapshot?.generation, appliedThrough: 2,
+      });
+      expect(rt.terminalAppliedSnapshot?.ackSentSeq).toBe(2);
+      rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 1 }); // duplicate
+      expect(ack).toHaveBeenCalledTimes(1);
+      rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 8, appliedThrough: 0 });
+      rt.noteStreamEventParsed({ streamEpoch: 8, streamSeq: 1 }); // wrong Agent epoch
+      expect(ack).toHaveBeenCalledTimes(1);
+
+      // Reconnect revokes the subscription before any new Agent attach can be used.
+      serverConnection.emit('connecting');
+      rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 0 });
+      rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 1 });
+      expect(ack).toHaveBeenCalledTimes(1);
+      rt.dispose();
+      expect(rt.relaySubscriptionProofSnapshot).toBeNull();
+    });
+
     it('re-begins exactly once across connected -> connecting -> connected (recoverable loss cycle)', async () => {
       const serverConnection = makeRelayServerConnection('connected');
       const rt = new SessionRuntime(makeConfig({ forcedRelay: true, serverConnection }));
