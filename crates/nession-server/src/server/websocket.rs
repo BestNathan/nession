@@ -881,19 +881,15 @@ fn validate_relay_client_auth_reply(
 /// a Server connection's current route. In particular the Agent may be
 /// buggy or compromised and tunnel arbitrary JSON frames. Refuse this wire
 /// on both the pre-attach and established forwarding paths (#2089).
-const RELAY_SUBSCRIPTION_READY_WIRE: &str = "server.session.relay.ready";
+pub const RELAY_SUBSCRIPTION_READY_WIRE: &str = "server.session.relay.ready";
 
 fn is_agent_forged_relay_ready(msg: &tokio_tungstenite::tungstenite::Message) -> bool {
+    // Reuse the header-only classifier. A full Value allocation per output
+    // frame would punish 100k+ terminal bursts for a rare spoofed wire.
     msg.to_text()
         .ok()
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
-        .and_then(|frame| {
-            frame
-                .get("msg_type")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_owned)
-        })
-        .is_some_and(|wire| wire == RELAY_SUBSCRIPTION_READY_WIRE)
+        .and_then(|text| serde_json::from_str::<RelayEnvelope<'_>>(text).ok())
+        .is_some_and(|frame| frame.msg_type == Some(RELAY_SUBSCRIPTION_READY_WIRE))
 }
 
 /// Publish only a pair actually returned on the **authenticated, currently
