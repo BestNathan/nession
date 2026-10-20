@@ -251,9 +251,15 @@ export function attestNativeRecoveryReadback({receipt:r,store,failedRun,jobs,art
     publisher_or_full_repair_verified:false});
 }
 
+// One shared bounded allowlist governs both high-level receipt discovery and
+// the inner live failed-Run proof. Diverging guards would silently produce an
+// incomplete v2 readback even when Issue selection succeeds.
+export function nativeRecoveryReadbackEligible(issue,stage){
+  return [2038,2041,2045,2063].includes(Number(issue))&&stage==='post-merge';
+}
 export function nativeReadbackEligible(issue,stage){
   return (Number(issue)===2010&&['staging','post-merge'].includes(stage))||
-    ([2038,2041,2045,2063].includes(Number(issue))&&stage==='post-merge');
+    nativeRecoveryReadbackEligible(issue,stage);
 }
 export function nativeReadbackAncestryReady(workspace,targetSha,sources,run=execFileSync){
   requireIt(SHA.test(targetSha??'')&&Array.isArray(sources)&&sources.length===3&&
@@ -365,7 +371,7 @@ export async function collectDevelopmentReadback({repo,issue,stage,targetSha,wor
 
     }
     let nativeRecoveryProof=null;
-    if(store.native_resume_verified&&[2038,2041,2045].includes(Number(issue))){
+    if(store.native_resume_verified&&nativeRecoveryReadbackEligible(issue,stage)){
       const failedRun=await get('/repos/'+repo+'/actions/runs/39376331942');
       if(!nativeReadbackAncestryReady(workspace,targetSha,
         [failedRun.head_sha,r.worker_sha,r.ingester_sha]))continue;
