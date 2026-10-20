@@ -16,7 +16,7 @@ export function verifyNativeResumeFailure(run,jobs,artifacts,developerLog,storeH
     deny('Run/commit identity or conclusive failure unverified');
   if(jobs?.total_count!==3||jobs.jobs?.length!==3||
     jobs.jobs.some(j=>expectedJobs[j.name]!==j.id||j.run_id!==run.id||
-      j.run_attempt!==1||j.status!=='completed')||
+      (j.run_attempt!=null&&j.run_attempt!==1)||j.status!=='completed')||
     new Set(jobs.jobs.map(j=>j.name)).size!==3)
     deny('unexpected or incomplete Worker job topology');
   const claim=jobs.jobs.find(j=>j.name==='claim');
