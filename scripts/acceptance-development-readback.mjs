@@ -169,7 +169,6 @@ export async function collectDevelopmentReadback({repo,issue,stage,targetSha,wor
       'scripts/lib/agent/providers','scripts/lib/agent/harness','scripts/lib/agent/store',
       'scripts/lib/agent/orchestration/outbox.mjs','scripts/lib/agent/orchestration/github-dispatch.mjs',
       'scripts/lib/agent/orchestration/state-store.mjs',
-      'scripts/agent-workflow-telemetry.mjs','scripts/agent-workflow-telemetry-contract.mjs',
       'automation/agents/registry.json'];
     execFileSync('git',['-C',workspace,'diff','--quiet',r.worker_sha,targetSha,'--',...owners],
       {stdio:'pipe',timeout:10000});
@@ -202,9 +201,10 @@ export async function collectDevelopmentReadback({repo,issue,stage,targetSha,wor
       prepared:find('dispatching'),dispatched:find('dispatched'),pending:find('pending')});
     return [{...r,...attested,...store,schema_version:1,kind:'verified_development_checkpoint_readback',
       target_sha:targetSha,fixture_issue:1997,
-      worker_code_unchanged:true,source_ancestry_verified:true,
+      native_execution_owners_unchanged:true,source_ancestry_verified:true,
       store_reachable_verified:true,native_resume_verified:false,
       pr_publication_verified:false,full_review_repair_cycle_verified:false,
+      provider_metric_comparability_verified:false,
       establishes_sc_verdict:false}];
   }
   return [];
