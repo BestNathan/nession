@@ -1,0 +1,109 @@
+{
+  "schema_version": 1,
+  "issue": 1997,
+  "version": 11,
+  "phase": "ready",
+  "target_sha": null,
+  "repair_attempts": 0,
+  "transitions": [],
+  "assignments": {
+    "developer": "dev-cursor-01",
+    "reviewer": "review-cursor-01",
+    "acceptor": "accept-cursor-01"
+  },
+  "outbox": [
+    {
+      "id": "95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae",
+      "task": {
+        "type": "dispatch",
+        "role": "developer",
+        "task": "implement",
+        "sha": "220266b9233ec97b1beacbc54e5cc7f82d3cece2",
+        "agent_id": "dev-cursor-01"
+      },
+      "status": "failed",
+      "attempts": 1,
+      "receipt": {
+        "status": "failed",
+        "dispatch_id": "95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae",
+        "source_run_id": 39267659650,
+        "source_attempt": 1,
+        "failure_code": "native_sdk_sandbox_unavailable"
+      }
+    },
+    {
+      "id": "85b69a9de06b02eb78f8a3a15d14b58a43ffc83ee6b1f5db11b9b541cfec9656",
+      "task": {
+        "type": "dispatch",
+        "role": "developer",
+        "task": "implement",
+        "sha": "220266b9233ec97b1beacbc54e5cc7f82d3cece2",
+        "agent_id": "dev-cursor-01"
+      },
+      "status": "yielded",
+      "attempts": 1,
+      "receipt": {
+        "status": "yielded",
+        "dispatch_id": "85b69a9de06b02eb78f8a3a15d14b58a43ffc83ee6b1f5db11b9b541cfec9656",
+        "source_run_id": 39288961865,
+        "source_attempt": 1,
+        "checkpoint_version": 1,
+        "checkpoint_commit_sha": "d812e3655c0ad6337b1003aa0c1794c12335adb0",
+        "ciphertext_sha256": "a42220e24ed5ff587ed6173b662a75856f62e5a16561274cb616325b150f4107"
+      }
+    },
+    {
+      "id": "3f4abb86785d41dbb771edbab1c400841d3d0e60335358332307b75e1d36c1c8",
+      "task": {
+        "type": "dispatch",
+        "role": "developer",
+        "task": "implement",
+        "sha": "220266b9233ec97b1beacbc54e5cc7f82d3cece2",
+        "agent_id": "dev-cursor-01",
+        "resume": true,
+        "continuation": {
+          "parent_action_id": "85b69a9de06b02eb78f8a3a15d14b58a43ffc83ee6b1f5db11b9b541cfec9656",
+          "ordinal": 1,
+          "checkpoint_version": 1,
+          "checkpoint_commit_sha": "d812e3655c0ad6337b1003aa0c1794c12335adb0",
+          "ciphertext_sha256": "a42220e24ed5ff587ed6173b662a75856f62e5a16561274cb616325b150f4107"
+        }
+      },
+      "status": "failed",
+      "attempts": 1,
+      "receipt": {
+        "status": "failed",
+        "dispatch_id": "3f4abb86785d41dbb771edbab1c400841d3d0e60335358332307b75e1d36c1c8",
+        "source_run_id": 39376331942,
+        "source_attempt": 1,
+        "failure_code": "native_cursor_agent_not_found_before_send"
+      }
+    },
+    {
+      "id": "6a84244ca028a93f8c057ab23852bb21c3906d485e4c16ccab661104c31d750e",
+      "task": {
+        "type": "dispatch",
+        "role": "developer",
+        "task": "implement",
+        "sha": "220266b9233ec97b1beacbc54e5cc7f82d3cece2",
+        "agent_id": "dev-cursor-01",
+        "resume": true,
+        "continuation": {
+          "parent_action_id": "85b69a9de06b02eb78f8a3a15d14b58a43ffc83ee6b1f5db11b9b541cfec9656",
+          "ordinal": 1,
+          "checkpoint_version": 1,
+          "checkpoint_commit_sha": "d812e3655c0ad6337b1003aa0c1794c12335adb0",
+          "ciphertext_sha256": "a42220e24ed5ff587ed6173b662a75856f62e5a16561274cb616325b150f4107"
+        }
+      },
+      "status": "dispatching",
+      "attempts": 1,
+      "receipt": {
+        "status": "prepared",
+        "dispatch_id": "6a84244ca028a93f8c057ab23852bb21c3906d485e4c16ccab661104c31d750e",
+        "issuer_run_id": 39396782160,
+        "ticket_sha256": "52656bcd59bcf39572817742511b091f68e51d8b0a28a6faf36e2c8a1977c17a"
+      }
+    }
+  ]
+}
