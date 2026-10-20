@@ -89,7 +89,8 @@ export function relayServerHandle(
   service: WebSocketService,
   terminalServerApi: TerminalServerApi,
 ): RelayServerTransport {
-  const stale = (): boolean => service.isDisposed;
+  const stale = (): boolean =>
+    service.isDisposed || terminalServerApi.isBoundTo?.(service) === false;
   return {
     onConnectionStateChange: (cb) => service.onConnectionStateChange(cb),
     isReady: () => !stale() && service.connectionState === 'connected',
