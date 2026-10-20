@@ -32,6 +32,7 @@ use crate::server::execution::ExecutionPolicy::{Inline, Key, Ordered, Query};
 use crate::server::execution::{
     ExecutionLanes, ResourceKey, DEFAULT_MUTATIONS_IN_FLIGHT, SHUTDOWN_GRACE,
 };
+use crate::server::issued_credit::SubscriberIssuedFlow;
 use crate::server::output_ack::{OutputAckBinding, OutputAckVerdict, SubscriberOutputAck};
 use crate::server::session_terminal::{self, InputSequence, InputVerdict};
 // The lanes' boxed work is the shared type, and the constructors take this
@@ -48,7 +49,7 @@ use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, Mutex};
 use tokio_tungstenite::tungstenite::handshake::server::{
@@ -100,6 +101,8 @@ struct SessionPeer {
     peer_token: Arc<()>,
     /// Fresh for each attach, independent of ControlLease/queue dequeue.
     output_ack: SubscriberOutputAck,
+    /// Short synchronous lock shared with the subscriber's forwarder, never across await.
+    issued_flow: Arc<StdMutex<SubscriberIssuedFlow>>,
     outbound: P2pOutbound,
     /// Sequenced output + authoritative resize share this per-peer FIFO.
     /// A legacy backend without a forwarder may leave it absent.
@@ -322,7 +325,9 @@ fn accept_output_ack(
     if !(1..=(1_u64 << 53) - 1).contains(&payload.renderer_generation) {
         return Err("invalid_renderer_generation");
     }
-    let verdict = peer.output_ack.observe_with_renderer(
+    // Stage the cursor: reject a beyond-issued credit claim before commit.
+    let mut cursor = peer.output_ack.clone();
+    let verdict = cursor.observe_with_renderer(
         OutputAckBinding {
             subscriber_generation: payload.subscriber_generation,
             stream_epoch: payload.stream_epoch,
@@ -332,7 +337,15 @@ fn accept_output_ack(
         issued_head,
     );
     match verdict {
-        OutputAckVerdict::Advanced { .. } | OutputAckVerdict::Duplicate => Ok(verdict),
+        OutputAckVerdict::Advanced { .. } => {
+            let mut issued = peer.issued_flow.lock().map_err(|_| "credit_state_unavailable")?;
+            issued
+                .parser_ack(payload.stream_epoch, payload.applied_through)
+                .map_err(|_| "invalid_issued_credit_ack")?;
+            peer.output_ack = cursor;
+            Ok(verdict)
+        }
+        OutputAckVerdict::Duplicate => Ok(verdict),
         _ => Err("invalid_output_ack"),
     }
 }
@@ -459,6 +472,7 @@ fn spawn_output_forwarder(
     session_name: String,
     detached_for_not_draining: Arc<AtomicBool>,
     queued_bytes: Arc<AtomicUsize>,
+    issued_flow: Arc<StdMutex<SubscriberIssuedFlow>>,
 ) {
     tokio::spawn(async move {
         while let Some(event) = rx.recv().await {
@@ -466,6 +480,19 @@ fn spawn_output_forwarder(
             // preceding xterm write. Only output uses the byte budget;
             // authoritative resize still consumes a bounded queue slot.
             release_subscriber_bytes(&queued_bytes, event.queued_bytes());
+            let (epoch, seq) = match &event {
+                SubscriberEvent::Output((_, epoch, seq)) => (*epoch, *seq),
+                SubscriberEvent::Resize { stream_epoch, stream_seq, .. } => (*stream_epoch, *stream_seq),
+            };
+            // Issue before offering to the writer; dequeue is not xterm parse.
+            let issued = issued_flow
+                .lock()
+                .map(|mut flow| flow.issue(epoch, seq, event.queued_bytes()).is_ok())
+                .unwrap_or(false);
+            if !issued {
+                outbound.close();
+                return;
+            }
             let json = match event {
                 SubscriberEvent::Output((bytes, stream_epoch, stream_seq)) => {
                     use base64::Engine;
@@ -1914,6 +1941,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                         let (tx, rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
                         let detached_for_not_draining = Arc::new(AtomicBool::new(false));
                             let queued_bytes = Arc::new(AtomicUsize::new(0));
+                            let issued_flow = Arc::new(StdMutex::new(SubscriberIssuedFlow::new()));
                         let wants_bootstrap = payload.needs_bootstrap.unwrap_or(false);
                         let (resp, atomic_prefix) = {
                             let mut guard = sessions_lock(ctx.sessions);
@@ -1939,6 +1967,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                     detached_for_not_draining: Arc::clone(
                                         &detached_for_not_draining,
                                     ),
+                                    issued_flow: Arc::clone(&issued_flow),
                                     queued_bytes: Arc::clone(&queued_bytes),
                                 },
                                 &tx,
@@ -2006,6 +2035,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                             session_name.clone(),
                             detached_for_not_draining,
                             queued_bytes,
+                            issued_flow,
                         );
 
                         return serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
@@ -2051,6 +2081,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                             let (tx, rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
                             let detached_for_not_draining = Arc::new(AtomicBool::new(false));
                             let queued_bytes = Arc::new(AtomicUsize::new(0));
+                            let issued_flow = Arc::new(StdMutex::new(SubscriberIssuedFlow::new()));
                             let mut control = session_terminal::SessionControlState::new();
                             control.ensure_controller(&client_id);
                             let stream = session_terminal::SessionStreamState::new();
@@ -2070,6 +2101,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                     detached_for_not_draining: Arc::clone(
                                         &detached_for_not_draining,
                                     ),
+                                    issued_flow: Arc::clone(&issued_flow),
                                     queued_bytes: Arc::clone(&queued_bytes),
                                 }],
                                 control,
@@ -2129,6 +2161,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 session_name.clone(),
                                 detached_for_not_draining,
                                 queued_bytes,
+                                issued_flow,
                             );
 
                             // Spawn ONE broadcast task for this session.
@@ -2231,6 +2264,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                             let (tx, rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
                             let detached_for_not_draining = Arc::new(AtomicBool::new(false));
                             let queued_bytes = Arc::new(AtomicUsize::new(0));
+                            let issued_flow = Arc::new(StdMutex::new(SubscriberIssuedFlow::new()));
                             let output_ack = match new_output_ack(stream.epoch) {
                                 Ok(ack) => ack,
                                 Err(_) => return ctx.err("invalid_stream_identity", "output ACK identity unavailable"),
@@ -2246,6 +2280,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                     detached_for_not_draining: Arc::clone(
                                         &detached_for_not_draining,
                                     ),
+                                    issued_flow: Arc::clone(&issued_flow),
                                     queued_bytes: Arc::clone(&queued_bytes),
                                 }],
                                 control,
@@ -2290,6 +2325,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 session_name.clone(),
                                 detached_for_not_draining,
                                 queued_bytes,
+                                issued_flow,
                             );
                             let session_name_clone = session_name.clone();
                             let sessions_for_output = Arc::clone(ctx.sessions);
@@ -3689,6 +3725,7 @@ mod tests {
             .unwrap(),
             outbound,
             output_tx: Some(tx),
+            issued_flow: Arc::new(StdMutex::new(SubscriberIssuedFlow::new())),
             queued_bytes: Arc::new(AtomicUsize::new(0)),
             detached_for_not_draining: Arc::new(AtomicBool::new(false)),
         }];
@@ -3956,6 +3993,7 @@ mod tests {
             output_ack: test_output_ack(),
             outbound,
             output_tx: Some(tx),
+            issued_flow: Arc::new(StdMutex::new(SubscriberIssuedFlow::new())),
             queued_bytes: Arc::new(AtomicUsize::new(0)),
             detached_for_not_draining: Arc::new(AtomicBool::new(false)),
         }];
@@ -3990,6 +4028,7 @@ mod tests {
             output_ack: test_output_ack(),
             outbound,
             output_tx: Some(tx),
+            issued_flow: Arc::new(StdMutex::new(SubscriberIssuedFlow::new())),
             queued_bytes: Arc::new(AtomicUsize::new(0)),
             detached_for_not_draining: Arc::new(AtomicBool::new(false)),
         };
@@ -4057,6 +4096,7 @@ mod tests {
                 output_ack: test_output_ack(),
                 outbound: slow_outbound,
                 output_tx: Some(slow_tx),
+                issued_flow: Arc::new(StdMutex::new(SubscriberIssuedFlow::new())),
                 queued_bytes: Arc::new(AtomicUsize::new(0)),
                 detached_for_not_draining: Arc::clone(&slow_flag),
             },
@@ -4066,6 +4106,7 @@ mod tests {
                 output_ack: test_output_ack(),
                 outbound: fast_outbound,
                 output_tx: Some(fast_tx),
+                issued_flow: Arc::new(StdMutex::new(SubscriberIssuedFlow::new())),
                 queued_bytes: Arc::new(AtomicUsize::new(0)),
                 detached_for_not_draining: Arc::clone(&fast_flag),
             },
@@ -4118,6 +4159,7 @@ mod tests {
             output_ack: test_output_ack(),
             outbound,
             output_tx: None,
+            issued_flow: Arc::new(StdMutex::new(SubscriberIssuedFlow::new())),
             queued_bytes: Arc::clone(&queued_bytes),
             detached_for_not_draining: Arc::new(AtomicBool::new(false)),
         };
@@ -4513,6 +4555,7 @@ mod tests {
                 output_ack: test_output_ack(),
                 outbound: slow_outbound,
                 output_tx: Some(slow_tx),
+                issued_flow: Arc::new(StdMutex::new(SubscriberIssuedFlow::new())),
                 queued_bytes: Arc::clone(&slow_bytes),
                 detached_for_not_draining: Arc::clone(&slow_flag),
             },
@@ -4522,6 +4565,7 @@ mod tests {
                 output_ack: test_output_ack(),
                 outbound: fast_outbound,
                 output_tx: Some(fast_tx),
+                issued_flow: Arc::new(StdMutex::new(SubscriberIssuedFlow::new())),
                 queued_bytes: Arc::clone(&fast_bytes),
                 detached_for_not_draining: Arc::clone(&fast_flag),
             },
@@ -4573,6 +4617,7 @@ mod tests {
             output_ack: test_output_ack(),
             outbound,
             output_tx: Some(tx),
+            issued_flow: Arc::new(StdMutex::new(SubscriberIssuedFlow::new())),
             queued_bytes: Arc::clone(&queued_bytes),
             detached_for_not_draining: Arc::clone(&detached_for_not_draining),
         }];
@@ -4597,6 +4642,7 @@ mod tests {
             output_ack: test_output_ack(),
             outbound,
             output_tx: Some(tx),
+            issued_flow: Arc::new(StdMutex::new(SubscriberIssuedFlow::new())),
             queued_bytes: Arc::clone(&queued_bytes),
             detached_for_not_draining: Arc::clone(&detached_for_not_draining),
         }];
@@ -4620,6 +4666,7 @@ mod tests {
             outbound: peer_outbound,
             output_tx: Some(tx.clone()),
             detached_for_not_draining: Arc::clone(&detached_for_not_draining),
+            issued_flow: Arc::new(StdMutex::new(SubscriberIssuedFlow::new())),
             queued_bytes: Arc::clone(&queued_bytes),
         }];
 
@@ -4629,6 +4676,7 @@ mod tests {
             "s1".to_string(),
             detached_for_not_draining,
             queued_bytes,
+            Arc::new(StdMutex::new(SubscriberIssuedFlow::new())),
         );
 
         // Saturate the subscriber queue, then let one more chunk evict it —
@@ -4677,6 +4725,7 @@ mod tests {
             "s1".to_string(),
             Arc::new(AtomicBool::new(false)),
             Arc::new(AtomicUsize::new(0)),
+            Arc::new(StdMutex::new(SubscriberIssuedFlow::new())),
         );
 
         // `already_attached` drops the old peer's sender without setting the
@@ -4727,6 +4776,7 @@ mod tests {
             "s1".to_string(),
             Arc::new(AtomicBool::new(false)),
             Arc::new(AtomicUsize::new(0)),
+            Arc::new(StdMutex::new(SubscriberIssuedFlow::new())),
         );
 
         tx.send(SubscriberEvent::Output((b"chunk".to_vec(), 1, 1)))
