@@ -1,4 +1,5 @@
 name: Agent / Controller Dispatch
+# #2095 temporary no-op trigger-scope probe; do not merge this branch.
 
 # #2010. Trusted, owner/main-only entrypoint. Provider never executes in this
 # workflow; the Store writer private key and Actions writer token are NEVER
