@@ -7,6 +7,20 @@ permissions:
 on:
   pull_request:
     branches: [staging, main]
+    # Staging PR validation only for relevant sources (#2095).
+    paths:
+      - '.github/workflows/acceptance-case-smoke.yml'
+      - 'crates/**'
+      - 'web/**'
+      - 'design/**'
+      - 'e2e/**'
+      - 'gates/**'
+      - 'scripts/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - '.cargo/**'
+      - 'justfile'
   workflow_dispatch:
 
 concurrency:
