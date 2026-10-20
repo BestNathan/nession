@@ -692,6 +692,46 @@ describe('ConnectionManager', () => {
       cm.dispose();
     });
 
+    it('drops late P2P output/resize/input from a superseded transport generation (#2055)', () => {
+      const first = makeAgentApi();
+      let firstCurrent = true;
+      const old = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test',
+        agentApi: first.api, ...attached,
+        isCurrentGeneration: () => firstCurrent,
+      });
+      const oldOutput = vi.fn();
+      const oldResize = vi.fn();
+      old.onOutput = oldOutput;
+      old.onResize = oldResize;
+      first.outputHandlers[0]({ data: new Uint8Array([1]), streamEpoch: 11, streamSeq: 1 });
+      expect(oldOutput).toHaveBeenCalledTimes(1);
+
+      firstCurrent = false; // runtime swaps routes before React unmounts old
+      first.outputHandlers[0]({ data: new Uint8Array([2]), streamEpoch: 11, streamSeq: 2 });
+      first.resizeHandlers[0]({ cols: 123, rows: 42, streamEpoch: 11, streamSeq: 3 });
+      old.send('stale input');
+      old.sendResize(123, 42);
+      expect(oldOutput).toHaveBeenCalledTimes(1);
+      expect(oldResize).not.toHaveBeenCalled();
+      expect(first.api.sendInput).not.toHaveBeenCalled();
+      expect(first.api.sendResize).not.toHaveBeenCalled();
+
+      const next = makeAgentApi();
+      const fresh = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test',
+        agentApi: next.api, ...attached,
+        isCurrentGeneration: () => true,
+      });
+      const freshOutput = vi.fn();
+      fresh.onOutput = freshOutput;
+      next.outputHandlers[0]({ data: new Uint8Array([9]), streamEpoch: 12, streamSeq: 1 });
+      expect(freshOutput).toHaveBeenCalledTimes(1);
+      expect(oldOutput).toHaveBeenCalledTimes(1);
+      old.dispose();
+      fresh.dispose();
+    });
+
     it('does not forward output, resize, or errors after dispose', () => {
       const { api, outputHandlers, resizeHandlers, errorHandlers } = makeAgentApi();
       const cm = new ConnectionManager({
@@ -1037,6 +1077,45 @@ describe('ConnectionManager', () => {
   });
 
   describe('Relay mode', () => {
+    it('drops late Relay output/resize after route generation swap (#2055)', () => {
+      type Out = Parameters<RelayServerTransport['onRelayOutput']>[1];
+      type Res = Parameters<RelayServerTransport['onRelayResize']>[1];
+      let output: Out = () => {};
+      let resize: Res = () => {};
+      const ws = makeMockWs();
+      (ws.onRelayOutput as ReturnType<typeof vi.fn>).mockImplementation((_name: string, cb: Out) => {
+        output = cb;
+        return () => {};
+      });
+      (ws.onRelayResize as ReturnType<typeof vi.fn>).mockImplementation((_name: string, cb: Res) => {
+        resize = cb;
+        return () => {};
+      });
+      let current = true;
+      const cm = new ConnectionManager({
+        mode: 'relay', sessionName: 'test', sessionId: 'a:test',
+        serverConnection: ws, ...attached, isCurrentGeneration: () => current,
+      });
+      const written = vi.fn();
+      const resized = vi.fn();
+      cm.onOutput = written;
+      cm.onResize = resized;
+      output(new Uint8Array([1]), undefined, { streamEpoch: 5, streamSeq: 1 });
+      expect(written).toHaveBeenCalledTimes(1);
+
+      current = false;
+      output(new Uint8Array([2]), undefined, { streamEpoch: 5, streamSeq: 2 });
+      resize(130, 45, { streamEpoch: 5, streamSeq: 3 });
+      cm.send('old');
+      cm.sendResize(130, 45);
+      expect(written).toHaveBeenCalledTimes(1);
+      expect(resized).not.toHaveBeenCalled();
+      expect(ws.sendRelayInput).not.toHaveBeenCalled();
+      expect(ws.sendRelayResize).not.toHaveBeenCalled();
+      expect(ws.resumeRelayStream).not.toHaveBeenCalled();
+      cm.dispose();
+    });
+
     it('send routes data via serverConnection.sendRelayInput', () => {
       const ws = makeMockWs();
       const cm = new ConnectionManager({

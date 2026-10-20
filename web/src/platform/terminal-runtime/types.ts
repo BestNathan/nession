@@ -19,6 +19,13 @@ export interface ConnectionOptions {
   /** When false, input/resize is buffered until attach completes. */
   isAttached?: () => boolean;
   /**
+   * SessionRuntime's transport-generation lease. A replaced transport must
+   * not emit stale P2P/Relay events or input after a route switch, even in the
+   * gap before React disposes its old listeners (#2055). Optional to preserve
+   * independent/legacy ConnectionManager consumers.
+   */
+  isCurrentGeneration?: () => boolean;
+  /**
    * Called after input has been handed to the transport.
    *
    * The transport cannot tell a delivered keystroke from one written into a

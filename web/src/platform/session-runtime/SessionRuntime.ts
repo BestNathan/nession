@@ -620,6 +620,7 @@ export class SessionRuntime {
   }
 
   updateContext(next: Partial<SessionRuntimeConfig>): RuntimeMirrorSnapshot {
+    const previousRelay = this.effectiveForcedRelay;
     const routeChanged =
       next.routeIntentEpoch !== undefined
       && next.routeIntentEpoch !== this.routeIntentEpoch;
@@ -636,6 +637,17 @@ export class SessionRuntime {
       // steady-state config sync touches neither and must NOT clear it — that
       // round trip is what used to clobber the fallback.
       this.forcedRelayFallback = false;
+    }
+
+    // A route-mode flip retires the current transport even when the previous
+    // candidate never opened a WebSocket. The generation must advance before
+    // any teardown/relay attach notifies subscribers; relying only on
+    // syncAgentConnection's hadBinding check leaves stale callbacks live.
+    // Explicit route-intent changes already advance in handleRouteIntentChange.
+    if (!routeChanged && previousRelay !== this.effectiveForcedRelay) {
+      this.transportGeneration += 1;
+      this.attachedTransportGeneration = null;
+      this.resetTerminalAppliedCursor();
     }
 
     this.addressPolicy.update({
@@ -764,6 +776,7 @@ export class SessionRuntime {
    */
   buildTransport(): TerminalTransport {
     const relay = this.effectiveForcedRelay;
+    const owningGeneration = this.transportGeneration;
     const transport = this.config.createTransport({
       mode: relay ? 'relay' : 'p2p',
       sessionName: this.config.sessionName,
@@ -771,6 +784,7 @@ export class SessionRuntime {
       agentApi: relay ? undefined : this.agentTerminalApi ?? undefined,
       serverConnection: relay ? this.config.serverConnection ?? undefined : undefined,
       isAttached: () => this.attachState.phase === 'attached',
+      isCurrentGeneration: () => !this.disposed && owningGeneration === this.transportGeneration,
       // Input is the moment a dead-but-open socket stops being invisible
       // (#1264); a stream with a hole is a fact for the owner (#1304); input
       // that can never arrive is reported, not kept (#1307 SC-09).

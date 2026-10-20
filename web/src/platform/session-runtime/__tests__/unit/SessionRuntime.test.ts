@@ -1559,6 +1559,29 @@ describe('SessionRuntime', () => {
       rt.dispose();
     });
 
+    it('fences each built transport by its captured route generation (#2055)', () => {
+      const rt = new SessionRuntime(makeConfig({
+        serverConnection: makeRelayServerConnection('connected'),
+      }));
+      const first = (rt.buildTransport() as MockTransport).builtWith;
+      expect(first.isCurrentGeneration?.()).toBe(true);
+
+      rt.updateContext({ forcedRelay: true });
+      expect(first.isCurrentGeneration?.()).toBe(false);
+      const relay = (rt.buildTransport() as MockTransport).builtWith;
+      expect(relay.mode).toBe('relay');
+      expect(relay.isCurrentGeneration?.()).toBe(true);
+
+      rt.updateContext({ forcedRelay: false });
+      expect(relay.isCurrentGeneration?.()).toBe(false);
+      const newer = (rt.buildTransport() as MockTransport).builtWith;
+      expect(newer.mode).toBe('p2p');
+      expect(newer.isCurrentGeneration?.()).toBe(true);
+
+      rt.dispose();
+      expect(newer.isCurrentGeneration?.()).toBe(false);
+    });
+
     it('posts the swap on both directions of the P2P ↔ relay flip', () => {
       const serverConnection = makeRelayServerConnection('connected');
       const rt = new SessionRuntime(makeConfig({ serverConnection }));
