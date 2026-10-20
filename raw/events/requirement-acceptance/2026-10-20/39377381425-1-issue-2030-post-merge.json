@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "kind": "agent_execution_trace",
+  "identity": {
+    "workflow_id": "requirement-acceptance",
+    "github_run_id": 39377381425,
+    "github_run_attempt": 1,
+    "unique_run_name": "39377381425-1-issue-2030-post-merge",
+    "repository": "BestNathan/nession"
+  },
+  "task": {
+    "id": "issue-2030-post-merge",
+    "type": "acceptance",
+    "issue": 2030,
+    "target_sha": "b1e0037d45b9904ad416a9293f93f7948c08e7f4"
+  },
+  "agent": {
+    "id": "legacy-acceptance-cursor",
+    "role": "acceptor",
+    "provider": "cursor",
+    "harness_sha256": null
+  },
+  "timing": {
+    "started_at": "2026-10-20T05:54:53.804Z",
+    "finished_at": "2026-10-20T05:55:06.750Z"
+  },
+  "coverage": {
+    "model": "observed",
+    "tools": "unobserved",
+    "skills": "unobserved",
+    "mcp": "unobserved"
+  },
+  "events": [
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "model.usage",
+      "sequence": 0,
+      "identity": {
+        "agent_id": "legacy-acceptance-cursor",
+        "role": "acceptor",
+        "issue": 2030,
+        "github_run_id": 39377381425,
+        "github_run_attempt": 1
+      },
+      "data": {
+        "usage": {
+          "input": 11096,
+          "output": 1445,
+          "cache_read": 1504,
+          "cache_write": 0,
+          "reasoning": null
+        },
+        "request_id": null,
+        "observation": "native-event"
+      }
+    }
+  ]
+}
