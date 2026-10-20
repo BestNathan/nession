@@ -238,6 +238,19 @@ Default UX stays quiet (VISION.md / PRINCIPLE.md). Show status only if recovery 
 
 **Ship gate:** design-only PR can be reviewed and merged as design documentation; it does not mark #1645 implementation SCs Pass. Runtime P1/P2/P3 need separate issues and verified checks.
 
+### Measured on main — 2026-10-20
+
+The invariants below are no longer design claims: each has a deterministic witness merged to `main`. The table records the property, not a green build; the tests are the executable owner.
+
+| Invariant | Witness |
+| --- | --- |
+| The **control-channel attach barrier** is an exact stream cut at `(epoch, 0)`: `%output` the capture covers is dropped from the live stream, so the stream created with the attach starts at 1. Fidelity and truncation remain screen facts. | `crates/nession-agent/tests/integration/control_mode.rs::the_bootstrap_capture_and_the_live_stream_join_exactly`; the marker from `send_bootstrap`'s `BootstrapCut::AtomicEpochStart` (#2124) |
+| A browser establishes a **parser-applied baseline** only from an atomic cut parsed by the current xterm generation. Screen-only/unverified captures establish nothing; a cut beyond 0 must be a complete untruncated replay. | `web/src/platform/terminal-runtime/bootstrap.ts` + `TerminalController` (#2122); bootstrap/controller suites |
+| The **real Agent** admits a Relay parser-applied ACK only for the exact Agent-minted subscription/epoch/renderer and a contiguous parser prefix; foreign generation/epoch, a remounted renderer, a regressive or beyond-issued position, and unsafe wire integers are refused. | `crates/nession-server/tests/integration/relay.rs::relay_output_applied_ack_is_admitted_only_for_the_agent_minted_subscription` (#2123) |
+| **P2P and Relay subscribers on one Session observe the same Agent `(streamEpoch, streamSeq)` and byte-identical data** for the same output, and one authoritative resize consumes one shared ordinal, ordered between the surrounding output events. | `crates/nession-server/tests/integration/relay.rs::p2p_and_relay_observe_one_agent_stream_timeline` (#2126) |
+
+Still unverified by design and not implied by the table: the **already-attached** separate-process tmux capture (explicitly `unverified`, no `throughSeq`), full-VT/alt-screen fidelity, and the deterministic staging fault-injection matrix (SC-10).
+
 ## 10. External references and non-goals
 
 - [Microsoft AHP Terminal Channel](https://github.com/microsoft/agent-host-protocol/blob/main/docs/specification/terminal-channel.md) is a reference for resource/subscribe/reconciliation semantics, not a drop-in VT checkpoint or global Channel Registry requirement.

@@ -1667,6 +1667,32 @@ describe('SessionRuntime', () => {
   });
 
   describe('transport binding (#1309)', () => {
+    it('a P2P→Relay flip revokes the parser cursor instead of continuing across routes (#1645)', () => {
+      const serverConnection = makeRelayServerConnection('connected');
+      const rt = new SessionRuntime(makeConfig({
+        serverConnection,
+        hasSessionOutput: () => true,
+      }));
+
+      // A verified parser position on the P2P route. The renderer really does
+      // hold those bytes, but the proof is bound to that subscription.
+      rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 2 });
+      expect(rt.terminalAppliedSnapshot?.appliedSeq).toBe(2);
+
+      rt.updateContext({ forcedRelay: true });
+
+      // The relay is a different subscription on a different transport. No
+      // one has proved it continues the same stream from this renderer, so
+      // the parsed frontier cannot be carried across the cut.
+      expect(rt.terminalAppliedSnapshot).toBeNull();
+
+      // A late callback from the old binding cannot revive it.
+      rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 3 });
+      expect(rt.terminalAppliedSnapshot).toBeNull();
+
+      rt.dispose();
+    });
+
     it('posts the swap only after the new generation is installed (SC-04)', () => {
       const rt = new SessionRuntime(makeConfig());
       const oldApi = rt.getAgentTerminalApi();
