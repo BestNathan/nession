@@ -2539,12 +2539,23 @@ async fn start_mock_agent_endpoint_with_subscription(
                     // and accidentally hid missing reply-type validation.
                     if is_relay_request(&parsed) {
                         let mut answer = mock_agent_relay_reply(&parsed);
-                        let is_attach = parsed["msg_type"] == "agent.attach";
+                        let is_attach = parsed.get("msg_type").and_then(serde_json::Value::as_str)
+                            == Some("agent.attach");
                         if is_attach {
                             if let Some((generation, epoch)) = subscriber {
-                                answer["payload"]["subscriber_generation"] =
-                                    serde_json::json!(generation);
-                                answer["payload"]["stream_epoch"] = serde_json::json!(epoch);
+                                if let Some(payload) = answer
+                                    .get_mut("payload")
+                                    .and_then(serde_json::Value::as_object_mut)
+                                {
+                                    payload.insert(
+                                        "subscriber_generation".to_string(),
+                                        serde_json::json!(generation),
+                                    );
+                                    payload.insert(
+                                        "stream_epoch".to_string(),
+                                        serde_json::json!(epoch),
+                                    );
+                                }
                             }
                         }
                         if sink
@@ -3069,7 +3080,10 @@ async fn relay_publishes_only_server_authored_agent_subscription_proof() -> anyh
     )
     .await?;
     let auth = next_json(&mut client).await?;
-    anyhow::ensure!(auth["payload"]["status"] == "success", "auth failed: {auth}");
+    anyhow::ensure!(
+        auth["payload"]["status"] == "success",
+        "auth failed: {auth}"
+    );
     wait_for_session(&mut client, "a1:dev").await?;
     send_json(
         &mut client,
@@ -3082,27 +3096,37 @@ async fn relay_publishes_only_server_authored_agent_subscription_proof() -> anyh
     .await?;
     acknowledge_grant(&mut agent).await?;
     let attach = expect_frame_of_type(
-        &mut endpoint.frames, "agent.attach", std::time::Duration::from_secs(5)
-    ).await?;
+        &mut endpoint.frames,
+        "agent.attach",
+        std::time::Duration::from_secs(5),
+    )
+    .await?;
     anyhow::ensure!(attach["payload"]["session_name"] == "dev");
-    let receipt = tokio::time::timeout(
-        std::time::Duration::from_secs(5), next_json(&mut client)
-    ).await??;
-    anyhow::ensure!(receipt["msg_type"] == "server.session.relay.ready", "missing ready: {receipt}");
+    let receipt =
+        tokio::time::timeout(std::time::Duration::from_secs(5), next_json(&mut client)).await??;
+    anyhow::ensure!(
+        receipt["msg_type"] == "server.session.relay.ready",
+        "missing ready: {receipt}"
+    );
     anyhow::ensure!(receipt["payload"]["browser_client_id"] == "browser-proof");
     anyhow::ensure!(receipt["payload"]["relay_request_id"] == "begin-proof");
     anyhow::ensure!(receipt["payload"]["session_name"] == "dev");
     anyhow::ensure!(receipt["payload"]["subscriber_generation"] == 61);
     anyhow::ensure!(receipt["payload"]["stream_epoch"] == 72);
     anyhow::ensure!(
-        receipt["payload"]["route_id"].as_str().is_some_and(|id| uuid::Uuid::parse_str(id).is_ok()),
+        receipt["payload"]["route_id"]
+            .as_str()
+            .is_some_and(|id| uuid::Uuid::parse_str(id).is_ok()),
         "route was not Server-authored: {receipt}"
     );
     anyhow::ensure!(receipt["payload"].get("credit_enabled").is_none());
     anyhow::ensure!(
-        tokio::time::timeout(std::time::Duration::from_millis(250), next_json(&mut client))
-            .await
-            .is_err(),
+        tokio::time::timeout(
+            std::time::Duration::from_millis(250),
+            next_json(&mut client)
+        )
+        .await
+        .is_err(),
         "Agent-injected fake Server receipt leaked to browser"
     );
     Ok(())
