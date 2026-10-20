@@ -328,10 +328,7 @@ mod tests {
         assert_eq!(flow.parser_ack(17, 3), Err(IssuedCreditError::BeyondIssued));
         assert_eq!(flow.outstanding_bytes(), 6);
         assert_eq!(flow.parser_ack(17, 2), Ok(6));
-        assert_eq!(
-            flow.issue(18, 3, 1),
-            Err(IssuedCreditError::SequenceGap)
-        );
+        assert_eq!(flow.issue(18, 3, 1), Err(IssuedCreditError::SequenceGap));
     }
 
     #[test]
