@@ -31,7 +31,8 @@ on:
     # Keep push / manual triggers unchanged for exact-SHA evidence.
     paths:
       - '.github/workflows/e2e-tests.yml'
-      - '.github/workflows/ci-quality.yml'
+      # CI Quality workflow-only edits cannot change application/browser behavior.
+      # The Quality workflow-check validates them without a full E2E run.
       - 'crates/**'
       - 'web/**'
       - 'design/**'
