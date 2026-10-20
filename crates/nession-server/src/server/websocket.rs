@@ -836,6 +836,32 @@ where
     }
 }
 
+/// A correlated reply is not evidence that the Agent bound this *browser*
+/// identity. In particular client.auth may answer "ok" with status="error"
+/// when its payload was invalid, leaving the Agent socket unauthenticated.
+/// This guard runs before attach on the very same Agent socket (#2084).
+fn validate_relay_client_auth_reply(
+    reply: &serde_json::Value,
+    expected_client_id: &str,
+) -> Result<(), &'static str> {
+    if expected_client_id.is_empty() {
+        return Err("missing_relay_client_identity");
+    }
+    if reply.get("msg_type").and_then(serde_json::Value::as_str) != Some("ok") {
+        return Err("unexpected_agent_auth_reply");
+    }
+    let Some(payload) = reply.get("payload") else {
+        return Err("missing_agent_auth_payload");
+    };
+    if payload.get("status").and_then(serde_json::Value::as_str) != Some("success") {
+        return Err("agent_auth_not_successful");
+    }
+    if payload.get("client_id").and_then(serde_json::Value::as_str) != Some(expected_client_id) {
+        return Err("agent_auth_wrong_client");
+    }
+    Ok(())
+}
+
 /// Validate that an Agent really accepted this Relay socket's attach before
 /// any browser output can be pumped (#2060). A matching response id alone is
 /// not proof: unexpected reply types and cross-session "ok" frames fail closed.
@@ -998,7 +1024,10 @@ where
     )
     .await;
     match auth_response {
-        Ok(Ok(_)) => {}
+        Ok(Ok(reply)) => {
+            validate_relay_client_auth_reply(&reply, client_id)
+                .map_err(|reason| anyhow::anyhow!("Agent relay client auth rejected: {reason}"))?;
+        }
         Ok(Err(reason)) => {
             error!("{reason}");
             return Err(anyhow::anyhow!("{reason}"));
@@ -1833,6 +1862,47 @@ mod tests {
     use serde_json::json;
     use std::pin::Pin;
     use std::task::{Context, Poll};
+
+    #[test]
+    fn relay_client_auth_requires_agent_confirmed_exact_browser_identity() {
+        let valid = json!({
+            "msg_type": "ok",
+            "payload": {"status": "success", "message": "ok", "client_id": "browser-a"}
+        });
+        assert_eq!(
+            validate_relay_client_auth_reply(&valid, "browser-a"),
+            Ok(())
+        );
+        assert_eq!(
+            validate_relay_client_auth_reply(&valid, "browser-b"),
+            Err("agent_auth_wrong_client")
+        );
+        assert_eq!(
+            validate_relay_client_auth_reply(&valid, ""),
+            Err("missing_relay_client_identity")
+        );
+        assert_eq!(
+            validate_relay_client_auth_reply(
+                &json!({"msg_type":"error","payload":{"status":"success","client_id":"browser-a"}}),
+                "browser-a"
+            ),
+            Err("unexpected_agent_auth_reply")
+        );
+        assert_eq!(
+            validate_relay_client_auth_reply(&json!({"msg_type":"ok"}), "browser-a"),
+            Err("missing_agent_auth_payload")
+        );
+        for payload in [
+            json!({"status":"error","client_id":"browser-a"}),
+            json!({"status":"success","client_id":"browser-b"}),
+            json!({"status":"success"}),
+            json!({"status":"success","client_id":""}),
+            json!({"status":"success","client_id":null}),
+        ] {
+            let reply = json!({"msg_type":"ok","payload":payload});
+            assert!(validate_relay_client_auth_reply(&reply, "browser-a").is_err());
+        }
+    }
 
     #[test]
     fn relay_attach_reply_requires_exact_success_and_session() {

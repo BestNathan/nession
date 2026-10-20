@@ -2459,16 +2459,45 @@ fn is_relay_request(value: &serde_json::Value) -> bool {
 /// Missing subscriber-generation is intentional legacy/non-credit coverage.
 fn mock_agent_relay_reply(request: &serde_json::Value) -> serde_json::Value {
     let requested_wire = request.get("msg_type").and_then(serde_json::Value::as_str);
+    // The real Agent does not echo a client.auth request. It returns "ok"
+    // carrying a status and the identity it actually bound to this socket.
+    // Keeping the old echo would accidentally make tests accept an
+    // unauthenticated Relay socket (#2084).
+    let payload = if requested_wire == Some("client.auth") {
+        serde_json::json!({
+            "status": "success",
+            "message": "ok",
+            "client_id": request.get("payload").and_then(|p| p.get("client_id")).cloned(),
+        })
+    } else {
+        request
+            .get("payload")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null)
+    };
     serde_json::json!({
-        "msg_type": if requested_wire == Some("agent.attach") {
+        "msg_type": if requested_wire == Some("agent.attach") || requested_wire == Some("client.auth") {
             "ok"
         } else {
             requested_wire.unwrap_or("")
         },
         "id": request.get("id").cloned().unwrap_or(serde_json::Value::Null),
         "timestamp": current_timestamp(),
-        "payload": request.get("payload").cloned().unwrap_or(serde_json::Value::Null),
+        "payload": payload,
     })
+}
+
+#[test]
+fn relay_mock_agent_auth_reply_is_a_success_for_the_exact_browser_client() {
+    let reply = mock_agent_relay_reply(&serde_json::json!({
+        "msg_type": "client.auth",
+        "id": "auth-a",
+        "payload": {"auth_token": "", "client_id": "browser-a"}
+    }));
+    assert_eq!(reply["msg_type"], "ok");
+    assert_eq!(reply["id"], "auth-a");
+    assert_eq!(reply["payload"]["status"], "success");
+    assert_eq!(reply["payload"]["client_id"], "browser-a");
 }
 
 async fn start_mock_agent_endpoint() -> anyhow::Result<MockAgentEndpoint> {
