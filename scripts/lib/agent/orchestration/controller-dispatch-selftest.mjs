@@ -70,7 +70,7 @@ for(const bad of [
     user:{login:'fork'}}}},
   {issue:1998},
 ])assert.throws(()=>assertDispatchAuthority({...continuationV2,...bad}),
-  /authenticated owner\\/main/);
+  /authenticated owner\/main/);
 for(const patch of [{actionId:actualAction},
   {event:{...continuation.event,comment:{...continuation.event.comment,body:'/nession resume issue=1997 checkpoint=2'}}},
   {event:{...continuation.event,comment:{...continuation.event.comment,user:{login:'fork'}}}},
