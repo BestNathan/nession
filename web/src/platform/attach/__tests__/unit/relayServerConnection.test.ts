@@ -49,7 +49,8 @@ describe('relayServerHandle', () => {
     expect(handle.sendRelayOutputApplied?.('work', {
       subscriberGeneration: 41, streamEpoch: 7, rendererGeneration: 3, appliedThrough: 2,
     })).toBe(true);
-    expect(frames(socket).at(-1)).toMatchObject({
+    const sent = frames(socket);
+    expect(sent[sent.length - 1]).toMatchObject({
       msg_type: 'agent.terminal.output.applied',
       payload: {
         session_name: 'work', subscriber_generation: 41, stream_epoch: 7,
