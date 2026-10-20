@@ -40,7 +40,8 @@ jobs:
          github.event.action == 'created' &&
          github.event.issue.number == 1997 &&
          github.event.comment.user.login == 'BestNathan' &&
-         github.event.comment.body == '/nession ingest issue=1997 worker_run=39288961865')
+         (github.event.comment.body == '/nession ingest issue=1997 worker_run=39288961865' ||
+          startsWith(github.event.comment.body, '/nession ingest issue=1997 action=3f4abb86785d41dbb771edbab1c400841d3d0e60335358332307b75e1d36c1c8 worker_run=')))
       )
     runs-on: ubuntu-latest
     environment: cursor
@@ -65,6 +66,12 @@ jobs:
           node scripts/lib/agent/orchestration/worker-preflight-selftest.mjs
           node scripts/lib/agent/store/remote-selftest.mjs
           ./gates/run run-store-integrity
+      - name: Resolve bounded owner/main source command before any credential use
+        run: |
+          set -euo pipefail
+          node scripts/lib/agent/orchestration/development-ingest.mjs source > "$RUNNER_TEMP/development-source-locator.json"
+          echo "SOURCE_RUN_ID=$(jq -er .run_id "$RUNNER_TEMP/development-source-locator.json")" >> "$GITHUB_ENV"
+          echo "SOURCE_ATTEMPT=$(jq -er .attempt "$RUNNER_TEMP/development-source-locator.json")" >> "$GITHUB_ENV"
       - name: Independently fetch exact successful Worker and two Artifacts
         env:
           GH_TOKEN: ${{ github.token }}

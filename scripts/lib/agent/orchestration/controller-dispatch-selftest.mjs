@@ -52,6 +52,14 @@ for(const event of [
 ])assert.throws(()=>assertDispatchAuthority({...commentValid,event}),/authenticated owner\/main/);
 assert.throws(()=>assertDispatchAuthority({...commentValid,
   environment:{...commentEnvironment,GITHUB_ACTOR:'fork'}}),/authenticated owner\/main/);
+const continuation={...commentValid,
+  actionId:'3f4abb86785d41dbb771edbab1c400841d3d0e60335358332307b75e1d36c1c8',
+  event:{...commentEvent,comment:{...commentEvent.comment,body:'/nession resume issue=1997 checkpoint=1'}}};
+assert.equal(assertDispatchAuthority(continuation).action_id,continuation.actionId);
+for(const patch of [{actionId:actualAction},
+  {event:{...continuation.event,comment:{...continuation.event.comment,body:'/nession resume issue=1997 checkpoint=2'}}},
+  {event:{...continuation.event,comment:{...continuation.event.comment,user:{login:'fork'}}}},
+])assert.throws(()=>assertDispatchAuthority({...continuation,...patch}),/authenticated owner\/main/);
 const denied=[
   {environment:{...environment,GITHUB_REF:'refs/pull/12/merge'}},
   {environment:{...environment,GITHUB_ACTOR:'attacker'}},

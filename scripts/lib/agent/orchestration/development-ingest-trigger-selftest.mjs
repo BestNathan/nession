@@ -17,6 +17,13 @@ const event={action:'created',
     body:'/nession ingest issue=1997 worker_run=39288961865'}};
 const good={environment,event};
 assert.deepEqual(resolveTrustedIngestSource(good),{run_id:runId,source:null});
+const resumeCommand='/nession ingest issue=1997 action=3f4abb86785d41dbb771edbab1c400841d3d0e60335358332307b75e1d36c1c8 worker_run=39388961865';
+const resumed={environment,event:{...event,comment:{...event.comment,body:resumeCommand}}};
+assert.deepEqual(resolveTrustedIngestSource(resumed),{run_id:39388961865,source:null,continuation:true});
+for(const command of [resumeCommand+' ',resumeCommand.replace('3f4abb','0f4abb'),
+  resumeCommand.replace('39388961865','1'),resumeCommand.replace('issue=1997','issue=1998')])
+  assert.throws(()=>resolveTrustedIngestSource({...resumed,event:{...resumed.event,
+    comment:{...resumed.event.comment,body:command}}}));
 const denied=[
   {environment:{...environment,GITHUB_ACTOR:'other'}},
   {environment:{...environment,GITHUB_REF:'refs/pull/5/merge'}},
