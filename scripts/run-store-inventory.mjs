@@ -423,7 +423,7 @@ function selfTest(){
   const compoundPush=new Map(sources);
   compoundPush.set(agentIngest,compoundPush.get(agentIngest).replace(
     '          node scripts/lib/agent/orchestration/development-ingest.mjs ingest',
-    '          echo preparing; git push origin "HEAD:${target_ref}"\\n          node scripts/lib/agent/orchestration/development-ingest.mjs ingest'));
+    '          echo preparing; git push origin "HEAD:${target_ref}"\n          node scripts/lib/agent/orchestration/development-ingest.mjs ingest'));
   assert.notEqual(compoundPush.get(agentIngest),sources.get(agentIngest));
   assert.throws(()=>checkInventory(manifest,compoundPush),
     /direct git push in privileged Store writer not covered by CAS/);
