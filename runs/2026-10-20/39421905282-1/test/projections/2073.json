@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_projection_receipt",
+  "outcome": "applied",
+  "issue": 2073,
+  "run_id": 39421905282,
+  "run_attempt": 1,
+  "target_sha": "9d2a51fcbe6ea87fd930977ed68929f7e2bc2441",
+  "plan_digest": "c50c3399a7abcf2f39109ada462e2d8c953318a501f60f89d4864ab3d557c866",
+  "artifact_digest": "sha256:07ec9d25ee81188a7501af3c557939ef26894a83637abf7cb1c986834f3cb065",
+  "ingest_run_id": 39422584422,
+  "ingest_attempt": 1,
+  "declaration_digest": "104d54e05c81b446bf465bf66820179051e8086e7bbe1bbed836faee9f7c24ff",
+  "before_body_sha256": "5b12a6223ae04551b0825092e0ac0a8f079fa94a5cee279759727cb0ffcee179",
+  "body_sha256": "83501cdc32a510ea8e372a277c9c573d596fb7796b5aa6cf4859cd314efeca4e",
+  "readback_body": "## Requirements: Standalone Pages publication acceptance\n\nPages owns artifact/publication truth; the Acceptance runtime only consumes independently attested evidence, and does not invent the verdict.\n\n### Success Criteria\n- [ ] SC-01: Define a dedicated strict source-backed Workflow publication receipt with main SHA, Run/Attempt, 27 curated nodes and HTML/JSON hashes read from the actual completed HTTPS deployment.\n- [ ] SC-02: Validate receipt at trusted Acceptance boundary using same-run authenticated publisher job and fail-closed tamper/stale/duplicated-log fixtures; publish it as separately typed, issue-scoped evidence (never a direct SC Pass).\n- [ ] SC-03: Preserve generic Pages site.json observation and enforce true Workflow Explorer deployment proof in Pages tests, CI and post-merge review.\n\n## Acceptance Plan\n```yaml\nacceptance:\n  SC-01:\n    when: pr\n    method: agent\n  SC-02:\n    when: pr\n    method: agent\n  SC-03:\n    when: pr\n    method: agent\n```\n\n## Acceptance Report\n| Criterion | Result | Evidence |\n|---|---|---|\n| SC-01 | Pending | Requires authenticated deployment completion and negative proof tests. |\n| SC-02 | Pending | Requires authenticated deployment completion and negative proof tests. |\n| SC-03 | Pending | Requires authenticated deployment completion and negative proof tests. |\n\n## E2E Verification\n### New\n- none: No new browser behavior; guarded source/runtime and deployment contracts are exercised by canonical unit and CI gates.\n### Regression\n- pages-workflows\n\n## E2E Report\n\n| ID | Type | Result | Evidence |\n|---|---|---|---|\n| pages-workflows | Regression | Pass | run 39421905282/1, SHA 9d2a51fcbe6ea87fd930977ed68929f7e2bc2441, contract 104d54e05c81b446bf465bf66820179051e8086e7bbe1bbed836faee9f7c24ff, plan c50c3399a7abcf2f39109ada462e2d8c953318a501f60f89d4864ab3d557c866, tests 3/3 (https://github.com/BestNathan/nession/actions/runs/39421905282) |\n\n## Product alignment\n- [x] Preserve trusted main-owned authorizations and exact-SHA evidence; no manual Success Criteria override.\n\n---\n**Status:** Approved",
+  "patch_updated_at": "2026-10-20T12:29:21Z",
+  "readback_updated_at": "2026-10-20T12:29:21Z",
+  "rows": [
+    {
+      "id": "pages-workflows",
+      "result": "Pass",
+      "evidence": "run 39421905282/1, SHA 9d2a51fcbe6ea87fd930977ed68929f7e2bc2441, contract 104d54e05c81b446bf465bf66820179051e8086e7bbe1bbed836faee9f7c24ff, plan c50c3399a7abcf2f39109ada462e2d8c953318a501f60f89d4864ab3d557c866, tests 3/3 (https://github.com/BestNathan/nession/actions/runs/39421905282)"
+    }
+  ]
+}
