@@ -45,9 +45,11 @@ export function checkInventory(manifest,workflows){
       fail('active orphan Store is missing writer inventory: '+store.ref);
     if(store.lifecycle==='planned'&&store.writers.length)
       fail('planned Store must not claim an active writer: '+store.ref);
-    if(store.ref==='agent-store'&&store.lifecycle==='planned'&&
-       !String(store.rollout_blocker??'').includes('Ruleset'))
-      fail('private Agent Store deployment blocker must be explicit');
+    if(store.ref==='agent-store'&&
+       (store.lifecycle!=='active'||
+        !String(store.rollout_blocker??'').includes('UNPROVEN')||
+        !String(store.rollout_blocker??'').includes('Ruleset')))
+      fail('real Agent Store and deferred admin proof must be classified honestly');
     // Even a disposable App smoke has the repository-scoped writer key.
     // Branch-selectable manual code could ignore its main-only job guard.
     if(store.ref==='agent-store'){
@@ -103,8 +105,8 @@ export function checkInventory(manifest,workflows){
       const rollout=store.controller_rollout;
       const requestPath='.github/workflows/acceptance-agent-controller.yml';
       const writerPath='.github/workflows/store-agent-controller-ingest.yml';
-      if(store.lifecycle!=='planned'||store.writers.length!==0||
-          rollout.phase!=='candidate-not-live-verified'||
+      if(store.lifecycle!=='active'||store.writers.length!==5||
+          rollout.phase!=='live-verified-limited-trust'||
           rollout.request_workflow!==requestPath||
           rollout.trusted_writer_workflow!==writerPath)
         fail('unreviewed Controller Store rollout status');
@@ -136,6 +138,60 @@ export function checkInventory(manifest,workflows){
          !writer.includes('secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY')||
          !writer.includes('STORE_APP_TOKEN: ${{ steps.writer.outputs.token }}'))
         fail('Controller Store ingester is not authenticated main-owned scoped App writer');
+    }
+    if(store.ref==='agent-store'){
+      // Real scoped App Writers are not the six legacy CAS Workflow wrappers:
+      // they invoke the shared CAS publisher via trusted Controller modules.
+      // Maintain an explicit, exhaustive limited-trust writer roster, including
+      // bootstrap and reconciliation. It MUST NOT be mislabeled server-enforced.
+      const approved=new Map([
+        ['.github/workflows/store-agent-bootstrap.yml',['bootstrap','main_push_only']],
+        ['.github/workflows/store-agent-controller-ingest.yml',['controller_initialization','main_workflow_run']],
+        ['.github/workflows/agent-controller-dispatch.yml',['controller_dispatch','owner_main_dispatch_or_issue_comment']],
+        ['.github/workflows/store-agent-development-ingest.yml',['encrypted_checkpoint_ingest','main_workflow_run_or_owner_comment']],
+        ['.github/workflows/store-agent-dispatch-reconcile.yml',['failed_dispatch_reconcile','main_workflow_run']],
+      ]);
+      if(store.writers.length!==approved.size)fail('incomplete live agent-store writer roster');
+      for(const writer of store.writers){
+        const expected=approved.get(writer.workflow);
+        if(!expected||writer.mode!==expected[0]||writer.event!==expected[1]||
+           writer.source!=='scoped GitHub App installation token'||
+           writer.credential_boundary!=='main-owned privileged job; no model-provided writer token'||
+           writer.app_id_variable!=='RUN_STORE_WRITER_APP_ID'||
+           writer.app_private_key_secret!=='RUN_STORE_WRITER_APP_PRIVATE_KEY'||
+           writer.app_scope!=='nession: contents write')
+          fail('unclassified active agent-store writer or credential boundary');
+        const body=workflows.get(writer.workflow);
+        if(typeof body!=='string'||
+           !body.includes('actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349')||
+           !body.includes('vars.RUN_STORE_WRITER_APP_ID')||
+           !body.includes('secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY')||
+           !body.includes('permission-contents: write')||
+           !body.includes('repositories: nession')||
+           !body.includes('persist-credentials: false')||
+           !body.includes("github.repository == 'BestNathan/nession'"))
+          fail('real agent-store Writer lacks trusted main/App path');
+        const triggers=body.split(/^permissions:\s*$/m)[0];
+        const needs=writer.event;
+        if((needs==='main_push_only'&&
+              (!/^  push:\s*$/m.test(triggers)||/^  workflow_dispatch:\s*$/m.test(triggers)))||
+           (needs==='main_workflow_run'&&
+              (!/^  workflow_run:\s*$/m.test(triggers)||/^  workflow_dispatch:\s*$/m.test(triggers)))||
+           (needs==='owner_main_dispatch_or_issue_comment'&&
+              (!/^  issue_comment:\s*$/m.test(triggers)||!/^  workflow_dispatch:\s*$/m.test(triggers)))||
+           (needs==='main_workflow_run_or_owner_comment'&&
+              (!/^  workflow_run:\s*$/m.test(triggers)||!/^  issue_comment:\s*$/m.test(triggers)||
+               /^  workflow_dispatch:\s*$/m.test(triggers))))
+          fail('active agent-store Writer trigger deviates from declared limited-trust profile');
+        if(seen.has(writer.workflow+'|agent-store'))fail('duplicate active agent-store Writer');
+        seen.set(writer.workflow+'|agent-store',writer);
+        approved.delete(writer.workflow);
+      }
+      if(approved.size!==0)fail('missing active agent-store privileged Writer');
+      // #1664 owns native Session crypto/CAS; #1690's independent anchors and
+      // server-side ordinary-fast-forward denial remain Pending. Do not claim
+      // they are verified merely because these trusted-main Workflow forms exist.
+      continue;
     }
     for(const writer of store.writers){
       if(!/^\.github\/workflows\/[a-z0-9-]+\.yml$/.test(writer.workflow)||
@@ -276,7 +332,27 @@ function selfTest(){
     {...trusted,GITHUB_EVENT_NAME:'push',GITHUB_REPOSITORY:'attacker/fork'},
     {...trusted,GITHUB_EVENT_NAME:'push',GITHUB_SHA:'main'},
   ]) assert.throws(()=>assertTrustedLiveContext(invalid),/trusted main/);
-  assert.equal(success.writers,6);
+  assert.equal(success.writers,11);
+  const agentStore=manifest.stores.find(x=>x.ref==='agent-store');
+  assert.equal(agentStore.lifecycle,'active');
+  const unknownAgentWriter=JSON.parse(JSON.stringify(manifest));
+  unknownAgentWriter.stores.find(x=>x.ref==='agent-store').writers[0].workflow=
+    '.github/workflows/untrusted-agent-writer.yml';
+  assert.throws(()=>checkInventory(unknownAgentWriter,sources),/unclassified active agent-store writer/);
+  const missingAgentWriter=JSON.parse(JSON.stringify(manifest));
+  missingAgentWriter.stores.find(x=>x.ref==='agent-store').writers.pop();
+  assert.throws(()=>checkInventory(missingAgentWriter,sources),/incomplete live agent-store writer roster|unreviewed Controller Store rollout status/);
+  const falselyProtectedAgent=JSON.parse(JSON.stringify(manifest));
+  falselyProtectedAgent.stores.find(x=>x.ref==='agent-store').rollout_blocker=
+    'all requirements passed';
+  assert.throws(()=>checkInventory(falselyProtectedAgent,sources),
+    /deferred admin proof must be classified honestly/);
+  const leakingAgentWriter=new Map(sources);
+  const agentWriter='.github/workflows/agent-controller-dispatch.yml';
+  leakingAgentWriter.set(agentWriter,leakingAgentWriter.get(agentWriter)
+    .replace('persist-credentials: false','persist-credentials: true'));
+  assert.throws(()=>checkInventory(manifest,leakingAgentWriter),
+    /real agent-store Writer lacks trusted main\/App path/);
   const bootstrapPath='.github/workflows/store-agent-bootstrap.yml';
   const bootstrapSource=sources.get(bootstrapPath);
   for(const [label,mutate] of [
@@ -446,7 +522,7 @@ function selfTest(){
   assert.throws(()=>checkInventory(manifest,unsupported),/upstream dependency/);
   assert.deepEqual(findStorePushes('git -C result push origin acceptance-results\n'+
     'git push origin HEAD:metrics').map(x=>x.ref),['acceptance-results','metrics']);
-  console.log('Run Store inventory: 4 refs, 6 App-default writers (7 jobs), explicit legacy rollback, no silent App fallback, source/permission/token/unknown-push negatives passed');
+  console.log('Run Store inventory: 4 active refs, 6 legacy plus 5 live agent-store scoped App writers, explicit deferred server authorization, no silent App fallback, negative fixtures passed');
 }
 function gh(endpoint){
   try{
