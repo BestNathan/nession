@@ -114,7 +114,16 @@ export function projectWorkflowGraph(definitions,sha,generatedAt=new Date().toIS
   return validateWorkflowGraph({schema_version:1,source:{repository:REPO,main_sha:sha,
     generated_at:generatedAt},groups:GROUPS,nodes,edges});
 }
+function exactKeys(value,expected){
+  return value&&typeof value==='object'&&!Array.isArray(value)&&
+    Object.keys(value).sort().join('|')===expected.slice().sort().join('|');
+}
 export function validateWorkflowGraph(graph){
+  // Static public snapshots are a strict allowlist, not an export of
+  // arbitrary future workflow fields or GitHub API responses.
+  if(!exactKeys(graph,['schema_version','source','groups','nodes','edges'])||
+    !exactKeys(graph.source,['repository','main_sha','generated_at']))
+    throw new Error('Unexpected public workflow projection fields');
   if(graph?.schema_version!==1||graph.source?.repository!==REPO||
     (graph.source.main_sha!==null&&!shaPattern.test(graph.source.main_sha))||
     !Number.isFinite(Date.parse(graph.source.generated_at)))throw new Error('Invalid workflow projection source');
@@ -122,6 +131,8 @@ export function validateWorkflowGraph(graph){
     !Array.isArray(graph.edges)||graph.edges.length>150)throw new Error('Invalid workflow projection size');
   for(let i=0;i<graph.nodes.length;i++){
     const n=graph.nodes[i],expected=catalog[i];
+    if(!exactKeys(n,['id','name','group','description','triggers','url']))
+      throw new Error('Unexpected public workflow node fields');
     if(n.id!==expected[0]||n.group!==expected[1]||n.description!==expected[2]||
       typeof n.name!=='string'||n.name.length>100||!/^[\w /.-]+$/.test(n.name)||
       !Array.isArray(n.triggers)||!n.triggers.length||n.triggers.some(t=>!TYPES.has(t))||
@@ -130,6 +141,7 @@ export function validateWorkflowGraph(graph){
   }
   const edgeKeys=new Set();
   for(const e of graph.edges){
+    if(!exactKeys(e,['from','to','kind']))throw new Error('Unexpected public workflow edge fields');
     const key=e.from+'>'+e.to+':'+e.kind;
     if(!WORKFLOW_IDS.includes(e.from)||!WORKFLOW_IDS.includes(e.to)||
       !['workflow_run','workflow_call'].includes(e.kind)||edgeKeys.has(key))
