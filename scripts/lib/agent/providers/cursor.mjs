@@ -77,8 +77,24 @@ export async function runCursorSession({
       ...(customTools ? { customTools } : {}),
     },
   };
-  if (resumeAgentId && typeof sdk.Agent.resume !== 'function') {
-    throw new Error('Cursor SDK has no native resume API; refusing fresh-session fallback');
+  if (resumeAgentId) {
+    if (typeof sdk.Agent.resume !== 'function' || typeof sdk.Agent.get !== 'function') {
+      throw new Error('Cursor SDK has no local Agent lookup/resume API; refusing fresh-session fallback');
+    }
+    // Prove the restored JSONL index resolves this exact native identity at
+    // the same cwd and Store instance that resume() will use. Do not create
+    // a replacement Agent when historical native lookup fails.
+    let stored;
+    try {
+      stored = await sdk.Agent.get(resumeAgentId, {
+        cwd: workspace, store: nativeOptions.local.store,
+      });
+    } catch {
+      throw new Error('Cursor native Agent unavailable in restored JSONL store/cwd; refusing fresh-session fallback');
+    }
+    if (stored?.agentId !== resumeAgentId) {
+      throw new Error('Cursor restored JSONL Agent identity mismatch');
+    }
   }
   const agent = resumeAgentId
     ? await sdk.Agent.resume(resumeAgentId, nativeOptions)
