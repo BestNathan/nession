@@ -3797,6 +3797,42 @@ mod tests {
             Err("invalid_output_ack"),
         );
         assert_eq!(peers[0].output_ack.applied_through(), 2);
+
+        // First advancing authenticated parser ACK opts into bounded credit
+        // at a conservative last-issued cut; it does NOT retro-credit bytes
+        // emitted before that ACK. The following output must actually be
+        // issued to this subscriber before another ACK can release it.
+        {
+            let mut issued = peers[0].issued_flow.lock().unwrap();
+            issued.issue(9, 1, 8).unwrap();
+            issued.issue(9, 2, 0).unwrap();
+            issued.issue(9, 3, 4).unwrap();
+        }
+        payload.applied_through = 3;
+        assert_eq!(
+            accept_output_ack(&mut peers, "observer", &new_socket, &payload, 5),
+            Ok(OutputAckVerdict::Advanced { previous: 2, applied_through: 3 })
+        );
+        {
+            let mut issued = peers[0].issued_flow.lock().unwrap();
+            assert!(issued.credit_enabled());
+            assert_eq!(issued.outstanding_bytes(), 0);
+            issued.issue(9, 4, 9).unwrap();
+            assert_eq!(issued.outstanding_bytes(), 9);
+        }
+        payload.applied_through = 5;
+        assert_eq!(
+            accept_output_ack(&mut peers, "observer", &new_socket, &payload, 5),
+            Err("invalid_issued_credit_ack")
+        );
+        assert_eq!(peers[0].output_ack.applied_through(), 3);
+        assert_eq!(peers[0].issued_flow.lock().unwrap().outstanding_bytes(), 9);
+        payload.applied_through = 4;
+        assert_eq!(
+            accept_output_ack(&mut peers, "observer", &new_socket, &payload, 5),
+            Ok(OutputAckVerdict::Advanced { previous: 3, applied_through: 4 })
+        );
+        assert_eq!(peers[0].issued_flow.lock().unwrap().outstanding_bytes(), 0);
     }
 
     #[test]
