@@ -548,6 +548,7 @@ where
                 agent_ws_urls,
                 session_id,
                 session_name,
+                relay_request_id,
                 client_id,
                 browser_client_id,
                 env_snapshots,
@@ -569,11 +570,15 @@ where
                     RelayRequest {
                         agent_ws_urls: &agent_ws_urls,
                         session_name: &session_name,
+                        relay_request_id: &relay_request_id,
                         // The browser's own id wherever it has one: the Agent's
                         // control bookkeeping names clients, and the client is
                         // the only party that can recognise its own name
                         // (#1429).
                         client_id: browser_client_id.as_deref().unwrap_or(&client_id),
+                        // A pre-ID legacy browser receives no route proof:
+                        // its Server-generated fallback is not its own identity.
+                        authenticated_browser_id: browser_client_id.as_deref(),
                         env_snapshots: &env_snapshots,
                         cols,
                         rows,
@@ -746,12 +751,18 @@ struct RelayRequest<'a> {
     agent_ws_urls: &'a [String],
     /// Short session name, as the agent knows it.
     session_name: &'a str,
+    /// Original browser begin request id; this is request correlation, not
+    /// a credential and not a verified parser baseline (#2089).
+    relay_request_id: &'a str,
     /// The identity this relay presents to the Agent (#1429): the browser's
     /// stable client id when it sent one, and the Server's per-attach id
     /// otherwise. It is written as `client.auth` on the relay's own connection
     /// before the attach, so every id the Agent publishes for this session is
     /// one the browser can recognise — see `relay_bidirectional_via_channel`.
     client_id: &'a str,
+    /// The browser-authored authenticated identity, if actually supplied.
+    /// A generated compatibility fallback can attach but cannot obtain proof.
+    authenticated_browser_id: Option<&'a str>,
     /// Resolved env snapshots to inject via the attach.
     env_snapshots: &'a [EnvSnapshot],
     /// Terminal columns for the initial tmux resize.
@@ -824,6 +835,10 @@ where
                 return Ok(value);
             }
         }
+        if is_agent_forged_relay_ready(&msg) {
+            warn!("Dropped Agent-forged Relay ready notification while awaiting {waiting_for}");
+            continue;
+        }
         match sender.send_terminal(msg).await {
             Ok(()) => {}
             Err(crate::server::outbound::OutboundError::Stalled) => {
@@ -860,6 +875,63 @@ fn validate_relay_client_auth_reply(
         return Err("agent_auth_wrong_client");
     }
     Ok(())
+}
+
+/// This is a **Server-authored notification**; an Agent cannot speak for
+/// a Server connection's current route. In particular the Agent may be
+/// buggy or compromised and tunnel arbitrary JSON frames. Refuse this wire
+/// on both the pre-attach and established forwarding paths (#2089).
+pub const RELAY_SUBSCRIPTION_READY_WIRE: &str = "server.session.relay.ready";
+
+fn is_agent_forged_relay_ready(msg: &tokio_tungstenite::tungstenite::Message) -> bool {
+    // Reuse the header-only classifier. A full Value allocation per output
+    // frame would punish 100k+ terminal bursts for a rare spoofed wire.
+    msg.to_text()
+        .ok()
+        .and_then(|text| serde_json::from_str::<RelayEnvelope<'_>>(text).ok())
+        .is_some_and(|frame| frame.msg_type == Some(RELAY_SUBSCRIPTION_READY_WIRE))
+}
+
+/// Publish only a pair actually returned on the **authenticated, currently
+/// attached Agent socket**. The Server mints the route ID, but never the
+/// subscriber generation or stream epoch; the browser's request ID provides
+/// correlation to its original Relay begin. This is NOT ACK authorization:
+/// verified renderer baseline, live-route admission and issued-byte credit
+/// are separate work in the parent Relay ACK requirement.
+fn agent_attached_relay_ready(
+    attach_reply: &serde_json::Value,
+    session_name: &str,
+    browser_client_id: &str,
+    relay_request_id: &str,
+) -> Option<tokio_tungstenite::tungstenite::Message> {
+    if browser_client_id.is_empty() || relay_request_id.is_empty() {
+        return None;
+    }
+    if validate_relay_attach_reply(attach_reply, session_name) != Ok(true) {
+        return None;
+    }
+    let payload = attach_reply.get("payload")?;
+    let subscriber_generation = payload.get("subscriber_generation")?.as_u64()?;
+    let stream_epoch = payload.get("stream_epoch")?.as_u64()?;
+    let frame = serde_json::json!({
+        "msg_type": RELAY_SUBSCRIPTION_READY_WIRE,
+        "id": uuid::Uuid::new_v4().to_string(),
+        "timestamp": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+        "payload": {
+            "session_name": session_name,
+            "browser_client_id": browser_client_id,
+            "relay_request_id": relay_request_id,
+            "route_id": uuid::Uuid::new_v4().to_string(),
+            "subscriber_generation": subscriber_generation,
+            "stream_epoch": stream_epoch,
+        }
+    });
+    Some(tokio_tungstenite::tungstenite::Message::Text(
+        frame.to_string(),
+    ))
 }
 
 /// Validate that an Agent really accepted this Relay socket's attach before
@@ -928,7 +1000,9 @@ where
     let RelayRequest {
         agent_ws_urls,
         session_name,
+        relay_request_id,
         client_id,
+        authenticated_browser_id,
         env_snapshots,
         cols,
         rows,
@@ -1176,6 +1250,23 @@ where
         session_name, has_agent_subscription_proof,
     );
 
+    // This receipt can only name the Agent subscription on the same socket
+    // whose attach reply we just validated. Legacy and partial identity never
+    // yield one. It is informational: it does NOT enable ACK or credit.
+    if has_agent_subscription_proof {
+        if let Some(browser_id) = authenticated_browser_id {
+            if let Some(receipt) = agent_attached_relay_ready(
+                &attach_response,
+                session_name,
+                browser_id,
+                relay_request_id,
+            ) {
+                sender.send_reply(receipt).await.map_err(|e| {
+                    anyhow::anyhow!("Could not publish Relay subscription proof: {e}")
+                })?;
+            }
+        }
+    }
     info!("Relay established for session '{}'", session_name);
 
     // ── Step 2: Bidirectional forwarding ──
@@ -1201,6 +1292,9 @@ where
     let agent_to_client = async {
         while let Some(msg) = agent_read.next().await {
             match msg {
+                Ok(msg) if is_agent_forged_relay_ready(&msg) => {
+                    warn!("Dropped Agent-forged Relay ready notification after attach");
+                }
                 Ok(msg) => match sender.send_terminal(msg).await {
                     Ok(()) => {}
                     Err(crate::server::outbound::OutboundError::Stalled) => {
@@ -1902,6 +1996,67 @@ mod tests {
             let reply = json!({"msg_type":"ok","payload":payload});
             assert!(validate_relay_client_auth_reply(&reply, "browser-a").is_err());
         }
+    }
+
+    #[test]
+    fn relay_ready_receipt_has_only_agent_origin_identity_and_unique_route() {
+        let accepted = json!({
+            "msg_type": "ok", "payload": {
+                "session_name": "sess", "subscriber_generation": 41,
+                "stream_epoch": 52
+            }
+        });
+        let a = agent_attached_relay_ready(&accepted, "sess", "browser-a", "begin-123")
+            .expect("verified Agent subscription");
+        let b = agent_attached_relay_ready(&accepted, "sess", "browser-a", "begin-123")
+            .expect("fresh route");
+        let a: serde_json::Value = serde_json::from_str(a.to_text().unwrap()).unwrap();
+        let b: serde_json::Value = serde_json::from_str(b.to_text().unwrap()).unwrap();
+        assert_eq!(a["msg_type"], RELAY_SUBSCRIPTION_READY_WIRE);
+        assert_eq!(a["payload"]["relay_request_id"], "begin-123");
+        assert_eq!(a["payload"]["browser_client_id"], "browser-a");
+        assert_eq!(a["payload"]["session_name"], "sess");
+        assert_eq!(a["payload"]["subscriber_generation"], 41);
+        assert_eq!(a["payload"]["stream_epoch"], 52);
+        assert_ne!(a["payload"]["route_id"], b["payload"]["route_id"]);
+        assert!(a["payload"].get("credit_enabled").is_none());
+        assert!(a["payload"].get("applied_through").is_none());
+        assert_eq!(
+            agent_attached_relay_ready(&accepted, "other", "browser-a", "begin-123"),
+            None
+        );
+        assert_eq!(
+            agent_attached_relay_ready(&accepted, "sess", "", "begin-123"),
+            None
+        );
+        assert_eq!(
+            agent_attached_relay_ready(&accepted, "sess", "browser-a", ""),
+            None
+        );
+    }
+
+    #[test]
+    fn relay_ready_is_never_minted_from_legacy_partial_or_forged_agent_frames() {
+        for reply in [
+            json!({"msg_type":"ok","payload":{"session_name":"sess"}}),
+            json!({"msg_type":"ok","payload":{"session_name":"sess","stream_epoch":17}}),
+            json!({"msg_type":"ok","payload":{"session_name":"sess","subscriber_generation":8}}),
+            json!({"msg_type":"ok","payload":{"session_name":"sess","subscriber_generation":0,"stream_epoch":8}}),
+            json!({"msg_type":"ok","payload":{"session_name":"sess","subscriber_generation":8,"stream_epoch":9007199254740992u64}}),
+            json!({"msg_type":"error","payload":{"session_name":"sess","subscriber_generation":8,"stream_epoch":9}}),
+        ] {
+            assert!(agent_attached_relay_ready(&reply, "sess", "browser-a", "begin-123").is_none());
+        }
+        let spoof = tokio_tungstenite::tungstenite::Message::Text(
+            json!({"msg_type":"server.session.relay.ready", "payload":{"route_id":"forged"}})
+                .to_string(),
+        );
+        assert!(is_agent_forged_relay_ready(&spoof));
+        assert!(!is_agent_forged_relay_ready(
+            &tokio_tungstenite::tungstenite::Message::Text(
+                json!({"msg_type":"agent.terminal.output","data":"ordinary"}).to_string(),
+            )
+        ));
     }
 
     #[test]
