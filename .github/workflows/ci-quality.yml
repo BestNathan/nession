@@ -81,12 +81,11 @@ jobs:
 
   rust-check:
     needs: scope
+    runs-on: ubuntu-latest
     steps:
       - name: Not Applicable — no rust inputs changed
         if: needs.scope.outputs.rust == 'false'
         run: echo 'Not Applicable — rust validated inputs unchanged at exact PR HEAD'
-    runs-on: ubuntu-latest
-    steps:
       - if: needs.scope.outputs.rust == 'true'
         uses: actions/checkout@v4
         with:
@@ -114,12 +113,11 @@ jobs:
 
   web-check:
     needs: scope
+    runs-on: ubuntu-latest
     steps:
       - name: Not Applicable — no web inputs changed
         if: needs.scope.outputs.web == 'false'
         run: echo 'Not Applicable — web validated inputs unchanged at exact PR HEAD'
-    runs-on: ubuntu-latest
-    steps:
       - if: needs.scope.outputs.web == 'true'
         uses: actions/checkout@v4
         with:
