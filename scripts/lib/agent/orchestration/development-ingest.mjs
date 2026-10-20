@@ -19,7 +19,7 @@ import {readIssueWorkflowState} from './state-store.mjs';
 import {failedDeveloperRetryActionId,nativeResumeSuccessorId} from './outbox.mjs';
 import {sealCheckpoint} from '../store/checkpoint.mjs';
 import {publishEncryptedAgentCheckpoint,verifyCommittedCheckpoint} from '../store/remote.mjs';
-import {CONTROLLED_CONTINUATION} from './development-resume.mjs';
+import {CONTROLLED_CONTINUATION,CONTROLLED_V2_CONTINUATION} from './development-resume.mjs';
 import {deriveStoreAesKey} from './development-checkpoint-key.mjs';
 import {openCursorNativeStore} from '../providers/cursor-native-store.mjs';
 
@@ -50,7 +50,10 @@ export function matchingResult(result,proof,sealed,claim,run) {
       result.content_sha256!==hash(resuming?
         'Durable Worker fixture: complete\nPrevious value: pending\n':'Durable Worker fixture: complete\n')||
       (resuming&&(result.native_resumed!==true||result.prior_turn_word_observed!==true||
-        result.parent_checkpoint_commit_sha!=='d812e3655c0ad6337b1003aa0c1794c12335adb0'||
+        result.parent_checkpoint_commit_sha!==(
+          ticket.action_id===CONTROLLED_V2_CONTINUATION
+            ?'f9abdeca3cc26780fb0a7b2ed7000d2dd28cf142'
+            :'d812e3655c0ad6337b1003aa0c1794c12335adb0')||
         proof.metadata?.agent_id!=='agent-7d5b4a61-1476-4ce7-a38a-82907aa3b1a6'))||
       (!resuming&&result.native_resumed===true)||
       proof.schema_version!==1||
@@ -162,6 +165,10 @@ export const NATIVE_RECOVERY_ACTION=nativeResumeSuccessorId(1997,CONTROLLED_CONT
 export const NATIVE_RECOVERY_RUN=39396836009;
 export const NATIVE_RECOVERY_SHA='2f75869833fb43ec54e88b560226f8913a6beac3';
 export const NATIVE_RECOVERY_INGEST_COMMAND='/nession ingest issue=1997 action='+NATIVE_RECOVERY_ACTION+' worker_run='+NATIVE_RECOVERY_RUN;
+export const V2_INGEST_WORKER_RUN=39448549052;
+export const V2_INGEST_WORKER_SHA='271b48e494b6bd54843403b831709d6365f30530';
+export const V2_INGEST_COMMAND='/nession ingest issue=1997 action='+CONTROLLED_V2_CONTINUATION+
+  ' worker_run='+V2_INGEST_WORKER_RUN;
 // The lack of a workflow_run delivery must not allow a result to be promoted
 // by editing a Store file or by supplying an arbitrary Run ID. This manual
 // recovery still re-reads GitHub, both Artifact digests, the HMAC Ticket and
@@ -189,7 +196,8 @@ export function resolveTrustedIngestSource({environment,event}){
         event.comment?.user?.login!=='BestNathan'||
         (event.comment?.body!==PINNED_RECOVERY_COMMAND&&
           !new RegExp('^/nession ingest issue=1997 action='+CONTROLLED_CONTINUATION+' worker_run=[1-9][0-9]{0,14}$').test(event.comment?.body??'')&&
-          event.comment?.body!==NATIVE_RECOVERY_INGEST_COMMAND)||
+          event.comment?.body!==NATIVE_RECOVERY_INGEST_COMMAND&&
+          event.comment?.body!==V2_INGEST_COMMAND)||
         !Number.isSafeInteger(event.comment.id)||event.comment.id<1)
       fail('manual checkpoint recovery requires exact owner/main Issue comment');
     if(event.comment.body===PINNED_RECOVERY_COMMAND)
@@ -197,7 +205,8 @@ export function resolveTrustedIngestSource({environment,event}){
     const id=Number(event.comment.body.match(/worker_run=([0-9]+)$/)[1]);
     if(!Number.isSafeInteger(id)||id<=PINNED_RECOVERY_SOURCE_RUN)fail('invalid continuation source Run');
     return {run_id:id,source:null,continuation:true,
-      ...(event.comment.body===NATIVE_RECOVERY_INGEST_COMMAND?{native_recovery:true}:{})};
+      ...(event.comment.body===NATIVE_RECOVERY_INGEST_COMMAND?{native_recovery:true}:{}),
+      ...(event.comment.body===V2_INGEST_COMMAND?{v2_recovery:true}:{})};
   }
   fail('unsupported Ingest trigger');
 }
@@ -234,6 +243,11 @@ async function main(){
        run.head_sha!=='e6e64eb84663f2bb935b9c0628d9ab787523186b'||
        run.conclusion!=='success'||run.status!=='completed'))
     fail('manual replay is not the exact successful isolated Worker');
+  if(authority.v2_recovery &&
+     (run.id!==V2_INGEST_WORKER_RUN||run.run_attempt!==1||
+      run.head_sha!==V2_INGEST_WORKER_SHA||
+      run.status!=='completed'||run.conclusion!=='success'))
+    fail('manual v2 continuation is not the exact successful Worker SHA/Run');
   if(authority.native_recovery &&
      (run.id!==NATIVE_RECOVERY_RUN||run.run_attempt!==1||
       run.head_sha!==NATIVE_RECOVERY_SHA||
@@ -271,13 +285,16 @@ async function main(){
             39267659650),
           CONTROLLED_CONTINUATION,
           NATIVE_RECOVERY_ACTION,
+          CONTROLLED_V2_CONTINUATION,
         ].includes(verified.action_id))
       fail('Developer scope not yet authorized outside #1997 fixture');
     if(authority.continuation&&(
-         ![CONTROLLED_CONTINUATION,NATIVE_RECOVERY_ACTION].includes(verified.action_id)||
+         ![CONTROLLED_CONTINUATION,NATIVE_RECOVERY_ACTION,CONTROLLED_V2_CONTINUATION].includes(verified.action_id)||
          run.run_attempt!==1||
          (authority.native_recovery&&verified.action_id!==NATIVE_RECOVERY_ACTION)||
-         (!authority.native_recovery&&verified.action_id!==CONTROLLED_CONTINUATION)))
+         (authority.v2_recovery&&verified.action_id!==CONTROLLED_V2_CONTINUATION)||
+         (!authority.native_recovery&&!authority.v2_recovery&&
+          verified.action_id!==CONTROLLED_CONTINUATION)))
       fail('continuation recovery source is not the exact controlled Action/Attempt');
     const store=env.AGENT_STORE_CONTROLLER_REMOTE;
     const admission=readConfirmedDevelopmentState(store,claim,run);
