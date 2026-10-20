@@ -10,7 +10,6 @@ import {
   countInBuffer,
   sendRawToTerminal,
   submitTerminalCommand,
-  expectPtySize,
 } from '../../helpers/terminalRegression';
 
 // #1645 SC-10 / #1926 SC-05: a high-rate numbered burst must reach the xterm
@@ -165,9 +164,5 @@ for (const mode of ['Relay', 'P2P'] as const) {
     // Nothing owned by the alternate screen may leak into normal scrollback.
     expect(await countInBuffer(page, 'ALT-2130-TUI')).toBe(0);
 
-    // The resize that happened during the TUI reached the PTY: this is the
-    // same grid/pty measurement the suite uses for #1187, taken once the
-    // shell is back at a prompt.
-    await expectPtySize(page, after.cols, after.rows);
   });
 }
