@@ -573,6 +573,14 @@ export class ConnectionManager implements TerminalTransport {
     streamCursor: number | undefined,
     options?: { preserveAppliedCursor?: boolean },
   ): void {
+    if (this.mode === 'relay') {
+      // Relay's attach cursor is a transport receipt, not proof that the
+      // current xterm renderer applied a complete, verified checkpoint.
+      // In particular tmux screen-only capture cannot establish a full VT
+      // baseline. A new Relay stream anchors only on its first live event,
+      // until an independently proven route-cutover checkpoint exists.
+      return;
+    }
     this.reconciler.seed(streamEpoch, streamCursor, options);
   }
 
@@ -681,20 +689,38 @@ export class ConnectionManager implements TerminalTransport {
     // Use sessionName for relay subscriptions — agent protocol messages
     // carry session_name (short name), not session_id (agent:name format).
     this.relayUnsubOutput = svc.onRelayOutput(this.sessionName, (data: Uint8Array, bootstrap?: TerminalBootstrap, position?: TerminalStreamPosition) => {
-      if (!this.disposed) {
-        this.observeRelayPosition(position, 'output', bootstrap !== undefined);
-        // Relay's stream position is NOT yet admitted to an ordered/replayed
-        // xterm timeline. Display-only until actual Relay resume exists.
-        this.onOutput?.(data, bootstrap);
+      if (this.disposed) { return; }
+      this.observeRelayPosition(position, 'output', bootstrap !== undefined);
+      if (bootstrap !== undefined || position === undefined) {
+        // Legacy output and screen-only bootstrap have no verifiable place in
+        // this Agent timeline. Invalidate any pending resume generation so a
+        // delayed reply cannot replay duplicate bytes across the opaque cut.
+        this.reconciler.invalidateContinuity();
       }
+      // Only Agent-positioned output enters the shared ordered replay lane.
+      // Unpositioned history/legacy output still renders exactly as before.
+      // A received/replayed ordinal is not a parser ACK or synchronized cut.
+      this.reconciler.acceptLive({
+        data,
+        bootstrap,
+        streamEpoch: position?.streamEpoch,
+        streamSeq: position?.streamSeq,
+      });
     });
 
     this.relayUnsubResize = svc.onRelayResize(
       this.sessionName,
       (cols: number, rows: number, position?: TerminalStreamPosition) => {
-        if (!this.disposed) {
-          this.observeRelayPosition(position, 'resize');
-          this.onResize?.(cols, rows);
+        if (this.disposed) { return; }
+        this.observeRelayPosition(position, 'resize');
+        if (position) {
+          this.reconciler.acceptLiveResize({
+            cols, rows,
+            streamEpoch: position.streamEpoch,
+            streamSeq: position.streamSeq,
+          });
+        } else {
+          this.reconciler.acceptLevelResize(cols, rows);
         }
       },
     );

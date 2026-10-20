@@ -292,6 +292,20 @@ export class StreamReconciler {
     this.reset(null);
   }
 
+  /**
+   * A new renderer/transport segment is not connected to the previous
+   * sequence when an unpositioned legacy output or an unverified bootstrap
+   * crosses the live stream (#2052). Forget the cursor and in-flight replay
+   * generation; future positioned frames may anchor a *new observed* run but
+   * cannot inherit a false parser/checkpoint proof. The caller separately
+   * reports the degraded gap.
+   */
+  invalidateContinuity(): void {
+    if (!this.disposed) {
+      this.reset(null);
+    }
+  }
+
   /** Adopt a stream generation, discarding every trace of the previous one. */
   private reset(epoch: number | null): void {
     this.epoch = epoch;

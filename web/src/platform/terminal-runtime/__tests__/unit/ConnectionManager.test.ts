@@ -1056,7 +1056,7 @@ describe('ConnectionManager', () => {
       cm.dispose();
     });
 
-    it('reports lost authoritative output/resize ordinals as degraded, not synchronized (#2048)', () => {
+    it('reports lost authoritative output/resize ordinals as degraded, not synchronized (#2048)', async () => {
       type Out = Parameters<RelayServerTransport['onRelayOutput']>[1];
       type Res = Parameters<RelayServerTransport['onRelayResize']>[1];
       let output: Out = () => {};
@@ -1084,17 +1084,25 @@ describe('ConnectionManager', () => {
       resize(100, 40, { streamEpoch: 9, streamSeq: 11 });
       output(new Uint8Array([2]), undefined, { streamEpoch: 9, streamSeq: 13 });
       expect(truncated).toHaveBeenCalledTimes(1);
-      expect(resized).toHaveBeenCalledWith(100, 40);
+      expect(resized).toHaveBeenCalledWith(100, 40, {
+        streamEpoch: 9, streamSeq: 11,
+      });
       output(new Uint8Array([3]), undefined, { streamEpoch: 9, streamSeq: 14 });
       output(new Uint8Array([4]), undefined, { streamEpoch: 9, streamSeq: 13 });
-      expect(truncated).toHaveBeenCalledTimes(1);
-      expect(displayed).toHaveBeenCalledTimes(4);
-      // Transport metadata must not become an unverified parser-applied ACK.
-      expect(displayed.mock.calls[3]).toHaveLength(2);
+      // Gap is withheld while Relay requests Agent replay, not rendered
+      // out-of-order or counted twice for duplicated stream_seq=13.
+      expect(displayed).toHaveBeenCalledTimes(1);
+      await flushMicrotasks(); // unavailable replay → explicit degraded skip
+      expect(truncated).toHaveBeenCalled();
+      expect(displayed).toHaveBeenCalledTimes(3);
+      // A delivered position is not an unverified parser-applied ACK.
+      expect(displayed.mock.calls[2]).toEqual([
+        new Uint8Array([3]), undefined,
+        { streamEpoch: 9, streamSeq: 14 },
+      ]);
       cm.dispose();
       output(new Uint8Array([5]), undefined, { streamEpoch: 9, streamSeq: 16 });
-      expect(truncated).toHaveBeenCalledTimes(1);
-      expect(displayed).toHaveBeenCalledTimes(4);
+      expect(displayed).toHaveBeenCalledTimes(3);
     });
 
     it('keeps legacy level resize outside timeline and reopens only observed segments (#2048)', () => {
@@ -1129,6 +1137,150 @@ describe('ConnectionManager', () => {
       output(new Uint8Array([7]), undefined, { streamEpoch: 9, streamSeq: 1 });
       expect(truncated).toHaveBeenCalledTimes(2);
       cm.dispose();
+    });
+
+    it('does not turn Relay attach receipt into an applied stream checkpoint (#2052)', () => {
+      const ws = makeMockWs();
+      const cm = new ConnectionManager({
+        mode: 'relay', sessionName: 'test', sessionId: 'a:test',
+        serverConnection: ws, ...attached,
+      });
+      cm.seedStreamCursor(17, 30);
+      // No resume is warranted from this unverified cut alone.
+      expect(ws.resumeRelayStream).not.toHaveBeenCalled();
+      cm.dispose();
+    });
+
+    it('orders Relay output → missing resize replay → output without parser ACK (#2052)', async () => {
+      type Out = Parameters<RelayServerTransport['onRelayOutput']>[1];
+      const ws = makeMockWs();
+      let output: Out = () => {};
+      (ws.onRelayOutput as ReturnType<typeof vi.fn>).mockImplementation((_name: string, cb: Out) => {
+        output = cb;
+        return () => {};
+      });
+      const deferred = deferredReply();
+      vi.mocked(ws.resumeRelayStream).mockReturnValue(deferred.promise);
+      const truncated = vi.fn();
+      const delivered: string[] = [];
+      const cm = new ConnectionManager({
+        mode: 'relay', sessionName: 'test', sessionId: 'a:test', serverConnection: ws,
+        onStreamTruncated: truncated, ...attached,
+      });
+      cm.onOutput = (data) => delivered.push(new TextDecoder().decode(data));
+      cm.onResize = (cols, rows) => delivered.push(`resize:${cols}x${rows}`);
+
+      output(new TextEncoder().encode('first'), undefined, { streamEpoch: 1, streamSeq: 1 });
+      output(new TextEncoder().encode('third'), undefined, { streamEpoch: 1, streamSeq: 3 });
+      expect(delivered).toEqual(['first']);
+      expect(truncated).toHaveBeenCalledTimes(1); // fail degraded before replay proof
+      expect(ws.resumeRelayStream).toHaveBeenCalledWith('test', 1, 1);
+      deferred.resolve({
+        streamEpoch: 1, epochMatch: true, complete: true,
+        events: [{ kind: 'resize', streamEpoch: 1, streamSeq: 2, cols: 120, rows: 33 }],
+      });
+      await flushMicrotasks();
+      expect(delivered).toEqual(['first', 'resize:120x33', 'third']);
+      cm.dispose();
+    });
+
+    it('cannot promote incomplete Agent Relay replay into a contiguous renderer (#2052)', async () => {
+      type Out = Parameters<RelayServerTransport['onRelayOutput']>[1];
+      const ws = makeMockWs();
+      let output: Out = () => {};
+      (ws.onRelayOutput as ReturnType<typeof vi.fn>).mockImplementation((_name: string, cb: Out) => {
+        output = cb;
+        return () => {};
+      });
+      const deferred = deferredReply();
+      vi.mocked(ws.resumeRelayStream).mockReturnValue(deferred.promise);
+      const truncated = vi.fn();
+      const delivered: number[] = [];
+      const cm = new ConnectionManager({
+        mode: 'relay', sessionName: 'test', sessionId: 'a:test', serverConnection: ws,
+        onStreamTruncated: truncated, ...attached,
+      });
+      cm.onOutput = (data) => delivered.push(data[0]!);
+      output(new Uint8Array([1]), undefined, { streamEpoch: 17, streamSeq: 1 });
+      output(new Uint8Array([3]), undefined, { streamEpoch: 17, streamSeq: 3 });
+      expect(delivered).toEqual([1]);
+      expect(truncated).toHaveBeenCalled();
+      deferred.resolve({
+        streamEpoch: 17, epochMatch: true, complete: false,
+        firstAvailableSeq: 3,
+        // The validated Agent API suppresses the untrusted incomplete suffix.
+        events: [],
+      });
+      await flushMicrotasks();
+      // The replay suffix is not proof of a continuous prefix. The consumer
+      // may display degraded-live seq=3, but seq=2 is NEVER manufactured.
+      expect(delivered).toEqual([1, 3]);
+      expect(truncated).toHaveBeenCalled();
+      cm.dispose();
+    });
+
+    it('fences an old in-flight replay across an opaque legacy Relay output (#2052)', async () => {
+      type Out = Parameters<RelayServerTransport['onRelayOutput']>[1];
+      const ws = makeMockWs();
+      let output: Out = () => {};
+      (ws.onRelayOutput as ReturnType<typeof vi.fn>).mockImplementation((_name: string, cb: Out) => {
+        output = cb;
+        return () => {};
+      });
+      const deferred = deferredReply();
+      vi.mocked(ws.resumeRelayStream).mockReturnValue(deferred.promise);
+      const truncated = vi.fn();
+      const delivered: number[] = [];
+      const cm = new ConnectionManager({
+        mode: 'relay', sessionName: 'test', sessionId: 'a:test',
+        serverConnection: ws, onStreamTruncated: truncated, ...attached,
+      });
+      cm.onOutput = (data) => delivered.push(data[0]!);
+      output(new Uint8Array([1]), undefined, { streamEpoch: 2, streamSeq: 1 });
+      output(new Uint8Array([3]), undefined, { streamEpoch: 2, streamSeq: 3 });
+      expect(delivered).toEqual([1]);
+      expect(ws.resumeRelayStream).toHaveBeenCalledTimes(1);
+      output(new Uint8Array([99])); // Opaque output invalidates pending seq2 reply.
+      output(new Uint8Array([10]), undefined, { streamEpoch: 2, streamSeq: 10 });
+      deferred.resolve({
+        streamEpoch: 2, epochMatch: true, complete: true,
+        events: [{ kind: 'output', streamEpoch: 2, streamSeq: 2, data: 'Ag==' }],
+      });
+      await flushMicrotasks();
+      expect(delivered).toEqual([1, 99, 10]);
+      expect(truncated).toHaveBeenCalled();
+      cm.dispose();
+    });
+
+    it('rejects late Relay replay after dispose and keeps unpositioned legacy display (#2052)', async () => {
+      type Out = Parameters<RelayServerTransport['onRelayOutput']>[1];
+      const ws = makeMockWs();
+      let output: Out = () => {};
+      (ws.onRelayOutput as ReturnType<typeof vi.fn>).mockImplementation((_name: string, cb: Out) => {
+        output = cb;
+        return () => {};
+      });
+      const deferred = deferredReply();
+      vi.mocked(ws.resumeRelayStream).mockReturnValue(deferred.promise);
+      const truncated = vi.fn();
+      const rendered = vi.fn();
+      const cm = new ConnectionManager({
+        mode: 'relay', sessionName: 'test', sessionId: 'a:test', serverConnection: ws,
+        onStreamTruncated: truncated, ...attached,
+      });
+      cm.onOutput = rendered;
+      output(new Uint8Array([1]), undefined, { streamEpoch: 1, streamSeq: 10 });
+      output(new Uint8Array([3]), undefined, { streamEpoch: 1, streamSeq: 12 });
+      expect(rendered).toHaveBeenCalledTimes(1);
+      output(new Uint8Array([4])); // legacy, not a fabricated ordered ordinal
+      expect(rendered).toHaveBeenCalledTimes(2);
+      cm.dispose();
+      deferred.resolve({
+        streamEpoch: 1, epochMatch: true, complete: true,
+        events: [{ kind: 'output', streamEpoch: 1, streamSeq: 11, data: 'Ag==' }],
+      });
+      await flushMicrotasks();
+      expect(rendered).toHaveBeenCalledTimes(2);
     });
 
     it('should send terminal.resize message in relay mode via sendRelayResize', () => {
