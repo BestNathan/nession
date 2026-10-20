@@ -836,6 +836,46 @@ where
     }
 }
 
+/// Validate that an Agent really accepted this Relay socket's attach before
+/// any browser output can be pumped (#2060). A matching response id alone is
+/// not proof: unexpected reply types and cross-session "ok" frames fail closed.
+///
+/// A new Agent includes a subscriber generation and stream epoch. The pair is
+/// eligible for a future route-scoped receipt only when BOTH were minted by
+/// that Agent and fit JavaScript's safe integer range. A legacy Agent may omit
+/// the pair and remain on its existing non-credit Relay lane; absence does not
+/// grant parser-applied ACK capability.
+fn validate_relay_attach_reply(
+    reply: &serde_json::Value,
+    expected_session: &str,
+) -> Result<bool, &'static str> {
+    if reply.get("msg_type").and_then(serde_json::Value::as_str) != Some("ok") {
+        return Err("unexpected_agent_attach_reply");
+    }
+    let Some(payload) = reply.get("payload") else {
+        return Err("missing_agent_attach_payload");
+    };
+    if payload
+        .get("session_name")
+        .and_then(serde_json::Value::as_str)
+        != Some(expected_session)
+    {
+        return Err("agent_attach_wrong_session");
+    }
+    let generation = payload.get("subscriber_generation");
+    let epoch = payload.get("stream_epoch");
+    const MAX_WIRE_INT: u64 = (1_u64 << 53) - 1;
+    let safe = |value: &serde_json::Value| {
+        value
+            .as_u64()
+            .is_some_and(|value| (1..=MAX_WIRE_INT).contains(&value))
+    };
+    if generation.is_some_and(|value| !safe(value)) || epoch.is_some_and(|value| !safe(value)) {
+        return Err("invalid_agent_attach_subscription_identity");
+    }
+    Ok(generation.is_some() && epoch.is_some())
+}
+
 /// Relay mode using the connection's queued outbound path for client writes.
 /// Used when the write sink is managed by a relay task.
 ///
@@ -1100,9 +1140,11 @@ where
         }
         return Ok(RelayEnd::Ended);
     }
+    let has_agent_subscription_proof = validate_relay_attach_reply(&attach_response, session_name)
+        .map_err(|reason| anyhow::anyhow!("Agent relay attach rejected: {reason}"))?;
     info!(
-        "Agent confirmed attach for session '{}' (msg_type={})",
-        session_name, resp_type
+        "Agent confirmed relay attach for session '{}' (Agent subscription proof: {})",
+        session_name, has_agent_subscription_proof,
     );
 
     info!("Relay established for session '{}'", session_name);
@@ -1791,6 +1833,60 @@ mod tests {
     use serde_json::json;
     use std::pin::Pin;
     use std::task::{Context, Poll};
+
+    #[test]
+    fn relay_attach_reply_requires_exact_success_and_session() {
+        let success = json!({
+            "msg_type": "ok",
+            "payload": {
+                "session_name": "sess",
+                "subscriber_generation": 14,
+                "stream_epoch": 25
+            }
+        });
+        assert_eq!(validate_relay_attach_reply(&success, "sess"), Ok(true));
+        assert_eq!(
+            validate_relay_attach_reply(&success, "other-session"),
+            Err("agent_attach_wrong_session")
+        );
+        assert_eq!(
+            validate_relay_attach_reply(
+                &json!({"msg_type":"unexpected","payload":{"session_name":"sess"}}),
+                "sess"
+            ),
+            Err("unexpected_agent_attach_reply")
+        );
+        assert_eq!(
+            validate_relay_attach_reply(&json!({"msg_type":"ok"}), "sess"),
+            Err("missing_agent_attach_payload")
+        );
+    }
+
+    #[test]
+    fn relay_subscription_proof_is_never_minted_from_legacy_or_invalid_pair() {
+        let legacy = json!({"msg_type":"ok", "payload":{"session_name":"sess"}});
+        let partial = json!({
+            "msg_type":"ok", "payload":{"session_name":"sess","stream_epoch":5}
+        });
+        assert_eq!(validate_relay_attach_reply(&legacy, "sess"), Ok(false));
+        assert_eq!(validate_relay_attach_reply(&partial, "sess"), Ok(false));
+        for pair in [
+            json!({"subscriber_generation":0,"stream_epoch":1}),
+            json!({"subscriber_generation":1,"stream_epoch":0}),
+            json!({"subscriber_generation":-1,"stream_epoch":1}),
+            json!({"subscriber_generation":1,"stream_epoch":9_007_199_254_740_992_u64}),
+            json!({"subscriber_generation":"1","stream_epoch":1}),
+        ] {
+            let mut frame = json!({"msg_type":"ok","payload":{"session_name":"sess"}});
+            if let Some(obj) = frame["payload"].as_object_mut() {
+                obj.extend(pair.as_object().cloned().unwrap_or_default());
+            }
+            assert_eq!(
+                validate_relay_attach_reply(&frame, "sess"),
+                Err("invalid_agent_attach_subscription_identity")
+            );
+        }
+    }
 
     /// A window no scheduling stall can cross.
     ///
