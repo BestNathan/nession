@@ -151,6 +151,8 @@ export interface TerminalServerApi {
   beginRelayTracked(sessionId: string, opts?: RelayBeginOptions): SentSocketMessage | null;
   /** Parsed Server-owned proof, stamped with the receiving physical socket generation. */
   onRelayReady(sessionName: string, cb: (proof: RelaySubscriptionProof, physicalGeneration: number) => void): () => void;
+  /** Real owning plugin surface; socket generation numbers can collide. */
+  isBoundTo?(connection: PluginSurface): boolean;
   endRelay(sessionId: string): void;
   /**
    * Relay terminal input — base64-wrapped, mirroring the server wire.
@@ -309,6 +311,11 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
 
   onRelayReady(sessionName: string, cb: (proof: RelaySubscriptionProof, physicalGeneration: number) => void): () => void {
     return this.addMapCallback(this.readyCallbacks, sessionName, cb);
+  }
+
+  /** Old live services must never borrow a newer terminal-server binding. */
+  isBoundTo(connection: PluginSurface): boolean {
+    return this.connection === connection;
   }
 
   private relayBeginPayload(sessionId: string, opts?: RelayBeginOptions): Record<string, unknown> {
