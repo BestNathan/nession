@@ -80,3 +80,5 @@ main().catch(error => {
     evidence: [{ type: 'protocol', value: 'SC-03 exact-SHA live Server Unit invariant failed' }] }));
   process.exitCode = 1;
 });
+
+// #2095 temporary Case-source trigger probe; do not merge.
