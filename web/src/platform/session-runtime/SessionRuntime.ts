@@ -353,6 +353,10 @@ export class SessionRuntime {
         // Attach confirms the PTY subscription, not the xterm buffer.
         // Only noteBootstrapApplied() may clear a pending history repair.
         this.applyAttachSeedToLiveTransport();
+        // An atomic bootstrap can be parsed before this reply installs the
+        // subscriber generation; now that the identity exists, offer the
+        // already-proven parser frontier as the first output ACK.
+        this.submitPendingAppliedAck();
       }
       if (result.forceRelay) {
         this.applyForceRelay();
@@ -536,6 +540,11 @@ export class SessionRuntime {
     this.terminalAppliedCursor.reset();
     if (this.disposed) { return; }
     this.terminalAppliedBinding = this.terminalAppliedCursor.beginFromVerifiedBaseline(baseline);
+    // The bootstrap that proves this cut is delivered *before* the attach
+    // reply that states the subscriber generation (and before a Relay ready
+    // proof), so the identity may not exist yet. Try now for the orderings
+    // where it does; the attach/proof owners retry when it lands.
+    this.submitPendingAppliedAck();
   }
 
   /** Current renderer's parser-applied *proof*, never transport receipt. */
@@ -548,17 +557,31 @@ export class SessionRuntime {
   noteStreamEventParsed(position: TerminalStreamPosition): void {
     const binding = this.terminalAppliedBinding;
     if (this.disposed || !binding) { return; }
-    const outcome = this.terminalAppliedCursor.recordParsed(binding, position);
+    if (this.terminalAppliedCursor.recordParsed(binding, position) !== 'advanced') {
+      return;
+    }
+    this.submitPendingAppliedAck();
+  }
+
+  /**
+   * Offer the current parser-applied frontier as an output ACK, if this
+   * runtime holds the current route/subscriber/renderer proof for it.
+   *
+   * Only parser-completed, contiguous events in a verified renderer
+   * generation may advance Agent credit. A relay receipt/stream delivery,
+   * screen-only capture or duplicate callback cannot cross this gate. Sending
+   * does not prove the Agent accepted or credited it — `recordAckSubmitted`
+   * records only a frame the transport accepted.
+   */
+  private submitPendingAppliedAck(): void {
+    const binding = this.terminalAppliedBinding;
+    if (this.disposed || !binding) { return; }
     const snapshot = this.terminalAppliedCursor.snapshot(binding);
     if (!snapshot) {
       this.terminalAppliedBinding = null;
       return;
     }
-    // Only parser-completed, contiguous events in a verified renderer
-    // generation may advance Agent credit. A relay receipt/stream delivery,
-    // screen-only capture or duplicate callback cannot cross this gate.
-    if (outcome !== 'advanced'
-      || snapshot.appliedSeq <= snapshot.ackSentSeq
+    if (snapshot.appliedSeq <= snapshot.ackSentSeq
       || this.attachState.phase !== 'attached'
       || this.liveTransportGeneration !== this.transportGeneration) {
       return;
@@ -578,7 +601,6 @@ export class SessionRuntime {
       || !seed?.streamEpoch || seed.streamEpoch !== snapshot.streamEpoch) {
       return;
     }
-    // Sending an ACK does not prove that Agent accepted or credited it.
     if (api.sendOutputApplied(this.config.sessionName, {
       subscriberGeneration,
       streamEpoch: snapshot.streamEpoch,
@@ -1191,6 +1213,9 @@ export class SessionRuntime {
         return; // stale route, foreign browser, missing begin, duplicate or legacy
       }
       this.relayProof = proof;
+      // The proof may arrive after the atomic bootstrap was parsed. It is the
+      // first moment this route may submit a parser-applied ACK.
+      this.submitPendingAppliedAck();
     }) ?? null;
 
     this.relayServerUnsub = conn.onConnectionStateChange((state: ConnectionState) => {

@@ -1,3 +1,5 @@
+import type { VerifiedTerminalBaseline } from './AppliedTerminalCursor';
+
 /**
  * The bootstrap marker (#321) and what the agent says about the snapshot it
  * came with (#1305).
@@ -37,6 +39,38 @@ export interface TerminalBootstrap {
   /** Optional, explicit identity of an actual Agent stream cut. */
   streamEpoch?: number;
   throughSeq?: number;
+}
+
+/**
+ * The stream-log cut a bootstrap proves: an atomic, complete prefix of the
+ * Agent's ordered output log from seq 1 through `throughSeq`.
+ *
+ * This is **not** a VT/screen checkpoint, and it is not a claim that the
+ * client's buffer holds the session's history. `fidelity: partial` states that
+ * side explicitly: a capture/replay cannot restore modes, an alternate screen,
+ * or history that predates the Agent's reader. It proves exactly one thing:
+ * once a renderer reset to empty has parsed this payload, every output byte the
+ * Agent's stream issued through `throughSeq` has been applied in order.
+ *
+ * The caller must therefore reset the renderer **before** writing the payload
+ * (the bootstrap writer is serialized, so that reset precedes these bytes) and
+ * report the baseline only from the write callback of the current
+ * renderer/subscription generation. A screen-only or unverified capture proves
+ * none of this and yields `undefined`.
+ */
+export function streamBaselineFromBootstrap(
+  bootstrap: TerminalBootstrap | undefined,
+): VerifiedTerminalBaseline | undefined {
+  if (bootstrap?.cutConsistency !== 'atomic' || bootstrap.truncated) {
+    return undefined;
+  }
+  const epoch = bootstrap.streamEpoch;
+  const through = bootstrap.throughSeq;
+  if (!Number.isSafeInteger(epoch) || (epoch ?? 0) <= 0
+    || !Number.isSafeInteger(through) || (through ?? -1) < 0) {
+    return undefined;
+  }
+  return { kind: 'verified', streamEpoch: epoch as number, appliedThrough: through as number };
 }
 
 /**

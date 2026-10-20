@@ -422,11 +422,94 @@ describe('TerminalController', () => {
     controller.dispose();
   });
 
+  it('establishes a parser baseline only after an atomic stream prefix parses (#2120)', () => {
+    const transport = makeTransport();
+    const onStreamBaseline = vi.fn();
+    const onBootstrapApplied = vi.fn();
+    const controller = new TerminalController(makeSession(), () => transport, {
+      rendererType: 'canvas', events: { onStreamBaseline, onBootstrapApplied },
+    });
+    controller.attach(host());
+    const h = delayedParser(controller);
+    transport.onOutput!(new Uint8Array([104, 105]), {
+      requestedLines: 5000, truncated: false,
+      cutConsistency: 'atomic', fidelity: 'partial', streamEpoch: 9, throughSeq: 7,
+    });
+    // A complete replay of the Agent event log requires an empty renderer,
+    // so the scrollback goes too — unlike a screen-only capture.
+    expect(h.spy).toHaveBeenNthCalledWith(1, '\x1b[2J\x1b[3J\x1b[H', expect.any(Function));
+    // Handing the prefix to xterm is not proof that it parsed.
+    expect(onStreamBaseline).not.toHaveBeenCalled();
+    h.finish(); // reset parsed
+    expect(onStreamBaseline).not.toHaveBeenCalled();
+    h.finish(); // prefix parsed
+    expect(onStreamBaseline).toHaveBeenCalledOnce();
+    expect(onStreamBaseline).toHaveBeenCalledWith({
+      kind: 'verified', streamEpoch: 9, appliedThrough: 7,
+    });
+    // Partial fidelity is a stream position, never a history repair.
+    expect(onBootstrapApplied).not.toHaveBeenCalled();
+    h.spy.mockRestore();
+    controller.dispose();
+  });
+
+  it('does not establish a baseline from a superseded bootstrap write (#2120)', () => {
+    const transport = makeTransport();
+    const onStreamBaseline = vi.fn();
+    const controller = new TerminalController(makeSession(), () => transport, {
+      rendererType: 'canvas', events: { onStreamBaseline },
+    });
+    controller.attach(host());
+    const h = delayedParser(controller);
+    transport.onOutput!(new Uint8Array([49]), {
+      requestedLines: 5000, truncated: false,
+      cutConsistency: 'atomic', fidelity: 'partial', streamEpoch: 9, throughSeq: 7,
+    });
+    transport.onOutput!(new Uint8Array([50]), {
+      requestedLines: 5000, truncated: false,
+      cutConsistency: 'atomic', fidelity: 'partial', streamEpoch: 9, throughSeq: 11,
+    });
+    h.finish(); // old reset
+    h.finish(); // superseded prefix
+    expect(onStreamBaseline).not.toHaveBeenCalled();
+    h.finish(); // latest reset
+    h.finish(); // latest prefix
+    expect(onStreamBaseline).toHaveBeenCalledOnce();
+    expect(onStreamBaseline).toHaveBeenCalledWith({
+      kind: 'verified', streamEpoch: 9, appliedThrough: 11,
+    });
+    h.spy.mockRestore();
+    controller.dispose();
+  });
+
+  it('does not establish a baseline from a replaced transport (#2120)', () => {
+    const first = makeTransport();
+    const second = makeTransport();
+    const transports = [first, second];
+    const onStreamBaseline = vi.fn();
+    const controller = new TerminalController(makeSession(), () => transports.shift()!, {
+      rendererType: 'canvas', events: { onStreamBaseline },
+    });
+    controller.attach(host());
+    const h = delayedParser(controller);
+    first.onOutput!(new Uint8Array([49]), {
+      requestedLines: 5000, truncated: false,
+      cutConsistency: 'atomic', fidelity: 'partial', streamEpoch: 9, throughSeq: 7,
+    });
+    h.finish(); // first transport reset
+    controller.attach(host()); // same xterm, new transport
+    h.finish(); // old transport's prefix callback
+    expect(onStreamBaseline).not.toHaveBeenCalled();
+    h.spy.mockRestore();
+    controller.dispose();
+  });
+
   it('keeps existing scrollback and recovery gap when a complete tmux capture is unverified (#2008)', () => {
     const transport = makeTransport();
     const onBootstrapApplied = vi.fn();
+    const onStreamBaseline = vi.fn();
     const controller = new TerminalController(makeSession(), () => transport, {
-      rendererType: 'canvas', events: { onBootstrapApplied },
+      rendererType: 'canvas', events: { onBootstrapApplied, onStreamBaseline },
     });
     controller.attach(host());
     const h = delayedParser(controller);
@@ -439,6 +522,7 @@ describe('TerminalController', () => {
     h.finish(); // parsed tmux text, not atomic stream cut
     expect(controller.hasSessionOutput).toBe(true);
     expect(onBootstrapApplied).not.toHaveBeenCalled();
+    expect(onStreamBaseline).not.toHaveBeenCalled();
     h.spy.mockRestore();
     controller.dispose();
   });
