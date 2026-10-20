@@ -15,6 +15,7 @@ gate_check() {
   gate_require_command jq "Install jq to execute the production Waker policy." || return $?
   gate_require_path './scripts/acceptance-postrun-waker-selftest.mjs' "Restore the Waker selftest." || return $?
   gate_require_path './.github/workflows/acceptance-postrun-waker.yml' "Restore the trusted Waker workflow." || return $?
-  gate_run_invariant node scripts/acceptance-postrun-waker-selftest.mjs
+  gate_run_invariant node scripts/acceptance-postrun-waker-selftest.mjs || return $?
+  gate_run_invariant node scripts/acceptance-dependency-state.mjs self-test
 }
 gate_main "$@"
