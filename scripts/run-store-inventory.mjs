@@ -37,7 +37,7 @@ export function findDirectGitPushes(workflow){
   const pushes=[];
   for(const [index,line] of workflow.split(/\r?\n/).entries()){
     const command=line.trim().replace(/^-\s*run:\s*/,'');
-    if(!command||command.startsWith('#')||command.startsWith('echo '))continue;
+    if(!command||command.startsWith('#'))continue;
     if(/(?:^|[\s;&|])git(?:\s+-(?:C|c)\s+\S+)*\s+push\b/.test(command))
       pushes.push({line:index+1,command});
   }
@@ -411,12 +411,21 @@ function selfTest(){
     'git -C worktree push origin\n'+
     'if git push origin HEAD:agent-store; then :; fi'
   ).map(x=>x.line),[1,2,3]);
+  // A harmless-looking command prefix must not hide a second shell command.
+  assert.equal(findDirectGitPushes('echo preparing; git push origin HEAD:${ref}').length,1);
   const variablePush=new Map(sources);
   variablePush.set(agentIngest,variablePush.get(agentIngest).replace(
     '          node scripts/lib/agent/orchestration/development-ingest.mjs ingest',
     '          git push origin "HEAD:${target_ref}"\n          node scripts/lib/agent/orchestration/development-ingest.mjs ingest'));
   assert.notEqual(variablePush.get(agentIngest),sources.get(agentIngest));
   assert.throws(()=>checkInventory(manifest,variablePush),
+    /direct git push in privileged Store writer not covered by CAS/);
+  const compoundPush=new Map(sources);
+  compoundPush.set(agentIngest,compoundPush.get(agentIngest).replace(
+    '          node scripts/lib/agent/orchestration/development-ingest.mjs ingest',
+    '          echo preparing; git push origin "HEAD:${target_ref}"\\n          node scripts/lib/agent/orchestration/development-ingest.mjs ingest'));
+  assert.notEqual(compoundPush.get(agentIngest),sources.get(agentIngest));
+  assert.throws(()=>checkInventory(manifest,compoundPush),
     /direct git push in privileged Store writer not covered by CAS/);
   const unclassifiedLegacyPush=new Map(sources);
   const caseIngest='.github/workflows/acceptance-case-ingest.yml';
