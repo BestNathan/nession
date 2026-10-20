@@ -2,8 +2,10 @@ name: Store / Agent Bootstrap
 
 # Trusted main-only initial creation of the dedicated encrypted Agent Store.
 # Never force-push or rewrite an existing branch. No model tools execute here.
+# Privileged App credentials must never run under an arbitrary-ref
+# workflow_dispatch: the selected branch could replace the job-level main guard.
+# Idempotent reconciliation uses the existing trusted main push trigger.
 on:
-  workflow_dispatch:
   push:
     branches: [main]
     paths:

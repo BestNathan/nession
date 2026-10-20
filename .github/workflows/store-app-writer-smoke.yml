@@ -11,7 +11,8 @@ on:
       - .github/workflows/*-ingest.yml
       - .github/workflows/metrics-repository.yml
       - scripts/run-store-inventory.json
-  workflow_dispatch:
+  # Deliberately no workflow_dispatch: ref-selected YAML could read the
+  # repository-scoped Store App secret before any main-only job guard.
 
 permissions:
   contents: read

@@ -48,6 +48,54 @@ export function checkInventory(manifest,workflows){
     if(store.ref==='agent-store'&&store.lifecycle==='planned'&&
        !String(store.rollout_blocker??'').includes('Ruleset'))
       fail('private Agent Store deployment blocker must be explicit');
+    // Even a disposable App smoke has the repository-scoped writer key.
+    // Branch-selectable manual code could ignore its main-only job guard.
+    if(store.ref==='agent-store'){
+      const smoke=workflows.get('.github/workflows/store-app-writer-smoke.yml');
+      const header=typeof smoke==='string'
+        ?smoke.split(/^permissions:\s*$/m)[0]:null;
+      const events=typeof header==='string'
+        ?[...header.matchAll(/^  ([a-z_]+):/gm)].map(x=>x[1]):[];
+      if(typeof smoke!=='string'||
+         !/^name: Store \/ App Writer Smoke$/m.test(smoke)||
+         JSON.stringify(events)!==JSON.stringify(['push'])||
+         !/^on:\s*\n  push:\s*\n    branches: \[main\]/m.test(header)||
+         !smoke.includes("github.ref == 'refs/heads/main'")||
+         !/^  contents: read$/m.test(smoke)||
+         !smoke.includes('actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349')||
+         !smoke.includes('vars.RUN_STORE_WRITER_APP_ID')||
+         !smoke.includes('secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY')||
+         !smoke.includes('permission-contents: write')||
+         !smoke.includes('run-store-smoke/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}'))
+        fail('App Writer Smoke must use trusted main push only; no ref-selected privileged dispatch');
+    }
+    // The real agent-store bootstrap has a scoped App private key. Unlike
+    // workflow_run/issue_comment it must NOT permit arbitrary-ref manual
+    // dispatch: the caller can select changed workflow YAML and bypass a
+    // job-level main guard before token minting.
+    if(store.ref==='agent-store'){
+      const source=workflows.get('.github/workflows/store-agent-bootstrap.yml');
+      const triggers=typeof source==='string'
+        ?source.split(/^permissions:\s*$/m)[0]:null;
+      const events=typeof triggers==='string'
+        ?[...triggers.matchAll(/^  ([a-z_]+):/gm)].map(x=>x[1]):[];
+      if(typeof source!=='string'||
+         !/^name: Store \/ Agent Bootstrap$/m.test(source)||
+         !/^on:\s*\n  push:\s*\n    branches: \[main\]/m.test(triggers)||
+         JSON.stringify(events)!==JSON.stringify(['push'])||
+         !/^[ \t]+paths:\s*$/m.test(triggers)||
+         !/^  contents: read$/m.test(source)||
+         !source.includes("github.ref == 'refs/heads/main'")||
+         !source.includes('ref: ${{ github.sha }}')||
+         !source.includes('persist-credentials: false')||
+         !source.includes('node scripts/lib/agent/store/bootstrap.mjs self-test')||
+         !source.includes('node scripts/lib/agent/store/bootstrap.mjs --apply')||
+         !source.includes('actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349')||
+         !source.includes('vars.RUN_STORE_WRITER_APP_ID')||
+         !source.includes('secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY')||
+         !source.includes('permission-contents: write'))
+        fail('Agent Store bootstrap must use authenticated main push only; no ref-selected privileged dispatch');
+    }
     // A deployable, but not yet live-proven, candidate Store writer MUST be
     // inventoried separately from active writers; a raw manual dispatch must
     // never be granted App credentials regardless of its main-only job guard.
@@ -229,6 +277,35 @@ function selfTest(){
     {...trusted,GITHUB_EVENT_NAME:'push',GITHUB_SHA:'main'},
   ]) assert.throws(()=>assertTrustedLiveContext(invalid),/trusted main/);
   assert.equal(success.writers,6);
+  const bootstrapPath='.github/workflows/store-agent-bootstrap.yml';
+  const bootstrapSource=sources.get(bootstrapPath);
+  for(const [label,mutate] of [
+    ['arbitrary-ref manual workflow',s=>s.replace(/^  push:/m,'  workflow_dispatch:\n  push:')],
+    ['untrusted branch selection',s=>s.replace('    branches: [main]','    branches: [main, feature]')],
+    ['missing trusted checkout',s=>s.replace('ref: ${{ github.sha }}','ref: ${{ github.head_ref }}')],
+    ['unscoped writer token',s=>s.replace('permission-contents: write','permission-contents: read')],
+    ['inherited checkout credential',s=>s.replace('persist-credentials: false','persist-credentials: true')],
+  ]){
+    const changed=mutate(bootstrapSource);
+    assert.notEqual(changed,bootstrapSource,'fixture must change '+label);
+    const candidate=new Map(sources);candidate.set(bootstrapPath,changed);
+    assert.throws(()=>checkInventory(manifest,candidate),
+      /Agent Store bootstrap must use authenticated main push only/,label);
+  }
+  const smokePath='.github/workflows/store-app-writer-smoke.yml';
+  const smokeSource=sources.get(smokePath);
+  for(const [label,mutate] of [
+    ['arbitrary-ref App smoke',s=>s.replace(/^  push:/m,'  workflow_dispatch:\n  push:')],
+    ['untrusted App smoke branch',s=>s.replace('    branches: [main]','    branches: [main, feature]')],
+    ['missing App smoke main guard',s=>s.replace("github.ref == 'refs/heads/main'","github.ref == 'refs/heads/feature'")],
+    ['weakened App smoke token',s=>s.replace('permission-contents: write','permission-contents: read')],
+  ]){
+    const changed=mutate(smokeSource);
+    assert.notEqual(changed,smokeSource,'fixture must change '+label);
+    const candidate=new Map(sources);candidate.set(smokePath,changed);
+    assert.throws(()=>checkInventory(manifest,candidate),
+      /App Writer Smoke must use trusted main push only/,label);
+  }
   const controllerRequest='.github/workflows/acceptance-agent-controller.yml';
   const controllerWriter='.github/workflows/store-agent-controller-ingest.yml';
   const unsafeControllerRequest=new Map(sources);
