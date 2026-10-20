@@ -5,8 +5,10 @@ use serde::{Deserialize, Serialize};
 /// The Agent authenticates the socket peer and its *current* attached
 /// subscriber generation before accepting this claimed parsed prefix.
 /// Renderer generation is the locally bound xterm/writer identity; no claim
-/// is allowed from an unverified capture or attach cursor. The ACK records
-/// progress only: it does NOT release subscriber bytes/credit in this version.
+/// is allowed from an unverified capture or attach cursor. On clients
+/// with a verified parser-applied baseline, the Agent may now use an advancing
+/// ACK to opt into per-subscriber, exact issued-byte credit; it never credits
+/// pre-baseline output or treats queue dequeue as parser completion.
 /// Independent from the Agent -> browser terminal *input* ACK (#1307).
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
