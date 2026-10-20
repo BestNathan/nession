@@ -26,6 +26,13 @@ If a source is unavailable the snapshot retains \`null\` / \`unavailable\` rathe
 
 The source-backed Workflow explorer lives at `workflows.html`. The build reads a curated set of actual `.github/workflows/*.yml` files from the checked-out source revision and publishes `dist/data/workflows.json` separately from the evidence snapshot. Solid arrows are derived exclusively from declarative `workflow_run` and reusable `workflow_call` references. Event triggers shown in details are *not* automatically inferred producer→consumer links. Missing/malformed source definitions fail the static build; no browser GitHub token/API, invented runtime status or SC verdict is published. Its tests run with the standalone Pages gate. Source topology follows the deployed main revision (scheduled refresh as a fallback) rather than claiming real-time execution state.
 
+### Published Workflow Explorer verification
+
+The public entrypoint is [Workflows](https://bestnathan.github.io/nession/workflows.html) (separate from the product Web UI). Every static build records the exact checked-out `SOURCE_MAIN_SHA` in `data/workflows.json`; its 27 curated workflow nodes and their source-file links are pinned to that revision. An edge indicates only a declared `workflow_run` or `workflow_call`, never a verified execution chain, Acceptance verdict or Issue ownership.
+
+Publishing has a stricter proof than a successful artifact upload or matching main SHA alone. The **Deploy / Public Pages** main-push job validates the graph shape and SHA at build time, records independent SHA-256 digests for `workflows.html` and `data/workflows.json`, then compares those digests against the **anonymous HTTPS responses** inside the same bounded deployment-readback loop used by `site.json`. A wrong graph revision, missing route, stale CDN response, altered HTML or JSON, or mismatched digest keeps the deployment job failed. The successful deployment emits a `Public Workflow topology verified` log line containing the main SHA, node count and both digests. The authenticated workflow Run/Attempt and log, not this README or browser output, are the post-merge publication evidence; Success Criteria are independently evaluated by the trusted Acceptance flow.
+
+
 The static UI uses hash navigation (\`#/agents\`, \`#/work\`, etc.) so direct deep links work under the repository's GitHub Pages base path without rewrite rules. Deployment is owned by a **separate, trusted, main-based workflow PR** per \`.github/AGENTS.md\`; it must not build, deploy, or modify \`web/\`.
 
 ## Phase 2-A — public source-backed observations
