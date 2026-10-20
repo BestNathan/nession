@@ -33,7 +33,7 @@ test('independent public deployment preserves exact anonymous JSON and observati
   '"$workflow_nodes" == "$EXPECTED_WORKFLOW_NODES"',
   '"$url/workflows.html?revision=$EXPECTED_SHA"',
   '"$url/data/workflows.json?revision=$EXPECTED_SHA"',
-  'Public Workflow topology verified:',
+  'node pages/scripts/publication-receipt.mjs emit',
   'source_backed_observation',
   'status=not_observed',
   'Public Issue Agent Run observation:',
