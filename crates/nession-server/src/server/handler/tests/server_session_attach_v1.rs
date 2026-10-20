@@ -290,6 +290,7 @@ async fn attach_relay_mode() {
             agent_ws_urls,
             session_id: _,
             session_name,
+            relay_request_id,
             client_id: _,
             browser_client_id: _,
             env_snapshots,
@@ -301,6 +302,7 @@ async fn attach_relay_mode() {
             assert!(!agent_ws_urls.is_empty(), "expected at least one relay URL");
             assert!(agent_ws_urls[0].contains("1.2.3.4"));
             assert_eq!(session_name, "dev");
+            assert!(!relay_request_id.is_empty(), "Relay begin correlation must be retained");
             assert!(env_snapshots.is_empty());
             // The same rule as `needs_bootstrap` below, one field earlier:
             // this payload said nothing about whether the browser had
