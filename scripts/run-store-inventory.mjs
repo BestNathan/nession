@@ -28,6 +28,21 @@ export function findStorePushes(workflow){
   }
   return entries;
 }
+// Treat every direct Git push in a privileged writer as a security-relevant
+// escape hatch, even when the target ref is a variable or the command has no
+// literal Store name. Only the separately SHA-leased Task cleanup may bypass
+// the shared Run Store CAS publisher. This is a source Gate, not a substitute
+// for server-side ref authorization (#1690 SC-02/03).
+export function findDirectGitPushes(workflow){
+  const pushes=[];
+  for(const [index,line] of workflow.split(/\r?\n/).entries()){
+    const command=line.trim().replace(/^-\s*run:\s*/,'');
+    if(!command||command.startsWith('#')||command.startsWith('echo '))continue;
+    if(/(?:^|[\s;&|])git(?:\s+-(?:C|c)\s+\S+)*\s+push\b/.test(command))
+      pushes.push({line:index+1,command});
+  }
+  return pushes;
+}
 export function checkInventory(manifest,workflows){
   if(manifest?.schema_version!==1||manifest.kind!=='run_store_writer_inventory'||
      manifest.repository!==REPO||!Array.isArray(manifest.stores))
@@ -310,7 +325,22 @@ export function checkInventory(manifest,workflows){
       seen.set(key,writer);
     }
   }
+  // Unknown target refs (including HEAD:${ref}, a bare push, or a
+  // shell-composed refspec) must not bypass Store governance just because
+  // they omit literal orphan branch names. The Task cleanup is a bounded,
+  // independently SHA-leased deletion of its own ephemeral task/* ref.
+  const privilegedWriters=new Set(manifest.stores.flatMap(store=>
+    store.writers.map(writer=>writer.workflow)));
+  const taskCleanup='git -C task-store push --force-with-lease="${ref}:${sha}" origin ":${ref}"';
   for(const [workflow,body] of workflows){
+    if(privilegedWriters.has(workflow)){
+      for(const push of findDirectGitPushes(body)){
+        if(workflow==='.github/workflows/task-result-ingest.yml'&&
+           push.command===taskCleanup)continue;
+        fail('direct git push in privileged Store writer not covered by CAS: '+
+          workflow+':'+push.line);
+      }
+    }
     for(const push of findStorePushes(body)){
       if(!seen.has(workflow+'|'+push.ref))
         fail('unknown privileged Store push '+workflow+':'+push.line+' -> '+push.ref);
@@ -373,6 +403,37 @@ function selfTest(){
   assert.notEqual(directAgentPushWithGitC.get(agentIngest),sources.get(agentIngest));
   assert.throws(()=>checkInventory(manifest,directAgentPushWithGitC),
     /agent-store writer bypasses bounded CAS/);
+  // Literal ref detection alone misses direct pushes with runtime-selected
+  // refspecs. Preserve the existing Task SHA-leased cleanup exception while
+  // rejecting additions that could write ANY ref using an App writer token.
+  assert.deepEqual(findDirectGitPushes(
+    'git push origin HEAD:${ref}\n'+
+    'git -C worktree push origin\n'+
+    'if git push origin HEAD:agent-store; then :; fi'
+  ).map(x=>x.line),[1,2,3]);
+  const variablePush=new Map(sources);
+  variablePush.set(agentIngest,variablePush.get(agentIngest).replace(
+    '          node scripts/lib/agent/orchestration/development-ingest.mjs ingest',
+    '          git push origin "HEAD:${target_ref}"\n          node scripts/lib/agent/orchestration/development-ingest.mjs ingest'));
+  assert.notEqual(variablePush.get(agentIngest),sources.get(agentIngest));
+  assert.throws(()=>checkInventory(manifest,variablePush),
+    /direct git push in privileged Store writer not covered by CAS/);
+  const unclassifiedLegacyPush=new Map(sources);
+  const caseIngest='.github/workflows/acceptance-case-ingest.yml';
+  unclassifiedLegacyPush.set(caseIngest,unclassifiedLegacyPush.get(caseIngest).replace(
+    '      - uses: actions/setup-node@v4',
+    '      - run: git push origin HEAD:${target_ref}\n      - uses: actions/setup-node@v4'));
+  assert.notEqual(unclassifiedLegacyPush.get(caseIngest),sources.get(caseIngest));
+  assert.throws(()=>checkInventory(manifest,unclassifiedLegacyPush),
+    /direct git push in privileged Store writer not covered by CAS/);
+  const taskCleanupPlusPush=new Map(sources);
+  const taskIngest='.github/workflows/task-result-ingest.yml';
+  taskCleanupPlusPush.set(taskIngest,taskCleanupPlusPush.get(taskIngest).replace(
+    '          git -C task-store push --force-with-lease="${ref}:${sha}" origin ":${ref}"',
+    '          git -C task-store push --force-with-lease="${ref}:${sha}" origin ":${ref}"\n          git push origin'));
+  assert.notEqual(taskCleanupPlusPush.get(taskIngest),sources.get(taskIngest));
+  assert.throws(()=>checkInventory(manifest,taskCleanupPlusPush),
+    /direct git push in privileged Store writer not covered by CAS/);
   const untrustedExtraCheckout=new Map(sources);
   untrustedExtraCheckout.set(agentIngest,untrustedExtraCheckout.get(agentIngest).replace(
     '      - uses: actions/setup-node@v4',
