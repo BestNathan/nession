@@ -21,10 +21,19 @@ export function parseE2EEvidence(row, contractDigest) {
     contract:match[4],plan:match[5],passed:Number(match[6]),discovered:Number(match[7])};
   if (!Number.isSafeInteger(result.run)||!Number.isSafeInteger(result.attempt)||
       !Number.isSafeInteger(result.passed)||!Number.isSafeInteger(result.discovered)||
-      result.discovered<1||result.passed>result.discovered||
-      (row.result==='Pass'&&result.passed!==result.discovered))
+      result.discovered<0||result.passed>result.discovered||
+      (row.result==='Pass'&&(result.discovered<1||result.passed!==result.discovered)))
     throw Error('invalid E2E evidence counters or source identity');
   return result;
+}
+// The trusted projector is the only E2E result writer. Formatting and
+// parsing here prevent drift between its output and the read-only gates.
+export function formatE2EEvidence({run,attempt,sha,contract,plan,passed,discovered},result) {
+  const receipt='run '+run+'/'+attempt+', SHA '+sha+', contract '+contract+
+    ', plan '+plan+', tests '+passed+'/'+discovered+
+    ' (https://github.com/BestNathan/nession/actions/runs/'+run+')';
+  parseE2EEvidence({result,evidence:receipt},contract);
+  return receipt;
 }
 function visibleLines(body) {
   const lines = String(body ?? '').replace(/\r\n?/g, '\n').split('\n');
@@ -162,6 +171,7 @@ function selfTest() {
   assert.match(parseIssueE2E(body.replace('| Pending | - |','| Pass | forged |')).errors.join('; '),/unauthenticated/);
   assert.match(parseIssueE2E(body.replace('| Pending | - |','| Fail | - |')).errors.join('; '),/unauthenticated/);
   assert.equal(parseE2EEvidence({result:'Pass',evidence:proof},good.digest).run,1);
+  assert.equal(formatE2EEvidence({run:1,attempt:1,sha:'a'.repeat(40),contract:good.digest,plan:'b'.repeat(64),passed:1,discovered:1},'Pass'),proof);
   assert.throws(()=>parseE2EEvidence({result:'Pass',evidence:proof.replace('tests 1/1','tests 0/1')},good.digest),/invalid E2E evidence counters/);
   const none = parseIssueE2E([
     '## E2E Verification', '### New', '- none: no new browser behavior', '### Regression',
