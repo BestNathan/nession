@@ -199,6 +199,7 @@ function makeRelayHandle(state: ConnectionState): RelayServerTransport {
     onRelayOutput: () => () => {},
     onRelayResize: () => () => {},
     onRelayInputAck: () => () => {},
+    resumeRelayStream: vi.fn().mockRejectedValue(new Error('no Relay stream baseline')),
   };
 }
 
@@ -669,6 +670,7 @@ describe('useSessionRuntime integration', () => {
       onRelayOutput: () => () => {},
       onRelayResize: () => () => {},
       onRelayInputAck: () => () => {},
+    resumeRelayStream: vi.fn().mockRejectedValue(new Error('no Relay stream baseline')),
     } satisfies RelayServerTransport & { emit(state: ConnectionState): void };
 
     const store = makeStore('agent:a', 'token-a');
