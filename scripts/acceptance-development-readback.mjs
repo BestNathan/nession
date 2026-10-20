@@ -7,6 +7,7 @@ import {execFileSync} from 'node:child_process';
 import {validateDevelopmentState,nativeResumeSuccessorId} from './lib/agent/orchestration/outbox.mjs';
 import {issueStatePath} from './lib/agent/orchestration/state-store.mjs';
 import {checkpointPath,checkpointPrefix} from './lib/agent/store/checkpoint.mjs';
+import {verifyNativeResumeFailure} from './lib/agent/orchestration/native-resume-failure.mjs';
 
 const REPO='BestNathan/nession',SHA=/^[a-f0-9]{40}$/,DIGEST=/^[a-f0-9]{64}$/;
 export const DEVELOPMENT_RECEIPT_PREFIX='AGENT_DEVELOPMENT_INGEST_V1 ';
@@ -206,6 +207,50 @@ export function attestOriginalDispatchHistory(history,sourceSha,oldRun,actionId)
 // Bounded reusable receipt readback for the original #2010 contract and
 // dependent native recovery requirements. Unrelated Issues cannot opt in via
 // comments, prompt text, or a forged target ref.
+// Independent failure provenance for the original, dispatched native Resume.
+// Existing v2 lineage alone proves that the action is terminal, not that the
+// failed Worker really stopped before Agent.send or that its Run ID is real.
+// Never use Issue prose, model events or an unverified 'failed' JSON field.
+export function attestNativeRecoveryReadback({receipt:r,store,failedRun,jobs,artifacts,log,v1Head,targetSha}){
+  requireIt(store?.native_resume_verified===true&&r?.checkpoint_version===2&&
+    SHA.test(targetSha??''),'native recovery requires authenticated v2 and exact target');
+  const historical=verifyNativeResumeFailure(failedRun,jobs,artifacts,log,v1Head);
+  requireIt(historical.verified===true&&historical.run_id===39376331942&&
+    historical.attempt===1&&historical.failure_code==='native_cursor_agent_not_found_before_send'&&
+    r.action_id===NATIVE_V2&&r.run_id===39396836009&&r.attempt===1&&
+    r.session_id===NATIVE_ID&&
+    store.dispatch_history?.states_and_source_bindings_verified===true&&
+    store.dispatch_history.action_id===r.action_id&&
+    store.dispatch_history.verified_worker_run_id===r.run_id&&
+    positive(store.dispatch_history.issuer_run_id),
+    'historical failed Run or authenticated one-time successor is not bound');
+  return Object.freeze({kind:'verified_native_resume_recovery',schema_version:1,
+    target_sha:targetSha,source_ancestry_verified:true,
+    original_failed_action_id:NATIVE_OLD,
+    original_failed_worker_run_id:historical.run_id,
+    original_failed_worker_attempt:historical.attempt,
+    original_failed_worker_sha:failedRun.head_sha,
+    original_failure_code:historical.failure_code,
+    native_lookup_failed_before_send_verified:true,
+    parent_checkpoint_version:1,
+    parent_checkpoint_commit_sha:'d812e3655c0ad6337b1003aa0c1794c12335adb0',
+    parent_ciphertext_sha256:v1Head.ciphertext_sha256,
+    successor_action_id:NATIVE_V2,
+    successor_controller_run_id:store.dispatch_history.issuer_run_id,
+    successor_worker_run_id:r.run_id,
+    successor_worker_attempt:r.attempt,
+    successor_worker_sha:r.worker_sha,
+    successor_checkpoint_version:2,
+    successor_checkpoint_commit_sha:r.checkpoint_commit_sha,
+    successor_ciphertext_sha256:r.ciphertext_sha256,
+    native_agent_id:r.session_id,
+    outbox_pending_intent_dispatch_and_yield_verified:true,
+    // A later pending Slice is NOT model output or permission for re-dispatch.
+    next_continuation_action_id:store.continuation_action_id,
+    new_worker_dispatch_requested:false,
+    publisher_or_full_repair_verified:false});
+}
+
 export function nativeReadbackEligible(issue,stage){
   return (Number(issue)===2010&&['staging','post-merge'].includes(stage))||
     ([2038,2041,2045].includes(Number(issue))&&stage==='post-merge');
@@ -319,8 +364,24 @@ export async function collectDevelopmentReadback({repo,issue,stage,targetSha,wor
         {stdio:'pipe',timeout:10000});
 
     }
+    let nativeRecoveryProof=null;
+    if(store.native_resume_verified&&[2038,2041,2045].includes(Number(issue))){
+      const failedRun=await get('/repos/'+repo+'/actions/runs/39376331942');
+      if(!nativeReadbackAncestryReady(workspace,targetSha,
+        [failedRun.head_sha,r.worker_sha,r.ingester_sha]))continue;
+      const failedJobs=await get('/repos/'+repo+
+        '/actions/runs/39376331942/attempts/1/jobs?per_page=100');
+      const failedArtifacts=await get('/repos/'+repo+
+        '/actions/runs/39376331942/artifacts?per_page=100');
+      const failedLog=await readLog('/repos/'+repo+
+        '/actions/jobs/118475281078/logs',1024*1024);
+      const v1Head=await read('d812e3655c0ad6337b1003aa0c1794c12335adb0',prefix+'/head.json');
+      nativeRecoveryProof=attestNativeRecoveryReadback({receipt:r,store,failedRun,
+        jobs:failedJobs,artifacts:failedArtifacts,log:failedLog,v1Head,targetSha});
+    }
     return [{...r,...attested,...store,schema_version:1,kind:'verified_development_checkpoint_readback',
       immutable_state_objects:historyObjects,original_dispatch_history,
+      ...(nativeRecoveryProof?{verified_native_resume_recovery:nativeRecoveryProof}:{}),
       verified_dispatch_controller:{run_id:controller.id,attempt:controller.run_attempt,
         sha:controller.head_sha,path:controller.path,conclusion:controller.conclusion},
       target_sha:targetSha,fixture_issue:1997,
