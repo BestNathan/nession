@@ -61,6 +61,12 @@ describe('relayServerHandle', () => {
     oldHandle.sendRelayInput('work', 'ignored');
     oldHandle.sendRelayResize('work', 80, 24);
     oldHandle.endRelay('agent:work');
+    // After #2103 the same stale handle must also be unable to send a
+    // parser-applied ACK into the *new* owner's Agent tunnel.
+    expect(oldHandle.sendRelayOutputApplied?.('work', {
+      subscriberGeneration: 9, streamEpoch: 11,
+      rendererGeneration: 1, appliedThrough: 1,
+    })).toBe(false);
     expect(frames(oldSocket)).toHaveLength(0);
     expect(frames(newSocket)).toHaveLength(0);
 
