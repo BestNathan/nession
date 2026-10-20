@@ -207,6 +207,33 @@ describe('createTerminalAgentApi', () => {
       // absence is the only thing that means "append" (#321).
       expect(cb.mock.calls[1]?.[0].bootstrap).toBeUndefined();
     });
+    it('never promotes unsafe, incomplete or bootstrap output positions into a live cursor (#2067)', () => {
+      const cb = vi.fn();
+      api.onOutput(cb);
+      const emit = (epoch: unknown, seq: unknown, extra?: Record<string, unknown>) => {
+        surface.pushMessage('agent.terminal.output', {
+          session_name: 'work', data: 'YQ==',
+          stream_epoch: epoch, stream_seq: seq, ...extra,
+        });
+      };
+      emit(31, 1);
+      emit(31, undefined);
+      emit(undefined, 2);
+      emit(0, 3);
+      emit(-1, 4);
+      emit(31, 1.5);
+      emit(31, NaN);
+      emit(Infinity, 5);
+      emit(31, Number.MAX_SAFE_INTEGER + 1);
+      emit(31, 2, { bootstrap: { requested_lines: 'not-an-integer' } });
+
+      expect(cb).toHaveBeenCalledTimes(10);
+      expect(cb.mock.calls[0]?.[0]).toMatchObject({ streamEpoch: 31, streamSeq: 1 });
+      for (const call of cb.mock.calls.slice(1)) {
+        expect(call[0].streamEpoch).toBeUndefined();
+        expect(call[0].streamSeq).toBeUndefined();
+      }
+    });
   });
 
   describe('resumeStream', () => {
@@ -390,6 +417,37 @@ describe('createTerminalAgentApi', () => {
       });
 
       expect(cb).toHaveBeenCalledWith({ cols: 150, rows: 50 });
+    });
+
+    it('keeps malformed Agent resize ordinals as legacy level resizes (#2067)', () => {
+      const cb = vi.fn();
+      api.onResize(cb);
+      const emit = (epoch: unknown, seq: unknown) => {
+        surface.pushMessage('agent.terminal.resize', {
+          session_name: 'work', cols: 101, rows: 42,
+          stream_epoch: epoch, stream_seq: seq,
+        });
+      };
+      emit(11, 12);
+      for (const [epoch, seq] of [
+        [11, undefined],
+        [undefined, 12],
+        [0, 1],
+        [-5, 10],
+        [11.5, 3],
+        [11, NaN],
+        [11, Infinity],
+        [Number.MAX_SAFE_INTEGER + 1, 6],
+      ]) {
+        emit(epoch, seq);
+      }
+      expect(cb).toHaveBeenCalledTimes(9);
+      expect(cb.mock.calls[0]?.[0]).toEqual({
+        cols: 101, rows: 42, streamEpoch: 11, streamSeq: 12,
+      });
+      for (const call of cb.mock.calls.slice(1)) {
+        expect(call[0]).toEqual({ cols: 101, rows: 42 });
+      }
     });
 
     it('stops delivering after unsubscribe', () => {

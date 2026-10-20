@@ -16,6 +16,7 @@ import type { TransportPlugin, PluginSurface } from '@/platform/socket/types';
 // alternative (each side declaring its own) is how the two would drift.
 import type { RelayBeginOptions } from '@/platform/attach/relayServerConnection';
 import type { TerminalStreamPosition } from '@/platform/terminal-runtime/streamApply';
+import { readAgentStreamPosition } from './streamPosition';
 
 /**
  * A relay output frame. `bootstrap` is present when the bytes are the
@@ -57,23 +58,6 @@ interface GenerationEntry<T> {
  */
 function getSessionId(payload: Record<string, unknown>): string {
   return (payload.session_name ?? payload.session_id) as string;
-}
-
-/**
- * Relay must not erase a sequence the Agent actually issued (#2043).
- * A half-stated or unsafe pair is never interpreted as an Agent position:
- * absence is legacy/unverified, not a made-up recovery cursor. Bootstrap
- * is outside the ordered event timeline regardless of its metadata.
- */
-function readAgentStreamPosition(payload: Record<string, unknown>): TerminalStreamPosition | undefined {
-  const epoch = payload.stream_epoch;
-  const seq = payload.stream_seq;
-  if (typeof epoch !== 'number' || typeof seq !== 'number'
-    || !Number.isSafeInteger(epoch) || epoch <= 0
-    || !Number.isSafeInteger(seq) || seq <= 0) {
-    return undefined;
-  }
-  return { streamEpoch: epoch, streamSeq: seq };
 }
 
 /**
