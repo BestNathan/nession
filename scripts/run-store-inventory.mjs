@@ -333,13 +333,32 @@ export function checkInventory(manifest,workflows){
     store.writers.map(writer=>writer.workflow)));
   const taskCleanup='git -C task-store push --force-with-lease="${ref}:${sha}" origin ":${ref}"';
   for(const [workflow,body] of workflows){
+    const directPushes=findDirectGitPushes(body);
     if(privilegedWriters.has(workflow)){
-      for(const push of findDirectGitPushes(body)){
+      for(const push of directPushes){
         if(workflow==='.github/workflows/task-result-ingest.yml'&&
            push.command===taskCleanup)continue;
         fail('direct git push in privileged Store writer not covered by CAS: '+
           workflow+':'+push.line);
       }
+    }else if(directPushes.length&&
+      (/^\s*contents:\s*write\s*$/m.test(body)||
+       body.includes('RUN_STORE_WRITER_APP_PRIVATE_KEY')||
+       body.includes('permission-contents: write'))){
+      // The disposable App connectivity smoke writes only a fresh probe ref,
+      // created from this run identity. Do not allow another push target, or
+      // a second assignment that might change the variable after validation.
+      const smoke='.github/workflows/store-app-writer-smoke.yml';
+      const smokePush='git -C "$root" push origin "HEAD:${probe}"';
+      const probe='probe="refs/heads/run-store-smoke/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"';
+      const validSmoke=workflow===smoke&&
+        body.split(/\r?\n/).filter(x=>/^\s*probe=/.test(x)).length===1&&
+        body.includes(probe)&&
+        directPushes.length===3&&
+        directPushes.every(x=>x.command===smokePush);
+      if(!validSmoke)
+        fail('unclassified direct Git push in privileged Workflow: '+
+          workflow+':'+directPushes[0].line);
     }
     for(const push of findStorePushes(body)){
       if(!seen.has(workflow+'|'+push.ref))
@@ -616,10 +635,47 @@ function selfTest(){
   triggerStripped.set(privilegedMetrics,triggerStripped.get(privilegedMetrics)
     .replace(/^  schedule:/m,'  workflow_dispatch:'));
   assert.throws(()=>checkInventory(manifest,triggerStripped),/untrusted manual dispatch\/trigger/);
+  // Unknown privileged workflows are not allowed to quietly gain a
+  // dynamic-ref Git Store writer identity outside the canonical inventory.
+  const unclassifiedWriter=new Map(sources);
+  unclassifiedWriter.set('.github/workflows/unclassified-writer.yml',[
+    'name: Unclassified Writer',
+    'on:',
+    '  push:',
+    'permissions:',
+    '  contents: write',
+    'jobs:',
+    '  write:',
+    '    steps:',
+    '      - run: git push origin "HEAD:${target_ref}"',
+    '',
+  ].join('\n'));
+  assert.throws(()=>checkInventory(manifest,unclassifiedWriter),
+    /unclassified direct Git push in privileged Workflow/);
+  const unclassifiedRelease=new Map(sources);
+  const release='.github/workflows/release-staging.yml';
+  unclassifiedRelease.set(release,unclassifiedRelease.get(release)+
+    '\n      - run: git push origin "HEAD:${ref}"\n');
+  assert.throws(()=>checkInventory(manifest,unclassifiedRelease),
+    /unclassified direct Git push in privileged Workflow/);
+  const appSmokeBypass=new Map(sources);
+  const smokeWorkflow='.github/workflows/store-app-writer-smoke.yml';
+  appSmokeBypass.set(smokeWorkflow,appSmokeBypass.get(smokeWorkflow).replace(
+    '          git -C "$root" push origin "HEAD:${probe}"',
+    '          git push origin "HEAD:${target_ref}"'));
+  assert.throws(()=>checkInventory(manifest,appSmokeBypass),
+    /unclassified direct Git push in privileged Workflow/);
+  const appSmokeReassignment=new Map(sources);
+  appSmokeReassignment.set(smokeWorkflow,appSmokeReassignment.get(smokeWorkflow).replace(
+    '          root="${RUNNER_TEMP}/run-store-smoke"',
+    '          probe="refs/heads/acceptance-results"\n          root="${RUNNER_TEMP}/run-store-smoke"'));
+  assert.throws(()=>checkInventory(manifest,appSmokeReassignment),
+    /unclassified direct Git push in privileged Workflow/);
   const unknownWorkflow=new Map(sources);
   unknownWorkflow.set('.github/workflows/unreviewed.yml',
     'on: push\npermissions:\n  contents: write\njobs:\n  writer:\n    steps:\n      - run: git push origin HEAD:metrics\n');
-  assert.throws(()=>checkInventory(manifest,unknownWorkflow),/unknown privileged Store push/);
+  assert.throws(()=>checkInventory(manifest,unknownWorkflow),
+    /unclassified direct Git push in privileged Workflow/);
   const unsupported=new Map(sources);
   unsupported.delete('.github/workflows/e2e-tests.yml');
   assert.throws(()=>checkInventory(manifest,unsupported),/upstream dependency/);
