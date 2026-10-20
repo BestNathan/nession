@@ -1055,6 +1055,81 @@ describe('ConnectionManager', () => {
       cm.dispose();
     });
 
+    it('reports lost authoritative output/resize ordinals as degraded, not synchronized (#2048)', () => {
+      type Out = Parameters<RelayServerTransport['onRelayOutput']>[1];
+      type Res = Parameters<RelayServerTransport['onRelayResize']>[1];
+      let output: Out = () => {};
+      let resize: Res = () => {};
+      const ws = makeMockWs();
+      (ws.onRelayOutput as ReturnType<typeof vi.fn>).mockImplementation((_sid: string, cb: Out) => {
+        output = cb;
+        return () => {};
+      });
+      (ws.onRelayResize as ReturnType<typeof vi.fn>).mockImplementation((_sid: string, cb: Res) => {
+        resize = cb;
+        return () => {};
+      });
+      const truncated = vi.fn();
+      const displayed = vi.fn();
+      const resized = vi.fn();
+      const cm = new ConnectionManager({
+        mode: 'relay', sessionName: 'test', sessionId: 'a:test',
+        serverConnection: ws, onStreamTruncated: truncated, ...attached,
+      });
+      cm.onOutput = displayed;
+      cm.onResize = resized;
+
+      output(new Uint8Array([1]), undefined, { streamEpoch: 9, streamSeq: 10 });
+      resize(100, 40, { streamEpoch: 9, streamSeq: 11 });
+      output(new Uint8Array([2]), undefined, { streamEpoch: 9, streamSeq: 13 });
+      expect(truncated).toHaveBeenCalledTimes(1);
+      expect(resized).toHaveBeenCalledWith(100, 40);
+      output(new Uint8Array([3]), undefined, { streamEpoch: 9, streamSeq: 14 });
+      output(new Uint8Array([4]), undefined, { streamEpoch: 9, streamSeq: 13 });
+      expect(truncated).toHaveBeenCalledTimes(1);
+      expect(displayed).toHaveBeenCalledTimes(4);
+      // Transport metadata must not become an unverified parser-applied ACK.
+      expect(displayed.mock.calls[3]).toHaveLength(2);
+      cm.dispose();
+      output(new Uint8Array([5]), undefined, { streamEpoch: 9, streamSeq: 16 });
+      expect(truncated).toHaveBeenCalledTimes(1);
+      expect(displayed).toHaveBeenCalledTimes(4);
+    });
+
+    it('keeps legacy level resize outside timeline and reopens only observed segments (#2048)', () => {
+      type Out = Parameters<RelayServerTransport['onRelayOutput']>[1];
+      type Res = Parameters<RelayServerTransport['onRelayResize']>[1];
+      let output: Out = () => {};
+      let resize: Res = () => {};
+      const ws = makeMockWs();
+      (ws.onRelayOutput as ReturnType<typeof vi.fn>).mockImplementation((_sid: string, cb: Out) => {
+        output = cb;
+        return () => {};
+      });
+      (ws.onRelayResize as ReturnType<typeof vi.fn>).mockImplementation((_sid: string, cb: Res) => {
+        resize = cb;
+        return () => {};
+      });
+      const truncated = vi.fn();
+      const cm = new ConnectionManager({
+        mode: 'relay', sessionName: 'test', sessionId: 'a:test',
+        serverConnection: ws, onStreamTruncated: truncated, ...attached,
+      });
+      output(new Uint8Array([1]), undefined, { streamEpoch: 7, streamSeq: 21 });
+      resize(90, 25); // Unpositioned level never consumes a sequence ordinal.
+      output(new Uint8Array([2]), undefined, { streamEpoch: 7, streamSeq: 22 });
+      expect(truncated).not.toHaveBeenCalled();
+      output(new Uint8Array([3])); // Legacy unknown output cuts observed continuity.
+      expect(truncated).toHaveBeenCalledTimes(1);
+      output(new Uint8Array([4]), undefined, { streamEpoch: 7, streamSeq: 30 });
+      expect(truncated).toHaveBeenCalledTimes(1);
+      output(new Uint8Array([5]), { requestedLines: 20, truncated: false });
+      output(new Uint8Array([6]), undefined, { streamEpoch: 8, streamSeq: 1 });
+      output(new Uint8Array([7]), undefined, { streamEpoch: 9, streamSeq: 1 });
+      expect(truncated).toHaveBeenCalledTimes(2);
+      cm.dispose();
+    });
+
     it('should send terminal.resize message in relay mode via sendRelayResize', () => {
       const ws = makeMockWs();
       const cm = new ConnectionManager({

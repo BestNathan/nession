@@ -8,6 +8,7 @@ import type { ConnectionOptions } from './types';
 import type { TerminalInputAck } from '@/product/terminal';
 import type { TerminalTransport, TerminalInputSeed } from './transport/TerminalTransport';
 import { StreamReconciler, type ResumeReply } from './streamReconciler';
+import type { TerminalStreamPosition } from './streamApply';
 import type { TerminalBootstrap } from './bootstrap';
 import { PendingInputQueue, type InputDrop, type InputQueueBounds } from './inputQueue';
 
@@ -82,6 +83,9 @@ export class ConnectionManager implements TerminalTransport {
   private relayUnsubOutput: (() => void) | null = null;
   private relayUnsubResize: (() => void) | null = null;
   private relayUnsubInputAck: (() => void) | null = null;
+  /** Observed Relay transport ordinals, never a parser-applied/resume cursor. */
+  private relayLastObserved: TerminalStreamPosition | null = null;
+  private relayGapNotified = false;
   private p2pUnsubOutput: (() => void) | null = null;
   private p2pUnsubResize: (() => void) | null = null;
   private p2pUnsubError: (() => void) | null = null;
@@ -625,21 +629,70 @@ export class ConnectionManager implements TerminalTransport {
     return api.resumeStream(this.sessionName, epoch, afterSeq);
   }
 
+  /**
+   * Relay currently has no gap replay: the sequence is a diagnostic, not a
+   * synchronized xterm cursor. Report discontinuity as degraded-live and
+   * continue to display what arrived (#2048). No ACK/resume is minted here.
+   */
+  private observeRelayPosition(
+    position: TerminalStreamPosition | undefined,
+    kind: 'output' | 'resize',
+    isBootstrap = false,
+  ): void {
+    if (isBootstrap) {
+      // Checkpoint presence cannot prove VT fidelity or restore a prior
+      // sequence cut. Future live events start a new observed-only segment.
+      this.relayLastObserved = null;
+      this.relayGapNotified = false;
+      return;
+    }
+    if (position === undefined) {
+      // A level resize has no stream ordinal by design. A legacy OUTPUT
+      // interrupts a previously observed sequenced run, however.
+      if (kind === 'output' && this.relayLastObserved !== null) {
+        this.relayLastObserved = null;
+        if (!this.relayGapNotified) {
+          this.relayGapNotified = true;
+          this.onStreamTruncated();
+        }
+      }
+      return;
+    }
+    const prev = this.relayLastObserved;
+    if (prev !== null) {
+      const contiguous = prev.streamEpoch === position.streamEpoch
+        && prev.streamSeq + 1 === position.streamSeq;
+      if (!contiguous && !this.relayGapNotified) {
+        this.relayGapNotified = true;
+        this.onStreamTruncated();
+      }
+      // Reordered/duplicate frames must not rewind an observed frontier.
+      if (prev.streamEpoch === position.streamEpoch && position.streamSeq <= prev.streamSeq) {
+        return;
+      }
+    }
+    this.relayLastObserved = position;
+  }
+
   private setupRelay(): void {
     const svc = this.serverConnection!;
 
     // Use sessionName for relay subscriptions — agent protocol messages
     // carry session_name (short name), not session_id (agent:name format).
-    this.relayUnsubOutput = svc.onRelayOutput(this.sessionName, (data: Uint8Array, bootstrap?: TerminalBootstrap) => {
+    this.relayUnsubOutput = svc.onRelayOutput(this.sessionName, (data: Uint8Array, bootstrap?: TerminalBootstrap, position?: TerminalStreamPosition) => {
       if (!this.disposed) {
+        this.observeRelayPosition(position, 'output', bootstrap !== undefined);
+        // Relay's stream position is NOT yet admitted to an ordered/replayed
+        // xterm timeline. Display-only until actual Relay resume exists.
         this.onOutput?.(data, bootstrap);
       }
     });
 
     this.relayUnsubResize = svc.onRelayResize(
       this.sessionName,
-      (cols: number, rows: number) => {
+      (cols: number, rows: number, position?: TerminalStreamPosition) => {
         if (!this.disposed) {
+          this.observeRelayPosition(position, 'resize');
           this.onResize?.(cols, rows);
         }
       },
