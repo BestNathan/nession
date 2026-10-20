@@ -2470,7 +2470,10 @@ fn mock_agent_relay_reply(request: &serde_json::Value) -> serde_json::Value {
             "client_id": request.get("payload").and_then(|p| p.get("client_id")).cloned(),
         })
     } else {
-        request.get("payload").cloned().unwrap_or(serde_json::Value::Null)
+        request
+            .get("payload")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null)
     };
     serde_json::json!({
         "msg_type": if requested_wire == Some("agent.attach") || requested_wire == Some("client.auth") {
