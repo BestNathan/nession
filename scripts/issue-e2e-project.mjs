@@ -2,7 +2,7 @@
 // Pure trusted projection owner for Issue E2E Report; GitHub mutations must be
 // performed only by main-owned ingestion after independent source attestation.
 import assert from 'node:assert/strict';
-import { parseIssueE2E } from './issue-e2e-contract.mjs';
+import { parseIssueE2E, formatE2EEvidence } from './issue-e2e-contract.mjs';
 
 const RESULTS = new Set(['Pass', 'Fail', 'Pending', 'Error']);
 const HEX40 = /^[0-9a-f]{40}$/;
@@ -48,11 +48,10 @@ export function projectIssueE2E(issue, plan, execution, authenticated) {
     const result = resultById.get(id);
     if (!result) throw new Error('required E2E ID missing from execution: ' + id);
     const type = current.newIds.includes(id) ? 'New' : 'Regression';
-    const runUrl = 'https://github.com/BestNathan/nession/actions/runs/' + authenticated.run_id;
     rows.push({ id, type, result: result.result,
-      evidence: 'run ' + authenticated.run_id + '/' + authenticated.run_attempt +
-        ', SHA ' + authenticated.target_sha + ', contract ' + current.digest + ', plan ' + plan.plan_digest + ', ' +
-        'tests ' + result.passed + '/' + result.discovered + ' (' + runUrl + ')' });
+      evidence: formatE2EEvidence({run:authenticated.run_id,attempt:authenticated.run_attempt,
+        sha:authenticated.target_sha,contract:current.digest,plan:plan.plan_digest,
+        passed:result.passed,discovered:result.discovered},result.result) });
   }
   // Preserve non-E2E Issue data verbatim. Only the result section is projected.
   const lines = issue.body.replace(/\r\n?/g, '\n').split('\n');
