@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_projection_receipt",
+  "outcome": "applied",
+  "issue": 2056,
+  "run_id": 39404434610,
+  "run_attempt": 1,
+  "target_sha": "80ddac41c05450a46fc0564b8c9363f72686a523",
+  "plan_digest": "4fa7aadeda3a75a710106855e0332bb67908d88dafe8e7e946c6f3ebc1fa1fca",
+  "artifact_digest": "sha256:16145df91bccee4a73caa575c6fdde480b99e274a6b05c68c9a12fbc644793bf",
+  "ingest_run_id": 39405072280,
+  "ingest_attempt": 2,
+  "declaration_digest": "b720f089cc96e4d322cae2d159a13a378526c4428c556cce6bea681b985dcbc4",
+  "before_body_sha256": "d3c05a43359140ba9d7feae1b5b8ae614e4038d07f7425b9f361a0897fabaf99",
+  "body_sha256": "8c731ae816cfe1d08454983bc5d904e56a152af2171802530a549564bd732dde",
+  "readback_body": "## Requirements: Public GitHub Workflow topology\n\nExpose the **current, source-backed workflow definitions** of BestNathan/nession in the independent public Pages site. A viewer must understand intake → agents → quality/E2E → acceptance → evidence → delivery, and distinguish genuinely declarative GitHub Actions dependencies from shared triggers or conceptual lifecycle relationships.\n\nThis is **not** a live execution/status monitor, SC verdict, authenticated Issue→PR→Agent causal chain or authorization for an orphan writer. This feature is subordinate to #1782 and #1664. All public data is build-time allowlisted, read-only, bounded and pinned to the static build's source revision.\n\n### Success Criteria\n- [ ] SC-01: The standalone Pages Workflows route displays a curated set of *existing* core workflow definitions grouped by lifecycle stage and links to canonical source at the captured revision.\n- [ ] SC-02: Every arrow is derived from an actual YAML `workflow_run` subscription or reusable `workflow_call`; shared Issue/PR/push/manual events do not create invented workflow→workflow or Issue→PR→Agent/SC edges.\n- [ ] SC-03: On desktop and mobile, users can navigate to the graph, search/filter nodes, inspect typed event triggers and dependencies, and recover from absent source without a misleading success or empty-history claim.\n- [ ] SC-04: Trusted static build works offline and publishes only bounded validated definition metadata; unit and security fixtures reject missing/forged sources and links, with no browser API secrets, product-Web imports, or private Run Store payloads.\n- [ ] SC-05: On merged main, the real independently deployed Pages site serves the new route and source-backed `/data/workflows.json` at the expected revision; final result uses authenticated post-merge deployment evidence rather than PR-only CI.\n\n## Acceptance Plan\n```yaml\nacceptance:\n  SC-01:\n    when: pr\n    method: agent\n  SC-02:\n    when: pr\n    method: agent\n  SC-03:\n    when: pr\n    method: agent\n  SC-04:\n    when: pr\n    method: agent\n  SC-05:\n    when: merged\n    branch: main\n    method: agent\n```\n\n## Acceptance Report\n| Criterion | Result | Evidence |\n|---|---|---|\n| SC-01 | Pending | Awaiting independently verified exact-PR-HEAD source and UI inspection. |\n| SC-02 | Pending | Awaiting exact-head YAML/edge regression proof. |\n| SC-03 | Pending | Awaiting selected browser E2E and responsive inspection. |\n| SC-04 | Pending | Awaiting CI / Pages and public projection checks at exact HEAD. |\n| SC-05 | Pending | Only a merged-main deploy and anonymous public HTTPS readback can satisfy this. |\n\n## E2E Verification\n### New\n- pages-workflows\n### Regression\n- pages-overview\n\n## E2E Report\n\n| ID | Type | Result | Evidence |\n|---|---|---|---|\n| pages-overview | Regression | Pass | run 39404434610/1, SHA 80ddac41c05450a46fc0564b8c9363f72686a523, contract b720f089cc96e4d322cae2d159a13a378526c4428c556cce6bea681b985dcbc4, plan 4fa7aadeda3a75a710106855e0332bb67908d88dafe8e7e946c6f3ebc1fa1fca, tests 4/4 (https://github.com/BestNathan/nession/actions/runs/39404434610) |\n| pages-workflows | New | Pass | run 39404434610/1, SHA 80ddac41c05450a46fc0564b8c9363f72686a523, contract b720f089cc96e4d322cae2d159a13a378526c4428c556cce6bea681b985dcbc4, plan 4fa7aadeda3a75a710106855e0332bb67908d88dafe8e7e946c6f3ebc1fa1fca, tests 3/3 (https://github.com/BestNathan/nession/actions/runs/39404434610) |\n\n## Product alignment\n- [x] Separate public Pages from authenticated product Web runtime (see #1782).\n- [x] Do not promote definitions/metrics to unverified acceptance or Store integrity.\n- [x] Keep GitHub workflow YAML the canonical source of actual trigger declarations.\n\n---\n**Status:** Approved\n\nImplementation: #2058.",
+  "patch_updated_at": "2026-10-20T10:29:27Z",
+  "readback_updated_at": "2026-10-20T10:29:27Z",
+  "rows": [
+    {
+      "id": "pages-overview",
+      "result": "Pass",
+      "evidence": "run 39404434610/1, SHA 80ddac41c05450a46fc0564b8c9363f72686a523, contract b720f089cc96e4d322cae2d159a13a378526c4428c556cce6bea681b985dcbc4, plan 4fa7aadeda3a75a710106855e0332bb67908d88dafe8e7e946c6f3ebc1fa1fca, tests 4/4 (https://github.com/BestNathan/nession/actions/runs/39404434610)"
+    },
+    {
+      "id": "pages-workflows",
+      "result": "Pass",
+      "evidence": "run 39404434610/1, SHA 80ddac41c05450a46fc0564b8c9363f72686a523, contract b720f089cc96e4d322cae2d159a13a378526c4428c556cce6bea681b985dcbc4, plan 4fa7aadeda3a75a710106855e0332bb67908d88dafe8e7e946c6f3ebc1fa1fca, tests 3/3 (https://github.com/BestNathan/nession/actions/runs/39404434610)"
+    }
+  ]
+}
