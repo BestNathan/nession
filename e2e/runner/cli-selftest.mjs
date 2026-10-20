@@ -26,7 +26,7 @@ const expectError = (...args) => {
 const testList = call('test', '--list');
 assert.equal(testList.code, 0, testList.stderr);
 const declaredTests = JSON.parse(testList.stdout).tests;
-assert.equal(declaredTests.length, 32);
+assert.equal(declaredTests.length, 33);
 assert.equal(new Set(declaredTests.map(item => item.id)).size, declaredTests.length);
 assert.ok(declaredTests.some(item => item.id === 'terminal-io'));
 const catalogFixtures = spawnSync(process.execPath, [path.join(repo, 'e2e/runner/test-catalog-selftest.cjs')], { cwd: repo, encoding: 'utf8', timeout: 10000 });
@@ -50,7 +50,7 @@ const split = [
   'conversation-live-scroll.spec.ts',
   'conversation-disclosure-app.spec.ts',
 ];
-const expectedSpecs = migration.specs.filter(name => name !== 'conversation-acceptance.spec.ts').concat(split, ['terminal-attach-bootstrap.spec.ts', 'ui-contract-web.spec.ts', 'fixture-visual-web-compact.spec.ts', 'fixture-visual-app.spec.ts', 'fixture-visual-app-compact.spec.ts', 'fixture-visual-app-landscape.spec.ts', 'pages-overview.spec.ts', 'pages-evidence.spec.ts']).sort();
+const expectedSpecs = migration.specs.filter(name => name !== 'conversation-acceptance.spec.ts').concat(split, ['terminal-attach-bootstrap.spec.ts', 'ui-contract-web.spec.ts', 'fixture-visual-web-compact.spec.ts', 'fixture-visual-app.spec.ts', 'fixture-visual-app-compact.spec.ts', 'fixture-visual-app-landscape.spec.ts', 'pages-overview.spec.ts', 'pages-evidence.spec.ts', 'pages-workflows.spec.ts']).sort();
 assert.deepEqual(foundSpecs, expectedSpecs, 'regression spec dropped or drifted during semantic split');
 assert.equal(catalog.browserTests, expectedSpecs.length, 'catalog may not silently omit specs');
 const snapshotRoot = path.join(browserRoot, '__snapshots__');
