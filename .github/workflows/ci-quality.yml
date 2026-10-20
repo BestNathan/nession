@@ -12,33 +12,64 @@ on:
   pull_request:
     branches: [staging, main]
 
+# Staging branch protection requires both rust-check and web-check on all PRs.
+# Never add top-level pull_request.paths here: omitted required contexts can
+# remain Pending. Each job explicitly reports Not Applicable for unrelated diffs.
 # One gate run per PR. Superseded runs are useless, so cancel them.
 concurrency:
   group: quality-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
-  rust-check:
+  scope:
+    # Staging requires rust-check / web-check contexts on EVERY PR.
+    # This cheap exact-head diff classifier selects expensive steps only.
     runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.changed.outputs.rust }}
+      web: ${{ steps.changed.outputs.web }}
+      workflow: ${{ steps.changed.outputs.workflow }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-        with: { cache-workspaces: ".", cache-all-crates: "true" }
-      - uses: extractions/setup-just@v2
-      - run: jq --version
-      - uses: actions/cache@v4
-        with:
-          path: ~/.cargo/bin/cargo-llvm-cov
-          key: cargo-llvm-cov-v1
-      - run: which cargo-llvm-cov || cargo install cargo-llvm-cov
-      - run: rustup component add llvm-tools-preview
-      - name: Verify Rust and Acceptance Gates
-        run: ./gates/run --suite quality-rust
+      - name: Classify exact PR diff
+        id: changed
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="$(git merge-base "$PR_BASE_SHA" "$PR_HEAD_SHA")"
+          git diff --name-only -z "$base" "$PR_HEAD_SHA" > "$RUNNER_TEMP/changed-paths"
+          mapfile -d '' -t changed < "$RUNNER_TEMP/changed-paths"
+          rust=false
+          web=false
+          workflow=false
+          for path in "${changed[@]}"; do
+            case "$path" in
+              crates/*|Cargo.toml|Cargo.lock|rust-toolchain.toml|.cargo/*|clippy.toml|justfile|gates/*|scripts/*|automation/*|.github/workflows/ci-quality.yml) rust=true ;;
+            esac
+            case "$path" in
+              web/*|design/*|e2e/*|justfile|gates/*|scripts/*|automation/*|.github/workflows/ci-quality.yml) web=true ;;
+            esac
+            case "$path" in
+              .github/workflows/*) workflow=true ;;
+            esac
+          done
+          {
+            echo "rust=$rust"
+            echo "web=$web"
+            echo "workflow=$workflow"
+          } >> "$GITHUB_OUTPUT"
+          echo "Required checks always present; Rust=$rust Web=$web Workflow=$workflow"
 
-  web-check:
+  workflow-check:
+    needs: scope
+    if: needs.scope.outputs.workflow == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -48,14 +79,70 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - name: Verify workflow taxonomy and cross-workflow references
+        run: ./gates/run workflow-conventions
+
+  rust-check:
+    needs: scope
+    runs-on: ubuntu-latest
+    steps:
+      - name: Not Applicable — no rust inputs changed
+        if: needs.scope.outputs.rust == 'false'
+        run: echo 'Not Applicable — rust validated inputs unchanged at exact PR HEAD'
+      - if: needs.scope.outputs.rust == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - if: needs.scope.outputs.rust == 'true'
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with: { cache-workspaces: ".", cache-all-crates: "true" }
+      - if: needs.scope.outputs.rust == 'true'
+        uses: extractions/setup-just@v2
+      - if: needs.scope.outputs.rust == 'true'
+        run: jq --version
+      - if: needs.scope.outputs.rust == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-llvm-cov
+          key: cargo-llvm-cov-v1
+      - if: needs.scope.outputs.rust == 'true'
+        run: which cargo-llvm-cov || cargo install cargo-llvm-cov
+      - if: needs.scope.outputs.rust == 'true'
+        run: rustup component add llvm-tools-preview
+      - if: needs.scope.outputs.rust == 'true'
+        name: Verify Rust and Acceptance Gates
+        run: ./gates/run --suite quality-rust
+
+  web-check:
+    needs: scope
+    runs-on: ubuntu-latest
+    steps:
+      - name: Not Applicable — no web inputs changed
+        if: needs.scope.outputs.web == 'false'
+        run: echo 'Not Applicable — web validated inputs unchanged at exact PR HEAD'
+      - if: needs.scope.outputs.web == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - if: needs.scope.outputs.web == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
           cache: 'npm'
           cache-dependency-path: web/package-lock.json
-      - uses: extractions/setup-just@v2
-      - name: Verify repository tooling Gates
+      - if: needs.scope.outputs.web == 'true'
+        uses: extractions/setup-just@v2
+      - if: needs.scope.outputs.web == 'true'
+        name: Verify repository tooling Gates
         run: |
           ./gates/run --suite quality-tooling
-      - run: cd web && npm ci
-      - name: Verify Web and design Gates
+      - if: needs.scope.outputs.web == 'true'
+        run: cd web && npm ci
+      - if: needs.scope.outputs.web == 'true'
+        name: Verify Web and design Gates
         run: ./gates/run design-system-full web-eslint web-typecheck web-test-unit web-test-integration
-      - name: Verify negative fixtures and Acceptance harness contracts
+      - if: needs.scope.outputs.web == 'true'
+        name: Verify negative fixtures and Acceptance harness contracts
         run: ./gates/run design-token-boundary-selftest pre-push-diff-base-selftest acceptance-executor-selftest acceptance-agent-selftest
