@@ -68,3 +68,29 @@ export function verifyNativeResumeFailure(run,jobs,artifacts,developerLog,storeH
   return Object.freeze({verified:true,issue:1997,run_id:FAILED_RUN,attempt:1,
     failure_code:'native_cursor_agent_not_found_before_send'});
 }
+
+// This trusted Controller-only reader verifies a fresh GitHub API snapshot;
+// the Store CAS writer must independently reread its own head before mutation.
+export async function verifyNativeResumeFailureLive(token,fetchFn=fetch){
+  if(typeof token!=='string'||token.length<8)deny('independent GitHub reader required');
+  const request=async path=>{
+    const r=await fetchFn('https://api.github.com/repos/'+REPO+path,{
+      headers:{Authorization:'Bearer '+token,Accept:'application/vnd.github+json'}});
+    if(!r.ok)deny('GitHub proof request failed '+r.status);
+    return r;
+  };
+  const json=async path=>(await request(path)).json();
+  const run=await json('/actions/runs/'+FAILED_RUN);
+  const jobs=await json('/actions/runs/'+FAILED_RUN+'/jobs?per_page=100');
+  const artifacts=await json('/actions/runs/'+FAILED_RUN+'/artifacts?per_page=100');
+  const text=await (await request('/actions/jobs/'+expectedJobs.developer+'/logs')).text();
+  if(text.length>1024*1024)deny('historical log exceeds size bound');
+  const record=await json('/contents/roles/developer/dev-cursor-01/issues/1997/head.json?ref=agent-store');
+  if(record?.type!=='file'||record.encoding!=='base64'||typeof record.content!=='string'||
+     record.size>8192)deny('untrusted native Store head response');
+  const decoded=Buffer.from(record.content.replace(/\s/g,''),'base64');
+  if(decoded.length>8192)deny('unbounded Store head');
+  let head;
+  try{head=JSON.parse(decoded.toString('utf8'));}catch{deny('unparseable Store head');}
+  return verifyNativeResumeFailure(run,jobs,artifacts,text,head);
+}
