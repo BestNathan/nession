@@ -1,5 +1,5 @@
 import { decodeTerminalData, encodeBase64 } from './base64';
-import { readResumeReply, type TerminalStreamResumeResult } from './agent';
+import { readResumeReply, type TerminalStreamResumeResult, type TerminalOutputAppliedAck } from './agent';
 import { readInputAck, type InputAckFields } from './controlPayload';
 import {
   decodeBootstrapMarker,
@@ -10,6 +10,7 @@ import { WIRE as RELAY_END_WIRE } from '@/generated/protocol/core/server-session
 import { WIRE as TERMINAL_INPUT_WIRE } from '@/generated/protocol/core/agent-terminal-input/v1';
 import { WIRE as TERMINAL_RESIZE_WIRE } from '@/generated/protocol/core/agent-terminal-resize/v1';
 import { WIRE as TERMINAL_STREAM_RESUME_WIRE } from '@/generated/protocol/core/agent-terminal-stream-resume/v1';
+import { WIRE as TERMINAL_OUTPUT_APPLIED_WIRE } from '@/generated/protocol/core/agent-terminal-output-applied/v1';
 import type { TransportPlugin, PluginSurface, SentSocketMessage } from '@/platform/socket/types';
 // The shared options shape, owned next to the runtime that drives relay. A
 // type-only import across the layer boundary, which the rule allows — and the
@@ -122,6 +123,12 @@ export interface TerminalServerApi {
    */
   sendRelayInput(sessionName: string, data: string, opts?: RelayInputOptions): void;
   sendRelayResize(sessionName: string, cols: number, rows: number): void;
+  /**
+   * Relay the existing versioned Agent output.applied contract. Only a caller
+   * holding a verified parser cursor and current Agent-authored subscription
+   * proof may invoke this; sending is NOT confirmation that credit was granted.
+   */
+  sendRelayOutputApplied(sessionName: string, ack: TerminalOutputAppliedAck): boolean;
   /** Subscribe to relay output frames for one session (routed by session_name). */
   onRelayOutput(sessionName: string, cb: RelayOutputCallback): () => void;
   /** Subscribe to relay resize frames for one session (routed by session_name). */
@@ -280,6 +287,30 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
 
   sendRelayResize(sessionName: string, cols: number, rows: number): void {
     this.requireConnection().send(TERMINAL_RESIZE_WIRE, { session_name: sessionName, cols, rows });
+  }
+
+  sendRelayOutputApplied(sessionName: string, ack: TerminalOutputAppliedAck): boolean {
+    const fields = [
+      ack.subscriberGeneration, ack.streamEpoch,
+      ack.rendererGeneration, ack.appliedThrough,
+    ];
+    if (!fields.every(Number.isSafeInteger)
+      || ack.subscriberGeneration <= 0 || ack.streamEpoch <= 0
+      || ack.rendererGeneration <= 0 || ack.appliedThrough < 0) {
+      return false;
+    }
+    try {
+      this.requireConnection().send(TERMINAL_OUTPUT_APPLIED_WIRE, {
+        session_name: sessionName,
+        subscriber_generation: ack.subscriberGeneration,
+        stream_epoch: ack.streamEpoch,
+        renderer_generation: ack.rendererGeneration,
+        applied_through: ack.appliedThrough,
+      });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   onRelayOutput(sessionName: string, cb: RelayOutputCallback): () => void {
