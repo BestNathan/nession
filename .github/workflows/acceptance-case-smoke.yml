@@ -7,6 +7,21 @@ permissions:
 on:
   pull_request:
     branches: [staging, main]
+    # Scope PR execution to changes that can affect this validator.
+    # Keep push / manual triggers unchanged for exact-SHA evidence.
+    paths:
+      - '.github/workflows/acceptance-case-smoke.yml'
+      - 'crates/**'
+      - 'web/**'
+      - 'design/**'
+      - 'e2e/**'
+      - 'gates/**'
+      - 'scripts/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - '.cargo/**'
+      - 'justfile'
   workflow_dispatch:
 
 concurrency:
