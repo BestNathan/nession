@@ -72,6 +72,8 @@ export class MockPluginSurfaceImpl implements MockPluginSurface {
   private readonly stateListeners = new Set<(state: ConnectionState) => void>();
   private readonly waiters = new Set<Waiter>();
   private messageCounter = 0;
+  private sendCounter = 0;
+  private physical = 1;
 
   constructor(state: ConnectionState = 'connected') {
     this.state = state;
@@ -81,8 +83,17 @@ export class MockPluginSurfaceImpl implements MockPluginSurface {
     return this.state;
   }
 
+  get physicalGeneration(): number {
+    return this.physical;
+  }
+
   send(type: string, payload: Record<string, unknown>): void {
     this.sent.push({ type, payload });
+  }
+
+  sendWithId(type: string, payload: Record<string, unknown>): string {
+    this.send(type, payload);
+    return `test_send_${++this.sendCounter}`;
   }
 
   subscribe(
@@ -204,6 +215,9 @@ export class MockPluginSurfaceImpl implements MockPluginSurface {
       return;
     }
     this.state = next;
+    if (next === 'connected') {
+      this.physical += 1;
+    }
     for (const listener of [...this.stateListeners]) {
       listener(next);
     }
