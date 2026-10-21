@@ -1427,6 +1427,21 @@ export class SessionRuntime {
     // connect — swallow so it cannot dangle as an unhandled rejection.
     void ws.connect().catch(() => {});
     this.wireConnectionHandler();
+    // A transport whose construction fails synchronously — a `WebSocket`
+    // constructor that throws, an unusable URL — settles at `disconnected`
+    // *inside* `connect()`, before the handler above exists. That transition
+    // is what the address policy reads to advance a candidate or force Relay;
+    // without it Auto strands on the dead candidate with no later state change
+    // to wake it (#2156). Replay the settled state once, off this call: when
+    // this build is itself a candidate rotation, the policy is running and
+    // re-entering it synchronously would nest the rotation inside itself.
+    if (ws.connectionState === 'disconnected') {
+      queueMicrotask(() => {
+        if (this.agentWs === ws && ws.connectionState === 'disconnected') {
+          this.handleTerminalDisconnect();
+        }
+      });
+    }
     // The swap is complete only now — new socket, new agent API, handler
     // wired — so this is the moment bindings may rebuild (never earlier:
     // a transport built before this point would bind the disposed socket).

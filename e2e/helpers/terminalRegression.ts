@@ -244,7 +244,16 @@ export async function attachToSession(
   // too (their hint text happens to contain the search string). Anchoring
   // at the start with a regex restricts matches to the mode whose label
   // actually begins with the name we want.
-  await dialog.getByRole('button', { name: new RegExp(`^${mode}\\b`) }).click();
+  //
+  // Auto is also the name of a Connection Path row ("Auto" = the policy that
+  // picks the fastest path), so its label alone matches two buttons. The mode
+  // button's accessible name includes its hint; the path row carries the
+  // measured-path sublabel instead. Disambiguate on the hint.
+  const autoHint = 'Test paths, pick fastest, fall back to relay';
+  const modeButton = mode === 'Auto'
+    ? dialog.getByRole('button', { name: new RegExp(`^${mode}\\b.*${autoHint}`) })
+    : dialog.getByRole('button', { name: new RegExp(`^${mode}\\b`) });
+  await modeButton.click();
 
   // Wait for the Attach button to be enabled (attachInfo loaded)
   const attachButton = dialog.getByRole('button', { name: 'Attach' });

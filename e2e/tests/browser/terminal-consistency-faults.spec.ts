@@ -620,3 +620,148 @@ test('an under-burst reconnect never replays already-parsed output (#2160)', asy
   ).toEqual([]);
   expect(missingTail, 'a tail line never reached the parser').toEqual([]);
 });
+
+// #2156 / #1926 SC-03: the live route change the product actually performs.
+// The UI has no manual switch while attached (the session gear only saves the
+// mode for the next attach, and a manual P2P route that disconnects ends in
+// transport-exhausted). Under Auto, when the P2P candidates stop answering,
+// AddressAttachPolicy calls force-relay and the runtime re-attaches over Relay
+// without tearing down the renderer.
+test('an Auto P2P loss falls back to Relay without remounting the xterm (#2156)', async ({ page }, testInfo) => {
+  test.skip(!process.env.CI, 'real stack available in CI only');
+  test.setTimeout(360_000);
+
+  const sessionName = `e2e-consistency-route-${testInfo.retry}-${Date.now()}`;
+  const sentWire: Array<{ msg_type?: string }> = [];
+  page.on('websocket', (socket) => {
+    socket.on('framesent', (frame) => {
+      if (typeof frame.payload !== 'string') { return; }
+      try {
+        sentWire.push(JSON.parse(frame.payload) as { msg_type?: string });
+      } catch {
+        // Non-JSON frames are not protocol messages.
+      }
+    });
+  });
+
+  await page.goto(
+    '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
+  );
+  await waitForShell(page);
+  await createSession(page, sessionName);
+  await attachToSession(page, sessionName, 'Auto');
+  await waitForInteractiveShell(page);
+
+  const relayStarted = (): boolean =>
+    sentWire.some((frame) => frame.msg_type === 'server.session.relay.begin');
+  // Auto must have chosen the direct route, or this fixture would not exercise
+  // a switch at all.
+  expect(relayStarted(), 'Auto attach must start on the P2P route').toBe(false);
+
+  await page.locator('.xterm').evaluate((node) => {
+    node.setAttribute('data-e2e-route-instance', 'original');
+  });
+  await submitTerminalCommand(page, `printf 'ROUTE-%s-BEFORE\\n' 2156`);
+  await expect.poll(async () => countInBuffer(page, 'ROUTE-2156-BEFORE')).toBe(1);
+
+  // Suppress the liveness probe's ping and make every P2P candidate
+  // unreachable. Typing triggers the probe (#1264); once it reports the
+  // socket unresponsive, the WebSocketService rebuilds it — and that rebuild
+  // must fail too, or it would just reconnect the same healthy URL and the
+  // route policy would never run. Only the Server socket (the Relay path) is
+  // allowed through. The counters are the witnesses that the fixture cut the
+  // stream at all: without them a green assertion would mean nothing happened.
+  await page.evaluate(() => {
+    const state = window as unknown as {
+      __e2eDroppedPings?: number;
+      __e2eBlockedAgentConnects?: number;
+    };
+    state.__e2eDroppedPings = 0;
+    state.__e2eBlockedAgentConnects = 0;
+    const Original = window.WebSocket;
+    const isServerSocket = (raw: string | URL): boolean => {
+      try {
+        return new URL(String(raw)).port === '19090';
+      } catch {
+        return false;
+      }
+    };
+    const Guarded = function (url: string | URL, protocols?: string | string[]) {
+      if (!isServerSocket(url)) {
+        state.__e2eBlockedAgentConnects = (state.__e2eBlockedAgentConnects ?? 0) + 1;
+        throw new Error('e2e: agent transport intentionally unavailable');
+      }
+      return new Original(url, protocols);
+    } as unknown as typeof WebSocket;
+    Guarded.prototype = Original.prototype;
+    Object.setPrototypeOf(Guarded, Original);
+    window.WebSocket = Guarded;
+
+    const originalSend = Original.prototype.send;
+    Original.prototype.send = function (data) {
+      if (typeof data === 'string') {
+        try {
+          if ((JSON.parse(data) as { msg_type?: string }).msg_type === 'control.ping') {
+            state.__e2eDroppedPings = (state.__e2eDroppedPings ?? 0) + 1;
+            return;
+          }
+        } catch {
+          // Non-JSON frames pass through unchanged.
+        }
+      }
+      return originalSend.call(this, data);
+    };
+  });
+
+  // A burst that spans the cut.
+  const COUNT = 800;
+  const TAIL = 200;
+  await submitTerminalCommand(page, `seq 1 ${COUNT} | sed 's/^/RS-/'`);
+
+  // One input is enough: the probe deadline tears the P2P socket down, and
+  // the blocked rebuild lets AddressAttachPolicy retire its candidates and
+  // force Relay. No further typing is needed to reach the policy.
+  await sendRawToTerminal(page, ' ');
+  await expect(async () => {
+    const seen = await page.evaluate(() => {
+      const state = window as unknown as {
+        __e2eDroppedPings?: number;
+        __e2eBlockedAgentConnects?: number;
+      };
+      return {
+        droppedPings: state.__e2eDroppedPings ?? 0,
+        blockedConnects: state.__e2eBlockedAgentConnects ?? 0,
+      };
+    });
+    expect(seen.droppedPings, 'the liveness probe never fired').toBeGreaterThan(0);
+    expect(seen.blockedConnects, 'no P2P transport rebuild was attempted').toBeGreaterThan(0);
+    expect(relayStarted(), 'the Auto route must reach force-relay').toBe(true);
+  }).toPass({ timeout: 90_000 });
+
+  await waitForLastLine(page, 'RS-', COUNT, { timeoutMs: 240_000, stallMs: 60_000 });
+
+  const text = await readTerminalBuffer(page);
+  const counts = new Map<number, number>();
+  for (const match of text.matchAll(/RS-(\d+)/g)) {
+    const value = Number(match[1]);
+    if (value >= 1 && value <= COUNT) {
+      counts.set(value, (counts.get(value) ?? 0) + 1);
+    }
+  }
+  const duplicated = [...counts.entries()]
+    .filter(([value, seen]) => seen > 1 && value > COUNT - TAIL)
+    .map(([value]) => value);
+  const missingTail: number[] = [];
+  for (let value = COUNT - TAIL + 1; value <= COUNT; value += 1) {
+    if (!counts.has(value)) { missingTail.push(value); }
+  }
+  expect(duplicated, 'a tail line was delivered more than once across the fallback').toEqual([]);
+  expect(missingTail, 'a tail line never reached the parser across the fallback').toEqual([]);
+
+  // The renderer survived and the controller can still write.
+  await expect(page.locator('.xterm')).toHaveAttribute('data-e2e-route-instance', 'original');
+  expect(await countInBuffer(page, 'ROUTE-2156-BEFORE')).toBe(1);
+  await submitTerminalCommand(page, `printf 'ROUTE-%s-AFTER\\n' 2156`);
+  await expect.poll(async () => countInBuffer(page, 'ROUTE-2156-AFTER'), { timeout: 20_000 })
+    .toBe(1);
+});
