@@ -22,7 +22,8 @@ export function mergeIdentity(event,commit,prs) {
   const matching=prs.filter(pr=>typeof pr?.merged_at === 'string' && pr.merged_at.length > 0 &&
     pr?.merge_commit_sha===commit.sha && pr?.base?.repo?.full_name===REPO &&
     pr?.base?.ref===event.ref.slice(11) && pr?.head?.repo?.full_name===REPO &&
-    pr?.head?.sha===commit.parents[1] && commit.parents.length===2);
+    (commit.parents.length===1 ||
+      (commit.parents.length===2 && pr?.head?.sha===commit.parents[1])));
   if(matching.length>1)throw Error('ambiguous exact merge PR identity');
   return {targetSha:commit.sha,baseSha:commit.parents[0],pr:matching[0]??null};
 }
@@ -74,6 +75,9 @@ function selfTest(){
   const pr={number:1,merged_at:'2026-10-21T02:00:00Z',merge_commit_sha:sha,
     base:{ref:'main',repo:{full_name:REPO}},head:{sha:head,repo:{full_name:REPO}}};
   assert.equal(mergeIdentity(event,commit,[pr]).pr.number,1);
+  const squash={sha,parents:[base]};
+  assert.equal(mergeIdentity(event,squash,[pr]).pr.number,1,
+    'GitHub-attested squash merge PR must not be mistaken for an unassociated push');
   assert.equal(mergeIdentity(event,commit,[]).pr,null);
   for(const [e,c,p] of [
     [{...event,after:base},commit,[pr]],
@@ -83,7 +87,7 @@ function selfTest(){
     [event,commit,[pr,pr]],
   ]) {
     if(p.length===2&&c.parents.length===1) {
-      assert.equal(mergeIdentity(e,c,p).pr,null);continue;
+      assert.throws(()=>mergeIdentity(e,c,p),/ambiguous/);continue;
     }
     assert.throws(()=>mergeIdentity(e,c,p),/identity|ambiguous/);
   }
