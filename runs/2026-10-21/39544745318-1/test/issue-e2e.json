@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "706bff7f169e64e7d81e82071c3f2f2dfa283976",
+  "run_id": 39544745318,
+  "run_attempt": 1,
+  "plan_digest": "7afff6401415d52f5228e9a11efa8fc56391f0e3ae494200f318384606fdee6b",
+  "artifact_digest": "sha256:a3c497b94c7139d0c0f3b40297d5b087f139d93a5d723c6ccb4dc5b5e97d3e68",
+  "results": [
+    {
+      "id": "terminal-consistency-faults",
+      "result": "Pass",
+      "discovered": 6,
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 213
+    }
+  ]
+}
