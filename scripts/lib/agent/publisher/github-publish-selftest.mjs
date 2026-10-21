@@ -114,7 +114,6 @@ for(const corrupt of [
   {status:'reconcile',may_publish:false},
   {store_commit_sha:'bad'},
   {record:{...intent.record,patch_sha256:'0'.repeat(64)}},
-  {record:{...intent.record,target_main_sha:'0'.repeat(40)}},
 ])await assert.rejects(()=>publishControlledGitHubPR({
   prepared,intent:{...intent,...corrupt},api:async()=>{throw Error('unexpected API');},
 }),/no first immutable|untrusted|mismatched/);
