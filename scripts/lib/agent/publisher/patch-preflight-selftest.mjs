@@ -105,6 +105,19 @@ try{
   assert.equal(fs.existsSync(addFile),false,'preflight must not write the source tree');
   assert.deepEqual(preflightAgentPatch({checkout:repo,source_sha:sha,patch:added,
     allowed_paths:['src/addition.js'],create_paths:['src/addition.js']}),created);
+  // A missing ordinary parent can be safely created only inside the trusted
+  // source tree; a symlink in any existing parent remains forbidden.
+  const nested=added.replaceAll('src/addition.js','src/nested/created.js');
+  assert.deepEqual(preflightAgentPatch({checkout:repo,source_sha:sha,patch:nested,
+    allowed_paths:['src/nested/created.js'],create_paths:['src/nested/created.js']})
+    .files.map(x=>[x.path,x.operation]),[['src/nested/created.js','create']]);
+  assert.equal(fs.existsSync(path.join(repo,'src/nested')),false);
+  // Even dangling symlinks in an untracked target must not be treated as an
+  // absent regular file (fs.existsSync alone would miss this attack).
+  fs.symlinkSync('/nonexistent-nession-preflight-target',addFile);
+  bad({patch:added,allowed_paths:['src/addition.js'],create_paths:['src/addition.js']},
+    /target already exists or is a symlink/);
+  fs.unlinkSync(addFile);
   const mixed=preflightAgentPatch({checkout:repo,source_sha:sha,patch:good+added,
     allowed_paths:['src/calc.js','src/addition.js'],create_paths:['src/addition.js']});
   assert.equal(mixed.files.length,2);
