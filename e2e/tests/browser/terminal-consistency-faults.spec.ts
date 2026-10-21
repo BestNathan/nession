@@ -8,6 +8,7 @@ import {
   readBufferType,
   readGrid,
   countInBuffer,
+  waitForStableGrid,
   sendRawToTerminal,
   submitTerminalCommand,
 } from '../../helpers/terminalRegression';
@@ -115,22 +116,6 @@ for (const mode of ['Relay', 'P2P'] as const) {
     test.skip(!process.env.CI, 'real stack available in CI only');
     test.setTimeout(120_000);
 
-    // Diagnostic for the resize gap (#2132): capture every terminal resize the
-    // page sends and every refusal the Agent returns, so the selected-mode run
-    // names the side that dropped it. (Keep this until the lane is green.)
-    // Capture every terminal resize the
-    // page sends and every refusal the Agent returns, so a failure says which
-    // side dropped it instead of only that the pane size did not move.
-    const wire = { sent: [] as string[], received: [] as string[] };
-    page.on('websocket', (socket) => {
-      socket.on('framesent', (frame) => {
-        if (typeof frame.payload === 'string') { wire.sent.push(frame.payload); }
-      });
-      socket.on('framereceived', (frame) => {
-        if (typeof frame.payload === 'string') { wire.received.push(frame.payload); }
-      });
-    });
-
     const sessionName = `e2e-consistency-tui-${mode.toLowerCase()}-${testInfo.retry}-${Date.now()}`;
     await page.goto(
       '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
@@ -156,6 +141,7 @@ for (const mode of ['Relay', 'P2P'] as const) {
     // still loading (`metricsAreProvisional`), but still resizes the local
     // grid. Wait for the face before measuring, or the grid moves and the PTY
     // legitimately does not follow.
+    await waitForStableGrid(page);
     await page.evaluate(async () => { await document.fonts.ready; });
 
     // The browser grid changes while the TUI owns the screen: the alternate
@@ -170,11 +156,6 @@ for (const mode of ['Relay', 'P2P'] as const) {
       after = await readGrid(page);
       expect(after.rows).toBeGreaterThan(before.rows);
     }).toPass({ timeout: 15_000 });
-
-    const resizeFrames = wire.sent.filter((frame) => frame.includes('agent.terminal.resize'));
-    const refusals = wire.received.filter((frame) => frame.includes('not_controller'));
-    console.log('PROBE resize frames', resizeFrames.slice(-6).map((f) => f.slice(0, 220)));
-    console.log('PROBE refusals', refusals.slice(-3).map((f) => f.slice(0, 220)));
 
     await expect(async () => {
       expect(await readBufferType(page)).toBe('alternate');
