@@ -524,7 +524,9 @@ test('an under-burst reconnect never replays already-parsed output (#2160)', asy
 
   const sessionName = `e2e-consistency-replay-${testInfo.retry}-${Date.now()}`;
   const bootstraps: Array<Record<string, unknown>> = [];
+  const sockets: string[] = [];
   page.on('websocket', (socket) => {
+    sockets.push(socket.url());
     socket.on('framereceived', (frame) => {
       if (typeof frame.payload !== 'string') { return; }
       try {
@@ -563,12 +565,16 @@ test('an under-burst reconnect never replays already-parsed output (#2160)', asy
   // Suppress the liveness probe's ping. Typing triggers the probe (#1264); its
   // 5 s deadline tears the socket down, the service rebuilds the same URL, and
   // the runtime re-attaches with a resume while the burst still streams.
+  const socketsBefore = sockets.length;
   await page.evaluate(() => {
+    const state = window as unknown as { __e2eDroppedPings?: number };
+    state.__e2eDroppedPings = 0;
     const original = WebSocket.prototype.send;
     WebSocket.prototype.send = function (data) {
       if (typeof data === 'string') {
         try {
           if ((JSON.parse(data) as { msg_type?: string }).msg_type === 'control.ping') {
+            state.__e2eDroppedPings = (state.__e2eDroppedPings ?? 0) + 1;
             return;
           }
         } catch {
@@ -579,6 +585,17 @@ test('an under-burst reconnect never replays already-parsed output (#2160)', asy
     };
   });
   await sendRawToTerminal(page, ' ');
+
+  // The witness that this fixture cut the stream at all: the probe must have
+  // asked (a ping was dropped) and the runtime must have rebuilt the socket.
+  // Without both, a green duplicate assertion would mean nothing happened.
+  await expect(async () => {
+    const dropped = await page.evaluate(
+      () => (window as unknown as { __e2eDroppedPings?: number }).__e2eDroppedPings ?? 0,
+    );
+    expect(dropped, 'the liveness probe never fired').toBeGreaterThan(0);
+    expect(sockets.length, 'the transport was never rebuilt').toBeGreaterThan(socketsBefore);
+  }).toPass({ timeout: 30_000 });
 
   await waitForLastLine(page, 'DR-', COUNT, { timeoutMs: 240_000, stallMs: 60_000 });
 
