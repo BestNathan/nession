@@ -50,12 +50,62 @@ async function readBufferTail(
   }, lines);
 }
 
+/**
+ * Wait until `prefix${last}` is present in the tail, failing on a genuine
+ * stall rather than on a slow environment.
+ *
+ * The stream is allowed to be slow: a saturated runner parses a burst far
+ * slower than an idle one (measured ~15–25 lines/s on contended runners
+ * against a handful of seconds for the whole burst on an idle one), and that
+ * is a property of the witness, not of the exactly-once guarantee. What is
+ * not allowed is a stream that stops advancing — every poll reports the
+ * highest numbered line seen, and a tail that does not advance for `stallMs`
+ * fails naming the position, so a real hole reports itself instead of burning
+ * the whole bound.
+ */
+async function waitForLastLine(
+  page: import('@playwright/test').Page,
+  prefix: string,
+  last: number,
+  { timeoutMs, stallMs }: { timeoutMs: number; stallMs: number },
+): Promise<void> {
+  const start = Date.now();
+  const pattern = new RegExp(`${prefix}(\\d+)`, 'g');
+  let highest = 0;
+  let advancedAt = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const tail = await readBufferTail(page);
+    const values = [...tail.matchAll(pattern)].map((match) => Number(match[1]));
+    const seen = values.length > 0 ? Math.max(...values) : 0;
+    if (seen > highest) {
+      highest = seen;
+      advancedAt = Date.now();
+    }
+    // The line's presence is the parsed number, not a line-shape match: xterm
+    // reports each row space-padded to the full width, so `HV-5000` at the
+    // end of the tail is `HV-5000` followed by padding, never end-of-line.
+    if (highest >= last) { return; }
+    if (Date.now() - advancedAt > stallMs) {
+      const grid = await readGrid(page);
+      throw new Error(
+        `${prefix}${last} stream stalled at ${prefix}${highest} for ${stallMs}ms ` +
+          `(grid ${grid.cols}x${grid.rows})`,
+      );
+    }
+    await page.waitForTimeout(500);
+  }
+  throw new Error(
+    `${prefix}${last} did not arrive within ${timeoutMs}ms; highest was ${prefix}${highest}`,
+  );
+}
+
 for (const mode of ['Relay', 'P2P'] as const) {
   test(`high-volume numbered output reaches the parser exactly once over ${mode}`, async ({ page }, testInfo) => {
     test.skip(!process.env.CI, 'real stack available in CI only');
-    // Session creation/attach plus the burst. The readiness wait below is the
-    // real bound; a stall is a finding, not a reason to extend the timeout.
-    test.setTimeout(240_000);
+    // Session creation/attach plus the burst. The readiness wait is
+    // progress-bounded (see waitForLastLine): a slow parser is tolerated, a
+    // stalled one fails with its position.
+    test.setTimeout(360_000);
 
     const sessionName = `e2e-consistency-hv-${mode.toLowerCase()}-${testInfo.retry}-${Date.now()}`;
     await page.goto(
@@ -71,11 +121,14 @@ for (const mode of ['Relay', 'P2P'] as const) {
     // LAST line — not a `echo DONE` marker, whose text is echoed at the prompt
     // the moment the command is submitted — is what makes the buffer read a
     // complete prefix rather than a mid-stream sample.
+    //
+    // `sed` is the producer: its stdout is block-buffered, so the pane's tty
+    // receives ~500-byte writes rather than one write per line. The burst's
+    // delivery rate is the environment's (see waitForLastLine); the 5,000-line
+    // count and the tail window are the witness and stay fixed.
     await submitTerminalCommand(page, `seq 1 ${COUNT} | sed 's/^/HV-/'`);
 
-    await expect(async () => {
-      expect(await readBufferTail(page)).toContain(`HV-${COUNT}`);
-    }).toPass({ timeout: 180_000 });
+    await waitForLastLine(page, 'HV-', COUNT, { timeoutMs: 300_000, stallMs: 60_000 });
 
     const text = await readTerminalBuffer(page);
     const counts = new Map<number, number>();
@@ -179,3 +232,99 @@ for (const mode of ['Relay', 'P2P'] as const) {
 
   });
 }
+
+// #2141 / #1926 SC-03: a Relay reconnect must keep the live renderer and its
+// stream. The reconnect is forced deterministically with the #1213 shape: the
+// browser keeps a half-open Server socket, and a visibility cycle makes the
+// bounded probe open a new physical socket. The xterm node identity proves the
+// Terminal was not remounted; the markers and the numbered tail prove no
+// output was lost or duplicated across the cut.
+test('a Relay reconnect keeps the xterm and loses no session output', async ({ page }, testInfo) => {
+  test.skip(!process.env.CI, 'real stack available in CI only');
+  test.setTimeout(240_000);
+
+  const sessionName = `e2e-consistency-reconnect-${testInfo.retry}-${Date.now()}`;
+  await page.goto(
+    '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
+  );
+  await waitForShell(page);
+  await createSession(page, sessionName);
+  await attachToSession(page, sessionName, 'Relay');
+  await waitForInteractiveShell(page);
+
+  await page.locator('.xterm').evaluate((node) => {
+    node.setAttribute('data-e2e-reconnect-instance', 'original');
+  });
+
+  // printf arguments keep the resolved marker out of the echoed command line.
+  await submitTerminalCommand(page, `printf 'RECONNECT-%s-BEFORE\\n' 2141`);
+  await expect.poll(async () => countInBuffer(page, 'RECONNECT-2141-BEFORE')).toBe(1);
+
+  await page.evaluate(() => {
+    const originalSend = WebSocket.prototype.send;
+    WebSocket.prototype.send = function (data) {
+      if (typeof data === 'string') {
+        try {
+          if ((JSON.parse(data) as { msg_type?: string }).msg_type === 'server.info') {
+            return;
+          }
+        } catch {
+          // Non-JSON frames still pass through unchanged.
+        }
+      }
+      return originalSend.call(this, data);
+    };
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => 'hidden',
+    });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+
+  // Register before the foreground event so the reconnect cannot race the
+  // subscription: a new physical /ws socket is the witness.
+  const newSocket = page.waitForEvent('websocket', {
+    predicate: (ws) => ws.url().includes('/ws'),
+    timeout: 20_000,
+  });
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => 'visible',
+    });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+
+  await newSocket;
+  await expect(page.getByTestId('terminal-connecting')).toBeHidden({ timeout: 30_000 });
+  await expect(page.locator('.xterm')).toHaveAttribute('data-e2e-reconnect-instance', 'original');
+  await expect.poll(async () => countInBuffer(page, 'RECONNECT-2141-BEFORE')).toBe(1);
+
+  await submitTerminalCommand(page, `printf 'RECONNECT-%s-AFTER\\n' 2141`);
+  await expect.poll(async () => countInBuffer(page, 'RECONNECT-2141-AFTER'), { timeout: 20_000 })
+    .toBe(1);
+
+  // A numbered burst after recovery: the tail must be present exactly once.
+  const COUNT = 1_000;
+  const TAIL = 400;
+  await submitTerminalCommand(page, `seq 1 ${COUNT} | sed 's/^/RC-/'`);
+  await waitForLastLine(page, 'RC-', COUNT, { timeoutMs: 150_000, stallMs: 45_000 });
+
+  const text = await readTerminalBuffer(page);
+  const counts = new Map<number, number>();
+  for (const match of text.matchAll(/RC-(\d+)/g)) {
+    const value = Number(match[1]);
+    if (value >= 1 && value <= COUNT) {
+      counts.set(value, (counts.get(value) ?? 0) + 1);
+    }
+  }
+  const duplicated = [...counts.entries()]
+    .filter(([value, seen]) => seen > 1 && value > COUNT - TAIL)
+    .map(([value]) => value);
+  const missingTail: number[] = [];
+  for (let value = COUNT - TAIL + 1; value <= COUNT; value += 1) {
+    if (!counts.has(value)) { missingTail.push(value); }
+  }
+  expect(duplicated, 'a tail line was delivered more than once').toEqual([]);
+  expect(missingTail, 'a tail line never reached the parser').toEqual([]);
+});
