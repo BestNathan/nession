@@ -134,28 +134,18 @@ function recordFor(event, run, workflow, tree, jobs, artifacts, scopeProof = nul
   const sourceTree = tree.tree.find(x => x.path === 'e2e/tests/browser' && x.type === 'tree');
   assert.ok(sourceTree && HEX40.test(sourceTree.sha), 'missing authentic Playwright source tree');
   const job = requireJob(jobs, run);
-  const found = artifacts.filter(x => x.name === 'playwright-report' &&
+  // A scoped producer's durable per-ID source is issue-e2e-verification,
+  // which embeds plan/results/Playwright assertions. The legacy Full producer
+  // owns playwright-report instead; no optional second artifact is required.
+  const isScoped=scopeProof?.scope==='selected'||scopeProof?.scope==='not-required';
+  const requiredName=isScoped?'issue-e2e-verification':'playwright-report';
+  const matching=artifacts.filter(x=>x.name===requiredName &&
     Number.isFinite(Date.parse(x.created_at)) &&
-    Date.parse(x.created_at) >= Date.parse(job.started_at) &&
-    Date.parse(x.created_at) <= Date.parse(job.completed_at));
-  if(scopeProof?.scope!=='not-required')
-    assert.equal(found.length, 1, 'missing or ambiguous exact-Attempt report artifact');
-  const requiredName=scopeProof?.scope==='not-required'?'issue-e2e-verification':'playwright-report';
-  const required=artifacts.filter(x=>x.name===requiredName &&
-    Number.isFinite(Date.parse(x.created_at))&&
-    Date.parse(x.created_at)>=Date.parse(job.started_at)&&
+    Date.parse(x.created_at)>=Date.parse(job.started_at) &&
     Date.parse(x.created_at)<=Date.parse(job.completed_at));
-  assert.equal(required.length,1,'missing or ambiguous scoped source artifact');
-  const artifact = requireArtifact(required[0], run, job, requiredName);
-  let selectedE2eArtifact=null;
-  if(scopeProof?.scope==='selected') {
-    const matches=artifacts.filter(a=>a.name==='issue-e2e-verification' &&
-      Number.isFinite(Date.parse(a.created_at)) &&
-      Date.parse(a.created_at)>=Date.parse(job.started_at) &&
-      Date.parse(a.created_at)<=Date.parse(job.completed_at));
-    assert.equal(matches.length,1,'missing/ambiguous authenticated selected E2E artifact');
-    selectedE2eArtifact=requireArtifact(matches[0],run,job,'issue-e2e-verification');
-  }
+  assert.equal(matching.length,1,'missing or ambiguous exact-Attempt source artifact');
+  const artifact=requireArtifact(matching[0],run,job,requiredName);
+  const selectedE2eArtifact=scopeProof?.scope==='selected'?artifact:null;
   const proof = { job_id: job.id, name: job.name, conclusion: job.conclusion,
     run_attempt: job.run_attempt };
   const date = run.created_at.slice(0, 10);
@@ -275,11 +265,22 @@ function selfTest() {
   assert.equal(selectedProof.scope,'selected');
   const selectedArtifact={...artifacts[0],id:35,name:'issue-e2e-verification'};
   const scopedRecord=JSON.parse(recordFor(event,run,workflow,tree,[scopedJob],
-    [...artifacts,selectedArtifact],selectedProof).recordBytes);
+    [selectedArtifact],selectedProof).recordBytes);
   assert.equal(scopedRecord.test_scope,'selected');
   assert.equal(scopedRecord.selected_e2e_artifact.artifact_id,35);
+  assert.equal(scopedRecord.evidence.name,'issue-e2e-verification');
+  // Scoped pushes do not require the unrelated legacy Full Playwright ZIP.
+  assert.deepEqual(scopedRecord.selected_e2e_artifact,scopedRecord.evidence);
+  assert.deepEqual(JSON.parse(recordFor(event,run,workflow,tree,[scopedJob],
+    [...artifacts,selectedArtifact],selectedProof).recordBytes).evidence,
+    scopedRecord.evidence,
+    'legacy Full artifact must not replace selected per-ID source on the same Attempt');
+  assert.throws(()=>recordFor(event,run,workflow,tree,[scopedJob],
+    [{...artifacts[0],name:'playwright-report'}],selectedProof),
+    /missing or ambiguous/,
+    'legacy Full-only artifact must not satisfy an authenticated selected plan');
   assert.throws(()=>recordFor(event,run,workflow,tree,[scopedJob],artifacts,selectedProof),
-    /missing\/ambiguous/);
+    /missing or ambiguous/);
   const nr=makeE2eNotRequiredReceipt({env,sha,steps:{
     rust_toolchain:'skipped',cargo_build:'skipped',tmux:'skipped',design_gate:'success',
   }});
@@ -297,6 +298,14 @@ function selfTest() {
   const nrRecord=JSON.parse(recordFor(event,run,workflow,tree,[nrJob],
     [selectedArtifact],notRequiredProof).recordBytes);
   assert.equal(nrRecord.test_scope,'not-required');
+  assert.equal(nrRecord.evidence.name,'issue-e2e-verification');
+  assert.equal(nrRecord.selected_e2e_artifact,null);
+  assert.throws(()=>recordFor(event,run,workflow,tree,[scopedJob],
+    [selectedArtifact,{...selectedArtifact,id:36}],selectedProof),
+    /missing or ambiguous/, 'ambiguous scoped artifacts must fail closed');
+  assert.throws(()=>recordFor(event,run,workflow,tree,[scopedJob],
+    [{...selectedArtifact,workflow_run:{id:121,head_sha:sha}}],selectedProof),
+    /foreign artifact run/, 'same-name foreign artifact must fail closed');
   assert.throws(()=>attestPushScope(run,scopedJob,'untrusted full push'),/receipt/);
   assert.throws(()=>attestPushScope(run,scopedJob,
     E2E_SELECTED_RUN_LOG_PREFIX+JSON.stringify(sr)+'\n'+
