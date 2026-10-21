@@ -104,7 +104,7 @@ await assert.rejects(()=>attestControlled1997PublisherSource({
   resultZip:Buffer.from('bad'),key:Buffer.alloc(32),
   reader:{getRun:async()=>{throw Error('must not fetch untrusted run');}},
   remote:'https://github.com/BestNathan/nession.git',checkout:'/tmp/not-used',
-}),/untrusted/);
+}),/wrong authenticated Developer source/);
 await assert.rejects(()=>attestControlled1997PublisherSource({
   run,ingesterRun:ingest,artifacts,claimZip:Buffer.from('bad'),
   resultZip:Buffer.from('bad'),key:Buffer.alloc(32),
