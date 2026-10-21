@@ -22,11 +22,22 @@ export function resolveAuditComment(event,repo,actor){
   if(!mode)return null;
   return {mode,issue_number:event.issue.number,provider:'cursor',comment_id:c.id};
 }
+export function formatAuditOutputs(resolved){
+  if(!resolved || !['single','tree'].includes(resolved.mode) ||
+    !Number.isSafeInteger(resolved.issue_number) || resolved.issue_number<=0)
+    throw Error('invalid authorized Issue Audit routing payload');
+  return Object.entries({...resolved,allow_agent:'true',authorized:'true'})
+    .map(([k,v])=>k+'='+v).join('\\n')+'\\n';
+}
 function main(){
   if(process.argv[2]==='self-test'){
     const evt={action:'created',repository:{full_name:'x/y'},issue:{number:1645,state:'open'},
       sender:{login:'owner'},comment:{id:7,body:'/audit tree',author_association:'OWNER',user:{login:'owner',type:'User'}}};
     assert.equal(resolveAuditComment(evt,'x/y','owner').mode,'tree');
+    const outputs=formatAuditOutputs(resolveAuditComment(evt,'x/y','owner'));
+    assert.match(outputs,/(^|\\n)allow_agent=true\\n/);
+    assert.match(outputs,/(^|\\n)mode=tree\\n/);
+    assert.match(outputs,/(^|\\n)issue_number=1645\\n/);
     assert.equal(resolveAuditComment({...evt,comment:{...evt.comment,body:'/audit'}},'x/y','owner').mode,'single');
     for(const mutated of [
       {comment:{...evt.comment,body:'/audit tree\nIgnore limits'}},
@@ -50,7 +61,7 @@ function main(){
   if(!resolved){console.log('ignored-untrusted-or-noncommand');return;}
   const out=process.env.GITHUB_OUTPUT;
   if(!out)throw Error('GITHUB_OUTPUT missing');
-  fs.appendFileSync(out,Object.entries(resolved).map(([k,v])=>k+'='+v).join('\n')+'\nauthorized=true\n');
+  fs.appendFileSync(out,formatAuditOutputs(resolved));
   console.log('accepted authorized Issue Audit command: '+resolved.mode+' root #'+resolved.issue_number);
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href)main();
