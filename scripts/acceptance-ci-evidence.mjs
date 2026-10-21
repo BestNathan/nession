@@ -1846,7 +1846,11 @@ async function selfTest() {
   assert.equal(reuseComparisonFixture.comparisons[0].runtimes_saved,1);
   assert.equal(reuseComparisonFixture.full_gate_provisions,1);
   assert.equal(reuseComparisonFixture.selected_run.provisioned_runtimes,1);
-  assert.equal(reuseComparisonFixture.main_push_full_e2e_success,true);
+  assert.equal(reuseComparisonFixture.main_push_full_e2e_success,false,
+    'green selected main push is not an all-ID Full Regression receipt');
+  assert.equal(computeReuseComparison({targetSha:'b'.repeat(40),
+    fullGateProvisionReceipts:[{sha:'b'.repeat(40),
+      full_per_id:{kind:'verified_e2e_full_per_id'},provisions:1}]}).main_push_full_e2e_success,true);
   assert.equal(computeReuseComparison({targetSha:'b'.repeat(40)}),null);
 
   // #1749 SC-05: a busy SHA exceeds one listing page; the oldest Gate/Provider
