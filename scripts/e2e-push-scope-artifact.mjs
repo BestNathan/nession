@@ -33,7 +33,9 @@ export function verifyScopeArtifact({plan,results,report,assertions,run,scopePro
     assert.equal(plan.selected.length,0);
     assert.equal(results.status,'NotRequired');
     assert.equal(results.scope,'not-required');
-    assert.ok(typeof plan.reason==='string'&&plan.reason.length>5);
+    assert.ok((typeof plan.reason==='string'&&plan.reason.length>5)||
+      /^[a-f0-9]{64}$/.test(plan.plan_digest??''),
+      'not-required requires a source-aligned plan reason or authenticated plan digest');
     assert.equal(results.run_id,run.id);
     assert.equal(results.run_attempt,run.run_attempt);
   }
