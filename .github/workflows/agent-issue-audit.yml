@@ -2,7 +2,7 @@ name: Agent / Issue Audit
 
 on:
   issues:
-    types: [opened, edited, reopened]
+    types: [opened, edited, reopened, labeled, unlabeled]
   workflow_dispatch:
     inputs:
       issue_number:
@@ -41,7 +41,7 @@ jobs:
       issues: read
     outputs:
       issue_number: ${{ steps.target.outputs.issue_number }}
-      needs_agent: ${{ steps.contract.outputs.needs_agent }}
+      needs_agent: ${{ steps.tier.outputs.needs_agent }}
       allow_agent: ${{ steps.target.outputs.allow_agent }}
       provider: ${{ steps.target.outputs.provider }}
     steps:
@@ -138,6 +138,37 @@ jobs:
               ;;
           esac
 
+      # Structurally valid Issues still require tier assessment on trusted edits.
+      - name: Select requirement-risk reassessment
+        id: tier
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ steps.target.outputs.issue_number }}
+          CONTRACT_NEEDS_AGENT: ${{ steps.contract.outputs.needs_agent }}
+          ALLOW_AGENT: ${{ steps.target.outputs.allow_agent }}
+          EVENT_ACTION: ${{ github.event.action }}
+          EVENT_LABEL: ${{ github.event.label.name }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          tier_count="$(gh api "repos/$GITHUB_REPOSITORY/issues/$ISSUE_NUMBER" --jq '[.labels[].name | select(. == "verification:scoped" or . == "verification:integration" or . == "verification:full")] | length')"
+          [[ "$tier_count" =~ ^[0-9]+$ ]] || exit 1
+          if (( tier_count > 1 )); then
+            echo "::error::Conflicting verification tier labels; trusted owner must resolve"
+            exit 1
+          fi
+          needs="${CONTRACT_NEEDS_AGENT}"
+          if [[ "$ALLOW_AGENT" == true ]]; then
+            if (( tier_count == 0 )) || [[ "$EVENT_NAME" == workflow_dispatch ]] ||
+               [[ "$EVENT_ACTION" == edited ]] ||
+               { [[ "$EVENT_ACTION" == labeled || "$EVENT_ACTION" == unlabeled ]] &&
+                 [[ "$EVENT_LABEL" == verification:* ]]; }; then
+              needs=true
+            fi
+          fi
+          echo "needs_agent=$needs" >> "$GITHUB_OUTPUT"
+          echo "Risk tier labels=$tier_count, needs_agent=$needs" >> "$GITHUB_STEP_SUMMARY"
+
   agent:
     needs: contract
     if: >-
@@ -157,6 +188,7 @@ jobs:
       ISSUE_AUDIT_PROVIDER: ${{ needs.contract.outputs.provider }}
       ISSUE_AUDIT_ALLOW_AGENT: 'true'
       ISSUE_AUDIT_TRIGGER: ${{ github.event_name }}
+      ISSUE_AUDIT_REEVALUATE_TIER: ${{ github.event_name == 'workflow_dispatch' || github.event.action == 'edited' || github.event.action == 'labeled' || github.event.action == 'unlabeled' }}
 
       CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
       CURSOR_MODEL: ${{ vars.CURSOR_MODEL || 'composer-2.5' }}
