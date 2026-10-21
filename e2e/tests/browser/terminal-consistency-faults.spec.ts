@@ -11,6 +11,7 @@ import {
   waitForStableGrid,
   sendRawToTerminal,
   submitTerminalCommand,
+  expectPtySize,
 } from '../../helpers/terminalRegression';
 
 // #1645 SC-10 / #1926 SC-05: a high-rate numbered burst must reach the xterm
@@ -24,6 +25,26 @@ const COUNT = 5_000;
 // (10k mobile / 50k desktop), and losing the oldest lines to scrollback is
 // correct behavior, not a stream defect. A hole in the tail is not.
 const TAIL = 2_000;
+
+/** One decoded browser↔runtime frame, as much as the diagnostic needs. */
+type WireRecord = {
+  sent: WireFrame[];
+  received: WireFrame[];
+};
+type WireFrame = {
+  id?: string;
+  msg_type?: string;
+  payload?: Record<string, unknown>;
+};
+
+function parseFrame(raw: string): WireFrame {
+  try {
+    const value = JSON.parse(raw) as WireFrame;
+    return { id: value.id, msg_type: value.msg_type, payload: value.payload };
+  } catch {
+    return {};
+  }
+}
 
 // Read only the last rows while the burst is still streaming. Serializing the
 // whole buffer on every poll blocks the page's event loop long enough
@@ -169,6 +190,21 @@ for (const mode of ['Relay', 'P2P'] as const) {
     test.skip(!process.env.CI, 'real stack available in CI only');
     test.setTimeout(120_000);
 
+    // #2132: the PTY drops a resize made while an alt-screen TUI owns the
+    // screen. tmux itself follows the command (probed directly), so the frame
+    // is lost between the browser and the Agent's write. Record both sides:
+    // what the page sent and how the Agent answered, so a failure names the
+    // layer instead of only reporting the stale `stty size`.
+    const wire: WireRecord = { sent: [], received: [] };
+    page.on('websocket', (socket) => {
+      socket.on('framesent', (frame) => {
+        if (typeof frame.payload === 'string') { wire.sent.push(parseFrame(frame.payload)); }
+      });
+      socket.on('framereceived', (frame) => {
+        if (typeof frame.payload === 'string') { wire.received.push(parseFrame(frame.payload)); }
+      });
+    });
+
     const sessionName = `e2e-consistency-tui-${mode.toLowerCase()}-${testInfo.retry}-${Date.now()}`;
     await page.goto(
       '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
@@ -218,6 +254,39 @@ for (const mode of ['Relay', 'P2P'] as const) {
       expect(await readTerminalBuffer(page)).toContain('ALT-2130-TUI');
     }).toPass({ timeout: 15_000 });
 
+    // #2132: the resize has left the browser by now (it is sent from the same
+    // observer fire that moved the grid, after a 200 ms debounce). Ask the
+    // wire which side dropped it: no frame names the browser, an `error` reply
+    // names the Agent, and a frame with an `ok` reply means the Agent wrote a
+    // resize tmux did not apply.
+    await page.waitForTimeout(1_500);
+    const resizeFrames = wire.sent.filter((frame) => frame.msg_type === 'agent.terminal.resize');
+    const lastResize = resizeFrames.at(-1);
+    const resizeReplies = lastResize === undefined
+      ? []
+      : wire.received.filter((frame) => frame.id === lastResize.id);
+    const wireSummary = JSON.stringify({
+      sent: resizeFrames.slice(-3).map((frame) => ({
+        cols: frame.payload?.cols, rows: frame.payload?.rows, session: frame.payload?.session_name,
+      })),
+      replies: resizeReplies.map((frame) => ({
+        msg_type: frame.msg_type, code: frame.payload?.code,
+      })),
+      captured: wire.sent.length,
+      lastSent: wire.sent.slice(-6).map((frame) => frame.msg_type),
+      fonts: await page.evaluate(() => document.fonts.status),
+      grid: after,
+      sessionName,
+    });
+    // Always visible in the selected lane: a passing wire assertion still has
+    // to say *which* frame carried the size and how the Agent answered.
+    console.log(`TUI-RESIZE-WIRE ${wireSummary}`);
+    expect(resizeFrames.length, `no resize left the browser: ${wireSummary}`).toBeGreaterThan(0);
+    expect(
+      resizeReplies.filter((frame) => frame.msg_type === 'error'),
+      `the Agent refused the TUI resize: ${wireSummary}`,
+    ).toEqual([]);
+
     // Interrupt the loop, then leave the alternate screen from the shell.
     await sendRawToTerminal(page, '\x03');
     await submitTerminalCommand(page, `printf '\\033[?1049l'; echo ALT-2130-BACK`);
@@ -226,6 +295,10 @@ for (const mode of ['Relay', 'P2P'] as const) {
       expect(await readBufferType(page)).toBe('normal');
       expect(await readTerminalBuffer(page)).toContain('ALT-2130-BACK');
     }).toPass({ timeout: 15_000 });
+
+    // The authoritative half: the pane's own tty now reports the size the
+    // browser grid showed while the TUI owned the screen (#2132).
+    await expectPtySize(page, after.cols, after.rows);
 
     // Nothing owned by the alternate screen may leak into normal scrollback.
     expect(await countInBuffer(page, 'ALT-2130-TUI')).toBe(0);
