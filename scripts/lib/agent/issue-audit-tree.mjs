@@ -62,6 +62,7 @@ export function createTreeAuditTools(root,repository=process.env.GITHUB_REPOSITO
   if(!repository||!Number.isSafeInteger(root?.number))throw Error('tree audit needs rooted Issue');
   const rootNumber=root.number, observed=new Set([rootNumber]),read=new Set([rootNumber]);
   const visited=new Map(),issues=new Map(),expanded=new Set();
+  const skipped=new Map(),failed=new Map();
   let published=false;
   const readIssue=n=>{
     if(issues.size>TREE_AUDIT_LIMIT*MAX_DEPTH)throw Error('tree relation lookup ceiling reached');
@@ -85,6 +86,8 @@ export function createTreeAuditTools(root,repository=process.env.GITHUB_REPOSITO
     unchanged:[...visited].filter(([,v])=>!v.updated).map(([n])=>n),
     remaining:[...observed].filter(n=>!visited.has(n)).sort((a,b)=>a-b),
     unexplored:[...observed].filter(n=>!expanded.has(n)).sort((a,b)=>a-b),
+    skipped:[...skipped].map(([number,reason])=>({number,reason})),
+    failed:[...failed].map(([number,reason])=>({number,reason})),
     limit:TREE_AUDIT_LIMIT,published};}
 
   function protectedSection(body,label) {
@@ -121,7 +124,7 @@ export function createTreeAuditTools(root,repository=process.env.GITHUB_REPOSITO
           try {
             ensureScoped(h.number);
             accepted.push({number:h.number,title:h.title,labels:h.labels?.map(x=>typeof x==='string'?x:x.name)});
-          } catch { /* misleading refs and unrelated/closed targets never enter scope */ }
+          } catch(error) {skipped.set(h.number,String(error.message??error).slice(0,180));}
         }
         return JSON.stringify({parent:parent_number,children:accepted,progress:progress()});
       }
@@ -157,6 +160,7 @@ export function createTreeAuditTools(root,repository=process.env.GITHUB_REPOSITO
         const contract=auditIssue(after);
         if(!contract.ok)throw Error('Issue Contract remains invalid: '+contract.errors.join('; '));
         if(readVerificationTier(after).tier!==(updated?tier:existing.tier))throw Error('tier readback mismatch');
+        failed.delete(issue_number);
         visited.set(issue_number,{updated,reason});
         return JSON.stringify({issue_number,tier:readVerificationTier(after).tier,
           status:updated?'updated':'unchanged',reason,contract:'Pass',progress:progress()});
@@ -183,7 +187,7 @@ export function createTreeAuditTools(root,repository=process.env.GITHUB_REPOSITO
         if(published)throw Error('tree audit summary already published');
         if(typeof summary!=='string'||summary.length<10||summary.length>2000)throw Error('invalid tree summary');
         const p=progress();
-        const complete=p.remaining.length===0&&p.unexplored.length===0&&p.reviewed>0;
+        const complete=p.remaining.length===0&&p.unexplored.length===0&&p.failed.length===0&&p.reviewed>0;
         const body=['## Issue Tree Audit',
           '- Root: #'+rootNumber,
           '- Status: **'+(complete?'Complete':'Partial / needs review')+'**',
@@ -192,6 +196,8 @@ export function createTreeAuditTools(root,repository=process.env.GITHUB_REPOSITO
           '- Unchanged: '+(p.unchanged.join(', ')||'none'),
           '- Not reviewed: '+(p.remaining.join(', ')||'none'),
           '- Branches not yet expanded: '+(p.unexplored.join(', ')||'none'),
+          '- Skipped unrelated candidates: '+(p.skipped.map(x=>'#'+x.number+' ('+x.reason+')').join('; ')||'none'),
+          '- Failed reviews: '+(p.failed.map(x=>'#'+x.number+' ('+x.reason+')').join('; ')||'none'),
           '', '### Agent findings',summary].join('\n');
         await createIssueCommentTool(root,repository).execute({body});
         published=true;
