@@ -1,15 +1,26 @@
 import { useCallback, useEffect } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import type { TerminalAgentApi } from '@/product/terminal/agent';
 import {
   terminalControlAtomFamily,
   type TerminalControlState,
 } from '@/product/terminal/state/terminalControl';
 
-/** Mirror P2P agent control lease into Jotai (#1095). */
+/**
+ * The control surface for the active route (#2157): the direct Agent API on
+ * P2P, the Server relay plugin on Relay. Both carry the same lease level.
+ */
+export interface TerminalControlSource {
+  getControlState(sessionName: string): TerminalControlState;
+  onControlChanged(cb: (sessionName: string, state: TerminalControlState) => void): () => void;
+  acquireControl(sessionName: string): Promise<
+    { ok: true; generation: number } | { ok: false; error: string }
+  >;
+}
+
+/** Mirror the active route's control lease into Jotai (#1095). */
 export function useTerminalControlBridge(
   sessionName: string,
-  agentTerminalApi: TerminalAgentApi | null,
+  agentTerminalApi: TerminalControlSource | null,
 ): {
   control: TerminalControlState;
   takeControl: () => Promise<void>;

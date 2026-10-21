@@ -913,7 +913,7 @@ fn agent_attached_relay_ready(
     let payload = attach_reply.get("payload")?;
     let subscriber_generation = payload.get("subscriber_generation")?.as_u64()?;
     let stream_epoch = payload.get("stream_epoch")?.as_u64()?;
-    let frame = serde_json::json!({
+    let mut frame = serde_json::json!({
         "msg_type": RELAY_SUBSCRIPTION_READY_WIRE,
         "id": uuid::Uuid::new_v4().to_string(),
         "timestamp": std::time::SystemTime::now()
@@ -929,6 +929,30 @@ fn agent_attached_relay_ready(
             "stream_epoch": stream_epoch,
         }
     });
+    // The ControlLease as the Agent answered it (#2157). Under Relay the
+    // attach reply belongs to this Server, so this receipt is the only place
+    // the *browser* can learn its role at attach; the Agent's later
+    // control.changed notifications cover every change after it. Forwarded
+    // only in its wire form and only when the Agent stated it — an older
+    // Agent simply leaves the fields absent and the browser keeps its
+    // pre-#2157 default.
+    let out_payload = frame.get_mut("payload")?;
+    if let Some(role) = payload.get("control_role").and_then(|v| v.as_str()) {
+        if role == "controller" || role == "observer" {
+            out_payload["control_role"] = serde_json::json!(role);
+        }
+    }
+    if let Some(generation) = payload
+        .get("control_generation")
+        .and_then(serde_json::Value::as_u64)
+    {
+        out_payload["control_generation"] = serde_json::json!(generation);
+    }
+    if let Some(client_id) = payload.get("controller_client_id").and_then(|v| v.as_str()) {
+        if !client_id.is_empty() {
+            out_payload["controller_client_id"] = serde_json::json!(client_id);
+        }
+    }
     Some(tokio_tungstenite::tungstenite::Message::Text(
         frame.to_string(),
     ))
@@ -2033,6 +2057,51 @@ mod tests {
             agent_attached_relay_ready(&accepted, "sess", "browser-a", ""),
             None
         );
+    }
+
+    #[test]
+    fn relay_ready_carries_the_agents_control_lease_when_stated() {
+        let accepted = json!({
+            "msg_type": "ok", "payload": {
+                "session_name": "sess", "subscriber_generation": 41,
+                "stream_epoch": 52, "control_role": "observer",
+                "control_generation": 7, "controller_client_id": "browser-b"
+            }
+        });
+        let ready = agent_attached_relay_ready(&accepted, "sess", "browser-b", "begin-123")
+            .expect("verified Agent subscription");
+        let ready: serde_json::Value = serde_json::from_str(ready.to_text().unwrap()).unwrap();
+        assert_eq!(ready["payload"]["control_role"], "observer");
+        assert_eq!(ready["payload"]["control_generation"], 7);
+        assert_eq!(ready["payload"]["controller_client_id"], "browser-b");
+
+        // Legacy Agent: absent fields stay absent rather than being invented.
+        let legacy = json!({
+            "msg_type": "ok", "payload": {
+                "session_name": "sess", "subscriber_generation": 41, "stream_epoch": 52
+            }
+        });
+        let ready = agent_attached_relay_ready(&legacy, "sess", "browser-b", "begin-123")
+            .expect("legacy Agent remains on the non-credit relay lane");
+        let ready: serde_json::Value = serde_json::from_str(ready.to_text().unwrap()).unwrap();
+        assert!(ready["payload"].get("control_role").is_none());
+        assert!(ready["payload"].get("control_generation").is_none());
+        assert!(ready["payload"].get("controller_client_id").is_none());
+
+        // A malformed role is not forwarded; the rest of the receipt stands.
+        let malformed = json!({
+            "msg_type": "ok", "payload": {
+                "session_name": "sess", "subscriber_generation": 41,
+                "stream_epoch": 52, "control_role": "owner",
+                "control_generation": "seven", "controller_client_id": ""
+            }
+        });
+        let ready = agent_attached_relay_ready(&malformed, "sess", "browser-b", "begin-123")
+            .expect("verified Agent subscription");
+        let ready: serde_json::Value = serde_json::from_str(ready.to_text().unwrap()).unwrap();
+        assert!(ready["payload"].get("control_role").is_none());
+        assert!(ready["payload"].get("control_generation").is_none());
+        assert!(ready["payload"].get("controller_client_id").is_none());
     }
 
     #[test]

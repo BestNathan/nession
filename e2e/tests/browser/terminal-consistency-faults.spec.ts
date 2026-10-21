@@ -436,16 +436,18 @@ test('two clients: a stalled observer never blocks the controller (#2144)', asyn
     await attachToSession(observer, sessionName, 'Relay');
     await waitForInteractiveShell(observer);
 
-    // SC-01: the controller's output reaches the observer.
+    // SC-01: the controller's output reaches the observer, and the lease the
+    // Agent stated is visible as state — the view-only affordance — rather
+    // than inferred from the route (#2157).
     await submitTerminalCommand(controller, `printf 'MULTI-%s-LIVE\\n' 2144`);
     await expect.poll(async () => countInBuffer(observer, 'MULTI-2144-LIVE')).toBe(1);
+    await expect(observer.getByTestId('terminal-observer-bar')).toBeVisible();
+    await expect(controller.getByTestId('terminal-observer-bar')).toHaveCount(0);
 
-    // SC-03: the observer's input and resize never reach the PTY. Lease
-    // *visibility* over Relay is Bug #2157 — today the observer cannot see its
-    // role (the Server's relay-ready carries no control fields), so its client
-    // may still send. The enforcement witness is the Agent: the observer's
-    // bytes and size never reach the shared session, and the controller's
-    // buffer and tty are unchanged.
+    // SC-03: the observer's input and resize never reach the PTY. Its client
+    // knows it is the observer and refuses them locally; the Agent enforces
+    // the same rule. The controller's buffer and tty are the witnesses that
+    // neither attempt reached the shared session.
     await submitTerminalCommand(observer, `printf 'OBSERVER-%s-INPUT\\n' 2144`);
     await expect.poll(async () => countInBuffer(controller, 'OBSERVER-2144-INPUT')).toBe(0);
     const controllerGrid = await readGrid(controller);
@@ -456,6 +458,17 @@ test('two clients: a stalled observer never blocks the controller (#2144)', asyn
       expect((await readGrid(observer)).cols).toBeGreaterThan(controllerGrid.cols);
     }).toPass({ timeout: 15_000 });
     await expectPtySize(controller, controllerGrid.cols, controllerGrid.rows);
+
+    // SC-02: acquiring control over the relay moves the lease, and both
+    // clients see it — the observer's bar leaves, the controller's appears,
+    // and acquiring back restores the original holder for the rest of the
+    // fixture.
+    await observer.getByRole('button', { name: 'Take control' }).click();
+    await expect(observer.getByTestId('terminal-observer-bar')).toHaveCount(0, { timeout: 10_000 });
+    await expect(controller.getByTestId('terminal-observer-bar')).toBeVisible({ timeout: 10_000 });
+    await controller.getByRole('button', { name: 'Take control' }).click();
+    await expect(controller.getByTestId('terminal-observer-bar')).toHaveCount(0, { timeout: 10_000 });
+    await expect(observer.getByTestId('terminal-observer-bar')).toBeVisible({ timeout: 10_000 });
 
     // SC-02: stall the observer's main thread — its socket stops draining —
     // and prove the controller still receives the burst's retained tail
