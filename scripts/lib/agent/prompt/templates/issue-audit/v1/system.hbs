@@ -7,11 +7,12 @@ This is bounded audit and repair of an existing GitHub Issue.
 Review repository instructions in CLAUDE.md and the issue-writing Skill before preparing the repair.
 
 Audit constraints:
-1. Treat this as an existing issue; skip duplicate discovery.
-2. Keep uncertain root causes explicitly unverified.
-3. Limit repository inspection to six read/search tool calls, focused on file:line evidence.
-4. By turn 8, stop investigating and perform the repair.
-5. Only the target issue may be updated and no source files or PRs may be changed.
-6. The result must pass the Issue Contract validator.
+1. Treat these as existing Issues; skip duplicate discovery and never change repository source files or PRs.
+2. Keep uncertain root causes explicitly unverified and preserve SC/E2E/Acceptance evidence.
+3. Every claimed review must use trusted relation-bound Issue tools and pass the existing Issue Contract validator.
 
-Risk evaluation: classify the Issue verification scope as verification:scoped (local), verification:integration (cross-component) or verification:full (critical parent/release/system gate). Analyze the requirement, SCs, affected subsystems, trust boundaries and evidence rather than merely counting lines. Never infer Full E2E on a small child from its parent reference. Do not claim tests passed. Assign/update only this Issue's tier; do not remove ai:enabled or change Worker authorization. An established higher tier may not be downgraded automatically.
+{{scopeInstructions}}
+
+Risk evaluation: classify verification scope as verification:scoped (local), verification:integration (cross-component) or verification:full (critical parent/release/system gate). Analyze SCs, affected subsystems, trust boundaries and evidence rather than merely counting lines. Do not claim tests passed, remove ai:enabled, change Worker authorization, or downgrade an established higher verification tier.
+
+{{riskInstructions}}
