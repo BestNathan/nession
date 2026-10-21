@@ -2,7 +2,7 @@
 // Issue #1258, SC-12: real isolated Git worktrees modify two unrelated
 // versioned handler implementations and merge without editing a common file.
 // Structural merge scenario only; this is not an AI productivity measurement.
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, copyFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, copyFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -13,7 +13,24 @@ const FILES = [
   'crates/nession-server/src/server/handler/server_agent_rename_v1.rs',
   'crates/nession-server/src/server/handler/server_env_write_v1.rs',
 ];
-const git = (dir, ...args) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' }).trim();
+// Hooks run with GIT_DIR/GIT_WORK_TREE pointing at the pushing checkout. A
+// fixture owns its own repository context, so inheriting them would make every
+// `git -C <temp fixture>` command below operate on the caller instead of the
+// fixture — observed: `git init` re-initialised the caller's gitdir and the
+// baseline commit landed on the caller's branch. Strip the inherited context.
+const gitEnv = { ...process.env };
+for (const key of [
+  'GIT_DIR',
+  'GIT_WORK_TREE',
+  'GIT_INDEX_FILE',
+  'GIT_COMMON_DIR',
+  'GIT_OBJECT_DIRECTORY',
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+]) {
+  delete gitEnv[key];
+}
+const git = (dir, ...args) =>
+  execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8', env: gitEnv }).trim();
 const hash = value => createHash('sha256').update(value).digest('hex');
 const temp = mkdtempSync(join(tmpdir(), 'nession-handler-concurrency-'));
 try {
@@ -26,6 +43,13 @@ try {
     return readFileSync(dst, 'utf8');
   });
   git(base, 'init', '-q', '-b', 'baseline');
+  // Fail closed if the inherited environment ever wins again: a fixture whose
+  // gitdir is not inside the temp directory is the caller's repository, and
+  // every command below would edit it.
+  const fixtureGitDir = git(base, 'rev-parse', '--absolute-git-dir');
+  if (!fixtureGitDir.startsWith(realpathSync(temp) + '/')) {
+    throw Error('fixture did not own its repository context: ' + fixtureGitDir);
+  }
   git(base, 'config', 'user.name', 'Nession Locality CI');
   git(base, 'config', 'user.email', 'ci@nession.local');
   git(base, 'add', '--', ...FILES);
