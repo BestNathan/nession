@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_projection_receipt",
+  "outcome": "applied",
+  "issue": 2141,
+  "run_id": 39538915263,
+  "run_attempt": 1,
+  "target_sha": "0869a9be62c1db43229798d29c855a67a79ed8ce",
+  "plan_digest": "699eb617619631313df9449f3248d4c1ad3d53ce71f4f5cb874638e9969d6c0d",
+  "artifact_digest": "sha256:1821243605541e7d8d24dadc10310acd3a72e46cff571e70545f78bb8e29682b",
+  "ingest_run_id": 39540198146,
+  "ingest_attempt": 1,
+  "declaration_digest": "5b99b542344780aa5b6f145559af699561ae51d57b3007ca526dc65ec7bdbd9f",
+  "before_body_sha256": "6c3e9db38f36dac7edfff6f7da0464bfa0299b6430bd37e35bcf9e125f8a934e",
+  "body_sha256": "586f29b725df8e63f123498daaa363b4c381d12aa664df2f66bfcd2ce52242b2",
+  "readback_body": "Parent #1926 (SC-03/SC-08) / #1645 (SC-10 reconnect element). Scoped child adding a deterministic reconnect fixture to the terminal consistency spec.\n\n## Requirements: A relay reconnect keeps the renderer and loses no session output\n\n### Problem\n\nThe suite proves a half-open Server socket creates a new physical socket and does not remount the Terminal (#1213), but the terminal-consistency fault spec has no reconnect witness that also checks the **stream**: output produced before the drop must not be duplicated, and a numbered burst after recovery must neither lose nor duplicate its tail.\n\n### Scope\n\n- Create and attach a Relay session, mark the current xterm DOM node, print a pre-drop marker (built through `printf` arguments so the echoed command never contains it), and wait for it exactly once.\n- Force the reconnect deterministically: suppress `server.info`, toggle visibility hidden→visible, and wait for a new physical `/ws` socket.\n- Assert the same xterm node survives, the Shell is visible again, and the pre-drop marker still occurs exactly once.\n- After recovery, print a post marker and run a numbered burst; assert the post marker and the burst tail are exactly once (no duplicate, no missing tail line).\n\n### Success Criteria\n\n- [ ] SC-01 A forced Relay reconnect creates a new physical socket without remounting the xterm; the pre-drop marker remains exactly once.\n- [ ] SC-02 After the reconnect, a post marker and a numbered burst tail are delivered exactly once — no silent gap and no duplicate in the retained tail.\n- [ ] SC-03 Exact PR HEAD Quality / E2E / Case Smoke / trusted Acceptance, and exact merge-SHA Quality / E2E / Cases / Orchestrator Pass.\n\n## Acceptance Plan\n\n```yaml\nacceptance:\n  SC-01:\n    when: pr\n    method: agent\n  SC-02:\n    when: pr\n    method: agent\n  SC-03:\n    when: merged\n    branch: main\n    method: agent\n```\n\n## E2E Verification\n\n### New\n- none: the fixture extends the existing canonical spec; no new spec ID is introduced.\n\n### Regression\n- terminal-consistency-faults\n- terminal-attach-bootstrap\n\n## E2E Report\n\n| ID | Type | Result | Evidence |\n|---|---|---|---|\n| terminal-attach-bootstrap | Regression | Error | run 39538915263/1, SHA 0869a9be62c1db43229798d29c855a67a79ed8ce, contract 5b99b542344780aa5b6f145559af699561ae51d57b3007ca526dc65ec7bdbd9f, plan 699eb617619631313df9449f3248d4c1ad3d53ce71f4f5cb874638e9969d6c0d, tests 0/0 (https://github.com/BestNathan/nession/actions/runs/39538915263) |\n| terminal-consistency-faults | Regression | Error | run 39538915263/1, SHA 0869a9be62c1db43229798d29c855a67a79ed8ce, contract 5b99b542344780aa5b6f145559af699561ae51d57b3007ca526dc65ec7bdbd9f, plan 699eb617619631313df9449f3248d4c1ad3d53ce71f4f5cb874638e9969d6c0d, tests 0/0 (https://github.com/BestNathan/nession/actions/runs/39538915263) |\n\n## Acceptance Report\n\n| Criterion | Result | Evidence |\n|---|---|---|\n| SC-01 | Pending | awaiting exact PR head SHA Agent proof |\n| SC-02 | Pending | awaiting exact PR head SHA Agent proof |\n| SC-03 | Pending | awaiting merged main SHA Agent proof |\n\n## Product alignment\n\n- [ ] Does this move Nession toward VISION.md?\n- [ ] Does it obey PRINCIPLE.md?\n- [ ] Were relevant docs/design/* sources checked?\n- [ ] Is any deviation explicit?\n\n---\n**Status:** Approved",
+  "patch_updated_at": "2026-10-21T03:44:26Z",
+  "readback_updated_at": "2026-10-21T03:44:26Z",
+  "rows": [
+    {
+      "id": "terminal-attach-bootstrap",
+      "result": "Error",
+      "evidence": "run 39538915263/1, SHA 0869a9be62c1db43229798d29c855a67a79ed8ce, contract 5b99b542344780aa5b6f145559af699561ae51d57b3007ca526dc65ec7bdbd9f, plan 699eb617619631313df9449f3248d4c1ad3d53ce71f4f5cb874638e9969d6c0d, tests 0/0 (https://github.com/BestNathan/nession/actions/runs/39538915263)"
+    },
+    {
+      "id": "terminal-consistency-faults",
+      "result": "Error",
+      "evidence": "run 39538915263/1, SHA 0869a9be62c1db43229798d29c855a67a79ed8ce, contract 5b99b542344780aa5b6f145559af699561ae51d57b3007ca526dc65ec7bdbd9f, plan 699eb617619631313df9449f3248d4c1ad3d53ce71f4f5cb874638e9969d6c0d, tests 0/0 (https://github.com/BestNathan/nession/actions/runs/39538915263)"
+    }
+  ]
+}
