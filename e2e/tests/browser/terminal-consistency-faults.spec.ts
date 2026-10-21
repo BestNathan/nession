@@ -499,3 +499,90 @@ test('two clients: a stalled observer never blocks the controller (#2144)', asyn
     await observerContext.close();
   }
 });
+
+/** Re-attach the live Session on another route through the attach settings. */
+async function reattachViaSettings(
+  page: import('@playwright/test').Page,
+  sessionName: string,
+  mode: 'Relay' | 'P2P',
+): Promise<void> {
+  await page
+    .getByRole('button', { name: `Configure attach settings for ${sessionName}` })
+    .click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  // Same anchored match as attachToSession: the mode buttons' accessible
+  // names include their hint, and a plain substring match also hits Auto.
+  await dialog.getByRole('button', { name: new RegExp(`^${mode}\\b`) }).click();
+  const attachButton = dialog.getByRole('button', { name: 'Attach' });
+  await expect(attachButton).toBeEnabled({ timeout: 10_000 });
+  await attachButton.click();
+  await expect(dialog).not.toBeVisible({ timeout: 5_000 });
+}
+
+// #2156 / #1926 SC-03: the switch an operator actually performs — re-attach
+// the same Session on the other route from the attach settings. The renderer
+// must survive, output before the cut must not be duplicated, and a burst that
+// spans the cut must have an exactly-once retained tail.
+test('a P2P↔Relay re-attach keeps the xterm and the stream (#2156)', async ({ page }, testInfo) => {
+  test.skip(!process.env.CI, 'real stack available in CI only');
+  test.setTimeout(360_000);
+
+  const sessionName = `e2e-consistency-route-${testInfo.retry}-${Date.now()}`;
+  await page.goto(
+    '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
+  );
+  await waitForShell(page);
+  await createSession(page, sessionName);
+  await attachToSession(page, sessionName, 'P2P');
+  await waitForInteractiveShell(page);
+
+  await page.locator('.xterm').evaluate((node) => {
+    node.setAttribute('data-e2e-route-instance', 'original');
+  });
+  await submitTerminalCommand(page, `printf 'ROUTE-%s-BEFORE\\n' 2156`);
+  await expect.poll(async () => countInBuffer(page, 'ROUTE-2156-BEFORE')).toBe(1);
+
+  // P2P → Relay, in place.
+  await reattachViaSettings(page, sessionName, 'Relay');
+  await expect(page.locator('.xterm')).toHaveAttribute('data-e2e-route-instance', 'original');
+  await submitTerminalCommand(page, `printf 'ROUTE-%s-RELAY\\n' 2156`);
+  await expect.poll(async () => countInBuffer(page, 'ROUTE-2156-RELAY'), { timeout: 30_000 })
+    .toBe(1);
+  // The pre-switch scrollback is still there, exactly once.
+  expect(await countInBuffer(page, 'ROUTE-2156-BEFORE')).toBe(1);
+
+  // A burst that spans the cut: start it, then switch back to P2P while it is
+  // still streaming. The tail must be present exactly once afterwards.
+  const COUNT = 800;
+  const TAIL = 200;
+  await submitTerminalCommand(page, `seq 1 ${COUNT} | sed 's/^/RS-/'`);
+  await reattachViaSettings(page, sessionName, 'P2P');
+  await expect(page.locator('.xterm')).toHaveAttribute('data-e2e-route-instance', 'original');
+  await waitForLastLine(page, 'RS-', COUNT, { timeoutMs: 240_000, stallMs: 60_000 });
+
+  const text = await readTerminalBuffer(page);
+  const counts = new Map<number, number>();
+  for (const match of text.matchAll(/RS-(\d+)/g)) {
+    const value = Number(match[1]);
+    if (value >= 1 && value <= COUNT) {
+      counts.set(value, (counts.get(value) ?? 0) + 1);
+    }
+  }
+  const duplicated = [...counts.entries()]
+    .filter(([value, seen]) => seen > 1 && value > COUNT - TAIL)
+    .map(([value]) => value);
+  const missingTail: number[] = [];
+  for (let value = COUNT - TAIL + 1; value <= COUNT; value += 1) {
+    if (!counts.has(value)) { missingTail.push(value); }
+  }
+  expect(duplicated, 'a tail line was delivered more than once across the switch').toEqual([]);
+  expect(missingTail, 'a tail line never reached the parser across the switch').toEqual([]);
+
+  // Both markers and the controller write path survived both switches.
+  expect(await countInBuffer(page, 'ROUTE-2156-BEFORE')).toBe(1);
+  expect(await countInBuffer(page, 'ROUTE-2156-RELAY')).toBe(1);
+  await submitTerminalCommand(page, `printf 'ROUTE-%s-AFTER\\n' 2156`);
+  await expect.poll(async () => countInBuffer(page, 'ROUTE-2156-AFTER'), { timeout: 20_000 })
+    .toBe(1);
+});
