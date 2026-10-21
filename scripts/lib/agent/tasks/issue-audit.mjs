@@ -70,11 +70,13 @@ export function issueAuditTools(issue, repository = process.env.GITHUB_REPOSITOR
   if(!['single','tree'].includes(mode)) throw Error('Unsupported Issue Audit mode');
   const tree=mode==='tree' ? createTreeAuditTools(issue,repository) : null;
   const {__progress,...relatedTools}=tree??{};
-  return {
+  const tools={
     read_target_issue: createIssueReadTool(issue, repository),
     update_target_issue: createIssueUpdateTool(issue, repository),
     comment_target_issue: createIssueCommentTool(issue, repository),
     set_verification_tier: createVerificationTierTool(issue, repository),
     ...relatedTools,
   };
+  if(__progress)Object.defineProperty(tools,'getTreeAuditProgress',{value:__progress,enumerable:false});
+  return tools;
 }
