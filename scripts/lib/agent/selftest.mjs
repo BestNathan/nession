@@ -31,6 +31,7 @@ await testIssueTree();
 const extra=issueAuditTools(issue,'example/repo','tree');
 assert.ok(Object.keys(extra).includes('find_related_issues'));
 assert.ok(Object.keys(extra).includes('review_related_issue'));
+assert.ok(Object.keys(extra).includes('publish_tree_audit'));
 assert.ok(typeof extra.getTreeAuditProgress==='function');
 assert.ok(!Object.keys(extra).includes('getTreeAuditProgress'));
 assert.deepEqual(cursor, renderIssueAuditPrompt(issue, audit, 'cursor', 'example/repo'));
