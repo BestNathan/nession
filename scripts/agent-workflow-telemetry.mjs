@@ -171,6 +171,14 @@ export function validateAgentWorkflowTelemetry(record) {
   }
   stableId(record?.task?.id, 'task.id');
   stableId(record?.task?.type, 'task.type');
+  // New PR-correlated Runs must pin both the real PR number and exact target
+  // commit. Historical v1 Agent summaries have no PR and remain valid.
+  if (Object.hasOwn(record.task, 'pr')) {
+    if (!Number.isSafeInteger(record.task.pr) || record.task.pr <= 0)
+      fail('invalid task PR number');
+    if (!/^[a-f0-9]{40}$/.test(record.task.target_ref ?? ''))
+      fail('PR-correlated run requires exact target SHA');
+  }
   // Optional correlation fields preserve compatibility with historical v1 run records.
   if (record.agent.id != null && !/^[a-z][a-z0-9-]*$/.test(record.agent.id)) fail('invalid agent id');
   if (record.agent.role != null && !/^[a-z][a-z0-9-]*$/.test(record.agent.role)) fail('invalid agent role');
@@ -289,6 +297,7 @@ function aggregateWindow(records) {
       by_role: countBy(records, (record) => record.agent.role),
       by_agent_id: countBy(records, (record) => record.agent.id),
       by_issue: countBy(records, (record) => record.task?.issue && String(record.task.issue)),
+      by_pr: countBy(records, (record) => record.task?.pr && String(record.task.pr)),
       by_harness: countBy(records, (record) => record.agent.harness_sha256),
       by_result: countBy(records, (record) => record.result?.status),
     },
@@ -467,6 +476,36 @@ function selfTest() {
   assert.equal(correlatedAggregate.windows['7d'].runs.by_role.developer, 1);
   assert.equal(correlatedAggregate.windows['7d'].runs.by_agent_id['dev-cursor-01'], 1);
   assert.equal(correlatedAggregate.windows['7d'].runs.by_issue['1664'], 1);
+  assert.equal(Object.hasOwn(correlated.task, 'pr'), false, 'old v1 source stays unmodified');
+  const reviewed = buildAgentWorkflowTelemetry({
+    workflow_id: 'agent-review', github_run_id: 39448549052, github_run_attempt: 2,
+    task: { id: 'issue-1997-review', type: 'review', issue: 1997, pr: 2176,
+      target_ref: '3d8e3807cc01f6082734b8d0ba458217c28f60a4' },
+    agent: { provider: 'cursor', role: 'reviewer', id: 'review-cursor-01',
+      harness_sha256: 'b'.repeat(64), checkpoint_id: 'agent-store:checkpoint-v1' },
+    execution: { turns: 1, tools: summarizeToolCalls(['read']) },
+  });
+  assert.equal(reviewed.task.pr, 2176);
+  assert.equal(reviewed.task.target_ref, '3d8e3807cc01f6082734b8d0ba458217c28f60a4');
+  assert.equal(aggregateAgentWorkflowTelemetry([correlated, reviewed], new Date())
+    .windows['7d'].runs.by_pr['2176'], 1);
+  assert.notEqual(telemetryStoragePath(reviewed),
+    telemetryStoragePath(buildAgentWorkflowTelemetry({
+      workflow_id: 'agent-review', github_run_id: 39448549052, github_run_attempt: 1,
+      task: { ...reviewed.task }, agent: { ...reviewed.agent },
+      execution: { turns: 1, tools: summarizeToolCalls(['read']) },
+    })), 'different Run attempts cannot collide');
+  for (const pr of [0, -1, 1.5, '2176', null, {}, []]) {
+    assert.throws(() => validateAgentWorkflowTelemetry({
+      ...reviewed, task: { ...reviewed.task, pr },
+    }), /invalid task PR/);
+  }
+  assert.throws(() => validateAgentWorkflowTelemetry({
+    ...reviewed, task: { ...reviewed.task, target_ref: 'main' },
+  }), /exact target SHA/);
+  assert.throws(() => validateAgentWorkflowTelemetry({
+    ...reviewed, task: { ...reviewed.task, target_ref: undefined },
+  }), /exact target SHA/);
   assert.throws(() => validateAgentWorkflowTelemetry({ ...correlated, agent: {
     ...correlated.agent, harness_sha256: 'invalid' } }), /harness SHA/);
   assert.throws(() => validateAgentWorkflowTelemetry({ ...fixture, agent: { ...fixture.agent, prompt: { ...fixture.agent.prompt, sha256: 'broken' } } }), /invalid agent prompt/);
