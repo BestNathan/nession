@@ -94,10 +94,18 @@ export function validateExecutionTrace(trace) {
     if (!Number.isSafeInteger(trace.identity[k]) || trace.identity[k] < 1) fail('invalid ' + k);
   }
   if (!/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(trace.identity.repository ?? '')) fail('invalid repository');
-  keysOnly(trace.task, ['id','type','issue','target_sha'], 'task');
+  keysOnly(trace.task, ['id','type','issue','target_sha','pr'], 'task');
   for (const k of ['id','type']) id(trace.task[k], 'task.' + k);
   if (!Number.isSafeInteger(trace.task.issue) || trace.task.issue < 1) fail('invalid Issue');
   if (trace.task.target_sha != null && !/^[0-9a-f]{40}$/.test(trace.task.target_sha)) fail('invalid target_sha');
+  if (trace.task.pr != null) {
+    keysOnly(trace.task.pr,['number','head_sha'],'task.pr');
+    if (Object.keys(trace.task.pr).length!==2||
+        !Number.isSafeInteger(trace.task.pr.number)||trace.task.pr.number<1||
+        typeof trace.task.pr.head_sha!=='string'||
+        !/^[0-9a-f]{40}$/.test(trace.task.pr.head_sha))
+      fail('invalid source task.pr number/head_sha');
+  }
   keysOnly(trace.agent, ['id','role','provider','harness_sha256'], 'agent');
   for (const k of ['id','role','provider']) id(trace.agent[k], 'agent.' + k);
   if (trace.agent.harness_sha256 != null && !HEX.test(trace.agent.harness_sha256)) fail('invalid harness digest');
@@ -131,7 +139,10 @@ export function buildExecutionTrace(run, events, coverage = {}) {
     identity: Object.fromEntries(['workflow_id','github_run_id','github_run_attempt','unique_run_name','repository']
       .map(key => [key, run.identity[key]])),
     task: { id: run.task.id, type: run.task.type, issue: run.task.issue,
-      target_sha: run.task.target_ref ?? null },
+      target_sha: run.task.target_ref ?? null,
+      ...(run.task.pr == null ? {} : {pr: {
+        number: run.task.pr.number, head_sha: run.task.pr.head_sha,
+      }}) },
     agent: { id: run.agent.id, role: run.agent.role, provider: run.agent.provider,
       harness_sha256: run.agent.harness_sha256 },
     timing: { started_at: run.timing.started_at, finished_at: run.timing.finished_at },
@@ -155,6 +166,12 @@ export function validateTraceSource(trace, summary) {
   if (trace.task.id !== summary.task?.id || trace.task.type !== summary.task?.type ||
       trace.task.issue !== summary.task?.issue ||
       trace.task.target_sha !== (summary.task.target_ref ?? null)) fail('trace/run summary task mismatch');
+  const sourcePr=summary.task?.pr ?? null,tracePr=trace.task.pr ?? null;
+  if ((sourcePr==null)!==(tracePr==null)||
+      (sourcePr!=null&&(
+        tracePr.number!==sourcePr.number||
+        tracePr.head_sha!==sourcePr.head_sha
+      )))fail('trace/run summary PR number/HEAD mismatch');
   for (const field of ['id','role','provider','harness_sha256']) {
     if (trace.agent[field] !== (summary.agent?.[field] ?? null)) fail('trace/run summary agent mismatch: ' + field);
   }
@@ -293,6 +310,33 @@ export function selfTest() {
   assert.equal(traceStoragePath(trace), 'raw/events/agent-develop/2026-10-13/101-1-issue-1692-developer.json');
   assert.equal(validateExecutionTrace(trace), trace);
   assert.equal(validateTraceSource(trace, summary), true);
+  assert.equal(Object.hasOwn(trace.task,'pr'),false,
+    'historical v1 traces are unchanged without authenticated PR context');
+  const summaryWithPr={...summary,task:{...summary.task,
+    pr:{number:2176,head_sha:'3d8e3807cc01f6082734b8d0ba458217c28f60a4'}}};
+  const traceWithPr=buildExecutionTrace(summaryWithPr,[e],{tools:'observed'});
+  assert.deepEqual(traceWithPr.task.pr,summaryWithPr.task.pr);
+  assert.equal(validateTraceSource(traceWithPr,summaryWithPr),true);
+  assert.throws(()=>validateTraceSource(traceWithPr,{
+    ...summaryWithPr,task:{...summaryWithPr.task,
+      pr:{...summaryWithPr.task.pr,number:2177}},
+  }),/PR number\/HEAD mismatch/);
+  assert.throws(()=>validateTraceSource(traceWithPr,{
+    ...summaryWithPr,task:{...summaryWithPr.task,
+      pr:{...summaryWithPr.task.pr,head_sha:'0'.repeat(40)}},
+  }),/PR number\/HEAD mismatch/);
+  assert.throws(()=>validateTraceSource(traceWithPr,summary),
+    /PR number\/HEAD mismatch/);
+  assert.throws(()=>validateTraceSource(trace,summaryWithPr),
+    /PR number\/HEAD mismatch/);
+  for(const pr of [
+    {number:'2176',head_sha:summaryWithPr.task.pr.head_sha},
+    {number:0,head_sha:summaryWithPr.task.pr.head_sha},
+    {number:2176,head_sha:'main'},
+    {...summaryWithPr.task.pr,next_role:'developer'},
+  ])assert.throws(()=>validateExecutionTrace({
+    ...traceWithPr,task:{...traceWithPr.task,pr},
+  }),/task.pr/);
   assert.equal(summarizeExecutionTrace(trace).tools.by_logical_name['repo.read'], 1);
   assert.equal(summarizeExecutionTrace(trace).skills.completeness, 'unobserved');
   assert.equal(summarizeExecutionTrace(trace).model.request_count, null);
@@ -344,5 +388,5 @@ export function selfTest() {
 
   assert.ok(!JSON.stringify(q).includes('/private'));
   assert.throws(() => buildExecutionTrace({...summary,agent:{...summary.agent,id:null}},[]),/agent.id/);
-  console.log('agent execution trace: schema, lifecycle, source identity and redaction fixtures passed');
+  console.log('agent execution trace: schema, lifecycle, v1 PR compatibility, exact source PR/HEAD and redaction fixtures passed');
 }
