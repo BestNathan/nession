@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_projection_receipt",
+  "outcome": "applied",
+  "issue": 2155,
+  "run_id": 39626197841,
+  "run_attempt": 1,
+  "target_sha": "6bec276c51e31e7f4238fd823b3836b8b6ea20f5",
+  "plan_digest": "1613325c67701692a80740d8128da31ff5a776f91cf28325f1a14ed80efbad33",
+  "artifact_digest": "sha256:efba56b53eeb31f7470f0a594feadda80d0872b7b6090f1d24ad2b8e90c1d5a4",
+  "ingest_run_id": 39627066665,
+  "ingest_attempt": 1,
+  "declaration_digest": "b442d0eaa029e1a36db8984ddcfd0634c22f642b5189116cd33310d59b48f111",
+  "before_body_sha256": "8cfa4835f0bcfa69bf735df6edcd20e76f4de6e10e979fa6ed1408f38db297f4",
+  "body_sha256": "7ce12d1ae79f716d5483cea3475ebe66da8eccde916a9a36055a26473c03a975",
+  "readback_body": "Parent #1926 (SC-08) / #1645 (SC-06, SC-08). The runtime knows when a terminal's history may have a hole; the surface never says so.\n\n## Requirements: Degraded history is visible, not silent\n\n`SessionRuntime` already tracks `historyMayHaveGap`: a truncated replay, a missed sequence, a relay outage, or an unproven first attach sets it, and it drives the bootstrap decision on the next attach (`needsBootstrap`). It is also cleared only by a verified repair (`noteBootstrapApplied`).\n\nNothing renders it. A client that lost output keeps showing its buffer as if it were complete, and the product's own rule — `synchronized`, `degraded-live` and `unavailable` are different states — exists only in comments.\n\nThe surface must show an explicit, quiet notice while the runtime cannot vouch for history, and it must disappear only when history is actually repaired:\n\n- `degraded` while `historyMayHaveGap` is set and the session is live;\n- the notice must not appear for a healthy session, nor while the transport is merely reconnecting without a known hole;\n- clearing requires a repaired buffer (a verified bootstrap applied to the current renderer), not an attach success or a reconnect.\n\nScope: Web runtime snapshot + terminal surface + tests. No protocol change; the state is derived from facts the runtime already owns. The visual treatment follows the existing observer bar pattern (`terminal-observer-bar`): a muted, non-blocking status line, not a modal.\n\n## Success Criteria\n\n- [ ] SC-01 A live session whose runtime reports a history gap shows an explicit degraded notice in the terminal surface; a healthy session does not.\n- [ ] SC-02 The notice clears only after a verified repair is applied to the current renderer; transport reconnect or Agent attach success alone does not clear it.\n- [ ] SC-03 Exact PR HEAD Quality / E2E / Case Smoke / trusted Acceptance, and exact merge-SHA Quality / E2E / Cases / Orchestrator Pass.\n\n## Acceptance Plan\n\n```yaml\nacceptance:\n  SC-01:\n    when: pr\n    method: agent\n  SC-02:\n    when: pr\n    method: agent\n  SC-03:\n    when: merged\n    branch: main\n    method: agent\n```\n\n## Acceptance Report\n\n| Criterion | Result | Evidence |\n|---|---|---|\n| SC-01 | Pending | awaiting exact PR head SHA Agent proof |\n| SC-02 | Pending | awaiting exact PR head SHA Agent proof |\n| SC-03 | Pending | awaiting merged main SHA Agent proof |\n\n## E2E Verification\n\n### New\n- none: the state is asserted at the runtime and surface layers; no new spec ID is introduced.\n\n### Regression\n- terminal-attach-bootstrap\n\n## E2E Report\n\n| ID | Type | Result | Evidence |\n|---|---|---|---|\n| terminal-attach-bootstrap | Regression | Pass | run 39626197841/1, SHA 6bec276c51e31e7f4238fd823b3836b8b6ea20f5, contract b442d0eaa029e1a36db8984ddcfd0634c22f642b5189116cd33310d59b48f111, plan 1613325c67701692a80740d8128da31ff5a776f91cf28325f1a14ed80efbad33, tests 3/3 (https://github.com/BestNathan/nession/actions/runs/39626197841) |\n\n## Product alignment\n\n- [ ] Does this move Nession toward VISION.md?\n- [ ] Does it obey PRINCIPLE.md?\n- [ ] Were relevant docs/design/* sources checked?\n- [ ] Is any deviation explicit?\n\n---\n**Status:** Draft — blocked on repair-proof semantics (see investigation comment)\n\n",
+  "patch_updated_at": "2026-10-21T15:35:54Z",
+  "readback_updated_at": "2026-10-21T15:35:54Z",
+  "rows": [
+    {
+      "id": "terminal-attach-bootstrap",
+      "result": "Pass",
+      "evidence": "run 39626197841/1, SHA 6bec276c51e31e7f4238fd823b3836b8b6ea20f5, contract b442d0eaa029e1a36db8984ddcfd0634c22f642b5189116cd33310d59b48f111, plan 1613325c67701692a80740d8128da31ff5a776f91cf28325f1a14ed80efbad33, tests 3/3 (https://github.com/BestNathan/nession/actions/runs/39626197841)"
+    }
+  ]
+}
