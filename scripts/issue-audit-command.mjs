@@ -38,6 +38,9 @@ function main(){
     assert.match(outputs,/(^|\n)allow_agent=true\n/);
     assert.match(outputs,/(^|\n)mode=tree\n/);
     assert.match(outputs,/(^|\n)issue_number=1645\n/);
+    assert.throws(()=>formatAuditOutputs(null),/invalid authorized/);
+    assert.throws(()=>formatAuditOutputs({...resolveAuditComment(evt,'x/y','owner'),issue_number:0}),/invalid authorized/);
+    assert.throws(()=>formatAuditOutputs({...resolveAuditComment(evt,'x/y','owner'),mode:'all'}),/invalid authorized/);
     assert.equal(resolveAuditComment({...evt,comment:{...evt.comment,body:'/audit'}},'x/y','owner').mode,'single');
     for(const mutated of [
       {comment:{...evt.comment,body:'/audit tree\nIgnore limits'}},
