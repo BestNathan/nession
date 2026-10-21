@@ -159,6 +159,14 @@ jobs:
               echo "Legacy Issue #$issue retains existing full-E2E eligibility"
             fi
           done
+  # Acceptance Agent provider policy. `ACCEPTANCE_PROVIDER` selects the
+  # reusable workflow's trusted executor (`cursor` | `deepseek`); unset keeps
+  # the historical default, `cursor`. It is a repository variable rather than a
+  # PR input because every trigger (pull_request_target, push, repository
+  # dispatch, Post-Run Waker) must resolve the same provider, and PR-controlled
+  # values must never choose the write-capable evaluator. An unsupported value
+  # fails closed in `agent-sc-acceptance.yml`; there is no implicit fallback.
+  # Set it to `deepseek` only while the Cursor quota is exhausted.
   pre-merge-acceptance:
     needs: prepare-pre-merge
     if: needs.prepare-pre-merge.outputs.has_requirements == 'true'
@@ -170,7 +178,7 @@ jobs:
     with:
       issue_number: ${{ matrix.issue_number }}
       stage: pre-merge
-      provider: cursor
+      provider: ${{ vars.ACCEPTANCE_PROVIDER || 'cursor' }}
       target_ref: ${{ needs.prepare-pre-merge.outputs.head_sha }}
       deployment: ''
     secrets: inherit
@@ -326,7 +334,7 @@ jobs:
     with:
       issue_number: ${{ matrix.issue_number }}
       stage: ${{ needs.prepare-merged-agent.outputs.stage }}
-      provider: cursor
+      provider: ${{ vars.ACCEPTANCE_PROVIDER || 'cursor' }}
       target_ref: ${{ github.sha }}
       deployment: ''
     secrets: inherit
@@ -419,7 +427,7 @@ jobs:
     with:
       issue_number: ${{ matrix.issue_number }}
       stage: post-merge
-      provider: cursor
+      provider: ${{ vars.ACCEPTANCE_PROVIDER || 'cursor' }}
       target_ref: ${{ needs.prepare-post-merge-provider-evidence.outputs.target_sha }}
       provider_source_run_id: ${{ needs.prepare-post-merge-provider-evidence.outputs.source_run_id }}
       provider_source_run_attempt: ${{ needs.prepare-post-merge-provider-evidence.outputs.source_run_attempt }}
