@@ -50,12 +50,60 @@ async function readBufferTail(
   }, lines);
 }
 
+/**
+ * Wait until `prefix${last}` is present in the tail, failing on a genuine
+ * stall rather than on a slow environment.
+ *
+ * The stream is allowed to be slow: a saturated runner parses a burst far
+ * slower than an idle one (measured ~15–25 lines/s on contended runners
+ * against a handful of seconds for the whole burst on an idle one), and that
+ * is a property of the witness, not of the exactly-once guarantee. What is
+ * not allowed is a stream that stops advancing — every poll reports the
+ * highest numbered line seen, and a tail that does not advance for `stallMs`
+ * fails naming the position, so a real hole reports itself instead of burning
+ * the whole bound.
+ */
+async function waitForLastLine(
+  page: import('@playwright/test').Page,
+  prefix: string,
+  last: number,
+  { timeoutMs, stallMs }: { timeoutMs: number; stallMs: number },
+): Promise<void> {
+  const start = Date.now();
+  const pattern = new RegExp(`${prefix}(\\d+)`, 'g');
+  const complete = new RegExp(`(?:^|\\n)${prefix}${last}\\r?(?:\\n|$)`);
+  let highest = 0;
+  let advancedAt = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const tail = await readBufferTail(page);
+    const values = [...tail.matchAll(pattern)].map((match) => Number(match[1]));
+    const seen = values.length > 0 ? Math.max(...values) : 0;
+    if (seen > highest) {
+      highest = seen;
+      advancedAt = Date.now();
+    }
+    if (complete.test(tail)) { return; }
+    if (Date.now() - advancedAt > stallMs) {
+      const grid = await readGrid(page);
+      throw new Error(
+        `${prefix}${last} stream stalled at ${prefix}${highest} for ${stallMs}ms ` +
+          `(grid ${grid.cols}x${grid.rows})`,
+      );
+    }
+    await page.waitForTimeout(500);
+  }
+  throw new Error(
+    `${prefix}${last} did not arrive within ${timeoutMs}ms; highest was ${prefix}${highest}`,
+  );
+}
+
 for (const mode of ['Relay', 'P2P'] as const) {
   test(`high-volume numbered output reaches the parser exactly once over ${mode}`, async ({ page }, testInfo) => {
     test.skip(!process.env.CI, 'real stack available in CI only');
-    // Session creation/attach plus the burst. The readiness wait below is the
-    // real bound; a stall is a finding, not a reason to extend the timeout.
-    test.setTimeout(240_000);
+    // Session creation/attach plus the burst. The readiness wait is
+    // progress-bounded (see waitForLastLine): a slow parser is tolerated, a
+    // stalled one fails with its position.
+    test.setTimeout(360_000);
 
     const sessionName = `e2e-consistency-hv-${mode.toLowerCase()}-${testInfo.retry}-${Date.now()}`;
     await page.goto(
@@ -72,18 +120,13 @@ for (const mode of ['Relay', 'P2P'] as const) {
     // the moment the command is submitted — is what makes the buffer read a
     // complete prefix rather than a mid-stream sample.
     //
-    // `sed` is deliberately the producer: its stdout is block-buffered, so the
-    // pane's tty receives ~500-byte writes (measured) and tmux sees tens of
-    // reads for the burst. An `awk` producer with a `system()` pace writes one
-    // line per tty write (measured: 36-byte chunks) and multiplies the
-    // per-read cost through the Agent and xterm without changing what the
-    // assertion is about. The count and the tail window are the witness; the
-    // producer must not change their scale.
+    // `sed` is the producer: its stdout is block-buffered, so the pane's tty
+    // receives ~500-byte writes rather than one write per line. The burst's
+    // delivery rate is the environment's (see waitForLastLine); the 5,000-line
+    // count and the tail window are the witness and stay fixed.
     await submitTerminalCommand(page, `seq 1 ${COUNT} | sed 's/^/HV-/'`);
 
-    await expect(async () => {
-      expect(await readBufferTail(page)).toContain(`HV-${COUNT}`);
-    }).toPass({ timeout: 180_000 });
+    await waitForLastLine(page, 'HV-', COUNT, { timeoutMs: 300_000, stallMs: 60_000 });
 
     const text = await readTerminalBuffer(page);
     const counts = new Map<number, number>();
@@ -196,7 +239,7 @@ for (const mode of ['Relay', 'P2P'] as const) {
 // output was lost or duplicated across the cut.
 test('a Relay reconnect keeps the xterm and loses no session output', async ({ page }, testInfo) => {
   test.skip(!process.env.CI, 'real stack available in CI only');
-  test.setTimeout(180_000);
+  test.setTimeout(240_000);
 
   const sessionName = `e2e-consistency-reconnect-${testInfo.retry}-${Date.now()}`;
   await page.goto(
@@ -263,9 +306,7 @@ test('a Relay reconnect keeps the xterm and loses no session output', async ({ p
   const COUNT = 1_000;
   const TAIL = 400;
   await submitTerminalCommand(page, `seq 1 ${COUNT} | sed 's/^/RC-/'`);
-  await expect(async () => {
-    expect(await readBufferTail(page)).toContain(`RC-${COUNT}`);
-  }).toPass({ timeout: 60_000 });
+  await waitForLastLine(page, 'RC-', COUNT, { timeoutMs: 150_000, stallMs: 45_000 });
 
   const text = await readTerminalBuffer(page);
   const counts = new Map<number, number>();
