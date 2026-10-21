@@ -139,7 +139,7 @@ for (const mode of ['Relay', 'P2P'] as const) {
     // The controller suppresses the PTY half of a resize while the webfont is
     // still loading (`metricsAreProvisional`), but still resizes the local
     // grid. Wait for the face before measuring, or the grid moves and the PTY
-    // legitimately does not.
+    // legitimately does not follow.
     await page.evaluate(async () => { await document.fonts.ready; });
 
     // The browser grid changes while the TUI owns the screen: the alternate
