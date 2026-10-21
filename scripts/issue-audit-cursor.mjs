@@ -254,6 +254,7 @@ function selfTest() {
   assert.equal(normalizeCursorSdkModule({ Cursor: {}, Agent: {} }).Cursor != null, true);
   assert.equal(normalizeCursorSdkModule({ default: { Cursor: {}, Agent: {} } }).Agent != null, true);
   const restrictedTools = ['read', 'grep', 'glob', 'ls', 'mcp'];
+  assert.equal(restrictedTools.includes('shell'),false);
   assert.equal(restrictedTools.includes('mcp'), true);
   assert.equal(restrictedTools.includes('shell'), false);
   const catalog = [{ id: 'composer-2.5', parameters: [{ id: 'fast', values: [{ value: 'false' }, { value: 'true' }] }] }];
