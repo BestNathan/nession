@@ -83,6 +83,9 @@ export function validateControlledPublisherIntent(value){
     reject('untrusted or conflicting immutable Publisher intent');
   return value;
 }
+export function planControlledPublisherIntent(args){
+  return validateControlledPublisherIntent(expected(args));
+}
 export const CONTROLLED_PUBLISHER_INTENT_PATH=EXPECTED_PATH;
 export const CONTROLLED_PUBLISHER_BRANCH=BRANCH;
 function confirmStore(root){
@@ -101,8 +104,7 @@ function confirmStore(root){
 export function commitControlledPublisherIntent({
   remote,target_main_sha,patch_sha256,issuer_run_id,
 }){
-  const record=validateControlledPublisherIntent(
-    expected({target_main_sha,patch_sha256,issuer_run_id}));
+  const record=planControlledPublisherIntent({target_main_sha,patch_sha256,issuer_run_id});
   if(typeof remote!=='string'||!remote||/\s/.test(remote)||remote.length>2000)
     reject('invalid scoped authenticated Store remote');
   const temp=fs.mkdtempSync(path.join(os.tmpdir(),'nession-publisher-intent-'));
