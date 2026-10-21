@@ -39,7 +39,8 @@ export function mergedSelection(event,commit,prs,issues,repoRoot) {
     if(!pathsCannotAffectE2E(paths))
       throw Error('non-PR runtime push requires trusted risk audit; full E2E is not the fallback');
     return {schema_version:1,kind:'issue_e2e_selection',base_sha:target.baseSha,
-      target_sha:target.targetSha,mode:'not-required',selected:[],issues:[],
+      target_sha:target.targetSha,merge_sha:target.targetSha,source_event:'push',
+      mode:'not-required',selected:[],issues:[],
       reason:'verified-unassociated-metadata-only-merge'};
   }
   const numbers=parsePreMergeIssueNumbers(target.pr.body, 'BestNathan','nession',target.pr.title);
