@@ -87,7 +87,7 @@ export async function collectScopeArtifact({run,scopeProof,artifact,token,fetche
   }finally{rmSync(dir,{recursive:true,force:true})}
 }
 function selfTest(){
-  const sha='a'.repeat(40),digest='b'.repeat(64);
+  const sha='a'.repeat(40);
   const run={id:42,run_attempt:2,head_sha:sha};
   const plan={schema_version:1,kind:'issue_e2e_selection',mode:'not-required',
     target_sha:sha,merge_sha:sha,source_event:'push',reason:'trusted metadata-only diff',selected:[],issues:[]};
@@ -102,7 +102,13 @@ function selfTest(){
     {plan:{...plan,selected:[{id:'login'}]}},
     {scopeProof:{scope:'selected',receipt:{selected_ids:['login']}}},
   ])assert.throws(()=>verifyScopeArtifact({plan,results,run,scopeProof,...wrong}));
-  const selected={...plan,mode:'selected',plan_digest:digest,selected:[{id:'login',owners:[]}]};
+  const selected={...plan,mode:'selected',selected:[{id:'login',owners:[]}]};
+  selected.plan_digest=sha256(JSON.stringify({schema_version:selected.schema_version,
+    kind:selected.kind,base_sha:selected.base_sha,target_sha:selected.target_sha,
+    issues:selected.issues,selected:selected.selected,mode:selected.mode}));
+  assert.throws(()=>verifyScopeArtifact({plan:{...selected,plan_digest:'b'.repeat(64)},
+    results,run,scopeProof:{scope:'selected',receipt:{selected_ids:['login']}}}),
+    /digest/);
   const selectedReceipt={scope:'selected',receipt:{selected_ids:['login']}};
   assert.throws(()=>verifyScopeArtifact({plan:selected,results,run,scopeProof:selectedReceipt,
     report:null,assertions:null}),/assertion|untrusted|Pass/);
