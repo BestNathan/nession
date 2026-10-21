@@ -395,6 +395,7 @@ export async function collectNotRequiredE2eReceipts(repo,sha,runs,
   for(const candidate of candidates){
     const run=await request('/repos/'+repo+'/actions/runs/'+candidate.id);
     if(run?.id!==candidate.id||run.head_sha!==sha||
+       run.event!==candidate.event||run.head_branch!==candidate.head_branch||
        !Number.isSafeInteger(run.run_attempt)||run.run_attempt<1||
        run.conclusion!=='success')
       throw Error('unverified not-required E2E receipt selection');
