@@ -52,7 +52,11 @@ export function admitOriginalControlledReviewerTarget(params){
      !Number.isFinite(Date.parse(run.created_at??''))||
      Date.parse(run.created_at)<Date.parse(comment.created_at))
     fail('wrong Owner comment or Publisher event lineage');
-  const intent=validateControlledPublisherIntent(rawIntent);
+  // Normalize the lower-level Store parser error into the Reviewer admission
+  // boundary; a forged immutable intent is still rejected, not silently used.
+  let intent;
+  try { intent=validateControlledPublisherIntent(rawIntent); }
+  catch { fail('untrusted immutable Publisher Store intent'); }
   must(intent.publisher_issuer_run_id,run.id,'Publisher Run in CAS');
   must(intent.target_main_sha,run.head_sha,'CAS main SHA');
   must(intent.action_id,POLICY.action_id,'signed Worker Action');
