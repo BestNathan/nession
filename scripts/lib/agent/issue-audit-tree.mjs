@@ -6,6 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { fetchGitHubIssue } from './tools/gh/issue/read.mjs';
 import { createVerificationTierTool } from './tools/gh/issue/verification-tier.mjs';
 import { createIssueUpdateTool } from './tools/gh/issue/update.mjs';
+import { createIssueCommentTool } from './tools/gh/issue/comment.mjs';
 import { auditIssue } from '../../issue-contract.mjs';
 import { readVerificationTier, VERIFICATION_TIERS } from '../../verification-tier-policy.mjs';
 
@@ -61,6 +62,7 @@ export function createTreeAuditTools(root,repository=process.env.GITHUB_REPOSITO
   if(!repository||!Number.isSafeInteger(root?.number))throw Error('tree audit needs rooted Issue');
   const rootNumber=root.number, observed=new Set([rootNumber]),read=new Set([rootNumber]);
   const visited=new Map(),issues=new Map(),expanded=new Set();
+  let published=false;
   const readIssue=n=>{
     if(issues.size>TREE_AUDIT_LIMIT*MAX_DEPTH)throw Error('tree relation lookup ceiling reached');
     const result=getIssue(n,repository);
@@ -83,7 +85,27 @@ export function createTreeAuditTools(root,repository=process.env.GITHUB_REPOSITO
     unchanged:[...visited].filter(([,v])=>!v.updated).map(([n])=>n),
     remaining:[...observed].filter(n=>!visited.has(n)).sort((a,b)=>a-b),
     unexplored:[...observed].filter(n=>!expanded.has(n)).sort((a,b)=>a-b),
-    limit:TREE_AUDIT_LIMIT};}
+    limit:TREE_AUDIT_LIMIT,published};}
+
+  function protectedSection(body,label) {
+    const lines=String(body??'').split(/\r?\n/);
+    const start=lines.findIndex(l=>l.trim()===label);
+    if(start<0)return null;
+    const level=(label.match(/^#+/)??['##'])[0].length;
+    let end=lines.length;
+    for(let i=start+1;i<lines.length;i++){
+      const heading=lines[i].match(/^(#{1,6})\s/);
+      if(heading&&heading[1].length<=level){end=i;break;}
+    }
+    return lines.slice(start,end).join('\n');
+  }
+  function assertPreservesAcceptance(before,after) {
+    for(const name of ['### Success Criteria','## Success Criteria','## Acceptance Plan','## Acceptance Report']){
+      if(protectedSection(before,name)!==protectedSection(after,name))
+        throw Error('tree audit cannot rewrite previously declared SC/Acceptance evidence: '+name);
+    }
+  }
+
   const int={type:'integer',minimum:1};
   return {
     find_related_issues:{
@@ -148,9 +170,32 @@ export function createTreeAuditTools(root,repository=process.env.GITHUB_REPOSITO
       async execute({issue_number,title,body,labels}){
         const issue=ensureScoped(issue_number,{writable:true});
         if(!read.has(issue_number))throw Error('read related Issue before repair');
+        assertPreservesAcceptance(issue.body,body);
         const result=await createIssueUpdateTool(issue,repository).execute({title,body,labels});
         readIssue(issue_number);
         return result;
+      }
+    },
+    publish_tree_audit:{
+      description:'Publish exactly one verified tree audit summary on the root Issue after exploring each branch. If unfinished, report partial honestly, never claim complete.',
+      inputSchema:{type:'object',properties:{summary:{type:'string',minLength:10,maxLength:2000}},required:['summary'],additionalProperties:false},
+      async execute({summary}){
+        if(published)throw Error('tree audit summary already published');
+        if(typeof summary!=='string'||summary.length<10||summary.length>2000)throw Error('invalid tree summary');
+        const p=progress();
+        const complete=p.remaining.length===0&&p.unexplored.length===0&&p.reviewed>0;
+        const body=['## Issue Tree Audit',
+          '- Root: #'+rootNumber,
+          '- Status: **'+(complete?'Complete':'Partial / needs review')+'**',
+          '- Reviewed: '+p.reviewed+' / '+p.observed+' observed (hard limit '+p.limit+')',
+          '- Tier updated: '+(p.updated.join(', ')||'none'),
+          '- Unchanged: '+(p.unchanged.join(', ')||'none'),
+          '- Not reviewed: '+(p.remaining.join(', ')||'none'),
+          '- Branches not yet expanded: '+(p.unexplored.join(', ')||'none'),
+          '', '### Agent findings',summary].join('\n');
+        await createIssueCommentTool(root,repository).execute({body});
+        published=true;
+        return JSON.stringify({complete,progress:progress()});
       }
     },
     tree_audit_progress:{
