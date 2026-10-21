@@ -545,10 +545,32 @@ test('an Auto P2P loss falls back to Relay without remounting the xterm (#2156)'
 
   // Suppress the liveness probe's ping. The peer is still alive but stops
   // answering the runtime's question — the half-open transport the probe
-  // exists to catch (#1264). Typing triggers the probe (onInputSent).
+  // exists to catch (#1264). Typing triggers the probe (onInputSent). Once
+  // the probe reports the socket unresponsive, the WebSocketService's attempt
+  // to rebuild it must fail too, or it would just reconnect the same healthy
+  // URL and never reach the route policy: guard the constructor for
+  // non-Server URLs and arm it here (the Server socket is already open and
+  // keeps working for the relay).
   await page.evaluate(() => {
-    const original = WebSocket.prototype.send;
-    WebSocket.prototype.send = function (data) {
+    const Original = window.WebSocket;
+    let blockAgentTransport = false;
+    const Guarded = function (url: string | URL, protocols?: string | string[]) {
+      if (blockAgentTransport && !String(url).includes('localhost:19090/ws')) {
+        throw new Error('e2e: agent transport intentionally unavailable');
+      }
+      return new Original(url, protocols);
+    } as unknown as typeof WebSocket;
+    Guarded.prototype = Original.prototype;
+    Object.setPrototypeOf(Guarded, Original);
+    window.WebSocket = Guarded;
+    (
+      window as unknown as { __e2eBlockAgentTransport?: () => void }
+    ).__e2eBlockAgentTransport = () => {
+      blockAgentTransport = true;
+    };
+
+    const originalSend = Original.prototype.send;
+    Original.prototype.send = function (data) {
       if (typeof data === 'string') {
         try {
           if ((JSON.parse(data) as { msg_type?: string }).msg_type === 'control.ping') {
@@ -558,8 +580,11 @@ test('an Auto P2P loss falls back to Relay without remounting the xterm (#2156)'
           // Non-JSON frames pass through unchanged.
         }
       }
-      return original.call(this, data);
+      return originalSend.call(this, data);
     };
+    (
+      window as unknown as { __e2eBlockAgentTransport?: () => void }
+    ).__e2eBlockAgentTransport?.();
   });
 
   // A burst that spans the cut.
