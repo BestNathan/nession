@@ -378,14 +378,8 @@ export class ConnectionManager implements TerminalTransport {
    * during attach/reconnect (virtual keyboard, input panel, rotation).
    */
   sendResize(cols: number, rows: number): void {
-    // #2132 diagnostic: a stashed resize is lost if the transport is replaced
-    // before the attach flush; log every decision so the fixture can name it.
-    if (this.disposed || !this.isCurrentGeneration()) {
-      console.info(`[resize] drop gen ${cols}x${rows} disposed=${this.disposed} genOk=${this.isCurrentGeneration()}`);
-      return;
-    }
+    if (this.disposed || !this.isCurrentGeneration()) { return; }
     if (!this.isAttached()) {
-      console.info(`[resize] stash ${cols}x${rows}`);
       this.pendingResize = { cols, rows };
       return;
     }
@@ -398,7 +392,6 @@ export class ConnectionManager implements TerminalTransport {
    * the connect window collapses to one terminal.resize on the wire.
    */
   flushPendingResize(): void {
-    console.info(`[resize] flush pending=${this.pendingResize ? `${this.pendingResize.cols}x${this.pendingResize.rows}` : 'none'} disposed=${this.disposed}`);
     if (this.disposed || !this.isCurrentGeneration() || this.pendingResize === null) { return; }
     const { cols, rows } = this.pendingResize;
     this.pendingResize = null;
@@ -431,25 +424,16 @@ export class ConnectionManager implements TerminalTransport {
   private sendResizeRaw(cols: number, rows: number): void {
     const last = this.lastSentResize;
     if (last !== null && last.cols === cols && last.rows === rows) {
-      console.info(`[resize] dedupe ${cols}x${rows} (last sent ${last.cols}x${last.rows})`);
       return;
-    }
-    if (this.mode === 'p2p' && !this.agentApi) {
-      console.info(`[resize] drop p2p no agentApi ${cols}x${rows}`);
-    }
-    if (this.mode === 'relay' && !this.serverConnection?.isReady()) {
-      console.info(`[resize] drop relay not ready ${cols}x${rows}`);
     }
     if (this.mode === 'p2p' && this.agentApi) {
       try {
-        console.info(`[resize] send p2p ${cols}x${rows}`);
         this.agentApi.sendResize(this.sessionName, cols, rows);
         // Recorded only where the call returned: a throw means nothing left the
         // client, so the next attempt must still send it.
         this.lastSentResize = { cols, rows };
       } catch { /* transport reconnecting — coalesced via the isAttached gate */ }
     } else if (this.mode === 'relay' && this.serverConnection?.isReady()) {
-      console.info(`[resize] send relay ${cols}x${rows}`);
       this.serverConnection.sendRelayResize(this.sessionName, cols, rows);
       this.lastSentResize = { cols, rows };
     }

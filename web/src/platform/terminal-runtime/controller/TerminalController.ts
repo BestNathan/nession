@@ -740,6 +740,16 @@ export class ResizeController {
   /** The element being observed — held for {@link reportedGrid}. */
   private container: HTMLElement | null = null;
   private lastCell = { width: 8, height: 16 };
+  /**
+   * Whether the cell box has already been through the font-load correction
+   * (#1490). Until it has, a provisional status means the grid is still the
+   * fallback's and the correction will report the final one. After it has,
+   * the box is final: `document.fonts.status` can flip back to `loading` for
+   * a lazy face the renderer requested, and treating that as provisional
+   * would swallow a real container resize with no correction left to report
+   * it (#2132).
+   */
+  private fontMetricsSettled = false;
 
   constructor(controller: TerminalController) {
     this.controller = controller;
@@ -770,11 +780,6 @@ export class ResizeController {
         // so neither the drawing nor the tty follows the scroll mode.
         const grid = this.reportedGrid();
         if (grid === null) { continue; }
-        // #2132 diagnostic: the observer fire is where the PTY half starts.
-        console.info(
-          `[resize] fire ${grid.cols}x${grid.rows} first=${this.isFirstFire} ` +
-            `provisional=${this.metricsAreProvisional()}`,
-        );
 
         // Local grid first, on EVERY fire — the container has already changed
         // size, so xterm must repaint at the new size in this same frame or
@@ -891,6 +896,9 @@ export class ResizeController {
    * a face that never arrives still releases the report.
    */
   private metricsAreProvisional(): boolean {
+    // Only before the correction: a later `loading` status is some other face
+    // the renderer asked for, not a measurement this grid was computed from.
+    if (this.fontMetricsSettled) { return false; }
     const fonts = typeof document === 'undefined' ? undefined : document.fonts;
     return fonts?.status === 'loading';
   }
@@ -900,6 +908,7 @@ export class ResizeController {
    *  resized). Refreshes the stashed cell size so later observer fires also
    *  use it. */
   remeasure(): void {
+    this.fontMetricsSettled = true;
     const { width, height } = this.lastContainer;
     if (width <= 0 || height <= 0) { return; }
     const cell = this.controller.cellDimensions;
