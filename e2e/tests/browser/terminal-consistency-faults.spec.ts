@@ -179,3 +179,101 @@ for (const mode of ['Relay', 'P2P'] as const) {
 
   });
 }
+
+// #2141 / #1926 SC-03: a Relay reconnect must keep the live renderer and its
+// stream. The reconnect is forced deterministically with the #1213 shape: the
+// browser keeps a half-open Server socket, and a visibility cycle makes the
+// bounded probe open a new physical socket. The xterm node identity proves the
+// Terminal was not remounted; the markers and the numbered tail prove no
+// output was lost or duplicated across the cut.
+test('a Relay reconnect keeps the xterm and loses no session output', async ({ page }, testInfo) => {
+  test.skip(!process.env.CI, 'real stack available in CI only');
+  test.setTimeout(180_000);
+
+  const sessionName = `e2e-consistency-reconnect-${testInfo.retry}-${Date.now()}`;
+  await page.goto(
+    '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
+  );
+  await waitForShell(page);
+  await createSession(page, sessionName);
+  await attachToSession(page, sessionName, 'Relay');
+  await waitForInteractiveShell(page);
+
+  await page.locator('.xterm').evaluate((node) => {
+    node.setAttribute('data-e2e-reconnect-instance', 'original');
+  });
+
+  // printf arguments keep the resolved marker out of the echoed command line.
+  await submitTerminalCommand(page, `printf 'RECONNECT-%s-BEFORE\\n' 2141`);
+  await expect.poll(async () => countInBuffer(page, 'RECONNECT-2141-BEFORE')).toBe(1);
+
+  await page.evaluate(() => {
+    const originalSend = WebSocket.prototype.send;
+    WebSocket.prototype.send = function (data) {
+      if (typeof data === 'string') {
+        try {
+          if ((JSON.parse(data) as { msg_type?: string }).msg_type === 'server.info') {
+            return;
+          }
+        } catch {
+          // Non-JSON frames still pass through unchanged.
+        }
+      }
+      return originalSend.call(this, data);
+    };
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => 'hidden',
+    });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+
+  // Register before the foreground event so the reconnect cannot race the
+  // subscription: a new physical /ws socket is the witness.
+  const newSocket = page.waitForEvent('websocket', {
+    predicate: (ws) => ws.url().includes('/ws'),
+    timeout: 20_000,
+  });
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => 'visible',
+    });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+
+  await newSocket;
+  await expect(page.getByTestId('terminal-connecting')).toBeHidden({ timeout: 30_000 });
+  await expect(page.locator('.xterm')).toHaveAttribute('data-e2e-reconnect-instance', 'original');
+  await expect.poll(async () => countInBuffer(page, 'RECONNECT-2141-BEFORE')).toBe(1);
+
+  await submitTerminalCommand(page, `printf 'RECONNECT-%s-AFTER\\n' 2141`);
+  await expect.poll(async () => countInBuffer(page, 'RECONNECT-2141-AFTER'), { timeout: 20_000 })
+    .toBe(1);
+
+  // A numbered burst after recovery: the tail must be present exactly once.
+  const COUNT = 1_000;
+  const TAIL = 400;
+  await submitTerminalCommand(page, `seq 1 ${COUNT} | sed 's/^/RC-/`);
+  await expect(async () => {
+    expect(await readBufferTail(page)).toContain(`RC-${COUNT}`);
+  }).toPass({ timeout: 60_000 });
+
+  const text = await readTerminalBuffer(page);
+  const counts = new Map<number, number>();
+  for (const match of text.matchAll(/RC-(\d+)/g)) {
+    const value = Number(match[1]);
+    if (value >= 1 && value <= COUNT) {
+      counts.set(value, (counts.get(value) ?? 0) + 1);
+    }
+  }
+  const duplicated = [...counts.entries()]
+    .filter(([value, seen]) => seen > 1 && value > COUNT - TAIL)
+    .map(([value]) => value);
+  const missingTail: number[] = [];
+  for (let value = COUNT - TAIL + 1; value <= COUNT; value += 1) {
+    if (!counts.has(value)) { missingTail.push(value); }
+  }
+  expect(duplicated, 'a tail line was delivered more than once').toEqual([]);
+  expect(missingTail, 'a tail line never reached the parser').toEqual([]);
+});
