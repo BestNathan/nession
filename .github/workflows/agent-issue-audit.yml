@@ -3,6 +3,8 @@ name: Agent / Issue Audit
 on:
   issues:
     types: [opened, edited, reopened, labeled, unlabeled]
+  issue_comment:
+    types: [created]
   workflow_dispatch:
     inputs:
       issue_number:
@@ -31,7 +33,7 @@ env:
 
 concurrency:
   group: issue-audit-${{ github.event.issue.number || inputs.issue_number || github.run_id }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   contract:
@@ -44,6 +46,7 @@ jobs:
       needs_agent: ${{ steps.tier.outputs.needs_agent }}
       allow_agent: ${{ steps.target.outputs.allow_agent }}
       provider: ${{ steps.target.outputs.provider }}
+      mode: ${{ steps.target.outputs.mode }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -63,6 +66,15 @@ jobs:
           INPUT_PROVIDER: ${{ inputs.provider }}
         run: |
           set -euo pipefail
+          if [[ "${EVENT_NAME}" == "issue_comment" ]]; then
+            # The trusted main-owned command parser validates exact body,
+            # author association, sender identity and non-PR, open Issue.
+            # Rejected comments are a no-op with no Agent credentials.
+            node scripts/issue-audit-command.mjs resolve \
+              "$GITHUB_EVENT_PATH" "$GITHUB_REPOSITORY" "$GITHUB_ACTOR"
+            exit 0
+          fi
+          echo "mode=single" >> "$GITHUB_OUTPUT"
           if [[ "${EVENT_NAME}" == "workflow_dispatch" ]]; then
             issue_number="${INPUT_ISSUE}"
             allow_agent=true
@@ -94,9 +106,11 @@ jobs:
           echo "provider=${provider}" >> "${GITHUB_OUTPUT}"
 
       - name: Self-test Issue Contract
+        if: github.event_name != 'issue_comment' || steps.target.outputs.authorized == 'true'
         run: ./gates/run issue-contract-selftest
 
       - name: Audit deterministic Issue Contract
+        if: github.event_name != 'issue_comment' || steps.target.outputs.authorized == 'true'
         id: contract
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -146,6 +160,7 @@ jobs:
 
       # Structurally valid Issues still require tier assessment on trusted edits.
       - name: Select requirement-risk reassessment
+        if: github.event_name != 'issue_comment' || steps.target.outputs.authorized == 'true'
         id: tier
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -165,7 +180,7 @@ jobs:
           fi
           needs="${CONTRACT_NEEDS_AGENT}"
           if [[ "$ALLOW_AGENT" == true ]]; then
-            if (( tier_count == 0 )) || [[ "$EVENT_NAME" == workflow_dispatch ]] ||
+            if (( tier_count == 0 )) || [[ "$EVENT_NAME" == workflow_dispatch || "$EVENT_NAME" == issue_comment ]] ||
                [[ "$EVENT_ACTION" == edited ]] ||
                { [[ "$EVENT_ACTION" == labeled || "$EVENT_ACTION" == unlabeled ]] &&
                  [[ "$EVENT_LABEL" == verification:* ]]; }; then
@@ -181,7 +196,7 @@ jobs:
       (needs.contract.outputs.needs_agent == 'true' && needs.contract.outputs.allow_agent == 'true') ||
       (github.event_name == 'workflow_dispatch' && inputs.simulate_missing_provider_config == true)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: ${{ needs.contract.outputs.mode == 'tree' && 60 || 20 }}
     environment: ${{ needs.contract.outputs.provider }}
     permissions:
       contents: read
@@ -194,14 +209,15 @@ jobs:
       ISSUE_AUDIT_PROVIDER: ${{ needs.contract.outputs.provider }}
       ISSUE_AUDIT_ALLOW_AGENT: 'true'
       ISSUE_AUDIT_TRIGGER: ${{ github.event_name }}
-      ISSUE_AUDIT_REEVALUATE_TIER: ${{ github.event_name == 'workflow_dispatch' || github.event.action == 'edited' || github.event.action == 'labeled' || github.event.action == 'unlabeled' }}
+      ISSUE_AUDIT_MODE: ${{ needs.contract.outputs.mode || 'single' }}
+      ISSUE_AUDIT_REEVALUATE_TIER: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'issue_comment' || github.event.action == 'edited' || github.event.action == 'labeled' || github.event.action == 'unlabeled' }}
 
       CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
       CURSOR_MODEL: ${{ vars.CURSOR_MODEL || 'composer-2.5' }}
       CURSOR_MODEL_FAST: ${{ vars.CURSOR_MODEL_FAST || 'true' }}
       CURSOR_SDK_VERSION: ${{ vars.CURSOR_SDK_VERSION || 'latest' }}
 
-      ISSUE_AUDIT_MAX_TURNS: ${{ vars.ISSUE_AUDIT_MAX_TURNS || '20' }}
+      ISSUE_AUDIT_MAX_TURNS: ${{ needs.contract.outputs.mode == 'tree' && '120' || (vars.ISSUE_AUDIT_MAX_TURNS || '20') }}
       ISSUE_AUDIT_CLAUDE_MODEL: ${{ vars.ISSUE_AUDIT_CLAUDE_MODEL || 'claude-sonnet-5' }}
       ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
       ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
