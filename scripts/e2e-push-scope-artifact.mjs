@@ -17,6 +17,15 @@ export function verifyScopeArtifact({plan,results,report,assertions,run,scopePro
     results.target_sha===run.head_sha&&
     results.run_id===run.id&&results.run_attempt===run.run_attempt);
   assert.ok(['selected','not-required'].includes(plan.mode));
+  assert.equal(plan.source_event,'push','only scoped post-merge producer plans are eligible');
+  assert.equal(plan.merge_sha,run.head_sha,'scope plan must bind exact merged SHA');
+  if(plan.plan_digest!=null){
+    const canonical={schema_version:plan.schema_version,kind:plan.kind,
+      base_sha:plan.base_sha,target_sha:plan.target_sha,issues:plan.issues,
+      selected:plan.selected,mode:plan.mode};
+    assert.equal(plan.plan_digest,sha256(JSON.stringify(canonical)),
+      'source plan digest does not match canonical declared E2E obligations');
+  }
   assert.equal(plan.mode,scopeProof.scope);
   assert.ok(Array.isArray(plan.selected)&&Array.isArray(plan.issues));
   if(plan.mode==='selected'){
@@ -81,7 +90,7 @@ function selfTest(){
   const sha='a'.repeat(40),digest='b'.repeat(64);
   const run={id:42,run_attempt:2,head_sha:sha};
   const plan={schema_version:1,kind:'issue_e2e_selection',mode:'not-required',
-    target_sha:sha,reason:'trusted metadata-only diff',selected:[],issues:[]};
+    target_sha:sha,merge_sha:sha,source_event:'push',reason:'trusted metadata-only diff',selected:[],issues:[]};
   const results={schema_version:1,kind:'issue_e2e_test_results',scope:'not-required',
     target_sha:sha,plan_digest:null,run_id:42,run_attempt:2,results:[],status:'NotRequired'};
   const scopeProof={scope:'not-required',receipt:{plan_mode:'not-required'}};
