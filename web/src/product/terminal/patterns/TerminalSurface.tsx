@@ -44,6 +44,13 @@ export interface TerminalSurfaceProps {
   /** P2P control lease (#1095). Omit in relay until server forwards attach metadata. */
   terminalControl?: TerminalControlState;
   onTakeControl?: () => void;
+  /**
+   * The runtime observed output it cannot prove it received (#2155). A quiet
+   * status line, not an error: the session is live, the history behind the
+   * visible screen may be incomplete, and the notice disappears only when a
+   * complete snapshot has repaired the buffer.
+   */
+  historyDegraded?: boolean;
   /** Input this Session lost rather than delivered (#1307 SC-09), if any. */
   inputDrop?: InputDrop | null;
   onDismissInputDrop?: () => void;
@@ -128,6 +135,7 @@ export function TerminalSurface({
   terminalControl,
   onTakeControl,
   inputDrop = null,
+  historyDegraded = false,
   onDismissInputDrop,
   surfaceAction,
   workContext,
@@ -190,6 +198,15 @@ export function TerminalSurface({
           workContext={workContext}
         />
       </div>
+      {historyDegraded ? (
+        <div
+          className={cn('flex shrink-0 items-center justify-between gap-3 border-t border-border bg-muted/40 px-3 py-2 text-muted-foreground', chromeSansRole('body'))}
+          data-testid="terminal-history-degraded"
+          role="status"
+        >
+          <span>History may be incomplete — some output was lost while disconnected.</span>
+        </div>
+      ) : null}
       {inputDrop ? (
         <div
           className={cn('flex shrink-0 items-center justify-between gap-3 border-t border-border bg-muted/40 px-3 py-2 text-muted-foreground', chromeSansRole('body'))}

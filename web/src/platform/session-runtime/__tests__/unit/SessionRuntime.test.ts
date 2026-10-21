@@ -21,6 +21,7 @@ interface MockWs {
   readyState: number;
   onopen: ((ev: Event) => void) | null;
   onmessage: ((ev: MessageEvent) => void) | null;
+  onclose: ((ev: CloseEvent) => void) | null;
   send: ReturnType<typeof vi.fn>;
 }
 
@@ -339,6 +340,36 @@ describe('SessionRuntime', () => {
     rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 5 });
     expect(rt.terminalAppliedSnapshot?.appliedSeq).toBe(6);
     expect(rt.terminalAppliedSnapshot?.ackSentSeq).toBe(0); // no network output ACK
+    rt.dispose();
+  });
+
+  it('surfaces an observed history gap and clears it only on a complete repair (#2155)', async () => {
+    const rt = new SessionRuntime(makeConfig({ hasSessionOutput: () => true }));
+    expect(rt.getSnapshot().historyDegraded).toBe(false);
+
+    // A first attach that asked for history is not a degraded session: no
+    // output was lost, the buffer was simply empty.
+    rt.setTransportReady(true);
+    rt.buildTransport();
+    await openWs();
+    answerAttach();
+    await flushMicrotasks();
+    expect(rt.getSnapshot().historyDegraded).toBe(false);
+
+    // An observed hole is.
+    rt.noteStreamTruncated();
+    expect(rt.getSnapshot().historyDegraded).toBe(true);
+
+    // The transport drops, the Auto policy retires the candidate, and the next
+    // attach requests a bootstrap — that request arms the repair.
+    lastWs().onclose?.(new Event('close') as unknown as CloseEvent);
+    expect(rt.onCandidateDisconnected()).toBe('next-candidate');
+    await openWs();
+    answerAttach();
+    await flushMicrotasks();
+    // Only the applied complete snapshot clears the notice.
+    rt.noteBootstrapApplied();
+    expect(rt.getSnapshot().historyDegraded).toBe(false);
     rt.dispose();
   });
 

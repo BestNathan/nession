@@ -126,6 +126,15 @@ export interface SessionRuntimeSnapshot extends RuntimeMirrorSnapshot {
   transportReady: boolean;
   lastResize: { cols: number; rows: number } | null;
   reconnectCount: number;
+  /**
+   * The runtime noticed output it cannot prove it received (#2155): a lost
+   * transport whose replay cannot reach back, a truncated stream, or a hole a
+   * replay gave up on. This is the **observed gap** fact — not "needs a
+   * bootstrap" (a fresh attach asks for history without a hole) and not
+   * "recovery proven" (cleared only by a complete repair). The surface shows
+   * a quiet notice while it is true.
+   */
+  historyDegraded: boolean;
 }
 
 export type SessionRuntimeEvent =
@@ -159,7 +168,8 @@ function isSameSnapshot(a: SessionRuntimeSnapshot, b: SessionRuntimeSnapshot): b
     && a.transportReady === b.transportReady
     && a.lastResize?.cols === b.lastResize?.cols
     && a.lastResize?.rows === b.lastResize?.rows
-    && a.reconnectCount === b.reconnectCount;
+    && a.reconnectCount === b.reconnectCount
+    && a.historyDegraded === b.historyDegraded;
 }
 
 /**
@@ -268,6 +278,16 @@ export class SessionRuntime {
    * Relay (which has no stream cursor) still marks an outage here.
    */
   private historyMayHaveGap = false;
+  /**
+   * The runtime *observed* output it cannot prove it received: a truncated
+   * replay, a hole a replay gave up on, or a lost unsequenced transport.
+   *
+   * Distinct from {@link historyMayHaveGap}, which also covers "this fresh
+   * attach has no buffer yet and wants the history" — a healthy first attach
+   * is not a degraded session (#2155). It is cleared only by a complete repair
+   * applied to the current renderer, never by a reconnect or attach success.
+   */
+  private gapDetected = false;
   /**
    * A requested bootstrap is not a repaired buffer until the *current*
    * xterm has parsed a complete snapshot. Agent attach success does not
@@ -650,6 +670,10 @@ export class SessionRuntime {
     }
     this.bootstrapRepairPending = false;
     this.historyMayHaveGap = false;
+    // The repair was applied to the current renderer; the observed gap it was
+    // repairing is closed. A later loss sets it again on its own.
+    this.gapDetected = false;
+    this.emitSnapshot();
   }
 
   /**
@@ -675,9 +699,14 @@ export class SessionRuntime {
   noteStreamTruncated(): void {
     this.resetTerminalAppliedCursor();
     this.historyMayHaveGap = true;
+    // This is the one place the runtime *observed* a hole. The bootstrap need
+    // and the degraded notice share the trigger but not the lifetime: the
+    // first attach also requests a bootstrap, yet nothing was lost (#2155).
+    this.gapDetected = true;
     // A newly discovered hole invalidates a repair that was in flight
     // before the loss was reported, even if its parser callback is late.
     this.bootstrapRepairPending = false;
+    this.emitSnapshot();
   }
 
   updateContext(next: Partial<SessionRuntimeConfig>): RuntimeMirrorSnapshot {
@@ -989,6 +1018,7 @@ export class SessionRuntime {
       transportReady: this.transportReady,
       lastResize: this.lastResize,
       reconnectCount: this.attachState.reconnectCount,
+      historyDegraded: this.gapDetected,
     };
   }
 

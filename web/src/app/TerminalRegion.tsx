@@ -47,6 +47,7 @@ export function TerminalRegion({
     inputDisabled,
     viewportReady,
     terminalState,
+    historyDegraded,
     terminalControl,
     onTakeControl,
     inputDrop,
@@ -72,6 +73,7 @@ export function TerminalRegion({
           capsuleProjection={capsuleProjection}
           surfaceAction={surfaceAction}
           terminalControl={terminalControl}
+          historyDegraded={historyDegraded}
           onTakeControl={() => {
             void onTakeControl();
           }}
