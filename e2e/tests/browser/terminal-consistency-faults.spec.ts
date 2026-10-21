@@ -500,42 +500,42 @@ test('two clients: a stalled observer never blocks the controller (#2144)', asyn
   }
 });
 
-/** Re-attach the live Session on another route through the attach settings. */
-async function reattachViaSettings(
-  page: import('@playwright/test').Page,
-  sessionName: string,
-  mode: 'Relay' | 'P2P',
-): Promise<void> {
-  await page
-    .getByRole('button', { name: `Configure attach settings for ${sessionName}` })
-    .click();
-  const dialog = page.getByRole('dialog');
-  await expect(dialog).toBeVisible();
-  // Same anchored match as attachToSession: the mode buttons' accessible
-  // names include their hint, and a plain substring match also hits Auto.
-  await dialog.getByRole('button', { name: new RegExp(`^${mode}\\b`) }).click();
-  const attachButton = dialog.getByRole('button', { name: 'Attach' });
-  await expect(attachButton).toBeEnabled({ timeout: 10_000 });
-  await attachButton.click();
-  await expect(dialog).not.toBeVisible({ timeout: 5_000 });
-}
-
-// #2156 / #1926 SC-03: the switch an operator actually performs — re-attach
-// the same Session on the other route from the attach settings. The renderer
-// must survive, output before the cut must not be duplicated, and a burst that
-// spans the cut must have an exactly-once retained tail.
-test('a P2P↔Relay re-attach keeps the xterm and the stream (#2156)', async ({ page }, testInfo) => {
+// #2156 / #1926 SC-03: the live route change the product actually performs.
+// The UI has no manual switch while attached (the session gear only saves the
+// mode for the next attach, and a manual P2P route that disconnects ends in
+// transport-exhausted). Under Auto, when the P2P candidates stop answering,
+// AddressAttachPolicy calls force-relay and the runtime re-attaches over Relay
+// without tearing down the renderer.
+test('an Auto P2P loss falls back to Relay without remounting the xterm (#2156)', async ({ page }, testInfo) => {
   test.skip(!process.env.CI, 'real stack available in CI only');
   test.setTimeout(360_000);
 
   const sessionName = `e2e-consistency-route-${testInfo.retry}-${Date.now()}`;
+  const sentWire: Array<{ msg_type?: string }> = [];
+  page.on('websocket', (socket) => {
+    socket.on('framesent', (frame) => {
+      if (typeof frame.payload !== 'string') { return; }
+      try {
+        sentWire.push(JSON.parse(frame.payload) as { msg_type?: string });
+      } catch {
+        // Non-JSON frames are not protocol messages.
+      }
+    });
+  });
+
   await page.goto(
     '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
   );
   await waitForShell(page);
   await createSession(page, sessionName);
-  await attachToSession(page, sessionName, 'P2P');
+  await attachToSession(page, sessionName, 'Auto');
   await waitForInteractiveShell(page);
+
+  const relayStarted = (): boolean =>
+    sentWire.some((frame) => frame.msg_type === 'server.session.relay.begin');
+  // Auto must have chosen the direct route, or this fixture would not exercise
+  // a switch at all.
+  expect(relayStarted(), 'Auto attach must start on the P2P route').toBe(false);
 
   await page.locator('.xterm').evaluate((node) => {
     node.setAttribute('data-e2e-route-instance', 'original');
@@ -543,22 +543,42 @@ test('a P2P↔Relay re-attach keeps the xterm and the stream (#2156)', async ({ 
   await submitTerminalCommand(page, `printf 'ROUTE-%s-BEFORE\\n' 2156`);
   await expect.poll(async () => countInBuffer(page, 'ROUTE-2156-BEFORE')).toBe(1);
 
-  // P2P → Relay, in place.
-  await reattachViaSettings(page, sessionName, 'Relay');
-  await expect(page.locator('.xterm')).toHaveAttribute('data-e2e-route-instance', 'original');
-  await submitTerminalCommand(page, `printf 'ROUTE-%s-RELAY\\n' 2156`);
-  await expect.poll(async () => countInBuffer(page, 'ROUTE-2156-RELAY'), { timeout: 30_000 })
-    .toBe(1);
-  // The pre-switch scrollback is still there, exactly once.
-  expect(await countInBuffer(page, 'ROUTE-2156-BEFORE')).toBe(1);
+  // Suppress the liveness probe's ping. The peer is still alive but stops
+  // answering the runtime's question — the half-open transport the probe
+  // exists to catch (#1264). Typing triggers the probe (onInputSent).
+  await page.evaluate(() => {
+    const original = WebSocket.prototype.send;
+    WebSocket.prototype.send = function (data) {
+      if (typeof data === 'string') {
+        try {
+          if ((JSON.parse(data) as { msg_type?: string }).msg_type === 'control.ping') {
+            return;
+          }
+        } catch {
+          // Non-JSON frames pass through unchanged.
+        }
+      }
+      return original.call(this, data);
+    };
+  });
 
-  // A burst that spans the cut: start it, then switch back to P2P while it is
-  // still streaming. The tail must be present exactly once afterwards.
+  // A burst that spans the cut.
   const COUNT = 800;
   const TAIL = 200;
   await submitTerminalCommand(page, `seq 1 ${COUNT} | sed 's/^/RS-/'`);
-  await reattachViaSettings(page, sessionName, 'P2P');
-  await expect(page.locator('.xterm')).toHaveAttribute('data-e2e-route-instance', 'original');
+
+  // Each unanswered probe (5 s deadline) retires a P2P candidate; when the
+  // last one is gone the Auto route forces Relay. A space is harmless to the
+  // shell and still counts as input at the transport.
+  for (let attempt = 0; attempt < 6 && !relayStarted(); attempt += 1) {
+    await sendRawToTerminal(page, ' ');
+    await page.waitForTimeout(6_500);
+  }
+  expect(
+    relayStarted(),
+    'the Auto route must reach force-relay once its P2P candidates stop answering',
+  ).toBe(true);
+
   await waitForLastLine(page, 'RS-', COUNT, { timeoutMs: 240_000, stallMs: 60_000 });
 
   const text = await readTerminalBuffer(page);
@@ -576,12 +596,12 @@ test('a P2P↔Relay re-attach keeps the xterm and the stream (#2156)', async ({ 
   for (let value = COUNT - TAIL + 1; value <= COUNT; value += 1) {
     if (!counts.has(value)) { missingTail.push(value); }
   }
-  expect(duplicated, 'a tail line was delivered more than once across the switch').toEqual([]);
-  expect(missingTail, 'a tail line never reached the parser across the switch').toEqual([]);
+  expect(duplicated, 'a tail line was delivered more than once across the fallback').toEqual([]);
+  expect(missingTail, 'a tail line never reached the parser across the fallback').toEqual([]);
 
-  // Both markers and the controller write path survived both switches.
+  // The renderer survived and the controller can still write.
+  await expect(page.locator('.xterm')).toHaveAttribute('data-e2e-route-instance', 'original');
   expect(await countInBuffer(page, 'ROUTE-2156-BEFORE')).toBe(1);
-  expect(await countInBuffer(page, 'ROUTE-2156-RELAY')).toBe(1);
   await submitTerminalCommand(page, `printf 'ROUTE-%s-AFTER\\n' 2156`);
   await expect.poll(async () => countInBuffer(page, 'ROUTE-2156-AFTER'), { timeout: 20_000 })
     .toBe(1);
