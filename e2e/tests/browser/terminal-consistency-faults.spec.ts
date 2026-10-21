@@ -127,7 +127,8 @@ for (const mode of ['Relay', 'P2P'] as const) {
     await submitTerminalCommand(
       page,
       `printf '\\033[?1049h'; printf '\\033[?1h\\033[?1000h\\033[?2004h'; ` +
-        `printf 'ALT-%s-TUI\\n' 2130; while :; do sleep 0.5; done`,
+        `printf 'ALT-%s-TUI\\n' 2130; ` +
+        `while :; do sleep 0.5; printf 'ALT-%s-SIZE %s\\n' 2130 "$(stty size)"; done`,
     );
 
     await expect(async () => {
@@ -135,8 +136,15 @@ for (const mode of ['Relay', 'P2P'] as const) {
       expect(await readTerminalBuffer(page)).toContain('ALT-2130-TUI');
     }).toPass({ timeout: 15_000 });
 
+    // The controller suppresses the PTY half of a resize while the webfont is
+    // still loading (`metricsAreProvisional`), but still resizes the local
+    // grid. Wait for the face before measuring, or the grid moves and the PTY
+    // legitimately does not.
+    await page.evaluate(async () => { await document.fonts.ready; });
+
     // The browser grid changes while the TUI owns the screen: the alternate
-    // buffer must stay active and keep its content through the reflow.
+    // buffer must stay active and the pane must report the same size from
+    // inside it.
     const before = await readGrid(page);
     // Grow, not shrink: tmux keeps the largest attached client's size, and
     // the suite's PTY-follow proof (#1187) is a growth assertion.
@@ -149,7 +157,9 @@ for (const mode of ['Relay', 'P2P'] as const) {
 
     await expect(async () => {
       expect(await readBufferType(page)).toBe('alternate');
-      expect(await readTerminalBuffer(page)).toContain('ALT-2130-TUI');
+      expect(await readTerminalBuffer(page)).toContain(
+        `ALT-2130-SIZE ${after.rows} ${after.cols}`,
+      );
     }).toPass({ timeout: 15_000 });
 
     // Interrupt the loop, then leave the alternate screen from the shell.
