@@ -482,6 +482,25 @@ describe('TerminalController', () => {
     controller.dispose();
   });
 
+  it('replaces the buffer with a complete history capture at an epoch start (#2160)', () => {
+    const transport = makeTransport();
+    const controller = new TerminalController(makeSession(), () => transport);
+    controller.attach(host());
+    const h = delayedParser(controller);
+    transport.onOutput!(new Uint8Array([104, 105]), {
+      requestedLines: 5000, truncated: false,
+      cutConsistency: 'atomic', fidelity: 'screen-only', streamEpoch: 5, throughSeq: 0,
+    });
+    // The capture is the pane's history at an exact stream position, so the
+    // retained buffer it would otherwise be appended to goes first.
+    // Appending re-writes every retained line the capture overlaps (#2160).
+    expect(h.spy).toHaveBeenNthCalledWith(1, '\x1b[2J\x1b[3J\x1b[H', expect.any(Function));
+    h.finish();
+    h.finish();
+    h.spy.mockRestore();
+    controller.dispose();
+  });
+
   it('does not establish a baseline from a superseded bootstrap write (#2120)', () => {
     const transport = makeTransport();
     const onStreamBaseline = vi.fn();
