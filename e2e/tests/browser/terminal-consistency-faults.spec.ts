@@ -116,6 +116,9 @@ for (const mode of ['Relay', 'P2P'] as const) {
     test.setTimeout(120_000);
 
     // Diagnostic for the resize gap (#2132): capture every terminal resize the
+    // page sends and every refusal the Agent returns, so the selected-mode run
+    // names the side that dropped it. (Keep this until the lane is green.)
+    // Capture every terminal resize the
     // page sends and every refusal the Agent returns, so a failure says which
     // side dropped it instead of only that the pane size did not move.
     const wire = { sent: [] as string[], received: [] as string[] };
