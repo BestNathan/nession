@@ -272,10 +272,15 @@ for (const mode of ['Relay', 'P2P'] as const) {
       replies: resizeReplies.map((frame) => ({
         msg_type: frame.msg_type, code: frame.payload?.code,
       })),
+      captured: wire.sent.length,
+      lastSent: wire.sent.slice(-6).map((frame) => frame.msg_type),
       fonts: await page.evaluate(() => document.fonts.status),
       grid: after,
       sessionName,
     });
+    // Always visible in the selected lane: a passing wire assertion still has
+    // to say *which* frame carried the size and how the Agent answered.
+    console.log(`TUI-RESIZE-WIRE ${wireSummary}`);
     expect(resizeFrames.length, `no resize left the browser: ${wireSummary}`).toBeGreaterThan(0);
     expect(
       resizeReplies.filter((frame) => frame.msg_type === 'error'),
