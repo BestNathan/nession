@@ -6,7 +6,7 @@ source "${GATE_DIR}/../lib/common.sh"
 
 GATE_ID='workflow-conventions'
 GATE_NAME='GitHub Actions workflow taxonomy and reference integrity'
-GATE_COMMAND='node scripts/workflow-conventions.mjs self-test && node scripts/workflow-conventions.mjs check && node scripts/ci-trigger-scope-selftest.mjs'
+GATE_COMMAND='node scripts/workflow-conventions.mjs self-test && node scripts/workflow-conventions.mjs check && node scripts/ci-trigger-scope-selftest.mjs && node scripts/ci-trigger-inventory.mjs self-test'
 GATE_SUCCESS='workflow taxonomy, references and CI path-scope fixtures are all valid'
 GATE_FAILURE='an unclassified workflow, incorrect domain, stale trigger/reference or telemetry source path was found'
 GATE_REPAIR='follow nession-workflows; migrate all upstream names, file paths and telemetry provenance as one tested boundary'
@@ -14,6 +14,6 @@ GATE_OWNER='scripts/workflow-conventions.mjs'
 
 gate_check() {
   gate_require_command node "Install Node.js to verify GitHub Actions workflow contracts." || return $?
-  gate_run_invariant bash -c 'node scripts/workflow-conventions.mjs self-test && node scripts/workflow-conventions.mjs check && node scripts/ci-trigger-scope-selftest.mjs'
+  gate_run_invariant bash -c 'node scripts/workflow-conventions.mjs self-test && node scripts/workflow-conventions.mjs check && node scripts/ci-trigger-scope-selftest.mjs && node scripts/ci-trigger-inventory.mjs self-test'
 }
 gate_main "$@"
