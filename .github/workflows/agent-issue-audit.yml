@@ -61,6 +61,10 @@ jobs:
           EVENT_ISSUE: ${{ github.event.issue.number }}
           EVENT_ASSOCIATION: ${{ github.event.issue.author_association }}
           EVENT_ACTOR: ${{ github.actor }}
+          EVENT_SENDER_LOGIN: ${{ github.event.sender.login }}
+          EVENT_SENDER_TYPE: ${{ github.event.sender.type }}
+          EVENT_ACTION: ${{ github.event.action }}
+          EVENT_ISSUE_AUTHOR: ${{ github.event.issue.user.login }}
           REPO_OWNER: ${{ github.repository_owner }}
           INPUT_ISSUE: ${{ inputs.issue_number }}
           INPUT_PROVIDER: ${{ inputs.provider }}
@@ -82,13 +86,20 @@ jobs:
           else
             issue_number="${EVENT_ISSUE}"
             provider=cursor
-            if [[ "${EVENT_ACTOR}" == "${REPO_OWNER}" ]]; then
-              allow_agent=true
-            else
-              case "${EVENT_ASSOCIATION}" in
-                OWNER|MEMBER|COLLABORATOR) allow_agent=true ;;
-                *) allow_agent=false ;;
-              esac
+            # Never trust issue.author_association as the editor identity.
+            # A collaborator opening their *own* Issue retains the normal
+            # automatic path; editors other than the Owner use /audit comment.
+            allow_agent=false
+            if [[ "${EVENT_SENDER_LOGIN}" == "${EVENT_ACTOR}" &&
+                  "${EVENT_SENDER_TYPE}" == User ]]; then
+              if [[ "${EVENT_ACTOR}" == "${REPO_OWNER}" ]]; then
+                allow_agent=true
+              elif [[ "${EVENT_ACTION}" == opened &&
+                      "${EVENT_ISSUE_AUTHOR}" == "${EVENT_ACTOR}" ]]; then
+                case "${EVENT_ASSOCIATION}" in
+                  OWNER|MEMBER|COLLABORATOR) allow_agent=true ;;
+                esac
+              fi
             fi
           fi
 
