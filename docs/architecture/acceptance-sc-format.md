@@ -52,7 +52,7 @@ Existing runner compatibility needs a stage. It is **derived**, never copied int
 
 ## Risk-based verification tiers and Full E2E
 
-Nession classifies issue verification scope using one label: \`verification:scoped\` (L1), \`verification:integration\` (L2), or \`verification:full\` (L3). Labels are mutually exclusive; legacy unlabelled issues default to L1 until a trusted reassessment. The read-only assessment helper and negative fixtures live in \`scripts/verification-tier-policy.mjs\`.
+Nession classifies issue verification scope using one label: `verification:scoped` (L1), `verification:integration` (L2), or `verification:full` (L3). Labels are mutually exclusive; legacy unlabelled issues default to L1 until a trusted reassessment. The read-only assessment helper and negative fixtures live in `scripts/verification-tier-policy.mjs`.
 
 | Tier | Mandatory work | When Full Regression becomes a gate |
 | --- | --- | --- |
@@ -60,7 +60,7 @@ Nession classifies issue verification scope using one label: \`verification:scop
 | L2 | L1 plus named cross-component/route integration Cases | Never automatically |
 | L3 | L2, with full-system verification only at an explicit critical milestone | At the milestone on its pinned exact SHA |
 
-Proof **stage** (\`when: pr / merged / deployed\`) and verification **scope** (L1/L2/L3) are independent. Routine \`when: merged\` may require selected E2E at the real merged SHA, not a Full E2E run. Major parent requirements may have L3 final acceptance while child PRs close from L1/L2 evidence. Any Full Regression triggered by Audit, scheduled, release or manual operation is a distinct SHA-bound record; an absent unrequested run is not a failure and not a Pass.
+Proof **stage** (`when: pr / merged / deployed`) and verification **scope** (L1/L2/L3) are independent. Routine `when: merged` may require selected E2E at the real merged SHA, not a Full E2E run. Major parent requirements may have L3 final acceptance while child PRs close from L1/L2 evidence. Any Full Regression triggered by Audit, scheduled, release or manual operation is a distinct SHA-bound record; an absent unrequested run is not a failure and not a Pass.
 
 Author SCs as observable behaviors rather than repetitive infrastructure checklists. Never add generic post-merge "every suite green" acceptance to a new ordinary Issue. Only a deliberate L3 integration or release criterion may make full-regression evidence a blocking dependency; declare its target, milestone and source, and preserve exact-SHA trust. Do not loosen real failed relevant Cases, compatibility/security guards, or previous SC evidence to make an Issue close.
 
