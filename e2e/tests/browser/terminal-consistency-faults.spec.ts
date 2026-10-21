@@ -254,7 +254,7 @@ test('a Relay reconnect keeps the xterm and loses no session output', async ({ p
   // A numbered burst after recovery: the tail must be present exactly once.
   const COUNT = 1_000;
   const TAIL = 400;
-  await submitTerminalCommand(page, `seq 1 ${COUNT} | sed 's/^/RC-/`);
+  await submitTerminalCommand(page, `seq 1 ${COUNT} | sed 's/^/RC-/'`);
   await expect(async () => {
     expect(await readBufferTail(page)).toContain(`RC-${COUNT}`);
   }).toPass({ timeout: 60_000 });
