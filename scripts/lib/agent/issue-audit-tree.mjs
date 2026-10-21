@@ -76,7 +76,11 @@ export function createTreeAuditTools(root,repository=process.env.GITHUB_REPOSITO
     if(number===rootNumber)return issue;
     if(!sameArea(root,issue))throw Error('unrelated Issue area');
     if(!isTreeDescendant(rootNumber,number,readIssue))throw Error('Issue has no explicit rooted parent chain');
-    if(writable&&String(issue.state).toLowerCase()!=='open')throw Error('closed related Issue cannot be edited');
+    if(String(issue.state).toLowerCase()!=='open'){
+      skipped.set(number,'closed related Issue: read-only historical context');
+      if(writable)throw Error('closed related Issue cannot be edited');
+      return issue;
+    }
     if(!observed.has(number)&&observed.size>=TREE_AUDIT_LIMIT)throw Error('tree audit scope limit reached');
     observed.add(number);
     return issue;
@@ -121,6 +125,12 @@ export function createTreeAuditTools(root,repository=process.env.GITHUB_REPOSITO
         const accepted=[];
         for(const h of hits){
           if(h.number===rootNumber||observed.has(h.number))continue;
+          // Completed historical children are read-only references, not audit
+          // targets. Do not poison completion by adding them to observed.
+          if(String(h.state).toLowerCase()!=='open'){
+            skipped.set(h.number,'closed historical child: no mutation');
+            continue;
+          }
           try {
             ensureScoped(h.number);
             accepted.push({number:h.number,title:h.title,labels:h.labels?.map(x=>typeof x==='string'?x:x.name)});
@@ -194,7 +204,9 @@ export function createTreeAuditTools(root,repository=process.env.GITHUB_REPOSITO
         if(published)throw Error('tree audit summary already published');
         if(typeof summary!=='string'||summary.length<10||summary.length>2000)throw Error('invalid tree summary');
         const p=progress();
-        const complete=p.remaining.length===0&&p.unexplored.length===0&&p.failed.length===0&&p.reviewed>0;
+        const complete=p.remaining.length===0&&p.unexplored.length===0&&
+          p.failed.length===0&&p.reviewed===p.observed&&
+          visited.has(rootNumber);
         const body=['## Issue Tree Audit',
           '- Root: #'+rootNumber,
           '- Status: **'+(complete?'Complete':'Partial / needs review')+'**',
@@ -238,6 +250,15 @@ export function testIssueTree(){
     await assert.rejects(scoped.read_related_issue.execute({issue_number:8888}),/unrelated Issue area/);
     const found=JSON.parse(await scoped.find_related_issues.execute({parent_number:1645}));
     assert.deepEqual(found.children.map(x=>x.number),[1924,1925]);
+    // Real #1645 includes a completed P0 child: it must be reported as
+    // skipped historical context, not indefinitely Pending.
+    const closed={...mk(1648,[1645]),state:'CLOSED'};
+    map.set(1648,closed);
+    const next=JSON.parse(await scoped.find_related_issues.execute({parent_number:1645}));
+    assert.ok(!next.children.some(x=>x.number===1648));
+    assert.ok(next.progress.skipped.some(x=>x.number===1648));
+    assert.ok(!next.progress.remaining.includes(1648));
+    assert.ok(!next.progress.unexplored.includes(1648));
     await assert.rejects(scoped.review_related_issue.execute({issue_number:1925,tier:'verification:full',reason:'This is a cross-component requirement with verified security risk'}),/read related Issue/);
     console.log('Issue tree Agent scope: verified explicit ancestry, cycle, domain, read-before-write and single scope');
   })();
