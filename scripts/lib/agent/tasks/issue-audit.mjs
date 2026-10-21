@@ -2,6 +2,7 @@ import { renderAgentPrompt } from '../prompt/index.mjs';
 import { createIssueReadTool } from '../tools/gh/issue/read.mjs';
 import { createIssueUpdateTool } from '../tools/gh/issue/update.mjs';
 import { createIssueCommentTool } from '../tools/gh/issue/comment.mjs';
+import { createVerificationTierTool } from '../tools/gh/issue/verification-tier.mjs';
 
 export function renderIssueAuditPrompt(issue, audit, provider, repository = process.env.GITHUB_REPOSITORY) {
   if (!['cursor', 'deepseek'].includes(provider)) throw new Error('Unsupported Issue Audit provider: ' + provider);
@@ -35,12 +36,20 @@ export async function applyIssueAuditProposal(issue, envelope, repository = proc
   if (!proposal || typeof proposal !== 'object' || Array.isArray(proposal)) {
     throw new Error('Issue Audit repair proposal must be an object');
   }
-  if (Object.keys(proposal).some((key) => !['title', 'body', 'labels', 'comment'].includes(key))) {
+  if (Object.keys(proposal).some((key) => !['title', 'body', 'labels', 'comment', 'verification_tier', 'tier_reason'].includes(key))) {
     throw new Error('Issue Audit proposal contains unauthorized fields');
   }
-  await createIssueUpdateTool(issue, repository).execute({
-    title: proposal.title, body: proposal.body, labels: proposal.labels,
-  });
+  const repair = ['title', 'body', 'labels'].some(key => proposal[key] != null);
+  if (repair) {
+    await createIssueUpdateTool(issue, repository).execute({
+      title: proposal.title, body: proposal.body, labels: proposal.labels,
+    });
+  }
+  if (proposal.verification_tier != null) {
+    await createVerificationTierTool(issue, repository).execute({
+      tier: proposal.verification_tier, reason: proposal.tier_reason,
+    });
+  }
   if (proposal.comment != null) {
     await createIssueCommentTool(issue, repository).execute({ body: proposal.comment });
   }
@@ -52,5 +61,6 @@ export function issueAuditTools(issue, repository = process.env.GITHUB_REPOSITOR
     read_target_issue: createIssueReadTool(issue, repository),
     update_target_issue: createIssueUpdateTool(issue, repository),
     comment_target_issue: createIssueCommentTool(issue, repository),
+    set_verification_tier: createVerificationTierTool(issue, repository),
   };
 }

@@ -5,6 +5,7 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { auditIssue } from './issue-contract.mjs';
+import { readVerificationTier } from './verification-tier-policy.mjs';
 import { fetchGitHubIssue as fetchIssue } from './lib/agent/tools/gh/issue/read.mjs';
 import { candidateIssue, issueLabelNames as labelNames } from './lib/agent/tools/gh/issue/update.mjs';
 import { renderIssueAuditPrompt, issueAuditTools } from './lib/agent/tasks/issue-audit.mjs';
@@ -270,7 +271,9 @@ async function main() {
   }
 
   const before = auditIssue(issue);
-  if (before.ok && process.env.ISSUE_AUDIT_FORCE_AGENT !== 'true') {
+  const missingTier = !readVerificationTier(issue).explicit;
+  const reevaluate = process.env.ISSUE_AUDIT_REEVALUATE_TIER === 'true';
+  if (before.ok && !missingTier && !reevaluate && process.env.ISSUE_AUDIT_FORCE_AGENT !== 'true') {
     writeRecord(outDir, { schema_version: 1, issue: { number: issue.number, title: issue.title, url: issue.url }, trigger, result: 'contract-pass', agent: { invoked: false, provider: 'cursor' }, errors: [] });
     return;
   }
@@ -303,11 +306,11 @@ async function main() {
     schema_version: 1,
     issue: { number: afterIssue.number, title: afterIssue.title, url: afterIssue.url },
     trigger,
-    result: after.ok ? 'repaired' : 'contract-fail',
+    result: after.ok && readVerificationTier(afterIssue).explicit ? 'repaired' : 'contract-fail',
     agent: meta,
     errors: after.errors,
   });
-  if (!after.ok) process.exitCode = 2;
+  if (!after.ok || !readVerificationTier(afterIssue).explicit) process.exitCode = 2;
 }
 
 try { await main(); } catch (error) {

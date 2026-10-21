@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { auditIssue } from './issue-contract.mjs';
+import { readVerificationTier } from './verification-tier-policy.mjs';
 import { fetchGitHubIssue as fetchIssue } from './lib/agent/tools/gh/issue/read.mjs';
 import { normalizeClaudeUsage, runClaudeCli, buildClaudeCliArgs } from './lib/agent/providers/claude-code.mjs';
 import { renderIssueAuditPrompt, applyIssueAuditProposal } from './lib/agent/tasks/issue-audit.mjs';
@@ -209,7 +210,9 @@ async function main() {
   }
 
   const before = auditIssue(issue);
-  if (before.ok) {
+  const missingTier = !readVerificationTier(issue).explicit;
+  const reevaluate = process.env.ISSUE_AUDIT_REEVALUATE_TIER === 'true';
+  if (before.ok && !missingTier && !reevaluate) {
     writeRecord(outDir, { schema_version: 1, issue: { number: issue.number, title: issue.title, url: issue.url }, trigger, result: 'contract-pass', agent: { invoked: false }, errors: [] });
     return;
   }
@@ -268,7 +271,7 @@ async function main() {
     schema_version: 1,
     issue: { number: afterIssue.number, title: afterIssue.title, url: afterIssue.url },
     trigger,
-    result: after.ok ? 'repaired' : 'contract-fail',
+    result: after.ok && readVerificationTier(afterIssue).explicit ? 'repaired' : 'contract-fail',
     agent: {
       invoked: true,
       provider: 'deepseek',
@@ -289,7 +292,7 @@ async function main() {
     errors: after.errors,
   };
   writeRecord(outDir, record);
-  if (!after.ok) process.exitCode = 2;
+  if (!after.ok || !readVerificationTier(afterIssue).explicit) process.exitCode = 2;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

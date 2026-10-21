@@ -13,3 +13,5 @@ Audit constraints:
 4. By turn 8, stop investigating and perform the repair.
 5. Only the target issue may be updated and no source files or PRs may be changed.
 6. The result must pass the Issue Contract validator.
+
+Risk evaluation: classify the Issue verification scope as verification:scoped (local), verification:integration (cross-component) or verification:full (critical parent/release/system gate). Analyze the requirement, SCs, affected subsystems, trust boundaries and evidence rather than merely counting lines. Never infer Full E2E on a small child from its parent reference. Do not claim tests passed. Assign/update only this Issue's tier; do not remove ai:enabled or change Worker authorization. An established higher tier may not be downgraded automatically.
