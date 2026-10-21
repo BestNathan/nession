@@ -171,6 +171,19 @@ export function validateAgentWorkflowTelemetry(record) {
   }
   stableId(record?.task?.id, 'task.id');
   stableId(record?.task?.type, 'task.type');
+  // A PR is an optional *host-authenticated* correlation, not a model-created
+  // field. Existing pre-publication v1 summaries remain valid without it.
+  // No URLs, labels, arbitrary metadata or unverified approval can enter
+  // the canonical Metrics Store through a PR descriptor.
+  if (record.task.pr != null) {
+    const pr=record.task.pr;
+    if (typeof pr!=='object'||Array.isArray(pr)||
+        Object.keys(pr).length!==2||
+        !Object.hasOwn(pr,'number')||!Object.hasOwn(pr,'head_sha')||
+        !Number.isSafeInteger(pr.number)||pr.number<1||
+        typeof pr.head_sha!=='string'||!/^[a-f0-9]{40}$/.test(pr.head_sha))
+      fail('task.pr requires exactly a positive PR number and 40-character head_sha');
+  }
   // Optional correlation fields preserve compatibility with historical v1 run records.
   if (record.agent.id != null && !/^[a-z][a-z0-9-]*$/.test(record.agent.id)) fail('invalid agent id');
   if (record.agent.role != null && !/^[a-z][a-z0-9-]*$/.test(record.agent.role)) fail('invalid agent role');
@@ -457,6 +470,35 @@ function selfTest() {
   assert.deepEqual(fixture.execution.tools.by_name, { grep: 1, read: 2 });
   assert.equal(fixture.tokens.total, 35);
   assert.equal(fixture.agent.prompt.sha256, 'a'.repeat(64));
+  // The actual historical Developer source predates PR #2176: no backfill.
+  assert.equal(Object.hasOwn(fixture.task,'pr'),false);
+  const withPr = buildAgentWorkflowTelemetry({
+    workflow_id:'agent-review',github_run_id:39609600546,github_run_attempt:1,
+    repository:'BestNathan/nession',
+    task:{id:'issue-1997-pr-2176-review',type:'review',issue:1997,
+      target_ref:'3d8e3807cc01f6082734b8d0ba458217c28f60a4',
+      pr:{number:2176,head_sha:'3d8e3807cc01f6082734b8d0ba458217c28f60a4'}},
+    agent:{provider:'cursor',id:'review-cursor-01',role:'reviewer',
+      harness_sha256:'a'.repeat(64)},
+    execution:{tools_observed:false},
+    timing:{started_at:'2026-10-21T13:37:57Z'},
+  });
+  assert.equal(withPr.task.pr.number,2176);
+  assert.equal(withPr.task.pr.head_sha,'3d8e3807cc01f6082734b8d0ba458217c28f60a4');
+  assert.equal(withPr.execution.tools.total,null,'unobserved remains null');
+  for(const pr of [
+    {number:0,head_sha:withPr.task.pr.head_sha},
+    {number:'2176',head_sha:withPr.task.pr.head_sha},
+    {number:2176,head_sha:'main'},
+    {number:2176,head_sha:'A'.repeat(40)},
+    {number:2176,head_sha:withPr.task.pr.head_sha,next_role:'developer'},
+    {number:2176,head_sha:withPr.task.pr.head_sha,token:'do not store'},
+    ['2176',withPr.task.pr.head_sha],
+  ])assert.throws(()=>validateAgentWorkflowTelemetry({
+    ...withPr,task:{...withPr.task,pr},
+  }),/task.pr/);
+  assert.equal(telemetryStoragePath(withPr),
+    'raw/workflows/agent-review/2026-10-21/39609600546-1-issue-1997-pr-2176-review.json');
   const correlated = buildAgentWorkflowTelemetry({
     workflow_id: 'agent-develop', github_run_id: 321, github_run_attempt: 1,
     task: { id: 'issue-1664', type: 'develop', issue: 1664 },
@@ -475,7 +517,7 @@ function selfTest() {
   assert.equal(metrics.windows['30d'].tools.total, 3);
   assert.match(renderAgentMetricsSvg(metrics, 'dark'), /Agent Workflow Telemetry/);
   executionTraceSelfTest();
-  console.log('agent-workflow-telemetry self-test: 6 cases passed');
+  console.log('agent-workflow-telemetry self-test: v1 legacy and exact PR correlation tamper fixtures passed');
 }
 
 async function main() {
