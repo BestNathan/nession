@@ -271,6 +271,14 @@ function selfTest() {
   assert.equal(scopedRecord.evidence.name,'issue-e2e-verification');
   // Scoped pushes do not require the unrelated legacy Full Playwright ZIP.
   assert.deepEqual(scopedRecord.selected_e2e_artifact,scopedRecord.evidence);
+  assert.deepEqual(JSON.parse(recordFor(event,run,workflow,tree,[scopedJob],
+    [...artifacts,selectedArtifact],selectedProof).recordBytes).evidence,
+    scopedRecord.evidence,
+    'legacy Full artifact must not replace selected per-ID source on the same Attempt');
+  assert.throws(()=>recordFor(event,run,workflow,tree,[scopedJob],
+    [{...artifacts[0],name:'playwright-report'}],selectedProof),
+    /missing or ambiguous/,
+    'legacy Full-only artifact must not satisfy an authenticated selected plan');
   assert.throws(()=>recordFor(event,run,workflow,tree,[scopedJob],artifacts,selectedProof),
     /missing or ambiguous/);
   const nr=makeE2eNotRequiredReceipt({env,sha,steps:{
