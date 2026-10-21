@@ -56,7 +56,7 @@ use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout};
 use tokio::sync::{mpsc, oneshot, watch};
-use tracing::warn;
+use tracing::{info, warn};
 
 use super::ops::TmuxDep;
 use super::parser::{parse_control_line, unescape_tmux_data, ControlMessage};
@@ -326,13 +326,26 @@ impl ControlModeSession {
     /// The comparison is against the size tmux reported, not the one this
     /// backend last asked for — see [`ObservedWindowSize`].
     pub async fn resize(&mut self, width: u16, height: u16) -> Result<()> {
+        let observed = self.observed.lock().ok().and_then(|size| *size);
         if self.window_is_at(width, height) {
             // The viewport is still this client's stated size: nothing was
             // written, and a later real resize compares against tmux's report
             // again rather than against this.
+            //
+            // Diagnostic for #2132: a Relay resize is acknowledged with `ok`
+            // and the pane does not move, while P2P moves. This says whether
+            // the write was skipped (tmux reports the requested size) or made.
+            info!(
+                "control resize {width}x{height} for session '{}': skipped, tmux reports {observed:?}",
+                self.session_name
+            );
             self.viewport = (width, height);
             return Ok(());
         }
+        info!(
+            "control resize {width}x{height} for session '{}': writing resize-window, tmux reports {observed:?}",
+            self.session_name
+        );
         self.viewport = (width, height);
         let cmd = format!(
             "resize-window -t {} -x {} -y {}\nrefresh-client\n",
