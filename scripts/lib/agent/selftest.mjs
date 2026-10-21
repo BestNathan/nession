@@ -64,7 +64,7 @@ const candidate = candidateIssue(issue, 'Bug: fixed', 'body', ['bug', 'ci']);
 assert.deepEqual(candidate.labels.map((value) => value.name).sort(), ['bug', 'ci', 'in-progress']);
 assert.deepEqual(issue.labels.map((value) => value.name), ['bug', 'web', 'in-progress']);
 
-assert.deepEqual(Object.keys(issueAuditTools(issue, 'example/repo')).sort(), ['comment_target_issue', 'read_target_issue', 'update_target_issue']);
+assert.deepEqual(Object.keys(issueAuditTools(issue, 'example/repo')).sort(), ['comment_target_issue', 'read_target_issue', 'set_verification_tier', 'update_target_issue']);
 const update = createIssueUpdateTool(issue, 'example/repo');
 const comment = createIssueCommentTool(issue, 'example/repo');
 const read = createIssueReadTool(issue, 'example/repo');
