@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { auditIssue } from './issue-contract.mjs';
 import { readVerificationTier } from './verification-tier-policy.mjs';
+import { isTreeAuditComplete } from './lib/agent/issue-audit-tree.mjs';
 import { fetchGitHubIssue as fetchIssue } from './lib/agent/tools/gh/issue/read.mjs';
 import { candidateIssue, issueLabelNames as labelNames } from './lib/agent/tools/gh/issue/update.mjs';
 import { renderIssueAuditPrompt, issueAuditTools } from './lib/agent/tasks/issue-audit.mjs';
@@ -232,8 +233,8 @@ async function runCursorAgent(issue, outDir) {
     status: meta.status, error: meta.error,
     mode, tree_progress: selectedTools.getTreeAuditProgress?.()??null,
   };
-  if (mode==='tree' && (normalized.tree_progress?.remaining.length ||
-      normalized.tree_progress?.unexplored.length || !normalized.tree_progress?.published || normalized.tree_progress?.reviewed===0)) {
+  if (mode==='tree' && (!normalized.tree_progress?.published ||
+      !isTreeAuditComplete(normalized.tree_progress,issue.number))) {
     const error=new Error('Tree Issue Audit is incomplete: '+JSON.stringify(normalized.tree_progress));
     error.cursorMeta=normalized;
     throw error;
