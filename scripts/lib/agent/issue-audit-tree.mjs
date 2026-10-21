@@ -144,6 +144,7 @@ export function createTreeAuditTools(root,repository=process.env.GITHUB_REPOSITO
         reason:{type:'string',minLength:20,maxLength:2000}},
         required:['issue_number','tier','reason'],additionalProperties:false},
       async execute({issue_number,tier,reason}){
+        try {
         const issue=ensureScoped(issue_number,{writable:true});
         if(!read.has(issue_number))throw Error('read related Issue before attempting review');
         if(visited.has(issue_number))throw Error('Issue already reviewed in this Agent session');
@@ -164,6 +165,12 @@ export function createTreeAuditTools(root,repository=process.env.GITHUB_REPOSITO
         visited.set(issue_number,{updated,reason});
         return JSON.stringify({issue_number,tier:readVerificationTier(after).tier,
           status:updated?'updated':'unchanged',reason,contract:'Pass',progress:progress()});
+        } catch(error){
+          if(Number.isSafeInteger(issue_number)&&observed.has(issue_number)){
+            failed.set(issue_number,String(error.message??error).slice(0,180));
+          }
+          throw error;
+        }
       }
     },
     repair_related_issue:{
