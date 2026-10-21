@@ -48,25 +48,31 @@ export function prepare(event, issues, repoRoot) {
   const refs = parsePreMergeIssueNumbers(pr.body, 'BestNathan', 'nession', pr.title);
   const listed = new Set(refs);
   for (const issue of issues) {
-    if (!listed.has(issue.number) || !['open','OPEN'].includes(issue.state))
+    if (!listed.has(issue.number) ||
+        !(event.source_event === 'push' ? ['open','OPEN','closed','CLOSED'].includes(issue.state) : ['open','OPEN'].includes(issue.state)))
       throw Error('unrelated or closed Issue in test plan');
   }
   if (!issues.length || issues.some(i => !i.body?.includes('## E2E Verification'))) {
     const noImpact = hasVerifiedMetadataOnlyDiff(repoRoot, pr.base.sha, pr.head.sha);
     return { schema_version:1, kind:'issue_e2e_selection', pr_number:pr.number,
       target_sha:pr.head.sha, base_sha:pr.base.sha,
-      mode:noImpact ? 'not-required' : 'full',
-      reason:noImpact ? 'verified-metadata-only-diff' : 'legacy-or-unlinked',
+      mode:noImpact ? 'not-required' : 'unresolved',
+      reason:noImpact ? 'verified-metadata-only-diff' : 'missing-scoped-e2e-obligation-needs-audit',
       selected:[], issues:[] };
   }
-  return { ...buildGitPlan(repoRoot,issues,pr.base.sha,pr.head.sha),pr_number:pr.number };
+  const effectiveBase=execFileSync('git',['merge-base',pr.base.sha,pr.head.sha],{
+    cwd:repoRoot,encoding:'utf8',stdio:['ignore','pipe','ignore'],
+  }).trim();
+  if(!SHA.test(effectiveBase)||effectiveBase===pr.head.sha)
+    throw Error('PR merge-base does not identify a distinct trusted change');
+  return { ...buildGitPlan(repoRoot,issues,effectiveBase,pr.head.sha),pr_number:pr.number };
 }
 function selfTest() {
   const event = { repository:{full_name:'BestNathan/nession'},pull_request:{
     number:17, title:'Refs #1702', body:'Refs #1702',
     head:{sha:'a'.repeat(40),repo:{full_name:'BestNathan/nession'}},
     base:{sha:'b'.repeat(40)} }};
-  assert.equal(prepare(event,[],'.').mode,'full');
+  assert.equal(prepare(event,[],'.').mode,'unresolved');
   assert.equal(pathsCannotAffectE2E(['docs/architecture/notes.md']), true);
   assert.equal(pathsCannotAffectE2E(['.github/workflows/agent-controller-dispatch.yml']), true);
   assert.equal(pathsCannotAffectE2E(['.github/workflows/ci-quality.yml','README.md']), true);
@@ -105,27 +111,27 @@ function selfTest() {
     });
     assert.equal(prepare(withShas(metadataHead),[],tmp).mode,'not-required');
     assert.equal(prepare(withShas(metadataHead),[],tmp).reason,'verified-metadata-only-diff');
-    assert.equal(prepare(withShas(base),[],tmp).mode,'full',
+    assert.equal(prepare(withShas(base),[],tmp).mode,'unresolved',
       'checking out a different HEAD must not mark tests unnecessary');
     fs.mkdirSync(join(tmp,'web','src'),{recursive:true});
     fs.writeFileSync(join(tmp,'web','src','App.tsx'),'export default null;\\n');
     git('add','.');
     git('commit','-qm','runtime changed');
     const runtimeHead = git('rev-parse','HEAD');
-    assert.equal(prepare(withShas(runtimeHead),[],tmp).mode,'full');
+    assert.equal(prepare(withShas(runtimeHead),[],tmp).mode,'unresolved');
     fs.mkdirSync(join(tmp,'docs'),{recursive:true});
     git('mv','web/src/App.tsx','docs/App.md');
     git('commit','-qm','runtime file moved into docs');
     const renamedHead = git('rev-parse','HEAD');
-    assert.equal(prepare(withShas(renamedHead,runtimeHead),[],tmp).mode,'full',
+    assert.equal(prepare(withShas(renamedHead,runtimeHead),[],tmp).mode,'unresolved',
       'runtime-to-docs rename must not be mistaken for docs-only');
   } finally {
     fs.rmSync(tmp,{recursive:true,force:true});
   }
   assert.throws(()=>prepare({...event,pull_request:{...event.pull_request,head:{sha:'x'}}},[],'.'),/identity/);
   assert.throws(()=>prepare(event,[{number:999,body:'',state:'open'}],'.'),/unrelated/);
-  assert.equal(prepare(event,[{number:1702,body:'old issue',state:'open'}],'.').mode,'full');
-  console.log('Issue E2E planner adapter: legacy fallback, source identity and unrelated Issue rejected');
+  assert.equal(prepare(event,[{number:1702,body:'old issue',state:'open'}],'.').mode,'unresolved');
+  console.log('Issue E2E planner adapter: unresolved legacy source does not force full, source identity and unrelated Issue rejected');
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
 const [op,eventFile,issuesFile,sourceRoot,output] = process.argv.slice(2);
