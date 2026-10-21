@@ -49,10 +49,17 @@ function ensureNumber(input){
   if(!Number.isSafeInteger(input)||input<=0)throw Error('invalid related Issue number');
   return input;
 }
-function sameArea(root,child){
+function sameArea(root,child,repository){
   const names=x=>(x.labels??[]).map(l=>typeof l==='string'?l:l.name);
-  // Domain label is a necessary, not sufficient, boundary: ancestry is checked separately.
-  return names(root).some(l=>['terminal','web','agent','ci','protocol','backend','rust'].includes(l)&&names(child).includes(l));
+  const overlap=names(root).some(l=>
+    ['terminal','web','agent','ci','protocol','backend','rust'].includes(l)&&names(child).includes(l));
+  if(overlap)return true;
+  // A real multi-component terminal project includes explicitly linked web-only
+  // slices. Allow cross-area traversal ONLY for repository-owner-authored Issues
+  // from a repository-owner-authored root, plus the separate mandatory parent
+  // chain check below. Outsiders cannot forge a Parent line to expand scope.
+  const owner=repository?.split('/')[0];
+  return !!owner && root.author?.login===owner&&child.author?.login===owner;
 }
 function searchExplicitChildren(parent,repository){
   const q='repo:'+repository+' is:issue is:open in:body "#'+parent+'"';
@@ -80,7 +87,7 @@ export function createTreeAuditTools(root,repository=process.env.GITHUB_REPOSITO
     ensureNumber(number);
     const issue=readIssue(number);
     if(number===rootNumber)return issue;
-    if(!sameArea(root,issue))throw Error('unrelated Issue area');
+    if(!sameArea(root,issue,repository))throw Error('unrelated Issue area or untrusted cross-area author');
     if(!isTreeDescendant(rootNumber,number,readIssue))throw Error('Issue has no explicit rooted parent chain');
     if(String(issue.state).toLowerCase()!=='open'){
       skipped.set(number,'closed related Issue: read-only historical context');
@@ -246,6 +253,15 @@ export function testIssueTree(){
   assert.equal(isTreeDescendant(1645,1931,n=>map.get(n)),true);
   assert.equal(isTreeDescendant(1645,9999,n=>map.get(n)),false);
   assert.equal(isTreeDescendant(1645,8888,n=>map.get(n)),true);
+  const rootOwned=map.get(1645);
+  rootOwned.author={login:'owner'};
+  const webOnly=mk(2102,[2060,1926,1645],'web');
+  webOnly.author={login:'owner'};
+  map.set(2102,webOnly);
+  assert.equal(sameArea(rootOwned,webOnly,'owner/repo'),true,
+    'owner-authored web-only child belongs to explicitly linked terminal parent');
+  assert.equal(sameArea(rootOwned,{...webOnly,author:{login:'attacker'}},'owner/repo'),false,
+    'external forged cross-area Parent must never expand write scope');
   const full={observed:2,reviewed:2,remaining:[],unexplored:[],failed:[],
     updated:[1924],unchanged:[1645]};
   assert.equal(isTreeAuditComplete(full,1645),true);
@@ -260,14 +276,15 @@ export function testIssueTree(){
     'closed P0 history is reported but does not create an impossible completion gate');
 
 
-  const scoped=createTreeAuditTools(map.get(1645),'example/repo',{getIssue:n=>map.get(n),
+  const scoped=createTreeAuditTools(map.get(1645),'owner/repo',{getIssue:n=>map.get(n),
     findChildren:n=>[...map.values()].filter(x=>explicitParentNumbers(x.body).includes(n))});
   return (async()=>{
     assert.equal(JSON.parse(await scoped.read_related_issue.execute({issue_number:1931})).issue.number,1931);
     await assert.rejects(scoped.read_related_issue.execute({issue_number:9999}),/no explicit rooted parent chain/);
     await assert.rejects(scoped.read_related_issue.execute({issue_number:8888}),/unrelated Issue area/);
     const found=JSON.parse(await scoped.find_related_issues.execute({parent_number:1645}));
-    assert.deepEqual(found.children.map(x=>x.number),[1924,1925]);
+    assert.deepEqual(found.children.map(x=>x.number),[1924,1925,2102],
+      'web-only owner-authored descendant of explicit terminal parent is not skipped');
     // Real #1645 includes a completed P0 child: it must be reported as
     // skipped historical context, not indefinitely Pending.
     const closed={...mk(1648,[1645]),state:'CLOSED'};
