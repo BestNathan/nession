@@ -21,8 +21,8 @@ on:
         description: 'Regenerate canonical visual baselines with --update-snapshots=all (download artifact and commit PNGs)'
         type: boolean
         default: false
-  # The post-merge Run Store records selected/not-required source evidence.
-  # Full regression is a distinct manual/scheduled workflow with its own SHA.
+  # Real post-merge E2E on main is consumed by the existing trusted
+  # E2E / Test Ingest: exact-SHA push evidence, App CAS, receipt/readback.
   push:
     branches: [staging, main]
   pull_request:
@@ -71,7 +71,7 @@ jobs:
           fetch-depth: 0
 
       - name: Checkout trusted E2E planning code
-        if: github.event_name != 'workflow_dispatch'
+        if: github.event_name == 'pull_request'
         uses: actions/checkout@v4
         with:
           ref: main
@@ -79,7 +79,7 @@ jobs:
           persist-credentials: false
 
       - name: Detect Issue-selected E2E support
-        if: github.event_name != 'workflow_dispatch'
+        if: github.event_name == 'pull_request'
         id: selected-capability
         shell: bash
         run: |
@@ -127,19 +127,6 @@ jobs:
             "$GITHUB_WORKSPACE" "$RUNNER_TEMP/issue-e2e/plan.json"
           echo "mode=$(jq -r '.mode' "$RUNNER_TEMP/issue-e2e/plan.json")" >> "$GITHUB_OUTPUT"
 
-      - name: Resolve merged-SHA Issue-selected E2E obligations
-        id: push-selection
-        if: github.event_name == 'push' && steps.selected-capability.outputs.available == 'true'
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/issue-e2e"
-          node trusted/scripts/issue-e2e-merge-selection.mjs plan \
-            "$GITHUB_EVENT_PATH" "$GITHUB_WORKSPACE" "$RUNNER_TEMP/issue-e2e/plan.json"
-          echo "mode=$(jq -r '.mode' "$RUNNER_TEMP/issue-e2e/plan.json")" >> "$GITHUB_OUTPUT"
-
       # ── E2E-only preparation ──────────────────────────────────────────
       # An explicit `not-required` plan skips the Rust build and the full-stack
       # prerequisites below. Every other mode (and every non-PR event) keeps
@@ -147,18 +134,18 @@ jobs:
       # is only set by a successful trusted selection.
       - name: Install Rust toolchain
         id: rust
-        if: steps.selection.outputs.mode != 'not-required' && steps.push-selection.outputs.mode != 'not-required'
+        if: steps.selection.outputs.mode != 'not-required'
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with: { cache-workspaces: ".", cache-all-crates: "true" }
 
       - uses: extractions/setup-just@v2
-        if: steps.selection.outputs.mode != 'not-required' && steps.push-selection.outputs.mode != 'not-required'
+        if: steps.selection.outputs.mode != 'not-required'
 
       # tmux is required by nession-agent to create sessions. The runner
       # image may or may not have it pre-installed; install it explicitly.
       - name: Install tmux
         id: tmux
-        if: steps.selection.outputs.mode != 'not-required' && steps.push-selection.outputs.mode != 'not-required'
+        if: steps.selection.outputs.mode != 'not-required'
         run: sudo apt-get update && sudo apt-get install -y tmux
 
       # Restore browser cache BEFORE install — a cache hit means the install
@@ -204,7 +191,7 @@ jobs:
       # (cargo's flock still serialises them; this is just the first hit.)
       - name: Build Rust binaries
         id: rust-build
-        if: steps.selection.outputs.mode != 'not-required' && steps.push-selection.outputs.mode != 'not-required'
+        if: steps.selection.outputs.mode != 'not-required'
         run: cargo build -p nession-server -p nession-agent
 
       # #759: browser contract enforcement uses the same canonical gate as
@@ -221,7 +208,7 @@ jobs:
       # skip the Rust build while the required design gate still executes.
       - name: Run canonical browser design gate (standalone)
         id: design
-        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots == true) || (steps.selection.outputs.mode == 'not-required' || steps.push-selection.outputs.mode == 'not-required') }}
+        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots == true) || steps.selection.outputs.mode == 'not-required' }}
         env:
           CI: true
           E2E_RUNTIME_WEB_ONLY: '1'
@@ -286,7 +273,7 @@ jobs:
             # tighter since #1038, which narrows this window but does not close
             # it: any drift under the current value is still skipped in silence.
             ./run test --suite fixture-visual --update-snapshots=all
-          elif [[ ( "${{ github.event_name }}" == 'pull_request' || "${{ github.event_name }}" == 'push' ) && "${{ steps.selected-capability.outputs.available }}" == 'true' ]]; then
+          elif [[ "${{ github.event_name }}" == 'pull_request' && "${{ steps.selected-capability.outputs.available }}" == 'true' ]]; then
             plan="$RUNNER_TEMP/issue-e2e/plan.json"
             mode="$(jq -r '.mode' "$plan")"
             case "$mode" in
@@ -361,9 +348,7 @@ jobs:
                   --cargo "${{ steps.rust-build.outcome }}" \
                   --tmux "${{ steps.tmux.outcome }}" \
                   --design "${{ steps.design.outcome }}" ;;
-              full|unresolved)
-                echo "::error::Unresolved Issue E2E obligations require a trusted audit decision; Full regression is never an implicit default"
-                exit 1 ;;
+              full) ./gates/run e2e-playwright ;;
               *) echo "::error::Invalid Issue E2E mode"; exit 1 ;;
             esac
           else
@@ -384,7 +369,7 @@ jobs:
       # canonical file-ID with independent Playwright assertion reporter
       # evidence. A missing/duplicate/skipped/zero-assertion ID fails closed.
       - name: Attest Full E2E per-ID assertion coverage
-        if: github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots != true
+        if: github.event_name == 'push'
         env:
           TARGET_SHA: ${{ github.sha }}
           FULL_JSON: ${{ runner.temp }}/issue-e2e/playwright-run.json
@@ -394,7 +379,7 @@ jobs:
             "$FULL_JSON" "$FULL_ASSERTIONS" "$TARGET_SHA"
 
       - name: Verify canonical browser design gate from the single E2E run
-        if: ${{ !cancelled() && !(github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots == true) && steps.selection.outputs.mode != 'not-required' && steps.push-selection.outputs.mode != 'not-required' }}
+        if: ${{ !cancelled() && !(github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots == true) && steps.selection.outputs.mode != 'not-required' }}
         env:
           DESIGN_BROWSER_REPORT: ${{ runner.temp }}/issue-e2e/playwright-run.json
           DESIGN_BROWSER_ASSERTIONS: ${{ runner.temp }}/issue-e2e/playwright-run-assertions.json
@@ -408,7 +393,7 @@ jobs:
           cat "$DESIGN_BROWSER_RECEIPT_FILE" >&2
 
       - name: Prove coalesced Browser Design evidence fails closed
-        if: ${{ !cancelled() && !(github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots == true) && steps.selection.outputs.mode != 'not-required' && steps.push-selection.outputs.mode != 'not-required' }}
+        if: ${{ !cancelled() && !(github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots == true) && steps.selection.outputs.mode != 'not-required' }}
         env:
           DESIGN_BROWSER_REPORT: ${{ runner.temp }}/issue-e2e/playwright-run.json
           DESIGN_BROWSER_ASSERTIONS: ${{ runner.temp }}/issue-e2e/playwright-run-assertions.json
@@ -421,7 +406,7 @@ jobs:
             --sha "$DESIGN_BROWSER_SHA"
 
       - name: Normalize selected per-file results even on failure
-        if: ${{ always() && !cancelled() && github.event_name != 'workflow_dispatch' && steps.selected-capability.outputs.available == 'true' && (steps.selection.outcome == 'success' || steps.push-selection.outcome == 'success') }}
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.selected-capability.outputs.available == 'true' && steps.selection.outcome == 'success' }}
         shell: bash
         env:
           E2E_PLAYWRIGHT_REPORT_FILE: ${{ runner.temp }}/issue-e2e/playwright-run.json
@@ -443,7 +428,7 @@ jobs:
           fi
 
       - uses: actions/upload-artifact@v4
-        if: ${{ always() && !cancelled() && github.event_name != 'workflow_dispatch' && (steps.selection.outcome == 'success' || steps.push-selection.outcome == 'success') }}
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.selection.outcome == 'success' }}
         with:
           name: issue-e2e-verification
           path: ${{ runner.temp }}/issue-e2e/
@@ -451,7 +436,7 @@ jobs:
           retention-days: 14
 
       - name: Enforce authenticated selected-E2E execution result
-        if: ${{ !cancelled() && github.event_name != 'workflow_dispatch' && (steps.selection.outcome == 'success' || steps.push-selection.outcome == 'success') }}
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && steps.selection.outcome == 'success' }}
         shell: bash
         run: |
           set -euo pipefail
