@@ -196,6 +196,11 @@ for (const mode of ['Relay', 'P2P'] as const) {
     // what the page sent and how the Agent answered, so a failure names the
     // layer instead of only reporting the stale `stty size`.
     const wire: WireRecord = { sent: [], received: [] };
+    const resizeLog: string[] = [];
+    page.on('console', (message) => {
+      const text = message.text();
+      if (text.includes('[resize]')) { resizeLog.push(text); }
+    });
     page.on('websocket', (socket) => {
       socket.on('framesent', (frame) => {
         if (typeof frame.payload === 'string') { wire.sent.push(parseFrame(frame.payload)); }
@@ -274,6 +279,7 @@ for (const mode of ['Relay', 'P2P'] as const) {
       })),
       captured: wire.sent.length,
       lastSent: wire.sent.slice(-6).map((frame) => frame.msg_type),
+      resizeLog: resizeLog.slice(-14),
       fonts: await page.evaluate(() => document.fonts.status),
       grid: after,
       sessionName,

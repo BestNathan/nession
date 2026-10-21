@@ -770,6 +770,11 @@ export class ResizeController {
         // so neither the drawing nor the tty follows the scroll mode.
         const grid = this.reportedGrid();
         if (grid === null) { continue; }
+        // #2132 diagnostic: the observer fire is where the PTY half starts.
+        console.info(
+          `[resize] fire ${grid.cols}x${grid.rows} first=${this.isFirstFire} ` +
+            `provisional=${this.metricsAreProvisional()}`,
+        );
 
         // Local grid first, on EVERY fire — the container has already changed
         // size, so xterm must repaint at the new size in this same frame or
