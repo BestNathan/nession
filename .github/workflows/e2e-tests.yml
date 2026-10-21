@@ -21,7 +21,9 @@ on:
         description: 'Regenerate canonical visual baselines with --update-snapshots=all (download artifact and commit PNGs)'
         type: boolean
         default: false
-  # The post-merge Run Store records selected/not-required source evidence.
+  # This producer change requires #2095's explicit terminal-io and
+# session-lifecycle regression IDs on the PR, not an implicit Full suite.
+# The post-merge Run Store records selected/not-required source evidence.
   # Full regression is a distinct manual/scheduled workflow with its own SHA.
   push:
     branches: [staging, main]
