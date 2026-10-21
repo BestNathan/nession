@@ -768,9 +768,20 @@ export async function collectAncestryRuns(repo,sourceAncestry,targetSha,
     const runs=await runsForSha(repo,entry.ancestor_sha);
     if(!Array.isArray(runs))throw Error('invalid ancestry run response');
     // Newest per ancestor, bounded: this reaches an evaluator's context, so it
-    // must never scale with an ancestor's whole run history.
-    const newest=[...runs].sort((a,b)=>Number(b?.id??0)-Number(a?.id??0))
-      .slice(0,ANCESTRY_RUNS_PER_SHA);
+    // must never scale with an ancestor's whole run history. A newer skipped or
+    // cancelled sibling must not hide the ancestor's successful receipt, so
+    // the newest successful completed run of each path is kept as well — the
+    // same rule as `retainedRuns`, one collector over.
+    const sorted=[...runs].sort((a,b)=>Number(b?.id??0)-Number(a?.id??0));
+    const newest=sorted.slice(0,ANCESTRY_RUNS_PER_SHA);
+    const seenSuccessPath=new Set();
+    for(const run of sorted){
+      if(run?.status!=='completed'||run?.conclusion!=='success')continue;
+      const path=String(run?.path??'');
+      if(seenSuccessPath.has(path))continue;
+      seenSuccessPath.add(path);
+      if(!newest.some(r=>r?.id===run?.id))newest.push(run);
+    }
     for(const run of newest){
       if(evidence.length>=ANCESTRY_RUNS_TOTAL)break;
       // Identity is re-bound here, never trusted from the ancestor list.
@@ -1909,6 +1920,22 @@ async function selfTest() {
   assert.equal(ancRuns[0].ancestor_sha,ancSha);
   assert.equal(ancRuns[0].id,901);
   assert.equal(ancRuns[0].run_attempt,1);
+  // Beyond the newest-12 window, an older SUCCESS of a path must survive
+  // newer skipped siblings: the ancestor's successful receipt is exactly what
+  // a later target needs to attest.
+  const ancHidden=await collectAncestryRuns(denialRepo,[
+    {ancestor_sha:ancSha,is_ancestor:true},
+  ],tgtSha,async()=>[
+    {id:800,path:'.github/workflows/acceptance-orchestrator.yml',status:'completed',
+      conclusion:'success',run_attempt:1,head_sha:ancSha,head_branch:'main',
+      repository:{full_name:denialRepo},head_repository:{full_name:denialRepo}},
+    ...Array.from({length:14},(_,i)=>({
+      id:1000+i,path:'.github/workflows/noise-'+(i%2)+'.yml',status:'completed',
+      conclusion:'skipped',run_attempt:1,head_sha:ancSha,head_branch:'main',
+      repository:{full_name:denialRepo},head_repository:{full_name:denialRepo}})),
+  ]);
+  assert.ok(ancHidden.some(run=>run.id===800),
+    'an older successful ancestor run must survive newer skipped siblings');
   await assert.rejects(()=>collectAncestryRuns(foreignRepo,[],tgtSha,async()=>[]),
     /invalid ancestry run scope/);
   await assert.rejects(()=>collectAncestryRuns(denialRepo,[],'short',async()=>[]),
