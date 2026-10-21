@@ -60,6 +60,7 @@ export function admitOriginalControlledReviewerTarget(params){
   must(intent.worker_run_attempt,POLICY.attempt,'original Worker attempt');
   must(intent.checkpoint_commit_sha,POLICY.checkpoint_commit_sha,'v3 native checkpoint');
   if(!HEX64.test(intent.patch_sha256??'')||
+     intent.patch_sha256!=='1f45a088966d41c1fcade13540498693d7d083ca238ca2b06c0525c654e314ee'||
      intent.publication!=='not_yet_attested'||
      intent.branch!==CONTROLLED_PUBLISHER_BRANCH)
     fail('malformed durable pre-publication intent');
