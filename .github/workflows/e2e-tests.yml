@@ -25,6 +25,21 @@ on:
   # Full regression is a distinct manual/scheduled workflow with its own SHA.
   push:
     branches: [staging, main]
+    # Do not launch browser E2E for docs or unrelated CI/agent workflow merges.
+    # A relevant push still authenticates its exact merged-SHA selected plan.
+    paths:
+      - '.github/workflows/e2e-tests.yml'
+      - 'crates/**'
+      - 'web/**'
+      - 'design/**'
+      - 'e2e/**'
+      - 'gates/**'
+      - 'scripts/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - '.cargo/**'
+      - 'justfile'
   pull_request:
     branches: [staging, main]
     # Scope PR execution to changes that can affect this validator.
