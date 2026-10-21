@@ -95,8 +95,10 @@ export function verifyControlledOriginalPublication({
   eq(branchRef.ref,'refs/heads/'+BRANCH,'current bounded branch name');
   eq(branchRef.object?.sha,pullRequest.head.sha,'current branch/PR HEAD');
   if(!Array.isArray(branchPulls)||branchPulls.length!==1||
-     branchPulls[0].number!==ORIGINAL_PR)
-    reject('missing or duplicate PR on deterministic Publisher branch');
+     branchPulls[0].number!==ORIGINAL_PR||
+     branchPulls[0].head?.ref!==BRANCH||
+     branchPulls[0].head?.repo?.full_name!==REPO)
+    reject('missing, forked or duplicate PR on deterministic Publisher branch');
   if(!Array.isArray(pullCommits)||pullCommits.length<1||
      pullCommits.length>100||pullCommits[0].sha!==ORIGINAL_PR_SHA||
      pullCommits[pullCommits.length-1].sha!==pullRequest.head.sha)

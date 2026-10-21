@@ -44,7 +44,7 @@ const pullRequest={
 const branchRef={ref:'refs/heads/'+P.branch,
   object:{sha:P.original_pr_sha}};
 const pullCommits=[{sha:P.original_pr_sha}];
-const branchPulls=[{number:P.original_pr}];
+const branchPulls=[{number:P.original_pr,head:{ref:P.branch,repo:{full_name:REPO}}}];
 const good={sourceRun,sourceJobs,ownerComment,intent,pullRequest,
   branchRef,pullCommits,originalCommit,originalFiles,currentFiles,branchPulls};
 const result=verify(good);
@@ -96,6 +96,8 @@ for(const part of [
 denied('branchRef',{...branchRef,object:{sha:'0'.repeat(40)}});
 denied('branchPulls',[]);
 denied('branchPulls',[branchPulls[0],{number:2177}]);
+denied('branchPulls',[{...branchPulls[0],head:{ref:'main',repo:{full_name:REPO}}}]);
+denied('branchPulls',[{...branchPulls[0],head:{ref:P.branch,repo:{full_name:'fork/nession'}}}]);
 denied('pullCommits',[]);
 denied('pullCommits',[{sha:'f'.repeat(40)}]);
 denied('originalCommit',{...originalCommit,parents:[]});
