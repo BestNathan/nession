@@ -255,6 +255,10 @@ export function testIssueTree(){
     'unexpanded leaf may hide descendants');
   assert.equal(isTreeAuditComplete({...full,failed:[{number:1924,reason:'denied'}]},1645),false);
   assert.equal(isTreeAuditComplete({...full,remaining:[1924]},1645),false);
+  assert.equal(isTreeAuditComplete({...full,skipped:[{number:1648,
+    reason:'closed historical child: no mutation'}]},1645),true,
+    'closed P0 history is reported but does not create an impossible completion gate');
+
 
   const scoped=createTreeAuditTools(map.get(1645),'example/repo',{getIssue:n=>map.get(n),
     findChildren:n=>[...map.values()].filter(x=>explicitParentNumbers(x.body).includes(n))});
