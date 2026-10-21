@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 // Authenticated GitHub workflow_run boundary for Issue E2E evidence.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -41,7 +42,10 @@ export function verifySource(event,run,pr,plan,results,artifact) {
 }
 
 export function verifyPlanFromSource(sourceRoot, issues, pr, claimed) {
-  const rebuilt = buildGitPlan(sourceRoot,issues,pr.base.sha,pr.head.sha);
+  const effectiveBase=execFileSync('git',['merge-base',pr.base.sha,pr.head.sha],{
+    cwd:sourceRoot,encoding:'utf8',
+  }).trim();
+  const rebuilt = buildGitPlan(sourceRoot,issues,effectiveBase,pr.head.sha);
   assert.equal(claimed.mode,rebuilt.mode);
   assert.equal(claimed.plan_digest,rebuilt.plan_digest,'plan changed from current Issue/source');
   assert.deepEqual(claimed.issues,rebuilt.issues,'Issue contract differs from captured plan');

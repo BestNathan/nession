@@ -7,6 +7,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { makeRunIndex } from './run-record-index-contract.mjs';
+import { attestFullReceipt } from '../e2e/runner/e2e-full-per-id-receipt.mjs';
+import {
+  parseE2eSelectedRunLog, attestE2eSelectedRunReceipt,
+  parseE2eNotRequiredLog, attestE2eNotRequiredReceipt,
+  makeE2eSelectedRunReceipt, makeE2eNotRequiredReceipt,
+  E2E_SELECTED_RUN_LOG_PREFIX, E2E_NOT_REQUIRED_LOG_PREFIX,
+} from './e2e-selected-run-receipt.mjs';
 
 const REPO = 'BestNathan/nession';
 const API = 'https://api.github.com/repos/' + REPO;
@@ -39,8 +46,8 @@ function assertSource(event, run, workflow) {
 // success artifact with an identical name. Authenticate the exact Attempt's
 // completed producer Job first, then select by its GitHub-issued clock window.
 // Do not use array order, "newest artifact", or mutable logs as authority.
-function requireArtifact(raw, run, job) {
-  assert.equal(raw.name, 'playwright-report');
+function requireArtifact(raw, run, job, expectedName = 'playwright-report') {
+  assert.equal(raw.name, expectedName);
   assert.ok(positive(raw.id) && positive(raw.size_in_bytes));
   assert.ok(raw.size_in_bytes <= 1024 * 1024 * 1024, 'oversized artifact');
   assert.equal(raw.expired, false, 'artifact already expired');
@@ -73,7 +80,54 @@ function requireJob(jobs, run) {
     'invalid exact Attempt producer Job time interval');
   return job;
 }
-function recordFor(event, run, workflow, tree, jobs, artifacts) {
+// Scope comes from the authenticated exact-run job, never from the fact a
+// push workflow succeeded. A missing receipt must not become "Full Pass".
+export function attestPushScope(run,job,log) {
+  assert.equal(run.event,'push');
+  assert.ok(['main','staging'].includes(run.head_branch));
+  assert.ok(typeof log==='string'&&log.length>0&&log.length<8*1024*1024);
+  const selected=parseE2eSelectedRunLog(log);
+  const noE2e=parseE2eNotRequiredLog(log);
+  assert.ok(Number(!!selected)+Number(!!noE2e)<=1,
+    'ambiguous post-merge selected/not-required source receipt');
+  if(!selected && !noE2e) {
+    // Compatibility for already-running historical full main-push Attempts.
+    // These must carry their own *real* all-ID receipt, not merely success.
+    const lines=log.split(/\r?\n/).filter(line=>line.includes('E2E_FULL_PER_ID_V1 '));
+    if(lines.length!==1)throw Error('missing bounded selected/not-required/real-full receipt');
+    const full=JSON.parse(lines[0].slice(lines[0].indexOf('E2E_FULL_PER_ID_V1 ')+19));
+    return {scope:'full-legacy',receipt:attestFullReceipt(full,run,job)};
+  }
+  if(selected){
+    const verified=attestE2eSelectedRunReceipt(selected,run,job);
+    for(const stepName of ['Resolve merged-SHA Issue-selected E2E obligations',
+      'Normalize selected per-file results even on failure',
+      'Enforce authenticated selected-E2E execution result']) {
+      const steps=job.steps?.filter(step=>step.name===stepName)??[];
+      assert.equal(steps.length,1,'missing merge selected verification step');
+      assert.equal(steps[0].conclusion,'success','selected E2E not verified');
+    }
+    return {scope:'selected',receipt:verified};
+  }
+  const verified=attestE2eNotRequiredReceipt(noE2e,run,job);
+  const selectedStep=job.steps?.filter(step=>
+    step.name==='Resolve merged-SHA Issue-selected E2E obligations')??[];
+  assert.equal(selectedStep.length,1);
+  assert.equal(selectedStep[0].conclusion,'success');
+  return {scope:'not-required',receipt:verified};
+}
+async function githubJobLog(id){
+  const token=process.env.GH_TOKEN??process.env.GITHUB_TOKEN;
+  const response=await fetch('https://api.github.com/repos/BestNathan/nession/actions/jobs/'+id+'/logs',{
+    headers:{Accept:'application/vnd.github+json',Authorization:'Bearer '+token,
+      'User-Agent':'nession-trusted-e2e-scope'},
+    signal:AbortSignal.timeout(30000)});
+  if(!response.ok)throw Error('GitHub exact-attempt E2E log unavailable: '+response.status);
+  const text=await response.text();
+  if(text.length>8*1024*1024)throw Error('E2E producer log too large');
+  return text;
+}
+function recordFor(event, run, workflow, tree, jobs, artifacts, scopeProof = null) {
   assertSource(event, run, workflow);
   assert.match(tree.sha, HEX40);
   const sourceTree = tree.tree.find(x => x.path === 'e2e/tests/browser' && x.type === 'tree');
@@ -83,8 +137,24 @@ function recordFor(event, run, workflow, tree, jobs, artifacts) {
     Number.isFinite(Date.parse(x.created_at)) &&
     Date.parse(x.created_at) >= Date.parse(job.started_at) &&
     Date.parse(x.created_at) <= Date.parse(job.completed_at));
-  assert.equal(found.length, 1, 'missing or ambiguous exact-Attempt report artifact');
-  const artifact = requireArtifact(found[0], run, job);
+  if(scopeProof?.scope!=='not-required')
+    assert.equal(found.length, 1, 'missing or ambiguous exact-Attempt report artifact');
+  const requiredName=scopeProof?.scope==='not-required'?'issue-e2e-verification':'playwright-report';
+  const required=artifacts.filter(x=>x.name===requiredName &&
+    Number.isFinite(Date.parse(x.created_at))&&
+    Date.parse(x.created_at)>=Date.parse(job.started_at)&&
+    Date.parse(x.created_at)<=Date.parse(job.completed_at));
+  assert.equal(required.length,1,'missing or ambiguous scoped source artifact');
+  const artifact = requireArtifact(required[0], run, job, requiredName);
+  let selectedE2eArtifact=null;
+  if(scopeProof?.scope==='selected') {
+    const matches=artifacts.filter(a=>a.name==='issue-e2e-verification' &&
+      Number.isFinite(Date.parse(a.created_at)) &&
+      Date.parse(a.created_at)>=Date.parse(job.started_at) &&
+      Date.parse(a.created_at)<=Date.parse(job.completed_at));
+    assert.equal(matches.length,1,'missing/ambiguous authenticated selected E2E artifact');
+    selectedE2eArtifact=requireArtifact(matches[0],run,job,'issue-e2e-verification');
+  }
   const proof = { job_id: job.id, name: job.name, conclusion: job.conclusion,
     run_attempt: job.run_attempt };
   const date = run.created_at.slice(0, 10);
@@ -99,6 +169,9 @@ function recordFor(event, run, workflow, tree, jobs, artifacts) {
     target_sha: run.head_sha, source_tree_sha: sourceTree.sha,
     run_id: run.id, run_attempt: run.run_attempt, source,
     started_at: run.created_at, status: 'Completed', evaluation: null,
+    test_scope: scopeProof?.scope??'historical-unclassified',
+    test_scope_receipt: scopeProof?.receipt??null,
+    selected_e2e_artifact: selectedE2eArtifact,
     test_job: proof, evidence: artifact };
   const executionId = sha256(JSON.stringify(identity));
   const record = { ...identity, execution_id: executionId };
@@ -140,7 +213,9 @@ async function create(eventFile, recordFile, indexFile, outputFile) {
   const tree = await github('/git/trees/' + commit.tree.sha + '?recursive=1');
   assert.equal(tree.truncated, false, 'Git tree enumeration truncated');
   assert.equal(tree.sha, commit.tree.sha);
-  const output = recordFor(event, run, workflow, tree, jobs.jobs, artifacts.artifacts);
+  const exactJob=requireJob(jobs.jobs,run);
+  const scopeProof=attestPushScope(run,exactJob,await githubJobLog(exactJob.id));
+  const output = recordFor(event, run, workflow, tree, jobs.jobs, artifacts.artifacts,scopeProof);
   fs.writeFileSync(recordFile, output.recordBytes, { flag: 'wx' });
   fs.writeFileSync(indexFile, output.indexBytes, { flag: 'wx' });
   fs.writeFileSync(outputFile, JSON.stringify({
@@ -150,7 +225,7 @@ function selfTest() {
   const sha = 'a'.repeat(40), sourceTree = 'b'.repeat(40), commitTree = 'c'.repeat(40);
   const run = { id: 120, run_attempt: 2, workflow_id: 5,
     repository: { full_name: REPO }, head_repository: { full_name: REPO },
-    path: '.github/workflows/e2e-tests.yml', event: 'push', head_branch: 'staging',
+    name: 'E2E / Tests', path: '.github/workflows/e2e-tests.yml', event: 'push', head_branch: 'staging',
     head_sha: sha, head_commit: { id: sha }, status: 'completed', conclusion: 'success',
     created_at: '2026-10-10T01:00:00Z' };
   const event = { repository: { full_name: REPO }, workflow_run: {
@@ -174,6 +249,48 @@ function selfTest() {
   assert.equal(record.evidence.sha256, 'd'.repeat(64));
   assert.equal(JSON.parse(result.indexBytes).record_sha256, sha256(result.recordBytes));
   assert.deepEqual(recordFor(event, run, workflow, tree, jobs, artifacts), result);
+  // A push "success" alone is not Full E2E: authenticate the exact
+  // selected/not-required result and its mandatory step outcomes.
+  const env={GITHUB_REPOSITORY:REPO,GITHUB_RUN_ID:'120',GITHUB_RUN_ATTEMPT:'2'};
+  const sr=makeE2eSelectedRunReceipt({env,sha,selectedIds:['terminal-attach'],provisions:1});
+  const scopedJob={...jobs[0],steps:[
+    {name:'Run E2E tests',conclusion:'success'},
+    {name:'Resolve merged-SHA Issue-selected E2E obligations',conclusion:'success'},
+    {name:'Normalize selected per-file results even on failure',conclusion:'success'},
+    {name:'Enforce authenticated selected-E2E execution result',conclusion:'success'},
+  ]};
+  const selectedProof=attestPushScope(run,scopedJob,
+    E2E_SELECTED_RUN_LOG_PREFIX+JSON.stringify(sr)+'\n');
+  assert.equal(selectedProof.scope,'selected');
+  const selectedArtifact={...artifacts[0],id:35,name:'issue-e2e-verification'};
+  const scopedRecord=JSON.parse(recordFor(event,run,workflow,tree,[scopedJob],
+    [...artifacts,selectedArtifact],selectedProof).recordBytes);
+  assert.equal(scopedRecord.test_scope,'selected');
+  assert.equal(scopedRecord.selected_e2e_artifact.artifact_id,35);
+  assert.throws(()=>recordFor(event,run,workflow,tree,[scopedJob],artifacts,selectedProof),
+    /missing\/ambiguous/);
+  const nr=makeE2eNotRequiredReceipt({env,sha,steps:{
+    rust_toolchain:'skipped',cargo_build:'skipped',tmux:'skipped',design_gate:'success',
+  }});
+  const nrJob={...jobs[0],steps:[
+    {name:'Resolve merged-SHA Issue-selected E2E obligations',conclusion:'success'},
+    {name:'Run E2E tests',conclusion:'success'},
+    {name:'Install Rust toolchain',conclusion:'skipped'},
+    {name:'Build Rust binaries',conclusion:'skipped'},
+    {name:'Install tmux',conclusion:'skipped'},
+    {name:'Run canonical browser design gate (standalone)',conclusion:'success'},
+  ]};
+  const notRequiredProof=attestPushScope(run,nrJob,
+    E2E_NOT_REQUIRED_LOG_PREFIX+JSON.stringify(nr)+'\n');
+  assert.equal(notRequiredProof.scope,'not-required');
+  const nrRecord=JSON.parse(recordFor(event,run,workflow,tree,[nrJob],
+    [selectedArtifact],notRequiredProof).recordBytes);
+  assert.equal(nrRecord.test_scope,'not-required');
+  assert.throws(()=>attestPushScope(run,scopedJob,'untrusted full push'),/receipt/);
+  assert.throws(()=>attestPushScope(run,scopedJob,
+    E2E_SELECTED_RUN_LOG_PREFIX+JSON.stringify(sr)+'\n'+
+    E2E_NOT_REQUIRED_LOG_PREFIX+JSON.stringify(nr)+'\n'),/ambiguous/);
+
   // Real GitHub Actions rerun semantics: the failed Attempt's same-name
   // artifact remains listed by Run. It must NEVER invalidate the new successful
   // Attempt, nor can newest/first ordering substitute for identity checks.

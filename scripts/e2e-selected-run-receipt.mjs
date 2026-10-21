@@ -20,9 +20,9 @@ export const E2E_SELECTED_WORKFLOW = '.github/workflows/e2e-tests.yml';
 export const E2E_SELECTED_WORKFLOW_NAME = 'E2E / Tests';
 export const E2E_SELECTED_JOB = 'e2e';
 export const E2E_SELECTED_STEP = 'Run E2E tests';
-// Only a pull_request run exercises the selected path; a push run is the full
-// regression and reports through its own canonical evidence.
-export const E2E_SELECTED_EVENTS = Object.freeze(['pull_request']);
+// Both the PR HEAD and real merged SHA may run the same trusted selected
+// suite. A push is NOT by itself proof of Full E2E.
+export const E2E_SELECTED_EVENTS = Object.freeze(['pull_request','push']);
 export const REPO = 'BestNathan/nession';
 const SHA = /^[a-f0-9]{40}$/;
 const ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -98,6 +98,7 @@ export function attestE2eSelectedRunReceipt(receipt, run, job) {
       run?.run_attempt !== receipt.run_attempt ||
       run?.head_sha !== receipt.sha ||
       !E2E_SELECTED_EVENTS.includes(run?.event) ||
+      (run?.event === 'push' && !['main','staging'].includes(run?.head_branch)) ||
       run?.name !== E2E_SELECTED_WORKFLOW_NAME ||
       normalizeWorkflowPath(run?.path) !== E2E_SELECTED_WORKFLOW ||
       run?.repository?.full_name !== REPO ||
@@ -230,6 +231,7 @@ export function attestE2eNotRequiredReceipt(receipt, run, job) {
       run?.run_attempt !== receipt.run_attempt ||
       run?.head_sha !== receipt.sha ||
       !E2E_SELECTED_EVENTS.includes(run?.event) ||
+      (run?.event === 'push' && !['main','staging'].includes(run?.head_branch)) ||
       run?.name !== E2E_SELECTED_WORKFLOW_NAME ||
       normalizeWorkflowPath(run?.path) !== E2E_SELECTED_WORKFLOW ||
       run?.repository?.full_name !== REPO ||
@@ -429,7 +431,8 @@ function selfTest() {
   const reject = (fn, pattern) => assert.throws(fn, pattern);
   const bound = receipt;
   reject(() => attestE2eSelectedRunReceipt(bound, { ...run, head_sha: 'b'.repeat(40) }, job), /mismatch/);
-  reject(() => attestE2eSelectedRunReceipt(bound, { ...run, event: 'push' }, job), /mismatch/);
+  assert.equal(attestE2eSelectedRunReceipt(bound, { ...run, event:'push',head_branch:'main' }, job).event,'push');
+  reject(() => attestE2eSelectedRunReceipt(bound, { ...run, event:'push' }, job), /mismatch/);
   reject(() => attestE2eSelectedRunReceipt(bound, { ...run, name: 'CI / Quality Gate',
     path: '.github/workflows/ci-quality.yml' }, job), /mismatch/);
   reject(() => attestE2eSelectedRunReceipt(bound, run, { ...job, conclusion: 'failure' }), /mismatch/);
