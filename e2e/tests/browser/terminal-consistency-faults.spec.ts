@@ -71,13 +71,15 @@ for (const mode of ['Relay', 'P2P'] as const) {
     // LAST line — not a `echo DONE` marker, whose text is echoed at the prompt
     // the moment the command is submitted — is what makes the buffer read a
     // complete prefix rather than a mid-stream sample.
-    // A short pace every 200 lines keeps the burst a burst (thousands per
-    // second) without letting one relay frame window exceed the browser's
-    // drain rate on a saturated runner; the stream still crosses many frames.
-    await submitTerminalCommand(
-      page,
-      `seq 1 ${COUNT} | awk '{ printf "HV-%s\\n", $1; if ($1 % 200 == 0) system("sleep 0.05") }'`,
-    );
+    //
+    // `sed` is deliberately the producer: its stdout is block-buffered, so the
+    // pane's tty receives ~500-byte writes (measured) and tmux sees tens of
+    // reads for the burst. An `awk` producer with a `system()` pace writes one
+    // line per tty write (measured: 36-byte chunks) and multiplies the
+    // per-read cost through the Agent and xterm without changing what the
+    // assertion is about. The count and the tail window are the witness; the
+    // producer must not change their scale.
+    await submitTerminalCommand(page, `seq 1 ${COUNT} | sed 's/^/HV-/'`);
 
     await expect(async () => {
       expect(await readBufferTail(page)).toContain(`HV-${COUNT}`);
