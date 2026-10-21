@@ -968,6 +968,31 @@ describe('SessionRuntime', () => {
       rt.dispose();
     });
 
+    it('a synchronously failing candidate build still advances the Auto policy (#2156)', async () => {
+      const serverConnection = makeRelayServerConnection('connected');
+      const rt = new SessionRuntime(makeConfig({ serverConnection }));
+      rt.setTransportReady(true);
+      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+
+      // Candidate 1 is the mock socket built above. The *next* candidate's
+      // transport cannot be constructed at all — the failure a blocked or
+      // unusable WebSocket constructor produces. Auto must still observe it
+      // and reach force-relay instead of stranding on the dead candidate.
+      vi.stubGlobal('WebSocket', class {
+        static CONNECTING = 0;
+        static OPEN = 1;
+        constructor() {
+          throw new Error('unit: agent transport unavailable');
+        }
+      });
+
+      expect(rt.onCandidateDisconnected()).toBe('next-candidate');
+      await flushMicrotasks();
+      expect(rt.getSnapshot().forcedRelay).toBe(true);
+      expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
+      rt.dispose();
+    });
+
     it('candidate/address exhaustion routes through applyForceRelay (single force-relay event, p2p torn down)', async () => {
       const serverConnection = makeRelayServerConnection('connected');
       const rt = new SessionRuntime(makeConfig({ serverConnection }));
