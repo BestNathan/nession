@@ -1,4 +1,5 @@
 import './tools/gh/issue/selftest.mjs';
+import { testIssueTree } from './issue-audit-tree.mjs';
 import assert from 'node:assert/strict';
 import { renderAgentPrompt } from './prompt/index.mjs';
 import { selfTest as providerSmokeSelfTest } from './provider-smoke.mjs';
@@ -21,6 +22,18 @@ const audit = { errors: ['missing Location'] };
 const cursor = renderIssueAuditPrompt(issue, audit, 'cursor', 'example/repo');
 const claude = renderIssueAuditPrompt(issue, audit, 'deepseek', 'example/repo');
 assert.notEqual(cursor.template_sha256, claude.template_sha256);
+const tree = renderIssueAuditPrompt(issue, audit, 'cursor', 'example/repo', 'tree');
+assert.match(tree.text,/Mode: tree/);
+assert.match(tree.text,/same|single|one Issue Audit Agent session/);
+assert.match(tree.text,/find_related_issues/);
+assert.throws(()=>renderIssueAuditPrompt(issue,audit,'deepseek','example/repo','tree'),/requires Cursor/);
+await testIssueTree();
+const extra=issueAuditTools(issue,'example/repo','tree');
+assert.ok(Object.keys(extra).includes('find_related_issues'));
+assert.ok(Object.keys(extra).includes('review_related_issue'));
+assert.ok(Object.keys(extra).includes('publish_tree_audit'));
+assert.ok(typeof extra.getTreeAuditProgress==='function');
+assert.ok(!Object.keys(extra).includes('getTreeAuditProgress'));
 assert.deepEqual(cursor, renderIssueAuditPrompt(issue, audit, 'cursor', 'example/repo'));
 assert.match(cursor.text, /update_target_issue/);
 assert.match(claude.text, /Return a JSON repair proposal only/);
@@ -30,7 +43,11 @@ assert.match(cursor.template_sha256, /^[0-9a-f]{64}$/);
 assert.equal(cursor.messages.length, 2);
 assert.throws(() => renderAgentPrompt({ id: '../escape', version: 'v1', context: {} }), /Invalid Prompt/);
 assert.throws(() => renderAgentPrompt({ id: 'issue-audit', version: 'v1', variant: 'cursor', context: {} }), /Missing Prompt/);
-assert.throws(() => renderAgentPrompt({ id: 'issue-audit', version: 'v1', context: {} }), /Missing required Prompt variant/);
+assert.throws(() => renderAgentPrompt({ id: 'issue-audit', version: 'v1',
+  context: {scopeInstructions:'scope',riskInstructions:'risk',mode:'single',
+    issueUrl:'https://example.test/17',repository:'example/repo',
+    issueNumber:17,labels:'web',findings:'none',issueBodyJson:'""'} }),
+  /Missing required Prompt variant/);
 
 const acceptance = renderAcceptancePrompt({
   issue: { number: 17 }, stage: 'pre-merge', target_ref: 'sha', deployment: null,

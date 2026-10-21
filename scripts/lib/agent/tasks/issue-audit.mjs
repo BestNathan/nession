@@ -3,8 +3,11 @@ import { createIssueReadTool } from '../tools/gh/issue/read.mjs';
 import { createIssueUpdateTool } from '../tools/gh/issue/update.mjs';
 import { createIssueCommentTool } from '../tools/gh/issue/comment.mjs';
 import { createVerificationTierTool } from '../tools/gh/issue/verification-tier.mjs';
+import { createTreeAuditTools } from '../issue-audit-tree.mjs';
 
-export function renderIssueAuditPrompt(issue, audit, provider, repository = process.env.GITHUB_REPOSITORY) {
+export function renderIssueAuditPrompt(issue, audit, provider, repository = process.env.GITHUB_REPOSITORY, mode = 'single') {
+  if(!['single','tree'].includes(mode)) throw Error('Unsupported Issue Audit mode');
+  if(mode==='tree' && provider!=='cursor') throw Error('Tree Audit requires Cursor custom tools (no unsafe shell fallback)');
   if (!['cursor', 'deepseek'].includes(provider)) throw new Error('Unsupported Issue Audit provider: ' + provider);
   if (!repository || !Number.isSafeInteger(issue.number) || issue.number <= 0) {
     throw new Error('Issue Audit requires a repository and a positive Issue number');
@@ -21,6 +24,13 @@ export function renderIssueAuditPrompt(issue, audit, provider, repository = proc
       labels: labels.join(', ') || '(none)',
       findings: (audit.errors ?? []).map((e) => '- ' + e).join('\n') || '(none)',
       issueBodyJson: JSON.stringify(issue.body ?? ''),
+      mode,
+      scopeInstructions: mode==='tree'
+        ? 'This is one Issue Audit Agent session: review the root and explicitly parent-linked descendants by choosing which Issue to inspect next. Do not dispatch Actions or sub-Agents. You may update only the root using target-bound tools and descendant Issues using relation-checked tools. Never update a closed or unrelated Issue. Max 40 Issues/5 levels. Traverse P1/P2/P3 and every explicit descendant before reporting completion. Use find_related_issues, read_related_issue, review_related_issue, and tree_audit_progress, avoiding duplicate visits. A partial run must be explicitly reported as partial.'
+        : 'Review only this fixed target Issue. Limit repository inspection to six focused read/search calls; By turn 8, stop investigating and repair if the contract needs it. Only this Issue may be mutated.',
+      riskInstructions: mode==='tree'
+        ? 'Classify each Issue individually as scoped, integration or full based on its own behavior and risk; parent full does NOT propagate to its children. Use verified related-Issue tools for children, which retain upgrade-only tier and SC/E2E evidence protections. Read before reviewing, and enumerate the entire explicit tree even for already classified Issues. At completion call publish_tree_audit exactly once, giving a concise factual coverage summary. The tool writes the root Issue report with verified reviewed/updated/unchanged/pending IDs. If your work is partial, publish a Partial report, not a fictitious completion.'
+        : 'Classify only this Issue using set_verification_tier. An established higher tier may not be downgraded automatically.',
     },
   });
 }
@@ -56,11 +66,17 @@ export async function applyIssueAuditProposal(issue, envelope, repository = proc
 }
 
 
-export function issueAuditTools(issue, repository = process.env.GITHUB_REPOSITORY) {
-  return {
+export function issueAuditTools(issue, repository = process.env.GITHUB_REPOSITORY, mode = 'single') {
+  if(!['single','tree'].includes(mode)) throw Error('Unsupported Issue Audit mode');
+  const tree=mode==='tree' ? createTreeAuditTools(issue,repository) : null;
+  const {__progress,...relatedTools}=tree??{};
+  const tools={
     read_target_issue: createIssueReadTool(issue, repository),
     update_target_issue: createIssueUpdateTool(issue, repository),
     comment_target_issue: createIssueCommentTool(issue, repository),
     set_verification_tier: createVerificationTierTool(issue, repository),
+    ...relatedTools,
   };
+  if(__progress)Object.defineProperty(tools,'getTreeAuditProgress',{value:__progress,enumerable:false});
+  return tools;
 }

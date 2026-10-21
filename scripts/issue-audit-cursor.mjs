@@ -100,8 +100,13 @@ async function loadCursorSdkForAudit() {
   return loadCursorSdk();
 }
 
+function auditMode() {
+  const mode=process.env.ISSUE_AUDIT_MODE||'single';
+  if(!['single','tree'].includes(mode))throw Error('Invalid Issue Audit mode: '+mode);
+  return mode;
+}
 function promptFor(issue, audit) {
-  return renderIssueAuditPrompt(issue, audit, 'cursor').text;
+  return renderIssueAuditPrompt(issue, audit, 'cursor',process.env.GITHUB_REPOSITORY,auditMode()).text;
 }
 
 function normalizeUsage(usage) {
@@ -203,6 +208,8 @@ function writeRecord(outDir, record) {
 
 async function runCursorAgent(issue, outDir) {
   ensureCursorConfig();
+  const mode=auditMode();
+  const selectedTools=issueAuditTools(issue,process.env.GITHUB_REPOSITORY,mode);
   const { result, meta } = await runCursorSession({
     sdkLoader: loadCursorSdkForAudit,
     apiKey: process.env.CURSOR_API_KEY,
@@ -211,7 +218,7 @@ async function runCursorAgent(issue, outDir) {
     workspace: process.cwd(),
     storePath: path.join(outDir, 'cursor-store'),
     tools: ['read', 'grep', 'glob', 'ls', 'mcp'],
-    customTools: issueAuditTools(issue),
+    customTools: selectedTools,
     prompt: promptFor(issue, auditIssue(issue)),
   });
   const normalized = {
@@ -223,7 +230,14 @@ async function runCursorAgent(issue, outDir) {
     usage: normalizeUsage(result.usage),
     raw_cost_usd: meta.cost.raw_usd, charged_cost_usd: meta.cost.charged_usd,
     status: meta.status, error: meta.error,
+    mode, tree_progress: selectedTools.getTreeAuditProgress?.()??null,
   };
+  if (mode==='tree' && (normalized.tree_progress?.remaining.length ||
+      normalized.tree_progress?.unexplored.length || !normalized.tree_progress?.published || normalized.tree_progress?.reviewed===0)) {
+    const error=new Error('Tree Issue Audit is incomplete: '+JSON.stringify(normalized.tree_progress));
+    error.cursorMeta=normalized;
+    throw error;
+  }
   if (result.status !== 'finished') {
     const error = new Error('Cursor Agent finished with status ' + result.status + ': ' + (result.error?.message ?? 'unknown error'));
     error.cursorMeta = normalized;
@@ -240,6 +254,7 @@ function selfTest() {
   assert.equal(normalizeCursorSdkModule({ Cursor: {}, Agent: {} }).Cursor != null, true);
   assert.equal(normalizeCursorSdkModule({ default: { Cursor: {}, Agent: {} } }).Agent != null, true);
   const restrictedTools = ['read', 'grep', 'glob', 'ls', 'mcp'];
+  assert.equal(restrictedTools.includes('shell'),false);
   assert.equal(restrictedTools.includes('mcp'), true);
   assert.equal(restrictedTools.includes('shell'), false);
   const catalog = [{ id: 'composer-2.5', parameters: [{ id: 'fast', values: [{ value: 'false' }, { value: 'true' }] }] }];
@@ -272,7 +287,7 @@ async function main() {
 
   const before = auditIssue(issue);
   const missingTier = !readVerificationTier(issue).explicit;
-  const reevaluate = process.env.ISSUE_AUDIT_REEVALUATE_TIER === 'true';
+  const reevaluate = process.env.ISSUE_AUDIT_REEVALUATE_TIER === 'true'||auditMode()==='tree';
   if (before.ok && !missingTier && !reevaluate && process.env.ISSUE_AUDIT_FORCE_AGENT !== 'true') {
     writeRecord(outDir, { schema_version: 1, issue: { number: issue.number, title: issue.title, url: issue.url }, trigger, result: 'contract-pass', agent: { invoked: false, provider: 'cursor' }, errors: [] });
     return;
