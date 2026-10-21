@@ -60,7 +60,7 @@ function expected({target_main_sha,patch_sha256,issuer_run_id}){
 }
 export function validateControlledPublisherIntent(value){
   if(!value||typeof value!=='object'||Array.isArray(value)||
-     Object.keys(value).length!==18||
+     Object.keys(value).length!==20||
      value.schema_version!==1||
      value.kind!=='trusted_publisher_write_ahead_intent'||
      value.repository!==REPO||value.issue!==1997||
