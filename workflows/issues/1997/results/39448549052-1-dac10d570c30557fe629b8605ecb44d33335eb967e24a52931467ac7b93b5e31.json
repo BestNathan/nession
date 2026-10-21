@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "trusted_publisher_write_ahead_intent",
+  "repository": "BestNathan/nession",
+  "issue": 1997,
+  "action_id": "dac10d570c30557fe629b8605ecb44d33335eb967e24a52931467ac7b93b5e31",
+  "worker_run_id": 39448549052,
+  "worker_run_attempt": 1,
+  "source_sha": "220266b9233ec97b1beacbc54e5cc7f82d3cece2",
+  "source_worker_sha": "271b48e494b6bd54843403b831709d6365f30530",
+  "checkpoint_version": 3,
+  "checkpoint_commit_sha": "eb891ee2154d02ddb758d50f0f694e70a343ffdf",
+  "checkpoint_ciphertext_sha256": "7afed3f229d371b850fda3fcc77fb0f601f2c588ccab6210d878b2f7501321a0",
+  "source_claim_artifact_id": 12276388775,
+  "source_result_artifact_id": 12275629206,
+  "source_ingest_run_id": 39465467460,
+  "target_main_sha": "c6894b59b8be9448cae3c68fd87593516f66b47a",
+  "patch_sha256": "1f45a088966d41c1fcade13540498693d7d083ca238ca2b06c0525c654e314ee",
+  "branch": "agent/1997/developer-checkpoint-v3",
+  "publisher_issuer_run_id": 39609600546,
+  "publication": "not_yet_attested"
+}
