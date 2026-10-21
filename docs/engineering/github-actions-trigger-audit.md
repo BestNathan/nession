@@ -12,51 +12,51 @@
 
 ## Complete workflow inventory (43 workflow files)
 
-| Family | Workflow | Incoming events | Delivery/path scope | Direct consumer / exception |
-|---|---|---|---|---|
-| Acceptance | `acceptance-agent-controller.yml` | manual | issue/SHA inputs | Controller request artifact → Store controller ingest |
-| Acceptance | `acceptance-case-ingest.yml` | workflow_run | Acceptance / Cases completed | authenticated Case results projection |
-| Acceptance | `acceptance-case-smoke.yml` | PR + manual | PR: code / E2E / Case inputs (#2097) | pre-merge Case smoke, selected fixtures |
-| Acceptance | `acceptance-cases.yml` | push + manual | staging/main pushes; exact SHA | Case execution; Case Ingest consumes output |
-| Acceptance | `acceptance-orchestrator.yml` | pull_request_target + dispatch + workflow_run + issues.closed + push | Quality/E2E workflow_run excludes main | authenticated SC coordination; event fan-out delegated to #2031 |
-| Acceptance | `acceptance-postrun-waker.yml` | workflow_run | main completed Orchestrator/fixture/E2E/Pages | postmerge evidence waker; #2031 event fan-out |
-| Acceptance | `acceptance-quota-recovery.yml` | schedule + manual + workflow_run | 15-min cron; main Quality completed | delayed retry; #2031 durable wake replacement prerequisite |
-| Acceptance | `acceptance-verified-stage.yml` | issue_comment | all comment creations; job-level authority | trusted owner stage approval; #2031 event fan-out |
-| Agent | `agent-claude-resume-seed.yml` | manual + push | main: own seed/verify workflows | controlled provider resume fixture |
-| Agent | `agent-claude-resume-verify.yml` | workflow_run | Claude Resume Seed completed | trusted verifier |
-| Agent | `agent-controller-dispatch.yml` | issue_comment + manual | all comments; job-level exact owner/main command | privileged Controller; cannot use file-path filter for comment event |
-| Agent | `agent-cursor-resume-seed.yml` | manual + push | main: own seed/verify workflows | controlled provider resume fixture |
-| Agent | `agent-cursor-resume-verify.yml` | workflow_run | Cursor Resume Seed completed | trusted verifier |
-| Agent | `agent-develop.yml` | manual | authenticated action inputs | Developer worker |
-| Agent | `agent-issue-audit.yml` | issues + manual | opened/edited/reopened | issue contract audit |
-| Agent | `agent-provider-smoke.yml` | manual + push | main selected provider/ingest scripts | provider smoke / telemetry evidence |
-| Agent | `agent-sc-acceptance.yml` | manual + reusable call | explicit source/SC/stage | per-SC Acceptance Agent |
-| CI | `ci-pages.yml` | PR | pages + Pages browser inputs | Pages quality |
-| CI | `ci-quality.yml` | PR + push | PR: relevant code/workflow paths + scope jobs; main: full exact SHA | Rust/Web checks; postmerge Quality consumers |
-| CI | `ci-run-store-fixture-evidence.yml` | push + repository_dispatch | all main pushes or explicit request | postmerge Run Store fixture evidence |
-| CI | `ci-run-store-integrity-audit.yml` | repository_dispatch + schedule | daily / explicit trusted request | Store integrity audit |
-| CI | `ci-web-dist-reuse-proof.yml` | workflow_run | Quality completed | Web dist evidence consumer; may create skipped runs (#2031) |
-| Deploy | `deploy-manual.yml` | manual | environment and SHA inputs | explicit deployment |
-| Deploy | `deploy-pages.yml` | push + schedule + manual | main Pages and registry path filter; 4-hour cron | public Pages publication |
-| E2E | `e2e-scenario-ingest.yml` | workflow_run | Scenario Smoke completed | authenticated terminal Scenario ingestion |
-| E2E | `e2e-scenario-smoke.yml` | PR + push + manual | main: scoped PR/main push paths (PR 2109); staging: scoped PR paths (PR 2114) | terminal repeated replay, authenticated Ingest |
-| E2E | `e2e-test-ingest.yml` | workflow_run | E2E / Tests completed | exact-SHA E2E evidence ingest |
-| E2E | `e2e-tests.yml` | PR + push + manual | PR: runtime/E2E inputs (#2097); main/staging push unchanged | browser E2E; main exact-SHA Store/Ingest |
-| Metrics | `metrics-agent-telemetry.yml` | workflow_run + schedule | Agent/Acceptance completion; 5-min recovery | telemetry ingestion; #2031 broad fan-out |
-| Metrics | `metrics-replay-request.yml` | manual | explicit replay input | Replay source |
-| Metrics | `metrics-repository.yml` | workflow_run + schedule | Replay Request; 4-hour schedule | repository metrics |
-| Release | `release-production.yml` | push | main all; version gate at job | versioned release (conservative trigger) |
-| Release | `release-staging.yml` | push + manual | staging with docs/.github path-ignore | staging artifact build/deploy |
-| Store | `store-agent-bootstrap.yml` | push | main: only bootstrap workflow | trusted Agent Store fixture |
-| Store | `store-agent-controller-ingest.yml` | workflow_run | Agent Controller completed | trusted controller ingest |
-| Store | `store-agent-development-ingest.yml` | workflow_run + issue_comment | Developer completed; comments with job guard | Worker result ingest/recovery |
-| Store | `store-agent-dispatch-reconcile.yml` | workflow_run | Agent Development completed on main | dispatch reconciliation |
-| Store | `store-app-writer-smoke.yml` | push | main: selected ingest/workflow/inventory inputs | writer credential/contract smoke |
-| Store | `store-five-mode-readback.yml` | push + repository_dispatch | all main pushes or trusted request | Run Store readback evidence |
-| Store | `store-governance-audit.yml` | push + manual + schedule | selected Store files; daily audit | Store governance |
-| Store | `store-receipt-readback.yml` | workflow_run + repository_dispatch | six Ingest/Metrics producers or trusted request | authenticated receipt readback; broad event fan-out (#2031) |
-| Task | `task-result-ingest.yml` | workflow_run | Task Runner completed | Task result ingestion |
-| Task | `task-runner.yml` | push + manual | task/** push changing .task/** | ephemeral task execution |
+| Family | Workflow | Incoming events | Delivery/path scope | Required check context | Direct consumer / exception |
+|---|---|---|---|---|---|
+| Acceptance | `acceptance-agent-controller.yml` | manual | issue/SHA inputs | None configured for main/staging | Controller request artifact → Store controller ingest |
+| Acceptance | `acceptance-case-ingest.yml` | workflow_run | Acceptance / Cases completed | None configured for main/staging | authenticated Case results projection |
+| Acceptance | `acceptance-case-smoke.yml` | PR + manual | PR: code / E2E / Case inputs (#2097) | None configured for main/staging | pre-merge Case smoke, selected fixtures |
+| Acceptance | `acceptance-cases.yml` | push + manual | staging/main pushes; exact SHA | None configured for main/staging | Case execution; Case Ingest consumes output |
+| Acceptance | `acceptance-orchestrator.yml` | pull_request_target + dispatch + workflow_run + issues.closed + push | Quality/E2E workflow_run excludes main | None configured for main/staging | authenticated SC coordination; event fan-out delegated to #2031 |
+| Acceptance | `acceptance-postrun-waker.yml` | workflow_run | main completed Orchestrator/fixture/E2E/Pages | None configured for main/staging | postmerge evidence waker; #2031 event fan-out |
+| Acceptance | `acceptance-quota-recovery.yml` | schedule + manual + workflow_run | 15-min cron; main Quality completed | None configured for main/staging | delayed retry; #2031 durable wake replacement prerequisite |
+| Acceptance | `acceptance-verified-stage.yml` | issue_comment | all comment creations; job-level authority | None configured for main/staging | trusted owner stage approval; #2031 event fan-out |
+| Agent | `agent-claude-resume-seed.yml` | manual + push | main: own seed/verify workflows | None configured for main/staging | controlled provider resume fixture |
+| Agent | `agent-claude-resume-verify.yml` | workflow_run | Claude Resume Seed completed | None configured for main/staging | trusted verifier |
+| Agent | `agent-controller-dispatch.yml` | issue_comment + manual | all comments; job-level exact owner/main command | None configured for main/staging | privileged Controller; cannot use file-path filter for comment event |
+| Agent | `agent-cursor-resume-seed.yml` | manual + push | main: own seed/verify workflows | None configured for main/staging | controlled provider resume fixture |
+| Agent | `agent-cursor-resume-verify.yml` | workflow_run | Cursor Resume Seed completed | None configured for main/staging | trusted verifier |
+| Agent | `agent-develop.yml` | manual | authenticated action inputs | None configured for main/staging | Developer worker |
+| Agent | `agent-issue-audit.yml` | issues + manual | opened/edited/reopened | None configured for main/staging | issue contract audit |
+| Agent | `agent-provider-smoke.yml` | manual + push | main selected provider/ingest scripts | None configured for main/staging | provider smoke / telemetry evidence |
+| Agent | `agent-sc-acceptance.yml` | manual + reusable call | explicit source/SC/stage | None configured for main/staging | per-SC Acceptance Agent |
+| CI | `ci-pages.yml` | PR | pages + Pages browser inputs | None configured for main/staging | Pages quality |
+| CI | `ci-quality.yml` | PR + push | PR: relevant code/workflow paths + scope jobs; main: full exact SHA | staging: `rust-check`, `web-check` (enforced); main: none | Rust/Web checks; postmerge Quality consumers |
+| CI | `ci-run-store-fixture-evidence.yml` | push + repository_dispatch | all main pushes or explicit request | None configured for main/staging | postmerge Run Store fixture evidence |
+| CI | `ci-run-store-integrity-audit.yml` | repository_dispatch + schedule | daily / explicit trusted request | None configured for main/staging | Store integrity audit |
+| CI | `ci-web-dist-reuse-proof.yml` | workflow_run | Quality completed | None configured for main/staging | Web dist evidence consumer; may create skipped runs (#2031) |
+| Deploy | `deploy-manual.yml` | manual | environment and SHA inputs | None configured for main/staging | explicit deployment |
+| Deploy | `deploy-pages.yml` | push + schedule + manual | main Pages and registry path filter; 4-hour cron | None configured for main/staging | public Pages publication |
+| E2E | `e2e-scenario-ingest.yml` | workflow_run | Scenario Smoke completed | None configured for main/staging | authenticated terminal Scenario ingestion |
+| E2E | `e2e-scenario-smoke.yml` | PR + push + manual | main: scoped PR/main push paths (PR 2109); staging: scoped PR paths (PR 2114) | None configured for main/staging | terminal repeated replay, authenticated Ingest |
+| E2E | `e2e-test-ingest.yml` | workflow_run | E2E / Tests completed | None configured for main/staging | exact-SHA E2E evidence ingest |
+| E2E | `e2e-tests.yml` | PR + push + manual | PR: runtime/E2E inputs (#2097); main/staging push unchanged | None configured for main/staging | browser E2E; main exact-SHA Store/Ingest |
+| Metrics | `metrics-agent-telemetry.yml` | workflow_run + schedule | Agent/Acceptance completion; 5-min recovery | None configured for main/staging | telemetry ingestion; #2031 broad fan-out |
+| Metrics | `metrics-replay-request.yml` | manual | explicit replay input | None configured for main/staging | Replay source |
+| Metrics | `metrics-repository.yml` | workflow_run + schedule | Replay Request; 4-hour schedule | None configured for main/staging | repository metrics |
+| Release | `release-production.yml` | push | main all; version gate at job | None configured for main/staging | versioned release (conservative trigger) |
+| Release | `release-staging.yml` | push + manual | staging with docs/.github path-ignore | None configured for main/staging | staging artifact build/deploy |
+| Store | `store-agent-bootstrap.yml` | push | main: only bootstrap workflow | None configured for main/staging | trusted Agent Store fixture |
+| Store | `store-agent-controller-ingest.yml` | workflow_run | Agent Controller completed | None configured for main/staging | trusted controller ingest |
+| Store | `store-agent-development-ingest.yml` | workflow_run + issue_comment | Developer completed; comments with job guard | None configured for main/staging | Worker result ingest/recovery |
+| Store | `store-agent-dispatch-reconcile.yml` | workflow_run | Agent Development completed on main | None configured for main/staging | dispatch reconciliation |
+| Store | `store-app-writer-smoke.yml` | push | main: selected ingest/workflow/inventory inputs | None configured for main/staging | writer credential/contract smoke |
+| Store | `store-five-mode-readback.yml` | push + repository_dispatch | all main pushes or trusted request | None configured for main/staging | Run Store readback evidence |
+| Store | `store-governance-audit.yml` | push + manual + schedule | selected Store files; daily audit | None configured for main/staging | Store governance |
+| Store | `store-receipt-readback.yml` | workflow_run + repository_dispatch | six Ingest/Metrics producers or trusted request | None configured for main/staging | authenticated receipt readback; broad event fan-out (#2031) |
+| Task | `task-result-ingest.yml` | workflow_run | Task Runner completed | None configured for main/staging | Task result ingestion |
+| Task | `task-runner.yml` | push + manual | task/** push changing .task/** | None configured for main/staging | ephemeral task execution |
 
 **Interpretation:** "all main pushes" entries above represent deliberately retained triggers or candidates for a later consumer-by-consumer audit, *not* evidence that each one creates expensive jobs. Job guards can skip after GitHub creates an Actions Run. Schedules are event sources, not code-change triggers.
 
@@ -101,3 +101,20 @@ Staging branch protection enforces `rust-check` and `web-check` (GitHub Actions 
 [PR 2118](https://github.com/BestNathan/nession/pull/2118) updates the trusted `scripts/issue-e2e-selection-entry.mjs`: when Issue E2E metadata is missing, an **exact-head Git diff** must positively prove that all changed paths are unrelated Markdown/Workflow metadata before returning `not-required`. Runtime code, changed E2E/Case workflows, unknown paths, an unavailable base, an incorrect checkout and a runtime-to-docs rename all preserve the full fallback. `ci-quality.yml` YAML-only edits no longer start PR E2E by themselves. The `issue-e2e-plan-selftest` Gate owns this invariant with real Git-history positive/negative fixtures. Main `push` exact-SHA full E2E/Store ingestion triggers are unchanged.
 
 The event-receiver fan-out across `workflow_run` / `issue_comment` and scheduled recovery remains in [Issue 2031](https://github.com/BestNathan/nession/issues/2031), without a competing CI router.
+
+## Before/after workflow creation — exact-head controlled probes
+
+This is a measured **Actions Run-count and heavy-Job avoidance** comparison, not a fabricated billing-minutes total. GitHub's authenticated billable Runner-minutes endpoint was not available to this audit; wall time, billable minutes and artifact download times are not interchangeable. It is still directly verified that no costly Rust/Web/Playwright jobs started in the after-case.
+
+| PR / changed path | Quality Run | Rust/Web heavy jobs | E2E Run | Case Smoke Run | Scenario Smoke Run | Total change-driven validation Runs |
+|---|---|---|---|---|---|---|
+| [Before PR 2087](https://github.com/BestNathan/nession/pull/2087), Controller Workflow single-line | [39444999181](https://github.com/BestNathan/nession/actions/runs/39444999181) | 2 executed | [39444999306](https://github.com/BestNathan/nession/actions/runs/39444999306), full | [39444999270](https://github.com/BestNathan/nession/actions/runs/39444999270) | N/A (main PR target) | **3** |
+| [After PR 2099](https://github.com/BestNathan/nession/pull/2099), Controller Workflow comment-only | [39453616699](https://github.com/BestNathan/nession/actions/runs/39453616699) | 0; both skipped | **Not created** | **Not created** | N/A | **1 light Run** |
+| [Before staging PR 2111](https://github.com/BestNathan/nession/pull/2111), docs-only | Created (legacy) | 2 executed by unfiltered Quality | Created | Created | Created | **4** |
+| [After staging PR 2117](https://github.com/BestNathan/nession/pull/2117), docs-only | [39460348578](https://github.com/BestNathan/nession/actions/runs/39460348578) | 0; required contexts success with explicit Not Applicable steps | **Not created** | **Not created** | **Not created** | **1 light Run** |
+
+The separate `Acceptance / Orchestrator` `pull_request_target` skipped receiver is outside this count and owned by Issue 2031, not represented as a heavy CI run. The negative probes were closed unmerged. The corresponding positive controls—Rust-only [PR 2104](https://github.com/BestNathan/nession/pull/2104), Web-only [PR 2105](https://github.com/BestNathan/nession/pull/2105), Case-only [PR 2107](https://github.com/BestNathan/nession/pull/2107)—ran their applicable suites to completion. `ci-trigger-scope-selftest`, an executable Quality tooling Gate, adds real Git-diff change-path fixtures to prevent regressions in these categories.
+
+## Required-check evidence provenance
+
+The required-check column applies to the observed branch settings: `main` reports enforcement `off` with no contexts; `staging` reports `enforcement_level=everyone` with `rust-check` and `web-check` (GitHub Actions app ID 15368). The main ruleset was disabled at the audit snapshot. The selected job names and actual `Not Applicable` receipt are linked above. These facts must be rechecked if repository branch protection changes.
