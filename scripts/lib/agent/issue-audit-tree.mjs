@@ -60,7 +60,7 @@ export function createTreeAuditTools(root,repository=process.env.GITHUB_REPOSITO
  {getIssue=fetchGitHubIssue,findChildren=searchExplicitChildren}={}){
   if(!repository||!Number.isSafeInteger(root?.number))throw Error('tree audit needs rooted Issue');
   const rootNumber=root.number, observed=new Set([rootNumber]),read=new Set([rootNumber]);
-  const visited=new Map(),issues=new Map();
+  const visited=new Map(),issues=new Map(),expanded=new Set();
   const readIssue=n=>{
     if(issues.size>TREE_AUDIT_LIMIT*MAX_DEPTH)throw Error('tree relation lookup ceiling reached');
     const result=getIssue(n,repository);
@@ -82,6 +82,7 @@ export function createTreeAuditTools(root,repository=process.env.GITHUB_REPOSITO
     updated:[...visited].filter(([,v])=>v.updated).map(([n])=>n),
     unchanged:[...visited].filter(([,v])=>!v.updated).map(([n])=>n),
     remaining:[...observed].filter(n=>!visited.has(n)).sort((a,b)=>a-b),
+    unexplored:[...observed].filter(n=>!expanded.has(n)).sort((a,b)=>a-b),
     limit:TREE_AUDIT_LIMIT};}
   const int={type:'integer',minimum:1};
   return {
@@ -91,6 +92,7 @@ export function createTreeAuditTools(root,repository=process.env.GITHUB_REPOSITO
       async execute({parent_number}){
         ensureScoped(parent_number);
         const hits=findChildren(parent_number,repository);
+        expanded.add(parent_number);
         const accepted=[];
         for(const h of hits){
           if(h.number===rootNumber||observed.has(h.number))continue;
