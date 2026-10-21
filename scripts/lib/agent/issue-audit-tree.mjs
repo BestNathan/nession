@@ -210,7 +210,7 @@ export function testIssueTree(){
   const mk=(n,parents=[],domain='terminal')=>({number:n,state:'OPEN',
     body:parents.length?'Parent '+parents.map(p=>'#'+p).join(' / '):'Root',
     labels:[{name:domain}]});
-  const map=new Map([mk(1645),mk(1924,[1645]),mk(1925,[1645]),mk(1931,[1924,1645]),
+  const map=new Map([mk(1645),mk(1924,[1645]),mk(1925,[1645]),mk(1931,[1924]),
     mk(9999,[4321]),mk(4321,[9999]),mk(8888,[1645],'ci')].map(x=>[x.number,x]));
   assert.deepEqual(explicitParentNumbers('Related #99\nParent #1924 / #1645'),[1924,1645]);
   assert.deepEqual(explicitParentNumbers('just mentions #1645'),[]);
