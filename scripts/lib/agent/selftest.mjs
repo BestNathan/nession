@@ -65,6 +65,11 @@ assert.deepEqual(candidate.labels.map((value) => value.name).sort(), ['bug', 'ci
 assert.deepEqual(issue.labels.map((value) => value.name), ['bug', 'web', 'in-progress']);
 
 assert.deepEqual(Object.keys(issueAuditTools(issue, 'example/repo')).sort(), ['comment_target_issue', 'read_target_issue', 'set_verification_tier', 'update_target_issue']);
+const tierTool = issueAuditTools(issue, 'example/repo').set_verification_tier;
+assert.equal(tierTool.inputSchema.additionalProperties, false);
+await assert.rejects(() => tierTool.execute({tier: 'verification:scoped', reason: 'short'}), /invalid Issue verification-tier proposal/);
+await assert.rejects(() => tierTool.execute({tier: 'verification:unexpected', reason: 'verified cross-component scope requires a broader test'}), /invalid Issue verification-tier proposal/);
+
 const update = createIssueUpdateTool(issue, 'example/repo');
 const comment = createIssueCommentTool(issue, 'example/repo');
 const read = createIssueReadTool(issue, 'example/repo');
