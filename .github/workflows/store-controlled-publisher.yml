@@ -52,6 +52,7 @@ jobs:
           node scripts/lib/agent/publisher/controlled-proposal-selftest.mjs
           node scripts/lib/agent/publisher/source-attestation-selftest.mjs
           node scripts/lib/agent/publisher/store-intent-selftest.mjs
+          node scripts/lib/agent/publisher/store-intent-conflict-selftest.mjs
           node scripts/lib/agent/publisher/github-publish-selftest.mjs
           node scripts/lib/agent/orchestration/worker-reconcile-selftest.mjs
           ./gates/run run-store-integrity
