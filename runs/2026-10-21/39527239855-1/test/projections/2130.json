@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_projection_receipt",
+  "outcome": "applied",
+  "issue": 2130,
+  "run_id": 39527239855,
+  "run_attempt": 1,
+  "target_sha": "e8ed8c3b9df1795889699b17637563a8bb3e4b1a",
+  "plan_digest": "2259e2df27f1747b351fe0975eb8d7f27b20e04dcbcf7c98107adbc890f2bd9d",
+  "artifact_digest": "sha256:e0a26f90bbb143f066aff32ca13af81b0d48d98a9fe35cea2ed1c982635f4366",
+  "ingest_run_id": 39527987565,
+  "ingest_attempt": 1,
+  "declaration_digest": "5b99b542344780aa5b6f145559af699561ae51d57b3007ca526dc65ec7bdbd9f",
+  "before_body_sha256": "a14f9c8756eb90633e1c932863e61bbbd63bc4a55aba8e8f3f325f2a7eb7a3cb",
+  "body_sha256": "51253adca9e9477f123c2cb4db38bd7ad90f99055c62a739920c6379f2fb9289",
+  "readback_body": "Parent #1926 (SC-07) / #1645 (SC-10). Scoped child adding the real TUI fixture to the terminal consistency fault spec.\n\n## Requirements: Alt-screen ownership survives resize and exits cleanly\n\n### Problem\n\nThe fault spec covers high-rate numbered output but not a screen that owns the terminal: alternate screen, application modes, and a redraw driven by an authoritative resize. Without it, a defect that leaks alt-screen content into normal scrollback, or that stops delivering resize during a TUI, has no browser-level witness.\n\n### Scope\n\n- Enter the alternate screen from a real shell (`\\x1b[?1049h`) and set application cursor, mouse and bracketed-paste modes; print a TUI marker built through `printf '%s'` so the echoed command line never contains the marker itself.\n- Assert xterm reports `alternate` and holds the marker.\n- Resize the viewport while the TUI owns the screen; after the webfont is ready, assert the browser grid changes, the alternate buffer stays active, and an in-TUI `stty size` print reports the new rows/cols.\n- Exit with Ctrl+C, leave the alternate screen, and assert xterm returns to `normal` with no alt-screen marker leaked into the normal buffer.\n- Run over both Relay and P2P; no runtime behavior change.\n\n### Success Criteria\n\n- [x] SC-01 Over Relay and P2P, an alt-screen enter shows `alternate` with the TUI marker, and exit returns `normal` without the TUI marker appearing in the normal buffer.\n- [ ] SC-02 An authoritative resize during the TUI changes the browser grid and delivers the same `rows cols` to the PTY, with the size printed from inside the same alternate buffer.\n- [ ] SC-03 Exact PR HEAD Quality / E2E / Case Smoke / trusted Acceptance, and exact merge-SHA Quality / E2E / Cases / Orchestrator Pass.\n\n## Acceptance Plan\n\n```yaml\nacceptance:\n  SC-01:\n    when: pr\n    method: agent\n  SC-02:\n    when: pr\n    method: agent\n  SC-03:\n    when: merged\n    branch: main\n    method: agent\n```\n\n## E2E Verification\n\n### New\n- none: the fixture extends the existing canonical spec; no new spec ID is introduced.\n\n### Regression\n- terminal-consistency-faults\n- terminal-attach-bootstrap\n\n## E2E Report\n\n| ID | Type | Result | Evidence |\n|---|---|---|---|\n| terminal-attach-bootstrap | Regression | Error | run 39527239855/1, SHA e8ed8c3b9df1795889699b17637563a8bb3e4b1a, contract 5b99b542344780aa5b6f145559af699561ae51d57b3007ca526dc65ec7bdbd9f, plan 2259e2df27f1747b351fe0975eb8d7f27b20e04dcbcf7c98107adbc890f2bd9d, tests 0/0 (https://github.com/BestNathan/nession/actions/runs/39527239855) |\n| terminal-consistency-faults | Regression | Error | run 39527239855/1, SHA e8ed8c3b9df1795889699b17637563a8bb3e4b1a, contract 5b99b542344780aa5b6f145559af699561ae51d57b3007ca526dc65ec7bdbd9f, plan 2259e2df27f1747b351fe0975eb8d7f27b20e04dcbcf7c98107adbc890f2bd9d, tests 0/0 (https://github.com/BestNathan/nession/actions/runs/39527239855) |\n\n## Acceptance Report\n\n| Criterion | Result | Evidence |\n|---|---|---|\n| SC-01 | Pass | run 39502507459; ref 63d2028b106286709e7845d06c4ea4efe1eb5c71; source agent-cursor; test: e2e/tests/browser/terminal-consistency-faults.spec.ts Relay/P2P tests assert alternate+ALT-2130-TUI then normal with countInBuffer(ALT-2130-TUI)===0; workflow: E2E / Tests run 39502510681 head_sha 63d2028b106286709e7845d06c4ea4efe1eb5c71 conclusion success terminal-consistency-faults 4/4 Pass; summary: Relay and P2P alt-screen enter/exit with TUI marker and no normal-buffer leak are asserted in the spec and passed at exact PR HEAD. |\n| SC-02 | Pending | run 39502507459; ref 63d2028b106286709e7845d06c4ea4efe1eb5c71; source agent-cursor; test: e2e/tests/browser/terminal-consistency-faults.spec.ts resize asserts readGrid growth and alternate persistence only; no expectPtySize/stty size print while buffer type is alternate; workflow: E2E run 39502510681/1 success does not record PTY rows/cols match or size-from-alternate assertions for issue 2130; summary: Authoritative resize during TUI is partially witnessed (browser grid change) but PTY rows/cols parity and size printed inside the alternate buffer are not proven at this SHA. |\n| SC-03 | Pending | awaiting merged main SHA Agent proof |\n\n## Product alignment\n\n- [ ] Does this move Nession toward VISION.md?\n- [ ] Does it obey PRINCIPLE.md?\n- [ ] Were relevant docs/design/* sources checked?\n- [ ] Is any deviation explicit?\n\n---\n**Status:** Approved\n\n\n\n\n",
+  "patch_updated_at": "2026-10-21T01:33:30Z",
+  "readback_updated_at": "2026-10-21T01:33:30Z",
+  "rows": [
+    {
+      "id": "terminal-attach-bootstrap",
+      "result": "Error",
+      "evidence": "run 39527239855/1, SHA e8ed8c3b9df1795889699b17637563a8bb3e4b1a, contract 5b99b542344780aa5b6f145559af699561ae51d57b3007ca526dc65ec7bdbd9f, plan 2259e2df27f1747b351fe0975eb8d7f27b20e04dcbcf7c98107adbc890f2bd9d, tests 0/0 (https://github.com/BestNathan/nession/actions/runs/39527239855)"
+    },
+    {
+      "id": "terminal-consistency-faults",
+      "result": "Error",
+      "evidence": "run 39527239855/1, SHA e8ed8c3b9df1795889699b17637563a8bb3e4b1a, contract 5b99b542344780aa5b6f145559af699561ae51d57b3007ca526dc65ec7bdbd9f, plan 2259e2df27f1747b351fe0975eb8d7f27b20e04dcbcf7c98107adbc890f2bd9d, tests 0/0 (https://github.com/BestNathan/nession/actions/runs/39527239855)"
+    }
+  ]
+}
