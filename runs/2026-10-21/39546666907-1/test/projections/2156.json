@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_projection_receipt",
+  "outcome": "applied",
+  "issue": 2156,
+  "run_id": 39546666907,
+  "run_attempt": 1,
+  "target_sha": "7f888f3cf7c983b7d86acb2506305eb13303a582",
+  "plan_digest": "5ac9c53b86e1069d3fdeac0136336e99b5761f3e77f8ea66d0048b81d19a7741",
+  "artifact_digest": "sha256:bf493178ee8588a979bc21f18ce9fea95034563ffcd085357329c268c56815fd",
+  "ingest_run_id": 39547469532,
+  "ingest_attempt": 1,
+  "declaration_digest": "d6a7dbf58485505a958b4b5516f3d5a45199d08f0f74fc26c4408260b4e4f200",
+  "before_body_sha256": "3a7a438b7e0d97fb5ea17781184669f22fa58f8a16b6f95d1a4c1af6a7b01cbc",
+  "body_sha256": "b9f9ef2b990f9b3d107bfc5cadfa049cd7fb7209475e31733d66c7ee3c4fca47",
+  "readback_body": "Parent #1926 (SC-03, SC-08) / #1645 (SC-10 route-switch element). Scoped child adding the browser-level route-switch witness.\n\n## Requirements: A live route switch keeps the renderer and its stream\n\n#2126 proves P2P and Relay observe one Agent stream timeline, and #2129 proves a forced route flip revokes the parser-applied cursor. Neither drives the switch a user actually performs: re-attaching the same Session on the other route from the attach dialog while the terminal is live.\n\nThe fixture must:\n\n- attach a Session over P2P, mark the current xterm DOM node, print a pre-switch marker, and wait for it exactly once;\n- re-attach the same Session over Relay **through the existing attach settings dialog** (no test-only route control);\n- assert the same xterm node survives, the pre-switch marker still occurs exactly once, and a post-switch marker arrives exactly once;\n- switch back Relay → P2P and prove a numbered burst that spans the cut has an exactly-once retained tail (no duplicate, no missing tail line).\n\nDegraded-vs-synchronized surfacing is out of scope here (tracked by #2155); this issue is about continuity of the renderer and the stream across an operator-visible switch.\n\n## Success Criteria\n\n- [ ] SC-01 A P2P→Relay re-attach through the attach settings keeps the same xterm node; the pre-switch marker remains exactly once and a post-switch marker arrives exactly once.\n- [ ] SC-02 A Relay→P2P re-attach back does the same, and a numbered burst spanning the switch has an exactly-once retained tail.\n- [ ] SC-03 Exact PR HEAD Quality / E2E / Case Smoke / trusted Acceptance, and exact merge-SHA Quality / E2E / Cases / Orchestrator Pass.\n\n## Acceptance Plan\n\n```yaml\nacceptance:\n  SC-01:\n    when: pr\n    method: agent\n  SC-02:\n    when: pr\n    method: agent\n  SC-03:\n    when: merged\n    branch: main\n    method: agent\n```\n\n## Acceptance Report\n\n| Criterion | Result | Evidence |\n|---|---|---|\n| SC-01 | Pending | awaiting exact PR head SHA Agent proof |\n| SC-02 | Pending | awaiting exact PR head SHA Agent proof |\n| SC-03 | Pending | awaiting merged main SHA Agent proof |\n\n## E2E Verification\n\n### New\n- none: the fixture extends the existing terminal consistency spec; no new spec ID is introduced.\n\n### Regression\n- terminal-consistency-faults\n\n## E2E Report\n\n| ID | Type | Result | Evidence |\n|---|---|---|---|\n| terminal-consistency-faults | Regression | Error | run 39546666907/1, SHA 7f888f3cf7c983b7d86acb2506305eb13303a582, contract d6a7dbf58485505a958b4b5516f3d5a45199d08f0f74fc26c4408260b4e4f200, plan 5ac9c53b86e1069d3fdeac0136336e99b5761f3e77f8ea66d0048b81d19a7741, tests 0/0 (https://github.com/BestNathan/nession/actions/runs/39546666907) |\n\n## Product alignment\n\n- [ ] Does this move Nession toward VISION.md?\n- [ ] Does it obey PRINCIPLE.md?\n- [ ] Were relevant docs/design/* sources checked?\n- [ ] Is any deviation explicit?\n\n---\n**Status:** Approved\n",
+  "patch_updated_at": "2026-10-21T05:04:22Z",
+  "readback_updated_at": "2026-10-21T05:04:22Z",
+  "rows": [
+    {
+      "id": "terminal-consistency-faults",
+      "result": "Error",
+      "evidence": "run 39546666907/1, SHA 7f888f3cf7c983b7d86acb2506305eb13303a582, contract d6a7dbf58485505a958b4b5516f3d5a45199d08f0f74fc26c4408260b4e4f200, plan 5ac9c53b86e1069d3fdeac0136336e99b5761f3e77f8ea66d0048b81d19a7741, tests 0/0 (https://github.com/BestNathan/nession/actions/runs/39546666907)"
+    }
+  ]
+}
