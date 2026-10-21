@@ -512,3 +512,94 @@ test('two clients: a stalled observer never blocks the controller (#2144)', asyn
     await observerContext.close();
   }
 });
+
+// #2160: a reconnect during a high-volume burst must not replay events the
+// renderer already displayed. Main's full E2E gate reproduced a 1,608-line
+// duplicated tail under load; this fixture forces one re-attach deterministically
+// and reports the bootstrap markers the client received so a failure names the
+// path that replayed.
+test('an under-burst reconnect never replays already-parsed output (#2160)', async ({ page }, testInfo) => {
+  test.skip(!process.env.CI, 'real stack available in CI only');
+  test.setTimeout(360_000);
+
+  const sessionName = `e2e-consistency-replay-${testInfo.retry}-${Date.now()}`;
+  const bootstraps: Array<Record<string, unknown>> = [];
+  page.on('websocket', (socket) => {
+    socket.on('framereceived', (frame) => {
+      if (typeof frame.payload !== 'string') { return; }
+      try {
+        const msg = JSON.parse(frame.payload) as {
+          msg_type?: string;
+          payload?: { bootstrap?: unknown };
+        };
+        if (msg.msg_type === 'agent.terminal.output' && msg.payload?.bootstrap) {
+          bootstraps.push(msg.payload.bootstrap as Record<string, unknown>);
+        }
+      } catch {
+        // Non-JSON frames are not protocol messages.
+      }
+    });
+  });
+
+  await page.goto(
+    '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
+  );
+  await waitForShell(page);
+  await createSession(page, sessionName);
+  await attachToSession(page, sessionName, 'P2P');
+  await waitForInteractiveShell(page);
+
+  const COUNT = 3_000;
+  const TAIL = 1_000;
+  await submitTerminalCommand(page, `seq 1 ${COUNT} | sed 's/^/DR-/'`);
+
+  // Let the burst get well ahead of the parser before the cut.
+  await expect(async () => {
+    const tail = await readBufferTail(page);
+    const seen = [...tail.matchAll(/DR-(\d+)/g)].map((match) => Number(match[1]));
+    expect(Math.max(0, ...seen)).toBeGreaterThanOrEqual(800);
+  }).toPass({ timeout: 120_000 });
+
+  // Suppress the liveness probe's ping. Typing triggers the probe (#1264); its
+  // 5 s deadline tears the socket down, the service rebuilds the same URL, and
+  // the runtime re-attaches with a resume while the burst still streams.
+  await page.evaluate(() => {
+    const original = WebSocket.prototype.send;
+    WebSocket.prototype.send = function (data) {
+      if (typeof data === 'string') {
+        try {
+          if ((JSON.parse(data) as { msg_type?: string }).msg_type === 'control.ping') {
+            return;
+          }
+        } catch {
+          // Non-JSON frames pass through unchanged.
+        }
+      }
+      return original.call(this, data);
+    };
+  });
+  await sendRawToTerminal(page, ' ');
+
+  await waitForLastLine(page, 'DR-', COUNT, { timeoutMs: 240_000, stallMs: 60_000 });
+
+  const text = await readTerminalBuffer(page);
+  const counts = new Map<number, number>();
+  for (const match of text.matchAll(/DR-(\d+)/g)) {
+    const value = Number(match[1]);
+    if (value >= 1 && value <= COUNT) {
+      counts.set(value, (counts.get(value) ?? 0) + 1);
+    }
+  }
+  const duplicated = [...counts.entries()]
+    .filter(([value, seen]) => seen > 1 && value > COUNT - TAIL)
+    .map(([value]) => value);
+  const missingTail: number[] = [];
+  for (let value = COUNT - TAIL + 1; value <= COUNT; value += 1) {
+    if (!counts.has(value)) { missingTail.push(value); }
+  }
+  expect(
+    duplicated,
+    `a tail line was replayed over parsed output; bootstraps=${JSON.stringify(bootstraps.slice(-4))}`,
+  ).toEqual([]);
+  expect(missingTail, 'a tail line never reached the parser').toEqual([]);
+});
