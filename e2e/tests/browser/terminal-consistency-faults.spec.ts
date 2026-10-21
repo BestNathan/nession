@@ -71,7 +71,13 @@ for (const mode of ['Relay', 'P2P'] as const) {
     // LAST line — not a `echo DONE` marker, whose text is echoed at the prompt
     // the moment the command is submitted — is what makes the buffer read a
     // complete prefix rather than a mid-stream sample.
-    await submitTerminalCommand(page, `seq 1 ${COUNT} | sed 's/^/HV-/'`);
+    // A short pace every 200 lines keeps the burst a burst (thousands per
+    // second) without letting one relay frame window exceed the browser's
+    // drain rate on a saturated runner; the stream still crosses many frames.
+    await submitTerminalCommand(
+      page,
+      `seq 1 ${COUNT} | awk '{ printf "HV-%s\\n", $1; if ($1 % 200 == 0) system("sleep 0.05") }'`,
+    );
 
     await expect(async () => {
       expect(await readBufferTail(page)).toContain(`HV-${COUNT}`);
