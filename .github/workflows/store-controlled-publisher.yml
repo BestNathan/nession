@@ -7,8 +7,8 @@ on:
     types: [created]
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
+  pull-requests: read
   actions: read
   issues: read
 
@@ -120,18 +120,32 @@ jobs:
           repositories: nession
           permission-contents: write
 
+      # GITHUB_TOKEN-originated PRs do not trigger normal push/PR CI.
+      # A separately installed GitHub App supplies the narrowly scoped PR
+      # writer identity. Missing App permissions fail BEFORE Store CAS intent.
+      - name: Mint distinct Publisher App token to trigger downstream CI
+        id: publisher
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.PUBLISHER_APP_ID }}
+          private-key: ${{ secrets.PUBLISHER_APP_PRIVATE_KEY }}
+          repositories: nession
+          permission-contents: write
+          permission-pull-requests: write
+
       - name: Authenticate Source and CAS intent before one Publisher PR creation
         env:
           ACTIONS_READ_TOKEN: ${{ github.token }}
           STORE_APP_TOKEN: ${{ steps.writer.outputs.token }}
           STORE_WRITER_PRIVATE_KEY: ${{ secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY }}
-          PUBLISHER_GITHUB_TOKEN: ${{ github.token }}
+          PUBLISHER_GITHUB_TOKEN: ${{ steps.publisher.outputs.token }}
         shell: bash
         run: |
           set -euo pipefail
           test -n "$STORE_APP_TOKEN"
           test -n "$STORE_WRITER_PRIVATE_KEY"
           test -n "$PUBLISHER_GITHUB_TOKEN"
+          test "$PUBLISHER_GITHUB_TOKEN" != "$STORE_APP_TOKEN"
           # Original Worker was an unprivileged model; this job never executes
           # a script from its historical checkout, nor an untrusted PR checkout.
           node scripts/lib/agent/publisher/trusted-publisher.mjs publish \
