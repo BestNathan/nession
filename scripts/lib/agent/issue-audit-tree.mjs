@@ -14,7 +14,7 @@ const MAX_DEPTH=5;
 export function explicitParentNumbers(body) {
   const found=new Set();
   for(const line of String(body??'').split(/\r?\n/).slice(0,100)){
-    if(!/^\s*(?:[-*]\s*)?(?:\*\*)?(?:Parent(?:\s+tracking)?|父需求|父级|上级需求)\b/i.test(line))continue;
+    if(!/^\s*(?:[-*]\s*)?(?:\*\*)?(?:Parent(?:\s+tracking)?|父需求|父级|上级需求)(?=\s|:|：|\*|$)/i.test(line))continue;
     for(const ref of line.matchAll(/#(\d{1,9})\b/g)){
       const n=Number(ref[1]);if(n>0)found.add(n);
     }
