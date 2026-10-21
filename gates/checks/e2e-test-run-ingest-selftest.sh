@@ -4,7 +4,7 @@ GATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 source "${GATE_DIR}/../lib/common.sh"
 GATE_ID='e2e-test-run-ingest-selftest'
 GATE_NAME='e2e test run ingest selftest'
-GATE_COMMAND='node scripts/e2e-test-run-ingest.mjs self-test'
+GATE_COMMAND='node scripts/e2e-test-run-ingest.mjs self-test && node scripts/e2e-push-scope-artifact.mjs self-test'
 GATE_SUCCESS='canonical e2e-test-run-ingest-selftest contract passes its checks'
 GATE_FAILURE='canonical e2e-test-run-ingest-selftest invariant or fixture failed'
 GATE_REPAIR='fix scripts/e2e-test-run-ingest.mjs and its fixtures; do not bypass the detection'
