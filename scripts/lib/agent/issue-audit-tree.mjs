@@ -74,6 +74,7 @@ export function createTreeAuditTools(root,repository=process.env.GITHUB_REPOSITO
     ensureNumber(number);
     const issue=readIssue(number);
     if(number===rootNumber)return issue;
+    if(String(issue.state).toLowerCase()!=='open')throw Error('closed related Issue excluded from active tree');
     if(!sameArea(root,issue))throw Error('unrelated Issue area');
     if(!isTreeDescendant(rootNumber,number,readIssue))throw Error('Issue has no explicit rooted parent chain');
     if(writable&&String(issue.state).toLowerCase()!=='open')throw Error('closed related Issue cannot be edited');
@@ -195,6 +196,8 @@ export function createTreeAuditTools(root,repository=process.env.GITHUB_REPOSITO
         if(typeof summary!=='string'||summary.length<10||summary.length>2000)throw Error('invalid tree summary');
         const p=progress();
         const complete=p.remaining.length===0&&p.unexplored.length===0&&p.failed.length===0&&p.reviewed>0;
+        if(!complete && /tree audit complete|all (?:related |child )?issues (?:reviewed|audited)/i.test(summary))
+          throw Error('partial tree cannot publish a contradictory Complete finding');
         const body=['## Issue Tree Audit',
           '- Root: #'+rootNumber,
           '- Status: **'+(complete?'Complete':'Partial / needs review')+'**',
@@ -223,13 +226,14 @@ export function testIssueTree(){
   const mk=(n,parents=[],domain='terminal')=>({number:n,state:'OPEN',
     body:parents.length?'Parent '+parents.map(p=>'#'+p).join(' / '):'Root',
     labels:[{name:domain}]});
-  const map=new Map([mk(1645),mk(1924,[1645]),mk(1925,[1645]),mk(1931,[1924]),
+  const map=new Map([mk(1645),mk(1924,[1645]),mk(1925,[1645]),mk(1931,[1924]),mk(1648,[1645]),
     mk(9999,[4321]),mk(4321,[9999]),mk(8888,[1645],'ci')].map(x=>[x.number,x]));
   assert.deepEqual(explicitParentNumbers('Related #99\nParent #1924 / #1645'),[1924,1645]);
   assert.deepEqual(explicitParentNumbers('just mentions #1645'),[]);
   assert.equal(isTreeDescendant(1645,1931,n=>map.get(n)),true);
   assert.equal(isTreeDescendant(1645,9999,n=>map.get(n)),false);
   assert.equal(isTreeDescendant(1645,8888,n=>map.get(n)),true);
+  map.get(1648).state='CLOSED';
   const scoped=createTreeAuditTools(map.get(1645),'example/repo',{getIssue:n=>map.get(n),
     findChildren:n=>[...map.values()].filter(x=>explicitParentNumbers(x.body).includes(n))});
   return (async()=>{
@@ -238,6 +242,8 @@ export function testIssueTree(){
     await assert.rejects(scoped.read_related_issue.execute({issue_number:8888}),/unrelated Issue area/);
     const found=JSON.parse(await scoped.find_related_issues.execute({parent_number:1645}));
     assert.deepEqual(found.children.map(x=>x.number),[1924,1925]);
+    assert.ok(!found.children.some(x=>x.number===1648));
+    assert.ok(!scoped.__progress().remaining.includes(1648));
     await assert.rejects(scoped.review_related_issue.execute({issue_number:1925,tier:'verification:full',reason:'This is a cross-component requirement with verified security risk'}),/read related Issue/);
     console.log('Issue tree Agent scope: verified explicit ancestry, cycle, domain, read-before-write and single scope');
   })();
