@@ -26,15 +26,15 @@ Developer/Reviewer Agents may submit typed, auditable proposals using `scripts/i
 ## Verification tiers and SC cost policy (canonical)
 
 Every Requirement or Bug may have **exactly one** of:
-- \`verification:scoped\` (L1, default for legacy unlabelled Issues): the affected Quality Gates, Issue-selected E2E IDs and source-aligned Acceptance, ordinarily at PR HEAD.
-- \`verification:integration\` (L2): the above plus bounded, explicitly named cross-component Cases; merged-SHA checks only for invariants that genuinely require integration.
-- \`verification:full\` (L3): a critical parent Requirement, major migration, security/release boundary or explicitly authorized system milestone; pin the **full-regression obligation to a specific milestone and SHA**. Do **not** propagate a parent's L3 to every child PR that only references it.
+- `verification:scoped` (L1, default for legacy unlabelled Issues): the affected Quality Gates, Issue-selected E2E IDs and source-aligned Acceptance, ordinarily at PR HEAD.
+- `verification:integration` (L2): the above plus bounded, explicitly named cross-component Cases; merged-SHA checks only for invariants that genuinely require integration.
+- `verification:full` (L3): a critical parent Requirement, major migration, security/release boundary or explicitly authorized system milestone; pin the **full-regression obligation to a specific milestone and SHA**. Do **not** propagate a parent's L3 to every child PR that only references it.
 
 The Issue Audit Agent should assess scope, touched components, trust/security impact, failure recovery, protocol compatibility, release scope and the actual SC/E2E plan; give reasons for a proposed tier. A trusted main-owned verification policy, not mutable labels or LLM prose, controls execution. A GitHub label is not a signed test result, a permission to dispatch an AI Worker, or a bypass for required deterministic checks.
 
-**Do not create boilerplate Success Criteria** requiring "merged SHA Full Quality + Full E2E + all Cases + Orchestrator green" for ordinary children. Default to \`when: pr\` and source-aligned relevant evidence. \`when: merged\` describes the point where a *specific invariant* becomes provable; it **does not imply Full E2E**. Only explicit L3 milestones require authenticated all-ID Full Regression. Missing or inapplicable Full Regression is \`Not Required\`, never a fabricated \`Full Pass\`. Preserve meaningful historical SC IDs and evidence; don't erase failed or pending results to relabel an Issue.
+**Do not create boilerplate Success Criteria** requiring "merged SHA Full Quality + Full E2E + all Cases + Orchestrator green" for ordinary children. Default to `when: pr` and source-aligned relevant evidence. `when: merged` describes the point where a *specific invariant* becomes provable; it **does not imply Full E2E**. Only explicit L3 milestones require authenticated all-ID Full Regression. Missing or inapplicable Full Regression is `Not Required`, never a fabricated `Full Pass`. Preserve meaningful historical SC IDs and evidence; don't erase failed or pending results to relabel an Issue.
 
-Issue \`ai:enabled\` remains a separate Worker execution authorization. Verification tiers never confer Worker or Store permissions.
+Issue `ai:enabled` remains a separate Worker execution authorization. Verification tiers never confer Worker or Store permissions.
 
 ## 1. Classify first
 
