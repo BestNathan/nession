@@ -88,6 +88,64 @@ try{
   const added=git(['diff','--cached','--','src/addition.js'])+'\n';
   git(['reset','-q','HEAD','--','src/addition.js']);fs.unlinkSync(addFile);
   bad({patch:added,allowed_paths:['src/addition.js']},/mode/);
+  // Only a separate trusted create-path grant can authorize a regular file
+  // addition. Default preflight still rejects new files, as above.
+  const created=preflightAgentPatch({checkout:repo,source_sha:sha,patch:added,
+    allowed_paths:['src/addition.js'],create_paths:['src/addition.js']});
+  assert.deepEqual(inspectTextPatch(added,['src/addition.js'],
+    {createPaths:['src/addition.js']}),['src/addition.js']);
+  assert.equal(created.files.length,1);
+  assert.equal(created.files[0].path,'src/addition.js');
+  assert.equal(created.files[0].operation,'create');
+  assert.equal(created.files[0].old_sha256,null);
+  assert.equal(created.files[0].old_bytes,0);
+  assert.equal(created.files[0].new_bytes,4);
+  assert.match(created.files[0].new_sha256,/^[a-f0-9]{64}$/);
+  assert.equal(created.scope,'preflight_only');
+  assert.equal(fs.existsSync(addFile),false,'preflight must not write the source tree');
+  assert.deepEqual(preflightAgentPatch({checkout:repo,source_sha:sha,patch:added,
+    allowed_paths:['src/addition.js'],create_paths:['src/addition.js']}),created);
+  // A missing ordinary parent can be safely created only inside the trusted
+  // source tree; a symlink in any existing parent remains forbidden.
+  const nested=added.replaceAll('src/addition.js','src/nested/created.js');
+  assert.deepEqual(preflightAgentPatch({checkout:repo,source_sha:sha,patch:nested,
+    allowed_paths:['src/nested/created.js'],create_paths:['src/nested/created.js']})
+    .files.map(x=>[x.path,x.operation]),[['src/nested/created.js','create']]);
+  assert.equal(fs.existsSync(path.join(repo,'src/nested')),false);
+  // Even dangling symlinks in an untracked target must not be treated as an
+  // absent regular file (fs.existsSync alone would miss this attack).
+  fs.symlinkSync('/nonexistent-nession-preflight-target',addFile);
+  bad({patch:added,allowed_paths:['src/addition.js'],create_paths:['src/addition.js']},
+    /target already exists or is a symlink/);
+  fs.unlinkSync(addFile);
+  const mixed=preflightAgentPatch({checkout:repo,source_sha:sha,patch:good+added,
+    allowed_paths:['src/calc.js','src/addition.js'],create_paths:['src/addition.js']});
+  assert.equal(mixed.files.length,2);
+  assert.equal(mixed.files.find(x=>x.path==='src/addition.js').operation,'create');
+  assert.equal(mixed.files.find(x=>x.path==='src/calc.js').old_bytes,original.length);
+  // A create grant is a subset of the separately trusted modification grant;
+  // it cannot authorize another path, symlinks or executable/binary changes.
+  bad({patch:added,allowed_paths:['src/normal.txt'],create_paths:['src/addition.js']},
+    /invalid trusted create-path/);
+  bad({patch:added,allowed_paths:['src/addition.js'],
+    create_paths:['src/addition.js','src/addition.js']},/invalid trusted create-path/);
+  bad({patch:added,allowed_paths:['src/addition.js'],create_paths:['src/../addition.js']},
+    /unsafe or protected/);
+  bad({patch:added.replace('new file mode 100644','new file mode 100755'),
+    allowed_paths:['src/addition.js'],create_paths:['src/addition.js']},
+    /unauthorized new file mode/);
+  bad({patch:added.replaceAll('src/addition.js','src/link/pwned.js'),
+    allowed_paths:['src/link/pwned.js'],create_paths:['src/link/pwned.js']},
+    /unsafe new-file parent directory/);
+  bad({patch:added.replaceAll('src/addition.js','src/calc.js'),
+    allowed_paths:['src/calc.js'],create_paths:['src/calc.js']},
+    /new-file target already exists/);
+  bad({patch:added.replace('--- /dev/null','--- a/src/addition.js'),
+    allowed_paths:['src/addition.js'],create_paths:['src/addition.js']},
+    /patch old path/);
+  bad({patch:added.replace('new file mode 100644','deleted file mode 100644'),
+    allowed_paths:['src/addition.js'],create_paths:['src/addition.js']},
+    /mode/);
   assert.throws(()=>validPublisherFile('scripts/lib/agent/outbox.mjs'),/unsafe or protected/);
   assert.throws(()=>validPublisherFile('src/../etc/passwd'),/unsafe or protected/);
   assert.throws(()=>validPublisherFile('src/.env'),/unsafe or protected/);
