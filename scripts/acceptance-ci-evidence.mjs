@@ -123,6 +123,20 @@ function retainedRuns(runs, expectedSha) {
     seenCompletedPath.add(path);
     chosen.set(keyOf(run), run);
   }
+  // A newer skipped or cancelled run of a path is not evidence that the path
+  // never passed: "did not run" and "ran and passed" are different facts, and
+  // a criterion whose receipt is the successful run cannot be judged from a
+  // pack that only kept its newer non-running sibling. Keep the newest
+  // successful completed run of each path too.
+  const seenSuccessPath = new Set();
+  for (const run of atSha) {
+    if (String(run?.status ?? '') !== 'completed' ||
+        String(run?.conclusion ?? '') !== 'success') continue;
+    const path = String(run?.path ?? '');
+    if (seenSuccessPath.has(path)) continue;
+    seenSuccessPath.add(path);
+    chosen.set(keyOf(run), run);
+  }
   for (const run of atSha.slice(0, MAX_RUNS_PER_SHA)) {
     if (!chosen.has(keyOf(run))) chosen.set(keyOf(run), run);
   }
@@ -2182,6 +2196,29 @@ async function selfTest() {
   assert.ok(liveIds.includes(10),
     'the newest completed run of a path must survive an in-progress successor');
   assert.ok(liveIds.includes(11));
+  // A newer skipped run of a path must not hide an older SUCCESS of the same
+  // path: the merge-SHA receipt may be the older run, and the pack is the
+  // evaluator's only view. The over-cap noise makes the 20-newest window keep
+  // only the newer non-running sibling.
+  const hiddenSha='f'.repeat(40);
+  const hiddenRun=(id,conclusion,createdAt)=>({
+    id,path:'.github/workflows/acceptance-orchestrator.yml',event:'workflow_run',
+    status:'completed',conclusion,head_branch:'main',head_sha:hiddenSha,
+    html_url:'https://example.invalid/'+id,created_at:createdAt,updated_at:createdAt});
+  const hiddenBundle=normalizeCiEvidence({targetSha:hiddenSha,directRuns:[
+    hiddenRun(20,'success','2026-10-18T00:00:00Z'),
+    hiddenRun(21,'skipped','2026-10-18T03:00:00Z'),
+    ...Array.from({length:24},(_,i)=>({
+      id:40+i,path:'.github/workflows/noise-'+(i%3)+'.yml',event:'push',
+      status:'completed',conclusion:'success',head_branch:'main',head_sha:hiddenSha,
+      html_url:'https://example.invalid/'+(40+i),
+      created_at:'2026-10-18T04:'+String(i).padStart(2,'0')+':00Z',
+      updated_at:'2026-10-18T04:'+String(i).padStart(2,'0')+':00Z'})),
+  ]});
+  const hiddenIds=hiddenBundle.direct_runs.map(run=>run.id);
+  assert.ok(hiddenIds.includes(20),
+    'an older successful run of a path must survive a newer skipped sibling');
+  assert.ok(hiddenIds.includes(21));
   assert.deepEqual(evidence.pull_requests[0].runs.map((run) => run.id), [4]);
   const lineage = normalizeCiEvidence({
     targetSha: 'c'.repeat(40),
