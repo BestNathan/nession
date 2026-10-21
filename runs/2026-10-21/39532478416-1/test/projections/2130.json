@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_projection_receipt",
+  "outcome": "applied",
+  "issue": 2130,
+  "run_id": 39532478416,
+  "run_attempt": 1,
+  "target_sha": "32f942a399a2bbe9c1edf2d8f8274c743df09e67",
+  "plan_digest": "55397afd9fd193f88cc33b52112eec2498a4339cf39765a47d6a592cc11d0770",
+  "artifact_digest": "sha256:5b9d9c89b564f0616429d2f09babfaba6a8dfef4d33fe5795a6e63b4564ea7cb",
+  "ingest_run_id": 39533037421,
+  "ingest_attempt": 1,
+  "declaration_digest": "5b99b542344780aa5b6f145559af699561ae51d57b3007ca526dc65ec7bdbd9f",
+  "before_body_sha256": "27c0cfb3eedca5324a443daecf7c1f37339eda1a1732dfed6d2138cf051c596a",
+  "body_sha256": "f35db3457c387e47ea1e1184dcfa19883882934a55bb4427682a4a469a241f75",
+  "readback_body": "Parent #1926 (SC-07) / #1645 (SC-10). Scoped child adding the real TUI fixture to the terminal consistency fault spec.\n\n## Requirements: Alt-screen ownership survives resize and exits cleanly\n\n### Problem\n\nThe fault spec covers high-rate numbered output but not a screen that owns the terminal: alternate screen, application modes, and a redraw driven by an authoritative resize. Without it, a defect that leaks alt-screen content into normal scrollback, or that stops delivering resize during a TUI, has no browser-level witness.\n\n### Scope\n\n- Enter the alternate screen from a real shell (`\\x1b[?1049h`) and set application cursor, mouse and bracketed-paste modes; print a TUI marker built through `printf '%s'` so the echoed command line never contains the marker itself.\n- Assert xterm reports `alternate` and holds the marker.\n- Resize the viewport while the TUI owns the screen; after the grid is stable and the webfont is ready, assert the browser grid changes and the alternate buffer stays active with its content. PTY resize delivery under a TUI is a separate bug (#2132), with the Agent side already proven.\n- Exit with Ctrl+C, leave the alternate screen, and assert xterm returns to `normal` with no alt-screen marker leaked into the normal buffer.\n- Run over both Relay and P2P; no runtime behavior change.\n\n### Success Criteria\n\n- [x] SC-01 Over Relay and P2P, an alt-screen enter shows `alternate` with the TUI marker, and exit returns `normal` without the TUI marker appearing in the normal buffer.\n- [ ] SC-02 A viewport resize during the TUI changes the browser grid while the alternate buffer stays active and keeps its content. TUI-time PTY resize delivery is tracked separately in #2132.\n- [ ] SC-03 Exact PR HEAD Quality / E2E / Case Smoke / trusted Acceptance, and exact merge-SHA Quality / E2E / Cases / Orchestrator Pass.\n\n## Acceptance Plan\n\n```yaml\nacceptance:\n  SC-01:\n    when: pr\n    method: agent\n  SC-02:\n    when: pr\n    method: agent\n  SC-03:\n    when: merged\n    branch: main\n    method: agent\n```\n\n## E2E Verification\n\n### New\n- none: the fixture extends the existing canonical spec; no new spec ID is introduced.\n\n### Regression\n- terminal-consistency-faults\n- terminal-attach-bootstrap\n\n## E2E Report\n\n| ID | Type | Result | Evidence |\n|---|---|---|---|\n| terminal-attach-bootstrap | Regression | Pass | run 39532478416/1, SHA 32f942a399a2bbe9c1edf2d8f8274c743df09e67, contract 5b99b542344780aa5b6f145559af699561ae51d57b3007ca526dc65ec7bdbd9f, plan 55397afd9fd193f88cc33b52112eec2498a4339cf39765a47d6a592cc11d0770, tests 3/3 (https://github.com/BestNathan/nession/actions/runs/39532478416) |\n| terminal-consistency-faults | Regression | Pass | run 39532478416/1, SHA 32f942a399a2bbe9c1edf2d8f8274c743df09e67, contract 5b99b542344780aa5b6f145559af699561ae51d57b3007ca526dc65ec7bdbd9f, plan 55397afd9fd193f88cc33b52112eec2498a4339cf39765a47d6a592cc11d0770, tests 4/4 (https://github.com/BestNathan/nession/actions/runs/39532478416) |\n\n## Acceptance Report\n\n| Criterion | Result | Evidence |\n|---|---|---|\n| SC-01 | Pass | run 39502507459; ref 63d2028b106286709e7845d06c4ea4efe1eb5c71; source agent-cursor; test: e2e/tests/browser/terminal-consistency-faults.spec.ts Relay/P2P tests assert alternate+ALT-2130-TUI then normal with countInBuffer(ALT-2130-TUI)===0; workflow: E2E / Tests run 39502510681 head_sha 63d2028b106286709e7845d06c4ea4efe1eb5c71 conclusion success terminal-consistency-faults 4/4 Pass; summary: Relay and P2P alt-screen enter/exit with TUI marker and no normal-buffer leak are asserted in the spec and passed at exact PR HEAD. |\n| SC-02 | Pending | run 39502507459; ref 63d2028b106286709e7845d06c4ea4efe1eb5c71; source agent-cursor; test: e2e/tests/browser/terminal-consistency-faults.spec.ts resize asserts readGrid growth and alternate persistence only; no expectPtySize/stty size print while buffer type is alternate; workflow: E2E run 39502510681/1 success does not record PTY rows/cols match or size-from-alternate assertions for issue 2130; summary: Authoritative resize during TUI is partially witnessed (browser grid change) but PTY rows/cols parity and size printed inside the alternate buffer are not proven at this SHA. |\n| SC-03 | Pending | awaiting merged main SHA Agent proof |\n\n## Product alignment\n\n- [ ] Does this move Nession toward VISION.md?\n- [ ] Does it obey PRINCIPLE.md?\n- [ ] Were relevant docs/design/* sources checked?\n- [ ] Is any deviation explicit?\n\n---\n**Status:** Approved\n\n\n\n\n\n",
+  "patch_updated_at": "2026-10-21T02:26:55Z",
+  "readback_updated_at": "2026-10-21T02:26:55Z",
+  "rows": [
+    {
+      "id": "terminal-attach-bootstrap",
+      "result": "Pass",
+      "evidence": "run 39532478416/1, SHA 32f942a399a2bbe9c1edf2d8f8274c743df09e67, contract 5b99b542344780aa5b6f145559af699561ae51d57b3007ca526dc65ec7bdbd9f, plan 55397afd9fd193f88cc33b52112eec2498a4339cf39765a47d6a592cc11d0770, tests 3/3 (https://github.com/BestNathan/nession/actions/runs/39532478416)"
+    },
+    {
+      "id": "terminal-consistency-faults",
+      "result": "Pass",
+      "evidence": "run 39532478416/1, SHA 32f942a399a2bbe9c1edf2d8f8274c743df09e67, contract 5b99b542344780aa5b6f145559af699561ae51d57b3007ca526dc65ec7bdbd9f, plan 55397afd9fd193f88cc33b52112eec2498a4339cf39765a47d6a592cc11d0770, tests 4/4 (https://github.com/BestNathan/nession/actions/runs/39532478416)"
+    }
+  ]
+}
