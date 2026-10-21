@@ -71,7 +71,6 @@ async function waitForLastLine(
 ): Promise<void> {
   const start = Date.now();
   const pattern = new RegExp(`${prefix}(\\d+)`, 'g');
-  const complete = new RegExp(`(?:^|\\n)${prefix}${last}\\r?(?:\\n|$)`);
   let highest = 0;
   let advancedAt = Date.now();
   while (Date.now() - start < timeoutMs) {
@@ -82,7 +81,10 @@ async function waitForLastLine(
       highest = seen;
       advancedAt = Date.now();
     }
-    if (complete.test(tail)) { return; }
+    // The line's presence is the parsed number, not a line-shape match: xterm
+    // reports each row space-padded to the full width, so `HV-5000` at the
+    // end of the tail is `HV-5000` followed by padding, never end-of-line.
+    if (highest >= last) { return; }
     if (Date.now() - advancedAt > stallMs) {
       const grid = await readGrid(page);
       throw new Error(
