@@ -77,6 +77,30 @@ async function telemetryArtifact(id,sha) {
   assert.equal(artifact.workflow_run?.head_sha,sha);
   return {id:artifact.id,digest:artifact.digest};
 }
+async function authenticatedErrorArtifacts(run) {
+  const response=await fetch('https://api.github.com/repos/'+REPOSITORY+
+    '/actions/runs/'+run.id+'/artifacts?per_page=100',{
+      headers:{Accept:'application/vnd.github+json',
+        'User-Agent':'nession-source-aligned-sc15-case',
+        'X-GitHub-Api-Version':'2022-11-28'},
+      signal:AbortSignal.timeout(15000),
+    });
+  assert.equal(response.status,200,'error Agent Artifact registry unavailable');
+  const doc=await response.json();
+  assert.ok(doc.total_count>=1&&doc.total_count<=100&&
+    doc.artifacts.length===doc.total_count);
+  const suffix='-'+run.id+'-'+run.run_attempt;
+  const matches=doc.artifacts.filter(a=>a.name.startsWith('agent-telemetry-')&&
+    a.name.endsWith(suffix));
+  assert.ok(matches.length>=1,'real error Agent telemetry Artifact missing');
+  for(const artifact of matches){
+    assert.equal(artifact.expired,false);
+    assert.match(artifact.digest,HEX64);
+    assert.equal(artifact.workflow_run?.id,run.id);
+    assert.equal(artifact.workflow_run?.head_sha,run.head_sha);
+  }
+  return matches.map(a=>a.id);
+}
 function localFixture(relative,...args) {
   execFileSync(process.execPath,[relative,...args],{
     cwd:repo,timeout:150000,maxBuffer:1024*1024,
@@ -84,25 +108,36 @@ function localFixture(relative,...args) {
   });
 }
 function findError(store) {
-  // Bound this search to durable summaries only; the Git Store is an
-  // independent historical observation, not a model-supplied receipt.
+  // One tracked Git index read instead of thousands of git-log processes.
+  // Never let an untracked file inside a cloned Store serve as evidence.
   const root=path.join(store,'raw','workflows');
+  const tracked=new Set(git(store,'ls-files','--','raw/workflows').split('\n').filter(Boolean));
+  if(!tracked.size||tracked.size>50000)throw Error('invalid bounded metrics index');
   let inspected=0;
   for(const source of fs.readdirSync(root).sort()){
     const sourceDir=path.join(root,source);
-    if(!fs.lstatSync(sourceDir).isDirectory())throw Error('unsafe metrics source directory');
+    const sourceStat=fs.lstatSync(sourceDir);
+    if(!sourceStat.isDirectory()||sourceStat.isSymbolicLink())
+      throw Error('unsafe metrics source directory');
     for(const day of fs.readdirSync(sourceDir).sort().reverse()){
       if(!/^\d{4}-\d{2}-\d{2}$/.test(day))throw Error('unsafe metrics date');
       const dayDir=path.join(sourceDir,day);
-      if(!fs.lstatSync(dayDir).isDirectory())throw Error('unsafe metrics date directory');
+      const dayStat=fs.lstatSync(dayDir);
+      if(!dayStat.isDirectory()||dayStat.isSymbolicLink())
+        throw Error('unsafe metrics date directory');
       for(const filename of fs.readdirSync(dayDir).sort().reverse()){
         if(++inspected>50000)throw Error('unbounded metrics history');
-        if(!/^[a-z0-9][a-z0-9._-]*\.json$/.test(filename))throw Error('unsafe metrics summary name');
+        if(!/^[a-z0-9][a-z0-9._-]*\.json$/.test(filename))
+          throw Error('unsafe metrics summary name');
         const relative='raw/workflows/'+source+'/'+day+'/'+filename;
-        const summary=record(store,relative);
+        if(!tracked.has(relative))throw Error('uncommitted metrics summary cannot be evidence');
+        const summary=json(path.join(store,relative));
+        if(summary.kind!=='agent_workflow_run'||
+           summary.identity?.repository!==REPOSITORY)
+          throw Error('invalid stored Agent metrics identity');
         if(summary.result?.status==='agent-error' &&
            summary.identity.github_run_attempt===1)
-          return {summary,relative};
+          return {summary:record(store,relative),relative};
       }
     }
   }
@@ -163,6 +198,7 @@ async function main(){
       '.github/workflows/acceptance-verified-stage.yml',
     ]).has(errorRun.path),'error telemetry must come from a trusted Agent source');
     assert.equal(bad.identity.repository,REPOSITORY);
+    const errorArtifactIds=await authenticatedErrorArtifacts(errorRun);
     // These execute the actual trusted ingestion parser: wrong Run/attempt,
     // unexpected unsafe fields, trace mutation, and conflicting immutable
     // replay fail closed; none writes to the public Store.
@@ -175,7 +211,8 @@ async function main(){
         {type:'runtime',value:'exact main Case SHA='+target+' metrics orphan tip='+tip},
         ...proof.map(p=>({type:'runtime',value:JSON.stringify(p)})),
         {type:'runtime',value:'error Agent record='+error.relative+
-          ' source run='+bad.identity.github_run_id+' outcome='+bad.result.status},
+          ' source run='+bad.identity.github_run_id+' outcome='+bad.result.status+
+          ' authenticated artifact IDs='+errorArtifactIds.join(',')},
         {type:'runtime',value:'trusted replay/forgery/unsafe-field negative fixtures passed'},
       ],
     }));
