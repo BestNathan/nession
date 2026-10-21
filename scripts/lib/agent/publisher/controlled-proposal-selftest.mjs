@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
-import {prepareBoundedPublisherProposal} from './controlled-proposal.mjs';
+import {prepareBoundedPublisherProposal,prepareControlled1997PublisherProposal,CONTROLLED_1997_POLICY} from './controlled-proposal.mjs';
 
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const contents='Durable Worker fixture: complete\nPrevious value: pending\n';
@@ -30,7 +30,12 @@ try{
     parent_checkpoint_commit_sha:'d'.repeat(40),
     checkpoint_version:3,checkpoint_commit_sha:'e'.repeat(40),
     checkpoint_ciphertext_sha256:'f'.repeat(64),
-    ingester_run_id:39465467460,ingester_sha:'a'.repeat(40),
+    ingester_run_id:39465467460,ingester_attempt:1,
+    ingester_sha:'a'.repeat(40),workflow_state_version:16,
+    workflow_commit_sha:'6'.repeat(40),
+    claim_artifact_id:11,claim_artifact_digest:'sha256:'+'3'.repeat(64),
+    result_artifact_id:12,result_artifact_digest:'sha256:'+'4'.repeat(64),
+    native_session_id:'agent-real-native-fixture',harness_digest:'5'.repeat(64),
   };
   const result={
     schema_version:1,kind:'developer_proposal',
@@ -46,12 +51,17 @@ try{
     schema_version:1,kind:'authenticated_development_checkpoint_receipt',
     status:'yielded',issue:1997,action_id:policy.action_id,
     run_id:policy.run_id,attempt:1,worker_sha:policy.worker_sha,source_sha:source,
-    ingester_run_id:policy.ingester_run_id,ingester_sha:policy.ingester_sha,
-    claim_artifact_id:11,claim_artifact_digest:'sha256:'+'3'.repeat(64),
-    result_artifact_id:12,result_artifact_digest:'sha256:'+'4'.repeat(64),
+    ingester_run_id:policy.ingester_run_id,ingester_attempt:policy.ingester_attempt,
+    ingester_sha:policy.ingester_sha,
+    claim_artifact_id:policy.claim_artifact_id,
+    claim_artifact_digest:policy.claim_artifact_digest,
+    result_artifact_id:policy.result_artifact_id,
+    result_artifact_digest:policy.result_artifact_digest,
     checkpoint_version:3,checkpoint_commit_sha:policy.checkpoint_commit_sha,
     ciphertext_sha256:policy.checkpoint_ciphertext_sha256,
-    session_id:'agent-real-native-fixture',harness_digest:'5'.repeat(64),
+    session_id:policy.native_session_id,harness_digest:policy.harness_digest,
+    workflow_state_version:policy.workflow_state_version,
+    workflow_commit_sha:policy.workflow_commit_sha,
   };
   const subject={checkout:repo,policy,result,receipt};
   const first=prepareBoundedPublisherProposal(subject);
@@ -83,10 +93,13 @@ try{
   for(const patch of [
     {status:'in_progress'},{source_sha:'f'.repeat(40)},
     {worker_sha:'a'.repeat(40)},{action_id:'0'.repeat(64)},
-    {run_id:6},{attempt:2},{ingester_run_id:0},{checkpoint_version:2},
-    {checkpoint_commit_sha:'0'.repeat(40)},{ciphertext_sha256:'0'.repeat(64)},
+    {run_id:6},{attempt:2},{ingester_run_id:0},{ingester_attempt:2},
+    {checkpoint_version:2},{checkpoint_commit_sha:'0'.repeat(40)},
+    {ciphertext_sha256:'0'.repeat(64)},
+    {claim_artifact_id:21},{result_artifact_id:22},
     {claim_artifact_digest:'forged'},{result_artifact_digest:'forged'},
     {harness_digest:null},{session_id:'forged'},
+    {workflow_state_version:17},{workflow_commit_sha:'0'.repeat(40)},
   ])deny({receipt:{...receipt,...patch}},/mismatched|missing trusted/);
   deny({policy:{...policy,file:'.github/workflows/ci.yml'}},/MAIN-owned/);
   deny({policy:{...policy,content:'Forged new file\n'}},/MAIN-owned/);
@@ -94,6 +107,15 @@ try{
   deny({policy:{...policy,action_id:'0'.repeat(64)}},/mismatched/);
   deny({policy:{...policy,checkpoint_ciphertext_sha256:'0'.repeat(64)}},
     /mismatched/);
+  // Real deployment can use only the hard-pinned main-owned fixture policy.
+  assert.equal(Object.isFrozen(CONTROLLED_1997_POLICY),true);
+  assert.equal(CONTROLLED_1997_POLICY.run_id,39448549052);
+  assert.equal(CONTROLLED_1997_POLICY.checkpoint_version,3);
+  assert.equal(CONTROLLED_1997_POLICY.claim_artifact_id,12276388775);
+  assert.equal(CONTROLLED_1997_POLICY.result_artifact_id,12275629206);
+  assert.throws(()=>prepareControlled1997PublisherProposal({
+    checkout:repo,result,receipt,
+  }),/mismatched/,'a synthetic Test Run cannot impersonate the production policy');
   deny({checkout:path.join(repo,'not-the-source')},/unreadable/);
   const target=path.join(repo,policy.file);
   fs.mkdirSync(path.dirname(target),{recursive:true});
