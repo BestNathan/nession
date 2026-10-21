@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_projection_receipt",
+  "outcome": "applied",
+  "issue": 2144,
+  "run_id": 39544745318,
+  "run_attempt": 1,
+  "target_sha": "706bff7f169e64e7d81e82071c3f2f2dfa283976",
+  "plan_digest": "7afff6401415d52f5228e9a11efa8fc56391f0e3ae494200f318384606fdee6b",
+  "artifact_digest": "sha256:a3c497b94c7139d0c0f3b40297d5b087f139d93a5d723c6ccb4dc5b5e97d3e68",
+  "ingest_run_id": 39545342015,
+  "ingest_attempt": 1,
+  "declaration_digest": "d6a7dbf58485505a958b4b5516f3d5a45199d08f0f74fc26c4408260b4e4f200",
+  "before_body_sha256": "f41ddc5875fbfb6fcea254f852316e2e7a05f9622e6f971b3045ef0b9e9c19bf",
+  "body_sha256": "f1a80dc20930634947f39148593fb1d1ba9e8f12ec985c4944c77fad5f26c85a",
+  "readback_body": "Parent #1926 (SC-06) / #1645 (SC-10 multi-client element). Scoped child adding the browser-level multi-client witness.\n\n## Requirements: Two real clients on one Session\n\nThe Agent has deterministic unit tests for per-subscriber credit and for a stalled subscriber (`crates/nession-agent/src/server/issued_credit.rs`, `websocket.rs` `resize_slot_pressure_detaches_only_slow_observer`), and the Web blocks input/resize when the lease says `observer` (`web/src/product/terminal/agent.ts`). Nothing puts two real clients on one Session and observes the browser facts.\n\nThe fixture must:\n\n- attach two **distinct** clients. The browser client id is persisted in `localStorage` (`web/src/platform/socket/clientId.ts`), so two pages in one context share it; the second client must be a separate browser context with its own storage.\n- have the first client (which claims the ControlLease) produce output the observer renders;\n- stall the observer's main thread while the controller streams a numbered burst, and prove the controller still receives its retained tail exactly once within the readiness bound — a stalled peer must not consume or duplicate the healthy client's stream;\n- prove the observer's input and resize never reach the PTY, and that the controller's lease and output are unaffected.\n\nThe fixture extends the canonical `terminal-consistency-faults` spec so it runs in the Issue-selected lane.\n\n**Out of scope:** whether the lease is *visible* (view-only bar, Take Control) on the Relay route. The fixture discovered that a Relay observer cannot see its role at all — tracked as Bug #2157, with that assertion removed here so this scope stays the data plane (enforcement), not SC-08 visibility.\n\n## Success Criteria\n\n- [ ] SC-01 Two distinct browser contexts attach to one Session; the observer renders the controller's output (same marker bytes) exactly once.\n- [ ] SC-02 With the observer's page main thread deliberately stalled, the controller still receives the numbered-burst tail exactly once within the readiness bound; the stalled peer does not block or duplicate the controller's stream.\n- [ ] SC-03 The observer's typed input and resize do not reach the PTY, and the controller's ControlLease and output are unchanged by the observer's attempts.\n- [ ] SC-04 Exact PR HEAD Quality / E2E / Case Smoke / trusted Acceptance, and exact merge-SHA Quality / E2E / Cases / Orchestrator Pass.\n\n## Acceptance Plan\n\n```yaml\nacceptance:\n  SC-01:\n    when: pr\n    method: agent\n  SC-02:\n    when: pr\n    method: agent\n  SC-03:\n    when: pr\n    method: agent\n  SC-04:\n    when: merged\n    branch: main\n    method: agent\n```\n\n## Acceptance Report\n\n| Criterion | Result | Evidence |\n|---|---|---|\n| SC-01 | Pending | awaiting exact PR head SHA Agent proof |\n| SC-02 | Pending | awaiting exact PR head SHA Agent proof |\n| SC-03 | Pending | awaiting exact PR head SHA Agent proof |\n| SC-04 | Pending | awaiting merged main SHA Agent proof |\n\n## E2E Verification\n\n### New\n- none: the fixture extends the existing terminal consistency spec; no new spec ID is introduced.\n\n### Regression\n- terminal-consistency-faults\n\n## E2E Report\n\n| ID | Type | Result | Evidence |\n|---|---|---|---|\n| terminal-consistency-faults | Regression | Pass | run 39544745318/1, SHA 706bff7f169e64e7d81e82071c3f2f2dfa283976, contract d6a7dbf58485505a958b4b5516f3d5a45199d08f0f74fc26c4408260b4e4f200, plan 7afff6401415d52f5228e9a11efa8fc56391f0e3ae494200f318384606fdee6b, tests 6/6 (https://github.com/BestNathan/nession/actions/runs/39544745318) |\n\n## Product alignment\n\n- [ ] Does this move Nession toward VISION.md?\n- [ ] Does it obey PRINCIPLE.md?\n- [ ] Were relevant docs/design/* sources checked?\n- [ ] Is any deviation explicit?\n\n---\n**Status:** Approved\n\n",
+  "patch_updated_at": "2026-10-21T04:40:54Z",
+  "readback_updated_at": "2026-10-21T04:40:54Z",
+  "rows": [
+    {
+      "id": "terminal-consistency-faults",
+      "result": "Pass",
+      "evidence": "run 39544745318/1, SHA 706bff7f169e64e7d81e82071c3f2f2dfa283976, contract d6a7dbf58485505a958b4b5516f3d5a45199d08f0f74fc26c4408260b4e4f200, plan 7afff6401415d52f5228e9a11efa8fc56391f0e3ae494200f318384606fdee6b, tests 6/6 (https://github.com/BestNathan/nession/actions/runs/39544745318)"
+    }
+  ]
+}
