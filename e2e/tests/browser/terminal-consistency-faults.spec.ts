@@ -401,3 +401,101 @@ test('a Relay reconnect keeps the xterm and loses no session output', async ({ p
   expect(duplicated, 'a tail line was delivered more than once').toEqual([]);
   expect(missingTail, 'a tail line never reached the parser').toEqual([]);
 });
+
+// #2144 / #1926 SC-06: two real clients on one Session. The browser client id
+// is persisted in localStorage, so two pages in one context are one client to
+// the Agent; the observer must be a separate browser context with its own
+// storage or the ControlLease would never distinguish the two.
+test('two clients: a stalled observer never blocks the controller (#2144)', async ({ browser }, testInfo) => {
+  test.skip(!process.env.CI, 'real stack available in CI only');
+  test.setTimeout(420_000);
+
+  const sessionName = `e2e-consistency-multi-${testInfo.retry}-${Date.now()}`;
+  const url = '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws');
+  const controllerContext = await browser.newContext();
+  const observerContext = await browser.newContext();
+  const controller = await controllerContext.newPage();
+  const observer = await observerContext.newPage();
+  try {
+    await controller.goto(url);
+    await waitForShell(controller);
+    await createSession(controller, sessionName);
+    await attachToSession(controller, sessionName, 'Relay');
+    await waitForInteractiveShell(controller);
+
+    await observer.goto(url);
+    await waitForShell(observer);
+    // The session was created in the other context; the list is server-wide,
+    // so the observer sees it through the ordinary refresh path.
+    const row = observer.locator('[data-testid="session-item-row"]', { hasText: sessionName });
+    await expect(async () => {
+      const refresh = observer.getByRole('button', { name: 'Refresh sessions' });
+      if (await refresh.isVisible().catch(() => false)) { await refresh.click(); }
+      await expect(row).toBeVisible({ timeout: 1_000 });
+    }).toPass({ timeout: 20_000 });
+    await attachToSession(observer, sessionName, 'Relay');
+    await waitForInteractiveShell(observer);
+
+    // SC-01: the controller's output reaches the observer.
+    await submitTerminalCommand(controller, `printf 'MULTI-%s-LIVE\\n' 2144`);
+    await expect.poll(async () => countInBuffer(observer, 'MULTI-2144-LIVE')).toBe(1);
+
+    // SC-03: the observer's input and resize never reach the PTY. Lease
+    // *visibility* over Relay is Bug #2157 — today the observer cannot see its
+    // role (the Server's relay-ready carries no control fields), so its client
+    // may still send. The enforcement witness is the Agent: the observer's
+    // bytes and size never reach the shared session, and the controller's
+    // buffer and tty are unchanged.
+    await submitTerminalCommand(observer, `printf 'OBSERVER-%s-INPUT\\n' 2144`);
+    await expect.poll(async () => countInBuffer(controller, 'OBSERVER-2144-INPUT')).toBe(0);
+    const controllerGrid = await readGrid(controller);
+    // Larger than the controller's: tmux follows the largest client, so a
+    // leaked observer resize would visibly move the shared pane.
+    await observer.setViewportSize({ width: 1700, height: 1100 });
+    await expect(async () => {
+      expect((await readGrid(observer)).cols).toBeGreaterThan(controllerGrid.cols);
+    }).toPass({ timeout: 15_000 });
+    await expectPtySize(controller, controllerGrid.cols, controllerGrid.rows);
+
+    // SC-02: stall the observer's main thread — its socket stops draining —
+    // and prove the controller still receives the burst's retained tail
+    // exactly once. The stall outlasts the burst on a slow runner.
+    const COUNT = 600;
+    const TAIL = 200;
+    const stalled = observer
+      .evaluate(() => new Promise<void>((resolve) => {
+        const until = performance.now() + 120_000;
+        while (performance.now() < until) { /* deliberately block the page */ }
+        resolve();
+      }))
+      .catch(() => undefined);
+    await submitTerminalCommand(controller, `seq 1 ${COUNT} | sed 's/^/MC-/'`);
+    await waitForLastLine(controller, 'MC-', COUNT, { timeoutMs: 180_000, stallMs: 45_000 });
+
+    const text = await readTerminalBuffer(controller);
+    const counts = new Map<number, number>();
+    for (const match of text.matchAll(/MC-(\d+)/g)) {
+      const value = Number(match[1]);
+      if (value >= 1 && value <= COUNT) {
+        counts.set(value, (counts.get(value) ?? 0) + 1);
+      }
+    }
+    const duplicated = [...counts.entries()]
+      .filter(([value, seen]) => seen > 1 && value > COUNT - TAIL)
+      .map(([value]) => value);
+    const missingTail: number[] = [];
+    for (let value = COUNT - TAIL + 1; value <= COUNT; value += 1) {
+      if (!counts.has(value)) { missingTail.push(value); }
+    }
+    expect(duplicated, 'a tail line was delivered more than once').toEqual([]);
+    expect(missingTail, 'a tail line never reached the parser').toEqual([]);
+
+    // The controller is still the controller after the stall.
+    await submitTerminalCommand(controller, `printf 'MULTI-%s-AFTER\\n' 2144`);
+    await expect.poll(async () => countInBuffer(controller, 'MULTI-2144-AFTER')).toBe(1);
+    await stalled;
+  } finally {
+    await controllerContext.close();
+    await observerContext.close();
+  }
+});
