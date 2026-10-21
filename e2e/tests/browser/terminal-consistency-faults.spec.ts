@@ -459,6 +459,17 @@ test('two clients: a stalled observer never blocks the controller (#2144)', asyn
     }).toPass({ timeout: 15_000 });
     await expectPtySize(controller, controllerGrid.cols, controllerGrid.rows);
 
+    // SC-02: acquiring control over the relay moves the lease, and both
+    // clients see it — the observer's bar leaves, the controller's appears,
+    // and acquiring back restores the original holder for the rest of the
+    // fixture.
+    await observer.getByRole('button', { name: 'Take control' }).click();
+    await expect(observer.getByTestId('terminal-observer-bar')).toHaveCount(0, { timeout: 10_000 });
+    await expect(controller.getByTestId('terminal-observer-bar')).toBeVisible({ timeout: 10_000 });
+    await controller.getByRole('button', { name: 'Take control' }).click();
+    await expect(controller.getByTestId('terminal-observer-bar')).toHaveCount(0, { timeout: 10_000 });
+    await expect(observer.getByTestId('terminal-observer-bar')).toBeVisible({ timeout: 10_000 });
+
     // SC-02: stall the observer's main thread — its socket stops draining —
     // and prove the controller still receives the burst's retained tail
     // exactly once. The stall outlasts the burst on a slow runner.
