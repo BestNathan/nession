@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { makeRunIndex } from './run-record-index-contract.mjs';
+import { collectScopeArtifact } from './e2e-push-scope-artifact.mjs';
 import { attestFullReceipt } from '../e2e/runner/e2e-full-per-id-receipt.mjs';
 import {
   parseE2eSelectedRunLog, attestE2eSelectedRunReceipt,
@@ -127,7 +128,7 @@ async function githubJobLog(id){
   if(text.length>8*1024*1024)throw Error('E2E producer log too large');
   return text;
 }
-function recordFor(event, run, workflow, tree, jobs, artifacts, scopeProof = null) {
+function recordFor(event, run, workflow, tree, jobs, artifacts, scopeProof = null, scopedAssertion = null) {
   assertSource(event, run, workflow);
   assert.match(tree.sha, HEX40);
   const sourceTree = tree.tree.find(x => x.path === 'e2e/tests/browser' && x.type === 'tree');
@@ -171,6 +172,7 @@ function recordFor(event, run, workflow, tree, jobs, artifacts, scopeProof = nul
     started_at: run.created_at, status: 'Completed', evaluation: null,
     test_scope: scopeProof?.scope??'historical-unclassified',
     test_scope_receipt: scopeProof?.receipt??null,
+    test_scope_assertion: scopedAssertion,
     selected_e2e_artifact: selectedE2eArtifact,
     test_job: proof, evidence: artifact };
   const executionId = sha256(JSON.stringify(identity));
@@ -215,7 +217,16 @@ async function create(eventFile, recordFile, indexFile, outputFile) {
   assert.equal(tree.sha, commit.tree.sha);
   const exactJob=requireJob(jobs.jobs,run);
   const scopeProof=attestPushScope(run,exactJob,await githubJobLog(exactJob.id));
-  const output = recordFor(event, run, workflow, tree, jobs.jobs, artifacts.artifacts,scopeProof);
+  const preliminary=recordFor(event, run, workflow, tree, jobs.jobs, artifacts.artifacts,scopeProof);
+  const provisional=JSON.parse(preliminary.recordBytes);
+  const scopedAssertion=scopeProof.scope==='selected'||scopeProof.scope==='not-required'
+    ?await collectScopeArtifact({run,scopeProof,
+      artifact:provisional.selected_e2e_artifact??provisional.evidence,
+      token:process.env.GH_TOKEN??process.env.GITHUB_TOKEN})
+    :null;
+  const output = scopedAssertion
+    ? recordFor(event,run,workflow,tree,jobs.jobs,artifacts.artifacts,scopeProof,scopedAssertion)
+    : preliminary;
   fs.writeFileSync(recordFile, output.recordBytes, { flag: 'wx' });
   fs.writeFileSync(indexFile, output.indexBytes, { flag: 'wx' });
   fs.writeFileSync(outputFile, JSON.stringify({
