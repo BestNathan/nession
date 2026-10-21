@@ -42,7 +42,11 @@ assert.match(cursor.template_sha256, /^[0-9a-f]{64}$/);
 assert.equal(cursor.messages.length, 2);
 assert.throws(() => renderAgentPrompt({ id: '../escape', version: 'v1', context: {} }), /Invalid Prompt/);
 assert.throws(() => renderAgentPrompt({ id: 'issue-audit', version: 'v1', variant: 'cursor', context: {} }), /Missing Prompt/);
-assert.throws(() => renderAgentPrompt({ id: 'issue-audit', version: 'v1', context: {} }), /Missing required Prompt variant/);
+assert.throws(() => renderAgentPrompt({ id: 'issue-audit', version: 'v1',
+  context: {scopeInstructions:'scope',riskInstructions:'risk',mode:'single',
+    issueUrl:'https://example.test/17',repository:'example/repo',
+    issueNumber:17,labels:'web',findings:'none',issueBodyJson:'""'} }),
+  /Missing required Prompt variant/);
 
 const acceptance = renderAcceptancePrompt({
   issue: { number: 17 }, stage: 'pre-merge', target_ref: 'sha', deployment: null,
