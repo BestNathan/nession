@@ -1,0 +1,394 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_test_run",
+  "mode": "test",
+  "target_sha": "9dcf5debcec670ba81f7978ba03fe9383300baa4",
+  "source_tree_sha": "6e314f65cc74e4948e4a14b9b555b812c3729a17",
+  "run_id": 39575257996,
+  "run_attempt": 1,
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 382193593,
+    "run_id": 39575257996,
+    "run_attempt": 1,
+    "head_sha": "9dcf5debcec670ba81f7978ba03fe9383300baa4",
+    "head_branch": "main",
+    "event": "push"
+  },
+  "started_at": "2026-10-21T09:13:17Z",
+  "status": "Completed",
+  "evaluation": null,
+  "test_scope": "full-legacy",
+  "test_scope_receipt": {
+    "schema_version": 1,
+    "kind": "e2e_full_per_id",
+    "sha": "9dcf5debcec670ba81f7978ba03fe9383300baa4",
+    "catalog_digest": "b1ccec3f1a059903f61cd5077a5edb855ddc87e6f28b6d69d8a9c0622faa3e81",
+    "id_count": 34,
+    "tests": 260,
+    "assertions": 3146,
+    "results": [
+      {
+        "id": "attach-critical-path",
+        "result": "Pass",
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 19
+      },
+      {
+        "id": "conversation-disclosure-app",
+        "result": "Pass",
+        "discovered": 3,
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 59
+      },
+      {
+        "id": "conversation-disclosure-narrow",
+        "result": "Pass",
+        "discovered": 4,
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 60
+      },
+      {
+        "id": "conversation-disclosure-web",
+        "result": "Pass",
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 32
+      },
+      {
+        "id": "conversation-list-state",
+        "result": "Pass",
+        "discovered": 2,
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 12
+      },
+      {
+        "id": "conversation-live-scroll",
+        "result": "Pass",
+        "discovered": 2,
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 42
+      },
+      {
+        "id": "conversation-motion",
+        "result": "Pass",
+        "discovered": 2,
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 5
+      },
+      {
+        "id": "conversation-scroll",
+        "result": "Pass",
+        "discovered": 2,
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 8
+      },
+      {
+        "id": "conversation-thread-state",
+        "result": "Pass",
+        "discovered": 4,
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 18
+      },
+      {
+        "id": "design-renderer-boundary",
+        "result": "Pass",
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 11
+      },
+      {
+        "id": "fixture-app",
+        "result": "Pass",
+        "discovered": 6,
+        "passed": 6,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 66
+      },
+      {
+        "id": "fixture-canonical",
+        "result": "Pass",
+        "discovered": 2,
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 23
+      },
+      {
+        "id": "fixture-env",
+        "result": "Pass",
+        "discovered": 10,
+        "passed": 10,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 45
+      },
+      {
+        "id": "fixture-git",
+        "result": "Pass",
+        "discovered": 7,
+        "passed": 7,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 38
+      },
+      {
+        "id": "fixture-matrix",
+        "result": "Pass",
+        "discovered": 3,
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 12
+      },
+      {
+        "id": "fixture-visual",
+        "result": "Pass",
+        "discovered": 12,
+        "passed": 12,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 87
+      },
+      {
+        "id": "fixture-visual-app",
+        "result": "Pass",
+        "discovered": 20,
+        "passed": 20,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 125
+      },
+      {
+        "id": "fixture-visual-app-compact",
+        "result": "Pass",
+        "discovered": 4,
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 12
+      },
+      {
+        "id": "fixture-visual-app-landscape",
+        "result": "Pass",
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 5
+      },
+      {
+        "id": "fixture-visual-web-compact",
+        "result": "Pass",
+        "discovered": 2,
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 6
+      },
+      {
+        "id": "fixture-workspace",
+        "result": "Pass",
+        "discovered": 3,
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 27
+      },
+      {
+        "id": "jsonl-preview-geometry",
+        "result": "Pass",
+        "discovered": 7,
+        "passed": 7,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 304
+      },
+      {
+        "id": "login",
+        "result": "Pass",
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 2
+      },
+      {
+        "id": "pages-evidence",
+        "result": "Pass",
+        "discovered": 3,
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 20
+      },
+      {
+        "id": "pages-overview",
+        "result": "Pass",
+        "discovered": 4,
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 49
+      },
+      {
+        "id": "pages-workflows",
+        "result": "Pass",
+        "discovered": 3,
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 19
+      },
+      {
+        "id": "session-lifecycle",
+        "result": "Pass",
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 18
+      },
+      {
+        "id": "terminal-attach-bootstrap",
+        "result": "Pass",
+        "discovered": 3,
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 143
+      },
+      {
+        "id": "terminal-consistency-faults",
+        "result": "Pass",
+        "discovered": 7,
+        "passed": 7,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 264
+      },
+      {
+        "id": "terminal-io",
+        "result": "Pass",
+        "discovered": 16,
+        "passed": 16,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 526
+      },
+      {
+        "id": "transcript-geometry",
+        "result": "Pass",
+        "discovered": 2,
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 12
+      },
+      {
+        "id": "ui-contract-assertions",
+        "result": "Pass",
+        "discovered": 19,
+        "passed": 19,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 56
+      },
+      {
+        "id": "ui-contract-matrix",
+        "result": "Pass",
+        "discovered": 72,
+        "passed": 72,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 640
+      },
+      {
+        "id": "ui-contract-web",
+        "result": "Pass",
+        "discovered": 30,
+        "passed": 30,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 381
+      }
+    ],
+    "status": "Pass",
+    "run_id": 39575257996,
+    "run_attempt": 1,
+    "provenance": "authenticated push Run/Attempt/SHA + per-ID verifier step success"
+  },
+  "test_scope_assertion": null,
+  "selected_e2e_artifact": null,
+  "test_job": {
+    "job_id": 119139078966,
+    "name": "e2e",
+    "conclusion": "success",
+    "run_attempt": 1
+  },
+  "evidence": {
+    "artifact_id": 12334387616,
+    "name": "playwright-report",
+    "size_bytes": 783193,
+    "sha256": "69dc0499e2a665fd76363cbd82a3d814db3abf9ec86a025b90a7b6d1f034106f",
+    "expires_at": "2026-10-28T09:24:46Z",
+    "durability": "GitHub Actions artifact; time-limited, not indefinitely archived"
+  },
+  "execution_id": "a9247424beeff24e2c6209809f6ce68e73ada42755b12943e5432773fab01e97"
+}
