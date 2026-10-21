@@ -28,7 +28,9 @@ export function verifySource(event,run,pr,plan,results,artifact) {
   assert.equal(pr.head.sha,run.head_sha,'stale PR head');
   assert.equal(pr.number,plan.pr_number);
   assert.equal(plan.target_sha,run.head_sha);
-  assert.equal(plan.base_sha,pr.base.sha);
+  // The independent source-tree plan checker recomputes the git merge-base;
+  // GitHub's mutable target-branch tip can advance after PR creation.
+  assert.match(plan.base_sha,SHA);
   assert.equal(results.target_sha,run.head_sha);
   assert.equal(results.plan_digest,plan.plan_digest);
   assert.equal(results.run_id,run.id);
