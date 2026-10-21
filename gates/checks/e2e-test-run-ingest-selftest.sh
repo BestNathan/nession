@@ -14,6 +14,7 @@ gate_check() {
   gate_require_path './scripts/e2e-test-run-ingest.mjs' "Restore scripts/e2e-test-run-ingest.mjs." || return $?
   gate_require_path './scripts/issue-e2e-attempt-artifact.mjs' "Restore trusted exact-Attempt Issue E2E artifact lookup." || return $?
   gate_run_invariant node scripts/e2e-test-run-ingest.mjs self-test || return $?
+  gate_run_invariant node scripts/e2e-push-scope-artifact.mjs self-test || return $?
   gate_run_invariant node scripts/issue-e2e-attempt-artifact.mjs self-test
 }
 gate_main "$@"
