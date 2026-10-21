@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "kind": "agent_metrics_aggregate",
-  "generated_at": "2026-10-21T14:08:34.418Z",
+  "generated_at": "2026-10-21T14:11:04.401Z",
   "windows": {
     "7d": {
       "runs": {
-        "total": 900,
+        "total": 901,
         "by_workflow": {
           "agent-claude-resume-seed": 1,
           "agent-claude-resume-verify": 1,
@@ -14,15 +14,15 @@
           "agent-develop": 3,
           "agent-provider-smoke": 217,
           "issue-audit": 118,
-          "requirement-acceptance": 558
+          "requirement-acceptance": 559
         },
         "by_provider": {
           "claude-code": 106,
-          "cursor": 737,
+          "cursor": 738,
           "deepseek": 57
         },
         "by_role": {
-          "acceptor": 731,
+          "acceptor": 732,
           "auditor": 4,
           "developer": 47
         },
@@ -32,7 +32,7 @@
           "dev-cursor-01": 3,
           "dev-qwen-01": 44,
           "legacy-acceptance-claude-code": 60,
-          "legacy-acceptance-cursor": 614,
+          "legacy-acceptance-cursor": 615,
           "legacy-acceptance-deepseek": 57
         },
         "by_issue": {
@@ -162,7 +162,7 @@
           "2152": 3,
           "2156": 3,
           "2157": 3,
-          "2160": 13,
+          "2160": 14,
           "2168": 11,
           "2177": 1
         },
@@ -170,7 +170,7 @@
           "ba54d9fb8b8ab9ec6ca2ac17727b02db21176437a2258123b753977fd32bbf68": 3
         },
         "by_result": {
-          "agent-error": 3,
+          "agent-error": 4,
           "canary-pass": 44,
           "completed": 728,
           "contract-fail": 11,
@@ -261,7 +261,7 @@
     },
     "30d": {
       "runs": {
-        "total": 1219,
+        "total": 1220,
         "by_workflow": {
           "agent-claude-resume-seed": 1,
           "agent-claude-resume-verify": 1,
@@ -270,15 +270,15 @@
           "agent-develop": 3,
           "agent-provider-smoke": 256,
           "issue-audit": 159,
-          "requirement-acceptance": 797
+          "requirement-acceptance": 798
         },
         "by_provider": {
           "claude-code": 121,
-          "cursor": 1029,
+          "cursor": 1030,
           "deepseek": 69
         },
         "by_role": {
-          "acceptor": 844,
+          "acceptor": 845,
           "auditor": 4,
           "developer": 54
         },
@@ -288,7 +288,7 @@
           "dev-cursor-01": 3,
           "dev-qwen-01": 51,
           "legacy-acceptance-claude-code": 68,
-          "legacy-acceptance-cursor": 710,
+          "legacy-acceptance-cursor": 711,
           "legacy-acceptance-deepseek": 66
         },
         "by_issue": {
@@ -473,7 +473,7 @@
           "2152": 3,
           "2156": 3,
           "2157": 3,
-          "2160": 13,
+          "2160": 14,
           "2168": 11,
           "2177": 1
         },
@@ -481,7 +481,7 @@
           "ba54d9fb8b8ab9ec6ca2ac17727b02db21176437a2258123b753977fd32bbf68": 3
         },
         "by_result": {
-          "agent-error": 4,
+          "agent-error": 5,
           "canary-pass": 51,
           "completed": 998,
           "contract-fail": 15,
@@ -572,7 +572,7 @@
     },
     "all_time": {
       "runs": {
-        "total": 1219,
+        "total": 1220,
         "by_workflow": {
           "agent-claude-resume-seed": 1,
           "agent-claude-resume-verify": 1,
@@ -581,15 +581,15 @@
           "agent-develop": 3,
           "agent-provider-smoke": 256,
           "issue-audit": 159,
-          "requirement-acceptance": 797
+          "requirement-acceptance": 798
         },
         "by_provider": {
           "claude-code": 121,
-          "cursor": 1029,
+          "cursor": 1030,
           "deepseek": 69
         },
         "by_role": {
-          "acceptor": 844,
+          "acceptor": 845,
           "auditor": 4,
           "developer": 54
         },
@@ -599,7 +599,7 @@
           "dev-cursor-01": 3,
           "dev-qwen-01": 51,
           "legacy-acceptance-claude-code": 68,
-          "legacy-acceptance-cursor": 710,
+          "legacy-acceptance-cursor": 711,
           "legacy-acceptance-deepseek": 66
         },
         "by_issue": {
@@ -784,7 +784,7 @@
           "2152": 3,
           "2156": 3,
           "2157": 3,
-          "2160": 13,
+          "2160": 14,
           "2168": 11,
           "2177": 1
         },
@@ -792,7 +792,7 @@
           "ba54d9fb8b8ab9ec6ca2ac17727b02db21176437a2258123b753977fd32bbf68": 3
         },
         "by_result": {
-          "agent-error": 4,
+          "agent-error": 5,
           "canary-pass": 51,
           "completed": 998,
           "contract-fail": 15,
