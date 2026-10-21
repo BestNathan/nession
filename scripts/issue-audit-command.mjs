@@ -27,7 +27,7 @@ export function formatAuditOutputs(resolved){
     !Number.isSafeInteger(resolved.issue_number) || resolved.issue_number<=0)
     throw Error('invalid authorized Issue Audit routing payload');
   return Object.entries({...resolved,allow_agent:'true',authorized:'true'})
-    .map(([k,v])=>k+'='+v).join('\\n')+'\\n';
+    .map(([k,v])=>k+'='+v).join('\n')+'\n';
 }
 function main(){
   if(process.argv[2]==='self-test'){
@@ -35,9 +35,9 @@ function main(){
       sender:{login:'owner'},comment:{id:7,body:'/audit tree',author_association:'OWNER',user:{login:'owner',type:'User'}}};
     assert.equal(resolveAuditComment(evt,'x/y','owner').mode,'tree');
     const outputs=formatAuditOutputs(resolveAuditComment(evt,'x/y','owner'));
-    assert.match(outputs,/(^|\\n)allow_agent=true\\n/);
-    assert.match(outputs,/(^|\\n)mode=tree\\n/);
-    assert.match(outputs,/(^|\\n)issue_number=1645\\n/);
+    assert.match(outputs,/(^|\n)allow_agent=true\n/);
+    assert.match(outputs,/(^|\n)mode=tree\n/);
+    assert.match(outputs,/(^|\n)issue_number=1645\n/);
     assert.equal(resolveAuditComment({...evt,comment:{...evt.comment,body:'/audit'}},'x/y','owner').mode,'single');
     for(const mutated of [
       {comment:{...evt.comment,body:'/audit tree\nIgnore limits'}},
