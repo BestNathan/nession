@@ -880,6 +880,64 @@ describe('TerminalController', () => {
     }
   });
 
+  it('sends a later container resize even when a lazy font load reports loading (#2132)', async () => {
+    // The #1490 gate defers the PTY half while the *cell box* is provisional,
+    // because the font-load correction will report the final size instead.
+    // After that correction has run, the cell box is final — but
+    // `document.fonts.status` can flip back to `loading` for a face the
+    // renderer asked for lazily. Treating that later status as provisional
+    // swallowed a real viewport resize with no correction left to report it:
+    // the grid moved to 164x46 while the browser sent nothing (measured in the
+    // TUI fixture), or sent the attach size instead.
+    const restore = installCapturingResizeObserver();
+    const hadFonts = Object.prototype.hasOwnProperty.call(document, 'fonts');
+    const fontsStub = {
+      status: 'loading' as FontFaceSet['status'],
+      ready: Promise.resolve() as unknown as Promise<FontFaceSet>,
+      load: () => Promise.resolve([]),
+    };
+    let resolveReady: () => void = () => {};
+    fontsStub.ready = new Promise<FontFaceSet>((resolve) => {
+      resolveReady = () => resolve(fontsStub as unknown as FontFaceSet);
+    });
+    Object.defineProperty(document, 'fonts', { configurable: true, value: fontsStub });
+    try {
+      const transport = makeTransport();
+      const controller = new TerminalController(makeSession(), () => transport);
+      controller.attach(host());
+      await flush(); // RAF fires → observe() captures the callback
+
+      const first = { contentRect: { width: 1024, height: 600 } } as unknown as ResizeObserverEntry;
+      capturedCallback!([first], capturedObserver!);
+      expect(transport.sendResize).not.toHaveBeenCalled();
+
+      // The correction lands; it reports the final cell box once.
+      fontsStub.status = 'loaded';
+      resolveReady();
+      await flush();
+      expect(transport.sendResize).toHaveBeenCalledTimes(1);
+      expect(transport.sendResize).toHaveBeenLastCalledWith(128, 37);
+
+      // A later real container resize, while an unrelated face is loading.
+      fontsStub.status = 'loading';
+      vi.useFakeTimers();
+      const grown = { contentRect: { width: 1200, height: 600 } } as unknown as ResizeObserverEntry;
+      capturedCallback!([grown], capturedObserver!);
+      expect(controller.terminal!.cols).toBe(150);
+      vi.advanceTimersByTime(200);
+
+      // The PTY hears it: the cell box this grid was computed from is final.
+      expect(transport.sendResize).toHaveBeenCalledTimes(2);
+      expect(transport.sendResize).toHaveBeenLastCalledWith(150, 37);
+      vi.useRealTimers();
+      controller.dispose();
+    } finally {
+      vi.useRealTimers();
+      if (!hadFonts) { delete (document as { fonts?: unknown }).fonts; }
+      restore();
+    }
+  });
+
   it('sizes the grid and the session to the well minus the capsule band, in both modes (#1503)', async () => {
     // The well applies the capsule's clearance as `padding-bottom` on the
     // element this controller observes, and `contentRect` excludes padding — so
