@@ -233,7 +233,7 @@ async function runCursorAgent(issue, outDir) {
     mode, tree_progress: selectedTools.getTreeAuditProgress?.()??null,
   };
   if (mode==='tree' && (normalized.tree_progress?.remaining.length ||
-      normalized.tree_progress?.unexplored.length || normalized.tree_progress?.reviewed===0)) {
+      normalized.tree_progress?.unexplored.length || !normalized.tree_progress?.published || normalized.tree_progress?.reviewed===0)) {
     const error=new Error('Tree Issue Audit is incomplete: '+JSON.stringify(normalized.tree_progress));
     error.cursorMeta=normalized;
     throw error;
