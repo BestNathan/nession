@@ -11,6 +11,12 @@ import { auditIssue } from '../../issue-contract.mjs';
 import { readVerificationTier, VERIFICATION_TIERS } from '../../verification-tier-policy.mjs';
 
 export const TREE_AUDIT_LIMIT=40;
+export function isTreeAuditComplete(p,root){
+  return Number.isSafeInteger(root)&&root>0&&p?.observed>0&&
+    p.reviewed===p.observed&&p.remaining?.length===0&&
+    p.unexplored?.length===0&&p.failed?.length===0&&
+    [...(p.updated??[]),...(p.unchanged??[])].includes(root);
+}
 const MAX_DEPTH=5;
 export function explicitParentNumbers(body) {
   const found=new Set();
@@ -204,9 +210,7 @@ export function createTreeAuditTools(root,repository=process.env.GITHUB_REPOSITO
         if(published)throw Error('tree audit summary already published');
         if(typeof summary!=='string'||summary.length<10||summary.length>2000)throw Error('invalid tree summary');
         const p=progress();
-        const complete=p.remaining.length===0&&p.unexplored.length===0&&
-          p.failed.length===0&&p.reviewed===p.observed&&
-          visited.has(rootNumber);
+        const complete=isTreeAuditComplete(p,rootNumber);
         const body=['## Issue Tree Audit',
           '- Root: #'+rootNumber,
           '- Status: **'+(complete?'Complete':'Partial / needs review')+'**',
@@ -242,6 +246,16 @@ export function testIssueTree(){
   assert.equal(isTreeDescendant(1645,1931,n=>map.get(n)),true);
   assert.equal(isTreeDescendant(1645,9999,n=>map.get(n)),false);
   assert.equal(isTreeDescendant(1645,8888,n=>map.get(n)),true);
+  const full={observed:2,reviewed:2,remaining:[],unexplored:[],failed:[],
+    updated:[1924],unchanged:[1645]};
+  assert.equal(isTreeAuditComplete(full,1645),true);
+  assert.equal(isTreeAuditComplete({...full,unchanged:[]},1645),false,
+    'root must be reviewed, not merely read');
+  assert.equal(isTreeAuditComplete({...full,unexplored:[1924]},1645),false,
+    'unexpanded leaf may hide descendants');
+  assert.equal(isTreeAuditComplete({...full,failed:[{number:1924,reason:'denied'}]},1645),false);
+  assert.equal(isTreeAuditComplete({...full,remaining:[1924]},1645),false);
+
   const scoped=createTreeAuditTools(map.get(1645),'example/repo',{getIssue:n=>map.get(n),
     findChildren:n=>[...map.values()].filter(x=>explicitParentNumbers(x.body).includes(n))});
   return (async()=>{
