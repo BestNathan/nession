@@ -15,6 +15,7 @@ const sourceRun={
   head_branch:'main',head_sha:P.publisher_main_sha,
   repository:{full_name:REPO},head_repository:{full_name:REPO},
   status:'completed',conclusion:'success',
+  created_at:'2026-10-21T13:37:20Z',
 };
 const sourceJobs={total_count:1,jobs:[{
   id:50,run_id:P.publisher_run,name:'publish',
@@ -24,6 +25,7 @@ const ownerComment={
   id:P.command_comment_id,user:{login:'BestNathan'},
   issue_url:'https://api.github.com/repos/'+REPO+'/issues/1997',
   body:'/nession publish issue=1997 worker_run=39448549052 checkpoint=3',
+  created_at:'2026-10-21T13:37:18Z',
 };
 const intent=planControlledPublisherIntent({
   target_main_sha:P.publisher_main_sha,
@@ -75,7 +77,19 @@ for(const part of [
   {id:2},{user:{login:'attacker'}},
   {issue_url:'https://api.github.com/repos/'+REPO+'/issues/1664'},
   {body:'/nession publish issue=1997 checkpoint=2'},
+  {created_at:'2026-10-21T13:37:21Z'},
+  {created_at:'2026-10-21T13:35:17Z'},
+  {created_at:'bad'},
+  {created_at:null},
 ])denied('ownerComment',{...ownerComment,...part});
+// An older identical owner command cannot be used as evidence of the newer
+// Publisher Run, even if the Issue URL, actor and command text are identical.
+denied('ownerComment',{...ownerComment,id:6308823032,
+  created_at:'2026-10-21T05:30:10Z'});
+// A claim that the original Run predates the triggering comment is false.
+denied('sourceRun',{...sourceRun,created_at:'2026-10-21T13:37:17Z'});
+denied('sourceRun',{...sourceRun,created_at:'2026-10-21T13:39:19Z'});
+denied('sourceRun',{...sourceRun,created_at:'not-a-date'});
 for(const part of [
   {action_id:'f'.repeat(64)},
   {worker_run_id:2},{checkpoint_version:4},
@@ -116,4 +130,4 @@ const repairedResult=verify({...good,pullRequest:repairPr,
 assert.equal(repairedResult.original_pr_sha,P.original_pr_sha);
 assert.equal(repairedResult.current_pr_sha,repaired);
 assert.equal(repairedResult.status,'original_pr_verified_not_reviewed');
-console.log('Original real Publisher readback contract: owner Run/comment, Store intent, App PR, initial bounded commit, unique branch, SHA A/B, replay and forgery negatives all pass (no Reviewer asserted, no writes)');
+console.log('Original real Publisher readback contract: exact triggering owner comment/Run time bound, old same-text owner command denied, Store intent, App PR, original commit, unique branch and SHA A/B replay negatives pass (no Reviewer asserted, no writes)');
