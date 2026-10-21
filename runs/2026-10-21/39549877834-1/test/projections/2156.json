@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_projection_receipt",
+  "outcome": "applied",
+  "issue": 2156,
+  "run_id": 39549877834,
+  "run_attempt": 1,
+  "target_sha": "3c3bf6c186b79a2799b234b30aaee46b0f10327b",
+  "plan_digest": "95d8ca460850ad2ba3d5fe89caf75d9e574999119daab62a05913c251b43957a",
+  "artifact_digest": "sha256:eecbd3f4c7b13b406ca8047e480931674e1cd7d7fcaa93147014f2f9983cbbb8",
+  "ingest_run_id": 39550909548,
+  "ingest_attempt": 1,
+  "declaration_digest": "d6a7dbf58485505a958b4b5516f3d5a45199d08f0f74fc26c4408260b4e4f200",
+  "before_body_sha256": "d4933c19843eabf230cdeba4f398710ee4b16e3ea1e97105d9f0ede9848805a6",
+  "body_sha256": "021b8d8b27a4013698e9ff4c98ae93ff0b8c103488d3ecaed86ccd54224dcf5d",
+  "readback_body": "Parent #1926 (SC-03, SC-08) / #1645 (SC-10 route-switch element). Scoped child adding the browser-level route-switch witness.\n\n## Requirements: A live route switch keeps the renderer and its stream\n\n#2126 proves P2P and Relay observe one Agent stream timeline, and #2129 proves a forced route flip revokes the parser-applied cursor. What is missing is the **live route change the product actually performs**.\n\nCorrected after reading the attach flow (2026-10-21): the UI has no live manual route switch. The session-row gear opens the attach dialog in `configure` intent, whose only action is **Save** — it persists the mode for the *next* attach. Clicking the row of the already-attached, healthy Session is deliberately a no-op (`requestAttach`), and a **manual** P2P route that disconnects ends in `transport-exhausted` (manualRoute), not a Relay fallback (`AddressAttachPolicy.onCandidateDisconnected`). The live P2P→Relay change is the **Auto** route's policy: when its P2P candidates are gone, it calls `force-relay` and re-attaches over Relay without tearing down the renderer.\n\nThe fixture must therefore:\n\n- attach a Session in **Auto** mode (effective route P2P) and mark the current xterm DOM node;\n- print a pre-switch marker and wait for it exactly once;\n- make the P2P transport deterministically fail (suppress the liveness probe's `control.ping`; the runtime's 5 s deadline declares the candidate gone), letting the Auto policy rotate through its candidates and reach `force-relay`;\n- assert the same xterm node survives, the pre-switch marker still occurs exactly once, and a post-switch marker arrives exactly once over the Relay route;\n- start a numbered burst before/while the switch happens and prove its retained tail is exactly once (no duplicate, no missing line).\n\nA manual switch back to P2P is **not** part of this fixture: the product only applies a manual mode on the next attach, and whether that flow keeps the renderer is a separate product question. Degraded-vs-synchronized surfacing is out of scope (tracked by #2155).\n\n## Success Criteria\n\n- [ ] SC-01 An Auto-route P2P transport failure falls back to Relay without remounting the xterm; the pre-switch marker remains exactly once and a post-switch marker arrives exactly once.\n- [ ] SC-02 A numbered burst spanning the fallback has an exactly-once retained tail on the Relay route, and the controller can still write afterwards.\n- [ ] SC-03 Exact PR HEAD Quality / E2E / Case Smoke / trusted Acceptance, and exact merge-SHA Quality / E2E / Cases / Orchestrator Pass.\n\n## Acceptance Plan\n\n```yaml\nacceptance:\n  SC-01:\n    when: pr\n    method: agent\n  SC-02:\n    when: pr\n    method: agent\n  SC-03:\n    when: merged\n    branch: main\n    method: agent\n```\n\n## Acceptance Report\n\n| Criterion | Result | Evidence |\n|---|---|---|\n| SC-01 | Pending | awaiting exact PR head SHA Agent proof |\n| SC-02 | Pending | awaiting exact PR head SHA Agent proof |\n| SC-03 | Pending | awaiting merged main SHA Agent proof |\n\n## E2E Verification\n\n### New\n- none: the fixture extends the existing terminal consistency spec; no new spec ID is introduced.\n\n### Regression\n- terminal-consistency-faults\n\n## E2E Report\n\n| ID | Type | Result | Evidence |\n|---|---|---|---|\n| terminal-consistency-faults | Regression | Error | run 39549877834/1, SHA 3c3bf6c186b79a2799b234b30aaee46b0f10327b, contract d6a7dbf58485505a958b4b5516f3d5a45199d08f0f74fc26c4408260b4e4f200, plan 95d8ca460850ad2ba3d5fe89caf75d9e574999119daab62a05913c251b43957a, tests 0/0 (https://github.com/BestNathan/nession/actions/runs/39549877834) |\n\n## Product alignment\n\n- [ ] Does this move Nession toward VISION.md?\n- [ ] Does it obey PRINCIPLE.md?\n- [ ] Were relevant docs/design/* sources checked?\n- [ ] Is any deviation explicit?\n\n---\n**Status:** Approved\n\n",
+  "patch_updated_at": "2026-10-21T05:41:00Z",
+  "readback_updated_at": "2026-10-21T05:41:00Z",
+  "rows": [
+    {
+      "id": "terminal-consistency-faults",
+      "result": "Error",
+      "evidence": "run 39549877834/1, SHA 3c3bf6c186b79a2799b234b30aaee46b0f10327b, contract d6a7dbf58485505a958b4b5516f3d5a45199d08f0f74fc26c4408260b4e4f200, plan 95d8ca460850ad2ba3d5fe89caf75d9e574999119daab62a05913c251b43957a, tests 0/0 (https://github.com/BestNathan/nession/actions/runs/39549877834)"
+    }
+  ]
+}
