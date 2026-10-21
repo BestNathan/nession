@@ -501,6 +501,46 @@ describe('TerminalController', () => {
     controller.dispose();
   });
 
+  it('reports a complete history capture as a history repair (#2155)', () => {
+    const transport = makeTransport();
+    const onBootstrapApplied = vi.fn();
+    const controller = new TerminalController(makeSession(), () => transport, {
+      rendererType: 'canvas', events: { onBootstrapApplied },
+    });
+    controller.attach(host());
+    const h = delayedParser(controller);
+    transport.onOutput!(new Uint8Array([104, 105]), {
+      requestedLines: 5000, truncated: false,
+      cutConsistency: 'atomic', fidelity: 'screen-only', streamEpoch: 5, throughSeq: 0,
+    });
+    // Parsing is what proves it; handing the bytes to xterm is not.
+    expect(onBootstrapApplied).not.toHaveBeenCalled();
+    h.finish();
+    h.finish();
+    expect(onBootstrapApplied).toHaveBeenCalledOnce();
+    h.spy.mockRestore();
+    controller.dispose();
+  });
+
+  it('does not report a screen-only repaint as a history repair (#2155)', () => {
+    const transport = makeTransport();
+    const onBootstrapApplied = vi.fn();
+    const controller = new TerminalController(makeSession(), () => transport, {
+      rendererType: 'canvas', events: { onBootstrapApplied },
+    });
+    controller.attach(host());
+    const h = delayedParser(controller);
+    transport.onOutput!(new Uint8Array([104, 105]), {
+      requestedLines: 0, truncated: false,
+      cutConsistency: 'atomic', fidelity: 'screen-only', streamEpoch: 5, throughSeq: 0,
+    });
+    h.finish();
+    h.finish();
+    expect(onBootstrapApplied).not.toHaveBeenCalled();
+    h.spy.mockRestore();
+    controller.dispose();
+  });
+
   it('does not establish a baseline from a superseded bootstrap write (#2120)', () => {
     const transport = makeTransport();
     const onStreamBaseline = vi.fn();

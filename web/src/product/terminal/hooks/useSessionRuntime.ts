@@ -61,6 +61,7 @@ const EMPTY_RUNTIME_SNAPSHOT: SessionRuntimeSnapshot = {
   transportReady: false,
   lastResize: null,
   reconnectCount: 0,
+  historyDegraded: false,
 };
 const EMPTY_RUNTIME_SUBSCRIBE = () => () => {};
 const EMPTY_RUNTIME_GET_SNAPSHOT = () => EMPTY_RUNTIME_SNAPSHOT;

@@ -232,6 +232,8 @@ export function useTerminalOrchestration({
     inputDisabled,
     terminalState,
     reconnectCount,
+    /** Observed output loss, for the surface's quiet notice (#2155). */
+    historyDegraded: snapshot?.historyDegraded ?? false,
     fileOps,
     terminalControl,
     onTakeControl: takeControl,

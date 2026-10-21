@@ -54,7 +54,14 @@ const BOOTSTRAP_SCREEN_RESET = '\x1b[2J\x1b[H';
 
 export interface TerminalControllerEvents {
   onTransportReady?: (ready: boolean) => void;
-  /** A cut-proven, full-VT snapshot has finished xterm parsing (#2008). */
+  /**
+   * A snapshot that **replaced** the buffer has finished xterm parsing: a
+   * cut-proven full-VT checkpoint (#2008), or an atomic, non-truncated
+   * epoch-start history capture, which IS the pane's history at that stream
+   * position and is written after a buffer reset (#2160). A screen-only
+   * repaint and a replay prefix are neither and must not clear a history
+   * repair (#2155).
+   */
   onBootstrapApplied?: () => void;
   /**
    * The current renderer parsed an atomic, complete Agent stream-log prefix.
@@ -354,8 +361,15 @@ export class TerminalController {
             this.events?.onStreamBaseline?.(streamBaseline);
           }
           // A truncated pane capture can repaint the current screen, but
-          // cannot establish that the missing history was recovered.
-          if (provesVerifiedBootstrapRepair(bootstrap)) {
+          // cannot establish that the missing history was recovered. A
+          // complete history capture was written after a buffer reset and is
+          // the pane's history, so it does repair it (#2155).
+          // Only an **epoch-start** history capture is that repair. A
+          // complete replay prefix (throughSeq > 0) is a stream position: its
+          // partial fidelity does not restore history that predates the
+          // Agent's reader (#2120), which is not this callback's claim.
+          if (provesVerifiedBootstrapRepair(bootstrap)
+            || (completeHistoryCut && bootstrap?.throughSeq === 0)) {
             this.events?.onBootstrapApplied?.();
           }
         }
