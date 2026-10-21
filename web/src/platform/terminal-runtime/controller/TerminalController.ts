@@ -301,15 +301,28 @@ export class TerminalController {
       // An atomic cut beyond position 0 is a complete replay of the Agent's
       // ordered stream log, so replacing the buffer is what makes "every event
       // through `throughSeq` was applied" true — appending it to bytes a
-      // previous subscription already applied would duplicate them. An
-      // epoch-start cut (#2124) is only a position: no replay follows, and the
-      // capture may be screen-only/truncated, so the scrollback stays.
-      // Fidelity stays whatever the marker states in both cases; this is a
-      // stream baseline, not the full-VT repair `provesVerifiedBootstrapRepair`
-      // gates.
+      // previous subscription already applied would duplicate them.
+      //
+      // An epoch-start cut (#2124) has no replay, but a **history-sized,
+      // non-truncated** capture taken there is the pane's history at that
+      // stream position: everything the client retained is a prefix of it.
+      // Appending it over the retained buffer writes the overlap a second time
+      // (#2160), and repainting only the screen leaves the frames produced
+      // while the transport was down missing. So it replaces too. A truncated
+      // capture is newer than it is complete — the byte ceiling dropped the
+      // oldest history (#1305) — so that one still only repaints the screen,
+      // and an unverified capture never replaces.
+      //
+      // Fidelity stays whatever the marker states; this is a stream baseline,
+      // not the full-VT repair `provesVerifiedBootstrapRepair` gates.
       const streamBaseline = bootstrap ? streamBaselineFromBootstrap(bootstrap) : undefined;
+      const completeHistoryCut = bootstrap !== undefined
+        && bootstrap.cutConsistency === 'atomic'
+        && bootstrap.requestedLines > 0
+        && !bootstrap.truncated;
       const replayReplacesBuffer = provesVerifiedBootstrapRepair(bootstrap)
-        || (streamBaseline !== undefined && streamBaseline.appliedThrough > 0);
+        || (streamBaseline !== undefined && streamBaseline.appliedThrough > 0)
+        || completeHistoryCut;
       if (bootstrap) {
         this.writer.write(replayReplacesBuffer
           ? BOOTSTRAP_BUFFER_RESET : BOOTSTRAP_SCREEN_RESET);

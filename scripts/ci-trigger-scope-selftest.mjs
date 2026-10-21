@@ -49,7 +49,7 @@ function classifier() {
     else break;
   }
   const script=body.join('\n');
-  assert.ok(script.includes('git merge-base') && script.includes('git diff --name-only -z'),
+  assert.ok(script.includes('git merge-base') && script.includes('git diff --no-renames --name-only -z') && script.includes('git rev-parse "$target^1"'),
     'Quality selector must use exact PR diff');
   return script;
 }
@@ -76,7 +76,7 @@ function git(dir,args) {
   assert.equal(r.status,0,'git '+args.join(' ')+' failed: '+r.stderr);
   return r.stdout.trim();
 }
-function select(files) {
+function select(files,eventName='pull_request') {
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'nession-ci-scope-'));
   try {
     git(dir,['init','-q']);
@@ -93,7 +93,7 @@ function select(files) {
     git(dir,['add','.']);git(dir,['commit','-qm','changes']);
     const head=git(dir,['rev-parse','HEAD']), output=path.join(dir,'out');
     const result=spawnSync('bash',['-c',script],{cwd:dir,encoding:'utf8',env:{
-      ...process.env,EVENT_NAME:'pull_request',PR_BASE_SHA:base,PR_HEAD_SHA:head,
+      ...process.env,EVENT_NAME:eventName,PR_BASE_SHA:base,PR_HEAD_SHA:head,GITHUB_SHA:head,
       GITHUB_OUTPUT:output,RUNNER_TEMP:dir,
     }});
     assert.equal(result.status,0,'Quality scope failed: '+result.stderr+' '+result.stdout);
@@ -109,6 +109,11 @@ for(const fixture of cases) {
   }
   if(fixture.quality!==null)
     assert.deepEqual(select(fixture.files),fixture.quality,
-      'Quality jobs incorrectly selected for '+fixture.name);
+      'Quality PR jobs incorrectly selected for '+fixture.name);
+  // A main-push owns its independent exact-commit source scope. Inapplicable
+  // module jobs must remain skipped, not pass because the workflow is green.
+  assert.deepEqual(select(fixture.files,'push'),
+    fixture.quality??[false,false,false],
+    'Quality merged-SHA jobs incorrectly selected for '+fixture.name);
 }
 console.log('CI trigger scopes: '+cases.length+' exact-diff regression fixtures passed');

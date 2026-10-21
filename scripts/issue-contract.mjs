@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import { validateAcceptancePlan } from './acceptance-plan.mjs';
 import { parseIssueE2E } from './issue-e2e-contract.mjs';
+import { readVerificationTier } from './verification-tier-policy.mjs';
 
 export const KIND_LABELS = new Set(['bug', 'requirement']);
 export const AREA_LABELS = new Set([
@@ -198,6 +199,8 @@ function validateRequirement(issue, errors) {
 
 export function auditIssue(issue) {
   const errors = [];
+  try { readVerificationTier(issue); }
+  catch (error) { errors.push(error.message); }
   const { kind, labels, areas } = validateKindAndArea(issue, errors);
   const e2e = parseIssueE2E(issue.body);
   if (e2e) errors.push(...e2e.errors);

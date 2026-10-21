@@ -1,0 +1,172 @@
+name: Store / Controlled Publisher
+
+# #2152. One owner-scoped wake for real #1997; never run PR-head code.
+# This job contains no model, Provider API key or Agent execution.
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: read
+  issues: read
+
+concurrency:
+  group: controlled-publisher-1997
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'BestNathan' &&
+      github.run_attempt == 1 &&
+      github.event_name == 'issue_comment' &&
+      github.event.action == 'created' &&
+      github.event.issue.number == 1997 &&
+      github.event.issue.state == 'open' &&
+      github.event.comment.user.login == 'BestNathan' &&
+      github.event.comment.body == '/nession publish issue=1997 worker_run=39448549052 checkpoint=3'
+    runs-on: ubuntu-latest
+    environment: cursor
+    timeout-minutes: 18
+    steps:
+      - name: Checkout only exact main-owned trusted Publisher code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Gate source, Store CAS, Provider and one-PR negative contracts before secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/lib/agent/publisher/patch-preflight-selftest.mjs
+          node scripts/lib/agent/publisher/controlled-proposal-selftest.mjs
+          node scripts/lib/agent/publisher/source-attestation-selftest.mjs
+          node scripts/lib/agent/publisher/store-intent-selftest.mjs
+          node scripts/lib/agent/publisher/store-intent-conflict-selftest.mjs
+          node scripts/lib/agent/publisher/github-publish-selftest.mjs
+          node scripts/lib/agent/orchestration/worker-reconcile-selftest.mjs
+          ./gates/run run-store-integrity
+
+      - name: Checkout original Developer source as unread and unexecuted data only
+        uses: actions/checkout@v4
+        with:
+          ref: 220266b9233ec97b1beacbc54e5cc7f82d3cece2
+          path: source
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Read only exact prior Worker/Ingest and immutable original Artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git -C source rev-parse HEAD)" = "220266b9233ec97b1beacbc54e5cc7f82d3cece2"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/39448549052" > "$RUNNER_TEMP/worker.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/39465467460" > "$RUNNER_TEMP/ingest.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/39448549052/artifacts?per_page=100" > "$RUNNER_TEMP/artifacts.json"
+          jq -e '
+            .id == 39448549052 and .run_attempt == 1 and
+            .head_sha == "271b48e494b6bd54843403b831709d6365f30530" and
+            .name == "Agent / Development" and
+            .path == ".github/workflows/agent-develop.yml" and
+            .status == "completed" and .conclusion == "success" and
+            .actor.login == "github-actions[bot]" and
+            .repository.full_name == "BestNathan/nession"
+          ' "$RUNNER_TEMP/worker.json" > /dev/null
+          jq -e '
+            .id == 39465467460 and .run_attempt == 1 and
+            .head_sha == "72ae0f9b9ecfcb469094c8b05dab129f75a3869c" and
+            .path == ".github/workflows/store-agent-development-ingest.yml" and
+            .status == "completed" and .conclusion == "success" and
+            .actor.login == "BestNathan"
+          ' "$RUNNER_TEMP/ingest.json" > /dev/null
+          jq -e '.total_count == (.artifacts | length) and .total_count <= 100' "$RUNNER_TEMP/artifacts.json" > /dev/null
+          jq -er '
+            [.artifacts[] |
+              select(.name == "development-worker-claim-39448549052-1" and
+                     .id == 12276388775 and .expired == false and
+                     .digest == "sha256:3d125a1d0c4ba508a5067ee95c10042394c48934ab548a23d31ae4266415c6c6")] |
+              if length == 1 then .[0].id else empty end
+          ' "$RUNNER_TEMP/artifacts.json" > /dev/null
+          jq -er '
+            [.artifacts[] |
+              select(.name == "development-worker-39448549052-1" and
+                     .id == 12275629206 and .expired == false and
+                     .digest == "sha256:a2ba4d173805e3aba61af4419790c73444a34931843d63f9b12782b78c5fe61d")] |
+              if length == 1 then .[0].id else empty end
+          ' "$RUNNER_TEMP/artifacts.json" > /dev/null
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/12276388775/zip" > "$RUNNER_TEMP/claim.zip"
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/12275629206/zip" > "$RUNNER_TEMP/result.zip"
+          test -s "$RUNNER_TEMP/claim.zip"
+          test -s "$RUNNER_TEMP/result.zip"
+
+      - name: Mint existing Store-only App token in this non-model job
+        id: writer
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.RUN_STORE_WRITER_APP_ID }}
+          private-key: ${{ secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY }}
+          repositories: nession
+          permission-contents: write
+
+      # GITHUB_TOKEN-originated PRs do not trigger normal push/PR CI.
+      # A separately installed GitHub App supplies the narrowly scoped PR
+      # writer identity. Missing App permissions fail BEFORE Store CAS intent.
+      - name: Mint distinct Publisher App token to trigger downstream CI
+        id: publisher
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.PUBLISHER_APP_ID }}
+          private-key: ${{ secrets.PUBLISHER_APP_PRIVATE_KEY }}
+          repositories: nession
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Authenticate Source and CAS intent before one Publisher PR creation
+        env:
+          ACTIONS_READ_TOKEN: ${{ github.token }}
+          STORE_APP_TOKEN: ${{ steps.writer.outputs.token }}
+          STORE_WRITER_PRIVATE_KEY: ${{ secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY }}
+          PUBLISHER_GITHUB_TOKEN: ${{ steps.publisher.outputs.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$STORE_APP_TOKEN"
+          test -n "$STORE_WRITER_PRIVATE_KEY"
+          test -n "$PUBLISHER_GITHUB_TOKEN"
+          test "$PUBLISHER_GITHUB_TOKEN" != "$STORE_APP_TOKEN"
+          # Original Worker was an unprivileged model; this job never executes
+          # a script from its historical checkout, nor an untrusted PR checkout.
+          node scripts/lib/agent/publisher/trusted-publisher.mjs publish \
+            "$RUNNER_TEMP/worker.json" \
+            "$RUNNER_TEMP/ingest.json" \
+            "$RUNNER_TEMP/artifacts.json" \
+            "$RUNNER_TEMP/claim.zip" \
+            "$RUNNER_TEMP/result.zip" \
+            "$GITHUB_WORKSPACE/source" > "$RUNNER_TEMP/publisher-receipt.json"
+          jq -e '
+            (.kind == "authenticated_publisher_pr_receipt" and
+             .status == "published_verified_by_github" and .pull_request > 0) or
+            (.kind == "trusted_publisher_reconciliation" and
+             .status == "reconcile_no_retry")
+          ' "$RUNNER_TEMP/publisher-receipt.json" > /dev/null
+          {
+            echo "## Trusted original #1997 Publisher"
+            echo "- Publisher Run: $GITHUB_RUN_ID / $GITHUB_RUN_ATTEMPT"
+            echo "- Outcome: $(jq -r .status "$RUNNER_TEMP/publisher-receipt.json")"
+            echo "- Source Worker: 39448549052/1; native Checkpoint v3"
+            echo "- PR: $(jq -r '.pull_request // "not published/reconcile"' "$RUNNER_TEMP/publisher-receipt.json")"
+            echo "- Store CAS intent was committed before any GitHub publication; no model tokens."
+          } >> "$GITHUB_STEP_SUMMARY"

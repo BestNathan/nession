@@ -15,6 +15,7 @@ GATE_OWNER='scripts/issue-contract.mjs'
 gate_check() {
   gate_require_command node "Install Node.js and rerun the gate." || return $?
   gate_run_invariant node scripts/issue-contract.mjs self-test
+  gate_run_invariant node scripts/verification-tier-policy.mjs self-test
 }
 
 gate_main "$@"

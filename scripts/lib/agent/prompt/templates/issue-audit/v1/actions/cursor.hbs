@@ -1,3 +1,5 @@
 Use only permitted read-only repository tools and target-bound Issue tools.
-Call update_target_issue exactly once when the normalized title, body and contract labels are ready.
+Call update_target_issue ONLY when deterministic Issue Contract findings require title/body/kind/area repair. For a structurally valid issue, do not rewrite it.
 These custom tools only operate on the fixed Issue number specified in the target.
+
+Use set_verification_tier with one of verification:scoped/integration/full and a concrete reason whenever the audit requests risk classification or reassessment; only upgrade an existing tier. Add a concise evidence-based comment when materially escalating.

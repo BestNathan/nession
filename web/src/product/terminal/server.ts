@@ -1,6 +1,11 @@
 import { decodeTerminalData, encodeBase64 } from './base64';
 import { readResumeReply, type TerminalStreamResumeResult, type TerminalOutputAppliedAck } from './agent';
-import { readInputAck, type InputAckFields } from './controlPayload';
+import {
+  readControlAcquireReply,
+  readControlChanged,
+  readInputAck,
+  type InputAckFields,
+} from './controlPayload';
 import {
   decodeBootstrapMarker,
   type TerminalBootstrap,
@@ -12,6 +17,9 @@ import { WIRE as TERMINAL_RESIZE_WIRE } from '@/generated/protocol/core/agent-te
 import { WIRE as TERMINAL_STREAM_RESUME_WIRE } from '@/generated/protocol/core/agent-terminal-stream-resume/v1';
 import { WIRE as TERMINAL_OUTPUT_APPLIED_WIRE } from '@/generated/protocol/core/agent-terminal-output-applied/v1';
 import type { TransportPlugin, PluginSurface, SentSocketMessage } from '@/platform/socket/types';
+import { getOrCreateClientId } from '@/platform/socket/clientId';
+import { controlRoleFor } from './agentControlLease';
+import type { TerminalControlRole, TerminalControlState } from './state/terminalControl';
 // The shared options shape, owned next to the runtime that drives relay. A
 // type-only import across the layer boundary, which the rule allows — and the
 // alternative (each side declaring its own) is how the two would drift.
@@ -33,6 +41,17 @@ type RelayOutputCallback = (data: Uint8Array, bootstrap?: TerminalBootstrap, pos
 type RelayResizeCallback = (cols: number, rows: number, position?: TerminalStreamPosition) => void;
 type RelayInputAckCallback = (ack: InputAckFields) => void;
 
+/**
+ * The ControlLease the Agent stated for THIS browser in its attach reply
+ * (#2157), forwarded by the Server. Absent for an older Agent or a Server
+ * that predates the field.
+ */
+export interface RelayControlLease {
+  role: TerminalControlRole;
+  generation?: number;
+  controllerClientId?: string;
+}
+
 /** Informational proof only: this does NOT authorize parser ACK or Agent credit. */
 export interface RelaySubscriptionProof {
   sessionName: string;
@@ -41,6 +60,23 @@ export interface RelaySubscriptionProof {
   routeId: string;
   subscriberGeneration: number;
   streamEpoch: number;
+  control?: RelayControlLease;
+}
+
+function readRelayControl(payload: Record<string, unknown>): RelayControlLease | undefined {
+  const role = payload.control_role;
+  if (role !== 'controller' && role !== 'observer') {
+    return undefined;
+  }
+  const generation = payload.control_generation;
+  const controllerClientId = payload.controller_client_id;
+  return {
+    role,
+    ...(typeof generation === 'number' && Number.isSafeInteger(generation)
+      && generation >= 0 ? { generation } : {}),
+    ...(typeof controllerClientId === 'string' && controllerClientId
+      ? { controllerClientId } : {}),
+  };
 }
 
 function readRelayReady(payload: Record<string, unknown>): RelaySubscriptionProof | null {
@@ -57,10 +93,12 @@ function readRelayReady(payload: Record<string, unknown>): RelaySubscriptionProo
     || !Number.isSafeInteger(stream_epoch) || stream_epoch <= 0) {
     return null;
   }
+  const control = readRelayControl(payload);
   return {
     sessionName: session_name, browserClientId: browser_client_id,
     relayRequestId: relay_request_id, routeId: route_id,
     subscriberGeneration: subscriber_generation, streamEpoch: stream_epoch,
+    ...(control ? { control } : {}),
   };
 }
 
@@ -147,6 +185,24 @@ export interface TerminalServerApi {
   onRelayInputAck(sessionName: string, cb: RelayInputAckCallback): () => void;
   /** Authenticated Relay uses the same Agent-owned complete-only replay as P2P. */
   resumeRelayStream(sessionName: string, epoch: number, afterSeq: number): Promise<TerminalStreamResumeResult>;
+  /**
+   * The ControlLease as the Agent publishes it (#2157).
+   *
+   * Under Relay the attach reply belongs to the Server, so the Agent's
+   * `agent.terminal.control.changed` notification is the only channel that
+   * reaches the browser. It is a level: the role is derived from
+   * `controller_client_id` and the browser's own client id.
+   */
+  getControlState(sessionName: string): TerminalControlState;
+  onControlChanged(cb: (sessionName: string, state: TerminalControlState) => void): () => void;
+  /**
+   * Acquire the lease through the relay. The request and its reply travel as
+   * `agent.` wires the relay forwards; the Agent then broadcasts the change.
+   */
+  acquireControl(sessionName: string): Promise<
+    | { ok: true; generation: number; role: TerminalControlRole }
+    | { ok: false; error: string }
+  >;
 }
 
 export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi {
@@ -158,6 +214,8 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
   private resizeCallbacks = new Map<string, Array<GenerationEntry<RelayResizeCallback>>>();
   private inputAckCallbacks = new Map<string, Array<GenerationEntry<RelayInputAckCallback>>>();
   private readyCallbacks = new Map<string, Array<GenerationEntry<(proof: RelaySubscriptionProof, physicalGeneration: number) => void>>>();
+  private controlBySession = new Map<string, TerminalControlState>();
+  private controlCallbacks = new Set<(sessionName: string, state: TerminalControlState) => void>();
 
   /**
    * Bind the plugin to the server connection. A later install replaces an
@@ -195,6 +253,22 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
           this.handleRelayReady(payload as Record<string, unknown>, connection.physicalGeneration ?? -1);
         }
       }),
+      // Spelled as a literal for the same reason as the input-ack wire above
+      // (#913); the Agent publishes the lease on every attach (#2157).
+      connection.subscribe('agent.terminal.control.changed', (payload) => {
+        const changed = readControlChanged(payload);
+        if (!changed) { return; }
+        const state: TerminalControlState = {
+          sessionName: changed.sessionName,
+          role: controlRoleFor(changed.controllerClientId, getOrCreateClientId()),
+          generation: changed.generation,
+          controllerClientId: changed.controllerClientId,
+        };
+        this.controlBySession.set(changed.sessionName, state);
+        for (const cb of this.controlCallbacks) {
+          cb(changed.sessionName, state);
+        }
+      }),
     ];
 
     return () => {
@@ -209,6 +283,8 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
         this.resizeCallbacks.clear();
         this.inputAckCallbacks.clear();
         this.readyCallbacks.clear();
+        this.controlBySession.clear();
+        this.controlCallbacks.clear();
       } else {
         // Stale release — a newer binding is active. Drop only the
         // registrations this release created; never touch newer ones.
@@ -340,10 +416,66 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
     return readResumeReply(reply, epoch);
   }
 
+  getControlState(sessionName: string): TerminalControlState {
+    return this.controlBySession.get(sessionName) ?? { role: 'controller', sessionName };
+  }
+
+  onControlChanged(cb: (sessionName: string, state: TerminalControlState) => void): () => void {
+    this.controlCallbacks.add(cb);
+    return () => {
+      this.controlCallbacks.delete(cb);
+    };
+  }
+
+  async acquireControl(sessionName: string): Promise<
+    | { ok: true; generation: number; role: TerminalControlRole }
+    | { ok: false; error: string }
+  > {
+    let reply: unknown;
+    try {
+      reply = await this.requireConnection().request('agent.terminal.control.acquire', {
+        session_name: sessionName,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { ok: false, error: message.startsWith('Request timeout: ') ? 'timeout' : message };
+    }
+    const fields = readControlAcquireReply(reply);
+    if (fields.generation === undefined) {
+      return { ok: false, error: 'missing control generation in acquire response' };
+    }
+    // The Agent broadcasts the change to every peer; this local write only
+    // spares the caller a round trip before the UI reflects its own action.
+    const role: TerminalControlRole = fields.role ?? 'controller';
+    this.controlBySession.set(sessionName, {
+      role,
+      generation: fields.generation,
+      controllerClientId: fields.controllerClientId ?? getOrCreateClientId(),
+      sessionName,
+    });
+    return { ok: true, generation: fields.generation, role };
+  }
+
   private handleRelayReady(payload: Record<string, unknown>, physicalGeneration: number): void {
     const proof = readRelayReady(payload);
     if (!proof || !Number.isSafeInteger(physicalGeneration) || physicalGeneration < 0) {
       return;
+    }
+    // The lease the Agent stated for this browser at attach (#2157). This is
+    // the deterministic seed: the attach reply itself is consumed by the
+    // Server, and an Agent notification fired during that reply would be
+    // dropped there while it awaits the reply by id.
+    if (proof.control) {
+      const state: TerminalControlState = {
+        sessionName: proof.sessionName,
+        role: proof.control.role,
+        generation: proof.control.generation,
+        controllerClientId: proof.control.controllerClientId,
+      };
+      this.controlBySession.set(proof.sessionName, state);
+      for (const cb of this.controlCallbacks) {
+        cb(proof.sessionName, state);
+      }
     }
     for (const entry of this.readyCallbacks.get(proof.sessionName) ?? []) {
       entry.cb(proof, physicalGeneration);

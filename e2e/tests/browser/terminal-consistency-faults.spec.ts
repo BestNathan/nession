@@ -436,16 +436,18 @@ test('two clients: a stalled observer never blocks the controller (#2144)', asyn
     await attachToSession(observer, sessionName, 'Relay');
     await waitForInteractiveShell(observer);
 
-    // SC-01: the controller's output reaches the observer.
+    // SC-01: the controller's output reaches the observer, and the lease the
+    // Agent stated is visible as state — the view-only affordance — rather
+    // than inferred from the route (#2157).
     await submitTerminalCommand(controller, `printf 'MULTI-%s-LIVE\\n' 2144`);
     await expect.poll(async () => countInBuffer(observer, 'MULTI-2144-LIVE')).toBe(1);
+    await expect(observer.getByTestId('terminal-observer-bar')).toBeVisible();
+    await expect(controller.getByTestId('terminal-observer-bar')).toHaveCount(0);
 
-    // SC-03: the observer's input and resize never reach the PTY. Lease
-    // *visibility* over Relay is Bug #2157 — today the observer cannot see its
-    // role (the Server's relay-ready carries no control fields), so its client
-    // may still send. The enforcement witness is the Agent: the observer's
-    // bytes and size never reach the shared session, and the controller's
-    // buffer and tty are unchanged.
+    // SC-03: the observer's input and resize never reach the PTY. Its client
+    // knows it is the observer and refuses them locally; the Agent enforces
+    // the same rule. The controller's buffer and tty are the witnesses that
+    // neither attempt reached the shared session.
     await submitTerminalCommand(observer, `printf 'OBSERVER-%s-INPUT\\n' 2144`);
     await expect.poll(async () => countInBuffer(controller, 'OBSERVER-2144-INPUT')).toBe(0);
     const controllerGrid = await readGrid(controller);
@@ -456,6 +458,17 @@ test('two clients: a stalled observer never blocks the controller (#2144)', asyn
       expect((await readGrid(observer)).cols).toBeGreaterThan(controllerGrid.cols);
     }).toPass({ timeout: 15_000 });
     await expectPtySize(controller, controllerGrid.cols, controllerGrid.rows);
+
+    // SC-02: acquiring control over the relay moves the lease, and both
+    // clients see it — the observer's bar leaves, the controller's appears,
+    // and acquiring back restores the original holder for the rest of the
+    // fixture.
+    await observer.getByRole('button', { name: 'Take control' }).click();
+    await expect(observer.getByTestId('terminal-observer-bar')).toHaveCount(0, { timeout: 10_000 });
+    await expect(controller.getByTestId('terminal-observer-bar')).toBeVisible({ timeout: 10_000 });
+    await controller.getByRole('button', { name: 'Take control' }).click();
+    await expect(controller.getByTestId('terminal-observer-bar')).toHaveCount(0, { timeout: 10_000 });
+    await expect(observer.getByTestId('terminal-observer-bar')).toBeVisible({ timeout: 10_000 });
 
     // SC-02: stall the observer's main thread — its socket stops draining —
     // and prove the controller still receives the burst's retained tail
@@ -498,6 +511,114 @@ test('two clients: a stalled observer never blocks the controller (#2144)', asyn
     await controllerContext.close();
     await observerContext.close();
   }
+});
+
+// #2160: a reconnect during a high-volume burst must not replay events the
+// renderer already displayed. Main's full E2E gate reproduced a 1,608-line
+// duplicated tail under load; this fixture forces one re-attach deterministically
+// and reports the bootstrap markers the client received so a failure names the
+// path that replayed.
+test('an under-burst reconnect never replays already-parsed output (#2160)', async ({ page }, testInfo) => {
+  test.skip(!process.env.CI, 'real stack available in CI only');
+  test.setTimeout(360_000);
+
+  const sessionName = `e2e-consistency-replay-${testInfo.retry}-${Date.now()}`;
+  const bootstraps: Array<Record<string, unknown>> = [];
+  const sockets: string[] = [];
+  page.on('websocket', (socket) => {
+    sockets.push(socket.url());
+    socket.on('framereceived', (frame) => {
+      if (typeof frame.payload !== 'string') { return; }
+      try {
+        const msg = JSON.parse(frame.payload) as {
+          msg_type?: string;
+          payload?: { bootstrap?: unknown };
+        };
+        if (msg.msg_type === 'agent.terminal.output' && msg.payload?.bootstrap) {
+          bootstraps.push(msg.payload.bootstrap as Record<string, unknown>);
+        }
+      } catch {
+        // Non-JSON frames are not protocol messages.
+      }
+    });
+  });
+
+  await page.goto(
+    '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
+  );
+  await waitForShell(page);
+  await createSession(page, sessionName);
+  await attachToSession(page, sessionName, 'P2P');
+  await waitForInteractiveShell(page);
+
+  const COUNT = 3_000;
+  const TAIL = 1_000;
+  await submitTerminalCommand(page, `seq 1 ${COUNT} | sed 's/^/DR-/'`);
+
+  // Let the burst get well ahead of the parser before the cut.
+  await expect(async () => {
+    const tail = await readBufferTail(page);
+    const seen = [...tail.matchAll(/DR-(\d+)/g)].map((match) => Number(match[1]));
+    expect(Math.max(0, ...seen)).toBeGreaterThanOrEqual(800);
+  }).toPass({ timeout: 120_000 });
+
+  // Suppress the liveness probe's ping. Typing triggers the probe (#1264); its
+  // 5 s deadline tears the socket down, the service rebuilds the same URL, and
+  // the runtime re-attaches with a resume while the burst still streams.
+  const socketsBefore = sockets.length;
+  await page.evaluate(() => {
+    const state = window as unknown as { __e2eDroppedPings?: number };
+    state.__e2eDroppedPings = 0;
+    const original = WebSocket.prototype.send;
+    WebSocket.prototype.send = function (data) {
+      if (typeof data === 'string') {
+        try {
+          if ((JSON.parse(data) as { msg_type?: string }).msg_type === 'control.ping') {
+            state.__e2eDroppedPings = (state.__e2eDroppedPings ?? 0) + 1;
+            return;
+          }
+        } catch {
+          // Non-JSON frames pass through unchanged.
+        }
+      }
+      return original.call(this, data);
+    };
+  });
+  await sendRawToTerminal(page, ' ');
+
+  // The witness that this fixture cut the stream at all: the probe must have
+  // asked (a ping was dropped) and the runtime must have rebuilt the socket.
+  // Without both, a green duplicate assertion would mean nothing happened.
+  await expect(async () => {
+    const dropped = await page.evaluate(
+      () => (window as unknown as { __e2eDroppedPings?: number }).__e2eDroppedPings ?? 0,
+    );
+    expect(dropped, 'the liveness probe never fired').toBeGreaterThan(0);
+    expect(sockets.length, 'the transport was never rebuilt').toBeGreaterThan(socketsBefore);
+  }).toPass({ timeout: 30_000 });
+
+  await waitForLastLine(page, 'DR-', COUNT, { timeoutMs: 240_000, stallMs: 60_000 });
+
+  const text = await readTerminalBuffer(page);
+  const counts = new Map<number, number>();
+  for (const match of text.matchAll(/DR-(\d+)/g)) {
+    const value = Number(match[1]);
+    if (value >= 1 && value <= COUNT) {
+      counts.set(value, (counts.get(value) ?? 0) + 1);
+    }
+  }
+  const duplicated = [...counts.entries()]
+    .filter(([value, seen]) => seen > 1 && value > COUNT - TAIL)
+    .map(([value]) => value);
+  const missingTail: number[] = [];
+  for (let value = COUNT - TAIL + 1; value <= COUNT; value += 1) {
+    if (!counts.has(value)) { missingTail.push(value); }
+  }
+  expect(
+    duplicated,
+    `a tail line was replayed over parsed output; bootstraps=${JSON.stringify(bootstraps.slice(-4))}`,
+  ).toEqual([]);
+  expect(missingTail, 'a tail line never reached the parser').toEqual([]);
 });
 
 // #2156 / #1926 SC-03: the live route change the product actually performs.
@@ -543,19 +664,31 @@ test('an Auto P2P loss falls back to Relay without remounting the xterm (#2156)'
   await submitTerminalCommand(page, `printf 'ROUTE-%s-BEFORE\\n' 2156`);
   await expect.poll(async () => countInBuffer(page, 'ROUTE-2156-BEFORE')).toBe(1);
 
-  // Suppress the liveness probe's ping. The peer is still alive but stops
-  // answering the runtime's question — the half-open transport the probe
-  // exists to catch (#1264). Typing triggers the probe (onInputSent). Once
-  // the probe reports the socket unresponsive, the WebSocketService's attempt
-  // to rebuild it must fail too, or it would just reconnect the same healthy
-  // URL and never reach the route policy: guard the constructor for
-  // non-Server URLs and arm it here (the Server socket is already open and
-  // keeps working for the relay).
+  // Suppress the liveness probe's ping and make every P2P candidate
+  // unreachable. Typing triggers the probe (#1264); once it reports the
+  // socket unresponsive, the WebSocketService rebuilds it — and that rebuild
+  // must fail too, or it would just reconnect the same healthy URL and the
+  // route policy would never run. Only the Server socket (the Relay path) is
+  // allowed through. The counters are the witnesses that the fixture cut the
+  // stream at all: without them a green assertion would mean nothing happened.
   await page.evaluate(() => {
+    const state = window as unknown as {
+      __e2eDroppedPings?: number;
+      __e2eBlockedAgentConnects?: number;
+    };
+    state.__e2eDroppedPings = 0;
+    state.__e2eBlockedAgentConnects = 0;
     const Original = window.WebSocket;
-    let blockAgentTransport = false;
+    const isServerSocket = (raw: string | URL): boolean => {
+      try {
+        return new URL(String(raw)).port === '19090';
+      } catch {
+        return false;
+      }
+    };
     const Guarded = function (url: string | URL, protocols?: string | string[]) {
-      if (blockAgentTransport && !String(url).includes('localhost:19090/ws')) {
+      if (!isServerSocket(url)) {
+        state.__e2eBlockedAgentConnects = (state.__e2eBlockedAgentConnects ?? 0) + 1;
         throw new Error('e2e: agent transport intentionally unavailable');
       }
       return new Original(url, protocols);
@@ -563,17 +696,13 @@ test('an Auto P2P loss falls back to Relay without remounting the xterm (#2156)'
     Guarded.prototype = Original.prototype;
     Object.setPrototypeOf(Guarded, Original);
     window.WebSocket = Guarded;
-    (
-      window as unknown as { __e2eBlockAgentTransport?: () => void }
-    ).__e2eBlockAgentTransport = () => {
-      blockAgentTransport = true;
-    };
 
     const originalSend = Original.prototype.send;
     Original.prototype.send = function (data) {
       if (typeof data === 'string') {
         try {
           if ((JSON.parse(data) as { msg_type?: string }).msg_type === 'control.ping') {
+            state.__e2eDroppedPings = (state.__e2eDroppedPings ?? 0) + 1;
             return;
           }
         } catch {
@@ -582,9 +711,6 @@ test('an Auto P2P loss falls back to Relay without remounting the xterm (#2156)'
       }
       return originalSend.call(this, data);
     };
-    (
-      window as unknown as { __e2eBlockAgentTransport?: () => void }
-    ).__e2eBlockAgentTransport?.();
   });
 
   // A burst that spans the cut.
@@ -592,17 +718,25 @@ test('an Auto P2P loss falls back to Relay without remounting the xterm (#2156)'
   const TAIL = 200;
   await submitTerminalCommand(page, `seq 1 ${COUNT} | sed 's/^/RS-/'`);
 
-  // Each unanswered probe (5 s deadline) retires a P2P candidate; when the
-  // last one is gone the Auto route forces Relay. A space is harmless to the
-  // shell and still counts as input at the transport.
-  for (let attempt = 0; attempt < 6 && !relayStarted(); attempt += 1) {
-    await sendRawToTerminal(page, ' ');
-    await page.waitForTimeout(6_500);
-  }
-  expect(
-    relayStarted(),
-    'the Auto route must reach force-relay once its P2P candidates stop answering',
-  ).toBe(true);
+  // One input is enough: the probe deadline tears the P2P socket down, and
+  // the blocked rebuild lets AddressAttachPolicy retire its candidates and
+  // force Relay. No further typing is needed to reach the policy.
+  await sendRawToTerminal(page, ' ');
+  await expect(async () => {
+    const seen = await page.evaluate(() => {
+      const state = window as unknown as {
+        __e2eDroppedPings?: number;
+        __e2eBlockedAgentConnects?: number;
+      };
+      return {
+        droppedPings: state.__e2eDroppedPings ?? 0,
+        blockedConnects: state.__e2eBlockedAgentConnects ?? 0,
+      };
+    });
+    expect(seen.droppedPings, 'the liveness probe never fired').toBeGreaterThan(0);
+    expect(seen.blockedConnects, 'no P2P transport rebuild was attempted').toBeGreaterThan(0);
+    expect(relayStarted(), 'the Auto route must reach force-relay').toBe(true);
+  }).toPass({ timeout: 90_000 });
 
   await waitForLastLine(page, 'RS-', COUNT, { timeoutMs: 240_000, stallMs: 60_000 });
 

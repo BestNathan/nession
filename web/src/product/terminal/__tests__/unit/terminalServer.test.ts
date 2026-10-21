@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TerminalServerPlugin, decodeTerminalData, terminalServerApi } from '@/product/terminal';
 import { createMockPluginSurface, type MockPluginSurface } from '@/test/mockPluginSurface';
+import { getOrCreateClientId } from '@/platform/socket/clientId';
 
 function b64Bytes(bytes: number[]): string {
   let binary = '';
@@ -576,6 +577,106 @@ describe('TerminalServerPlugin', () => {
 
       expect(staleCb).not.toHaveBeenCalled();
       expect(liveCb).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('ControlLease over Relay (#2157)', () => {
+    it('derives the role from the published holder and the browser client id', () => {
+      const self = getOrCreateClientId();
+      const observed: Array<{ name: string; role: string }> = [];
+      plugin.onControlChanged((name, state) => {
+        observed.push({ name, role: state.role });
+      });
+
+      surface.pushMessage('agent.terminal.control.changed', {
+        session_name: 'work', generation: 4, controller_client_id: 'someone-else',
+      });
+      surface.pushMessage('agent.terminal.control.changed', {
+        session_name: 'work', generation: 5, controller_client_id: self,
+      });
+
+      expect(observed).toEqual([
+        { name: 'work', role: 'observer' },
+        { name: 'work', role: 'controller' },
+      ]);
+      expect(plugin.getControlState('work')).toEqual({
+        sessionName: 'work', role: 'controller', generation: 5, controllerClientId: self,
+      });
+    });
+
+    it('keeps sessions independent and defaults an unknown one to controller', () => {
+      surface.pushMessage('agent.terminal.control.changed', {
+        session_name: 'a', generation: 1, controller_client_id: 'someone-else',
+      });
+      expect(plugin.getControlState('a').role).toBe('observer');
+      expect(plugin.getControlState('b')).toEqual({ role: 'controller', sessionName: 'b' });
+    });
+
+    it('acquires through the relayed Agent wire and records the reply', async () => {
+      const pending = plugin.acquireControl('work');
+      expect(surface.requests.map((request) => request.type)).toEqual([
+        'agent.terminal.control.acquire',
+      ]);
+      expect(surface.requests[0]?.payload).toEqual({ session_name: 'work' });
+
+      surface.resolveNext('agent.terminal.control.acquire', {
+        session_name: 'work', generation: 9, role: 'controller',
+        controller_client_id: getOrCreateClientId(),
+      });
+      await expect(pending).resolves.toEqual({ ok: true, generation: 9, role: 'controller' });
+      expect(plugin.getControlState('work').generation).toBe(9);
+    });
+
+    it('fails closed on a reply without a generation', async () => {
+      const pending = plugin.acquireControl('work');
+      surface.resolveNext('agent.terminal.control.acquire', { session_name: 'work' });
+      await expect(pending).resolves.toEqual({
+        ok: false, error: 'missing control generation in acquire response',
+      });
+    });
+
+    it('seeds the lease from the relay-ready receipt at attach (#2157)', () => {
+      Object.defineProperty(surface, 'physicalGeneration', { value: 3, configurable: true });
+      const observed: string[] = [];
+      plugin.onControlChanged((name, state) => {
+        observed.push(`${name}:${state.role}`);
+      });
+
+      surface.pushMessage('server.session.relay.ready', {
+        session_name: 'work', browser_client_id: 'browser-a',
+        relay_request_id: 'begin-1', route_id: 'aabbccdd-1234-4000-8000-aabbccddeeff',
+        subscriber_generation: 41, stream_epoch: 7,
+        control_role: 'observer', control_generation: 5,
+        controller_client_id: 'browser-b',
+      });
+
+      expect(plugin.getControlState('work')).toEqual({
+        sessionName: 'work', role: 'observer', generation: 5,
+        controllerClientId: 'browser-b',
+      });
+      expect(observed).toEqual(['work:observer']);
+    });
+
+    it('keeps the pre-#2157 default when the receipt states no lease', () => {
+      Object.defineProperty(surface, 'physicalGeneration', { value: 3, configurable: true });
+      surface.pushMessage('server.session.relay.ready', {
+        session_name: 'work', browser_client_id: 'browser-a',
+        relay_request_id: 'begin-1', route_id: 'aabbccdd-1234-4000-8000-aabbccddeeff',
+        subscriber_generation: 41, stream_epoch: 7,
+      });
+      expect(plugin.getControlState('work')).toEqual({ role: 'controller', sessionName: 'work' });
+    });
+
+    it('teardown stops delivering the lease from the released binding', () => {
+      const teardown = plugin.install(surface);
+      const stale = vi.fn();
+      plugin.onControlChanged(stale);
+      teardown();
+
+      surface.pushMessage('agent.terminal.control.changed', {
+        session_name: 'work', generation: 2, controller_client_id: 'x',
+      });
+      expect(stale).not.toHaveBeenCalled();
     });
   });
 
