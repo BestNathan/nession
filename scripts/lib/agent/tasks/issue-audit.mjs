@@ -26,7 +26,16 @@ export function renderIssueAuditPrompt(issue, audit, provider, repository = proc
       issueBodyJson: JSON.stringify(issue.body ?? ''),
       mode,
       scopeInstructions: mode==='tree'
-        ? 'This is one Issue Audit Agent session: review the root and explicitly parent-linked descendants by choosing which Issue to inspect next. Do not dispatch Actions or sub-Agents. You may update only the root using target-bound tools and descendant Issues using relation-checked tools. Never update a closed or unrelated Issue. Max 40 Issues/5 levels. Traverse P1/P2/P3 and every explicit descendant before reporting completion. Use find_related_issues, read_related_issue, review_related_issue, and tree_audit_progress, avoiding duplicate visits. A partial run must be explicitly reported as partial.'
+        ? [
+            'Run ONE existing Issue Audit Agent session with the same tools; no recursive Actions, no new Agent, no background dispatch.',
+            'Algorithm (mandatory, do not stop after reviewing the first layer):',
+            '1. Immediately call read_related_issue(root_number) and review_related_issue(root_number, tier, reason) for the root itself. Root must count as reviewed.',
+            '2. Call find_related_issues(parent_number) for the root. For EVERY returned open child: read_related_issue then review_related_issue, then find_related_issues on that child even if its tier was already correct.',
+            '3. Continue breadth/depth traversal yourself via these tools until tree_audit_progress reports BOTH remaining=[] and unexplored=[]. An already-reviewed node can still have unexplored children.',
+            '4. Never try to edit a closed Issue; closed/foreign references are skipped with explicit reasons by trusted tools. Do not let a closed child block reviews of open descendants.',
+            '5. Only then call publish_tree_audit with a truthful final summary. If you cannot exhaust the tree within 40 Issues or the available session budget, publish Partial / needs review, listing exactly what remains; do NOT write that the audit is complete.',
+            'Use only relation-checked Issue tools for children, and the original target-bound tools for the root. Do not rewrite SC/E2E/Acceptance evidence.'
+          ].join('\\n')
         : 'Review only this fixed target Issue. Limit repository inspection to six focused read/search calls; By turn 8, stop investigating and repair if the contract needs it. Only this Issue may be mutated.',
       riskInstructions: mode==='tree'
         ? 'Classify each Issue individually as scoped, integration or full based on its own behavior and risk; parent full does NOT propagate to its children. Use verified related-Issue tools for children, which retain upgrade-only tier and SC/E2E evidence protections. Read before reviewing, and enumerate the entire explicit tree even for already classified Issues. At completion call publish_tree_audit exactly once, giving a concise factual coverage summary. The tool writes the root Issue report with verified reviewed/updated/unchanged/pending IDs. If your work is partial, publish a Partial report, not a fictitious completion.'
