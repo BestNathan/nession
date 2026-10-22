@@ -41,15 +41,22 @@ const ADMISSION_FIELDS=['schema_version','kind','status','repository','issue',
   'publisher_run_id','publisher_attempt','publisher_intent_sha256',
   'original_worker_run_id','native_checkpoint_commit_sha','expected_file',
   'expected_file_sha256','expected_file_mode'];
+const CANONICAL_ADMISSION_IDENTITY=Object.freeze({
+  kind:'authenticated_reviewer_admission_only',
+  status:'await_native_reviewer',
+  agent_id:'review-cursor-01',
+});
 // Consumers (Reviewer prompt/task/worker) must reject any task that did not
 // come from this exact builder; accepting a hand-built lookalike would let a
-// model or caller choose the reviewed target.
-export function assertAuthenticatedReviewerAdmission(task){
+// model or caller choose the reviewed target. The identity fields are
+// parameterized only for an explicitly-labeled smoke admission; the target,
+// file and Publisher facts are always the same authenticated #2176 facts.
+export function assertReviewerAdmission(task,identity=CANONICAL_ADMISSION_IDENTITY){
+  const expected={...CANONICAL_ADMISSION_IDENTITY,...identity};
   if(!only(task,ADMISSION_FIELDS)||task.schema_version!==1||
-     task.kind!=='authenticated_reviewer_admission_only'||
-     task.status!=='await_native_reviewer'||
+     task.kind!==expected.kind||task.status!==expected.status||
      task.repository!==REPO||task.issue!==1997||
-     task.role!=='reviewer'||task.agent_id!=='review-cursor-01'||
+     task.role!=='reviewer'||task.agent_id!==expected.agent_id||
      task.task!=='review'||
      task.pr_number!==PR_NUMBER||task.target_sha!==PR_SHA||
      task.base_sha_at_publication!==ORIGINAL_MAIN_SHA||
@@ -63,6 +70,9 @@ export function assertAuthenticatedReviewerAdmission(task){
      task.expected_file!==FILE||task.expected_file_mode!==FILE_MODE)
     fail('not an authenticated reviewer admission');
   return task;
+}
+export function assertAuthenticatedReviewerAdmission(task){
+  return assertReviewerAdmission(task);
 }
 
 export function admitOriginalControlledReviewerTarget(params){
@@ -152,5 +162,5 @@ export function admitOriginalControlledReviewerTarget(params){
   };
   // Never claim a Reviewer action: only a future independently authenticated
   // Reviewer Workflow may return a schema-validated changes_requested/approved.
-  return Object.freeze(assertAuthenticatedReviewerAdmission(task));
+  return Object.freeze(assertReviewerAdmission(task));
 }
