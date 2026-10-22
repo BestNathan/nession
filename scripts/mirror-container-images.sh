@@ -3,8 +3,8 @@
 # CI owns image builds/manifests; this script only copies existing release tags.
 set -euo pipefail
 
-if [[ "$#" -ne 4 ]]; then
-  echo "Usage: $0 <source-image> <destination-image> <server-agent-tag-suffix> <ui-tag-suffix>" >&2
+if [[ "$#" -lt 4 || "$#" -gt 5 ]]; then
+  echo "Usage: $0 <source-image> <destination-image> <server-agent-tag-suffix> <ui-tag-suffix> [server|agent|ui]" >&2
   exit 2
 fi
 
@@ -12,6 +12,20 @@ source_image="$1"
 destination_image="$2"
 runtime_version="$3"
 ui_version="$4"
+image_kind="${5:-all}"
+
+case "${image_kind}" in
+  server) tags=("server-${runtime_version}") ;;
+  agent) tags=("agent-${runtime_version}") ;;
+  ui) tags=("ui-${ui_version}") ;;
+  all) tags=("server-${runtime_version}" "agent-${runtime_version}" "ui-${ui_version}") ;;
+  *) echo "ERROR: Invalid image kind: ${image_kind}" >&2; exit 2 ;;
+esac
+
+# Some cross-border registry proxies interrupt the HTTP/2 upload stream with
+# PROTOCOL_ERROR. Use HTTP/1.1 for Go's registry client to avoid this class of
+# transport issue while keeping the existing authenticated Buildx transfer.
+export GODEBUG="${GODEBUG:+${GODEBUG},}http2client=0"
 
 platform_digests() {
   docker buildx imagetools inspect --raw "$1" | jq -ce '
@@ -24,7 +38,7 @@ platform_digests() {
   '
 }
 
-for tag in "server-${runtime_version}" "agent-${runtime_version}" "ui-${ui_version}"; do
+for tag in "${tags[@]}"; do
   source_ref="${source_image}:${tag}"
   destination_ref="${destination_image}:${tag}"
 
@@ -43,8 +57,22 @@ for tag in "server-${runtime_version}" "agent-${runtime_version}" "ui-${ui_versi
   arm64_digest="$(jq -r '.[] | select(.arch == "arm64") | .digest' <<< "${source_platforms}")"
 
   echo "Mirroring two platform manifests: ${source_ref} -> ${destination_ref}"
-  docker buildx imagetools create --tag "${destination_ref}" \
-    "${source_image}@${amd64_digest}" "${source_image}@${arm64_digest}"
+  copied=false
+  for attempt in 1 2 3; do
+    if docker buildx imagetools create --tag "${destination_ref}" \
+      "${source_image}@${amd64_digest}" "${source_image}@${arm64_digest}"; then
+      copied=true
+      break
+    fi
+    if (( attempt < 3 )); then
+      echo "::warning::ACR mirror ${tag} attempt ${attempt}/3 failed; retrying upload"
+      sleep "$((attempt * 15))"
+    fi
+  done
+  if [[ "${copied}" != true ]]; then
+    echo "ERROR: ACR mirror failed for ${tag} after 3 attempts" >&2
+    exit 1
+  fi
 
   # The destination must preserve exactly the selected platform manifest
   # digests (not just their tags or architecture labels).
