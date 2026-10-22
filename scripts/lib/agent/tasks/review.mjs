@@ -2,7 +2,7 @@
 // the Prompt selection and the model-result schema; it never performs a
 // provider call, GitHub/Issue write, Store write, merge or role transition.
 import { renderAgentPrompt } from '../prompt/index.mjs';
-import { assertAuthenticatedReviewerAdmission } from '../reviewer/pr-admission.mjs';
+import { assertReviewerAdmission } from '../reviewer/pr-admission.mjs';
 import { parseModelJson } from './model-json.mjs';
 
 const OUTCOMES=new Set(['approved','changes_requested']);
@@ -29,8 +29,10 @@ function safePath(value){
 
 // Only the host-owned admission supplies identity and target. The model sees
 // exactly what it must review and never an alternative role or approval path.
-export function reviewModelView(admission){
-  assertAuthenticatedReviewerAdmission(admission);
+// `identity` is used only by an explicitly-labeled smoke admission; the
+// canonical callers pass nothing and keep the #2177 cursor contract.
+export function reviewModelView(admission,identity){
+  assertReviewerAdmission(admission,identity);
   return Object.freeze({
     issue: admission.issue,
     pull_request: admission.pr_number,
@@ -42,8 +44,8 @@ export function reviewModelView(admission){
   });
 }
 
-export function renderReviewPrompt(admission){
-  const view=reviewModelView(admission);
+export function renderReviewPrompt(admission,identity){
+  const view=reviewModelView(admission,identity);
   return renderAgentPrompt({
     id:'review',version:'v1',
     context:{contextJson:JSON.stringify(view,null,2)},
@@ -53,8 +55,8 @@ export function renderReviewPrompt(admission){
 // Parse and validate the model verdict. The returned object deliberately binds
 // the admission's Issue/PR/target SHA: a model cannot select another target,
 // author a role, or substitute an approval.
-export function reviewModelResult(admission,raw){
-  const view=reviewModelView(admission);
+export function reviewModelResult(admission,raw,identity){
+  const view=reviewModelView(admission,identity);
   const parsed=parseModelJson(raw,'Reviewer Agent');
   if(!only(parsed,RESULT_FIELDS))fail('unexpected result fields');
   if(!OUTCOMES.has(parsed.outcome))fail('invalid review outcome');
