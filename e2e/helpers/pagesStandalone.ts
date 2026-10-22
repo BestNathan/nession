@@ -25,7 +25,7 @@ const fixture={
     agent_id:'review-cursor-01',role:'acceptor',provider:'cursor',tokens_total:1200,duration_ms:3400,
     observed_at:'2026-10-14T12:00:00Z',verification:'github_run_verified',pr_linkage:'unlinked',
     url:'https://github.com/BestNathan/nession/actions/runs/81'}],pr_references:{status:'available',prs:[{number:1787,url:'https://github.com/BestNathan/nession/pull/1787',relation:'github_cross_reference'}]}}],pulls:[{number:1787,title:'Pages MVP',url:'https://github.com/BestNathan/nession/pull/1787',state:'open',updated_at:'2026-10-14T12:00:00Z',workflow:{head_sha:'a'.repeat(40),ci:{run_id:42,attempt:1,status:'success',url:'https://github.com/BestNathan/nession/actions/runs/42'},e2e:null},review:{status:'available',latest:{review_id:89,commit_sha:'a'.repeat(40),state:'changes_requested',submitted_at:'2026-10-14T12:00:00Z',url:'https://github.com/BestNathan/nession/pull/1787#pullrequestreview-89'}}}]},
- evidence:{stores:[{name:'metrics',purpose:'Repository and Agent telemetry',state:'present',sha:'b'.repeat(40),url:'https://github.com/BestNathan/nession/tree/metrics'},{name:'agent-store',purpose:'Durable Agent checkpoints',state:'missing',sha:null,url:'https://github.com/BestNathan/nession/tree/agent-store'}]}
+ evidence:{stores:[{name:'metrics',purpose:'Repository and Agent telemetry',state:'present',sha:'b'.repeat(40),url:'https://github.com/BestNathan/nession/tree/metrics',updated_at:'2026-10-14T12:00:00Z',freshness:{state:'fresh',age_hours:0},records:42,truncated:false}]}
 };
 // Browser fixture for the independent, source-only workflow definitions UI.
 const topology={

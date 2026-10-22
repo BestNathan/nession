@@ -11,6 +11,7 @@ const base={
   issues:[{number:6,title:'Issue <img src=x onerror=alert(1)>',state:'open',updated_at:now,html_url:'https://evil.com/steal',secret:'oops'}, {number:7,pull_request:{url:'x'},title:'A PR not an Issue'}],
   pulls:[{number:5,title:'PR',state:'open',updated_at:now,html_url:'https://example.com'}],
   refs:{metrics:{state:'present',sha:met},'agent-store':{state:'missing'}},
+  storeMeta:{metrics:{updated_at:now,records:42,truncated:false}},
   meta:{generated_at:now,main_sha:main,metrics_sha:met},
 };
 test('strict sanitized/public schema only, source backed URLs',()=>{
@@ -50,12 +51,34 @@ test('unknown source is unavailable, never zero or trusted integrity',()=>{
   assert.equal(p.agents.summary.cost_observed_runs,null);
   assert.equal(p.work.issues_status,'unavailable');
   assert.equal(p.work.issues.length,0);
-  assert.ok(p.evidence.stores.every(s=>s.state==='unavailable'));
+  assert.equal(p.evidence.stores.length,0,'no ref means no inventory row');
 });
 test('unverified and invalid branch identities never yield present status',()=>{
   const p=makeProjection({...base,refs:{metrics:{state:'present',sha:'tampered'},'agent-store':{state:'present',sha:met}}});
-  assert.equal(p.evidence.stores[0].state,'unavailable');
-  assert.equal(p.evidence.stores.find(s=>s.name==='agent-store').state,'present');
+  assert.equal(p.evidence.stores.some(s=>s.name==='metrics'),false);
+  const store=p.evidence.stores.find(s=>s.name==='agent-store');
+  assert.equal(store.state,'present');
+  assert.equal(store.records,null,'unobserved count is not zero');
+  assert.equal(store.freshness.state,'unavailable');
+});
+test('orphan inventory lists only existing refs with bounded counts and freshness',()=>{
+  const p=validateProjection(makeProjection({...base,refs:{
+    metrics:{state:'present',sha:met},
+    'acceptance-results':{state:'present',sha:'c'.repeat(40)},
+    'task-results':{state:'missing'},
+    'agent-store':{state:'unavailable'},
+  },storeMeta:{
+    metrics:{updated_at:now,records:42,truncated:false},
+    'acceptance-results':{updated_at:'2026-10-01T00:00:00Z',records:5000,truncated:true},
+  }}));
+  assert.deepEqual(p.evidence.stores.map(x=>x.name),['metrics','acceptance-results']);
+  assert.equal(p.evidence.stores[0].records,42);
+  assert.equal(p.evidence.stores[0].truncated,false);
+  assert.equal(p.evidence.stores[0].freshness.state,'fresh');
+  assert.equal(p.evidence.stores[0].updated_at,'2026-10-14T12:00:00.000Z');
+  assert.equal(p.evidence.stores[1].records,5000);
+  assert.equal(p.evidence.stores[1].truncated,true);
+  assert.equal(p.evidence.stores[1].freshness.state,'stale');
 });
 test('independent UI must not import product Web styles/components/tokens',async()=>{
   for(const path of ['../app.js','../styles.css','../index.html']){
