@@ -149,6 +149,25 @@ jobs:
             ${{ runner.temp }}/qwen-developer-metrics/agent-execution-trace.json
           if-no-files-found: warn
           retention-days: 14
+      # SMOKE ONLY: read-only review of the real admitted #2176 target with the
+      # canonical Review Prompt and verdict contract. Not the cursor admission.
+      - name: Exercise Qwen Reviewer with restricted read tools
+        if: matrix.provider == 'qwen'
+        run: |
+          set -euo pipefail
+          claude --help | grep -q -- '--restricted' ||
+            { echo 'Claude CLI lacks required restricted mode; no unsafe fallback' >&2; exit 1; }
+          node scripts/lib/agent/reviewer/qwen-review-canary.mjs run "$RUNNER_TEMP/qwen-review-metrics"
+      - name: Upload Qwen Reviewer canonical telemetry
+        if: always() && matrix.provider == 'qwen'
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-telemetry-provider-smoke-qwen-reviewer-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/qwen-review-metrics/agent-telemetry.json
+            ${{ runner.temp }}/qwen-review-metrics/agent-execution-trace.json
+          if-no-files-found: warn
+          retention-days: 14
       - name: Upload canonical Agent metadata
         if: always()
         uses: actions/upload-artifact@v4
