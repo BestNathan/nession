@@ -8,6 +8,10 @@ on:
     types: [nession-issue-e2e-projected, nession-agent-telemetry-ingested]
   workflow_run:
     workflows: ["CI / Quality Gate", "E2E / Tests"]
+    # PR-only source reconciliation. Main push completion belongs to the
+    # separate Acceptance / Post-Run Waker, not this PR retry workflow.
+    # Filter at event delivery, not with a no-op job after run creation.
+    branches-ignore: [main]
     types: [completed]
   issues:
     types: [closed]
@@ -155,6 +159,14 @@ jobs:
               echo "Legacy Issue #$issue retains existing full-E2E eligibility"
             fi
           done
+  # Acceptance Agent provider policy. `ACCEPTANCE_PROVIDER` selects the
+  # reusable workflow's trusted executor (`cursor` | `deepseek`); unset keeps
+  # the historical default, `cursor`. It is a repository variable rather than a
+  # PR input because every trigger (pull_request_target, push, repository
+  # dispatch, Post-Run Waker) must resolve the same provider, and PR-controlled
+  # values must never choose the write-capable evaluator. An unsupported value
+  # fails closed in `agent-sc-acceptance.yml`; there is no implicit fallback.
+  # Set it to `deepseek` only while the Cursor quota is exhausted.
   pre-merge-acceptance:
     needs: prepare-pre-merge
     if: needs.prepare-pre-merge.outputs.has_requirements == 'true'
@@ -166,7 +178,7 @@ jobs:
     with:
       issue_number: ${{ matrix.issue_number }}
       stage: pre-merge
-      provider: cursor
+      provider: ${{ vars.ACCEPTANCE_PROVIDER || 'cursor' }}
       target_ref: ${{ needs.prepare-pre-merge.outputs.head_sha }}
       deployment: ''
     secrets: inherit
@@ -322,7 +334,7 @@ jobs:
     with:
       issue_number: ${{ matrix.issue_number }}
       stage: ${{ needs.prepare-merged-agent.outputs.stage }}
-      provider: cursor
+      provider: ${{ vars.ACCEPTANCE_PROVIDER || 'cursor' }}
       target_ref: ${{ github.sha }}
       deployment: ''
     secrets: inherit
@@ -342,6 +354,8 @@ jobs:
       pull-requests: read
     outputs:
       target_sha: ${{ steps.select.outputs.target_sha }}
+      source_run_id: ${{ steps.select.outputs.source_run_id }}
+      source_run_attempt: ${{ steps.select.outputs.source_run_attempt }}
       agent_issues: ${{ steps.select.outputs.agent_issues }}
       has_agents: ${{ steps.select.outputs.has_agents }}
     steps:
@@ -382,6 +396,8 @@ jobs:
             "$RUNNER_TEMP/telemetry-wake.json" "$RUNNER_TEMP/provider-source.json" \
             "$GITHUB_WORKSPACE/metrics-store"
           echo "target_sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
+          echo "source_run_id=$SOURCE_RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "source_run_attempt=$SOURCE_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
 
           # Reuse the canonical merged-stage association/method selector.
           issue_numbers="$(node scripts/requirement-acceptance.mjs discover-ref "$SOURCE_SHA")"
@@ -411,8 +427,10 @@ jobs:
     with:
       issue_number: ${{ matrix.issue_number }}
       stage: post-merge
-      provider: cursor
+      provider: ${{ vars.ACCEPTANCE_PROVIDER || 'cursor' }}
       target_ref: ${{ needs.prepare-post-merge-provider-evidence.outputs.target_sha }}
+      provider_source_run_id: ${{ needs.prepare-post-merge-provider-evidence.outputs.source_run_id }}
+      provider_source_run_attempt: ${{ needs.prepare-post-merge-provider-evidence.outputs.source_run_attempt }}
       deployment: ''
     secrets: inherit
 
@@ -420,6 +438,9 @@ jobs:
   # completed run. A dispatch, unlike GITHUB_TOKEN PR edits, can wake Actions.
   # Rerun only the failed Acceptance jobs; no polling or fabricated Pass.
   reconcile-issue-e2e:
+    concurrency:
+      group: acceptance-pr-reconcile
+      cancel-in-progress: false
     if: github.event_name == 'repository_dispatch' && github.event.action == 'nession-issue-e2e-projected'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -477,10 +498,25 @@ jobs:
             [[ "$issue_number" =~ ^[1-9][0-9]*$ ]] || exit 1
             gh api "repos/$GITHUB_REPOSITORY/issues/$issue_number" > "$RUNNER_TEMP/issue-$issue_number.json"
             if jq -e '.body | contains("## E2E Verification")' "$RUNNER_TEMP/issue-$issue_number.json" > /dev/null; then
-              node scripts/issue-e2e-gate.mjs verify "$RUNNER_TEMP/issue-$issue_number.json" "$TARGET_SHA"
-              jq -e --arg digest "$PLAN_DIGEST" '.body | contains("plan " + $digest + ",")' \
-                "$RUNNER_TEMP/issue-$issue_number.json" > /dev/null
-              verified=$((verified + 1))
+              # The canonical Gate distinguishes selected IDs from a valid
+              # explicit-none Issue. The latter has no per-ID E2E Report and
+              # MUST NOT pretend to contain the source Plan digest.
+              verdict="$(node scripts/issue-e2e-gate.mjs verify-json \
+                "$RUNNER_TEMP/issue-$issue_number.json" "$TARGET_SHA")"
+              case "$(jq -r .reason <<< "$verdict")" in
+                selected)
+                  [[ "$(jq -r .required <<< "$verdict")" =~ ^[1-9][0-9]*$ ]] || exit 1
+                  jq -e --arg digest "$PLAN_DIGEST" \
+                    '.body | contains("plan " + $digest + ",")' \
+                    "$RUNNER_TEMP/issue-$issue_number.json" > /dev/null
+                  verified=$((verified + 1))
+                  ;;
+                explicit-none)
+                  [[ "$(jq -r .required <<< "$verdict")" == 0 ]] || exit 1
+                  echo "Issue #$issue_number declares no browser E2E IDs; no Plan receipt required"
+                  ;;
+                *) echo "::error::Unclassified Issue E2E Gate verdict"; exit 1 ;;
+              esac
             fi
           done < <(jq -r '.[]' "$RUNNER_TEMP/issue-refs.json")
           (( verified > 0 )) || { echo 'No verified Issue E2E requirements'; exit 0; }
@@ -504,6 +540,9 @@ jobs:
   # Source Quality/E2E workflow_run completion is the waker for a previously
   # failed (not yet ready) Acceptance run. A single SHA check replaces polling.
   reconcile-completed-quality-e2e:
+    concurrency:
+      group: acceptance-pr-reconcile
+      cancel-in-progress: false
     if: >-
       ${{ github.event_name == 'workflow_run' &&
           github.event.workflow_run.event == 'pull_request' &&
@@ -548,13 +587,28 @@ jobs:
           jq -e --arg sha "$TARGET_SHA" --arg repo "$GITHUB_REPOSITORY" '
             .state == "open" and .head.sha == $sha and .head.repo.full_name == $repo' \
             "$RUNNER_TEMP/pr.json" > /dev/null || exit 0
+          # Only an exact-head, newest-run pair of completed successes can
+          # authorize the existing failed-only Acceptance rerun. Pending is
+          # not Pass; failed and superseded dependencies do not wake an Agent.
+          ./gates/run acceptance-postrun-waker-selftest
           for workflow in ci-quality.yml e2e-tests.yml; do
-            list="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow "$workflow" \
+            file="$(basename "$workflow" .yml)"
+            gh run list --repo "$GITHUB_REPOSITORY" --workflow "$workflow" \
               --commit "$TARGET_SHA" --event pull_request --limit 20 \
-              --json status,conclusion)"
-            jq -e '.[0].status == "completed" and .[0].conclusion == "success"' \
-              <<< "$list" > /dev/null || { echo "Waiting for $workflow completion"; exit 0; }
+              --json databaseId,headSha,event,status,conclusion \
+              > "$RUNNER_TEMP/$file-runs.json"
           done
+          verdict="$(node scripts/acceptance-dependency-state.mjs classify \
+            "$RUNNER_TEMP/ci-quality-runs.json" "$RUNNER_TEMP/e2e-tests-runs.json" "$TARGET_SHA")"
+          state="$(jq -r .state <<< "$verdict")"
+          case "$state" in
+            ready) ;;
+            waiting|blocked|superseded)
+              echo "Acceptance source barrier: $verdict (no premature rerun)" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+              ;;
+            *) echo "::error::Unrecognized dependency barrier state"; exit 1 ;;
+          esac
           node --input-type=module -e '
             import fs from "node:fs";
             import { parsePreMergeIssueNumbers } from "./scripts/requirement-acceptance.mjs";
@@ -581,9 +635,12 @@ jobs:
              ([.pull_requests[].number] | index($pr) != null))] |
             sort_by(.created_at) | last | .id // empty' "$RUNNER_TEMP/acceptance-runs.json")" || exit 0
           [[ "$id" =~ ^[1-9][0-9]*$ ]] || exit 0
-          status="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id" --jq .status)"
-          conclusion="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id" --jq .conclusion)"
-          if [[ "$status" == completed && "$conclusion" == failure ]]; then
+          run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id")"
+          printf '%s\n' "$verdict" > "$RUNNER_TEMP/dependency-barrier.json"
+          printf '%s\n' "$run_json" > "$RUNNER_TEMP/acceptance-target-run.json"
+          replay="$(node scripts/acceptance-dependency-state.mjs replay \
+            "$RUNNER_TEMP/dependency-barrier.json" "$RUNNER_TEMP/acceptance-target-run.json" "$TARGET_SHA")"
+          if [[ "$replay" == true ]]; then
             gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/rerun-failed-jobs"
             echo "Replayed failed Acceptance after both Quality/E2E completion events" >> "$GITHUB_STEP_SUMMARY"
           fi

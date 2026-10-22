@@ -18,6 +18,8 @@ use nession_agent::sync::session_watcher::SessionWatcher;
 use nession_agent::tmux::manager::SessionManager;
 use nession_common::config::ServerConfig;
 use nession_protocol::contracts::agent::v1::AgentMetadata;
+use nession_protocol::contracts::p2p::agent_url_with_credential;
+use nession_protocol::contracts::p2p::v1::{CredentialScope, P2pGrantPayload};
 use nession_server::db::Database;
 use nession_server::server::WebSocketServer;
 use std::sync::Arc;
@@ -1071,4 +1073,700 @@ async fn relay_binds_the_browser_identity_to_the_agent_connection() {
     client_handle.shutdown().await.ok();
     agent_handle.shutdown().await.ok();
     server_handle.abort();
+}
+
+/// #2060 SC-02 / #2120 SC-02: the **real** Agent admits a parser-applied ACK
+/// only from the exact Relay peer and subscription it minted.
+///
+/// The mock-tunnel test proves the Server forwards the wire; this one runs the
+/// whole chain the product runs — browser → Server relay → real Agent → tmux —
+/// and reads the Agent's own verdict back through the same tunnel.
+///
+/// Every fact is Agent-authored: the ready receipt carries the subscription
+/// generation and stream epoch, the output frame carries the stream position,
+/// and the Agent answers each ACK with `ok` or `output_ack_rejected`. The
+/// negatives are the point of the test: a foreign generation, a foreign epoch,
+/// a second renderer generation after the first pinned it, a regressive
+/// cursor, a cursor past the Agent-issued head, and an unsafe JavaScript
+/// integer must all be refused, so none of them can release issued credit.
+#[tokio::test]
+async fn relay_output_applied_ack_is_admitted_only_for_the_agent_minted_subscription() {
+    const BROWSER_ID: &str = "browser-relay-parser-ack-2060";
+    let session_name = unique_session_name("relay-parser-ack");
+
+    // Pre-clean a tmux session from a previous crashed run.
+    SessionManager::new().kill_session(&session_name).await.ok();
+
+    let (server_addr, server_handle, _db_dir) = start_server("test-token").await.unwrap();
+    let (agent_addr, agent_handle, agent_credentials, agent_mutations) =
+        start_agent("relay-parser-ack-agent").await.unwrap();
+
+    let tmux = SessionManager::new();
+    tmux.create_session(&session_name, 80, 24, "/tmp", &[])
+        .await
+        .expect("create tmux session");
+
+    let client_handle = register_agent(
+        server_addr,
+        "relay-parser-ack-agent",
+        "test-token",
+        agent_addr.port(),
+        Arc::clone(&agent_credentials),
+        Arc::clone(&agent_mutations),
+    )
+    .await
+    .unwrap();
+
+    let heartbeat = HeartbeatLoop::new(client_handle.clone(), SessionManager::new(), 1);
+    let heartbeat_shutdown = heartbeat.shutdown_handle();
+    tokio::spawn(async move {
+        let _ = heartbeat.run().await;
+    });
+
+    let watcher = SessionWatcher::new(client_handle.clone(), SessionManager::new(), 1);
+    let watcher_shutdown = watcher.shutdown_handle();
+    tokio::spawn(async move {
+        let _ = watcher.run().await;
+    });
+
+    let (ws, _) = connect_async(format!("ws://{server_addr}"))
+        .await
+        .expect("client connect");
+    let (mut sink, mut stream) = ws.split();
+
+    // The ready receipt is minted only for a browser that authenticated with
+    // its own stable id (`authenticated_browser_id`); a legacy browser gets no
+    // route proof and must stay on the non-credit lane.
+    let auth_req = msg(
+        "server.auth",
+        "auth-parser-ack",
+        serde_json::json!({ "auth_token": "test-token", "client_id": BROWSER_ID }),
+    );
+    let auth_resp = send_and_recv(&mut sink, &mut stream, &auth_req)
+        .await
+        .unwrap();
+    assert_eq!(
+        auth_resp["payload"]["status"], "success",
+        "auth failed: {auth_resp}"
+    );
+
+    let session_id = format!("relay-parser-ack-agent:{session_name}");
+    wait_for_discovered_session(
+        &mut sink,
+        &mut stream,
+        "relay-parser-ack-agent",
+        &session_id,
+        Duration::from_secs(20),
+        "started (1s session watcher polling)",
+    )
+    .await
+    .expect("target tmux session must be visible in server discovery before relay attach");
+
+    let attach_req = msg(
+        "server.session.attach",
+        "attach-parser-ack",
+        serde_json::json!({ "session_id": session_id, "preferred_mode": "relay" }),
+    );
+    let attach_resp = send_and_recv(&mut sink, &mut stream, &attach_req)
+        .await
+        .unwrap();
+    assert_eq!(
+        attach_resp["payload"]["status"], "success",
+        "attach failed: {attach_resp}"
+    );
+
+    let begin_req = msg(
+        "server.session.relay.begin",
+        "begin-parser-ack",
+        serde_json::json!({ "session_id": session_id }),
+    );
+    sink.send(WsMessage::Text(begin_req.to_string()))
+        .await
+        .expect("send begin");
+
+    // One known Agent output event. Sent immediately after begin for the same
+    // reason as the input-ack test: the Plain PTY attach subprocess fails with
+    // EIO when it idles too long before the first write.
+    let input_msg = msg(
+        "agent.terminal.input",
+        "input-parser-ack",
+        serde_json::json!({
+            "session_name": session_name,
+            "data": base64::engine::general_purpose::STANDARD
+                .encode("echo RELAY_PARSER_ACK_MARKER\n"),
+        }),
+    );
+    sink.send(WsMessage::Text(input_msg.to_string()))
+        .await
+        .expect("send terminal.input");
+
+    // Collect the two Agent-authored facts. Their relative order is not part
+    // of the contract: the attach reply is answered before a stream position
+    // exists, output can arrive while the receipt is still in flight.
+    let mut proof: Option<serde_json::Value> = None;
+    let mut positioned: Option<serde_json::Value> = None;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    while (proof.is_none() || positioned.is_none()) && tokio::time::Instant::now() < deadline {
+        match tokio::time::timeout(Duration::from_millis(500), stream.next()).await {
+            Ok(Some(Ok(WsMessage::Text(text)))) => {
+                let parsed: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
+                match parsed["msg_type"].as_str().unwrap_or("") {
+                    "server.session.relay.ready" => proof = Some(parsed),
+                    "agent.terminal.output" => {
+                        if parsed["payload"]["stream_epoch"].is_u64()
+                            && parsed["payload"]["stream_seq"].is_u64()
+                        {
+                            positioned = Some(parsed);
+                        }
+                    }
+                    "error" => panic!("relay error while waiting for proof/output: {parsed}"),
+                    _ => {}
+                }
+            }
+            Ok(Some(Ok(_))) => continue,
+            Ok(Some(Err(e))) => panic!("WS error: {e}"),
+            Ok(None) => panic!("WS stream closed before proof and output arrived"),
+            Err(_) => continue,
+        }
+    }
+    let proof = proof.expect("the Agent-authored relay ready proof must reach the browser");
+    let positioned = positioned.expect("a positioned Agent output event must reach the browser");
+
+    let generation = proof["payload"]["subscriber_generation"]
+        .as_u64()
+        .expect("ready proof must carry the Agent-minted subscriber generation");
+    let epoch = proof["payload"]["stream_epoch"]
+        .as_u64()
+        .expect("ready proof must carry the Agent stream epoch");
+    assert_eq!(
+        proof["payload"]["browser_client_id"], BROWSER_ID,
+        "the receipt must be scoped to this browser: {proof}"
+    );
+    assert_eq!(proof["payload"]["relay_request_id"], "begin-parser-ack");
+    assert_eq!(proof["payload"]["session_name"], session_name);
+    assert_eq!(
+        positioned["payload"]["stream_epoch"].as_u64(),
+        Some(epoch),
+        "Relay must carry the same Agent stream epoch the proof named: {positioned}"
+    );
+    let applied = positioned["payload"]["stream_seq"]
+        .as_u64()
+        .expect("positioned output must carry a stream seq");
+    assert!(applied > 0, "a positioned output event starts at seq 1");
+
+    let ack = |id: &str, generation: u64, epoch: u64, renderer: u64, through: u64| {
+        msg(
+            "agent.terminal.output.applied",
+            id,
+            serde_json::json!({
+                "session_name": session_name,
+                "subscriber_generation": generation,
+                "stream_epoch": epoch,
+                "renderer_generation": renderer,
+                "applied_through": through,
+            }),
+        )
+    };
+    let rejected = |reply: &serde_json::Value| {
+        reply["msg_type"] == "error" && reply["payload"]["code"] == "output_ack_rejected"
+    };
+
+    // The exact peer, subscription, epoch, renderer and contiguous prefix.
+    let ok = send_and_recv(
+        &mut sink,
+        &mut stream,
+        &ack("ack-valid", generation, epoch, 1, applied),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        ok["msg_type"], "ok",
+        "the real Agent must admit the exact parser-applied prefix: {ok}"
+    );
+
+    // The same position again is idempotent credit, not a second release.
+    let duplicate = send_and_recv(
+        &mut sink,
+        &mut stream,
+        &ack("ack-duplicate", generation, epoch, 1, applied),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        duplicate["msg_type"], "ok",
+        "a duplicate parser position is acknowledged without advancing: {duplicate}"
+    );
+
+    // A generation the Agent did not mint for this peer.
+    let wrong_generation = send_and_recv(
+        &mut sink,
+        &mut stream,
+        &ack("ack-wrong-generation", generation + 1, epoch, 1, applied),
+    )
+    .await
+    .unwrap();
+    assert!(
+        rejected(&wrong_generation),
+        "a foreign subscriber generation must not release credit: {wrong_generation}"
+    );
+
+    // The right subscription, a foreign stream timeline.
+    let wrong_epoch = send_and_recv(
+        &mut sink,
+        &mut stream,
+        &ack("ack-wrong-epoch", generation, epoch + 1, 1, applied),
+    )
+    .await
+    .unwrap();
+    assert!(
+        rejected(&wrong_epoch),
+        "a foreign stream epoch must not release credit: {wrong_epoch}"
+    );
+
+    // The first advancing ACK pinned renderer 1; a remount needs a new
+    // subscription, not a second renderer on this one.
+    let stale_renderer = send_and_recv(
+        &mut sink,
+        &mut stream,
+        &ack("ack-stale-renderer", generation, epoch, 2, applied),
+    )
+    .await
+    .unwrap();
+    assert!(
+        rejected(&stale_renderer),
+        "a new renderer generation cannot advance the pinned subscription: {stale_renderer}"
+    );
+
+    // Past the Agent-issued frontier: no credit exists for bytes it never sent.
+    let beyond_issued = send_and_recv(
+        &mut sink,
+        &mut stream,
+        &ack(
+            "ack-beyond-issued",
+            generation,
+            epoch,
+            1,
+            applied + 1_000_000,
+        ),
+    )
+    .await
+    .unwrap();
+    assert!(
+        rejected(&beyond_issued),
+        "an ACK past the issued head must not release credit: {beyond_issued}"
+    );
+
+    // A cursor that walks backwards cannot re-release a credited prefix.
+    let regressive = send_and_recv(
+        &mut sink,
+        &mut stream,
+        &ack(
+            "ack-regressive",
+            generation,
+            epoch,
+            1,
+            applied.saturating_sub(1),
+        ),
+    )
+    .await
+    .unwrap();
+    assert!(
+        rejected(&regressive),
+        "a regressive parser cursor must not release credit: {regressive}"
+    );
+
+    // JavaScript cannot round-trip this integer, so it is not a position.
+    let unsafe_integer = send_and_recv(
+        &mut sink,
+        &mut stream,
+        &ack("ack-unsafe", generation, epoch, 1, 1_u64 << 53),
+    )
+    .await
+    .unwrap();
+    assert!(
+        rejected(&unsafe_integer),
+        "an unsafe wire integer must not release credit: {unsafe_integer}"
+    );
+
+    heartbeat_shutdown.shutdown().await.ok();
+    watcher_shutdown.shutdown().await.ok();
+    tmux.kill_session(&session_name).await.ok();
+    client_handle.shutdown().await.ok();
+    agent_handle.shutdown().await.ok();
+    server_handle.abort();
+}
+
+// ---------------------------------------------------------------------------
+// #2126: one Agent timeline, observed through both routes
+// ---------------------------------------------------------------------------
+
+type ParityStream = futures_util::stream::SplitStream<
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+>;
+
+#[derive(Default)]
+struct RouteObservations {
+    /// (stream epoch, stream seq, decoded text) for positioned output.
+    outputs: Vec<(u64, u64, String)>,
+    /// (stream epoch, stream seq) of authoritative resizes.
+    resizes: Vec<(u64, u64)>,
+}
+
+fn marker_event<'a>(
+    observations: &'a RouteObservations,
+    marker: &str,
+) -> Option<&'a (u64, u64, String)> {
+    observations
+        .outputs
+        .iter()
+        .find(|(_, _, text)| text.contains(marker))
+}
+
+/// Read one route until `done`, recording Agent positions. Frames without a
+/// position (legacy output, bootstraps) cannot be compared and are skipped.
+async fn collect_route(
+    stream: &mut ParityStream,
+    deadline: tokio::time::Instant,
+    done: impl Fn(&RouteObservations) -> bool,
+) -> anyhow::Result<RouteObservations> {
+    let mut observations = RouteObservations::default();
+    while tokio::time::Instant::now() < deadline {
+        match tokio::time::timeout(Duration::from_millis(500), stream.next()).await {
+            Ok(Some(Ok(WsMessage::Text(text)))) => {
+                let frame: serde_json::Value = serde_json::from_str(&text)?;
+                let msg_type = frame
+                    .get("msg_type")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("");
+                let payload = frame.get("payload");
+                match msg_type {
+                    "agent.terminal.output" => {
+                        let Some(payload) = payload else { continue };
+                        // A bootstrap is history, not an event in the stream.
+                        if payload.get("bootstrap").is_some() {
+                            continue;
+                        }
+                        if let (Some(epoch), Some(seq)) = (
+                            payload
+                                .get("stream_epoch")
+                                .and_then(serde_json::Value::as_u64),
+                            payload
+                                .get("stream_seq")
+                                .and_then(serde_json::Value::as_u64),
+                        ) {
+                            let bytes = base64::engine::general_purpose::STANDARD
+                                .decode(
+                                    payload
+                                        .get("data")
+                                        .and_then(serde_json::Value::as_str)
+                                        .unwrap_or(""),
+                                )
+                                .unwrap_or_default();
+                            observations.outputs.push((
+                                epoch,
+                                seq,
+                                String::from_utf8_lossy(&bytes).to_string(),
+                            ));
+                        }
+                    }
+                    "agent.terminal.resize" => {
+                        let payload = payload.unwrap_or(&serde_json::Value::Null);
+                        if let (Some(epoch), Some(seq)) = (
+                            payload
+                                .get("stream_epoch")
+                                .and_then(serde_json::Value::as_u64),
+                            payload
+                                .get("stream_seq")
+                                .and_then(serde_json::Value::as_u64),
+                        ) {
+                            observations.resizes.push((epoch, seq));
+                        }
+                    }
+                    "error" => anyhow::bail!("route error while observing: {frame}"),
+                    _ => {}
+                }
+                if done(&observations) {
+                    return Ok(observations);
+                }
+            }
+            Ok(Some(Ok(_))) => continue,
+            Ok(Some(Err(e))) => return Err(e.into()),
+            Ok(None) => anyhow::bail!("route closed before the expected event"),
+            Err(_) => continue,
+        }
+    }
+    Ok(observations)
+}
+
+/// #2126 SC-01/SC-02: a direct P2P subscriber and a Server-Relay subscriber on
+/// the same Session observe one Agent-assigned timeline.
+///
+/// The two routes are genuinely distinct: the P2P client dials the Agent's own
+/// WebSocket, while the Relay client dials the Server, which opens its own
+/// authenticated Agent socket and forwards frames. Both must report the same
+/// `(streamEpoch, streamSeq)` and the same bytes for the same output event, and
+/// one authoritative resize must consume the same shared ordinal on both.
+///
+/// A Server that renumbered, minted a second sequence, or rewrote the frame
+/// would fail the position equality; a route that dropped or reordered the
+/// shared ordinal would fail the output → resize → output assertion.
+#[tokio::test]
+async fn p2p_and_relay_observe_one_agent_stream_timeline() -> anyhow::Result<()> {
+    const AGENT_ID: &str = "route-parity-agent";
+    const P2P_ID: &str = "p2p-parity-browser";
+    const RELAY_ID: &str = "relay-parity-browser";
+    const MARKER: &str = "ROUTE-PARITY-MARKER-2126";
+    const AFTER: &str = "ROUTE-PARITY-AFTER-2126";
+
+    let session_name = unique_session_name("route-parity");
+    SessionManager::new().kill_session(&session_name).await.ok();
+
+    let (server_addr, server_handle, _db_dir) = start_server("test-token").await?;
+    let (agent_addr, agent_handle, agent_credentials, agent_mutations) =
+        start_agent(AGENT_ID).await?;
+
+    let tmux = SessionManager::new();
+    tmux.create_session(&session_name, 80, 24, "/tmp", &[])
+        .await?;
+
+    let client_handle = register_agent(
+        server_addr,
+        AGENT_ID,
+        "test-token",
+        agent_addr.port(),
+        Arc::clone(&agent_credentials),
+        Arc::clone(&agent_mutations),
+    )
+    .await?;
+
+    let heartbeat = HeartbeatLoop::new(client_handle.clone(), SessionManager::new(), 1);
+    let heartbeat_shutdown = heartbeat.shutdown_handle();
+    tokio::spawn(async move {
+        let _ = heartbeat.run().await;
+    });
+    let watcher = SessionWatcher::new(client_handle.clone(), SessionManager::new(), 1);
+    let watcher_shutdown = watcher.shutdown_handle();
+    tokio::spawn(async move {
+        let _ = watcher.run().await;
+    });
+
+    // ── Direct P2P subscriber ────────────────────────────────────────────
+    let credential = format!("route-parity-credential-{session_name}");
+    let grant = P2pGrantPayload {
+        request_id: "route-parity".to_string(),
+        credential: credential.clone(),
+        agent_id: AGENT_ID.to_string(),
+        session_id: format!("{AGENT_ID}:{session_name}"),
+        scope: CredentialScope::for_attach(&session_name),
+        expires_at: "2999-01-01T00:00:00Z".to_string(),
+    };
+    agent_credentials
+        .grant(AGENT_ID, &grant)
+        .map_err(|refusal| anyhow::anyhow!("agent refused the test grant: {refusal:?}"))?;
+    let p2p_url = agent_url_with_credential(&format!("ws://{agent_addr}"), &credential);
+    let (p2p_ws, _) = connect_async(&p2p_url).await?;
+    let (mut p2p_sink, mut p2p_stream) = p2p_ws.split();
+
+    let auth = msg(
+        "client.auth",
+        "p2p-auth",
+        serde_json::json!({ "auth_token": "", "client_id": P2P_ID }),
+    );
+    let reply = send_and_recv(&mut p2p_sink, &mut p2p_stream, &auth).await?;
+    anyhow::ensure!(reply["msg_type"] == "ok", "p2p auth failed: {reply}");
+
+    let attach = msg(
+        "agent.attach",
+        "p2p-attach",
+        serde_json::json!({
+            "session_name": session_name,
+            "width": 80,
+            "height": 24,
+            "size_known": null,
+            "env_snapshots": [],
+            "needs_bootstrap": true,
+        }),
+    );
+    let attached = send_and_recv(&mut p2p_sink, &mut p2p_stream, &attach).await?;
+    anyhow::ensure!(
+        attached["msg_type"] == "ok",
+        "p2p attach failed: {attached}"
+    );
+    let p2p_epoch = attached["payload"]["stream_epoch"]
+        .as_u64()
+        .ok_or_else(|| anyhow::anyhow!("p2p attach did not state a stream epoch: {attached}"))?;
+
+    // ── Relay subscriber through the Server ──────────────────────────────
+    let (relay_ws, _) = connect_async(format!("ws://{server_addr}")).await?;
+    let (mut relay_sink, mut relay_stream) = relay_ws.split();
+    let auth = msg(
+        "server.auth",
+        "relay-auth",
+        serde_json::json!({ "auth_token": "test-token", "client_id": RELAY_ID }),
+    );
+    let reply = send_and_recv(&mut relay_sink, &mut relay_stream, &auth).await?;
+    anyhow::ensure!(
+        reply["payload"]["status"] == "success",
+        "relay auth failed: {reply}"
+    );
+
+    let session_id = format!("{AGENT_ID}:{session_name}");
+    wait_for_discovered_session(
+        &mut relay_sink,
+        &mut relay_stream,
+        AGENT_ID,
+        &session_id,
+        Duration::from_secs(20),
+        "started (1s session watcher polling)",
+    )
+    .await?;
+
+    let attach = msg(
+        "server.session.attach",
+        "relay-attach",
+        serde_json::json!({ "session_id": session_id, "preferred_mode": "relay" }),
+    );
+    let reply = send_and_recv(&mut relay_sink, &mut relay_stream, &attach).await?;
+    anyhow::ensure!(
+        reply["payload"]["status"] == "success",
+        "relay attach failed: {reply}"
+    );
+
+    let begin = msg(
+        "server.session.relay.begin",
+        "relay-begin",
+        serde_json::json!({ "session_id": session_id }),
+    );
+    relay_sink.send(WsMessage::Text(begin.to_string())).await?;
+    let proof = await_wire(&mut relay_stream, "server.session.relay.ready")
+        .await
+        .ok_or_else(|| anyhow::anyhow!("relay ready receipt did not arrive"))?;
+    let relay_epoch = proof["payload"]["stream_epoch"]
+        .as_u64()
+        .ok_or_else(|| anyhow::anyhow!("relay receipt did not state a stream epoch: {proof}"))?;
+    anyhow::ensure!(
+        relay_epoch == p2p_epoch,
+        "routes disagree on the session stream epoch: p2p={p2p_epoch} relay={relay_epoch}"
+    );
+
+    // Output produced only after both routes are subscribed.
+    let input = msg(
+        "agent.terminal.input",
+        "parity-input",
+        serde_json::json!({
+            "session_name": session_name,
+            "data": base64::engine::general_purpose::STANDARD
+                .encode(format!("echo {MARKER}\n")),
+        }),
+    );
+    p2p_sink.send(WsMessage::Text(input.to_string())).await?;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let p2p_obs = collect_route(&mut p2p_stream, deadline, |o| {
+        marker_event(o, MARKER).is_some()
+    })
+    .await?;
+    let relay_obs = collect_route(&mut relay_stream, deadline, |o| {
+        marker_event(o, MARKER).is_some()
+    })
+    .await?;
+    let p2p_marker = marker_event(&p2p_obs, MARKER).expect("p2p never saw the marker");
+    let relay_marker = marker_event(&relay_obs, MARKER).expect("relay never saw the marker");
+    anyhow::ensure!(
+        (p2p_marker.0, p2p_marker.1) == (relay_marker.0, relay_marker.1),
+        "routes disagree on the same output event's Agent position: \
+         p2p={:?} relay={:?}",
+        (p2p_marker.0, p2p_marker.1),
+        (relay_marker.0, relay_marker.1)
+    );
+    anyhow::ensure!(
+        p2p_marker.2 == relay_marker.2,
+        "routes delivered different bytes for the same Agent event"
+    );
+
+    // Every ordinal both routes saw carries identical bytes: the Server
+    // neither renumbers nor rewrites what the Agent assigned.
+    for (epoch, seq, text) in &p2p_obs.outputs {
+        if let Some((_, _, relay_text)) = relay_obs
+            .outputs
+            .iter()
+            .find(|(seen_epoch, seen_seq, _)| seen_epoch == epoch && seen_seq == seq)
+        {
+            anyhow::ensure!(
+                relay_text == text,
+                "seq {seq} differs across routes: p2p vs relay"
+            );
+        }
+    }
+
+    // ── One authoritative resize, one shared ordinal ─────────────────────
+    let resize = msg(
+        "agent.terminal.resize",
+        "parity-resize",
+        serde_json::json!({ "session_name": session_name, "cols": 100, "rows": 30 }),
+    );
+    p2p_sink.send(WsMessage::Text(resize.to_string())).await?;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let p2p_obs = collect_route(&mut p2p_stream, deadline, |o| !o.resizes.is_empty()).await?;
+    let relay_obs = collect_route(&mut relay_stream, deadline, |o| !o.resizes.is_empty()).await?;
+    let p2p_resize = p2p_obs
+        .resizes
+        .first()
+        .copied()
+        .expect("p2p never saw the recorded resize");
+    let relay_resize = relay_obs
+        .resizes
+        .first()
+        .copied()
+        .expect("relay never saw the recorded resize");
+    anyhow::ensure!(
+        p2p_resize == relay_resize,
+        "routes disagree on the resize's Agent position: p2p={p2p_resize:?} relay={relay_resize:?}"
+    );
+    anyhow::ensure!(
+        p2p_resize.1 > p2p_marker.1,
+        "the resize must be ordered after the preceding output"
+    );
+
+    // Output after the resize advances past its ordinal on both routes.
+    let input = msg(
+        "agent.terminal.input",
+        "parity-after",
+        serde_json::json!({
+            "session_name": session_name,
+            "data": base64::engine::general_purpose::STANDARD
+                .encode(format!("echo {AFTER}\n")),
+        }),
+    );
+    p2p_sink.send(WsMessage::Text(input.to_string())).await?;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let p2p_obs = collect_route(&mut p2p_stream, deadline, |o| {
+        marker_event(o, AFTER).is_some()
+    })
+    .await?;
+    let relay_obs = collect_route(&mut relay_stream, deadline, |o| {
+        marker_event(o, AFTER).is_some()
+    })
+    .await?;
+    let p2p_after = marker_event(&p2p_obs, AFTER).expect("p2p never saw the post-resize output");
+    let relay_after =
+        marker_event(&relay_obs, AFTER).expect("relay never saw the post-resize output");
+    anyhow::ensure!(
+        (p2p_after.0, p2p_after.1) == (relay_after.0, relay_after.1),
+        "routes disagree on the post-resize event position: p2p={:?} relay={:?}",
+        (p2p_after.0, p2p_after.1),
+        (relay_after.0, relay_after.1)
+    );
+    anyhow::ensure!(
+        p2p_after.1 > p2p_resize.1,
+        "output after the resize must advance past its ordinal"
+    );
+
+    heartbeat_shutdown.shutdown().await.ok();
+    watcher_shutdown.shutdown().await.ok();
+    tmux.kill_session(&session_name).await.ok();
+    client_handle.shutdown().await.ok();
+    agent_handle.shutdown().await.ok();
+    server_handle.abort();
+    Ok(())
 }

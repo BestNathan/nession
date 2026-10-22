@@ -1,0 +1,124 @@
+name: Store / Agent Controller Ingest
+
+# MAIN-OWNED ONLY. The request is unprivileged workflow_dispatch; this distinct
+# workflow_run authenticates the producer Run and immutable ZIP before minting
+# the existing Store writer App credential. Never checkout source branch code.
+on:
+  workflow_run:
+    workflows: ["Acceptance / Agent Controller"]
+    branches: [main]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+  issues: read
+
+concurrency:
+  group: store-agent-controller-ingest
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'workflow_dispatch' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.actor.login == 'BestNathan' &&
+      github.event.workflow_run.repository.full_name == 'BestNathan/nession' &&
+      github.event.workflow_run.head_repository.full_name == 'BestNathan/nession'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+      SOURCE_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+      SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - name: Checkout only current trusted main Ingest code
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Require Controller and strict Artifact reader negative fixtures
+        run: |
+          set -euo pipefail
+          node scripts/lib/agent/orchestration/controller-start-selftest.mjs
+          node scripts/lib/agent/orchestration/controller-request-selftest.mjs
+          ./gates/run run-store-integrity
+      - name: Independently verify successful owner/main Run and unique Artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID" > "$RUNNER_TEMP/controller-source.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/controller-artifacts.json"
+          node scripts/lib/agent/orchestration/controller-request.mjs verify-source             "$RUNNER_TEMP/controller-source.json" "$RUNNER_TEMP/controller-artifacts.json"             "$SOURCE_RUN_ID" "$SOURCE_ATTEMPT" "$SOURCE_SHA" > "$RUNNER_TEMP/controller-authority.json"
+      - name: Fetch exact authenticated Artifact ZIP and decode canonical request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          id="$(jq -er .artifact_id "$RUNNER_TEMP/controller-authority.json")"
+          digest="$(jq -er .digest "$RUNNER_TEMP/controller-authority.json")"
+          [[ "$id" =~ ^[1-9][0-9]*$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$id/zip" > "$RUNNER_TEMP/controller-request.zip"
+          node scripts/lib/agent/orchestration/controller-request.mjs consume             "$RUNNER_TEMP/controller-request.zip" "$digest"             "$RUNNER_TEMP/controller-source.json" "$SOURCE_RUN_ID" "$SOURCE_ATTEMPT" "$SOURCE_SHA"             > "$RUNNER_TEMP/controller-authorized-request.json"
+      - name: Check source SHA ancestry and live Issue before giving Store write authority
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          issue="$(jq -er .request.issue "$RUNNER_TEMP/controller-authorized-request.json")"
+          source_sha="$(jq -er .request.sha "$RUNNER_TEMP/controller-authorized-request.json")"
+          [[ "$issue" =~ ^[1-9][0-9]*$ ]]
+          [[ "$source_sha" =~ ^[a-f0-9]{40}$ ]]
+          git cat-file -e "$source_sha^{commit}"
+          git merge-base --is-ancestor "$source_sha" HEAD
+          gh api "repos/$GITHUB_REPOSITORY/issues/$issue" |
+            jq -e --argjson n "$issue" '
+              .number == $n and .state == "open" and (.pull_request | not) and
+              .repository_url == ("https://api.github.com/repos/" + env.GITHUB_REPOSITORY)
+            ' >/dev/null
+      - name: Require existing scoped Run Store Writer App
+        env:
+          APP_ID: ${{ vars.RUN_STORE_WRITER_APP_ID }}
+        run: |
+          set -euo pipefail
+          [[ "$APP_ID" =~ ^[1-9][0-9]*$ ]] || {
+            echo "::error::Existing RUN_STORE_WRITER_APP_ID must be configured"; exit 1;
+          }
+      - name: Mint repository-scoped Store App only after provenance verification
+        id: writer
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.RUN_STORE_WRITER_APP_ID }}
+          private-key: ${{ secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY }}
+          repositories: nession
+          permission-contents: write
+      - name: Commit exactly one immutable Issue Controller root using Store CAS
+        env:
+          STORE_APP_TOKEN: ${{ steps.writer.outputs.token }}
+        run: |
+          set -euo pipefail
+          test -n "$STORE_APP_TOKEN"
+          export AGENT_STORE_CONTROLLER_REMOTE="https://x-access-token:${STORE_APP_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          node scripts/lib/agent/orchestration/controller-start.mjs             --apply "$RUNNER_TEMP/controller-authorized-request.json" > "$RUNNER_TEMP/controller-start-result.json"
+          unset STORE_APP_TOKEN AGENT_STORE_CONTROLLER_REMOTE
+          jq -e '.issue > 0 and .version == 1 and
+            (.first_action_id | test("^[a-f0-9]{64}$")) and
+            (.commit_sha | test("^[a-f0-9]{40}$"))' "$RUNNER_TEMP/controller-start-result.json" >/dev/null
+          {
+            echo "## Durable Controller initialization (independent trusted Run)"
+            echo "- Source Run: $SOURCE_RUN_ID / attempt $SOURCE_ATTEMPT"
+            echo "- Issue: #$(jq -r .issue "$RUNNER_TEMP/controller-start-result.json")"
+            echo "- Created: $(jq -r .created "$RUNNER_TEMP/controller-start-result.json")"
+            echo "- Replayed: $(jq -r .replayed "$RUNNER_TEMP/controller-start-result.json")"
+            echo "- Verified agent-store commit: $(jq -r .commit_sha "$RUNNER_TEMP/controller-start-result.json")"
+            echo "- Pending Developer action: $(jq -r .first_action_id "$RUNNER_TEMP/controller-start-result.json")"
+            echo "- No Agent tool executed and no Worker was dispatched."
+          } >> "$GITHUB_STEP_SUMMARY"

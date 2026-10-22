@@ -232,6 +232,35 @@ function selfTest() {
     head_repository: { full_name: 'BestNathan/nession' },
     path: '.github/workflows/e2e-scenario-smoke.yml' } };
   assert.equal(sourceIdentity(event, 'BestNathan/nession').run_id, 12);
+  // #1690: main Push Scenario production source must be reachable, not only
+  // a PR or an arbitrary-ref manual dispatch. Still observational, never Pass.
+  const producerYml=fs.readFileSync(new URL('../.github/workflows/e2e-scenario-smoke.yml',import.meta.url),'utf8');
+  const ingesterYml=fs.readFileSync(new URL('../.github/workflows/e2e-scenario-ingest.yml',import.meta.url),'utf8');
+  assert.match(producerYml,/^  push:\n    branches: \[main\]/m,
+    'main post-merge terminal Scenario source is not connected');
+  assert.match(producerYml,/^      - '\.github\/workflows\/e2e-scenario-smoke\.yml'$/m,
+    'a change to this workflow must exercise the real scenario');
+  assert.match(ingesterYml,/workflows: \["E2E \/ Scenario Smoke"\]/,
+    'trusted Scenario Ingest must follow the canonical producer');
+  const eligibleGate=ingesterYml.split('  ingest-scenario:')[1]?.split('    runs-on:')[0]??'';
+  assert.match(eligibleGate,/github\.event\.workflow_run\.status == 'completed'/,
+    'Scenario ingester must ignore incomplete/cancelled upstream sources');
+  assert.match(eligibleGate,/github\.event\.workflow_run\.conclusion == 'success'/);
+  assert.match(eligibleGate,/github\.event\.workflow_run\.conclusion == 'failure'/,
+    'Scenario failure observations remain eligible and non-evaluative');
+  assert.match(eligibleGate,/github\.event\.workflow_run\.repository\.full_name == github\.repository/);
+  assert.match(eligibleGate,/github\.event\.workflow_run\.head_repository\.full_name == github\.repository/);
+  assert.doesNotMatch(eligibleGate,/head_branch == 'main'|event == 'push'/,
+    'do not suppress eligible PR/dispatch Scenario observations');
+  assert.equal(sourceIdentity({...event,workflow_run:{...event.workflow_run,conclusion:'failure'}},
+    'BestNathan/nession').conclusion,'failure');
+  for(const conclusion of ['cancelled','skipped','timed_out',null])
+    assert.throws(()=>sourceIdentity({...event,workflow_run:{...event.workflow_run,conclusion}},
+      'BestNathan/nession'),/not a completed/);
+  const mainEvent={workflow_run:{...event.workflow_run,
+    event:'push',head_branch:'main'}};
+  assert.equal(sourceIdentity(mainEvent,'BestNathan/nession').event,'push');
+  assert.equal(sourceIdentity(mainEvent,'BestNathan/nession').branch,'main');
   assert.equal(sourceIdentity({ workflow_run: { ...event.workflow_run,
     path: 'BestNathan/nession/.github/workflows/e2e-scenario-smoke.yml' } }, 'BestNathan/nession').run_id, 12);
   for (const path of [undefined, '', 'other/.github/workflows/e2e-scenario-smoke.yml',

@@ -57,7 +57,15 @@ first_available_seq?: number | null,
  * means the caller is already at the head — and stating it is what keeps
  * that ambiguity off the wire.
  */
-complete?: boolean | null, events: Array<TerminalStreamEventPayload>, };
+complete?: boolean | null, 
+/**
+ * Source-side recovery verdict. A same-epoch evicted ring requires a
+ * checkpoint rather than handing an unsafe suffix to the caller. Epoch
+ * mismatch cannot be answered by the current session at all.
+ * Omitted only by legacy providers; it must never mean `complete`.
+ */
+recovery?: TerminalResumeRecovery | null, events: Array<TerminalStreamEventPayload>, };
+export type TerminalResumeRecovery = "complete" | "checkpoint-required" | "unavailable";
 export type TerminalStreamEventPayload = { "kind": "output", session_name: string, stream_epoch: number, stream_seq: number, data: string, } | { "kind": "resize", session_name: string, stream_epoch: number, stream_seq: number, cols: number, rows: number, };
 
 // ── Operations ──
@@ -101,5 +109,12 @@ first_available_seq?: number | null,
  * means the caller is already at the head — and stating it is what keeps
  * that ambiguity off the wire.
  */
-complete?: boolean | null, events: Array<TerminalStreamEventPayload>, };
+complete?: boolean | null, 
+/**
+ * Source-side recovery verdict. A same-epoch evicted ring requires a
+ * checkpoint rather than handing an unsafe suffix to the caller. Epoch
+ * mismatch cannot be answered by the current session at all.
+ * Omitted only by legacy providers; it must never mean `complete`.
+ */
+recovery?: TerminalResumeRecovery | null, events: Array<TerminalStreamEventPayload>, };
 

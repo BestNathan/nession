@@ -2,7 +2,9 @@ name: Agent / Issue Audit
 
 on:
   issues:
-    types: [opened, edited, reopened]
+    types: [opened, edited, reopened, labeled, unlabeled]
+  issue_comment:
+    types: [created]
   workflow_dispatch:
     inputs:
       issue_number:
@@ -31,7 +33,7 @@ env:
 
 concurrency:
   group: issue-audit-${{ github.event.issue.number || inputs.issue_number || github.run_id }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   contract:
@@ -41,9 +43,10 @@ jobs:
       issues: read
     outputs:
       issue_number: ${{ steps.target.outputs.issue_number }}
-      needs_agent: ${{ steps.contract.outputs.needs_agent }}
+      needs_agent: ${{ steps.tier.outputs.needs_agent }}
       allow_agent: ${{ steps.target.outputs.allow_agent }}
       provider: ${{ steps.target.outputs.provider }}
+      mode: ${{ steps.target.outputs.mode }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -57,10 +60,25 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           EVENT_ISSUE: ${{ github.event.issue.number }}
           EVENT_ASSOCIATION: ${{ github.event.issue.author_association }}
+          EVENT_ACTOR: ${{ github.actor }}
+          EVENT_SENDER_LOGIN: ${{ github.event.sender.login }}
+          EVENT_SENDER_TYPE: ${{ github.event.sender.type }}
+          EVENT_ACTION: ${{ github.event.action }}
+          EVENT_ISSUE_AUTHOR: ${{ github.event.issue.user.login }}
+          REPO_OWNER: ${{ github.repository_owner }}
           INPUT_ISSUE: ${{ inputs.issue_number }}
           INPUT_PROVIDER: ${{ inputs.provider }}
         run: |
           set -euo pipefail
+          if [[ "${EVENT_NAME}" == "issue_comment" ]]; then
+            # The trusted main-owned command parser validates exact body,
+            # author association, sender identity and non-PR, open Issue.
+            # Rejected comments are a no-op with no Agent credentials.
+            node scripts/issue-audit-command.mjs resolve \
+              "$GITHUB_EVENT_PATH" "$GITHUB_REPOSITORY" "$GITHUB_ACTOR"
+            exit 0
+          fi
+          echo "mode=single" >> "$GITHUB_OUTPUT"
           if [[ "${EVENT_NAME}" == "workflow_dispatch" ]]; then
             issue_number="${INPUT_ISSUE}"
             allow_agent=true
@@ -68,10 +86,21 @@ jobs:
           else
             issue_number="${EVENT_ISSUE}"
             provider=cursor
-            case "${EVENT_ASSOCIATION}" in
-              OWNER|MEMBER|COLLABORATOR) allow_agent=true ;;
-              *) allow_agent=false ;;
-            esac
+            # Never trust issue.author_association as the editor identity.
+            # A collaborator opening their *own* Issue retains the normal
+            # automatic path; editors other than the Owner use /audit comment.
+            allow_agent=false
+            if [[ "${EVENT_SENDER_LOGIN}" == "${EVENT_ACTOR}" &&
+                  "${EVENT_SENDER_TYPE}" == User ]]; then
+              if [[ "${EVENT_ACTOR}" == "${REPO_OWNER}" ]]; then
+                allow_agent=true
+              elif [[ "${EVENT_ACTION}" == opened &&
+                      "${EVENT_ISSUE_AUTHOR}" == "${EVENT_ACTOR}" ]]; then
+                case "${EVENT_ASSOCIATION}" in
+                  OWNER|MEMBER|COLLABORATOR) allow_agent=true ;;
+                esac
+              fi
+            fi
           fi
 
           if ! [[ "${issue_number}" =~ ^[0-9]+$ ]] || [[ "${issue_number}" -le 0 ]]; then
@@ -88,9 +117,11 @@ jobs:
           echo "provider=${provider}" >> "${GITHUB_OUTPUT}"
 
       - name: Self-test Issue Contract
+        if: github.event_name != 'issue_comment' || steps.target.outputs.authorized == 'true'
         run: ./gates/run issue-contract-selftest
 
       - name: Audit deterministic Issue Contract
+        if: github.event_name != 'issue_comment' || steps.target.outputs.authorized == 'true'
         id: contract
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -138,13 +169,45 @@ jobs:
               ;;
           esac
 
+      # Structurally valid Issues still require tier assessment on trusted edits.
+      - name: Select requirement-risk reassessment
+        if: github.event_name != 'issue_comment' || steps.target.outputs.authorized == 'true'
+        id: tier
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ steps.target.outputs.issue_number }}
+          CONTRACT_NEEDS_AGENT: ${{ steps.contract.outputs.needs_agent }}
+          ALLOW_AGENT: ${{ steps.target.outputs.allow_agent }}
+          EVENT_ACTION: ${{ github.event.action }}
+          EVENT_LABEL: ${{ github.event.label.name }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          tier_count="$(gh api "repos/$GITHUB_REPOSITORY/issues/$ISSUE_NUMBER" --jq '[.labels[].name | select(. == "verification:scoped" or . == "verification:integration" or . == "verification:full")] | length')"
+          [[ "$tier_count" =~ ^[0-9]+$ ]] || exit 1
+          if (( tier_count > 1 )); then
+            echo "::error::Conflicting verification tier labels; trusted owner must resolve"
+            exit 1
+          fi
+          needs="${CONTRACT_NEEDS_AGENT}"
+          if [[ "$ALLOW_AGENT" == true ]]; then
+            if (( tier_count == 0 )) || [[ "$EVENT_NAME" == workflow_dispatch || "$EVENT_NAME" == issue_comment ]] ||
+               [[ "$EVENT_ACTION" == edited ]] ||
+               { [[ "$EVENT_ACTION" == labeled || "$EVENT_ACTION" == unlabeled ]] &&
+                 [[ "$EVENT_LABEL" == verification:* ]]; }; then
+              needs=true
+            fi
+          fi
+          echo "needs_agent=$needs" >> "$GITHUB_OUTPUT"
+          echo "Risk tier labels=$tier_count, needs_agent=$needs" >> "$GITHUB_STEP_SUMMARY"
+
   agent:
     needs: contract
     if: >-
       (needs.contract.outputs.needs_agent == 'true' && needs.contract.outputs.allow_agent == 'true') ||
       (github.event_name == 'workflow_dispatch' && inputs.simulate_missing_provider_config == true)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: ${{ needs.contract.outputs.mode == 'tree' && 60 || 20 }}
     environment: ${{ needs.contract.outputs.provider }}
     permissions:
       contents: read
@@ -157,13 +220,15 @@ jobs:
       ISSUE_AUDIT_PROVIDER: ${{ needs.contract.outputs.provider }}
       ISSUE_AUDIT_ALLOW_AGENT: 'true'
       ISSUE_AUDIT_TRIGGER: ${{ github.event_name }}
+      ISSUE_AUDIT_MODE: ${{ needs.contract.outputs.mode || 'single' }}
+      ISSUE_AUDIT_REEVALUATE_TIER: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'issue_comment' || github.event.action == 'edited' || github.event.action == 'labeled' || github.event.action == 'unlabeled' }}
 
       CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
       CURSOR_MODEL: ${{ vars.CURSOR_MODEL || 'composer-2.5' }}
       CURSOR_MODEL_FAST: ${{ vars.CURSOR_MODEL_FAST || 'true' }}
       CURSOR_SDK_VERSION: ${{ vars.CURSOR_SDK_VERSION || 'latest' }}
 
-      ISSUE_AUDIT_MAX_TURNS: ${{ vars.ISSUE_AUDIT_MAX_TURNS || '20' }}
+      ISSUE_AUDIT_MAX_TURNS: ${{ needs.contract.outputs.mode == 'tree' && '120' || (vars.ISSUE_AUDIT_MAX_TURNS || '20') }}
       ISSUE_AUDIT_CLAUDE_MODEL: ${{ vars.ISSUE_AUDIT_CLAUDE_MODEL || 'claude-sonnet-5' }}
       ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
       ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}

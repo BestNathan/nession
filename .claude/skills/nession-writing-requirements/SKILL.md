@@ -7,7 +7,9 @@ description: Use when creating/updating Nession Requirement or Bug GitHub issues
 
 This Skill owns **issue structure and requirement capture**. It does not own implementation, Gate semantics, or execution of acceptance.
 
-The optional, constrained `## Acceptance Plan` schema (`when × branch/environment × method`) is **implemented** and validated by `scripts/acceptance-plan.mjs`, `scripts/issue-contract.mjs`, and Requirement Acceptance. A legacy `Stage` Acceptance Report remains mandatory for backward compatibility. The full deployed-environment trigger and complete replacement of stages are **not implemented**. Keep new and historical Issue semantics explicit.
+**New Requirement authoring:** use `Success Criteria` for observable outcomes, `Acceptance Plan` for `when × branch/environment × method`, and a three-column `Acceptance Report` for `Result × Evidence`. **Do not duplicate Stage in new Reports.** Compatibility stages are derived from the Plan by `scripts/acceptance-plan.mjs`. Existing Issues without a Plan or with an explicit four-column Report remain unchanged. Production `when: deployed` requires separate authenticated deployment identity and is not inferred from a main merge.
+
+See `docs/architecture/acceptance-sc-format.md` for canonical examples and migration rules.
 
 - implementation -> `nession-development`
 - acceptance execution -> `nession-acceptance`
@@ -15,9 +17,24 @@ The optional, constrained `## Acceptance Plan` schema (`when × branch/environme
 
 The executable structural owner is `scripts/issue-contract.mjs`.
 
-For newly adopted Issue contracts, declare **E2E Verification** under two headings `### New` and `### Regression`. Each contains `- <filename-stem>` from `e2e/tests/**/*.spec.ts` or `- none: <concrete explanation>`. E2E Report has `ID | Type | Result | Evidence`, one row per required ID, and is trusted execution output, never an author-controlled success signal. Historical Issues without either E2E section remain accepted. Runtime E2E execution is CI-only; exact file-ID registry #1700 and per-Issue execution #1702 remain separate responsibilities.
+For new Issues, add **E2E Verification** with `### New` and `### Regression`; each contains a stable filename stem from `e2e/tests/**/*.spec.ts` or `- none: <specific reason>`. **E2E Report** has `ID | Type | Result | Evidence`; only trusted execution can mark Pass. Historical Issues lacking both sections remain supported. This is independent of the canonical v2 SC Acceptance Plan and Report.
 
-Developer/Reviewer Agent **may suggest** new E2E IDs, but may not mark E2E evidence as Pass or remove required tests. Use the typed `scripts/issue-e2e-proposal.mjs` contract to produce an auditable Issue **comment** with E2E ID list, role, justification, and current declaration digest; the comment alone never changes required tests. Only a **trusted reviewer-approved updater**, after checking the current Issue digest and the exact head/base catalog, may apply additions and generate new Pending E2E Report rows. The trusted `scripts/issue-e2e-gate.mjs` contract checks each Pass against the exact SHA and declaration digest; missing or stale evidence cannot count as Pass.
+Developer/Reviewer Agents may submit typed, auditable proposals using `scripts/issue-e2e-proposal.mjs` (Issue comment only). A trusted approval flow must validate the current declaration digest and exact head/base test catalog before adding new Pending obligations. Untrusted Agent Issue-edit tools may not alter required E2E IDs or result/evidence fields. Only `scripts/issue-e2e-gate.mjs` accepts authenticated exact-SHA proof. No permanent source-code→E2E mapping is maintained.
+
+
+
+## Verification tiers and SC cost policy (canonical)
+
+Every Requirement or Bug may have **exactly one** of:
+- `verification:scoped` (L1, default for legacy unlabelled Issues): the affected Quality Gates, Issue-selected E2E IDs and source-aligned Acceptance, ordinarily at PR HEAD.
+- `verification:integration` (L2): the above plus bounded, explicitly named cross-component Cases; merged-SHA checks only for invariants that genuinely require integration.
+- `verification:full` (L3): a critical parent Requirement, major migration, security/release boundary or explicitly authorized system milestone; pin the **full-regression obligation to a specific milestone and SHA**. Do **not** propagate a parent's L3 to every child PR that only references it.
+
+The Issue Audit Agent should assess scope, touched components, trust/security impact, failure recovery, protocol compatibility, release scope and the actual SC/E2E plan; give reasons for a proposed tier. A trusted main-owned verification policy, not mutable labels or LLM prose, controls execution. A GitHub label is not a signed test result, a permission to dispatch an AI Worker, or a bypass for required deterministic checks.
+
+**Do not create boilerplate Success Criteria** requiring "merged SHA Full Quality + Full E2E + all Cases + Orchestrator green" for ordinary children. Default to `when: pr` and source-aligned relevant evidence. `when: merged` describes the point where a *specific invariant* becomes provable; it **does not imply Full E2E**. Only explicit L3 milestones require authenticated all-ID Full Regression. Missing or inapplicable Full Regression is `Not Required`, never a fabricated `Full Pass`. Preserve meaningful historical SC IDs and evidence; don't erase failed or pending results to relabel an Issue.
+
+Issue `ai:enabled` remains a separate Worker execution authorization. Verification tiers never confer Worker or Store permissions.
 
 ## 1. Classify first
 
@@ -60,9 +77,9 @@ Title:
 Requirement: <concise outcome>
 ```
 
-Body must contain:
+Body must contain the **canonical v2 authoring format**:
 
-```markdown
+````markdown
 ## Requirements: <Topic>
 
 <problem, desired behavior, constraints, design decisions>
@@ -72,12 +89,25 @@ Body must contain:
 - [ ] SC-01 <observable criterion>
 - [ ] SC-02 <observable criterion>
 
+## Acceptance Plan
+
+```yaml
+acceptance:
+  SC-01:
+    when: pr
+    method: agent
+  SC-02:
+    when: merged
+    branch: staging
+    method: case
+```
+
 ## Acceptance Report
 
-| Criterion | Stage | Result | Evidence |
-|---|---|---|---|
-| SC-01 | pre-merge | Pending | implementation pending |
-| SC-02 | staging | Pending | implementation pending |
+| Criterion | Result | Evidence |
+|---|---|---|
+| SC-01 | Pending | awaiting exact PR head SHA Agent proof |
+| SC-02 | Pending | awaiting merged staging SHA E2E Case proof |
 
 ## Product alignment
 
@@ -88,15 +118,15 @@ Body must contain:
 
 ---
 **Status:** Draft | In Discussion | Approved
-```
+````
 
-Every Success Criterion has a stable `SC-xx` ID and exactly one Acceptance Report row.
+Every `SC-xx` has a stable ID, exactly one Plan entry, and exactly one Report row. Define the timing and proof method **once in the Plan**. The Report and SC checkbox are trusted projections, not alternative sources of proof configuration.
 
-Stages are `pre-merge`, `staging`, or `post-merge`.
+The Plan supports `when: pr | merged | deployed` and `method: agent | case`; `merged` requires `branch: staging | main`, while `deployed` requires `environment`. The runner compatibility stage derives from the Plan (`pr → pre-merge`, merged staging → staging, merged main/deployed → post-merge), **but a main merge is never production deployment evidence**.
 
-Optionally, a Requirement may include one fenced `yaml` block under `## Acceptance Plan` with `acceptance.SC-xx.{when,method,branch|environment}`. If present it must cover **all** SCs, agree with the still-required legacy report Stage, and use `method: agent|case`. The constrained parser and its migration rules belong to `scripts/acceptance-plan.mjs`; do not infer a production deployment merely from `post-merge`. Absence of this plan retains historic behavior.
+Historical four-column Reports (`Criterion | Stage | Result | Evidence`) remain readable and must agree with a Plan if one is present. Historical three-column Reports without a Plan continue to mean `staging`; do not infer a new proof method for them. Do not rewrite old evidence merely to normalize Markdown.
 
-Results are `Pending`, `Pass`, `Fail`, or justified `N/A`.
+Results are `Pending`, `Pass`, `Fail`, or justified `N/A`; infrastructure errors are separately recorded.
 
 ## 4. Good Success Criteria
 

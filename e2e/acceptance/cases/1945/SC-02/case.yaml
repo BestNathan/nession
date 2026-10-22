@@ -1,0 +1,11 @@
+schema_version: 1
+issue: 1945
+criterion: SC-02
+stage: post-merge
+runtime: full-stack-local
+# Read-only deterministic control-plane proof: no browser state.
+isolation: shared
+verifiers:
+  - type: runtime
+    entry: verify.cjs
+result_policy: all-pass

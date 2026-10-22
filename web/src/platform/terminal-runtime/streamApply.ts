@@ -11,9 +11,15 @@ export type TerminalStreamEvent =
   | { kind: 'output'; streamEpoch: number; streamSeq: number; data: string }
   | { kind: 'resize'; streamEpoch: number; streamSeq: number; cols: number; rows: number };
 
+/** Agent-assigned position at stream delivery, NOT an xterm parser-applied ACK. */
+export interface TerminalStreamPosition {
+  streamEpoch: number;
+  streamSeq: number;
+}
+
 export interface StreamApplyHandlers {
-  onOutput: (data: Uint8Array) => void;
-  onResize: (cols: number, rows: number) => void;
+  onOutput: (data: Uint8Array, position?: TerminalStreamPosition) => void;
+  onResize: (cols: number, rows: number, position?: TerminalStreamPosition) => void;
 }
 
 /** Apply ordered stream events from `agent.terminal.stream.resume` (#1094). */
@@ -22,10 +28,14 @@ export function applyTerminalStreamEvents(
   handlers: StreamApplyHandlers,
 ): void {
   for (const event of events) {
+    const position: TerminalStreamPosition = {
+      streamEpoch: event.streamEpoch,
+      streamSeq: event.streamSeq,
+    };
     if (event.kind === 'output') {
-      handlers.onOutput(decodeBase64Bytes(event.data));
+      handlers.onOutput(decodeBase64Bytes(event.data), position);
     } else {
-      handlers.onResize(event.cols, event.rows);
+      handlers.onResize(event.cols, event.rows, position);
     }
   }
 }

@@ -5,6 +5,7 @@ export function readAttachControlFields(payload: unknown): {
   controllerClientId?: string;
   streamEpoch?: number;
   streamCursor?: number;
+  subscriberGeneration?: number;
   inputEpoch?: number;
   inputAppliedThrough?: number;
 } {
@@ -26,6 +27,9 @@ export function readAttachControlFields(payload: unknown): {
       typeof p.controller_client_id === 'string' ? p.controller_client_id : undefined,
     streamEpoch: typeof p.stream_epoch === 'number' ? p.stream_epoch : undefined,
     streamCursor: typeof p.stream_cursor === 'number' ? p.stream_cursor : undefined,
+    subscriberGeneration:
+      Number.isSafeInteger(p.subscriber_generation) && (p.subscriber_generation as number) > 0
+        ? p.subscriber_generation as number : undefined,
     // Absent, never zero: an agent built before the input contract states
     // neither field, and "I have no position" is a different answer from "my
     // position is zero" — the first is why a client keeps sending unsequenced

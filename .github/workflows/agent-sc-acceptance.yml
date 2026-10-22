@@ -61,6 +61,14 @@ on:
         required: false
         default: ''
         type: string
+      provider_source_run_id:
+        required: false
+        default: ''
+        type: string
+      provider_source_run_attempt:
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -84,7 +92,7 @@ jobs:
       issues: read
       pull-requests: read
     outputs:
-      criteria_count: ${{ steps.prepare.outputs.criteria_count }}
+      criteria_count: ${{ steps.reuse.outputs.criteria_count }}
       source: ${{ steps.source.outputs.source }}
     env:
       ISSUE_NUMBER: ${{ inputs.issue_number }}
@@ -93,6 +101,8 @@ jobs:
       TARGET_REF: ${{ inputs.target_ref }}
       DEPLOYMENT: ${{ inputs.deployment }}
       DETERMINISTIC_RESULT_JSON: ${{ inputs.deterministic_result_json }}
+      PROVIDER_SOURCE_RUN_ID: ${{ inputs.provider_source_run_id }}
+      PROVIDER_SOURCE_RUN_ATTEMPT: ${{ inputs.provider_source_run_attempt }}
 
       CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
       CURSOR_MODEL: ${{ vars.CURSOR_MODEL || 'composer-2.5' }}
@@ -126,6 +136,14 @@ jobs:
           # depth-1 leaves only the commit SHA in .git/shallow and makes
           # exact-source merge/parent proofs incorrectly Pending.
           fetch-depth: 0
+
+      - name: Checkout immutable authenticated Provider evidence
+        if: inputs.provider_source_run_id != '' || (inputs.stage == 'post-merge' && inputs.issue_number == 1749)
+        uses: actions/checkout@v4
+        with:
+          ref: metrics
+          path: provider-metrics
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -177,6 +195,25 @@ jobs:
           echo "criteria_count=${count}" >> "${GITHUB_OUTPUT}"
           echo "has_criteria=$([[ "${count}" -gt 0 ]] && echo true || echo false)" >> "${GITHUB_OUTPUT}"
 
+      # The Issue row is only a lookup hint. Before skipping expensive Agent
+      # work, verify the prior completed trusted run and immutable attempt artifact.
+      # Missing/untrusted proof leaves the SC outstanding (fail-open to evaluation).
+      - name: Reuse authenticated prior Agent SC results
+        id: reuse
+        working-directory: trusted
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Caller-supplied deterministic results must preserve their full selection.
+          if [[ -z "${DETERMINISTIC_RESULT_JSON}" ]]; then
+            node scripts/acceptance-reuse.mjs select "${RUNNER_TEMP}/acceptance-context.json"
+          fi
+          count="$(jq '.criteria | length' "${RUNNER_TEMP}/acceptance-context.json")"
+          echo "criteria_count=${count}" >> "${GITHUB_OUTPUT}"
+          echo "has_criteria=$([[ "${count}" -gt 0 ]] && echo true || echo false)" >> "${GITHUB_OUTPUT}"
+
       - name: Use supplied deterministic evidence
         if: inputs.deterministic_result_json != ''
         run: |
@@ -184,11 +221,11 @@ jobs:
           printf '%s\n' "${DETERMINISTIC_RESULT_JSON}" > "${RUNNER_TEMP}/acceptance-raw.json"
 
       - name: Produce empty result when requested stage has no criteria
-        if: inputs.deterministic_result_json == '' && steps.prepare.outputs.has_criteria == 'false'
+        if: inputs.deterministic_result_json == '' && steps.reuse.outputs.has_criteria == 'false'
         run: printf '%s\n' '{"criteria":[]}' > "${RUNNER_TEMP}/acceptance-raw.json"
 
       - name: Verify selected provider configuration
-        if: inputs.deterministic_result_json == '' && steps.prepare.outputs.has_criteria == 'true'
+        if: inputs.deterministic_result_json == '' && steps.reuse.outputs.has_criteria == 'true'
         run: |
           set -euo pipefail
           case "${ACCEPTANCE_PROVIDER}" in
@@ -211,7 +248,7 @@ jobs:
           esac
 
       - name: Install selected provider runtime
-        if: inputs.deterministic_result_json == '' && steps.prepare.outputs.has_criteria == 'true'
+        if: inputs.deterministic_result_json == '' && steps.reuse.outputs.has_criteria == 'true'
         run: |
           set -euo pipefail
           case "${ACCEPTANCE_PROVIDER}" in
@@ -230,14 +267,14 @@ jobs:
           CLAUDE_CODE_VERSION: ${{ vars.CLAUDE_CODE_VERSION || 'latest' }}
 
       - name: Run read-only Acceptance Agent
-        if: inputs.deterministic_result_json == '' && steps.prepare.outputs.has_criteria == 'true'
+        if: inputs.deterministic_result_json == '' && steps.reuse.outputs.has_criteria == 'true'
         working-directory: trusted
         run: |
           set -euo pipefail
           node scripts/acceptance-agent.mjs             "${RUNNER_TEMP}/acceptance-context.json"             "${ACCEPTANCE_PROVIDER}"             "${GITHUB_WORKSPACE}/workspace"             "${RUNNER_TEMP}/acceptance-raw.json"             "${RUNNER_TEMP}/agent-telemetry.json"
 
       - name: Upload canonical Agent telemetry
-        if: always() && inputs.deterministic_result_json == '' && steps.prepare.outputs.has_criteria == 'true'
+        if: always() && inputs.deterministic_result_json == '' && steps.reuse.outputs.has_criteria == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: agent-telemetry-requirement-acceptance-${{ inputs.issue_number }}-${{ inputs.stage }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -253,7 +290,7 @@ jobs:
         run: |
           if [[ -n "${DETERMINISTIC_RESULT_JSON}" ]]; then
             source=deterministic-caller
-          elif [[ "${{ steps.prepare.outputs.has_criteria }}" == "false" ]]; then
+          elif [[ "${{ steps.reuse.outputs.has_criteria }}" == "false" ]]; then
             source=no-criteria
           else
             source="agent-${ACCEPTANCE_PROVIDER}"

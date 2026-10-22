@@ -1,4 +1,5 @@
 import type { TerminalBootstrap } from '../bootstrap';
+import type { TerminalStreamPosition } from '../streamApply';
 
 /**
  * What an attach said about the agent's input cursor (#1307).
@@ -59,8 +60,13 @@ export interface TerminalTransport {
    * truncated one is not a history the consumer may replace its buffer with
    * (#1305) — see {@link TerminalBootstrap}.
    */
-  onOutput: ((data: Uint8Array, bootstrap?: TerminalBootstrap) => void) | null;
-  onResize: ((cols: number, rows: number) => void) | null;
+  /**
+   * Optional Agent-assigned stream position when StreamReconciler delivered
+   * the event. This is *not* parser applied, continuity-proof or an ACK.
+   * Relay / legacy bootstrap / level resize have no position yet (#1938).
+   */
+  onOutput: ((data: Uint8Array, bootstrap?: TerminalBootstrap, position?: TerminalStreamPosition) => void) | null;
+  onResize: ((cols: number, rows: number, position?: TerminalStreamPosition) => void) | null;
   onError: ((err: Error) => void) | null;
 
   dispose(): void;

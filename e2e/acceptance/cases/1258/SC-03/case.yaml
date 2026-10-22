@@ -3,6 +3,9 @@ issue: 1258
 criterion: SC-03
 stage: staging
 runtime: full-stack-local
+# Read-only observation: auth/info/session.list over a real socket. It creates
+# no session, file or tmux state, so it may share a job-owned runtime (#1866).
+isolation: shared
 verifiers:
   - type: protocol
     entry: verify.js

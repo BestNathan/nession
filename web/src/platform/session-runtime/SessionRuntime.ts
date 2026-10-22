@@ -1,7 +1,7 @@
 import type { AttachInfo } from '@/types';
 import type { RelayServerTransport } from '@/platform/attach/relayServerConnection';
 import { buildAgentWsUrl, WebSocketService } from '@/platform/socket';
-import type { ConnectionState, HandshakeSurface } from '@/platform/socket/types';
+import type { ConnectionState, HandshakeSurface, SentSocketMessage } from '@/platform/socket/types';
 import { getOrCreateClientId } from '@/platform/socket/clientId';
 import { WIRE as CLIENT_AUTH_WIRE, type AuthResponsePayload } from '@/generated/protocol/core/client-auth/v1';
 import { AddressAttachPolicy } from '@/platform/attach/AddressAttachPolicy';
@@ -16,6 +16,13 @@ import { SessionAttachController } from '@/platform/attach/SessionAttachControll
 import type { ConnectionOptions } from '@/platform/terminal-runtime/types';
 import type { TerminalTransport } from '@/platform/terminal-runtime/transport/TerminalTransport';
 import type { InputDrop } from '@/platform/terminal-runtime/inputQueue';
+import {
+  AppliedTerminalCursor,
+  type AppliedCursorBinding,
+  type AppliedCursorSnapshot,
+  type VerifiedTerminalBaseline,
+} from '@/platform/terminal-runtime/AppliedTerminalCursor';
+import type { TerminalStreamPosition } from '@/platform/terminal-runtime/streamApply';
 // Types only. The capability *factories* are injected through
 // SessionRuntimeConfig instead of imported, because `platform` sits below
 // `product` and `capabilities` and may not import either — while the runtime is
@@ -24,7 +31,7 @@ import type { InputDrop } from '@/platform/terminal-runtime/inputQueue';
 // the constraint is the same one, and it is why the type-only imports below are
 // legal while a value import of the same modules would not be.
 import type { FilesPlugin } from '@/capabilities/files';
-import type { TerminalAgentApi } from '@/product/terminal';
+import type { TerminalAgentApi, RelaySubscriptionProof } from '@/product/terminal';
 
 export interface SessionRuntimeConfig {
   sessionId: string;
@@ -96,6 +103,24 @@ export interface SessionRuntimeConfig {
    * silently suppressing history.
    */
   hasSessionOutput?: () => boolean;
+  /**
+   * Whether the **renderer mounted now** parsed a capture of this session
+   * (#2194).
+   *
+   * `hasSessionOutput` answers "does the Terminal hold any output"; that is
+   * true for a replacement renderer as soon as live frames reach it, which is
+   * before any attach and therefore before any capture. A renderer that only
+   * ever saw live output holds no history: attaching without asking for one
+   * starts a new timeline silently. This reader is the narrower question and
+   * the one attach must ask.
+   *
+   * A reader rather than a flag for the same reason as `hasSessionOutput`: the
+   * renderer can be replaced under a surviving runtime, so only the Terminal
+   * can answer. Absent means "assume it does" — the pre-#2194 behaviour for
+   * consumers that have no Terminal to ask (and for tests that predate the
+   * distinction).
+   */
+  hasSessionHistory?: () => boolean;
 }
 
 export interface RuntimeMirrorSnapshot {
@@ -119,7 +144,36 @@ export interface SessionRuntimeSnapshot extends RuntimeMirrorSnapshot {
   transportReady: boolean;
   lastResize: { cols: number; rows: number } | null;
   reconnectCount: number;
+  /**
+   * The runtime noticed output it cannot prove it received (#2155): a lost
+   * transport whose replay cannot reach back, a truncated stream, or a hole a
+   * replay gave up on. This is the **observed gap** fact — not "needs a
+   * bootstrap" (a fresh attach asks for history without a hole) and not
+   * "recovery proven" (cleared only by a complete repair). The surface shows
+   * a quiet notice while it is true.
+   */
+  historyDegraded: boolean;
+  /**
+   * The explicit tri-state the UI and tests read (#1926 SC-08).
+   *
+   * `attached` is not `synchronized`: a route that is attached but has no
+   * proven parser baseline for its **current** subscription is displaying live
+   * output whose history it cannot vouch for. This is the runtime's one answer
+   * to "may I call this synchronized", so no consumer has to recompute it from
+   * phase plus gap flags:
+   *
+   * - `unavailable` — no attached stream at all (attaching, reconnecting,
+   *   failed, transport-exhausted);
+   * - `degraded-live` — attached, but either an observed gap is open or the
+   *   current subscription has no verified baseline (screen-only capture,
+   *   unproven route cutover, or a route change that revoked the old proof);
+   * - `synchronized` — attached **and** the current subscription has a
+   *   verified parser baseline with no observed gap.
+   */
+  streamState: TerminalStreamState;
 }
+
+export type TerminalStreamState = 'synchronized' | 'degraded-live' | 'unavailable';
 
 export type SessionRuntimeEvent =
   | { type: 'next-candidate'; activeUrl: string | null }
@@ -152,7 +206,9 @@ function isSameSnapshot(a: SessionRuntimeSnapshot, b: SessionRuntimeSnapshot): b
     && a.transportReady === b.transportReady
     && a.lastResize?.cols === b.lastResize?.cols
     && a.lastResize?.rows === b.lastResize?.rows
-    && a.reconnectCount === b.reconnectCount;
+    && a.reconnectCount === b.reconnectCount
+    && a.historyDegraded === b.historyDegraded
+    && a.streamState === b.streamState;
 }
 
 /**
@@ -235,6 +291,11 @@ export class SessionRuntime {
    */
   private attachedSize: { cols: number; rows: number } | null = null;
   private transportReady = false;
+  /** A parser-completed stream position is distinct from attach/stream receipt.
+   * Null until an externally verified baseline is explicitly supplied (#1965).
+   * No network ACK or recovery claim is generated here. */
+  private readonly terminalAppliedCursor = new AppliedTerminalCursor();
+  private terminalAppliedBinding: AppliedCursorBinding | null = null;
   /**
    * Runtime-owned dynamic relay fallback: every P2P candidate failed, so the
    * session continues through the server. Deliberately NOT part of the config
@@ -257,6 +318,31 @@ export class SessionRuntime {
    */
   private historyMayHaveGap = false;
   /**
+   * The runtime *observed* output it cannot prove it received: a truncated
+   * replay, a hole a replay gave up on, or a lost unsequenced transport.
+   *
+   * Distinct from {@link historyMayHaveGap}, which also covers "this fresh
+   * attach has no buffer yet and wants the history" — a healthy first attach
+   * is not a degraded session (#2155). It is cleared only by a complete repair
+   * applied to the current renderer, never by a reconnect or attach success.
+   */
+  private gapDetected = false;
+  /**
+   * Whether this runtime ever reached `attached` (#2194).
+   *
+   * A later attach whose mounted renderer parsed no capture is then a
+   * **replacement**: the buffer the earlier attach filled is gone, which is an
+   * observed loss — not the healthy first attach's "I have nothing yet".
+   */
+  private everAttached = false;
+  /**
+   * The last stream epoch this runtime adopted from an attach seed or a relay
+   * proof (#2194). A new epoch is a new timeline: the old timeline's ring never
+   * held it, so a buffer kept from the previous one cannot be proven
+   * continuous with it.
+   */
+  private lastObservedStreamEpoch: number | null = null;
+  /**
    * A requested bootstrap is not a repaired buffer until the *current*
    * xterm has parsed a complete snapshot. Agent attach success does not
    * prove capture succeeded or that the parser applied its bytes (#1645).
@@ -275,6 +361,7 @@ export class SessionRuntime {
     streamEpoch?: number;
     streamCursor?: number;
     preserveAppliedCursor?: boolean;
+    subscriberGeneration?: number;
     inputEpoch?: number;
     inputAppliedThrough?: number;
     controlGeneration?: number;
@@ -305,6 +392,11 @@ export class SessionRuntime {
   /** Guards against re-entrant / duplicate terminal-disconnect handling. */
   private disconnectHandling = false;
   private relayServerUnsub: (() => void) | null = null;
+  private relayReadyUnsub: (() => void) | null = null;
+  /** Exact begin envelope, scoped to its physical Server socket. */
+  private relayBeginWire: SentSocketMessage | null = null;
+  /** Informational only: no verified renderer baseline or ACK credit. */
+  private relayProof: RelaySubscriptionProof | null = null;
   private disposed = false;
   private snapshot: SessionRuntimeSnapshot;
   private readonly snapshotListeners = new Set<() => void>();
@@ -331,10 +423,15 @@ export class SessionRuntime {
     this.snapshot = this.buildSnapshot();
     this.attachController.subscribeOutcomes((result) => {
       if (result.phase === 'attached') {
+        this.everAttached = true;
         this.attachedTransportGeneration = this.transportGeneration;
         // Attach confirms the PTY subscription, not the xterm buffer.
         // Only noteBootstrapApplied() may clear a pending history repair.
         this.applyAttachSeedToLiveTransport();
+        // An atomic bootstrap can be parsed before this reply installs the
+        // subscriber generation; now that the identity exists, offer the
+        // already-proven parser frontier as the first output ACK.
+        this.submitPendingAppliedAck();
       }
       if (result.forceRelay) {
         this.applyForceRelay();
@@ -388,6 +485,11 @@ export class SessionRuntime {
       return;
     }
     this.transportReady = ready;
+    if (!ready) {
+      // Replacing a transport can replace its xterm binding; retained stream
+      // receipt is never proof that the *new* renderer parsed those bytes.
+      this.resetTerminalAppliedCursor();
+    }
     if (ready) {
       if (this.effectiveForcedRelay && this.attachState.phase === 'idle') {
         this.attachController.dispatch({ type: 'SESSION_SELECTED' });
@@ -443,6 +545,7 @@ export class SessionRuntime {
   getP2pAttachSeed(): {
     streamEpoch?: number;
     streamCursor?: number;
+    subscriberGeneration?: number;
     inputEpoch?: number;
     inputAppliedThrough?: number;
     controlGeneration?: number;
@@ -478,9 +581,18 @@ export class SessionRuntime {
    * convenient one — it **replaces** the buffer from tmux's own scrollback,
    * which tmux retains regardless of who is attached, so refilling a hole
    * cannot duplicate what the client already has.
+   *
+   * **The third question is who holds the buffer now** (#2194).
+   * A replacement renderer receives live frames as soon as a transport is
+   * bound, so `hasSessionOutput` answers *yes* for a terminal that holds no
+   * history at all — and the attach then skips the capture. `hasSessionHistory`
+   * asks the narrower question: did a capture parse into the renderer that is
+   * mounted now. Absent readers keep the pre-#2194 answer.
    */
   private needsBootstrap(): boolean {
-    return this.historyMayHaveGap || !(this.config.hasSessionOutput?.() ?? false);
+    return this.historyMayHaveGap
+      || !(this.config.hasSessionOutput?.() ?? false)
+      || !(this.config.hasSessionHistory?.() ?? true);
   }
 
   /**
@@ -493,6 +605,15 @@ export class SessionRuntime {
     if (needed) {
       this.historyMayHaveGap = true;
       this.bootstrapRepairPending = true;
+      // A re-attach onto a renderer that parsed no capture is a replacement:
+      // whatever the previous attach filled is gone. That is an observed loss,
+      // and the degraded statement must survive until a capture proves it
+      // repaired — a transport swap alone must not present a fresh buffer as
+      // continuous (#2194).
+      if (this.everAttached && !(this.config.hasSessionHistory?.() ?? true)) {
+        this.gapDetected = true;
+        this.emitSnapshot();
+      }
     }
     return needed;
   }
@@ -502,12 +623,140 @@ export class SessionRuntime {
    * and only from the currently bound Terminal transport. A successful
    * attach response alone is insufficient (#1645).
    */
+  /**
+   * Only a source that actually proves its checkpoint/empty-renderer cut may
+   * call this. Not agent.attach cursor, not a plain tmux capture, not an
+   * onBootstrapApplied boolean. A failed rebind invalidates the old cursor.
+   */
+  setVerifiedTerminalBaseline(baseline: VerifiedTerminalBaseline): void {
+    this.terminalAppliedBinding = null;
+    this.terminalAppliedCursor.reset();
+    if (this.disposed) { return; }
+    this.terminalAppliedBinding = this.terminalAppliedCursor.beginFromVerifiedBaseline(baseline);
+    // The capture names the timeline this renderer is now proven against.
+    // The attach reply and the Relay proof arrive *after* the history they
+    // describe, so adopting their (same) epoch must not count as a change —
+    // treating it as one re-degraded a terminal the capture had just repaired
+    // (#2194). A genuinely different epoch still differs from this value.
+    this.lastObservedStreamEpoch = baseline.streamEpoch;
+    // The bootstrap that proves this cut is delivered *before* the attach
+    // reply that states the subscriber generation (and before a Relay ready
+    // proof), so the identity may not exist yet. Try now for the orderings
+    // where it does; the attach/proof owners retry when it lands.
+    this.submitPendingAppliedAck();
+    // `streamState` is derived from this proof: an attached stream that was
+    // degraded-live becomes synchronized at this exact moment, and subscribers
+    // must be told (the value-equality filter drops a no-op).
+    this.emitSnapshot();
+  }
+
+  /** Current renderer's parser-applied *proof*, never transport receipt. */
+  get terminalAppliedSnapshot(): AppliedCursorSnapshot | null {
+    const binding = this.terminalAppliedBinding;
+    return binding ? this.terminalAppliedCursor.snapshot(binding) : null;
+  }
+
+  /** TerminalController only emits this after its xterm callback / FIFO resize. */
+  noteStreamEventParsed(position: TerminalStreamPosition): void {
+    const binding = this.terminalAppliedBinding;
+    if (this.disposed || !binding) { return; }
+    if (this.terminalAppliedCursor.recordParsed(binding, position) !== 'advanced') {
+      return;
+    }
+    this.submitPendingAppliedAck();
+  }
+
+  /**
+   * Offer the current parser-applied frontier as an output ACK, if this
+   * runtime holds the current route/subscriber/renderer proof for it.
+   *
+   * Only parser-completed, contiguous events in a verified renderer
+   * generation may advance Agent credit. A relay receipt/stream delivery,
+   * screen-only capture or duplicate callback cannot cross this gate. Sending
+   * does not prove the Agent accepted or credited it — `recordAckSubmitted`
+   * records only a frame the transport accepted.
+   */
+  private submitPendingAppliedAck(): void {
+    const binding = this.terminalAppliedBinding;
+    if (this.disposed || !binding) { return; }
+    const snapshot = this.terminalAppliedCursor.snapshot(binding);
+    if (!snapshot) {
+      this.terminalAppliedBinding = null;
+      return;
+    }
+    if (snapshot.appliedSeq <= snapshot.ackSentSeq
+      || this.attachState.phase !== 'attached'
+      || this.liveTransportGeneration !== this.transportGeneration) {
+      return;
+    }
+
+    if (this.effectiveForcedRelay) {
+      this.sendVerifiedRelayOutputAck(binding, snapshot);
+      return;
+    }
+
+    const seed = this.p2pAttachSeed;
+    const api = this.agentTerminalApi;
+    const subscriberGeneration = seed?.subscriberGeneration;
+    if (this.attachedTransportGeneration !== this.transportGeneration
+      || !api?.sendOutputApplied
+      || !Number.isSafeInteger(subscriberGeneration) || !subscriberGeneration
+      || !seed?.streamEpoch || seed.streamEpoch !== snapshot.streamEpoch) {
+      return;
+    }
+    if (api.sendOutputApplied(this.config.sessionName, {
+      subscriberGeneration,
+      streamEpoch: snapshot.streamEpoch,
+      rendererGeneration: snapshot.generation,
+      appliedThrough: snapshot.appliedSeq,
+    })) {
+      this.terminalAppliedCursor.recordAckSubmitted(binding, snapshot.appliedSeq);
+    }
+  }
+
+  /** Separate current-route proof admission from parser prefix accounting.
+   * A Server receipt alone is never a parser baseline or issued-byte credit.
+   */
+  private sendVerifiedRelayOutputAck(
+    binding: AppliedCursorBinding,
+    snapshot: AppliedCursorSnapshot,
+  ): void {
+    const conn = this.config.serverConnection;
+    const proof = this.relayProof;
+    const sent = this.relayBeginWire;
+    if (!conn?.isReady() || !conn.sendRelayOutputApplied || !proof || !sent
+      || proof.streamEpoch !== snapshot.streamEpoch
+      || proof.sessionName !== this.config.sessionName
+      || proof.browserClientId !== getOrCreateClientId()) {
+      return; // unverified/legacy/stale routes have no credit
+    }
+    // The proof was accepted only on the exact begin+physical socket. Agent
+    // rechecks peer token, stream generation/epoch and the issued frontier.
+    if (conn.sendRelayOutputApplied(this.config.sessionName, {
+      subscriberGeneration: proof.subscriberGeneration,
+      streamEpoch: snapshot.streamEpoch,
+      rendererGeneration: snapshot.generation,
+      appliedThrough: snapshot.appliedSeq,
+    })) {
+      this.terminalAppliedCursor.recordAckSubmitted(binding, snapshot.appliedSeq);
+    }
+  }
+
+  private resetTerminalAppliedCursor(): void {
+    this.terminalAppliedBinding = null;
+    this.terminalAppliedCursor.reset();
+  }
+
   noteBootstrapApplied(): void {
     if (!this.bootstrapRepairPending) {
       return;
     }
     this.bootstrapRepairPending = false;
     this.historyMayHaveGap = false;
+    // The repair was applied to the current renderer; the observed gap it was
+    // repairing is closed. A later loss sets it again on its own.
+    this.gapDetected = false;
+    this.emitSnapshot();
   }
 
   /**
@@ -531,13 +780,114 @@ export class SessionRuntime {
    * is still on screen.
    */
   noteStreamTruncated(): void {
+    this.resetTerminalAppliedCursor();
     this.historyMayHaveGap = true;
+    // This is the one place the runtime *observed* a hole. The bootstrap need
+    // and the degraded notice share the trigger but not the lifetime: the
+    // first attach also requests a bootstrap, yet nothing was lost (#2155).
+    this.gapDetected = true;
     // A newly discovered hole invalidates a repair that was in flight
     // before the loss was reported, even if its parser callback is late.
     this.bootstrapRepairPending = false;
+    this.emitSnapshot();
+  }
+
+  /**
+   * Adopt a stream epoch from an attach seed or a relay proof, stating the gap
+   * when it changed (#2194).
+   *
+   * A different epoch means the process that owned the old timeline is gone.
+   * The client may have kept the old buffer; nothing it holds can be proven
+   * continuous with the new timeline, and the new Agent's ring never held the
+   * events before it. Stating the gap is what makes the loss visible and makes
+   * the next attach request the capture that repairs it, instead of seeding
+   * the new epoch over the old buffer as if it continued.
+   */
+  private adoptStreamEpoch(epoch: number | undefined): void {
+    if (epoch === undefined || !Number.isSafeInteger(epoch) || epoch <= 0) {
+      return;
+    }
+    const previous = this.lastObservedStreamEpoch;
+    this.lastObservedStreamEpoch = epoch;
+    if (previous !== null && previous !== epoch) {
+      this.noteStreamEpochChanged();
+    }
+  }
+
+  /**
+   * The epoch-change half of {@link noteStreamTruncated}.
+   *
+   * It deliberately keeps a requested bootstrap pending: unlike an observed
+   * replay hole, the capture in flight may be exactly the new epoch's proven
+   * cut, and `noteBootstrapApplied` is the one thing allowed to clear the gap.
+   */
+  private noteStreamEpochChanged(): void {
+    this.resetTerminalAppliedCursor();
+    this.historyMayHaveGap = true;
+    this.gapDetected = true;
+    this.emitSnapshot();
+  }
+
+  /**
+   * The renderer was replaced because its parser writer halted (#2196).
+   *
+   * A halted writer drops operations and cannot vouch for the parser state
+   * afterwards, so the replacement starts empty — the session's history is
+   * gone with the old buffer. The only repair is a bootstrap parsed by the
+   * replacement, and a bootstrap cannot be requested on a live attach
+   * (`canStartAttach` refuses while attached), so this retires the current
+   * transport and drives a fresh attach that asks for one.
+   *
+   * Unlike an observed replay hole, the repair here is being requested right
+   * now: `bootstrapRepairPending` stays true so `noteBootstrapApplied` is the
+   * only thing that clears the degraded state. A capture that reaches the new
+   * renderer but does not prove its cut leaves the gap stated.
+   */
+  noteRendererReplaced(): void {
+    if (this.disposed) { return; }
+    this.resetTerminalAppliedCursor();
+    this.historyMayHaveGap = true;
+    this.gapDetected = true;
+    this.bootstrapRepairPending = true;
+    this.emitSnapshot();
+    this.forceBootstrapReattach();
+  }
+
+  /**
+   * Retire the current transport and start a fresh attach that carries
+   * `needs_bootstrap` (#2196).
+   *
+   * Shaped like a route-intent change because it needs the same guarantees:
+   * the old generation is fenced off before it is torn down, so no late frame
+   * from the disposed transport can write into the replacement renderer, and
+   * the new attach is driven by the runtime rather than by a React tick.
+   */
+  private forceBootstrapReattach(): void {
+    const hadP2PBinding = this.agentWs !== null || this.agentTerminalApi !== null;
+    this.revokeRelayProof();
+    this.attachedTransportGeneration = null;
+    this.attachController.cancelActiveAttach();
+    this.attachController.dispatch({ type: 'DISCONNECT' });
+    const result = this.attachController.dispatch({ type: 'SESSION_SELECTED' });
+    this.transportGeneration += 1;
+    this.syncAgentConnection({ forceReconnect: true });
+    if (this.effectiveForcedRelay) {
+      // The relay branch has no P2P binding to retire, so syncAgentConnection
+      // does not announce a swap; the controller's replacement renderer still
+      // needs a transport built for the advanced generation, and the relay
+      // attach has to be driven from here.
+      if (!hadP2PBinding) {
+        this.emitTransportSwap();
+      }
+      this.requestRelayAttach();
+    }
+    this.emitRuntimeEvent({ type: 'route-intent-changed', phase: result.phase });
+    this.emitSnapshot();
   }
 
   updateContext(next: Partial<SessionRuntimeConfig>): RuntimeMirrorSnapshot {
+    const previousServerConnection = this.config.serverConnection;
+    const previousRelay = this.effectiveForcedRelay;
     const routeChanged =
       next.routeIntentEpoch !== undefined
       && next.routeIntentEpoch !== this.routeIntentEpoch;
@@ -545,6 +895,10 @@ export class SessionRuntime {
       next.addressUrls !== undefined
       && next.addressUrls.join('|') !== this.config.addressUrls.join('|');
     this.config = { ...this.config, ...next };
+    if (previousServerConnection !== this.config.serverConnection
+      || routeChanged || planUrlsChanged || previousRelay !== this.effectiveForcedRelay) {
+      this.revokeRelayProof();
+    }
     if (next.routeIntentEpoch !== undefined) {
       this.routeIntentEpoch = next.routeIntentEpoch;
     }
@@ -554,6 +908,17 @@ export class SessionRuntime {
       // steady-state config sync touches neither and must NOT clear it — that
       // round trip is what used to clobber the fallback.
       this.forcedRelayFallback = false;
+    }
+
+    // A route-mode flip retires the current transport even when the previous
+    // candidate never opened a WebSocket. The generation must advance before
+    // any teardown/relay attach notifies subscribers; relying only on
+    // syncAgentConnection's hadBinding check leaves stale callbacks live.
+    // Explicit route-intent changes already advance in handleRouteIntentChange.
+    if (!routeChanged && previousRelay !== this.effectiveForcedRelay) {
+      this.transportGeneration += 1;
+      this.attachedTransportGeneration = null;
+      this.resetTerminalAppliedCursor();
     }
 
     this.addressPolicy.update({
@@ -585,7 +950,22 @@ export class SessionRuntime {
     if (this.effectiveForcedRelay) {
       return;
     }
+    this.revokeRelayProof();
     this.forcedRelayFallback = true;
+    // A P2P → Relay fallback cuts the route: the Relay subscription cannot
+    // prove continuity with the frames the P2P transport delivered, so a
+    // buffer that holds output may have a hole only a capture can prove
+    // closed. State that and request the capture. Gated on the renderer
+    // holding output at all — a first attach whose terminal is still empty
+    // loses nothing, and its normal bootstrap request carries no degradation
+    // (#2155). Deliberately not gated on this runtime having attached: the
+    // fallback can land on a runtime created after the loss, and the question
+    // is about the renderer, not this object's history.
+    if (this.config.hasSessionOutput?.() ?? false) {
+      this.historyMayHaveGap = true;
+      this.bootstrapRepairPending = true;
+      this.gapDetected = true;
+    }
     this.addressPolicy.update({ forcedRelay: true });
     this.attachedTransportGeneration = null;
     this.attachController.cancelActiveAttach();
@@ -600,6 +980,7 @@ export class SessionRuntime {
   }
 
   private handleRouteIntentChange(): void {
+    this.revokeRelayProof();
     this.attachedTransportGeneration = null;
     this.attachController.cancelActiveAttach();
     this.attachController.dispatch({ type: 'DISCONNECT' });
@@ -643,10 +1024,15 @@ export class SessionRuntime {
       needsBootstrap,
       transportGeneration: this.transportGeneration,
       onAttachOk: (result) => {
+        // An attach reply names the stream epoch this subscription continues.
+        // If it differs from the last one adopted, the buffer kept across the
+        // loss belongs to a timeline this Agent cannot replay (#2194).
+        this.adoptStreamEpoch(result.streamEpoch);
         this.attachedSize = attachSize;
         this.p2pAttachSeed = {
           streamEpoch: result.streamEpoch,
           streamCursor: result.streamCursor,
+          subscriberGeneration: result.subscriberGeneration,
           preserveAppliedCursor,
           inputEpoch: result.inputEpoch,
           inputAppliedThrough: result.inputAppliedThrough,
@@ -681,6 +1067,7 @@ export class SessionRuntime {
    */
   buildTransport(): TerminalTransport {
     const relay = this.effectiveForcedRelay;
+    const owningGeneration = this.transportGeneration;
     const transport = this.config.createTransport({
       mode: relay ? 'relay' : 'p2p',
       sessionName: this.config.sessionName,
@@ -688,6 +1075,7 @@ export class SessionRuntime {
       agentApi: relay ? undefined : this.agentTerminalApi ?? undefined,
       serverConnection: relay ? this.config.serverConnection ?? undefined : undefined,
       isAttached: () => this.attachState.phase === 'attached',
+      isCurrentGeneration: () => !this.disposed && owningGeneration === this.transportGeneration,
       // Input is the moment a dead-but-open socket stops being invisible
       // (#1264); a stream with a hole is a fact for the owner (#1304); input
       // that can never arrive is reported, not kept (#1307 SC-09).
@@ -712,6 +1100,7 @@ export class SessionRuntime {
   }
 
   private emitTransportSwap(): void {
+    this.resetTerminalAppliedCursor();
     for (const listener of this.transportSwapListeners) {
       listener();
     }
@@ -774,6 +1163,8 @@ export class SessionRuntime {
 
   dispose(): void {
     this.disposed = true;
+    this.revokeRelayProof();
+    this.resetTerminalAppliedCursor();
     // End the server-side relay forwarding loop with the runtime that began
     // it (#1309 SC-08). Disposal covers every leave — disconnect, session
     // switch, unmount — so this is the one place an endRelay can never be
@@ -821,7 +1212,28 @@ export class SessionRuntime {
       transportReady: this.transportReady,
       lastResize: this.lastResize,
       reconnectCount: this.attachState.reconnectCount,
+      historyDegraded: this.gapDetected,
+      streamState: this.computeStreamState(),
     };
+  }
+
+  /**
+   * The one derivation of {@link SessionRuntimeSnapshot.streamState}.
+   *
+   * A verified baseline is bound to the *current* subscription and renderer
+   * generation; `terminalAppliedSnapshot` is null until one exists and is
+   * revoked by a route change or an observed gap. Phase alone cannot answer
+   * this: an attached stream with a screen-only capture is live output whose
+   * history is unproven, and claiming it synchronized would be exactly the
+   * false claim #1645 forbids.
+   */
+  private computeStreamState(): TerminalStreamState {
+    if (this.attachState.phase !== 'attached') {
+      return 'unavailable';
+    }
+    return this.gapDetected || this.terminalAppliedSnapshot === null
+      ? 'degraded-live'
+      : 'synchronized';
   }
 
   private emitSnapshot(): void {
@@ -1009,9 +1421,22 @@ export class SessionRuntime {
     }
   }
 
+  /** Non-credit evidence only; not a synchronized cursor. */
+  get relaySubscriptionProofSnapshot(): RelaySubscriptionProof | null {
+    return !this.disposed && this.effectiveForcedRelay && this.attachState.phase === 'attached'
+      && this.config.serverConnection?.isReady() ? this.relayProof : null;
+  }
+
+  private revokeRelayProof(): void {
+    this.relayBeginWire = null;
+    this.relayProof = null;
+  }
+
   private teardownRelayServerHandler(): void {
     this.relayServerUnsub?.();
     this.relayServerUnsub = null;
+    this.relayReadyUnsub?.();
+    this.relayReadyUnsub = null;
   }
 
   private wireRelayServerHandler(): void {
@@ -1021,7 +1446,30 @@ export class SessionRuntime {
       return;
     }
 
+    this.relayReadyUnsub = conn.onRelayReady?.(this.config.sessionName, (proof, physicalGeneration) => {
+      const sent = this.relayBeginWire;
+      if (this.disposed || !this.effectiveForcedRelay || !conn.isReady()
+        || this.attachState.phase !== 'attached' || !sent || this.relayProof
+        || sent.id !== proof.relayRequestId
+        || sent.physicalGeneration !== physicalGeneration
+        || this.config.sessionName !== proof.sessionName
+        || proof.browserClientId !== getOrCreateClientId()) {
+        return; // stale route, foreign browser, missing begin, duplicate or legacy
+      }
+      // A relay proof names the Agent stream this route is bound to. If it is a
+      // different epoch than the last one this runtime adopted, the buffer may
+      // be holding a timeline the new Agent cannot replay (#2194).
+      this.adoptStreamEpoch(proof.streamEpoch);
+      this.relayProof = proof;
+      // The proof may arrive after the atomic bootstrap was parsed. It is the
+      // first moment this route may submit a parser-applied ACK.
+      this.submitPendingAppliedAck();
+    }) ?? null;
+
     this.relayServerUnsub = conn.onConnectionStateChange((state: ConnectionState) => {
+      if (state !== 'connected') {
+        this.revokeRelayProof();
+      }
       // Any loss of the server transport ends the server-side relay forwarding
       // loop: 'connecting' (first connect / handshake pending), 'reconnecting'
       // (recoverable intra-budget drop — the new transport surfaces this
@@ -1029,12 +1477,14 @@ export class SessionRuntime {
       // disconnect). The phase guard keeps this inert before the relay is live.
       if (state !== 'connected') {
         if (this.attachState.phase === 'attached') {
-          // Relay output is currently unsequenced (#1645): even if a prior
-          // P2P attach supplied a stream cursor, the Relay transport cannot
-          // resume from it. Every Relay disconnect can therefore hide PTY
-          // output. Always request a fresh history bootstrap on reattach.
-          // Once Relay has the same sequenced resume contract as P2P, this
-          // can be narrowed to proven retention gaps.
+          // Relay carries an Agent-issued sequence and can resume since
+          // #2043/#2050, and its parser-applied ACK is bound to the
+          // Agent-minted subscription proof (#2060/#2120). The *disconnect*
+          // is still treated as potentially lossy here: a route cutover
+          // checkpoint is not independently proven, so output produced during
+          // the gap may sit outside the retained window. Always request a
+          // fresh history bootstrap on reattach; narrow this once a cutover
+          // can prove its own continuity.
           this.noteStreamTruncated();
           const result = this.attachController.dispatch({ type: 'TRANSPORT_LOST' });
           this.emitRuntimeEvent({ type: 'route-intent-changed', phase: result.phase });
@@ -1082,11 +1532,18 @@ export class SessionRuntime {
       return;
     }
     const resize = this.lastResize;
-    conn.beginRelay(this.sessionId, {
+    this.revokeRelayProof();
+    const opts = {
       cols: resize?.cols,
       rows: resize?.rows,
       needsBootstrap: this.requestBootstrapForAttach(),
-    });
+    };
+    // Legacy continues non-credit; never fabricate an envelope id.
+    if (conn.beginRelayTracked) {
+      this.relayBeginWire = conn.beginRelayTracked(this.sessionId, opts);
+    } else {
+      conn.beginRelay(this.sessionId, opts);
+    }
     const result = this.attachController.dispatch({ type: 'RELAY_BEGIN_OK' });
     this.emitRuntimeEvent({ type: 'route-intent-changed', phase: result.phase });
   }
@@ -1220,6 +1677,21 @@ export class SessionRuntime {
     // connect — swallow so it cannot dangle as an unhandled rejection.
     void ws.connect().catch(() => {});
     this.wireConnectionHandler();
+    // A transport whose construction fails synchronously — a `WebSocket`
+    // constructor that throws, an unusable URL — settles at `disconnected`
+    // *inside* `connect()`, before the handler above exists. That transition
+    // is what the address policy reads to advance a candidate or force Relay;
+    // without it Auto strands on the dead candidate with no later state change
+    // to wake it (#2156). Replay the settled state once, off this call: when
+    // this build is itself a candidate rotation, the policy is running and
+    // re-entering it synchronously would nest the rotation inside itself.
+    if (ws.connectionState === 'disconnected') {
+      queueMicrotask(() => {
+        if (this.agentWs === ws && ws.connectionState === 'disconnected') {
+          this.handleTerminalDisconnect();
+        }
+      });
+    }
     // The swap is complete only now — new socket, new agent API, handler
     // wired — so this is the moment bindings may rebuild (never earlier:
     // a transport built before this point would bind the disposed socket).

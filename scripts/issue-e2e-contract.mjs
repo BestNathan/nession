@@ -4,6 +4,37 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 
 const ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+// Shared evidence grammar for Issue audit, planning, projection and Acceptance.
+// Pending has no run identity: prose is not an authenticated receipt.
+const RECEIPT = /^run ([1-9]\d*)\/([1-9]\d*), SHA ([a-f0-9]{40}), contract ([a-f0-9]{64}), plan ([a-f0-9]{64}), tests (\d+)\/(\d+) \(https:\/\/github\.com\/BestNathan\/nession\/actions\/runs\/([1-9]\d*)\)$/;
+export function parseE2EEvidence(row, contractDigest) {
+  if (row?.result === 'Pending') {
+    if (row.evidence !== '-') throw Error('Pending E2E evidence must be exactly "-"');
+    return null;
+  }
+  if (!['Pass','Fail','Error'].includes(row?.result) ||
+      !/^[a-f0-9]{64}$/.test(contractDigest)) throw Error('invalid E2E evidence identity');
+  const match = row.evidence?.match(RECEIPT);
+  if (!match || match[1] !== match[8] || match[4] !== contractDigest)
+    throw Error('Issue E2E Report contains unauthenticated or mismatched evidence');
+  const result = {run:Number(match[1]),attempt:Number(match[2]),sha:match[3],
+    contract:match[4],plan:match[5],passed:Number(match[6]),discovered:Number(match[7])};
+  if (!Number.isSafeInteger(result.run)||!Number.isSafeInteger(result.attempt)||
+      !Number.isSafeInteger(result.passed)||!Number.isSafeInteger(result.discovered)||
+      result.discovered<0||result.passed>result.discovered||
+      (row.result==='Pass'&&(result.discovered<1||result.passed!==result.discovered)))
+    throw Error('invalid E2E evidence counters or source identity');
+  return result;
+}
+// The trusted projector is the only E2E result writer. Formatting and
+// parsing here prevent drift between its output and the read-only gates.
+export function formatE2EEvidence({run,attempt,sha,contract,plan,passed,discovered},result) {
+  const receipt='run '+run+'/'+attempt+', SHA '+sha+', contract '+contract+
+    ', plan '+plan+', tests '+passed+'/'+discovered+
+    ' (https://github.com/BestNathan/nession/actions/runs/'+run+')';
+  parseE2EEvidence({result,evidence:receipt},contract);
+  return receipt;
+}
 function visibleLines(body) {
   const lines = String(body ?? '').replace(/\r\n?/g, '\n').split('\n');
   let fence = null;
@@ -92,6 +123,12 @@ export function parseIssueE2E(body, { requireDeclaration = false } = {}) {
   const normalized = { newIds: [...news.ids].sort(), regressionIds: [...regressions.ids].sort(), newNone: news.none, regressionNone: regressions.none };
   // Result/Evidence must not change required set identity.
   const digest = createHash('sha256').update(JSON.stringify({ version: 1, ...normalized })).digest('hex');
+  // Detect noncanonical Pending and forged receipts at Issue Audit / PR selection,
+  // not only after tests succeed and the privileged writer tries to project.
+  for (const [id,row] of rows) {
+    try { parseE2EEvidence(row,digest); }
+    catch (error) { errors.push(id+': '+error.message); }
+  }
   return { ...normalized, selectedIds, rows, digest, errors };
 }
 
@@ -116,7 +153,8 @@ function selfTest() {
   const good = parseIssueE2E(body);
   assert.deepEqual(good.errors, []);
   assert.deepEqual(verifyIssueE2EAgainstCatalog(good, ['terminal-reconnect','terminal-attach'], ['terminal-attach']), ['terminal-attach', 'terminal-reconnect']);
-  assert.equal(parseIssueE2E(body.replace('| Pending | - |', '| Pass | run 1 |')).digest, good.digest);
+  const proof='run 1/1, SHA '+'a'.repeat(40)+', contract '+good.digest+', plan '+'b'.repeat(64)+', tests 1/1 (https://github.com/BestNathan/nession/actions/runs/1)';
+  assert.equal(parseIssueE2E(body.replace('| Pending | - |', '| Pass | '+proof+' |')).digest, good.digest);
   assert.equal(parseIssueE2E('old issue'), null);
   assert.equal(parseIssueE2E('```markdown\n## E2E Verification\n### New\n- fake\n## E2E Report\n```'), null);
   assert.match(parseIssueE2E('old issue', { requireDeclaration: true }).errors.join(','), /missing/);
@@ -129,6 +167,12 @@ function selfTest() {
   ]) assert.match(parseIssueE2E(bad).errors.join(','), expected);
   assert.throws(() => verifyIssueE2EAgainstCatalog(good, ['terminal-attach'], ['terminal-attach']), /New E2E/);
   assert.throws(() => verifyIssueE2EAgainstCatalog(good, ['terminal-reconnect', 'terminal-attach'], []), /Regression E2E/);
+  assert.match(parseIssueE2E(body.replace('| Pending | - |','| Pending | Waiting for test ingest |')).errors.join('; '),/Pending E2E evidence must/);
+  assert.match(parseIssueE2E(body.replace('| Pending | - |','| Pass | forged |')).errors.join('; '),/unauthenticated/);
+  assert.match(parseIssueE2E(body.replace('| Pending | - |','| Fail | - |')).errors.join('; '),/unauthenticated/);
+  assert.equal(parseE2EEvidence({result:'Pass',evidence:proof},good.digest).run,1);
+  assert.equal(formatE2EEvidence({run:1,attempt:1,sha:'a'.repeat(40),contract:good.digest,plan:'b'.repeat(64),passed:1,discovered:1},'Pass'),proof);
+  assert.throws(()=>parseE2EEvidence({result:'Pass',evidence:proof.replace('tests 1/1','tests 0/1')},good.digest),/invalid E2E evidence counters/);
   const none = parseIssueE2E([
     '## E2E Verification', '### New', '- none: no new browser behavior', '### Regression',
     '- none: documentation only', '## E2E Report', '| ID | Type | Result | Evidence |',

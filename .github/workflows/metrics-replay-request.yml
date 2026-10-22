@@ -1,0 +1,25 @@
+name: Metrics / Replay Request
+
+# Unprivileged request only. GitHub workflow_dispatch can run code selected by
+# the supplied ref, so this workflow has NO Store token, App key, contents:write,
+# shell-controlled input or direct publisher. The independent trusted-main
+# Metrics / Repository Health workflow authenticates the completed run through
+# GitHub REST before initiating any privileged work.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  request:
+    if: github.repository == 'BestNathan/nession' && github.ref == 'refs/heads/main' && github.actor == 'BestNathan'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Record read-only main/owner replay request
+        run: |
+          set -euo pipefail
+          echo "Metrics replay request, no publisher credentials or source artifacts." >> "$GITHUB_STEP_SUMMARY"
+          echo "Source SHA: $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo "The trusted-main workflow_run consumer independently rechecks this run." >> "$GITHUB_STEP_SUMMARY"

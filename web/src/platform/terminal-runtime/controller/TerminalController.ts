@@ -7,7 +7,9 @@ import type {
   TerminalSession,
 } from '../types';
 import type { TerminalTransport } from '../transport/TerminalTransport';
-import type { TerminalBootstrap } from '../bootstrap';
+import { provesVerifiedBootstrapRepair, streamBaselineFromBootstrap, type TerminalBootstrap } from '../bootstrap';
+import type { VerifiedTerminalBaseline } from '../AppliedTerminalCursor';
+import type { TerminalStreamPosition } from '../streamApply';
 import { InputRouter } from '../input/InputRouter';
 import { InputSourceManager } from '../input/InputSourceManager';
 import { TerminalInputHandler } from '../input/TerminalInputHandler';
@@ -17,6 +19,7 @@ import { AIInputHandler } from '../input/AIInputHandler';
 import { CustomInputHandler } from '../input/CustomInputHandler';
 import { CapsuleOcclusionScroll } from '../capsule/occlusionScroll';
 import { TerminalInstance } from '../instance/TerminalInstance';
+import { SerializedTerminalWriter, type TerminalWriterLimits } from './SerializedTerminalWriter';
 import { MobileImeInput } from '../input/MobileImeInput';
 import {
   TerminalInteractionController,
@@ -51,8 +54,38 @@ const BOOTSTRAP_SCREEN_RESET = '\x1b[2J\x1b[H';
 
 export interface TerminalControllerEvents {
   onTransportReady?: (ready: boolean) => void;
-  /** A complete remote history snapshot has finished xterm parsing (#1645). */
+  /**
+   * A snapshot that **replaced** the buffer has finished xterm parsing: a
+   * cut-proven full-VT checkpoint (#2008), or an atomic, non-truncated
+   * epoch-start history capture, which IS the pane's history at that stream
+   * position and is written after a buffer reset (#2160). A screen-only
+   * repaint and a replay prefix are neither and must not clear a history
+   * repair (#2155).
+   */
   onBootstrapApplied?: () => void;
+  /**
+   * The current renderer parsed an atomic, complete Agent stream-log prefix.
+   *
+   * This is a *stream position*, not a screen/history repair: `fidelity`
+   * partial/screen-only content can still follow it, and the buffer may not
+   * hold history that predates the Agent's reader. Emitted only from the
+   * latest bootstrap's write callback for the current transport/renderer
+   * (#2120).
+   */
+  onStreamBaseline?: (baseline: VerifiedTerminalBaseline) => void;
+  /** Parser writer pressure/stall invalidates synchronized output. */
+  onStreamTruncated?: () => void;
+  /**
+   * The parser writer refused further work and this controller replaced the
+   * xterm that owned it (#2196). A halted writer cannot be resumed: the only
+   * repair is a fresh renderer plus a bootstrap that refills it, so the owner
+   * must request one on a new attach. Emitted after the replacement is mounted
+   * and bound to a transport.
+   */
+  onRendererReplaced?: () => void;
+  /** An individual Agent event is now parsed/applied by the current xterm.
+   * Not a cumulative applied cursor, nor an output ACK (#1950). */
+  onStreamEventParsed?: (position: TerminalStreamPosition) => void;
   onInputModeChange?: (sessionId: string, mode: InputMode) => void;
   onResize?: (sessionId: string, cols: number, rows: number) => void;
   onTitleChange?: (sessionId: string, title: string) => void;
@@ -91,6 +124,12 @@ export interface TerminalControllerOptions {
   events?: TerminalControllerEvents;
   /** Lifecycle-owner swap channel — the controller rewires when it fires. */
   transportBinding?: TerminalTransportBinding;
+  /**
+   * Bounds for the parser writer ({@link SerializedTerminalWriter}). Defaults
+   * are the measured production bounds; tests inject small ones to drive the
+   * overflow repair deterministically.
+   */
+  writerLimits?: Partial<TerminalWriterLimits>;
 }
 
 /**
@@ -116,6 +155,17 @@ export class TerminalController {
 
   private _terminal: Terminal | null = null;
   private instance: TerminalInstance;
+  /**
+   * FIFO parser ordering survives a transport rewire along with TerminalInstance.
+   *
+   * It does NOT survive a halted writer (#2196): a queue that refused work is
+   * replaced together with the xterm it serializes, never reset in place.
+   */
+  private writer: SerializedTerminalWriter;
+  private readonly options: TerminalControllerOptions;
+  private mountElement: HTMLElement | null = null;
+  private repairQueued = false;
+  private disposed = false;
   private transportFactory: () => TerminalTransport;
   private transport: TerminalTransport | null = null;
   private resizeController: ResizeController | null = null;
@@ -151,6 +201,18 @@ export class TerminalController {
    */
   private _hasSessionOutput = false;
   /**
+   * Whether a capture (a bootstrap of any fidelity) has been parsed into the
+   * xterm that is mounted now.
+   *
+   * This is not the same question as {@link hasSessionOutput}, and conflating
+   * them lost history (#2194): a **replacement** renderer receives live frames
+   * as soon as a transport is bound, so it answers "I hold output" while
+   * holding none of the session's history. The attach that follows then skips
+   * the capture — and the terminal silently starts a new timeline. A renderer
+   * only answers this one `true` after a capture's write callback ran for it.
+   */
+  private _hasParsedCapture = false;
+  /**
    * Numbers the snapshots this controller has handed to xterm, so the newest
    * one's write callback is the only one that can lift
    * {@link hasSessionOutput}. A re-attach while a large snapshot is still
@@ -171,7 +233,9 @@ export class TerminalController {
   ) {
     this.session = session;
     this.transportFactory = transportFactory;
+    this.options = options;
     this.instance = new TerminalInstance(options);
+    this.writer = this.createWriter();
     this._terminal = this.instance.terminal;
     this.inputSourceManager = new InputSourceManager();
     this.useMobileIme = shouldUseMobileIme(options.deviceProfile);
@@ -186,6 +250,80 @@ export class TerminalController {
         this.rewireTransport(this._terminal);
       }
     }) ?? null;
+  }
+
+  private createWriter(): SerializedTerminalWriter {
+    return new SerializedTerminalWriter(
+      this.instance.terminal,
+      () => this.handleWriterDegraded(),
+      this.options.writerLimits,
+    );
+  }
+
+  /**
+   * The parser writer will not accept more work. State the gap to its owner,
+   * then replace the renderer.
+   *
+   * The replacement is deferred by one microtask: `degrade()` runs from the
+   * writer's own enqueue/parse path, and disposing the xterm instance and the
+   * transport that delivered the frame underneath that stack would tear down
+   * a handler while it is still executing. Every write between the halt and
+   * the replacement is dropped by the halted writer — the gap is already
+   * stated, and the bootstrap that follows refills the new buffer.
+   */
+  private handleWriterDegraded(): void {
+    this.events?.onStreamTruncated?.();
+    if (this.repairQueued || this.disposed) { return; }
+    this.repairQueued = true;
+    queueMicrotask(() => {
+      this.repairQueued = false;
+      this.rebuildRenderer();
+    });
+  }
+
+  /**
+   * Replace the xterm instance and its parser writer after the writer halted
+   * (#2196).
+   *
+   * A halted writer is a statement about the renderer, not a queue that can
+   * be flushed: it dropped operations and cannot vouch for the parser state
+   * afterwards. So the renderer is rebuilt empty, the new writer starts clean,
+   * and the owner is told to request the bootstrap that gives the new buffer
+   * its history. Until that capture is parsed and proved, the runtime keeps
+   * reporting the degraded state (it is the owner of that decision).
+   */
+  private rebuildRenderer(): void {
+    if (this.disposed || !this._terminal) { return; }
+    // A halt is repaired even without a viewport (a local write can overflow
+    // before attach); only the mounting half is skipped then and the next
+    // attach mounts the clean instance.
+    const element = this.attached ? this.mountElement : null;
+    if (this.attached && !element) { return; }
+
+    this.teardownTerminalUi();
+    // Any bootstrap callback still held by the old xterm describes a buffer
+    // that no longer exists; the sequence is what keeps it from vouching for
+    // `hasSessionOutput` on the replacement.
+    this.bootstrapSequence += 1;
+    this.writer.dispose();
+    this.instance.detach();
+    this.instance.dispose();
+
+    this.instance = new TerminalInstance(this.options);
+    this.writer = this.createWriter();
+    this._terminal = this.instance.terminal;
+    // The replacement holds nothing of the session's yet; an attach that
+    // reads this flag must ask for the history the old buffer had.
+    this._hasSessionOutput = false;
+    if (element) {
+      this.instance.attach(element);
+      // Retires the transport that was bound to the disposed xterm and binds a
+      // fresh one; the runtime advances its generation and re-attaches with a
+      // bootstrap when it hears about the replacement.
+      this.rewireTransport(this._terminal);
+      this.wireTerminalUi(element, this._terminal);
+    }
+    this.events?.onRendererReplaced?.();
   }
 
   /**
@@ -223,9 +361,12 @@ export class TerminalController {
   /** Create xterm, mount on `element`, and wire the transport to it. */
   attach(element: HTMLElement): void {
     const terminal = this.instance.terminal;
-    if (this.instance.isDisposed) {
+    if (this.instance.isDisposed || this.disposed) {
       return;
     }
+    // Kept so a writer-halt repair can mount its replacement in the same
+    // viewport without asking React to re-render (#2196).
+    this.mountElement = element;
 
     // Same container — transport-only rewire (P2P socket / route changed).
     if (this.attached && terminal.element?.parentElement === element) {
@@ -260,7 +401,7 @@ export class TerminalController {
     this.teardownTransport();
     const transport = this.transportFactory();
     this.transport = transport;
-    transport.onOutput = (data: Uint8Array, bootstrap?: TerminalBootstrap) => {
+    transport.onOutput = (data: Uint8Array, bootstrap?: TerminalBootstrap, position?: TerminalStreamPosition) => {
       // A bootstrap is the session's history, not more output: it **replaces**
       // this buffer instead of appending to it, which is the whole reason the
       // agent can re-send history on every attach that needs one without the
@@ -272,11 +413,37 @@ export class TerminalController {
       // display, erase scrollback, cursor home: the three things a replaced
       // buffer needs, and nothing else.
       //
-      // A snapshot the agent had to cut short is the one case that does not get
-      // the third one — it is not a history that can stand in for what the
-      // client already has (#1305).
+      // A shortened or unverified capture cannot stand in for the client's
+      // existing scrollback. Repaint the visible screen only; preserve history
+      // unless a proven atomic, full-VT checkpoint justifies replacement.
+      // An atomic cut beyond position 0 is a complete replay of the Agent's
+      // ordered stream log, so replacing the buffer is what makes "every event
+      // through `throughSeq` was applied" true — appending it to bytes a
+      // previous subscription already applied would duplicate them.
+      //
+      // An epoch-start cut (#2124) has no replay, but a **history-sized,
+      // non-truncated** capture taken there is the pane's history at that
+      // stream position: everything the client retained is a prefix of it.
+      // Appending it over the retained buffer writes the overlap a second time
+      // (#2160), and repainting only the screen leaves the frames produced
+      // while the transport was down missing. So it replaces too. A truncated
+      // capture is newer than it is complete — the byte ceiling dropped the
+      // oldest history (#1305) — so that one still only repaints the screen,
+      // and an unverified capture never replaces.
+      //
+      // Fidelity stays whatever the marker states; this is a stream baseline,
+      // not the full-VT repair `provesVerifiedBootstrapRepair` gates.
+      const streamBaseline = bootstrap ? streamBaselineFromBootstrap(bootstrap) : undefined;
+      const completeHistoryCut = bootstrap !== undefined
+        && bootstrap.cutConsistency === 'atomic'
+        && bootstrap.requestedLines > 0
+        && !bootstrap.truncated;
+      const replayReplacesBuffer = provesVerifiedBootstrapRepair(bootstrap)
+        || (streamBaseline !== undefined && streamBaseline.appliedThrough > 0)
+        || completeHistoryCut;
       if (bootstrap) {
-        terminal.write(bootstrap.truncated ? BOOTSTRAP_SCREEN_RESET : BOOTSTRAP_BUFFER_RESET);
+        this.writer.write(replayReplacesBuffer
+          ? BOOTSTRAP_BUFFER_RESET : BOOTSTRAP_SCREEN_RESET);
       }
       const follow = this.capsuleOcclusionScroll?.snapshotFollowing() ?? false;
       // A snapshot is this buffer's *history*, and handing it to xterm is not
@@ -292,17 +459,35 @@ export class TerminalController {
       // for a callback there would report "no session output" for every
       // session that never sends a bootstrap.
       const bootstrapSeq = bootstrap ? ++this.bootstrapSequence : null;
-      terminal.write(data, () => {
+      this.writer.write(data, () => {
         if (bootstrapSeq !== null
           && bootstrapSeq === this.bootstrapSequence
           && this._terminal === terminal
           && this.transport === transport) {
           this.markSessionOutput();
+          this._hasParsedCapture = true;
+          // The baseline is a parser-applied stream position, not a claim that
+          // the screen was restored: it comes strictly from an atomic cut and
+          // this write's callback in the current generation.
+          if (streamBaseline) {
+            this.events?.onStreamBaseline?.(streamBaseline);
+          }
           // A truncated pane capture can repaint the current screen, but
-          // cannot establish that the missing history was recovered.
-          if (!bootstrap?.truncated) {
+          // cannot establish that the missing history was recovered. A
+          // complete history capture was written after a buffer reset and is
+          // the pane's history, so it does repair it (#2155).
+          // Only an **epoch-start** history capture is that repair. A
+          // complete replay prefix (throughSeq > 0) is a stream position: its
+          // partial fidelity does not restore history that predates the
+          // Agent's reader (#2120), which is not this callback's claim.
+          if (provesVerifiedBootstrapRepair(bootstrap)
+            || (completeHistoryCut && bootstrap?.throughSeq === 0)) {
             this.events?.onBootstrapApplied?.();
           }
+        }
+        if (bootstrapSeq === null && position
+          && this._terminal === terminal && this.transport === transport) {
+          this.events?.onStreamEventParsed?.(position);
         }
         if (follow) {
           this.capsuleOcclusionScroll?.afterOutputWhileFollowing();
@@ -310,7 +495,13 @@ export class TerminalController {
       });
       if (bootstrapSeq === null) { this.markSessionOutput(); }
     };
-    transport.onResize = (cols: number, rows: number) => { terminal.resize(cols, rows); };
+    transport.onResize = (cols: number, rows: number, position?: TerminalStreamPosition) => {
+      this.writer.resize(cols, rows, () => {
+        if (position && this._terminal === terminal && this.transport === transport) {
+          this.events?.onStreamEventParsed?.(position);
+        }
+      });
+    };
     transport.onError = (err: Error) => { this.onError?.(err); };
     this.events?.onTransportReady?.(true);
   }
@@ -332,6 +523,17 @@ export class TerminalController {
    */
   get hasSessionOutput(): boolean {
     return this._hasSessionOutput;
+  }
+
+  /**
+   * Whether the mounted xterm parsed a capture of this session (#2194).
+   *
+   * The attach decision this answers is "would re-sending history duplicate
+   * what I hold, or fill what I lack?" — and live output alone neither
+   * duplicates nor fills history. See {@link _hasParsedCapture}.
+   */
+  get hasParsedCapture(): boolean {
+    return this._hasParsedCapture;
   }
 
   private teardownTransport(): void {
@@ -441,6 +643,7 @@ export class TerminalController {
   detach(): void {
     if (!this.attached) { return; }
     this.attached = false;
+    this.mountElement = null;
 
     this.teardownTerminalUi();
     this.teardownTransport();
@@ -451,9 +654,11 @@ export class TerminalController {
 
   /** Tear down xterm, transport, and GPU resources (controller replacement / unmount). */
   dispose(): void {
+    this.disposed = true;
     this.transportBindingUnsub?.();
     this.transportBindingUnsub = null;
     this.detach();
+    this.writer.dispose();
     this.instance.dispose();
   }
 
@@ -468,7 +673,8 @@ export class TerminalController {
    */
   write(data: string | Uint8Array): void {
     const follow = this.capsuleOcclusionScroll?.snapshotFollowing() ?? false;
-    this._terminal?.write(data, () => {
+    if (!this._terminal) { return; }
+    this.writer.write(data, () => {
       if (follow) {
         this.capsuleOcclusionScroll?.afterOutputWhileFollowing();
       }
@@ -686,6 +892,16 @@ export class ResizeController {
   /** The element being observed — held for {@link reportedGrid}. */
   private container: HTMLElement | null = null;
   private lastCell = { width: 8, height: 16 };
+  /**
+   * Whether the cell box has already been through the font-load correction
+   * (#1490). Until it has, a provisional status means the grid is still the
+   * fallback's and the correction will report the final one. After it has,
+   * the box is final: `document.fonts.status` can flip back to `loading` for
+   * a lazy face the renderer requested, and treating that as provisional
+   * would swallow a real container resize with no correction left to report
+   * it (#2132).
+   */
+  private fontMetricsSettled = false;
 
   constructor(controller: TerminalController) {
     this.controller = controller;
@@ -832,6 +1048,9 @@ export class ResizeController {
    * a face that never arrives still releases the report.
    */
   private metricsAreProvisional(): boolean {
+    // Only before the correction: a later `loading` status is some other face
+    // the renderer asked for, not a measurement this grid was computed from.
+    if (this.fontMetricsSettled) { return false; }
     const fonts = typeof document === 'undefined' ? undefined : document.fonts;
     return fonts?.status === 'loading';
   }
@@ -841,6 +1060,7 @@ export class ResizeController {
    *  resized). Refreshes the stashed cell size so later observer fires also
    *  use it. */
   remeasure(): void {
+    this.fontMetricsSettled = true;
     const { width, height } = this.lastContainer;
     if (width <= 0 || height <= 0) { return; }
     const cell = this.controller.cellDimensions;

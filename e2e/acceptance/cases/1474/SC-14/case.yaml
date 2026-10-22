@@ -3,6 +3,10 @@ issue: 1474
 criterion: SC-14
 stage: staging
 runtime: full-stack-local
+# Read-only observation: an authenticating browser shell plus online-agent
+# protocol evidence. Neither verifier mutates server, session or tmux state, so
+# it may share a job-owned runtime (#1866).
+isolation: shared
 verifiers:
   - type: browser
     entry: verify.spec.js

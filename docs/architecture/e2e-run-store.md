@@ -36,3 +36,34 @@ The `E2E Test Run Ingest` workflow is a **separate, main-owned, write-token-only
 It appends compact, immutable `test` mode Run metadata at `acceptance-results:runs/<UTC-day>/<run-id>-<attempt>/test/playwright.json` with a versioned `indexes/by-sha/<sha>/test/...` entry. The trusted single-writer concurrency group is shared with Acceptance and Scenario ingestion. A divergent retry fails instead of overwriting data; matching bytes are idempotent. These Test records contain only an exact SHA, workflow/Job success facts, source tree identity, execution digest, and the artifact ID, SHA-256, size and expiration. They deliberately do **not** include raw browser output or a fabricated Acceptance verdict (`evaluation: null`). GitHub Actions artifacts are time-limited (the E2E workflow currently uses 7-day report retention), not permanently archived by this mechanism. Benchmark producer ingestion is a separate future capability; the shared versioned index schema merely reserves that mode.
 
 **Gate:** this workflow only becomes active after the trusted source is on GitHub's default `main` branch. A staging code merge alone is not proof of actual Test record ingestion. A stage-specific source Case must independently verify a completed post-deployment push run, both immutable orphan files, and the authentic source artifact checksum before marking the relevant SC Pass.
+
+
+## Issue-centric selected PR E2E and immutable Issue projections
+
+This selected PR path is **distinct** from the successful full-suite push ingestion above. Only files at `e2e/tests/**/*.spec.ts` are selectable: the basename before `.spec.ts` is the stable E2E ID. Each linked Issue explicitly declares `New` and `Regression` IDs in `## E2E Verification`. The authenticated source plan takes the de-duplicated union of all linked Issue obligations and any changed Spec IDs; there is no static source-code→E2E mapping. GitHub Actions invokes `./e2e/run test --id <ID>` for each selected ID. Staging push still runs the complete Playwright regression suite.
+
+An Issue declaring `New: none` and `Regression: none` remains a *validated participant*, but owns **no selected ID** and must not receive a synthetic empty E2E Report PATCH or projection receipt. The selection plan preserves full Issue attribution: the same test executes once even when two Issues own that ID.
+
+For selected PR runs, Playwright JSON plus a separate runtime assertion reporter is independently checked. A Pass needs actual discovered tests, complete non-flaky and non-skipped execution, and at least one verified executed assertion. Absent or conflicting evidence, missing test IDs, zero assertions, Skip or Flaky cannot become Pass. A source E2E workflow can therefore fail while still generating authentic per-ID Fail/Pass results.
+
+The privileged, default-main-owned `E2E / Test Ingest` handles **completed success or failure** selected PR source runs. It verifies GitHub workflow identity, exact HEAD SHA, Run ID/Attempt, source Spec catalog, Issue contracts, selection plan and original report/artifact digest before persisting `acceptance-results:runs/YYYY-MM-DD/<source-run>-<attempt>/test/issue-e2e.json`. For each actual E2E owner it may PATCH the Issue's `## E2E Report`, independently GET the updated Issue, then append a bounded, immutable `test/projections/<issue>.json` in the *same* Run Store. The receipt binds Issue ID, source Run/Attempt, SHA, Issue declaration digest, Plan Digest, artifact digest, per-ID verdicts, trusted Ingest Run ID/Attempt and the full read-back body SHA-256. `outcome=applied` requires the real PATCH and GET; `outcome=recovered` means a previous identical projection was found and does **not** claim a new PATCH.
+
+Read-only SC Acceptance may use a historical projection only after independently joining the source GitHub Run, PR commit list, exact SHA and verified plan, protected Run Store record/receipt, and a **completed successful** main-owned Ingest workflow and privileged projection job. A source Playwright artifact, mutable Issue comment, failed Ingest or `recovered` receipt alone is never positive historical PATCH proof. For old closed/unmerged test-only PR runs without `applied` receipts, exclude the run from positive Issue-mutation evidence; malformed *present* receipts remain hard failures. Do not rewrite, force-push or collapse previous Fail and Pass receipts.
+
+### Executed two-owner Fail → Pass proof (2026-10-14)
+
+The closed **unmerged** test-only [PR #1775](https://github.com/BestNathan/nession/pull/1775) associated owning Issues #1702 and #1776 with `login`; #1702 alone also required `session-lifecycle`. Linked #1759/#1772 both declared `none`, so they correctly received no empty projection.
+
+| Phase | Exact source HEAD | Source E2E | Main-owned Ingest | Authenticated outcomes |
+| --- | --- | --- | --- | --- |
+| Controlled Fail | `92838abca9ee9fe4f0a4bcde91071ff111d72fcc` | [38556580416](https://github.com/BestNathan/nession/actions/runs/38556580416) (expected workflow failure) | [38557400411](https://github.com/BestNathan/nession/actions/runs/38557400411) (success) | `login=Fail` for both owners; `session-lifecycle=Pass` |
+| Corrected Pass | `ac601555c1de69e66b7d9cf2da73fe4971862230` | [38557570973](https://github.com/BestNathan/nession/actions/runs/38557570973) (success) | [38558355729](https://github.com/BestNathan/nession/actions/runs/38558355729) (success) | `login=Pass` for both owners; `session-lifecycle=Pass` |
+
+Independently fetched immutable `applied` receipt blobs, one per Issue and source Run:
+
+| Phase | #1702 projection blob SHA | #1776 projection blob SHA |
+| --- | --- | --- |
+| Fail | `37b7542a08b3bae5524dd18d96f4cff3a7b749db` | `f2d72afad3fd8082f521702afd1287ada294a48f` |
+| Pass | `7e26b8172f066491f0943086220e320db6421eb9` | `f74782c82fa28739fe9fc167f12670b653e022ba` |
+
+The paths are `runs/2026-10-14/{38556580416-1,38557570973-1}/test/projections/{1702,1776}.json` on `acceptance-results`. The corrected Pass did not erase the earlier Fail evidence. Both outcomes were separately read back from the live GitHub Issue reports. This is evidence for the trusted Acceptance evaluator, **not** an instruction to manually approve SCs or waive final merge gates.

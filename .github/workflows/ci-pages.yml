@@ -1,0 +1,49 @@
+name: CI / Pages
+
+# An independent, read-only gate for the public Pages project; no Web build,
+# private Nession runtime, trusted writer, or GitHub secret is required.
+on:
+  pull_request:
+    branches: [main, staging]
+    paths:
+      - 'pages/**'
+      - 'e2e/tests/browser/pages-*.spec.ts'
+      - 'e2e/helpers/pagesStandalone.ts'
+      - 'e2e/runner/cli-selftest.mjs'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-quality-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  standalone-pages:
+    name: Pages unit, security and static build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify standalone projection and import boundary
+        run: cd pages && npm run check
+      - name: Build sanitized Pages without network credentials
+        env:
+          PAGES_OFFLINE: '1'
+          SOURCE_MAIN_SHA: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+        run: node pages/scripts/build.mjs
+      - name: Verify output and null semantics
+        run: |
+          node - <<'NODE'
+          const fs=require('node:fs');
+          const p=JSON.parse(fs.readFileSync('pages/dist/data/site.json','utf8'));
+          if(p.schema_version!==1 || p.source.main_sha!=='a'.repeat(40))process.exit(1);
+          if(p.work.issues_status!=='unavailable' || p.agents.summary.cost_7d!==null)process.exit(1);
+          if(!fs.existsSync('pages/dist/index.html'))process.exit(1);
+          console.log('Public Pages schema, offline state and static artifact verified');
+          NODE

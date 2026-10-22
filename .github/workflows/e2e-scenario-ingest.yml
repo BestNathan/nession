@@ -16,6 +16,17 @@ concurrency:
 
 jobs:
   ingest-scenario:
+    # A completed cancellation/skip can still upload partial artifacts, but
+    # it cannot satisfy sourceIdentity (success/failure only). Do not mint
+    # an App writer token or report an ingester failure for ineligible events.
+    # Retain same-repository PR, push and workflow_dispatch observations.
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.event.workflow_run.status == 'completed' &&
+      (github.event.workflow_run.conclusion == 'success' ||
+       github.event.workflow_run.conclusion == 'failure') &&
+      github.event.workflow_run.repository.full_name == github.repository &&
+      github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -37,9 +48,31 @@ jobs:
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: incoming
+      - name: Mint scoped App token for orphan Run Store updates
+        if: (vars.RUN_STORE_WRITER_MODE == '' || vars.RUN_STORE_WRITER_MODE == 'app')
+        id: store_app
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.RUN_STORE_WRITER_APP_ID }}
+          private-key: ${{ secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY }}
+          repositories: nession
+          permission-contents: write
+      - name: Reject unrecognized writer mode or unavailable App token
+        env:
+          WRITER_MODE: ${{ vars.RUN_STORE_WRITER_MODE }}
+          APP_TOKEN: ${{ steps.store_app.outputs.token }}
+        run: |
+          set -euo pipefail
+          case "$WRITER_MODE" in
+            legacy) ;;
+            ''|app) [[ -n "$APP_TOKEN" ]] || { echo "::error::No App token; refuse legacy fallback" >&2; exit 1; } ;;
+            *) echo "::error::Unsupported RUN_STORE_WRITER_MODE" >&2; exit 1 ;;
+          esac
+
       - name: Append immutable records and indexes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STORE_PUSH_TOKEN: ${{ vars.RUN_STORE_WRITER_MODE == 'legacy' && secrets.GITHUB_TOKEN || steps.store_app.outputs.token }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
@@ -47,7 +80,7 @@ jobs:
           git -C results-repo init
           git -C results-repo config user.name "github-actions[bot]"
           git -C results-repo config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git -C results-repo remote add origin "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git"
+          git -C results-repo remote add origin "https://x-access-token:$STORE_PUSH_TOKEN@github.com/$GITHUB_REPOSITORY.git"
           git -C results-repo fetch --depth=1 origin acceptance-results
           git -C results-repo checkout -B acceptance-results FETCH_HEAD
           count=0
@@ -77,7 +110,27 @@ jobs:
             echo "Idempotent retry: existing bytes matched"
           else
             git -C results-repo commit -m "e2e: ingest source run ${{ github.event.workflow_run.id }} attempt ${{ github.event.workflow_run.run_attempt }}"
-            git -C results-repo push origin acceptance-results
+            node trusted/scripts/run-store-cas-push.mjs acceptance-results "${GITHUB_WORKSPACE}/results-repo"
           fi
           echo "Scenario records ingested: $count; orphan branch: acceptance-results" >> "$GITHUB_STEP_SUMMARY"
           echo "External evidence: source Actions artifact (14-day retention, not indefinitely durable)" >> "$GITHUB_STEP_SUMMARY"
+      - name: Verify immutable Git bytes before uploading Run Store receipts
+        if: success()
+        run: |
+          set -euo pipefail
+          count=0
+          for file in "${RUNNER_TEMP}"/run-store-receipts/*.json; do
+            [[ -f "$file" ]] || continue
+            node "${GITHUB_WORKSPACE}/trusted/scripts/run-store-receipt-verify.mjs" "$file" "${GITHUB_WORKSPACE}/results-repo" acceptance-results
+            count=$((count + 1))
+          done
+          echo "Read-only exact Git-byte receipts verified: ${count}; no independent signing/anchor claimed" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Preserve Run Store post-commit receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-store-receipt-${{ github.run_id }}-${{ github.run_attempt }}-scenario
+          path: ${{ runner.temp }}/run-store-receipts
+          if-no-files-found: ignore
+          retention-days: 14

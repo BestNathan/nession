@@ -217,10 +217,11 @@ ok(() => {
     const original = fs.readFileSync(path.join(repoRoot, '.github',
       'workflows', 'acceptance-cases.yml'), 'utf8');
     const dollar = String.fromCharCode(36);
-    const exact = ['args+=(--sha "', dollar, '{TARGET_SHA}" --profile "',
-      dollar, '{profile}" --output "', dollar, '{output}")'].join('');
-    const missing = ['args+=(--profile "', dollar, '{profile}" --output "',
-      dollar, '{output}")'].join('');
+    // #1866 Phase B: the batch invocation carries the exact SHA directly. The
+    // negative swaps it for the retired --target-sha spelling, so the workflow
+    // still runs but SC-11 must refuse it.
+    const exact = '--sha "' + dollar + '{TARGET_SHA}"';
+    const missing = '--target-sha "' + dollar + '{TARGET_SHA}"';
     assert.ok(original.includes(exact), 'canonical SHA assertion fixture absent');
     fs.writeFileSync(path.join(folder, 'acceptance-cases.yml'),
       original.replace(exact, missing));
@@ -229,7 +230,7 @@ ok(() => {
       encoding: 'utf8', timeout: 5000,
     });
     assert.notEqual(negative.status, 0, 'missing SHA must be rejected');
-    assert.match(negative.stderr, /manual and automatic paths share exact SHA and runtime profile/);
+    assert.match(negative.stderr, /manual and automatic paths share the exact SHA/);
   } finally {
     fs.rmSync(fixture, { recursive: true, force: true });
   }

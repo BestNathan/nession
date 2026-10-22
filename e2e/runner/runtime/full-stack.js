@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const { execFileSync, spawn } = require('node:child_process');
 const { once } = require('node:events');
-const { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } = require('node:fs');
+const { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } = require('node:fs');
 const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
@@ -256,6 +256,11 @@ async function startFullStackRuntime(options) {
   const readyTimeoutMs = Number(options?.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS);
   const cleanupHome = options?.cleanupHome !== false;
   const targetSha = assertTargetSha(repoRoot, options?.targetSha);
+  // #1866 SC-01: fixture-only browser gates (the design-system browser profile)
+  // need the built web app and nothing else. A web-only runtime still proves
+  // the preview is ready, but does not start Server, Agent or tmux, so a
+  // `not-required` E2E plan can skip the Rust build entirely.
+  const webOnly = options?.webOnly === true;
 
   const serverTemplate = path.resolve(
     options?.serverConfigTemplate ??
@@ -305,25 +310,14 @@ async function startFullStackRuntime(options) {
     if (cleanupHome) rmSync(home, { recursive: true, force: true });
   };
 
-  try {
-    const server = binaryCommand(repoRoot, 'nession-server', 'nession-server', serverConfig);
-    const serverProcess = spawnManaged(server.command, server.args, {
-      cwd: repoRoot,
-      env: {
-        ...isolationEnv,
-        RUST_LOG: 'info',
-        RUST_BACKTRACE: '1',
-      },
-      label: 'nession-server',
-    });
-    processes.push(serverProcess);
-    await waitForTcp(serverPort, readyTimeoutMs, serverProcess.child, serverProcess.label);
-
-    // Preserve the existing E2E stabilization window after server readiness.
-    await sleep(Number(options?.agentStartDelayMs ?? 5_000));
-
+  // The Agent is the one process a test may restart: its tmux sessions live in
+  // the separate tmux server, so a restart is the real failure shape — a new
+  // process with a new stream epoch over the sessions that survived (#1926
+  // SC-05). Kept out of the `webOnly` profile, which has no Agent at all.
+  let agentEntry = null;
+  const startAgentProcess = async () => {
     const agent = binaryCommand(repoRoot, 'nession-agent', 'nession-agent', agentConfig);
-    const agentProcess = spawnManaged(agent.command, agent.args, {
+    const entry = spawnManaged(agent.command, agent.args, {
       cwd: repoRoot,
       env: {
         ...isolationEnv,
@@ -333,8 +327,40 @@ async function startFullStackRuntime(options) {
       },
       label: 'nession-agent',
     });
-    processes.push(agentProcess);
-    await waitForTcp(agentPort, readyTimeoutMs, agentProcess.child, agentProcess.label);
+    processes.push(entry);
+    await waitForTcp(agentPort, readyTimeoutMs, entry.child, entry.label);
+    return entry;
+  };
+  const restartAgent = async () => {
+    if (webOnly) throw new Error('the web-only runtime has no agent to restart');
+    if (!agentEntry) throw new Error('the agent has not been started');
+    const previous = agentEntry;
+    agentEntry = null;
+    await stopManaged(previous);
+    agentEntry = await startAgentProcess();
+    return { restarted: true, pid: agentEntry.child.pid ?? null };
+  };
+
+  try {
+    if (!webOnly) {
+      const server = binaryCommand(repoRoot, 'nession-server', 'nession-server', serverConfig);
+      const serverProcess = spawnManaged(server.command, server.args, {
+        cwd: repoRoot,
+        env: {
+          ...isolationEnv,
+          RUST_LOG: 'info',
+          RUST_BACKTRACE: '1',
+        },
+        label: 'nession-server',
+      });
+      processes.push(serverProcess);
+      await waitForTcp(serverPort, readyTimeoutMs, serverProcess.child, serverProcess.label);
+
+      // Preserve the existing E2E stabilization window after server readiness.
+      await sleep(Number(options?.agentStartDelayMs ?? 5_000));
+
+      agentEntry = await startAgentProcess();
+    }
 
     const webProcess = spawnManaged(
       'npm',
@@ -356,18 +382,32 @@ async function startFullStackRuntime(options) {
     const metadata = {
       schema_version: 1,
       target_sha: targetSha,
-      profile: options?.profile ?? 'full-stack-local',
+      profile: options?.profile ?? (webOnly ? 'web-only' : 'full-stack-local'),
       home,
       tmux_socket: tmuxSocket,
-      server_port: serverPort,
-      agent_port: agentPort,
+      // A web-only runtime has no Server/Agent; reporting invented ports would
+      // claim a stack that was never started.
+      ...(webOnly ? {} : { server_port: serverPort, agent_port: agentPort }),
       web_port: webPort,
       base_url: baseURL,
     };
     writeFileSync(path.join(home, 'runtime.json'), JSON.stringify(metadata, null, 2) + '\n');
+    // #1866: a bounded, non-sensitive provision counter. The Full E2E Gate used
+    // to start this stack twice per invocation and nothing in CI recorded it, so
+    // "at most once" was unmeasurable. One appended line per real provision lets
+    // the owning Gate report a measured count instead of a claim. Absolute paths
+    // only; failures here must never break provisioning.
+    const provisionLog = process.env.E2E_RUNTIME_PROVISION_LOG;
+    if (typeof provisionLog === 'string' && path.isAbsolute(provisionLog)) {
+      try {
+        appendFileSync(provisionLog,
+          JSON.stringify({ profile: metadata.profile, web_only: webOnly,
+            at: new Date().toISOString() }) + '\n');
+      } catch { /* measurement is best-effort; never fail the runtime for it */ }
+    }
     console.log('[e2e runner] ready ' + JSON.stringify(metadata));
 
-    return { ...metadata, stop };
+    return { ...metadata, stop, restartAgent };
   } catch (error) {
     await stop();
     throw error;

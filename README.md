@@ -1,5 +1,7 @@
 # Nession
 
+**Explore [Nession Pages](https://bestnathan.github.io/nession/)** — an independently designed, read-only project site introducing Nession and showing public AI workflow Agent activity, active engineering work, repository metrics, and evidence-source metadata. Pages (`pages/`) is separate from the authenticated product Web workspace (`web/`); it does not reuse its design system or runtime components.
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/BestNathan/nession/metrics/repo-metrics-dark.svg?sanitize=true&v=2">
   <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/BestNathan/nession/metrics/repo-metrics-light.svg?sanitize=true&v=2">

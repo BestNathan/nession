@@ -1,0 +1,111 @@
+name: E2E / Full Regression
+
+# Separate system/release verification, never an implicit per-merge gate.
+on:
+  workflow_dispatch:
+    inputs:
+      target_ref:
+        description: Existing source branch (pin to immutable SHA)
+        required: true
+        default: main
+        type: string
+      target_sha:
+        description: Optional exact 40-character SHA reachable from branch
+        required: false
+        type: string
+  schedule:
+    - cron: '0 2 * * 0'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-full-regression-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  full:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    env:
+      RUSTC_WRAPPER: ""
+      PLAYWRIGHT_BROWSERS_PATH: ~/.cache/ms-playwright
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Resolve immutable branch/SHA target
+        id: pin
+        env:
+          REQUESTED_REF: ${{ inputs.target_ref }}
+          REQUESTED_SHA: ${{ inputs.target_sha }}
+        run: |
+          set -euo pipefail
+          ref="$REQUESTED_REF"
+          [[ -n "$ref" ]] || ref=main
+          [[ "$ref" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,120}$ ]] || exit 1
+          [[ "$ref" != *..* && "$ref" != *//* && "$ref" != *.lock ]] || exit 1
+          git fetch --no-tags origin "refs/heads/$ref"
+          tip="$(git rev-parse FETCH_HEAD)"
+          sha="$REQUESTED_SHA"
+          [[ -n "$sha" ]] || sha="$tip"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          git cat-file -e "$sha^{commit}"
+          git merge-base --is-ancestor "$sha" "$tip" || {
+            echo "::error::Requested SHA is not reachable from the branch"
+            exit 1
+          }
+          git checkout --detach "$sha"
+          [[ "$(git rev-parse HEAD)" == "$sha" ]] || exit 1
+          echo "target_sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "source_ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "Full Regression target: $ref @ $sha" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            e2e/package-lock.json
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache-workspaces: "."
+          cache-all-crates: "true"
+      - uses: extractions/setup-just@v2
+      - name: Prepare tmux
+        run: sudo apt-get update && sudo apt-get install -y tmux
+      - name: Install web, browser and binaries
+        run: |
+          (cd web && npm ci && npm run build)
+          (cd e2e && npm ci && npx playwright install chromium --with-deps)
+          cargo build -p nession-server -p nession-agent
+      - name: Run full canonical Playwright suite at pinned SHA
+        env:
+          CI: true
+          NESSION_TARGET_SHA: ${{ steps.pin.outputs.target_sha }}
+          E2E_PLAYWRIGHT_REPORT_FILE: ${{ runner.temp }}/full-regression-playwright.json
+          E2E_PLAYWRIGHT_ASSERTIONS_FILE: ${{ runner.temp }}/full-regression-assertions.json
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$NESSION_TARGET_SHA" ]] || exit 1
+          ./gates/run e2e-playwright
+      - name: Verify complete per-ID assertions
+        env:
+          TARGET_SHA: ${{ steps.pin.outputs.target_sha }}
+        run: |
+          node e2e/runner/e2e-full-per-id-receipt.mjs verify \
+            "$RUNNER_TEMP/full-regression-playwright.json" \
+            "$RUNNER_TEMP/full-regression-assertions.json" "$TARGET_SHA"
+      - name: Preserve full regression report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-regression-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/full-regression-playwright.json
+            ${{ runner.temp }}/full-regression-assertions.json
+            e2e/playwright-report/
+          if-no-files-found: warn
+          retention-days: 14

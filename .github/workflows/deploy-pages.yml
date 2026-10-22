@@ -1,0 +1,262 @@
+name: Deploy / Public Pages
+
+# Trusted main-only public projection; never Nession product web/.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'pages/**'
+      - 'automation/agents/registry.json'
+      - '.github/workflows/deploy-pages.yml'
+  schedule:
+    - cron: '43 */4 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-public-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build independent Pages
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    outputs:
+      active: ${{ steps.detect.outputs.active }}
+      public_data_sha256: ${{ steps.public_data.outputs.sha256 }}
+      workflow_json_sha256: ${{ steps.public_data.outputs.workflow_json_sha256 }}
+      workflow_html_sha256: ${{ steps.public_data.outputs.workflow_html_sha256 }}
+      workflow_nodes: ${{ steps.public_data.outputs.workflow_nodes }}
+      public_agent_source: ${{ steps.public_data.outputs.source }}
+      public_agent_runs: ${{ steps.public_data.outputs.observed_runs }}
+    steps:
+      - name: Checkout trusted main
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - id: detect
+        name: Detect standalone Pages source
+        shell: bash
+        run: |
+          if [[ -f pages/index.html && -f pages/scripts/build.mjs ]]; then
+            echo 'active=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'active=false' >> "$GITHUB_OUTPUT"
+            echo 'Pages source has not merged to main; skipping deployment.'
+          fi
+      - name: Checkout pinned metrics snapshot
+        if: steps.detect.outputs.active == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: metrics
+          path: metrics-store
+          persist-credentials: false
+      - name: Checkout pinned read-only Acceptance results
+        if: steps.detect.outputs.active == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: acceptance-results
+          path: acceptance-store
+          persist-credentials: false
+      - name: Setup standalone Node toolchain
+        if: steps.detect.outputs.active == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate independent public projection
+        if: steps.detect.outputs.active == 'true'
+        run: cd pages && npm run check
+      - name: Build sanitized static Pages artifact
+        if: steps.detect.outputs.active == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SOURCE_MAIN_SHA: ${{ github.sha }}
+          METRICS_DIR: ${{ github.workspace }}/metrics-store
+          ACCEPTANCE_RESULTS_DIR: ${{ github.workspace }}/acceptance-store
+        shell: bash
+        run: |
+          set -euo pipefail
+          export METRICS_SHA="$(git -C metrics-store rev-parse HEAD)"
+          export ACCEPTANCE_RESULTS_SHA="$(git -C acceptance-store rev-parse HEAD)"
+          node pages/scripts/build.mjs
+          test -s pages/dist/index.html
+          test -s pages/dist/data/site.json
+          test -s pages/dist/workflows.html
+          test -s pages/dist/data/workflows.json
+          node -e "const d=require('./pages/dist/data/site.json'); if(d.schema_version!==1 || d.source.main_sha!==process.env.SOURCE_MAIN_SHA || d.source.metrics_sha!==process.env.METRICS_SHA || d.source.acceptance_results_sha!==process.env.ACCEPTANCE_RESULTS_SHA) process.exit(1)"
+      - name: Capture exact static public evidence digest and coverage
+        if: steps.detect.outputs.active == 'true'
+        id: public_data
+        shell: bash
+        run: |
+          set -euo pipefail
+          file=pages/dist/data/site.json
+          workflow_json=pages/dist/data/workflows.json
+          workflow_html=pages/dist/workflows.html
+          jq -e --arg sha "$GITHUB_SHA" '
+            .schema_version == 1 and
+            .source.repository == "BestNathan/nession" and
+            .source.main_sha == $sha and
+            (.groups | length) == 6 and
+            (.nodes | length) == 27 and
+            (.edges | type) == "array" and
+            ([.edges[] | .kind] | all(.[]; . == "workflow_run" or . == "workflow_call"))
+          ' "$workflow_json" >/dev/null
+          grep -Fq '<title>GitHub Workflows' "$workflow_html"
+          echo "workflow_json_sha256=$(sha256sum "$workflow_json" | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "workflow_html_sha256=$(sha256sum "$workflow_html" | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "workflow_nodes=$(jq -r '.nodes | length' "$workflow_json")" >> "$GITHUB_OUTPUT"
+          jq -e '
+            (.work.agent_run_source == "available" or .work.agent_run_source == "truncated" or .work.agent_run_source == "unavailable")
+            and (.work.issues | type == "array")
+            and ([.work.issues[]?.agent_runs[]?] | all(.[]; 
+              (.run_id | type == "number") and (.run_id > 0)
+              and (.attempt | type == "number") and (.attempt > 0)
+              and (.pr_linkage == "unlinked")
+              and (.url == ("https://github.com/BestNathan/nession/actions/runs/" + (.run_id | tostring)))
+            ))
+          ' "$file" >/dev/null
+          echo "sha256=$(sha256sum "$file" | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "source=$(jq -r .work.agent_run_source "$file")" >> "$GITHUB_OUTPUT"
+          echo "observed_runs=$(jq '[.work.issues[]?.agent_runs[]?] | length' "$file")" >> "$GITHUB_OUTPUT"
+      - name: Configure GitHub Pages
+        if: steps.detect.outputs.active == 'true'
+        uses: actions/configure-pages@v5
+      - name: Upload standalone Pages
+        if: steps.detect.outputs.active == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: pages/dist
+
+  deploy:
+    name: Publish independent Pages
+    if: needs.build.outputs.active == 'true'
+    needs: [build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.publication.outputs.page_url }}
+    steps:
+      - name: Deploy GitHub Pages
+        id: publication
+        uses: actions/deploy-pages@v4
+      # Read only the exact trusted main code that owns the publication
+      # receipt grammar; GitHub Pages deployment permissions are not reused
+      # for untrusted PR code or any mutable Issue text.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify public site URL and exact deployed main SHA
+        env:
+          PUBLISHED_URL: ${{ steps.publication.outputs.page_url }}
+          EXPECTED_SHA: ${{ github.sha }}
+          EXPECTED_DATA_SHA256: ${{ needs.build.outputs.public_data_sha256 }}
+          EXPECTED_WORKFLOW_JSON_SHA256: ${{ needs.build.outputs.workflow_json_sha256 }}
+          EXPECTED_WORKFLOW_HTML_SHA256: ${{ needs.build.outputs.workflow_html_sha256 }}
+          EXPECTED_WORKFLOW_NODES: ${{ needs.build.outputs.workflow_nodes }}
+          EXPECTED_AGENT_SOURCE: ${{ needs.build.outputs.public_agent_source }}
+          EXPECTED_AGENT_RUNS: ${{ needs.build.outputs.public_agent_runs }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Verify the actual anonymous HTTPS website, not just an upload job.
+          url="${PUBLISHED_URL%/}"
+          [[ "$url" == "https://bestnathan.github.io/nession" ]] || {
+            echo "::error::Unexpected Pages publication origin: $url"
+            exit 1
+          }
+          json="$(mktemp)"
+          html="$(mktemp)"
+          workflow_json="$(mktemp)"
+          workflow_html="$(mktemp)"
+          trap 'rm -f "$json" "$html" "$workflow_json" "$workflow_html"' EXIT
+          # Main SHA alone is not a publication identity: consecutive
+          # scheduled builds from the same SHA contain different store snapshots.
+          # A CDN response for the previous deployment can have the right SHA
+          # but stale bytes. Retry only during the existing bounded readback
+          # window, accepting the *exact artifact* rather than the ref.
+          [[ "$EXPECTED_DATA_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+          [[ "$EXPECTED_WORKFLOW_JSON_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+          [[ "$EXPECTED_WORKFLOW_HTML_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+          [[ "$EXPECTED_WORKFLOW_NODES" == 27 ]] || exit 1
+          [[ "$EXPECTED_AGENT_RUNS" =~ ^[0-9]+$ ]] || exit 1
+          [[ "$EXPECTED_AGENT_SOURCE" =~ ^(available|truncated|unavailable)$ ]] || exit 1
+          matched=false
+          for attempt in {1..18}; do
+            if curl --fail --silent --show-error --location --connect-timeout 10 --max-time 20 \
+                -H 'Cache-Control: no-cache' "$url/data/site.json?revision=$EXPECTED_SHA" -o "$json" \
+              && jq -e --arg sha "$EXPECTED_SHA" \
+                '.schema_version == 1 and .source.repository == "BestNathan/nession" and .source.main_sha == $sha' "$json" >/dev/null \
+              && curl --fail --silent --show-error --location --connect-timeout 10 --max-time 20 \
+                -H 'Cache-Control: no-cache' "$url/?revision=$EXPECTED_SHA" -o "$html" \
+              && grep -Fq '<title>Nession' "$html" \
+              && curl --fail --silent --show-error --location --connect-timeout 10 --max-time 20 \
+                -H 'Cache-Control: no-cache' "$url/data/workflows.json?revision=$EXPECTED_SHA" -o "$workflow_json" \
+              && jq -e --arg sha "$EXPECTED_SHA" --argjson count "$EXPECTED_WORKFLOW_NODES" '
+                .schema_version == 1 and
+                .source.repository == "BestNathan/nession" and
+                .source.main_sha == $sha and
+                (.nodes | length) == $count and
+                (.groups | length) == 6 and
+                (.edges | type) == "array"
+              ' "$workflow_json" >/dev/null \
+              && curl --fail --silent --show-error --location --connect-timeout 10 --max-time 20 \
+                -H 'Cache-Control: no-cache' "$url/workflows.html?revision=$EXPECTED_SHA" -o "$workflow_html" \
+              && grep -Fq '<title>GitHub Workflows' "$workflow_html"; then
+              # Compare anonymous HTTPS bytes with the exact build outputs
+              # BEFORE ending the readiness loop (not after a same-SHA match).
+              digest="$(sha256sum "$json" | cut -d ' ' -f1)"
+              source="$(jq -r .work.agent_run_source "$json")"
+              observed="$(jq '[.work.issues[]?.agent_runs[]?] | length' "$json")"
+              workflow_json_digest="$(sha256sum "$workflow_json" | cut -d ' ' -f1)"
+              workflow_html_digest="$(sha256sum "$workflow_html" | cut -d ' ' -f1)"
+              workflow_nodes="$(jq -r '.nodes | length' "$workflow_json")"
+              if [[ "$digest" == "$EXPECTED_DATA_SHA256" &&
+                    "$source" == "$EXPECTED_AGENT_SOURCE" &&
+                    "$observed" == "$EXPECTED_AGENT_RUNS" &&
+                    "$workflow_json_digest" == "$EXPECTED_WORKFLOW_JSON_SHA256" &&
+                    "$workflow_html_digest" == "$EXPECTED_WORKFLOW_HTML_SHA256" &&
+                    "$workflow_nodes" == "$EXPECTED_WORKFLOW_NODES" ]]; then
+                matched=true
+                break
+              fi
+            fi
+            sleep 5
+          done
+          [[ "$matched" == true ]] || {
+            echo "::error::Public Pages did not serve the exact HTML/JSON artifacts at the merged main SHA during bounded HTTPS polling"
+            exit 1
+          }
+          # This is only source observation; never infer SC acceptance or PR
+          # lineage from matching bytes. The existing trusted attester rechecks
+          # the published SHA-256 against the exact GitHub Run/Attempt.
+          status=not_observed
+          if [[ "$source" != unavailable && "$observed" -gt 0 ]]; then
+            status=source_backed_observation
+          fi
+          echo "Public Issue Agent Run observation: $status (source=$source, runs=$observed, digest=$digest)"
+          node pages/scripts/publication-receipt.mjs emit "$EXPECTED_SHA" "$workflow_nodes" "$workflow_json_digest" "$workflow_html_digest"
+          {
+            echo "## Public Pages verified"
+            echo
+            echo "- Public HTTPS URL: $url/"
+            echo "- Exact deployed main SHA: \`$EXPECTED_SHA\`"
+            echo "- Checked: exact HTML /, workflows.html and both sanitized JSON artifacts at the deployed SHA"
+            echo "- Workflow topology nodes: $workflow_nodes; exact HTML SHA-256: \`$workflow_html_digest\`"
+            echo "- Workflow topology exact JSON SHA-256: \`$workflow_json_digest\`"
+            echo "- Exact published JSON SHA-256: \`$digest\` (matches pinned build artifact)"
+            echo "- Issue Agent Run observation: $status · source $source · visible runs $observed"
+            echo "- PR ownership / SC Acceptance / orphan integrity: not inferred"
+          } >> "$GITHUB_STEP_SUMMARY"

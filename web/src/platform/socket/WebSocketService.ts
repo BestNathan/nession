@@ -6,6 +6,7 @@ import type {
   HandshakeSurface,
   PluginSurface,
   RequestOptions,
+  SentSocketMessage,
   SocketMessage,
   WebSocketServiceOptions,
 } from './types';
@@ -268,15 +269,26 @@ export class WebSocketService implements PluginSurface {
    * socket is gone or not yet OPEN.
    */
   send(type: string, payload: Record<string, unknown>): void {
+    this.sendTracked(type, payload);
+  }
+
+  /**
+   * Return the actual emitted envelope id and physical socket generation.
+   * A Relay-ready receipt must correlate to this wire, not a guessed id.
+   */
+  sendTracked(type: string, payload: Record<string, unknown>): SentSocketMessage {
     if (this.disposed) {
       throw new Error('WebSocketService disposed');
     }
+    const id = this.generateMessageId();
+    const physicalGeneration = this.generation;
     this.sendRaw({
       msg_type: type,
-      id: this.generateMessageId(),
+      id,
       timestamp: Date.now(),
       payload,
     });
+    return { id, physicalGeneration };
   }
 
   request<T>(

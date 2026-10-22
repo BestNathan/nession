@@ -1,0 +1,88 @@
+name: Acceptance / Agent Controller
+
+# Unprivileged MANUAL REQUEST ONLY. This workflow cannot write agent-store,
+# issue comments or PRs; the separate verified workflow_run receiver owns App.
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: 'Existing OPEN Issue (use a separate fixture Issue, not #1664)'
+        required: true
+        type: number
+      input_sha:
+        description: 'Exact main-ancestor development SHA'
+        required: true
+        type: string
+      developer:
+        description: 'Registered Developer ID'
+        required: true
+        default: dev-cursor-01
+        type: string
+      reviewer:
+        description: 'Registered Reviewer ID'
+        required: true
+        default: review-cursor-01
+        type: string
+      acceptor:
+        description: 'Registered Acceptor ID'
+        required: true
+        default: accept-cursor-01
+        type: string
+
+permissions:
+  contents: read
+  issues: read
+
+jobs:
+  request:
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'BestNathan'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout trusted main request contract
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify request and Controller Store contracts without credentials
+        run: |
+          set -euo pipefail
+          node scripts/lib/agent/orchestration/controller-start-selftest.mjs
+          node scripts/lib/agent/orchestration/controller-request-selftest.mjs
+      - name: Confirm exact SHA and open native Issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          INPUT_SHA: ${{ inputs.input_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$ISSUE_NUMBER" =~ ^[1-9][0-9]*$ ]]
+          [[ "$INPUT_SHA" =~ ^[a-f0-9]{40}$ ]]
+          git cat-file -e "$INPUT_SHA^{commit}"
+          git merge-base --is-ancestor "$INPUT_SHA" HEAD
+          gh api "repos/$GITHUB_REPOSITORY/issues/$ISSUE_NUMBER" |
+            jq -e --argjson n "$ISSUE_NUMBER" '
+              .number == $n and .state == "open" and
+              (.pull_request | not) and
+              .repository_url == ("https://api.github.com/repos/" + env.GITHUB_REPOSITORY)
+            ' >/dev/null
+      - name: Export validated sanitized request (no Store private key)
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/controller-request"
+          node scripts/lib/agent/orchestration/controller-request.mjs prepare             "$RUNNER_TEMP/controller-request/controller-request.json"
+      - name: Publish only owner/main-bound Controller request
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-controller-request-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/controller-request/controller-request.json
+          if-no-files-found: error
+          retention-days: 2

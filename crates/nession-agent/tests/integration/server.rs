@@ -39,6 +39,17 @@ async fn start_server(
     nession_agent::server::ServerHandle,
     Arc<P2pCredentials>,
 )> {
+    start_server_in_mode(AttachMode::Plain).await
+}
+
+/// Same server, with the attach backend chosen by the test.
+async fn start_server_in_mode(
+    mode: AttachMode,
+) -> anyhow::Result<(
+    SocketAddr,
+    nession_agent::server::ServerHandle,
+    Arc<P2pCredentials>,
+)> {
     let tmp = Box::leak(Box::new(tempfile::tempdir()?));
     let (resize, _resize_updates) = nession_agent::server::ResizeReporter::new();
     // Built, granted into, and only then handed to the listener — the store the
@@ -57,7 +68,7 @@ async fn start_server(
         None,
         "/tmp".to_string(),
         tmp.path().to_string_lossy().as_ref(),
-        AttachMode::Plain,
+        mode,
         AgentServerContext {
             resize,
             credentials: Arc::clone(&credentials),
@@ -720,6 +731,194 @@ async fn a_plain_first_attach_sends_the_history_it_was_asked_for() {
         bytes.starts_with(b"\x1b[?1h"),
         "the bootstrap does not open with the pane's mode escapes: {:?}",
         String::from_utf8_lossy(&bytes[..bytes.len().min(80)])
+    );
+
+    tmux.kill_session(&session_name).await.ok();
+    handle.shutdown().await.ok();
+}
+
+/// #2124 SC-01/SC-03: a Control-mode first attach's bootstrap names an atomic
+/// cut at the session stream's position 0, and the live stream starts at 1.
+///
+/// The capture is the attach's own, taken on the control channel; `%output`
+/// the capture covers is dropped from the live stream, so the session stream
+/// created with the attach begins exactly where the snapshot ends. Before
+/// #2124 the wire still said `unverified` with no epoch, so a first attach
+/// could never establish a parser position.
+#[tokio::test]
+async fn a_control_first_attach_names_an_atomic_epoch_start_cut() {
+    let (addr, handle, credentials) = start_server_in_mode(AttachMode::Control).await.unwrap();
+    let tmux = SessionManager::new();
+    let session = TestSession::new("control-bootstrap");
+    let session_name = session.name().to_string();
+    tmux.create_session(&session_name, 80, 24, "/tmp", &[])
+        .await
+        .unwrap();
+
+    // History that must be inside the capture, not the live stream.
+    let marker = "CONTROL-BOOTSTRAP-MARKER";
+    TmuxDep::global()
+        .ops()
+        .send_keys(&session_name, &format!("echo {marker}\n"))
+        .await
+        .unwrap();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let capture = TmuxDep::global()
+            .ops()
+            .capture_pane(&session_name, 200)
+            .await
+            .expect("capture works against a real tmux");
+        if capture
+            .as_deref()
+            .is_some_and(|bytes| String::from_utf8_lossy(bytes).contains(marker))
+        {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the fixture never painted its marker"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    let (mut sink, mut stream) = connect_for(&credentials, addr, &session_name)
+        .await
+        .unwrap();
+    let attach = new_message(
+        msg_types::CLIENT_ATTACH,
+        ClientAttachPayload {
+            session_name: session_name.clone(),
+            width: 80,
+            height: 24,
+            size_known: None,
+            env_snapshots: Vec::new(),
+            needs_bootstrap: Some(true),
+        },
+    );
+    sink.send(WsMessage::Text(serde_json::to_string(&attach).unwrap()))
+        .await
+        .unwrap();
+
+    let mut bootstrap: Option<serde_json::Value> = None;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let frame = tokio::time::timeout(Duration::from_secs(2), stream.next())
+            .await
+            .expect("timeout waiting for the attach response")
+            .expect("stream ended")
+            .expect("error reading the attach response");
+        let WsMessage::Text(text) = frame else {
+            continue;
+        };
+        let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
+        match parsed["msg_type"].as_str().unwrap_or("") {
+            msg_types::OK => break,
+            msg_types::TERMINAL_OUTPUT => {
+                if let Some(marker) = parsed["payload"].get("bootstrap") {
+                    bootstrap = Some(marker.clone());
+                }
+            }
+            _ => {}
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out waiting for the attach to be ok"
+        );
+    }
+
+    let bootstrap = bootstrap.expect("a Control first attach sent no bootstrap");
+    let epoch = bootstrap["stream_epoch"]
+        .as_u64()
+        .expect("the epoch-start cut must name the session's stream epoch");
+    assert_eq!(bootstrap["cut_consistency"].as_str(), Some("atomic"));
+    assert_eq!(
+        bootstrap["through_seq"].as_u64(),
+        Some(0),
+        "the control barrier's cut is the stream's position zero"
+    );
+    assert_ne!(
+        bootstrap["fidelity"].as_str(),
+        Some("full-vt"),
+        "a pane capture is a screen projection, never full VT"
+    );
+    assert!(
+        bootstrap["truncated"].as_bool().is_some(),
+        "truncation is stated independently of the cut"
+    );
+
+    // Produce one more line and collect every positioned live event. The
+    // barrier promises the stream starts at 1: the capture owns everything
+    // strictly before it, so no later ordinal can be first and 0 is never a
+    // live event (an initial authoritative resize may own seq 1).
+    use base64::Engine;
+    let input = serde_json::json!({
+        "msg_type": msg_types::TERMINAL_INPUT,
+        "id": "input-after-bootstrap",
+        "timestamp": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+        "payload": {
+            "session_name": session_name,
+            "data": base64::engine::general_purpose::STANDARD.encode("echo AFTER-BOOTSTRAP\n"),
+        },
+    });
+    sink.send(WsMessage::Text(input.to_string())).await.unwrap();
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let mut seqs: Vec<u64> = Vec::new();
+    let mut saw_output = false;
+    while tokio::time::Instant::now() < deadline {
+        let frame = match tokio::time::timeout(Duration::from_millis(500), stream.next()).await {
+            Ok(Some(Ok(WsMessage::Text(text)))) => {
+                serde_json::from_str::<serde_json::Value>(&text).unwrap_or_default()
+            }
+            Ok(Some(Ok(_))) => continue,
+            Ok(Some(Err(_))) | Ok(None) => break,
+            Err(_) => continue,
+        };
+        let msg_type = frame["msg_type"].as_str().unwrap_or("");
+        if msg_type != msg_types::TERMINAL_OUTPUT && msg_type != msg_types::TERMINAL_RESIZE {
+            continue;
+        }
+        // A bootstrap carries no position; only live events do.
+        if frame["payload"].get("bootstrap").is_some() {
+            continue;
+        }
+        let (Some(frame_epoch), Some(seq)) = (
+            frame["payload"]["stream_epoch"].as_u64(),
+            frame["payload"]["stream_seq"].as_u64(),
+        ) else {
+            continue;
+        };
+        assert_eq!(
+            frame_epoch, epoch,
+            "every live event stays on the bootstrap's stream: {frame}"
+        );
+        seqs.push(seq);
+        if msg_type == msg_types::TERMINAL_OUTPUT {
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(frame["payload"]["data"].as_str().unwrap_or(""))
+                .unwrap_or_default();
+            saw_output |= String::from_utf8_lossy(&bytes).contains("AFTER-BOOTSTRAP");
+        }
+        if saw_output && seqs.iter().min() == Some(&1) {
+            break;
+        }
+    }
+    assert!(
+        saw_output,
+        "the live stream never delivered the post-bootstrap output: {seqs:?}"
+    );
+    assert_eq!(
+        seqs.iter().min(),
+        Some(&1),
+        "the stream must start at seq 1, not at a later ordinal: {seqs:?}"
+    );
+    assert!(
+        !seqs.contains(&0),
+        "position 0 is the cut itself, never a live event: {seqs:?}"
     );
 
     tmux.kill_session(&session_name).await.ok();

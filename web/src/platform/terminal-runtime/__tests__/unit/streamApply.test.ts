@@ -47,6 +47,13 @@ describe('streamApply', () => {
       { onOutput, onResize },
     );
     expect(onOutput).toHaveBeenCalledTimes(1);
-    expect(onResize).toHaveBeenCalledWith(80, 24);
+    expect(onOutput).toHaveBeenCalledWith(new Uint8Array([104, 105]), {
+      streamEpoch: 1,
+      streamSeq: 1,
+    });
+    expect(onResize).toHaveBeenCalledWith(80, 24, {
+      streamEpoch: 1,
+      streamSeq: 2,
+    });
   });
 });

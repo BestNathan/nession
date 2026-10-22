@@ -5,6 +5,8 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { auditIssue } from './issue-contract.mjs';
+import { readVerificationTier } from './verification-tier-policy.mjs';
+import { isTreeAuditComplete } from './lib/agent/issue-audit-tree.mjs';
 import { fetchGitHubIssue as fetchIssue } from './lib/agent/tools/gh/issue/read.mjs';
 import { candidateIssue, issueLabelNames as labelNames } from './lib/agent/tools/gh/issue/update.mjs';
 import { renderIssueAuditPrompt, issueAuditTools } from './lib/agent/tasks/issue-audit.mjs';
@@ -99,8 +101,13 @@ async function loadCursorSdkForAudit() {
   return loadCursorSdk();
 }
 
+function auditMode() {
+  const mode=process.env.ISSUE_AUDIT_MODE||'single';
+  if(!['single','tree'].includes(mode))throw Error('Invalid Issue Audit mode: '+mode);
+  return mode;
+}
 function promptFor(issue, audit) {
-  return renderIssueAuditPrompt(issue, audit, 'cursor').text;
+  return renderIssueAuditPrompt(issue, audit, 'cursor',process.env.GITHUB_REPOSITORY,auditMode()).text;
 }
 
 function normalizeUsage(usage) {
@@ -202,6 +209,8 @@ function writeRecord(outDir, record) {
 
 async function runCursorAgent(issue, outDir) {
   ensureCursorConfig();
+  const mode=auditMode();
+  const selectedTools=issueAuditTools(issue,process.env.GITHUB_REPOSITORY,mode);
   const { result, meta } = await runCursorSession({
     sdkLoader: loadCursorSdkForAudit,
     apiKey: process.env.CURSOR_API_KEY,
@@ -210,7 +219,7 @@ async function runCursorAgent(issue, outDir) {
     workspace: process.cwd(),
     storePath: path.join(outDir, 'cursor-store'),
     tools: ['read', 'grep', 'glob', 'ls', 'mcp'],
-    customTools: issueAuditTools(issue),
+    customTools: selectedTools,
     prompt: promptFor(issue, auditIssue(issue)),
   });
   const normalized = {
@@ -222,7 +231,14 @@ async function runCursorAgent(issue, outDir) {
     usage: normalizeUsage(result.usage),
     raw_cost_usd: meta.cost.raw_usd, charged_cost_usd: meta.cost.charged_usd,
     status: meta.status, error: meta.error,
+    mode, tree_progress: selectedTools.getTreeAuditProgress?.()??null,
   };
+  if (mode==='tree' && (!normalized.tree_progress?.published ||
+      !isTreeAuditComplete(normalized.tree_progress,issue.number))) {
+    const error=new Error('Tree Issue Audit is incomplete: '+JSON.stringify(normalized.tree_progress));
+    error.cursorMeta=normalized;
+    throw error;
+  }
   if (result.status !== 'finished') {
     const error = new Error('Cursor Agent finished with status ' + result.status + ': ' + (result.error?.message ?? 'unknown error'));
     error.cursorMeta = normalized;
@@ -239,6 +255,7 @@ function selfTest() {
   assert.equal(normalizeCursorSdkModule({ Cursor: {}, Agent: {} }).Cursor != null, true);
   assert.equal(normalizeCursorSdkModule({ default: { Cursor: {}, Agent: {} } }).Agent != null, true);
   const restrictedTools = ['read', 'grep', 'glob', 'ls', 'mcp'];
+  assert.equal(restrictedTools.includes('shell'),false);
   assert.equal(restrictedTools.includes('mcp'), true);
   assert.equal(restrictedTools.includes('shell'), false);
   const catalog = [{ id: 'composer-2.5', parameters: [{ id: 'fast', values: [{ value: 'false' }, { value: 'true' }] }] }];
@@ -270,7 +287,9 @@ async function main() {
   }
 
   const before = auditIssue(issue);
-  if (before.ok && process.env.ISSUE_AUDIT_FORCE_AGENT !== 'true') {
+  const missingTier = !readVerificationTier(issue).explicit;
+  const reevaluate = process.env.ISSUE_AUDIT_REEVALUATE_TIER === 'true'||auditMode()==='tree';
+  if (before.ok && !missingTier && !reevaluate && process.env.ISSUE_AUDIT_FORCE_AGENT !== 'true') {
     writeRecord(outDir, { schema_version: 1, issue: { number: issue.number, title: issue.title, url: issue.url }, trigger, result: 'contract-pass', agent: { invoked: false, provider: 'cursor' }, errors: [] });
     return;
   }
@@ -303,11 +322,11 @@ async function main() {
     schema_version: 1,
     issue: { number: afterIssue.number, title: afterIssue.title, url: afterIssue.url },
     trigger,
-    result: after.ok ? 'repaired' : 'contract-fail',
+    result: after.ok && readVerificationTier(afterIssue).explicit ? 'repaired' : 'contract-fail',
     agent: meta,
     errors: after.errors,
   });
-  if (!after.ok) process.exitCode = 2;
+  if (!after.ok || !readVerificationTier(afterIssue).explicit) process.exitCode = 2;
 }
 
 try { await main(); } catch (error) {

@@ -3,20 +3,60 @@ name: Metrics / Repository Health
 on:
   schedule:
     - cron: '17 */4 * * *'
-  workflow_dispatch:
+  # Trusted main receives completion events; upstream dispatch has NO secrets.
+  workflow_run:
+    workflows: ["Metrics / Replay Request"]
+    types: [completed]
 
 permissions:
   actions: read
-  contents: write
+  contents: read
   issues: read
   pull-requests: read
 
-concurrency:
-  group: metrics-writer
-  cancel-in-progress: false
-
+# Deliberately NO run-level concurrency group. GitHub cancels *any* previously
+# pending job or workflow in a group as soon as a newer one is queued, even with
+# `cancel-in-progress: false`. A run-level membership here let ordinary
+# `metrics-writer` traffic (the `*/5` telemetry writer) evict this run while it
+# was still pending and before `authorize-replay` was ever scheduled, silently
+# dropping a one-shot `workflow_run` wake: the replay request was neither
+# authorized nor denied and no denial receipt was produced (#1690 SC-09). Only
+# the Store writer job below serializes on `metrics-writer`.
 jobs:
+  authorize-replay:
+    if: github.repository == 'BestNathan/nession' && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_run')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout default-main authorization code, never upstream source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with: { node-version: '24' }
+      - name: Authenticate owner/main replay request using GitHub REST
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/metrics-replay-source.mjs authorize
+      # A denied, main-owned authorizer may emit a tiny untrusted-source
+      # *claim* for later independent REST/job verification. Never attach
+      # App Store credentials or turn a rejected upstream into success.
+      - name: Preserve denied request source claim
+        if: ${{ failure() && github.event_name == 'workflow_run' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: metrics-replay-denial-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/metrics-replay-denial.json
+          if-no-files-found: ignore
+          retention-days: 14
+
   rust-health:
+    needs: authorize-replay
+    if: needs.authorize-replay.result == 'success' && github.ref == 'refs/heads/main' && github.repository == 'BestNathan/nession'
     runs-on: ubuntu-latest
     env:
       RUSTC_WRAPPER: ""
@@ -24,6 +64,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
+          persist-credentials: false
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with: { cache-workspaces: ".", cache-all-crates: "true" }
       - uses: actions/setup-node@v4
@@ -44,11 +85,14 @@ jobs:
           retention-days: 1
 
   web-health:
+    needs: authorize-replay
+    if: needs.authorize-replay.result == 'success' && github.ref == 'refs/heads/main' && github.repository == 'BestNathan/nession'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -64,6 +108,8 @@ jobs:
           retention-days: 1
 
   e2e-health:
+    needs: authorize-replay
+    if: needs.authorize-replay.result == 'success' && github.ref == 'refs/heads/main' && github.repository == 'BestNathan/nession'
     runs-on: ubuntu-latest
     env:
       RUSTC_WRAPPER: ""
@@ -73,6 +119,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
+          persist-credentials: false
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with: { cache-workspaces: ".", cache-all-crates: "true" }
       - uses: actions/setup-node@v4
@@ -99,13 +146,29 @@ jobs:
           retention-days: 1
 
   publish:
-    if: ${{ always() }}
-    needs: [rust-health, web-health, e2e-health]
+    # Do not mint the privileged App token unless every health dependency passed.
+    # `always()` previously allowed a publish attempt after failed/skipped health jobs.
+    if: ${{ success() && needs.authorize-replay.result == 'success' && needs.rust-health.result == 'success' && needs.web-health.result == 'success' && needs.e2e-health.result == 'success' && github.ref == 'refs/heads/main' && github.repository == 'BestNathan/nession' }}
+    needs: [authorize-replay, rust-health, web-health, e2e-health]
+    # Only the job that actually CAS-pushes the `metrics` orphan branch joins the
+    # shared writer group. `metrics-agent-telemetry.yml` holds the same group for
+    # its ingest job; both rewrite `agent-metrics*.{json,svg}`, so cross-workflow
+    # serialization is still required. Authorization and health collection are
+    # read-only and must never queue behind this group.
+    concurrency:
+      group: metrics-writer
+      cancel-in-progress: false
     runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+      issues: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
+          persist-credentials: false
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
@@ -116,6 +179,7 @@ jobs:
           ref: metrics
           path: metrics-store
           fetch-depth: 0
+          persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
           pattern: '*-health'
@@ -137,10 +201,32 @@ jobs:
         run: |
           node scripts/agent-workflow-telemetry.mjs aggregate             "${GITHUB_WORKSPACE}/metrics-store/raw/workflows"             "${RUNNER_TEMP}/agent-metrics"
 
+      - name: Mint scoped App token for orphan Run Store updates
+        if: (vars.RUN_STORE_WRITER_MODE == '' || vars.RUN_STORE_WRITER_MODE == 'app')
+        id: store_app
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.RUN_STORE_WRITER_APP_ID }}
+          private-key: ${{ secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY }}
+          repositories: nession
+          permission-contents: write
+      - name: Reject unrecognized writer mode or unavailable App token
+        env:
+          WRITER_MODE: ${{ vars.RUN_STORE_WRITER_MODE }}
+          APP_TOKEN: ${{ steps.store_app.outputs.token }}
+        run: |
+          set -euo pipefail
+          case "$WRITER_MODE" in
+            legacy) ;;
+            ''|app) [[ -n "$APP_TOKEN" ]] || { echo "::error::No App token; refuse legacy fallback" >&2; exit 1; } ;;
+            *) echo "::error::Unsupported RUN_STORE_WRITER_MODE" >&2; exit 1 ;;
+          esac
+
       - name: Publish durable metrics branch
         env:
           OUT_DIR: ${{ runner.temp }}/repo-metrics
           AGENT_OUT_DIR: ${{ runner.temp }}/agent-metrics
+          STORE_PUSH_TOKEN: ${{ vars.RUN_STORE_WRITER_MODE == 'legacy' && secrets.GITHUB_TOKEN || steps.store_app.outputs.token }}
         run: |
           set -euo pipefail
           for file in metrics.json repo-metrics-light.svg repo-metrics-dark.svg; do
@@ -169,11 +255,37 @@ jobs:
 
           git add metrics.json repo-metrics-light.svg repo-metrics-dark.svg             agent-metrics.json agent-metrics-light.svg agent-metrics-dark.svg
 
+          # The shared Run Store policy allows only declared derived Metrics
+          # projections to change; never publish raw/history deletion or
+          # unexpected paths from a privileged scheduled writer.
+          node "${GITHUB_WORKSPACE}/scripts/run-store-integrity.mjs" staged metrics "${GITHUB_WORKSPACE}/metrics-store"
+
           if git diff --cached --quiet; then
             echo "Metrics projections are unchanged."
             exit 0
           fi
 
           git commit -m "metrics: update repository telemetry projections"
-          git push origin HEAD:metrics
+          git remote set-url origin "https://x-access-token:${STORE_PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          node "${GITHUB_WORKSPACE}/scripts/run-store-cas-push.mjs" metrics "${GITHUB_WORKSPACE}/metrics-store"
+          git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
+      - name: Verify immutable Git bytes before uploading Run Store receipts
+        if: success()
+        run: |
+          set -euo pipefail
+          count=0
+          for file in "${RUNNER_TEMP}"/run-store-receipts/*.json; do
+            [[ -f "$file" ]] || continue
+            node "${GITHUB_WORKSPACE}/scripts/run-store-receipt-verify.mjs" "$file" "${GITHUB_WORKSPACE}/metrics-store" metrics
+            count=$((count + 1))
+          done
+          echo "Read-only exact Git-byte receipts verified: ${count}; no independent signing/anchor claimed" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Preserve Run Store post-commit receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-store-receipt-${{ github.run_id }}-${{ github.run_attempt }}-repository
+          path: ${{ runner.temp }}/run-store-receipts
+          if-no-files-found: ignore
+          retention-days: 14

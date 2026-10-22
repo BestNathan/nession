@@ -31,6 +31,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
   issues: read
 
 concurrency:
@@ -163,15 +164,31 @@ jobs:
         if: steps.select.outputs.count != '0'
         run: sudo apt-get update && sudo apt-get install -y tmux
 
-      - name: Build full-stack runtime
+      - name: Install Web preview dependencies
         if: steps.select.outputs.count != '0'
-        run: |
-          set -euo pipefail
-          cd workspace/web
-          npm ci
-          npm run build
-          cd ..
-          cargo build -p nession-server -p nession-agent
+        run: cd workspace/web && npm ci
+
+      # Only an exact main push may read a completed successful main Quality
+      # producer. PR or manual/other stage Cases build locally without any
+      # GH_TOKEN passed to target-controlled code. This never suppresses Cases.
+      - name: Restore verified main Web dist
+        id: web-dist
+        if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && steps.target.outputs.stage == 'post-merge' && steps.target.outputs.target_sha == github.sha)) && github.ref == 'refs/heads/main' && steps.select.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash workspace/scripts/ci/try-web-build-reuse.sh workspace "${{ steps.target.outputs.target_sha }}"
+
+      - name: Build Web on cold/mismatched artifact
+        if: steps.select.outputs.count != '0' && steps.web-dist.outputs.hit != 'true'
+        run: cd workspace/web && npm run build
+
+      - name: Verify runnable Web preview and proxy parity
+        if: steps.select.outputs.count != '0'
+        run: node workspace/scripts/ci/web-preview-parity.mjs workspace
+
+      - name: Build Rust runtime
+        if: steps.select.outputs.count != '0'
+        run: cd workspace && cargo build -p nession-server -p nession-agent
 
       # Runtime/Protocol verifiers may invoke a real Browser/Terminal Scenario
       # transitively. Each such Case must explicitly declare a Browser verifier;
@@ -184,7 +201,11 @@ jobs:
           npm ci
           npx playwright install chromium --with-deps
 
-      - name: Execute selected Cases
+      # #1866 Phase B: one job-scoped invocation instead of one `run acceptance`
+      # per Case. Each Case still emits its own record and verdict; eligible
+      # Cases (manifest `isolation: shared`) may share one runtime. Every Case
+      # still runs even when an earlier one fails, and the step still fails.
+      - name: Execute selected Cases in one job-scoped batch
         id: cases
         if: steps.select.outputs.count != '0'
         env:
@@ -192,16 +213,24 @@ jobs:
           ACCEPTANCE_STAGE: ${{ steps.target.outputs.stage }}
         run: |
           set -uo pipefail
-          failed=0
-          while read -r issue criterion profile; do
-            output="${RUNNER_TEMP}/acceptance-case-results/${issue}-${criterion}.case.json"
-            # The trusted selector stays here; the canonical CLI owns dispatch.
-            args=(acceptance --issue-json "${RUNNER_TEMP}/acceptance-contracts/${issue}.json")
-            args+=(--issue "${issue}" --sc "${criterion}" --stage "${ACCEPTANCE_STAGE}")
-            args+=(--sha "${TARGET_SHA}" --profile "${profile}" --output "${output}")
-            node workspace/e2e/run "${args[@]}" || failed=1
-          done < <(jq -r '.[] | [.issue, .criterion, .runtime] | @tsv' "${RUNNER_TEMP}/selected-cases.json")
-          exit "${failed}"
+          results="${RUNNER_TEMP}/acceptance-case-results"
+          node workspace/e2e/run acceptance-batch \
+            --sha "${TARGET_SHA}" \
+            --stage "${ACCEPTANCE_STAGE}" \
+            --selection "${RUNNER_TEMP}/selected-cases.json" \
+            --contracts-dir "${RUNNER_TEMP}/acceptance-contracts" \
+            --results-dir "${results}" \
+            > "${results}/records.jsonl" 2> "${results}/batch.log"
+          status=$?
+          cat "${results}/batch.log" >&2
+          {
+            echo "## Acceptance Case batch"
+            echo
+            echo '```'
+            grep -E '^\[acceptance-batch\]' "${results}/batch.log" || true
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+          exit "${status}"
       - name: Enforce Case coverage without suppressing executed Case evidence
         if: always() && steps.select.outcome == 'success'
         run: |

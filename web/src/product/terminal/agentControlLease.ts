@@ -15,6 +15,18 @@ export interface AgentControlLease {
   roleForClient(controllerClientId?: string): TerminalControlRole;
 }
 
+/**
+ * The one place the lease's role rule lives: a client is the controller only
+ * when it is the holder. Every route (P2P Agent surface, Relay Server
+ * surface) derives the role from the same level, so the two cannot disagree.
+ */
+export function controlRoleFor(
+  controllerClientId: string | undefined,
+  self: string,
+): TerminalControlRole {
+  return controllerClientId === self ? 'controller' : 'observer';
+}
+
 export function createAgentControlLease(surface: PluginSurface): AgentControlLease {
   const controlBySession = new Map<string, TerminalControlState>();
   const controlListeners = new Set<(sessionName: string, state: TerminalControlState) => void>();
@@ -26,10 +38,8 @@ export function createAgentControlLease(surface: PluginSurface): AgentControlLea
     }
   };
 
-  const roleForClient = (controllerClientId?: string): TerminalControlRole => {
-    const self = getOrCreateClientId();
-    return controllerClientId === self ? 'controller' : 'observer';
-  };
+  const roleForClient = (controllerClientId?: string): TerminalControlRole =>
+    controlRoleFor(controllerClientId, getOrCreateClientId());
 
   surface.subscribe(TERMINAL_CONTROL_CHANGED_WIRE, (payload) => {
     const changed = readControlChanged(payload);

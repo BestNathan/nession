@@ -136,6 +136,14 @@ export function useTerminalOrchestration({
     () => controllerRef.current?.hasSessionOutput ?? false,
     [],
   );
+  // The narrower question the attach must ask (#2194): a replacement renderer
+  // holds live output as soon as a transport is bound, but holds no history
+  // until a capture parses into it. Reading it through the same ref keeps the
+  // answer about the renderer that is mounted now.
+  const hasSessionHistory = useCallback(
+    () => controllerRef.current?.hasParsedCapture ?? false,
+    [],
+  );
   const { agentTerminalApi, connectionState, runtime, snapshot, fileOps } = useP2PAttachTransport({
     attachInfo,
     sessionName,
@@ -143,11 +151,20 @@ export function useTerminalOrchestration({
     manualOverride,
     serverConnection: relayServer,
     hasSessionOutput,
+    hasSessionHistory,
   });
 
+  // The effective transport mode, derived — never stored (#1309 SC-02): the
+  // static intent comes from the attach choice, and a runtime that fell back
+  // to relay says so on its own snapshot. The lease follows the same route
+  // (#2157): the direct Agent API on P2P, the Server relay plugin on Relay.
+  const effectiveMode: 'p2p' | 'relay' =
+    (snapshot?.forcedRelay ?? false) || attachInfo?.mode !== 'p2p' ? 'relay' : 'p2p';
+  const controlSource = agentTerminalApi
+    ?? (effectiveMode === 'relay' ? terminalServerApi : null);
   const { control: terminalControl, takeControl } = useTerminalControlBridge(
     sessionName,
-    agentTerminalApi,
+    controlSource,
   );
 
   // The runtime snapshot is the only attach-phase source: the runtime selects
@@ -157,13 +174,6 @@ export function useTerminalOrchestration({
   // attaching: idle, zero attempts.
   const terminalState = snapshot?.phase ?? 'idle';
   const reconnectCount = snapshot?.reconnectCount ?? 0;
-  // The effective transport mode, derived — never stored (#1309 SC-02): the
-  // static intent comes from the attach choice, and a runtime that fell back
-  // to relay says so on its own snapshot. The deleted effectiveModeAtom read
-  // the fallback from an atom the runtime's React mirror wrote, which is one
-  // of the two mirrors this refactor removes.
-  const effectiveMode: 'p2p' | 'relay' =
-    (snapshot?.forcedRelay ?? false) || attachInfo?.mode !== 'p2p' ? 'relay' : 'p2p';
 
   useSessionEnvSourcing({ envRefs, sessionId, effectiveMode, agentTerminalApi, connectionState });
   const [inputDrop, setInputDrop] = useAtom(inputDropAtomFamily(sessionId));
@@ -195,8 +205,9 @@ export function useTerminalOrchestration({
   const banner = useReconnectBanner({
     sessionId, terminalState, effectiveMode, serverConnection: relayServer,
   });
-  const observerReadOnly =
-    effectiveMode === 'p2p' && terminalControl.role === 'observer';
+  // The Agent enforces the lease on every route; the UI must tell the same
+  // truth on every route (#2157).
+  const observerReadOnly = terminalControl.role === 'observer';
   // A manual route is being switched while its transport is not yet connected
   // (#1309 SC-02 — read from the runtime's live connection state instead of
   // the deleted p2pStateAtom mirror; a failed session never counts as
@@ -230,6 +241,9 @@ export function useTerminalOrchestration({
     inputDisabled,
     terminalState,
     reconnectCount,
+    /** Observed output loss, for the surface's quiet notice (#2155). */
+    historyDegraded: snapshot?.historyDegraded ?? false,
+    streamState: snapshot?.streamState ?? 'unavailable',
     fileOps,
     terminalControl,
     onTakeControl: takeControl,

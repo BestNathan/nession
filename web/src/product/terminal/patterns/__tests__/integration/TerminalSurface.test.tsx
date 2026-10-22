@@ -32,7 +32,7 @@ function renderSurface(
   props: Partial<
     Pick<
       TerminalSurfaceProps,
-      'inputDrop' | 'onDismissInputDrop' | 'terminalControl' | 'onTakeControl'
+      'inputDrop' | 'onDismissInputDrop' | 'terminalControl' | 'onTakeControl' | 'historyDegraded' | 'streamState'
     >
   > = {},
 ) {
@@ -206,11 +206,40 @@ describe('the capsule host wraps the well, not the surface (#1307 stage 6)', () 
     expect(hostOf(view).contains(bar)).toBe(false);
   });
 
+  it('shows the degraded-history notice only while the runtime reports an observed gap (#2155)', () => {
+    const healthy = renderSurface('web', { historyDegraded: false });
+    expect(healthy.queryByTestId('terminal-history-degraded')).toBeNull();
+    healthy.unmount();
+
+    const degraded = renderSurface('web', { historyDegraded: true });
+    const notice = degraded.getByTestId('terminal-history-degraded');
+    expect(notice).toHaveTextContent(/history may be incomplete/i);
+    // Same strip geometry as the other status lines: outside the capsule host.
+    expect(hostOf(degraded).contains(notice)).toBe(false);
+  });
+
   it('wraps the well and the capsule the band exists for', () => {
     const view = renderSurface('web');
     const host = hostOf(view);
 
     expect(host.contains(view.getByTestId('terminal-viewport-slot'))).toBe(true);
     expect(host.contains(view.getByTestId('terminal-capsule'))).toBe(true);
+  });
+});
+
+describe('explicit stream state (#1926 SC-08)', () => {
+  it('publishes the runtime answer as a contract attribute', () => {
+    for (const state of ['synchronized', 'degraded-live', 'unavailable'] as const) {
+      const view = renderSurface('web', { streamState: state });
+      expect(view.getByTestId('terminal-surface'))
+        .toHaveAttribute('data-terminal-stream-state', state);
+      view.unmount();
+    }
+  });
+
+  it('defaults to unavailable when no runtime answer is supplied', () => {
+    const view = renderSurface('web');
+    expect(view.getByTestId('terminal-surface'))
+      .toHaveAttribute('data-terminal-stream-state', 'unavailable');
   });
 });

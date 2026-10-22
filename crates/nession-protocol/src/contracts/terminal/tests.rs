@@ -147,6 +147,10 @@ fn a_bootstrap_carries_what_was_asked_for_and_whether_it_was_cut() {
         bootstrap: Some(TerminalBootstrapPayload {
             requested_lines: 5000,
             truncated: true,
+            cut_consistency: Some(TerminalCheckpointCutConsistency::Unverified),
+            fidelity: Some(TerminalCheckpointFidelity::Partial),
+            stream_epoch: None,
+            through_seq: None,
         }),
     };
     let back: TerminalOutputPayload =
@@ -154,6 +158,71 @@ fn a_bootstrap_carries_what_was_asked_for_and_whether_it_was_cut() {
     let bootstrap = back.bootstrap.expect("the marker survives a round trip");
     assert_eq!(bootstrap.requested_lines, 5000);
     assert!(bootstrap.truncated);
+}
+
+#[test]
+fn atomic_bootstrap_is_bound_to_a_specific_stream_epoch_and_cut() {
+    let marker = TerminalBootstrapPayload {
+        requested_lines: 5000,
+        truncated: false,
+        cut_consistency: Some(TerminalCheckpointCutConsistency::Atomic),
+        fidelity: Some(TerminalCheckpointFidelity::Partial),
+        stream_epoch: Some(17),
+        through_seq: Some(42),
+    };
+    let value = serde_json::to_value(&marker).unwrap();
+    assert_eq!(value["stream_epoch"], 17);
+    assert_eq!(value["through_seq"], 42);
+    let decoded: TerminalBootstrapPayload = serde_json::from_value(value).unwrap();
+    assert_eq!(decoded.stream_epoch, Some(17));
+    assert_eq!(decoded.through_seq, Some(42));
+}
+
+#[test]
+fn bootstrap_cut_consistency_is_independent_of_screen_fidelity() {
+    let marker = TerminalBootstrapPayload {
+        requested_lines: 5000,
+        truncated: false,
+        cut_consistency: Some(TerminalCheckpointCutConsistency::Unverified),
+        fidelity: Some(TerminalCheckpointFidelity::ScreenOnly),
+        stream_epoch: None,
+        through_seq: None,
+    };
+    let wire = serde_json::to_value(&marker).unwrap();
+    assert_eq!(wire["cut_consistency"], "unverified");
+    assert_eq!(wire["fidelity"], "screen-only");
+    assert!(
+        wire.get("through_seq").is_none(),
+        "unverified text capture cannot name a stream cut"
+    );
+    let back: TerminalBootstrapPayload = serde_json::from_value(wire).unwrap();
+    assert!(matches!(
+        back.cut_consistency,
+        Some(TerminalCheckpointCutConsistency::Unverified)
+    ));
+    assert!(matches!(
+        back.fidelity,
+        Some(TerminalCheckpointFidelity::ScreenOnly)
+    ));
+}
+
+#[test]
+fn legacy_bootstrap_marker_never_defaults_to_atomic_or_full_vt() {
+    let legacy = serde_json::json!({"requested_lines": 5000, "truncated": false});
+    let parsed: TerminalBootstrapPayload = serde_json::from_value(legacy.clone()).unwrap();
+    assert!(parsed.cut_consistency.is_none());
+    assert!(parsed.fidelity.is_none());
+    assert_eq!(serde_json::to_value(parsed).unwrap(), legacy);
+    assert!(
+        serde_json::from_value::<TerminalBootstrapPayload>(serde_json::json!({
+            "requested_lines": 5000,
+            "truncated": false,
+            "cut_consistency": "verified",
+            "fidelity": "full-vt"
+        }))
+        .is_err(),
+        "unknown cut vocabulary must fail closed"
+    );
 }
 
 /// A frame with no sequence is **byte-identical** to the frame this contract
@@ -246,4 +315,35 @@ fn an_input_acknowledgement_states_its_cursor() {
     assert_eq!(back.input_epoch, 1_790_771_445_798_089);
     assert_eq!(back.applied_through, 12);
     assert_eq!(back.control_generation, Some(3));
+}
+
+#[test]
+fn resume_recovery_verdict_is_additive_and_legacy_response_stays_byte_identical() {
+    let legacy = serde_json::json!({
+        "session_name": "work",
+        "stream_epoch": 7,
+        "epoch_match": true,
+        "first_available_seq": 1,
+        "complete": true,
+        "events": []
+    });
+    let reply: TerminalStreamResumeResponse = serde_json::from_value(legacy.clone()).unwrap();
+    assert!(reply.recovery.is_none(), "omitted never means recovered");
+    assert_eq!(serde_json::to_value(&reply).unwrap(), legacy);
+    let mut complete = reply;
+    complete.recovery = Some(TerminalResumeRecovery::Complete);
+    assert_eq!(
+        serde_json::to_value(&complete).unwrap()["recovery"],
+        "complete"
+    );
+    complete.recovery = Some(TerminalResumeRecovery::CheckpointRequired);
+    assert_eq!(
+        serde_json::to_value(&complete).unwrap()["recovery"],
+        "checkpoint-required"
+    );
+    complete.recovery = Some(TerminalResumeRecovery::Unavailable);
+    assert_eq!(
+        serde_json::to_value(&complete).unwrap()["recovery"],
+        "unavailable"
+    );
 }

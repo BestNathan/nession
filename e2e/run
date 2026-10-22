@@ -241,6 +241,34 @@ function acceptance(args) {
     if (disposable) fs.rmSync(disposable, { recursive: true, force: true });
   }
 }
+// #1866 Phase B: one job-scoped invocation for a whole selected batch. Each
+// Case still emits its own record; eligible Cases may share one runtime.
+function acceptanceBatch(args) {
+  const sha = required(args, 'sha');
+  const stage = required(args, 'stage');
+  const selection = required(args, 'selection');
+  const contractsDir = required(args, 'contracts-dir');
+  const resultsDir = required(args, 'results-dir');
+  if (!/^[0-9a-f]{40}$/.test(sha) ||
+      !['pre-merge', 'staging', 'post-merge'].includes(stage)) {
+    throw new Error('invalid batch target SHA or stage');
+  }
+  const targetSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+  if (sha !== targetSha) throw new Error('requested SHA does not match checked-out source SHA');
+  for (const file of [selection, contractsDir, resultsDir]) {
+    if (!path.isAbsolute(file)) throw new Error('acceptance-batch paths must be absolute');
+  }
+  if (!fs.existsSync(selection) || !fs.lstatSync(contractsDir).isDirectory()) {
+    throw new Error('acceptance-batch selection or contracts directory is missing');
+  }
+  return execute(process.execPath, [
+    at('e2e', 'acceptance', 'evaluator', 'run-batch.mjs'),
+    '--repo-root', root, '--sha', sha, '--stage', stage,
+    '--selection', selection, '--contracts-dir', contractsDir, '--results-dir', resultsDir,
+    '--run-id', process.env.GITHUB_RUN_ID ?? '1',
+    '--run-attempt', process.env.GITHUB_RUN_ATTEMPT ?? '1',
+  ]);
+}
 function tests(args) {
   const registry = testCatalog.discover(at('e2e', 'tests'));
   if (args.length === 1 && args[0] === '--list') {
@@ -277,6 +305,33 @@ function tests(args) {
       throw new Error('selected E2E must have absolute assertion receipt output path');
     }
     reporters = ['--reporter=json,' + reporter];
+  } else if (!selected.length && process.env.PLAYWRIGHT_JSON_OUTPUT_FILE) {
+    // #1866 SC-03: the Full E2E Gate derives per-ID attribution from the SAME
+    // full run instead of provisioning a second stack for a canary. That needs
+    // a JSON report for `--all`/`--suite` too. The html report is kept so
+    // failure artifacts are unchanged; the config's single-reporter default is
+    // only overridden when a caller explicitly asked for a machine-readable one.
+    //
+    // #1876 Phase A: the coalesced Browser Design verdict also needs executed
+    // assertion counts from that same run. The built-in JSON reporter omits
+    // TestResult.steps, so when an assertion receipt path is requested we add
+    // the assertion-only reporter along with json+html. Trusted main code wins
+    // when present; the checked-in owner is the fallback for non-PR runs.
+    const assertionsFile = process.env.NESSION_E2E_ASSERTIONS_OUTPUT_FILE;
+    if (assertionsFile) {
+      if (!path.isAbsolute(assertionsFile)) {
+        throw new Error('full E2E assertion receipt output path must be absolute');
+      }
+      const reporter = [
+        at('trusted', 'scripts', 'issue-e2e-assertion-reporter.cjs'),
+        at('scripts', 'issue-e2e-assertion-reporter.cjs'),
+      ].find((candidate) =>
+        fs.existsSync(candidate) && !fs.lstatSync(candidate).isSymbolicLink());
+      if (!reporter) throw new Error('canonical Playwright assertion reporter is required');
+      reporters = ['--reporter=json,' + reporter + ',html'];
+    } else {
+      reporters = ['--reporter=json,html'];
+    }
   }
   return execute('npx', ['playwright', 'test', ...selected, ...(suite ? [suite] : []),
     ...reporters,
@@ -305,6 +360,7 @@ async function main() {
   if (mode === '--validate') return await validate();
   if (mode === 'test') return exitByCode(tests(args));
   if (mode === 'acceptance') return exitByCode(acceptance(args));
+  if (mode === 'acceptance-batch') return exitByCode(acceptanceBatch(args));
   if (mode === 'scenario') return exitByCode(scenario(args));
   if (mode === 'compare') return compare(args);
   throw new Error('usage: ./e2e/run --list|--validate|test --all|test --list|test --id ID [--id ID...]|acceptance --issue N --sc SC-NN --sha SHA --stage staging|scenario ID|compare LEFT RIGHT');

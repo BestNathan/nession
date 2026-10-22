@@ -32,7 +32,7 @@ interface Harness {
   readonly truncated: number;
 }
 
-function makeHarness(): Harness {
+function makeHarness(limits: { maxBytes?: number; maxFrames?: number } = {}): Harness {
   const requests: PendingRequest[] = [];
   const out: string[] = [];
   const resizes: Array<[number, number]> = [];
@@ -49,6 +49,7 @@ function makeHarness(): Harness {
         seen.truncated += 1;
       },
     },
+    limits,
   );
   return {
     reconciler,
@@ -781,5 +782,174 @@ describe('StreamReconciler', () => {
     await flushMicrotasks();
     expect(h.out).toEqual([]);
     expect(h.requests).toHaveLength(0);
+  });
+});
+
+
+describe('StreamReconciler Agent position forwarding (#1938)', () => {
+  const encode = (text: string) => new TextEncoder().encode(text);
+
+  it('preserves the sequenced live output/resize identity, but not bootstrap or level identity', () => {
+    const outputs: Array<{ payload: string; position?: { streamEpoch: number; streamSeq: number } }> = [];
+    const resizes: Array<{ cols: number; position?: { streamEpoch: number; streamSeq: number } }> = [];
+    const reconciler = new StreamReconciler(
+      async () => reply([], 11),
+      {
+        onOutput: (data, _bootstrap, position) => outputs.push({
+          payload: new TextDecoder().decode(data),
+          position,
+        }),
+        onResize: (cols, _rows, position) => resizes.push({ cols, position }),
+        onStreamTruncated: vi.fn(),
+      },
+    );
+    reconciler.acceptLive({ data: encode('live'), streamEpoch: 11, streamSeq: 30 });
+    reconciler.acceptLiveResize({ cols: 100, rows: 30, streamEpoch: 11, streamSeq: 31 });
+    reconciler.acceptLive({ data: encode('bootstrap'), bootstrap: { requestedLines: 50, truncated: false } });
+    reconciler.acceptLevelResize(120, 40);
+
+    expect(outputs).toEqual([
+      { payload: 'live', position: { streamEpoch: 11, streamSeq: 30 } },
+      { payload: 'bootstrap', position: undefined },
+    ]);
+    expect(resizes).toEqual([
+      { cols: 100, position: { streamEpoch: 11, streamSeq: 31 } },
+      { cols: 120, position: undefined },
+    ]);
+    reconciler.dispose();
+  });
+
+  it('preserves replay positions and deduplicates a live/replay overlap without renumbering', async () => {
+    const events: Array<{ kind: string; seq?: number; epoch?: number }> = [];
+    let answer: ((value: ResumeReply) => void) | undefined;
+    const reconciler = new StreamReconciler(
+      () => new Promise<ResumeReply>((resolve) => { answer = resolve; }),
+      {
+        onOutput: (_data, _bootstrap, position) => events.push({
+          kind: 'output', seq: position?.streamSeq, epoch: position?.streamEpoch,
+        }),
+        onResize: (_cols, _rows, position) => events.push({
+          kind: 'resize', seq: position?.streamSeq, epoch: position?.streamEpoch,
+        }),
+        onStreamTruncated: vi.fn(),
+      },
+    );
+    reconciler.acceptLive({ data: encode('4'), streamEpoch: 11, streamSeq: 4 });
+    reconciler.acceptLive({ data: encode('7'), streamEpoch: 11, streamSeq: 7 });
+    expect(events).toEqual([{ kind: 'output', seq: 4, epoch: 11 }]);
+    expect(answer).toBeTypeOf('function');
+
+    answer!(reply([
+      { kind: 'output', streamEpoch: 11, streamSeq: 5, data: btoa('5') },
+      { kind: 'resize', streamEpoch: 11, streamSeq: 6, cols: 90, rows: 20 },
+      { kind: 'output', streamEpoch: 11, streamSeq: 7, data: btoa('7-replay') },
+    ], 11, { firstAvailableSeq: 4, complete: true }));
+    await flushMicrotasks();
+    expect(events).toEqual([
+      { kind: 'output', seq: 4, epoch: 11 },
+      { kind: 'output', seq: 5, epoch: 11 },
+      { kind: 'resize', seq: 6, epoch: 11 },
+      { kind: 'output', seq: 7, epoch: 11 },
+    ]);
+    reconciler.dispose();
+  });
+});
+
+
+describe('StreamReconciler bounded reorder window (#1961)', () => {
+  it('drops retained gap and announces degraded continuity at event-count budget', async () => {
+    const h = makeHarness({ maxFrames: 2, maxBytes: 1024 });
+    live(h, 1, 'one');
+    live(h, 4, 'four');
+    live(h, 5, 'five');
+    expect(h.reconciler.pendingUsage).toEqual({ frames: 2, bytes: 128 * 2 + 8 });
+    expect(h.out).toEqual(['one']);
+    live(h, 6, 'six'); // would retain the third waiting frame
+    expect(h.truncated).toBe(1);
+    expect(h.out).toEqual(['one', 'six']);
+    expect(h.reconciler.pendingUsage).toEqual({ frames: 0, bytes: 0 });
+    // A late replay of the old gap cannot apply to the invalidated generation.
+    h.requests[0].resolve(reply([output(2), output(3), output(4), output(5)]));
+    await flushMicrotasks();
+    expect(h.out).toEqual(['one', 'six']);
+    h.reconciler.dispose();
+  });
+
+  it('delivers large contiguous output directly without a false overflow notice', async () => {
+    const h = makeHarness({ maxFrames: 4, maxBytes: 600 });
+    h.reconciler.acceptLive({ data: new Uint8Array(4096), streamEpoch: 1, streamSeq: 1 });
+    h.reconciler.acceptLive({ data: new Uint8Array(8192), streamEpoch: 1, streamSeq: 2 });
+    expect(h.truncated).toBe(0);
+    expect(h.reconciler.pendingUsage).toEqual({ frames: 0, bytes: 0 });
+    expect(h.out).toHaveLength(2);
+
+    live(h, 5, 'gap');
+    expect(h.reconciler.pendingUsage.frames).toBe(1);
+    h.requests[0].resolve(reply([output(3), output(4)]));
+    await flushMicrotasks();
+    expect(h.truncated).toBe(0); // replay fills the gap in time
+    expect(h.reconciler.pendingUsage).toEqual({ frames: 0, bytes: 0 });
+    h.reconciler.dispose();
+  });
+
+  it('bounds bytes and treats one oversized event as degraded live without retention', () => {
+    const h = makeHarness({ maxFrames: 8, maxBytes: 130 });
+    live(h, 1, 'a');
+    live(h, 3, 'b');
+    expect(h.reconciler.pendingUsage).toEqual({ frames: 1, bytes: 129 });
+    live(h, 4, 'c');
+    expect(h.truncated).toBe(1);
+    expect(h.reconciler.pendingUsage).toEqual({ frames: 0, bytes: 0 });
+    expect(h.out).toEqual(['a', 'c']);
+    h.reconciler.acceptLive({
+      streamEpoch: 1, streamSeq: 7, data: new Uint8Array(2048),
+    });
+    expect(h.truncated).toBe(2);
+    expect(h.reconciler.pendingUsage).toEqual({ frames: 0, bytes: 0 });
+    expect(h.out).toHaveLength(3);
+    h.reconciler.dispose();
+  });
+
+  it('bounds replay bursts, deduplicates, and isolates an unaffected subscriber', async () => {
+    const slow = makeHarness({ maxFrames: 2, maxBytes: 400 });
+    const healthy = makeHarness({ maxFrames: 2, maxBytes: 400 });
+    live(slow, 1, 'one');
+    live(slow, 6, 'six');
+    live(healthy, 1, 'one');
+    live(healthy, 2, 'two');
+    live(healthy, 3, 'three');
+    slow.requests[0].resolve(reply([4, 5, 6].map((n) => output(n)), 1, { firstAvailableSeq: 4, complete: false }));
+    await flushMicrotasks();
+    expect(slow.truncated).toBeGreaterThan(0);
+    expect(slow.reconciler.pendingUsage.frames).toBeLessThanOrEqual(2);
+    expect(slow.reconciler.pendingUsage.bytes).toBeLessThanOrEqual(400);
+    expect(healthy.truncated).toBe(0);
+    expect(healthy.out).toEqual(['one', 'two', 'three']);
+    slow.reconciler.dispose();
+    healthy.reconciler.dispose();
+  });
+
+  it('reclaims frame accounting on normal drain and epoch reset', async () => {
+    const h = makeHarness({ maxFrames: 2, maxBytes: 300 });
+    live(h, 1, 'one');
+    live(h, 3, 'three');
+    expect(h.reconciler.pendingUsage.frames).toBe(1);
+    live(h, 2, 'two');
+    expect(h.out).toEqual(['one', 'two', 'three']);
+    expect(h.reconciler.pendingUsage).toEqual({ frames: 0, bytes: 0 });
+    live(h, 5, 'five');
+    expect(h.reconciler.pendingUsage.frames).toBe(1);
+    // A fresh authoritative seed discards the retired epoch's pending bytes.
+    // A *live* different-epoch frame deliberately waits for replay (#1303).
+    h.reconciler.seed(2, 0);
+    expect(h.reconciler.pendingUsage).toEqual({ frames: 0, bytes: 0 });
+    h.reconciler.dispose();
+  });
+
+  it('rejects invalid resource limits rather than silently disabling backpressure', () => {
+    for (const invalid of [0, -1, 0.25, Number.POSITIVE_INFINITY]) {
+      expect(() => makeHarness({ maxFrames: invalid })).toThrow(RangeError);
+      expect(() => makeHarness({ maxBytes: invalid })).toThrow(RangeError);
+    }
   });
 });

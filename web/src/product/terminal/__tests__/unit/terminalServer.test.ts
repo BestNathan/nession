@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TerminalServerPlugin, decodeTerminalData, terminalServerApi } from '@/product/terminal';
 import { createMockPluginSurface, type MockPluginSurface } from '@/test/mockPluginSurface';
+import { getOrCreateClientId } from '@/platform/socket/clientId';
 
 function b64Bytes(bytes: number[]): string {
   let binary = '';
@@ -36,6 +37,53 @@ describe('TerminalServerPlugin', () => {
 
   it('exposes the "terminal-server" capability name', () => {
     expect(plugin.name).toBe('terminal-server');
+  });
+
+  describe('Agent-authored Relay-ready receipt (#2100)', () => {
+    const routeId = 'aabbccdd-1234-4000-8000-aabbccddeeff';
+    const valid = {
+      session_name: 'work', browser_client_id: 'unit-client',
+      relay_request_id: 'real-wire-id', route_id: routeId,
+      subscriber_generation: 41, stream_epoch: 7,
+    };
+
+    it('returns only the real outgoing envelope id; legacy transport cannot fabricate one', () => {
+      expect(plugin.beginRelayTracked('a:work')).toBeNull();
+      expect(surface.sent).toHaveLength(1);
+      surface.sendTracked = vi.fn((type, payload) => {
+        surface.send(type, payload);
+        return { id: 'real-wire-id', physicalGeneration: 3 };
+      });
+      expect(plugin.beginRelayTracked('a:work')).toEqual({
+        id: 'real-wire-id', physicalGeneration: 3,
+      });
+      expect(surface.sent[1]?.type).toBe('server.session.relay.begin');
+    });
+
+    it('decodes only complete safe Agent pair and route identity, scoped to session', () => {
+      Object.defineProperty(surface, 'physicalGeneration', { value: 3, configurable: true });
+      const cb = vi.fn();
+      plugin.onRelayReady('work', cb);
+      plugin.onRelayReady('other', vi.fn());
+      surface.pushMessage('server.session.relay.ready', valid);
+      expect(cb).toHaveBeenCalledExactlyOnceWith({
+        sessionName: 'work', browserClientId: 'unit-client',
+        relayRequestId: 'real-wire-id', routeId,
+        subscriberGeneration: 41, streamEpoch: 7,
+      }, 3);
+      for (const bad of [
+        { ...valid, subscriber_generation: Number.MAX_SAFE_INTEGER + 1 },
+        { ...valid, stream_epoch: 0 },
+        { ...valid, stream_epoch: undefined },
+        { ...valid, subscriber_generation: undefined },
+        { ...valid, route_id: 'not-a-uuid' },
+        { ...valid, relay_request_id: '' },
+        { ...valid, session_name: 'other' },
+      ]) {
+        surface.pushMessage('server.session.relay.ready', bad);
+      }
+      expect(cb).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('relay lifecycle sends', () => {
@@ -116,6 +164,73 @@ describe('TerminalServerPlugin', () => {
     });
   });
 
+  describe('Relay parser-applied output ACK (#2103)', () => {
+    it('preserves Agent output.applied contract on the tunneled socket and never sends invalid cursors', () => {
+      const ack = {
+        subscriberGeneration: 41, streamEpoch: 7, rendererGeneration: 3, appliedThrough: 12,
+      };
+      expect(plugin.sendRelayOutputApplied('work', ack)).toBe(true);
+      expect(surface.sent).toEqual([{
+        type: 'agent.terminal.output.applied',
+        payload: {
+          session_name: 'work', subscriber_generation: 41,
+          stream_epoch: 7, renderer_generation: 3, applied_through: 12,
+        },
+      }]);
+      for (const invalid of [
+        { ...ack, subscriberGeneration: 0 },
+        { ...ack, streamEpoch: 0 },
+        { ...ack, rendererGeneration: 0 },
+        { ...ack, appliedThrough: -1 },
+        { ...ack, appliedThrough: Number.MAX_SAFE_INTEGER + 1 },
+      ]) {
+        expect(plugin.sendRelayOutputApplied('work', invalid)).toBe(false);
+      }
+      expect(surface.sent).toHaveLength(1);
+    });
+  });
+
+  describe('Agent Relay stream resume', () => {
+    it('passes the original Agent resume wire and preserves a complete reply (#2050)', async () => {
+      const pending = plugin.resumeRelayStream('work', 31, 4);
+      expect(surface.requests[0]).toMatchObject({
+        type: 'agent.terminal.stream.resume',
+        payload: { session_name: 'work', stream_epoch: 31, after_seq: 4 },
+      });
+      expect(surface.resolveNext('agent.terminal.stream.resume', {
+        stream_epoch: 31,
+        epoch_match: true,
+        first_available_seq: 5,
+        complete: true,
+        recovery: 'complete',
+        events: [{ kind: 'resize', stream_epoch: 31, stream_seq: 5, cols: 120, rows: 40 }],
+      })).toBe(true);
+      await expect(pending).resolves.toMatchObject({
+        streamEpoch: 31, epochMatch: true, complete: true,
+        recovery: 'complete',
+        events: [{ kind: 'resize', streamEpoch: 31, streamSeq: 5, cols: 120, rows: 40 }],
+      });
+    });
+
+    it('refuses contradictory and incomplete Relay recovery without leaking retained suffix (#2050)', async () => {
+      const pending = plugin.resumeRelayStream('work', 31, 4);
+      expect(surface.requests).toHaveLength(1);
+      surface.resolveNext('agent.terminal.stream.resume', {
+        stream_epoch: 31,
+        epoch_match: true,
+        complete: false,
+        recovery: 'complete',
+        events: [{ kind: 'output', stream_epoch: 31, stream_seq: 9, data: 'aGk=' }],
+      });
+      const result = await pending;
+      expect(result.recovery).toBe('unavailable');
+      expect(result.epochMatch).toBe(false);
+      expect(result.events).toEqual([]);
+      await expect(plugin.resumeRelayStream('work', 0, 0)).rejects.toThrow('invalid Relay stream cursor');
+      await expect(plugin.resumeRelayStream('work', 31, -1)).rejects.toThrow('invalid Relay stream cursor');
+    });
+  });
+
   describe('onRelayOutput', () => {
     it('routes relay frames per session_name and decodes base64 to raw bytes', () => {
       const cbWork = vi.fn();
@@ -130,6 +245,40 @@ describe('TerminalServerPlugin', () => {
 
       surface.pushMessage('agent.terminal.output', { session_name: 'other', data: 'aGk=' });
       expect(cbOther.mock.calls[0]?.[0]).toEqual(new Uint8Array([104, 105]));
+    });
+
+    it('retains only complete safe Agent-assigned output positions on Relay (#2043)', () => {
+      const cb = vi.fn();
+      plugin.onRelayOutput('work', cb);
+      surface.pushMessage('agent.terminal.output', {
+        session_name: 'work', data: 'YQ==', stream_epoch: 31, stream_seq: 1,
+      });
+      surface.pushMessage('agent.terminal.output', {
+        session_name: 'work', data: 'Yg==', stream_epoch: 31,
+      });
+      surface.pushMessage('agent.terminal.output', {
+        session_name: 'work', data: 'Yw==', stream_epoch: 31, stream_seq: Number.MAX_SAFE_INTEGER + 1,
+      });
+      surface.pushMessage('agent.terminal.output', { session_name: 'work', data: 'ZA==' });
+      surface.pushMessage('agent.terminal.output', {
+        session_name: 'work', data: 'ZQ==', stream_epoch: 31, stream_seq: 5,
+        bootstrap: { requested_lines: 10, truncated: false },
+      });
+
+      surface.pushMessage('agent.terminal.output', {
+        session_name: 'work', data: 'Zg==', stream_epoch: 31, stream_seq: 6,
+        bootstrap: { requested_lines: 'invalid', truncated: false },
+      });
+
+      expect(cb.mock.calls[0]?.[2]).toEqual({ streamEpoch: 31, streamSeq: 1 });
+      expect(cb.mock.calls[1]?.[2]).toBeUndefined();
+      expect(cb.mock.calls[2]?.[2]).toBeUndefined();
+      expect(cb.mock.calls[3]?.[2]).toBeUndefined();
+      // A checkpoint marker is not a stream event even if malformed metadata
+      // contains a pair: never promote it to parser-applied sequence.
+      expect(cb.mock.calls[4]?.[2]).toBeUndefined();
+      expect(cb.mock.calls[5]?.[2]).toBeUndefined();
+      expect(cb.mock.calls[0]?.[0]).toEqual(new TextEncoder().encode('a'));
     });
 
     it('routes by session_id when the frame carries no session_name (non-relay decode)', () => {
@@ -246,6 +395,28 @@ describe('TerminalServerPlugin', () => {
 
       expect(cb).toHaveBeenCalledWith(0, 0);
     });
+  });
+
+  it('preserves sequenced authoritative resize but not legacy levels or invalid pairs (#2043)', () => {
+    const cb = vi.fn();
+    plugin.onRelayResize('work', cb);
+    surface.pushMessage('agent.terminal.resize', {
+      session_name: 'work', cols: 100, rows: 30, stream_epoch: 31, stream_seq: 2,
+    });
+    surface.pushMessage('agent.terminal.resize', {
+      session_name: 'work', cols: 101, rows: 30, stream_epoch: 31,
+    });
+    surface.pushMessage('agent.terminal.resize', {
+      session_name: 'work', cols: 102, rows: 30, stream_epoch: -1, stream_seq: 3,
+    });
+    surface.pushMessage('agent.terminal.resize', {
+      session_name: 'work', cols: 103, rows: 30,
+    });
+
+    expect(cb.mock.calls[0]).toEqual([100, 30, { streamEpoch: 31, streamSeq: 2 }]);
+    for (const call of cb.mock.calls.slice(1)) {
+      expect(call[2]).toBeUndefined();
+    }
   });
 
   describe('onRelayInputAck', () => {
@@ -406,6 +577,106 @@ describe('TerminalServerPlugin', () => {
 
       expect(staleCb).not.toHaveBeenCalled();
       expect(liveCb).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('ControlLease over Relay (#2157)', () => {
+    it('derives the role from the published holder and the browser client id', () => {
+      const self = getOrCreateClientId();
+      const observed: Array<{ name: string; role: string }> = [];
+      plugin.onControlChanged((name, state) => {
+        observed.push({ name, role: state.role });
+      });
+
+      surface.pushMessage('agent.terminal.control.changed', {
+        session_name: 'work', generation: 4, controller_client_id: 'someone-else',
+      });
+      surface.pushMessage('agent.terminal.control.changed', {
+        session_name: 'work', generation: 5, controller_client_id: self,
+      });
+
+      expect(observed).toEqual([
+        { name: 'work', role: 'observer' },
+        { name: 'work', role: 'controller' },
+      ]);
+      expect(plugin.getControlState('work')).toEqual({
+        sessionName: 'work', role: 'controller', generation: 5, controllerClientId: self,
+      });
+    });
+
+    it('keeps sessions independent and defaults an unknown one to controller', () => {
+      surface.pushMessage('agent.terminal.control.changed', {
+        session_name: 'a', generation: 1, controller_client_id: 'someone-else',
+      });
+      expect(plugin.getControlState('a').role).toBe('observer');
+      expect(plugin.getControlState('b')).toEqual({ role: 'controller', sessionName: 'b' });
+    });
+
+    it('acquires through the relayed Agent wire and records the reply', async () => {
+      const pending = plugin.acquireControl('work');
+      expect(surface.requests.map((request) => request.type)).toEqual([
+        'agent.terminal.control.acquire',
+      ]);
+      expect(surface.requests[0]?.payload).toEqual({ session_name: 'work' });
+
+      surface.resolveNext('agent.terminal.control.acquire', {
+        session_name: 'work', generation: 9, role: 'controller',
+        controller_client_id: getOrCreateClientId(),
+      });
+      await expect(pending).resolves.toEqual({ ok: true, generation: 9, role: 'controller' });
+      expect(plugin.getControlState('work').generation).toBe(9);
+    });
+
+    it('fails closed on a reply without a generation', async () => {
+      const pending = plugin.acquireControl('work');
+      surface.resolveNext('agent.terminal.control.acquire', { session_name: 'work' });
+      await expect(pending).resolves.toEqual({
+        ok: false, error: 'missing control generation in acquire response',
+      });
+    });
+
+    it('seeds the lease from the relay-ready receipt at attach (#2157)', () => {
+      Object.defineProperty(surface, 'physicalGeneration', { value: 3, configurable: true });
+      const observed: string[] = [];
+      plugin.onControlChanged((name, state) => {
+        observed.push(`${name}:${state.role}`);
+      });
+
+      surface.pushMessage('server.session.relay.ready', {
+        session_name: 'work', browser_client_id: 'browser-a',
+        relay_request_id: 'begin-1', route_id: 'aabbccdd-1234-4000-8000-aabbccddeeff',
+        subscriber_generation: 41, stream_epoch: 7,
+        control_role: 'observer', control_generation: 5,
+        controller_client_id: 'browser-b',
+      });
+
+      expect(plugin.getControlState('work')).toEqual({
+        sessionName: 'work', role: 'observer', generation: 5,
+        controllerClientId: 'browser-b',
+      });
+      expect(observed).toEqual(['work:observer']);
+    });
+
+    it('keeps the pre-#2157 default when the receipt states no lease', () => {
+      Object.defineProperty(surface, 'physicalGeneration', { value: 3, configurable: true });
+      surface.pushMessage('server.session.relay.ready', {
+        session_name: 'work', browser_client_id: 'browser-a',
+        relay_request_id: 'begin-1', route_id: 'aabbccdd-1234-4000-8000-aabbccddeeff',
+        subscriber_generation: 41, stream_epoch: 7,
+      });
+      expect(plugin.getControlState('work')).toEqual({ role: 'controller', sessionName: 'work' });
+    });
+
+    it('teardown stops delivering the lease from the released binding', () => {
+      const teardown = plugin.install(surface);
+      const stale = vi.fn();
+      plugin.onControlChanged(stale);
+      teardown();
+
+      surface.pushMessage('agent.terminal.control.changed', {
+        session_name: 'work', generation: 2, controller_client_id: 'x',
+      });
+      expect(stale).not.toHaveBeenCalled();
     });
   });
 

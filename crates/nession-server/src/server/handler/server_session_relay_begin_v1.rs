@@ -209,6 +209,7 @@ impl ConnectionHandler {
             agent_ws_urls: relay_urls,
             session_id: session_id.to_string(),
             session_name,
+            relay_request_id: msg.id,
             client_id,
             browser_client_id: self.browser_client_id.clone(),
             env_snapshots: Vec::new(),

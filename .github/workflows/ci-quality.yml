@@ -11,19 +11,40 @@ env:
 on:
   pull_request:
     branches: [staging, main]
+    # Scope PR execution to changes that can affect this validator.
+    # Keep push / manual triggers unchanged for exact-SHA evidence.
+    paths:
+      - '.github/workflows/**'
+      - 'crates/**'
+      - 'web/**'
+      - 'design/**'
+      - 'e2e/**'
+      - 'gates/**'
+      - 'scripts/**'
+      - 'automation/**'
+      - '.cargo/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - 'clippy.toml'
+      - 'justfile'
+  # Keep exact main SHA evidence but select impacted gates; the remaining
+  # module checks are inapplicable rather than silently green.
+  push:
+    branches: [main]
 
-# Staging branch protection requires both rust-check and web-check on all PRs.
-# Never add top-level pull_request.paths here: omitted required contexts can
-# remain Pending. Each job explicitly reports Not Applicable for unrelated diffs.
-# One gate run per PR. Superseded runs are useless, so cancel them.
+# PR heads may supersede earlier runs, but each main-push SHA must retain
+# its own completed Quality Gate for exact-SHA post-merge Acceptance (#1876).
+# GitHub run_id is unique per push; a newer main commit must not cancel the
+# previous commit's evidence (nor should unrelated branches share a group).
 concurrency:
-  group: quality-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  group: quality-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   scope:
-    # Staging requires rust-check / web-check contexts on EVERY PR.
-    # This cheap exact-head diff classifier selects expensive steps only.
+    # PR and merged main source both select only the relevant checks.
+    # A skipped job is Not Applicable, not a fabricated Quality Pass.
     runs-on: ubuntu-latest
     outputs:
       rust: ${{ steps.changed.outputs.rust }}
@@ -35,17 +56,33 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Classify exact PR diff
+      - name: Select impacted checks from the exact PR diff
         id: changed
         env:
+          EVENT_NAME: ${{ github.event_name }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         shell: bash
         run: |
           set -euo pipefail
-          base="$(git merge-base "$PR_BASE_SHA" "$PR_HEAD_SHA")"
-          git diff --name-only -z "$base" "$PR_HEAD_SHA" > "$RUNNER_TEMP/changed-paths"
-          mapfile -d '' -t changed < "$RUNNER_TEMP/changed-paths"
+          # Compare the exact *change* under review: merge-base for PRs,
+          # first-parent to merged SHA for main pushes. Never rerun both
+          # suites just because the merge created a new commit hash.
+          if [[ "$EVENT_NAME" == pull_request ]]; then
+            [[ "$(git rev-parse HEAD)" == "$PR_HEAD_SHA" ]] || exit 1
+            base="$(git merge-base "$PR_BASE_SHA" "$PR_HEAD_SHA")"
+            target="$PR_HEAD_SHA"
+          elif [[ "$EVENT_NAME" == push ]]; then
+            target="$(git rev-parse HEAD)"
+            [[ "$target" == "$GITHUB_SHA" ]] || exit 1
+            base="$(git rev-parse "$target^1")"
+          else
+            echo "::error::Unsupported Quality source event"
+            exit 1
+          fi
+          [[ "$base" =~ ^[0-9a-f]{40}$ && "$target" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          git diff --no-renames --name-only -z "$base" "$target" > "$RUNNER_TEMP/quality-changed-paths"
+          mapfile -d '' -t changed < "$RUNNER_TEMP/quality-changed-paths"
           rust=false
           web=false
           workflow=false
@@ -60,12 +97,17 @@ jobs:
               .github/workflows/*) workflow=true ;;
             esac
           done
+          if [[ "$EVENT_NAME" == pull_request &&
+                "$rust" == false && "$web" == false && "$workflow" == false ]]; then
+            echo '::error::PR matched Quality trigger but no applicable checks were found'
+            exit 1
+          fi
           {
             echo "rust=$rust"
             echo "web=$web"
             echo "workflow=$workflow"
           } >> "$GITHUB_OUTPUT"
-          echo "Required checks always present; Rust=$rust Web=$web Workflow=$workflow"
+          echo "Rust applicable: $rust; Web applicable: $web; Workflow contracts applicable: $workflow"
 
   workflow-check:
     needs: scope
@@ -79,70 +121,73 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Verify workflow taxonomy and cross-workflow references
+      - name: Validate workflow taxonomy and references
         run: ./gates/run workflow-conventions
-
+      - name: Validate trusted Controller and Store negative contracts
+        run: |
+          node scripts/lib/agent/orchestration/controller-dispatch-selftest.mjs
+          node scripts/lib/agent/orchestration/dispatch-intent-selftest.mjs
+          node scripts/lib/agent/orchestration/worker-preflight-selftest.mjs
   rust-check:
     needs: scope
+    if: needs.scope.outputs.rust == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Not Applicable — no rust inputs changed
-        if: needs.scope.outputs.rust == 'false'
-        run: echo 'Not Applicable — rust validated inputs unchanged at exact PR HEAD'
-      - if: needs.scope.outputs.rust == 'true'
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - if: needs.scope.outputs.rust == 'true'
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with: { cache-workspaces: ".", cache-all-crates: "true" }
-      - if: needs.scope.outputs.rust == 'true'
-        uses: extractions/setup-just@v2
-      - if: needs.scope.outputs.rust == 'true'
-        run: jq --version
-      - if: needs.scope.outputs.rust == 'true'
-        uses: actions/cache@v4
+      - uses: extractions/setup-just@v2
+      - run: jq --version
+      - uses: actions/cache@v4
         with:
           path: ~/.cargo/bin/cargo-llvm-cov
           key: cargo-llvm-cov-v1
-      - if: needs.scope.outputs.rust == 'true'
-        run: which cargo-llvm-cov || cargo install cargo-llvm-cov
-      - if: needs.scope.outputs.rust == 'true'
-        run: rustup component add llvm-tools-preview
-      - if: needs.scope.outputs.rust == 'true'
-        name: Verify Rust and Acceptance Gates
+      - run: which cargo-llvm-cov || cargo install cargo-llvm-cov
+      - run: rustup component add llvm-tools-preview
+      - name: Verify Rust and Acceptance Gates
         run: ./gates/run --suite quality-rust
 
   web-check:
     needs: scope
+    if: needs.scope.outputs.web == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Not Applicable — no web inputs changed
-        if: needs.scope.outputs.web == 'false'
-        run: echo 'Not Applicable — web validated inputs unchanged at exact PR HEAD'
-      - if: needs.scope.outputs.web == 'true'
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - if: needs.scope.outputs.web == 'true'
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: 'npm'
           cache-dependency-path: web/package-lock.json
-      - if: needs.scope.outputs.web == 'true'
-        uses: extractions/setup-just@v2
-      - if: needs.scope.outputs.web == 'true'
-        name: Verify repository tooling Gates
+      - uses: extractions/setup-just@v2
+      - name: Verify repository tooling Gates
         run: |
           ./gates/run --suite quality-tooling
-      - if: needs.scope.outputs.web == 'true'
-        run: cd web && npm ci
-      - if: needs.scope.outputs.web == 'true'
-        name: Verify Web and design Gates
+      - run: cd web && npm ci
+      - name: Verify Web and design Gates
         run: ./gates/run design-system-full web-eslint web-typecheck web-test-unit web-test-integration
-      - if: needs.scope.outputs.web == 'true'
-        name: Verify negative fixtures and Acceptance harness contracts
+      - name: Verify negative fixtures and Acceptance harness contracts
         run: ./gates/run design-token-boundary-selftest pre-push-diff-base-selftest acceptance-executor-selftest acceptance-agent-selftest
+      # #1876: The Quality Gate remains independently blocking; a dist artifact
+      # is transport only, and is published only for a validated main push.
+      - name: Verify Web artifact integrity and negative fixtures
+        run: ./gates/run web-build-artifact-selftest
+      - name: Build verified main Web dist
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: cd web && npm run build
+      - name: Pack exact-SHA Web dist
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: node scripts/ci/web-build-artifact.mjs pack --root . --dest "$RUNNER_TEMP/nession-web-dist"
+      - name: Publish exact-SHA Web dist transport
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: nession-web-dist-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/nession-web-dist/
+          if-no-files-found: error
+          retention-days: 7

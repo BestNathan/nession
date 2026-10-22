@@ -3,8 +3,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { spawnSync } from 'node:child_process';
 
-import { validateInstructionTree } from './instruction-contract.mjs';
+import { foreignGitEnv, validateInstructionTree } from './instruction-contract.mjs';
 
 const scopes = ['web', 'crates/nession-protocol', 'crates/nession-agent', 'scripts', '.github', 'design', 'docs'];
 
@@ -169,6 +170,53 @@ test('accepts the Gate-ID array router with full staged change detection', () =>
     ].join('\n'));
     assert.deepEqual(validateInstructionTree(root).errors, []);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('ignores the git environment a hook exports', () => {
+  // Git exports GIT_DIR/GIT_WORK_TREE to hooks, so `git -C <fixture>` inside a
+  // pre-push run adopted the *exporting* repository and listed its index
+  // instead of falling back to walking the fixture. The fixture deliberately
+  // has no `pages/` scope, so a hijacked probe reports a foreign path that does
+  // not exist under the fixture — the ENOENT seen from `git push`.
+  const root = fixture();
+  const foreign = fs.mkdtempSync(path.join(os.tmpdir(), 'nession-instruction-foreign-'));
+  try {
+    // This test's *own* Git commands must also clear the hook environment: a
+    // hook exports GIT_DIR, so an unsanitised `init`/`add` here would write
+    // `core.bare` and the index of the real repository instead of the scratch
+    // one. Prove the commands really did target `foreign`.
+    const cleanEnv = foreignGitEnv(process.env);
+    const git = (...args) => spawnSync('git', ['-C', foreign, ...args], { encoding: 'utf8', env: cleanEnv });
+    assert.equal(git('init', '-q').status, 0);
+    fs.mkdirSync(path.join(foreign, 'pages'), { recursive: true });
+    fs.writeFileSync(path.join(foreign, 'AGENTS.md'), '# Foreign\n');
+    fs.writeFileSync(path.join(foreign, 'pages', 'AGENTS.md'), '# Foreign scope\n');
+    assert.equal(git('add', '-A').status, 0);
+    const toplevel = fs.realpathSync(git('rev-parse', '--show-toplevel').stdout.trim());
+    assert.equal(toplevel, fs.realpathSync(foreign));
+
+    const program = `import { validateInstructionTree } from ${
+      JSON.stringify(new URL('./instruction-contract.mjs', import.meta.url).href)};
+      const r = validateInstructionTree(process.env.CONTRACT_PROBE_ROOT);
+      process.stdout.write(JSON.stringify({ errors: r.errors, scopes: r.scopes }));`;
+    const probe = spawnSync(process.execPath, ['--input-type=module', '-e', program], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        CONTRACT_PROBE_ROOT: root,
+        GIT_DIR: path.join(foreign, '.git'),
+        GIT_WORK_TREE: foreign,
+      },
+    });
+    assert.equal(probe.status, 0, probe.stderr);
+    const discovered = JSON.parse(probe.stdout);
+    assert.deepEqual(discovered.errors, []);
+    // Only the fixture's own scopes; `pages` exists solely in the foreign repo.
+    assert.deepEqual(discovered.scopes, [...scopes].sort());
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(foreign, { recursive: true, force: true });
+  }
 });
 
 test('rejects Gate-ID router that drops the instruction Gate', () => {
