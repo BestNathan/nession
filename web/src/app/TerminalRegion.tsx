@@ -48,6 +48,7 @@ export function TerminalRegion({
     viewportReady,
     terminalState,
     historyDegraded,
+    streamState,
     terminalControl,
     onTakeControl,
     inputDrop,
@@ -74,6 +75,7 @@ export function TerminalRegion({
           surfaceAction={surfaceAction}
           terminalControl={terminalControl}
           historyDegraded={historyDegraded}
+          streamState={streamState}
           onTakeControl={() => {
             void onTakeControl();
           }}

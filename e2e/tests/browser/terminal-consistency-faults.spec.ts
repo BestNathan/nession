@@ -732,6 +732,14 @@ test('an Auto P2P loss falls back to Relay without remounting the xterm (#2156)'
   await attachToSession(page, sessionName, 'Auto');
   await waitForInteractiveShell(page);
 
+  // #1926 SC-08: a fresh attach whose atomic cut was parsed is the one case
+  // the runtime may call synchronized. The surface publishes the runtime's
+  // answer as a contract attribute, so the state is asserted rather than
+  // inferred from which notice happens to render.
+  const streamState = (): Promise<string | null> =>
+    page.getByTestId('terminal-surface').getAttribute('data-terminal-stream-state');
+  await expect.poll(streamState, { timeout: 30_000 }).toBe('synchronized');
+
   const relayStarted = (): boolean =>
     sentWire.some((frame) => frame.msg_type === 'server.session.relay.begin');
   // Auto must have chosen the direct route, or this fixture would not exercise
@@ -802,6 +810,12 @@ test('an Auto P2P loss falls back to Relay without remounting the xterm (#2156)'
   // the blocked rebuild lets AddressAttachPolicy retire its candidates and
   // force Relay. No further typing is needed to reach the policy.
   await sendRawToTerminal(page, ' ');
+
+  // #1926 SC-08: the cut is the moment the tri-state must stop claiming
+  // synchronization. The runtime revokes the P2P baseline; a stale
+  // `synchronized` here would be exactly the false claim SC-03 forbids.
+  await expect.poll(streamState, { timeout: 30_000 }).not.toBe('synchronized');
+
   await expect(async () => {
     const seen = await page.evaluate(() => {
       const state = window as unknown as {
@@ -837,6 +851,18 @@ test('an Auto P2P loss falls back to Relay without remounting the xterm (#2156)'
   }
   expect(duplicated, 'a tail line was delivered more than once across the fallback').toEqual([]);
   expect(missingTail, 'a tail line never reached the parser across the fallback').toEqual([]);
+
+  // #1926 SC-08: the recovered route may be synchronized or degraded-live
+  // depending on whether its bootstrap proved a baseline — but a visible
+  // degraded notice and a synchronized claim may never coexist.
+  const recoveredState = await streamState();
+  expect(['synchronized', 'degraded-live', 'unavailable']).toContain(recoveredState);
+  if (await page.getByTestId('terminal-history-degraded').count() > 0) {
+    expect(
+      recoveredState,
+      'a visible degraded notice must not coexist with a synchronized claim',
+    ).toBe('degraded-live');
+  }
 
   // The renderer survived and the controller can still write.
   await expect(page.locator('.xterm')).toHaveAttribute('data-e2e-route-instance', 'original');

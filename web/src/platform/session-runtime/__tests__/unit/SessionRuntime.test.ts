@@ -1918,3 +1918,44 @@ describe('SessionRuntime', () => {
     });
   });
 });
+
+describe('explicit stream state (#1926 SC-08)', () => {
+  it('is unavailable until a stream is attached', () => {
+    const rt = new SessionRuntime(makeConfig());
+    expect(rt.getSnapshot().streamState).toBe('unavailable');
+    rt.dispose();
+  });
+
+  it('is degraded-live when attached without a verified baseline, and never claims synchronized on an observed gap', () => {
+    const rt = new SessionRuntime(makeConfig({ hasSessionOutput: () => true }));
+    rt.attachController.dispatch({ type: 'ATTACH_OK' });
+    // Attached is not synchronized: a screen-only capture is live output
+    // whose history has no proof behind it.
+    expect(rt.getSnapshot().streamState).toBe('degraded-live');
+
+    rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 2 });
+    expect(rt.getSnapshot().streamState).toBe('synchronized');
+
+    rt.noteStreamTruncated();
+    expect(rt.getSnapshot().streamState).toBe('degraded-live');
+    rt.dispose();
+  });
+
+  it('a route change revokes the claim until a new baseline proves the new subscription', () => {
+    const serverConnection = makeRelayServerConnection('connected');
+    const rt = new SessionRuntime(makeConfig({
+      serverConnection,
+      hasSessionOutput: () => true,
+    }));
+    rt.attachController.dispatch({ type: 'ATTACH_OK' });
+    rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 2 });
+    expect(rt.getSnapshot().streamState).toBe('synchronized');
+
+    rt.updateContext({ forcedRelay: true });
+    expect(rt.getSnapshot().streamState).toBe('degraded-live');
+
+    rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 8, appliedThrough: 0 });
+    expect(rt.getSnapshot().streamState).toBe('synchronized');
+    rt.dispose();
+  });
+});

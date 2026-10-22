@@ -10,6 +10,7 @@ import type { TerminalController } from '@/platform/terminal-runtime/controller/
 import type { TerminalSemanticKey } from '@/platform/terminal-runtime/interaction/TerminalInteractionController';
 import type { TerminalControlState } from '@/product/terminal/state/terminalControl';
 import type { InputDrop } from '@/platform/terminal-runtime/inputQueue';
+import type { TerminalStreamState } from '@/platform/session-runtime/SessionRuntime';
 import { Button } from '@/components/ui/button';
 import type { ResolvedWorkContext } from '@/product/terminal/capsule/workAwareness';
 import { cn } from '@/shared/lib/utils';
@@ -51,6 +52,15 @@ export interface TerminalSurfaceProps {
    * complete snapshot has repaired the buffer.
    */
   historyDegraded?: boolean;
+  /**
+   * The runtime's explicit synchronized / degraded-live / unavailable answer
+   * (#1926 SC-08). Published as `data-terminal-stream-state` so the browser
+   * fixtures assert the state itself rather than inferring it from which
+   * notice happens to be rendered. It does not add a visual element: the
+   * quiet degraded notice stays tied to an **observed** gap, and a
+   * screen-only-but-clean attach is degraded-live without shouting.
+   */
+  streamState?: TerminalStreamState;
   /** Input this Session lost rather than delivered (#1307 SC-09), if any. */
   inputDrop?: InputDrop | null;
   onDismissInputDrop?: () => void;
@@ -136,6 +146,7 @@ export function TerminalSurface({
   onTakeControl,
   inputDrop = null,
   historyDegraded = false,
+  streamState = 'unavailable',
   onDismissInputDrop,
   surfaceAction,
   workContext,
@@ -162,6 +173,7 @@ export function TerminalSurface({
   return (
     <div
       data-testid="terminal-surface"
+      data-terminal-stream-state={streamState}
       className="relative flex min-h-0 flex-1 flex-col"
     >
       {/*
