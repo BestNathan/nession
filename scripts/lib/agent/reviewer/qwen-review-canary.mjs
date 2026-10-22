@@ -83,7 +83,8 @@ function canaryTelemetry(env,startedAt,finishedAt,events,envelope,verdict,admiss
   const model=providerModel(env);
   return buildAgentWorkflowTelemetry({
     workflow_id:'agent-provider-smoke',github_workflow:'Agent / Provider Smoke',
-    job:'qwen-reviewer-canary',repository:env.GITHUB_REPOSITORY,event:'push',
+    job:'qwen-reviewer-canary',repository:env.GITHUB_REPOSITORY,
+    event:env.GITHUB_EVENT_NAME,
     github_run_id:Number(env.GITHUB_RUN_ID),github_run_attempt:Number(env.GITHUB_RUN_ATTEMPT),
     unique_run_name:providerScopedRunName({workflowId:'agent-provider-smoke',
       runId:env.GITHUB_RUN_ID,runAttempt:env.GITHUB_RUN_ATTEMPT,taskId:TASK,provider:'claude-code'}),
