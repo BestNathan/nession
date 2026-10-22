@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_test_run",
+  "mode": "test",
+  "target_sha": "1790d9fc08ae6f6f97028e53d99f1687e4de40bd",
+  "source_tree_sha": "0428157f99d6957f62c0d54097f7a318a71d4b97",
+  "run_id": 39822246212,
+  "run_attempt": 2,
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 382193593,
+    "run_id": 39822246212,
+    "run_attempt": 2,
+    "head_sha": "1790d9fc08ae6f6f97028e53d99f1687e4de40bd",
+    "head_branch": "staging",
+    "event": "push"
+  },
+  "started_at": "2026-10-22T17:23:27Z",
+  "status": "Completed",
+  "evaluation": null,
+  "test_scope": "not-required",
+  "test_scope_receipt": {
+    "kind": "verified_e2e_not_required",
+    "run_id": 39822246212,
+    "run_attempt": 2,
+    "sha": "1790d9fc08ae6f6f97028e53d99f1687e4de40bd",
+    "event": "push",
+    "branch": "staging",
+    "plan_mode": "not-required",
+    "skipped_e2e_only_steps": [
+      "rust_toolchain",
+      "cargo_build",
+      "tmux"
+    ],
+    "design_gate": "success",
+    "evidence": "GitHub API Run/Attempt/job step outcomes + exact original not-required E2E job log receipt emitted by the measured run"
+  },
+  "test_scope_assertion": {
+    "scope": "not-required",
+    "target_sha": "1790d9fc08ae6f6f97028e53d99f1687e4de40bd",
+    "run_id": 39822246212,
+    "run_attempt": 2,
+    "verified_ids": [],
+    "plan_digest": "59327ae9d808901bc1686e6735440e911a8e63020504688b9b936765a6e7a7ab",
+    "evidence": "authenticated SHA256 artifact + independent per-ID assertions"
+  },
+  "selected_e2e_artifact": null,
+  "test_job": {
+    "job_id": 119977621241,
+    "name": "e2e",
+    "conclusion": "success",
+    "run_attempt": 2
+  },
+  "evidence": {
+    "artifact_id": 12445703995,
+    "name": "issue-e2e-verification",
+    "size_bytes": 11949,
+    "sha256": "5ce0817724b826e4b1f233a78872f5c0f2cf249ba432a9f11bd2bee9553fd5f7",
+    "expires_at": "2026-11-05T17:41:22Z",
+    "durability": "GitHub Actions artifact; time-limited, not indefinitely archived"
+  },
+  "execution_id": "4626836dfd60bc9d913c3f0994e93e32150184796c86d9bb2d87f1f9dda3af30"
+}
