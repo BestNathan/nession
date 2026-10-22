@@ -1240,6 +1240,19 @@ test('a writer overflow replaces the renderer and resumes output (#2196)', async
     } as typeof WebSocket;
   });
 
+  // #2196 diagnostics: whether the repair's re-attach asked for a capture and
+  // what the Agent answered. Recorded before the page loads so every socket
+  // is covered.
+  const wire: WireRecord = { sent: [], received: [] };
+  page.on('websocket', (socket) => {
+    socket.on('framesent', (frame) => {
+      if (typeof frame.payload === 'string') { wire.sent.push(parseFrame(frame.payload)); }
+    });
+    socket.on('framereceived', (frame) => {
+      if (typeof frame.payload === 'string') { wire.received.push(parseFrame(frame.payload)); }
+    });
+  });
+
   const sessionName = `e2e-consistency-overflow-${testInfo.retry}-${Date.now()}`;
   await page.goto(
     '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
@@ -1321,6 +1334,31 @@ test('a writer overflow replaces the renderer and resumes output (#2196)', async
 
   // 4. A parsed atomic epoch-start capture is what clears the statement; the
   //    notice may not outlive the repair that proved it.
+  const bootstraps = wire.received
+    .filter((frame) => frame.msg_type === 'agent.terminal.output'
+      && frame.payload?.bootstrap !== undefined)
+    .map((frame) => {
+      const bootstrap = frame.payload?.bootstrap as Record<string, unknown>;
+      return {
+        requested: bootstrap.requested_lines,
+        cut: bootstrap.cut_consistency,
+        fidelity: bootstrap.fidelity,
+        truncated: bootstrap.truncated,
+        epoch: bootstrap.stream_epoch,
+        through: bootstrap.through_seq,
+      };
+    });
+  console.log(`AGENT-OVERFLOW-WIRE ${JSON.stringify({
+    attaches: wire.sent
+      .filter((frame) => frame.msg_type === 'agent.attach')
+      .map((frame) => frame.payload?.needs_bootstrap),
+    resumes: wire.sent.filter((frame) => frame.msg_type === 'agent.terminal.stream.resume').length,
+    relayBegins: wire.sent
+      .filter((frame) => frame.msg_type === 'server.session.relay.begin')
+      .map((frame) => frame.payload?.needs_bootstrap),
+    bootstraps: bootstraps.slice(-4),
+    state: await page.locator('[data-terminal-stream-state]').getAttribute('data-terminal-stream-state'),
+  })}`);
   await expect(page.getByTestId('terminal-history-degraded'))
     .toBeHidden({ timeout: 60_000 });
 
