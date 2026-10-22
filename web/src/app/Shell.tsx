@@ -1,5 +1,6 @@
-import { useCallback } from 'react';
-import { Loader2, X } from 'lucide-react';
+import { useCallback, useState } from 'react';
+import { Bot, Loader2, X } from 'lucide-react';
+import { AIExperience } from '@/app/experiences/ai/AIExperience';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ShellDialogs } from '@/app/ShellDialogs';
@@ -17,6 +18,12 @@ export interface ShellProps {
 export function Shell({ connectionStatus, onRetry }: ShellProps) {
   const state = useShellState();
   const { data } = state;
+  const [mode, setMode] = useState<'standard' | 'ai'>('standard');
+  const [preselectedAgentId, setPreselectedAgentId] = useState<string | null>(null);
+  const openCreateSession = useCallback((agentId?: string) => {
+    setPreselectedAgentId(agentId ?? null);
+    data.setShowCreateModal(true);
+  }, [data]);
 
   // Creating and selecting are two hooks' jobs, so they are composed here
   // rather than one reaching into the other's state (#1082): the dashboard
@@ -28,6 +35,7 @@ export function Shell({ connectionStatus, onRetry }: ShellProps) {
     (sessionId?: string) => {
       data.handleSessionCreated();
       state.selectCreatedSession(sessionId);
+      setMode('standard');
     },
     [data, state],
   );
@@ -35,6 +43,7 @@ export function Shell({ connectionStatus, onRetry }: ShellProps) {
   const dialogs = (
     <ShellDialogs
       showCreateModal={data.showCreateModal}
+      createPreselectedAgentId={preselectedAgentId}
       setShowCreateModal={data.setShowCreateModal}
       agents={data.agents}
       handleSessionCreated={handleSessionCreated}
@@ -87,12 +96,27 @@ export function Shell({ connectionStatus, onRetry }: ShellProps) {
             <Button type="button" size="sm" variant="ghost" onClick={onRetry}>Retry</Button>
           </div>
         ) : null}
+        <div className="flex shrink-0 items-center justify-between border-b px-3 py-2 sm:px-5" data-testid="shell-mode-bar">
+          <span className="flex items-center gap-2 text-sm font-medium"><Bot className="size-4" aria-hidden /> Nession</span>
+          <div className="flex items-center gap-1 rounded-lg bg-muted p-1" role="group" aria-label="Interface mode">
+            <Button type="button" size="sm" variant={mode === 'standard' ? 'secondary' : 'ghost'} aria-pressed={mode === 'standard'} onClick={() => setMode('standard')}>Standard</Button>
+            <Button type="button" size="sm" variant={mode === 'ai' ? 'secondary' : 'ghost'} aria-pressed={mode === 'ai'} onClick={() => setMode('ai')}>AI</Button>
+          </div>
+        </div>
         {state.isRestoringDeepLink ? (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3">
             <Loader2 className="size-8 animate-spin text-muted-foreground" />
             <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>Restoring terminal session…</p>
           </div>
         ) : (
+          <div className="relative flex min-h-0 flex-1">
+            {/* Keep the existing work surface mounted, including its Terminal runtime,
+                while AI mode takes focus. Visibility preserves layout measurements. */}
+            <div
+              className={cn('absolute inset-0 flex min-h-0', mode === 'ai' && 'invisible pointer-events-none')}
+              inert={mode === 'ai'}
+              aria-hidden={mode === 'ai'}
+            >
           <WorkspaceRegion
             connectionStatus={connectionStatus}
             agents={data.agents}
@@ -116,7 +140,7 @@ export function Shell({ connectionStatus, onRetry }: ShellProps) {
             surface={state.surface}
             tool={state.tool}
             fileOps={state.fileOps}
-            onCreate={() => data.setShowCreateModal(true)}
+            onCreate={() => openCreateSession()}
             onRefresh={() => { void data.fetchSessions({ force: true }); }}
             onSelect={state.handleSelect}
             onOpenWorktreeSession={state.handleOpenWorktreeSession}
@@ -130,6 +154,16 @@ export function Shell({ connectionStatus, onRetry }: ShellProps) {
             onBackToSessions={state.openList}
             onCloseDrawer={state.openDetail}
           />
+            </div>
+            {mode === 'ai' ? (
+              <AIExperience
+                agents={data.agents}
+                sessions={data.sessions}
+                onCreateSession={openCreateSession}
+                onOpenSession={(session) => { state.handleSelect(session); setMode('standard'); }}
+              />
+            ) : null}
+          </div>
         )}
       </div>
       {dialogs}
