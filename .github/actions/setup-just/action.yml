@@ -1,0 +1,39 @@
+name: Install verified just
+description: Install a pinned just release without GitHub Releases API discovery
+runs:
+  using: composite
+  steps:
+    - name: Download and verify just
+      shell: bash
+      run: |
+        set -euo pipefail
+        version="1.58.0"
+        case "$(uname -m)" in
+          x86_64)
+            arch="x86_64"
+            sha256="4a5cc2f53e6f0f8c59092a6cc38291eb729d46a7dd95d3ae582008881b84931d"
+            ;;
+          aarch64)
+            arch="aarch64"
+            sha256="748237128c4c40cbdabc65e841d05ceba13cc23a91eaba395495894c1d9764df"
+            ;;
+          *)
+            echo "::error::Unsupported just runner architecture $(uname -m)" >&2
+            exit 1
+            ;;
+        esac
+        archive="$RUNNER_TEMP/just-${version}-${arch}.tar.gz"
+        url="https://github.com/casey/just/releases/download/${version}/just-${version}-${arch}-unknown-linux-musl.tar.gz"
+        curl --fail --location --show-error --silent \
+          --retry 5 --retry-all-errors --retry-delay 2 \
+          --connect-timeout 15 --max-time 120 \
+          --output "$archive" "$url"
+        printf '%s  %s\n' "$sha256" "$archive" | sha256sum --check --status || {
+          echo "::error::just archive SHA-256 does not match the pinned official release" >&2
+          exit 1
+        }
+        mkdir -p "$HOME/.local/bin"
+        tar -xzf "$archive" -C "$HOME/.local/bin" just
+        chmod +x "$HOME/.local/bin/just"
+        printf '%s\n' "$HOME/.local/bin" >> "$GITHUB_PATH"
+        "$HOME/.local/bin/just" --version
