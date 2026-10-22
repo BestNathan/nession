@@ -112,9 +112,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with: { workspaces: ".", cache-all-crates: "true" }
-      - uses: extractions/setup-just@v4
+      - uses: taiki-e/install-action@v2
         with:
-          just-version: '1.57.0'
+          tool: just@1.58.0
+          fallback: none
       - run: jq --version
       - uses: actions/cache@v4
         with:
@@ -136,9 +137,10 @@ jobs:
           node-version: '24'
           cache: 'npm'
           cache-dependency-path: web/package-lock.json
-      - uses: extractions/setup-just@v4
+      - uses: taiki-e/install-action@v2
         with:
-          just-version: '1.57.0'
+          tool: just@1.58.0
+          fallback: none
       - run: cd web && npm ci
       - name: Verify Web lint, types and tests
         run: ./gates/run web-eslint web-typecheck web-test-unit web-test-integration
