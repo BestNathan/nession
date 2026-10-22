@@ -1,0 +1,52 @@
+name: Release / ACR GitOps Backfill Smoke (temporary)
+on:
+  push:
+    branches: [test/acr-gitops-backfill-20261022]
+    paths:
+      - '.github/workflows/release-acr-gitops-backfill-smoke.yml'
+permissions:
+  contents: read
+  packages: read
+jobs:
+  anonymous-pull:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker/setup-buildx-action@v3
+      - name: Verify anonymous ACR pull for existing server image
+        env:
+          ACR_IMAGE: crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession
+        run: |
+          set -euo pipefail
+          docker buildx imagetools inspect --raw "${ACR_IMAGE}:server-0.36.0" > /tmp/manifest.json
+          jq -e '[.manifests[]? | select(.platform.os == "linux")] | length == 2' /tmp/manifest.json
+          echo "Public pull access verified"
+  backfill:
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        image: [server, agent, ui]
+        version: [0.35.0, e0ce848, cfb4cc9]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ACR_REGISTRY: crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com
+      ACR_IMAGE: crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession
+      GODEBUG: http2client=0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.ACR_REGISTRY }}
+          username: ${{ secrets.ALIYUN_ACR_USERNAME }}
+          password: ${{ secrets.ALIYUN_ACR_PASSWORD }}
+      - name: Mirror GitOps referenced image and verify platforms
+        run: |
+          GHCR_IMAGE="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession"
+          bash scripts/mirror-container-images.sh "$GHCR_IMAGE" "$ACR_IMAGE" "${{ matrix.version }}" "${{ matrix.version }}" "${{ matrix.image }}"
