@@ -154,7 +154,7 @@ export function Shell({ connectionStatus, onRetry }: ShellProps) {
                 onBackToSessions={state.openList}
                 onCloseDrawer={state.openDetail}
               />
-                </div>
+            </div>
             {mode === 'ai' ? (
               <AIExperience
                 agents={data.agents}
