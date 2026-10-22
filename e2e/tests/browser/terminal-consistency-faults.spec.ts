@@ -1255,30 +1255,47 @@ test('a writer overflow replaces the renderer and resumes output (#2196)', async
     node.setAttribute('data-e2e-overflow-instance', 'original');
   });
 
-  const injected = await page.evaluate((name: string) => {
-    const sockets = (window as unknown as { __overflowSockets?: WebSocket[] })
-      .__overflowSockets ?? [];
-    // The P2P Agent socket is the only one that carries agent.terminal.output
-    // into this runtime; the Server socket at 19090 is a different plugin.
-    const socket = sockets.find((s) => s.url.includes(':19091/'));
-    if (!socket) {
-      return { ok: false, urls: sockets.map((s) => s.url) };
-    }
-    const payload = btoa('A'.repeat(1400));
-    const frames = 2_500;
-    for (let i = 0; i < frames; i += 1) {
-      socket.dispatchEvent(new MessageEvent('message', {
-        data: JSON.stringify({
-          id: `overflow-inject-${i}`,
-          msg_type: 'agent.terminal.output',
-          payload: { session_name: name, data: payload },
-        }),
-      }));
-    }
-    return { ok: true, frames };
-  }, sessionName);
-  // A missing socket would turn the whole fixture into a no-op.
-  expect(injected.ok, `injected into the Agent socket (${JSON.stringify(injected)})`).toBe(true);
+  // Deliver output frames the way the Agent does, on the live P2P socket(s).
+  // Only sockets that are open are used: an address-plan rebuild can leave a
+  // disposed socket in the captured list, and dispatching into it is a no-op.
+  const deliver = async (frames: number, text: string) => page.evaluate(
+    ({ name, count, body }: { name: string; count: number; body: string }) => {
+      const sockets = ((window as unknown as { __overflowSockets?: WebSocket[] })
+        .__overflowSockets ?? []).filter((s) => s.url.includes(':19091/') && s.readyState === 1);
+      if (sockets.length === 0) {
+        return { ok: false, urls: ((window as unknown as { __overflowSockets?: WebSocket[] })
+          .__overflowSockets ?? []).map((s) => `${s.url} (${s.readyState})`) };
+      }
+      const payload = btoa(body);
+      for (let i = 0; i < count; i += 1) {
+        for (const socket of sockets) {
+          socket.dispatchEvent(new MessageEvent('message', {
+            data: JSON.stringify({
+              id: `overflow-inject-${i}`,
+              msg_type: 'agent.terminal.output',
+              payload: { session_name: name, data: payload },
+            }),
+          }));
+        }
+      }
+      return { ok: true, count, sockets: sockets.length };
+    },
+    { name: sessionName, count: frames, body: text },
+  );
+
+  // Prove the boundary routes before relying on it: three tiny frames with a
+  // marker the terminal must display. Without this, a misplaced dispatch would
+  // turn the whole fixture into a silent no-op.
+  const probe = await deliver(3, 'INJECT-PROBE\n');
+  expect(probe.ok, `probe dispatch (${JSON.stringify(probe)})`).toBe(true);
+  await expect.poll(async () => countInBuffer(page, 'INJECT-PROBE'), { timeout: 30_000 })
+    .toBeGreaterThan(0);
+
+  // Now the overflow: every one of these is a real `agent.terminal.output`
+  // notification, and all of them are enqueued before xterm parses any, so
+  // the writer's 4 MiB byte accounting is crossed deterministically.
+  const injected = await deliver(2_500, 'A'.repeat(1400));
+  expect(injected.ok, `overflow dispatch (${JSON.stringify(injected)})`).toBe(true);
 
   // 1. The halt is stated. gapDetected stays set until a proven capture is
   //    parsed, so this also proves the writer actually overflowed.
