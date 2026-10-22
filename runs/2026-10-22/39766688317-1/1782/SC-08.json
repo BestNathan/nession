@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "357f458df9f9207cc135dd19628b04ac04d44bd36b6f6995a5b720028772eaaf",
+  "run_id": 39766688317,
+  "run_attempt": 1,
+  "issue": 1782,
+  "criterion": "SC-08",
+  "criterion_text": "Public export is versioned, deterministic, pin-ref/source-traceable, schema-validated, bounded and completely **read-only** relative to the canonical stores; no new telemetry writer/SC projector or site-generated commit on `main`.",
+  "stage": "post-merge",
+  "target_sha": "d955bda84fffeffb2d35f82821f046be73149e37",
+  "contract_sha256": "247865c5269ad52a0b0cb19a43564a07db1ee791363ec61e3311bbc6b53b8981",
+  "case_revision": "d955bda84fffeffb2d35f82821f046be73149e37",
+  "case_tree_sha": "80e5513f807f017ffd96d704aba2d54af29e2e14",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-22T10:58:45.808Z",
+  "finished_at": "2026-10-22T10:58:52.030Z",
+  "duration_ms": 6222,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.mjs",
+      "result": "Pass",
+      "summary": "Two offline builds from the same pinned revision produced identical schema-valid bounded exports; the release gate rejects private, unsafe and unbounded content and the publication path is read-only.",
+      "evidence": [
+        {
+          "type": "pin",
+          "value": "source_main_sha=d955bda84fffeffb2d35f82821f046be73149e37 metrics_sha=bbbbbbbbbbbb acceptance_results_sha=cccccccccccc"
+        },
+        {
+          "type": "determinism",
+          "value": "site.json=2951B and workflows.json=10746B reproducible apart from generated_at"
+        },
+        {
+          "type": "schema",
+          "value": "validateProjection accepted release artifact; extra root field, private field, untrusted URL and 13-Issue list rejected"
+        },
+        {
+          "type": "read-only",
+          "value": "git status unchanged; HEAD=d955bda84fffeffb2d35f82821f046be73149e37; deploy-pages.yml has no contents/issues write, git push/commit or Run Store writer"
+        }
+      ],
+      "duration_ms": 309,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 39766688317,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "d955bda84fffeffb2d35f82821f046be73149e37",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/39766688317",
+    "record_path": "runs/2026-10-22/39766688317-1/1782/SC-08.json",
+    "source_result_sha256": "635d2b54460f12e680d602ae862aaf4da80f7cefe221e039fdafd5e42d6165fd"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-39766688317-1",
+    "sha256": "635d2b54460f12e680d602ae862aaf4da80f7cefe221e039fdafd5e42d6165fd",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/39766688317",
+    "durability": "time-limited; object archival not configured"
+  }
+}
