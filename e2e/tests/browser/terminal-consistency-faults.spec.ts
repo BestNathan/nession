@@ -187,7 +187,7 @@ for (const mode of ['Relay', 'P2P'] as const) {
 // scrollback when it exits. Markers are built from printf arguments so the
 // command line the PTY echoes never contains the resolved marker.
 for (const mode of ['Relay', 'P2P'] as const) {
-  test(`alternate screen survives an authoritative resize and exits cleanly over ${mode}`, async ({ page }, testInfo) => {
+  test(`alternate screen survives an authoritative resize and exits cleanly over ${mode}`, async ({ page, browser }, testInfo) => {
     test.skip(!process.env.CI, 'real stack available in CI only');
     test.setTimeout(120_000);
 
@@ -215,16 +215,94 @@ for (const mode of ['Relay', 'P2P'] as const) {
     await attachToSession(page, sessionName, mode);
     await waitForInteractiveShell(page);
 
+    // The TUI reads input instead of sleeping so the bracketed-paste mode it
+    // asked for can be measured at the PTY: `-icanon -echo` hands bytes to
+    // `cat -v` as they arrive, and `cat -v` makes the ESC bytes it receives
+    // visible in the alternate screen. Signals stay enabled (`-icanon`, not
+    // `raw`), so the Ctrl+C below still interrupts it.
     await submitTerminalCommand(
       page,
       `printf '\\033[?1049h'; printf '\\033[?1h\\033[?1000h\\033[?2004h'; ` +
-        `printf 'ALT-%s-TUI\\n' 2130; while :; do sleep 0.5; done`,
+        `printf 'ALT-%s-TUI\\n' 2130; stty -icanon -echo min 1 time 0; cat -v`,
     );
 
     await expect(async () => {
       expect(await readBufferType(page)).toBe('alternate');
       expect(await readTerminalBuffer(page)).toContain('ALT-2130-TUI');
     }).toPass({ timeout: 15_000 });
+
+    // #1926 SC-07 — bracketed paste. The TUI asked for it (`?2004h`); a paste
+    // delivered through the terminal's paste path must reach the PTY wrapped
+    // in `ESC[200~ ... ESC[201~`, not as bare text. `cat -v` prints exactly the
+    // bytes it received, so the wrapper is observable in the alternate screen.
+    await page.evaluate(() => {
+      const textarea = document.querySelector('.xterm-helper-textarea');
+      if (!(textarea instanceof HTMLTextAreaElement)) {
+        throw new Error('xterm helper textarea missing');
+      }
+      const data = new DataTransfer();
+      data.setData('text/plain', 'PASTE-2130-MARKER');
+      textarea.dispatchEvent(new ClipboardEvent('paste', {
+        clipboardData: data,
+        bubbles: true,
+        cancelable: true,
+      }));
+    });
+    await expect.poll(
+      async () => countInBuffer(page, 'PASTE-2130-MARKER'),
+      { timeout: 15_000 },
+    ).toBe(1);
+    expect(
+      await readTerminalBuffer(page),
+      'the paste reached the PTY without bracketed-paste markers',
+    ).toMatch(/\^\[\[200~PASTE-2130-MARKER\^\[\[201~/);
+
+    // #1926 SC-07 — fidelity is a declaration, and a TUI capture must not
+    // claim full VT. A second client attaching while the alternate screen owns
+    // the terminal receives a bootstrap; its declared fidelity is the only
+    // place the screen-only/partial-vs-full-VT distinction exists on the wire.
+    const second = await browser.newContext();
+    try {
+      const other = await second.newPage();
+      const secondWire: WireRecord = { sent: [], received: [] };
+      other.on('websocket', (socket) => {
+        socket.on('framereceived', (frame) => {
+          if (typeof frame.payload === 'string') {
+            secondWire.received.push(parseFrame(frame.payload));
+          }
+        });
+      });
+      await other.goto(
+        '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
+      );
+      await waitForShell(other);
+      await attachToSession(other, sessionName, mode);
+      await expect.poll(
+        () => secondWire.received.filter(
+          (frame) => frame.msg_type === 'agent.terminal.output'
+            && frame.payload?.bootstrap !== undefined,
+        ).length,
+        { timeout: 30_000 },
+      ).toBeGreaterThan(0);
+      const bootstrap = secondWire.received.find(
+        (frame) => frame.msg_type === 'agent.terminal.output'
+          && frame.payload?.bootstrap !== undefined,
+      )?.payload?.bootstrap as Record<string, unknown>;
+      console.log(`TUI-BOOTSTRAP-FIDELITY ${JSON.stringify({
+        fidelity: bootstrap.fidelity,
+        cut: bootstrap.cut_consistency,
+        truncated: bootstrap.truncated,
+        requested: bootstrap.requested_lines,
+      })}`);
+      expect(
+        bootstrap.fidelity,
+        'a pane capture must never be declared full VT',
+      ).not.toBe('full-vt');
+      expect(['screen-only', 'partial']).toContain(bootstrap.fidelity);
+      expect(typeof bootstrap.truncated, 'truncation must be stated').toBe('boolean');
+    } finally {
+      await second.close();
+    }
 
     // The controller suppresses the PTY half of a resize while the webfont is
     // still loading (`metricsAreProvisional`), but still resizes the local
@@ -288,9 +366,10 @@ for (const mode of ['Relay', 'P2P'] as const) {
       `the Agent refused the TUI resize: ${wireSummary}`,
     ).toEqual([]);
 
-    // Interrupt the loop, then leave the alternate screen from the shell.
+    // Interrupt the TUI, restore the tty the TUI changed, then leave the
+    // alternate screen from the shell.
     await sendRawToTerminal(page, '\x03');
-    await submitTerminalCommand(page, `printf '\\033[?1049l'; echo ALT-2130-BACK`);
+    await submitTerminalCommand(page, `stty sane; printf '\\033[?1049l'; echo ALT-2130-BACK`);
 
     await expect(async () => {
       expect(await readBufferType(page)).toBe('normal');
