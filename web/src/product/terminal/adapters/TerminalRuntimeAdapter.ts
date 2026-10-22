@@ -42,6 +42,12 @@ export function createTerminalRuntimeAdapter(runtime: SessionRuntime): TerminalC
     onStreamTruncated: () => {
       runtime.noteStreamTruncated();
     },
+    // The controller replaced its halted xterm (#2196). The runtime owns the
+    // repair: it states the gap and drives a fresh attach that requests the
+    // bootstrap the empty renderer needs.
+    onRendererReplaced: () => {
+      runtime.noteRendererReplaced();
+    },
     onInputModeChange: (sid, mode) => {
       store.set(inputModeAtomFamily(sid), mode);
     },

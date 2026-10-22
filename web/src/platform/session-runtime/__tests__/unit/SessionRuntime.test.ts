@@ -970,6 +970,32 @@ describe('SessionRuntime', () => {
       rt.dispose();
     });
 
+    it('re-drives the relay attach with a bootstrap after the renderer was replaced (#2196)', async () => {
+      const serverConnection = makeRelayServerConnection('connected');
+      const rt = new SessionRuntime(makeConfig({
+        forcedRelay: true,
+        serverConnection,
+        hasSessionOutput: () => true,
+      }));
+      rt.setTransportReady(true);
+      await flushMicrotasks();
+      expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
+      expect(serverConnection.beginRelay.mock.calls[0]?.[1]).toMatchObject({
+        needsBootstrap: false,
+      });
+
+      rt.noteRendererReplaced();
+      await flushMicrotasks();
+      // The relay path has no P2P binding to retire, so the repair itself must
+      // ask again — with the bootstrap the empty replacement needs.
+      expect(serverConnection.beginRelay).toHaveBeenCalledTimes(2);
+      expect(serverConnection.beginRelay.mock.calls[1]?.[1]).toMatchObject({
+        needsBootstrap: true,
+      });
+      expect(rt.attachState.phase).toBe('attached');
+      rt.dispose();
+    });
+
     it('ignores repeated connecting while already reconnecting (no double TRANSPORT_LOST)', async () => {
       const serverConnection = makeRelayServerConnection('connected');
       const rt = new SessionRuntime(makeConfig({ forcedRelay: true, serverConnection }));
@@ -1288,6 +1314,37 @@ describe('SessionRuntime', () => {
       await flushMicrotasks();
       expect(clientAttachBootstrapFlags()).toEqual([false]);
       provisioned.dispose();
+    });
+
+    it('re-attaches with a bootstrap after the renderer was replaced (#2196)', async () => {
+      const rt = new SessionRuntime(makeConfig({ hasSessionOutput: () => true }));
+      rt.setTransportReady(true);
+      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      await openWs();
+      await flushMicrotasks();
+      expect(clientAttachBootstrapFlags()).toEqual([false]);
+      // The mock P2P socket does not model the attach reply; settle the phase
+      // the way the runtime would on that reply.
+      rt.attachController.dispatch({ type: 'ATTACH_OK' });
+      rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 2 });
+      expect(rt.getSnapshot().streamState).toBe('synchronized');
+
+      // The controller replaced a halted renderer. The replacement holds
+      // nothing, so a live continuation is not an option: the runtime retires
+      // the transport and asks for history on the next attach.
+      rt.noteRendererReplaced();
+      await openWs();
+      await flushMicrotasks();
+      expect(clientAttachBootstrapFlags()).toEqual([false, true]);
+      // After the reply lands, attached is still not synchronized: only a
+      // parsed cut can prove the replacement's history.
+      rt.attachController.dispatch({ type: 'ATTACH_OK' });
+      expect(rt.getSnapshot().streamState).toBe('degraded-live');
+
+      rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 0 });
+      rt.noteBootstrapApplied();
+      expect(rt.getSnapshot().streamState).toBe('synchronized');
+      rt.dispose();
     });
 
     it('asks for a bootstrap when no Terminal reader is wired at all', async () => {

@@ -1195,6 +1195,91 @@ test('a 100k-line burst survives parser starvation and a retention-lost reconnec
     .toBe(1);
 });
 
+// #2196: the writer's own bound is the fault. The 100k witness above stays
+// inside that bound by design; this one crosses it, so the halt and its repair
+// are the thing under test.
+//
+// The burst is many small PTY writes rather than a few large ones: the
+// writer's *event* bound (4 096) is crossed while its byte bound and the
+// Agent's per-subscriber byte budget are not. A halted writer refuses every
+// later write — including a bootstrap — so the repair cannot be a reset. The
+// controller must replace the xterm, and the runtime must re-attach asking for
+// the capture that gives the replacement its history. Both are asserted
+// directly:
+//
+// 1. the degraded notice appears (the halt was stated, and the burst did
+//    overflow — a green run cannot be one where the fault never fired);
+// 2. the original `.xterm` node does not survive (the renderer was replaced,
+//    not merely marked);
+// 3. a command typed afterwards is displayed (the terminal is live again);
+// 4. the notice clears (a parsed atomic capture repaired it).
+test('a writer overflow replaces the renderer and resumes output (#2196)', async ({ page }, testInfo) => {
+  test.skip(!process.env.CI, 'real stack available in CI only');
+  test.setTimeout(600_000);
+
+  const sessionName = `e2e-consistency-overflow-${testInfo.retry}-${Date.now()}`;
+  await page.goto(
+    '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
+  );
+  await waitForShell(page);
+  await createSession(page, sessionName);
+  await attachToSession(page, sessionName, 'P2P');
+  await waitForInteractiveShell(page);
+
+  // The renderer this test expects to lose. A replacement mounts a new xterm
+  // in the same container, so this marker is the difference between "the
+  // renderer was replaced" and "the old renderer kept serving notices".
+  await page.locator('.xterm').evaluate((node) => {
+    node.setAttribute('data-e2e-overflow-instance', 'original');
+  });
+
+  // 12 000 writes of 100 bytes: ~1.2 MiB, inside the Agent's 2 MiB subscriber
+  // budget and below the writer's 4 MiB byte bound, but more than twice its
+  // 4 096-event bound. The page is then blocked for two seconds — long enough
+  // that the frames queue instead of being parsed as they arrive.
+  const COUNT = 12_000;
+  await submitTerminalCommand(
+    page,
+    `i=0; while [ $i -lt ${COUNT} ]; do printf '%0100d\\n' $i; i=$((i+1)); done; `
+      + `printf 'OVERFLOW-%s-EXIT\\n' 2196`,
+  );
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    const until = performance.now() + 2_000;
+    while (performance.now() < until) { /* deliberately block the page */ }
+    resolve();
+  }));
+
+  // 1. The halt is stated. gapDetected stays set until a proven capture is
+  //    parsed, so this also proves the burst actually overflowed.
+  await expect(page.getByTestId('terminal-history-degraded'))
+    .toBeVisible({ timeout: 180_000 });
+
+  // 2. The renderer that halted is gone.
+  await expect(page.locator('.xterm[data-e2e-overflow-instance="original"]'))
+    .toHaveCount(0, { timeout: 180_000 });
+
+  // 3. Input and output work on the replacement without a page reload.
+  await expect(async () => {
+    await submitTerminalCommand(page, `printf 'OVERFLOW-%s-AFTER\\n' 2196`);
+    await expect
+      .poll(async () => countInBuffer(page, 'OVERFLOW-2196-AFTER'), { timeout: 10_000 })
+      .toBeGreaterThan(0);
+  }).toPass({ timeout: 180_000 });
+
+  // 4. A parsed atomic epoch-start capture is what clears the statement; the
+  //    notice may not outlive the repair that proved it.
+  await expect(page.getByTestId('terminal-history-degraded'))
+    .toBeHidden({ timeout: 60_000 });
+
+  // The repaired session keeps working.
+  await expect(async () => {
+    await submitTerminalCommand(page, `printf 'OVERFLOW-%s-STABLE\\n' 2196`);
+    await expect
+      .poll(async () => countInBuffer(page, 'OVERFLOW-2196-STABLE'), { timeout: 10_000 })
+      .toBeGreaterThan(0);
+  }).toPass({ timeout: 60_000 });
+});
+
 // #1926 SC-05: ANSI bursts. The plain numbered bursts prove stream identity;
 // this one proves the same path under escape traffic — every line is wrapped
 // in SGR colour/cursor sequences, so a parser that desynchronizes on ESC does
