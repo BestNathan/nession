@@ -3,8 +3,8 @@ import { resolveUIIntent } from '@/app/experiences/ai/intent';
 import type { Agent } from '@/types';
 
 const agents = [
-  { agent_id: 'a1', display_name: 'Beijing Server', hostname: 'beijing-01' },
-  { agent_id: 'a2', display_name: 'MacBook Pro', hostname: 'macbook' },
+  { agent_id: 'a1', display_name: 'Beijing Server', hostname: 'beijing-01', status: 'online' },
+  { agent_id: 'a2', display_name: 'MacBook Pro', hostname: 'macbook', status: 'online' },
 ] as Agent[];
 
 describe('resolveUIIntent', () => {
