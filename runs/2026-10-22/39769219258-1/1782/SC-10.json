@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "05eff70c8eefe744c05db144925e52382aee4044f5e32b0a8efaa009ac8c72f6",
+  "run_id": 39769219258,
+  "run_attempt": 1,
+  "issue": 1782,
+  "criterion": "SC-10",
+  "criterion_text": "Security fixtures reject raw Agent transcript/prompt/tool payloads, checkpoint bytes, tokens, private IP/path/hostname/session data, malicious Issue content and unsafe URLs before publication.",
+  "stage": "post-merge",
+  "target_sha": "cf1326605c60775b7316a1a8f8a59e6c6d6dac5c",
+  "contract_sha256": "2c52956ecb55862563899f9b3334ba19c7d0dacaf6f712deac49d80878a2ca1d",
+  "case_revision": "cf1326605c60775b7316a1a8f8a59e6c6d6dac5c",
+  "case_tree_sha": "49fcf8b0a9e016ddb81d8fb7ae57ec10b7acee50",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-22T11:29:24.319Z",
+  "finished_at": "2026-10-22T11:29:30.710Z",
+  "duration_ms": 6391,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.mjs",
+      "result": "Pass",
+      "summary": "Security fixtures and independent release-gate negatives reject raw Agent payloads, credentials, private addressing/paths/hostnames, malicious markup and unsafe URLs before publication.",
+      "evidence": [
+        {
+          "type": "fixtures",
+          "value": "38 passing security tests across 5 fixture files; zero skip/fail at cf1326605c60"
+        },
+        {
+          "type": "sanitize",
+          "value": "HTML/JS stripped; 8 private/credential patterns redacted; 7 raw Agent payload markers absent from the projection"
+        },
+        {
+          "type": "release-gate",
+          "value": "11 forbidden fields plus private value, credential marker and unsafe URL all rejected"
+        },
+        {
+          "type": "source",
+          "value": "canonical_url=https://github.com/BestNathan/nession/issues/1"
+        }
+      ],
+      "duration_ms": 530,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 39769219258,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "cf1326605c60775b7316a1a8f8a59e6c6d6dac5c",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/39769219258",
+    "record_path": "runs/2026-10-22/39769219258-1/1782/SC-10.json",
+    "source_result_sha256": "ee28ec8e9421ec168b9315c036a89fef8c14b08a535462ea619b6f95bf7565d5"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-39769219258-1",
+    "sha256": "ee28ec8e9421ec168b9315c036a89fef8c14b08a535462ea619b6f95bf7565d5",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/39769219258",
+    "durability": "time-limited; object archival not configured"
+  }
+}
