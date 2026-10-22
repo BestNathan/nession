@@ -1199,19 +1199,24 @@ test('a 100k-line burst survives parser starvation and a retention-lost reconnec
 // inside that bound by design; this one crosses it, so the halt and its repair
 // are the thing under test.
 //
-// The burst is escape-dense: every line is SGR-wrapped, so xterm's
-// time-sliced parser — not the transport — is the bottleneck and the writer's
-// queue grows past its bounds while the page reads normally. Deliberately no
-// main-thread block: a consumer that stops reading trips the Agent's 2 MiB
-// subscriber budget first, and that is a detach (a different fault), not the
-// writer overflow this test owns.
+// The trigger is injected at the **real inbound protocol boundary** rather
+// than produced organically. Organic bursts are shaped by tmux coalescing and
+// by the Agent's own per-subscriber budget: an earlier 8 MiB flood tripped
+// that budget (a detach, a different fault) while never crossing the writer's
+// bound, and an earlier small-write burst was coalesced into too few frames.
+// The writer is the component under test, so the frames it receives are what
+// this test fixes deterministically: 2 500 `agent.terminal.output`
+// notifications of ~1 KiB each, dispatched into the live socket in one task.
+// The writer charges every frame at 2× its length plus 128 bytes, so the
+// 4 MiB bound is crossed around frame ~1 900 — before xterm's parser, which
+// only runs after the task, can apply any of them.
 //
 // A halted writer refuses every later write — including a bootstrap — so the
 // repair cannot be a reset. The controller must replace the xterm, and the
 // runtime must re-attach asking for the capture that gives the replacement
 // its history. Both are asserted directly:
 //
-// 1. the degraded notice appears (the halt was stated, and the burst did
+// 1. the degraded notice appears (the halt was stated, and the writer did
 //    overflow — a green run cannot be one where the fault never fired);
 // 2. the original `.xterm` node does not survive (the renderer was replaced,
 //    not merely marked);
@@ -1220,6 +1225,19 @@ test('a 100k-line burst survives parser starvation and a retention-lost reconnec
 test('a writer overflow replaces the renderer and resumes output (#2196)', async ({ page }, testInfo) => {
   test.skip(!process.env.CI, 'real stack available in CI only');
   test.setTimeout(600_000);
+
+  // Keep the live sockets so the fault can be delivered on the real one.
+  await page.addInitScript(() => {
+    const NativeWebSocket = window.WebSocket;
+    const sockets: WebSocket[] = [];
+    (window as unknown as { __overflowSockets?: WebSocket[] }).__overflowSockets = sockets;
+    window.WebSocket = class extends NativeWebSocket {
+      constructor(url: string | URL, protocols?: string | string[]) {
+        super(url, protocols);
+        sockets.push(this);
+      }
+    } as typeof WebSocket;
+  });
 
   const sessionName = `e2e-consistency-overflow-${testInfo.retry}-${Date.now()}`;
   await page.goto(
@@ -1237,25 +1255,39 @@ test('a writer overflow replaces the renderer and resumes output (#2196)', async
     node.setAttribute('data-e2e-overflow-instance', 'original');
   });
 
-  // 8 MiB (raw) of `ESC[31mABCDEFGHIJESC[0m` lines. The writer charges every
-  // queued write at 2× its byte length plus 128 bytes per frame, so the
-  // moment xterm falls ~2 MiB behind the transport the 4 MiB bound is
-  // crossed. `head -c` ends the producer; the shell then prints a marker the
-  // repair may repaint.
-  await submitTerminalCommand(
-    page,
-    `yes "$(printf '\\033[31mABCDEFGHIJ\\033[0m')" | head -c 8000000; `
-      + `printf 'OVERFLOW-%s-EXIT\\n' 2196`,
-  );
+  const injected = await page.evaluate((name: string) => {
+    const sockets = (window as unknown as { __overflowSockets?: WebSocket[] })
+      .__overflowSockets ?? [];
+    // The P2P Agent socket is the only one that carries agent.terminal.output
+    // into this runtime; the Server socket at 19090 is a different plugin.
+    const socket = sockets.find((s) => s.url.includes(':19091/'));
+    if (!socket) {
+      return { ok: false, urls: sockets.map((s) => s.url) };
+    }
+    const payload = btoa('A'.repeat(1400));
+    const frames = 2_500;
+    for (let i = 0; i < frames; i += 1) {
+      socket.dispatchEvent(new MessageEvent('message', {
+        data: JSON.stringify({
+          id: `overflow-inject-${i}`,
+          msg_type: 'agent.terminal.output',
+          payload: { session_name: name, data: payload },
+        }),
+      }));
+    }
+    return { ok: true, frames };
+  }, sessionName);
+  // A missing socket would turn the whole fixture into a no-op.
+  expect(injected.ok, `injected into the Agent socket (${JSON.stringify(injected)})`).toBe(true);
 
   // 1. The halt is stated. gapDetected stays set until a proven capture is
-  //    parsed, so this also proves the burst actually overflowed.
+  //    parsed, so this also proves the writer actually overflowed.
   await expect(page.getByTestId('terminal-history-degraded'))
-    .toBeVisible({ timeout: 120_000 });
+    .toBeVisible({ timeout: 60_000 });
 
   // 2. The renderer that halted is gone.
   await expect(page.locator('.xterm[data-e2e-overflow-instance="original"]'))
-    .toHaveCount(0, { timeout: 120_000 });
+    .toHaveCount(0, { timeout: 60_000 });
 
   // 3. Input and output work on the replacement without a page reload.
   await expect(async () => {
