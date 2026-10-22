@@ -117,44 +117,44 @@ export function Shell({ connectionStatus, onRetry }: ShellProps) {
               inert={mode === 'ai'}
               aria-hidden={mode === 'ai'}
             >
-          <WorkspaceRegion
-            connectionStatus={connectionStatus}
-            agents={data.agents}
-            filteredSessions={data.filteredSessions}
-            totalSessionCount={data.sessions.length}
-            staleAgents={data.staleAgents}
-            selectedId={state.selectedId}
-            clientSessionId={state.clientSessionId}
-            loadingSessions={data.loadingSessions}
-            searchQuery={data.searchQuery}
-            setSearchQuery={data.setSearchQuery}
-            statusFilter={data.statusFilter}
-            setStatusFilter={data.setStatusFilter}
-            sortField={data.sortField}
-            sortDirection={data.sortDirection}
-            toggleSort={data.toggleSort}
-            isSearchActive={data.isSearchActive}
-            selectedSession={state.selectedSession}
-            selectedAgent={state.selectedAgent}
-            domain={state.domain}
-            surface={state.surface}
-            tool={state.tool}
-            fileOps={state.fileOps}
-            onCreate={() => openCreateSession()}
-            onRefresh={() => { void data.fetchSessions({ force: true }); }}
-            onSelect={state.handleSelect}
-            onOpenWorktreeSession={state.handleOpenWorktreeSession}
-            onConfigure={state.openAttachSettings}
-            onKill={(s) => data.setSessionToKill(s)}
-            onSurfaceChange={state.setSurface}
-            onToolChange={state.setTool}
-            isWide={state.isWide}
-            showList={state.showList}
-            showDetail={state.showDetail}
-            onBackToSessions={state.openList}
-            onCloseDrawer={state.openDetail}
-          />
-            </div>
+              <WorkspaceRegion
+                connectionStatus={connectionStatus}
+                agents={data.agents}
+                filteredSessions={data.filteredSessions}
+                totalSessionCount={data.sessions.length}
+                staleAgents={data.staleAgents}
+                selectedId={state.selectedId}
+                clientSessionId={state.clientSessionId}
+                loadingSessions={data.loadingSessions}
+                searchQuery={data.searchQuery}
+                setSearchQuery={data.setSearchQuery}
+                statusFilter={data.statusFilter}
+                setStatusFilter={data.setStatusFilter}
+                sortField={data.sortField}
+                sortDirection={data.sortDirection}
+                toggleSort={data.toggleSort}
+                isSearchActive={data.isSearchActive}
+                selectedSession={state.selectedSession}
+                selectedAgent={state.selectedAgent}
+                domain={state.domain}
+                surface={state.surface}
+                tool={state.tool}
+                fileOps={state.fileOps}
+                onCreate={() => openCreateSession()}
+                onRefresh={() => { void data.fetchSessions({ force: true }); }}
+                onSelect={state.handleSelect}
+                onOpenWorktreeSession={state.handleOpenWorktreeSession}
+                onConfigure={state.openAttachSettings}
+                onKill={(s) => data.setSessionToKill(s)}
+                onSurfaceChange={state.setSurface}
+                onToolChange={state.setTool}
+                isWide={state.isWide}
+                showList={state.showList}
+                showDetail={state.showDetail}
+                onBackToSessions={state.openList}
+                onCloseDrawer={state.openDetail}
+              />
+                </div>
             {mode === 'ai' ? (
               <AIExperience
                 agents={data.agents}
