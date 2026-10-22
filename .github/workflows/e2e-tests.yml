@@ -168,7 +168,11 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with: { cache-workspaces: ".", cache-all-crates: "true" }
 
-      - uses: extractions/setup-just@v2
+      - uses: extractions/setup-just@v4
+
+        with:
+
+          just-version: '1.58.0'
         if: steps.selection.outputs.mode != 'not-required' && steps.push-selection.outputs.mode != 'not-required'
 
       # tmux is required by nession-agent to create sessions. The runner
