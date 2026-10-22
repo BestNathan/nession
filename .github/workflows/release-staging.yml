@@ -465,7 +465,9 @@ jobs:
   # Deploy to the retained staging environment (gitops/environments/staging).
   # ArgoCD consumes the gitops branch; no more kustomize commits on main.
   deploy-staging-gitops:
-    needs: [versions, merge]
+    # Staging pulls exclusively from ACR, so wait for all three independent
+    # mirrors (both platforms) before advancing ArgoCD desired state.
+    needs: [versions, mirror-acr]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -476,8 +478,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # Mirror published multi-arch GHCR images to ACR, without rebuilding.
-  # This job is independent of GitOps deployment and GitHub Release; an ACR
-  # outage must not prevent GHCR-based deployment/rollback.
+  # Staging GitOps promotion depends on successful ACR replication; an ACR
+  # outage must fail closed rather than publish unavailable image tags.
   mirror-acr:
     needs: [versions, merge]
     strategy:
@@ -503,9 +505,8 @@ jobs:
           ACR_PASSWORD: ${{ secrets.ALIYUN_ACR_PASSWORD }}
         run: |
           if [[ -z "$ACR_USERNAME" || -z "$ACR_PASSWORD" ]]; then
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::ACR mirror skipped: set repository secrets ALIYUN_ACR_USERNAME and ALIYUN_ACR_PASSWORD"
-            echo "ACR mirror skipped: missing ALIYUN_ACR_USERNAME or ALIYUN_ACR_PASSWORD." >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::ACR staging mirror requires ALIYUN_ACR_USERNAME and ALIYUN_ACR_PASSWORD"
+            exit 1
           else
             echo "configured=true" >> "$GITHUB_OUTPUT"
           fi
