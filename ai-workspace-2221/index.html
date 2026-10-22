@@ -130,6 +130,10 @@
     .spinner { width: 16px; height: 16px; border: 2px solid #e7ebf1; border-top-color: #56606c; border-radius: 50%; animation: spin .7s linear infinite; display: inline-block; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .form-area { padding: 25px 30px 25px; max-width: 590px; }
+    .embedded-path { font-size: 11px; font-weight: 600; color:#737e8c; margin: 0 0 17px; }
+    .embedded-path strong { color:#313944; }
+    .embedded-heading { font-size: 18px; margin: 0 0 12px; }
+    .in-item-chip { font-size: 11px; color: #657382; background:#f1f4f7; padding: 7px 10px; border-radius: 8px; display: inline-block; margin:0 0 17px; }
     .form-intro { font-size: 12px; color: #939ba5; margin: 0 0 23px; line-height: 1.75; }
     .form-label { display: block; font-size: 12px; font-weight: 650; margin-bottom: 8px; }
     .form-control { background: #fff; border: 1px solid #e3e7ed; border-radius: 10px; min-height: 42px; width: 100%; padding: 10px 13px; font-size: 13px; color: #333b45; outline: none; transition: .15s; }
@@ -357,8 +361,10 @@
       visibleAgentIds:i.facts?.visibleAgentIds||[],
       availableActions:i.facts?.availableActions||[],
       pendingQuestion:i.facts?.pendingQuestion||null,
-      formDraft:i.type==='session.create'?{agentId:i.draft.agentId,name:i.draft.name,dirty:!!i.draft.name}:undefined,
-      result:i.result||null,
+      activeSubview:i.type==='agent.list'?(i.flow?.view||'list'):null,
+      formDraft:(i.type==='agent.list'&&i.flow)?{...i.flow.draft,dirty:!!i.flow.draft.name}:i.type==='session.create'?{...i.draft,dirty:!!i.draft.name}:undefined,
+      actionStatus:i.type==='agent.list'?(i.flow?.status||null):null,
+      result:(i.type==='agent.list'?i.flow?.result:i.result)||null,
     }))
   });
   const getItem = (id) => state.items.find(i=>i.id===id);
@@ -373,10 +379,11 @@
     let item=state.items.find(i=>i.key===key && !(opts.forceNew && i.status==='complete'));
     const reused=!!item;
     if(!item){
-      item={id:`work-${++seq}`,type,key,title:({ 'agent.list':'Agent 列表','session.list':'Session 列表','session.create':'创建 Session','clarify':'需要进一步说明' })[type]||type,createdAt:Date.now(),status:'ready',facts:{},selectedAgentId:null,draft:{agentId:scope==='all'?(state.selectedAgentId||''):scope,name:''},result:null};
+      item={id:`work-${++seq}`,type,key,title:({ 'agent.list':'Agent 列表','session.list':'Session 列表','session.create':'创建 Session','clarify':'需要进一步说明' })[type]||type,createdAt:Date.now(),status:'ready',facts:{},selectedAgentId:null,draft:{agentId:scope==='all'?(state.selectedAgentId||''):scope,name:''},result:null,flow:null};
       state.items.push(item);
     }
     state.activeItemId=item.id;
+    if(type==='agent.list' && item.flow?.view==='session.create')item.flow.view='list';
     if(type==='agent.list' && (!item.facts.visibleAgentIds || Date.now()-(item.facts.fetchedAt||0)>20000))fetchAgentList(item);
     if(type==='session.list' && (!item.facts.sessionIds || Date.now()-(item.facts.fetchedAt||0)>20000))fetchSessionList(item);
     bump();render();
@@ -410,6 +417,40 @@
     const list=state.items.find(i=>i.type==='agent.list');
     if(list){list.selectedAgentId=id;list.facts.pendingQuestion='接下来在这个 Agent 上做什么？';}
     bump();render();log('STATE WRITEBACK',`选中 ${agent.name} (${id})`);toast(`已选择 ${agent.name}`);
+  }
+  // A parent Item owns its operations. Opening a form is a subview, not a new Item.
+  function openAgentCreateInline(agentId=null,origin='Agent operation'){
+    const item=focused();if(item?.type!=='agent.list')return;
+    if(agentId && agents.find(a=>a.id===agentId)?.status!=='online'){toast('此 Agent 已离线，无法创建 Session');return;}
+    let flow=item.flow;
+    if(!flow){
+      flow={view:'list',status:'ready',draft:{agentId:agentId||state.selectedAgentId||'',name:''},result:null,error:''};
+      item.flow=flow;
+    }
+    if(flow.status==='submitting'){toast('创建正在进行中');return;}
+    const change=!!agentId && !!flow.draft.agentId && flow.draft.agentId!==agentId;
+    if(change&&flow.draft.name.trim()&&flow.status!=='complete'&&!confirm('切换 Agent 会清空当前 Session 草稿，继续吗？'))return;
+    if(change||flow.status==='complete'){
+      flow={view:'list',status:'ready',draft:{agentId:agentId||state.selectedAgentId||'',name:''},result:null,error:''};
+      item.flow=flow;
+    }
+    flow.view='session.create';
+    flow.draft.agentId=agentId||flow.draft.agentId||state.selectedAgentId||'';
+    if(agentId){state.selectedAgentId=agentId;item.selectedAgentId=agentId;}
+    bump();render();
+    log('IN-ITEM ACTION',`${origin}: ${item.id} 内创建 Session，Item 总数仍为 ${state.items.length}`);
+  }
+  function backToAgentList(){
+    const item=focused();
+    if(item?.type!=='agent.list'||!item.flow)return;
+    item.flow.view='list';bump();render();
+    log('IN-ITEM BACK',`返回 ${item.id} 的 Agent 列表，保留草稿`);
+  }
+  function formContext(){
+    const item=focused();
+    if(item?.type==='session.create')return {item,form:item,inline:false};
+    if(item?.type==='agent.list'&&item.flow?.view==='session.create')return {item,form:item.flow,inline:true};
+    return null;
   }
   function openSession(id){
     const s=sessions.find(s=>s.id===id);if(!s)return;
@@ -468,7 +509,8 @@
       const id=decision.params.agentId;
       if(id && agents.find(a=>a.id===id)?.status==='offline'){
         toast('此 Agent 已离线，请重新选择');activate('agent.list');
-      }else activate('session.create',id||'all', {forceNew:/再创建|另建|another/.test(question)});
+      }else if(focused()?.type==='agent.list'&&!/独立工作项|新工作区|new item/i.test(question))openAgentCreateInline(id,'System 1 follow-up');
+      else activate('session.create',id||'all', {forceNew:/再创建|另建|another/.test(question)});
     } else if(decision.intent==='agent.select'){
       setAgentSelected(decision.params.agentId);
       const list=state.items.find(i=>i.type==='agent.list');if(list)activateId(list.id);else activate('agent.list');
@@ -487,7 +529,7 @@
   function renderPreview(el,item,position){
     if(!item){el.classList.add('unavailable');el.innerHTML='';el.removeAttribute('data-focus');return;}
     el.classList.remove('unavailable');el.setAttribute('data-focus',item.id);
-    const sub=item.type==='agent.list'?`${item.facts.visibleAgentIds?.length||0} Agents · ${item.selectedAgentId?'已选择节点':'可选节点'}`:item.type==='session.create'?(item.draft.name?`草稿 · ${item.draft.name}`:'未完成的 Session 表单'):item.type==='session.list'?`${item.facts.sessionIds?.length||0} Sessions`:'等待用户说明';
+    const sub=item.type==='agent.list'?(item.flow?.view==='session.create'?'内部操作 · 创建 Session':`${item.facts.visibleAgentIds?.length||0} Agents · ${item.selectedAgentId?'已选择节点':'可选节点'}`):item.type==='session.create'?(item.draft.name?`草稿 · ${item.draft.name}`:'未完成的 Session 表单'):item.type==='session.list'?`${item.facts.sessionIds?.length||0} Sessions`:'等待用户说明';
     el.innerHTML=`<div class="side-type">${position==='left'?'PREVIOUS ITEM':'NEXT ITEM'}</div><div class="side-heading">${escapeHtml(item.title)}</div><div class="side-description">${escapeHtml(sub)}</div><div class="side-mini-lines"><i></i><i></i><i></i></div><div style="margin-top:auto;font-size:10px;color:#abb3bd">点击切换 →</div>`;
   }
   function render(){
@@ -511,7 +553,7 @@
   }
   function renderItem(item){
     if(!item)return '';
-    if(item.type==='agent.list')return renderAgents(item);
+    if(item.type==='agent.list')return item.flow?.view==='session.create'?renderCreate(item):renderAgents(item);
     if(item.type==='session.list')return renderSessions(item);
     if(item.type==='session.create')return renderCreate(item);
     return cardHead(item,'INTENT / UNKNOWN','该输入未匹配到可执行的 UI 能力')+`<div class="card-body clarify"><div class="lead">需要一个更明确的工作区操作</div><div class="sub">本原型通过本地 Mock 模拟 System 1 返回的 UI 意图，不调用真实模型。你可以尝试：</div><div class="clarify-actions"><button class="soft-button" data-suggest="查看 Agent 列表">查看 Agent 列表</button><button class="soft-button" data-suggest="创建 Session">创建 Session</button><button class="soft-button" data-suggest="看看 Session 列表">看看 Session 列表</button></div></div>`;
@@ -521,8 +563,8 @@
     const head=cardHead(item,'CAPABILITY / AGENTS','可选择节点，并直接在该节点上创建 Session',btn);
     if(item.status==='loading')return head+`<div class="card-body"><div class="loading-state"><span class="spinner"></span>正在获取 Agent 列表（Mock API）…</div></div>`;
     const currentList=agents.filter(a=>!activeSearch || a.name.toLowerCase().includes(activeSearch.toLowerCase()));
-    const rows=currentList.map(a=>`<div class="agent-row ${a.id===state.selectedAgentId?'selected':''}"><div class="node-name"><span class="node-icon">${svg('server')}</span><div style="min-width:0"><span class="node-name-text">${escapeHtml(a.name)}</span><span class="node-small">${escapeHtml(a.detail)}</span></div></div><span class="pill ${a.status}">${a.status==='online'?'在线':'离线'}</span><span class="metric">${a.sessions} 个</span><div class="row-actions"><button type="button" class="text-button ${a.id===state.selectedAgentId?'primary-action':''}" data-agent-select="${escapeHtml(a.id)}">${a.id===state.selectedAgentId?'已选':'选择'}</button><button type="button" class="text-button primary-action" data-create-agent="${escapeHtml(a.id)}" ${a.status!=='online'?'disabled':''} title="在此 Agent 上新建 Session">${svg('plus')}</button></div></div>`).join('');
-    return head+`<div class="card-body"><div class="toolbar"><div class="toolbar-left"><span>${agents.length} 个 Agent · ${agents.filter(a=>a.status==='online').length} 在线</span></div><input aria-label="搜索 Agent" class="search" id="agentSearch" value="${escapeHtml(activeSearch)}" placeholder="搜索节点..."/></div><div class="table-shell"><div class="rowhead"><span>Agent</span><span>状态</span><span>Session</span><span style="text-align:right">操作</span></div>${rows||'<div class="no-data">没有匹配的节点</div>'}</div><div class="hint-strip">${state.selectedAgentId?`已选择 <strong>${escapeHtml(agents.find(a=>a.id===state.selectedAgentId)?.name||'')}</strong>。现在输入「在这个节点创建 Session」，或直接点击右侧 <strong>＋</strong>。`:'选择一个 Agent 后，这个选择将被写入 Workspace State，并传给下一轮 System 1。'}</div></div>`;
+    const rows=currentList.map(a=>`<div class="agent-row ${a.id===state.selectedAgentId?'selected':''}"><div class="node-name"><span class="node-icon">${svg('server')}</span><div style="min-width:0"><span class="node-name-text">${escapeHtml(a.name)}</span><span class="node-small">${escapeHtml(a.detail)}</span></div></div><span class="pill ${a.status}">${a.status==='online'?'在线':'离线'}</span><span class="metric">${a.sessions} 个</span><div class="row-actions"><button type="button" class="text-button ${a.id===state.selectedAgentId?'primary-action':''}" data-agent-select="${escapeHtml(a.id)}">${a.id===state.selectedAgentId?'已选':'选择'}</button><button type="button" class="text-button primary-action" data-create-agent="${escapeHtml(a.id)}" ${a.status!=='online'?'disabled':''} title="在当前 Agent Item 内创建 Session（不新增 Item）">${svg('plus')}</button></div></div>`).join('');
+    return head+`<div class="card-body"><div class="toolbar"><div class="toolbar-left"><span>${agents.length} 个 Agent · ${agents.filter(a=>a.status==='online').length} 在线</span></div><input aria-label="搜索 Agent" class="search" id="agentSearch" value="${escapeHtml(activeSearch)}" placeholder="搜索节点..."/></div><div class="table-shell"><div class="rowhead"><span>Agent</span><span>状态</span><span>Session</span><span style="text-align:right">操作</span></div>${rows||'<div class="no-data">没有匹配的节点</div>'}</div><div class="hint-strip">${state.selectedAgentId?`已选择 <strong>${escapeHtml(agents.find(a=>a.id===state.selectedAgentId)?.name||'')}</strong>。现在输入「在这个节点创建 Session」，或点击右侧 <strong>＋</strong>，在同一个工作项内操作。`:'选择一个 Agent 后，这个选择将被写入 Workspace State，并传给下一轮 System 1。'}</div></div>`;
   }
   function renderSessions(item){
     const head=cardHead(item,'CAPABILITY / SESSIONS','继续已有工作，无须新建 Terminal Runtime',`<button class="soft-button" data-refresh="sessions">${svg('refresh')} 刷新</button>`);
@@ -530,10 +572,17 @@
     return head+`<div class="card-body"><div class="toolbar"><div class="toolbar-left">${sessions.length} 个 Session</div></div><div class="table-shell"><div class="rowhead"><span>Session</span><span>状态</span><span>所在节点</span><span style="text-align:right">操作</span></div>${sessions.map(s=>`<div class="session-row"><div class="node-name"><span class="node-icon">${svg('terminal')}</span><div style="min-width:0"><span class="node-name-text">${escapeHtml(s.name)}</span><span class="node-small">${escapeHtml(s.id)}</span></div></div><span class="pill ${s.status==='active'?'online':''}">${s.status==='active'?'运行中':'已分离'}</span><span class="metric" title="Agent ID">${escapeHtml(agents.find(a=>a.id===s.agentId)?.name||'--')}</span><div class="row-actions"><button class="text-button primary-action" data-open-session="${escapeHtml(s.id)}">打开 →</button></div></div>`).join('')}</div><div class="hint-strip">「打开」会演示切换到普通模式中的 Terminal 工作区，不会真的连接或创建 Session。</div></div>`;
   }
   function renderCreate(item){
-    const head=cardHead(item,'CAPABILITY / SESSION CREATE','在工作区内直接完成创建操作；离开此 Item 不会丢失草稿');
-    if(item.status==='complete' && item.result){return head+`<div class="card-body"><div class="status-panel"><span class="success-icon">${svg('check')}</span><div class="success-title">Session 创建成功</div><div class="success-sub">${escapeHtml(item.result.name)} · ${escapeHtml(agents.find(a=>a.id===item.result.agentId)?.name||'')}<br>这是模拟执行结果，已回写 Workspace State。</div><div class="result-actions"><button class="button-dark" data-open-session="${escapeHtml(item.result.id)}">打开 Session →</button><button class="soft-button" data-show-sessions>查看所有 Session</button></div></div></div>`;}
-    const options=agents.filter(a=>a.status==='online').map(a=>`<option value="${escapeHtml(a.id)}" ${a.id===item.draft.agentId?'selected':''}>${escapeHtml(a.name)}</option>`).join('');
-    return head+`<div class="card-body"><form id="createSessionForm" class="form-area" novalidate><p class="form-intro">该表单属于当前 Workspace Item。可以切换到 Agent 列表再回来，也可以继续输入自然语言操作。</p><div class="form-field"><label class="form-label" for="formAgent">执行节点</label><select class="form-control" id="formAgent" name="agent"><option value="">请选择 Agent</option>${options}</select><div class="form-field-tip">Agent 来自当前模拟节点列表，不由 System 1 编造。</div></div><div class="form-field"><label class="form-label" for="formName">Session 名称</label><input class="form-control" id="formName" name="sessionName" value="${escapeHtml(item.draft.name)}" autocomplete="off" placeholder="例如：my-workspace" maxlength="64"><div class="form-field-tip">支持字母、数字、点、短横线和下划线。</div></div><div class="selected-info">${svg('eye')}当前已选择：${escapeHtml(agents.find(a=>a.id===item.draft.agentId)?.name||'未指定 Agent')} · 草稿会保留</div>${item.error?`<div class="status-message" role="alert">${escapeHtml(item.error)}</div>`:''}<div class="form-actions"><button class="button-dark" type="submit" ${item.status==='submitting'?'disabled':''}>${item.status==='submitting'?'正在创建…':'创建 Session'}</button><button class="soft-button" type="button" data-cancel-create>返回 Agent 列表</button></div></form></div>`;
+    const inline=item.type==='agent.list';
+    const flow=inline?item.flow:item;
+    const back=inline?`<button class="soft-button" type="button" data-cancel-create>${svg('chevronLeft')} Agent 列表</button>`:'';
+    const head=cardHead(item,inline?'AGENT ITEM / INLINE ACTION':'CAPABILITY / SESSION CREATE',
+      inline?'在原有 Agent Item 内完成创建；Item 总数不变':'创建独立 Session 任务；离开后草稿仍会保留',back);
+    const path=inline?`<div class="embedded-path"><strong>Agent 列表</strong>　›　创建 Session</div><h3 class="embedded-heading">创建 Session</h3><div class="in-item-chip">当前工作项 ${escapeHtml(item.id)} · 不新增 Item</div>`:'';
+    if(flow.status==='complete'&&flow.result){
+      return head+`<div class="card-body"><div class="form-area">${path}<div class="status-panel" style="margin:0"><span class="success-icon">${svg('check')}</span><div class="success-title">Session 创建成功</div><div class="success-sub">${escapeHtml(flow.result.name)} · ${escapeHtml(agents.find(a=>a.id===flow.result.agentId)?.name||'')}<br>这是 Mock 执行结果，已回写原有 Item State。</div><div class="result-actions"><button class="button-dark" data-open-session="${escapeHtml(flow.result.id)}">打开 Session →</button>${inline?'<button class="soft-button" data-cancel-create>返回 Agent 列表</button>':'<button class="soft-button" data-show-sessions>查看所有 Session</button>'}</div></div></div></div>`;
+    }
+    const options=agents.filter(a=>a.status==='online').map(a=>`<option value="${escapeHtml(a.id)}" ${a.id===flow.draft.agentId?'selected':''}>${escapeHtml(a.name)}</option>`).join('');
+    return head+`<div class="card-body"><form id="createSessionForm" class="form-area" novalidate>${path}<p class="form-intro">${inline?'这是 Agent 列表内的操作。表单执行和返回都不会新增工作区 Item。':'该表单属于当前独立 Workspace Item，离开后仍可恢复草稿。'}</p><div class="form-field"><label class="form-label" for="formAgent">执行节点</label><select class="form-control" id="formAgent" name="agent"><option value="">请选择 Agent</option>${options}</select><div class="form-field-tip">Agent 由列表接口提供，模型不生成 Agent 数据。</div></div><div class="form-field"><label class="form-label" for="formName">Session 名称</label><input class="form-control" id="formName" name="sessionName" value="${escapeHtml(flow.draft.name)}" autocomplete="off" placeholder="例如：my-workspace" maxlength="64"><div class="form-field-tip">支持字母、数字、点、短横线和下划线。</div></div><div class="selected-info">${svg('eye')}当前已选择：${escapeHtml(agents.find(a=>a.id===flow.draft.agentId)?.name||'未指定 Agent')} · 草稿自动保留</div>${flow.error?`<div class="status-message" role="alert">${escapeHtml(flow.error)}</div>`:''}<div class="form-actions"><button class="button-dark" type="submit" ${flow.status==='submitting'?'disabled':''}>${flow.status==='submitting'?'正在创建…':'创建 Session'}</button><button class="soft-button" type="button" data-cancel-create>返回 Agent 列表</button></div></form></div>`;
   }
   function renderStandard(){
     $('standardAgents').innerHTML=agents.map(a=>`<button class="standard-item" type="button" data-standard-agent="${escapeHtml(a.id)}">${svg('server')} ${escapeHtml(a.name)}</button>`).join('');
@@ -577,13 +626,13 @@
     const btn=e.target.closest('button');if(!btn)return;
     if(btn.dataset.focus)activateId(btn.dataset.focus);
     if(btn.dataset.agentSelect)setAgentSelected(btn.dataset.agentSelect);
-    if(btn.dataset.createAgent){setAgentSelected(btn.dataset.createAgent);activate('session.create',btn.dataset.createAgent);}
+    if(btn.dataset.createAgent)openAgentCreateInline(btn.dataset.createAgent,'Agent 行内操作');
     if(btn.dataset.refresh==='agents'){activeSearch='';fetchAgentList(focused(),true);}
     if(btn.dataset.refresh==='sessions')fetchSessionList(focused(),true);
     if(btn.dataset.openSession)openSession(btn.dataset.openSession);
     if(btn.hasAttribute('data-show-sessions'))activate('session.list');
     if(btn.dataset.suggest)ask(btn.dataset.suggest);
-    if(btn.hasAttribute('data-cancel-create')){const list=state.items.find(i=>i.type==='agent.list');if(list)activateId(list.id);else activate('agent.list');}
+    if(btn.hasAttribute('data-cancel-create')){if(focused()?.type==='agent.list')backToAgentList();else {const list=state.items.find(i=>i.type==='agent.list');if(list)activateId(list.id);else activate('agent.list');}}
     if(btn.dataset.standardAgent){setAgentSelected(btn.dataset.standardAgent);toast('已更新选择状态');}
   });
   document.addEventListener('input',e=>{
@@ -593,26 +642,37 @@
       // Preserve focus and caret through lightweight rerender.
       const pos=e.target.selectionStart;render();const newInput=$('agentSearch');if(newInput){newInput.focus();newInput.setSelectionRange(pos,pos);}
     }
-    if(!item||item.type!=='session.create')return;
-    if(e.target.id==='formName'){item.draft.name=e.target.value;item.error='';bump();}
+    const ctx=formContext();if(!ctx)return;
+    if(e.target.id==='formName'){ctx.form.draft.name=e.target.value;ctx.form.error='';bump();}
   });
   document.addEventListener('change',e=>{
-    const item=focused();if(!item||item.type!=='session.create')return;
-    if(e.target.id==='formAgent'){item.draft.agentId=e.target.value;if(e.target.value)state.selectedAgentId=e.target.value;item.error='';bump();render();log('STATE WRITEBACK',`SessionCreate 选择 Agent: ${e.target.value}`);}
+    const ctx=formContext();if(!ctx)return;
+    if(e.target.id==='formAgent'){ctx.form.draft.agentId=e.target.value;if(e.target.value){state.selectedAgentId=e.target.value;if(ctx.inline)ctx.item.selectedAgentId=e.target.value;}ctx.form.error='';bump();render();log('STATE WRITEBACK',`SessionCreate 选择 Agent: ${e.target.value} · Item ${ctx.item.id}`);}
   });
   document.addEventListener('submit',e=>{
     if(e.target.id!=='createSessionForm')return;
     e.preventDefault();
-    const item=focused();if(!item||item.type!=='session.create')return;
-    const agentId=item.draft.agentId,name=item.draft.name.trim();
-    if(!agentId){item.error='请选择 Agent';render();return;}
-    if(!/^[a-zA-Z0-9_.-]{1,64}$/.test(name)){item.error='名称只能包含字母、数字、点、短横线及下划线';render();return;}
-    if(sessions.some(s=>s.id===`${agentId}:${name}`)){item.error='该 Agent 上已存在同名 Session';render();return;}
-    item.status='submitting';item.error='';bump();render();log('SESSION API (MOCK)',`请求创建 Session: ${name}`);
-    setTimeout(()=>{const current=getItem(item.id);if(!current)return;
+    const ctx=formContext();if(!ctx)return;
+    const {item,form,inline}=ctx;
+    if(form.status==='submitting')return;
+    const agentId=form.draft.agentId,name=form.draft.name.trim();
+    if(!agentId){form.error='请选择 Agent';render();return;}
+    if(agents.find(a=>a.id===agentId)?.status!=='online'){form.error='目标 Agent 当前离线';render();return;}
+    if(!/^[a-zA-Z0-9_.-]{1,64}$/.test(name)){form.error='名称只能包含字母、数字、点、短横线及下划线';render();return;}
+    if(sessions.some(s=>s.id===`${agentId}:${name}`)){form.error='该 Agent 上已存在同名 Session';render();return;}
+    form.status='submitting';form.error='';bump();render();
+    log('SESSION API (MOCK)',`SessionCreate (${inline?'inside Agent Item':'standalone'})：${name}`);
+    setTimeout(()=>{
+      const itemNow=getItem(item.id);if(!itemNow)return;
+      const f=inline?itemNow.flow:itemNow;
+      if(!f||f.status!=='submitting')return;
       const result={id:`${agentId}:${name}`,agentId,name,status:'active'};
-      sessions.push(result);current.status='complete';current.result={id:result.id,agentId,name};state.lastOperation={type:'session.create',status:'success',sessionId:result.id};state.selectedSessionId=result.id;
-      bump();render();log('STATE WRITEBACK',`Session 创建成功：${name}`);toast(`已创建 Session：${name}（模拟）`);
+      sessions.push(result);f.status='complete';f.result={id:result.id,agentId,name};
+      const agent=agents.find(a=>a.id===agentId);if(agent)agent.sessions++;
+      state.lastOperation={type:'session.create',status:'success',sessionId:result.id,ownerItemId:item.id};
+      state.selectedSessionId=result.id;
+      bump();render();log('STATE WRITEBACK',`成功：${name} · owner ${item.id} · ${state.items.length} 个 Item`);
+      toast(`已创建 Session：${name}（模拟）`);
     },650);
   });
   // Touch: swiping the active panel navigates Items without hijacking form scrolling.
