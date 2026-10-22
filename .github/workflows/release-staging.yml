@@ -474,3 +474,51 @@ jobs:
       - run: ./scripts/gitops-commit.sh staging "${{ needs.versions.outputs.short_sha }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Mirror published multi-arch GHCR images to ACR, without rebuilding.
+  # This job is independent of GitOps deployment and GitHub Release; an ACR
+  # outage must not prevent GHCR-based deployment/rollback.
+  mirror-acr:
+    needs: [versions, merge]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    env:
+      ACR_REGISTRY: crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com
+      ACR_IMAGE: crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check ACR credentials
+        id: credentials
+        env:
+          ACR_USERNAME: ${{ secrets.ALIYUN_ACR_USERNAME }}
+          ACR_PASSWORD: ${{ secrets.ALIYUN_ACR_PASSWORD }}
+        run: |
+          if [[ -z "$ACR_USERNAME" || -z "$ACR_PASSWORD" ]]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::ACR mirror skipped: set repository secrets ALIYUN_ACR_USERNAME and ALIYUN_ACR_PASSWORD"
+            echo "ACR mirror skipped: missing ALIYUN_ACR_USERNAME or ALIYUN_ACR_PASSWORD." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: docker/setup-buildx-action@v3
+        if: steps.credentials.outputs.configured == 'true'
+      - uses: docker/login-action@v3
+        if: steps.credentials.outputs.configured == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/login-action@v3
+        if: steps.credentials.outputs.configured == 'true'
+        with:
+          registry: ${{ env.ACR_REGISTRY }}
+          username: ${{ secrets.ALIYUN_ACR_USERNAME }}
+          password: ${{ secrets.ALIYUN_ACR_PASSWORD }}
+      - name: Mirror and verify multi-arch images
+        if: steps.credentials.outputs.configured == 'true'
+        shell: bash
+        run: |
+          GHCR_IMAGE="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession"
+          bash scripts/mirror-container-images.sh "$GHCR_IMAGE" "$ACR_IMAGE" "${{ needs.versions.outputs.short_sha }}" "${{ needs.versions.outputs.short_sha }}"
