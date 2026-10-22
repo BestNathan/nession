@@ -199,7 +199,8 @@ export function makeProjection({ repository, agent, registry, issues, pulls, wor
   const current = r?.repository || {}, efficiency = r?.efficiency || {};
   const aw = a?.windows?.['7d'] || {};
   const aw30 = a?.windows?.['30d'] || {};
-  const tok = aw?.tokens?.total || {}, tool=aw?.tools||{}, cost=aw?.cost_usd?.charged || {};
+  const tok = aw?.tokens?.total || {}, tool=aw?.tools||{}, cost=aw?.cost_usd?.charged || {},
+    duration=aw?.duration_ms||{};
   const record = (name,purpose)=>{
     const v=refs[name];
     return {
@@ -258,9 +259,13 @@ export function makeProjection({ repository, agent, registry, issues, pulls, wor
         runs_30d:countIn(aw30.runs,'total'),
         tokens_7d:number(tok.total),
         tokens_observed_runs:number(tok.observed_runs),
+        duration_7d:number(duration.total),
+        duration_observed_runs:number(duration.observed_runs),
+        duration_avg_7d:number(duration.avg),
         tools_7d:number(tool.total),
         tools_observed_runs:number(tool.observed_runs),
         cost_7d:cost.observed_runs > 0 ? number(cost.total) : null,
+        cost_observed_runs:number(cost.observed_runs),
       },
     },
     work: {
@@ -322,7 +327,7 @@ export function validateProjection(p) {
   allowedFields(p.evidence,['stores'],'evidence');
   allowedFields(p.repository.current,['loc','files','tests','rust_coverage','web_coverage','protocol_units','unit_pass'],'repository.current');
   allowedFields(p.repository.efficiency,['commits_7d','additions_7d','deletions_7d','merged_7d','open_issues','open_prs'],'repository.efficiency');
-  allowedFields(p.agents.summary,['runs_7d','runs_30d','tokens_7d','tokens_observed_runs','tools_7d','tools_observed_runs','cost_7d'],'agents.summary');
+  allowedFields(p.agents.summary,['runs_7d','runs_30d','tokens_7d','tokens_observed_runs','duration_7d','duration_observed_runs','duration_avg_7d','tools_7d','tools_observed_runs','cost_7d','cost_observed_runs'],'agents.summary');
   allowedFields(p.agents.distribution,['7d','30d'],'agents.distribution');
   for(const period of ['7d','30d']){
     allowedFields(p.agents.distribution[period],['providers','workflows'],'distribution');

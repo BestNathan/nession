@@ -2,7 +2,7 @@
 // result files. A schema-valid v2 claim is NEVER trusted producer/writer proof.
 // Nothing here is called by the public projection until an independent source
 // attester (not merely in-record "verified") is implemented.
-import {lstat,readdir,readFile} from 'node:fs/promises';
+import {lstat,readdir,readFile,realpath} from 'node:fs/promises';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {resolve,join} from 'node:path';
@@ -88,12 +88,14 @@ export async function scanPinnedAgentCandidates({root,expectedSha,issues,maxFile
     issues.some(n=>!pos(n))||!Number.isSafeInteger(maxFiles)||
     maxFiles<1||maxFiles>200)return unavailable();
  try {
-   const abs=resolve(root);await dir(abs);
+   // Compare real paths: macOS spells the same temporary directory as
+   // /var/... for the caller and /private/var/... for Git's own output.
+   const abs=await realpath(resolve(root));await dir(abs);
    const head=execFileSync('git',['-C',abs,'rev-parse','HEAD'],{
      encoding:'utf8',timeout:5000}).trim();
    const top=execFileSync('git',['-C',abs,'rev-parse','--show-toplevel'],{
      encoding:'utf8',timeout:5000}).trim();
-   if(head!==expectedSha||resolve(top)!==abs)fail();
+   if(head!==expectedSha||(await realpath(resolve(top)))!==abs)fail();
    const dirty=execFileSync('git',['-C',abs,'status','--porcelain','--untracked-files=all'],{
      encoding:'utf8',timeout:5000}).trim();
    if(dirty)fail();

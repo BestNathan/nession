@@ -28,6 +28,12 @@ function fmt(n) {
   return Intl.NumberFormat('en-US', { notation: Math.abs(n) > 9999 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(n);
 }
 function pct(n) { return typeof n === 'number' && Number.isFinite(n) ? Math.round(n * 100) + '%' : 'N/A'; }
+function duration(ms) {
+  if (ms === null || ms === undefined || typeof ms !== 'number' || !Number.isFinite(ms)) return 'N/A';
+  if (ms < 1000) return Math.round(ms) + 'ms';
+  if (ms < 60000) return (ms / 1000).toFixed(1).replace(/\.0$/, '') + 's';
+  return (ms / 60000).toFixed(1).replace(/\.0$/, '') + 'm';
+}
 function date(n) { if (!n || Number.isNaN(Date.parse(n))) return 'Unavailable'; return new Date(n).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric', timeZone:'UTC' }); }
 function section(kicker, title, hint) {
   const wrapper = node('section', 'section');
@@ -110,8 +116,9 @@ function renderAgents(){
   const stats=section('OBSERVED USAGE','Work in numbers','7-day window · missing measurements are N/A, not zero.');
   stats.append(grid([metric('Agent runs',fmt(s.runs_7d),'workflow summary'),
     metric('Tokens',fmt(s.tokens_7d),'observed '+fmt(s.tokens_observed_runs)+' runs'),
+    metric('Agent duration',duration(s.duration_7d),'avg '+duration(s.duration_avg_7d)+' · observed '+fmt(s.duration_observed_runs)+' runs'),
     metric('Tool calls',fmt(s.tools_7d),'observed '+fmt(s.tools_observed_runs)+' runs'),
-    metric('Cost in USD',s.cost_7d===null?'Unobserved':'$'+fmt(s.cost_7d),'no estimation inferred')],'four'));root.append(stats);
+    metric('Cost in USD',s.cost_7d===null?'Unobserved':'$'+fmt(s.cost_7d),'observed '+fmt(s.cost_observed_runs)+' runs · no estimation')],'three'));root.append(stats);
   const summary30=section('OBSERVED TIME WINDOWS','7 days and 30 days','Canonical workflow totals · generated '+date(w.generated_at)+' · metrics revision '+(snapshot.source?.metrics_sha?.slice(0,12)||'unavailable'));
   summary30.append(grid([metric('7-day runs',fmt(s.runs_7d),'observed workflow runs'),metric('30-day runs',fmt(s.runs_30d),'observed workflow runs')],'two'));
   root.append(summary30);

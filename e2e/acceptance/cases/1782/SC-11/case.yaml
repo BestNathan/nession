@@ -1,0 +1,9 @@
+schema_version: 1
+issue: 1782
+criterion: SC-11
+stage: post-merge
+runtime: full-stack-local
+verifiers:
+  - type: runtime
+    entry: verify.mjs
+result_policy: all-pass
