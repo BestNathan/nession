@@ -879,7 +879,10 @@ test('a 100k-line burst survives parser starvation and a retention-lost reconnec
   // Starve the parser deterministically. This is the slow-Parser fault: the
   // page cannot read its socket or parse a byte while this loop runs, so the
   // transport and Agent buffers must hold the burst rather than lose it or
-  // evict a subscriber that is merely not scheduled.
+  // evict a subscriber that is merely not scheduled. The measured shape of
+  // this burst is ~2 000 PTY-sized chunks; the terminal writer's event bound
+  // has to hold them (512 did not — it overflowed and halted after ~5-8k
+  // displayed lines; see `SerializedTerminalWriter`'s measured default).
   await page.evaluate(() => new Promise<void>((resolve) => {
     const until = performance.now() + 2_000;
     while (performance.now() < until) { /* deliberately block the page */ }

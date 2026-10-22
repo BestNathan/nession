@@ -151,6 +151,32 @@ describe('SerializedTerminalWriter bounded parser queue (#1975)', () => {
     writer.dispose();
   });
 
+  it('holds a 100k-line burst of PTY-sized chunks without degrading (#1926 SC-05)', () => {
+    const h = harness();
+    const degraded = vi.fn();
+    const writer = new SerializedTerminalWriter(h.terminal, degraded);
+
+    // The measured shape of a 100 000-line Relay burst: ~2 000 PTY-sized
+    // chunks arriving faster than a deliberately starved parser can apply
+    // them. The old 512-event bound overflowed here and halted the writer
+    // after a few thousand displayed lines.
+    for (let i = 0; i < 2_000; i += 1) {
+      writer.write(`BIG-${i}\n`);
+    }
+    expect(writer.pendingUsage.halted).toBe(false);
+    expect(degraded).not.toHaveBeenCalled();
+    expect(writer.pendingUsage.events).toBe(2_000);
+
+    // The byte budget remains the memory bound: enough large writes overflow
+    // while the event count is still under its limit.
+    for (let i = 0; i < 800 && !writer.pendingUsage.halted; i += 1) {
+      writer.write('x'.repeat(3_000));
+    }
+    expect(degraded).toHaveBeenCalledWith('overflow');
+    expect(writer.pendingUsage.halted).toBe(true);
+    writer.dispose();
+  });
+
   it('charges actual output retention and rejects an oversized event', () => {
     const h = harness();
     const degraded = vi.fn();

@@ -28,7 +28,15 @@ export interface TerminalWriterLimits {
 
 const DEFAULT_WRITER_LIMITS: TerminalWriterLimits = {
   maxBytes: 4 * 1024 * 1024,
-  maxEvents: 512,
+  // Measured against a 100 000-line Relay burst (#1926 SC-05): the transport
+  // delivers it as ~2 000 PTY-sized chunks in about a second, and a parser
+  // that is deliberately starved for 2 s cannot apply them at that rate. The
+  // previous 512-event bound overflowed and halted the writer after ~5 000–8 000
+  // displayed lines — a bounded queue doing its job, but with a bound far below
+  // the volume the product is required to display. 4 096 events holds the whole
+  // burst (each chunk charged by its actual bytes; the 4 MiB byte budget stays
+  // the memory bound), while a genuinely runaway stream still degrades.
+  maxEvents: 4_096,
   maxParseMs: 30_000,
 };
 const RESIZE_BYTES = 128;
