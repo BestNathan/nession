@@ -889,6 +889,20 @@ export class SessionRuntime {
     }
     this.revokeRelayProof();
     this.forcedRelayFallback = true;
+    // A P2P → Relay fallback cuts the route: the Relay subscription cannot
+    // prove continuity with the frames the P2P transport delivered, so a
+    // buffer that holds output may have a hole only a capture can prove
+    // closed. State that and request the capture. Gated on the renderer
+    // holding output at all — a first attach whose terminal is still empty
+    // loses nothing, and its normal bootstrap request carries no degradation
+    // (#2155). Deliberately not gated on this runtime having attached: the
+    // fallback can land on a runtime created after the loss, and the question
+    // is about the renderer, not this object's history.
+    if (this.config.hasSessionOutput?.() ?? false) {
+      this.historyMayHaveGap = true;
+      this.bootstrapRepairPending = true;
+      this.gapDetected = true;
+    }
     this.addressPolicy.update({ forcedRelay: true });
     this.attachedTransportGeneration = null;
     this.attachController.cancelActiveAttach();

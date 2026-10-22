@@ -1094,6 +1094,43 @@ describe('SessionRuntime', () => {
       expect(rt.getSnapshot().forcedRelay).toBe(true);
     }
 
+    it('states the gap and asks for a capture on a fallback over a live buffer (#2194)', async () => {
+      const serverConnection = makeRelayServerConnection('connected');
+      const rt = new SessionRuntime(makeConfig({
+        serverConnection,
+        hasSessionOutput: () => true,
+      }));
+      rt.setTransportReady(true);
+      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      await openWs();
+      await flushMicrotasks();
+      // Settle the P2P attach the mock socket does not model, and prove a
+      // baseline so the session is explicitly synchronized before the cut.
+      rt.attachController.dispatch({ type: 'ATTACH_OK' });
+      rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 3 });
+      expect(rt.getSnapshot().streamState).toBe('synchronized');
+
+      // The fallback happens because the P2P transport dropped.
+      rt.attachController.dispatch({ type: 'TRANSPORT_LOST' });
+      expect(rt.onCandidateDisconnected()).toBe('next-candidate');
+      expect(rt.onCandidateDisconnected()).toBe('force-relay');
+      await flushMicrotasks();
+      expect(rt.attachState.phase).toBe('attached');
+      // The Relay route cannot prove continuity with the P2P transport, so
+      // the attach asks for the capture that can.
+      expect(serverConnection.beginRelay.mock.calls[0]?.[1]).toMatchObject({
+        needsBootstrap: true,
+      });
+      // And the cut is stated, not presented as synchronized.
+      expect(rt.getSnapshot().historyDegraded).toBe(true);
+
+      // A parsed capture that proves its cut is the repair.
+      rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 9, appliedThrough: 0 });
+      rt.noteBootstrapApplied();
+      expect(rt.getSnapshot().historyDegraded).toBe(false);
+      rt.dispose();
+    });
+
     it('a steady-state config sync does not clobber the runtime-owned fallback', async () => {
       const serverConnection = makeRelayServerConnection('connected');
       const rt = new SessionRuntime(makeConfig({ serverConnection }));
