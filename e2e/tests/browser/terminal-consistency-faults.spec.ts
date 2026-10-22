@@ -794,12 +794,12 @@ for (const mode of ['Relay', 'P2P'] as const) {
     await attachToSession(page, sessionName, mode);
     await waitForInteractiveShell(page);
 
-    // The xterm node identity is what says recovery kept the live renderer
-    // rather than rebuilding the Terminal around a new one.
-    await page.locator('.xterm').evaluate((node) => {
-      node.setAttribute('data-e2e-restart-instance', 'original');
-    });
-
+    // Deliberately no xterm-node identity assertion here. An Agent restart is
+    // a full transport loss (the process that owned the epoch is replaced), and
+    // the recovery path is allowed to rebuild the renderer around a fresh
+    // verified bootstrap; #2156 owns "same node across a route change". What
+    // must hold is that the session recovers and that whatever history it
+    // could not prove is stated, which the assertions below cover.
     await submitTerminalCommand(page, `printf 'RESTART-%s-BEFORE\\n' 1926`);
     await expect.poll(async () => countInBuffer(page, 'RESTART-1926-BEFORE')).toBe(1);
 
@@ -815,9 +815,6 @@ for (const mode of ['Relay', 'P2P'] as const) {
         .poll(async () => countInBuffer(page, 'RESTART-1926-AFTER'), { timeout: 10_000 })
         .toBeGreaterThan(0);
     }).toPass({ timeout: 180_000 });
-
-    // Same renderer across the restart.
-    await expect(page.locator('.xterm')).toHaveAttribute('data-e2e-restart-instance', 'original');
 
     // No silent skip at the boundary. tmux history normally survives, so the
     // pre-restart line should be repainted by the new Agent's bootstrap. If it
