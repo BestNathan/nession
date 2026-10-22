@@ -35,6 +35,9 @@ const SMOKE_IDENTITY=Object.freeze({
   kind:'reviewer_smoke_admission_only',status:'await_smoke_review',agent_id:'review-qwen-01',
 });
 const sha256=value=>createHash('sha256').update(value,'utf8').digest('hex');
+const blobSha=value=>createHash('sha1').update(Buffer.concat([
+  Buffer.from('blob '+Buffer.byteLength(value)+'\0'),Buffer.from(value,'utf8'),
+])).digest('hex');
 function fail(message){throw new Error('Qwen Reviewer Canary: '+message);}
 function git(root,...args){
   return execFileSync('git',['-C',root,...args],{
@@ -73,7 +76,7 @@ export function smokeReviewAdmission(){
 }
 export function canaryArgs(prompt,model){
   return ['-p',prompt,'--output-format','stream-json','--verbose',
-    '--no-session-persistence','--max-turns','6','--model',model,'--strict-mcp-config',
+    '--no-session-persistence','--max-turns','10','--model',model,'--strict-mcp-config',
     ...claudeCliToolPolicy(READ_TOOLS,{restricted:true})];
 }
 function canaryTelemetry(env,startedAt,finishedAt,events,envelope,verdict,admission){
@@ -101,9 +104,12 @@ function canaryTelemetry(env,startedAt,finishedAt,events,envelope,verdict,admiss
 }
 async function run(dir){
   const env=process.env;
+  // A trusted main push or an explicit owner dispatch on main are equivalent
+  // trust: the job only ever runs main-owned code with the Environment secrets.
   if(env.GITHUB_REPOSITORY!==REPO||env.GITHUB_REF!=='refs/heads/main'||
-      env.GITHUB_EVENT_NAME!=='push'||!SHA.test(env.GITHUB_SHA??''))
-    fail('only trusted main push may run the Qwen Reviewer Canary');
+      !['push','workflow_dispatch'].includes(env.GITHUB_EVENT_NAME)||
+      !SHA.test(env.GITHUB_SHA??''))
+    fail('only trusted main push or dispatch may run the Qwen Reviewer Canary');
   if(!env.ANTHROPIC_BASE_URL||(!env.ANTHROPIC_API_KEY&&!env.ANTHROPIC_AUTH_TOKEN))
     fail('missing Qwen Gateway credentials');
   if(!dir||!path.isAbsolute(dir))fail('metrics directory must be absolute');
@@ -111,19 +117,28 @@ async function run(dir){
   const prompt=renderReviewPrompt(admission,SMOKE_IDENTITY);
   const root=fs.mkdtempSync(path.join(env.RUNNER_TEMP||os.tmpdir(),'qwen-review-canary-'));
   const workspace=path.join(root,'workspace');
-  let added=false,events=[],envelope=null,verdict=null,error=null;
+  let events=[],envelope=null,verdict=null,error=null;
   const startedAt=new Date().toISOString();
   try{
     // The admitted commit is not in the trusted main checkout. Fetch the
-    // public PR ref read-only and stage it in a disposable worktree.
+    // public PR ref read-only and materialize the exact tree WITHOUT .git
+    // metadata, so restricted mode only sees ordinary repository files.
     git(env.GITHUB_WORKSPACE,'fetch','--quiet','--no-tags','origin','refs/pull/'+PR+'/head');
     if(git(env.GITHUB_WORKSPACE,'rev-parse','FETCH_HEAD')!==TARGET_SHA)
       fail('fetched PR head is not the admitted target SHA');
-    git(env.GITHUB_WORKSPACE,'worktree','add','--detach',workspace,TARGET_SHA);
-    added=true;
-    if(git(workspace,'rev-parse','HEAD')!==TARGET_SHA)fail('workspace is not the admitted target SHA');
-    const [mode,blob]=git(workspace,'ls-tree',TARGET_SHA,'--',FILE).split(/\s+/);
+    const [mode,blob]=git(env.GITHUB_WORKSPACE,'ls-tree',TARGET_SHA,'--',FILE).split(/\s+/);
     if(mode!=='100644')fail('admitted file is not a regular 100644 blob');
+    if(blob!==blobSha(POLICY.content))fail('admitted file blob differs from the expected content');
+    fs.mkdirSync(workspace,{mode:0o700});
+    const archive=path.join(root,'target.tar');
+    execFileSync('git',['-C',env.GITHUB_WORKSPACE,'archive','--format=tar',
+      '--output='+archive,TARGET_SHA],{
+      timeout:120000,maxBuffer:1024*1024,stdio:['ignore','pipe','pipe'],
+      env:{...process.env,GIT_TERMINAL_PROMPT:'0',GIT_NO_REPLACE_OBJECTS:'1'},
+    });
+    execFileSync('tar',['-xf',archive,'-C',workspace],{
+      timeout:120000,maxBuffer:1024*1024,stdio:['ignore','pipe','pipe'],
+    });
     const bytes=fs.readFileSync(path.join(workspace,FILE));
     if(bytes.toString('utf8')!==POLICY.content||sha256(bytes.toString('utf8'))!==admission.expected_file_sha256)
       fail('admitted file bytes changed');
@@ -132,7 +147,19 @@ async function run(dir){
       env:{...env,DISABLE_AUTOUPDATER:'1',ANTHROPIC_MODEL:model,
         ANTHROPIC_DEFAULT_SONNET_MODEL:model},
     });
-    if(proc.error||proc.status!==0)fail('restricted Claude Code CLI failed (no raw output logged)');
+    if(proc.error||proc.status!==0){
+      // Safe diagnostics only: no raw model text, prompt or tool output.
+      const detail=[];
+      if(proc.error?.code)detail.push('spawn='+proc.error.code);
+      if(proc.signal)detail.push('signal='+proc.signal);
+      if(Number.isInteger(proc.status))detail.push('status='+proc.status);
+      try{
+        const failed=parseNativeEvents(proc.stdout||'');
+        if(failed.envelope?.subtype)detail.push('subtype='+failed.envelope.subtype);
+        if(failed.envelope?.is_error===true)detail.push('provider_error');
+      }catch{}
+      fail('restricted Claude Code CLI failed ('+(detail.join(', ')||'no diagnostics')+')');
+    }
     const parsed=parseNativeEvents(proc.stdout);
     events=parsed.events;envelope=parsed.envelope;
     if(envelope.is_error===true)fail('Provider returned error');
@@ -152,7 +179,6 @@ async function run(dir){
       skills:'unobserved',mcp:'unobserved',
     });
     writeExecutionTrace(path.join(dir,'agent-execution-trace.json'),trace);
-    if(added)try{git(env.GITHUB_WORKSPACE,'worktree','remove','--force',workspace);}catch{}
     fs.rmSync(root,{recursive:true,force:true});
   }
   if(error)throw error;
