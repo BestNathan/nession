@@ -1199,13 +1199,17 @@ test('a 100k-line burst survives parser starvation and a retention-lost reconnec
 // inside that bound by design; this one crosses it, so the halt and its repair
 // are the thing under test.
 //
-// The burst is many small PTY writes rather than a few large ones: the
-// writer's *event* bound (4 096) is crossed while its byte bound and the
-// Agent's per-subscriber byte budget are not. A halted writer refuses every
-// later write — including a bootstrap — so the repair cannot be a reset. The
-// controller must replace the xterm, and the runtime must re-attach asking for
-// the capture that gives the replacement its history. Both are asserted
-// directly:
+// The burst is escape-dense: every line is SGR-wrapped, so xterm's
+// time-sliced parser — not the transport — is the bottleneck and the writer's
+// queue grows past its bounds while the page reads normally. Deliberately no
+// main-thread block: a consumer that stops reading trips the Agent's 2 MiB
+// subscriber budget first, and that is a detach (a different fault), not the
+// writer overflow this test owns.
+//
+// A halted writer refuses every later write — including a bootstrap — so the
+// repair cannot be a reset. The controller must replace the xterm, and the
+// runtime must re-attach asking for the capture that gives the replacement
+// its history. Both are asserted directly:
 //
 // 1. the degraded notice appears (the halt was stated, and the burst did
 //    overflow — a green run cannot be one where the fault never fired);
@@ -1233,30 +1237,25 @@ test('a writer overflow replaces the renderer and resumes output (#2196)', async
     node.setAttribute('data-e2e-overflow-instance', 'original');
   });
 
-  // 12 000 writes of 100 bytes: ~1.2 MiB, inside the Agent's 2 MiB subscriber
-  // budget and below the writer's 4 MiB byte bound, but more than twice its
-  // 4 096-event bound. The page is then blocked for two seconds — long enough
-  // that the frames queue instead of being parsed as they arrive.
-  const COUNT = 12_000;
+  // 8 MiB (raw) of `ESC[31mABCDEFGHIJESC[0m` lines. The writer charges every
+  // queued write at 2× its byte length plus 128 bytes per frame, so the
+  // moment xterm falls ~2 MiB behind the transport the 4 MiB bound is
+  // crossed. `head -c` ends the producer; the shell then prints a marker the
+  // repair may repaint.
   await submitTerminalCommand(
     page,
-    `i=0; while [ $i -lt ${COUNT} ]; do printf '%0100d\\n' $i; i=$((i+1)); done; `
+    `yes "$(printf '\\033[31mABCDEFGHIJ\\033[0m')" | head -c 8000000; `
       + `printf 'OVERFLOW-%s-EXIT\\n' 2196`,
   );
-  await page.evaluate(() => new Promise<void>((resolve) => {
-    const until = performance.now() + 2_000;
-    while (performance.now() < until) { /* deliberately block the page */ }
-    resolve();
-  }));
 
   // 1. The halt is stated. gapDetected stays set until a proven capture is
   //    parsed, so this also proves the burst actually overflowed.
   await expect(page.getByTestId('terminal-history-degraded'))
-    .toBeVisible({ timeout: 180_000 });
+    .toBeVisible({ timeout: 120_000 });
 
   // 2. The renderer that halted is gone.
   await expect(page.locator('.xterm[data-e2e-overflow-instance="original"]'))
-    .toHaveCount(0, { timeout: 180_000 });
+    .toHaveCount(0, { timeout: 120_000 });
 
   // 3. Input and output work on the replacement without a page reload.
   await expect(async () => {
@@ -1264,7 +1263,7 @@ test('a writer overflow replaces the renderer and resumes output (#2196)', async
     await expect
       .poll(async () => countInBuffer(page, 'OVERFLOW-2196-AFTER'), { timeout: 10_000 })
       .toBeGreaterThan(0);
-  }).toPass({ timeout: 180_000 });
+  }).toPass({ timeout: 120_000 });
 
   // 4. A parsed atomic epoch-start capture is what clears the statement; the
   //    notice may not outlive the repair that proved it.
