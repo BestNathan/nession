@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "b9868359a6fa5fa35212bb2843a4b099704ff8cf9e10726232425723b167593a",
+  "run_id": 39790623959,
+  "run_attempt": 1,
+  "issue": 1974,
+  "criterion": "SC-03",
+  "criterion_text": "A genuine logical Slice identifier is separately demonstrated and joins the real Agent→Run, or the source is explicitly Partial and #1906 remains Unlinked; no fake Slice identity.",
+  "stage": "post-merge",
+  "target_sha": "01d25966a4933b37ec336ee52b22a043ea7508a1",
+  "contract_sha256": "8f89fc0ce98e48ec081cf458439c18223e3a90681b5da03b55ecc1c8f6800ab9",
+  "case_revision": "01d25966a4933b37ec336ee52b22a043ea7508a1",
+  "case_tree_sha": "1850bf73d98b2bea04c4ec203e757267a20bc6ca",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pending",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-22T13:53:40.855Z",
+  "finished_at": "2026-10-22T13:53:46.959Z",
+  "duration_ms": 6104,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pending",
+      "summary": "No authenticated Result v2 exists, so a logical Slice cannot be joined. The source remains explicitly Partial and #1906 stays Unlinked.",
+      "evidence": [
+        {
+          "type": "store",
+          "value": "agent-store=5e4ea9e27a358965e96e7ed86d22f270f46b9acb result_records=1 slice_records=0"
+        }
+      ],
+      "duration_ms": 268,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 39790623959,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "01d25966a4933b37ec336ee52b22a043ea7508a1",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/39790623959",
+    "record_path": "runs/2026-10-22/39790623959-1/1974/SC-03.json",
+    "source_result_sha256": "d22197ef7f59ce522d2263dd594839a03c0cbdeea1710780f4b190aba48ac984"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-39790623959-1",
+    "sha256": "d22197ef7f59ce522d2263dd594839a03c0cbdeea1710780f4b190aba48ac984",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/39790623959",
+    "durability": "time-limited; object archival not configured"
+  }
+}
