@@ -1749,6 +1749,43 @@ describe('SessionRuntime', () => {
       rt.dispose();
     });
 
+    it('a P2P→Relay→P2P round trip never revives a cursor from an earlier hop (#1926 SC-03)', () => {
+      const serverConnection = makeRelayServerConnection('connected');
+      const rt = new SessionRuntime(makeConfig({
+        serverConnection,
+        hasSessionOutput: () => true,
+      }));
+
+      // A verified parser position on the first P2P subscription. The renderer
+      // really holds those bytes; the proof belongs to that subscription.
+      rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 2 });
+      expect(rt.terminalAppliedSnapshot?.appliedSeq).toBe(2);
+
+      // Hop 1: P2P → Relay. The Relay is a different subscription on a
+      // different transport and nothing has proven it continues the stream.
+      rt.updateContext({ forcedRelay: true });
+      expect(rt.terminalAppliedSnapshot).toBeNull();
+
+      // A late frame from the first P2P binding cannot revive the cursor.
+      rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 3 });
+      expect(rt.terminalAppliedSnapshot).toBeNull();
+
+      // Hop 2: Relay → P2P. The returning P2P subscription is again a new
+      // route generation, so the *first* P2P proof is not revived either —
+      // continuity is never inferred from sharing a transport kind.
+      rt.updateContext({ forcedRelay: false });
+      expect(rt.terminalAppliedSnapshot).toBeNull();
+      rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 4 });
+      expect(rt.terminalAppliedSnapshot).toBeNull();
+
+      // Only a baseline that proves this renderer's new subscription may
+      // claim continuity again.
+      rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 5 });
+      expect(rt.terminalAppliedSnapshot?.appliedSeq).toBe(5);
+
+      rt.dispose();
+    });
+
     it('posts the swap only after the new generation is installed (SC-04)', () => {
       const rt = new SessionRuntime(makeConfig());
       const oldApi = rt.getAgentTerminalApi();
