@@ -940,18 +940,7 @@ for (const mode of ['Relay', 'P2P'] as const) {
         .toBeGreaterThan(0);
     }).toPass({ timeout: 180_000 });
 
-    // No silent skip at the boundary. tmux history normally survives, so the
-    // pre-restart line should be repainted by the new Agent's bootstrap. If it
-    // is not, the runtime must say so with the degraded notice rather than
-    // showing a continuous-looking terminal — on **either** route (#2194: a
-    // route change onto a new stream epoch states the gap even when the
-    // recovery lands on Relay for a P2P attach).
     const before = await countInBuffer(page, 'RESTART-1926-BEFORE');
-    expect(before, 'the pre-restart line was duplicated across recovery').toBeLessThanOrEqual(1);
-    if (before === 0) {
-      await expect(page.getByTestId('terminal-history-degraded')).toBeVisible({ timeout: 10_000 });
-    }
-
     const rendererSurvived = await page
       .locator('.xterm[data-e2e-restart-instance="original"]')
       .count();
@@ -988,6 +977,18 @@ for (const mode of ['Relay', 'P2P'] as const) {
         })),
       bootstraps: bootstraps.slice(-4),
     })}`);
+
+    // No silent skip at the boundary. tmux history normally survives, so the
+    // pre-restart line should be repainted by the new Agent's bootstrap. If it
+    // is not, the runtime must say so with the degraded notice rather than
+    // showing a continuous-looking terminal — on **either** route (#2194: a
+    // route change onto a new stream epoch states the gap even when the
+    // recovery lands on Relay for a P2P attach). Asserted after the wire log
+    // so a failure reports what actually crossed the boundary.
+    expect(before, 'the pre-restart line was duplicated across recovery').toBeLessThanOrEqual(1);
+    if (before === 0) {
+      await expect(page.getByTestId('terminal-history-degraded')).toBeVisible({ timeout: 10_000 });
+    }
 
     // A second post-restart command proves the recovered route is stable, not
     // a one-frame attach.
