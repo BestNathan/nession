@@ -890,6 +890,21 @@ for (const mode of ['Relay', 'P2P'] as const) {
     test.skip(!process.env.CI, 'real stack available in CI only');
     test.setTimeout(360_000);
 
+    // #2194 diagnostics, always visible in the selected lane: the wire decides
+    // why a recovery lost history. It records which attaches asked for a
+    // bootstrap, what cut/fidelity the Agent declared, whether a resume was
+    // attempted, and whether the recovered route was Relay — the facts the
+    // runtime's own state cannot show after the fact.
+    const wire: WireRecord = { sent: [], received: [] };
+    page.on('websocket', (socket) => {
+      socket.on('framesent', (frame) => {
+        if (typeof frame.payload === 'string') { wire.sent.push(parseFrame(frame.payload)); }
+      });
+      socket.on('framereceived', (frame) => {
+        if (typeof frame.payload === 'string') { wire.received.push(parseFrame(frame.payload)); }
+      });
+    });
+
     const sessionName = `e2e-consistency-restart-${mode.toLowerCase()}-${testInfo.retry}-${Date.now()}`;
     await page.goto(
       '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
@@ -898,6 +913,10 @@ for (const mode of ['Relay', 'P2P'] as const) {
     await createSession(page, sessionName);
     await attachToSession(page, sessionName, mode);
     await waitForInteractiveShell(page);
+
+    await page.locator('.xterm').evaluate((node) => {
+      node.setAttribute('data-e2e-restart-instance', 'original');
+    });
 
     // Deliberately no xterm-node identity assertion here. An Agent restart is
     // a full transport loss (the process that owned the epoch is replaced), and
@@ -937,6 +956,43 @@ for (const mode of ['Relay', 'P2P'] as const) {
     if (mode === 'Relay' && before === 0) {
       await expect(page.getByTestId('terminal-history-degraded')).toBeVisible({ timeout: 10_000 });
     }
+
+    const rendererSurvived = await page
+      .locator('.xterm[data-e2e-restart-instance="original"]')
+      .count();
+    const degraded = await page.getByTestId('terminal-history-degraded').count();
+    const bootstraps = wire.received
+      .filter((frame) => frame.msg_type === 'agent.terminal.output'
+        && frame.payload?.bootstrap !== undefined)
+      .map((frame) => {
+        const bootstrap = frame.payload?.bootstrap as Record<string, unknown>;
+        return {
+          requested: bootstrap.requested_lines,
+          cut: bootstrap.cut_consistency,
+          fidelity: bootstrap.fidelity,
+          truncated: bootstrap.truncated,
+          epoch: bootstrap.stream_epoch,
+          through: bootstrap.through_seq,
+        };
+      });
+    console.log(`AGENT-RESTART-WIRE ${JSON.stringify({
+      mode,
+      before,
+      degraded,
+      rendererSurvived: rendererSurvived === 1,
+      attaches: wire.sent
+        .filter((frame) => frame.msg_type === 'agent.attach')
+        .map((frame) => frame.payload?.needs_bootstrap),
+      resumes: wire.sent.filter((frame) => frame.msg_type === 'agent.terminal.stream.resume').length,
+      relayBegins: wire.sent.filter((frame) => frame.msg_type === 'server.session.relay.begin').length,
+      relayReady: wire.received
+        .filter((frame) => frame.msg_type === 'server.session.relay.ready')
+        .map((frame) => ({
+          epoch: frame.payload?.stream_epoch,
+          generation: frame.payload?.subscriber_generation,
+        })),
+      bootstraps: bootstraps.slice(-4),
+    })}`);
 
     // A second post-restart command proves the recovered route is stable, not
     // a one-frame attach.
