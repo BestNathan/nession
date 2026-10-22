@@ -712,11 +712,18 @@ jobs:
   mirror-acr:
     needs: [version-check, merge]
     if: needs.version-check.outputs.version_changed == 'true'
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        image: [server, agent, ui]
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: read
     env:
+      GODEBUG: http2client=0
       ACR_REGISTRY: crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com
       ACR_IMAGE: crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession
     steps:
@@ -748,9 +755,9 @@ jobs:
           registry: ${{ env.ACR_REGISTRY }}
           username: ${{ secrets.ALIYUN_ACR_USERNAME }}
           password: ${{ secrets.ALIYUN_ACR_PASSWORD }}
-      - name: Mirror and verify multi-arch images
+      - name: Mirror and verify multi-arch ${{ matrix.image }} image
         if: steps.credentials.outputs.configured == 'true'
         shell: bash
         run: |
           GHCR_IMAGE="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession"
-          bash scripts/mirror-container-images.sh "$GHCR_IMAGE" "$ACR_IMAGE" "${{ needs.version-check.outputs.rust_version }}" "${{ needs.version-check.outputs.web_version }}"
+          bash scripts/mirror-container-images.sh "$GHCR_IMAGE" "$ACR_IMAGE" "${{ needs.version-check.outputs.rust_version }}" "${{ needs.version-check.outputs.web_version }} "${{ matrix.image }}"
