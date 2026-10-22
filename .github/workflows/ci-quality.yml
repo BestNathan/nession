@@ -141,7 +141,7 @@ jobs:
         with: { cache-workspaces: ".", cache-all-crates: "true" }
       - uses: extractions/setup-just@v4
         with:
-          just-version: '1.58.0'
+          just-version: '1.57.0'
       - run: jq --version
       - uses: actions/cache@v4
         with:
@@ -168,7 +168,7 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - uses: extractions/setup-just@v4
         with:
-          just-version: '1.58.0'
+          just-version: '1.57.0'
       - name: Verify repository tooling Gates
         run: |
           ./gates/run --suite quality-tooling
