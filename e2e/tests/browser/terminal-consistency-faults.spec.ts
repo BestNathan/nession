@@ -890,6 +890,73 @@ for (const mode of ['Relay', 'P2P'] as const) {
     test.skip(!process.env.CI, 'real stack available in CI only');
     test.setTimeout(360_000);
 
+    // #2194 diagnostics, always visible in the selected lane: the wire decides
+    // why a recovery lost history. It records which attaches asked for a
+    // bootstrap, what cut/fidelity the Agent declared, whether a resume was
+    // attempted, and whether the recovered route was Relay — the facts the
+    // runtime's own state cannot show after the fact.
+    const wire: WireRecord = { sent: [], received: [] };
+    page.on('websocket', (socket) => {
+      socket.on('framesent', (frame) => {
+        if (typeof frame.payload === 'string') { wire.sent.push(parseFrame(frame.payload)); }
+      });
+      socket.on('framereceived', (frame) => {
+        if (typeof frame.payload === 'string') { wire.received.push(parseFrame(frame.payload)); }
+      });
+    });
+
+    // Page-side ordering (#2194): the wire alone cannot tell whether a request
+    // was decided before or after the visible renderer changed. Record every
+    // bootstrap-relevant request together with the DOM facts at that instant,
+    // and every transition of those facts.
+    await page.addInitScript(() => {
+      const w = window as unknown as { __restartLog?: Array<Record<string, unknown>> };
+      w.__restartLog = [];
+      const domFacts = () => ({
+        state: document.querySelector('[data-terminal-stream-state]')
+          ?.getAttribute('data-terminal-stream-state') ?? null,
+        notice: document.querySelector('[data-testid="terminal-history-degraded"]') !== null,
+        original: document.querySelector('.xterm[data-e2e-restart-instance="original"]') !== null,
+        xterms: document.querySelectorAll('.xterm').length,
+      });
+      const originalSend = WebSocket.prototype.send;
+      WebSocket.prototype.send = function (data) {
+        if (typeof data === 'string') {
+          try {
+            const parsed = JSON.parse(data) as { msg_type?: string; payload?: Record<string, unknown> };
+            if (parsed.msg_type === 'agent.attach'
+              || parsed.msg_type === 'agent.terminal.stream.resume'
+              || parsed.msg_type === 'server.session.relay.begin') {
+              w.__restartLog!.push({
+                t: Date.now(),
+                label: `send:${parsed.msg_type}`,
+                needsBootstrap: parsed.payload?.needs_bootstrap,
+                epoch: parsed.payload?.stream_epoch,
+                afterSeq: parsed.payload?.after_seq,
+                ...domFacts(),
+              });
+            }
+          } catch {
+            // Non-JSON frames are not part of this ordering.
+          }
+        }
+        return originalSend.call(this, data);
+      };
+      new MutationObserver(() => {
+        const facts = domFacts();
+        const key = `${facts.state}|${facts.notice}|${facts.original}|${facts.xterms}`;
+        const previous = w.__restartLog!.filter((e) => e.label === 'dom').at(-1);
+        if (previous?.key !== key) {
+          w.__restartLog!.push({ t: Date.now(), label: 'dom', key, ...facts });
+        }
+      // `document` rather than `documentElement`: an init script runs before
+      // the document is parsed, so the root element may not exist yet.
+      }).observe(document, {
+        childList: true, subtree: true, attributes: true,
+        attributeFilter: ['data-terminal-stream-state', 'data-e2e-restart-instance'],
+      });
+    });
+
     const sessionName = `e2e-consistency-restart-${mode.toLowerCase()}-${testInfo.retry}-${Date.now()}`;
     await page.goto(
       '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
@@ -898,6 +965,10 @@ for (const mode of ['Relay', 'P2P'] as const) {
     await createSession(page, sessionName);
     await attachToSession(page, sessionName, mode);
     await waitForInteractiveShell(page);
+
+    await page.locator('.xterm').evaluate((node) => {
+      node.setAttribute('data-e2e-restart-instance', 'original');
+    });
 
     // Deliberately no xterm-node identity assertion here. An Agent restart is
     // a full transport loss (the process that owned the epoch is replaced), and
@@ -921,20 +992,77 @@ for (const mode of ['Relay', 'P2P'] as const) {
         .toBeGreaterThan(0);
     }).toPass({ timeout: 180_000 });
 
+    const before = await countInBuffer(page, 'RESTART-1926-BEFORE');
+    const rendererSurvived = await page
+      .locator('.xterm[data-e2e-restart-instance="original"]')
+      .count();
+    const degraded = await page.getByTestId('terminal-history-degraded').count();
+    const bootstraps = wire.received
+      .filter((frame) => frame.msg_type === 'agent.terminal.output'
+        && frame.payload?.bootstrap !== undefined)
+      .map((frame) => {
+        const bootstrap = frame.payload?.bootstrap as Record<string, unknown>;
+        return {
+          requested: bootstrap.requested_lines,
+          cut: bootstrap.cut_consistency,
+          fidelity: bootstrap.fidelity,
+          truncated: bootstrap.truncated,
+          epoch: bootstrap.stream_epoch,
+          through: bootstrap.through_seq,
+        };
+      });
+    const pageLog = await page.evaluate(() => {
+      const w = window as unknown as { __restartLog?: Array<Record<string, unknown>> };
+      return (w.__restartLog ?? []).slice(-60);
+    });
+    console.log(`AGENT-RESTART-WIRE ${JSON.stringify({
+      mode,
+      before,
+      degraded,
+      pageLog,
+      rendererSurvived: rendererSurvived === 1,
+      attaches: wire.sent
+        .filter((frame) => frame.msg_type === 'agent.attach')
+        .map((frame) => frame.payload?.needs_bootstrap),
+      // The reply is what the runtime's epoch adoption reads; testing only the
+      // request would leave "it never asked" and "the answer named no epoch"
+      // indistinguishable. Operation replies carry the `ok`/`error` ack type,
+      // not the request's wire name.
+      acks: wire.received
+        .filter((frame) => frame.msg_type === 'ok' || frame.msg_type === 'error')
+        .map((frame) => ({
+          type: frame.msg_type,
+          session: frame.payload?.session_name,
+          epoch: frame.payload?.stream_epoch,
+          cursor: frame.payload?.stream_cursor,
+          match: frame.payload?.epoch_match,
+          complete: frame.payload?.complete,
+          recovery: frame.payload?.recovery,
+          events: Array.isArray(frame.payload?.events) ? frame.payload.events.length : undefined,
+        }))
+        .slice(-12),
+      resumes: wire.sent.filter((frame) => frame.msg_type === 'agent.terminal.stream.resume').length,
+      relayBegins: wire.sent
+        .filter((frame) => frame.msg_type === 'server.session.relay.begin')
+        .map((frame) => frame.payload?.needs_bootstrap),
+      relayReady: wire.received
+        .filter((frame) => frame.msg_type === 'server.session.relay.ready')
+        .map((frame) => ({
+          epoch: frame.payload?.stream_epoch,
+          generation: frame.payload?.subscriber_generation,
+        })),
+      bootstraps: bootstraps.slice(-4),
+    })}`);
+
     // No silent skip at the boundary. tmux history normally survives, so the
     // pre-restart line should be repainted by the new Agent's bootstrap. If it
     // is not, the runtime must say so with the degraded notice rather than
-    // showing a continuous-looking terminal.
-    //
-    // This part is asserted on the Relay case, which owns the route across the
-    // restart. A P2P attach does not: the product's reconnect policy is Auto,
-    // and a P2P loss of a manual attach can legitimately recover through Relay.
-    // An epoch change with a kept buffer must still state the gap there — that
-    // is #2194's contract and its own witness, not something this fixture
-    // assumes before the fix lands.
-    const before = await countInBuffer(page, 'RESTART-1926-BEFORE');
+    // showing a continuous-looking terminal — on **either** route (#2194: a
+    // route change onto a new stream epoch states the gap even when the
+    // recovery lands on Relay for a P2P attach). Asserted after the wire log
+    // so a failure reports what actually crossed the boundary.
     expect(before, 'the pre-restart line was duplicated across recovery').toBeLessThanOrEqual(1);
-    if (mode === 'Relay' && before === 0) {
+    if (before === 0) {
       await expect(page.getByTestId('terminal-history-degraded')).toBeVisible({ timeout: 10_000 });
     }
 
