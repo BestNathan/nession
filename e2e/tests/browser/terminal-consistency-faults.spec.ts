@@ -905,6 +905,58 @@ for (const mode of ['Relay', 'P2P'] as const) {
       });
     });
 
+    // Page-side ordering (#2194): the wire alone cannot tell whether a request
+    // was decided before or after the visible renderer changed. Record every
+    // bootstrap-relevant request together with the DOM facts at that instant,
+    // and every transition of those facts.
+    await page.addInitScript(() => {
+      const w = window as unknown as { __restartLog?: Array<Record<string, unknown>> };
+      w.__restartLog = [];
+      const domFacts = () => ({
+        state: document.querySelector('[data-terminal-stream-state]')
+          ?.getAttribute('data-terminal-stream-state') ?? null,
+        notice: document.querySelector('[data-testid="terminal-history-degraded"]') !== null,
+        original: document.querySelector('.xterm[data-e2e-restart-instance="original"]') !== null,
+        xterms: document.querySelectorAll('.xterm').length,
+      });
+      const originalSend = WebSocket.prototype.send;
+      WebSocket.prototype.send = function (data) {
+        if (typeof data === 'string') {
+          try {
+            const parsed = JSON.parse(data) as { msg_type?: string; payload?: Record<string, unknown> };
+            if (parsed.msg_type === 'agent.attach'
+              || parsed.msg_type === 'agent.terminal.stream.resume'
+              || parsed.msg_type === 'server.session.relay.begin') {
+              w.__restartLog!.push({
+                t: Date.now(),
+                label: `send:${parsed.msg_type}`,
+                needsBootstrap: parsed.payload?.needs_bootstrap,
+                epoch: parsed.payload?.stream_epoch,
+                afterSeq: parsed.payload?.after_seq,
+                ...domFacts(),
+              });
+            }
+          } catch {
+            // Non-JSON frames are not part of this ordering.
+          }
+        }
+        return originalSend.call(this, data);
+      };
+      new MutationObserver(() => {
+        const facts = domFacts();
+        const key = `${facts.state}|${facts.notice}|${facts.original}|${facts.xterms}`;
+        const previous = w.__restartLog!.filter((e) => e.label === 'dom').at(-1);
+        if (previous?.key !== key) {
+          w.__restartLog!.push({ t: Date.now(), label: 'dom', key, ...facts });
+        }
+      // `document` rather than `documentElement`: an init script runs before
+      // the document is parsed, so the root element may not exist yet.
+      }).observe(document, {
+        childList: true, subtree: true, attributes: true,
+        attributeFilter: ['data-terminal-stream-state', 'data-e2e-restart-instance'],
+      });
+    });
+
     const sessionName = `e2e-consistency-restart-${mode.toLowerCase()}-${testInfo.retry}-${Date.now()}`;
     await page.goto(
       '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
@@ -959,33 +1011,37 @@ for (const mode of ['Relay', 'P2P'] as const) {
           through: bootstrap.through_seq,
         };
       });
+    const pageLog = await page.evaluate(() => {
+      const w = window as unknown as { __restartLog?: Array<Record<string, unknown>> };
+      return (w.__restartLog ?? []).slice(-60);
+    });
     console.log(`AGENT-RESTART-WIRE ${JSON.stringify({
       mode,
       before,
       degraded,
+      pageLog,
       rendererSurvived: rendererSurvived === 1,
       attaches: wire.sent
         .filter((frame) => frame.msg_type === 'agent.attach')
         .map((frame) => frame.payload?.needs_bootstrap),
       // The reply is what the runtime's epoch adoption reads; testing only the
       // request would leave "it never asked" and "the answer named no epoch"
-      // indistinguishable.
-      attachReplies: wire.received
-        .filter((frame) => frame.msg_type === 'agent.attach')
+      // indistinguishable. Operation replies carry the `ok`/`error` ack type,
+      // not the request's wire name.
+      acks: wire.received
+        .filter((frame) => frame.msg_type === 'ok' || frame.msg_type === 'error')
         .map((frame) => ({
-          ok: frame.payload?.ok,
+          type: frame.msg_type,
+          session: frame.payload?.session_name,
           epoch: frame.payload?.stream_epoch,
           cursor: frame.payload?.stream_cursor,
-        })),
-      resumes: wire.sent.filter((frame) => frame.msg_type === 'agent.terminal.stream.resume').length,
-      resumeReplies: wire.received
-        .filter((frame) => frame.msg_type === 'agent.terminal.stream.resume')
-        .map((frame) => ({
-          epoch: frame.payload?.stream_epoch,
-          epochMatch: frame.payload?.epoch_match,
+          match: frame.payload?.epoch_match,
           complete: frame.payload?.complete,
           recovery: frame.payload?.recovery,
-        })),
+          events: Array.isArray(frame.payload?.events) ? frame.payload.events.length : undefined,
+        }))
+        .slice(-12),
+      resumes: wire.sent.filter((frame) => frame.msg_type === 'agent.terminal.stream.resume').length,
       relayBegins: wire.sent
         .filter((frame) => frame.msg_type === 'server.session.relay.begin')
         .map((frame) => frame.payload?.needs_bootstrap),
