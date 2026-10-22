@@ -136,6 +136,14 @@ export function useTerminalOrchestration({
     () => controllerRef.current?.hasSessionOutput ?? false,
     [],
   );
+  // The narrower question the attach must ask (#2194): a replacement renderer
+  // holds live output as soon as a transport is bound, but holds no history
+  // until a capture parses into it. Reading it through the same ref keeps the
+  // answer about the renderer that is mounted now.
+  const hasSessionHistory = useCallback(
+    () => controllerRef.current?.hasParsedCapture ?? false,
+    [],
+  );
   const { agentTerminalApi, connectionState, runtime, snapshot, fileOps } = useP2PAttachTransport({
     attachInfo,
     sessionName,
@@ -143,6 +151,7 @@ export function useTerminalOrchestration({
     manualOverride,
     serverConnection: relayServer,
     hasSessionOutput,
+    hasSessionHistory,
   });
 
   // The effective transport mode, derived — never stored (#1309 SC-02): the
@@ -232,6 +241,9 @@ export function useTerminalOrchestration({
     inputDisabled,
     terminalState,
     reconnectCount,
+    /** Observed output loss, for the surface's quiet notice (#2155). */
+    historyDegraded: snapshot?.historyDegraded ?? false,
+    streamState: snapshot?.streamState ?? 'unavailable',
     fileOps,
     terminalControl,
     onTakeControl: takeControl,

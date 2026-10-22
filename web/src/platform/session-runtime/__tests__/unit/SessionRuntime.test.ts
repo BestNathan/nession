@@ -21,6 +21,7 @@ interface MockWs {
   readyState: number;
   onopen: ((ev: Event) => void) | null;
   onmessage: ((ev: MessageEvent) => void) | null;
+  onclose: ((ev: CloseEvent) => void) | null;
   send: ReturnType<typeof vi.fn>;
 }
 
@@ -339,6 +340,36 @@ describe('SessionRuntime', () => {
     rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 5 });
     expect(rt.terminalAppliedSnapshot?.appliedSeq).toBe(6);
     expect(rt.terminalAppliedSnapshot?.ackSentSeq).toBe(0); // no network output ACK
+    rt.dispose();
+  });
+
+  it('surfaces an observed history gap and clears it only on a complete repair (#2155)', async () => {
+    const rt = new SessionRuntime(makeConfig({ hasSessionOutput: () => true }));
+    expect(rt.getSnapshot().historyDegraded).toBe(false);
+
+    // A first attach that asked for history is not a degraded session: no
+    // output was lost, the buffer was simply empty.
+    rt.setTransportReady(true);
+    rt.buildTransport();
+    await openWs();
+    answerAttach();
+    await flushMicrotasks();
+    expect(rt.getSnapshot().historyDegraded).toBe(false);
+
+    // An observed hole is.
+    rt.noteStreamTruncated();
+    expect(rt.getSnapshot().historyDegraded).toBe(true);
+
+    // The transport drops, the Auto policy retires the candidate, and the next
+    // attach requests a bootstrap — that request arms the repair.
+    lastWs().onclose?.(new Event('close') as unknown as CloseEvent);
+    expect(rt.onCandidateDisconnected()).toBe('next-candidate');
+    await openWs();
+    answerAttach();
+    await flushMicrotasks();
+    // Only the applied complete snapshot clears the notice.
+    rt.noteBootstrapApplied();
+    expect(rt.getSnapshot().historyDegraded).toBe(false);
     rt.dispose();
   });
 
@@ -873,6 +904,45 @@ describe('SessionRuntime', () => {
       rt.dispose();
     });
 
+    it('states the loss when a re-attach lands on a renderer with no parsed capture (#2194)', async () => {
+      let parsedCapture = false;
+      const serverConnection = makeRelayServerConnection('connected');
+      const rt = new SessionRuntime(makeConfig({
+        forcedRelay: true,
+        serverConnection,
+        hasSessionOutput: () => true,
+        hasSessionHistory: () => parsedCapture,
+      }));
+      rt.setTransportReady(true);
+      await flushMicrotasks();
+      expect(rt.attachState.phase).toBe('attached');
+      // The first attach asks for the capture it has none of, but nothing has
+      // been lost yet: a healthy first attach is not a degraded session.
+      expect(serverConnection.beginRelay.mock.calls[0]?.[1]).toMatchObject({
+        needsBootstrap: true,
+      });
+      expect(rt.getSnapshot().historyDegraded).toBe(false);
+
+      // A route change onto a renderer that never parsed a capture: the
+      // buffer the attached session filled is gone.
+      rt.updateContext({ routeIntentEpoch: 1 });
+      await flushMicrotasks();
+      expect(serverConnection.beginRelay).toHaveBeenCalledTimes(2);
+      expect(serverConnection.beginRelay.mock.calls[1]?.[1]).toMatchObject({
+        needsBootstrap: true,
+      });
+      expect(rt.getSnapshot().historyDegraded).toBe(true);
+
+      // A capture parsed into the replacement is the repair; only then does
+      // the statement clear.
+      parsedCapture = true;
+      rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 9, appliedThrough: 0 });
+      rt.noteBootstrapApplied();
+      expect(rt.getSnapshot().historyDegraded).toBe(false);
+      expect(rt.getSnapshot().streamState).toBe('synchronized');
+      rt.dispose();
+    });
+
     it('requires a new bootstrap after relay loss even if an old P2P cursor exists (#1645)', async () => {
       const serverConnection = makeRelayServerConnection('connected');
       const rt = new SessionRuntime(makeConfig({
@@ -897,6 +967,32 @@ describe('SessionRuntime', () => {
       expect(serverConnection.beginRelay.mock.calls[1]?.[1]).toMatchObject({
         needsBootstrap: true,
       });
+      rt.dispose();
+    });
+
+    it('re-drives the relay attach with a bootstrap after the renderer was replaced (#2196)', async () => {
+      const serverConnection = makeRelayServerConnection('connected');
+      const rt = new SessionRuntime(makeConfig({
+        forcedRelay: true,
+        serverConnection,
+        hasSessionOutput: () => true,
+      }));
+      rt.setTransportReady(true);
+      await flushMicrotasks();
+      expect(serverConnection.beginRelay).toHaveBeenCalledTimes(1);
+      expect(serverConnection.beginRelay.mock.calls[0]?.[1]).toMatchObject({
+        needsBootstrap: false,
+      });
+
+      rt.noteRendererReplaced();
+      await flushMicrotasks();
+      // The relay path has no P2P binding to retire, so the repair itself must
+      // ask again — with the bootstrap the empty replacement needs.
+      expect(serverConnection.beginRelay).toHaveBeenCalledTimes(2);
+      expect(serverConnection.beginRelay.mock.calls[1]?.[1]).toMatchObject({
+        needsBootstrap: true,
+      });
+      expect(rt.attachState.phase).toBe('attached');
       rt.dispose();
     });
 
@@ -1023,6 +1119,43 @@ describe('SessionRuntime', () => {
       expect(rt.onCandidateDisconnected()).toBe('force-relay');
       expect(rt.getSnapshot().forcedRelay).toBe(true);
     }
+
+    it('states the gap and asks for a capture on a fallback over a live buffer (#2194)', async () => {
+      const serverConnection = makeRelayServerConnection('connected');
+      const rt = new SessionRuntime(makeConfig({
+        serverConnection,
+        hasSessionOutput: () => true,
+      }));
+      rt.setTransportReady(true);
+      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      await openWs();
+      await flushMicrotasks();
+      // Settle the P2P attach the mock socket does not model, and prove a
+      // baseline so the session is explicitly synchronized before the cut.
+      rt.attachController.dispatch({ type: 'ATTACH_OK' });
+      rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 3 });
+      expect(rt.getSnapshot().streamState).toBe('synchronized');
+
+      // The fallback happens because the P2P transport dropped.
+      rt.attachController.dispatch({ type: 'TRANSPORT_LOST' });
+      expect(rt.onCandidateDisconnected()).toBe('next-candidate');
+      expect(rt.onCandidateDisconnected()).toBe('force-relay');
+      await flushMicrotasks();
+      expect(rt.attachState.phase).toBe('attached');
+      // The Relay route cannot prove continuity with the P2P transport, so
+      // the attach asks for the capture that can.
+      expect(serverConnection.beginRelay.mock.calls[0]?.[1]).toMatchObject({
+        needsBootstrap: true,
+      });
+      // And the cut is stated, not presented as synchronized.
+      expect(rt.getSnapshot().historyDegraded).toBe(true);
+
+      // A parsed capture that proves its cut is the repair.
+      rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 9, appliedThrough: 0 });
+      rt.noteBootstrapApplied();
+      expect(rt.getSnapshot().historyDegraded).toBe(false);
+      rt.dispose();
+    });
 
     it('a steady-state config sync does not clobber the runtime-owned fallback', async () => {
       const serverConnection = makeRelayServerConnection('connected');
@@ -1153,6 +1286,65 @@ describe('SessionRuntime', () => {
       // that re-sending the history would duplicate what is already on screen.
       expect(clientAttachBootstrapFlags()).toEqual([false]);
       holding.dispose();
+    });
+
+    it('asks for a bootstrap when the mounted renderer never parsed a capture (#2194)', async () => {
+      // A replacement renderer latches `hasSessionOutput` as soon as live
+      // frames arrive, but it holds no history. The narrower reader is what
+      // the attach must ask.
+      const rt = new SessionRuntime(makeConfig({
+        hasSessionOutput: () => true,
+        hasSessionHistory: () => false,
+      }));
+      rt.setTransportReady(true);
+      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      await openWs();
+      await flushMicrotasks();
+      expect(clientAttachBootstrapFlags()).toEqual([true]);
+      rt.dispose();
+
+      wsInstances = [];
+      const provisioned = new SessionRuntime(makeConfig({
+        hasSessionOutput: () => true,
+        hasSessionHistory: () => true,
+      }));
+      provisioned.setTransportReady(true);
+      provisioned.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      await openWs();
+      await flushMicrotasks();
+      expect(clientAttachBootstrapFlags()).toEqual([false]);
+      provisioned.dispose();
+    });
+
+    it('re-attaches with a bootstrap after the renderer was replaced (#2196)', async () => {
+      const rt = new SessionRuntime(makeConfig({ hasSessionOutput: () => true }));
+      rt.setTransportReady(true);
+      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      await openWs();
+      await flushMicrotasks();
+      expect(clientAttachBootstrapFlags()).toEqual([false]);
+      // The mock P2P socket does not model the attach reply; settle the phase
+      // the way the runtime would on that reply.
+      rt.attachController.dispatch({ type: 'ATTACH_OK' });
+      rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 2 });
+      expect(rt.getSnapshot().streamState).toBe('synchronized');
+
+      // The controller replaced a halted renderer. The replacement holds
+      // nothing, so a live continuation is not an option: the runtime retires
+      // the transport and asks for history on the next attach.
+      rt.noteRendererReplaced();
+      await openWs();
+      await flushMicrotasks();
+      expect(clientAttachBootstrapFlags()).toEqual([false, true]);
+      // After the reply lands, attached is still not synchronized: only a
+      // parsed cut can prove the replacement's history.
+      rt.attachController.dispatch({ type: 'ATTACH_OK' });
+      expect(rt.getSnapshot().streamState).toBe('degraded-live');
+
+      rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 0 });
+      rt.noteBootstrapApplied();
+      expect(rt.getSnapshot().streamState).toBe('synchronized');
+      rt.dispose();
     });
 
     it('asks for a bootstrap when no Terminal reader is wired at all', async () => {
@@ -1718,6 +1910,43 @@ describe('SessionRuntime', () => {
       rt.dispose();
     });
 
+    it('a P2P→Relay→P2P round trip never revives a cursor from an earlier hop (#1926 SC-03)', () => {
+      const serverConnection = makeRelayServerConnection('connected');
+      const rt = new SessionRuntime(makeConfig({
+        serverConnection,
+        hasSessionOutput: () => true,
+      }));
+
+      // A verified parser position on the first P2P subscription. The renderer
+      // really holds those bytes; the proof belongs to that subscription.
+      rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 2 });
+      expect(rt.terminalAppliedSnapshot?.appliedSeq).toBe(2);
+
+      // Hop 1: P2P → Relay. The Relay is a different subscription on a
+      // different transport and nothing has proven it continues the stream.
+      rt.updateContext({ forcedRelay: true });
+      expect(rt.terminalAppliedSnapshot).toBeNull();
+
+      // A late frame from the first P2P binding cannot revive the cursor.
+      rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 3 });
+      expect(rt.terminalAppliedSnapshot).toBeNull();
+
+      // Hop 2: Relay → P2P. The returning P2P subscription is again a new
+      // route generation, so the *first* P2P proof is not revived either —
+      // continuity is never inferred from sharing a transport kind.
+      rt.updateContext({ forcedRelay: false });
+      expect(rt.terminalAppliedSnapshot).toBeNull();
+      rt.noteStreamEventParsed({ streamEpoch: 7, streamSeq: 4 });
+      expect(rt.terminalAppliedSnapshot).toBeNull();
+
+      // Only a baseline that proves this renderer's new subscription may
+      // claim continuity again.
+      rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 5 });
+      expect(rt.terminalAppliedSnapshot?.appliedSeq).toBe(5);
+
+      rt.dispose();
+    });
+
     it('posts the swap only after the new generation is installed (SC-04)', () => {
       const rt = new SessionRuntime(makeConfig());
       const oldApi = rt.getAgentTerminalApi();
@@ -1885,5 +2114,133 @@ describe('SessionRuntime', () => {
       expect(relayTransport.seedStreamCursor).not.toHaveBeenCalled();
       rt.dispose();
     });
+  });
+});
+
+describe('explicit stream state (#1926 SC-08)', () => {
+  it('is unavailable until a stream is attached', () => {
+    const rt = new SessionRuntime(makeConfig());
+    expect(rt.getSnapshot().streamState).toBe('unavailable');
+    rt.dispose();
+  });
+
+  it('is degraded-live when attached without a verified baseline, and never claims synchronized on an observed gap', () => {
+    const rt = new SessionRuntime(makeConfig({ hasSessionOutput: () => true }));
+    rt.attachController.dispatch({ type: 'ATTACH_OK' });
+    // Attached is not synchronized: a screen-only capture is live output
+    // whose history has no proof behind it.
+    expect(rt.getSnapshot().streamState).toBe('degraded-live');
+
+    rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 2 });
+    expect(rt.getSnapshot().streamState).toBe('synchronized');
+
+    rt.noteStreamTruncated();
+    expect(rt.getSnapshot().streamState).toBe('degraded-live');
+    rt.dispose();
+  });
+
+  it('a route change revokes the claim until a new baseline proves the new subscription', () => {
+    const serverConnection = makeRelayServerConnection('connected');
+    const rt = new SessionRuntime(makeConfig({
+      serverConnection,
+      hasSessionOutput: () => true,
+    }));
+    rt.attachController.dispatch({ type: 'ATTACH_OK' });
+    rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 7, appliedThrough: 2 });
+    expect(rt.getSnapshot().streamState).toBe('synchronized');
+
+    rt.updateContext({ forcedRelay: true });
+    expect(rt.getSnapshot().streamState).toBe('degraded-live');
+
+    rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 8, appliedThrough: 0 });
+    expect(rt.getSnapshot().streamState).toBe('synchronized');
+    rt.dispose();
+  });
+});
+
+describe('stream epoch adoption (#2194)', () => {
+  function relayWithProofs() {
+    const serverConnection = makeRelayServerConnection('connected');
+    const callbacks = new Set<(proof: RelaySubscriptionProof, physicalGeneration: number) => void>();
+    let wireNumber = 0;
+    const conn = Object.assign(serverConnection, {
+      beginRelayTracked: vi.fn(() => ({
+        id: 'wire-' + ++wireNumber,
+        physicalGeneration: wireNumber + 2,
+      })),
+      onRelayReady: (
+        _session: string,
+        cb: (proof: RelaySubscriptionProof, gen: number) => void,
+      ) => {
+        callbacks.add(cb);
+        return () => { callbacks.delete(cb); };
+      },
+    });
+    const publish = (proof: RelaySubscriptionProof, generation: number) => {
+      for (const cb of callbacks) { cb(proof, generation); }
+    };
+    return { conn, publish };
+  }
+
+  it('states the lost history when a different epoch is adopted, and not for the same epoch', async () => {
+    const { conn, publish } = relayWithProofs();
+    const rt = new SessionRuntime(makeConfig({ forcedRelay: true, serverConnection: conn }));
+    const base: RelaySubscriptionProof = {
+      sessionName: 's1', browserClientId: 'unit-client',
+      relayRequestId: 'wire-1', routeId: 'aabbccdd-1234-4000-8000-aabbccddeeff',
+      subscriberGeneration: 41, streamEpoch: 7,
+    };
+    rt.setTransportReady(true);
+    await flushMicrotasks();
+    publish(base, 3);
+    expect(rt.relaySubscriptionProofSnapshot).not.toBeNull();
+    expect(rt.getSnapshot().historyDegraded).toBe(false);
+
+    // A route change that lands on the same epoch continues the same timeline.
+    rt.updateContext({ routeIntentEpoch: 1 });
+    await flushMicrotasks();
+    publish({ ...base, relayRequestId: 'wire-2', routeId: 'bbbbccdd-1234-4000-8000-aabbccddeeff' }, 4);
+    expect(rt.relaySubscriptionProofSnapshot?.relayRequestId).toBe('wire-2');
+    expect(rt.getSnapshot().historyDegraded).toBe(false);
+
+    // A different epoch means the old timeline is gone; state it.
+    rt.updateContext({ routeIntentEpoch: 2 });
+    await flushMicrotasks();
+    publish({ ...base, relayRequestId: 'wire-3', routeId: 'ccccccdd-1234-4000-8000-aabbccddeeff', streamEpoch: 8 }, 5);
+    expect(rt.relaySubscriptionProofSnapshot?.streamEpoch).toBe(8);
+    expect(rt.getSnapshot().historyDegraded).toBe(true);
+    // `noteStreamEpochChanged` deliberately keeps a requested bootstrap
+    // pending, so the new epoch's proven cut can still repair the buffer.
+    rt.noteBootstrapApplied();
+    expect(rt.getSnapshot().historyDegraded).toBe(false);
+    rt.dispose();
+  });
+
+  it('does not re-degrade when the proof restates the epoch its capture proved (#2194)', async () => {
+    // The Agent sends the history, then the attach reply / Relay proof. The
+    // capture is therefore parsed against the new epoch first; the proof that
+    // names the same epoch afterwards is not a change.
+    const { conn, publish } = relayWithProofs();
+    const rt = new SessionRuntime(makeConfig({ forcedRelay: true, serverConnection: conn }));
+    const base: RelaySubscriptionProof = {
+      sessionName: 's1', browserClientId: 'unit-client',
+      relayRequestId: 'wire-1', routeId: 'aabbccdd-1234-4000-8000-aabbccddeeff',
+      subscriberGeneration: 41, streamEpoch: 7,
+    };
+    rt.setTransportReady(true);
+    await flushMicrotasks();
+    publish(base, 3);
+    expect(rt.relaySubscriptionProofSnapshot?.streamEpoch).toBe(7);
+
+    rt.updateContext({ routeIntentEpoch: 1 });
+    await flushMicrotasks();
+    // The replacement route's capture proves epoch 8 before its proof lands.
+    rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 8, appliedThrough: 0 });
+    expect(rt.getSnapshot().streamState).toBe('synchronized');
+
+    publish({ ...base, relayRequestId: 'wire-2', routeId: 'bbbbccdd-1234-4000-8000-aabbccddeeff', streamEpoch: 8 }, 4);
+    expect(rt.getSnapshot().historyDegraded).toBe(false);
+    expect(rt.getSnapshot().streamState).toBe('synchronized');
+    rt.dispose();
   });
 });

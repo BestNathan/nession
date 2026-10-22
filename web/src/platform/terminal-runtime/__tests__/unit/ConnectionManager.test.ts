@@ -1218,6 +1218,51 @@ describe('ConnectionManager', () => {
       cm.dispose();
     });
 
+    it('a level Relay resize supersedes a buffered sequenced resize without consuming its ordinal (#2050)', async () => {
+      type Out = Parameters<RelayServerTransport['onRelayOutput']>[1];
+      type Res = Parameters<RelayServerTransport['onRelayResize']>[1];
+      let output: Out = () => {};
+      let resize: Res = () => {};
+      const ws = makeMockWs();
+      (ws.onRelayOutput as ReturnType<typeof vi.fn>).mockImplementation((_sid: string, cb: Out) => {
+        output = cb;
+        return () => {};
+      });
+      (ws.onRelayResize as ReturnType<typeof vi.fn>).mockImplementation((_sid: string, cb: Res) => {
+        resize = cb;
+        return () => {};
+      });
+      const truncated = vi.fn();
+      const displayed = vi.fn();
+      const resized = vi.fn();
+      const cm = new ConnectionManager({
+        mode: 'relay', sessionName: 'test', sessionId: 'a:test',
+        serverConnection: ws, onStreamTruncated: truncated, ...attached,
+      });
+      cm.onOutput = displayed;
+      cm.onResize = resized;
+
+      output(new Uint8Array([1]), undefined, { streamEpoch: 9, streamSeq: 10 });
+      // The sequenced resize is held behind the missing ordinal 11.
+      resize(100, 40, { streamEpoch: 9, streamSeq: 12 });
+      // The level is the pane's size now: it applies immediately and marks the
+      // held resize superseded, so committing that frame advances the timeline
+      // without restoring a grid the pane has already left.
+      resize(90, 25);
+      expect(resized).toHaveBeenCalledTimes(1);
+      expect(resized).toHaveBeenCalledWith(90, 25);
+      await flushMicrotasks(); // unavailable replay → explicit degraded skip
+      // The hole is reported, never silently promoted to a synchronized cut;
+      // the retry count is the reconciler's, not this test's contract.
+      expect(truncated).toHaveBeenCalled();
+      // The superseded resize consumed ordinal 12, so the next output is
+      // contiguous and is not held as another gap.
+      output(new Uint8Array([2]), undefined, { streamEpoch: 9, streamSeq: 13 });
+      expect(displayed).toHaveBeenCalledTimes(2);
+      expect(resized).toHaveBeenCalledTimes(1);
+      cm.dispose();
+    });
+
     it('does not turn Relay attach receipt into an applied stream checkpoint (#2052)', () => {
       const ws = makeMockWs();
       const cm = new ConnectionManager({

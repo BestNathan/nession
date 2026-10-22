@@ -586,11 +586,13 @@ export class ConnectionManager implements TerminalTransport {
     options?: { preserveAppliedCursor?: boolean },
   ): void {
     if (this.mode === 'relay') {
-      // Relay's attach cursor is a transport receipt, not proof that the
+      // Relay's attach receipt is a transport receipt, not proof that the
       // current xterm renderer applied a complete, verified checkpoint.
       // In particular tmux screen-only capture cannot establish a full VT
-      // baseline. A new Relay stream anchors only on its first live event,
-      // until an independently proven route-cutover checkpoint exists.
+      // baseline, and a route-cutover checkpoint is not independently proven.
+      // A new Relay stream anchors on its first live event; recovery is the
+      // reconciler's complete-only resume through the Server tunnel (#2050),
+      // not a cursor invented from this receipt.
       return;
     }
     this.reconciler.seed(streamEpoch, streamCursor, options);
@@ -654,9 +656,14 @@ export class ConnectionManager implements TerminalTransport {
   }
 
   /**
-   * Relay currently has no gap replay: the sequence is a diagnostic, not a
-   * synchronized xterm cursor. Report discontinuity as degraded-live and
-   * continue to display what arrived (#2048). No ACK/resume is minted here.
+   * Relay sequence positions are observed for continuity only (#2048).
+   *
+   * Relay carries an Agent-issued sequence and can resume through the
+   * authenticated Server tunnel since #2043/#2050, and its parser-applied ACK
+   * is bound to the Agent-minted subscription proof (#2060/#2120). None of
+   * that is minted *here*: a transport position is receipt, not proof that
+   * this renderer applied a complete checkpoint, so this lane only reports
+   * discontinuity as degraded-live and keeps displaying what arrived.
    */
   private observeRelayPosition(
     position: TerminalStreamPosition | undefined,

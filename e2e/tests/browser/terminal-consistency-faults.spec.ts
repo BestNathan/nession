@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { waitForShell } from '../../helpers/shell';
+import { restartAgent } from '../../helpers/runtimeControl';
 import {
   createSession,
   attachToSession,
@@ -186,7 +187,7 @@ for (const mode of ['Relay', 'P2P'] as const) {
 // scrollback when it exits. Markers are built from printf arguments so the
 // command line the PTY echoes never contains the resolved marker.
 for (const mode of ['Relay', 'P2P'] as const) {
-  test(`alternate screen survives an authoritative resize and exits cleanly over ${mode}`, async ({ page }, testInfo) => {
+  test(`alternate screen survives an authoritative resize and exits cleanly over ${mode}`, async ({ page, browser }, testInfo) => {
     test.skip(!process.env.CI, 'real stack available in CI only');
     test.setTimeout(120_000);
 
@@ -214,16 +215,94 @@ for (const mode of ['Relay', 'P2P'] as const) {
     await attachToSession(page, sessionName, mode);
     await waitForInteractiveShell(page);
 
+    // The TUI reads input instead of sleeping so the bracketed-paste mode it
+    // asked for can be measured at the PTY: `-icanon -echo` hands bytes to
+    // `cat -v` as they arrive, and `cat -v` makes the ESC bytes it receives
+    // visible in the alternate screen. Signals stay enabled (`-icanon`, not
+    // `raw`), so the Ctrl+C below still interrupts it.
     await submitTerminalCommand(
       page,
       `printf '\\033[?1049h'; printf '\\033[?1h\\033[?1000h\\033[?2004h'; ` +
-        `printf 'ALT-%s-TUI\\n' 2130; while :; do sleep 0.5; done`,
+        `printf 'ALT-%s-TUI\\n' 2130; stty -icanon -echo min 1 time 0; cat -v`,
     );
 
     await expect(async () => {
       expect(await readBufferType(page)).toBe('alternate');
       expect(await readTerminalBuffer(page)).toContain('ALT-2130-TUI');
     }).toPass({ timeout: 15_000 });
+
+    // #1926 SC-07 — bracketed paste. The TUI asked for it (`?2004h`); a paste
+    // delivered through the terminal's paste path must reach the PTY wrapped
+    // in `ESC[200~ ... ESC[201~`, not as bare text. `cat -v` prints exactly the
+    // bytes it received, so the wrapper is observable in the alternate screen.
+    await page.evaluate(() => {
+      const textarea = document.querySelector('.xterm-helper-textarea');
+      if (!(textarea instanceof HTMLTextAreaElement)) {
+        throw new Error('xterm helper textarea missing');
+      }
+      const data = new DataTransfer();
+      data.setData('text/plain', 'PASTE-2130-MARKER');
+      textarea.dispatchEvent(new ClipboardEvent('paste', {
+        clipboardData: data,
+        bubbles: true,
+        cancelable: true,
+      }));
+    });
+    await expect.poll(
+      async () => countInBuffer(page, 'PASTE-2130-MARKER'),
+      { timeout: 15_000 },
+    ).toBe(1);
+    expect(
+      await readTerminalBuffer(page),
+      'the paste reached the PTY without bracketed-paste markers',
+    ).toMatch(/\^\[\[200~PASTE-2130-MARKER\^\[\[201~/);
+
+    // #1926 SC-07 — fidelity is a declaration, and a TUI capture must not
+    // claim full VT. A second client attaching while the alternate screen owns
+    // the terminal receives a bootstrap; its declared fidelity is the only
+    // place the screen-only/partial-vs-full-VT distinction exists on the wire.
+    const second = await browser.newContext();
+    try {
+      const other = await second.newPage();
+      const secondWire: WireRecord = { sent: [], received: [] };
+      other.on('websocket', (socket) => {
+        socket.on('framereceived', (frame) => {
+          if (typeof frame.payload === 'string') {
+            secondWire.received.push(parseFrame(frame.payload));
+          }
+        });
+      });
+      await other.goto(
+        '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
+      );
+      await waitForShell(other);
+      await attachToSession(other, sessionName, mode);
+      await expect.poll(
+        () => secondWire.received.filter(
+          (frame) => frame.msg_type === 'agent.terminal.output'
+            && frame.payload?.bootstrap !== undefined,
+        ).length,
+        { timeout: 30_000 },
+      ).toBeGreaterThan(0);
+      const bootstrap = secondWire.received.find(
+        (frame) => frame.msg_type === 'agent.terminal.output'
+          && frame.payload?.bootstrap !== undefined,
+      )?.payload?.bootstrap as Record<string, unknown>;
+      console.log(`TUI-BOOTSTRAP-FIDELITY ${JSON.stringify({
+        fidelity: bootstrap.fidelity,
+        cut: bootstrap.cut_consistency,
+        truncated: bootstrap.truncated,
+        requested: bootstrap.requested_lines,
+      })}`);
+      expect(
+        bootstrap.fidelity,
+        'a pane capture must never be declared full VT',
+      ).not.toBe('full-vt');
+      expect(['screen-only', 'partial']).toContain(bootstrap.fidelity);
+      expect(typeof bootstrap.truncated, 'truncation must be stated').toBe('boolean');
+    } finally {
+      await second.close();
+    }
 
     // The controller suppresses the PTY half of a resize while the webfont is
     // still loading (`metricsAreProvisional`), but still resizes the local
@@ -287,9 +366,10 @@ for (const mode of ['Relay', 'P2P'] as const) {
       `the Agent refused the TUI resize: ${wireSummary}`,
     ).toEqual([]);
 
-    // Interrupt the loop, then leave the alternate screen from the shell.
+    // Interrupt the TUI, restore the tty the TUI changed, then leave the
+    // alternate screen from the shell.
     await sendRawToTerminal(page, '\x03');
-    await submitTerminalCommand(page, `printf '\\033[?1049l'; echo ALT-2130-BACK`);
+    await submitTerminalCommand(page, `stty sane; printf '\\033[?1049l'; echo ALT-2130-BACK`);
 
     await expect(async () => {
       expect(await readBufferType(page)).toBe('normal');
@@ -652,6 +732,14 @@ test('an Auto P2P loss falls back to Relay without remounting the xterm (#2156)'
   await attachToSession(page, sessionName, 'Auto');
   await waitForInteractiveShell(page);
 
+  // #1926 SC-08: a fresh attach whose atomic cut was parsed is the one case
+  // the runtime may call synchronized. The surface publishes the runtime's
+  // answer as a contract attribute, so the state is asserted rather than
+  // inferred from which notice happens to render.
+  const streamState = (): Promise<string | null> =>
+    page.getByTestId('terminal-surface').getAttribute('data-terminal-stream-state');
+  await expect.poll(streamState, { timeout: 30_000 }).toBe('synchronized');
+
   const relayStarted = (): boolean =>
     sentWire.some((frame) => frame.msg_type === 'server.session.relay.begin');
   // Auto must have chosen the direct route, or this fixture would not exercise
@@ -722,6 +810,12 @@ test('an Auto P2P loss falls back to Relay without remounting the xterm (#2156)'
   // the blocked rebuild lets AddressAttachPolicy retire its candidates and
   // force Relay. No further typing is needed to reach the policy.
   await sendRawToTerminal(page, ' ');
+
+  // #1926 SC-08: the cut is the moment the tri-state must stop claiming
+  // synchronization. The runtime revokes the P2P baseline; a stale
+  // `synchronized` here would be exactly the false claim SC-03 forbids.
+  await expect.poll(streamState, { timeout: 30_000 }).not.toBe('synchronized');
+
   await expect(async () => {
     const seen = await page.evaluate(() => {
       const state = window as unknown as {
@@ -758,6 +852,18 @@ test('an Auto P2P loss falls back to Relay without remounting the xterm (#2156)'
   expect(duplicated, 'a tail line was delivered more than once across the fallback').toEqual([]);
   expect(missingTail, 'a tail line never reached the parser across the fallback').toEqual([]);
 
+  // #1926 SC-08: the recovered route may be synchronized or degraded-live
+  // depending on whether its bootstrap proved a baseline — but a visible
+  // degraded notice and a synchronized claim may never coexist.
+  const recoveredState = await streamState();
+  expect(['synchronized', 'degraded-live', 'unavailable']).toContain(recoveredState);
+  if (await page.getByTestId('terminal-history-degraded').count() > 0) {
+    expect(
+      recoveredState,
+      'a visible degraded notice must not coexist with a synchronized claim',
+    ).toBe('degraded-live');
+  }
+
   // The renderer survived and the controller can still write.
   await expect(page.locator('.xterm')).toHaveAttribute('data-e2e-route-instance', 'original');
   expect(await countInBuffer(page, 'ROUTE-2156-BEFORE')).toBe(1);
@@ -765,3 +871,554 @@ test('an Auto P2P loss falls back to Relay without remounting the xterm (#2156)'
   await expect.poll(async () => countInBuffer(page, 'ROUTE-2156-AFTER'), { timeout: 20_000 })
     .toBe(1);
 });
+
+// #1926 SC-05: an Agent restart is the fault that invalidates every in-memory
+// stream position at once — a new process, a new stream epoch, and tmux
+// sessions that outlived it. The client must recover on the same renderer and
+// must not present the boundary as synchronized when it cannot prove the
+// history it lost.
+//
+// The restart is real: the harness stops the Agent process and starts a fresh
+// one on the same port over the same tmux server, so the Session's PTY and
+// scrollback survive while every epoch, replay ring and parser cursor belongs
+// to a process that no longer exists. Both routes are exercised because they
+// reach the restart through different owners: P2P loses its browser socket,
+// Relay loses the Server's tunnel (which must close the browser connection so
+// the client re-attaches instead of sitting on a frozen terminal, #2179).
+for (const mode of ['Relay', 'P2P'] as const) {
+  test(`an Agent restart recovers without claiming unproven history over ${mode} (#1926 SC-05)`, async ({ page }, testInfo) => {
+    test.skip(!process.env.CI, 'real stack available in CI only');
+    test.setTimeout(360_000);
+
+    // #2194 diagnostics, always visible in the selected lane: the wire decides
+    // why a recovery lost history. It records which attaches asked for a
+    // bootstrap, what cut/fidelity the Agent declared, whether a resume was
+    // attempted, and whether the recovered route was Relay — the facts the
+    // runtime's own state cannot show after the fact.
+    const wire: WireRecord = { sent: [], received: [] };
+    page.on('websocket', (socket) => {
+      socket.on('framesent', (frame) => {
+        if (typeof frame.payload === 'string') { wire.sent.push(parseFrame(frame.payload)); }
+      });
+      socket.on('framereceived', (frame) => {
+        if (typeof frame.payload === 'string') { wire.received.push(parseFrame(frame.payload)); }
+      });
+    });
+
+    // Page-side ordering (#2194): the wire alone cannot tell whether a request
+    // was decided before or after the visible renderer changed. Record every
+    // bootstrap-relevant request together with the DOM facts at that instant,
+    // and every transition of those facts.
+    await page.addInitScript(() => {
+      const w = window as unknown as { __restartLog?: Array<Record<string, unknown>> };
+      w.__restartLog = [];
+      const domFacts = () => ({
+        state: document.querySelector('[data-terminal-stream-state]')
+          ?.getAttribute('data-terminal-stream-state') ?? null,
+        notice: document.querySelector('[data-testid="terminal-history-degraded"]') !== null,
+        original: document.querySelector('.xterm[data-e2e-restart-instance="original"]') !== null,
+        xterms: document.querySelectorAll('.xterm').length,
+      });
+      const originalSend = WebSocket.prototype.send;
+      WebSocket.prototype.send = function (data) {
+        if (typeof data === 'string') {
+          try {
+            const parsed = JSON.parse(data) as { msg_type?: string; payload?: Record<string, unknown> };
+            if (parsed.msg_type === 'agent.attach'
+              || parsed.msg_type === 'agent.terminal.stream.resume'
+              || parsed.msg_type === 'server.session.relay.begin') {
+              w.__restartLog!.push({
+                t: Date.now(),
+                label: `send:${parsed.msg_type}`,
+                needsBootstrap: parsed.payload?.needs_bootstrap,
+                epoch: parsed.payload?.stream_epoch,
+                afterSeq: parsed.payload?.after_seq,
+                ...domFacts(),
+              });
+            }
+          } catch {
+            // Non-JSON frames are not part of this ordering.
+          }
+        }
+        return originalSend.call(this, data);
+      };
+      new MutationObserver(() => {
+        const facts = domFacts();
+        const key = `${facts.state}|${facts.notice}|${facts.original}|${facts.xterms}`;
+        const previous = w.__restartLog!.filter((e) => e.label === 'dom').at(-1);
+        if (previous?.key !== key) {
+          w.__restartLog!.push({ t: Date.now(), label: 'dom', key, ...facts });
+        }
+      // `document` rather than `documentElement`: an init script runs before
+      // the document is parsed, so the root element may not exist yet.
+      }).observe(document, {
+        childList: true, subtree: true, attributes: true,
+        attributeFilter: ['data-terminal-stream-state', 'data-e2e-restart-instance'],
+      });
+    });
+
+    const sessionName = `e2e-consistency-restart-${mode.toLowerCase()}-${testInfo.retry}-${Date.now()}`;
+    await page.goto(
+      '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
+    );
+    await waitForShell(page);
+    await createSession(page, sessionName);
+    await attachToSession(page, sessionName, mode);
+    await waitForInteractiveShell(page);
+
+    await page.locator('.xterm').evaluate((node) => {
+      node.setAttribute('data-e2e-restart-instance', 'original');
+    });
+
+    // Deliberately no xterm-node identity assertion here. An Agent restart is
+    // a full transport loss (the process that owned the epoch is replaced), and
+    // the recovery path is allowed to rebuild the renderer around a fresh
+    // verified bootstrap; #2156 owns "same node across a route change". What
+    // must hold is that the session recovers and that whatever history it
+    // could not prove is stated, which the assertions below cover.
+    await submitTerminalCommand(page, `printf 'RESTART-%s-BEFORE\\n' 1926`);
+    await expect.poll(async () => countInBuffer(page, 'RESTART-1926-BEFORE')).toBe(1);
+
+    await restartAgent();
+
+    // Recovery: input works again on the surviving tmux session. The command
+    // is retried because it can be typed while the transport is still
+    // re-attaching; every attempt prints the same marker, and the assertion is
+    // about the stream recovering at all, not about input deduplication.
+    await expect(async () => {
+      await submitTerminalCommand(page, `printf 'RESTART-%s-AFTER\\n' 1926`);
+      await expect
+        .poll(async () => countInBuffer(page, 'RESTART-1926-AFTER'), { timeout: 10_000 })
+        .toBeGreaterThan(0);
+    }).toPass({ timeout: 180_000 });
+
+    const before = await countInBuffer(page, 'RESTART-1926-BEFORE');
+    const rendererSurvived = await page
+      .locator('.xterm[data-e2e-restart-instance="original"]')
+      .count();
+    const degraded = await page.getByTestId('terminal-history-degraded').count();
+    const bootstraps = wire.received
+      .filter((frame) => frame.msg_type === 'agent.terminal.output'
+        && frame.payload?.bootstrap !== undefined)
+      .map((frame) => {
+        const bootstrap = frame.payload?.bootstrap as Record<string, unknown>;
+        return {
+          requested: bootstrap.requested_lines,
+          cut: bootstrap.cut_consistency,
+          fidelity: bootstrap.fidelity,
+          truncated: bootstrap.truncated,
+          epoch: bootstrap.stream_epoch,
+          through: bootstrap.through_seq,
+        };
+      });
+    const pageLog = await page.evaluate(() => {
+      const w = window as unknown as { __restartLog?: Array<Record<string, unknown>> };
+      return (w.__restartLog ?? []).slice(-60);
+    });
+    console.log(`AGENT-RESTART-WIRE ${JSON.stringify({
+      mode,
+      before,
+      degraded,
+      pageLog,
+      rendererSurvived: rendererSurvived === 1,
+      attaches: wire.sent
+        .filter((frame) => frame.msg_type === 'agent.attach')
+        .map((frame) => frame.payload?.needs_bootstrap),
+      // The reply is what the runtime's epoch adoption reads; testing only the
+      // request would leave "it never asked" and "the answer named no epoch"
+      // indistinguishable. Operation replies carry the `ok`/`error` ack type,
+      // not the request's wire name.
+      acks: wire.received
+        .filter((frame) => frame.msg_type === 'ok' || frame.msg_type === 'error')
+        .map((frame) => ({
+          type: frame.msg_type,
+          session: frame.payload?.session_name,
+          epoch: frame.payload?.stream_epoch,
+          cursor: frame.payload?.stream_cursor,
+          match: frame.payload?.epoch_match,
+          complete: frame.payload?.complete,
+          recovery: frame.payload?.recovery,
+          events: Array.isArray(frame.payload?.events) ? frame.payload.events.length : undefined,
+        }))
+        .slice(-12),
+      resumes: wire.sent.filter((frame) => frame.msg_type === 'agent.terminal.stream.resume').length,
+      relayBegins: wire.sent
+        .filter((frame) => frame.msg_type === 'server.session.relay.begin')
+        .map((frame) => frame.payload?.needs_bootstrap),
+      relayReady: wire.received
+        .filter((frame) => frame.msg_type === 'server.session.relay.ready')
+        .map((frame) => ({
+          epoch: frame.payload?.stream_epoch,
+          generation: frame.payload?.subscriber_generation,
+        })),
+      bootstraps: bootstraps.slice(-4),
+    })}`);
+
+    // No silent skip at the boundary. tmux history normally survives, so the
+    // pre-restart line should be repainted by the new Agent's bootstrap. If it
+    // is not, the runtime must say so with the degraded notice rather than
+    // showing a continuous-looking terminal — on **either** route (#2194: a
+    // route change onto a new stream epoch states the gap even when the
+    // recovery lands on Relay for a P2P attach). Asserted after the wire log
+    // so a failure reports what actually crossed the boundary.
+    expect(before, 'the pre-restart line was duplicated across recovery').toBeLessThanOrEqual(1);
+    if (before === 0) {
+      await expect(page.getByTestId('terminal-history-degraded')).toBeVisible({ timeout: 10_000 });
+    }
+
+    // A second post-restart command proves the recovered route is stable, not
+    // a one-frame attach.
+    await expect(async () => {
+      await submitTerminalCommand(page, `printf 'RESTART-%s-STABLE\\n' 1926`);
+      await expect
+        .poll(async () => countInBuffer(page, 'RESTART-1926-STABLE'), { timeout: 10_000 })
+        .toBeGreaterThan(0);
+    }).toPass({ timeout: 60_000 });
+  });
+}
+
+// #1926 SC-05: the burst that is larger than every in-memory window at once.
+// The Agent's replay ring is bounded by events, xterm's scrollback by lines,
+// and this fixture deliberately crosses both. Two things are asserted that the
+// 5k witnesses cannot see:
+//
+// 1. the controller's *parser* is starved (the page's main thread blocks for
+//    two seconds mid-burst — the xterm parser runs exactly there), and the
+//    retained tail still arrives exactly once; and
+// 2. after the burst the client reconnects with an applied cursor the Agent's
+//    ring no longer holds, and the runtime states that history may be
+//    incomplete instead of continuing a buffer it cannot prove.
+test('a 100k-line burst survives parser starvation and a retention-lost reconnect (#1926 SC-05)', async ({ page }, testInfo) => {
+  test.skip(!process.env.CI, 'real stack available in CI only');
+  test.setTimeout(900_000);
+
+  const sessionName = `e2e-consistency-big-${testInfo.retry}-${Date.now()}`;
+  await page.goto(
+    '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
+  );
+  await waitForShell(page);
+  await createSession(page, sessionName);
+  await attachToSession(page, sessionName, 'Relay');
+  await waitForInteractiveShell(page);
+
+  // 100k numbered lines: far beyond the Agent's 4096-event ring and the
+  // browser's scrollback, so the tail is the only synchronizable window.
+  // `sed` block-buffers ~500 bytes per write rather than one write per line;
+  // the numbers themselves are the witness.
+  const COUNT = 100_000;
+  const TAIL = 5_000;
+  await submitTerminalCommand(page, `seq 1 ${COUNT} | sed 's/^/BIG-/'`);
+
+  // Starve the parser deterministically. This is the slow-Parser fault: the
+  // page cannot read its socket or parse a byte while this loop runs, so the
+  // transport and Agent buffers must hold the burst rather than lose it or
+  // evict a subscriber that is merely not scheduled. The measured shape of
+  // this burst is ~2 000 PTY-sized chunks; the terminal writer's event bound
+  // has to hold them (512 did not — it overflowed and halted after ~5-8k
+  // displayed lines; see `SerializedTerminalWriter`'s measured default).
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    const until = performance.now() + 2_000;
+    while (performance.now() < until) { /* deliberately block the page */ }
+    resolve();
+  }));
+
+  await waitForLastLine(page, 'BIG-', COUNT, { timeoutMs: 600_000, stallMs: 120_000 });
+
+  const text = await readTerminalBuffer(page);
+  const counts = new Map<number, number>();
+  for (const match of text.matchAll(/BIG-(\d+)/g)) {
+    const value = Number(match[1]);
+    if (value >= 1 && value <= COUNT) {
+      counts.set(value, (counts.get(value) ?? 0) + 1);
+    }
+  }
+  const duplicated = [...counts.entries()]
+    .filter(([value, seen]) => seen > 1 && value > COUNT - TAIL)
+    .map(([value]) => value);
+  const missingTail: number[] = [];
+  for (let value = COUNT - TAIL + 1; value <= COUNT; value += 1) {
+    if (!counts.has(value)) { missingTail.push(value); }
+  }
+  expect(duplicated, 'a tail line was delivered more than once').toEqual([]);
+  expect(missingTail, 'a tail line never reached the starved parser').toEqual([]);
+
+  // Retention overflow: force a new physical Server socket while the relay's
+  // applied cursor sits far above the Agent's retained window. No replay can
+  // cover that stretch, so the client must either obtain a complete capture
+  // or say that its history may be incomplete. Continuing silently is the
+  // failure this asserts against.
+  await page.evaluate(() => {
+    const originalSend = WebSocket.prototype.send;
+    WebSocket.prototype.send = function (data) {
+      if (typeof data === 'string') {
+        try {
+          if ((JSON.parse(data) as { msg_type?: string }).msg_type === 'server.info') {
+            return;
+          }
+        } catch {
+          // Non-JSON frames still pass through unchanged.
+        }
+      }
+      return originalSend.call(this, data);
+    };
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => 'hidden',
+    });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+
+  const newSocket = page.waitForEvent('websocket', {
+    predicate: (ws) => ws.url().includes('/ws'),
+    timeout: 30_000,
+  });
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => 'visible',
+    });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await newSocket;
+  await expect(page.getByTestId('terminal-connecting')).toBeHidden({ timeout: 60_000 });
+
+  // The tail may be repainted by a fresh capture or explicitly marked
+  // degraded; what may not happen is a missing tail with no statement.
+  const tailLine = await countInBuffer(page, `BIG-${COUNT}`);
+  if (tailLine === 0) {
+    await expect(page.getByTestId('terminal-history-degraded')).toBeVisible({ timeout: 15_000 });
+  }
+
+  // The recovered route is still usable.
+  await submitTerminalCommand(page, `printf 'BIG-%s-AFTER\\n' 1926`);
+  await expect.poll(async () => countInBuffer(page, 'BIG-1926-AFTER'), { timeout: 30_000 })
+    .toBe(1);
+});
+
+// #2196: the writer's own bound is the fault. The 100k witness above stays
+// inside that bound by design; this one crosses it, so the halt and its repair
+// are the thing under test.
+//
+// The trigger is injected at the **real inbound protocol boundary** rather
+// than produced organically. Organic bursts are shaped by tmux coalescing and
+// by the Agent's own per-subscriber budget: an earlier 8 MiB flood tripped
+// that budget (a detach, a different fault) while never crossing the writer's
+// bound, and an earlier small-write burst was coalesced into too few frames.
+// The writer is the component under test, so the frames it receives are what
+// this test fixes deterministically: 4 200 one-byte `agent.terminal.output`
+// notifications, dispatched into the live socket in one task. The writer's
+// 4 096-event count bound is crossed before xterm's parser, which only runs
+// after the task, can apply any of them. One byte per frame is deliberate —
+// the bound under test is the count, and a multi-megabyte payload would
+// leave the shared fixture's parser busy for the following test.
+//
+// A halted writer refuses every later write — including a bootstrap — so the
+// repair cannot be a reset. The controller must replace the xterm, and the
+// runtime must re-attach asking for the capture that gives the replacement
+// its history. Both are asserted directly:
+//
+// 1. the degraded notice appears (the halt was stated, and the writer did
+//    overflow — a green run cannot be one where the fault never fired);
+// 2. the original `.xterm` node does not survive (the renderer was replaced,
+//    not merely marked);
+// 3. a command typed afterwards is displayed (the terminal is live again);
+// 4. the notice clears (a parsed atomic capture repaired it).
+test('a writer overflow replaces the renderer and resumes output (#2196)', async ({ page }, testInfo) => {
+  test.skip(!process.env.CI, 'real stack available in CI only');
+  test.setTimeout(600_000);
+
+  // Keep the live sockets so the fault can be delivered on the real one.
+  await page.addInitScript(() => {
+    const NativeWebSocket = window.WebSocket;
+    const sockets: WebSocket[] = [];
+    (window as unknown as { __overflowSockets?: WebSocket[] }).__overflowSockets = sockets;
+    window.WebSocket = class extends NativeWebSocket {
+      constructor(url: string | URL, protocols?: string | string[]) {
+        super(url, protocols);
+        sockets.push(this);
+      }
+    } as typeof WebSocket;
+  });
+
+  // #2196 diagnostics: whether the repair's re-attach asked for a capture and
+  // what the Agent answered. Recorded before the page loads so every socket
+  // is covered.
+  const wire: WireRecord = { sent: [], received: [] };
+  page.on('websocket', (socket) => {
+    socket.on('framesent', (frame) => {
+      if (typeof frame.payload === 'string') { wire.sent.push(parseFrame(frame.payload)); }
+    });
+    socket.on('framereceived', (frame) => {
+      if (typeof frame.payload === 'string') { wire.received.push(parseFrame(frame.payload)); }
+    });
+  });
+
+  const sessionName = `e2e-consistency-overflow-${testInfo.retry}-${Date.now()}`;
+  await page.goto(
+    '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
+  );
+  await waitForShell(page);
+  await createSession(page, sessionName);
+  await attachToSession(page, sessionName, 'P2P');
+  await waitForInteractiveShell(page);
+
+  // The renderer this test expects to lose. A replacement mounts a new xterm
+  // in the same container, so this marker is the difference between "the
+  // renderer was replaced" and "the old renderer kept serving notices".
+  await page.locator('.xterm').evaluate((node) => {
+    node.setAttribute('data-e2e-overflow-instance', 'original');
+  });
+
+  // Deliver output frames the way the Agent does, on the live P2P socket(s).
+  // Only sockets that are open are used: an address-plan rebuild can leave a
+  // disposed socket in the captured list, and dispatching into it is a no-op.
+  const deliver = async (frames: number, text: string) => page.evaluate(
+    ({ name, count, body }: { name: string; count: number; body: string }) => {
+      const sockets = ((window as unknown as { __overflowSockets?: WebSocket[] })
+        .__overflowSockets ?? []).filter((s) => s.url.includes(':19091/') && s.readyState === 1);
+      if (sockets.length === 0) {
+        return { ok: false, urls: ((window as unknown as { __overflowSockets?: WebSocket[] })
+          .__overflowSockets ?? []).map((s) => `${s.url} (${s.readyState})`) };
+      }
+      const payload = btoa(body);
+      for (let i = 0; i < count; i += 1) {
+        for (const socket of sockets) {
+          socket.dispatchEvent(new MessageEvent('message', {
+            data: JSON.stringify({
+              id: `overflow-inject-${i}`,
+              msg_type: 'agent.terminal.output',
+              payload: { session_name: name, data: payload },
+            }),
+          }));
+        }
+      }
+      return { ok: true, count, sockets: sockets.length };
+    },
+    { name: sessionName, count: frames, body: text },
+  );
+
+  // Prove the boundary routes before relying on it: three tiny frames with a
+  // marker the terminal must display. Without this, a misplaced dispatch would
+  // turn the whole fixture into a silent no-op.
+  const probe = await deliver(3, 'INJECT-PROBE\n');
+  expect(probe.ok, `probe dispatch (${JSON.stringify(probe)})`).toBe(true);
+  await expect.poll(async () => countInBuffer(page, 'INJECT-PROBE'), { timeout: 30_000 })
+    .toBeGreaterThan(0);
+
+  // Now the overflow. Every one of these is a real `agent.terminal.output`
+  // notification, and all 4 200 are enqueued in one task — before xterm's
+  // parser (which only runs after the task) can apply any — so the writer's
+  // 4 096-event bound is crossed deterministically. The frames are one byte
+  // on purpose: the bound under test is the count, the terminal should not
+  // be flooded, and the next fixture must not inherit a busy parser.
+  const OVERFLOW_FRAMES = 4_200;
+  const injected = await deliver(OVERFLOW_FRAMES, 'A');
+  expect(injected.ok, `overflow dispatch (${JSON.stringify(injected)})`).toBe(true);
+
+  // 1. The halt is stated. gapDetected stays set until a proven capture is
+  //    parsed, so this also proves the writer actually overflowed.
+  await expect(page.getByTestId('terminal-history-degraded'))
+    .toBeVisible({ timeout: 60_000 });
+
+  // 2. The renderer that halted is gone.
+  await expect(page.locator('.xterm[data-e2e-overflow-instance="original"]'))
+    .toHaveCount(0, { timeout: 60_000 });
+
+  // 3. Input and output work on the replacement without a page reload.
+  await expect(async () => {
+    await submitTerminalCommand(page, `printf 'OVERFLOW-%s-AFTER\\n' 2196`);
+    await expect
+      .poll(async () => countInBuffer(page, 'OVERFLOW-2196-AFTER'), { timeout: 10_000 })
+      .toBeGreaterThan(0);
+  }).toPass({ timeout: 120_000 });
+
+  // 4. A parsed atomic epoch-start capture is what clears the statement; the
+  //    notice may not outlive the repair that proved it.
+  const bootstraps = wire.received
+    .filter((frame) => frame.msg_type === 'agent.terminal.output'
+      && frame.payload?.bootstrap !== undefined)
+    .map((frame) => {
+      const bootstrap = frame.payload?.bootstrap as Record<string, unknown>;
+      return {
+        requested: bootstrap.requested_lines,
+        cut: bootstrap.cut_consistency,
+        fidelity: bootstrap.fidelity,
+        truncated: bootstrap.truncated,
+        epoch: bootstrap.stream_epoch,
+        through: bootstrap.through_seq,
+      };
+    });
+  console.log(`AGENT-OVERFLOW-WIRE ${JSON.stringify({
+    attaches: wire.sent
+      .filter((frame) => frame.msg_type === 'agent.attach')
+      .map((frame) => frame.payload?.needs_bootstrap),
+    resumes: wire.sent.filter((frame) => frame.msg_type === 'agent.terminal.stream.resume').length,
+    relayBegins: wire.sent
+      .filter((frame) => frame.msg_type === 'server.session.relay.begin')
+      .map((frame) => frame.payload?.needs_bootstrap),
+    bootstraps: bootstraps.slice(-4),
+    state: await page.locator('[data-terminal-stream-state]').getAttribute('data-terminal-stream-state'),
+  })}`);
+  await expect(page.getByTestId('terminal-history-degraded'))
+    .toBeHidden({ timeout: 60_000 });
+
+  // The repaired session keeps working.
+  await expect(async () => {
+    await submitTerminalCommand(page, `printf 'OVERFLOW-%s-STABLE\\n' 2196`);
+    await expect
+      .poll(async () => countInBuffer(page, 'OVERFLOW-2196-STABLE'), { timeout: 10_000 })
+      .toBeGreaterThan(0);
+  }).toPass({ timeout: 60_000 });
+});
+
+// #1926 SC-05: ANSI bursts. The plain numbered bursts prove stream identity;
+// this one proves the same path under escape traffic — every line is wrapped
+// in SGR colour/cursor sequences, so a parser that desynchronizes on ESC does
+// not merely render wrong, it loses or repeats line identity. Asserted as the
+// retained tail exactly once, which catches both a dropped line and a double
+// delivery even when the visible text still looks plausible.
+for (const mode of ['Relay', 'P2P'] as const) {
+  test(`an ANSI-coloured numbered burst reaches the parser exactly once over ${mode} (#1926 SC-05)`, async ({ page }, testInfo) => {
+    test.skip(!process.env.CI, 'real stack available in CI only');
+    test.setTimeout(300_000);
+
+    const sessionName = `e2e-consistency-ansi-${mode.toLowerCase()}-${testInfo.retry}-${Date.now()}`;
+    await page.goto(
+      '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
+    );
+    await waitForShell(page);
+    await createSession(page, sessionName);
+    await attachToSession(page, sessionName, mode);
+    await waitForInteractiveShell(page);
+
+    const COUNT = 2_000;
+    const TAIL = 500;
+    // awk builds the SGR wrapper per line; the typed command carries literal
+    // backslash escapes, so the command line echoed by the PTY never matches
+    // `ANSI-<digits>`.
+    await submitTerminalCommand(
+      page,
+      `seq 1 ${COUNT} | awk '{printf "\\033[3%dmANSI-%d\\033[0m\\n", ($1 % 8), $1}'`,
+    );
+
+    await waitForLastLine(page, 'ANSI-', COUNT, { timeoutMs: 180_000, stallMs: 45_000 });
+
+    const text = await readTerminalBuffer(page);
+    const counts = new Map<number, number>();
+    for (const match of text.matchAll(/ANSI-(\d+)/g)) {
+      const value = Number(match[1]);
+      if (value >= 1 && value <= COUNT) {
+        counts.set(value, (counts.get(value) ?? 0) + 1);
+      }
+    }
+    const duplicated = [...counts.entries()]
+      .filter(([value, seen]) => seen > 1 && value > COUNT - TAIL)
+      .map(([value]) => value);
+    const missingTail: number[] = [];
+    for (let value = COUNT - TAIL + 1; value <= COUNT; value += 1) {
+      if (!counts.has(value)) { missingTail.push(value); }
+    }
+    expect(duplicated, 'an ANSI-wrapped line was delivered more than once').toEqual([]);
+    expect(missingTail, 'an ANSI-wrapped tail line never reached the parser').toEqual([]);
+  });
+}

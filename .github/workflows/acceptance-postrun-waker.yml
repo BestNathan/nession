@@ -121,11 +121,18 @@ jobs:
       matrix:
         issue_number: ${{ fromJSON(needs.select.outputs.agent_issues) }}
     # Reuse the existing main-owned read-only evaluator and deterministic Issue updater.
+    #
+    # The provider follows the same repository-variable policy as the
+    # orchestrator's pre-merge and merged evaluations (#2190): every trigger has
+    # to resolve the same trusted executor, and a waker pinned to one provider
+    # silently fails the merged-SHA evaluation while the rest of the pipeline
+    # has moved. `ACCEPTANCE_PROVIDER` is not PR-controlled; an unsupported value
+    # fails closed in `agent-sc-acceptance.yml`.
     uses: BestNathan/nession/.github/workflows/agent-sc-acceptance.yml@main
     with:
       issue_number: ${{ matrix.issue_number }}
       stage: post-merge
-      provider: cursor
+      provider: ${{ vars.ACCEPTANCE_PROVIDER || 'cursor' }}
       target_ref: ${{ needs.select.outputs.target_sha }}
       deployment: ''
     secrets: inherit

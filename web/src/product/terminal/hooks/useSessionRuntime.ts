@@ -26,6 +26,11 @@ export interface UseSessionRuntimeOptions {
    * the answer is taken at attach time from the live Terminal.
    */
   hasSessionOutput?: () => boolean;
+  /**
+   * Whether the renderer mounted now parsed a capture of this session
+   * (#2194) — see `SessionRuntimeConfig.hasSessionHistory`.
+   */
+  hasSessionHistory?: () => boolean;
 }
 
 export interface UseSessionRuntimeResult {
@@ -61,6 +66,8 @@ const EMPTY_RUNTIME_SNAPSHOT: SessionRuntimeSnapshot = {
   transportReady: false,
   lastResize: null,
   reconnectCount: 0,
+  historyDegraded: false,
+  streamState: 'unavailable',
 };
 const EMPTY_RUNTIME_SUBSCRIBE = () => () => {};
 const EMPTY_RUNTIME_GET_SNAPSHOT = () => EMPTY_RUNTIME_SNAPSHOT;
@@ -296,6 +303,7 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
       createTransport: (opts) => new ConnectionManager(opts),
       onInputDrop: (drop) => setInputDrop(drop),
       hasSessionOutput: options.hasSessionOutput,
+      hasSessionHistory: options.hasSessionHistory,
     };
   }, [
     sessionId,
@@ -307,6 +315,7 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
     addressUrls,
     options.serverConnection,
     options.hasSessionOutput,
+    options.hasSessionHistory,
     routeIntentEpoch,
     setInputDrop,
   ]);
