@@ -28,6 +28,10 @@ export function resolveUIIntent(input: string, agents: Agent[]): UIIntent {
         (name) => name && text.includes(name.toLowerCase()),
       ),
     );
+    // A named offline Agent must never silently turn into a different target.
+    if (matches.length === 1 && matches[0].status !== 'online') {
+      return { type: 'unsupported' };
+    }
     const distinctIds = [...new Set(matches.map((agent) => agent.agent_id))];
     return {
       type: 'session.create',
