@@ -55,3 +55,34 @@
 @media(max-width:920px){.workflow-bottom{grid-template-columns:1fr}.workflow-detail{position:static}.workflow-roster{max-height:none}}
 @media(max-width:640px){.workflow-hero{padding:46px 0 34px}.workflow-hero h1{font-size:58px}.workflow-view{padding:20px 14px}.workflow-roster{grid-template-columns:1fr}.workflow-toolbar label{min-width:100%}.workflow-section-heading h2{font-size:34px}.workflow-graph-scroll{max-height:620px;overflow:auto}}
 @media(prefers-reduced-motion:reduce){.workflow-edge,.workflow-node{transition:none}}
+
+/* Independent public Pages workflow-explorer dark palette. */
+@media (prefers-color-scheme: dark){
+ .workflow-toolbar input,.workflow-toolbar select{border-color:#33473d}
+ .workflow-toolbar input:focus-visible,.workflow-toolbar select:focus-visible{outline-color:#5fbf99}
+ .workflow-legend{color:#9aada2}
+ .workflow-explainer{color:#96a89d}
+ .workflow-graph-scroll{background:#111c18;border-color:#2a3b34;scrollbar-color:#4f7a68 transparent}
+ .workflow-lane{border-bottom-color:#2c4037;color:#9fc9b2}
+ .workflow-lane small{color:#8fa398}
+ .workflow-node{background:#17241f;border-color:#31473c;box-shadow:0 8px 26px #00000040}
+ .workflow-node:hover,.workflow-node.related{border-color:#4c8a6f}
+ .workflow-node.selected{background:#1d352a;border-color:#69b894;box-shadow:0 0 0 2px #69b89433}
+ .workflow-node-meta{color:#8fa398}
+ .workflow-no-match{color:#8fa398}
+ .workflow-roster-row{background:#16231e;border-color:#2a3b34}
+ .workflow-roster-row:hover,.workflow-roster-row[aria-pressed=true]{background:#1d352a;border-color:#4c8a6f}
+ .workflow-roster-name{color:#cfe3d7}
+ .workflow-roster-group{color:#8fa398}
+ .workflow-detail{background:#14211c;border-color:#2c4037}
+ .workflow-detail p{color:#9eb2a6}
+ .workflow-detail-block{border-top-color:#2c4037}
+ .workflow-detail-block h4{color:#b7d2c1}
+ .workflow-chip{background:#1a2b23;border-color:#31473c;color:#a9d0b9}
+ .workflow-dependency,.workflow-link{color:#7fc4a4}
+ .workflow-detail .workflow-note{color:#8a9d92}
+ .legend-line{border-top-color:#69b894}
+ .legend-line.legend-call{border-top-color:#c9916a}
+ .workflow-edge{stroke:#69b894}
+ .workflow-edge.workflow_call{stroke:#c9916a}
+}

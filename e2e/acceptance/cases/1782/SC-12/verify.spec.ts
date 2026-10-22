@@ -79,6 +79,29 @@ test.describe('Nession Pages parent acceptance', () => {
     await expect(page.locator('script').filter({hasText: 'alert(1)'})).toHaveCount(0);
   });
 
+  test('dark color scheme and observed duration/cost coverage render truthfully', async ({page}) => {
+    await page.emulateMedia({colorScheme: 'dark'});
+    await page.goto(site.origin + '/#/agents');
+    await expect(page.getByRole('heading', {name: 'The agents behind the work.'})).toBeVisible();
+    await expect(page.getByText('Agent duration')).toBeVisible();
+    await expect(page.getByText('avg 2.5s · observed 2 runs')).toBeVisible();
+    await expect(page.getByText('observed 0 runs · no estimation')).toBeVisible();
+    await expect(page.getByText('Unobserved', {exact: true})).toBeVisible();
+    const body = await page.evaluate(() => ({
+      background: getComputedStyle(document.body).backgroundColor,
+      color: getComputedStyle(document.body).color,
+    }));
+    expect(body.background).toBe('rgb(13, 21, 19)');
+    expect(body.color).toBe('rgb(194, 209, 201)');
+
+    // The independent Workflow Explorer shares the dark palette.
+    await page.goto(site.origin + '/workflows.html');
+    await expect(page.getByRole('heading', {name: 'Inside the workflow.'})).toBeVisible();
+    const explorer = await page.evaluate(() =>
+      getComputedStyle(document.querySelector('.workflow-view')!).backgroundColor);
+    expect(explorer).toBe('rgb(21, 32, 28)');
+  });
+
   test('mobile layout keeps the deep-linked evidence readable without horizontal overflow', async ({page}) => {
     await page.setViewportSize({width: 390, height: 844});
     await page.goto(site.origin + '/#/work/pr/1787');
