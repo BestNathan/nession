@@ -32,19 +32,19 @@ fi
 # remotely readable. This also guards manual staging deploys, whose workflow
 # doesn't depend on the ACR mirror job.
 if [[ "${env}" == "staging" ]]; then
-  registry_url="https://crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/v2/n_public/nession"
   for img in server agent ui; do
     tag="${img}-${ref}"
-    response="$(curl -fsSL --retry 2 --connect-timeout 15 --max-time 45 \
-      -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json' \
-      "${registry_url}/manifests/${tag}")" || {
-        echo "ACR image ${tag} unavailable; refusing to advance staging GitOps" >&2
-        exit 1
-      }
+    # ACR can return HTTP 401 to raw curl manifest requests while the Docker
+    # Registry challenge/token flow still permits anonymous image pulls.
+    # Buildx performs that negotiation, just as Kubernetes containerd does.
+    if ! manifest="$(docker buildx imagetools inspect --raw "${TARGET_IMAGE}:${tag}")"; then
+      echo "ACR image ${tag} unavailable; refusing to advance staging GitOps" >&2
+      exit 1
+    fi
     if ! jq -e '
       [.manifests[]? | select(.platform.os == "linux") | .platform.architecture]
       | index("amd64") != null and index("arm64") != null
-    ' <<< "${response}" >/dev/null; then
+    ' <<< "${manifest}" >/dev/null; then
       echo "ACR image ${tag} missing amd64 or arm64; refusing staging GitOps update" >&2
       exit 1
     fi
