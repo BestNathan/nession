@@ -178,6 +178,18 @@ export class TerminalController {
    */
   private _hasSessionOutput = false;
   /**
+   * Whether a capture (a bootstrap of any fidelity) has been parsed into the
+   * xterm that is mounted now.
+   *
+   * This is not the same question as {@link hasSessionOutput}, and conflating
+   * them lost history (#2194): a **replacement** renderer receives live frames
+   * as soon as a transport is bound, so it answers "I hold output" while
+   * holding none of the session's history. The attach that follows then skips
+   * the capture — and the terminal silently starts a new timeline. A renderer
+   * only answers this one `true` after a capture's write callback ran for it.
+   */
+  private _hasParsedCapture = false;
+  /**
    * Numbers the snapshots this controller has handed to xterm, so the newest
    * one's write callback is the only one that can lift
    * {@link hasSessionOutput}. A re-attach while a large snapshot is still
@@ -354,6 +366,7 @@ export class TerminalController {
           && this._terminal === terminal
           && this.transport === transport) {
           this.markSessionOutput();
+          this._hasParsedCapture = true;
           // The baseline is a parser-applied stream position, not a claim that
           // the screen was restored: it comes strictly from an atomic cut and
           // this write's callback in the current generation.
@@ -411,6 +424,17 @@ export class TerminalController {
    */
   get hasSessionOutput(): boolean {
     return this._hasSessionOutput;
+  }
+
+  /**
+   * Whether the mounted xterm parsed a capture of this session (#2194).
+   *
+   * The attach decision this answers is "would re-sending history duplicate
+   * what I hold, or fill what I lack?" — and live output alone neither
+   * duplicates nor fills history. See {@link _hasParsedCapture}.
+   */
+  get hasParsedCapture(): boolean {
+    return this._hasParsedCapture;
   }
 
   private teardownTransport(): void {

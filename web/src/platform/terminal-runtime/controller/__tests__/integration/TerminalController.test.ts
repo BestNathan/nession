@@ -704,6 +704,31 @@ describe('TerminalController', () => {
     controller.detach();
   });
 
+  it('distinguishes a parsed capture from live output (#2194)', async () => {
+    const transport = makeTransport();
+    const controller = new TerminalController(makeSession(), () => transport);
+    controller.attach(host());
+    const h = delayedParser(controller);
+
+    // Live output answers "this Terminal holds something"; it proves nothing
+    // about history, and a replacement renderer reaches this state before any
+    // attach can ask.
+    transport.onOutput!(new Uint8Array([104, 105]));
+    expect(controller.hasSessionOutput).toBe(true);
+    expect(controller.hasParsedCapture).toBe(false);
+    h.finish();
+
+    // A capture's parser callback is the history fact.
+    transport.onOutput!(new Uint8Array([104, 105]), {
+      requestedLines: 5000, truncated: false,
+    });
+    h.finish(); // buffer reset
+    h.finish(); // snapshot bytes
+    expect(controller.hasParsedCapture).toBe(true);
+    h.spy.mockRestore();
+    controller.dispose();
+  });
+
   it('ignores a superseded snapshot when it finally lands (#1491)', () => {
     const transport = makeTransport();
     const controller = new TerminalController(makeSession(), () => transport);

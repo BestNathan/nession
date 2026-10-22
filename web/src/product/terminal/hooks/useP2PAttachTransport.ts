@@ -12,6 +12,8 @@ interface UseP2PAttachTransportOptions {
   serverConnection?: RelayServerTransport;
   /** Whether the Terminal already holds this session's history (#321). */
   hasSessionOutput?: () => boolean;
+  /** Whether the mounted renderer parsed a capture of this session (#2194). */
+  hasSessionHistory?: () => boolean;
 }
 
 interface UseP2PAttachTransportResult {
@@ -31,6 +33,7 @@ interface UseP2PAttachTransportResult {
 export function useP2PAttachTransport({
   serverConnection,
   hasSessionOutput,
+  hasSessionHistory,
 }: UseP2PAttachTransportOptions): UseP2PAttachTransportResult {
   const {
     activeUrl, agentTerminalApi, connectionState,
@@ -39,6 +42,7 @@ export function useP2PAttachTransport({
     configOwner: true,
     serverConnection,
     hasSessionOutput,
+    hasSessionHistory,
   });
 
   return {

@@ -103,6 +103,24 @@ export interface SessionRuntimeConfig {
    * silently suppressing history.
    */
   hasSessionOutput?: () => boolean;
+  /**
+   * Whether the **renderer mounted now** parsed a capture of this session
+   * (#2194).
+   *
+   * `hasSessionOutput` answers "does the Terminal hold any output"; that is
+   * true for a replacement renderer as soon as live frames reach it, which is
+   * before any attach and therefore before any capture. A renderer that only
+   * ever saw live output holds no history: attaching without asking for one
+   * starts a new timeline silently. This reader is the narrower question and
+   * the one attach must ask.
+   *
+   * A reader rather than a flag for the same reason as `hasSessionOutput`: the
+   * renderer can be replaced under a surviving runtime, so only the Terminal
+   * can answer. Absent means "assume it does" — the pre-#2194 behaviour for
+   * consumers that have no Terminal to ask (and for tests that predate the
+   * distinction).
+   */
+  hasSessionHistory?: () => boolean;
 }
 
 export interface RuntimeMirrorSnapshot {
@@ -310,6 +328,14 @@ export class SessionRuntime {
    */
   private gapDetected = false;
   /**
+   * Whether this runtime ever reached `attached` (#2194).
+   *
+   * A later attach whose mounted renderer parsed no capture is then a
+   * **replacement**: the buffer the earlier attach filled is gone, which is an
+   * observed loss — not the healthy first attach's "I have nothing yet".
+   */
+  private everAttached = false;
+  /**
    * The last stream epoch this runtime adopted from an attach seed or a relay
    * proof (#2194). A new epoch is a new timeline: the old timeline's ring never
    * held it, so a buffer kept from the previous one cannot be proven
@@ -397,6 +423,7 @@ export class SessionRuntime {
     this.snapshot = this.buildSnapshot();
     this.attachController.subscribeOutcomes((result) => {
       if (result.phase === 'attached') {
+        this.everAttached = true;
         this.attachedTransportGeneration = this.transportGeneration;
         // Attach confirms the PTY subscription, not the xterm buffer.
         // Only noteBootstrapApplied() may clear a pending history repair.
@@ -554,9 +581,18 @@ export class SessionRuntime {
    * convenient one — it **replaces** the buffer from tmux's own scrollback,
    * which tmux retains regardless of who is attached, so refilling a hole
    * cannot duplicate what the client already has.
+   *
+   * **The third question is who holds the buffer now** (#2194).
+   * A replacement renderer receives live frames as soon as a transport is
+   * bound, so `hasSessionOutput` answers *yes* for a terminal that holds no
+   * history at all — and the attach then skips the capture. `hasSessionHistory`
+   * asks the narrower question: did a capture parse into the renderer that is
+   * mounted now. Absent readers keep the pre-#2194 answer.
    */
   private needsBootstrap(): boolean {
-    return this.historyMayHaveGap || !(this.config.hasSessionOutput?.() ?? false);
+    return this.historyMayHaveGap
+      || !(this.config.hasSessionOutput?.() ?? false)
+      || !(this.config.hasSessionHistory?.() ?? true);
   }
 
   /**
@@ -569,6 +605,15 @@ export class SessionRuntime {
     if (needed) {
       this.historyMayHaveGap = true;
       this.bootstrapRepairPending = true;
+      // A re-attach onto a renderer that parsed no capture is a replacement:
+      // whatever the previous attach filled is gone. That is an observed loss,
+      // and the degraded statement must survive until a capture proves it
+      // repaired — a transport swap alone must not present a fresh buffer as
+      // continuous (#2194).
+      if (this.everAttached && !(this.config.hasSessionHistory?.() ?? true)) {
+        this.gapDetected = true;
+        this.emitSnapshot();
+      }
     }
     return needed;
   }

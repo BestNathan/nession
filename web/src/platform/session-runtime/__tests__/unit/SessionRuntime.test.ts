@@ -904,6 +904,45 @@ describe('SessionRuntime', () => {
       rt.dispose();
     });
 
+    it('states the loss when a re-attach lands on a renderer with no parsed capture (#2194)', async () => {
+      let parsedCapture = false;
+      const serverConnection = makeRelayServerConnection('connected');
+      const rt = new SessionRuntime(makeConfig({
+        forcedRelay: true,
+        serverConnection,
+        hasSessionOutput: () => true,
+        hasSessionHistory: () => parsedCapture,
+      }));
+      rt.setTransportReady(true);
+      await flushMicrotasks();
+      expect(rt.attachState.phase).toBe('attached');
+      // The first attach asks for the capture it has none of, but nothing has
+      // been lost yet: a healthy first attach is not a degraded session.
+      expect(serverConnection.beginRelay.mock.calls[0]?.[1]).toMatchObject({
+        needsBootstrap: true,
+      });
+      expect(rt.getSnapshot().historyDegraded).toBe(false);
+
+      // A route change onto a renderer that never parsed a capture: the
+      // buffer the attached session filled is gone.
+      rt.updateContext({ routeIntentEpoch: 1 });
+      await flushMicrotasks();
+      expect(serverConnection.beginRelay).toHaveBeenCalledTimes(2);
+      expect(serverConnection.beginRelay.mock.calls[1]?.[1]).toMatchObject({
+        needsBootstrap: true,
+      });
+      expect(rt.getSnapshot().historyDegraded).toBe(true);
+
+      // A capture parsed into the replacement is the repair; only then does
+      // the statement clear.
+      parsedCapture = true;
+      rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 9, appliedThrough: 0 });
+      rt.noteBootstrapApplied();
+      expect(rt.getSnapshot().historyDegraded).toBe(false);
+      expect(rt.getSnapshot().streamState).toBe('synchronized');
+      rt.dispose();
+    });
+
     it('requires a new bootstrap after relay loss even if an old P2P cursor exists (#1645)', async () => {
       const serverConnection = makeRelayServerConnection('connected');
       const rt = new SessionRuntime(makeConfig({
@@ -1184,6 +1223,34 @@ describe('SessionRuntime', () => {
       // that re-sending the history would duplicate what is already on screen.
       expect(clientAttachBootstrapFlags()).toEqual([false]);
       holding.dispose();
+    });
+
+    it('asks for a bootstrap when the mounted renderer never parsed a capture (#2194)', async () => {
+      // A replacement renderer latches `hasSessionOutput` as soon as live
+      // frames arrive, but it holds no history. The narrower reader is what
+      // the attach must ask.
+      const rt = new SessionRuntime(makeConfig({
+        hasSessionOutput: () => true,
+        hasSessionHistory: () => false,
+      }));
+      rt.setTransportReady(true);
+      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      await openWs();
+      await flushMicrotasks();
+      expect(clientAttachBootstrapFlags()).toEqual([true]);
+      rt.dispose();
+
+      wsInstances = [];
+      const provisioned = new SessionRuntime(makeConfig({
+        hasSessionOutput: () => true,
+        hasSessionHistory: () => true,
+      }));
+      provisioned.setTransportReady(true);
+      provisioned.attachController.dispatch({ type: 'SESSION_SELECTED' });
+      await openWs();
+      await flushMicrotasks();
+      expect(clientAttachBootstrapFlags()).toEqual([false]);
+      provisioned.dispose();
     });
 
     it('asks for a bootstrap when no Terminal reader is wired at all', async () => {
