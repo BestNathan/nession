@@ -66,7 +66,7 @@ export function AIExperience({
           {turns.length === 0 ? (
             <div className="flex flex-col items-center gap-3 text-center">
               <Bot className="size-8 text-foreground" aria-hidden />
-              <h1 className={cn('text-2xl font-medium tracking-tight', chromeSansRole('title'))}>What can I do for you?</h1>
+              <h1 className={cn('tracking-tight', chromeSansRole('title'))}>What can I do for you?</h1>
               <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>
                 Ask Nession to open a capability.
               </p>
