@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // A real-provider, read-only Acceptance canary. No Issue/GitHub writes.
 import assert from 'node:assert/strict';
+import { ACCEPTANCE_PROMPT_VERSION } from './tasks/acceptance.mjs';
 import { providerScopedRunName } from './telemetry/run-name.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -42,7 +43,8 @@ export function verifySmoke({ context, result, telemetry, provider }) {
   }
   assert.equal(telemetry.agent.status, 'finished');
   assert.equal(telemetry.agent.prompt?.id, 'acceptance');
-  assert.equal(telemetry.agent.prompt?.version, 'v1');
+  assert.equal(telemetry.agent.prompt?.version, ACCEPTANCE_PROMPT_VERSION,
+    'smoke telemetry must carry the canonical acceptance Prompt version');
   assert.match(telemetry.agent.prompt?.sha256 || '', /^[0-9a-f]{64}$/, 'prompt sha256 must be valid');
   assert.equal(telemetry.task.target_ref, context.target_ref);
   const expectedSuffix = '-issue-' + context.issue.number + '-' + context.stage + '-' + canonicalProvider;
@@ -57,7 +59,7 @@ export function selfTest() {
     context, provider: 'deepseek',
     result: { criteria: [{ criterion: EXPECTED, result: 'Pending', evidence: [], summary: 'No evidence supplied' }] },
     telemetry: { schema_version: 1, identity: { unique_run_name: '42-1-issue-1556-staging-deepseek' }, task: { target_ref: context.target_ref }, agent: {
-      provider: 'deepseek', status: 'finished', prompt: { id: 'acceptance', version: 'v1', sha256: 'c'.repeat(64) },
+      provider: 'deepseek', status: 'finished', prompt: { id: 'acceptance', version: ACCEPTANCE_PROMPT_VERSION, sha256: 'c'.repeat(64) },
     } },
   };
   assert.equal(verifySmoke(fixture).outcome, 'Pending');
@@ -84,7 +86,8 @@ export function selfTest() {
   assert.throws(() => verifySmoke({ ...fixture, result: { criteria: [{ criterion: 'SC-98', result: 'Pending' }] } }), /criterion identity/);
   assert.throws(() => verifySmoke({ ...fixture, result: { criteria: [{ criterion: EXPECTED, result: 'Pass' }] } }), /fabricated evidence/);
   assert.throws(() => verifySmoke({ ...fixture, telemetry: { ...fixture.telemetry, agent: { ...fixture.telemetry.agent, provider: 'cursor' } } }), /provider/);
-  assert.throws(() => verifySmoke({ ...fixture, telemetry: { ...fixture.telemetry, agent: { ...fixture.telemetry.agent, prompt: { id: 'acceptance', version: 'v1', sha256: 'invalid' } } } }), /sha256/);
+  assert.throws(() => verifySmoke({ ...fixture, telemetry: { ...fixture.telemetry, agent: { ...fixture.telemetry.agent, prompt: { id: 'acceptance', version: 'v1', sha256: 'c'.repeat(64) } } } }), /canonical acceptance Prompt version/);
+  assert.throws(() => verifySmoke({ ...fixture, telemetry: { ...fixture.telemetry, agent: { ...fixture.telemetry.agent, prompt: { id: 'acceptance', version: ACCEPTANCE_PROMPT_VERSION, sha256: 'invalid' } } } }), /sha256/);
 
   const nameCursor = providerScopedRunName({
     workflowId: 'agent-provider-smoke', runId: 42, runAttempt: 1,
