@@ -6,6 +6,7 @@ import type { Session } from '@/types';
 
 export function ShellDialogs({
   showCreateModal,
+  createPreselectedAgentId,
   setShowCreateModal,
   agents,
   handleSessionCreated,
@@ -19,6 +20,7 @@ export function ShellDialogs({
   onAttachClose,
 }: {
   showCreateModal: boolean;
+  createPreselectedAgentId?: string | null;
   setShowCreateModal: (show: boolean) => void;
   agents: ReturnType<typeof useDashboard>['agents'];
   /** Forwarded unchanged from `CreateSessionDialog`; see its `onCreated`. */
@@ -38,7 +40,7 @@ export function ShellDialogs({
         isOpen={showCreateModal}
         onClose={() => setShowCreateModal(false)}
         agents={agents}
-        preselectedAgentId={null}
+        preselectedAgentId={createPreselectedAgentId ?? null}
         onCreated={handleSessionCreated}
       />
       <KillConfirmDialog

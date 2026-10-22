@@ -661,4 +661,15 @@ describe('Shell', () => {
     await userEvent.click(screen.getByTestId('session-item-a1:fix'));
     expect(screen.queryByTestId('app-layer-root')).not.toBeInTheDocument();
   });
+  it('keeps its Terminal mounted across AI and Standard mode switching', async () => {
+    deepLink.sessionIdFromUrl = sess.session_id;
+    renderShell();
+    const terminal = screen.getByTestId('terminal');
+    await userEvent.click(screen.getByRole('button', { name: 'AI' }));
+    expect(screen.getByTestId('ai-mode')).toBeInTheDocument();
+    expect(screen.getByTestId('terminal')).toBe(terminal);
+    await userEvent.click(screen.getByRole('button', { name: 'Standard' }));
+    expect(screen.queryByTestId('ai-mode')).not.toBeInTheDocument();
+    expect(screen.getByTestId('terminal')).toBe(terminal);
+  });
 });
