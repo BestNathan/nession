@@ -1066,3 +1066,55 @@ test('a 100k-line burst survives parser starvation and a retention-lost reconnec
   await expect.poll(async () => countInBuffer(page, 'BIG-1926-AFTER'), { timeout: 30_000 })
     .toBe(1);
 });
+
+// #1926 SC-05: ANSI bursts. The plain numbered bursts prove stream identity;
+// this one proves the same path under escape traffic — every line is wrapped
+// in SGR colour/cursor sequences, so a parser that desynchronizes on ESC does
+// not merely render wrong, it loses or repeats line identity. Asserted as the
+// retained tail exactly once, which catches both a dropped line and a double
+// delivery even when the visible text still looks plausible.
+for (const mode of ['Relay', 'P2P'] as const) {
+  test(`an ANSI-coloured numbered burst reaches the parser exactly once over ${mode} (#1926 SC-05)`, async ({ page }, testInfo) => {
+    test.skip(!process.env.CI, 'real stack available in CI only');
+    test.setTimeout(300_000);
+
+    const sessionName = `e2e-consistency-ansi-${mode.toLowerCase()}-${testInfo.retry}-${Date.now()}`;
+    await page.goto(
+      '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
+    );
+    await waitForShell(page);
+    await createSession(page, sessionName);
+    await attachToSession(page, sessionName, mode);
+    await waitForInteractiveShell(page);
+
+    const COUNT = 2_000;
+    const TAIL = 500;
+    // awk builds the SGR wrapper per line; the typed command carries literal
+    // backslash escapes, so the command line echoed by the PTY never matches
+    // `ANSI-<digits>`.
+    await submitTerminalCommand(
+      page,
+      `seq 1 ${COUNT} | awk '{printf "\\033[3%dmANSI-%d\\033[0m\\n", ($1 % 8), $1}'`,
+    );
+
+    await waitForLastLine(page, 'ANSI-', COUNT, { timeoutMs: 180_000, stallMs: 45_000 });
+
+    const text = await readTerminalBuffer(page);
+    const counts = new Map<number, number>();
+    for (const match of text.matchAll(/ANSI-(\d+)/g)) {
+      const value = Number(match[1]);
+      if (value >= 1 && value <= COUNT) {
+        counts.set(value, (counts.get(value) ?? 0) + 1);
+      }
+    }
+    const duplicated = [...counts.entries()]
+      .filter(([value, seen]) => seen > 1 && value > COUNT - TAIL)
+      .map(([value]) => value);
+    const missingTail: number[] = [];
+    for (let value = COUNT - TAIL + 1; value <= COUNT; value += 1) {
+      if (!counts.has(value)) { missingTail.push(value); }
+    }
+    expect(duplicated, 'an ANSI-wrapped line was delivered more than once').toEqual([]);
+    expect(missingTail, 'an ANSI-wrapped tail line never reached the parser').toEqual([]);
+  });
+}
