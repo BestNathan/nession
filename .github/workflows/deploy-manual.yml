@@ -25,6 +25,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      # The shared GitOps writer verifies ACR multi-arch manifests when
+      # targeting staging; other environments keep their existing GHCR path.
+      - uses: docker/setup-buildx-action@v3
+        if: ${{ github.event.inputs.environment == 'staging' }}
 
       # Two lanes (owner model 2026-09-05): the staging lane deploys ANY
       # commit whose images exist (a commit merged to staging has them — the
