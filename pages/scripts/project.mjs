@@ -193,7 +193,7 @@ function rosterFrom(registry, agentWindow) {
     observed_7d: Object.hasOwn(usage,id) ? number(usage[id]) : null,
   })).sort((a,b)=>a.role.localeCompare(b.role)||a.id.localeCompare(b.id));
 }
-export function makeProjection({ repository, agent, registry, issues, pulls, workflowRuns, issueTimelines, prReviews, issueRunSource, acceptanceE2E, agentStoreSource, lineageEvidence, refs={}, meta={} }) {
+export function makeProjection({ repository, agent, registry, issues, pulls, workflowRuns, issueTimelines, prReviews, issueRunSource, acceptanceE2E, agentStoreSource, lineageEvidence, refs={}, storeMeta={}, meta={} }) {
   const r = repository?.schema_version === 2 ? repository : null;
   const a = agent?.schema_version === 1 && agent?.kind === 'agent_metrics_aggregate' ? agent : null;
   const current = r?.repository || {}, efficiency = r?.efficiency || {};
@@ -202,12 +202,18 @@ export function makeProjection({ repository, agent, registry, issues, pulls, wor
   const tok = aw?.tokens?.total || {}, tool=aw?.tools||{}, cost=aw?.cost_usd?.charged || {},
     duration=aw?.duration_ms||{};
   const record = (name,purpose)=>{
-    const v=refs[name];
+    const v=refs[name], m=storeMeta[name]||{};
     return {
       name, purpose,
       state: v?.state === 'present' && safeSha(v.sha) ? 'present' : v?.state === 'missing' ? 'missing' : 'unavailable',
       sha: safeSha(v?.sha),
-      url:GH+'/tree/'+name
+      url:GH+'/tree/'+name,
+      // Safe bounded facts from a read-only public ref. A missing measurement
+      // stays null; a truncated tree is never presented as a complete count.
+      updated_at: safeDate(m.updated_at),
+      freshness: sourceFreshness(m.updated_at, meta.generated_at),
+      records: number(m.records),
+      truncated: m.truncated === true,
     };
   };
   return {
@@ -290,7 +296,8 @@ export function makeProjection({ repository, agent, registry, issues, pulls, wor
         return {...x,workflow:prWorkflowEvidence(source,workflowRuns),review:prReviewEvidence(source,prReviews?.[String(x.number)])};
       }),
     },
-    evidence:{ stores:stores.map(([name,purpose])=>record(name,purpose)) },
+    // Inventory only refs that actually exist; absence is not an inventory row.
+    evidence:{ stores:stores.map(([name,purpose])=>record(name,purpose)).filter(x=>x.state==='present') },
   };
 }
 // Only exported public contract keys are permitted. This is a release gate,
@@ -339,7 +346,13 @@ export function validateProjection(p) {
     }
   }
   p.agents.roster.forEach(x=>allowedFields(x,['id','role','provider','observed_7d'],'Agent roster'));
-  p.evidence.stores.forEach(x=>allowedFields(x,['name','purpose','state','sha','url'],'store'));
+  p.evidence.stores.forEach(x=>{
+    allowedFields(x,['name','purpose','state','sha','url','updated_at','freshness','records','truncated'],'store');
+    checkFreshness(x.freshness);
+    if(x.records!==null&&(!Number.isSafeInteger(x.records)||x.records<0))throw Error('invalid store record count');
+    if(typeof x.truncated!=='boolean')throw Error('invalid store truncation flag');
+    if(x.updated_at!==null&&!safeDate(x.updated_at))throw Error('invalid store update time');
+  });
   checkFreshness(p.repository.freshness);
   checkFreshness(p.agents.freshness);
   if(!Array.isArray(p.work.issues)||p.work.issues.length>12||

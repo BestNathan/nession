@@ -15,8 +15,11 @@ test.describe('standalone Pages evidence',()=>{
  test('orphan ref presence never claims independent audit',async({page})=>{
   await page.goto(site.origin+'/#/evidence');
   await expect(page.getByRole('heading',{name:'Evidence, not claims.'})).toBeVisible();
-  await expect(page.getByText('Integrity: not independently verified by this public site')).toHaveCount(2);
-  await expect(page.getByText('Ref not verified / unavailable')).toBeVisible();
+  await expect(page.getByText('Integrity: not independently verified by this public site')).toHaveCount(1);
+  await expect(page.getByText('Ref observed · bbbbbbbbbbbb')).toBeVisible();
+  await expect(page.getByText('Updated Oct 14, 2026 · fresh')).toBeVisible();
+  await expect(page.getByText('Records 42')).toBeVisible();
+  await expect(page.getByText('Lineage: public metrics ref at bbbbbbbbbbbb')).toBeVisible();
   await expect(page.getByRole('link',{name:'View public branch',exact:false})).toHaveCount(1);
  });
  test('independently attested per-ID E2E never becomes an SC verdict or PR linkage',async({page})=>{
