@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "kind": "agent_workflow_run",
+  "identity": {
+    "workflow_id": "agent-provider-smoke",
+    "github_workflow": "Agent / Provider Smoke",
+    "github_run_id": 39833696052,
+    "github_run_attempt": 1,
+    "job": "qwen-reviewer-canary",
+    "repository": "BestNathan/nession",
+    "event": "push",
+    "unique_run_name": "39833696052-1-issue-1997-review-canary-claude-code"
+  },
+  "task": {
+    "id": "issue-1997-review-canary",
+    "type": "review",
+    "issue": 1997,
+    "pr": 2176,
+    "target_ref": "3d8e3807cc01f6082734b8d0ba458217c28f60a4"
+  },
+  "agent": {
+    "provider": "claude-code",
+    "id": "review-qwen-01",
+    "role": "reviewer",
+    "harness_sha256": null,
+    "checkpoint_id": null,
+    "model": {
+      "id": "qwen3.7-plus",
+      "request_model": "qwen3.7-plus"
+    },
+    "run_id": "006d8e1f-83f2-42be-9996-5a1f6167a3da",
+    "request_id": null,
+    "status": "finished",
+    "prompt": {
+      "id": "review",
+      "version": "v1",
+      "sha256": "5a89550be9c738a07c03059b1ea249a97d69ae71d3825815e179494c38a871eb"
+    }
+  },
+  "execution": {
+    "turns": 27,
+    "model_requests": null,
+    "tools": {
+      "observed": true,
+      "total": 26,
+      "unique": 2,
+      "by_name": {
+        "Grep": 17,
+        "Read": 9
+      }
+    }
+  },
+  "tokens": {
+    "input": 126,
+    "output": 7848,
+    "cache_read": 466499,
+    "cache_write": 40412,
+    "reasoning": null,
+    "total": 514885
+  },
+  "cost": {
+    "raw_usd": null,
+    "charged_usd": null,
+    "estimated_usd": null
+  },
+  "timing": {
+    "started_at": "2026-10-22T18:43:13.435Z",
+    "finished_at": "2026-10-22T18:46:00.929Z",
+    "agent_duration_ms": 167494,
+    "workflow_duration_ms": null
+  },
+  "result": {
+    "status": "canary-pass"
+  }
+}
