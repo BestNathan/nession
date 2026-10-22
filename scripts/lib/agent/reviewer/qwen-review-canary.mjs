@@ -20,7 +20,6 @@ import { providerScopedRunName } from '../telemetry/run-name.mjs';
 import { parseNativeEvents } from '../developer-canary.mjs';
 import { renderReviewPrompt, reviewModelResult } from '../tasks/review.mjs';
 import { buildAgentWorkflowTelemetry, writeAgentWorkflowTelemetry } from '../../../agent-workflow-telemetry.mjs';
-
 const REPO='BestNathan/nession', ISSUE=1997, PR=2176;
 const TARGET_SHA='3d8e3807cc01f6082734b8d0ba458217c28f60a4';
 const BASE_SHA='c6894b59b8be9448cae3c68fd87593516f66b47a';
@@ -35,7 +34,7 @@ const SMOKE_IDENTITY=Object.freeze({
   kind:'reviewer_smoke_admission_only',status:'await_smoke_review',agent_id:'review-qwen-01',
 });
 const sha256=value=>createHash('sha256').update(value,'utf8').digest('hex');
-const blobSha=value=>createHash('sha1').update(Buffer.concat([
+export const blobSha=value=>createHash('sha1').update(Buffer.concat([
   Buffer.from('blob '+Buffer.byteLength(value)+'\0'),Buffer.from(value,'utf8'),
 ])).digest('hex');
 function fail(message){throw new Error('Qwen Reviewer Canary: '+message);}
@@ -126,9 +125,13 @@ async function run(dir){
     git(env.GITHUB_WORKSPACE,'fetch','--quiet','--no-tags','origin','refs/pull/'+PR+'/head');
     if(git(env.GITHUB_WORKSPACE,'rev-parse','FETCH_HEAD')!==TARGET_SHA)
       fail('fetched PR head is not the admitted target SHA');
-    const [mode,blob]=git(env.GITHUB_WORKSPACE,'ls-tree',TARGET_SHA,'--',FILE).split(/\s+/);
+    const mode=git(env.GITHUB_WORKSPACE,'ls-tree',TARGET_SHA,'--',FILE).split(/\s+/)[0];
     if(mode!=='100644')fail('admitted file is not a regular 100644 blob');
-    if(blob!==blobSha(POLICY.content))fail('admitted file blob differs from the expected content');
+    // Ask git for the blob identity directly; no whitespace parsing of ls-tree.
+    const blob=git(env.GITHUB_WORKSPACE,'rev-parse',TARGET_SHA+':'+FILE);
+    const expectedBlob=blobSha(POLICY.content);
+    if(blob!==expectedBlob)
+      fail('admitted file blob differs from the expected content ('+blob+' != '+expectedBlob+')');
     fs.mkdirSync(workspace,{mode:0o700});
     const archive=path.join(root,'target.tar');
     execFileSync('git',['-C',env.GITHUB_WORKSPACE,'archive','--format=tar',
@@ -185,6 +188,9 @@ async function run(dir){
 }
 function selfTest(){
   const admission=smokeReviewAdmission();
+  assert.equal(admission.expected_file_sha256,sha256(POLICY.content));
+  // The admitted file's git identity is the real blob at PR #2176 HEAD.
+  assert.equal(blobSha(POLICY.content),'c43fc9a41c1c8cd49bb8128a725e0cac6f4acb3f');
   const prompt=renderReviewPrompt(admission,SMOKE_IDENTITY);
   assert.equal(prompt.template_id,'review');
   assert.equal(prompt.template_version,'v1');
