@@ -20,6 +20,7 @@ const ORIGINAL_TREE_SHA='34ba295f4b6d0becffd6bc1d3e178a54325c0410';
 const FILE_MODE='100644';
 const REPO_PATH='.github/workflows/store-controlled-publisher.yml';
 const FILE='e2e/fixtures/agent-development/1997-canary.txt';
+const HEX40=/^[a-f0-9]{40}$/;
 const HEX64=/^[a-f0-9]{64}$/;
 const only=(x,fields)=>x&&typeof x==='object'&&!Array.isArray(x)&&
   Object.keys(x).length===fields.length&&Object.keys(x).every(k=>fields.includes(k));
@@ -34,6 +35,35 @@ const ORIGINAL_PATCH='@@ -0,0 +1,2 @@\n+Durable Worker fixture: complete\n+Previ
 export const CONTROLLED_REVIEWER_PR=PR_NUMBER;
 export const CONTROLLED_REVIEWER_SHA=PR_SHA;
 export const CONTROLLED_REVIEWER_PUBLISH_RUN=PUBLISH_RUN;
+
+const ADMISSION_FIELDS=['schema_version','kind','status','repository','issue',
+  'role','agent_id','task','pr_number','target_sha','base_sha_at_publication',
+  'publisher_run_id','publisher_attempt','publisher_intent_sha256',
+  'original_worker_run_id','native_checkpoint_commit_sha','expected_file',
+  'expected_file_sha256','expected_file_mode'];
+// Consumers (Reviewer prompt/task/worker) must reject any task that did not
+// come from this exact builder; accepting a hand-built lookalike would let a
+// model or caller choose the reviewed target.
+export function assertAuthenticatedReviewerAdmission(task){
+  if(!only(task,ADMISSION_FIELDS)||task.schema_version!==1||
+     task.kind!=='authenticated_reviewer_admission_only'||
+     task.status!=='await_native_reviewer'||
+     task.repository!==REPO||task.issue!==1997||
+     task.role!=='reviewer'||task.agent_id!=='review-cursor-01'||
+     task.task!=='review'||
+     task.pr_number!==PR_NUMBER||task.target_sha!==PR_SHA||
+     task.base_sha_at_publication!==ORIGINAL_MAIN_SHA||
+     !HEX40.test(task.target_sha??'')||
+     !HEX40.test(task.native_checkpoint_commit_sha??'')||
+     !HEX64.test(task.publisher_intent_sha256??'')||
+     !HEX64.test(task.expected_file_sha256??'')||
+     !Number.isSafeInteger(task.publisher_run_id)||task.publisher_run_id<=0||
+     !Number.isSafeInteger(task.publisher_attempt)||task.publisher_attempt<=0||
+     !Number.isSafeInteger(task.original_worker_run_id)||task.original_worker_run_id<=0||
+     task.expected_file!==FILE||task.expected_file_mode!==FILE_MODE)
+    fail('not an authenticated reviewer admission');
+  return task;
+}
 
 export function admitOriginalControlledReviewerTarget(params){
   if(!only(params,['publisherRun','ownerComment','pullRequest',
@@ -122,5 +152,5 @@ export function admitOriginalControlledReviewerTarget(params){
   };
   // Never claim a Reviewer action: only a future independently authenticated
   // Reviewer Workflow may return a schema-validated changes_requested/approved.
-  return Object.freeze(task);
+  return Object.freeze(assertAuthenticatedReviewerAdmission(task));
 }

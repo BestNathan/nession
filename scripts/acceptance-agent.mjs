@@ -6,6 +6,7 @@ import path from 'node:path';
 import { buildAgentWorkflowTelemetry, writeAgentWorkflowTelemetry } from './agent-workflow-telemetry.mjs';
 import { normalizeNativeTrace, writeExecutionTrace } from './lib/agent/telemetry/execution-trace.mjs';
 import { renderAcceptancePrompt } from './lib/agent/tasks/acceptance.mjs';
+import { parseModelJson } from './lib/agent/tasks/model-json.mjs';
 import { promptTelemetry } from './lib/agent/telemetry/prompt.mjs';
 import { providerScopedRunName } from './lib/agent/telemetry/run-name.mjs';
 import { runClaudeCli, normalizeClaudeUsage } from './lib/agent/providers/claude-code.mjs';
@@ -16,18 +17,7 @@ function promptFor(context) {
 }
 
 function parseJsonText(raw) {
-  let text = String(raw ?? '').trim();
-  if (!text) throw new Error('Acceptance Agent returned empty output');
-  const fenced = text.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
-  if (fenced) text = fenced[1].trim();
-  try {
-    return JSON.parse(text);
-  } catch {
-    const start = text.indexOf('{');
-    const end = text.lastIndexOf('}');
-    if (start >= 0 && end > start) return JSON.parse(text.slice(start, end + 1));
-    throw new Error('Acceptance Agent output did not contain valid JSON');
-  }
+  return parseModelJson(raw, 'Acceptance Agent');
 }
 
 function requestedCursorModel() {
