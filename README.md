@@ -1,16 +1,18 @@
-# Nession AI Workspace — Interactive Prototype
+# Nession Prototypes
 
-Requirement: https://github.com/BestNathan/nession/issues/2221
+**Purpose:** a dedicated, history-isolated branch for **all** clickable design prototypes.
 
-**[▶ Open interactive browser preview](https://raw.githack.com/BestNathan/nession/670eef58d2e99a65187df60ec844887f3bad5470/index.html)**
+- **Branch:** `prototype` (one shared branch, never one branch per Issue).
+- **Directory convention:** `<topic>-<issue-number>/` (one prototype per directory; revisions stay inside that directory).
+- **Each prototype:** `index.html` (standalone browser UI), `README.md` (scope, data/behavior fidelity, related Requirement).
+- **No runtime coupling:** mock-only assets, never production Web/API, secrets, or live user data.
+- **Links from Requirements:** use a pin to the exact **prototype commit SHA**, and move the link when the design changes.
+- **Hosting:** the main GitHub Pages pipeline only deploys trusted `main`; previews use a separate HTML rendering service. Treat these as design discussions, **not Acceptance evidence**.
 
-This is a **static, mocked prototype**, not a production implementation.
+## Catalog
 
-Preview is served by a third-party static HTML renderer, not GitHub Pages. It may show a one-time safety confirmation.
+| Prototype | Requirement | HTML |
+|---|---|---|
+| AI Workspace (interactive carousel, AI mode) | [#2221](https://github.com/BestNathan/nession/issues/2221) | [ai-workspace-2221/index.html](ai-workspace-2221/index.html) |
 
-- Open `index.html` through a static HTML renderer.
-- All Agent/Session records, System 1/JEV decisions and operations are simulated.
-- No credentials, API requests or Nession Server interactions are included.
-- This branch is intentionally detached from Nession's main history (prototype asset store).
-
-The original source file is `index.html`; update this branch independently of the main product tree.
+Do not add more `prototypes/<topic>` branches. Add another sibling directory here.
