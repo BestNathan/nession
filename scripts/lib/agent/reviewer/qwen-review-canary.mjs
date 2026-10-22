@@ -75,7 +75,7 @@ export function smokeReviewAdmission(){
 }
 export function canaryArgs(prompt,model){
   return ['-p',prompt,'--output-format','stream-json','--verbose',
-    '--no-session-persistence','--max-turns','10','--model',model,'--strict-mcp-config',
+    '--no-session-persistence','--max-turns','24','--model',model,'--strict-mcp-config',
     ...claudeCliToolPolicy(READ_TOOLS,{restricted:true})];
 }
 function canaryTelemetry(env,startedAt,finishedAt,events,envelope,verdict,admission){
@@ -215,7 +215,9 @@ function selfTest(){
     '--strict-mcp-config','--disallowedTools mcp__*','--no-session-persistence']){
     assert.ok(args.includes(flag),'required Claude flag absent: '+flag);
   }
-  assert.ok(!args.includes('Bash')&&!args.includes('Edit'));
+  assert.ok(args.includes('Bash')===false&&args.includes('Edit')===false);
+  const turnIndex=canaryArgs('prompt','qwen3.7-plus').indexOf('--max-turns');
+  assert.equal(canaryArgs('prompt','qwen3.7-plus')[turnIndex+1],'24');
   assert.equal(assertReadOnlyTools(['Read','Grep']),true);
   for(const bad of [[],['Read','Edit'],['Bash'],['Grep','Write']])
     assert.throws(()=>assertReadOnlyTools(bad),/read-only|non-read/);
