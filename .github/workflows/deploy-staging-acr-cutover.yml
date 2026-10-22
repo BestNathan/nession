@@ -1,0 +1,38 @@
+name: Deploy / Staging ACR Cutover (temporary)
+
+on:
+  push:
+    branches: [test/acr-staging-gitops-cutover]
+    paths:
+      - '.github/workflows/deploy-staging-acr-cutover.yml'
+
+concurrency:
+  group: gitops-writer
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  staging-acr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify exact current staging desired-state tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --depth=1 origin gitops
+          current="$(git show FETCH_HEAD:environments/staging/nession/kustomization.yaml)"
+          test "$(grep -c '^  newTag: .*e0ce848$' <<< "$current")" -eq 3
+          if grep -q 'newName: crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession' <<< "$current"; then
+            echo "Already switched or partial switch: refuse to overwrite unexpected state" >&2
+            exit 1
+          fi
+      - name: Use canonical GitOps writer to switch staging only
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/gitops-commit.sh staging e0ce848
