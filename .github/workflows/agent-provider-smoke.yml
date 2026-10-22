@@ -151,8 +151,10 @@ jobs:
           retention-days: 14
       # SMOKE ONLY: read-only review of the real admitted #2176 target with the
       # canonical Review Prompt and verdict contract. Not the cursor admission.
+      # Independent of the Developer canary: that one is intentionally push-only,
+      # while this read-only review may also run on an explicit main dispatch.
       - name: Exercise Qwen Reviewer with restricted read tools
-        if: matrix.provider == 'qwen'
+        if: always() && matrix.provider == 'qwen'
         run: |
           set -euo pipefail
           claude --help | grep -q -- '--restricted' ||
