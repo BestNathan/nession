@@ -967,8 +967,28 @@ for (const mode of ['Relay', 'P2P'] as const) {
       attaches: wire.sent
         .filter((frame) => frame.msg_type === 'agent.attach')
         .map((frame) => frame.payload?.needs_bootstrap),
+      // The reply is what the runtime's epoch adoption reads; testing only the
+      // request would leave "it never asked" and "the answer named no epoch"
+      // indistinguishable.
+      attachReplies: wire.received
+        .filter((frame) => frame.msg_type === 'agent.attach')
+        .map((frame) => ({
+          ok: frame.payload?.ok,
+          epoch: frame.payload?.stream_epoch,
+          cursor: frame.payload?.stream_cursor,
+        })),
       resumes: wire.sent.filter((frame) => frame.msg_type === 'agent.terminal.stream.resume').length,
-      relayBegins: wire.sent.filter((frame) => frame.msg_type === 'server.session.relay.begin').length,
+      resumeReplies: wire.received
+        .filter((frame) => frame.msg_type === 'agent.terminal.stream.resume')
+        .map((frame) => ({
+          epoch: frame.payload?.stream_epoch,
+          epochMatch: frame.payload?.epoch_match,
+          complete: frame.payload?.complete,
+          recovery: frame.payload?.recovery,
+        })),
+      relayBegins: wire.sent
+        .filter((frame) => frame.msg_type === 'server.session.relay.begin')
+        .map((frame) => frame.payload?.needs_bootstrap),
       relayReady: wire.received
         .filter((frame) => frame.msg_type === 'server.session.relay.ready')
         .map((frame) => ({
