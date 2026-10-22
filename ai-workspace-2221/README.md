@@ -14,4 +14,4 @@
 
 All Agent/Session records, model decisions, and submit actions are **mocked**. No System 1/TypeSafe/Nession backend call, no real Session created.
 
-The interactive HTML can be previewed through a static HTML renderer such as `https://raw.githack.com/BestNathan/nession/<commit-sha>/ai-workspace-2221/index.html`; an external content-safety confirmation may be shown. Pin `<commit-sha>` to a verified commit when linking from an Issue.
+Preview: `https://raw.githack.com/BestNathan/nession/prototype/ai-workspace-2221/index.html` for development (branch updates may take minutes), or `https://rawcdn.githack.com/BestNathan/nession/<commit-sha>/ai-workspace-2221/index.html` for a pinned immutable review link. An external HTML safety confirmation may be shown. Pin `<commit-sha>` to the verified prototype commit when linking from an Issue.
