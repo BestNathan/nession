@@ -147,7 +147,7 @@ async function run(dir){
     if(bytes.toString('utf8')!==POLICY.content||sha256(bytes.toString('utf8'))!==admission.expected_file_sha256)
       fail('admitted file bytes changed');
     const proc=spawnSync('claude',canaryArgs(prompt.text,model),{
-      cwd:workspace,encoding:'utf8',timeout:180000,maxBuffer:8*1024*1024,
+      cwd:workspace,encoding:'utf8',timeout:480000,maxBuffer:8*1024*1024,
       env:{...env,DISABLE_AUTOUPDATER:'1',ANTHROPIC_MODEL:model,
         ANTHROPIC_DEFAULT_SONNET_MODEL:model},
     });
