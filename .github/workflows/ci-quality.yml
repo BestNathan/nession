@@ -11,23 +11,10 @@ env:
 on:
   pull_request:
     branches: [staging, main]
-    # Scope PR execution to changes that can affect this validator.
-    # Keep push / manual triggers unchanged for exact-SHA evidence.
-    paths:
-      - '.github/workflows/**'
-      - 'crates/**'
-      - 'web/**'
-      - 'design/**'
-      - 'e2e/**'
-      - 'gates/**'
-      - 'scripts/**'
-      - 'automation/**'
-      - '.cargo/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'rust-toolchain.toml'
-      - 'clippy.toml'
-      - 'justfile'
+    # Staging branch protection requires the rust-check and web-check contexts
+    # on EVERY PR. A top-level `paths` filter would leave both Pending for a
+    # PR outside the list, so the trigger stays unconditional and the `scope`
+    # job selects the expensive steps from the exact-head diff instead (#2095).
   # Keep exact main SHA evidence but select impacted gates; the remaining
   # module checks are inapplicable rather than silently green.
   push:
