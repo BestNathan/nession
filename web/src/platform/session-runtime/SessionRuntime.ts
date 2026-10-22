@@ -633,6 +633,12 @@ export class SessionRuntime {
     this.terminalAppliedCursor.reset();
     if (this.disposed) { return; }
     this.terminalAppliedBinding = this.terminalAppliedCursor.beginFromVerifiedBaseline(baseline);
+    // The capture names the timeline this renderer is now proven against.
+    // The attach reply and the Relay proof arrive *after* the history they
+    // describe, so adopting their (same) epoch must not count as a change —
+    // treating it as one re-degraded a terminal the capture had just repaired
+    // (#2194). A genuinely different epoch still differs from this value.
+    this.lastObservedStreamEpoch = baseline.streamEpoch;
     // The bootstrap that proves this cut is delivered *before* the attach
     // reply that states the subscriber generation (and before a Relay ready
     // proof), so the identity may not exist yet. Try now for the orderings

@@ -2215,4 +2215,32 @@ describe('stream epoch adoption (#2194)', () => {
     expect(rt.getSnapshot().historyDegraded).toBe(false);
     rt.dispose();
   });
+
+  it('does not re-degrade when the proof restates the epoch its capture proved (#2194)', async () => {
+    // The Agent sends the history, then the attach reply / Relay proof. The
+    // capture is therefore parsed against the new epoch first; the proof that
+    // names the same epoch afterwards is not a change.
+    const { conn, publish } = relayWithProofs();
+    const rt = new SessionRuntime(makeConfig({ forcedRelay: true, serverConnection: conn }));
+    const base: RelaySubscriptionProof = {
+      sessionName: 's1', browserClientId: 'unit-client',
+      relayRequestId: 'wire-1', routeId: 'aabbccdd-1234-4000-8000-aabbccddeeff',
+      subscriberGeneration: 41, streamEpoch: 7,
+    };
+    rt.setTransportReady(true);
+    await flushMicrotasks();
+    publish(base, 3);
+    expect(rt.relaySubscriptionProofSnapshot?.streamEpoch).toBe(7);
+
+    rt.updateContext({ routeIntentEpoch: 1 });
+    await flushMicrotasks();
+    // The replacement route's capture proves epoch 8 before its proof lands.
+    rt.setVerifiedTerminalBaseline({ kind: 'verified', streamEpoch: 8, appliedThrough: 0 });
+    expect(rt.getSnapshot().streamState).toBe('synchronized');
+
+    publish({ ...base, relayRequestId: 'wire-2', routeId: 'bbbbccdd-1234-4000-8000-aabbccddeeff', streamEpoch: 8 }, 4);
+    expect(rt.getSnapshot().historyDegraded).toBe(false);
+    expect(rt.getSnapshot().streamState).toBe('synchronized');
+    rt.dispose();
+  });
 });
