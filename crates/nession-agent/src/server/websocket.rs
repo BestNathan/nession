@@ -156,22 +156,37 @@ struct AttachedSession {
 /// How much terminal output one attached client may have waiting (#961).
 ///
 /// This is the terminal lane's slow-consumer policy, and the depth is the
-/// policy. The backend's own hop is bounded at 64 chunks of up to 4 KiB
-/// ([`crate::tmux::pty`]) before it reaches the broadcast task, so a client that
-/// can absorb what tmux produces never fills this: 64 chunks is the same depth
-/// the session itself buffers, about 256 KiB.
+/// policy. What it buys is that the *slowest* client cannot become the pace of
+/// the session for everybody else: the broadcast task fans one session's output
+/// out to every attached client, so a `send().await` here would park the
+/// fan-out on whichever client is behind — the other clients and the PTY reader
+/// behind it. A client with a full queue is therefore detached. That is the same
+/// verdict the Server reaches for a relayed client
+/// (`server::outbound::send_terminal`), applied where the terminal is served.
 ///
-/// What this buys is that the *slowest* client cannot become the pace of the
-/// session for everybody else. The broadcast task fans one session's output out
-/// to every attached client, so a `send().await` here would park the fan-out on
-/// whichever client is behind — the other clients and the PTY reader behind it.
-/// A client with a full queue is therefore detached instead: its queue is
-/// dropped, its forwarding task sees the receiver close and closes the
-/// connection, and it re-attaches to a redrawn screen. That is the same verdict
-/// the Server reaches for a relayed client (`server::outbound::send_terminal`),
-/// applied where the terminal is actually served.
-const SUBSCRIBER_QUEUE_SLOTS: usize = 64;
+/// **The byte cap is the memory bound; the slot count is only a metadata
+/// backstop.** This used to be 64 slots, sized from the backend hop's *64
+/// chunks of up to 4 KiB* — but that hop's unit is not this queue's unit.
+/// Terminal events here are per-PTY-chunk, and tmux/`sed` emit small chunks
+/// (measured: a 5 000-line `sed` burst arrived as ~500-byte reads, and one
+/// relayed burst stalled after 913 delivered lines with only ~64 events
+/// queued). A 64-slot bound therefore evicted a *healthy* relayed subscriber
+/// after ~35 ms of scheduling lag with barely 1 KiB queued (#2179), while the
+/// 2 MiB byte budget below had not been approached.
+///
+/// The number is large enough that the byte budget binds first for realistic
+/// chunks (16 384 × 128 B = 2 MiB), and a genuinely stalled subscriber is still
+/// detached: the per-connection outbound path ends it after
+/// `DEFAULT_TERMINAL_STALL_GRACE`, and the queue's own byte reservation stops
+/// it before memory does. A subscriber evicted here must also actually *end* —
+/// see `P2pOutbound::close` on why the read loop races `wait_closed`.
+const SUBSCRIBER_QUEUE_SLOTS: usize = 16_384;
 /// Independent byte cap for the per-subscriber mpsc queue (#1983).
+///
+/// This is the bound a slow consumer actually reaches, and it is deliberately
+/// small enough to be a real verdict: 2 MiB is tens of thousands of terminal
+/// lines. A client that accumulates that much has stopped reading in any
+/// useful sense.
 const SUBSCRIBER_QUEUE_BYTES: usize = 2 * 1024 * 1024;
 
 /// Fan one chunk of terminal output out to every subscriber of a session.
@@ -3523,6 +3538,33 @@ impl AgentServer {
         result
     }
 
+    /// The next frame, or `None` when this connection is over.
+    ///
+    /// Two things end a reader: the peer's stream ending (or failing), and the
+    /// outbound path being closed. The second used to be invisible here — the
+    /// reader waited on a socket that the writer, parked in a write the peer
+    /// was not reading, could not close (#2179). Racing the two is what makes
+    /// `close()` a connection verdict rather than a queue flag: returning lets
+    /// `serve` abort the writer, and aborting it cancels the parked write and
+    /// drops the socket, so the peer sees an end instead of a half-open
+    /// connection that delivers nothing and says nothing.
+    ///
+    /// Generic over the stream so the race can be tested with one that never
+    /// yields — the case a live socket cannot be made to produce on demand.
+    async fn next_frame_or_closed<S>(
+        stream: &mut S,
+        outbound: &P2pOutbound,
+    ) -> Option<Result<WsMessage, tokio_tungstenite::tungstenite::Error>>
+    where
+        S: futures_util::Stream<Item = Result<WsMessage, tokio_tungstenite::tungstenite::Error>>
+            + Unpin,
+    {
+        tokio::select! {
+            _ = outbound.wait_closed() => None,
+            frame = stream.next() => frame,
+        }
+    }
+
     /// Drain incoming WebSocket frames and dispatch them (`#961-D`).
     ///
     /// The reader's job is now **routing and nothing else**. It parses the
@@ -3562,11 +3604,18 @@ impl AgentServer {
             crate::server::execution::LANE_LABEL,
         );
 
-        while let Some(msg) = ws_stream.next().await {
-            let msg = match msg {
-                Ok(m) => m,
-                Err(e) => {
+        loop {
+            let next = Self::next_frame_or_closed(&mut ws_stream, &connection.outbound).await;
+            let msg = match next {
+                Some(Ok(m)) => m,
+                Some(Err(e)) => {
                     warn!("WebSocket read error from {}: {:#}", addr, e);
+                    break;
+                }
+                None => {
+                    if connection.outbound.is_closed() {
+                        info!("Outbound path closed for {}; ending the connection", addr);
+                    }
                     break;
                 }
             };
@@ -4316,6 +4365,106 @@ mod tests {
         );
     }
 
+    /// #2179: a burst is not a stall.
+    ///
+    /// The failing witness delivered 913 numbered lines and then queued 64
+    /// events while the relay leg was briefly behind; the 64-slot bound
+    /// detached the subscriber and the stream went silent. The same shape in
+    /// the fan-out: a 5 000-line burst of small chunks, none of it read yet,
+    /// must stay attached — it is 45 KiB against a 2 MiB budget and 5 000
+    /// against 16 384 slots. A subscriber that is merely behind the producer's
+    /// burst has not stopped reading.
+    #[test]
+    fn a_high_rate_burst_of_small_chunks_is_not_a_slow_consumer() {
+        let (tx, mut rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
+        let (outbound, _) = P2pOutbound::new();
+        let flag = Arc::new(AtomicBool::new(false));
+        let queued = Arc::new(AtomicUsize::new(0));
+        let mut peers = vec![SessionPeer {
+            client_id: "relay".into(),
+            peer_token: Arc::new(()),
+            output_ack: test_output_ack(),
+            outbound,
+            output_tx: Some(tx),
+            issued_flow: Arc::new(StdMutex::new(SubscriberIssuedFlow::new())),
+            queued_bytes: Arc::clone(&queued),
+            detached_for_not_draining: Arc::clone(&flag),
+        }];
+
+        let lines = 5_000_usize;
+        for seq in 1..=lines {
+            assert_eq!(
+                fan_out_peers(
+                    &mut peers,
+                    (
+                        b"HV-5000\n".to_vec(),
+                        3,
+                        u64::try_from(seq).expect("the line number fits in u64"),
+                    ),
+                ),
+                0,
+                "a burst evicted its subscriber at line {seq}"
+            );
+        }
+        assert_eq!(peers.len(), 1);
+        assert!(!flag.load(Ordering::Acquire));
+        assert_eq!(
+            queued.load(Ordering::Acquire),
+            lines * b"HV-5000\n".len(),
+            "every queued byte is reserved once, and the total stays under the budget"
+        );
+        for seq in 1..=lines {
+            assert!(
+                matches!(rx.try_recv(), Ok(SubscriberEvent::Output(_))),
+                "line {seq} was not queued"
+            );
+        }
+    }
+
+    /// `SUBSCRIBER_QUEUE_BYTES` is the slow-consumer verdict, and it still
+    /// fires with slots to spare: 2 MiB of 1 KiB chunks is far below 16 384
+    /// events, so a detached subscriber here was detached for memory, not for
+    /// the event count this test's buffer never approaches.
+    #[test]
+    fn a_subscriber_beyond_the_byte_budget_is_detached_even_with_slots_left() {
+        let (tx, _rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
+        let (outbound, _) = P2pOutbound::new();
+        let flag = Arc::new(AtomicBool::new(false));
+        let mut peers = vec![SessionPeer {
+            client_id: "stalled".into(),
+            peer_token: Arc::new(()),
+            output_ack: test_output_ack(),
+            outbound,
+            output_tx: Some(tx),
+            issued_flow: Arc::new(StdMutex::new(SubscriberIssuedFlow::new())),
+            queued_bytes: Arc::new(AtomicUsize::new(0)),
+            detached_for_not_draining: Arc::clone(&flag),
+        }];
+
+        let chunk = vec![b'x'; 1024];
+        for seq in 1..=(SUBSCRIBER_QUEUE_BYTES / chunk.len()) {
+            assert_eq!(
+                fan_out_peers(
+                    &mut peers,
+                    (
+                        chunk.clone(),
+                        1,
+                        u64::try_from(seq).expect("the chunk number fits in u64"),
+                    ),
+                ),
+                0,
+                "the byte budget must admit its full capacity"
+            );
+        }
+        assert_eq!(
+            fan_out_peers(&mut peers, (chunk, 1, 2_049)),
+            1,
+            "one chunk beyond the byte budget detaches the subscriber"
+        );
+        assert!(peers.is_empty());
+        assert!(flag.load(Ordering::Acquire));
+    }
+
     /// #2024: hold the external capture open while a second client joins an
     /// already-attached session with a *missing* event-log prefix. Previously
     /// that subscriber's output_tx was None until capture completed, so
@@ -4834,7 +4983,14 @@ mod tests {
 
     #[tokio::test]
     async fn a_detached_subscriber_closes_the_connection() {
-        let (outbound, _rx) = P2pOutbound::new();
+        let (outbound, mut outbound_rx) = P2pOutbound::new();
+        // The socket writer is not this test's subject, but the forwarder
+        // sends through the outbound queue to it. Drain that queue so a
+        // 16 384-event subscriber backlog is moved rather than parked in the
+        // terminal lane's stall grace — the production writer does the same.
+        // (With the old 64-slot policy the queue and the lane had the same
+        // depth, so the forwarder reached the receiver's end by coincidence.)
+        let drain = tokio::spawn(async move { while outbound_rx.recv().await.is_some() {} });
         let (tx, rx) = mpsc::channel::<SubscriberEvent>(SUBSCRIBER_QUEUE_SLOTS);
         let detached_for_not_draining = Arc::new(AtomicBool::new(false));
         let queued_bytes = Arc::new(AtomicUsize::new(0));
@@ -4884,6 +5040,42 @@ mod tests {
             "a detached subscriber left the connection open: the client keeps a \
              terminal that has stopped moving, with nothing coming to say so"
         );
+        drain.abort();
+    }
+
+    /// #2179: the reader must not outlive a closed outbound path.
+    ///
+    /// The production failure was exactly this wait: the forwarder closed the
+    /// outbound after the peer would not drain, the writer was parked in a
+    /// socket write that peer was not reading, and the reader went on waiting
+    /// for a frame that could never arrive. A live socket cannot be made to
+    /// hang on demand, so the race is proved with a stream that never yields:
+    /// a live outbound leaves the wait pending, and a closed one resolves it
+    /// without a frame.
+    #[tokio::test]
+    async fn a_closed_outbound_ends_the_read_wait() {
+        let (outbound, _rx) = P2pOutbound::new();
+        let mut silent = futures_util::stream::pending::<
+            Result<WsMessage, tokio_tungstenite::tungstenite::Error>,
+        >();
+        assert!(
+            tokio::time::timeout(
+                Duration::from_millis(50),
+                AgentServer::next_frame_or_closed(&mut silent, &outbound),
+            )
+            .await
+            .is_err(),
+            "a live outbound must not end a reader waiting for a frame"
+        );
+
+        outbound.close();
+        let ended = tokio::time::timeout(
+            Duration::from_secs(1),
+            AgentServer::next_frame_or_closed(&mut silent, &outbound),
+        )
+        .await
+        .expect("a closed outbound must end the read wait");
+        assert!(ended.is_none(), "there is no frame to return");
     }
 
     /// The #1226 half: the receiver also ends when a newer attach of the same

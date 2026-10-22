@@ -596,6 +596,24 @@ where
                         // use.
                         continue;
                     }
+                    Ok(RelayEnd::AgentEnded) => {
+                        // The Agent's terminal stream ended while this browser
+                        // still had the relay live. Nothing will arrive again,
+                        // and the browser cannot see its own healthy socket and
+                        // the dead tunnel apart — that silence *is* the frozen
+                        // terminal #2179 reports. Closing the connection is what
+                        // makes the client's own reconnect path run: it records
+                        // the truncation and re-begins the relay with a fresh
+                        // history bootstrap. A client that asked to stop, or one
+                        // whose socket already ended, takes `Ended` instead.
+                        warn!(
+                            "Relay for session '{}' ended: the Agent's terminal stream ended \
+                             while the client was still attached; closing the connection so it \
+                             re-attaches",
+                            session_name
+                        );
+                        break;
+                    }
                     Ok(RelayEnd::ClientStalled) => {
                         // The client stopped draining its terminal (#961). Every
                         // remaining answer for it is one it is not reading, and
@@ -731,12 +749,22 @@ async fn claim_agent_channel(
 /// connection it ran on (#961).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RelayEnd {
-    /// The relay stopped for an ordinary reason: the client detached, the agent
-    /// closed, or either side's socket ended. The WebSocket stays open.
+    /// The relay stopped for an ordinary reason: the client detached or asked
+    /// to stop, or the client's own socket ended. The WebSocket stays open for
+    /// the connection's other work.
     Ended,
     /// The client stopped draining the terminal lane long enough that the
-    /// Server declared it gone. The caller closes the connection.
+    /// Server declared it gone. The caller closes the connection so the client
+    /// re-attaches and is handed a redrawn screen.
     ClientStalled,
+    /// The **Agent's** terminal stream ended while the client was still
+    /// attached and had not asked to stop (#2179). The client has no other way
+    /// to learn that its terminal will produce nothing again: the relay is a
+    /// Server-side pump and the client's own socket is still healthy, so
+    /// silence here is the frozen terminal the bug reports. Closing the
+    /// connection is what turns it into the client's reconnect path
+    /// (`noteStreamTruncated` + re-begin with a fresh history bootstrap).
+    AgentEnded,
 }
 
 /// What a relay was asked for: the addresses to try, and everything the attach
@@ -1313,25 +1341,41 @@ where
     // (`ClientStalled`) instead of an indefinite park; see
     // `outbound::WsMessageSender::send_terminal`.
     let mut stalled = false;
+    let mut agent_ended = false;
     let agent_to_client = async {
-        while let Some(msg) = agent_read.next().await {
-            match msg {
-                Ok(msg) if is_agent_forged_relay_ready(&msg) => {
-                    warn!("Dropped Agent-forged Relay ready notification after attach");
-                }
-                Ok(msg) => match sender.send_terminal(msg).await {
-                    Ok(()) => {}
-                    Err(crate::server::outbound::OutboundError::Stalled) => {
-                        stalled = true;
-                        break;
-                    }
-                    Err(e) => {
-                        error!("Failed to forward agent message to client: {}", e);
-                        break;
-                    }
-                },
-                Err(e) => {
+        loop {
+            let msg = match agent_read.next().await {
+                Some(Ok(msg)) => msg,
+                Some(Err(e)) => {
                     error!("Error reading from agent: {}", e);
+                    // The Agent's end of the tunnel failed while the client was
+                    // still attached: the terminal will never produce again,
+                    // and no frame says so (#2179).
+                    agent_ended = true;
+                    break;
+                }
+                // The Agent's stream ended (its socket closed). That is not the
+                // client asking to stop — those paths end `client_to_agent`
+                // instead — so the client must learn about it from the close.
+                None => {
+                    agent_ended = true;
+                    break;
+                }
+            };
+            if is_agent_forged_relay_ready(&msg) {
+                warn!("Dropped Agent-forged Relay ready notification after attach");
+                continue;
+            }
+            match sender.send_terminal(msg).await {
+                Ok(()) => {}
+                Err(crate::server::outbound::OutboundError::Stalled) => {
+                    stalled = true;
+                    break;
+                }
+                // The client's own connection is gone; the caller has nothing
+                // left to close.
+                Err(e) => {
+                    error!("Failed to forward agent message to client: {}", e);
                     break;
                 }
             }
@@ -1386,6 +1430,8 @@ where
     info!("Relay mode ended for session '{}'", session_name);
     Ok(if stalled {
         RelayEnd::ClientStalled
+    } else if agent_ended {
+        RelayEnd::AgentEnded
     } else {
         RelayEnd::Ended
     })
