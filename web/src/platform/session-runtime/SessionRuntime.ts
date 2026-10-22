@@ -135,7 +135,27 @@ export interface SessionRuntimeSnapshot extends RuntimeMirrorSnapshot {
    * a quiet notice while it is true.
    */
   historyDegraded: boolean;
+  /**
+   * The explicit tri-state the UI and tests read (#1926 SC-08).
+   *
+   * `attached` is not `synchronized`: a route that is attached but has no
+   * proven parser baseline for its **current** subscription is displaying live
+   * output whose history it cannot vouch for. This is the runtime's one answer
+   * to "may I call this synchronized", so no consumer has to recompute it from
+   * phase plus gap flags:
+   *
+   * - `unavailable` — no attached stream at all (attaching, reconnecting,
+   *   failed, transport-exhausted);
+   * - `degraded-live` — attached, but either an observed gap is open or the
+   *   current subscription has no verified baseline (screen-only capture,
+   *   unproven route cutover, or a route change that revoked the old proof);
+   * - `synchronized` — attached **and** the current subscription has a
+   *   verified parser baseline with no observed gap.
+   */
+  streamState: TerminalStreamState;
 }
+
+export type TerminalStreamState = 'synchronized' | 'degraded-live' | 'unavailable';
 
 export type SessionRuntimeEvent =
   | { type: 'next-candidate'; activeUrl: string | null }
@@ -169,7 +189,8 @@ function isSameSnapshot(a: SessionRuntimeSnapshot, b: SessionRuntimeSnapshot): b
     && a.lastResize?.cols === b.lastResize?.cols
     && a.lastResize?.rows === b.lastResize?.rows
     && a.reconnectCount === b.reconnectCount
-    && a.historyDegraded === b.historyDegraded;
+    && a.historyDegraded === b.historyDegraded
+    && a.streamState === b.streamState;
 }
 
 /**
@@ -565,6 +586,10 @@ export class SessionRuntime {
     // proof), so the identity may not exist yet. Try now for the orderings
     // where it does; the attach/proof owners retry when it lands.
     this.submitPendingAppliedAck();
+    // `streamState` is derived from this proof: an attached stream that was
+    // degraded-live becomes synchronized at this exact moment, and subscribers
+    // must be told (the value-equality filter drops a no-op).
+    this.emitSnapshot();
   }
 
   /** Current renderer's parser-applied *proof*, never transport receipt. */
@@ -1019,7 +1044,27 @@ export class SessionRuntime {
       lastResize: this.lastResize,
       reconnectCount: this.attachState.reconnectCount,
       historyDegraded: this.gapDetected,
+      streamState: this.computeStreamState(),
     };
+  }
+
+  /**
+   * The one derivation of {@link SessionRuntimeSnapshot.streamState}.
+   *
+   * A verified baseline is bound to the *current* subscription and renderer
+   * generation; `terminalAppliedSnapshot` is null until one exists and is
+   * revoked by a route change or an observed gap. Phase alone cannot answer
+   * this: an attached stream with a screen-only capture is live output whose
+   * history is unproven, and claiming it synchronized would be exactly the
+   * false claim #1645 forbids.
+   */
+  private computeStreamState(): TerminalStreamState {
+    if (this.attachState.phase !== 'attached') {
+      return 'unavailable';
+    }
+    return this.gapDetected || this.terminalAppliedSnapshot === null
+      ? 'degraded-live'
+      : 'synchronized';
   }
 
   private emitSnapshot(): void {

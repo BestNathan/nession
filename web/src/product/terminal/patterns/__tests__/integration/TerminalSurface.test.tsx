@@ -32,7 +32,7 @@ function renderSurface(
   props: Partial<
     Pick<
       TerminalSurfaceProps,
-      'inputDrop' | 'onDismissInputDrop' | 'terminalControl' | 'onTakeControl' | 'historyDegraded'
+      'inputDrop' | 'onDismissInputDrop' | 'terminalControl' | 'onTakeControl' | 'historyDegraded' | 'streamState'
     >
   > = {},
 ) {
@@ -224,5 +224,22 @@ describe('the capsule host wraps the well, not the surface (#1307 stage 6)', () 
 
     expect(host.contains(view.getByTestId('terminal-viewport-slot'))).toBe(true);
     expect(host.contains(view.getByTestId('terminal-capsule'))).toBe(true);
+  });
+});
+
+describe('explicit stream state (#1926 SC-08)', () => {
+  it('publishes the runtime answer as a contract attribute', () => {
+    for (const state of ['synchronized', 'degraded-live', 'unavailable'] as const) {
+      const view = renderSurface('web', { streamState: state });
+      expect(view.getByTestId('terminal-surface'))
+        .toHaveAttribute('data-terminal-stream-state', state);
+      view.unmount();
+    }
+  });
+
+  it('defaults to unavailable when no runtime answer is supplied', () => {
+    const view = renderSurface('web');
+    expect(view.getByTestId('terminal-surface'))
+      .toHaveAttribute('data-terminal-stream-state', 'unavailable');
   });
 });
