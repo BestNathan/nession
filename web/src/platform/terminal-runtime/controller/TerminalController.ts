@@ -19,7 +19,7 @@ import { AIInputHandler } from '../input/AIInputHandler';
 import { CustomInputHandler } from '../input/CustomInputHandler';
 import { CapsuleOcclusionScroll } from '../capsule/occlusionScroll';
 import { TerminalInstance } from '../instance/TerminalInstance';
-import { SerializedTerminalWriter } from './SerializedTerminalWriter';
+import { SerializedTerminalWriter, type TerminalWriterLimits } from './SerializedTerminalWriter';
 import { MobileImeInput } from '../input/MobileImeInput';
 import {
   TerminalInteractionController,
@@ -75,6 +75,14 @@ export interface TerminalControllerEvents {
   onStreamBaseline?: (baseline: VerifiedTerminalBaseline) => void;
   /** Parser writer pressure/stall invalidates synchronized output. */
   onStreamTruncated?: () => void;
+  /**
+   * The parser writer refused further work and this controller replaced the
+   * xterm that owned it (#2196). A halted writer cannot be resumed: the only
+   * repair is a fresh renderer plus a bootstrap that refills it, so the owner
+   * must request one on a new attach. Emitted after the replacement is mounted
+   * and bound to a transport.
+   */
+  onRendererReplaced?: () => void;
   /** An individual Agent event is now parsed/applied by the current xterm.
    * Not a cumulative applied cursor, nor an output ACK (#1950). */
   onStreamEventParsed?: (position: TerminalStreamPosition) => void;
@@ -116,6 +124,12 @@ export interface TerminalControllerOptions {
   events?: TerminalControllerEvents;
   /** Lifecycle-owner swap channel — the controller rewires when it fires. */
   transportBinding?: TerminalTransportBinding;
+  /**
+   * Bounds for the parser writer ({@link SerializedTerminalWriter}). Defaults
+   * are the measured production bounds; tests inject small ones to drive the
+   * overflow repair deterministically.
+   */
+  writerLimits?: Partial<TerminalWriterLimits>;
 }
 
 /**
@@ -141,8 +155,17 @@ export class TerminalController {
 
   private _terminal: Terminal | null = null;
   private instance: TerminalInstance;
-  /** FIFO parser ordering survives a transport rewire along with TerminalInstance. */
-  private readonly writer: SerializedTerminalWriter;
+  /**
+   * FIFO parser ordering survives a transport rewire along with TerminalInstance.
+   *
+   * It does NOT survive a halted writer (#2196): a queue that refused work is
+   * replaced together with the xterm it serializes, never reset in place.
+   */
+  private writer: SerializedTerminalWriter;
+  private readonly options: TerminalControllerOptions;
+  private mountElement: HTMLElement | null = null;
+  private repairQueued = false;
+  private disposed = false;
   private transportFactory: () => TerminalTransport;
   private transport: TerminalTransport | null = null;
   private resizeController: ResizeController | null = null;
@@ -210,10 +233,9 @@ export class TerminalController {
   ) {
     this.session = session;
     this.transportFactory = transportFactory;
+    this.options = options;
     this.instance = new TerminalInstance(options);
-    this.writer = new SerializedTerminalWriter(this.instance.terminal, () => {
-      this.events?.onStreamTruncated?.();
-    });
+    this.writer = this.createWriter();
     this._terminal = this.instance.terminal;
     this.inputSourceManager = new InputSourceManager();
     this.useMobileIme = shouldUseMobileIme(options.deviceProfile);
@@ -228,6 +250,80 @@ export class TerminalController {
         this.rewireTransport(this._terminal);
       }
     }) ?? null;
+  }
+
+  private createWriter(): SerializedTerminalWriter {
+    return new SerializedTerminalWriter(
+      this.instance.terminal,
+      () => this.handleWriterDegraded(),
+      this.options.writerLimits,
+    );
+  }
+
+  /**
+   * The parser writer will not accept more work. State the gap to its owner,
+   * then replace the renderer.
+   *
+   * The replacement is deferred by one microtask: `degrade()` runs from the
+   * writer's own enqueue/parse path, and disposing the xterm instance and the
+   * transport that delivered the frame underneath that stack would tear down
+   * a handler while it is still executing. Every write between the halt and
+   * the replacement is dropped by the halted writer — the gap is already
+   * stated, and the bootstrap that follows refills the new buffer.
+   */
+  private handleWriterDegraded(): void {
+    this.events?.onStreamTruncated?.();
+    if (this.repairQueued || this.disposed) { return; }
+    this.repairQueued = true;
+    queueMicrotask(() => {
+      this.repairQueued = false;
+      this.rebuildRenderer();
+    });
+  }
+
+  /**
+   * Replace the xterm instance and its parser writer after the writer halted
+   * (#2196).
+   *
+   * A halted writer is a statement about the renderer, not a queue that can
+   * be flushed: it dropped operations and cannot vouch for the parser state
+   * afterwards. So the renderer is rebuilt empty, the new writer starts clean,
+   * and the owner is told to request the bootstrap that gives the new buffer
+   * its history. Until that capture is parsed and proved, the runtime keeps
+   * reporting the degraded state (it is the owner of that decision).
+   */
+  private rebuildRenderer(): void {
+    if (this.disposed || !this._terminal) { return; }
+    // A halt is repaired even without a viewport (a local write can overflow
+    // before attach); only the mounting half is skipped then and the next
+    // attach mounts the clean instance.
+    const element = this.attached ? this.mountElement : null;
+    if (this.attached && !element) { return; }
+
+    this.teardownTerminalUi();
+    // Any bootstrap callback still held by the old xterm describes a buffer
+    // that no longer exists; the sequence is what keeps it from vouching for
+    // `hasSessionOutput` on the replacement.
+    this.bootstrapSequence += 1;
+    this.writer.dispose();
+    this.instance.detach();
+    this.instance.dispose();
+
+    this.instance = new TerminalInstance(this.options);
+    this.writer = this.createWriter();
+    this._terminal = this.instance.terminal;
+    // The replacement holds nothing of the session's yet; an attach that
+    // reads this flag must ask for the history the old buffer had.
+    this._hasSessionOutput = false;
+    if (element) {
+      this.instance.attach(element);
+      // Retires the transport that was bound to the disposed xterm and binds a
+      // fresh one; the runtime advances its generation and re-attaches with a
+      // bootstrap when it hears about the replacement.
+      this.rewireTransport(this._terminal);
+      this.wireTerminalUi(element, this._terminal);
+    }
+    this.events?.onRendererReplaced?.();
   }
 
   /**
@@ -265,9 +361,12 @@ export class TerminalController {
   /** Create xterm, mount on `element`, and wire the transport to it. */
   attach(element: HTMLElement): void {
     const terminal = this.instance.terminal;
-    if (this.instance.isDisposed) {
+    if (this.instance.isDisposed || this.disposed) {
       return;
     }
+    // Kept so a writer-halt repair can mount its replacement in the same
+    // viewport without asking React to re-render (#2196).
+    this.mountElement = element;
 
     // Same container — transport-only rewire (P2P socket / route changed).
     if (this.attached && terminal.element?.parentElement === element) {
@@ -544,6 +643,7 @@ export class TerminalController {
   detach(): void {
     if (!this.attached) { return; }
     this.attached = false;
+    this.mountElement = null;
 
     this.teardownTerminalUi();
     this.teardownTransport();
@@ -554,6 +654,7 @@ export class TerminalController {
 
   /** Tear down xterm, transport, and GPU resources (controller replacement / unmount). */
   dispose(): void {
+    this.disposed = true;
     this.transportBindingUnsub?.();
     this.transportBindingUnsub = null;
     this.detach();

@@ -332,6 +332,62 @@ describe('TerminalController', () => {
     controller.dispose();
   });
 
+  it('replaces a halted renderer and resumes writing after a writer overflow (#2196)', async () => {
+    const transports: MockTransport[] = [];
+    const events = {
+      onStreamTruncated: vi.fn(),
+      onRendererReplaced: vi.fn(),
+      onTransportReady: vi.fn(),
+    };
+    const controller = new TerminalController(makeSession(), () => {
+      const transport = makeTransport();
+      transports.push(transport);
+      return transport;
+    }, {
+      rendererType: 'canvas',
+      events,
+      // The production bound is 4 096 events; the smallest useful bound makes
+      // the halt deterministic without writing megabytes in jsdom.
+      writerLimits: { maxEvents: 2 },
+    });
+    const el = host();
+    controller.attach(el);
+
+    const first = controller.terminal!;
+    const h = delayedParser(controller);
+    const transport = transports[0]!;
+    transport.onOutput!(new Uint8Array([1]));
+    transport.onOutput!(new Uint8Array([2]));
+    // One parse still pending plus two queued operations exceeds the bound.
+    transport.onOutput!(new Uint8Array([3]));
+    h.spy.mockRestore();
+
+    expect(events.onStreamTruncated).toHaveBeenCalledTimes(1);
+    // The replacement is deferred out of the writer's own call stack.
+    await flush();
+
+    expect(events.onRendererReplaced).toHaveBeenCalledTimes(1);
+    const replacement = controller.terminal!;
+    expect(replacement).not.toBe(first);
+    expect(el.contains(replacement.element!)).toBe(true);
+    expect(el.contains(first.element!)).toBe(false);
+    // The old transport was retired with the renderer it delivered into, and
+    // a fresh one is bound to the replacement.
+    expect(transport.dispose).toHaveBeenCalled();
+    expect(transports.length).toBeGreaterThanOrEqual(2);
+
+    // The replacement accepts output: a halted writer would drop this.
+    transports[transports.length - 1]!.onOutput!(new TextEncoder().encode('AFTER-OVERFLOW'));
+    await flush();
+    const buffer = replacement.buffer.active;
+    const lines: string[] = [];
+    for (let i = 0; i < buffer.length; i += 1) {
+      lines.push(buffer.getLine(i)?.translateToString(true) ?? '');
+    }
+    expect(lines.join('\n')).toContain('AFTER-OVERFLOW');
+    controller.dispose();
+  });
+
   it('reports sequenced Agent events after FIFO xterm parse, not when delivered (#1950)', () => {
     const transport = makeTransport();
     const onStreamEventParsed = vi.fn();

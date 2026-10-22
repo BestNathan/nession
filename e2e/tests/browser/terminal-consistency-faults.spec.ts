@@ -1195,6 +1195,182 @@ test('a 100k-line burst survives parser starvation and a retention-lost reconnec
     .toBe(1);
 });
 
+// #2196: the writer's own bound is the fault. The 100k witness above stays
+// inside that bound by design; this one crosses it, so the halt and its repair
+// are the thing under test.
+//
+// The trigger is injected at the **real inbound protocol boundary** rather
+// than produced organically. Organic bursts are shaped by tmux coalescing and
+// by the Agent's own per-subscriber budget: an earlier 8 MiB flood tripped
+// that budget (a detach, a different fault) while never crossing the writer's
+// bound, and an earlier small-write burst was coalesced into too few frames.
+// The writer is the component under test, so the frames it receives are what
+// this test fixes deterministically: 4 200 one-byte `agent.terminal.output`
+// notifications, dispatched into the live socket in one task. The writer's
+// 4 096-event count bound is crossed before xterm's parser, which only runs
+// after the task, can apply any of them. One byte per frame is deliberate —
+// the bound under test is the count, and a multi-megabyte payload would
+// leave the shared fixture's parser busy for the following test.
+//
+// A halted writer refuses every later write — including a bootstrap — so the
+// repair cannot be a reset. The controller must replace the xterm, and the
+// runtime must re-attach asking for the capture that gives the replacement
+// its history. Both are asserted directly:
+//
+// 1. the degraded notice appears (the halt was stated, and the writer did
+//    overflow — a green run cannot be one where the fault never fired);
+// 2. the original `.xterm` node does not survive (the renderer was replaced,
+//    not merely marked);
+// 3. a command typed afterwards is displayed (the terminal is live again);
+// 4. the notice clears (a parsed atomic capture repaired it).
+test('a writer overflow replaces the renderer and resumes output (#2196)', async ({ page }, testInfo) => {
+  test.skip(!process.env.CI, 'real stack available in CI only');
+  test.setTimeout(600_000);
+
+  // Keep the live sockets so the fault can be delivered on the real one.
+  await page.addInitScript(() => {
+    const NativeWebSocket = window.WebSocket;
+    const sockets: WebSocket[] = [];
+    (window as unknown as { __overflowSockets?: WebSocket[] }).__overflowSockets = sockets;
+    window.WebSocket = class extends NativeWebSocket {
+      constructor(url: string | URL, protocols?: string | string[]) {
+        super(url, protocols);
+        sockets.push(this);
+      }
+    } as typeof WebSocket;
+  });
+
+  // #2196 diagnostics: whether the repair's re-attach asked for a capture and
+  // what the Agent answered. Recorded before the page loads so every socket
+  // is covered.
+  const wire: WireRecord = { sent: [], received: [] };
+  page.on('websocket', (socket) => {
+    socket.on('framesent', (frame) => {
+      if (typeof frame.payload === 'string') { wire.sent.push(parseFrame(frame.payload)); }
+    });
+    socket.on('framereceived', (frame) => {
+      if (typeof frame.payload === 'string') { wire.received.push(parseFrame(frame.payload)); }
+    });
+  });
+
+  const sessionName = `e2e-consistency-overflow-${testInfo.retry}-${Date.now()}`;
+  await page.goto(
+    '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
+  );
+  await waitForShell(page);
+  await createSession(page, sessionName);
+  await attachToSession(page, sessionName, 'P2P');
+  await waitForInteractiveShell(page);
+
+  // The renderer this test expects to lose. A replacement mounts a new xterm
+  // in the same container, so this marker is the difference between "the
+  // renderer was replaced" and "the old renderer kept serving notices".
+  await page.locator('.xterm').evaluate((node) => {
+    node.setAttribute('data-e2e-overflow-instance', 'original');
+  });
+
+  // Deliver output frames the way the Agent does, on the live P2P socket(s).
+  // Only sockets that are open are used: an address-plan rebuild can leave a
+  // disposed socket in the captured list, and dispatching into it is a no-op.
+  const deliver = async (frames: number, text: string) => page.evaluate(
+    ({ name, count, body }: { name: string; count: number; body: string }) => {
+      const sockets = ((window as unknown as { __overflowSockets?: WebSocket[] })
+        .__overflowSockets ?? []).filter((s) => s.url.includes(':19091/') && s.readyState === 1);
+      if (sockets.length === 0) {
+        return { ok: false, urls: ((window as unknown as { __overflowSockets?: WebSocket[] })
+          .__overflowSockets ?? []).map((s) => `${s.url} (${s.readyState})`) };
+      }
+      const payload = btoa(body);
+      for (let i = 0; i < count; i += 1) {
+        for (const socket of sockets) {
+          socket.dispatchEvent(new MessageEvent('message', {
+            data: JSON.stringify({
+              id: `overflow-inject-${i}`,
+              msg_type: 'agent.terminal.output',
+              payload: { session_name: name, data: payload },
+            }),
+          }));
+        }
+      }
+      return { ok: true, count, sockets: sockets.length };
+    },
+    { name: sessionName, count: frames, body: text },
+  );
+
+  // Prove the boundary routes before relying on it: three tiny frames with a
+  // marker the terminal must display. Without this, a misplaced dispatch would
+  // turn the whole fixture into a silent no-op.
+  const probe = await deliver(3, 'INJECT-PROBE\n');
+  expect(probe.ok, `probe dispatch (${JSON.stringify(probe)})`).toBe(true);
+  await expect.poll(async () => countInBuffer(page, 'INJECT-PROBE'), { timeout: 30_000 })
+    .toBeGreaterThan(0);
+
+  // Now the overflow. Every one of these is a real `agent.terminal.output`
+  // notification, and all 4 200 are enqueued in one task — before xterm's
+  // parser (which only runs after the task) can apply any — so the writer's
+  // 4 096-event bound is crossed deterministically. The frames are one byte
+  // on purpose: the bound under test is the count, the terminal should not
+  // be flooded, and the next fixture must not inherit a busy parser.
+  const OVERFLOW_FRAMES = 4_200;
+  const injected = await deliver(OVERFLOW_FRAMES, 'A');
+  expect(injected.ok, `overflow dispatch (${JSON.stringify(injected)})`).toBe(true);
+
+  // 1. The halt is stated. gapDetected stays set until a proven capture is
+  //    parsed, so this also proves the writer actually overflowed.
+  await expect(page.getByTestId('terminal-history-degraded'))
+    .toBeVisible({ timeout: 60_000 });
+
+  // 2. The renderer that halted is gone.
+  await expect(page.locator('.xterm[data-e2e-overflow-instance="original"]'))
+    .toHaveCount(0, { timeout: 60_000 });
+
+  // 3. Input and output work on the replacement without a page reload.
+  await expect(async () => {
+    await submitTerminalCommand(page, `printf 'OVERFLOW-%s-AFTER\\n' 2196`);
+    await expect
+      .poll(async () => countInBuffer(page, 'OVERFLOW-2196-AFTER'), { timeout: 10_000 })
+      .toBeGreaterThan(0);
+  }).toPass({ timeout: 120_000 });
+
+  // 4. A parsed atomic epoch-start capture is what clears the statement; the
+  //    notice may not outlive the repair that proved it.
+  const bootstraps = wire.received
+    .filter((frame) => frame.msg_type === 'agent.terminal.output'
+      && frame.payload?.bootstrap !== undefined)
+    .map((frame) => {
+      const bootstrap = frame.payload?.bootstrap as Record<string, unknown>;
+      return {
+        requested: bootstrap.requested_lines,
+        cut: bootstrap.cut_consistency,
+        fidelity: bootstrap.fidelity,
+        truncated: bootstrap.truncated,
+        epoch: bootstrap.stream_epoch,
+        through: bootstrap.through_seq,
+      };
+    });
+  console.log(`AGENT-OVERFLOW-WIRE ${JSON.stringify({
+    attaches: wire.sent
+      .filter((frame) => frame.msg_type === 'agent.attach')
+      .map((frame) => frame.payload?.needs_bootstrap),
+    resumes: wire.sent.filter((frame) => frame.msg_type === 'agent.terminal.stream.resume').length,
+    relayBegins: wire.sent
+      .filter((frame) => frame.msg_type === 'server.session.relay.begin')
+      .map((frame) => frame.payload?.needs_bootstrap),
+    bootstraps: bootstraps.slice(-4),
+    state: await page.locator('[data-terminal-stream-state]').getAttribute('data-terminal-stream-state'),
+  })}`);
+  await expect(page.getByTestId('terminal-history-degraded'))
+    .toBeHidden({ timeout: 60_000 });
+
+  // The repaired session keeps working.
+  await expect(async () => {
+    await submitTerminalCommand(page, `printf 'OVERFLOW-%s-STABLE\\n' 2196`);
+    await expect
+      .poll(async () => countInBuffer(page, 'OVERFLOW-2196-STABLE'), { timeout: 10_000 })
+      .toBeGreaterThan(0);
+  }).toPass({ timeout: 60_000 });
+});
+
 // #1926 SC-05: ANSI bursts. The plain numbered bursts prove stream identity;
 // this one proves the same path under escape traffic — every line is wrapped
 // in SGR colour/cursor sequences, so a parser that desynchronizes on ESC does

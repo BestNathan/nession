@@ -633,6 +633,12 @@ export class SessionRuntime {
     this.terminalAppliedCursor.reset();
     if (this.disposed) { return; }
     this.terminalAppliedBinding = this.terminalAppliedCursor.beginFromVerifiedBaseline(baseline);
+    // The capture names the timeline this renderer is now proven against.
+    // The attach reply and the Relay proof arrive *after* the history they
+    // describe, so adopting their (same) epoch must not count as a change —
+    // treating it as one re-degraded a terminal the capture had just repaired
+    // (#2194). A genuinely different epoch still differs from this value.
+    this.lastObservedStreamEpoch = baseline.streamEpoch;
     // The bootstrap that proves this cut is delivered *before* the attach
     // reply that states the subscriber generation (and before a Relay ready
     // proof), so the identity may not exist yet. Try now for the orderings
@@ -819,6 +825,63 @@ export class SessionRuntime {
     this.resetTerminalAppliedCursor();
     this.historyMayHaveGap = true;
     this.gapDetected = true;
+    this.emitSnapshot();
+  }
+
+  /**
+   * The renderer was replaced because its parser writer halted (#2196).
+   *
+   * A halted writer drops operations and cannot vouch for the parser state
+   * afterwards, so the replacement starts empty — the session's history is
+   * gone with the old buffer. The only repair is a bootstrap parsed by the
+   * replacement, and a bootstrap cannot be requested on a live attach
+   * (`canStartAttach` refuses while attached), so this retires the current
+   * transport and drives a fresh attach that asks for one.
+   *
+   * Unlike an observed replay hole, the repair here is being requested right
+   * now: `bootstrapRepairPending` stays true so `noteBootstrapApplied` is the
+   * only thing that clears the degraded state. A capture that reaches the new
+   * renderer but does not prove its cut leaves the gap stated.
+   */
+  noteRendererReplaced(): void {
+    if (this.disposed) { return; }
+    this.resetTerminalAppliedCursor();
+    this.historyMayHaveGap = true;
+    this.gapDetected = true;
+    this.bootstrapRepairPending = true;
+    this.emitSnapshot();
+    this.forceBootstrapReattach();
+  }
+
+  /**
+   * Retire the current transport and start a fresh attach that carries
+   * `needs_bootstrap` (#2196).
+   *
+   * Shaped like a route-intent change because it needs the same guarantees:
+   * the old generation is fenced off before it is torn down, so no late frame
+   * from the disposed transport can write into the replacement renderer, and
+   * the new attach is driven by the runtime rather than by a React tick.
+   */
+  private forceBootstrapReattach(): void {
+    const hadP2PBinding = this.agentWs !== null || this.agentTerminalApi !== null;
+    this.revokeRelayProof();
+    this.attachedTransportGeneration = null;
+    this.attachController.cancelActiveAttach();
+    this.attachController.dispatch({ type: 'DISCONNECT' });
+    const result = this.attachController.dispatch({ type: 'SESSION_SELECTED' });
+    this.transportGeneration += 1;
+    this.syncAgentConnection({ forceReconnect: true });
+    if (this.effectiveForcedRelay) {
+      // The relay branch has no P2P binding to retire, so syncAgentConnection
+      // does not announce a swap; the controller's replacement renderer still
+      // needs a transport built for the advanced generation, and the relay
+      // attach has to be driven from here.
+      if (!hadP2PBinding) {
+        this.emitTransportSwap();
+      }
+      this.requestRelayAttach();
+    }
+    this.emitRuntimeEvent({ type: 'route-intent-changed', phase: result.phase });
     this.emitSnapshot();
   }
 
