@@ -1205,11 +1205,12 @@ test('a 100k-line burst survives parser starvation and a retention-lost reconnec
 // that budget (a detach, a different fault) while never crossing the writer's
 // bound, and an earlier small-write burst was coalesced into too few frames.
 // The writer is the component under test, so the frames it receives are what
-// this test fixes deterministically: 2 500 `agent.terminal.output`
-// notifications of ~1 KiB each, dispatched into the live socket in one task.
-// The writer charges every frame at 2× its length plus 128 bytes, so the
-// 4 MiB bound is crossed around frame ~1 900 — before xterm's parser, which
-// only runs after the task, can apply any of them.
+// this test fixes deterministically: 4 200 one-byte `agent.terminal.output`
+// notifications, dispatched into the live socket in one task. The writer's
+// 4 096-event count bound is crossed before xterm's parser, which only runs
+// after the task, can apply any of them. One byte per frame is deliberate —
+// the bound under test is the count, and a multi-megabyte payload would
+// leave the shared fixture's parser busy for the following test.
 //
 // A halted writer refuses every later write — including a bootstrap — so the
 // repair cannot be a reset. The controller must replace the xterm, and the
@@ -1291,10 +1292,14 @@ test('a writer overflow replaces the renderer and resumes output (#2196)', async
   await expect.poll(async () => countInBuffer(page, 'INJECT-PROBE'), { timeout: 30_000 })
     .toBeGreaterThan(0);
 
-  // Now the overflow: every one of these is a real `agent.terminal.output`
-  // notification, and all of them are enqueued before xterm parses any, so
-  // the writer's 4 MiB byte accounting is crossed deterministically.
-  const injected = await deliver(2_500, 'A'.repeat(1400));
+  // Now the overflow. Every one of these is a real `agent.terminal.output`
+  // notification, and all 4 200 are enqueued in one task — before xterm's
+  // parser (which only runs after the task) can apply any — so the writer's
+  // 4 096-event bound is crossed deterministically. The frames are one byte
+  // on purpose: the bound under test is the count, the terminal should not
+  // be flooded, and the next fixture must not inherit a busy parser.
+  const OVERFLOW_FRAMES = 4_200;
+  const injected = await deliver(OVERFLOW_FRAMES, 'A');
   expect(injected.ok, `overflow dispatch (${JSON.stringify(injected)})`).toBe(true);
 
   // 1. The halt is stated. gapDetected stays set until a proven capture is
