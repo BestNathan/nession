@@ -12,9 +12,14 @@ const PUBLISH_RUN=39609600546;
 const OWNER_COMMENT=6317468284;
 const PR_NUMBER=2176;
 const PR_SHA='3d8e3807cc01f6082734b8d0ba458217c28f60a4';
+// The real Publisher ran main at this commit, and the App-authored fixture
+// commit 3d8e3807 has exactly this tree and single main parent. Pinning both
+// rejects a coordinated fake run SHA + Store intent + parent/tree.
+const ORIGINAL_MAIN_SHA='c6894b59b8be9448cae3c68fd87593516f66b47a';
+const ORIGINAL_TREE_SHA='34ba295f4b6d0becffd6bc1d3e178a54325c0410';
+const FILE_MODE='100644';
 const REPO_PATH='.github/workflows/store-controlled-publisher.yml';
 const FILE='e2e/fixtures/agent-development/1997-canary.txt';
-const HEX40=/^[a-f0-9]{40}$/;
 const HEX64=/^[a-f0-9]{64}$/;
 const only=(x,fields)=>x&&typeof x==='object'&&!Array.isArray(x)&&
   Object.keys(x).length===fields.length&&Object.keys(x).every(k=>fields.includes(k));
@@ -32,16 +37,16 @@ export const CONTROLLED_REVIEWER_PUBLISH_RUN=PUBLISH_RUN;
 
 export function admitOriginalControlledReviewerTarget(params){
   if(!only(params,['publisherRun','ownerComment','pullRequest',
-    'headCommit','files','storeIntent']))
+    'headCommit','files','treeEntry','storeIntent']))
     fail('unexpected source fields (model/Issue content cannot select a role)');
   const {publisherRun:run,ownerComment:comment,pullRequest:pr,
-    headCommit:head,files,storeIntent:rawIntent}=params;
+    headCommit:head,files,treeEntry,storeIntent:rawIntent}=params;
   if(!run||run.id!==PUBLISH_RUN||run.run_attempt!==1||
      run.repository?.full_name!==REPO||
      run.head_repository?.full_name!==REPO||
      run.name!=='Store / Controlled Publisher'||run.path!==REPO_PATH||
      run.event!=='issue_comment'||run.actor?.login!=='BestNathan'||
-     run.head_branch!=='main'||!HEX40.test(run.head_sha??'')||
+     run.head_branch!=='main'||run.head_sha!==ORIGINAL_MAIN_SHA||
      run.status!=='completed'||run.conclusion!=='success')
     fail('unauthenticated trusted Publisher Run/Attempt');
   if(!comment||comment.id!==OWNER_COMMENT||
@@ -58,7 +63,7 @@ export function admitOriginalControlledReviewerTarget(params){
   try { intent=validateControlledPublisherIntent(rawIntent); }
   catch { fail('untrusted immutable Publisher Store intent'); }
   must(intent.publisher_issuer_run_id,run.id,'Publisher Run in CAS');
-  must(intent.target_main_sha,run.head_sha,'CAS main SHA');
+  must(intent.target_main_sha,ORIGINAL_MAIN_SHA,'original main SHA in CAS');
   must(intent.action_id,POLICY.action_id,'signed Worker Action');
   must(intent.worker_run_id,POLICY.run_id,'original Worker');
   must(intent.worker_run_attempt,POLICY.attempt,'original Worker attempt');
@@ -79,10 +84,10 @@ export function admitOriginalControlledReviewerTarget(params){
      Date.parse(pr.created_at)<Date.parse(run.created_at))
     fail('PR is not the unique open App-authored bounded source');
   if(!head||head.sha!==PR_SHA||
-     !HEX40.test(head.tree?.sha??'')||
+     head.tree?.sha!==ORIGINAL_TREE_SHA||
      !Array.isArray(head.parents)||head.parents.length!==1||
-     head.parents[0].sha!==intent.target_main_sha)
-    fail('PR original HEAD or Git parent differs from committed CAS');
+     head.parents[0].sha!==ORIGINAL_MAIN_SHA)
+    fail('PR original HEAD, tree or Git parent differs from committed CAS');
   if(!Array.isArray(files)||files.length!==1)
     fail('PR changed more than one authorized file');
   const entry=files[0];
@@ -92,6 +97,14 @@ export function admitOriginalControlledReviewerTarget(params){
      entry.additions!==2||entry.deletions!==0||
      (entry.changes!=null&&entry.changes!==2))
     fail('unauthorized PR file bytes, diff or scope');
+  // The pull-request files API carries no mode, so the independently fetched
+  // Git tree entry owns the regular-file mode/type. A 100755 or symlink blob
+  // with the trusted bytes must not be admitted as the authorized 100644 file.
+  if(!treeEntry||treeEntry.path!==FILE||treeEntry.mode!==FILE_MODE||
+     treeEntry.type!=='blob'||
+     treeEntry.sha!==blobSha(original)||
+     treeEntry.size!==Buffer.byteLength(original))
+    fail('unauthorized PR file mode, type or tree entry');
   const task={
     schema_version:1,kind:'authenticated_reviewer_admission_only',
     status:'await_native_reviewer',
@@ -105,6 +118,7 @@ export function admitOriginalControlledReviewerTarget(params){
     original_worker_run_id:POLICY.run_id,
     native_checkpoint_commit_sha:POLICY.checkpoint_commit_sha,
     expected_file:FILE,expected_file_sha256:sha(original),
+    expected_file_mode:FILE_MODE,
   };
   // Never claim a Reviewer action: only a future independently authenticated
   // Reviewer Workflow may return a schema-validated changes_requested/approved.

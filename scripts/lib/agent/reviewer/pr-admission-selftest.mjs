@@ -42,12 +42,16 @@ const files=[{
   sha:blob(Buffer.from(POLICY.content)),additions:2,deletions:0,changes:2,
   patch:'@@ -0,0 +1,2 @@\n+Durable Worker fixture: complete\n+Previous value: pending',
 }];
+const treeEntry={
+  path:POLICY.file,mode:'100644',type:'blob',
+  sha:blob(Buffer.from(POLICY.content)),size:Buffer.byteLength(POLICY.content),
+};
 const storeIntent=planControlledPublisherIntent({
   target_main_sha:publisherRun.head_sha,
   patch_sha256:'1f45a088966d41c1fcade13540498693d7d083ca238ca2b06c0525c654e314ee',
   issuer_run_id:publisherRun.id,
 });
-const input={publisherRun,ownerComment,pullRequest,headCommit,files,storeIntent};
+const input={publisherRun,ownerComment,pullRequest,headCommit,files,treeEntry,storeIntent};
 const positive=admitOriginalControlledReviewerTarget(input);
 assert.deepEqual(positive,admitOriginalControlledReviewerTarget(input));
 assert.equal(positive.issue,1997);
@@ -56,6 +60,7 @@ assert.equal(positive.agent_id,'review-cursor-01');
 assert.equal(positive.task,'review');
 assert.equal(positive.pr_number,2176);
 assert.equal(positive.target_sha,HEAD);
+assert.equal(positive.expected_file_mode,'100644');
 assert.equal(positive.status,'await_native_reviewer');
 assert.equal(positive.kind,'authenticated_reviewer_admission_only');
 assert.ok(!Object.hasOwn(positive,'next_role'));
@@ -90,9 +95,17 @@ for(const patch of [
 ])deny({pullRequest:{...pullRequest,...patch}});
 for(const patch of [
   {sha:'0'.repeat(40)},{tree:{sha:'invalid'}},
+  {tree:{sha:'e'.repeat(40)}},
+  {tree:{sha:'34ba295f4b6d0becffd6bc1d3e178a54325c0410'.replace('34ba','34bb')}},
   {parents:[]},{parents:[{sha:'0'.repeat(40)}]},
   {parents:[{sha:publisherRun.head_sha},{sha:publisherRun.head_sha}]},
 ])deny({headCommit:{...headCommit,...patch}});
+for(const patch of [
+  {mode:'100755'},{mode:'120000'},{path:'.github/workflows/evil.yml'},
+  {type:'tree'},{sha:'0'.repeat(40)},
+  {size:Buffer.byteLength(POLICY.content)+1},
+])deny({treeEntry:{...treeEntry,...patch}});
+deny({treeEntry:undefined});deny({treeEntry:null});
 for(const patch of [
   {filename:'.github/workflows/evil.yml'},{status:'modified'},
   {sha:'0'.repeat(40)},{additions:3},{deletions:1},
@@ -110,4 +123,4 @@ deny({...input,next_role:'developer'},/unexpected source fields/);
 deny({...input,model_approval:'approved'},/unexpected source fields/);
 deny({...input,issue_comment:'changes_requested'},/unexpected source fields/);
 deny({...input,review_event:{state:'APPROVED'}},/unexpected source fields/);
-console.log('Reviewer admission: real #2176 App Publisher Run/Owner/CAS/HEAD/parent/one-file proof and forged source, stale SHA, path, role and model-outcome negatives passed; no Reviewer was run');
+console.log('Reviewer admission: real #2176 App Publisher Run/Owner/CAS/HEAD/parent/tree/100644-mode/one-file proof and forged source, stale SHA, path, mode, tree, role and model-outcome negatives passed; no Reviewer was run');
