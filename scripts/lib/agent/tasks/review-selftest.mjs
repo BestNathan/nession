@@ -32,7 +32,7 @@ assert.ok(!Object.hasOwn(view,'agent_id'),'model view carries no role/agent sele
 
 const prompt=renderReviewPrompt(admission);
 assert.equal(prompt.template_id,'review');
-assert.equal(prompt.template_version,'v1');
+assert.equal(prompt.template_version,'v2');
 assert.match(prompt.template_sha256,/^[a-f0-9]{64}$/);
 assert.match(prompt.text,/3d8e3807cc01f6082734b8d0ba458217c28f60a4/);
 assert.match(prompt.text,/"pull_request": 2176/);
