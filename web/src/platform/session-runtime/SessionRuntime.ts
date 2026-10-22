@@ -1304,12 +1304,14 @@ export class SessionRuntime {
       // disconnect). The phase guard keeps this inert before the relay is live.
       if (state !== 'connected') {
         if (this.attachState.phase === 'attached') {
-          // Relay output is currently unsequenced (#1645): even if a prior
-          // P2P attach supplied a stream cursor, the Relay transport cannot
-          // resume from it. Every Relay disconnect can therefore hide PTY
-          // output. Always request a fresh history bootstrap on reattach.
-          // Once Relay has the same sequenced resume contract as P2P, this
-          // can be narrowed to proven retention gaps.
+          // Relay carries an Agent-issued sequence and can resume since
+          // #2043/#2050, and its parser-applied ACK is bound to the
+          // Agent-minted subscription proof (#2060/#2120). The *disconnect*
+          // is still treated as potentially lossy here: a route cutover
+          // checkpoint is not independently proven, so output produced during
+          // the gap may sit outside the retained window. Always request a
+          // fresh history bootstrap on reattach; narrow this once a cutover
+          // can prove its own continuity.
           this.noteStreamTruncated();
           const result = this.attachController.dispatch({ type: 'TRANSPORT_LOST' });
           this.emitRuntimeEvent({ type: 'route-intent-changed', phase: result.phase });
