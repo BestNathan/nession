@@ -207,6 +207,57 @@ describe('createTerminalAgentApi', () => {
       // absence is the only thing that means "append" (#321).
       expect(cb.mock.calls[1]?.[0].bootstrap).toBeUndefined();
     });
+    it('rejects sequenced history even when bootstrap marker is malformed or null (#2067)', () => {
+      const cb = vi.fn();
+      api.onOutput(cb);
+      const send = (extra: Record<string, unknown>) => surface.pushMessage('agent.terminal.output', {
+        session_name: 'work',
+        data: 'YQ==',
+        stream_epoch: 20,
+        stream_seq: 30,
+        ...extra,
+      });
+
+      send({ bootstrap: null });
+      send({ bootstrap: { requested_lines: 'malformed' } });
+      send({ bootstrap: false });
+      send({}); // Only a truly absent history marker can carry a live ordinal.
+
+      expect(cb).toHaveBeenCalledTimes(4);
+      for (const call of cb.mock.calls.slice(0, 3)) {
+        expect(call[0].streamEpoch).toBeUndefined();
+        expect(call[0].streamSeq).toBeUndefined();
+      }
+      expect(cb.mock.calls[3]?.[0]).toMatchObject({ streamEpoch: 20, streamSeq: 30 });
+    });
+
+    it('never promotes unsafe, incomplete or bootstrap output positions into a live cursor (#2067)', () => {
+      const cb = vi.fn();
+      api.onOutput(cb);
+      const emit = (epoch: unknown, seq: unknown, extra?: Record<string, unknown>) => {
+        surface.pushMessage('agent.terminal.output', {
+          session_name: 'work', data: 'YQ==',
+          stream_epoch: epoch, stream_seq: seq, ...extra,
+        });
+      };
+      emit(31, 1);
+      emit(31, undefined);
+      emit(undefined, 2);
+      emit(0, 3);
+      emit(-1, 4);
+      emit(31, 1.5);
+      emit(31, NaN);
+      emit(Infinity, 5);
+      emit(31, Number.MAX_SAFE_INTEGER + 1);
+      emit(31, 2, { bootstrap: { requested_lines: 'not-an-integer' } });
+
+      expect(cb).toHaveBeenCalledTimes(10);
+      expect(cb.mock.calls[0]?.[0]).toMatchObject({ streamEpoch: 31, streamSeq: 1 });
+      for (const call of cb.mock.calls.slice(1)) {
+        expect(call[0].streamEpoch).toBeUndefined();
+        expect(call[0].streamSeq).toBeUndefined();
+      }
+    });
   });
 
   describe('resumeStream', () => {
@@ -234,6 +285,73 @@ describe('createTerminalAgentApi', () => {
         firstAvailableSeq: 11,
         complete: false,
       });
+    });
+
+    it('does not deliver a retained suffix when a checkpoint is required (#2012)', async () => {
+      const pending = api.resumeStream('work', 7, 1);
+      surface.resolveNext('agent.terminal.stream.resume', {
+        session_name: 'work', stream_epoch: 7,
+        epoch_match: true, first_available_seq: 4, complete: false,
+        recovery: 'checkpoint-required',
+        events: [{ kind: 'output', session_name: 'work',
+          stream_epoch: 7, stream_seq: 4, data: 'eA==' }],
+      });
+      const result = await pending;
+      expect(result).toMatchObject({
+        epochMatch: true, firstAvailableSeq: 4,
+        complete: false, recovery: 'checkpoint-required', events: [],
+      });
+    });
+
+    it('rejects contradictory complete and unavailable recovery claims (#2012)', async () => {
+      const event = { kind: 'output', session_name: 'work',
+        stream_epoch: 7, stream_seq: 3, data: 'eA==' };
+      const pending = api.resumeStream('work', 7, 1);
+      surface.resolveNext('agent.terminal.stream.resume', {
+        session_name: 'work', stream_epoch: 7, epoch_match: true,
+        complete: false, recovery: 'complete', events: [event],
+      });
+      const contradictory = await pending;
+      expect(contradictory).toMatchObject({
+        epochMatch: false, complete: false, recovery: 'unavailable', events: [],
+      });
+      const legacyMismatch = api.resumeStream('work', 7, 1);
+      surface.resolveNext('agent.terminal.stream.resume', {
+        session_name: 'work', stream_epoch: 8, epoch_match: false,
+        complete: true, events: [event],
+      });
+      expect(await legacyMismatch).toMatchObject({
+        epochMatch: false, complete: false, events: [],
+      });
+      const missing = api.resumeStream('work', 7, 1);
+      surface.resolveNext('agent.terminal.stream.resume', {
+        session_name: 'work', stream_epoch: 8, epoch_match: false,
+        recovery: 'unavailable', events: [event],
+      });
+      expect(await missing).toMatchObject({
+        epochMatch: false, recovery: 'unavailable', events: [],
+      });
+    });
+
+    it('permits complete replay but rejects an incomplete legacy suffix (#2012)', async () => {
+      const event = { kind: 'output', session_name: 'work',
+        stream_epoch: 7, stream_seq: 2, data: 'eA==' };
+      const good = api.resumeStream('work', 7, 1);
+      surface.resolveNext('agent.terminal.stream.resume', {
+        session_name: 'work', stream_epoch: 7, epoch_match: true,
+        complete: true, recovery: 'complete', events: [event],
+      });
+      expect(await good).toMatchObject({
+        epochMatch: true, complete: true, recovery: 'complete',
+        events: [{ kind: 'output', streamEpoch: 7, streamSeq: 2 }],
+      });
+
+      const legacy = api.resumeStream('work', 7, 1);
+      surface.resolveNext('agent.terminal.stream.resume', {
+        session_name: 'work', stream_epoch: 7, epoch_match: true,
+        complete: false, events: [event],
+      });
+      expect(await legacy).toMatchObject({ complete: false, events: [] });
     });
 
     it('reads an agent that states nothing as stating nothing, not as zero (#1304)', async () => {
@@ -323,6 +441,37 @@ describe('createTerminalAgentApi', () => {
       });
 
       expect(cb).toHaveBeenCalledWith({ cols: 150, rows: 50 });
+    });
+
+    it('keeps malformed Agent resize ordinals as legacy level resizes (#2067)', () => {
+      const cb = vi.fn();
+      api.onResize(cb);
+      const emit = (epoch: unknown, seq: unknown) => {
+        surface.pushMessage('agent.terminal.resize', {
+          session_name: 'work', cols: 101, rows: 42,
+          stream_epoch: epoch, stream_seq: seq,
+        });
+      };
+      emit(11, 12);
+      for (const [epoch, seq] of [
+        [11, undefined],
+        [undefined, 12],
+        [0, 1],
+        [-5, 10],
+        [11.5, 3],
+        [11, NaN],
+        [11, Infinity],
+        [Number.MAX_SAFE_INTEGER + 1, 6],
+      ]) {
+        emit(epoch, seq);
+      }
+      expect(cb).toHaveBeenCalledTimes(9);
+      expect(cb.mock.calls[0]?.[0]).toEqual({
+        cols: 101, rows: 42, streamEpoch: 11, streamSeq: 12,
+      });
+      for (const call of cb.mock.calls.slice(1)) {
+        expect(call[0]).toEqual({ cols: 101, rows: 42 });
+      }
     });
 
     it('stops delivering after unsubscribe', () => {

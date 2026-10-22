@@ -94,6 +94,22 @@ function installCapturingResizeObserver(): () => void {
   };
 }
 
+/** Manually complete xterm parser callbacks instead of assuming write() is synchronous. */
+function delayedParser(controller: TerminalController) {
+  const callbacks: Array<() => void> = [];
+  const spy = vi.spyOn(controller.terminal!, 'write').mockImplementation(
+    ((_data: unknown, callback?: () => void) => {
+      if (callback) { callbacks.push(callback); }
+    }) as never,
+  );
+  const finish = () => {
+    const callback = callbacks.shift();
+    expect(callback).toBeDefined();
+    callback!();
+  };
+  return { callbacks, spy, finish };
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 describe('TerminalController', () => {
@@ -299,78 +315,391 @@ describe('TerminalController', () => {
     expect(writeSpy).toHaveBeenCalledWith(new Uint8Array([104, 105]), expect.any(Function));
   });
 
-  it('writes transport output to the terminal in arrival order', () => {
+  it('writes transport output to the terminal in parser order', () => {
     const transport = makeTransport();
     const controller = new TerminalController(makeSession(), () => transport);
     controller.attach(host());
-
-    // Capture writes by spying on the terminal (the agent sends captured
-    // scrollback as the FIRST output, so arrival order must be preserved).
-    const writeSpy = vi.spyOn(controller.terminal!, 'write');
+    const h = delayedParser(controller);
     transport.onOutput!(new Uint8Array([1]));
     transport.onOutput!(new Uint8Array([2]));
-
-    expect(writeSpy).toHaveBeenCalledTimes(2);
-    expect(writeSpy).toHaveBeenNthCalledWith(1, new Uint8Array([1]), expect.any(Function));
-    expect(writeSpy).toHaveBeenNthCalledWith(2, new Uint8Array([2]), expect.any(Function));
-    writeSpy.mockRestore();
-    controller.detach();
+    expect(h.spy).toHaveBeenCalledTimes(1);
+    expect(h.spy).toHaveBeenNthCalledWith(1, new Uint8Array([1]), expect.any(Function));
+    h.finish();
+    expect(h.spy).toHaveBeenCalledTimes(2);
+    expect(h.spy).toHaveBeenNthCalledWith(2, new Uint8Array([2]), expect.any(Function));
+    h.finish();
+    h.spy.mockRestore();
+    controller.dispose();
   });
 
-  it('wipes the buffer before a bootstrap, and only its own modes survive', () => {
+  it('replaces a halted renderer and resumes writing after a writer overflow (#2196)', async () => {
+    const transports: MockTransport[] = [];
+    const events = {
+      onStreamTruncated: vi.fn(),
+      onRendererReplaced: vi.fn(),
+      onTransportReady: vi.fn(),
+    };
+    const controller = new TerminalController(makeSession(), () => {
+      const transport = makeTransport();
+      transports.push(transport);
+      return transport;
+    }, {
+      rendererType: 'canvas',
+      events,
+      // The production bound is 4 096 events; the smallest useful bound makes
+      // the halt deterministic without writing megabytes in jsdom.
+      writerLimits: { maxEvents: 2 },
+    });
+    const el = host();
+    controller.attach(el);
+
+    const first = controller.terminal!;
+    const h = delayedParser(controller);
+    const transport = transports[0]!;
+    transport.onOutput!(new Uint8Array([1]));
+    transport.onOutput!(new Uint8Array([2]));
+    // One parse still pending plus two queued operations exceeds the bound.
+    transport.onOutput!(new Uint8Array([3]));
+    h.spy.mockRestore();
+
+    expect(events.onStreamTruncated).toHaveBeenCalledTimes(1);
+    // The replacement is deferred out of the writer's own call stack.
+    await flush();
+
+    expect(events.onRendererReplaced).toHaveBeenCalledTimes(1);
+    const replacement = controller.terminal!;
+    expect(replacement).not.toBe(first);
+    expect(el.contains(replacement.element!)).toBe(true);
+    expect(el.contains(first.element!)).toBe(false);
+    // The old transport was retired with the renderer it delivered into, and
+    // a fresh one is bound to the replacement.
+    expect(transport.dispose).toHaveBeenCalled();
+    expect(transports.length).toBeGreaterThanOrEqual(2);
+
+    // The replacement accepts output: a halted writer would drop this.
+    transports[transports.length - 1]!.onOutput!(new TextEncoder().encode('AFTER-OVERFLOW'));
+    await flush();
+    const buffer = replacement.buffer.active;
+    const lines: string[] = [];
+    for (let i = 0; i < buffer.length; i += 1) {
+      lines.push(buffer.getLine(i)?.translateToString(true) ?? '');
+    }
+    expect(lines.join('\n')).toContain('AFTER-OVERFLOW');
+    controller.dispose();
+  });
+
+  it('reports sequenced Agent events after FIFO xterm parse, not when delivered (#1950)', () => {
+    const transport = makeTransport();
+    const onStreamEventParsed = vi.fn();
+    const controller = new TerminalController(makeSession(), () => transport, {
+      rendererType: 'canvas', events: { onStreamEventParsed },
+    });
+    controller.attach(host());
+    const h = delayedParser(controller);
+    // jsdom has no xterm render dimensions. The real resize schedules a
+    // viewport timer that can fire after teardown and throw asynchronously.
+    // Assert FIFO resize completion with a synchronous spy, not that timer.
+    const resizeSpy = vi.spyOn(controller.terminal!, 'resize').mockImplementation(() => {});
+    const first = { streamEpoch: 7, streamSeq: 10 };
+    const resized = { streamEpoch: 7, streamSeq: 11 };
+    const last = { streamEpoch: 7, streamSeq: 12 };
+    transport.onOutput!(new Uint8Array([65]), undefined, first);
+    transport.onResize!(120, 30, resized);
+    transport.onOutput!(new Uint8Array([66]), undefined, last);
+    expect(onStreamEventParsed).not.toHaveBeenCalled();
+    expect(h.spy).toHaveBeenCalledTimes(1);
+    h.finish();
+    expect(onStreamEventParsed.mock.calls.map((call) => call[0])).toEqual([first, resized]);
+    expect(h.spy).toHaveBeenCalledTimes(2);
+    h.finish();
+    expect(onStreamEventParsed.mock.calls.map((call) => call[0])).toEqual([first, resized, last]);
+
+    // Legacy frames and local display bytes are not Agent timeline events.
+    transport.onOutput!(new Uint8Array([67]));
+    transport.onResize!(100, 25);
+    controller.write('local');
+    h.finish();
+    h.finish();
+    expect(onStreamEventParsed).toHaveBeenCalledTimes(3);
+    expect(resizeSpy).toHaveBeenCalledWith(120, 30);
+    resizeSpy.mockRestore();
+    h.spy.mockRestore();
+    controller.dispose();
+  });
+
+  it('does not report bootstrap parsing or late transport callbacks as current Agent events (#1950)', () => {
+    const first = makeTransport();
+    const second = makeTransport();
+    const transports = [first, second];
+    const onStreamEventParsed = vi.fn();
+    const controller = new TerminalController(makeSession(), () => transports.shift()!, {
+      rendererType: 'canvas', events: { onStreamEventParsed },
+    });
+    controller.attach(host());
+    const h = delayedParser(controller);
+    first.onOutput!(new Uint8Array([49]), { requestedLines: 5000, truncated: false });
+    h.finish(); // snapshot reset
+    h.finish(); // snapshot bytes
+    expect(onStreamEventParsed).not.toHaveBeenCalled();
+
+    first.onOutput!(new Uint8Array([50]), undefined, { streamEpoch: 7, streamSeq: 2 });
+    controller.attach(host()); // old subscriber no longer owns current delivery
+    h.finish(); // old frame parsed but callback cannot certify the new subscription
+    expect(onStreamEventParsed).not.toHaveBeenCalled();
+    second.onOutput!(new Uint8Array([51]), undefined, { streamEpoch: 7, streamSeq: 3 });
+    h.finish();
+    expect(onStreamEventParsed).toHaveBeenCalledOnce();
+    expect(onStreamEventParsed).toHaveBeenCalledWith({ streamEpoch: 7, streamSeq: 3 });
+    second.onOutput!(new Uint8Array([52]), undefined, { streamEpoch: 7, streamSeq: 4 });
+    controller.dispose();
+    h.finish(); // disposed instance ignores even a previously queued callback
+    expect(onStreamEventParsed).toHaveBeenCalledOnce();
+    h.spy.mockRestore();
+  });
+
+  it('replaces scrollback only for an atomic full-VT complete checkpoint (#2008)', () => {
     const transport = makeTransport();
     const controller = new TerminalController(makeSession(), () => transport);
     controller.attach(host());
-
-    const writeSpy = vi.spyOn(controller.terminal!, 'write');
+    const h = delayedParser(controller);
     const resetSpy = vi.spyOn(controller.terminal!, 'reset');
-    transport.onOutput!(new Uint8Array([104, 105]), { requestedLines: 5000, truncated: false });
-
-    // Erase display, erase scrollback, cursor home — in that order, before the
-    // snapshot itself, so the history it carries is all the buffer holds.
-    expect(writeSpy).toHaveBeenNthCalledWith(1, '\x1b[2J\x1b[3J\x1b[H');
-    expect(writeSpy).toHaveBeenNthCalledWith(2, new Uint8Array([104, 105]), expect.any(Function));
-    // `reset()` would leave the alternate screen and clear modes the
-    // application set — a TUI's pane would come back normal-buffered.
+    transport.onOutput!(new Uint8Array([104, 105]), {
+      requestedLines: 5000, truncated: false,
+      cutConsistency: 'atomic', fidelity: 'full-vt', streamEpoch: 9, throughSeq: 7,
+    });
+    expect(h.spy).toHaveBeenNthCalledWith(1, '\x1b[2J\x1b[3J\x1b[H', expect.any(Function));
+    expect(h.spy).toHaveBeenCalledTimes(1);
+    h.finish();
+    expect(h.spy).toHaveBeenNthCalledWith(2, new Uint8Array([104, 105]), expect.any(Function));
     expect(resetSpy).not.toHaveBeenCalled();
-    writeSpy.mockRestore();
+    h.finish();
+    h.spy.mockRestore();
     resetSpy.mockRestore();
-    controller.detach();
+    controller.dispose();
+  });
+
+  it('establishes a parser baseline only after an atomic stream prefix parses (#2120)', () => {
+    const transport = makeTransport();
+    const onStreamBaseline = vi.fn();
+    const onBootstrapApplied = vi.fn();
+    const controller = new TerminalController(makeSession(), () => transport, {
+      rendererType: 'canvas', events: { onStreamBaseline, onBootstrapApplied },
+    });
+    controller.attach(host());
+    const h = delayedParser(controller);
+    transport.onOutput!(new Uint8Array([104, 105]), {
+      requestedLines: 5000, truncated: false,
+      cutConsistency: 'atomic', fidelity: 'partial', streamEpoch: 9, throughSeq: 7,
+    });
+    // A complete replay of the Agent event log requires an empty renderer,
+    // so the scrollback goes too — unlike a screen-only capture.
+    expect(h.spy).toHaveBeenNthCalledWith(1, '\x1b[2J\x1b[3J\x1b[H', expect.any(Function));
+    // Handing the prefix to xterm is not proof that it parsed.
+    expect(onStreamBaseline).not.toHaveBeenCalled();
+    h.finish(); // reset parsed
+    expect(onStreamBaseline).not.toHaveBeenCalled();
+    h.finish(); // prefix parsed
+    expect(onStreamBaseline).toHaveBeenCalledOnce();
+    expect(onStreamBaseline).toHaveBeenCalledWith({
+      kind: 'verified', streamEpoch: 9, appliedThrough: 7,
+    });
+    // Partial fidelity is a stream position, never a history repair.
+    expect(onBootstrapApplied).not.toHaveBeenCalled();
+    h.spy.mockRestore();
+    controller.dispose();
+  });
+
+  it('establishes an epoch-start baseline without wiping scrollback (#2124)', () => {
+    const transport = makeTransport();
+    const onStreamBaseline = vi.fn();
+    const onBootstrapApplied = vi.fn();
+    const controller = new TerminalController(makeSession(), () => transport, {
+      rendererType: 'canvas', events: { onStreamBaseline, onBootstrapApplied },
+    });
+    controller.attach(host());
+    const h = delayedParser(controller);
+    transport.onOutput!(new Uint8Array([104, 105]), {
+      requestedLines: 5000, truncated: true,
+      cutConsistency: 'atomic', fidelity: 'screen-only', streamEpoch: 5, throughSeq: 0,
+    });
+    // Position 0 has no replay to apply, so the scrollback the screen-only
+    // capture cannot restore is preserved.
+    expect(h.spy).toHaveBeenNthCalledWith(1, '\x1b[2J\x1b[H', expect.any(Function));
+    expect(onStreamBaseline).not.toHaveBeenCalled();
+    h.finish(); // screen reset
+    expect(onStreamBaseline).not.toHaveBeenCalled();
+    h.finish(); // capture parsed
+    expect(onStreamBaseline).toHaveBeenCalledOnce();
+    expect(onStreamBaseline).toHaveBeenCalledWith({
+      kind: 'verified', streamEpoch: 5, appliedThrough: 0,
+    });
+    expect(onBootstrapApplied).not.toHaveBeenCalled();
+    h.spy.mockRestore();
+    controller.dispose();
+  });
+
+  it('replaces the buffer with a complete history capture at an epoch start (#2160)', () => {
+    const transport = makeTransport();
+    const controller = new TerminalController(makeSession(), () => transport);
+    controller.attach(host());
+    const h = delayedParser(controller);
+    transport.onOutput!(new Uint8Array([104, 105]), {
+      requestedLines: 5000, truncated: false,
+      cutConsistency: 'atomic', fidelity: 'screen-only', streamEpoch: 5, throughSeq: 0,
+    });
+    // The capture is the pane's history at an exact stream position, so the
+    // retained buffer it would otherwise be appended to goes first.
+    // Appending re-writes every retained line the capture overlaps (#2160).
+    expect(h.spy).toHaveBeenNthCalledWith(1, '\x1b[2J\x1b[3J\x1b[H', expect.any(Function));
+    h.finish();
+    h.finish();
+    h.spy.mockRestore();
+    controller.dispose();
+  });
+
+  it('reports a complete history capture as a history repair (#2155)', () => {
+    const transport = makeTransport();
+    const onBootstrapApplied = vi.fn();
+    const controller = new TerminalController(makeSession(), () => transport, {
+      rendererType: 'canvas', events: { onBootstrapApplied },
+    });
+    controller.attach(host());
+    const h = delayedParser(controller);
+    transport.onOutput!(new Uint8Array([104, 105]), {
+      requestedLines: 5000, truncated: false,
+      cutConsistency: 'atomic', fidelity: 'screen-only', streamEpoch: 5, throughSeq: 0,
+    });
+    // Parsing is what proves it; handing the bytes to xterm is not.
+    expect(onBootstrapApplied).not.toHaveBeenCalled();
+    h.finish();
+    h.finish();
+    expect(onBootstrapApplied).toHaveBeenCalledOnce();
+    h.spy.mockRestore();
+    controller.dispose();
+  });
+
+  it('does not report a screen-only repaint as a history repair (#2155)', () => {
+    const transport = makeTransport();
+    const onBootstrapApplied = vi.fn();
+    const controller = new TerminalController(makeSession(), () => transport, {
+      rendererType: 'canvas', events: { onBootstrapApplied },
+    });
+    controller.attach(host());
+    const h = delayedParser(controller);
+    transport.onOutput!(new Uint8Array([104, 105]), {
+      requestedLines: 0, truncated: false,
+      cutConsistency: 'atomic', fidelity: 'screen-only', streamEpoch: 5, throughSeq: 0,
+    });
+    h.finish();
+    h.finish();
+    expect(onBootstrapApplied).not.toHaveBeenCalled();
+    h.spy.mockRestore();
+    controller.dispose();
+  });
+
+  it('does not establish a baseline from a superseded bootstrap write (#2120)', () => {
+    const transport = makeTransport();
+    const onStreamBaseline = vi.fn();
+    const controller = new TerminalController(makeSession(), () => transport, {
+      rendererType: 'canvas', events: { onStreamBaseline },
+    });
+    controller.attach(host());
+    const h = delayedParser(controller);
+    transport.onOutput!(new Uint8Array([49]), {
+      requestedLines: 5000, truncated: false,
+      cutConsistency: 'atomic', fidelity: 'partial', streamEpoch: 9, throughSeq: 7,
+    });
+    transport.onOutput!(new Uint8Array([50]), {
+      requestedLines: 5000, truncated: false,
+      cutConsistency: 'atomic', fidelity: 'partial', streamEpoch: 9, throughSeq: 11,
+    });
+    h.finish(); // old reset
+    h.finish(); // superseded prefix
+    expect(onStreamBaseline).not.toHaveBeenCalled();
+    h.finish(); // latest reset
+    h.finish(); // latest prefix
+    expect(onStreamBaseline).toHaveBeenCalledOnce();
+    expect(onStreamBaseline).toHaveBeenCalledWith({
+      kind: 'verified', streamEpoch: 9, appliedThrough: 11,
+    });
+    h.spy.mockRestore();
+    controller.dispose();
+  });
+
+  it('does not establish a baseline from a replaced transport (#2120)', () => {
+    const first = makeTransport();
+    const second = makeTransport();
+    const transports = [first, second];
+    const onStreamBaseline = vi.fn();
+    const controller = new TerminalController(makeSession(), () => transports.shift()!, {
+      rendererType: 'canvas', events: { onStreamBaseline },
+    });
+    controller.attach(host());
+    const h = delayedParser(controller);
+    first.onOutput!(new Uint8Array([49]), {
+      requestedLines: 5000, truncated: false,
+      cutConsistency: 'atomic', fidelity: 'partial', streamEpoch: 9, throughSeq: 7,
+    });
+    h.finish(); // first transport reset
+    controller.attach(host()); // same xterm, new transport
+    h.finish(); // old transport's prefix callback
+    expect(onStreamBaseline).not.toHaveBeenCalled();
+    h.spy.mockRestore();
+    controller.dispose();
+  });
+
+  it('keeps existing scrollback and recovery gap when a complete tmux capture is unverified (#2008)', () => {
+    const transport = makeTransport();
+    const onBootstrapApplied = vi.fn();
+    const onStreamBaseline = vi.fn();
+    const controller = new TerminalController(makeSession(), () => transport, {
+      rendererType: 'canvas', events: { onBootstrapApplied, onStreamBaseline },
+    });
+    controller.attach(host());
+    const h = delayedParser(controller);
+    transport.onOutput!(new Uint8Array([104, 105]), {
+      requestedLines: 5000, truncated: false,
+      cutConsistency: 'unverified', fidelity: 'screen-only',
+    });
+    expect(h.spy).toHaveBeenNthCalledWith(1, '\x1b[2J\x1b[H', expect.any(Function));
+    h.finish(); // screen-only reset
+    h.finish(); // parsed tmux text, not atomic stream cut
+    expect(controller.hasSessionOutput).toBe(true);
+    expect(onBootstrapApplied).not.toHaveBeenCalled();
+    expect(onStreamBaseline).not.toHaveBeenCalled();
+    h.spy.mockRestore();
+    controller.dispose();
   });
 
   it('keeps the scrollback when the snapshot the agent sent was cut short (#1305)', () => {
     const transport = makeTransport();
     const controller = new TerminalController(makeSession(), () => transport);
     controller.attach(host());
-
-    const writeSpy = vi.spyOn(controller.terminal!, 'write');
+    const h = delayedParser(controller);
     transport.onOutput!(new Uint8Array([104, 105]), { requestedLines: 5000, truncated: true });
-
-    // Erase the display and home the cursor, but leave the scrollback: the
-    // agent's ceiling drops the *oldest* history, and this client holds up to
-    // 50k lines against a 512 KiB capture — so the snapshot cannot stand in
-    // for what `\x1b[3J` would have destroyed. The screen it *can* restore is
-    // still replaced, which is why the display wipe stays.
-    expect(writeSpy).toHaveBeenNthCalledWith(1, '\x1b[2J\x1b[H');
-    expect(writeSpy).toHaveBeenNthCalledWith(2, new Uint8Array([104, 105]), expect.any(Function));
-    writeSpy.mockRestore();
-    controller.detach();
+    expect(h.spy).toHaveBeenNthCalledWith(1, '\x1b[2J\x1b[H', expect.any(Function));
+    expect(h.spy).toHaveBeenCalledTimes(1);
+    h.finish();
+    expect(h.spy).toHaveBeenNthCalledWith(2, new Uint8Array([104, 105]), expect.any(Function));
+    h.finish();
+    h.spy.mockRestore();
+    controller.dispose();
   });
 
   it('appends, without wiping, when the frame carries no marker', () => {
     const transport = makeTransport();
     const controller = new TerminalController(makeSession(), () => transport);
     controller.attach(host());
-
-    const writeSpy = vi.spyOn(controller.terminal!, 'write');
+    const h = delayedParser(controller);
     transport.onOutput!(new Uint8Array([1]));
     transport.onOutput!(new Uint8Array([2]), undefined);
-
-    expect(writeSpy).toHaveBeenCalledTimes(2);
-    expect(writeSpy).toHaveBeenNthCalledWith(1, new Uint8Array([1]), expect.any(Function));
-    expect(writeSpy).toHaveBeenNthCalledWith(2, new Uint8Array([2]), expect.any(Function));
-    writeSpy.mockRestore();
-    controller.detach();
+    expect(h.spy).toHaveBeenCalledTimes(1);
+    h.finish();
+    expect(h.spy).toHaveBeenNthCalledWith(1, new Uint8Array([1]), expect.any(Function));
+    expect(h.spy).toHaveBeenNthCalledWith(2, new Uint8Array([2]), expect.any(Function));
+    h.finish();
+    h.spy.mockRestore();
+    controller.dispose();
   });
 
   it('reports hasSessionOutput only once output has arrived, bootstrap included', async () => {
@@ -403,7 +732,7 @@ describe('TerminalController', () => {
         originalWrite(data, callback
           ? () => {
             callback();
-            signalParsed();
+            if (data instanceof Uint8Array) { signalParsed(); }
           }
           : undefined);
       }) as never,
@@ -431,35 +760,50 @@ describe('TerminalController', () => {
     controller.detach();
   });
 
-  it('ignores a superseded snapshot when it finally lands (#1491)', async () => {
+  it('distinguishes a parsed capture from live output (#2194)', async () => {
     const transport = makeTransport();
     const controller = new TerminalController(makeSession(), () => transport);
     controller.attach(host());
+    const h = delayedParser(controller);
 
-    // Two snapshots in flight — a re-attach arriving while the first is still
-    // parsing, which is what a large history plus a rewire produces. The first
-    // callback describes a buffer the second one has since erased, so it must
-    // not lift the flag; only the newest snapshot speaks for the buffer.
-    const writes: Array<() => void> = [];
-    const writeSpy = vi.spyOn(controller.terminal!, 'write').mockImplementation(
-      ((_data: unknown, callback?: () => void) => { if (callback) { writes.push(callback); } }) as never,
-    );
-
-    transport.onOutput!(new Uint8Array([49]), { requestedLines: 5000, truncated: false });
-    transport.onOutput!(new Uint8Array([50]), { requestedLines: 5000, truncated: false });
-    expect(writes).toHaveLength(2);
-
-    writes[0]!();  // the superseded snapshot lands
-    expect(controller.hasSessionOutput).toBe(false);
-
-    writes[1]!();  // the one the buffer actually holds
+    // Live output answers "this Terminal holds something"; it proves nothing
+    // about history, and a replacement renderer reaches this state before any
+    // attach can ask.
+    transport.onOutput!(new Uint8Array([104, 105]));
     expect(controller.hasSessionOutput).toBe(true);
+    expect(controller.hasParsedCapture).toBe(false);
+    h.finish();
 
-    writeSpy.mockRestore();
-    controller.detach();
+    // A capture's parser callback is the history fact.
+    transport.onOutput!(new Uint8Array([104, 105]), {
+      requestedLines: 5000, truncated: false,
+    });
+    h.finish(); // buffer reset
+    h.finish(); // snapshot bytes
+    expect(controller.hasParsedCapture).toBe(true);
+    h.spy.mockRestore();
+    controller.dispose();
   });
 
-  it('reports bootstrap applied only after the latest COMPLETE snapshot parses (#1645)', () => {
+  it('ignores a superseded snapshot when it finally lands (#1491)', () => {
+    const transport = makeTransport();
+    const controller = new TerminalController(makeSession(), () => transport);
+    controller.attach(host());
+    const h = delayedParser(controller);
+    transport.onOutput!(new Uint8Array([49]), { requestedLines: 5000, truncated: false });
+    transport.onOutput!(new Uint8Array([50]), { requestedLines: 5000, truncated: false });
+    expect(h.spy).toHaveBeenCalledTimes(1);
+    h.finish(); // first reset parsed
+    h.finish(); // first snapshot parsed, but superseded
+    expect(controller.hasSessionOutput).toBe(false);
+    h.finish(); // second reset
+    h.finish(); // latest snapshot
+    expect(controller.hasSessionOutput).toBe(true);
+    h.spy.mockRestore();
+    controller.dispose();
+  });
+
+  it('reports bootstrap applied only after the latest atomic/full-VT snapshot parses (#2008)', () => {
     const transport = makeTransport();
     const onBootstrapApplied = vi.fn();
     const controller = new TerminalController(makeSession(), () => transport, {
@@ -467,25 +811,26 @@ describe('TerminalController', () => {
       events: { onBootstrapApplied },
     });
     controller.attach(host());
-
-    const callbacks: Array<() => void> = [];
-    const spy = vi.spyOn(controller.terminal!, 'write').mockImplementation(
-      ((_data: unknown, callback?: () => void) => {
-        if (callback) { callbacks.push(callback); }
-      }) as never,
-    );
-    transport.onOutput!(new Uint8Array([49]), { requestedLines: 5000, truncated: false });
-    transport.onOutput!(new Uint8Array([50]), { requestedLines: 5000, truncated: false });
+    const h = delayedParser(controller);
+    transport.onOutput!(new Uint8Array([49]), {
+      requestedLines: 5000, truncated: false, cutConsistency: 'atomic', fidelity: 'full-vt', streamEpoch: 9, throughSeq: 7,
+    });
+    transport.onOutput!(new Uint8Array([50]), {
+      requestedLines: 5000, truncated: false, cutConsistency: 'atomic', fidelity: 'full-vt', streamEpoch: 9, throughSeq: 7,
+    });
     expect(onBootstrapApplied).not.toHaveBeenCalled();
-    callbacks[0]!(); // Superseded by a newer snapshot
+    h.finish(); // old reset
+    h.finish(); // old snapshot
     expect(onBootstrapApplied).not.toHaveBeenCalled();
-    callbacks[1]!();
+    h.finish(); // latest reset
+    expect(onBootstrapApplied).not.toHaveBeenCalled();
+    h.finish(); // latest snapshot
     expect(onBootstrapApplied).toHaveBeenCalledTimes(1);
-
     transport.onOutput!(new Uint8Array([51]), { requestedLines: 5000, truncated: true });
-    callbacks[2]!(); // A truncated capture cannot repair a missing history range
+    h.finish(); // truncated reset
+    h.finish(); // truncated capture cannot repair the missing history
     expect(onBootstrapApplied).toHaveBeenCalledTimes(1);
-    spy.mockRestore();
+    h.spy.mockRestore();
     controller.dispose();
   });
 
@@ -499,19 +844,13 @@ describe('TerminalController', () => {
       events: { onBootstrapApplied },
     });
     controller.attach(host());
-
-    let oldCallback: (() => void) | undefined;
-    const spy = vi.spyOn(controller.terminal!, 'write').mockImplementation(
-      ((_data: unknown, callback?: () => void) => {
-        if (callback) { oldCallback = callback; }
-      }) as never,
-    );
+    const h = delayedParser(controller);
     first.onOutput!(new Uint8Array([49]), { requestedLines: 5000, truncated: false });
-    controller.attach(host()); // Viewport reparent replaces transport, not xterm
-    expect(oldCallback).toBeDefined();
-    oldCallback!();
+    h.finish(); // first transport reset; its snapshot is now in flight
+    controller.attach(host()); // same xterm, new transport
+    h.finish(); // old transport's snapshot parse callback
     expect(onBootstrapApplied).not.toHaveBeenCalled();
-    spy.mockRestore();
+    h.spy.mockRestore();
     controller.dispose();
   });
 
@@ -676,6 +1015,64 @@ describe('TerminalController', () => {
       expect(transport.sendResize).toHaveBeenCalledWith(128, 37);
       controller.dispose();
     } finally {
+      if (!hadFonts) { delete (document as { fonts?: unknown }).fonts; }
+      restore();
+    }
+  });
+
+  it('sends a later container resize even when a lazy font load reports loading (#2132)', async () => {
+    // The #1490 gate defers the PTY half while the *cell box* is provisional,
+    // because the font-load correction will report the final size instead.
+    // After that correction has run, the cell box is final — but
+    // `document.fonts.status` can flip back to `loading` for a face the
+    // renderer asked for lazily. Treating that later status as provisional
+    // swallowed a real viewport resize with no correction left to report it:
+    // the grid moved to 164x46 while the browser sent nothing (measured in the
+    // TUI fixture), or sent the attach size instead.
+    const restore = installCapturingResizeObserver();
+    const hadFonts = Object.prototype.hasOwnProperty.call(document, 'fonts');
+    const fontsStub = {
+      status: 'loading' as FontFaceSet['status'],
+      ready: Promise.resolve() as unknown as Promise<FontFaceSet>,
+      load: () => Promise.resolve([]),
+    };
+    let resolveReady: () => void = () => {};
+    fontsStub.ready = new Promise<FontFaceSet>((resolve) => {
+      resolveReady = () => resolve(fontsStub as unknown as FontFaceSet);
+    });
+    Object.defineProperty(document, 'fonts', { configurable: true, value: fontsStub });
+    try {
+      const transport = makeTransport();
+      const controller = new TerminalController(makeSession(), () => transport);
+      controller.attach(host());
+      await flush(); // RAF fires → observe() captures the callback
+
+      const first = { contentRect: { width: 1024, height: 600 } } as unknown as ResizeObserverEntry;
+      capturedCallback!([first], capturedObserver!);
+      expect(transport.sendResize).not.toHaveBeenCalled();
+
+      // The correction lands; it reports the final cell box once.
+      fontsStub.status = 'loaded';
+      resolveReady();
+      await flush();
+      expect(transport.sendResize).toHaveBeenCalledTimes(1);
+      expect(transport.sendResize).toHaveBeenLastCalledWith(128, 37);
+
+      // A later real container resize, while an unrelated face is loading.
+      fontsStub.status = 'loading';
+      vi.useFakeTimers();
+      const grown = { contentRect: { width: 1200, height: 600 } } as unknown as ResizeObserverEntry;
+      capturedCallback!([grown], capturedObserver!);
+      expect(controller.terminal!.cols).toBe(150);
+      vi.advanceTimersByTime(200);
+
+      // The PTY hears it: the cell box this grid was computed from is final.
+      expect(transport.sendResize).toHaveBeenCalledTimes(2);
+      expect(transport.sendResize).toHaveBeenLastCalledWith(150, 37);
+      vi.useRealTimers();
+      controller.dispose();
+    } finally {
+      vi.useRealTimers();
       if (!hadFonts) { delete (document as { fonts?: unknown }).fonts; }
       restore();
     }

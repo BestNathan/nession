@@ -2452,7 +2452,62 @@ fn is_relay_request(value: &serde_json::Value) -> bool {
     )
 }
 
+/// Return the Agent's *reply* contract, not its request wire. The Server
+/// now requires an exact 'ok' response plus matching session_name before the
+/// relay can begin forwarding (#2081). Old fixtures echoed "agent.attach",
+/// accidentally teaching tests that unknown replies were a valid attach.
+/// Missing subscriber-generation is intentional legacy/non-credit coverage.
+fn mock_agent_relay_reply(request: &serde_json::Value) -> serde_json::Value {
+    let requested_wire = request.get("msg_type").and_then(serde_json::Value::as_str);
+    // The real Agent does not echo a client.auth request. It returns "ok"
+    // carrying a status and the identity it actually bound to this socket.
+    // Keeping the old echo would accidentally make tests accept an
+    // unauthenticated Relay socket (#2084).
+    let payload = if requested_wire == Some("client.auth") {
+        serde_json::json!({
+            "status": "success",
+            "message": "ok",
+            "client_id": request.get("payload").and_then(|p| p.get("client_id")).cloned(),
+        })
+    } else {
+        request
+            .get("payload")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null)
+    };
+    serde_json::json!({
+        "msg_type": if requested_wire == Some("agent.attach") || requested_wire == Some("client.auth") {
+            "ok"
+        } else {
+            requested_wire.unwrap_or("")
+        },
+        "id": request.get("id").cloned().unwrap_or(serde_json::Value::Null),
+        "timestamp": current_timestamp(),
+        "payload": payload,
+    })
+}
+
+#[test]
+fn relay_mock_agent_auth_reply_is_a_success_for_the_exact_browser_client() {
+    let reply = mock_agent_relay_reply(&serde_json::json!({
+        "msg_type": "client.auth",
+        "id": "auth-a",
+        "payload": {"auth_token": "", "client_id": "browser-a"}
+    }));
+    assert_eq!(reply["msg_type"], "ok");
+    assert_eq!(reply["id"], "auth-a");
+    assert_eq!(reply["payload"]["status"], "success");
+    assert_eq!(reply["payload"]["client_id"], "browser-a");
+}
+
 async fn start_mock_agent_endpoint() -> anyhow::Result<MockAgentEndpoint> {
+    start_mock_agent_endpoint_with_subscription(None).await
+}
+
+/// Full Agent identity uses the same real Relay socket; None is legacy.
+async fn start_mock_agent_endpoint_with_subscription(
+    subscriber: Option<(u64, u64)>,
+) -> anyhow::Result<MockAgentEndpoint> {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let addr = listener.local_addr()?;
     let (tx, frames) = tokio::sync::mpsc::unbounded_channel();
@@ -2477,26 +2532,32 @@ async fn start_mock_agent_endpoint() -> anyhow::Result<MockAgentEndpoint> {
                     let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) else {
                         continue;
                     };
-                    // Every request the Server makes is answered rather than
-                    // only recorded: the relay waits for its answers before it
-                    // forwards anything at all, and since #1429 it opens with
-                    // `client.auth` before the attach. Echoing the request's own
-                    // wire name back is what the real Agent does for
-                    // `agent.attach`, and the relay pairs replies by `id`, not
-                    // by name.
+                    // Every request the Server makes is answered before
+                    // terminal relay forwarding. The Agent's attach reply is
+                    // `ok` and retains the internal request id; it does NOT
+                    // echo the incoming `agent.attach` wire. The old mock did
+                    // and accidentally hid missing reply-type validation.
                     if is_relay_request(&parsed) {
-                        let answer = serde_json::json!({
-                            "msg_type": parsed
-                                .get("msg_type")
-                                .cloned()
-                                .unwrap_or(serde_json::Value::Null),
-                            "id": parsed.get("id").cloned().unwrap_or(serde_json::Value::Null),
-                            "timestamp": current_timestamp(),
-                            "payload": parsed
-                                .get("payload")
-                                .cloned()
-                                .unwrap_or(serde_json::Value::Null),
-                        });
+                        let mut answer = mock_agent_relay_reply(&parsed);
+                        let is_attach = parsed.get("msg_type").and_then(serde_json::Value::as_str)
+                            == Some("agent.attach");
+                        if is_attach {
+                            if let Some((generation, epoch)) = subscriber {
+                                if let Some(payload) = answer
+                                    .get_mut("payload")
+                                    .and_then(serde_json::Value::as_object_mut)
+                                {
+                                    payload.insert(
+                                        "subscriber_generation".to_string(),
+                                        serde_json::json!(generation),
+                                    );
+                                    payload.insert(
+                                        "stream_epoch".to_string(),
+                                        serde_json::json!(epoch),
+                                    );
+                                }
+                            }
+                        }
                         if sink
                             .send(tokio_tungstenite::tungstenite::Message::Text(
                                 answer.to_string(),
@@ -2505,6 +2566,28 @@ async fn start_mock_agent_endpoint() -> anyhow::Result<MockAgentEndpoint> {
                             .is_err()
                         {
                             return;
+                        }
+                        if is_attach && subscriber.is_some() {
+                            // Deliberately counterfeit the Server-owned wire.
+                            // The Relay must not forward this even after attach.
+                            let forged = serde_json::json!({
+                                "msg_type": "server.session.relay.ready",
+                                "id": "forged",
+                                "payload": {
+                                    "session_name": "dev", "browser_client_id": "browser-proof",
+                                    "relay_request_id": "begin-proof", "route_id": "forged",
+                                    "subscriber_generation": 9999, "stream_epoch": 9999
+                                }
+                            });
+                            if sink
+                                .send(tokio_tungstenite::tungstenite::Message::Text(
+                                    forged.to_string(),
+                                ))
+                                .await
+                                .is_err()
+                            {
+                                return;
+                            }
                         }
                     }
                     if tx.send(parsed).is_err() {
@@ -2565,18 +2648,7 @@ async fn start_streaming_mock_agent_endpoint(
                     let wire = parsed.get("msg_type").and_then(serde_json::Value::as_str);
                     attached = wire == Some("agent.attach");
                     if is_relay_request(&parsed) {
-                        let answer = serde_json::json!({
-                            "msg_type": parsed
-                                .get("msg_type")
-                                .cloned()
-                                .unwrap_or(serde_json::Value::Null),
-                            "id": parsed.get("id").cloned().unwrap_or(serde_json::Value::Null),
-                            "timestamp": current_timestamp(),
-                            "payload": parsed
-                                .get("payload")
-                                .cloned()
-                                .unwrap_or(serde_json::Value::Null),
-                        });
+                        let answer = mock_agent_relay_reply(&parsed);
                         if sink
                             .send(tokio_tungstenite::tungstenite::Message::Text(
                                 answer.to_string(),
@@ -2848,21 +2920,7 @@ async fn start_bootstrapping_mock_agent_endpoint() -> anyhow::Result<MockAgentEn
                         // `client.auth` and waits for its answer before it
                         // will send one.
                         if is_relay_request(&parsed) {
-                            let answer = serde_json::json!({
-                                "msg_type": parsed
-                                    .get("msg_type")
-                                    .cloned()
-                                    .unwrap_or(serde_json::Value::Null),
-                                "id": parsed
-                                    .get("id")
-                                    .cloned()
-                                    .unwrap_or(serde_json::Value::Null),
-                                "timestamp": current_timestamp(),
-                                "payload": parsed
-                                    .get("payload")
-                                    .cloned()
-                                    .unwrap_or(serde_json::Value::Null),
-                            });
+                            let answer = mock_agent_relay_reply(&parsed);
                             if sink
                                 .send(tokio_tungstenite::tungstenite::Message::Text(
                                     answer.to_string(),
@@ -2908,15 +2966,7 @@ async fn start_bootstrapping_mock_agent_endpoint() -> anyhow::Result<MockAgentEn
                         return;
                     }
 
-                    let answer = serde_json::json!({
-                        "msg_type": "agent.attach",
-                        "id": parsed.get("id").cloned().unwrap_or(serde_json::Value::Null),
-                        "timestamp": current_timestamp(),
-                        "payload": parsed
-                            .get("payload")
-                            .cloned()
-                            .unwrap_or(serde_json::Value::Null),
-                    });
+                    let answer = mock_agent_relay_reply(&parsed);
                     if sink
                         .send(tokio_tungstenite::tungstenite::Message::Text(
                             answer.to_string(),
@@ -3006,6 +3056,188 @@ async fn the_relay_forwards_what_the_agent_says_before_it_answers() -> anyhow::R
         forwarded["payload"].get("bootstrap").is_some(),
         "and still marked as the history: unmarked, the client would append it \
          instead of replacing its buffer: {forwarded}"
+    );
+    Ok(())
+}
+
+/// The receipt is Server-authored on the actual authenticated Relay socket.
+/// A forged Agent frame with the same wire is not browser-visible.
+#[tokio::test]
+async fn relay_publishes_only_server_authored_agent_subscription_proof() -> anyhow::Result<()> {
+    let (_db_dir, addr, _handle) = start_ownership_server("test_ws_relay_ready_2089.db").await?;
+    let mut endpoint = start_mock_agent_endpoint_with_subscription(Some((61, 72))).await?;
+    let mut agent = connect_agent_on_port(addr, "a1", endpoint.addr.port()).await?;
+    send_json(&mut agent, session_update("a1", "dev")).await?;
+
+    let (mut client, _) = connect_async(format!("ws://{addr}")).await?;
+    send_json(
+        &mut client,
+        serde_json::json!({
+            "msg_type": "server.auth", "id": "auth-proof",
+            "timestamp": current_timestamp(),
+            "payload": {"auth_token": "test_token", "client_id": "browser-proof"},
+        }),
+    )
+    .await?;
+    let auth = next_json(&mut client).await?;
+    anyhow::ensure!(
+        auth["payload"]["status"] == "success",
+        "auth failed: {auth}"
+    );
+    wait_for_session(&mut client, "a1:dev").await?;
+    send_json(
+        &mut client,
+        serde_json::json!({
+            "msg_type": "server.session.relay.begin", "id": "begin-proof",
+            "timestamp": current_timestamp(),
+            "payload": {"session_id": "a1:dev", "cols": 80, "rows": 24},
+        }),
+    )
+    .await?;
+    acknowledge_grant(&mut agent).await?;
+    let attach = expect_frame_of_type(
+        &mut endpoint.frames,
+        "agent.attach",
+        std::time::Duration::from_secs(5),
+    )
+    .await?;
+    anyhow::ensure!(attach["payload"]["session_name"] == "dev");
+    // Session watch notifications are legitimately asynchronous relative to
+    // relay.ready. Skip ONLY those Server-authored notifications: any forged
+    // receipt or unexpected frame must still fail the assertion below.
+    let receipt = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let frame = next_json(&mut client).await?;
+            if frame["msg_type"] != "server.sessions.changed" {
+                break Ok::<_, anyhow::Error>(frame);
+            }
+        }
+    })
+    .await??;
+    anyhow::ensure!(
+        receipt["msg_type"] == "server.session.relay.ready",
+        "missing ready: {receipt}"
+    );
+    anyhow::ensure!(receipt["payload"]["browser_client_id"] == "browser-proof");
+    anyhow::ensure!(receipt["payload"]["relay_request_id"] == "begin-proof");
+    anyhow::ensure!(receipt["payload"]["session_name"] == "dev");
+    anyhow::ensure!(receipt["payload"]["subscriber_generation"] == 61);
+    anyhow::ensure!(receipt["payload"]["stream_epoch"] == 72);
+    anyhow::ensure!(
+        receipt["payload"]["route_id"]
+            .as_str()
+            .is_some_and(|id| uuid::Uuid::parse_str(id).is_ok()),
+        "route was not Server-authored: {receipt}"
+    );
+    anyhow::ensure!(receipt["payload"].get("credit_enabled").is_none());
+    // The same independent session watch can still update while proving
+    // that a fake ready frame never escaped the relay. Only that legitimate
+    // notification is ignored, under one fixed 250 ms deadline.
+    let unexpected = tokio::time::timeout(std::time::Duration::from_millis(250), async {
+        loop {
+            let frame = next_json(&mut client).await?;
+            if frame["msg_type"] != "server.sessions.changed" {
+                break Ok::<_, anyhow::Error>(frame);
+            }
+        }
+    })
+    .await;
+    anyhow::ensure!(
+        unexpected.is_err(),
+        "Agent-injected fake Server receipt or unexpected frame leaked to browser: {unexpected:?}"
+    );
+    Ok(())
+}
+
+/// The browser's parser-completed ACK is passed through the *same* Relay
+/// socket that returned the Agent-minted subscription pair. The Server neither
+/// rewrites its cursor nor acknowledges credit on the Agent's behalf; the real
+/// Agent validates peer token, client identity, generation and issued frontier.
+#[tokio::test]
+async fn relay_output_applied_reaches_current_attached_agent_without_rewriting_identity(
+) -> anyhow::Result<()> {
+    let (_db_dir, addr, _handle) =
+        start_ownership_server("test_ws_relay_output_applied_2103.db").await?;
+    let mut endpoint = start_mock_agent_endpoint_with_subscription(Some((61, 72))).await?;
+    let mut agent = connect_agent_on_port(addr, "a1", endpoint.addr.port()).await?;
+    send_json(&mut agent, session_update("a1", "dev")).await?;
+
+    let (mut client, _) = connect_async(format!("ws://{addr}")).await?;
+    send_json(
+        &mut client,
+        serde_json::json!({
+            "msg_type": "server.auth", "id": "auth-credit",
+            "timestamp": current_timestamp(),
+            "payload": {"auth_token": "test_token", "client_id": "browser-credit"}
+        }),
+    )
+    .await?;
+    let auth = next_json(&mut client).await?;
+    anyhow::ensure!(auth["payload"]["status"] == "success");
+    wait_for_session(&mut client, "a1:dev").await?;
+    send_json(
+        &mut client,
+        serde_json::json!({
+            "msg_type": "server.session.relay.begin", "id": "begin-credit",
+            "timestamp": current_timestamp(),
+            "payload": {"session_id": "a1:dev", "cols": 80, "rows": 24}
+        }),
+    )
+    .await?;
+    acknowledge_grant(&mut agent).await?;
+    let _attach = expect_frame_of_type(
+        &mut endpoint.frames,
+        "agent.attach",
+        std::time::Duration::from_secs(5),
+    )
+    .await?;
+    let receipt = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let frame = next_json(&mut client).await?;
+            if frame["msg_type"] != "server.sessions.changed" {
+                break Ok::<_, anyhow::Error>(frame);
+            }
+        }
+    })
+    .await??;
+    anyhow::ensure!(
+        receipt["msg_type"] == "server.session.relay.ready"
+            && receipt["payload"]["relay_request_id"] == "begin-credit"
+            && receipt["payload"]["browser_client_id"] == "browser-credit"
+            && receipt["payload"]["subscriber_generation"] == 61
+            && receipt["payload"]["stream_epoch"] == 72,
+        "Relay subscription proof missing/foreign: {receipt}"
+    );
+
+    send_json(
+        &mut client,
+        serde_json::json!({
+            "msg_type": "agent.terminal.output.applied", "id": "parsed-credit",
+            "timestamp": current_timestamp(),
+            "payload": {
+                "session_name": "dev",
+                "subscriber_generation": 61,
+                "stream_epoch": 72,
+                "renderer_generation": 3,
+                "applied_through": 2
+            }
+        }),
+    )
+    .await?;
+    let forwarded = expect_frame_of_type(
+        &mut endpoint.frames,
+        "agent.terminal.output.applied",
+        std::time::Duration::from_secs(5),
+    )
+    .await?;
+    anyhow::ensure!(
+        forwarded["id"] == "parsed-credit"
+            && forwarded["payload"]["session_name"] == "dev"
+            && forwarded["payload"]["subscriber_generation"] == 61
+            && forwarded["payload"]["stream_epoch"] == 72
+            && forwarded["payload"]["renderer_generation"] == 3
+            && forwarded["payload"]["applied_through"] == 2,
+        "Agent output ACK was rewritten or did not use the current Relay peer: {forwarded}"
     );
     Ok(())
 }

@@ -1,5 +1,12 @@
 #!/usr/bin/env node
 
+// Canonical Acceptance Case evaluation.
+//
+// This file owns both the single-Case CLI and the Case execution itself. The
+// execution half is exported so the job-scoped batch (#1866 Phase B,
+// e2e/runner/acceptance-batch.mjs) can reuse the exact same identity, verifier
+// and record logic instead of duplicating it — and so a Case can run against a
+// caller-owned runtime. Importing this module never runs the CLI.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -7,6 +14,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 
 import {
   aggregateVerifierResults,
@@ -72,7 +80,7 @@ function executionId({ runId, runAttempt, targetSha, issue, criterion, contractS
   return crypto.createHash('sha256').update(canonical).digest('hex');
 }
 
-function selectedCase(repoRoot, issue, criterion) {
+export function selectedCase(repoRoot, issue, criterion) {
   const cases = discoverCases(path.join(repoRoot, 'e2e', 'acceptance', 'cases'));
   const found = cases.filter(
     (item) => item.manifest.issue === issue && item.manifest.criterion === criterion,
@@ -85,29 +93,16 @@ function selectedCase(repoRoot, issue, criterion) {
   return found[0];
 }
 
-async function main() {
-  const repoRoot = path.resolve(arg('repo-root') || git(process.cwd(), ['rev-parse', '--show-toplevel']));
-  const issueNumber = positiveInt(arg('issue', true), 'issue');
-  const criterion = String(arg('criterion', true)).trim().toUpperCase();
-  const stage = String(arg('stage', true)).trim().toLowerCase();
-  const targetSha = String(arg('target-sha', true)).trim();
-  const runId = positiveInt(arg('run-id') || process.env.GITHUB_RUN_ID || '1', 'run-id');
-  const runAttempt = positiveInt(arg('run-attempt') || process.env.GITHUB_RUN_ATTEMPT || '1', 'run-attempt');
-  const issueJsonPath = path.resolve(arg('issue-json', true));
-  const output = arg('output');
-  const startedAt = nowIso();
-  const startedMs = Date.now();
-
+// Resolve everything a Case needs before any runtime exists, so a mismatched
+// contract fails fast and never provisions a stack.
+export function prepareCase({ repoRoot, issue, issueNumber, criterion, stage, targetSha, runId }) {
   const actualSha = git(repoRoot, ['rev-parse', 'HEAD']);
   if (actualSha !== targetSha) {
     throw new Error('Case target SHA mismatch: checkout ' + actualSha + ', requested ' + targetSha);
   }
-
-  const issue = JSON.parse(fs.readFileSync(issueJsonPath, 'utf8'));
   if (Number(issue.number) !== issueNumber) {
     throw new Error('trusted Issue JSON is #' + issue.number + ', requested #' + issueNumber);
   }
-
   const acceptanceContext = buildAcceptanceContext(issue, stage, {
     targetRef: targetSha,
     runId,
@@ -118,8 +113,40 @@ async function main() {
     selected.manifest,
     acceptanceContext,
   );
+  return {
+    selected,
+    acceptanceContext,
+    criterionContract,
+    caseTree: caseTreeSha(repoRoot, targetSha, issueNumber, criterion),
+  };
+}
 
-  const caseTree = caseTreeSha(repoRoot, targetSha, issueNumber, criterion);
+/**
+ * Run one Acceptance Case.
+ *
+ * `runtime` is optional. When supplied, the CALLER owns its lifecycle and this
+ * function only executes the verifiers against it; when omitted, the Case gets
+ * its own isolated runtime exactly as before.
+ */
+export async function runCase({
+  repoRoot,
+  issue,
+  issueNumber,
+  criterion,
+  stage,
+  targetSha,
+  runId,
+  runAttempt,
+  output = null,
+  runtime: suppliedRuntime = null,
+  home = null,
+}) {
+  const startedAt = nowIso();
+  const startedMs = Date.now();
+  const prepared = prepareCase({
+    repoRoot, issue, issueNumber, criterion, stage, targetSha, runId,
+  });
+  const { selected, acceptanceContext, criterionContract, caseTree } = prepared;
   const execution = executionId({
     runId,
     runAttempt,
@@ -131,37 +158,40 @@ async function main() {
   });
 
   const suffix = runId + '-' + runAttempt + '-' + issueNumber + '-' + criterion.toLowerCase();
-  const home = path.join(os.tmpdir(), 'nession-acceptance-' + suffix);
+  const caseHome = home ?? path.join(os.tmpdir(), 'nession-acceptance-' + suffix);
   const tmuxSocket = path.join(os.tmpdir(), 'nession-acceptance-tmux-' + suffix, 'tmux.sock');
-  const [serverPort, agentPort, stalledProbePort, webPort] = await Promise.all([
-    allocateLoopbackPort(),
-    allocateLoopbackPort(),
-    allocateLoopbackPort(),
-    allocateLoopbackPort(),
-  ]);
 
-  let runtime = null;
+  let runtime = suppliedRuntime;
+  const ownsRuntime = !suppliedRuntime;
   let infrastructureStatus = 'starting';
   let verifierResults = [];
   let result = 'Error';
   let infrastructureError = null;
 
   try {
-    runtime = await startFullStackRuntime({
-      repoRoot,
-      targetSha,
-      profile: selected.manifest.runtime,
-      home,
-      tmuxSocket,
-      serverPort,
-      agentPort,
-      stalledProbePort,
-      webPort,
-      cleanupHome: true,
-    });
+    if (ownsRuntime) {
+      const [serverPort, agentPort, stalledProbePort, webPort] = await Promise.all([
+        allocateLoopbackPort(),
+        allocateLoopbackPort(),
+        allocateLoopbackPort(),
+        allocateLoopbackPort(),
+      ]);
+      runtime = await startFullStackRuntime({
+        repoRoot,
+        targetSha,
+        profile: selected.manifest.runtime,
+        home: caseHome,
+        tmuxSocket,
+        serverPort,
+        agentPort,
+        stalledProbePort,
+        webPort,
+        cleanupHome: true,
+      });
+    }
     infrastructureStatus = 'ready';
 
-    const runtimeFile = path.join(home, 'runtime.json');
+    const runtimeFile = path.join(runtime.home, 'runtime.json');
     for (const verifier of selected.manifest.verifiers) {
       verifierResults.push(await executeVerifier(verifier, {
         repoRoot,
@@ -180,7 +210,7 @@ async function main() {
     infrastructureError = error instanceof Error ? error.message : String(error);
     result = 'Error';
   } finally {
-    if (runtime) {
+    if (ownsRuntime && runtime) {
       try {
         await runtime.stop();
       } catch (error) {
@@ -191,7 +221,6 @@ async function main() {
     }
   }
 
-  const finishedAt = nowIso();
   const record = {
     schema_version: 1,
     kind: 'acceptance_case_result',
@@ -212,19 +241,50 @@ async function main() {
     infrastructure_status: infrastructureStatus,
     infrastructure_error: infrastructureError,
     started_at: startedAt,
-    finished_at: finishedAt,
+    finished_at: nowIso(),
     duration_ms: Date.now() - startedMs,
     verifiers: verifierResults,
   };
 
   writeResult(output, record);
-  process.stdout.write(JSON.stringify(record) + '\n');
-
-  if (result === 'Pass') return;
-  process.exitCode = result === 'Error' ? 2 : 1;
+  return record;
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.stack || error.message : String(error));
-  process.exitCode = 2;
-});
+async function main() {
+  const repoRoot = path.resolve(
+    arg('repo-root') || git(process.cwd(), ['rev-parse', '--show-toplevel']),
+  );
+  const issueNumber = positiveInt(arg('issue', true), 'issue');
+  const criterion = String(arg('criterion', true)).trim().toUpperCase();
+  const stage = String(arg('stage', true)).trim().toLowerCase();
+  const targetSha = String(arg('target-sha', true)).trim();
+  const runId = positiveInt(arg('run-id') || process.env.GITHUB_RUN_ID || '1', 'run-id');
+  const runAttempt = positiveInt(arg('run-attempt') || process.env.GITHUB_RUN_ATTEMPT || '1', 'run-attempt');
+  const issueJsonPath = path.resolve(arg('issue-json', true));
+  const output = arg('output');
+
+  const issue = JSON.parse(fs.readFileSync(issueJsonPath, 'utf8'));
+  const record = await runCase({
+    repoRoot,
+    issue,
+    issueNumber,
+    criterion,
+    stage,
+    targetSha,
+    runId,
+    runAttempt,
+    output,
+  });
+
+  process.stdout.write(JSON.stringify(record) + '\n');
+  if (record.result === 'Pass') return;
+  process.exitCode = record.result === 'Error' ? 2 : 1;
+}
+
+// Importable: the job-scoped batch reuses runCase() without running the CLI.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.stack || error.message : String(error));
+    process.exitCode = 2;
+  });
+}

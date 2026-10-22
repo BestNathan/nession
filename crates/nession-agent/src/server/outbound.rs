@@ -250,11 +250,35 @@ impl P2pOutbound {
     ///
     /// The writer stops at its next opportunity — before its next frame, or when
     /// the frame it is writing completes — and the peer sees the socket close.
-    /// The reader ends with it, because its stream ends; that is the whole
-    /// teardown, and it needs no signal back to the reader.
+    ///
+    /// **The reader does not necessarily end with it.** This used to claim it
+    /// did ("its stream ends"), and that assumption is what left a relayed
+    /// subscriber half-open (#2179): the writer was parked in a socket write
+    /// the peer was not reading, so it could not stop and drop the sink, and
+    /// the read loop waited for a frame that was never coming. The connection
+    /// then delivered nothing and told nobody. The read loop therefore races
+    /// its stream against [`Self::wait_closed`], and its `serve` caller aborts
+    /// the writer — cancelling the parked write and dropping the socket is
+    /// what makes the close a fact the peer can observe.
     pub fn close(&self) {
         self.closed.store(true, Ordering::SeqCst);
         self.stop.notify_waiters();
+    }
+
+    /// Resolve once [`Self::close`] has been called, including when it was
+    /// called before this future was first polled.
+    ///
+    /// The registration is enabled *before* the second check so a `close()`
+    /// landing between the two is not a lost wake-up — the same ordering
+    /// `run_writer` uses, for the same reason.
+    pub async fn wait_closed(&self) {
+        let stop = self.stop.notified();
+        tokio::pin!(stop);
+        stop.as_mut().enable();
+        if self.is_closed() {
+            return;
+        }
+        stop.await;
     }
 
     /// Whether [`Self::close`] has been called on this connection.
@@ -384,5 +408,38 @@ mod tests {
         outbound.close();
         assert!(clone.is_closed());
         assert!(outbound.snapshot().closed);
+    }
+
+    /// The read loop's wake-up (#2179).
+    ///
+    /// `close` has to be observable by a task that is *waiting on something
+    /// else* — a socket read that may never produce a frame — or the
+    /// connection stays open after the writer could not stop. Two cases: a
+    /// close that arrives while the waiter is parked, and one that arrives
+    /// before the waiter ever polls. The second is the lost-wake-up case the
+    /// registration-before-check ordering exists for.
+    #[tokio::test]
+    async fn wait_closed_resolves_when_close_arrives_and_when_it_already_did() {
+        let (outbound, _rx) = P2pOutbound::new();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), outbound.wait_closed())
+                .await
+                .is_err(),
+            "a live connection must not report itself closed"
+        );
+
+        let waiter = outbound.clone();
+        let waiting = tokio::spawn(async move { waiter.wait_closed().await });
+        outbound.close();
+        tokio::time::timeout(Duration::from_secs(1), waiting)
+            .await
+            .expect("close must wake a parked reader")
+            .expect("the waiter must not panic");
+
+        // Already closed: the first poll must return rather than wait for a
+        // second notification that will never come.
+        tokio::time::timeout(Duration::from_millis(50), outbound.wait_closed())
+            .await
+            .expect("an already-closed outbound must resolve immediately");
     }
 }

@@ -3,7 +3,32 @@ name: E2E / Scenario Smoke
 on:
   pull_request:
     branches: [staging]
-    # Run heavy validation only for changes to its inputs (#2095).
+    # Scenario-specific PR changes only: unrelated staging PRs must not
+    # build Rust/Web and replay terminal sessions twice (#2095).
+    paths:
+      - '.github/workflows/e2e-scenario-smoke.yml'
+      - 'e2e/scenarios/**'
+      - 'e2e/run'
+      - 'e2e/runner/**'
+      - 'e2e/package.json'
+      - 'e2e/package-lock.json'
+      - 'web/src/**/terminal/**'
+      - 'web/src/**/Terminal*'
+      - 'web/package.json'
+      - 'web/package-lock.json'
+      - 'web/vite.config.ts'
+      - 'crates/nession-agent/**'
+      - 'crates/nession-server/**'
+      - 'crates/nession-protocol/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+  # Real main-owned post-merge terminal observations feed the existing trusted
+  # E2E / Scenario Ingest. Restrict the costly real replay to relevant changes.
+  push:
+    branches: [main]
+    # Keep main-push exact-SHA Scenario evidence on the same relevant inputs.
+    # Legacy agent/src and server/src paths were not the current crate roots.
     paths:
       - '.github/workflows/e2e-scenario-smoke.yml'
       - 'e2e/scenarios/**'
@@ -28,8 +53,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: e2e-scenario-${{ github.event.pull_request.number || github.ref_name }}
-  cancel-in-progress: true
+  # A superseded PR can be cancelled; each completed main Push must retain
+  # an independent exact-SHA run for trusted Run Store ingestion (#1690).
+  group: e2e-scenario-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   terminal-replay:

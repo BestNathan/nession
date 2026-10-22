@@ -1,0 +1,138 @@
+name: Acceptance / Post-Run Waker
+
+# A post-merge Agent cannot attest its own Orchestrator's completion while
+# running. Fixture evidence, exact-main-SHA E2E and public Pages deployment
+# may finish AFTER the Agent. Re-evaluate after independently verified completion,
+# using the same trusted evaluator and Issue updater, not a second projector.
+on:
+  workflow_run:
+    # Include the independently HTTPS-verified main Pages publication as a waker;
+    # never infer SC Pass from merely receiving this notification.
+    workflows: ["Acceptance / Orchestrator", "CI / Run Store Fixture Evidence", "E2E / Tests", "Deploy / Public Pages"]
+    # Only successful main-push sources can authorize post-merge verification.
+    # Filtering the event here prevents thousands of PR completion no-op runs,
+    # rather than creating a downstream run solely to skip its select job.
+    branches: [main]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: acceptance-postrun-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
+  cancel-in-progress: false
+
+jobs:
+  select:
+    if: >-
+      ${{ github.event.workflow_run.event == 'push' &&
+          github.event.workflow_run.head_branch == 'main' &&
+          github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+      issues: read
+      pull-requests: read
+    outputs:
+      target_sha: ${{ steps.verify.outputs.target_sha }}
+      issue_numbers: ${{ steps.select.outputs.issue_numbers }}
+      agent_issues: ${{ steps.select.outputs.agent_issues }}
+      has_agents: ${{ steps.select.outputs.has_agents }}
+    steps:
+      - name: Checkout trusted Acceptance planner
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Authenticate trusted completed main-push source and exact ancestry
+        id: verify
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+          SOURCE_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$SOURCE_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID" > "$RUNNER_TEMP/source.json"
+          jq -e --arg repo "$GITHUB_REPOSITORY" --arg sha "$SOURCE_SHA" \
+            --argjson id "$SOURCE_RUN_ID" --argjson attempt "$SOURCE_ATTEMPT" '
+            .id == $id and .run_attempt == $attempt and
+            .repository.full_name == $repo and .head_repository.full_name == $repo and
+            (
+              (.name == "Acceptance / Orchestrator" and
+               .path == ".github/workflows/acceptance-orchestrator.yml") or
+              (.name == "CI / Run Store Fixture Evidence" and
+               .path == ".github/workflows/ci-run-store-fixture-evidence.yml") or
+              (.name == "E2E / Tests" and
+               .path == ".github/workflows/e2e-tests.yml") or
+              (.name == "Deploy / Public Pages" and
+               .path == ".github/workflows/deploy-pages.yml")
+            ) and
+            .event == "push" and .head_branch == "main" and
+            .head_sha == $sha and .status == "completed" and
+            .conclusion == "success"' "$RUNNER_TEMP/source.json" > /dev/null
+          git cat-file -e "$SOURCE_SHA^{commit}"
+          git merge-base --is-ancestor "$SOURCE_SHA" HEAD
+          echo "target_sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
+      - name: Select only outstanding merged-main Agent criteria
+        id: select
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_SHA: ${{ steps.verify.outputs.target_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          issue_numbers="$(node scripts/requirement-acceptance.mjs discover-ref "$TARGET_SHA")"
+          echo "issue_numbers=$issue_numbers" >> "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/postrun-contracts"
+          jq -r '.[]' <<< "$issue_numbers" | while read -r number; do
+            [[ "$number" =~ ^[1-9][0-9]*$ ]]
+            gh api "repos/$GITHUB_REPOSITORY/issues/$number" > "$RUNNER_TEMP/postrun-contracts/$number.json"
+          done
+          agent_issues="$(ISSUE_NUMBERS="$issue_numbers" ACCEPTANCE_STAGE=post-merge \
+            TARGET_SHA="$TARGET_SHA" node scripts/select-merged-agents.mjs select "$RUNNER_TEMP/postrun-contracts")"
+          echo "agent_issues=$agent_issues" >> "$GITHUB_OUTPUT"
+          if [[ "$(jq length <<< "$agent_issues")" -gt 0 ]]; then
+            echo 'has_agents=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'has_agents=false' >> "$GITHUB_OUTPUT"
+          fi
+          echo "Reconcile completed, authenticated main source at $TARGET_SHA: $agent_issues" >> "$GITHUB_STEP_SUMMARY"
+
+  evaluate:
+    needs: select
+    if: needs.select.outputs.has_agents == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        issue_number: ${{ fromJSON(needs.select.outputs.agent_issues) }}
+    # Reuse the existing main-owned read-only evaluator and deterministic Issue updater.
+    #
+    # The provider follows the same repository-variable policy as the
+    # orchestrator's pre-merge and merged evaluations (#2190): every trigger has
+    # to resolve the same trusted executor, and a waker pinned to one provider
+    # silently fails the merged-SHA evaluation while the rest of the pipeline
+    # has moved. `ACCEPTANCE_PROVIDER` is not PR-controlled; an unsupported value
+    # fails closed in `agent-sc-acceptance.yml`.
+    uses: BestNathan/nession/.github/workflows/agent-sc-acceptance.yml@main
+    with:
+      issue_number: ${{ matrix.issue_number }}
+      stage: post-merge
+      provider: ${{ vars.ACCEPTANCE_PROVIDER || 'cursor' }}
+      target_ref: ${{ needs.select.outputs.target_sha }}
+      deployment: ''
+    secrets: inherit

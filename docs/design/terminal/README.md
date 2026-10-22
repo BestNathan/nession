@@ -11,8 +11,11 @@ GitHub requirements (Approved):
 | [#1095](https://github.com/BestNathan/nession/issues/1095) | Multi-client Controller / Observer | [multi-client-ownership.md](multi-client-ownership.md) |
 | [#1094](https://github.com/BestNathan/nession/issues/1094) | Terminal stream, checkpoints & replay | [stream-replay.md](stream-replay.md) |
 | [#1309](https://github.com/BestNathan/nession/issues/1309) | Session runtime = single lifecycle authority | [session-runtime-ownership.md](session-runtime-ownership.md) |
+| [#1645](https://github.com/BestNathan/nession/issues/1645) / [#1927](https://github.com/BestNathan/nession/issues/1927) | Terminal buffer continuity, parser ACK, atomic checkpoint & recovery RFC v2 | [ahp-inspired-terminal-consistency.md](ahp-inspired-terminal-consistency.md) |
 
 Related: [#1081](https://github.com/BestNathan/nession/issues/1081) (App shell gestures).
+
+**#1645 implementation:** [P0 #1648](https://github.com/BestNathan/nession/issues/1648) completed; [P1 #1924](https://github.com/BestNathan/nession/issues/1924) renderer writer/cursors; [P2 #1925](https://github.com/BestNathan/nession/issues/1925) Agent checkpoint/replay/flow control; [P3 #1926](https://github.com/BestNathan/nession/issues/1926) Relay parity/E2E. Original Draft PR #1646 is superseded by canonical RFC v2 PR #1922.
 
 ## Dependency graph
 

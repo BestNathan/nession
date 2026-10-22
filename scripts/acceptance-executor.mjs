@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { validateAcceptancePlan, isProofEligible } from './acceptance-plan.mjs';
 import {
   extractSection,
+  isAcceptanceIssue,
   parseAcceptanceReport,
   parseSuccessCriteria,
   validateRequirementBody,
@@ -358,10 +359,6 @@ export function applyAcceptanceResultToBody(body, normalized) {
   return updated;
 }
 
-function labelNames(issue) {
-  return (issue.labels ?? []).map((label) => typeof label === 'string' ? label : label?.name).filter(Boolean);
-}
-
 function fetchIssue(issueNumber) {
   if (!Number.isSafeInteger(Number(issueNumber)) || Number(issueNumber) <= 0) throw new Error('issue number must be a positive integer');
   const repo = process.env.GITHUB_REPOSITORY;
@@ -394,7 +391,7 @@ function implicitCiEvidenceFile(outFile) {
 function prepareCommand(issueNumber, stage, targetRef, outFile, deployment, ciEvidenceFile) {
   const issue = fetchIssue(issueNumber);
   if (String(issue.state).toUpperCase() !== 'OPEN') throw new Error('requirement #' + issueNumber + ' is not open');
-  if (!labelNames(issue).includes('requirement')) throw new Error('issue #' + issueNumber + ' is not labeled requirement');
+  if (!isAcceptanceIssue(issue)) throw new Error('issue #' + issueNumber + ' must be labeled bug or requirement');
 
   // Current Acceptance workflows pass a trusted CI-evidence file explicitly.
   // Older workflow runs do not. GitHub re-runs preserve the workflow definition
@@ -429,7 +426,7 @@ function isSupersededRunError(error) {
 
 function applyCommand(issueNumber, resultFile) {
   const issue = fetchIssue(issueNumber);
-  if (!labelNames(issue).includes('requirement')) throw new Error('issue #' + issueNumber + ' is not labeled requirement');
+  if (!isAcceptanceIssue(issue)) throw new Error('issue #' + issueNumber + ' must be labeled bug or requirement');
   const normalized = JSON.parse(fs.readFileSync(resultFile, 'utf8'));
   if (Number(normalized.issue) !== Number(issueNumber)) throw new Error('result targets issue #' + normalized.issue + ', not #' + issueNumber);
   // Concurrent Acceptance runs may finish out of order. Never project older
@@ -489,6 +486,14 @@ function fixtureBody() {
 }
 
 function selfTest() {
+  // Both issue kinds use the same trusted Acceptance context/projector.
+  // Discussions without an eligible label remain out of scope.
+  for (const labels of [['bug'], [{ name: 'bug' }], ['requirement'], [{ name: 'requirement' }]]) {
+    assert.equal(isAcceptanceIssue({ labels }), true);
+  }
+  for (const labels of [[], ['ci'], ['test', 'documentation']]) {
+    assert.equal(isAcceptanceIssue({ labels }), false);
+  }
   const issue = { number: 1360, title: 'Requirement: fixture', url: 'https://example.test/1360', body: fixtureBody() };
   const staging = buildAcceptanceContext(issue, 'staging', {
     targetRef: 'abc123',
@@ -534,6 +539,32 @@ function selfTest() {
   assert.match(failedBody, /- \[ \] SC-02 failing acceptance stays unchecked/);
   assert.match(failedBody, /\| SC-02 \| post-merge \| Fail \| run 101; ref def456;/);
   assert.equal(validateRequirementBody(failedBody, { mode: 'closure' }).ok, false);
+  // A rerun retains the workflow run ID but has a different attempt.
+  // Only exact-attempt artifact lookup prevents reusing the prior verdict.
+  const corrected=normalizeAcceptanceResult(post,{
+    criteria:[{criterion:'SC-02',result:'Pass',
+      evidence:[{type:'workflow',value:'new attempt independently passed'}],
+      summary:'verified correction'}],
+  },'agent-cursor');
+  const correctedBody=applyAcceptanceResultToBody(failedBody,corrected);
+  assert.match(correctedBody, /- \[x\] SC-02 failing acceptance stays unchecked/);
+  assert.match(correctedBody, /\| SC-02 \| post-merge \| Pass \| run 101;/);
+  assert.equal(applyAcceptanceResultToBody(correctedBody,corrected),correctedBody);
+  const workflow=fs.readFileSync(new URL('../.github/workflows/agent-sc-acceptance.yml',
+    import.meta.url),'utf8');
+  const receipts=[...workflow.matchAll(/^\s*name: (acceptance-result-[^\r\n]+)$/gm)]
+    .map(match=>match[1]);
+  const exact='acceptance-result-${{ inputs.issue_number }}-${{ inputs.stage }}-${{ github.run_id }}-${{ github.run_attempt }}';
+  assert.deepEqual(receipts,[exact,exact],
+    'Acceptance upload and download must bind both Run ID and Attempt');
+  const renderReceipt=(attempt)=>exact
+    .replace('${{ inputs.issue_number }}','1702')
+    .replace('${{ inputs.stage }}','post-merge')
+    .replace('${{ github.run_id }}','38516094498')
+    .replace('${{ github.run_attempt }}',String(attempt));
+  assert.equal(renderReceipt(1),'acceptance-result-1702-post-merge-38516094498-1');
+  assert.equal(renderReceipt(2),'acceptance-result-1702-post-merge-38516094498-2');
+  assert.notEqual(renderReceipt(1),renderReceipt(2));
 
   assert.throws(
     () => normalizeAcceptanceResult(staging, { criteria: [{ criterion: 'SC-99', result: 'Pass', evidence: 'ghost' }] }),
@@ -654,6 +685,37 @@ function selfTest() {
   const fullyAccepted = applyAcceptanceResultToBody(mixedAgentBody, mixedCaseResult);
   assert.match(fullyAccepted, /\| SC-01 \| staging \| Pass \|/);
   assert.match(fullyAccepted, /\| SC-02 \| staging \| Pass \|/);
+
+  // Plan is the only source of timing/method in the canonical v2 format.
+  // The read-only plan and trusted projector must derive exactly the same
+  // compatibility stage as the old explicit four-column representation.
+  const v2Body = mixedBody
+    .replace('| Criterion | Stage | Result | Evidence |', '| Criterion | Result | Evidence |')
+    .replace('|---|---|---|---|', '|---|---|---|')
+    .replace('| SC-01 | staging | Pending |', '| SC-01 | Pending |')
+    .replace('| SC-02 | staging | Pending |', '| SC-02 | Pending |');
+  const v2Issue = { ...issue, body: v2Body };
+  const v2Agent = buildAcceptanceContext(v2Issue, 'staging', {
+    targetRef: 'c'.repeat(40), runId: 420, method: 'agent',
+  });
+  const v2Case = buildAcceptanceContext(v2Issue, 'staging', {
+    targetRef: 'c'.repeat(40), runId: 421, method: 'case',
+  });
+  assert.equal(v2Agent.contract_sha256, mixedAgent.contract_sha256);
+  assert.equal(v2Case.contract_sha256, mixedCase.contract_sha256);
+  assert.deepEqual(v2Agent.criteria.map((x) => x.criterion), ['SC-01']);
+  assert.deepEqual(v2Case.criteria.map((x) => x.criterion), ['SC-02']);
+  const v2Accepted = applyAcceptanceResultToBody(v2Body,
+    normalizeAcceptanceResult(v2Agent, {
+      criteria: [{ criterion: 'SC-01', result: 'Pass', evidence: 'test: source and CI tied to SHA' }],
+    }, 'agent-cursor'));
+  assert.match(v2Accepted, /\| SC-01 \| Pass \| run 420;/);
+  assert.match(v2Accepted, /\| SC-02 \| Pending \|/);
+  assert.doesNotMatch(v2Accepted, /\| SC-01 \| staging \|/);
+  assert.throws(() => applyAcceptanceResultToBody(v2Body,
+    normalizeAcceptanceResult(v2Agent, {
+      criteria: [{ criterion: 'SC-01', result: 'Pass', evidence: 'test: source and CI tied to SHA' }],
+    }, 'case-runner')), /selected method does not match/);
 
   console.log('acceptance-executor self-test: legacy, mixed-method and provenance cases passed');
 }

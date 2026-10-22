@@ -9,6 +9,10 @@ function makeRuntime() {
   return {
     setTransportReady: vi.fn<(ready: boolean) => void>(),
     updateViewportSize: vi.fn<(size: { cols: number; rows: number }) => void>(),
+    noteStreamEventParsed: vi.fn(),
+    noteStreamTruncated: vi.fn(),
+    noteRendererReplaced: vi.fn(),
+    setVerifiedTerminalBaseline: vi.fn(),
   } as unknown as SessionRuntime;
 }
 
@@ -21,11 +25,22 @@ describe('TerminalRuntimeAdapter', () => {
     events.onTransportReady?.(true);
     events.onInputModeChange?.('sess-1', { type: 'command' });
     events.onResize?.('sess-1', 120, 40);
+    events.onStreamEventParsed?.({ streamEpoch: 7, streamSeq: 8 });
+    events.onStreamTruncated?.();
+    events.onRendererReplaced?.();
+    events.onStreamBaseline?.({ kind: 'verified', streamEpoch: 7, appliedThrough: 6 });
 
     // Readiness and size have exactly one sink — the runtime. The Jotai atoms
     // they used to round-trip through are gone.
     expect(runtime.setTransportReady).toHaveBeenCalledWith(true);
     expect(runtime.updateViewportSize).toHaveBeenCalledWith({ cols: 120, rows: 40 });
+    expect(runtime.noteStreamEventParsed).toHaveBeenCalledWith({ streamEpoch: 7, streamSeq: 8 });
+    expect(runtime.setVerifiedTerminalBaseline).toHaveBeenCalledWith({
+      kind: 'verified', streamEpoch: 7, appliedThrough: 6,
+    });
+    expect(runtime.noteStreamTruncated).toHaveBeenCalledOnce();
+    // A replaced renderer is a repair request, not just a stream-state change.
+    expect(runtime.noteRendererReplaced).toHaveBeenCalledOnce();
     expect(store.get(inputModeAtomFamily('sess-1'))).toEqual({ type: 'command' });
   });
 });

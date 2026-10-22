@@ -10,7 +10,7 @@ export function providerScopedRunName({ workflowId, runId, runAttempt, taskId, p
   if (!/^[a-z0-9][a-z0-9._-]*$/.test(String(taskId))) {
     throw new Error('Provider Smoke requires a stable task ID');
   }
-  if (!['cursor', 'deepseek'].includes(provider)) {
+  if (!['cursor', 'deepseek', 'claude-code'].includes(provider)) {
     throw new Error('Provider Smoke requires a declared Provider');
   }
   return [runId, runAttempt, taskId, provider].join('-');

@@ -1,0 +1,107 @@
+name: Agent / Claude Resume Seed
+
+# Main-only synthetic Qwen-over-Claude-CLI native Session continuity.
+# Tool-free model run, ciphertext-only output; no GitHub write permissions.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/agent-claude-resume-seed.yml
+      - .github/workflows/agent-claude-resume-verify.yml
+
+env:
+  NSESSION_AGENT_WORKFLOW_ID: agent-claude-resume-seed
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-claude-resume-seed-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  seed:
+    if: github.repository == 'BestNathan/nession' && github.ref == 'refs/heads/main'
+    environment: dev-claude-qwen
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
+      ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
+      ACCEPTANCE_CLAUDE_MODEL: ${{ vars.ACCEPTANCE_CLAUDE_MODEL || vars.ANTHROPIC_MODEL }}
+      CLAUDE_CODE_VERSION: ${{ vars.CLAUDE_CODE_VERSION || 'latest' }}
+    steps:
+      - name: Checkout exact trusted main source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify Claude native resume and privacy contracts
+        run: |
+          set -euo pipefail
+          node scripts/lib/agent/providers/claude-resume-selftest.mjs
+          python3 scripts/lib/agent/providers/cursor-resume-zip.py self-test
+      - name: Verify Qwen Gateway and derive public-only native Session key
+        env:
+          CLAUDE_RESUME_PRIVATE_KEY_B64: ${{ secrets.CLAUDE_RESUME_PRIVATE_KEY_B64 }}
+          CONFIGURED_PUBLIC_KEY_B64: ${{ vars.CLAUDE_RESUME_PUBLIC_KEY_B64 }}
+        run: |
+          set -euo pipefail
+          [[ -n "${ANTHROPIC_BASE_URL:-}" ]] || { echo "::error::Qwen Gateway endpoint missing"; exit 1; }
+          [[ -n "${ANTHROPIC_API_KEY:-}" || -n "${ANTHROPIC_AUTH_TOKEN:-}" ]] ||
+            { echo "::error::Qwen Gateway authorization missing"; exit 1; }
+          [[ -n "${CLAUDE_RESUME_PRIVATE_KEY_B64:-}" ]] ||
+            { echo "::error::dev-claude-qwen Environment needs CLAUDE_RESUME_PRIVATE_KEY_B64 (separate from gateway API credential)"; exit 1; }
+          node --input-type=module <<'NODE'
+          import {createPrivateKey,createPublicKey} from 'node:crypto';
+          import {appendFileSync} from 'node:fs';
+          try {
+            const privatePem=Buffer.from(process.env.CLAUDE_RESUME_PRIVATE_KEY_B64,'base64').toString('utf8');
+            const key=createPrivateKey(privatePem);
+            if(key.asymmetricKeyType!=='rsa'||(key.asymmetricKeyDetails?.modulusLength??0)<2048)
+              throw Error('unsupported native Session key');
+            const pub=Buffer.from(createPublicKey(key).export({type:'spki',format:'pem'})).toString('base64');
+            if(process.env.CONFIGURED_PUBLIC_KEY_B64 &&
+                process.env.CONFIGURED_PUBLIC_KEY_B64!==pub)
+              throw Error('mismatched public native Session key');
+            appendFileSync(process.env.GITHUB_ENV,'CLAUDE_RESUME_PUBLIC_KEY_B64='+pub+'\n');
+            console.log('Claude D1 preflight: validated RSA key, exported public-only encryption capability');
+          } catch {
+            console.error('::error::missing/invalid Claude RSA Session key or incompatible public key');
+            process.exitCode=1;
+          }
+          NODE
+      - name: Install native Claude Code CLI and validate restricted mode
+        run: |
+          set -euo pipefail
+          npm install -g "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION"
+          claude --version
+          claude --help | grep -q -- '--restricted' ||
+            { echo "::error::Claude CLI must support native restricted mode"; exit 1; }
+      - name: Create bounded tool-free UUID Session and seal checkpoint
+        run: |
+          set -euo pipefail
+          node scripts/lib/agent/providers/claude-resume-fixture.mjs seed "$RUNNER_TEMP/claude-seed-output"
+      - name: Publish canonical Agent telemetry
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-telemetry-claude-resume-seed-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/claude-seed-output/agent-telemetry.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Publish only encrypted Session and sanitized SHA proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-resume-seed-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/claude-seed-output/ciphertext.json
+            ${{ runner.temp }}/claude-seed-output/proof.json
+            ${{ runner.temp }}/claude-seed-output/agent-telemetry.json
+          if-no-files-found: error
+          retention-days: 7

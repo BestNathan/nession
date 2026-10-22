@@ -8,6 +8,7 @@ import type { ConnectionOptions } from './types';
 import type { TerminalInputAck } from '@/product/terminal';
 import type { TerminalTransport, TerminalInputSeed } from './transport/TerminalTransport';
 import { StreamReconciler, type ResumeReply } from './streamReconciler';
+import type { TerminalStreamPosition } from './streamApply';
 import type { TerminalBootstrap } from './bootstrap';
 import { PendingInputQueue, type InputDrop, type InputQueueBounds } from './inputQueue';
 
@@ -82,6 +83,9 @@ export class ConnectionManager implements TerminalTransport {
   private relayUnsubOutput: (() => void) | null = null;
   private relayUnsubResize: (() => void) | null = null;
   private relayUnsubInputAck: (() => void) | null = null;
+  /** Observed Relay transport ordinals, never a parser-applied/resume cursor. */
+  private relayLastObserved: TerminalStreamPosition | null = null;
+  private relayGapNotified = false;
   private p2pUnsubOutput: (() => void) | null = null;
   private p2pUnsubResize: (() => void) | null = null;
   private p2pUnsubError: (() => void) | null = null;
@@ -139,6 +143,7 @@ export class ConnectionManager implements TerminalTransport {
    */
   private readonly reconciler: StreamReconciler;
   private isAttached: () => boolean;
+  private isCurrentGeneration: () => boolean;
   /** Notified after input is handed to either transport — see `onInputSent`. */
   private onInputSent: () => void;
   /**
@@ -159,9 +164,9 @@ export class ConnectionManager implements TerminalTransport {
    * it: P2P from the frame the agent API decoded, relay from the payload the
    * Server forwarded verbatim.
    */
-  onOutput: ((data: Uint8Array, bootstrap?: TerminalBootstrap) => void) | null = null;
+  onOutput: TerminalTransport['onOutput'] = null;
   onError: ((error: Error) => void) | null = null;
-  onResize: ((cols: number, rows: number) => void) | null = null;
+  onResize: TerminalTransport['onResize'] = null;
 
   constructor(options: ConnectionOptions) {
     this.mode = options.mode;
@@ -169,6 +174,7 @@ export class ConnectionManager implements TerminalTransport {
     this.agentApi = options.agentApi;
     this.serverConnection = options.serverConnection;
     this.isAttached = options.isAttached ?? (() => false);
+    this.isCurrentGeneration = options.isCurrentGeneration ?? (() => true);
     this.onInputSent = options.onInputSent ?? (() => {});
     this.onStreamTruncated = options.onStreamTruncated ?? (() => {});
     this.onInputDrop = options.onInputDrop ?? (() => {});
@@ -176,17 +182,41 @@ export class ConnectionManager implements TerminalTransport {
     // layer that decides what the user is told (#1307 SC-09). Set here rather
     // than passed in, because the queue is built here and nothing above it
     // should have to know the queue exists to hear about a loss.
-    this.pendingInput.onDrop = (drop) => this.onInputDrop(drop);
+    this.pendingInput.onDrop = (drop) => {
+      if (!this.disposed && this.isCurrentGeneration()) {
+        this.onInputDrop(drop);
+      }
+    };
     this.reconciler = new StreamReconciler(
       (epoch, afterSeq) => this.resumeStream(epoch, afterSeq),
       {
-        onOutput: (data, bootstrap) => this.onOutput?.(data, bootstrap),
-        onResize: (cols, rows) => this.onResize?.(cols, rows),
+        // A legacy unpositioned event preserves the historical callback arity.
+        // A known Agent sequence is forwarded intact; neither says "parsed".
+        onOutput: (data, bootstrap, position) => {
+          if (this.disposed || !this.isCurrentGeneration()) { return; }
+          if (position === undefined) {
+            this.onOutput?.(data, bootstrap);
+          } else {
+            this.onOutput?.(data, bootstrap, position);
+          }
+        },
+        onResize: (cols, rows, position) => {
+          if (this.disposed || !this.isCurrentGeneration()) { return; }
+          if (position === undefined) {
+            this.onResize?.(cols, rows);
+          } else {
+            this.onResize?.(cols, rows, position);
+          }
+        },
         // Only the reconciler can tell a buffer that is whole from one with a
         // stretch given up on, and only this class holds the session's owner.
         // It carries the fact up; what repair that implies is not the
         // transport's decision (#1304).
-        onStreamTruncated: () => this.onStreamTruncated(),
+        onStreamTruncated: () => {
+          if (!this.disposed && this.isCurrentGeneration()) {
+            this.onStreamTruncated();
+          }
+        },
       },
     );
 
@@ -208,7 +238,7 @@ export class ConnectionManager implements TerminalTransport {
    * loss, not a silent one.
    */
   send(data: string): void {
-    if (this.disposed) { return; }
+    if (this.disposed || !this.isCurrentGeneration()) { return; }
     // A client without the lease does not get to number input at all (#1307
     // SC-10). The capability refuses an observer's `sendInput` as well, but it
     // refuses it *after* this point, and a chunk accepted here is not inert
@@ -254,7 +284,7 @@ export class ConnectionManager implements TerminalTransport {
    * derived from a stale cursor.
    */
   flushInputBuffer(): void {
-    if (this.disposed || this.pendingInput.size === 0) { return; }
+    if (this.disposed || !this.isCurrentGeneration() || this.pendingInput.size === 0) { return; }
     const outbound = this.pendingInput.outbound();
     if (outbound === null) {
       // No epoch yet — an agent built before this contract, or a transport that
@@ -348,7 +378,7 @@ export class ConnectionManager implements TerminalTransport {
    * during attach/reconnect (virtual keyboard, input panel, rotation).
    */
   sendResize(cols: number, rows: number): void {
-    if (this.disposed) { return; }
+    if (this.disposed || !this.isCurrentGeneration()) { return; }
     if (!this.isAttached()) {
       this.pendingResize = { cols, rows };
       return;
@@ -362,7 +392,7 @@ export class ConnectionManager implements TerminalTransport {
    * the connect window collapses to one terminal.resize on the wire.
    */
   flushPendingResize(): void {
-    if (this.disposed || this.pendingResize === null) { return; }
+    if (this.disposed || !this.isCurrentGeneration() || this.pendingResize === null) { return; }
     const { cols, rows } = this.pendingResize;
     this.pendingResize = null;
     this.sendResizeRaw(cols, rows);
@@ -463,7 +493,7 @@ export class ConnectionManager implements TerminalTransport {
     const api = this.agentApi!;
 
     this.p2pUnsubOutput = api.onOutput((frame) => {
-      if (this.disposed) {
+      if (this.disposed || !this.isCurrentGeneration()) {
         return;
       }
       // Synchronous on purpose: the reconciler places the frame in the
@@ -473,7 +503,7 @@ export class ConnectionManager implements TerminalTransport {
     });
 
     this.p2pUnsubResize = api.onResize((frame) => {
-      if (this.disposed) {
+      if (this.disposed || !this.isCurrentGeneration()) {
         return;
       }
       // A resize the agent recorded consumed a sequence number, so it belongs
@@ -504,7 +534,7 @@ export class ConnectionManager implements TerminalTransport {
     // keystroke. `applied_through` covers every chunk at or below it, so a
     // dropped acknowledgement costs nothing: the next one says the same thing.
     this.p2pUnsubInputAck = api.onInputAck((ack) => {
-      if (this.disposed) { return; }
+      if (this.disposed || !this.isCurrentGeneration()) { return; }
       this.applyInputAck(ack);
     });
 
@@ -514,12 +544,12 @@ export class ConnectionManager implements TerminalTransport {
     // name — which is exactly what would happen if a client that lost the
     // lease and got it back simply flushed what it had been holding.
     this.p2pUnsubControlChanged = api.onControlChanged((sessionName, state) => {
-      if (this.disposed || sessionName !== this.sessionName) { return; }
+      if (this.disposed || !this.isCurrentGeneration() || sessionName !== this.sessionName) { return; }
       this.noteControlGeneration(state.generation);
     });
 
     this.p2pUnsubError = api.onError((err) => {
-      if (this.disposed) { return; }
+      if (this.disposed || !this.isCurrentGeneration()) { return; }
       // Belt-and-suspenders: the outbound gate should make `not_attached`
       // unreachable, but if a race slips through (e.g. a stale message
       // already on the wire before the gate landed) we swallow it here
@@ -536,7 +566,7 @@ export class ConnectionManager implements TerminalTransport {
     // initiates protocol actions.  client.attach timing is owned by the
     // SessionRuntime.
     this.pingTimer = setInterval(() => {
-      if (this.disposed) { return; }
+      if (this.disposed || !this.isCurrentGeneration()) { return; }
       // Fire-and-forget, and deliberately not a verdict: this keeps the
       // *agent's* watchdog fed, which is the direction the wire was built for.
       // The reverse question — is the agent still answering? — belongs to the
@@ -555,6 +585,16 @@ export class ConnectionManager implements TerminalTransport {
     streamCursor: number | undefined,
     options?: { preserveAppliedCursor?: boolean },
   ): void {
+    if (this.mode === 'relay') {
+      // Relay's attach receipt is a transport receipt, not proof that the
+      // current xterm renderer applied a complete, verified checkpoint.
+      // In particular tmux screen-only capture cannot establish a full VT
+      // baseline, and a route-cutover checkpoint is not independently proven.
+      // A new Relay stream anchors on its first live event; recovery is the
+      // reconciler's complete-only resume through the Server tunnel (#2050),
+      // not a cursor invented from this receipt.
+      return;
+    }
     this.reconciler.seed(streamEpoch, streamCursor, options);
   }
 
@@ -576,7 +616,7 @@ export class ConnectionManager implements TerminalTransport {
    * cannot retry what it typed.
    */
   seedInputCursor(seed: TerminalInputSeed | undefined): void {
-    if (this.disposed || !seed) { return; }
+    if (this.disposed || !this.isCurrentGeneration() || !seed) { return; }
     if (seed.inputEpoch === undefined) { return; }
     this.pendingInput.reconcile(
       {
@@ -593,22 +633,76 @@ export class ConnectionManager implements TerminalTransport {
   }
 
   /**
-   * Ask the agent for the events after a cursor (#1094), on the reconciler's
-   * behalf — it decides when a replay is worth asking for and what to do with
-   * the answer.
+   * Ask the same Agent stream owner for a complete-only replay. The Server's
+   * Relay tunnel forwards this wire unchanged; it never allocates a cursor.
+   * Missing/dead routes reject rather than pretending an empty replay, and
+   * the reconciler owns all gap/expiry decisions.
    *
-   * Only P2P has a stream to resume: relay frames carry no sequence numbers, so
-   * nothing on that path ever asks. A refusal is a rejection rather than an
-   * empty answer, because the reconciler reads "no events after your cursor"
-   * as a cursor that is up to date, and a request that never happened must not
-   * look like one that did.
+   * The Relay observed-only detector still reports degraded output until a
+   * provable subscribe/baseline cutover exists (#2050); exposing this request
+   * alone does NOT establish a synchronized Relay renderer or parser ACK.
    */
   private resumeStream(epoch: number, afterSeq: number): Promise<ResumeReply> {
-    const api = this.agentApi;
-    if (this.mode !== 'p2p' || !api) {
-      return Promise.reject(new Error('terminal stream resume is P2P-only'));
+    if (this.disposed || !this.isCurrentGeneration()) {
+      return Promise.reject(new Error('stale terminal transport generation'));
     }
-    return api.resumeStream(this.sessionName, epoch, afterSeq);
+    if (this.mode === 'p2p' && this.agentApi) {
+      return this.agentApi.resumeStream(this.sessionName, epoch, afterSeq);
+    }
+    if (this.mode === 'relay' && this.serverConnection?.isReady()) {
+      return this.serverConnection.resumeRelayStream(this.sessionName, epoch, afterSeq);
+    }
+    return Promise.reject(new Error('terminal stream resume unavailable on current transport'));
+  }
+
+  /**
+   * Relay sequence positions are observed for continuity only (#2048).
+   *
+   * Relay carries an Agent-issued sequence and can resume through the
+   * authenticated Server tunnel since #2043/#2050, and its parser-applied ACK
+   * is bound to the Agent-minted subscription proof (#2060/#2120). None of
+   * that is minted *here*: a transport position is receipt, not proof that
+   * this renderer applied a complete checkpoint, so this lane only reports
+   * discontinuity as degraded-live and keeps displaying what arrived.
+   */
+  private observeRelayPosition(
+    position: TerminalStreamPosition | undefined,
+    kind: 'output' | 'resize',
+    isBootstrap = false,
+  ): void {
+    if (isBootstrap) {
+      // Checkpoint presence cannot prove VT fidelity or restore a prior
+      // sequence cut. Future live events start a new observed-only segment.
+      this.relayLastObserved = null;
+      this.relayGapNotified = false;
+      return;
+    }
+    if (position === undefined) {
+      // A level resize has no stream ordinal by design. A legacy OUTPUT
+      // interrupts a previously observed sequenced run, however.
+      if (kind === 'output' && this.relayLastObserved !== null) {
+        this.relayLastObserved = null;
+        if (!this.relayGapNotified) {
+          this.relayGapNotified = true;
+          this.onStreamTruncated();
+        }
+      }
+      return;
+    }
+    const prev = this.relayLastObserved;
+    if (prev !== null) {
+      const contiguous = prev.streamEpoch === position.streamEpoch
+        && prev.streamSeq + 1 === position.streamSeq;
+      if (!contiguous && !this.relayGapNotified) {
+        this.relayGapNotified = true;
+        this.onStreamTruncated();
+      }
+      // Reordered/duplicate frames must not rewind an observed frontier.
+      if (prev.streamEpoch === position.streamEpoch && position.streamSeq <= prev.streamSeq) {
+        return;
+      }
+    }
+    this.relayLastObserved = position;
   }
 
   private setupRelay(): void {
@@ -616,17 +710,39 @@ export class ConnectionManager implements TerminalTransport {
 
     // Use sessionName for relay subscriptions — agent protocol messages
     // carry session_name (short name), not session_id (agent:name format).
-    this.relayUnsubOutput = svc.onRelayOutput(this.sessionName, (data: Uint8Array, bootstrap?: TerminalBootstrap) => {
-      if (!this.disposed) {
-        this.onOutput?.(data, bootstrap);
+    this.relayUnsubOutput = svc.onRelayOutput(this.sessionName, (data: Uint8Array, bootstrap?: TerminalBootstrap, position?: TerminalStreamPosition) => {
+      if (this.disposed || !this.isCurrentGeneration()) { return; }
+      this.observeRelayPosition(position, 'output', bootstrap !== undefined);
+      if (bootstrap !== undefined || position === undefined) {
+        // Legacy output and screen-only bootstrap have no verifiable place in
+        // this Agent timeline. Invalidate any pending resume generation so a
+        // delayed reply cannot replay duplicate bytes across the opaque cut.
+        this.reconciler.invalidateContinuity();
       }
+      // Only Agent-positioned output enters the shared ordered replay lane.
+      // Unpositioned history/legacy output still renders exactly as before.
+      // A received/replayed ordinal is not a parser ACK or synchronized cut.
+      this.reconciler.acceptLive({
+        data,
+        bootstrap,
+        streamEpoch: position?.streamEpoch,
+        streamSeq: position?.streamSeq,
+      });
     });
 
     this.relayUnsubResize = svc.onRelayResize(
       this.sessionName,
-      (cols: number, rows: number) => {
-        if (!this.disposed) {
-          this.onResize?.(cols, rows);
+      (cols: number, rows: number, position?: TerminalStreamPosition) => {
+        if (this.disposed || !this.isCurrentGeneration()) { return; }
+        this.observeRelayPosition(position, 'resize');
+        if (position) {
+          this.reconciler.acceptLiveResize({
+            cols, rows,
+            streamEpoch: position.streamEpoch,
+            streamSeq: position.streamSeq,
+          });
+        } else {
+          this.reconciler.acceptLevelResize(cols, rows);
         }
       },
     );
@@ -640,7 +756,7 @@ export class ConnectionManager implements TerminalTransport {
     // drained and every chunk it had ever sent stayed pending until the TTL
     // took it.
     this.relayUnsubInputAck = svc.onRelayInputAck(this.sessionName, (ack) => {
-      if (this.disposed) { return; }
+      if (this.disposed || !this.isCurrentGeneration()) { return; }
       this.applyInputAck(ack);
     });
   }

@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="Source-backed graph of Nession's GitHub Actions development and acceptance workflows.">
+  <title>GitHub Workflows — Nession</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="workflows.css">
+  <script src="workflows.js" type="module"></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="site">
+    <header class="topbar">
+      <a href="index.html#/" class="brand" aria-label="Nession home">
+        <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+        <span>ness<span class="brand-muted">ion</span></span>
+        <span class="brand-note">/ LAB</span>
+      </a>
+      <nav class="navigation" aria-label="Main navigation">
+        <a href="index.html#/">Overview</a>
+        <a href="index.html#/agents">AI Agents</a>
+        <a href="index.html#/work">Collaboration</a>
+        <a href="workflows.html" aria-current="page">Workflows</a>
+        <a href="index.html#/repository">Repository</a>
+        <a href="index.html#/evidence">Evidence</a>
+      </nav>
+      <a class="top-source" href="https://github.com/BestNathan/nession/actions" target="_blank" rel="noopener noreferrer">Actions <span aria-hidden="true">↗</span></a>
+    </header>
+    <main id="main" tabindex="-1">
+      <div class="page-head workflow-hero">
+        <div class="eyebrow">ENGINEERING SYSTEM / SOURCE TOPOLOGY</div>
+        <h1>Inside the workflow.</h1>
+        <p class="lede">How Nession coordinates issue audit, agent execution, quality, acceptance, trusted evidence and release. Every solid connection is declared by a checked-in GitHub Action.</p>
+      </div>
+      <section class="workflow-overview" aria-label="Topology coverage">
+        <div id="workflow-summary" class="workflow-summary" role="status">Loading checked-in workflow definitions…</div>
+        <p id="workflow-source" class="workflow-source"></p>
+      </section>
+      <div class="workflow-toolbar">
+        <label class="workflow-search-label" for="workflow-search">Find workflow
+          <input type="search" id="workflow-search" placeholder="Search name, trigger or responsibility…" autocomplete="off">
+        </label>
+        <label class="workflow-filter-label" for="workflow-group">Focus on
+          <select id="workflow-group"><option value="all">All stages</option></select>
+        </label>
+      </div>
+      <section class="workflow-view" aria-label="Workflow dependency graph">
+        <div class="workflow-section-heading">
+          <div>
+            <div class="eyebrow">DECLARED RELATIONSHIPS</div>
+            <h2>Execution topology</h2>
+          </div>
+          <div class="workflow-legend">
+            <span><i class="legend-line"></i> workflow_run (completed event)</span>
+            <span><i class="legend-line legend-call"></i> workflow_call (reusable workflow)</span>
+          </div>
+        </div>
+        <p class="workflow-explainer">Arrows mean a downstream workflow explicitly subscribes to an upstream workflow completion, or invokes a reusable workflow. They do <strong>not</strong> guarantee successful execution or attested Acceptance. Other events (PR, Issue, push, manual, dispatch) are visible in node details, not drawn as causal workflow edges.</p>
+        <div class="workflow-graph-scroll" id="workflow-graph-scroll" tabindex="0" aria-label="Scrollable dependency graph">
+          <div class="workflow-graph" id="workflow-graph" role="group" aria-label="GitHub Actions definitions by lifecycle stage"></div>
+        </div>
+        <div class="workflow-bottom">
+          <div class="workflow-roster" id="workflow-roster" aria-label="Accessible workflow list"></div>
+          <aside class="workflow-detail" id="workflow-detail" aria-live="polite">
+            <div class="eyebrow">INSPECT A WORKFLOW</div>
+            <h3>Select a node</h3>
+            <p>Choose a workflow from the map or the list to view its exact triggers, declared dependencies and source file.</p>
+          </aside>
+        </div>
+      </section>
+      <p class="workflow-disclaimer">This is a build-time snapshot of the workflow <strong>definitions</strong>, not a live Actions dashboard. It does not infer Issue → implementing PR → Agent provenance, passing CI/E2E, Success Criteria approval or orphan-store integrity. For runs and actual results follow the linked canonical GitHub sources.</p>
+    </main>
+    <footer class="footer">
+      <span>NESSION / OPEN ENGINEERING</span>
+      <span>Trusted source, bounded public projection · no browser token</span>
+      <a href="https://github.com/BestNathan/nession/issues/2056" target="_blank" rel="noopener noreferrer">Topology contract ↗</a>
+    </footer>
+  </div>
+</body>
+</html>

@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { buildAgentWorkflowTelemetry, writeAgentWorkflowTelemetry } from './agent-workflow-telemetry.mjs';
+import { normalizeNativeTrace, writeExecutionTrace } from './lib/agent/telemetry/execution-trace.mjs';
 import { renderAcceptancePrompt } from './lib/agent/tasks/acceptance.mjs';
 import { promptTelemetry } from './lib/agent/telemetry/prompt.mjs';
 import { providerScopedRunName } from './lib/agent/telemetry/run-name.mjs';
@@ -51,7 +52,7 @@ async function runCursor(context, workspace) {
     provider: 'cursor',
     model: meta.model, run_id: meta.run_id, request_id: meta.request_id,
     status: meta.status, turns: meta.turns, model_requests: meta.turns,
-    tool_calls: meta.tool_calls, tools_observed: true,
+    tool_calls: meta.tool_calls, tools_observed: true, native_events: meta.native_events,
     tokens: meta.usage, cost: { ...meta.cost, estimated_usd: null },
     timing: { started_at: meta.started_at, finished_at: meta.finished_at, agent_duration_ms: meta.duration_ms },
   };
@@ -63,16 +64,26 @@ async function runCursor(context, workspace) {
   return { result: parseJsonText(result.result), meta: normalized };
 }
 
+function requestedClaudeGatewayModel(backend, env = process.env) {
+  const model = backend === 'qwen'
+    ? (env.ACCEPTANCE_CLAUDE_MODEL || env.ANTHROPIC_MODEL)
+    : (env.ACCEPTANCE_CLAUDE_MODEL || 'claude-sonnet-5');
+  if (backend === 'qwen' && (typeof model !== 'string' || !/^qwen[a-z0-9._-]*$/i.test(model))) {
+    throw new Error('Qwen Environment must explicitly set a Qwen model via ACCEPTANCE_CLAUDE_MODEL or ANTHROPIC_MODEL');
+  }
+  return model;
+}
+
 function claudeUsage(envelope) {
   return normalizeClaudeUsage(envelope);
 }
 
-function runDeepSeek(context, workspace) {
-  if (!process.env.ANTHROPIC_BASE_URL) throw new Error('ANTHROPIC_BASE_URL is required from the deepseek GitHub Environment');
+function runClaudeGateway(context, workspace, backend) {
+  if (!process.env.ANTHROPIC_BASE_URL) throw new Error('ANTHROPIC_BASE_URL is required from the selected Claude Gateway Environment');
   if (!process.env.ANTHROPIC_AUTH_TOKEN && !process.env.ANTHROPIC_API_KEY) {
-    throw new Error('ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY is required from the deepseek GitHub Environment');
+    throw new Error('ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY is required from the selected Claude Gateway Environment');
   }
-  const model = process.env.ACCEPTANCE_CLAUDE_MODEL || 'claude-sonnet-5';
+  const model = requestedClaudeGatewayModel(backend);
   const startedAt = new Date();
   const { proc, parsed: envelope } = runClaudeCli({
     prompt: promptFor(context), model,
@@ -83,11 +94,11 @@ function runDeepSeek(context, workspace) {
   });
   if (!envelope) throw new Error('Claude Code failed without a parseable response');
   const meta = {
-    provider: 'deepseek',
+    provider: backend === 'qwen' ? 'claude-code' : 'deepseek',
     model: {
-      id: process.env.ANTHROPIC_MODEL || 'gateway-default',
+      id: backend === 'qwen' ? model : (process.env.ANTHROPIC_MODEL || 'gateway-default'),
       request_model: model,
-      backend_mapping: 'claude-sonnet* -> deepseek-flash',
+      backend_mapping: backend === 'qwen' ? 'qwen-configured-gateway' : 'claude-sonnet* -> deepseek-flash',
     },
     run_id: envelope.session_id ?? envelope.sessionId ?? null,
     request_id: null,
@@ -96,6 +107,7 @@ function runDeepSeek(context, workspace) {
     model_requests: null,
     tool_calls: null,
     tools_observed: false,
+    native_events: [], // JSON-only Claude invocation does not expose the tool lifecycle.
     tokens: claudeUsage(envelope),
     cost: {
       raw_usd: null,
@@ -119,7 +131,7 @@ function runDeepSeek(context, workspace) {
 export async function runAcceptanceAgent(context, provider, workspace) {
   if (!context.criteria?.length) return { result: { criteria: [] }, meta: null };
   if (provider === 'cursor') return runCursor(context, workspace);
-  if (provider === 'deepseek') return runDeepSeek(context, workspace);
+  if (provider === 'deepseek' || provider === 'qwen') return runClaudeGateway(context, workspace, provider);
   throw new Error('unsupported Acceptance Agent provider: ' + provider);
 }
 
@@ -149,6 +161,10 @@ function telemetryInput(context, providerMeta, result, status = 'completed') {
     },
     agent: {
       provider: providerMeta.provider,
+      // Legacy acceptance runs still use the shared cursor/deepseek Environments;
+      // do not misidentify them as the future per-ID Registry instances.
+      id: 'legacy-acceptance-' + providerMeta.provider,
+      role: 'acceptor',
       prompt: promptTelemetry(renderAcceptancePrompt(context)),
       model: providerMeta.model,
       run_id: providerMeta.run_id,
@@ -174,6 +190,24 @@ function telemetryInput(context, providerMeta, result, status = 'completed') {
   };
 }
 
+function writeAcceptanceTelemetry(file, context, providerMeta, result, status = 'completed') {
+  const summary = buildAgentWorkflowTelemetry(telemetryInput(context, providerMeta, result, status));
+  writeAgentWorkflowTelemetry(file, summary);
+  const nativeEvents = providerMeta.native_events ?? [];
+  const seen = (type) => nativeEvents.some(event => event.type === type);
+  const coverage = {
+    model: seen('usage') ? 'observed' : 'unobserved',
+    tools: seen('tool_call') ? 'partial' : 'unobserved',
+    skills: 'unobserved',
+    mcp: 'unobserved',
+  };
+  // Claude JSON mode cannot support per-tool/Skill claims: an empty trace
+  // records the gap explicitly, rather than inventing observed=0.
+  const nativeProvider = providerMeta.provider === 'cursor' ? 'cursor' : 'claude-code';
+  const trace = normalizeNativeTrace(nativeProvider, nativeEvents, summary, coverage);
+  writeExecutionTrace(path.join(path.dirname(file), 'agent-execution-trace.json'), trace);
+}
+
 function selfTest() {
   const context = {
     issue: { number: 1360, title: 'Requirement: fixture' },
@@ -195,6 +229,11 @@ function selfTest() {
   assert.match(prompt, /untrusted inputs/);
   assert.match(prompt, /"ci_evidence"/);
   assert.match(prompt, /"id": 42/);
+  assert.match(prompt, /In EVERY stage/);
+  assert.match(prompt, /Never require a producer to set that flag true/);
+  assert.match(prompt, /Agent judgment must NEVER replace a required Case-method/);
+  assert.match(prompt, /not where the old Worker executed/);
+  assert.match(prompt, /never substitutes PR results for a criterion explicitly requiring new execution/);
   assert.deepEqual(parseJsonText('{"criteria":[]}'), { criteria: [] });
   assert.deepEqual(parseJsonText('```json\n{"criteria":[]}\n```'), { criteria: [] });
   const catalog = [{ id: 'composer-2.5', parameters: [{ id: 'fast', values: [{ value: 'true' }] }] }];
@@ -204,7 +243,15 @@ function selfTest() {
   });
   assert.throws(() => selectCursorModel([], { id: 'composer-2.5', fast: true }), /no fallback/i);
   assert.equal(claudeUsage({ usage: { input_tokens: 2, output_tokens: 1 } }).input, 2);
-  console.log('acceptance-agent self-test: 9 cases passed');
+  assert.equal(claudeUsage({}).input, null);
+  assert.equal(claudeUsage({ modelUsage: { modelA: { inputTokens: 5 } } }).input, 5);
+  assert.equal(requestedClaudeGatewayModel('qwen', { ANTHROPIC_MODEL:'qwen3-coder-plus' }), 'qwen3-coder-plus');
+  assert.equal(requestedClaudeGatewayModel('qwen', { ACCEPTANCE_CLAUDE_MODEL:'qwen3.7-plus' }), 'qwen3.7-plus');
+  assert.throws(() => requestedClaudeGatewayModel('qwen', {}), /Qwen Environment/);
+  assert.throws(() => requestedClaudeGatewayModel('qwen', {ANTHROPIC_MODEL:'claude-sonnet-5'}), /Qwen Environment/);
+  assert.throws(() => requestedClaudeGatewayModel('qwen', {ANTHROPIC_MODEL:'glm-5'}), /Qwen Environment/);
+  assert.equal(requestedClaudeGatewayModel('deepseek', {}), 'claude-sonnet-5');
+  console.log('acceptance-agent self-test: 15 cases passed');
 }
 
 async function main() {
@@ -218,15 +265,17 @@ async function main() {
     const { result, meta } = await runAcceptanceAgent(context, provider, workspace);
     fs.writeFileSync(outFile, JSON.stringify(result, null, 2) + '\n');
     if (telemetryFile && meta) {
-      writeAgentWorkflowTelemetry(telemetryFile, buildAgentWorkflowTelemetry(telemetryInput(context, meta, result)));
+      writeAcceptanceTelemetry(telemetryFile, context, meta, result);
     }
   } catch (error) {
     if (telemetryFile) {
       const fallbackMeta = error?.agentMeta ?? {
-        provider,
+        provider: provider === 'qwen' ? 'claude-code' : provider,
         model: provider === 'cursor'
           ? requestedCursorModel()
-          : { id: process.env.ANTHROPIC_MODEL || 'gateway-default', request_model: process.env.ACCEPTANCE_CLAUDE_MODEL || 'claude-sonnet-5' },
+          : { id: process.env.ANTHROPIC_MODEL || 'gateway-default',
+              request_model: provider === 'qwen' ? (process.env.ACCEPTANCE_CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || null)
+                : (process.env.ACCEPTANCE_CLAUDE_MODEL || 'claude-sonnet-5') },
         run_id: null,
         request_id: null,
         status: 'error',
@@ -242,10 +291,7 @@ async function main() {
           agent_duration_ms: null,
         },
       };
-      writeAgentWorkflowTelemetry(
-        telemetryFile,
-        buildAgentWorkflowTelemetry(telemetryInput(context, fallbackMeta, { criteria: [] }, 'agent-error')),
-      );
+      writeAcceptanceTelemetry(telemetryFile, context, fallbackMeta, { criteria: [] }, 'agent-error');
     }
     throw error;
   }

@@ -1,4 +1,5 @@
 import { decodeBase64Bytes, encodeBase64 } from './base64';
+import { readAgentStreamPosition } from './streamPosition';
 import {
   readAttachControlFields,
   readControlAcquireReply,
@@ -108,6 +109,8 @@ export interface TerminalStreamResumeResult {
    * already at the head. `undefined` again means the agent said nothing.
    */
   complete?: boolean;
+  /** Trusted Agent recovery verdict; legacy missing field is never proof. */
+  recovery?: 'complete' | 'checkpoint-required' | 'unavailable';
   events: import('@/platform/terminal-runtime/streamApply').TerminalStreamEvent[];
 }
 
@@ -118,6 +121,15 @@ export interface TerminalStreamResumeResult {
  * the PTY, and it means "everything at or below this chunk is applied". It is
  * not paired with any request — see {@link TerminalAgentApi.onInputAck}.
  */
+/** Browser -> Agent ACK of cumulative verified xterm parser progress.
+ * No ACK is allowed from an ordinary attach cursor or tmux capture. */
+export interface TerminalOutputAppliedAck {
+  subscriberGeneration: number;
+  streamEpoch: number;
+  rendererGeneration: number;
+  appliedThrough: number;
+}
+
 export interface TerminalInputAck {
   sessionName: string;
   inputEpoch: number;
@@ -178,6 +190,9 @@ export interface TerminalAgentApi {
    * one-way keystroke it always was.
    */
   sendInput(sessionName: string, data: string, sequence?: TerminalInputSequence): void;
+  /** P2P-only Output Applied ACK. `true` means submitted, not Agent accepted.
+   * Optional for old test/provider implementations. Never input ACK (#1307). */
+  sendOutputApplied?(sessionName: string, ack: TerminalOutputAppliedAck): boolean;
   /** Resize the remote PTY (controller only). */
   sendResize(sessionName: string, cols: number, rows: number): void;
   /** Current control lease for a session (#1095). */
@@ -273,6 +288,7 @@ async function attachToSession(
       controllerClientId: fields.controllerClientId,
       streamEpoch: fields.streamEpoch,
       streamCursor: fields.streamCursor,
+      subscriberGeneration: fields.subscriberGeneration,
       inputEpoch: fields.inputEpoch,
       inputAppliedThrough: fields.inputAppliedThrough,
     };
@@ -343,6 +359,100 @@ function subscribeInputAck(
   });
 }
 
+/** The Agent's replay status is authoritative, but all fields must agree.
+ * A mismatched or incomplete prefix is never passed on as ordinary events.
+ * Legacy providers keep their existing epoch/complete interpretation. */
+function parseResumeRecovery(value: unknown): TerminalStreamResumeResult['recovery'] {
+  switch (value) {
+    case 'complete':
+    case 'checkpoint-required':
+    case 'unavailable':
+      return value;
+    default:
+      return undefined;
+  }
+}
+
+/** Shared authoritative Agent resume decoder; direct and Relay cannot drift. */
+export function readResumeReply(reply: unknown, requestedEpoch: number): TerminalStreamResumeResult {
+  const r = reply as Record<string, unknown>;
+  const firstAvailableSeq = r.first_available_seq;
+  const complete = r.complete;
+  const epochMatch = r.epoch_match === true;
+  const declaredRecovery = parseResumeRecovery(r.recovery);
+  const provenComplete = epochMatch && complete === true
+    && (declaredRecovery === undefined || declaredRecovery === 'complete');
+  // A new provider claiming "complete" while its epoch/complete flags
+  // contradict it cannot recover. Treat the contradiction as unavailable.
+  const effectiveRecovery = declaredRecovery === 'complete' && !provenComplete
+    ? 'unavailable' : declaredRecovery;
+  const safeToApply = epochMatch && (
+    provenComplete || (declaredRecovery === undefined && complete === undefined)
+  );
+  return {
+    streamEpoch:
+      typeof r.stream_epoch === 'number' ? r.stream_epoch : requestedEpoch,
+    epochMatch: effectiveRecovery === 'unavailable' ? false : epochMatch,
+    firstAvailableSeq:
+      typeof firstAvailableSeq === 'number' ? firstAvailableSeq : undefined,
+    // Even legacy replies cannot report completion for a different epoch.
+    complete: typeof complete === 'boolean'
+      ? complete && epochMatch
+        && (declaredRecovery === undefined || declaredRecovery === 'complete')
+      : effectiveRecovery !== undefined ? false : undefined,
+    recovery: effectiveRecovery,
+    events: safeToApply ? parseStreamEvents(r.events) : [],
+  };
+}
+
+function submitOutputApplied(
+  surface: PluginSurface,
+  sessionName: string,
+  ack: TerminalOutputAppliedAck,
+): boolean {
+  const values = [
+    ack.subscriberGeneration, ack.streamEpoch,
+    ack.rendererGeneration, ack.appliedThrough,
+  ];
+  if (!values.every(Number.isSafeInteger)
+    || ack.subscriberGeneration <= 0 || ack.streamEpoch <= 0
+    || ack.rendererGeneration <= 0 || ack.appliedThrough < 0) {
+    return false;
+  }
+  try {
+    // An independent client->Agent operation, never the input ACK.
+    // Submitting only records a claimed parser prefix, not a credit receipt.
+    surface.send('agent.terminal.output.applied', {
+      session_name: sessionName,
+      subscriber_generation: ack.subscriberGeneration,
+      stream_epoch: ack.streamEpoch,
+      renderer_generation: ack.rendererGeneration,
+      applied_through: ack.appliedThrough,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function submitTerminalResize(
+  surface: PluginSurface,
+  lease: ControlLease,
+  sessionName: string,
+  size: { cols: number; rows: number },
+): void {
+  if (lease.getControlState(sessionName).role === 'observer') {
+    return;
+  }
+  const generation = lease.generationFor(sessionName);
+  surface.send(TERMINAL_RESIZE_WIRE, {
+    session_name: sessionName,
+    cols: size.cols,
+    rows: size.rows,
+    ...(generation !== undefined ? { control_generation: generation } : {}),
+  });
+}
+
 export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi {
   const lease = createAgentControlLease(surface);
 
@@ -377,19 +487,11 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
       });
     },
 
-    sendResize: (sessionName: string, cols: number, rows: number): void => {
-      const state = lease.getControlState(sessionName);
-      if (state.role === 'observer') {
-        return;
-      }
-      const generation = lease.generationFor(sessionName);
-      surface.send(TERMINAL_RESIZE_WIRE, {
-        session_name: sessionName,
-        cols,
-        rows,
-        ...(generation !== undefined ? { control_generation: generation } : {}),
-      });
-    },
+    sendOutputApplied: (sessionName, ack) =>
+      submitOutputApplied(surface, sessionName, ack),
+
+    sendResize: (sessionName, cols, rows) =>
+      submitTerminalResize(surface, lease, sessionName, { cols, rows }),
 
     getControlState: (sessionName: string): TerminalControlState =>
       lease.getControlState(sessionName),
@@ -411,11 +513,15 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
         };
         const data = p.data as string | undefined;
         if (data) {
+          // A capture (even with a malformed marker) is not a numbered live
+          // event. P2P and Relay must apply the identical Agent pair proof.
+          const position = Object.prototype.hasOwnProperty.call(p, 'bootstrap')
+            ? undefined
+            : readAgentStreamPosition(p);
           cb({
             data: decodeBase64Bytes(data),
-            streamEpoch:
-              typeof p.stream_epoch === 'number' ? p.stream_epoch : undefined,
-            streamSeq: typeof p.stream_seq === 'number' ? p.stream_seq : undefined,
+            streamEpoch: position?.streamEpoch,
+            streamSeq: position?.streamSeq,
             // Presence is the fact; the contents are the qualification. A
             // snapshot the agent had to cut short is not a history the
             // consumer may replace its buffer with, and collapsing this to a
@@ -434,22 +540,7 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
         stream_epoch: streamEpoch,
         after_seq: afterSeq,
       });
-      const r = reply as Record<string, unknown>;
-      // Both read by type and left `undefined` otherwise: the wire omits them
-      // when the agent has nothing to state, and a coercion here (`Number(x)`
-      // on a missing field is 0) would invent the position the contract
-      // forbids — 0 is below every sequence a stream can have (#1304).
-      const firstAvailableSeq = r.first_available_seq;
-      const complete = r.complete;
-      return {
-        streamEpoch:
-          typeof r.stream_epoch === 'number' ? r.stream_epoch : streamEpoch,
-        epochMatch: r.epoch_match === true,
-        firstAvailableSeq:
-          typeof firstAvailableSeq === 'number' ? firstAvailableSeq : undefined,
-        complete: typeof complete === 'boolean' ? complete : undefined,
-        events: parseStreamEvents(r.events),
-      };
+      return readResumeReply(reply, streamEpoch);
     },
 
     onResize: (cb: (frame: TerminalResizeFrame) => void): (() => void) => {
@@ -464,10 +555,9 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
         // carried only one would be a position nothing can be placed at — so
         // it is read as the level it still is rather than half-applied as an
         // event (#1303).
-        const epoch = p.stream_epoch;
-        const seq = p.stream_seq;
-        if (typeof epoch === 'number' && typeof seq === 'number') {
-          cb({ cols: p.cols, rows: p.rows, streamEpoch: epoch, streamSeq: seq });
+        const position = readAgentStreamPosition(p);
+        if (position) {
+          cb({ cols: p.cols, rows: p.rows, ...position });
           return;
         }
         cb({ cols: p.cols, rows: p.rows });

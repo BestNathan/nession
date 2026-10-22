@@ -26,13 +26,18 @@ export function selectCursorModel(models, requested) {
 }
 
 export function normalizeCursorUsage(usage) {
+  const observed = (value) => {
+    if (value == null) return null;
+    const n = Number(value);
+    return Number.isSafeInteger(n) && n >= 0 ? n : null;
+  };
   return {
-    input: Number(usage?.inputTokens ?? 0),
-    output: Number(usage?.outputTokens ?? 0),
-    cache_read: Number(usage?.cacheReadTokens ?? 0),
-    cache_write: Number(usage?.cacheWriteTokens ?? 0),
-    reasoning: usage?.reasoningTokens == null ? null : Number(usage.reasoningTokens),
-    total: usage?.totalTokens == null ? null : Number(usage.totalTokens),
+    input: observed(usage?.inputTokens),
+    output: observed(usage?.outputTokens),
+    cache_read: observed(usage?.cacheReadTokens),
+    cache_write: observed(usage?.cacheWriteTokens),
+    reasoning: observed(usage?.reasoningTokens),
+    total: observed(usage?.totalTokens),
   };
 }
 
@@ -46,42 +51,100 @@ export function normalizeCursorCost(value) {
 /** Run a Cursor session with task-supplied capability selection. */
 export async function runCursorSession({
   sdkLoader = loadCursorSdk, apiKey, name, requestedModel,
-  workspace, storePath, tools, customTools, prompt,
+  workspace, storePath, tools, customTools, prompt, resumeAgentId = null,
+  sandbox = false,
 }) {
   if (!apiKey) throw new Error('Cursor API key is required');
   const sdk = await sdkLoader();
   const selected = selectCursorModel(await sdk.Cursor.models.list(), requestedModel);
-  const agent = await sdk.Agent.create({
-    apiKey, name, model: selected, tools,
+  // The exact same SDK-native JSONL store must be restored before resuming.
+  // Re-declare model/tool policy on every call: SDK tool allowlists, custom tools,
+  // and inline capabilities are not persisted with the session.
+  if(typeof sandbox!=='boolean') throw new Error('Cursor sandbox flag must be boolean');
+  if (!Array.isArray(tools) || tools.some(tool => typeof tool !== 'string')) {
+    throw new Error('Cursor requires an explicit tool allowlist on create and resume');
+  }
+  if (resumeAgentId != null && !/^agent-[a-zA-Z0-9-]{4,100}$/.test(resumeAgentId)) {
+    throw new Error('Invalid local Cursor native resume agent ID');
+  }
+  const nativeOptions = {
+    apiKey, model: selected, tools,
     local: {
       cwd: workspace,
       settingSources: [],
+      ...(sandbox ? {sandboxOptions:{enabled:true}} : {}),
       store: new sdk.JsonlLocalAgentStore(storePath),
       ...(customTools ? { customTools } : {}),
     },
-  });
+  };
+  if (resumeAgentId) {
+    if (typeof sdk.Agent.resume !== 'function' || typeof sdk.Agent.get !== 'function') {
+      throw new Error('Cursor SDK has no local Agent lookup/resume API; refusing fresh-session fallback');
+    }
+    // Prove the restored JSONL index resolves this exact native identity at
+    // the same cwd and Store instance that resume() will use. Do not create
+    // a replacement Agent when historical native lookup fails.
+    let stored;
+    try {
+      stored = await sdk.Agent.get(resumeAgentId, {
+        cwd: workspace, store: nativeOptions.local.store,
+      });
+    } catch {
+      throw new Error('Cursor native Agent unavailable in restored JSONL store/cwd; refusing fresh-session fallback');
+    }
+    if (stored?.agentId !== resumeAgentId) {
+      throw new Error('Cursor restored JSONL Agent identity mismatch');
+    }
+  }
+  const agent = resumeAgentId
+    ? await sdk.Agent.resume(resumeAgentId, nativeOptions)
+    : await sdk.Agent.create({ ...nativeOptions, name });
+  if (resumeAgentId && agent.agentId !== resumeAgentId) {
+    try { await agent.close?.(); } catch {}
+    throw new Error('Cursor resumed a different native agent ID');
+  }
   const started = new Date();
   try {
     const run = await agent.send(prompt);
     const toolCalls = [];
+    // Store only bounded native event *metadata*. No tool arguments, result text,
+    // system messages, or model-generated text enter the telemetry collector.
+    const nativeEvents = [];
     let availableTools = [];
     let turns = 0;
     for await (const event of run.stream()) {
-      if (event.type === 'usage') turns += 1;
+      if (event.type === 'usage') {
+        turns += 1;
+        if (nativeEvents.length < 10000) {
+          const usage = event.usage ?? event;
+          nativeEvents.push({ type: 'usage', requestId: event.requestId ?? null,
+            usage: Object.fromEntries(['inputTokens','outputTokens','cacheReadTokens','cacheWriteTokens','reasoningTokens']
+              .filter(k => Number.isSafeInteger(usage[k]) && usage[k] >= 0).map(k => [k, usage[k]])) });
+        }
+      }
       if (event.type === 'system' && Array.isArray(event.tools)) availableTools = event.tools;
       if (event.type === 'tool_call' && event.status === 'running') toolCalls.push(event.name);
+      if (event.type === 'tool_call' && ['running','completed','error'].includes(event.status) &&
+          typeof event.name === 'string' && nativeEvents.length < 10000) {
+        nativeEvents.push({ type:'tool_call', status:event.status, name:event.name,
+          call_id: String(event.callId ?? event.call_id ?? event.id ?? 'tool-' + nativeEvents.length),
+          duration_ms: Number.isSafeInteger(event.durationMs) && event.durationMs >= 0 ? event.durationMs : null });
+      }
     }
     const result = await run.wait();
     let billed = null;
-    try { billed = await agent.getUsage(); } catch {}
+    // Agent-level billing can include earlier native runs after resume. It
+    // is not a per-Slice charge; leave cost unobserved rather than double-count.
+    if (!resumeAgentId) try { billed = await agent.getUsage(); } catch {}
     return {
       result,
       meta: {
         model: { id: selected.id, fast: requestedModel.fast, params: selected.params ?? [] },
         agent_id: agent.agentId ?? null,
+        resumed: resumeAgentId !== null,
         run_id: result.id ?? run.id ?? null,
         request_id: result.requestId ?? run.requestId ?? null,
-        turns, available_tools: availableTools, tool_calls: toolCalls,
+        turns, available_tools: availableTools, tool_calls: toolCalls, native_events: nativeEvents,
         status: result.status, error: result.error ?? null,
         usage: normalizeCursorUsage(result.usage),
         cost: normalizeCursorCost(billed),
@@ -92,6 +155,6 @@ export async function runCursorSession({
     };
   } finally {
     if (typeof agent[Symbol.asyncDispose] === 'function') await agent[Symbol.asyncDispose]();
-    else agent.close?.();
+    else await agent.close?.();
   }
 }

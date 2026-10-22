@@ -125,9 +125,12 @@ impl ConnectionHandler {
                     .unwrap_or(false);
                 let session_id = if success {
                     let sid = format!("{agent_id}:{name}");
-                    // Immediately register the session so it shows up in list
-                    // and attach requests without waiting for the agent's
-                    // SessionWatcher poll cycle.
+                    // The SessionWatcher may have reported the real pane
+                    // command *before* this create ACK was delivered (#2021).
+                    // Only fill an absent row. Overwriting an existing Agent
+                    // report with foreground_command=None would roll "bash"
+                    // back to "unknown" even after the server already pushed
+                    // the authoritative value to the browser.
                     let session_info = crate::registry::session::SessionInfo {
                         session_id: sid.clone(),
                         agent_id: agent_id.to_string(),
@@ -142,7 +145,11 @@ impl ConnectionHandler {
                         created_at: chrono::Utc::now(),
                         last_activity: chrono::Utc::now(),
                     };
-                    self.session_registry.update_session(session_info).await;
+                    self.session_registry
+                        .insert_session_if_absent(session_info)
+                        .await;
+                    // Broadcast the current registry snapshot, which might
+                    // contain a newer Agent report than this create reply.
                     self.broadcast_sessions().await;
                     // Record create-time env usage for visibility + in-use lock.
                     if !env_refs.is_empty() {

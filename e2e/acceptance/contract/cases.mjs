@@ -4,6 +4,9 @@ import path from 'node:path';
 export const CASE_SCHEMA_VERSION = 1;
 export const CASE_STAGES = new Set(['pre-merge', 'staging', 'post-merge']);
 export const CASE_RUNTIMES = new Set(['full-stack-local']);
+// Only a Case that provably leaves no observable state may join a shared
+// job-scoped runtime (#1866 SC-05). Anything else keeps its own runtime.
+export const CASE_ISOLATIONS = new Set(['isolated', 'shared']);
 export const VERIFIER_TYPES = new Set(['browser', 'protocol', 'runtime']);
 export const RESULT_POLICIES = new Set(['all-pass']);
 
@@ -92,6 +95,7 @@ export function validateCaseManifest(raw, caseDir) {
     'criterion',
     'stage',
     'runtime',
+    'isolation',
     'verifiers',
     'result_policy',
   ]);
@@ -111,6 +115,13 @@ export function validateCaseManifest(raw, caseDir) {
   const resultPolicy = String(raw.result_policy ?? '').trim();
   if (!RESULT_POLICIES.has(resultPolicy)) {
     throw new Error('unsupported result_policy: ' + (resultPolicy || '(empty)'));
+  }
+  // #1866 Phase B: sharing a runtime across Cases is a claim that the Case leaves
+  // no state a later Case could observe. That claim must be explicit; the default
+  // keeps today's fresh-runtime behaviour.
+  const isolation = String(raw.isolation ?? 'isolated').trim().toLowerCase();
+  if (!CASE_ISOLATIONS.has(isolation)) {
+    throw new Error('unsupported case isolation: ' + (isolation || '(empty)'));
   }
   if (!Array.isArray(raw.verifiers) || raw.verifiers.length === 0) {
     throw new Error('case requires at least one verifier');
@@ -154,6 +165,7 @@ export function validateCaseManifest(raw, caseDir) {
     criterion,
     stage,
     runtime,
+    isolation,
     verifiers,
     result_policy: resultPolicy,
   };

@@ -10,6 +10,7 @@ import type { TerminalController } from '@/platform/terminal-runtime/controller/
 import type { TerminalSemanticKey } from '@/platform/terminal-runtime/interaction/TerminalInteractionController';
 import type { TerminalControlState } from '@/product/terminal/state/terminalControl';
 import type { InputDrop } from '@/platform/terminal-runtime/inputQueue';
+import type { TerminalStreamState } from '@/platform/session-runtime/SessionRuntime';
 import { Button } from '@/components/ui/button';
 import type { ResolvedWorkContext } from '@/product/terminal/capsule/workAwareness';
 import { cn } from '@/shared/lib/utils';
@@ -44,6 +45,22 @@ export interface TerminalSurfaceProps {
   /** P2P control lease (#1095). Omit in relay until server forwards attach metadata. */
   terminalControl?: TerminalControlState;
   onTakeControl?: () => void;
+  /**
+   * The runtime observed output it cannot prove it received (#2155). A quiet
+   * status line, not an error: the session is live, the history behind the
+   * visible screen may be incomplete, and the notice disappears only when a
+   * complete snapshot has repaired the buffer.
+   */
+  historyDegraded?: boolean;
+  /**
+   * The runtime's explicit synchronized / degraded-live / unavailable answer
+   * (#1926 SC-08). Published as `data-terminal-stream-state` so the browser
+   * fixtures assert the state itself rather than inferring it from which
+   * notice happens to be rendered. It does not add a visual element: the
+   * quiet degraded notice stays tied to an **observed** gap, and a
+   * screen-only-but-clean attach is degraded-live without shouting.
+   */
+  streamState?: TerminalStreamState;
   /** Input this Session lost rather than delivered (#1307 SC-09), if any. */
   inputDrop?: InputDrop | null;
   onDismissInputDrop?: () => void;
@@ -128,6 +145,8 @@ export function TerminalSurface({
   terminalControl,
   onTakeControl,
   inputDrop = null,
+  historyDegraded = false,
+  streamState = 'unavailable',
   onDismissInputDrop,
   surfaceAction,
   workContext,
@@ -154,6 +173,7 @@ export function TerminalSurface({
   return (
     <div
       data-testid="terminal-surface"
+      data-terminal-stream-state={streamState}
       className="relative flex min-h-0 flex-1 flex-col"
     >
       {/*
@@ -190,6 +210,15 @@ export function TerminalSurface({
           workContext={workContext}
         />
       </div>
+      {historyDegraded ? (
+        <div
+          className={cn('flex shrink-0 items-center justify-between gap-3 border-t border-border bg-muted/40 px-3 py-2 text-muted-foreground', chromeSansRole('body'))}
+          data-testid="terminal-history-degraded"
+          role="status"
+        >
+          <span>History may be incomplete — some output was lost while disconnected.</span>
+        </div>
+      ) : null}
       {inputDrop ? (
         <div
           className={cn('flex shrink-0 items-center justify-between gap-3 border-t border-border bg-muted/40 px-3 py-2 text-muted-foreground', chromeSansRole('body'))}

@@ -32,6 +32,8 @@ use crate::server::execution::ExecutionPolicy::{Inline, Key, Ordered, Query};
 use crate::server::execution::{
     ExecutionLanes, ResourceKey, DEFAULT_MUTATIONS_IN_FLIGHT, SHUTDOWN_GRACE,
 };
+use crate::server::issued_credit::SubscriberIssuedFlow;
+use crate::server::output_ack::{OutputAckBinding, OutputAckVerdict, SubscriberOutputAck};
 use crate::server::session_terminal::{self, InputSequence, InputVerdict};
 // The lanes' boxed work is the shared type, and the constructors take this
 // socket's own bounds — see `nession_runtime::lane`.
@@ -46,8 +48,8 @@ use nession_runtime::lane::{KeyedLane, Work};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, Mutex};
 use tokio_tungstenite::tungstenite::handshake::server::{
@@ -68,17 +70,45 @@ use tracing::{debug, error, info, warn};
 ///
 /// The `backend` is either a plain PTY or a control-mode session, hidden
 /// behind [`TmuxSession`] so callers dispatch input/resize/close uniformly.
-/// `subscribers` fans terminal output out to every attached client; the
-/// control-mode path forwards output directly and leaves this empty.
+/// Per-peer fan-out uses the same FIFO for sequenced output and authoritative
+/// resize, regardless of which tmux backend produced the event (#2028).
 type OutputChunk = (Vec<u8>, u64, u64);
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum SubscriberEvent {
+    Output(OutputChunk),
+    Resize {
+        cols: u16,
+        rows: u16,
+        stream_epoch: u64,
+        stream_seq: u64,
+    },
+}
+
+impl SubscriberEvent {
+    fn queued_bytes(&self) -> usize {
+        match self {
+            Self::Output((bytes, _, _)) => bytes.len(),
+            // Resize consumes a slot and a sequence but carries no PTY bytes.
+            Self::Resize { .. } => 0,
+        }
+    }
+}
 
 #[derive(Clone)]
 struct SessionPeer {
     client_id: String,
     peer_token: Arc<()>,
+    /// Fresh for each attach, independent of ControlLease/queue dequeue.
+    output_ack: SubscriberOutputAck,
+    /// Short synchronous lock shared with the subscriber's forwarder, never across await.
+    issued_flow: Arc<StdMutex<SubscriberIssuedFlow>>,
     outbound: P2pOutbound,
-    /// PTY multi-client fan-out; `None` for control-mode (direct outbound).
-    output_tx: Option<mpsc::Sender<OutputChunk>>,
+    /// Sequenced output + authoritative resize share this per-peer FIFO.
+    /// A legacy backend without a forwarder may leave it absent.
+    output_tx: Option<mpsc::Sender<SubscriberEvent>>,
+    /** Pending bytes charged per subscriber, never shared across peers. */
+    queued_bytes: Arc<AtomicUsize>,
     /// Set by [`fan_out_peers`] when it drops this peer for a full queue.
     ///
     /// The forwarder's receiver ends for several reasons — the session ended,
@@ -126,21 +156,38 @@ struct AttachedSession {
 /// How much terminal output one attached client may have waiting (#961).
 ///
 /// This is the terminal lane's slow-consumer policy, and the depth is the
-/// policy. The backend's own hop is bounded at 64 chunks of up to 4 KiB
-/// ([`crate::tmux::pty`]) before it reaches the broadcast task, so a client that
-/// can absorb what tmux produces never fills this: 64 chunks is the same depth
-/// the session itself buffers, about 256 KiB.
+/// policy. What it buys is that the *slowest* client cannot become the pace of
+/// the session for everybody else: the broadcast task fans one session's output
+/// out to every attached client, so a `send().await` here would park the
+/// fan-out on whichever client is behind — the other clients and the PTY reader
+/// behind it. A client with a full queue is therefore detached. That is the same
+/// verdict the Server reaches for a relayed client
+/// (`server::outbound::send_terminal`), applied where the terminal is served.
 ///
-/// What this buys is that the *slowest* client cannot become the pace of the
-/// session for everybody else. The broadcast task fans one session's output out
-/// to every attached client, so a `send().await` here would park the fan-out on
-/// whichever client is behind — the other clients and the PTY reader behind it.
-/// A client with a full queue is therefore detached instead: its queue is
-/// dropped, its forwarding task sees the receiver close and closes the
-/// connection, and it re-attaches to a redrawn screen. That is the same verdict
-/// the Server reaches for a relayed client (`server::outbound::send_terminal`),
-/// applied where the terminal is actually served.
-const SUBSCRIBER_QUEUE_SLOTS: usize = 64;
+/// **The byte cap is the memory bound; the slot count is only a metadata
+/// backstop.** This used to be 64 slots, sized from the backend hop's *64
+/// chunks of up to 4 KiB* — but that hop's unit is not this queue's unit.
+/// Terminal events here are per-PTY-chunk, and tmux/`sed` emit small chunks
+/// (measured: a 5 000-line `sed` burst arrived as ~500-byte reads, and one
+/// relayed burst stalled after 913 delivered lines with only ~64 events
+/// queued). A 64-slot bound therefore evicted a *healthy* relayed subscriber
+/// after ~35 ms of scheduling lag with barely 1 KiB queued (#2179), while the
+/// 2 MiB byte budget below had not been approached.
+///
+/// The number is large enough that the byte budget binds first for realistic
+/// chunks (16 384 × 128 B = 2 MiB), and a genuinely stalled subscriber is still
+/// detached: the per-connection outbound path ends it after
+/// `DEFAULT_TERMINAL_STALL_GRACE`, and the queue's own byte reservation stops
+/// it before memory does. A subscriber evicted here must also actually *end* —
+/// see `P2pOutbound::close` on why the read loop races `wait_closed`.
+const SUBSCRIBER_QUEUE_SLOTS: usize = 16_384;
+/// Independent byte cap for the per-subscriber mpsc queue (#1983).
+///
+/// This is the bound a slow consumer actually reaches, and it is deliberately
+/// small enough to be a real verdict: 2 MiB is tens of thousands of terminal
+/// lines. A client that accumulates that much has stopped reading in any
+/// useful sense.
+const SUBSCRIBER_QUEUE_BYTES: usize = 2 * 1024 * 1024;
 
 /// Fan one chunk of terminal output out to every subscriber of a session.
 ///
@@ -167,27 +214,158 @@ fn fan_out(subscribers: &mut Vec<mpsc::Sender<OutputChunk>>, chunk: OutputChunk)
     detached
 }
 
+fn release_subscriber_bytes(queued: &AtomicUsize, bytes: usize) {
+    // A disconnected raw-test sender may have skipped reservations; never
+    // underflow. Production's only fan-out writer reserves before try_send.
+    let _ = queued.fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+        Some(n.saturating_sub(bytes))
+    });
+}
+
 fn fan_out_peers(peers: &mut Vec<SessionPeer>, chunk: OutputChunk) -> usize {
+    fan_out_session_event(peers, SubscriberEvent::Output(chunk))
+}
+
+fn fan_out_recorded_resize(
+    peers: &mut Vec<SessionPeer>,
+    cols: u16,
+    rows: u16,
+    stream_epoch: u64,
+    stream_seq: u64,
+) -> usize {
+    fan_out_session_event(
+        peers,
+        SubscriberEvent::Resize {
+            cols,
+            rows,
+            stream_epoch,
+            stream_seq,
+        },
+    )
+}
+
+/// Called in the same producer lock after recording *either* event type.
+/// Every subscriber gets the identical sequence in the same FIFO order.
+fn fan_out_session_event(peers: &mut Vec<SessionPeer>, event: SubscriberEvent) -> usize {
     let mut detached = 0usize;
     peers.retain(|peer| {
         let Some(tx) = &peer.output_tx else {
             return true;
         };
-        match tx.try_send(chunk.clone()) {
+        // Reserve before delivery; the receiver can immediately dequeue and
+        // release its charge on another task. One oversized frame is enough
+        // to evict this peer but cannot stall or evict a healthy observer.
+        let bytes = event.queued_bytes();
+        let reserved =
+            peer.queued_bytes
+                .fetch_update(Ordering::AcqRel, Ordering::Acquire, |queued| {
+                    queued
+                        .checked_add(bytes)
+                        .filter(|n| *n <= SUBSCRIBER_QUEUE_BYTES)
+                });
+        if reserved.is_err() {
+            peer.detached_for_not_draining
+                .store(true, Ordering::Release);
+            detached += 1;
+            return false;
+        }
+        match tx.try_send(event.clone()) {
             Ok(()) => true,
             Err(mpsc::error::TrySendError::Full(_)) => {
-                // Tell the forwarder *why* its channel is ending before the
-                // drop ends it — the one cause that must reach the client as
-                // a closed connection (#1226).
+                peer.queued_bytes.fetch_sub(bytes, Ordering::AcqRel);
                 peer.detached_for_not_draining
                     .store(true, Ordering::Release);
                 detached += 1;
                 false
             }
-            Err(mpsc::error::TrySendError::Closed(_)) => false,
+            Err(mpsc::error::TrySendError::Closed(_)) => {
+                peer.queued_bytes.fetch_sub(bytes, Ordering::AcqRel);
+                false
+            }
         }
     });
     detached
+}
+
+fn new_output_ack(stream_epoch: u64) -> Result<SubscriberOutputAck, OutputAckVerdict> {
+    SubscriberOutputAck::new(OutputAckBinding {
+        subscriber_generation: session_terminal::next_subscriber_generation(),
+        stream_epoch,
+    })
+}
+
+/// Never hand a caller the retained *tail* of an incomplete ring: it is
+/// not a contiguous suffix of the requested cursor. A failed replay requires
+/// a future verified checkpoint (or an explicit degraded/unavailable state).
+fn build_terminal_resume_response(
+    request: &TerminalStreamResumePayload,
+    stream: &session_terminal::SessionStreamState,
+) -> TerminalStreamResumeResponse {
+    let replay = stream.replay_since(request.stream_epoch, request.after_seq);
+    let recovery = match replay.as_ref() {
+        None => TerminalResumeRecovery::Unavailable,
+        Some(r) if r.complete => TerminalResumeRecovery::Complete,
+        Some(_) => TerminalResumeRecovery::CheckpointRequired,
+    };
+    TerminalStreamResumeResponse {
+        session_name: request.session_name.clone(),
+        stream_epoch: stream.epoch,
+        epoch_match: replay.is_some(),
+        first_available_seq: replay.as_ref().map(|r| r.first_available_seq),
+        complete: replay.as_ref().map(|r| r.complete),
+        recovery: Some(recovery),
+        events: if recovery == TerminalResumeRecovery::Complete {
+            replay.map_or_else(Vec::new, |r| r.events)
+        } else {
+            Vec::new()
+        },
+    }
+}
+
+/// Socket identity and per-attach subscription generation are both required.
+/// Nothing here grants credit for queued/dequeued bytes.
+fn accept_output_ack(
+    peers: &mut [SessionPeer],
+    client_id: &str,
+    peer_token: &Arc<()>,
+    payload: &TerminalOutputAppliedPayload,
+    issued_head: u64,
+) -> Result<OutputAckVerdict, &'static str> {
+    let Some(peer) = peers
+        .iter_mut()
+        .find(|peer| peer.client_id == client_id && Arc::ptr_eq(&peer.peer_token, peer_token))
+    else {
+        return Err("not_current_subscriber");
+    };
+    if !(1..=(1_u64 << 53) - 1).contains(&payload.renderer_generation) {
+        return Err("invalid_renderer_generation");
+    }
+    // Stage the cursor: reject a beyond-issued credit claim before commit.
+    let mut cursor = peer.output_ack.clone();
+    let verdict = cursor.observe_with_renderer(
+        OutputAckBinding {
+            subscriber_generation: payload.subscriber_generation,
+            stream_epoch: payload.stream_epoch,
+        },
+        payload.renderer_generation,
+        payload.applied_through,
+        issued_head,
+    );
+    match verdict {
+        OutputAckVerdict::Advanced { .. } => {
+            let mut issued = peer
+                .issued_flow
+                .lock()
+                .map_err(|_| "credit_state_unavailable")?;
+            issued
+                .parser_ack(payload.stream_epoch, payload.applied_through)
+                .map_err(|_| "invalid_issued_credit_ack")?;
+            peer.output_ack = cursor;
+            Ok(verdict)
+        }
+        OutputAckVerdict::Duplicate => Ok(verdict),
+        _ => Err("invalid_output_ack"),
+    }
 }
 
 async fn connection_client_id(client_id: &Arc<Mutex<Option<String>>>) -> String {
@@ -218,6 +396,11 @@ fn client_attach_response(
         controller_client_id: session.control.controller_client_id.clone(),
         stream_epoch: Some(session.stream.epoch),
         stream_cursor: Some(session.stream.cursor()),
+        subscriber_generation: session
+            .peers
+            .iter()
+            .find(|peer| peer.client_id == client_id)
+            .map(|peer| peer.output_ack.binding().subscriber_generation),
         // Stated on every attach, including a re-attach to a session this
         // agent already holds — which is the case they are for. A client whose
         // transport was rebuilt does not know what became of the input it had
@@ -302,26 +485,63 @@ async fn notify_control_changed(peers: &[SessionPeer], payload: TerminalControlC
 /// It used to be one task per subscriber inline in the attach arms, twice, and
 /// the only difference between the two was which names the locals had.
 fn spawn_output_forwarder(
-    mut rx: mpsc::Receiver<OutputChunk>,
+    mut rx: mpsc::Receiver<SubscriberEvent>,
     outbound: P2pOutbound,
     session_name: String,
     detached_for_not_draining: Arc<AtomicBool>,
+    queued_bytes: Arc<AtomicUsize>,
+    issued_flow: Arc<StdMutex<SubscriberIssuedFlow>>,
 ) {
     tokio::spawn(async move {
-        while let Some((bytes, stream_epoch, stream_seq)) = rx.recv().await {
-            use base64::Engine;
-            let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
-            let output = TerminalOutputPayload {
-                session_name: session_name.clone(),
-                data: encoded,
-                stream_epoch: Some(stream_epoch),
-                stream_seq: Some(stream_seq),
-                // Live output, not the session's history: the bootstrap
-                // marker lands here in S4b (#321).
-                bootstrap: None,
+        while let Some(event) = rx.recv().await {
+            // The one FIFO protects both event types from overtaking a
+            // preceding xterm write. Only output uses the byte budget;
+            // authoritative resize still consumes a bounded queue slot.
+            release_subscriber_bytes(&queued_bytes, event.queued_bytes());
+            let (epoch, seq) = match &event {
+                SubscriberEvent::Output((_, epoch, seq)) => (*epoch, *seq),
+                SubscriberEvent::Resize {
+                    stream_epoch,
+                    stream_seq,
+                    ..
+                } => (*stream_epoch, *stream_seq),
             };
-            let msg = new_message(msg_types::TERMINAL_OUTPUT, output);
-            if let Ok(json) = serde_json::to_string(&msg) {
+            // Issue before offering to the writer; dequeue is not xterm parse.
+            let issued = issued_flow
+                .lock()
+                .map(|mut flow| flow.issue(epoch, seq, event.queued_bytes()).is_ok())
+                .unwrap_or(false);
+            if !issued {
+                outbound.close();
+                return;
+            }
+            let json = match event {
+                SubscriberEvent::Output((bytes, stream_epoch, stream_seq)) => {
+                    use base64::Engine;
+                    let output = TerminalOutputPayload {
+                        session_name: session_name.clone(),
+                        data: base64::engine::general_purpose::STANDARD.encode(&bytes),
+                        stream_epoch: Some(stream_epoch),
+                        stream_seq: Some(stream_seq),
+                        bootstrap: None,
+                    };
+                    serde_json::to_string(&new_message(msg_types::TERMINAL_OUTPUT, output)).ok()
+                }
+                SubscriberEvent::Resize {
+                    cols,
+                    rows,
+                    stream_epoch,
+                    stream_seq,
+                } => terminal_resize_frame(
+                    &session_name,
+                    cols,
+                    rows,
+                    Some((stream_epoch, stream_seq)),
+                ),
+            };
+            if let Some(json) = json {
+                // Both output and sequenced resize use the non-dropping terminal
+                // lane, unlike legacy unsequenced/level resize.
                 // Terminal output goes on the terminal lane, which waits for
                 // room and gives up at the stall grace. A verdict there is not
                 // this forwarder's to act on twice — another session's
@@ -458,6 +678,7 @@ pub mod msg_types {
     pub const TERMINAL_RESIZE: &str = "agent.terminal.resize";
     pub const TERMINAL_CONTROL_ACQUIRE: &str = "agent.terminal.control.acquire";
     pub const TERMINAL_STREAM_RESUME: &str = "agent.terminal.stream.resume";
+    pub const TERMINAL_OUTPUT_APPLIED: &str = "agent.terminal.output.applied";
 
     // Web UI → Agent (compatibility layer)
     pub const CLIENT_AUTH: &str = "client.auth";
@@ -566,10 +787,11 @@ pub use nession_protocol::contracts::file::v1::{
     FileWritePayload, FileWriteResponse,
 };
 pub use nession_protocol::contracts::terminal::v1::{
-    TerminalBootstrapPayload, TerminalControlAcquirePayload, TerminalControlAcquireResponse,
-    TerminalControlChangedPayload, TerminalInputAckPayload, TerminalInputPayload,
-    TerminalOutputPayload, TerminalResizePayload, TerminalStreamResumePayload,
-    TerminalStreamResumeResponse,
+    TerminalBootstrapPayload, TerminalCheckpointCutConsistency, TerminalCheckpointFidelity,
+    TerminalControlAcquirePayload, TerminalControlAcquireResponse, TerminalControlChangedPayload,
+    TerminalInputAckPayload, TerminalInputPayload, TerminalOutputAppliedPayload,
+    TerminalOutputPayload, TerminalResizePayload, TerminalResumeRecovery,
+    TerminalStreamEventPayload, TerminalStreamResumePayload, TerminalStreamResumeResponse,
 };
 
 // --- Protocol helpers ---
@@ -708,12 +930,15 @@ async fn capture_for_bootstrap(
 
 /// Send `session`'s history to one connection, marked as a **bootstrap** (#321).
 ///
-/// Awaited, and in order, before the caller starts live forwarding. That
-/// ordering *is* the barrier on the send side: the live producer does not
-/// exist yet and the outbound queue is FIFO, so nothing the session produces
-/// can overtake the snapshot — there is no gap to close and nothing to
-/// reconcile afterwards. The alternative, a cursor plus a reconciliation
-/// pass, is the shape #1148 measured going wrong.
+/// Awaited before the caller starts its live forwarder. The subscriber's
+/// bounded queue is already active (#2024), so Agent output produced during
+/// this asynchronous tmux capture is retained and sent *after* the snapshot.
+/// Send order alone proves no cut; `cut` states where the capture came from
+/// (#2124). Only the Control arm's control-channel barrier is an exact stream
+/// cut — it drops the `%output` its capture covers, so the stream created with
+/// the attach starts at 0. The PTY arm's separate-process capture is
+/// unverified: a racing producer can put a line in both snapshot and stream.
+/// An unverified marker must never seed parser ACKs.
 ///
 /// `capture` is the snapshot, and where it came from is the barrier's other
 /// half (#1228): the Control arm's is taken **on the control channel**
@@ -733,13 +958,202 @@ async fn capture_for_bootstrap(
 /// requested — a client with no history is a client with an empty screen,
 /// which is the state every attach was in before this existed. No frame is
 /// sent and the attach proceeds.
+/// `capture-pane` always projects text/modes, never a full VT checkpoint.
+fn tmux_capture_fidelity(truncated: bool, modes_complete: bool) -> TerminalCheckpointFidelity {
+    if truncated || !modes_complete {
+        TerminalCheckpointFidelity::Partial
+    } else {
+        TerminalCheckpointFidelity::ScreenOnly
+    }
+}
+
+/// Build a contiguous prefix exclusively from the Agent's *ordered* stream
+/// ring. No tmux capture occurs here, so a current-head cut and the new
+/// subscriber's live queue can be activated under the same SessionMap lock.
+///
+/// This proves stream continuity only. It cannot restore terminal history
+/// preceding the Agent reader, nor replay resize/emulator state as full VT.
+/// Missing, expired or oversized prefixes must take the unverified fallback.
+struct AtomicOutputPrefix {
+    bytes: Vec<u8>,
+    stream_epoch: u64,
+    through_seq: u64,
+}
+
+fn atomic_output_prefix(
+    stream: &session_terminal::SessionStreamState,
+) -> Option<AtomicOutputPrefix> {
+    use base64::Engine;
+    let replay = stream.replay_since(stream.epoch, 0)?;
+    if !replay.complete || replay.events.is_empty() {
+        return None;
+    }
+    let mut raw = Vec::new();
+    for event in replay.events {
+        match event {
+            TerminalStreamEventPayload::Output { data, .. } => {
+                let decoded = base64::engine::general_purpose::STANDARD
+                    .decode(data)
+                    .ok()?;
+                let size = raw.len().checked_add(decoded.len())?;
+                if size > crate::server::bootstrap::BOOTSTRAP_MAX_BYTES {
+                    return None;
+                }
+                raw.extend_from_slice(&decoded);
+            }
+            // A resize is a real sequenced event, but not a byte sequence.
+            // The baseline is marked Partial even when output replay is whole.
+            TerminalStreamEventPayload::Resize { .. } => {}
+        }
+    }
+    (!raw.is_empty()).then_some(AtomicOutputPrefix {
+        bytes: raw,
+        stream_epoch: stream.epoch,
+        through_seq: stream.cursor(),
+    })
+}
+
+/// Register a new subscriber and its bounded queue at one Agent stream cut.
+///
+/// The caller MUST hold the SessionMap producer lock, which also protects
+/// stream.record_output + fan_out_peers. A complete ring prefix therefore
+/// joins the live queue exactly at `through_seq`. For an incomplete ring, the
+/// external tmux capture is still **unverified**: output may overlap that
+/// snapshot, but it is no longer silently discarded while capture awaits.
+///
+/// Queue activation is mandatory even on the unverified fallback. In
+/// particular, do not defer `output_tx = Some(..)` until after capture: that
+/// leaves an unbounded loss window for concurrently recorded Agent output.
+fn subscribe_at_stream_cut(
+    peers: &mut Vec<SessionPeer>,
+    stream: &session_terminal::SessionStreamState,
+    mut peer: SessionPeer,
+    live_tx: &mpsc::Sender<SubscriberEvent>,
+    needs_bootstrap: bool,
+) -> Option<AtomicOutputPrefix> {
+    // A replaced peer's queue must not receive subsequent output; its
+    // detached_for_not_draining flag remains false (not a slow-peer eviction).
+    peers.retain(|current| current.client_id != peer.client_id);
+    let prefix = if needs_bootstrap {
+        atomic_output_prefix(stream)
+    } else {
+        None
+    };
+    // This is under the same lock as the producer, *before* any await.
+    peer.output_tx = Some(live_tx.clone());
+    peers.push(peer);
+    prefix
+}
+
+/// A stream-log cut is atomic with its live queue *only* when both are
+/// selected under the same SessionMap lock. No unproven tmux cut is promoted.
+fn atomic_prefix_payload(session_name: &str, prefix: &AtomicOutputPrefix) -> TerminalOutputPayload {
+    use base64::Engine;
+    TerminalOutputPayload {
+        session_name: session_name.to_string(),
+        data: base64::engine::general_purpose::STANDARD.encode(&prefix.bytes),
+        stream_epoch: None,
+        stream_seq: None,
+        bootstrap: Some(TerminalBootstrapPayload {
+            requested_lines: crate::tmux::HISTORY_LIMIT_LINES,
+            truncated: false,
+            cut_consistency: Some(TerminalCheckpointCutConsistency::Atomic),
+            // This is raw Agent output since stream epoch began, not a
+            // verified VT/screen snapshot from tmux's whole lifetime.
+            fidelity: Some(TerminalCheckpointFidelity::Partial),
+            stream_epoch: Some(prefix.stream_epoch),
+            through_seq: Some(prefix.through_seq),
+        }),
+    }
+}
+
+async fn send_atomic_output_prefix(
+    outbound: &P2pOutbound,
+    session_name: &str,
+    prefix: &AtomicOutputPrefix,
+) -> bool {
+    let msg = new_message(
+        msg_types::TERMINAL_OUTPUT,
+        atomic_prefix_payload(session_name, prefix),
+    );
+    let Ok(json) = serde_json::to_string(&msg) else {
+        return false;
+    };
+    match outbound.send_terminal(WsMessage::Text(json)).await {
+        Ok(()) => true,
+        Err(OutboundError::Stalled) => {
+            warn!("stream cut: client stalled on atomic prefix for {session_name}");
+            outbound.close();
+            false
+        }
+        Err(_) => false,
+    }
+}
+
+/// Where a bootstrap capture's stream cut came from (#2124).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BootstrapCut {
+    /// The **control-channel attach barrier** (`ControlModeSession::attach`).
+    ///
+    /// The capture is taken on the control channel and `%output` the capture
+    /// covers is dropped from the live stream (`ControlRouter`'s barrier), so
+    /// the session stream created with this attach records only events after
+    /// the snapshot. The cut is therefore exact at stream position 0 — and at
+    /// no other position, because the capture is a screen projection, not a
+    /// replay of the Agent's event log.
+    AtomicEpochStart { stream_epoch: u64 },
+    /// A capture taken outside the ordered producer: the separate-process PTY
+    /// capture and the already-attached fallback. No stream cut is proven.
+    Unverified,
+}
+
+/// Build the bootstrap frame for one capture. Pure so the marker's meaning can
+/// be tested without a transport: an epoch-start cut names the stream epoch
+/// and `throughSeq = 0`, while an unverified capture names neither.
+///
+/// Fidelity and truncation describe the **screen** and remain independent of
+/// the cut: a truncated epoch-start capture still proves that no stream event
+/// precedes it, and never becomes a full-VT claim.
+fn bootstrap_payload(
+    session_name: &str,
+    bytes: Vec<u8>,
+    truncated: bool,
+    fidelity: TerminalCheckpointFidelity,
+    cut: BootstrapCut,
+) -> TerminalOutputPayload {
+    use base64::Engine;
+    let (cut_consistency, stream_epoch, through_seq) = match cut {
+        BootstrapCut::AtomicEpochStart { stream_epoch } => (
+            TerminalCheckpointCutConsistency::Atomic,
+            Some(stream_epoch),
+            Some(0),
+        ),
+        BootstrapCut::Unverified => (TerminalCheckpointCutConsistency::Unverified, None, None),
+    };
+    TerminalOutputPayload {
+        session_name: session_name.to_string(),
+        data: base64::engine::general_purpose::STANDARD.encode(&bytes),
+        stream_epoch: None,
+        stream_seq: None,
+        bootstrap: Some(TerminalBootstrapPayload {
+            requested_lines: crate::tmux::HISTORY_LIMIT_LINES,
+            truncated,
+            cut_consistency: Some(cut_consistency),
+            // Even a complete pane capture is text/modes, not full VT.
+            fidelity: Some(fidelity),
+            stream_epoch,
+            through_seq,
+        }),
+    }
+}
+
 async fn send_bootstrap(
     outbound: &P2pOutbound,
     tmux: &crate::tmux::ops::TmuxDep,
     session_name: &str,
     capture: Option<Vec<u8>>,
+    cut: BootstrapCut,
 ) -> bool {
-    let lines = crate::tmux::HISTORY_LIMIT_LINES;
     let Some(mut capture) = capture else {
         return true;
     };
@@ -748,11 +1162,11 @@ async fn send_bootstrap(
     // fails costs the modes and not the history: a client with the session's
     // text and default modes is strictly better off than one with nothing, and
     // that is the same judgement the capture failure above makes.
-    let modes = match tmux.ops().pane_mode_flags(session_name).await {
-        Ok(flags) => crate::server::bootstrap::mode_escapes(&flags),
+    let (modes, modes_complete) = match tmux.ops().pane_mode_flags(session_name).await {
+        Ok(flags) => (crate::server::bootstrap::mode_escapes(&flags), true),
         Err(e) => {
             warn!("bootstrap: pane modes for {session_name} failed: {e:#}");
-            Vec::new()
+            (Vec::new(), false)
         }
     };
     // The pane's unwritten screen is dropped before anything else, so what
@@ -776,17 +1190,13 @@ async fn send_bootstrap(
         bytes,
         truncated: bounded.truncated,
     };
-    use base64::Engine;
-    let payload = TerminalOutputPayload {
-        session_name: session_name.to_string(),
-        data: base64::engine::general_purpose::STANDARD.encode(&bounded.bytes),
-        stream_epoch: None,
-        stream_seq: None,
-        bootstrap: Some(TerminalBootstrapPayload {
-            requested_lines: lines,
-            truncated: bounded.truncated,
-        }),
-    };
+    let payload = bootstrap_payload(
+        session_name,
+        bounded.bytes,
+        bounded.truncated,
+        tmux_capture_fidelity(bounded.truncated, modes_complete),
+        cut,
+    );
     let msg = new_message(msg_types::TERMINAL_OUTPUT, payload);
     let Ok(json) = serde_json::to_string(&msg) else {
         return true;
@@ -1601,37 +2011,43 @@ p2p_routes! { ctx, msg_type, payload_value;
                         let client_id = connection_client_id(ctx.client_id).await;
                         let (tx, rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
                         let detached_for_not_draining = Arc::new(AtomicBool::new(false));
+                            let queued_bytes = Arc::new(AtomicUsize::new(0));
+                            let issued_flow = Arc::new(StdMutex::new(SubscriberIssuedFlow::new()));
                         let wants_bootstrap = payload.needs_bootstrap.unwrap_or(false);
-                        let resp = {
+                        let (resp, atomic_prefix) = {
                             let mut guard = sessions_lock(ctx.sessions);
                             let Some(shared) = guard.get_mut(&session_name) else {
                                 return ctx.err("not_attached", "session ended during attach");
                             };
-                            // The peer this drops is *replaced*, not evicted:
-                            // its flag stays unset, so its forwarder ends
-                            // quietly instead of closing the connection this
-                            // attach is about to answer on (#1226).
-                            shared.peers.retain(|p| p.client_id != client_id);
-                            // When a bootstrap is coming, leave `output_tx` unset
-                            // until the snapshot is on the wire. The broadcast
-                            // task is already running and would otherwise queue
-                            // live bytes that the capture also covers — the
-                            // duplicate window #1228 measured on subsequent attach
-                            // (#321 SC4).
-                            shared.peers.push(SessionPeer {
-                                client_id: client_id.clone(),
-                                peer_token: Arc::clone(ctx.peer_token),
-                                outbound: ctx.outbound.clone(),
-                                output_tx: if wants_bootstrap {
-                                    None
-                                } else {
-                                    Some(tx.clone())
+                            // The subscription and its stream cut are
+                            // installed atomically with producer record/fan-out,
+                            // including the unverified tmux fallback (#2024).
+                            let output_ack = match new_output_ack(shared.stream.epoch) {
+                                Ok(ack) => ack,
+                                Err(_) => return ctx.err("invalid_stream_identity", "output ACK identity unavailable"),
+                            };
+                            let atomic_prefix = subscribe_at_stream_cut(
+                                &mut shared.peers,
+                                &shared.stream,
+                                SessionPeer {
+                                    client_id: client_id.clone(),
+                                    peer_token: Arc::clone(ctx.peer_token),
+                                    outbound: ctx.outbound.clone(),
+                                    output_ack,
+                                    output_tx: None, // enabled by subscribe_at_stream_cut
+                                    detached_for_not_draining: Arc::clone(
+                                        &detached_for_not_draining,
+                                    ),
+                                    issued_flow: Arc::clone(&issued_flow),
+                                    queued_bytes: Arc::clone(&queued_bytes),
                                 },
-                                detached_for_not_draining: Arc::clone(
-                                    &detached_for_not_draining,
-                                ),
-                            });
-                            client_attach_response(payload.session_name.clone(), shared, &client_id)
+                                &tx,
+                                wants_bootstrap,
+                            );
+                            (
+                                client_attach_response(payload.session_name.clone(), shared, &client_id),
+                                atomic_prefix,
+                            )
                         };
 
                         // The session's history, before the live forwarder
@@ -1647,31 +2063,40 @@ p2p_routes! { ctx, msg_type, payload_value;
                         // holds nothing). Absent means "the backend is attached,
                         // so no" — the behaviour an older client already has.
                         if wants_bootstrap {
-                            let bootstrap_tmux = ctx.tmux.tmux_dep();
-                            let capture = capture_for_bootstrap(
-                                &bootstrap_tmux,
-                                &session_name,
-                                crate::tmux::HISTORY_LIMIT_LINES,
-                            )
-                            .await;
-                            if !send_bootstrap(ctx.outbound, &bootstrap_tmux, &session_name, capture)
-                                .await
-                            {
-                                return ctx.err(
-                                    "bootstrap_stalled",
-                                    "the client stalled while its history was being sent",
-                                );
-                            }
-                            {
-                                let mut guard = sessions_lock(ctx.sessions);
-                                if let Some(shared) = guard.get_mut(&session_name) {
-                                    if let Some(peer) = shared
-                                        .peers
-                                        .iter_mut()
-                                        .find(|p| p.client_id == client_id)
-                                    {
-                                        peer.output_tx = Some(tx);
-                                    }
+                            if let Some(ref prefix) = atomic_prefix {
+                                // The queue was activated at precisely the
+                                // prefix's stream cursor; live chunks collected
+                                // while this await runs remain queued behind it.
+                                if !send_atomic_output_prefix(
+                                    ctx.outbound, &session_name, prefix,
+                                ).await {
+                                    return ctx.err(
+                                        "bootstrap_stalled",
+                                        "the client stalled while its ordered history was being sent",
+                                    );
+                                }
+                            } else {
+                                // No complete event-log prefix: external tmux
+                                // text capture is explicitly unverified, not an
+                                // atomic checkpoint. The bounded live queue was
+                                // activated BEFORE capture. Its post-registration
+                                // output drains only after the snapshot is sent,
+                                // possibly overlapping capture content (never
+                                // treat this as a parser-applied baseline).
+                                let bootstrap_tmux = ctx.tmux.tmux_dep();
+                                let capture = capture_for_bootstrap(
+                                    &bootstrap_tmux,
+                                    &session_name,
+                                    crate::tmux::HISTORY_LIMIT_LINES,
+                                ).await;
+                                if !send_bootstrap(
+                                    ctx.outbound, &bootstrap_tmux, &session_name, capture,
+                                    BootstrapCut::Unverified,
+                                ).await {
+                                    return ctx.err(
+                                        "bootstrap_stalled",
+                                        "the client stalled while its history was being sent",
+                                    );
                                 }
                             }
                         }
@@ -1681,6 +2106,8 @@ p2p_routes! { ctx, msg_type, payload_value;
                             ctx.outbound.clone(),
                             session_name.clone(),
                             detached_for_not_draining,
+                            queued_bytes,
+                            issued_flow,
                         );
 
                         return serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
@@ -1725,20 +2152,29 @@ p2p_routes! { ctx, msg_type, payload_value;
                             let client_id = connection_client_id(ctx.client_id).await;
                             let (tx, rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
                             let detached_for_not_draining = Arc::new(AtomicBool::new(false));
+                            let queued_bytes = Arc::new(AtomicUsize::new(0));
+                            let issued_flow = Arc::new(StdMutex::new(SubscriberIssuedFlow::new()));
                             let mut control = session_terminal::SessionControlState::new();
                             control.ensure_controller(&client_id);
                             let stream = session_terminal::SessionStreamState::new();
                             let input = session_terminal::SessionInputState::new();
+                            let output_ack = match new_output_ack(stream.epoch) {
+                                Ok(ack) => ack,
+                                Err(_) => return ctx.err("invalid_stream_identity", "output ACK identity unavailable"),
+                            };
                             let attached = AttachedSession {
                                 backend: Arc::new(Mutex::new(Box::new(pty_session))),
                                 peers: vec![SessionPeer {
                                     client_id: client_id.clone(),
                                     peer_token: Arc::clone(ctx.peer_token),
+                                    output_ack,
                                     outbound: ctx.outbound.clone(),
                                     output_tx: Some(tx),
                                     detached_for_not_draining: Arc::clone(
                                         &detached_for_not_draining,
                                     ),
+                                    issued_flow: Arc::clone(&issued_flow),
+                                    queued_bytes: Arc::clone(&queued_bytes),
                                 }],
                                 control,
                                 stream,
@@ -1781,7 +2217,11 @@ p2p_routes! { ctx, msg_type, payload_value;
                             } else {
                                 None
                             };
-                            if !send_bootstrap(ctx.outbound, &bootstrap_tmux, &session_name, capture)
+                            // A separate-process capture proves no stream cut.
+                            if !send_bootstrap(
+                                ctx.outbound, &bootstrap_tmux, &session_name, capture,
+                                BootstrapCut::Unverified,
+                            )
                                 .await
                             {
                                 return ctx.err(
@@ -1796,6 +2236,8 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 ctx.outbound.clone(),
                                 session_name.clone(),
                                 detached_for_not_draining,
+                                queued_bytes,
+                                issued_flow,
                             );
 
                             // Spawn ONE broadcast task for this session.
@@ -1894,19 +2336,31 @@ p2p_routes! { ctx, msg_type, payload_value;
                             let mut control = session_terminal::SessionControlState::new();
                             control.ensure_controller(&client_id);
                             let stream = session_terminal::SessionStreamState::new();
+                            // The barrier below makes the attach capture an exact
+                            // cut at this epoch's position 0 (#2124).
+                            let stream_epoch = stream.epoch;
                             let input = session_terminal::SessionInputState::new();
                             let (tx, rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
                             let detached_for_not_draining = Arc::new(AtomicBool::new(false));
+                            let queued_bytes = Arc::new(AtomicUsize::new(0));
+                            let issued_flow = Arc::new(StdMutex::new(SubscriberIssuedFlow::new()));
+                            let output_ack = match new_output_ack(stream.epoch) {
+                                Ok(ack) => ack,
+                                Err(_) => return ctx.err("invalid_stream_identity", "output ACK identity unavailable"),
+                            };
                             let attached = AttachedSession {
                                 backend: Arc::new(Mutex::new(Box::new(session))),
                                 peers: vec![SessionPeer {
                                     client_id: client_id.clone(),
                                     peer_token: Arc::clone(ctx.peer_token),
+                                    output_ack,
                                     outbound: ctx.outbound.clone(),
                                     output_tx: Some(tx),
                                     detached_for_not_draining: Arc::clone(
                                         &detached_for_not_draining,
                                     ),
+                                    issued_flow: Arc::clone(&issued_flow),
+                                    queued_bytes: Arc::clone(&queued_bytes),
                                 }],
                                 control,
                                 stream,
@@ -1931,9 +2385,13 @@ p2p_routes! { ctx, msg_type, payload_value;
                             // on the control channel: tmux's own wire order
                             // makes it the other half of the barrier (#1228) —
                             // the output stream about to be spawned starts
-                            // exactly where this snapshot ends.
+                            // exactly where this snapshot ends, so the marker
+                            // can name the stream cut at position 0 (#2124).
                             let bootstrap_tmux = ctx.tmux.tmux_dep();
-                            if !send_bootstrap(ctx.outbound, &bootstrap_tmux, &session_name, capture)
+                            if !send_bootstrap(
+                                ctx.outbound, &bootstrap_tmux, &session_name, capture,
+                                BootstrapCut::AtomicEpochStart { stream_epoch },
+                            )
                                 .await
                             {
                                 return ctx.err(
@@ -1949,6 +2407,8 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 ctx.outbound.clone(),
                                 session_name.clone(),
                                 detached_for_not_draining,
+                                queued_bytes,
+                                issued_flow,
                             );
                             let session_name_clone = session_name.clone();
                             let sessions_for_output = Arc::clone(ctx.sessions);
@@ -2193,26 +2653,36 @@ p2p_routes! { ctx, msg_type, payload_value;
                             &format!("not attached to session: {}", payload.session_name),
                         );
                     };
-                    // One call decides everything the answer says (#1304): the
-                    // replay is `None` exactly when the request is about another
-                    // stream, so `epoch_match` is derived from it rather than
-                    // asked alongside it. Two sources for the same fact is how
-                    // they come to disagree — an answer with a matching epoch
-                    // and no window, or the reverse.
-                    let replay = session
-                        .stream
-                        .replay_since(payload.stream_epoch, payload.after_seq);
-                    TerminalStreamResumeResponse {
-                        session_name: payload.session_name.clone(),
-                        stream_epoch: session.stream.epoch,
-                        epoch_match: replay.is_some(),
-                        first_available_seq: replay.as_ref().map(|r| r.first_available_seq),
-                        complete: replay.as_ref().map(|r| r.complete),
-                        events: replay.map_or_else(Vec::new, |r| r.events),
-                    }
+                    build_terminal_resume_response(&payload, &session.stream)
                 };
                 serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                     .unwrap_or_default()
+            }
+            "agent.terminal.output.applied" => "agent.terminal.output.applied" => 1 => terminal_scope(payload_value) => Key(session_named(payload_value)) => {
+                let payload: TerminalOutputAppliedPayload = match serde_json::from_value(payload_value) {
+                    Ok(p) => p,
+                    Err(e) => return ctx.err("parse_error", &e.to_string()),
+                };
+                let client_id = connection_client_id(ctx.client_id).await;
+                let verdict = {
+                    let mut guard = sessions_lock(ctx.sessions);
+                    let Some(session) = guard.get_mut(&payload.session_name) else {
+                        return ctx.err("not_attached", "session not attached");
+                    };
+                    let head = session.stream.cursor();
+                    accept_output_ack(
+                        &mut session.peers,
+                        &client_id,
+                        ctx.peer_token,
+                        &payload,
+                        head,
+                    )
+                };
+                match verdict {
+                    Ok(_) => serde_json::to_string(&make_ok(ctx.id, "output applied"))
+                        .unwrap_or_default(),
+                    Err(reason) => ctx.err("output_ack_rejected", reason),
+                }
             }
             "agent.terminal.input" => "agent.terminal.input" => 1 => terminal_scope(payload_value) => Key(session_named(payload_value)) => {
                 let payload: TerminalInputPayload = match serde_json::from_value(payload_value) {
@@ -2404,13 +2874,40 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 let recorded = sessions_lock(ctx.sessions)
                                     .get_mut(&payload.session_name)
                                     .map(|session| {
-                                        session.stream.record_resize(
+                                        let position = session.stream.record_resize(
                                             &payload.session_name,
                                             payload.cols,
                                             payload.rows,
-                                        )
+                                        );
+                                        // Record and enqueue within the SAME lock
+                                        // as record_output + fan-out. A resize
+                                        // cannot overtake output in any attached
+                                        // subscriber's FIFO (#2028).
+                                        let has_subscriber_queue = session
+                                            .peers
+                                            .iter()
+                                            .any(|peer| peer.output_tx.is_some());
+                                        let detached = fan_out_recorded_resize(
+                                            &mut session.peers,
+                                            payload.cols,
+                                            payload.rows,
+                                            position.0,
+                                            position.1,
+                                        );
+                                        if detached > 0 {
+                                            warn!(
+                                                "session {}: detached {detached} subscriber(s) on sequenced resize",
+                                                payload.session_name,
+                                            );
+                                        }
+                                        (position, has_subscriber_queue)
                                     });
-                                if let Some(position) = recorded {
+                                // Compatibility only: an old attachment with
+                                // no sequenced forwarder retains the original
+                                // single-connection delivery. Never duplicate
+                                // a resize already dispatched to subscriber
+                                // FIFOs, including the requesting controller.
+                                if let Some((position, false)) = recorded {
                                     send_recorded_resize_msg(
                                         ctx.outbound,
                                         &payload.session_name,
@@ -3041,6 +3538,33 @@ impl AgentServer {
         result
     }
 
+    /// The next frame, or `None` when this connection is over.
+    ///
+    /// Two things end a reader: the peer's stream ending (or failing), and the
+    /// outbound path being closed. The second used to be invisible here — the
+    /// reader waited on a socket that the writer, parked in a write the peer
+    /// was not reading, could not close (#2179). Racing the two is what makes
+    /// `close()` a connection verdict rather than a queue flag: returning lets
+    /// `serve` abort the writer, and aborting it cancels the parked write and
+    /// drops the socket, so the peer sees an end instead of a half-open
+    /// connection that delivers nothing and says nothing.
+    ///
+    /// Generic over the stream so the race can be tested with one that never
+    /// yields — the case a live socket cannot be made to produce on demand.
+    async fn next_frame_or_closed<S>(
+        stream: &mut S,
+        outbound: &P2pOutbound,
+    ) -> Option<Result<WsMessage, tokio_tungstenite::tungstenite::Error>>
+    where
+        S: futures_util::Stream<Item = Result<WsMessage, tokio_tungstenite::tungstenite::Error>>
+            + Unpin,
+    {
+        tokio::select! {
+            _ = outbound.wait_closed() => None,
+            frame = stream.next() => frame,
+        }
+    }
+
     /// Drain incoming WebSocket frames and dispatch them (`#961-D`).
     ///
     /// The reader's job is now **routing and nothing else**. It parses the
@@ -3080,11 +3604,18 @@ impl AgentServer {
             crate::server::execution::LANE_LABEL,
         );
 
-        while let Some(msg) = ws_stream.next().await {
-            let msg = match msg {
-                Ok(m) => m,
-                Err(e) => {
+        loop {
+            let next = Self::next_frame_or_closed(&mut ws_stream, &connection.outbound).await;
+            let msg = match next {
+                Some(Ok(m)) => m,
+                Some(Err(e)) => {
                     warn!("WebSocket read error from {}: {:#}", addr, e);
+                    break;
+                }
+                None => {
+                    if connection.outbound.is_closed() {
+                        info!("Outbound path closed for {}; ending the connection", addr);
+                    }
                     break;
                 }
             };
@@ -3294,6 +3825,723 @@ impl AgentServer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn output_ack_requires_exact_attached_socket_and_current_subscription() {
+        let old_socket = Arc::new(());
+        let new_socket = Arc::new(());
+        let (outbound, _) = P2pOutbound::new();
+        let (tx, _) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
+        let mut peers = vec![SessionPeer {
+            client_id: "observer".to_string(),
+            peer_token: Arc::clone(&new_socket),
+            output_ack: SubscriberOutputAck::new(OutputAckBinding {
+                subscriber_generation: 88,
+                stream_epoch: 9,
+            })
+            .unwrap(),
+            outbound,
+            output_tx: Some(tx),
+            issued_flow: Arc::new(StdMutex::new(SubscriberIssuedFlow::new())),
+            queued_bytes: Arc::new(AtomicUsize::new(0)),
+            detached_for_not_draining: Arc::new(AtomicBool::new(false)),
+        }];
+        let mut payload = TerminalOutputAppliedPayload {
+            session_name: "demo".into(),
+            subscriber_generation: 88,
+            stream_epoch: 9,
+            renderer_generation: 7,
+            applied_through: 2,
+        };
+        assert_eq!(
+            accept_output_ack(&mut peers, "observer", &old_socket, &payload, 3),
+            Err("not_current_subscriber"),
+        );
+        assert_eq!(
+            accept_output_ack(&mut peers, "other", &new_socket, &payload, 3),
+            Err("not_current_subscriber"),
+        );
+        assert_eq!(peers[0].output_ack.applied_through(), 0);
+        payload.subscriber_generation = 87;
+        assert_eq!(
+            accept_output_ack(&mut peers, "observer", &new_socket, &payload, 3),
+            Err("invalid_output_ack"),
+        );
+        payload.subscriber_generation = 88;
+        payload.stream_epoch = 10;
+        assert_eq!(
+            accept_output_ack(&mut peers, "observer", &new_socket, &payload, 3),
+            Err("invalid_output_ack"),
+        );
+        payload.stream_epoch = 9;
+        payload.renderer_generation = 0;
+        assert_eq!(
+            accept_output_ack(&mut peers, "observer", &new_socket, &payload, 3),
+            Err("invalid_renderer_generation"),
+        );
+        payload.renderer_generation = 7;
+        payload.applied_through = 4;
+        assert_eq!(
+            accept_output_ack(&mut peers, "observer", &new_socket, &payload, 3),
+            Err("invalid_output_ack"),
+        );
+        assert_eq!(peers[0].output_ack.applied_through(), 0);
+        payload.applied_through = 2;
+        assert_eq!(
+            accept_output_ack(&mut peers, "observer", &new_socket, &payload, 3),
+            Ok(OutputAckVerdict::Advanced {
+                previous: 0,
+                applied_through: 2
+            }),
+        );
+        assert_eq!(
+            accept_output_ack(&mut peers, "observer", &new_socket, &payload, 3),
+            Ok(OutputAckVerdict::Duplicate),
+        );
+        // A renderer remount must obtain a fresh subscriber generation;
+        // its old socket/stream alone is not authority for the new renderer.
+        payload.renderer_generation = 8;
+        payload.applied_through = 3;
+        assert_eq!(
+            accept_output_ack(&mut peers, "observer", &new_socket, &payload, 3),
+            Err("invalid_output_ack"),
+        );
+        assert_eq!(peers[0].output_ack.applied_through(), 2);
+        payload.renderer_generation = 7;
+        payload.applied_through = 1;
+        assert_eq!(
+            accept_output_ack(&mut peers, "observer", &new_socket, &payload, 3),
+            Err("invalid_output_ack"),
+        );
+        assert_eq!(peers[0].output_ack.applied_through(), 2);
+
+        // First advancing authenticated parser ACK opts into bounded credit
+        // at a conservative last-issued cut; it does NOT retro-credit bytes
+        // emitted before that ACK. The following output must actually be
+        // issued to this subscriber before another ACK can release it.
+        {
+            let mut issued = peers[0].issued_flow.lock().unwrap();
+            issued.issue(9, 1, 8).unwrap();
+            issued.issue(9, 2, 0).unwrap();
+            issued.issue(9, 3, 4).unwrap();
+        }
+        payload.applied_through = 3;
+        assert_eq!(
+            accept_output_ack(&mut peers, "observer", &new_socket, &payload, 5),
+            Ok(OutputAckVerdict::Advanced {
+                previous: 2,
+                applied_through: 3
+            })
+        );
+        {
+            let mut issued = peers[0].issued_flow.lock().unwrap();
+            assert!(issued.credit_enabled());
+            assert_eq!(issued.outstanding_bytes(), 0);
+            issued.issue(9, 4, 9).unwrap();
+            assert_eq!(issued.outstanding_bytes(), 9);
+        }
+        payload.applied_through = 5;
+        assert_eq!(
+            accept_output_ack(&mut peers, "observer", &new_socket, &payload, 5),
+            Err("invalid_issued_credit_ack")
+        );
+        assert_eq!(peers[0].output_ack.applied_through(), 3);
+        assert_eq!(peers[0].issued_flow.lock().unwrap().outstanding_bytes(), 9);
+        payload.applied_through = 4;
+        assert_eq!(
+            accept_output_ack(&mut peers, "observer", &new_socket, &payload, 5),
+            Ok(OutputAckVerdict::Advanced {
+                previous: 3,
+                applied_through: 4
+            })
+        );
+        assert_eq!(peers[0].issued_flow.lock().unwrap().outstanding_bytes(), 0);
+    }
+
+    #[test]
+    fn every_attach_mints_a_new_subscription_generation() {
+        let a = new_output_ack(10).unwrap();
+        let b = new_output_ack(10).unwrap();
+        let next_epoch = new_output_ack(11).unwrap();
+        assert_ne!(
+            a.binding().subscriber_generation,
+            b.binding().subscriber_generation
+        );
+        assert_ne!(
+            b.binding().subscriber_generation,
+            next_epoch.binding().subscriber_generation
+        );
+        assert_eq!(a.binding().stream_epoch, 10);
+        assert_eq!(b.binding().stream_epoch, 10);
+        assert_eq!(next_epoch.binding().stream_epoch, 11);
+        assert_eq!(a.applied_through(), 0);
+    }
+
+    #[test]
+    fn tmux_capture_never_claims_full_vt_and_degrades_on_mode_loss_or_truncation() {
+        assert_eq!(
+            tmux_capture_fidelity(false, true),
+            TerminalCheckpointFidelity::ScreenOnly
+        );
+        assert_eq!(
+            tmux_capture_fidelity(true, true),
+            TerminalCheckpointFidelity::Partial
+        );
+        assert_eq!(
+            tmux_capture_fidelity(false, false),
+            TerminalCheckpointFidelity::Partial
+        );
+        assert_eq!(
+            tmux_capture_fidelity(true, false),
+            TerminalCheckpointFidelity::Partial
+        );
+    }
+
+    #[test]
+    fn terminal_resume_never_returns_noncontiguous_suffix_after_retention_loss() {
+        let mut stream = session_terminal::SessionStreamState::new();
+        let epoch = stream.epoch;
+        stream.record_output("demo", "one".to_owned());
+        let request = |epoch, after_seq| TerminalStreamResumePayload {
+            session_name: "demo".to_owned(),
+            stream_epoch: epoch,
+            after_seq,
+        };
+        let complete = build_terminal_resume_response(&request(epoch, 0), &stream);
+        assert_eq!(complete.recovery, Some(TerminalResumeRecovery::Complete));
+        assert_eq!(complete.complete, Some(true));
+        assert_eq!(complete.events.len(), 1);
+        let at_head = build_terminal_resume_response(&request(epoch, 1), &stream);
+        assert_eq!(at_head.recovery, Some(TerminalResumeRecovery::Complete));
+        assert!(at_head.events.is_empty());
+
+        // A frame too large for the bounded ring is issued but not replayed.
+        // A subsequent small frame is retained; the original API returned
+        // that suffix even though the requested prefix could never arrive.
+        stream.record_output("demo", "x".repeat(700_000));
+        stream.record_output("demo", "new-tail".to_owned());
+        let incomplete = build_terminal_resume_response(&request(epoch, 1), &stream);
+        assert_eq!(
+            incomplete.recovery,
+            Some(TerminalResumeRecovery::CheckpointRequired)
+        );
+        assert_eq!(incomplete.complete, Some(false));
+        assert!(
+            incomplete.events.is_empty(),
+            "never deliver an unsafe suffix"
+        );
+        assert_eq!(incomplete.first_available_seq, Some(3));
+        assert_eq!(
+            serde_json::to_value(&incomplete).unwrap()["recovery"],
+            "checkpoint-required"
+        );
+
+        let future = build_terminal_resume_response(&request(epoch, 20), &stream);
+        assert_eq!(
+            future.recovery,
+            Some(TerminalResumeRecovery::CheckpointRequired)
+        );
+        assert_eq!(future.complete, Some(false));
+        assert!(future.events.is_empty());
+
+        let stale = build_terminal_resume_response(&request(epoch.wrapping_add(1), 0), &stream);
+        assert_eq!(stale.recovery, Some(TerminalResumeRecovery::Unavailable));
+        assert!(!stale.epoch_match);
+        assert!(stale.first_available_seq.is_none());
+        assert!(stale.complete.is_none());
+        assert!(stale.events.is_empty());
+    }
+
+    #[test]
+    fn bounded_stream_prefix_is_an_atomic_cut_not_a_full_vt_checkpoint() {
+        use base64::Engine;
+        let mut stream = session_terminal::SessionStreamState::new();
+        let encode =
+            |n| base64::engine::general_purpose::STANDARD.encode(format!("GAP-{n:03}\\r\\n"));
+        for i in 1..=18 {
+            stream.record_output("demo", encode(i));
+        }
+        let cursor_at_cut = stream.cursor();
+        let raw = atomic_output_prefix(&stream).expect("contiguous event history");
+        let expected = (1..=18)
+            .map(|i| format!("GAP-{i:03}\\r\\n"))
+            .collect::<String>();
+        assert_eq!(raw.bytes, expected.into_bytes());
+        assert_eq!(raw.stream_epoch, stream.epoch);
+        assert_eq!(raw.through_seq, cursor_at_cut);
+        let payload = atomic_prefix_payload("demo", &raw);
+        assert_eq!(
+            payload.bootstrap.as_ref().and_then(|b| b.cut_consistency),
+            Some(TerminalCheckpointCutConsistency::Atomic)
+        );
+        assert_eq!(
+            payload.bootstrap.as_ref().and_then(|b| b.fidelity),
+            Some(TerminalCheckpointFidelity::Partial),
+            "a replay from the Agent's start omits earlier tmux/VT state"
+        );
+        assert_eq!(
+            payload.bootstrap.as_ref().and_then(|b| b.stream_epoch),
+            Some(stream.epoch)
+        );
+        assert_eq!(
+            payload.bootstrap.as_ref().and_then(|b| b.through_seq),
+            Some(cursor_at_cut)
+        );
+        assert!(payload.stream_seq.is_none());
+        assert!(payload.stream_epoch.is_none());
+        assert_eq!(cursor_at_cut, 18);
+    }
+
+    #[test]
+    fn control_attach_barrier_names_an_atomic_epoch_start_cut() {
+        let payload = bootstrap_payload(
+            "demo",
+            b"history".to_vec(),
+            false,
+            TerminalCheckpointFidelity::ScreenOnly,
+            BootstrapCut::AtomicEpochStart { stream_epoch: 42 },
+        );
+        // The bootstrap is not itself a stream event: its position lives only
+        // in the marker, while the first live event after it is seq 1.
+        assert!(payload.stream_epoch.is_none());
+        assert!(payload.stream_seq.is_none());
+        let bootstrap = payload.bootstrap.expect("bootstrap marker");
+        assert_eq!(
+            bootstrap.cut_consistency,
+            Some(TerminalCheckpointCutConsistency::Atomic)
+        );
+        assert_eq!(
+            bootstrap.fidelity,
+            Some(TerminalCheckpointFidelity::ScreenOnly),
+            "a pane capture is a screen projection, never full VT"
+        );
+        assert_eq!(bootstrap.stream_epoch, Some(42));
+        assert_eq!(bootstrap.through_seq, Some(0));
+    }
+
+    #[test]
+    fn a_truncated_epoch_start_keeps_the_stream_cut_but_not_full_vt() {
+        let payload = bootstrap_payload(
+            "demo",
+            b"tail".to_vec(),
+            true,
+            TerminalCheckpointFidelity::Partial,
+            BootstrapCut::AtomicEpochStart { stream_epoch: 7 },
+        );
+        let bootstrap = payload.bootstrap.expect("bootstrap marker");
+        // Truncation describes the screen snapshot. No stream event precedes
+        // the cut either way, so the stream position is still exact at 0.
+        assert!(bootstrap.truncated);
+        assert_eq!(
+            bootstrap.cut_consistency,
+            Some(TerminalCheckpointCutConsistency::Atomic)
+        );
+        assert_eq!(
+            bootstrap.fidelity,
+            Some(TerminalCheckpointFidelity::Partial)
+        );
+        assert_eq!(bootstrap.stream_epoch, Some(7));
+        assert_eq!(bootstrap.through_seq, Some(0));
+    }
+
+    #[test]
+    fn external_capture_never_names_a_stream_cut() {
+        let payload = bootstrap_payload(
+            "demo",
+            b"history".to_vec(),
+            false,
+            TerminalCheckpointFidelity::ScreenOnly,
+            BootstrapCut::Unverified,
+        );
+        let bootstrap = payload.bootstrap.expect("bootstrap marker");
+        assert_eq!(
+            bootstrap.cut_consistency,
+            Some(TerminalCheckpointCutConsistency::Unverified)
+        );
+        assert!(bootstrap.stream_epoch.is_none());
+        assert!(bootstrap.through_seq.is_none());
+    }
+
+    #[test]
+    fn atomic_prefix_fails_closed_for_missing_oversized_and_malformed_ring() {
+        use base64::Engine;
+        let mut stream = session_terminal::SessionStreamState::new();
+        assert!(atomic_output_prefix(&stream).is_none());
+        stream.record_output("demo", "%%%".to_string());
+        assert!(
+            atomic_output_prefix(&stream).is_none(),
+            "invalid base64 must not become history"
+        );
+
+        let mut oversized = session_terminal::SessionStreamState::new();
+        oversized.record_output(
+            "demo",
+            base64::engine::general_purpose::STANDARD.encode(vec![
+                b'x';
+                crate::server::bootstrap::BOOTSTRAP_MAX_BYTES
+                    + 1
+            ]),
+        );
+        assert!(
+            atomic_output_prefix(&oversized).is_none(),
+            "never silently truncate an atomic cut"
+        );
+
+        let mut evicted = session_terminal::SessionStreamState::new();
+        evicted.record_output("demo", "x".repeat(5_000_000));
+        evicted.record_output(
+            "demo",
+            base64::engine::general_purpose::STANDARD.encode(b"new"),
+        );
+        assert!(
+            atomic_output_prefix(&evicted).is_none(),
+            "missing seq 1 cannot be proven atomic"
+        );
+    }
+
+    #[test]
+    fn atomic_prefix_and_live_subscriber_queue_have_no_gap_or_duplicate() {
+        use base64::Engine;
+        let mut stream = session_terminal::SessionStreamState::new();
+        let before = base64::engine::general_purpose::STANDARD.encode(b"GAP-001\\r\\n");
+        stream.record_output("demo", before);
+        // A resize consumes a sequence but cannot be reconstructed as a VT
+        // reset; we still recover the full ordered OUTPUT prefix, Partial.
+        stream.record_resize("demo", 120, 30);
+        let prefix = atomic_output_prefix(&stream).expect("prefix complete");
+        let cut = stream.cursor();
+        assert_eq!(prefix.bytes, b"GAP-001\\r\\n");
+        assert_eq!(prefix.through_seq, cut);
+        assert_eq!(prefix.stream_epoch, stream.epoch);
+
+        let (tx, mut rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
+        let (outbound, _) = P2pOutbound::new();
+        let mut peers = vec![SessionPeer {
+            client_id: "observer".to_owned(),
+            peer_token: Arc::new(()),
+            output_ack: test_output_ack(),
+            outbound,
+            output_tx: Some(tx),
+            issued_flow: Arc::new(StdMutex::new(SubscriberIssuedFlow::new())),
+            queued_bytes: Arc::new(AtomicUsize::new(0)),
+            detached_for_not_draining: Arc::new(AtomicBool::new(false)),
+        }];
+        let live = b"GAP-002\\r\\n".to_vec();
+        let (epoch, seq) = stream.record_output(
+            "demo",
+            base64::engine::general_purpose::STANDARD.encode(&live),
+        );
+        assert_eq!(seq, cut + 1);
+        assert_eq!(fan_out_peers(&mut peers, (live.clone(), epoch, seq)), 0);
+        let queued = rx
+            .try_recv()
+            .expect("post-cut output is held for forwarder");
+        assert_eq!(queued, SubscriberEvent::Output((live, epoch, cut + 1)));
+        assert!(rx.try_recv().is_err(), "no duplicated next event");
+    }
+
+    /// #2028: two clients share the *same* sequence for PTY bytes and
+    /// authoritative resize. No separate direct controller send may race
+    /// the FIFO, and no observer can silently skip the resize's ordinal.
+    #[test]
+    fn authoritative_resize_is_ordered_with_output_for_both_subscribers() {
+        use base64::Engine;
+        let mut stream = session_terminal::SessionStreamState::new();
+        let (controller_tx, mut controller_rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
+        let (observer_tx, mut observer_rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
+        let (controller_outbound, _) = P2pOutbound::new();
+        let (observer_outbound, _) = P2pOutbound::new();
+        let peer = |client_id: &str, outbound: P2pOutbound, tx| SessionPeer {
+            client_id: client_id.to_owned(),
+            peer_token: Arc::new(()),
+            output_ack: test_output_ack(),
+            outbound,
+            output_tx: Some(tx),
+            issued_flow: Arc::new(StdMutex::new(SubscriberIssuedFlow::new())),
+            queued_bytes: Arc::new(AtomicUsize::new(0)),
+            detached_for_not_draining: Arc::new(AtomicBool::new(false)),
+        };
+        let mut peers = vec![
+            peer("controller", controller_outbound, controller_tx),
+            peer("observer", observer_outbound, observer_tx),
+        ];
+        let first = b"BEFORE-RESIZE".to_vec();
+        let (epoch, seq1) = stream.record_output(
+            "demo",
+            base64::engine::general_purpose::STANDARD.encode(&first),
+        );
+        assert_eq!(fan_out_peers(&mut peers, (first.clone(), epoch, seq1)), 0);
+        let (resize_epoch, seq2) = stream.record_resize("demo", 132, 40);
+        assert_eq!(resize_epoch, epoch);
+        assert_eq!(seq2, seq1 + 1);
+        assert_eq!(
+            fan_out_recorded_resize(&mut peers, 132, 40, resize_epoch, seq2),
+            0
+        );
+        let last = b"AFTER-RESIZE".to_vec();
+        let (last_epoch, seq3) = stream.record_output(
+            "demo",
+            base64::engine::general_purpose::STANDARD.encode(&last),
+        );
+        assert_eq!(seq3, seq2 + 1);
+        assert_eq!(
+            fan_out_peers(&mut peers, (last.clone(), last_epoch, seq3)),
+            0
+        );
+        let expected = vec![
+            SubscriberEvent::Output((first, epoch, seq1)),
+            SubscriberEvent::Resize {
+                cols: 132,
+                rows: 40,
+                stream_epoch: epoch,
+                stream_seq: seq2,
+            },
+            SubscriberEvent::Output((last, last_epoch, seq3)),
+        ];
+        for rx in [&mut controller_rx, &mut observer_rx] {
+            assert_eq!(
+                (0..3)
+                    .map(|_| rx.try_recv().expect("event missing"))
+                    .collect::<Vec<_>>(),
+                expected,
+                "both peers must see the same full ordered stream"
+            );
+            assert!(rx.try_recv().is_err(), "no duplicate direct resize");
+        }
+    }
+
+    #[test]
+    fn resize_slot_pressure_detaches_only_slow_observer() {
+        let (slow_tx, _slow_rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
+        let (fast_tx, mut fast_rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
+        let (slow_outbound, _) = P2pOutbound::new();
+        let (fast_outbound, _) = P2pOutbound::new();
+        let slow_flag = Arc::new(AtomicBool::new(false));
+        let fast_flag = Arc::new(AtomicBool::new(false));
+        let mut peers = vec![
+            SessionPeer {
+                client_id: "slow".into(),
+                peer_token: Arc::new(()),
+                output_ack: test_output_ack(),
+                outbound: slow_outbound,
+                output_tx: Some(slow_tx),
+                issued_flow: Arc::new(StdMutex::new(SubscriberIssuedFlow::new())),
+                queued_bytes: Arc::new(AtomicUsize::new(0)),
+                detached_for_not_draining: Arc::clone(&slow_flag),
+            },
+            SessionPeer {
+                client_id: "fast".into(),
+                peer_token: Arc::new(()),
+                output_ack: test_output_ack(),
+                outbound: fast_outbound,
+                output_tx: Some(fast_tx),
+                issued_flow: Arc::new(StdMutex::new(SubscriberIssuedFlow::new())),
+                queued_bytes: Arc::new(AtomicUsize::new(0)),
+                detached_for_not_draining: Arc::clone(&fast_flag),
+            },
+        ];
+        for seq in 1..=SUBSCRIBER_QUEUE_SLOTS {
+            assert_eq!(fan_out_peers(&mut peers, (vec![b'x'], 7, seq as u64)), 0);
+            assert!(matches!(fast_rx.try_recv(), Ok(SubscriberEvent::Output(_))));
+        }
+        assert_eq!(
+            fan_out_recorded_resize(&mut peers, 90, 30, 7, SUBSCRIBER_QUEUE_SLOTS as u64 + 1),
+            1,
+        );
+        assert_eq!(peers.len(), 1);
+        assert_eq!(peers[0].client_id, "fast");
+        assert!(slow_flag.load(Ordering::Acquire));
+        assert!(!fast_flag.load(Ordering::Acquire));
+        assert_eq!(
+            fast_rx
+                .try_recv()
+                .expect("healthy subscriber must receive resize"),
+            SubscriberEvent::Resize {
+                cols: 90,
+                rows: 30,
+                stream_epoch: 7,
+                stream_seq: SUBSCRIBER_QUEUE_SLOTS as u64 + 1,
+            }
+        );
+    }
+
+    /// #2179: a burst is not a stall.
+    ///
+    /// The failing witness delivered 913 numbered lines and then queued 64
+    /// events while the relay leg was briefly behind; the 64-slot bound
+    /// detached the subscriber and the stream went silent. The same shape in
+    /// the fan-out: a 5 000-line burst of small chunks, none of it read yet,
+    /// must stay attached — it is 45 KiB against a 2 MiB budget and 5 000
+    /// against 16 384 slots. A subscriber that is merely behind the producer's
+    /// burst has not stopped reading.
+    #[test]
+    fn a_high_rate_burst_of_small_chunks_is_not_a_slow_consumer() {
+        let (tx, mut rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
+        let (outbound, _) = P2pOutbound::new();
+        let flag = Arc::new(AtomicBool::new(false));
+        let queued = Arc::new(AtomicUsize::new(0));
+        let mut peers = vec![SessionPeer {
+            client_id: "relay".into(),
+            peer_token: Arc::new(()),
+            output_ack: test_output_ack(),
+            outbound,
+            output_tx: Some(tx),
+            issued_flow: Arc::new(StdMutex::new(SubscriberIssuedFlow::new())),
+            queued_bytes: Arc::clone(&queued),
+            detached_for_not_draining: Arc::clone(&flag),
+        }];
+
+        let lines = 5_000_usize;
+        for seq in 1..=lines {
+            assert_eq!(
+                fan_out_peers(
+                    &mut peers,
+                    (
+                        b"HV-5000\n".to_vec(),
+                        3,
+                        u64::try_from(seq).expect("the line number fits in u64"),
+                    ),
+                ),
+                0,
+                "a burst evicted its subscriber at line {seq}"
+            );
+        }
+        assert_eq!(peers.len(), 1);
+        assert!(!flag.load(Ordering::Acquire));
+        assert_eq!(
+            queued.load(Ordering::Acquire),
+            lines * b"HV-5000\n".len(),
+            "every queued byte is reserved once, and the total stays under the budget"
+        );
+        for seq in 1..=lines {
+            assert!(
+                matches!(rx.try_recv(), Ok(SubscriberEvent::Output(_))),
+                "line {seq} was not queued"
+            );
+        }
+    }
+
+    /// `SUBSCRIBER_QUEUE_BYTES` is the slow-consumer verdict, and it still
+    /// fires with slots to spare: 2 MiB of 1 KiB chunks is far below 16 384
+    /// events, so a detached subscriber here was detached for memory, not for
+    /// the event count this test's buffer never approaches.
+    #[test]
+    fn a_subscriber_beyond_the_byte_budget_is_detached_even_with_slots_left() {
+        let (tx, _rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
+        let (outbound, _) = P2pOutbound::new();
+        let flag = Arc::new(AtomicBool::new(false));
+        let mut peers = vec![SessionPeer {
+            client_id: "stalled".into(),
+            peer_token: Arc::new(()),
+            output_ack: test_output_ack(),
+            outbound,
+            output_tx: Some(tx),
+            issued_flow: Arc::new(StdMutex::new(SubscriberIssuedFlow::new())),
+            queued_bytes: Arc::new(AtomicUsize::new(0)),
+            detached_for_not_draining: Arc::clone(&flag),
+        }];
+
+        let chunk = vec![b'x'; 1024];
+        for seq in 1..=(SUBSCRIBER_QUEUE_BYTES / chunk.len()) {
+            assert_eq!(
+                fan_out_peers(
+                    &mut peers,
+                    (
+                        chunk.clone(),
+                        1,
+                        u64::try_from(seq).expect("the chunk number fits in u64"),
+                    ),
+                ),
+                0,
+                "the byte budget must admit its full capacity"
+            );
+        }
+        assert_eq!(
+            fan_out_peers(&mut peers, (chunk, 1, 2_049)),
+            1,
+            "one chunk beyond the byte budget detaches the subscriber"
+        );
+        assert!(peers.is_empty());
+        assert!(flag.load(Ordering::Acquire));
+    }
+
+    /// #2024: hold the external capture open while a second client joins an
+    /// already-attached session with a *missing* event-log prefix. Previously
+    /// that subscriber's output_tx was None until capture completed, so
+    /// GAP-019 was recorded and sent to other clients but lost for this one.
+    #[tokio::test]
+    async fn concurrent_unverified_capture_buffers_producer_output_without_a_blackhole() {
+        use base64::Engine;
+        let shared = Arc::new(std::sync::Mutex::new((
+            session_terminal::SessionStreamState::new(),
+            Vec::<SessionPeer>::new(),
+        )));
+        let (tx, mut rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
+        let (outbound, _) = P2pOutbound::new();
+        let queued_bytes = Arc::new(AtomicUsize::new(0));
+        let (capture_started_tx, capture_started_rx) = tokio::sync::oneshot::channel();
+        let (release_capture_tx, release_capture_rx) = tokio::sync::oneshot::channel();
+        let attach_state = Arc::clone(&shared);
+        let peer = SessionPeer {
+            client_id: "late-observer".to_owned(),
+            peer_token: Arc::new(()),
+            output_ack: test_output_ack(),
+            outbound,
+            output_tx: None,
+            issued_flow: Arc::new(StdMutex::new(SubscriberIssuedFlow::new())),
+            queued_bytes: Arc::clone(&queued_bytes),
+            detached_for_not_draining: Arc::new(AtomicBool::new(false)),
+        };
+
+        let attach = tokio::spawn(async move {
+            let prefix = {
+                let mut state = attach_state.lock().unwrap();
+                let (stream, peers) = &mut *state;
+                // Force the incomplete-ring fallback without requiring tmux.
+                stream.record_output("demo", "invalid-base64%%%".to_owned());
+                subscribe_at_stream_cut(peers, stream, peer, &tx, true)
+            };
+            assert!(prefix.is_none(), "cannot claim an atomic tmux cut");
+            capture_started_tx.send(()).unwrap();
+            // Deterministic fault injection: async capture has yielded here.
+            release_capture_rx.await.unwrap();
+            // Production sends its explicitly unverified snapshot at this
+            // point, and only THEN spawns the live queue forwarder.
+        });
+        capture_started_rx.await.expect("subscribed before capture");
+        let live = b"GAP-019\r\n".to_vec();
+        let expected_position = {
+            let mut state = shared.lock().unwrap();
+            let (stream, peers) = &mut *state;
+            let (epoch, seq) = stream.record_output(
+                "demo",
+                base64::engine::general_purpose::STANDARD.encode(&live),
+            );
+            assert_eq!(fan_out_peers(peers, (live.clone(), epoch, seq)), 0);
+            (epoch, seq)
+        };
+        assert_eq!(queued_bytes.load(Ordering::Acquire), live.len());
+        release_capture_tx.send(()).unwrap();
+        attach.await.expect("async capture completes");
+        assert_eq!(
+            rx.try_recv()
+                .expect("post-subscription output must be retained"),
+            SubscriberEvent::Output((live, expected_position.0, expected_position.1))
+        );
+        assert!(
+            rx.try_recv().is_err(),
+            "a post-subscription event is queued once"
+        );
+    }
+
+    fn test_output_ack() -> SubscriberOutputAck {
+        SubscriberOutputAck::new(OutputAckBinding {
+            subscriber_generation: 1,
+            stream_epoch: 9,
+        })
+        .expect("test ACK binding")
+    }
+
     use crate::fs::ops::FileData;
     use crate::test_support::TestSession;
     use base64::Engine;
@@ -3620,17 +4868,142 @@ mod tests {
     /// the *verdict*, and `P2pOutbound::close` is where a verdict becomes a
     /// connection ending.
     #[tokio::test]
-    async fn a_detached_subscriber_closes_the_connection() {
-        let (outbound, _rx) = P2pOutbound::new();
-        let (tx, rx) = mpsc::channel::<OutputChunk>(SUBSCRIBER_QUEUE_SLOTS);
+    async fn byte_pressure_detaches_only_the_slow_terminal_subscriber() {
+        let (slow_tx, _slow_rx) = mpsc::channel::<SubscriberEvent>(SUBSCRIBER_QUEUE_SLOTS);
+        let (fast_tx, mut fast_rx) = mpsc::channel::<SubscriberEvent>(SUBSCRIBER_QUEUE_SLOTS);
+        let slow_bytes = Arc::new(AtomicUsize::new(0));
+        let fast_bytes = Arc::new(AtomicUsize::new(0));
+        let slow_flag = Arc::new(AtomicBool::new(false));
+        let fast_flag = Arc::new(AtomicBool::new(false));
+        let (slow_outbound, _) = P2pOutbound::new();
+        let (fast_outbound, _) = P2pOutbound::new();
+        let mut peers = vec![
+            SessionPeer {
+                client_id: "slow".to_owned(),
+                peer_token: Arc::new(()),
+                output_ack: test_output_ack(),
+                outbound: slow_outbound,
+                output_tx: Some(slow_tx),
+                issued_flow: Arc::new(StdMutex::new(SubscriberIssuedFlow::new())),
+                queued_bytes: Arc::clone(&slow_bytes),
+                detached_for_not_draining: Arc::clone(&slow_flag),
+            },
+            SessionPeer {
+                client_id: "fast".to_owned(),
+                peer_token: Arc::new(()),
+                output_ack: test_output_ack(),
+                outbound: fast_outbound,
+                output_tx: Some(fast_tx),
+                issued_flow: Arc::new(StdMutex::new(SubscriberIssuedFlow::new())),
+                queued_bytes: Arc::clone(&fast_bytes),
+                detached_for_not_draining: Arc::clone(&fast_flag),
+            },
+        ];
+        let payload_bytes = SUBSCRIBER_QUEUE_BYTES / 2 + 1;
+        assert_eq!(
+            fan_out_peers(&mut peers, (vec![b'x'; payload_bytes], 1, 1)),
+            0
+        );
+        assert_eq!(slow_bytes.load(Ordering::Acquire), payload_bytes);
+        assert_eq!(fast_bytes.load(Ordering::Acquire), payload_bytes);
+
+        // The healthy client's receiver drains; the slow client's does not.
+        let SubscriberEvent::Output((delivered, _, _)) = fast_rx.try_recv().expect("healthy frame")
+        else {
+            panic!("a live chunk must remain output");
+        };
+        release_subscriber_bytes(&fast_bytes, delivered.len());
+        assert_eq!(fast_bytes.load(Ordering::Acquire), 0);
+
+        assert_eq!(
+            fan_out_peers(&mut peers, (vec![b'y'; payload_bytes], 1, 2)),
+            1
+        );
+        assert_eq!(peers.len(), 1);
+        assert_eq!(peers[0].client_id, "fast");
+        assert!(slow_flag.load(Ordering::Acquire));
+        assert!(!fast_flag.load(Ordering::Acquire));
+        assert_eq!(fast_bytes.load(Ordering::Acquire), payload_bytes);
+        let SubscriberEvent::Output((_, epoch, seq)) =
+            fast_rx.try_recv().expect("healthy client progresses")
+        else {
+            panic!("a live chunk must remain output");
+        };
+        assert_eq!((epoch, seq), (1, 2));
+        release_subscriber_bytes(&fast_bytes, payload_bytes);
+        assert_eq!(fast_bytes.load(Ordering::Acquire), 0);
+    }
+
+    #[tokio::test]
+    async fn oversized_frame_eviction_is_bounded_even_below_slot_capacity() {
+        let (tx, mut rx) = mpsc::channel::<SubscriberEvent>(SUBSCRIBER_QUEUE_SLOTS);
+        let queued_bytes = Arc::new(AtomicUsize::new(0));
         let detached_for_not_draining = Arc::new(AtomicBool::new(false));
+        let (outbound, _) = P2pOutbound::new();
+        let mut peers = vec![SessionPeer {
+            client_id: "big".to_owned(),
+            peer_token: Arc::new(()),
+            output_ack: test_output_ack(),
+            outbound,
+            output_tx: Some(tx),
+            issued_flow: Arc::new(StdMutex::new(SubscriberIssuedFlow::new())),
+            queued_bytes: Arc::clone(&queued_bytes),
+            detached_for_not_draining: Arc::clone(&detached_for_not_draining),
+        }];
+        let oversized = vec![b'x'; SUBSCRIBER_QUEUE_BYTES + 1];
+        assert_eq!(fan_out_peers(&mut peers, (oversized, 9, 10)), 1);
+        assert!(peers.is_empty());
+        assert_eq!(queued_bytes.load(Ordering::Acquire), 0);
+        assert!(detached_for_not_draining.load(Ordering::Acquire));
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn closed_subscriber_refunds_queued_byte_reservation() {
+        let (tx, rx) = mpsc::channel::<SubscriberEvent>(SUBSCRIBER_QUEUE_SLOTS);
+        drop(rx);
+        let queued_bytes = Arc::new(AtomicUsize::new(0));
+        let detached_for_not_draining = Arc::new(AtomicBool::new(false));
+        let (outbound, _) = P2pOutbound::new();
+        let mut peers = vec![SessionPeer {
+            client_id: "closed".to_owned(),
+            peer_token: Arc::new(()),
+            output_ack: test_output_ack(),
+            outbound,
+            output_tx: Some(tx),
+            issued_flow: Arc::new(StdMutex::new(SubscriberIssuedFlow::new())),
+            queued_bytes: Arc::clone(&queued_bytes),
+            detached_for_not_draining: Arc::clone(&detached_for_not_draining),
+        }];
+        assert_eq!(fan_out_peers(&mut peers, (b"hello".to_vec(), 1, 1)), 0);
+        assert!(peers.is_empty());
+        assert_eq!(queued_bytes.load(Ordering::Acquire), 0);
+        assert!(!detached_for_not_draining.load(Ordering::Acquire));
+    }
+
+    #[tokio::test]
+    async fn a_detached_subscriber_closes_the_connection() {
+        let (outbound, mut outbound_rx) = P2pOutbound::new();
+        // The socket writer is not this test's subject, but the forwarder
+        // sends through the outbound queue to it. Drain that queue so a
+        // 16 384-event subscriber backlog is moved rather than parked in the
+        // terminal lane's stall grace — the production writer does the same.
+        // (With the old 64-slot policy the queue and the lane had the same
+        // depth, so the forwarder reached the receiver's end by coincidence.)
+        let drain = tokio::spawn(async move { while outbound_rx.recv().await.is_some() {} });
+        let (tx, rx) = mpsc::channel::<SubscriberEvent>(SUBSCRIBER_QUEUE_SLOTS);
+        let detached_for_not_draining = Arc::new(AtomicBool::new(false));
+        let queued_bytes = Arc::new(AtomicUsize::new(0));
         let (peer_outbound, _) = P2pOutbound::new();
         let mut peers = vec![SessionPeer {
             client_id: "test-client".to_string(),
             peer_token: Arc::new(()),
+            output_ack: test_output_ack(),
             outbound: peer_outbound,
             output_tx: Some(tx.clone()),
             detached_for_not_draining: Arc::clone(&detached_for_not_draining),
+            issued_flow: Arc::new(StdMutex::new(SubscriberIssuedFlow::new())),
+            queued_bytes: Arc::clone(&queued_bytes),
         }];
 
         spawn_output_forwarder(
@@ -3638,12 +5011,14 @@ mod tests {
             outbound.clone(),
             "s1".to_string(),
             detached_for_not_draining,
+            queued_bytes,
+            Arc::new(StdMutex::new(SubscriberIssuedFlow::new())),
         );
 
         // Saturate the subscriber queue, then let one more chunk evict it —
         // the production trigger, not a re-enactment of it.
         for n in 0..SUBSCRIBER_QUEUE_SLOTS {
-            tx.try_send((b"chunk".to_vec(), 1, n as u64))
+            tx.try_send(SubscriberEvent::Output((b"chunk".to_vec(), 1, n as u64)))
                 .expect("room before the bound");
         }
         assert_eq!(
@@ -3665,6 +5040,42 @@ mod tests {
             "a detached subscriber left the connection open: the client keeps a \
              terminal that has stopped moving, with nothing coming to say so"
         );
+        drain.abort();
+    }
+
+    /// #2179: the reader must not outlive a closed outbound path.
+    ///
+    /// The production failure was exactly this wait: the forwarder closed the
+    /// outbound after the peer would not drain, the writer was parked in a
+    /// socket write that peer was not reading, and the reader went on waiting
+    /// for a frame that could never arrive. A live socket cannot be made to
+    /// hang on demand, so the race is proved with a stream that never yields:
+    /// a live outbound leaves the wait pending, and a closed one resolves it
+    /// without a frame.
+    #[tokio::test]
+    async fn a_closed_outbound_ends_the_read_wait() {
+        let (outbound, _rx) = P2pOutbound::new();
+        let mut silent = futures_util::stream::pending::<
+            Result<WsMessage, tokio_tungstenite::tungstenite::Error>,
+        >();
+        assert!(
+            tokio::time::timeout(
+                Duration::from_millis(50),
+                AgentServer::next_frame_or_closed(&mut silent, &outbound),
+            )
+            .await
+            .is_err(),
+            "a live outbound must not end a reader waiting for a frame"
+        );
+
+        outbound.close();
+        let ended = tokio::time::timeout(
+            Duration::from_secs(1),
+            AgentServer::next_frame_or_closed(&mut silent, &outbound),
+        )
+        .await
+        .expect("a closed outbound must end the read wait");
+        assert!(ended.is_none(), "there is no frame to return");
     }
 
     /// The #1226 half: the receiver also ends when a newer attach of the same
@@ -3678,13 +5089,15 @@ mod tests {
     #[tokio::test]
     async fn a_superseded_forwarder_leaves_the_connection_open() {
         let (outbound, _rx) = P2pOutbound::new();
-        let (tx, rx) = mpsc::channel::<OutputChunk>(SUBSCRIBER_QUEUE_SLOTS);
+        let (tx, rx) = mpsc::channel::<SubscriberEvent>(SUBSCRIBER_QUEUE_SLOTS);
 
         spawn_output_forwarder(
             rx,
             outbound.clone(),
             "s1".to_string(),
             Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicUsize::new(0)),
+            Arc::new(StdMutex::new(SubscriberIssuedFlow::new())),
         );
 
         // `already_attached` drops the old peer's sender without setting the
@@ -3728,15 +5141,17 @@ mod tests {
             "the whole byte budget is one frame's worth"
         );
 
-        let (tx, rx) = mpsc::channel::<OutputChunk>(SUBSCRIBER_QUEUE_SLOTS);
+        let (tx, rx) = mpsc::channel::<SubscriberEvent>(SUBSCRIBER_QUEUE_SLOTS);
         spawn_output_forwarder(
             rx,
             outbound.clone(),
             "s1".to_string(),
             Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicUsize::new(0)),
+            Arc::new(StdMutex::new(SubscriberIssuedFlow::new())),
         );
 
-        tx.send((b"chunk".to_vec(), 1, 1))
+        tx.send(SubscriberEvent::Output((b"chunk".to_vec(), 1, 1)))
             .await
             .expect("the chunk is sent");
         let closed = tokio::time::timeout(Duration::from_secs(5), async {
@@ -5194,6 +6609,7 @@ mod tests {
         msg_types::TERMINAL_RESIZE,
         msg_types::TERMINAL_CONTROL_ACQUIRE,
         msg_types::TERMINAL_STREAM_RESUME,
+        msg_types::TERMINAL_OUTPUT_APPLIED,
         msg_types::CLIENT_AUTH,
         msg_types::CLIENT_SESSIONS_LIST,
         msg_types::CLIENT_SESSION_ATTACH,

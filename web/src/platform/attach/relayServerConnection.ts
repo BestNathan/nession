@@ -1,8 +1,8 @@
 import type { WebSocketService } from '@/platform/socket';
-import type { ConnectionState } from '@/platform/socket/types';
+import type { ConnectionState, SentSocketMessage } from '@/platform/socket/types';
 // Type only. The capability singleton is passed in by the caller, which lives
 // above this layer — `platform` may not import a `product` module (#783).
-import type { TerminalServerApi } from '@/product/terminal';
+import type { TerminalServerApi, RelaySubscriptionProof, TerminalOutputAppliedAck } from '@/product/terminal';
 
 /**
  * Everything optional about a relay begin. An object rather than a positional
@@ -46,6 +46,12 @@ export interface RelayServerHandle {
    * (terminal state machine) gates on {@link isReady}.
    */
   beginRelay(sessionId: string, opts?: RelayBeginOptions): void;
+  /** Optional for legacy handles. Returns the actual sent wire id or null (no fabricated id). */
+  beginRelayTracked?(sessionId: string, opts?: RelayBeginOptions): SentSocketMessage | null;
+  /** Informational Agent-origin proof, never parser ACK/issued-byte authority. */
+  onRelayReady?(sessionName: string, cb: (proof: RelaySubscriptionProof, physicalGeneration: number) => void): () => void;
+  /** Optional on legacy handle; Agent ACK credit is strictly guarded by SessionRuntime. */
+  sendRelayOutputApplied?(sessionName: string, ack: TerminalOutputAppliedAck): boolean;
   /** Ask the server to stop relaying terminal traffic for a session. */
   endRelay(sessionId: string): void;
 }
@@ -66,6 +72,7 @@ export type RelayServerTransport = RelayServerHandle &
     | 'onRelayOutput'
     | 'onRelayResize'
     | 'onRelayInputAck'
+    | 'resumeRelayStream'
   >;
 
 /**
@@ -94,9 +101,26 @@ export function relayServerHandle(
       if (stale()) { return; }
       terminalServerApi.beginRelay(sessionId, opts);
     },
+    beginRelayTracked: (sessionId, opts) => {
+      if (stale()) { return null; }
+      return terminalServerApi.beginRelayTracked(sessionId, opts);
+    },
+    onRelayReady: (sessionName, cb) => {
+      if (stale()) { return () => {}; }
+      return terminalServerApi.onRelayReady(sessionName, (proof, physicalGeneration) => {
+        if (!stale() && service.connectionState === 'connected'
+          && service.physicalGeneration === physicalGeneration) {
+          cb(proof, physicalGeneration);
+        }
+      });
+    },
     endRelay: (sessionId) => {
       if (stale()) { return; }
       terminalServerApi.endRelay(sessionId);
+    },
+    sendRelayOutputApplied: (sessionName, ack) => {
+      if (stale() || service.connectionState !== 'connected') { return false; }
+      return terminalServerApi.sendRelayOutputApplied(sessionName, ack);
     },
     sendRelayInput: (sessionName, data, opts) => {
       if (stale()) { return; }
@@ -117,6 +141,12 @@ export function relayServerHandle(
     onRelayInputAck: (sessionName, cb) => {
       if (stale()) { return () => {}; }
       return terminalServerApi.onRelayInputAck(sessionName, cb);
+    },
+    resumeRelayStream: (sessionName, epoch, afterSeq) => {
+      if (stale() || service.connectionState !== 'connected') {
+        return Promise.reject(new Error('Relay transport is not attached'));
+      }
+      return terminalServerApi.resumeRelayStream(sessionName, epoch, afterSeq);
     },
   };
 }

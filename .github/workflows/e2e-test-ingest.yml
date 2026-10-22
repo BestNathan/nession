@@ -44,16 +44,38 @@ jobs:
           mkdir -p scratch
           node trusted/scripts/e2e-test-run-ingest.mjs create \
             "$GITHUB_EVENT_PATH" scratch/test-record.json scratch/test-index.json scratch/paths.json
+      - name: Mint scoped App token for orphan Run Store updates
+        if: (vars.RUN_STORE_WRITER_MODE == '' || vars.RUN_STORE_WRITER_MODE == 'app')
+        id: store_app
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.RUN_STORE_WRITER_APP_ID }}
+          private-key: ${{ secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY }}
+          repositories: nession
+          permission-contents: write
+      - name: Reject unrecognized writer mode or unavailable App token
+        env:
+          WRITER_MODE: ${{ vars.RUN_STORE_WRITER_MODE }}
+          APP_TOKEN: ${{ steps.store_app.outputs.token }}
+        run: |
+          set -euo pipefail
+          case "$WRITER_MODE" in
+            legacy) ;;
+            ''|app) [[ -n "$APP_TOKEN" ]] || { echo "::error::No App token; refuse legacy fallback" >&2; exit 1; } ;;
+            *) echo "::error::Unsupported RUN_STORE_WRITER_MODE" >&2; exit 1 ;;
+          esac
+
       - name: Append Test Run Record and SHA index only to orphan branch
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STORE_PUSH_TOKEN: ${{ vars.RUN_STORE_WRITER_MODE == 'legacy' && secrets.GITHUB_TOKEN || steps.store_app.outputs.token }}
         run: |
           set -euo pipefail
           mkdir results-repo
           git -C results-repo init
           git -C results-repo config user.name "github-actions[bot]"
           git -C results-repo config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git -C results-repo remote add origin "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git"
+          git -C results-repo remote add origin "https://x-access-token:$STORE_PUSH_TOKEN@github.com/$GITHUB_REPOSITORY.git"
           git -C results-repo fetch --depth=1 origin acceptance-results
           git -C results-repo checkout -B acceptance-results FETCH_HEAD
           record="$(jq -r .record scratch/paths.json)"
@@ -77,11 +99,32 @@ jobs:
           git -C results-repo add runs indexes
           if ! git -C results-repo diff --cached --quiet; then
             git -C results-repo commit -m "e2e: ingest trusted Test run ${{ github.event.workflow_run.id }} attempt ${{ github.event.workflow_run.run_attempt }}"
-            git -C results-repo push origin acceptance-results
+            node trusted/scripts/run-store-cas-push.mjs acceptance-results "${GITHUB_WORKSPACE}/results-repo"
           else
             echo "Identical immutable retry; no branch change" >> "$GITHUB_STEP_SUMMARY"
           fi
           echo "Test metadata ingested to acceptance-results with exact SHA and finite report-artifact digest" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify immutable Git bytes before uploading Run Store receipts
+        if: success()
+        run: |
+          set -euo pipefail
+          count=0
+          for file in "${RUNNER_TEMP}"/run-store-receipts/*.json; do
+            [[ -f "$file" ]] || continue
+            node "${GITHUB_WORKSPACE}/trusted/scripts/run-store-receipt-verify.mjs" "$file" "${GITHUB_WORKSPACE}/results-repo" acceptance-results
+            count=$((count + 1))
+          done
+          echo "Read-only exact Git-byte receipts verified: ${count}; no independent signing/anchor claimed" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Preserve Run Store post-commit receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-store-receipt-${{ github.run_id }}-${{ github.run_attempt }}-test
+          path: ${{ runner.temp }}/run-store-receipts
+          if-no-files-found: ignore
+          retention-days: 14
 
   ingest-pr:
     if: >-
@@ -119,6 +162,9 @@ jobs:
           else
             echo 'available=false' >> "$GITHUB_OUTPUT"
           fi
+      - name: Verify exact-Attempt Issue E2E artifact selector
+        if: steps.capability.outputs.available == 'true'
+        run: node trusted/scripts/issue-e2e-attempt-artifact.mjs self-test
       - name: Fetch authenticated run and Playwright evidence
         if: steps.capability.outputs.available == 'true'
         env:
@@ -131,10 +177,31 @@ jobs:
           pr="$(jq -r '.pull_requests[0].number // empty' scratch/metadata/run.json)"
           [[ "$pr" =~ ^[1-9][0-9]*$ ]] || { echo 'No verified source PR'; exit 1; }
           gh api "repos/$GITHUB_REPOSITORY/pulls/$pr" > scratch/metadata/pr.json
+          # GitHub artifacts belong to a Run, not an Attempt. A rerun may
+          # leave TWO same-name verification ZIPs; the trusted selector ties
+          # the one consumed to this exact successful/failed source E2E job,
+          # attempt, SHA, producer interval and GitHub artifact SHA256.
+          attempt="$(jq -r .run_attempt scratch/metadata/run.json)"
+          [[ "$attempt" =~ ^[1-9][0-9]*$ ]] || exit 1
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/attempts/$attempt/jobs?per_page=100" > scratch/metadata/jobs.json
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts?per_page=100" > scratch/metadata/artifacts.json
-          jq -e '[.artifacts[] | select(.name=="issue-e2e-verification" and .expired==false)] | length==1' scratch/metadata/artifacts.json
-          jq '.artifacts[] | select(.name=="issue-e2e-verification")' scratch/metadata/artifacts.json > scratch/metadata/artifact.json
-          gh run download "$run_id" --repo "$GITHUB_REPOSITORY" --name issue-e2e-verification --dir scratch/artifact
+          node trusted/scripts/issue-e2e-attempt-artifact.mjs select \
+            scratch/metadata/run.json scratch/metadata/jobs.json \
+            scratch/metadata/artifacts.json scratch/metadata/artifact.json
+          artifact_id="$(jq -r .id scratch/metadata/artifact.json)"
+          [[ "$artifact_id" =~ ^[1-9][0-9]*$ ]] || exit 1
+          # gh run download has no artifact-ID selection flag. Download the
+          # *exact* authenticated GitHub REST artifact ID, follow its signed
+          # redirect, and check the immutable ZIP digest before extraction.
+          curl --fail --silent --show-error --location \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" \
+            --output scratch/issue-e2e.zip
+          artifact_sha256="$(jq -r '.digest | sub("^sha256:";"")' scratch/metadata/artifact.json)"
+          [[ "$artifact_sha256" =~ ^[0-9a-f]{64}$ ]] || exit 1
+          echo "$artifact_sha256  scratch/issue-e2e.zip" | sha256sum --check --status
+          unzip -q scratch/issue-e2e.zip -d scratch/artifact
           [[ -s scratch/artifact/plan.json && -s scratch/artifact/results.json ]] || exit 1
           echo "$pr" > scratch/metadata/pr-number
       - name: Independently validate and project per-ID results
@@ -156,10 +223,33 @@ jobs:
             scratch/metadata/artifact.json scratch/metadata/issues.json \
             source scratch/output scratch/artifact/playwright.json \
             scratch/artifact/assertions.json
+      - name: Mint scoped App token for orphan Run Store updates
+        if: (vars.RUN_STORE_WRITER_MODE == '' || vars.RUN_STORE_WRITER_MODE == 'app') && steps.capability.outputs.available == 'true'
+        id: store_app
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.RUN_STORE_WRITER_APP_ID }}
+          private-key: ${{ secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY }}
+          repositories: nession
+          permission-contents: write
+      - name: Reject unrecognized writer mode or unavailable App token
+        if: steps.capability.outputs.available == 'true'
+        env:
+          WRITER_MODE: ${{ vars.RUN_STORE_WRITER_MODE }}
+          APP_TOKEN: ${{ steps.store_app.outputs.token }}
+        run: |
+          set -euo pipefail
+          case "$WRITER_MODE" in
+            legacy) ;;
+            ''|app) [[ -n "$APP_TOKEN" ]] || { echo "::error::No App token; refuse legacy fallback" >&2; exit 1; } ;;
+            *) echo "::error::Unsupported RUN_STORE_WRITER_MODE" >&2; exit 1 ;;
+          esac
+
       - name: Store immutable results and update Issue reports
         if: steps.capability.outputs.available == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STORE_PUSH_TOKEN: ${{ vars.RUN_STORE_WRITER_MODE == 'legacy' && secrets.GITHUB_TOKEN || steps.store_app.outputs.token }}
         run: |
           set -euo pipefail
           [[ -s scratch/output/record.json ]] || exit 0
@@ -173,7 +263,7 @@ jobs:
           git -C results-repo init
           git -C results-repo config user.name "github-actions[bot]"
           git -C results-repo config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git -C results-repo remote add origin "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git"
+          git -C results-repo remote add origin "https://x-access-token:$STORE_PUSH_TOKEN@github.com/$GITHUB_REPOSITORY.git"
           git -C results-repo fetch --depth=1 origin acceptance-results
           git -C results-repo checkout -B acceptance-results FETCH_HEAD
           mkdir -p "results-repo/$(dirname "$dest")"
@@ -185,7 +275,7 @@ jobs:
           git -C results-repo add runs
           if ! git -C results-repo diff --cached --quiet; then
             git -C results-repo commit -m "e2e: trusted Issue test $run_id attempt $attempt"
-            git -C results-repo push origin acceptance-results
+            node trusted/scripts/run-store-cas-push.mjs acceptance-results "${GITHUB_WORKSPACE}/results-repo"
           fi
           live_pr="$(jq -r .number scratch/metadata/pr.json)"
           current_head="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$live_pr" --jq .head.sha)"
@@ -255,7 +345,7 @@ jobs:
             git -C results-repo add "$receipt_path"
             if ! git -C results-repo diff --cached --quiet; then
               git -C results-repo commit -m "e2e: $mode Issue #$number projection $run_id/$attempt"
-              git -C results-repo push origin acceptance-results
+              node trusted/scripts/run-store-cas-push.mjs acceptance-results "${GITHUB_WORKSPACE}/results-repo"
             fi
           done
           if ! jq -e '.status == "Pass"' scratch/artifact/results.json > /dev/null; then
@@ -273,3 +363,23 @@ jobs:
           gh api --method POST "repos/$GITHUB_REPOSITORY/dispatches" \
             --input scratch/metadata/dispatch.json
           echo 'Requested event-driven Acceptance reconciliation after verified Issue E2E projection' >> "$GITHUB_STEP_SUMMARY"
+      - name: Verify immutable Git bytes before uploading Run Store receipts
+        if: success()
+        run: |
+          set -euo pipefail
+          count=0
+          for file in "${RUNNER_TEMP}"/run-store-receipts/*.json; do
+            [[ -f "$file" ]] || continue
+            node "${GITHUB_WORKSPACE}/trusted/scripts/run-store-receipt-verify.mjs" "$file" "${GITHUB_WORKSPACE}/results-repo" acceptance-results
+            count=$((count + 1))
+          done
+          echo "Read-only exact Git-byte receipts verified: ${count}; no independent signing/anchor claimed" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Preserve Run Store post-commit receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-store-receipt-${{ github.run_id }}-${{ github.run_attempt }}-pr
+          path: ${{ runner.temp }}/run-store-receipts
+          if-no-files-found: ignore
+          retention-days: 14

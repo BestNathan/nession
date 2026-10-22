@@ -1,0 +1,10 @@
+schema_version: 1
+issue: 1940
+criterion: SC-04
+stage: post-merge
+runtime: full-stack-local
+isolation: shared
+verifiers:
+  - type: runtime
+    entry: verify.cjs
+result_policy: all-pass

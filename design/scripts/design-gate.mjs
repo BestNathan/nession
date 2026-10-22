@@ -1,11 +1,19 @@
-import { readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 // One definition of "this token value is px-measurable" for the whole design
 // pipeline. A second parser here would drift from the resolver's, and the two
 // would disagree about exactly the values this check exists to catch.
 import { parseCssPx } from './resolve-contracts.mjs';
+// #1876 Phase A: the mandatory browser subset has a single owner. Both the
+// standalone profile and the coalesced Full E2E verdict read it from here.
+import { browserDesignSpecPaths } from './browser-design-catalog.mjs';
+import {
+  emitReceipt,
+  verifyReportFiles,
+} from './verify-browser-design-report.mjs';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(SCRIPT_DIR, '..', '..');
@@ -79,28 +87,17 @@ const FULL_COMMANDS = [
   },
 ];
 
+// One Playwright process, one runtime. Splitting this into two invocations used
+// to provision the full stack twice for the same four specs; the coalesced Full
+// E2E path (#1876 Phase A) needs exactly the same selection, so the list lives
+// in the catalog owner and the process is shared.
 const BROWSER_COMMANDS = [
   {
-    id: 'browser-ui-contracts',
-    command: 'cd e2e && npx playwright test tests/browser/ui-contract-assertions.spec.ts tests/browser/ui-contract-matrix.spec.ts tests/browser/ui-contract-web.spec.ts',
-    owner: 'design/contracts/* + e2e/helpers/ui-assert/',
-    expected: 'canonical browser surfaces satisfy resolved UI contracts across the viewport matrix',
+    id: 'browser-design',
+    command: () => 'cd e2e && npx playwright test ' + browserDesignSpecPaths().join(' '),
+    owner: 'design/contracts/* + e2e/helpers/ui-assert/ + web/src/platform/editor/model/editorTheme.ts',
+    expected: 'canonical browser surfaces satisfy resolved UI contracts and CodeMirror renders with workspace editor metrics',
     repair: 'fix the drifting implementation or the canonical contract owner; do not update baselines to hide a structured failure',
-  },
-  {
-    // The full profile's `codemirror-renderer-boundary` proves the token reached
-    // CodeMirror's injected stylesheet. That is not the same claim as the token
-    // reaching the *rendered result*: a stylesheet can name a custom property
-    // that resolves to nothing, or match no element, or lose to a later rule,
-    // and the injected CSS still reads as correct. #757 was exactly that — the
-    // source looked right and the cascade decided otherwise. This entry
-    // measures computed styles on the running editor, which is the claim SC9
-    // actually makes.
-    id: 'codemirror-rendered-metrics',
-    command: 'cd e2e && npx playwright test tests/browser/design-renderer-boundary.spec.ts',
-    owner: 'web/src/platform/editor/model/editorTheme.ts',
-    expected: "CodeMirror's rendered metrics match the workspace editor tokens rather than its own defaults",
-    repair: "the token did not reach the rendered result — move the decision into EditorView.theme; a utility class loses to CodeMirror's injected theme",
   },
 ];
 
@@ -377,12 +374,14 @@ function checkCapsuleSemanticBridge(root) {
   return violations;
 }
 
-function runCommand(spec) {
-  process.stdout.write(`\n→ [design:${spec.id}] ${spec.command}\n`);
-  const result = spawnSync('bash', ['-lc', spec.command], {
+function runCommand(spec, env = {}) {
+  const command = typeof spec.command === 'function' ? spec.command() : spec.command;
+  process.stdout.write(`\n→ [design:${spec.id}] ${command}\n`);
+  const result = spawnSync('bash', ['-lc', command], {
     cwd: ROOT,
     encoding: 'utf8',
     stdio: 'inherit',
+    env: { ...process.env, ...env },
   });
   if (result.status === 0) {
     process.stdout.write(`✓ [design:${spec.id}]\n`);
@@ -395,6 +394,104 @@ function runCommand(spec) {
     owner: spec.owner,
     repair: spec.repair,
   }];
+}
+
+function browserVerdictViolation(error) {
+  return {
+    rule: 'browser-design-verdict',
+    actual: error.message,
+    expected: 'the canonical browser subset executed and passed with authenticated assertions at this exact SHA',
+    owner: 'design/scripts/browser-design-catalog.mjs + e2e/runner runtime',
+    repair: 'run the canonical browser profile; a missing, skipped, flaky, zero-assertion or foreign-SHA report is not a Pass',
+  };
+}
+
+function verifyBrowserReport({ reportFile, assertionsFile, sha }) {
+  try {
+    return {
+      result: verifyReportFiles({
+        reportFile,
+        assertionsFile,
+        sha,
+        root: ROOT,
+      }),
+    };
+  } catch (error) {
+    return { violation: browserVerdictViolation(error) };
+  }
+}
+
+function writeBrowserReceipt(result, filename = process.env.DESIGN_BROWSER_RECEIPT_FILE) {
+  const line = emitReceipt(result);
+  process.stdout.write(line);
+  if (!filename) return;
+  if (!filename.startsWith('/')) {
+    throw new Error('DESIGN_BROWSER_RECEIPT_FILE must be absolute');
+  }
+  writeFileSync(filename, line);
+}
+
+function runBrowserProfile() {
+  const dir = mkdtempSync(join(tmpdir(), 'nession-design-browser-'));
+  // A caller may ask for the raw evidence (the workflow proves fail-closed
+  // behavior against the SAME report the standalone verdict used). Explicit
+  // *_OUT paths are caller-owned and survive this run; temp paths do not.
+  const reportOut = process.env.DESIGN_BROWSER_REPORT_OUT;
+  const assertionsOut = process.env.DESIGN_BROWSER_ASSERTIONS_OUT;
+  const reportFile = reportOut || join(dir, 'playwright.json');
+  const assertionsFile = assertionsOut || join(dir, 'assertions.json');
+  const reporter = join(ROOT, 'scripts', 'issue-e2e-assertion-reporter.cjs');
+  try {
+    const [spec] = BROWSER_COMMANDS;
+    const command = typeof spec.command === 'function' ? spec.command() : spec.command;
+    const violations = runCommand({
+      ...spec,
+      // The built-in JSON report alone cannot prove attempts executed
+      // assertions; the trusted reporter counts expect() steps per result.
+      command: `${command} --reporter=json,${reporter},html`,
+    }, {
+      PLAYWRIGHT_JSON_OUTPUT_FILE: reportFile,
+      NESSION_E2E_ASSERTIONS_OUTPUT_FILE: assertionsFile,
+    });
+    if (violations.length > 0) return violations;
+    const sha = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' })
+      .stdout.trim();
+    const { result, violation } = verifyBrowserReport({ reportFile, assertionsFile, sha });
+    if (violation) return [violation];
+    writeBrowserReceipt(result);
+    return [];
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+function argValue(argv, name) {
+  const index = argv.indexOf(name);
+  return index < 0 ? '' : argv[index + 1] ?? '';
+}
+
+function verifyReportMode(argv) {
+  const reportFile = argValue(argv, '--verify-report');
+  const assertionsFile = argValue(argv, '--assertions');
+  const sha = argValue(argv, '--sha');
+  const receipt = argValue(argv, '--receipt');
+  if (!assertionsFile) {
+    process.stderr.write('DESIGN_SYSTEM_VIOLATION\nrule: browser-design-verdict\n' +
+      'actual: --assertions is required with --verify-report\n\n');
+    return 1;
+  }
+  if (!/^[0-9a-f]{40}$/.test(sha)) {
+    process.stderr.write('DESIGN_SYSTEM_VIOLATION\nrule: browser-design-verdict\n' +
+      'actual: --sha must be the exact 40-character target SHA\n\n');
+    return 1;
+  }
+  const { result, violation } = verifyBrowserReport({ reportFile, assertionsFile, sha });
+  if (violation) {
+    process.stderr.write('\n' + formatViolation(violation) + '\n\n');
+    return 1;
+  }
+  writeBrowserReceipt(result, receipt);
+  return 0;
 }
 
 function profileCommands(profile) {
@@ -410,8 +507,14 @@ export function parseProfile(argv) {
 }
 
 function main() {
-  const profile = parseProfile(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  const profile = parseProfile(argv);
   const violations = [];
+
+  if (profile === 'browser' && argv.includes('--verify-report')) {
+    process.exitCode = verifyReportMode(argv);
+    return;
+  }
 
   if (profile !== 'browser') {
     violations.push(...scanUiPrimitives(ROOT));
@@ -419,9 +522,13 @@ function main() {
   }
 
   if (violations.length === 0) {
-    for (const spec of profileCommands(profile)) {
-      violations.push(...runCommand(spec));
-      if (violations.length > 0) break;
+    if (profile === 'browser') {
+      violations.push(...runBrowserProfile());
+    } else {
+      for (const spec of profileCommands(profile)) {
+        violations.push(...runCommand(spec));
+        if (violations.length > 0) break;
+      }
     }
   }
 

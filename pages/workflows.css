@@ -1,0 +1,57 @@
+/* Standalone Pages-only visual workflow explorer. No product web dependency. */
+.workflow-hero{padding:72px 0 46px}
+.workflow-hero h1{font-size:clamp(64px,7vw,98px)}
+.workflow-hero .lede{max-width:880px}
+.workflow-overview{padding:24px 0 22px;display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}
+.workflow-summary{font:600 16px "DM Sans",system-ui,sans-serif;color:var(--ink)}
+.workflow-source{font:11px/1.6 "DM Mono",monospace;color:var(--muted);margin:0}
+.workflow-toolbar{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:30px}
+.workflow-toolbar label{display:flex;flex-direction:column;gap:8px;color:var(--muted);font-size:12px;font-weight:700;min-width:220px}
+.workflow-search-label{flex:2}.workflow-filter-label{flex:1}
+.workflow-toolbar input,.workflow-toolbar select{background:var(--surface);border:1px solid #cbdccf;border-radius:12px;padding:13px 16px;font:inherit;color:var(--ink);width:100%;min-height:48px}
+.workflow-toolbar input:focus-visible,.workflow-toolbar select:focus-visible{outline:2px solid #438870;outline-offset:2px}
+.workflow-view{border:1px solid var(--line);border-radius:22px;background:var(--surface);padding:28px 26px 26px;margin-bottom:24px;min-width:0}
+.workflow-section-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;flex-wrap:wrap}
+.workflow-section-heading h2{font:400 40px/1.15 "Instrument Serif",Georgia,serif;color:var(--ink);margin:5px 0 0}
+.workflow-legend{display:flex;gap:17px;flex-wrap:wrap;color:#5f766b;font:11px "DM Mono",monospace}
+.workflow-legend span{display:flex;gap:8px;align-items:center}
+.legend-line{display:inline-block;width:28px;height:0;border-top:2px solid #438870}
+.legend-line.legend-call{border-top:2px dashed #b87d55}
+.workflow-explainer{font-size:12px;line-height:1.8;color:#708178;max-width:950px;margin:18px 0 26px}
+.workflow-graph-scroll{overflow-x:auto;overflow-y:hidden;max-width:100%;padding:3px;border:1px solid #e1e9e0;border-radius:16px;background:#f9fbf7;scrollbar-color:#8db5a1 transparent}
+.workflow-graph{position:relative;isolation:isolate}
+.workflow-lane{position:absolute;top:0;height:72px;border-bottom:1px solid #c7d9ca;padding:16px 0 0;color:#315b48;font:600 13px "DM Sans",system-ui,sans-serif;pointer-events:none}
+.workflow-lane small{display:block;max-width:245px;color:#809487;font:11px/1.5 "DM Sans",system-ui,sans-serif;margin-top:6px;font-weight:400}
+.workflow-lane-empty{opacity:.5}
+.workflow-lines{position:absolute;inset:0;pointer-events:none;z-index:0}
+.workflow-edge{fill:none;stroke:#438870;stroke-width:1.65;opacity:.5;transition:opacity .2s}
+.workflow-edge.workflow_call{stroke:#b87d55;stroke-dasharray:5 4}
+.workflow-edge.active{stroke-width:2.9;opacity:1}
+.workflow-node{position:absolute;z-index:1;text-align:left;display:flex;flex-direction:column;justify-content:center;gap:8px;height:70px;padding:12px 15px;background:white;border:1px solid #cdded1;border-radius:13px;box-shadow:0 8px 26px #1c3b2710;color:var(--ink);cursor:pointer;transition:border-color .15s,box-shadow .15s,background .15s}
+.workflow-node:hover,.workflow-node.related{border-color:#7aae90;box-shadow:0 8px 20px #1c3b271e}
+.workflow-node.selected{background:#e5f3e9;border-color:#2d8263;box-shadow:0 0 0 2px #2d82631c}
+.workflow-node-title{font-weight:700;font-size:12px;line-height:1.4}
+.workflow-node-meta{font:10px/1.4 "DM Mono",monospace;color:#668171;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.workflow-no-match{margin:26px;color:#718678;font-size:14px}
+.workflow-bottom{display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,420px);gap:26px;margin-top:28px;align-items:start}
+.workflow-roster{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;max-height:520px;overflow:auto;align-content:start}
+.workflow-roster-row{min-width:0;display:flex;align-items:flex-start;justify-content:space-between;flex-direction:column;gap:5px;background:#f6f9f5;border:1px solid #e0e9de;border-radius:10px;padding:11px 12px;text-align:left;cursor:pointer}
+.workflow-roster-row:hover,.workflow-roster-row[aria-pressed=true]{background:#e4f2e7;border-color:#91bba1}
+.workflow-roster-name{font-size:12px;font-weight:700;color:#245341}
+.workflow-roster-group{font:10px "DM Mono",monospace;color:#7b9183}
+.workflow-detail{border:1px solid #d1dfd2;border-radius:17px;padding:22px;background:#eef6ee;min-height:290px;position:sticky;top:16px;overflow-wrap:anywhere}
+.workflow-detail h3{font:400 28px/1.2 "Instrument Serif",Georgia,serif;color:var(--ink);margin:12px 0}
+.workflow-detail p{font:12px/1.65 "DM Sans",system-ui,sans-serif;color:#668375}
+.workflow-detail-block{margin:20px 0;border-top:1px solid #d2e2d5;padding-top:13px}
+.workflow-detail-block h4{font-size:12px;color:#315843;margin:0 0 10px}
+.workflow-chips{display:flex;flex-wrap:wrap;gap:6px}
+.workflow-chip{font:10px/1.5 "DM Mono",monospace;border-radius:100px;padding:5px 9px;background:white;border:1px solid #d4e6d7;color:#406d55}
+.workflow-dependency{font-size:12px;background:transparent;border:0;display:block;text-align:left;color:#246e50;padding:6px 2px;cursor:pointer;line-height:1.55}
+.workflow-dependency:hover{text-decoration:underline}
+.workflow-link{display:block;font-size:12px;font-weight:700;margin:12px 0;color:#21694e;overflow-wrap:anywhere}
+.workflow-link:hover{text-decoration:underline}
+.workflow-detail .workflow-note{font:11px/1.6 "DM Mono",monospace;color:#849488}
+.workflow-disclaimer{font:12px/1.8 "DM Sans",system-ui,sans-serif;color:var(--muted);max-width:1080px;margin:0 0 45px}
+@media(max-width:920px){.workflow-bottom{grid-template-columns:1fr}.workflow-detail{position:static}.workflow-roster{max-height:none}}
+@media(max-width:640px){.workflow-hero{padding:46px 0 34px}.workflow-hero h1{font-size:58px}.workflow-view{padding:20px 14px}.workflow-roster{grid-template-columns:1fr}.workflow-toolbar label{min-width:100%}.workflow-section-heading h2{font-size:34px}.workflow-graph-scroll{max-height:620px;overflow:auto}}
+@media(prefers-reduced-motion:reduce){.workflow-edge,.workflow-node{transition:none}}

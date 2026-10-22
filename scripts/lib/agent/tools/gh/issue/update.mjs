@@ -15,8 +15,6 @@ export function candidateIssue(issue, title, body, contractLabels) {
   return { ...issue, title: title.trim(), body, labels: labels.map((name) => ({ name })) };
 }
 
-// Untrusted Agent Issue tools may reformat non-E2E content but cannot change
-// verification obligations, results or evidence. Trusted Issue projection is separate.
 export function enforceE2EReadOnly(currentBody, candidateBody) {
   const before = parseIssueE2E(currentBody);
   const after = parseIssueE2E(candidateBody);

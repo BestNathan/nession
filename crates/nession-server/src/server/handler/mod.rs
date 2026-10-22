@@ -55,6 +55,9 @@ pub enum HandlerAction {
         session_id: String,
         /// Short session name for agent protocol messages (agent.attach, etc.).
         session_name: String,
+        /// Correlation ID from the authenticated browser's original Relay begin
+        /// envelope; never mint this in the Server or reuse a P2P id (#2089).
+        relay_request_id: String,
         /// Unique client id assigned for this relay connection.
         client_id: String,
         /// The stable identity the browser presented on `server.auth`, when it

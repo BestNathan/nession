@@ -1,9 +1,10 @@
 import './tools/gh/issue/selftest.mjs';
+import { testIssueTree } from './issue-audit-tree.mjs';
 import assert from 'node:assert/strict';
 import { renderAgentPrompt } from './prompt/index.mjs';
 import { selfTest as providerSmokeSelfTest } from './provider-smoke.mjs';
 import { renderIssueAuditPrompt, applyIssueAuditProposal, issueAuditTools } from './tasks/issue-audit.mjs';
-import { renderAcceptancePrompt } from './tasks/acceptance.mjs';
+import { renderAcceptancePrompt, acceptanceModelView } from './tasks/acceptance.mjs';
 import { candidateIssue, createIssueUpdateTool } from './tools/gh/issue/update.mjs';
 import { createIssueCommentTool } from './tools/gh/issue/comment.mjs';
 import { createIssueReadTool } from './tools/gh/issue/read.mjs';
@@ -21,6 +22,18 @@ const audit = { errors: ['missing Location'] };
 const cursor = renderIssueAuditPrompt(issue, audit, 'cursor', 'example/repo');
 const claude = renderIssueAuditPrompt(issue, audit, 'deepseek', 'example/repo');
 assert.notEqual(cursor.template_sha256, claude.template_sha256);
+const tree = renderIssueAuditPrompt(issue, audit, 'cursor', 'example/repo', 'tree');
+assert.match(tree.text,/Mode: tree/);
+assert.match(tree.text,/same|single|one Issue Audit Agent session/);
+assert.match(tree.text,/find_related_issues/);
+assert.throws(()=>renderIssueAuditPrompt(issue,audit,'deepseek','example/repo','tree'),/requires Cursor/);
+await testIssueTree();
+const extra=issueAuditTools(issue,'example/repo','tree');
+assert.ok(Object.keys(extra).includes('find_related_issues'));
+assert.ok(Object.keys(extra).includes('review_related_issue'));
+assert.ok(Object.keys(extra).includes('publish_tree_audit'));
+assert.ok(typeof extra.getTreeAuditProgress==='function');
+assert.ok(!Object.keys(extra).includes('getTreeAuditProgress'));
 assert.deepEqual(cursor, renderIssueAuditPrompt(issue, audit, 'cursor', 'example/repo'));
 assert.match(cursor.text, /update_target_issue/);
 assert.match(claude.text, /Return a JSON repair proposal only/);
@@ -30,7 +43,11 @@ assert.match(cursor.template_sha256, /^[0-9a-f]{64}$/);
 assert.equal(cursor.messages.length, 2);
 assert.throws(() => renderAgentPrompt({ id: '../escape', version: 'v1', context: {} }), /Invalid Prompt/);
 assert.throws(() => renderAgentPrompt({ id: 'issue-audit', version: 'v1', variant: 'cursor', context: {} }), /Missing Prompt/);
-assert.throws(() => renderAgentPrompt({ id: 'issue-audit', version: 'v1', context: {} }), /Missing required Prompt variant/);
+assert.throws(() => renderAgentPrompt({ id: 'issue-audit', version: 'v1',
+  context: {scopeInstructions:'scope',riskInstructions:'risk',mode:'single',
+    issueUrl:'https://example.test/17',repository:'example/repo',
+    issueNumber:17,labels:'web',findings:'none',issueBodyJson:'""'} }),
+  /Missing required Prompt variant/);
 
 const acceptance = renderAcceptancePrompt({
   issue: { number: 17 }, stage: 'pre-merge', target_ref: 'sha', deployment: null,
@@ -38,12 +55,38 @@ const acceptance = renderAcceptancePrompt({
 });
 assert.match(acceptance.text, /Do not add, remove, rename, rewrite, weaken/);
 assert.match(acceptance.text, /"target_ref": "sha"/);
-assert.equal(acceptance.template_version, 'v1');
+assert.equal(acceptance.template_version, 'v2');
+const staleContext={issue:{number:17},stage:'staging',target_ref:'a'.repeat(40),
+  criteria:[{criterion:'SC-01',text:'Observe exact Worker scope',stage:'staging',
+    current_result:'Pending',current_evidence:'obsolete-case-absence-claim'}],
+  requirement_body:'## Requirements: retained\n\n### Success Criteria\n- [x] SC-01 Observe exact Worker scope\n\n'+
+    '## Acceptance Report\n| Criterion | Stage | Result | Evidence |\n'+
+    '| SC-01 | staging | Pending | obsolete-case-absence-claim |\n\n## Product alignment\nkept',
+  ci_evidence:{verified_observation:{worker_run_id:82,conclusion:'success'}}};
+const beforeModelView=structuredClone(staleContext);
+const modelView=acceptanceModelView(staleContext);
+assert.deepEqual(staleContext,beforeModelView,'model serialization cannot mutate the frozen executor/reuse context');
+assert.equal(modelView.criteria[0].text,staleContext.criteria[0].text);
+assert.equal(modelView.criteria[0].stage,'staging');
+assert.equal(modelView.criteria[0].proof_method,'agent');
+assert.equal(modelView.ci_evidence,staleContext.ci_evidence);
+assert.ok(modelView.requirement_body.includes('## Product alignment\nkept'));
+assert.ok(modelView.requirement_body.includes('- [ ] SC-01 Observe exact Worker scope'));
+assert.ok(!JSON.stringify(modelView).includes('obsolete-case-absence-claim'));
+assert.ok(!Object.hasOwn(modelView.criteria[0],'current_result'));
+assert.ok(!Object.hasOwn(modelView.criteria[0],'current_evidence'));
+assert.equal(acceptanceModelView({...staleContext,requirement_body:'no projected report'}).requirement_body,
+  'no projected report');
 const candidate = candidateIssue(issue, 'Bug: fixed', 'body', ['bug', 'ci']);
 assert.deepEqual(candidate.labels.map((value) => value.name).sort(), ['bug', 'ci', 'in-progress']);
 assert.deepEqual(issue.labels.map((value) => value.name), ['bug', 'web', 'in-progress']);
 
-assert.deepEqual(Object.keys(issueAuditTools(issue, 'example/repo')).sort(), ['comment_target_issue', 'read_target_issue', 'update_target_issue']);
+assert.deepEqual(Object.keys(issueAuditTools(issue, 'example/repo')).sort(), ['comment_target_issue', 'read_target_issue', 'set_verification_tier', 'update_target_issue']);
+const tierTool = issueAuditTools(issue, 'example/repo').set_verification_tier;
+assert.equal(tierTool.inputSchema.additionalProperties, false);
+await assert.rejects(() => tierTool.execute({tier: 'verification:scoped', reason: 'short'}), /invalid Issue verification-tier proposal/);
+await assert.rejects(() => tierTool.execute({tier: 'verification:unexpected', reason: 'verified cross-component scope requires a broader test'}), /invalid Issue verification-tier proposal/);
+
 const update = createIssueUpdateTool(issue, 'example/repo');
 const comment = createIssueCommentTool(issue, 'example/repo');
 const read = createIssueReadTool(issue, 'example/repo');
