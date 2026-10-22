@@ -47,7 +47,7 @@ export function reviewModelView(admission,identity){
 export function renderReviewPrompt(admission,identity){
   const view=reviewModelView(admission,identity);
   return renderAgentPrompt({
-    id:'review',version:'v1',
+    id:'review',version:'v2',
     context:{contextJson:JSON.stringify(view,null,2)},
   });
 }

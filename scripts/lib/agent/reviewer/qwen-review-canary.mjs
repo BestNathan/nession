@@ -194,7 +194,7 @@ function selfTest(){
   assert.equal(blobSha(POLICY.content),'c43fc9a41c1c8cd49bb8128a725e0cac6f4acb3f');
   const prompt=renderReviewPrompt(admission,SMOKE_IDENTITY);
   assert.equal(prompt.template_id,'review');
-  assert.equal(prompt.template_version,'v1');
+  assert.equal(prompt.template_version,'v2');
   assert.match(prompt.text,new RegExp(TARGET_SHA));
   assert.match(prompt.text,/"pull_request": 2176/);
   // The smoke identity cannot masquerade as the canonical #2177 admission.
