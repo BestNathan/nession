@@ -310,6 +310,13 @@ export class SessionRuntime {
    */
   private gapDetected = false;
   /**
+   * The last stream epoch this runtime adopted from an attach seed or a relay
+   * proof (#2194). A new epoch is a new timeline: the old timeline's ring never
+   * held it, so a buffer kept from the previous one cannot be proven
+   * continuous with it.
+   */
+  private lastObservedStreamEpoch: number | null = null;
+  /**
    * A requested bootstrap is not a repaired buffer until the *current*
    * xterm has parsed a complete snapshot. Agent attach success does not
    * prove capture succeeded or that the parser applied its bytes (#1645).
@@ -734,6 +741,42 @@ export class SessionRuntime {
     this.emitSnapshot();
   }
 
+  /**
+   * Adopt a stream epoch from an attach seed or a relay proof, stating the gap
+   * when it changed (#2194).
+   *
+   * A different epoch means the process that owned the old timeline is gone.
+   * The client may have kept the old buffer; nothing it holds can be proven
+   * continuous with the new timeline, and the new Agent's ring never held the
+   * events before it. Stating the gap is what makes the loss visible and makes
+   * the next attach request the capture that repairs it, instead of seeding
+   * the new epoch over the old buffer as if it continued.
+   */
+  private adoptStreamEpoch(epoch: number | undefined): void {
+    if (epoch === undefined || !Number.isSafeInteger(epoch) || epoch <= 0) {
+      return;
+    }
+    const previous = this.lastObservedStreamEpoch;
+    this.lastObservedStreamEpoch = epoch;
+    if (previous !== null && previous !== epoch) {
+      this.noteStreamEpochChanged();
+    }
+  }
+
+  /**
+   * The epoch-change half of {@link noteStreamTruncated}.
+   *
+   * It deliberately keeps a requested bootstrap pending: unlike an observed
+   * replay hole, the capture in flight may be exactly the new epoch's proven
+   * cut, and `noteBootstrapApplied` is the one thing allowed to clear the gap.
+   */
+  private noteStreamEpochChanged(): void {
+    this.resetTerminalAppliedCursor();
+    this.historyMayHaveGap = true;
+    this.gapDetected = true;
+    this.emitSnapshot();
+  }
+
   updateContext(next: Partial<SessionRuntimeConfig>): RuntimeMirrorSnapshot {
     const previousServerConnection = this.config.serverConnection;
     const previousRelay = this.effectiveForcedRelay;
@@ -859,6 +902,10 @@ export class SessionRuntime {
       needsBootstrap,
       transportGeneration: this.transportGeneration,
       onAttachOk: (result) => {
+        // An attach reply names the stream epoch this subscription continues.
+        // If it differs from the last one adopted, the buffer kept across the
+        // loss belongs to a timeline this Agent cannot replay (#2194).
+        this.adoptStreamEpoch(result.streamEpoch);
         this.attachedSize = attachSize;
         this.p2pAttachSeed = {
           streamEpoch: result.streamEpoch,
@@ -1287,6 +1334,10 @@ export class SessionRuntime {
         || proof.browserClientId !== getOrCreateClientId()) {
         return; // stale route, foreign browser, missing begin, duplicate or legacy
       }
+      // A relay proof names the Agent stream this route is bound to. If it is a
+      // different epoch than the last one this runtime adopted, the buffer may
+      // be holding a timeline the new Agent cannot replay (#2194).
+      this.adoptStreamEpoch(proof.streamEpoch);
       this.relayProof = proof;
       // The proof may arrive after the atomic bootstrap was parsed. It is the
       // first moment this route may submit a parser-applied ACK.

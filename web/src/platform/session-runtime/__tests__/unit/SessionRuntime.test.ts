@@ -1996,3 +1996,62 @@ describe('explicit stream state (#1926 SC-08)', () => {
     rt.dispose();
   });
 });
+
+describe('stream epoch adoption (#2194)', () => {
+  function relayWithProofs() {
+    const serverConnection = makeRelayServerConnection('connected');
+    const callbacks = new Set<(proof: RelaySubscriptionProof, physicalGeneration: number) => void>();
+    let wireNumber = 0;
+    const conn = Object.assign(serverConnection, {
+      beginRelayTracked: vi.fn(() => ({
+        id: 'wire-' + ++wireNumber,
+        physicalGeneration: wireNumber + 2,
+      })),
+      onRelayReady: (
+        _session: string,
+        cb: (proof: RelaySubscriptionProof, gen: number) => void,
+      ) => {
+        callbacks.add(cb);
+        return () => { callbacks.delete(cb); };
+      },
+    });
+    const publish = (proof: RelaySubscriptionProof, generation: number) => {
+      for (const cb of callbacks) { cb(proof, generation); }
+    };
+    return { conn, publish };
+  }
+
+  it('states the lost history when a different epoch is adopted, and not for the same epoch', async () => {
+    const { conn, publish } = relayWithProofs();
+    const rt = new SessionRuntime(makeConfig({ forcedRelay: true, serverConnection: conn }));
+    const base: RelaySubscriptionProof = {
+      sessionName: 's1', browserClientId: 'unit-client',
+      relayRequestId: 'wire-1', routeId: 'aabbccdd-1234-4000-8000-aabbccddeeff',
+      subscriberGeneration: 41, streamEpoch: 7,
+    };
+    rt.setTransportReady(true);
+    await flushMicrotasks();
+    publish(base, 3);
+    expect(rt.relaySubscriptionProofSnapshot).not.toBeNull();
+    expect(rt.getSnapshot().historyDegraded).toBe(false);
+
+    // A route change that lands on the same epoch continues the same timeline.
+    rt.updateContext({ routeIntentEpoch: 1 });
+    await flushMicrotasks();
+    publish({ ...base, relayRequestId: 'wire-2', routeId: 'bbbbccdd-1234-4000-8000-aabbccddeeff' }, 4);
+    expect(rt.relaySubscriptionProofSnapshot?.relayRequestId).toBe('wire-2');
+    expect(rt.getSnapshot().historyDegraded).toBe(false);
+
+    // A different epoch means the old timeline is gone; state it.
+    rt.updateContext({ routeIntentEpoch: 2 });
+    await flushMicrotasks();
+    publish({ ...base, relayRequestId: 'wire-3', routeId: 'ccccccdd-1234-4000-8000-aabbccddeeff', streamEpoch: 8 }, 5);
+    expect(rt.relaySubscriptionProofSnapshot?.streamEpoch).toBe(8);
+    expect(rt.getSnapshot().historyDegraded).toBe(true);
+    // `noteStreamEpochChanged` deliberately keeps a requested bootstrap
+    // pending, so the new epoch's proven cut can still repair the buffer.
+    rt.noteBootstrapApplied();
+    expect(rt.getSnapshot().historyDegraded).toBe(false);
+    rt.dispose();
+  });
+});
