@@ -843,3 +843,118 @@ for (const mode of ['Relay', 'P2P'] as const) {
     }).toPass({ timeout: 60_000 });
   });
 }
+
+// #1926 SC-05: the burst that is larger than every in-memory window at once.
+// The Agent's replay ring is bounded by events, xterm's scrollback by lines,
+// and this fixture deliberately crosses both. Two things are asserted that the
+// 5k witnesses cannot see:
+//
+// 1. the controller's *parser* is starved (the page's main thread blocks for
+//    two seconds mid-burst — the xterm parser runs exactly there), and the
+//    retained tail still arrives exactly once; and
+// 2. after the burst the client reconnects with an applied cursor the Agent's
+//    ring no longer holds, and the runtime states that history may be
+//    incomplete instead of continuing a buffer it cannot prove.
+test('a 100k-line burst survives parser starvation and a retention-lost reconnect (#1926 SC-05)', async ({ page }, testInfo) => {
+  test.skip(!process.env.CI, 'real stack available in CI only');
+  test.setTimeout(900_000);
+
+  const sessionName = `e2e-consistency-big-${testInfo.retry}-${Date.now()}`;
+  await page.goto(
+    '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
+  );
+  await waitForShell(page);
+  await createSession(page, sessionName);
+  await attachToSession(page, sessionName, 'Relay');
+  await waitForInteractiveShell(page);
+
+  // 100k numbered lines: far beyond the Agent's 4096-event ring and the
+  // browser's scrollback, so the tail is the only synchronizable window.
+  // `sed` block-buffers ~500 bytes per write rather than one write per line;
+  // the numbers themselves are the witness.
+  const COUNT = 100_000;
+  const TAIL = 5_000;
+  await submitTerminalCommand(page, `seq 1 ${COUNT} | sed 's/^/BIG-/'`);
+
+  // Starve the parser deterministically. This is the slow-Parser fault: the
+  // page cannot read its socket or parse a byte while this loop runs, so the
+  // transport and Agent buffers must hold the burst rather than lose it or
+  // evict a subscriber that is merely not scheduled.
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    const until = performance.now() + 2_000;
+    while (performance.now() < until) { /* deliberately block the page */ }
+    resolve();
+  }));
+
+  await waitForLastLine(page, 'BIG-', COUNT, { timeoutMs: 600_000, stallMs: 120_000 });
+
+  const text = await readTerminalBuffer(page);
+  const counts = new Map<number, number>();
+  for (const match of text.matchAll(/BIG-(\d+)/g)) {
+    const value = Number(match[1]);
+    if (value >= 1 && value <= COUNT) {
+      counts.set(value, (counts.get(value) ?? 0) + 1);
+    }
+  }
+  const duplicated = [...counts.entries()]
+    .filter(([value, seen]) => seen > 1 && value > COUNT - TAIL)
+    .map(([value]) => value);
+  const missingTail: number[] = [];
+  for (let value = COUNT - TAIL + 1; value <= COUNT; value += 1) {
+    if (!counts.has(value)) { missingTail.push(value); }
+  }
+  expect(duplicated, 'a tail line was delivered more than once').toEqual([]);
+  expect(missingTail, 'a tail line never reached the starved parser').toEqual([]);
+
+  // Retention overflow: force a new physical Server socket while the relay's
+  // applied cursor sits far above the Agent's retained window. No replay can
+  // cover that stretch, so the client must either obtain a complete capture
+  // or say that its history may be incomplete. Continuing silently is the
+  // failure this asserts against.
+  await page.evaluate(() => {
+    const originalSend = WebSocket.prototype.send;
+    WebSocket.prototype.send = function (data) {
+      if (typeof data === 'string') {
+        try {
+          if ((JSON.parse(data) as { msg_type?: string }).msg_type === 'server.info') {
+            return;
+          }
+        } catch {
+          // Non-JSON frames still pass through unchanged.
+        }
+      }
+      return originalSend.call(this, data);
+    };
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => 'hidden',
+    });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+
+  const newSocket = page.waitForEvent('websocket', {
+    predicate: (ws) => ws.url().includes('/ws'),
+    timeout: 30_000,
+  });
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => 'visible',
+    });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await newSocket;
+  await expect(page.getByTestId('terminal-connecting')).toBeHidden({ timeout: 60_000 });
+
+  // The tail may be repainted by a fresh capture or explicitly marked
+  // degraded; what may not happen is a missing tail with no statement.
+  const tailLine = await countInBuffer(page, `BIG-${COUNT}`);
+  if (tailLine === 0) {
+    await expect(page.getByTestId('terminal-history-degraded')).toBeVisible({ timeout: 15_000 });
+  }
+
+  // The recovered route is still usable.
+  await submitTerminalCommand(page, `printf 'BIG-%s-AFTER\\n' 1926`);
+  await expect.poll(async () => countInBuffer(page, 'BIG-1926-AFTER'), { timeout: 30_000 })
+    .toBe(1);
+});
