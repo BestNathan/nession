@@ -73,6 +73,15 @@ export function smokeReviewAdmission(){
     expected_file:FILE,expected_file_sha256:sha256(POLICY.content),expected_file_mode:'100644',
   });
 }
+// Canonical Prompt + a smoke-only execution bound. The bound is not part of the
+// canonical review/v2 contract; it inlines the single admitted file so a smoke
+// Provider cannot wander across the repository until the turn limit.
+export function smokePromptText(prompt){
+  return prompt.text+'\n\nSMOKE EXECUTION BOUND (canary only): the admitted change is exactly the single file '
+    +FILE+' with this content:\n'+POLICY.content
+    +'\nRead that file once with the Read tool to confirm it, then output the JSON verdict immediately. '
+    +'Do not search, grep or read any other file.';
+}
 export function canaryArgs(prompt,model){
   return ['-p',prompt,'--output-format','stream-json','--verbose',
     '--no-session-persistence','--max-turns','24','--model',model,'--strict-mcp-config',
@@ -146,7 +155,7 @@ async function run(dir){
     const bytes=fs.readFileSync(path.join(workspace,FILE));
     if(bytes.toString('utf8')!==POLICY.content||sha256(bytes.toString('utf8'))!==admission.expected_file_sha256)
       fail('admitted file bytes changed');
-    const proc=spawnSync('claude',canaryArgs(prompt.text,model),{
+    const proc=spawnSync('claude',canaryArgs(smokePromptText(prompt),model),{
       cwd:workspace,encoding:'utf8',timeout:480000,maxBuffer:8*1024*1024,
       env:{...env,DISABLE_AUTOUPDATER:'1',ANTHROPIC_MODEL:model,
         ANTHROPIC_DEFAULT_SONNET_MODEL:model},
@@ -197,6 +206,10 @@ function selfTest(){
   assert.equal(prompt.template_version,'v2');
   assert.match(prompt.text,new RegExp(TARGET_SHA));
   assert.match(prompt.text,/"pull_request": 2176/);
+  const bounded=smokePromptText(prompt);
+  assert.ok(bounded.includes(FILE));
+  assert.ok(bounded.includes(POLICY.content));
+  assert.match(bounded,/Do not search, grep or read any other file/);
   // The smoke identity cannot masquerade as the canonical #2177 admission.
   assert.throws(()=>renderReviewPrompt(admission),/authenticated reviewer admission/);
   assert.throws(()=>reviewModelResult(admission,
