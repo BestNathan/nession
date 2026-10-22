@@ -310,6 +310,37 @@ async function startFullStackRuntime(options) {
     if (cleanupHome) rmSync(home, { recursive: true, force: true });
   };
 
+  // The Agent is the one process a test may restart: its tmux sessions live in
+  // the separate tmux server, so a restart is the real failure shape — a new
+  // process with a new stream epoch over the sessions that survived (#1926
+  // SC-05). Kept out of the `webOnly` profile, which has no Agent at all.
+  let agentEntry = null;
+  const startAgentProcess = async () => {
+    const agent = binaryCommand(repoRoot, 'nession-agent', 'nession-agent', agentConfig);
+    const entry = spawnManaged(agent.command, agent.args, {
+      cwd: repoRoot,
+      env: {
+        ...isolationEnv,
+        LANG: 'C.UTF-8',
+        RUST_LOG: 'info',
+        RUST_BACKTRACE: '1',
+      },
+      label: 'nession-agent',
+    });
+    processes.push(entry);
+    await waitForTcp(agentPort, readyTimeoutMs, entry.child, entry.label);
+    return entry;
+  };
+  const restartAgent = async () => {
+    if (webOnly) throw new Error('the web-only runtime has no agent to restart');
+    if (!agentEntry) throw new Error('the agent has not been started');
+    const previous = agentEntry;
+    agentEntry = null;
+    await stopManaged(previous);
+    agentEntry = await startAgentProcess();
+    return { restarted: true, pid: agentEntry.child.pid ?? null };
+  };
+
   try {
     if (!webOnly) {
       const server = binaryCommand(repoRoot, 'nession-server', 'nession-server', serverConfig);
@@ -328,19 +359,7 @@ async function startFullStackRuntime(options) {
       // Preserve the existing E2E stabilization window after server readiness.
       await sleep(Number(options?.agentStartDelayMs ?? 5_000));
 
-      const agent = binaryCommand(repoRoot, 'nession-agent', 'nession-agent', agentConfig);
-      const agentProcess = spawnManaged(agent.command, agent.args, {
-        cwd: repoRoot,
-        env: {
-          ...isolationEnv,
-          LANG: 'C.UTF-8',
-          RUST_LOG: 'info',
-          RUST_BACKTRACE: '1',
-        },
-        label: 'nession-agent',
-      });
-      processes.push(agentProcess);
-      await waitForTcp(agentPort, readyTimeoutMs, agentProcess.child, agentProcess.label);
+      agentEntry = await startAgentProcess();
     }
 
     const webProcess = spawnManaged(
@@ -388,7 +407,7 @@ async function startFullStackRuntime(options) {
     }
     console.log('[e2e runner] ready ' + JSON.stringify(metadata));
 
-    return { ...metadata, stop };
+    return { ...metadata, stop, restartAgent };
   } catch (error) {
     await stop();
     throw error;

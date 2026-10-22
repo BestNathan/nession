@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { waitForShell } from '../../helpers/shell';
+import { restartAgent } from '../../helpers/runtimeControl';
 import {
   createSession,
   attachToSession,
@@ -765,3 +766,76 @@ test('an Auto P2P loss falls back to Relay without remounting the xterm (#2156)'
   await expect.poll(async () => countInBuffer(page, 'ROUTE-2156-AFTER'), { timeout: 20_000 })
     .toBe(1);
 });
+
+// #1926 SC-05: an Agent restart is the fault that invalidates every in-memory
+// stream position at once — a new process, a new stream epoch, and tmux
+// sessions that outlived it. The client must recover on the same renderer and
+// must not present the boundary as synchronized when it cannot prove the
+// history it lost.
+//
+// The restart is real: the harness stops the Agent process and starts a fresh
+// one on the same port over the same tmux server, so the Session's PTY and
+// scrollback survive while every epoch, replay ring and parser cursor belongs
+// to a process that no longer exists. Both routes are exercised because they
+// reach the restart through different owners: P2P loses its browser socket,
+// Relay loses the Server's tunnel (which must close the browser connection so
+// the client re-attaches instead of sitting on a frozen terminal, #2179).
+for (const mode of ['Relay', 'P2P'] as const) {
+  test(`an Agent restart recovers without claiming unproven history over ${mode} (#1926 SC-05)`, async ({ page }, testInfo) => {
+    test.skip(!process.env.CI, 'real stack available in CI only');
+    test.setTimeout(360_000);
+
+    const sessionName = `e2e-consistency-restart-${mode.toLowerCase()}-${testInfo.retry}-${Date.now()}`;
+    await page.goto(
+      '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
+    );
+    await waitForShell(page);
+    await createSession(page, sessionName);
+    await attachToSession(page, sessionName, mode);
+    await waitForInteractiveShell(page);
+
+    // The xterm node identity is what says recovery kept the live renderer
+    // rather than rebuilding the Terminal around a new one.
+    await page.locator('.xterm').evaluate((node) => {
+      node.setAttribute('data-e2e-restart-instance', 'original');
+    });
+
+    await submitTerminalCommand(page, `printf 'RESTART-%s-BEFORE\\n' 1926`);
+    await expect.poll(async () => countInBuffer(page, 'RESTART-1926-BEFORE')).toBe(1);
+
+    await restartAgent();
+
+    // Recovery: input works again on the surviving tmux session. The command
+    // is retried because it can be typed while the transport is still
+    // re-attaching; every attempt prints the same marker, and the assertion is
+    // about the stream recovering at all, not about input deduplication.
+    await expect(async () => {
+      await submitTerminalCommand(page, `printf 'RESTART-%s-AFTER\\n' 1926`);
+      await expect
+        .poll(async () => countInBuffer(page, 'RESTART-1926-AFTER'), { timeout: 10_000 })
+        .toBeGreaterThan(0);
+    }).toPass({ timeout: 180_000 });
+
+    // Same renderer across the restart.
+    await expect(page.locator('.xterm')).toHaveAttribute('data-e2e-restart-instance', 'original');
+
+    // No silent skip at the boundary. tmux history normally survives, so the
+    // pre-restart line should be repainted by the new Agent's bootstrap. If it
+    // is not, the runtime must say so with the degraded notice rather than
+    // showing a continuous-looking terminal.
+    const before = await countInBuffer(page, 'RESTART-1926-BEFORE');
+    expect(before, 'the pre-restart line was duplicated across recovery').toBeLessThanOrEqual(1);
+    if (before === 0) {
+      await expect(page.getByTestId('terminal-history-degraded')).toBeVisible({ timeout: 10_000 });
+    }
+
+    // A second post-restart command proves the recovered route is stable, not
+    // a one-frame attach.
+    await expect(async () => {
+      await submitTerminalCommand(page, `printf 'RESTART-%s-STABLE\\n' 1926`);
+      await expect
+        .poll(async () => countInBuffer(page, 'RESTART-1926-STABLE'), { timeout: 10_000 })
+        .toBeGreaterThan(0);
+    }).toPass({ timeout: 60_000 });
+  });
+}
