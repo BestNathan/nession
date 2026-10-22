@@ -11,7 +11,7 @@ const ORIGINAL_PUBLISHER_RUN=39609600546;
 const ORIGINAL_PUBLISHER_MAIN_SHA='c6894b59b8be9448cae3c68fd87593516f66b47a';
 const ORIGINAL_PR=2176;
 const ORIGINAL_PR_SHA='3d8e3807cc01f6082734b8d0ba458217c28f60a4';
-const ORIGINAL_COMMENT=6308823032;
+const ORIGINAL_COMMENT=6317468284;
 const PATCH_SHA='1f45a088966d41c1fcade13540498693d7d083ca238ca2b06c0525c654e314ee';
 const ORIGINAL_BLOB_SHA='c43fc9a41c1c8cd49bb8128a725e0cac6f4acb3f';
 const COMMAND='/nession publish issue=1997 worker_run=39448549052 checkpoint=3';
@@ -65,6 +65,14 @@ export function verifyControlledOriginalPublication({
   eq(ownerComment.issue_url,'https://api.github.com/repos/'+REPO+'/issues/1997',
     'owner comment Issue');
   eq(ownerComment.body,COMMAND,'owner comment exact command');
+  // This owner posted the exact same command earlier. The successful
+  // Publisher Run is linked to the *later* comment via source creation time.
+  // Actor, Issue and command text alone are insufficient event provenance.
+  const ownerCreated=Date.parse(ownerComment.created_at??'');
+  const publisherCreated=Date.parse(sourceRun.created_at??'');
+  if(!Number.isFinite(ownerCreated)||!Number.isFinite(publisherCreated)||
+      publisherCreated<ownerCreated||publisherCreated-ownerCreated>120000)
+    reject('owner comment is not the actual temporally bounded Publisher wake');
 
   const record=validateControlledPublisherIntent(intent);
   eq(record.publisher_issuer_run_id,sourceRun.id,'immutable Publisher issuer');
