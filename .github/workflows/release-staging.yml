@@ -528,4 +528,4 @@ jobs:
         shell: bash
         run: |
           GHCR_IMAGE="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession"
-          bash scripts/mirror-container-images.sh "$GHCR_IMAGE" "$ACR_IMAGE" "${{ needs.versions.outputs.short_sha }}" "${{ needs.versions.outputs.short_sha }} "${{ matrix.image }}"
+          bash scripts/mirror-container-images.sh "$GHCR_IMAGE" "$ACR_IMAGE" "${{ needs.versions.outputs.short_sha }}" "${{ needs.versions.outputs.short_sha }}" "${{ matrix.image }}"
