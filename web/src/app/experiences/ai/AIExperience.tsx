@@ -39,7 +39,8 @@ export function AIExperience({
     if (!message) { return; }
 
     const intent = resolveUIIntent(message, agents);
-    setTurns((current) => [...current, { id: ++nextId.current, message, intent }]);
+    const id = ++nextId.current;
+    setTurns((current) => [...current, { id, message, intent }]);
     setDraft('');
 
     if (intent.type === 'session.create') {
