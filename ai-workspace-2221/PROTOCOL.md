@@ -378,7 +378,7 @@ The HTML prototype must be runnable without credentials/network and expose:
 | Discover AgentList, select second visible filtered Agent | Correct selected resource according to visible ordered snapshot |
 | Click Agent “+”, fill create draft, back, reopen, commit | Same Scene ID/count, draft preserved, success from mock API event |
 | Natural-language “在这个节点创建” | No new Scene while compatible Agent Scene active |
-| Standalone create with no compatible host / explicit independent Scene | New Scene only if Instance/Presentation Contract allows |
+| Explicit independent Create Scene | The Agent entry/loaded list/selected target must expose Create **before** an independently requested Scene is allocated |
 | Open SessionList twice / back to prior Scene | Reuse exact Scene, no duplicate |
 | Confirmed Session created → open it | Last confirmed resource ID, handoff, no new Terminal runtime |
 | Provider “unknown” / no match | Clarification, **no** clarification Scene allocated |
