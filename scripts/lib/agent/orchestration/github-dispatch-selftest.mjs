@@ -143,7 +143,7 @@ assert.equal(reviewPlan.workflow_id,'agent-review.yml');
 // #2262 SC-02: the reviewer workflow declares only reviewer/action_id, so the
 // plan must never send the Developer-only inputs; the ticket stays on the plan.
 assert.deepEqual(reviewPlan.inputs,{action_id:reviewAction.id,
-  reviewer:'review-cursor-01'});
+  reviewer:'review-cursor-01',dispatch_ticket:reviewPlan.ticket});
 assert.doesNotThrow(()=>verifyDispatchTicket(reviewPlan.ticket,keyring,{now}));
 assert.match(reviewPlan.ticket,/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
 const reviewPosted=[];
@@ -152,13 +152,13 @@ const reviewDispatch=createGitHubDispatchClient('credentialedControllerToken',{
 });
 assert.deepEqual(await reviewDispatch(reviewPlan),{status:'accepted',dispatch_id:reviewAction.id});
 assert.deepEqual(JSON.parse(reviewPosted[0].params.body).inputs,{action_id:reviewAction.id,
-  reviewer:'review-cursor-01'});
+  reviewer:'review-cursor-01',dispatch_ticket:reviewPlan.ticket});
 await assert.rejects(()=>reviewDispatch({...reviewPlan,
   inputs:{...reviewPlan.inputs,reviewer:'review-qwen-01'}}),/signed Outbox ticket/);
 await assert.rejects(()=>reviewDispatch({...reviewPlan,
   inputs:{...reviewPlan.inputs,issue_number:'1997'}}),/signed Outbox ticket/);
 await assert.rejects(()=>reviewDispatch({...reviewPlan,inputs:{
-  ...reviewPlan.inputs,dispatch_ticket:reviewPlan.ticket}}),/signed Outbox ticket/);
+  ...reviewPlan.inputs,dispatch_ticket:'tampered'}}),/signed Outbox ticket/);
 const reviewState=recordDispatch(advanced,advanced.version,reviewAction.id,
   {status:'verified',dispatch_id:reviewAction.id,source_run_id:334});
 runs.set(334,{...devRun,id:334,path:'.github/workflows/agent-review.yml',
