@@ -8,8 +8,8 @@ import { CONTROLLED_1997_POLICY as POLICY } from '../publisher/controlled-propos
 import { admitOriginalControlledReviewerTarget } from './pr-admission.mjs';
 import { CONTROLLED_PUBLISHER_INTENT_PATH,
   validateControlledPublisherIntent } from '../publisher/store-intent.mjs';
+import { githubFetcher } from '../github-read.mjs';
 
-const REPO='BestNathan/nession';
 const PUBLISH_RUN=39609600546;
 const OWNER_COMMENT=6317468284;
 const PR=2176;
@@ -50,19 +50,6 @@ export async function prepareReviewAdmission({
   return admitOriginalControlledReviewerTarget({
     publisherRun,ownerComment,pullRequest,headCommit,files,treeEntry,storeIntent,
   },reviewerAgentId);
-}
-
-export function githubFetcher(token){
-  if(typeof token!=='string'||token.length<8)fail('trusted read-only token required');
-  return async (endpoint)=>{
-    const response=await fetch('https://api.github.com/repos/'+REPO+'/'+endpoint,{
-      headers:{Authorization:'Bearer '+token,Accept:'application/vnd.github+json',
-        'X-GitHub-Api-Version':'2022-11-28'},
-      signal:AbortSignal.timeout(20000),
-    });
-    if(!response.ok)fail('GitHub read failed: '+endpoint+' ('+response.status+')');
-    return response.json();
-  };
 }
 
 async function main(){
