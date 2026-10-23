@@ -203,6 +203,26 @@ try {
       agent_id:'dev-cursor-01'},status:'pending',attempts:0,receipt:null}]};
   assert.throws(()=>acceptPublisherPublication(ambiguous,16,published,trusted,registry),
     /exactly one pending Developer proposal/);
+  // #2262: an owner-authorized override binds a different registered Reviewer,
+  // and the queued action targets that identity; identity negatives fail closed.
+  const overridden=acceptPublisherPublication(fixture,16,
+    {...published,reviewer_agent_id:'review-qwen-01'},trusted,registry);
+  assert.equal(overridden.assignments.reviewer,'review-qwen-01');
+  assert.equal(overridden.transitions.find(x=>x.kind==='publisher').reviewer_agent_id,
+    'review-qwen-01');
+  const boundPending=reconcileOutbox(overridden).pending;
+  assert.equal(boundPending.length,1);
+  assert.equal(boundPending[0].task.agent_id,'review-qwen-01');
+  assert.equal(acceptPublisherPublication(overridden,overridden.version,
+    {...published,reviewer_agent_id:'review-qwen-01'},trusted,registry),overridden);
+  for(const [reviewerAgentId,matcher] of [
+    ['review-ghost-01',/not a registered reviewer/],
+    ['dev-cursor-01',/not a registered reviewer/],
+    ['review-cursor-01',/already assigned/],
+  ]) assert.throws(()=>acceptPublisherPublication(fixture,16,
+    {...published,reviewer_agent_id:reviewerAgentId},trusted,registry),matcher);
+  assert.throws(()=>acceptPublisherPublication(overridden,overridden.version,
+    published,trusted,registry),/conflicting publication replay/);
 }
 
 const symlinkDir=mkdtempSync(path.join(os.tmpdir(),'agent-outbox-symlink-'));

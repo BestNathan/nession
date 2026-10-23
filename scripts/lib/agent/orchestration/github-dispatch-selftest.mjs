@@ -20,6 +20,7 @@ const plan=planGitHubDispatch(state,item.id,registry,signer);
 assert.equal(plan.workflow_id,'agent-develop.yml');
 assert.deepEqual(verifyDispatchTicket(ticket,keyring,{now}),body);
 assert.equal(plan.inputs.dispatch_ticket,ticket);
+assert.equal(plan.ticket,ticket);
 assert.throws(()=>verifyDispatchTicket(ticket,keyring,{now:now+700000}),/validity window/);
 assert.throws(()=>verifyDispatchTicket(ticket,{'control-v1':Buffer.alloc(32,0x63)},{now}),/HMAC/);
 assert.throws(()=>verifyDispatchTicket(ticket,{'control-v2':key},{now}),/unknown signing key/);
@@ -64,7 +65,7 @@ await assert.rejects(()=>api200({...plan,ref:'feature'}),/unapproved/);
 await assert.rejects(()=>api200({...plan,inputs:{...plan.inputs,input_sha:b}}),
   /signed Outbox ticket/);
 await assert.rejects(()=>api200({...plan,inputs:{...plan.inputs,dispatch_ticket:'tampered'}}),
-  /malformed/);
+  /signed Outbox ticket/);
 
 const issuer={id:222,path:'.github/workflows/acceptance-agent-controller.yml',
   name:'Acceptance / Agent Controller',event:'workflow_dispatch',head_branch:'main',
@@ -139,6 +140,25 @@ assert.throws(()=>createGitHubRunReader(''),/missing trusted/);
 const reviewAction=reconcileOutbox(advanced).pending[0];
 const reviewPlan=planGitHubDispatch(advanced,reviewAction.id,registry,signer);
 assert.equal(reviewPlan.workflow_id,'agent-review.yml');
+// #2262 SC-02: the reviewer workflow declares only reviewer/action_id, so the
+// plan must never send the Developer-only inputs; the ticket stays on the plan.
+assert.deepEqual(reviewPlan.inputs,{action_id:reviewAction.id,
+  reviewer:'review-cursor-01'});
+assert.doesNotThrow(()=>verifyDispatchTicket(reviewPlan.ticket,keyring,{now}));
+assert.match(reviewPlan.ticket,/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
+const reviewPosted=[];
+const reviewDispatch=createGitHubDispatchClient('credentialedControllerToken',{
+  keyring,now,fetchFn:async(url,params)=>{reviewPosted.push({url,params});return{status:204};},
+});
+assert.deepEqual(await reviewDispatch(reviewPlan),{status:'accepted',dispatch_id:reviewAction.id});
+assert.deepEqual(JSON.parse(reviewPosted[0].params.body).inputs,{action_id:reviewAction.id,
+  reviewer:'review-cursor-01'});
+await assert.rejects(()=>reviewDispatch({...reviewPlan,
+  inputs:{...reviewPlan.inputs,reviewer:'review-qwen-01'}}),/signed Outbox ticket/);
+await assert.rejects(()=>reviewDispatch({...reviewPlan,
+  inputs:{...reviewPlan.inputs,issue_number:'1997'}}),/signed Outbox ticket/);
+await assert.rejects(()=>reviewDispatch({...reviewPlan,inputs:{
+  ...reviewPlan.inputs,dispatch_ticket:reviewPlan.ticket}}),/signed Outbox ticket/);
 const reviewState=recordDispatch(advanced,advanced.version,reviewAction.id,
   {status:'verified',dispatch_id:reviewAction.id,source_run_id:334});
 runs.set(334,{...devRun,id:334,path:'.github/workflows/agent-review.yml',
@@ -146,9 +166,9 @@ runs.set(334,{...devRun,id:334,path:'.github/workflows/agent-review.yml',
 const reviewResult={kind:'reviewer',issue,run_id:334,run_attempt:1,target_sha:b,
   outcome:'approved',task_id:reviewAction.id};
 const reviewSource=await attestAgentOutcome({...options,state:reviewState,result:reviewResult,
-  dispatch_ticket:reviewPlan.inputs.dispatch_ticket});
+  dispatch_ticket:reviewPlan.ticket});
 assert.equal(acceptTaskResult(reviewState,reviewState.version,reviewResult,reviewSource,registry).phase,'quality');
 await assert.rejects(()=>attestAgentOutcome({...options,state:reviewState,
   result:{...reviewResult,target_sha:'c'.repeat(40)},
-  dispatch_ticket:reviewPlan.inputs.dispatch_ticket}),/PR head/);
+  dispatch_ticket:reviewPlan.ticket}),/PR head/);
 console.log('Agent signed dispatch, GitHub REST attestation and spoof/replay fixtures passed');
