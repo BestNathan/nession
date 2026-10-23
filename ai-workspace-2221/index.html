@@ -254,6 +254,99 @@
       .docked-composer { margin-bottom: 8px; }
       .side-card { height: calc(100% - 35px); }
     }
+
+    /* Immersive Scene canvas — one dominant active Scene, quiet adjacent previews. */
+    .work-stage { position:relative; padding-top:clamp(10px,1.7vh,20px); }
+    .workspace-titlebar, .item-tabs, .carousel-bottom, .stage-nav { display:none !important; }
+    .stage-frame { flex:1 1 0; min-height:0; width:100%; gap:0; display:flex; align-items:stretch; justify-content:center;
+      padding:0 clamp(12px,1.5vw,24px); position:relative; overflow:hidden; transition:padding .2s ease; }
+    .stage-frame.has-prev { padding-left:clamp(54px,4.3vw,72px); }
+    .stage-frame.has-next { padding-right:clamp(54px,4.3vw,72px); }
+    .main-card { flex:1 1 0; min-width:0; width:auto; max-width:none; height:100%; min-height:0;
+      border-radius:clamp(16px,1.8vw,25px); background:#fff; border:1px solid #e4e8ed;
+      box-shadow:0 18px 52px rgba(32,42,58,.045),0 1px 5px rgba(32,42,58,.02); }
+    .side-card { position:absolute; z-index:4; top:50%; transform:translateY(-50%);
+      width:clamp(40px,3.3vw,50px); height:clamp(180px,44vh,350px); max-height:none; min-height:0;
+      padding:17px 8px; border:1px solid #dde2e9; border-radius:13px;
+      background:#eff2f5; box-shadow:0 8px 20px rgba(35,46,64,.035);
+      color:#728090; opacity:.68; display:flex; flex-direction:column; align-items:center; justify-content:flex-start;
+      gap:13px; overflow:hidden; transition:opacity .18s ease,background .18s ease,border-color .18s ease,transform .18s ease; }
+    #prevPreview {left:clamp(5px,.8vw,13px)}
+    #nextPreview {right:clamp(5px,.8vw,13px)}
+    .side-card:hover, .side-card:focus-visible {opacity:1; transform:translateY(-50%);
+      background:#e6ecf2; border-color:#b7c3d0; }
+    .side-card.unavailable {visibility:hidden;pointer-events:none;box-shadow:none}
+    .scene-peek-icon {flex:0 0 auto; display:flex; align-items:center;justify-content:center;color:#78899a}
+    .scene-peek-icon .icon{width:16px;height:16px}
+    .scene-peek-label {font-size:11px;font-weight:700;line-height:1.4;letter-spacing:.02em;writing-mode:vertical-rl;
+      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-height:210px;flex:1;min-height:0;}
+    .scene-peek-arrow {margin-top:auto;font-size:14px;font-weight:600;color:#a3afbc}
+    .docked-composer {width:min(960px,calc(100% - 72px));margin:13px auto 18px;flex:0 0 auto;}
+    .docked-composer .composer {border-radius:17px;padding:11px 14px 8px 16px;box-shadow:0 4px 16px rgba(31,42,58,.035)}
+    .docked-composer .question-input {min-height:31px;max-height:120px;font-size:14px;}
+    .docked-composer .composer-hint {display:none}
+    .question-progress{bottom:2px}
+    .scene-reset {width:33px;height:33px;display:inline-flex;align-items:center;justify-content:center;
+      border:1px solid transparent;border-radius:9px; color:#9ba4af; font-size:21px;padding:0;font-weight:400}
+    .scene-reset:hover{border-color:#e1e5ea;color:#596675;background:#f7f9fa}
+    .card-header {padding:clamp(21px,2.1vw,36px) clamp(24px,3vw,52px) clamp(18px,1.5vw,25px);}
+    .card-title {font-size:clamp(24px,2.2vw,32px);font-weight:680;letter-spacing:-.047em;}
+    .card-eyebrow {margin-bottom:11px;font-size:10px;letter-spacing:.11em;color:#a1a9b4}
+    .card-subtitle {font-size:13px;margin-top:9px}
+    .toolbar {padding:21px clamp(24px,3vw,52px) 18px;}
+    .table-shell {margin:0 clamp(24px,3vw,52px) 22px;border-radius:13px;}
+    .agent-row,.session-row{min-height:76px;padding:15px 20px;grid-template-columns:minmax(175px,1.7fr) minmax(90px,.55fr) minmax(90px,.45fr) 142px}
+    .rowhead{grid-template-columns:minmax(175px,1.7fr) minmax(90px,.55fr) minmax(90px,.45fr) 142px;padding:0 20px}
+    .node-name{font-size:13px}
+    .node-icon {width:36px;height:36px;flex-basis:36px;border-radius:10px}
+    .node-small{font-size:11px}
+    .form-area {max-width:760px;padding:clamp(24px,3vw,44px) clamp(24px,3vw,52px);}
+    .hint-strip, .in-item-chip, .form-intro, .selected-info {display:none}
+    .suggested-actions {background:transparent;border:0;border-top:1px solid #f0f2f4;border-radius:0;
+      margin:8px clamp(24px,3vw,52px) 22px;padding:16px 0 0;}
+    .suggest-head {display:none;}
+    .suggest-action {background:#f4f6f8;border-color:#e9edf1;border-radius:9px;}
+    .suggest-action.primary {background:#edf1f6;border-color:#dee5ed;color:#344354;}
+    .clarification-inline{margin:0 clamp(24px,3vw,52px) 18px}
+    .card-body {overscroll-behavior-y:contain;}
+    @media (max-width:1050px) {
+      .stage-frame {gap:0;padding:0 14px;}
+      .stage-frame.has-prev{padding-left:56px}
+      .stage-frame.has-next{padding-right:56px}
+      .main-card{width:auto;max-width:none}
+      .side-card {width:43px;padding:15px 7px}
+      .rowhead,.agent-row,.session-row{grid-template-columns:minmax(130px,1.5fr) 80px 65px 115px;gap:9px;}
+    }
+    @media (max-width:710px) {
+      .work-stage{padding-top:7px}
+      .stage-frame{padding:0 7px!important;gap:0}
+      .main-card{width:100%;min-width:0;border-radius:17px;box-shadow:0 8px 26px rgba(32,42,58,.04);}
+      .side-card {display:flex;top:50%;width:24px;height:clamp(140px,30vh,230px);min-height:0;
+        padding:12px 3px;border-radius:7px;opacity:.76;background:#e9edf2;gap:8px;box-shadow:none}
+      #prevPreview{left:0}#nextPreview{right:0}
+      .scene-peek-icon .icon {width:12px;height:12px}
+      .scene-peek-label {font-size:9px;max-height:160px}
+      .scene-peek-arrow{font-size:11px}
+      .card-header{padding:19px 22px 18px}
+      .card-title{font-size:23px}
+      .card-subtitle{font-size:11px}
+      .toolbar{padding:13px 20px}
+      .table-shell{margin:0 18px 18px;}
+      .agent-row,.session-row{grid-template-columns:minmax(120px,1fr) 90px;min-height:70px;padding:14px 13px;gap:9px}
+      .agent-row .metric,.session-row .metric,.agent-row .pill,.session-row .pill{display:none}
+      .row-actions{justify-content:flex-end}
+      .docked-composer {width:calc(100% - 18px);margin:9px auto max(9px,env(safe-area-inset-bottom))}
+      .docked-composer .composer{padding:9px 10px 7px 13px;border-radius:13px}
+      .form-area{padding:21px 22px;max-width:none}
+      .suggested-actions{margin:9px 20px 17px;}
+      .clarification-inline{margin:0 20px 15px}
+      .scene-reset{width:28px;height:28px;font-size:19px}
+    }
+    @media (max-height:710px) {
+      .work-stage {padding-top:5px}
+      .card-header{padding-top:17px;padding-bottom:15px}
+      .docked-composer{margin-top:7px;margin-bottom:8px}
+    }
     @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition-duration: .001ms !important; animation-duration: .001ms !important; } }
   </style>
   <link rel="stylesheet" href="./jev-replay.css">
