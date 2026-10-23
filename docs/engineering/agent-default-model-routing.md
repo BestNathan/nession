@@ -42,6 +42,16 @@ their historical `cursor` Environment selection. The legacy
 acceptance orchestrator for migration. Explicit authorized workflow dispatch
 inputs may select a registered alternative; invalid choices fail closed.
 
+**Developer runtime pinning (incremental #2274):** a trusted, Store-admitted
+Qwen Developer must pass `qwen-developer-policy.mjs` before invoking the
+Provider. The binding contains registered Agent, exact source SHA, Qwen model,
+canonical HTTPS gateway, pinned numeric Claude CLI version and restricted
+native tools. Its SHA-256 Harness digest intentionally excludes credentials.
+The native Resume verifier rejects source/model/CLI/Harness mismatches instead
+of silently starting another model or session. The real Store-driven Qwen
+Worker and cross-Run Resume remain **unimplemented**; this policy alone does
+not activate `AGENT_DEFAULT_DEVELOPER=dev-qwen-01`.
+
 **Durability:** the existing Issue-centric Developer flow currently executes
 the specifically scoped Cursor-native #1997 Worker. The Controller reads this variable for new requests but refuses a Qwen Developer until #2274 is proven. Do **not** switch the Developer default to Qwen before then. Implement and prove
 the Provider-neutral Developer execution, checkpoint and Resume path before
