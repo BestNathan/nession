@@ -3,7 +3,9 @@
 // and then applies the deterministic transition; this module never trusts a
 // model, an Issue comment or a PR-head checkout for identity.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { CONTROLLED_ORIGINAL_PUBLICATION as P,
   verifyControlledOriginalPublication } from './publication-readback.mjs';
@@ -11,6 +13,8 @@ import { CONTROLLED_PUBLISHER_INTENT_PATH } from './store-intent.mjs';
 import { readIssueWorkflowState, writeIssueWorkflowState } from '../orchestration/state-store.mjs';
 import { acceptPublisherPublication } from '../orchestration/outbox.mjs';
 import { githubFetcher } from '../github-read.mjs';
+import { auditStagedRunStore } from '../../../run-store-integrity.mjs';
+import { publish } from '../../../run-store-cas-push.mjs';
 
 const REPO = 'BestNathan/nession';
 const ISSUE = 1997;
@@ -92,6 +96,78 @@ function loadRegistry() {
   return JSON.parse(fs.readFileSync('automation/agents/registry.json', 'utf8'));
 }
 
+const STORE_REF = 'agent-store';
+function git(root, args) {
+  try {
+    return execFileSync('git', ['-C', root, ...args], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 45000, maxBuffer: 2 * 1024 * 1024,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_NO_REPLACE_OBJECTS: '1' },
+    }).trim();
+  } catch {
+    // Never surface stderr: an authenticated origin URL may contain a token.
+    fail('Git ' + args[0] + ' failed');
+  }
+}
+function openStoreRemote(remote) {
+  if (typeof remote !== 'string' || !remote || remote.length > 2000 || /\s/.test(remote))
+    fail('invalid trusted Store remote');
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'publisher-store-write-'));
+  const work = path.join(temp, 'store');
+  try {
+    execFileSync('git', ['clone', '--no-tags', '--single-branch', '--branch', STORE_REF,
+      '--', remote, work], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 45000, maxBuffer: 2 * 1024 * 1024,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_NO_REPLACE_OBJECTS: '1' },
+    });
+    if (git(work, ['symbolic-ref', '--short', 'HEAD']) !== STORE_REF)
+      fail('not an agent-store checkout');
+    return { temp, work };
+  } catch (error) {
+    fs.rmSync(temp, { recursive: true, force: true });
+    if (String(error.message).startsWith('Publisher review ingest:')) throw error;
+    fail('authenticated agent-store remote unavailable');
+  }
+}
+
+// Composes the existing owners: the state-store CAS writes the version, the
+// run-store audit proves exactly one state + head change, and the canonical
+// CAS push publishes without force or rewriting history. The workflow supplies
+// the authenticated remote; this function never logs it.
+export function applyPublicationToRemote({ remote, readback, registry,
+  publishStore = publish, onCandidate = null }) {
+  const { temp, work } = openStoreRemote(remote);
+  try {
+    const applied = applyPublisherReviewHandoff({ storeRoot: work, readback, registry });
+    if (!applied.changed) return { ...applied, commit_sha: null, replayed: true };
+    git(work, ['add', '-A']);
+    const audit = auditStagedRunStore(work, STORE_REF);
+    if (audit.checked_changes !== 2)
+      fail('publisher handoff expected one immutable state and one head pointer');
+    git(work, ['-c', 'user.name=nession-agent-controller',
+      '-c', 'user.email=nession-agent-controller@users.noreply.github.com',
+      'commit', '-m', 'agent-store: record Publisher review handoff for Issue ' + ISSUE]);
+    if (onCandidate !== null) {
+      if (process.env.NODE_ENV !== 'test') fail('candidate injection prohibited outside tests');
+      onCandidate();
+    }
+    const published = publishStore(STORE_REF, work, 4);
+    return { ...applied, commit_sha: published.commit_sha, replayed: published.replayed };
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function assertTrustedMainWorkflow() {
+  if (process.env.GITHUB_ACTIONS !== 'true' ||
+      process.env.GITHUB_REPOSITORY !== REPO ||
+      process.env.GITHUB_REF !== 'refs/heads/main' ||
+      process.env.GITHUB_EVENT_NAME !== 'workflow_run' ||
+      process.env.GITHUB_WORKFLOW !== 'Store / Publisher Review Ingest')
+    fail('trusted main-only Store Ingest required');
+}
+
 async function main() {
   const [command, ...args] = process.argv.slice(2);
   if (command === 'fetch' && args.length === 2 && args[0] === '--out') {
@@ -104,12 +180,7 @@ async function main() {
     return;
   }
   if (command === 'apply' && args.length === 2) {
-    if (process.env.GITHUB_ACTIONS !== 'true' ||
-        process.env.GITHUB_REPOSITORY !== REPO ||
-        process.env.GITHUB_REF !== 'refs/heads/main' ||
-        process.env.GITHUB_EVENT_NAME !== 'workflow_run' ||
-        process.env.GITHUB_WORKFLOW !== 'Store / Publisher Review Ingest')
-      fail('trusted main-only Store Ingest required');
+    assertTrustedMainWorkflow();
     const readback = JSON.parse(fs.readFileSync(args[1], 'utf8'));
     const result = applyPublisherReviewHandoff({
       storeRoot: args[0], readback, registry: loadRegistry(),
@@ -119,7 +190,19 @@ async function main() {
       reviewer_agent_id: result.reviewer_agent_id }));
     return;
   }
-  fail('usage: fetch --out FILE | apply STORE READBACK_JSON');
+  if (command === 'apply-store' && args.length === 2) {
+    assertTrustedMainWorkflow();
+    const readback = JSON.parse(fs.readFileSync(args[1], 'utf8'));
+    const result = applyPublicationToRemote({
+      remote: args[0], readback, registry: loadRegistry(),
+    });
+    console.log(JSON.stringify({ changed: result.changed, version: result.version,
+      target_sha: result.target_sha, reviewer_action_id: result.reviewer_action_id,
+      reviewer_agent_id: result.reviewer_agent_id, commit_sha: result.commit_sha,
+      replayed: result.replayed }));
+    return;
+  }
+  fail('usage: fetch --out FILE | apply STORE READBACK_JSON | apply-store REMOTE READBACK_JSON');
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
