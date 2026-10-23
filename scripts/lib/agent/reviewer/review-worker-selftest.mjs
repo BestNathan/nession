@@ -35,6 +35,13 @@ try{
   const file=path.join(temp,'admission.json');
   fs.writeFileSync(file,JSON.stringify(admission));
   assert.equal(readReviewAdmission(file).target_sha,admission.target_sha);
+  // The Worker must accept every registered reviewer identity, not only cursor.
+  const qwenFile=path.join(temp,'admission-qwen.json');
+  fs.writeFileSync(qwenFile,JSON.stringify({...admission,agent_id:'review-qwen-01'}));
+  assert.equal(readReviewAdmission(qwenFile).agent_id,'review-qwen-01');
+  const unregistered=path.join(temp,'admission-dev.json');
+  fs.writeFileSync(unregistered,JSON.stringify({...admission,agent_id:'dev-cursor-01'}));
+  assert.throws(()=>readReviewAdmission(unregistered),/unregistered reviewer identity/);
   const symlink=path.join(temp,'admission-link.json');
   fs.symlinkSync(file,symlink);
   assert.throws(()=>readReviewAdmission(symlink),/unsafe verified admission/);

@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { loadCursorSdk, runCursorSession } from '../providers/cursor.mjs';
 import { parseNativeEvents, toolUseNames } from '../providers/claude-stream.mjs';
 import { claudeCliToolPolicy } from '../harness/native.mjs';
-import { assertAuthenticatedReviewerAdmission, resolveReviewerIdentity } from './pr-admission.mjs';
+import { assertReviewerAdmission, resolveReviewerIdentity } from './pr-admission.mjs';
 import { REVIEW_TOOLS, assertUnprivilegedReviewerEnvironment, runReviewSlice } from './review-slice.mjs';
 
 const MAX_ADMISSION = 16384;
@@ -34,7 +34,11 @@ export function readReviewAdmission(file) {
   const stat = fs.lstatSync(file);
   if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_ADMISSION)
     fail('unsafe verified admission');
-  return assertAuthenticatedReviewerAdmission(JSON.parse(fs.readFileSync(file, 'utf8')));
+  const task = JSON.parse(fs.readFileSync(file, 'utf8'));
+  // The identity must be a registered reviewer; the Worker must accept any
+  // registered provider's admission, not only the cursor default.
+  const identity = resolveReviewerIdentity(task?.agent_id);
+  return assertReviewerAdmission(task, { agent_id: identity.agent_id });
 }
 
 // Same OS-isolation contract as the Developer slice: no host SDK sandbox,
