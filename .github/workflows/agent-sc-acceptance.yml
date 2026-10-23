@@ -109,11 +109,14 @@ jobs:
             const registry=JSON.parse(readFileSync("automation/agents/registry.json","utf8"));
             const given=process.env.ACCEPTOR_OVERRIDE;
             const legacy={cursor:"accept-cursor-01",qwen:"accept-qwen-01"};
-            if(given==="deepseek") {
-              // Existing explicit DeepSeek workflow contract remains available.
-              process.stdout.write("provider=deepseek\n");
-              process.stdout.write("environment=deepseek\n");
-              process.stdout.write("agent_id=legacy-acceptance-deepseek\n");
+            if(given==="deepseek" || given==="cursor" ||
+                (!given && !process.env.ACCEPTOR_DEFAULT)) {
+              // Keep existing shared legacy Environments until an owner sets a
+              // registered Acceptor default in GitHub Repository Variables.
+              const provider=given==="deepseek"?"deepseek":"cursor";
+              process.stdout.write("provider="+provider+"\n");
+              process.stdout.write("environment="+provider+"\n");
+              process.stdout.write("agent_id=legacy-acceptance-"+provider+"\n");
             } else {
               const identity=resolveAgentDefault(registry,"acceptor",{
                 configured:process.env.ACCEPTOR_DEFAULT,
