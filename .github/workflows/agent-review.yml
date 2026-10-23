@@ -34,7 +34,10 @@ jobs:
     if: >-
       github.repository == 'BestNathan/nession' &&
       github.ref == 'refs/heads/main' &&
-      github.actor == 'BestNathan'
+      (
+        github.actor == 'BestNathan' ||
+        (github.event_name == 'workflow_dispatch' && github.actor == 'github-actions[bot]')
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -158,7 +161,7 @@ jobs:
             --cap-drop=ALL --security-opt=no-new-privileges \
             --pids-limit=256 --memory=2g --cpus=2 \
             --network=bridge --tmpfs /tmp:rw,nosuid,nodev,size=2g \
-            --user "$(id -u):$(id -g)" --workdir /trusted-code \
+            --user "$(id -u):$(id -g)" --workdir /workspace \
             -v "$GITHUB_WORKSPACE:/workspace:ro" \
             -v "$RUNNER_TEMP/review-output:/output:rw" \
             -v "$RUNNER_TEMP/admission:/admission:ro" \
@@ -175,7 +178,7 @@ jobs:
             -e CURSOR_SDK_ROOT=/sdk -e HOME=/tmp \
             -e PATH=/claude-cli/node_modules/.bin:/usr/local/bin:/usr/bin:/bin \
             node:24-bookworm \
-            node /trusted-code/scripts/lib/agent/reviewer/review-worker.mjs \
+            node /workspace/scripts/lib/agent/reviewer/review-worker.mjs \
               /admission/review-admission.json /output
       - name: Upload canonical telemetry for Metrics ingest
         if: always()
