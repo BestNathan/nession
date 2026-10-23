@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "03c3b723c5a49f46e00c9cda4a5c4fc7ba32d84807e4f254b9bf26d4694077fc",
+  "run_id": 40021909560,
+  "run_attempt": 1,
+  "issue": 2307,
+  "criterion": "SC-03",
+  "criterion_text": "Valid arbitrary pane bytes including non-UTF-8, octal control bytes, CR/LF, split/large frames and interleaved command output arrive byte-identically; malformed/oversized frames and unknown notifications have bounded, intentional outcomes, reusing the #2300 contract.",
+  "stage": "post-merge",
+  "target_sha": "accaa98f07f66dd5433d374ea96594e37a1e5930",
+  "contract_sha256": "209b23fcadf30044fe0722c55678f9607dbb3d4503c5c25259485743d49efd6d",
+  "case_revision": "accaa98f07f66dd5433d374ea96594e37a1e5930",
+  "case_tree_sha": "4457dff214cfca396b77f042361f506473708064",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-23T20:50:58.357Z",
+  "finished_at": "2026-10-23T20:50:59.226Z",
+  "duration_ms": 869,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Arbitrary pane bytes are preserved byte-identically, and malformed/oversized/unknown records have the bounded #2300 outcomes",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "byte-exact non-UTF-8 and split-frame output, CR/ESC data preservation, and capture-body OSC-8 ST survival passed at exact SHA accaa98f07f66dd5433d374ea96594e37a1e5930"
+        },
+        {
+          "type": "runtime",
+          "value": "truncated records fail closed as UnexpectedEof; unknown notifications stay forward compatible; a known-tag prefix alone is not that tag"
+        }
+      ],
+      "duration_ms": 857,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40021909560,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "accaa98f07f66dd5433d374ea96594e37a1e5930",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40021909560",
+    "record_path": "runs/2026-10-23/40021909560-1/2307/SC-03.json",
+    "source_result_sha256": "642b4a1c84e48c3d0818805710472ee67b0b43d3d8adbe2c5a5d3574531176a3"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40021909560-1",
+    "sha256": "642b4a1c84e48c3d0818805710472ee67b0b43d3d8adbe2c5a5d3574531176a3",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40021909560",
+    "durability": "time-limited; object archival not configured"
+  }
+}

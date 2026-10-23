@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "667e45219cb6f26f64700b67c124603064ec6b4d0261142dac2692cdebb9ecb3",
+  "run_id": 40021909560,
+  "run_attempt": 1,
+  "issue": 2307,
+  "criterion": "SC-04",
+  "criterion_text": "Concurrent commands receive the correct matching tmux `%end/%error` result in wire order; timeout, cancellation, disconnect and late reply cannot misdeliver a response to a later caller, with deterministic red/green fault fixtures.",
+  "stage": "post-merge",
+  "target_sha": "accaa98f07f66dd5433d374ea96594e37a1e5930",
+  "contract_sha256": "209b23fcadf30044fe0722c55678f9607dbb3d4503c5c25259485743d49efd6d",
+  "case_revision": "accaa98f07f66dd5433d374ea96594e37a1e5930",
+  "case_tree_sha": "357f0140ba5365d0c45d6f4c30144e776dd75df5",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-23T20:50:59.226Z",
+  "finished_at": "2026-10-23T20:51:00.090Z",
+  "duration_ms": 864,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Concurrent commands resolve against their own replies in wire order, and timeout/loss/late replies cannot misdeliver",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "wire-order matching, %error bodies, timeout tombstones, source-loss rejection and the bounded pending queue passed at exact SHA accaa98f07f66dd5433d374ea96594e37a1e5930"
+        },
+        {
+          "type": "runtime",
+          "value": "a late reply is consumed by its own tombstone; the next caller never receives it"
+        }
+      ],
+      "duration_ms": 852,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40021909560,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "accaa98f07f66dd5433d374ea96594e37a1e5930",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40021909560",
+    "record_path": "runs/2026-10-23/40021909560-1/2307/SC-04.json",
+    "source_result_sha256": "908c3ffbb04b2d91e6464f9c5090ae296cdc330f91038dab5dd5a3d05f1369a3"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40021909560-1",
+    "sha256": "908c3ffbb04b2d91e6464f9c5090ae296cdc330f91038dab5dd5a3d05f1369a3",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40021909560",
+    "durability": "time-limited; object archival not configured"
+  }
+}

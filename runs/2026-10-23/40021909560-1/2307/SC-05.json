@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "5c87a58763305e88f3115dd69ee290a51886e1abff52c859b2c021fc4cd7aa3e",
+  "run_id": 40021909560,
+  "run_attempt": 1,
+  "issue": 2307,
+  "criterion": "SC-05",
+  "criterion_text": "From the single Client source, output and authoritative size/layout changes preserve source order through Agent epoch/seq; capture/live straddling and source failure do not lose/duplicate data or falsely declare a verified checkpoint/continuity.",
+  "stage": "post-merge",
+  "target_sha": "accaa98f07f66dd5433d374ea96594e37a1e5930",
+  "contract_sha256": "209b23fcadf30044fe0722c55678f9607dbb3d4503c5c25259485743d49efd6d",
+  "case_revision": "accaa98f07f66dd5433d374ea96594e37a1e5930",
+  "case_tree_sha": "2c3418fc4bd8ddc2f7a7ce568d7a4ec793227416",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-23T20:51:00.090Z",
+  "finished_at": "2026-10-23T20:51:11.693Z",
+  "duration_ms": 11603,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Source-ordered output and layout events, with an exact capture/live join and no duplication",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "tmux executable: tmux 3.4"
+        },
+        {
+          "type": "runtime",
+          "value": "capture/live GAP-001..060 exactly-once join, peer-driven resize delivery, and attach output passed on real isolated tmux at exact SHA accaa98f07f66dd5433d374ea96594e37a1e5930"
+        },
+        {
+          "type": "runtime",
+          "value": "the ordered event stream publishes pre-capture output, CaptureStarted, interleaved output, Capture and post-capture output in wire order"
+        }
+      ],
+      "duration_ms": 11590,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40021909560,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "accaa98f07f66dd5433d374ea96594e37a1e5930",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40021909560",
+    "record_path": "runs/2026-10-23/40021909560-1/2307/SC-05.json",
+    "source_result_sha256": "c8aaadfc5230f375de1444bb309db0927d7fb5232089d7627d2b9fc8a0d3328b"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40021909560-1",
+    "sha256": "c8aaadfc5230f375de1444bb309db0927d7fb5232089d7627d2b9fc8a0d3328b",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40021909560",
+    "durability": "time-limited; object archival not configured"
+  }
+}

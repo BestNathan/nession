@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "788c4fd3e78be5e3e0359403684234015be8b5d5d05fdcfb1ef8d9df75d4c5fa",
+  "run_id": 40021909560,
+  "run_attempt": 1,
+  "issue": 2307,
+  "criterion": "SC-02",
+  "criterion_text": "Both `-C + Pipe` and `-CC + PTY` successfully handshake, execute commands and deliver equivalent typed pane output/layout events on real isolated tmux; the `-CC` DCS/ST, termios and invalid-Pipe negative path are handled explicitly on supported macOS/Linux runners.",
+  "stage": "post-merge",
+  "target_sha": "accaa98f07f66dd5433d374ea96594e37a1e5930",
+  "contract_sha256": "209b23fcadf30044fe0722c55678f9607dbb3d4503c5c25259485743d49efd6d",
+  "case_revision": "accaa98f07f66dd5433d374ea96594e37a1e5930",
+  "case_tree_sha": "2225cc6907ca9807ee8257b82038e431479e5417",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-23T20:50:22.121Z",
+  "finished_at": "2026-10-23T20:50:58.356Z",
+  "duration_ms": 36235,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Both transports deliver equivalent typed output/capture/resize on real isolated tmux, and the -CC/negative/default paths are explicit",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "tmux executable: tmux 3.4"
+        },
+        {
+          "type": "runtime",
+          "value": "-C and -CC handshake, input, %output, capture and resize parity passed on real isolated tmux at exact SHA accaa98f07f66dd5433d374ea96594e37a1e5930"
+        },
+        {
+          "type": "runtime",
+          "value": "-CC real PTY DCS/ST/CRLF handshake and command reply passed; missing binary errors on both transports; child death is SourceLost; the default stays -C"
+        }
+      ],
+      "duration_ms": 36209,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40021909560,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "accaa98f07f66dd5433d374ea96594e37a1e5930",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40021909560",
+    "record_path": "runs/2026-10-23/40021909560-1/2307/SC-02.json",
+    "source_result_sha256": "cdcb4d0a2903b2319499c319e59e338d434e124d64960e19a1413f3e9f12f6ba"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40021909560-1",
+    "sha256": "cdcb4d0a2903b2319499c319e59e338d434e124d64960e19a1413f3e9f12f6ba",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40021909560",
+    "durability": "time-limited; object archival not configured"
+  }
+}

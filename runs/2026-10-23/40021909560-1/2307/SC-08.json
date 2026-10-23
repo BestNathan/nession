@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "7c82f1a4c036b6b41988ba2ed13ba08441804f2e202d42795d9593d2438cf8a9",
+  "run_id": 40021909560,
+  "run_attempt": 1,
+  "issue": 2307,
+  "criterion": "SC-08",
+  "criterion_text": "Normal shell, Vim/top-style full-screen TUI, resize, exit, capture bootstrap and relevant existing P2P/Relay regression fixtures remain functional using the migrated Client; the new implementation does not assert complete VT restoration from screen-only capture.",
+  "stage": "post-merge",
+  "target_sha": "accaa98f07f66dd5433d374ea96594e37a1e5930",
+  "contract_sha256": "209b23fcadf30044fe0722c55678f9607dbb3d4503c5c25259485743d49efd6d",
+  "case_revision": "accaa98f07f66dd5433d374ea96594e37a1e5930",
+  "case_tree_sha": "1ec10187154e14641f04e29a5287c6f80a66199a",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Fail",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-23T20:51:23.663Z",
+  "finished_at": "2026-10-23T20:51:57.825Z",
+  "duration_ms": 34162,
+  "verifiers": [
+    {
+      "type": "browser",
+      "entry": "verify.spec.js",
+      "result": "Fail",
+      "summary": "Playwright assertions failed at verify.spec.js:58:90",
+      "evidence": [],
+      "execution": {
+        "discovered": 1,
+        "passed": 0,
+        "failed": 1,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 66
+      },
+      "duration_ms": 28300,
+      "exit_code": 1
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40021909560,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "accaa98f07f66dd5433d374ea96594e37a1e5930",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40021909560",
+    "record_path": "runs/2026-10-23/40021909560-1/2307/SC-08.json",
+    "source_result_sha256": "6fbacc175d7a02e6b23ee6d806e9b6eeecd885528b5e5108f78f3c6be142145c"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40021909560-1",
+    "sha256": "6fbacc175d7a02e6b23ee6d806e9b6eeecd885528b5e5108f78f3c6be142145c",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40021909560",
+    "durability": "time-limited; object archival not configured"
+  }
+}
