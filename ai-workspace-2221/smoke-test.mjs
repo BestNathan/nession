@@ -174,9 +174,13 @@ check('target-free create opens Agent entry but pauses for selection',
   state().pendingGoal.status === 'awaiting_selection' &&
   !space().view.some(c => c.actionId === 'session.create.open'));
 click({agentSelect:'agent-mac-02'});
-check('manual Agent selection resumes pending goal to Create form',
-  state().pendingGoal.status === 'awaiting_user_commit' &&
+check('manual Agent selection resumes goal but waits for missing form input',
+  state().pendingGoal.status === 'awaiting_input' &&
   state().scenes[0].activeView === 'session.create');
+dispatch('input', {id:'formName',value:'manual-goal'});
+check('valid user input makes goal commit-ready but does not auto-submit',
+  state().pendingGoal.status === 'awaiting_user_commit' &&
+  !state().lastConfirmedOutcome?.resource?.id?.endsWith('manual-goal'));
 
 
 dispatch('click', el('resetButton'), 'resetButton');
