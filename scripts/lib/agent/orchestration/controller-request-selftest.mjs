@@ -19,8 +19,20 @@ const context={repository:'BestNathan/nession',workflow:'Acceptance / Agent Cont
 const request=buildControllerRequest(inputs,context,registry);
 assert.equal(request.request.issue,issue);
 assert.equal(request.run.actor,'BestNathan');
+const routed=buildControllerRequest({...inputs,reviewer:'',acceptor:''},
+  context,registry,{reviewer:'review-qwen-01',acceptor:'accept-qwen-01'});
+assert.equal(routed.request.reviewer,'review-qwen-01');
+assert.equal(routed.request.acceptor,'accept-qwen-01');
+assert.equal(routed.request.developer,'dev-cursor-01');
+assert.equal(buildControllerRequest({...inputs,reviewer:'review-cursor-01'},context,registry,
+  {reviewer:'review-qwen-01'}).request.reviewer,'review-cursor-01');
+assert.throws(()=>buildControllerRequest({...inputs,reviewer:''},context,registry,
+  {reviewer:'dev-qwen-01'}),/wrong-role/);
+assert.throws(()=>buildControllerRequest({...inputs,developer:''},context,registry,
+  {developer:'dev-qwen-01'}),/requires #2274/);
+
 assert.throws(()=>buildControllerRequest({...inputs,developer:'review-cursor-01'},
-  context,registry),/role or ID/);
+  context,registry),/wrong-role/);
 assert.throws(()=>buildControllerRequest({...inputs,inject:'secret'},context,registry),
   /extra/);
 assert.throws(()=>buildControllerRequest({...inputs,input_sha:'main'},context,registry),

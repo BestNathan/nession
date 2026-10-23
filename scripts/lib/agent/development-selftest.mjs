@@ -113,6 +113,27 @@ assert.throws(() => advanceWorkflow(null, { ...publication, outcome: 'yielded' }
   publishAttest(publication)), /invalid event envelope/);
 assert.throws(() => advanceWorkflow(handoff.state, { ...publication, run_id: 11 },
   publishAttest({ ...publication, run_id: 11 })), /illegal state transition/);
+// #2262: an owner-authorized publication may bind a different registered
+// Reviewer; the identity is recorded and a conflicting replay fails closed.
+const assigned = { issue: 1664, phase: 'ready', target_sha: null, repair_attempts: 0,
+  transitions: [], assignments: { developer: 'dev-cursor-01',
+    reviewer: 'review-cursor-01', acceptor: 'accept-cursor-01' } };
+const bound = advanceWorkflow(assigned,
+  { ...publication, reviewer_agent_id: 'review-qwen-01' }, publishAttest(publication));
+assert.equal(bound.state.assignments.reviewer, 'review-qwen-01');
+assert.equal(bound.state.transitions.at(-1).reviewer_agent_id, 'review-qwen-01');
+assert.throws(() => advanceWorkflow(bound.state,
+  { ...publication, reviewer_agent_id: 'review-other-01' }, publishAttest(publication)),
+  /conflicting reviewer replay/);
+assert.throws(() => advanceWorkflow(null, { ...publication, reviewer_agent_id: 'review-qwen-01' },
+  publishAttest(publication)), /initialized assignment/);
+assert.throws(() => advanceWorkflow(assigned,
+  { ...publication, reviewer_agent_id: 'Bad Id' }, publishAttest(publication)),
+  /invalid replacement reviewer/);
+assert.throws(() => advanceWorkflow(assigned,
+  { ...event('reviewer', 'approved', 12), reviewer_agent_id: 'review-qwen-01' },
+  { ...publishAttest(event('reviewer', 'approved', 12)), role: 'reviewer' }),
+  /only applies to publication/);
 assert.equal(authorizeCommentCommand('/agent review', 'write').role, 'reviewer');
 assert.throws(() => authorizeCommentCommand('/agent review', 'read'), /authority/);
 assert.throws(() => authorizeCommentCommand('/agent merge', 'write'), /unsupported/);

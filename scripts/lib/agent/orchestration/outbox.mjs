@@ -297,7 +297,8 @@ export function acceptPublisherPublication(state, expectedVersion, event, truste
   const prior = state.transitions.find(x => x.kind === 'publisher' &&
     x.run_id === event.run_id && x.attempt === event.run_attempt);
   if (prior) {
-    if (prior.target_sha !== event.target_sha || prior.outcome !== event.outcome)
+    if (prior.target_sha !== event.target_sha || prior.outcome !== event.outcome ||
+        (prior.reviewer_agent_id ?? null) !== (event.reviewer_agent_id ?? null))
       reject('conflicting publication replay');
     return state; // the same authenticated publication is idempotent
   }
@@ -311,14 +312,24 @@ export function acceptPublisherPublication(state, expectedVersion, event, truste
   if (state.outbox.some(x =>
     x.status === 'pending' && x.task.type === 'dispatch' && x.task.role === 'reviewer'))
     reject('a Reviewer action is already pending');
+  if (event.reviewer_agent_id != null) {
+    const replacement = registry.instances?.[event.reviewer_agent_id];
+    if (typeof event.reviewer_agent_id !== 'string' || !replacement ||
+        replacement.role !== 'reviewer')
+      reject('replacement reviewer is not a registered reviewer');
+    resolveIdentity(registry, event.reviewer_agent_id, 'review', replacement.environment);
+    if (state.assignments.reviewer === event.reviewer_agent_id)
+      reject('replacement reviewer is already assigned');
+  }
   const advanced = advanceWorkflow(state, event, trusted);
   if (advanced.duplicate) reject('duplicate publication event');
   const superseded = supersededProposalChain(state, proposals[0]);
   const version = state.version + 1;
   const outbox = advanced.state.outbox.filter(x => !superseded.has(x.id));
   if (outbox.length + advanced.actions.length > MAX_OUTBOX) reject('outbox size limit exceeded');
+  const assignments = advanced.state.assignments ?? state.assignments;
   const spawned = advanced.actions.map((action, index) => {
-    const entry = makeAction(state.issue, version, action, state.assignments, index);
+    const entry = makeAction(state.issue, version, action, assignments, index);
     if (entry.task.type === 'dispatch') {
       boundRole(registry, entry.task.agent_id, entry.task.role, entry.task.task);
     }
