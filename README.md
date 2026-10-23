@@ -13,6 +13,6 @@
 
 | Prototype | Requirement | HTML |
 |---|---|---|
-| AI Workspace (Scene + dynamic Action Space + Jev mock) | [#2221](https://github.com/BestNathan/nession/issues/2221) | [Interactive HTML](ai-workspace-2221/index.html) · [Protocol](ai-workspace-2221/PROTOCOL.md) |
+| AI Workspace (Progressive Action Space + Pending Goal + Jev mock) | [#2221](https://github.com/BestNathan/nession/issues/2221) | [Interactive HTML](ai-workspace-2221/index.html) · [Protocol](ai-workspace-2221/PROTOCOL.md) |
 
 Do not add more `prototypes/<topic>` branches. Add another sibling directory here.
