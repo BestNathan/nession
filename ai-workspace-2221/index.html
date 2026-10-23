@@ -537,7 +537,7 @@
   function activateId(id){
     const item=getScene(id);
     if(!item || item.id===state.activeSceneId)return;
-    userInteractionEpoch++;if(state.pendingGoal&&['resolving','awaiting_data'].includes(state.pendingGoal.status))state.pendingGoal.status='suspended';state.activeSceneId=id;bump();render();log('FOCUS SCENE',`${item.title} · 用户手动切换`);
+    userInteractionEpoch++;if(state.pendingGoal&&['resolving','awaiting_data'].includes(state.pendingGoal.status))transitionGoal(state.pendingGoal,'suspended','interrupted');state.activeSceneId=id;bump();render();log('FOCUS SCENE',`${item.title} · 用户手动切换`);
   }
   function fetchAgentList(item, forced=false){
     if(item.status==='loading'&&!forced)return;
@@ -621,6 +621,24 @@
     return item===focused()?visibleAgentIds()[index]||null:null;
   }
 
+  // Explicit, validated PendingGoal state transition graph (mock reducer-owned).
+  const goalTransitions=Object.freeze({
+    resolving:['awaiting_data','awaiting_selection','awaiting_input','awaiting_user_commit','suspended','cancelled','failed'],
+    awaiting_data:['resolving','awaiting_selection','awaiting_input','awaiting_user_commit','suspended','cancelled','failed'],
+    awaiting_selection:['resolving','awaiting_data','awaiting_input','awaiting_user_commit','suspended','cancelled','failed'],
+    awaiting_input:['awaiting_user_commit','suspended','cancelled','failed'],
+    awaiting_user_commit:['awaiting_input','completed','suspended','cancelled','failed'],
+    suspended:['resolving','awaiting_data','awaiting_selection','awaiting_input','awaiting_user_commit','cancelled'],
+    completed:[],cancelled:[],failed:[]
+  });
+  function transitionGoal(goal,next,cause){
+    if(!goal||goal.status===next)return;
+    if(!goalTransitions[goal.status]?.includes(next))
+      throw new Error('Invalid PendingGoal transition: '+goal.status+' → '+next+' ('+cause+')');
+    goal.transitions=(goal.transitions||[]).slice(-15);
+    goal.transitions.push({from:goal.status,to:next,cause,revision:state.revision});
+    goal.status=next;
+  }
   // Pending Goal is a continuation reference, not a precomputed workflow or a future action.
   function parseCreationGoal(utterance){
     if(!/(创建|新建|增加|create|new|再创建)/i.test(utterance)||!/(session|会话|终端|窗口)/i.test(utterance))return null;
@@ -634,7 +652,7 @@
   }
   function suspendGoal(status,message){
     const g=state.pendingGoal;if(!g)return;
-    g.status=status;if(message)clarification=message;bump();render();
+    transitionGoal(g,status,'suspend');if(message)clarification=message;bump();render();
     log('GOAL '+status.toUpperCase(),message||g.goalId);
   }
   function goalAgentMatches(g,a){
@@ -658,7 +676,7 @@
     if(name&&ctx&&['awaiting_input','awaiting_user_commit'].includes(goal.status)){
       userInteractionEpoch++;
       ctx.form.draft.name=name[1];ctx.form.error='';
-      goal.status=/^[A-Za-z0-9_.-]{1,64}$/.test(name[1])?'awaiting_user_commit':'awaiting_input';
+      transitionGoal(goal,/^[A-Za-z0-9_.-]{1,64}$/.test(name[1])?'awaiting_user_commit':'awaiting_input','slot-message');
       goal.userEpoch=userInteractionEpoch;
       state.currentQuestion=question;
       latestDecision={mock:true,judgment:'slot.update',chosen:'view.draft.update',modelCalled:false};
@@ -666,7 +684,7 @@
       return true;
     }
     if(/^(继续|继续刚才的操作|恢复刚才的操作)$/.test(question.trim())&&goal.status==='suspended'){
-      goal.status=ctx?(ctx.form.draft.name?'awaiting_user_commit':'awaiting_input'):'resolving';
+      transitionGoal(goal,ctx?(ctx.form.draft.name?'awaiting_user_commit':'awaiting_input'):'resolving','explicit-resume');
       goal.userEpoch=userInteractionEpoch;
       clarification='';bump();render();
       if(goal.status==='resolving')advancePendingGoal('resume');
@@ -681,7 +699,7 @@
     if(!g||!['resolving','awaiting_data','awaiting_selection'].includes(g.status))return;
     const scene=focused();if(!scene||scene.type!=='agent.list')return;
     g.ownerSceneId=scene.id;
-    if(scene.status!=='ready'){g.status='awaiting_data';bump();return;}
+    if(scene.status!=='ready'){transitionGoal(g,'awaiting_data','view-loading');bump();return;}
     let space=deriveActionSpace(),target=scene.selectedAgentId;
     if(g.agentHint){
       const matched=space.view.filter(c=>c.actionId==='agent.select'&&c.eligibility==='enabled')
@@ -717,7 +735,7 @@
       flow.draft.name=g.nameHint;
       g.steps.push({step:'prefill',source:'explicit-utterance',view:'session.create.form'});
     }
-    g.resolvedAgentId=target;g.ownerSceneId=focused()?.id;g.status=/^[A-Za-z0-9_.-]{1,64}$/.test(flow.draft.name.trim())?'awaiting_user_commit':'awaiting_input';g.userEpoch=userInteractionEpoch;
+    g.resolvedAgentId=target;g.ownerSceneId=focused()?.id;transitionGoal(g,/^[A-Za-z0-9_.-]{1,64}$/.test(flow.draft.name.trim())?'awaiting_user_commit':'awaiting_input','form-prepared');g.userEpoch=userInteractionEpoch;
     clarification='';bump();render();
     log('GOAL COMMIT BARRIER','表单已准备好；后端创建仍须用户明确提交');
   }
@@ -764,7 +782,7 @@
     busy=true;setBusy(true);clarification='';state.currentQuestion=question;
     if(applyGoalFollowup(question)){setBusy(false);return;}
     if(/取消.*(目标|创建)|不创建了/.test(question)){
-      if(state.pendingGoal)state.pendingGoal.status='cancelled';
+      if(state.pendingGoal)transitionGoal(state.pendingGoal,'cancelled','user-cancelled');
       busy=false;setBusy(false);bump();render();return;
     }
     if(state.pendingGoal&&!['completed','cancelled'].includes(state.pendingGoal.status))
@@ -776,7 +794,7 @@
     const plan=buildJevPlan(question,projection,space);
     if(!plan){
       latestQuestionPlan={status:'awaiting_data',reason:'no currently enabled action'};
-      if(state.pendingGoal)state.pendingGoal.status='awaiting_data';
+      if(state.pendingGoal)transitionGoal(state.pendingGoal,'awaiting_data','no-eligible-candidates');
       setBusy(false);bump();render();log('MODEL SKIPPED','没有可执行候选：等待 View 数据更新');
       return;
     }
@@ -819,7 +837,7 @@
             const goal=state.pendingGoal,flow=focused()?.type==='session.create'?focused():focused()?.flow;
             if(flow){
               if(goal.nameHint&&!flow.draft.name)flow.draft.name=goal.nameHint;
-              goal.status=/^[A-Za-z0-9_.-]{1,64}$/.test(flow.draft.name.trim())?'awaiting_user_commit':'awaiting_input';goal.ownerSceneId=focused()?.id;
+              transitionGoal(goal,/^[A-Za-z0-9_.-]{1,64}$/.test(flow.draft.name.trim())?'awaiting_user_commit':'awaiting_input','form-opened');goal.ownerSceneId=focused()?.id;
               goal.steps.push({candidateId:candidate.candidateId,source:'current-view'});
               bump();render();
             }
@@ -969,14 +987,14 @@
     const ctx=formContext();if(!ctx)return;
     if(e.target.id==='formName'){userInteractionEpoch++;ctx.form.draft.name=e.target.value;ctx.form.error='';
       if(state.pendingGoal?.ownerSceneId===ctx.item.id&&['awaiting_input','awaiting_user_commit'].includes(state.pendingGoal.status))
-        state.pendingGoal.status=/^[A-Za-z0-9_.-]{1,64}$/.test(e.target.value.trim())?'awaiting_user_commit':'awaiting_input';
+        transitionGoal(state.pendingGoal,/^[A-Za-z0-9_.-]{1,64}$/.test(e.target.value.trim())?'awaiting_user_commit':'awaiting_input','form-name-edit');
       bump();}
   });
   document.addEventListener('change',e=>{
     const ctx=formContext();if(!ctx)return;
     if(e.target.id==='formAgent'){userInteractionEpoch++;ctx.form.draft.agentId=e.target.value;
       if(state.pendingGoal?.ownerSceneId===ctx.item.id&&['awaiting_input','awaiting_user_commit'].includes(state.pendingGoal.status))
-        state.pendingGoal.status=/^[A-Za-z0-9_.-]{1,64}$/.test(ctx.form.draft.name.trim())&&agents.find(a=>a.id===e.target.value)?.status==='online'?'awaiting_user_commit':'awaiting_input';if(e.target.value){state.selectedAgentId=e.target.value;if(ctx.inline)ctx.item.selectedAgentId=e.target.value;}ctx.form.error='';bump();render();log('STATE WRITEBACK',`SessionCreate 选择 Agent: ${e.target.value} · Scene ${ctx.item.id}`);}
+        transitionGoal(state.pendingGoal,/^[A-Za-z0-9_.-]{1,64}$/.test(ctx.form.draft.name.trim())&&agents.find(a=>a.id===e.target.value)?.status==='online'?'awaiting_user_commit':'awaiting_input','form-target-edit');if(e.target.value){state.selectedAgentId=e.target.value;if(ctx.inline)ctx.item.selectedAgentId=e.target.value;}ctx.form.error='';bump();render();log('STATE WRITEBACK',`SessionCreate 选择 Agent: ${e.target.value} · Scene ${ctx.item.id}`);}
   });
   document.addEventListener('submit',e=>{
     if(e.target.id!=='createSessionForm')return;
@@ -1000,7 +1018,7 @@
       const agent=agents.find(a=>a.id===agentId);if(agent)agent.sessions++;
       state.lastOperation={type:'session.create',status:'success',sessionId:result.id,ownerSceneId:item.id};
       state.selectedSessionId=result.id;
-      if(state.pendingGoal?.status==='awaiting_user_commit'&&state.pendingGoal.ownerSceneId===item.id)state.pendingGoal.status='completed';
+      if(state.pendingGoal?.status==='awaiting_user_commit'&&state.pendingGoal.ownerSceneId===item.id)transitionGoal(state.pendingGoal,'completed','confirmed-backend-result');
       bump();render();log('STATE WRITEBACK',`成功：${name} · owner ${item.id} · ${state.scenes.length} 个 Scene`);
       toast(`已创建 Session：${name}（模拟）`);
     },650);
