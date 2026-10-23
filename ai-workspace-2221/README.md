@@ -51,7 +51,7 @@ You can switch between three suites, browse any case, move backward/forward by s
 
 The static data file [`jev-replay-data.js`](jev-replay-data.js) was generated from the **immutable Task Result Ingest records**, with inputs recovered from the pinned Task source files. It intentionally contains **no API credentials**, and does not ask TypeSafe/Jev to infer anything while browsing. The UI and styles are [`jev-replay.js`](jev-replay.js) and [`jev-replay.css`](jev-replay.css). Data values are recorded observations, not model predictions reproduced locally.
 
-Run `node ai-workspace-2221/jev-replay.test.mjs` to check the **17 fake-DOM controller/data invariants** without npm packages, plus `node ai-workspace-2221/smoke-test.mjs` for the **47 existing Workspace mock invariants**. Neither script is a real browser E2E or SC acceptance. The archived sample sizes are tiny and vary between suites: **do not interpret these percentages as production accuracy or statistical improvement**.
+Run `node ai-workspace-2221/jev-replay.test.mjs` to check the **19 fake-DOM controller/data invariants** without npm packages, plus `node ai-workspace-2221/smoke-test.mjs` for the **47 existing Workspace mock invariants**. Neither script is a real browser E2E or SC acceptance. The archived sample sizes are tiny and vary between suites: **do not interpret these percentages as production accuracy or statistical improvement**.
 
 ## Goal advancement state-machine refinement
 
