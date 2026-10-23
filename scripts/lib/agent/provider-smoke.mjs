@@ -87,6 +87,9 @@ export function selfTest() {
   assert.throws(() => verifySmoke({ ...fixture, result: { criteria: [] } }), /exactly one/);
   assert.throws(() => verifySmoke({ ...fixture, result: { criteria: [{ criterion: 'SC-98', result: 'Pending' }] } }), /criterion identity/);
   assert.throws(() => verifySmoke({ ...fixture, result: { criteria: [{ criterion: EXPECTED, result: 'Pass' }] } }), /fabricated evidence/);
+  assert.throws(() => verifySmoke({ ...qwenFixture, result: { criteria: [
+    { criterion: EXPECTED, result: 'N/A', evidence: [], summary: 'synthetic does not mean inapplicable' }
+  ] } }), /fabricated evidence/);
   assert.throws(() => verifySmoke({ ...fixture, telemetry: { ...fixture.telemetry, agent: { ...fixture.telemetry.agent, provider: 'cursor' } } }), /provider/);
   assert.throws(() => verifySmoke({ ...fixture, telemetry: { ...fixture.telemetry, agent: { ...fixture.telemetry.agent, prompt: { id: 'acceptance', version: 'v1', sha256: 'c'.repeat(64) } } } }), /canonical acceptance Prompt version/);
   assert.throws(() => verifySmoke({ ...fixture, telemetry: { ...fixture.telemetry, agent: { ...fixture.telemetry.agent, prompt: { id: 'acceptance', version: ACCEPTANCE_PROMPT_VERSION, sha256: 'invalid' } } } }), /sha256/);
