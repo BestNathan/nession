@@ -552,12 +552,20 @@ test('two clients: a stalled observer never blocks the controller (#2144)', asyn
     await submitTerminalCommand(observer, `printf 'OBSERVER-%s-INPUT\\n' 2144`);
     await expect.poll(async () => countInBuffer(controller, 'OBSERVER-2144-INPUT')).toBe(0);
     const controllerGrid = await readGrid(controller);
-    // Larger than the controller's: tmux follows the largest client, so a
-    // leaked observer resize would visibly move the shared pane.
+    const controllerWellWidth = await controller
+      .locator('[data-terminal-viewport]')
+      .evaluate((node) => node.getBoundingClientRect().width);
+    // The Observer's physical container can grow, but it is NOT the pane's
+    // geometry authority. Its xterm must keep following the current tmux
+    // size; only a foreground takeover may apply the larger measured box.
     await observer.setViewportSize({ width: 1700, height: 1100 });
-    await expect(async () => {
-      expect((await readGrid(observer)).cols).toBeGreaterThan(controllerGrid.cols);
-    }).toPass({ timeout: 15_000 });
+    await expect.poll(async () => observer
+      .locator('[data-terminal-viewport]')
+      .evaluate((node) => node.getBoundingClientRect().width))
+      .toBeGreaterThan(controllerWellWidth);
+    await expect
+      .poll(async () => readGrid(observer), { timeout: 15_000 })
+      .toEqual(controllerGrid);
     await expectPtySize(controller, controllerGrid.cols, controllerGrid.rows);
     await expect(observer.getByTestId('terminal-observer-bar')).toBeVisible();
 
