@@ -178,4 +178,20 @@ check('manual Agent selection resumes pending goal to Create form',
   state().pendingGoal.status === 'awaiting_user_commit' &&
   state().scenes[0].activeView === 'session.create');
 
+
+dispatch('click', el('resetButton'), 'resetButton');
+check('reset removes prior Pending Goal and confirmed mock result',
+  state().scenes.length === 0 && state().pendingGoal === null && state().lastConfirmedOutcome === null);
+await ask('在北京节点单独创建一个名叫 independent-dev 的 Session');
+check('independent placement is only resolved after Agent View exposes Create',
+  state().scenes.length === 2 &&
+  state().scenes[0].rootCapabilityId === 'agent.list' &&
+  state().scenes[1].rootCapabilityId === 'session.create' &&
+  state().pendingGoal?.steps?.some(x => x.candidateId === 'agent:selected:create'));
+check('standalone Scene starts with bound target and user commit barrier',
+  state().scenes[1].activeView === 'session.create' &&
+  state().pendingGoal?.status === 'awaiting_user_commit' &&
+  space().view.some(x => x.actionId === 'session.create.submit' && x.eligibility === 'enabled'));
+check('inactive Agent Scene row actions do not leak into the standalone View',
+  !space().view.some(x => x.actionId === 'agent.select'));
 console.log('\nPASS: ' + count + ' local mock state/event checks. Browser and real-provider acceptance remain pending.');
