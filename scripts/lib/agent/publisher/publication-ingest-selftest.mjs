@@ -12,7 +12,7 @@ import { CONTROLLED_1997_POLICY as SOURCE } from './controlled-proposal.mjs';
 import { planControlledPublisherIntent, CONTROLLED_PUBLISHER_INTENT_PATH } from './store-intent.mjs';
 import { CONTROLLED_ORIGINAL_PUBLICATION as P } from './publication-readback.mjs';
 import { fetchControlledPublication, applyPublisherReviewHandoff,
-  applyPublicationToRemote } from './publication-ingest.mjs';
+  applyPublicationToRemote, assertTrustedMainWorkflow } from './publication-ingest.mjs';
 
 const REPO='BestNathan/nession';
 const sourceRun={
@@ -82,6 +82,22 @@ await assert.rejects(()=>fetchControlledPublication({fetcher:async endpoint=>{
 }}),/Publisher original PR readback/);
 
 const registry=JSON.parse(fs.readFileSync('automation/agents/registry.json','utf8'));
+// The writer guard accepts the automatic Publisher wake and the one-shot owner
+// wake on trusted main only; every other event/ref/workflow fails closed.
+const trustedEnv={GITHUB_ACTIONS:'true',GITHUB_REPOSITORY:'BestNathan/nession',
+  GITHUB_REF:'refs/heads/main',GITHUB_EVENT_NAME:'workflow_run',
+  GITHUB_WORKFLOW:'Store / Publisher Review Ingest'};
+assert.doesNotThrow(()=>assertTrustedMainWorkflow(trustedEnv));
+assert.doesNotThrow(()=>assertTrustedMainWorkflow(
+  {...trustedEnv,GITHUB_EVENT_NAME:'workflow_dispatch'}));
+for(const bad of [
+  {...trustedEnv,GITHUB_ACTIONS:'false'},
+  {...trustedEnv,GITHUB_REPOSITORY:'attacker/nession'},
+  {...trustedEnv,GITHUB_REF:'refs/heads/feature'},
+  {...trustedEnv,GITHUB_EVENT_NAME:'push'},
+  {...trustedEnv,GITHUB_EVENT_NAME:'issue_comment'},
+  {...trustedEnv,GITHUB_WORKFLOW:'Store / Controlled Publisher'},
+]) assert.throws(()=>assertTrustedMainWorkflow(bad),/trusted main-only Store Ingest required/);
 const fixture=JSON.parse(fs.readFileSync(
   'scripts/lib/agent/publisher/fixtures/1997-v16-state.json','utf8'));
 const temp=fs.mkdtempSync(path.join(os.tmpdir(),'publisher-ingest-'));
