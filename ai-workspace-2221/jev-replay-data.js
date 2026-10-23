@@ -1,5 +1,4 @@
-// Safe, static replay fixtures from 2026-10-23 trusted Task Result Ingest. No credentials.
-// Real Jev outputs came from immutable task-results; input fixtures from pinned task source.
+// Static replay · selected Jev output from trusted task-results; never contains credentials.
 window.NESSION_JEV_REPLAY = {
   "schemaVersion": 1,
   "model": "jev-1.13.0",
@@ -49,7 +48,9 @@ window.NESSION_JEV_REPLAY = {
             "choice": "none",
             "inputTokens": 626,
             "outputTokens": 40,
-            "requestHash": "354084b4534aa987"
+            "requestHash": "354084b4534aa987",
+            "expectedProbability": 0.19,
+            "resolvedModel": "jev-1.13.0"
           }
         },
         {
@@ -78,7 +79,9 @@ window.NESSION_JEV_REPLAY = {
             "choice": "c1",
             "inputTokens": 619,
             "outputTokens": 41,
-            "requestHash": "8bada0fcaf5463da"
+            "requestHash": "8bada0fcaf5463da",
+            "expectedProbability": 1,
+            "resolvedModel": "jev-1.13.0"
           }
         },
         {
@@ -107,7 +110,9 @@ window.NESSION_JEV_REPLAY = {
             "choice": "none",
             "inputTokens": 612,
             "outputTokens": 40,
-            "requestHash": "271860d34484a0f3"
+            "requestHash": "271860d34484a0f3",
+            "expectedProbability": 0,
+            "resolvedModel": "jev-1.13.0"
           }
         },
         {
@@ -148,7 +153,9 @@ window.NESSION_JEV_REPLAY = {
             "choice": "c1",
             "inputTokens": 814,
             "outputTokens": 49,
-            "requestHash": "664e9759ff1226dd"
+            "requestHash": "664e9759ff1226dd",
+            "expectedProbability": 0.95,
+            "resolvedModel": "jev-1.13.0"
           }
         },
         {
@@ -180,7 +187,9 @@ window.NESSION_JEV_REPLAY = {
             "choice": "c1",
             "inputTokens": 696,
             "outputTokens": 41,
-            "requestHash": "0ef3b776d49b7552"
+            "requestHash": "0ef3b776d49b7552",
+            "expectedProbability": 0.97,
+            "resolvedModel": "jev-1.13.0"
           }
         },
         {
@@ -208,7 +217,9 @@ window.NESSION_JEV_REPLAY = {
             "choice": "none",
             "inputTokens": 545,
             "outputTokens": 32,
-            "requestHash": "43955b288e974154"
+            "requestHash": "43955b288e974154",
+            "expectedProbability": 0.8,
+            "resolvedModel": "jev-1.13.0"
           }
         },
         {
@@ -241,7 +252,9 @@ window.NESSION_JEV_REPLAY = {
             "choice": "c1",
             "inputTokens": 646,
             "outputTokens": 41,
-            "requestHash": "b8f6f7050438218d"
+            "requestHash": "b8f6f7050438218d",
+            "expectedProbability": 1,
+            "resolvedModel": "jev-1.13.0"
           }
         },
         {
@@ -272,7 +285,9 @@ window.NESSION_JEV_REPLAY = {
             "choice": "c1",
             "inputTokens": 618,
             "outputTokens": 41,
-            "requestHash": "735177c66b9afcbf"
+            "requestHash": "735177c66b9afcbf",
+            "expectedProbability": 1,
+            "resolvedModel": "jev-1.13.0"
           }
         },
         {
@@ -307,7 +322,9 @@ window.NESSION_JEV_REPLAY = {
             "choice": "c1",
             "inputTokens": 706,
             "outputTokens": 41,
-            "requestHash": "08cb46bbeec62a2e"
+            "requestHash": "08cb46bbeec62a2e",
+            "expectedProbability": 0.99,
+            "resolvedModel": "jev-1.13.0"
           }
         },
         {
@@ -342,7 +359,9 @@ window.NESSION_JEV_REPLAY = {
             "choice": "none",
             "inputTokens": 702,
             "outputTokens": 40,
-            "requestHash": "51e0e835d316db67"
+            "requestHash": "51e0e835d316db67",
+            "expectedProbability": 0.95,
+            "resolvedModel": "jev-1.13.0"
           }
         },
         {
@@ -369,7 +388,9 @@ window.NESSION_JEV_REPLAY = {
             "choice": "none",
             "inputTokens": 609,
             "outputTokens": 32,
-            "requestHash": "e8a2c527a61b4bae"
+            "requestHash": "e8a2c527a61b4bae",
+            "expectedProbability": 0.77,
+            "resolvedModel": "jev-1.13.0"
           }
         },
         {
@@ -400,7 +421,9 @@ window.NESSION_JEV_REPLAY = {
             "choice": "c0",
             "inputTokens": 615,
             "outputTokens": 41,
-            "requestHash": "1cbe14549e2fb196"
+            "requestHash": "1cbe14549e2fb196",
+            "expectedProbability": 0.71,
+            "resolvedModel": "jev-1.13.0"
           }
         }
       ]
