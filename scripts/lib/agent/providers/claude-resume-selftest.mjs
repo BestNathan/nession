@@ -7,9 +7,21 @@ import {generateKeyPairSync} from 'node:crypto';
 import {buildClaudeCliArgs,runClaudeCli} from './claude-code.mjs';
 import {sealClaudeNativeSession,openClaudeNativeSession,discoverClaudeNativeProject}
   from './claude-native-store.mjs';
-import {verifyClaudeSeedSource} from './claude-resume-fixture.mjs';
+import {verifyClaudeSeedSource,qwenNativeResumeModel} from './claude-resume-fixture.mjs';
 import {wrapClaudeNativeCheckpoint,unwrapClaudeNativeCheckpoint} from './claude-store-bridge.mjs';
 
+const resumeEnv={
+  ANTHROPIC_MODEL:'qwen3.7-plus',
+  ACCEPTANCE_CLAUDE_MODEL:'claude-sonnet-5',
+  ANTHROPIC_BASE_URL:'https://coding.dashscope.aliyuncs.com/apps/anthropic',
+  ANTHROPIC_AUTH_TOKEN:'dummy-not-a-real-key',
+};
+assert.equal(qwenNativeResumeModel(resumeEnv),'qwen3.7-plus',
+  'Acceptance alias must not override the Developer model binding');
+assert.throws(()=>qwenNativeResumeModel({...resumeEnv,ANTHROPIC_MODEL:'claude-sonnet-5'}),
+  /Qwen/);
+assert.throws(()=>qwenNativeResumeModel({...resumeEnv,ANTHROPIC_AUTH_TOKEN:'',
+  ANTHROPIC_BASE_URL:'http://insecure.example.test/'}),/HTTPS/);
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'claude-resume-v1-'));
 const session='550e8400-e29b-41d4-a716-446655440000';
 const otherSession='a50e8400-e29b-41d4-a716-446655440000';
