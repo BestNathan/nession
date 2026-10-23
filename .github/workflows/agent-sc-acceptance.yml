@@ -162,7 +162,7 @@ jobs:
       CURSOR_SDK_VERSION: ${{ vars.CURSOR_SDK_VERSION || 'latest' }}
 
       ACCEPTANCE_MAX_TURNS: ${{ vars.ACCEPTANCE_MAX_TURNS || '20' }}
-      ACCEPTANCE_CLAUDE_MODEL: ${{ vars.ACCEPTANCE_CLAUDE_MODEL || (needs.resolve.outputs.provider == 'qwen' && vars.ANTHROPIC_MODEL) || 'claude-sonnet-5' }}
+      ACCEPTANCE_CLAUDE_MODEL: ${{ (needs.resolve.outputs.provider == 'qwen' && vars.ANTHROPIC_MODEL) || vars.ACCEPTANCE_CLAUDE_MODEL || 'claude-sonnet-5' }}
       ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
       ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
