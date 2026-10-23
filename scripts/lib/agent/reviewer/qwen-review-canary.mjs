@@ -17,7 +17,7 @@ import { normalizeClaudeUsage } from '../providers/claude-code.mjs';
 import { normalizeNativeTrace, writeExecutionTrace } from '../telemetry/execution-trace.mjs';
 import { promptTelemetry } from '../telemetry/prompt.mjs';
 import { providerScopedRunName } from '../telemetry/run-name.mjs';
-import { parseNativeEvents } from '../developer-canary.mjs';
+import { parseNativeEvents, toolUseNames } from '../providers/claude-stream.mjs';
 import { renderReviewPrompt, reviewModelResult } from '../tasks/review.mjs';
 import { buildAgentWorkflowTelemetry, writeAgentWorkflowTelemetry } from '../../../agent-workflow-telemetry.mjs';
 const REPO='BestNathan/nession', ISSUE=1997, PR=2176;
@@ -48,12 +48,6 @@ function providerModel(env){
   const model=env.ACCEPTANCE_CLAUDE_MODEL||env.ANTHROPIC_MODEL;
   if(!/^qwen[a-z0-9._-]*$/i.test(model??''))fail('Qwen model must be explicit');
   return model;
-}
-function toolUses(events){
-  return events.filter(x=>x?.type==='assistant'&&Array.isArray(x?.message?.content))
-    .flatMap(x=>x.message.content)
-    .filter(block=>block?.type==='tool_use'&&typeof block.id==='string')
-    .map(block=>block.name);
 }
 export function assertReadOnlyTools(names){
   if(!Array.isArray(names)||names.some(name=>!READ_TOOLS.includes(name)))
@@ -88,7 +82,7 @@ export function canaryArgs(prompt,model){
     ...claudeCliToolPolicy(READ_TOOLS,{restricted:true})];
 }
 function canaryTelemetry(env,startedAt,finishedAt,events,envelope,verdict,admission){
-  const tools=toolUses(events);
+  const tools=toolUseNames(events);
   const model=providerModel(env);
   return buildAgentWorkflowTelemetry({
     workflow_id:'agent-provider-smoke',github_workflow:'Agent / Provider Smoke',
@@ -176,7 +170,7 @@ async function run(dir){
     const parsed=parseNativeEvents(proc.stdout);
     events=parsed.events;envelope=parsed.envelope;
     if(envelope.is_error===true)fail('Provider returned error');
-    assertReadOnlyTools(toolUses(events));
+    assertReadOnlyTools(toolUseNames(events));
     verdict=reviewModelResult(admission,envelope.result,SMOKE_IDENTITY);
     console.log('Qwen Reviewer Canary: restricted read-only inspection and host-bound '+
       verdict.outcome+' verdict verified (smoke, not canonical admission)');
@@ -188,7 +182,7 @@ async function run(dir){
     writeAgentWorkflowTelemetry(path.join(dir,'agent-telemetry.json'),summary);
     const trace=normalizeNativeTrace('claude-code',events,summary,{
       model:events.some(e=>e.type==='assistant'&&e.message?.usage)?'observed':'unobserved',
-      tools:toolUses(events).length?'partial':'unobserved',
+      tools:toolUseNames(events).length?'partial':'unobserved',
       skills:'unobserved',mcp:'unobserved',
     });
     writeExecutionTrace(path.join(dir,'agent-execution-trace.json'),trace);
@@ -237,8 +231,8 @@ function selfTest(){
     assert.throws(()=>assertReadOnlyTools(bad),/read-only|non-read/);
   const events=[{type:'assistant',message:{content:[
     {type:'tool_use',id:'r1',name:'Read'},{type:'tool_use',id:'g1',name:'Grep'}]}}];
-  assert.deepEqual(toolUses(events),['Read','Grep']);
-  assert.equal(assertReadOnlyTools(toolUses(events)),true);
+  assert.deepEqual(toolUseNames(events),['Read','Grep']);
+  assert.equal(assertReadOnlyTools(toolUseNames(events)),true);
   assert.throws(()=>parseNativeEvents('{not-json}'),/malformed/);
   console.log('Qwen Reviewer Canary: smoke-identity separation, restricted read/grep flags, verdict binding and tool denial fixtures passed');
 }

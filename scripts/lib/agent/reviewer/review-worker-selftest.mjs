@@ -11,7 +11,7 @@ import { spawnSync } from 'node:child_process';
 import { CONTROLLED_1997_POLICY as POLICY } from '../publisher/controlled-proposal.mjs';
 import { reviewModelResult } from '../tasks/review.mjs';
 import { runReviewSlice } from './review-slice.mjs';
-import { assertIsolatedReviewerProcess, createCursorReviewRunner,
+import { assertIsolatedReviewerProcess, createClaudeReviewRunner, createCursorReviewRunner,
   readReviewAdmission } from './review-worker.mjs';
 
 const admission=Object.freeze({
@@ -35,6 +35,13 @@ try{
   const file=path.join(temp,'admission.json');
   fs.writeFileSync(file,JSON.stringify(admission));
   assert.equal(readReviewAdmission(file).target_sha,admission.target_sha);
+  // The Worker must accept every registered reviewer identity, not only cursor.
+  const qwenFile=path.join(temp,'admission-qwen.json');
+  fs.writeFileSync(qwenFile,JSON.stringify({...admission,agent_id:'review-qwen-01'}));
+  assert.equal(readReviewAdmission(qwenFile).agent_id,'review-qwen-01');
+  const unregistered=path.join(temp,'admission-dev.json');
+  fs.writeFileSync(unregistered,JSON.stringify({...admission,agent_id:'dev-cursor-01'}));
+  assert.throws(()=>readReviewAdmission(unregistered),/unregistered reviewer identity/);
   const symlink=path.join(temp,'admission-link.json');
   fs.symlinkSync(file,symlink);
   assert.throws(()=>readReviewAdmission(symlink),/unsafe verified admission/);
@@ -92,6 +99,51 @@ assert.equal(slice.artifact.task_id,TASK);
 assert.deepEqual(slice.verdict.findings,[{path:'scripts/lib/agent/example.mjs',
   evidence:'accepts an unbounded retry count'}]);
 assert.equal(reviewModelResult(admission,verdictText).outcome,'changes_requested');
+// Claude Code (Qwen) path: same Slice contract, restricted Read/Grep, UUID session.
+const qwenAdmission=Object.freeze({...admission,agent_id:'review-qwen-01'});
+const UUID='11111111-2222-4333-8444-555555555555';
+let capturedClaude=null;
+const claudeSpawn=(status,lines)=>(cmd,args,opts)=>{
+  capturedClaude={cmd,args,opts};
+  return {status,signal:null,stdout:lines.join('\n'),error:null};
+};
+const claudeLines=[
+  JSON.stringify({type:'assistant',message:{content:[{type:'tool_use',id:'r1',name:'Read'}]}}),
+  JSON.stringify({type:'result',subtype:'success',is_error:false,session_id:UUID,
+    result:JSON.stringify({outcome:'approved',summary:'no blocking defect',findings:[]})}),
+];
+const claudeRunner=createClaudeReviewRunner({model:'qwen3.7-plus',workspace:'/tmp',
+  spawn:claudeSpawn(0,claudeLines),env:{}});
+await assert.rejects(()=>claudeRunner('prompt',{tools:['read']}),/exactly read\/grep/);
+await assert.rejects(()=>claudeRunner('prompt',{tools:['read','edit']}),/exactly read\/grep/);
+const qwenSlice=await runReviewSlice({admission:qwenAdmission,runner:claudeRunner,
+  taskId:TASK,runId:RUN,runAttempt:ATTEMPT,env:{}});
+assert.equal(qwenSlice.provider,'claude-code');
+assert.equal(qwenSlice.meta.agent_id,UUID);
+assert.equal(qwenSlice.artifact.outcome,'approved');
+assert.equal(qwenSlice.artifact.target_sha,admission.target_sha);
+assert.ok(capturedClaude.args.includes('--restricted'));
+assert.ok(capturedClaude.args.includes('--no-session-persistence'));
+assert.equal(capturedClaude.args[capturedClaude.args.indexOf('--tools')+1],'Grep,Read');
+// Provider identity is registry-owned: a cursor-shaped session id on the Qwen
+// admission, and an explicit provider override, both fail closed.
+await assert.rejects(()=>runReviewSlice({admission:qwenAdmission,runner,
+  taskId:TASK,runId:RUN,runAttempt:ATTEMPT,env:{}}),/native Agent identity/);
+await assert.rejects(()=>runReviewSlice({admission,runner,provider:'claude-code',
+  taskId:TASK,runId:RUN,runAttempt:ATTEMPT,env:{}}),/provider does not match/);
+await assert.rejects(()=>runReviewSlice({admission:qwenAdmission,
+  runner:createClaudeReviewRunner({model:'qwen3.7-plus',workspace:'/tmp',
+    spawn:claudeSpawn(1,[]),env:{}}),
+  taskId:TASK,runId:RUN,runAttempt:ATTEMPT,env:{}}),/restricted Claude Code CLI failed/);
+const editLines=[
+  JSON.stringify({type:'assistant',message:{content:[
+    {type:'tool_use',id:'r1',name:'Read'},{type:'tool_use',id:'e1',name:'Edit'}]}}),
+  claudeLines[1],
+];
+await assert.rejects(()=>runReviewSlice({admission:qwenAdmission,
+  runner:createClaudeReviewRunner({model:'qwen3.7-plus',workspace:'/tmp',
+    spawn:claudeSpawn(0,editLines),env:{}}),
+  taskId:TASK,runId:RUN,runAttempt:ATTEMPT,env:{}}),/write\/shell tool/);
 // The CLI path must fail closed on a non-container host before reading input.
 const cli=spawnSync(process.execPath,['scripts/lib/agent/reviewer/review-worker.mjs',
   'missing.json','/tmp/nession-review-out'],{encoding:'utf8',env:{PATH:process.env.PATH}});

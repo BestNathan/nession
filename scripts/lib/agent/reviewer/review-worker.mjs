@@ -9,14 +9,17 @@
 // network, GitHub, Issue, Store, review or merge action.
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { loadCursorSdk, runCursorSession } from '../providers/cursor.mjs';
-import { assertAuthenticatedReviewerAdmission } from './pr-admission.mjs';
+import { parseNativeEvents, toolUseNames } from '../providers/claude-stream.mjs';
+import { claudeCliToolPolicy } from '../harness/native.mjs';
+import { assertReviewerAdmission, resolveReviewerIdentity } from './pr-admission.mjs';
 import { REVIEW_TOOLS, assertUnprivilegedReviewerEnvironment, runReviewSlice } from './review-slice.mjs';
 
 const MAX_ADMISSION = 16384;
 const HEX64 = /^[a-f0-9]{64}$/;
+const CLAUDE_TOOL = Object.freeze({ read: 'Read', grep: 'Grep' });
 function fail(message) { throw new Error('Reviewer Worker: ' + message); }
 function git(root, ...args) {
   return execFileSync('git', ['-C', root, ...args], {
@@ -31,7 +34,11 @@ export function readReviewAdmission(file) {
   const stat = fs.lstatSync(file);
   if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_ADMISSION)
     fail('unsafe verified admission');
-  return assertAuthenticatedReviewerAdmission(JSON.parse(fs.readFileSync(file, 'utf8')));
+  const task = JSON.parse(fs.readFileSync(file, 'utf8'));
+  // The identity must be a registered reviewer; the Worker must accept any
+  // registered provider's admission, not only the cursor default.
+  const identity = resolveReviewerIdentity(task?.agent_id);
+  return assertReviewerAdmission(task, { agent_id: identity.agent_id });
 }
 
 // Same OS-isolation contract as the Developer slice: no host SDK sandbox,
@@ -60,6 +67,43 @@ export function createCursorReviewRunner({
   };
 }
 
+// Claude Code (Qwen) adapter for the same Slice contract. Restricted mode
+// confines file tools to the disposable workspace; only Read/Grep are exposed.
+export function createClaudeReviewRunner({
+  model, workspace, env = process.env, spawn = spawnSync, timeoutMs = 480000,
+}) {
+  return async (prompt, { tools } = {}) => {
+    if (!Array.isArray(tools) || tools.length !== REVIEW_TOOLS.length ||
+        tools.some((tool, index) => tool !== REVIEW_TOOLS[index]))
+      fail('Provider must be offered exactly read/grep');
+    const nativeTools = tools.map((tool) => CLAUDE_TOOL[tool]);
+    if (nativeTools.some((tool) => !tool)) fail('unsupported reviewer tool');
+    const args = ['-p', prompt, '--output-format', 'stream-json', '--verbose',
+      '--no-session-persistence', '--max-turns', '24', '--model', model,
+      '--strict-mcp-config', ...claudeCliToolPolicy(nativeTools, { restricted: true })];
+    const proc = spawn('claude', args, {
+      cwd: workspace, encoding: 'utf8', timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024,
+      env: { ...env, DISABLE_AUTOUPDATER: '1', ANTHROPIC_MODEL: model,
+        ANTHROPIC_DEFAULT_SONNET_MODEL: model },
+    });
+    if (proc.error || proc.status !== 0) {
+      // Safe diagnostics only: no raw model text, prompt or tool output.
+      const detail = [
+        proc.error?.code ? 'spawn=' + proc.error.code : '',
+        proc.signal ? 'signal=' + proc.signal : '',
+        Number.isInteger(proc.status) ? 'status=' + proc.status : '',
+      ].filter(Boolean).join(', ');
+      fail('restricted Claude Code CLI failed (' + (detail || 'no diagnostics') + ')');
+    }
+    const { events, envelope } = parseNativeEvents(proc.stdout);
+    if (envelope.is_error === true) fail('Provider returned error');
+    return {
+      result: { status: 'finished', result: envelope.result, session_id: envelope.session_id },
+      meta: { status: 'finished', agent_id: envelope.session_id, tool_calls: toolUseNames(events) },
+    };
+  };
+}
+
 async function main() {
   if (process.argv.length !== 4) fail('usage: verified-admission.json output-directory');
   assertIsolatedReviewerProcess(process.env, { dockerenv: fs.existsSync('/.dockerenv') });
@@ -68,30 +112,50 @@ async function main() {
   if (!HEX64.test(taskId ?? '')) fail('missing signed reviewer action ID');
   const runId = Number(process.env.GITHUB_RUN_ID);
   const runAttempt = Number(process.env.GITHUB_RUN_ATTEMPT);
-  if (!process.env.CURSOR_API_KEY) fail('missing Cursor provider key');
-  const sdkPkg = JSON.parse(fs.readFileSync(
-    path.join(process.env.CURSOR_SDK_ROOT, 'node_modules/@cursor/sdk/package.json'), 'utf8'));
-  if (sdkPkg.version !== process.env.CURSOR_SDK_VERSION)
-    fail('Cursor SDK version differs from pinned Environment version');
-  const model = {
-    id: process.env.CURSOR_MODEL || 'composer-2.5',
-    fast: (process.env.CURSOR_MODEL_FAST || 'true') !== 'false',
-  };
+  const identity = resolveReviewerIdentity(admission.agent_id);
+  const provider = identity.provider;
   const out = path.resolve(process.argv[3]);
   const temp = fs.mkdtempSync(path.join(process.env.RUNNER_TEMP, 'nession-review-'));
   const workspace = path.join(temp, 'workspace');
   const storePath = path.join(temp, 'jsonl');
-  let added = false;
   try {
     fs.mkdirSync(storePath, { mode: 0o700 });
-    git(process.env.GITHUB_WORKSPACE, 'worktree', 'add', '--detach', workspace, admission.target_sha);
-    added = true;
-    if (git(workspace, 'rev-parse', 'HEAD') !== admission.target_sha)
-      fail('workspace is not the exact admitted PR SHA');
-    const runner = createCursorReviewRunner({
-      apiKey: process.env.CURSOR_API_KEY, model, workspace, storePath,
+    // Materialize the admitted tree without .git metadata; restricted Claude
+    // mode and the Cursor SDK both read ordinary files from the workspace.
+    fs.mkdirSync(workspace, { mode: 0o700 });
+    const archive = path.join(temp, 'target.tar');
+    execFileSync('git', ['-C', process.env.GITHUB_WORKSPACE, 'archive', '--format=tar',
+      '--output=' + archive, admission.target_sha], {
+      timeout: 120000, maxBuffer: 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_NO_REPLACE_OBJECTS: '1' },
     });
-    const slice = await runReviewSlice({ admission, runner, taskId, runId, runAttempt });
+    execFileSync('tar', ['-xf', archive, '-C', workspace], {
+      timeout: 120000, maxBuffer: 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let runner;
+    if (provider === 'cursor') {
+      if (!process.env.CURSOR_API_KEY) fail('missing Cursor provider key');
+      const sdkPkg = JSON.parse(fs.readFileSync(
+        path.join(process.env.CURSOR_SDK_ROOT, 'node_modules/@cursor/sdk/package.json'), 'utf8'));
+      if (sdkPkg.version !== process.env.CURSOR_SDK_VERSION)
+        fail('Cursor SDK version differs from pinned Environment version');
+      runner = createCursorReviewRunner({
+        apiKey: process.env.CURSOR_API_KEY,
+        model: {
+          id: process.env.CURSOR_MODEL || 'composer-2.5',
+          fast: (process.env.CURSOR_MODEL_FAST || 'true') !== 'false',
+        },
+        workspace, storePath,
+      });
+    } else if (provider === 'claude-code') {
+      if (!process.env.ANTHROPIC_BASE_URL ||
+          (!process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_AUTH_TOKEN))
+        fail('missing Claude gateway credentials');
+      const model = process.env.ACCEPTANCE_CLAUDE_MODEL || process.env.ANTHROPIC_MODEL;
+      if (!/^qwen[a-z0-9._-]*$/i.test(model ?? '')) fail('Qwen model must be explicit');
+      runner = createClaudeReviewRunner({ model, workspace, env: process.env });
+    } else fail('unsupported reviewer Provider');
+    const slice = await runReviewSlice({ admission, runner, taskId, runId, runAttempt, provider });
     fs.mkdirSync(out, { recursive: true, mode: 0o700 });
     const save = (name, value) => fs.writeFileSync(path.join(out, name),
       JSON.stringify(value, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
@@ -106,7 +170,6 @@ async function main() {
     });
     console.log('Read-only Reviewer Slice finished with a host-bound verdict; no review was published');
   } finally {
-    if (added) try { git(process.env.GITHUB_WORKSPACE, 'worktree', 'remove', '--force', workspace); } catch {}
     fs.rmSync(temp, { recursive: true, force: true });
   }
 }
