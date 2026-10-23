@@ -31,7 +31,7 @@ use nession_protocol::contracts::session::v1::{
     ClientSessionCreatePayload, ClientSessionCreateResponsePayload, ClientSessionEnvActivePayload,
     ClientSessionEnvApplyPayload, ClientSessionEnvQueryPayload, ClientSessionEnvResponsePayload,
     ClientSessionEnvUnsetPayload, ClientSessionKillPayload, ServerSessionListPayload,
-    ServerSessionListReply, ServerTerminalResizePayload, SessionEnvActiveResponse,
+    ServerSessionListReply, SessionEnvActiveResponse,
     SessionEnvQueryResponse, SessionRefusal, WebSessionInfo, WebSessionKillResponse,
     WebSessionsListResponse,
 };
