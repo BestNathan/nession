@@ -112,6 +112,16 @@
       "role": "developer",
       "provider": "claude-code",
       "environment": "dev-claude-qwen"
+    },
+    "accept-qwen-01": {
+      "role": "acceptor",
+      "provider": "claude-code",
+      "environment": "dev-claude-qwen"
+    },
+    "audit-qwen-01": {
+      "role": "auditor",
+      "provider": "claude-code",
+      "environment": "dev-claude-qwen"
     }
   },
   "external_dependencies": []
