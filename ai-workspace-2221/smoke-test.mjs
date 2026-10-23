@@ -138,11 +138,14 @@ const otherSceneId=state().activeSceneId;
 click({focus:stableId});
 check('clicking edge Scene preview can activate the previous Scene',
   state().activeSceneId===stableId);
-dispatch('touchstart', {touches:[{clientX:220,clientY:180}],target:{closest:()=>false}}, 'mainCard');
-dispatch('touchend', {changedTouches:[{clientX:80,clientY:178}]}, 'mainCard');
+for (const fn of listeners.get('mainCard:touchstart') || [])
+  fn({touches:[{clientX:220,clientY:180}],target:{closest:()=>false}});
+for (const fn of listeners.get('mainCard:touchend') || [])
+  fn({changedTouches:[{clientX:80,clientY:178}]});
 check('swiping horizontally returns to adjacent Scene',
   state().activeSceneId===otherSceneId);
-dispatch('wheel', {deltaX:-140,deltaY:8,target:{closest:()=>false}}, 'stageFrame');
+for (const fn of listeners.get('stageFrame:wheel') || [])
+  fn({deltaX:-140,deltaY:8,target:{closest:()=>false}});
 check('desktop horizontal trackpad gesture switches Scene without affecting the domain record',
   state().activeSceneId===stableId && state().scenes.length===2);
 click({focus:otherSceneId});
