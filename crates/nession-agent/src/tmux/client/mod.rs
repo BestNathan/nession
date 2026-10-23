@@ -16,6 +16,16 @@
 //!   the parser in `tmux::parser`, including the #2300 bounded-byte contract
 //!   and its fatal/forward-compatible record split.
 //!
+//! ## Transports
+//!
+//! [`ControlTransport::Pipe`] (`tmux -C`) is the production default;
+//! [`ControlTransport::Pty`] (`tmux -CC`) runs the identical protocol over a
+//! PTY. `-CC` brackets the stream with terminal framing (DCS/ST) and writes
+//! `CRLF` line endings; the transport removes that framing before this module
+//! sees a byte, so the grammar, matcher and events are the same on both. Both
+//! spawn through `TmuxCmd`, and a failed launch is an error — never a silent
+//! fallback to the other transport.
+//!
 //! ## Command matching
 //!
 //! tmux executes control commands in the order it receives them and answers
@@ -55,7 +65,9 @@ pub mod transport;
 
 pub use commands::ControlCommand;
 pub use events::{PaneOutput, TmuxEvent};
-pub use transport::{ClientIo, PipeTransport};
+#[cfg(unix)]
+pub use transport::PtyTransport;
+pub use transport::{ClientChild, ClientIo, ControlTransport, PipeTransport};
 
 /// Bound on commands awaiting a reply. A caller at this bound gets
 /// [`TmuxClientError::QueueFull`] instead of an unbounded queue: the control
@@ -206,13 +218,13 @@ pub struct TmuxClient {
     state: Arc<ClientState>,
     write_tx: mpsc::Sender<WriteOp>,
     events: Option<mpsc::Receiver<TmuxEvent>>,
-    child: Option<tokio::process::Child>,
+    child: Option<ClientChild>,
     reader_task: Option<JoinHandle<()>>,
     writer_task: Option<JoinHandle<()>>,
 }
 
 impl TmuxClient {
-    /// Attach over the initial production transport (`tmux -C` pipes).
+    /// Attach over the production default (`tmux -C` pipes).
     ///
     /// The attachment's identity is minted here rather than by the caller: it
     /// only has to distinguish a replacement from its predecessor, and the
@@ -220,7 +232,26 @@ impl TmuxClient {
     /// [`TmuxClient::from_io`] with an explicit generation when they need a
     /// fixed one.
     pub fn connect(tmux: &TmuxDep, session_name: &str) -> anyhow::Result<Self> {
-        let io = PipeTransport::connect(tmux, session_name)?;
+        Self::connect_with(tmux, session_name, ControlTransport::Pipe)
+    }
+
+    /// Attach over an explicitly chosen transport.
+    ///
+    /// `-C + Pipe` is the default; `-CC + PTY` is the same client API over the
+    /// other transport (#2307 slice D). A failed launch returns the transport's
+    /// error and never falls back to the other transport.
+    pub fn connect_with(
+        tmux: &TmuxDep,
+        session_name: &str,
+        transport: ControlTransport,
+    ) -> anyhow::Result<Self> {
+        let io = match transport {
+            ControlTransport::Pipe => PipeTransport::connect(tmux, session_name)?,
+            #[cfg(unix)]
+            ControlTransport::Pty { cols, rows } => {
+                PtyTransport::connect(tmux, session_name, cols, rows)?
+            }
+        };
         Ok(Self::from_io(
             session_name,
             io,
@@ -229,8 +260,8 @@ impl TmuxClient {
     }
 
     /// The transport-independent constructor: the same client over any byte
-    /// stream pair. Tests use an in-memory duplex; slice D makes the PTY
-    /// transport construct this same type.
+    /// stream pair. Tests use an in-memory duplex; the PTY transport constructs
+    /// this same type over a real PTY.
     pub fn from_io(session_name: &str, io: ClientIo, generation: u64) -> Self {
         let state = Arc::new(ClientState::new());
         let (events_tx, events) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
@@ -261,7 +292,7 @@ impl TmuxClient {
     /// client itself never kills it; only `close` reaps it after a graceful
     /// detach.
     pub fn child_pid(&self) -> Option<u32> {
-        self.child.as_ref().and_then(tokio::process::Child::id)
+        self.child.as_ref().and_then(ClientChild::pid)
     }
 
     pub fn is_closed(&self) -> bool {
@@ -417,11 +448,12 @@ impl TmuxClient {
     ///
     /// The detach goes through the ordered writer so it cannot overtake an
     /// input frame already queued; the child is waited for (never killed, for
-    /// the macOS tmux reason `ControlModeSession::close` documents).
+    /// the macOS tmux reason `ControlModeSession::close` documents). The wait is
+    /// transport-specific and bounded by [`ClientChild::reap`].
     pub async fn close(&mut self) {
         let _ = self.write_tx.send(WriteOp::Close).await;
-        if let Some(mut child) = self.child.take() {
-            let _ = tokio::time::timeout(Duration::from_secs(2), child.wait()).await;
+        if let Some(child) = self.child.take() {
+            child.reap().await;
         }
         if let Some(task) = self.writer_task.take() {
             let _ = tokio::time::timeout(Duration::from_secs(2), task).await;
