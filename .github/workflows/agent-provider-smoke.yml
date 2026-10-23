@@ -4,6 +4,12 @@ name: Agent / Provider Smoke
 # No credentialed PR-head execution, GitHub Issue writes, or deployment.
 on:
   workflow_dispatch:
+    inputs:
+      include_legacy:
+        description: 'Also smoke legacy Cursor and DeepSeek (may consume quota)'
+        required: false
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths:
@@ -56,14 +62,11 @@ jobs:
     timeout-minutes: 15
     strategy:
       fail-fast: false
+      # The default main-push smoke must prove the active Qwen route, not
+      # fail due to exhausted legacy Cursor quotas. Legacy Providers remain
+      # explicitly testable via workflow_dispatch(include_legacy=true).
       matrix:
-        include:
-          - provider: cursor
-            environment: cursor
-          - provider: deepseek
-            environment: deepseek
-          - provider: qwen
-            environment: dev-claude-qwen
+        include: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.include_legacy && '[{"provider":"cursor","environment":"cursor"},{"provider":"deepseek","environment":"deepseek"},{"provider":"qwen","environment":"dev-claude-qwen"}]' || '[{"provider":"qwen","environment":"dev-claude-qwen"}]') }}
     environment: ${{ matrix.environment }}
     env:
       CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}

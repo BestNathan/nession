@@ -51,8 +51,7 @@ assignments are not changed by Repository Variables.
 ## Verify a change
 
 1. Set one supported Repository Variable to a registered ID.
-2. Check the corresponding trusted GitHub Actions workflow's selected
-   Environment, provider selection and verified result/telemetry.
+2. Run `Agent / Provider Smoke` in GitHub Actions to verify the Qwen gateway. The normal main-push/default manual smoke targets Qwen only; use `include_legacy=true` manually to test Cursor and DeepSeek compatibility when their quotas are available. Check the selected Environment, provider selection and verified result/telemetry.
 3. To roll back **new** runs, restore the previous ID in the same GitHub
    Settings page; existing accepted Tasks retain their original assignments.
 4. If the Environment is missing an API key, endpoint or the explicit Qwen
