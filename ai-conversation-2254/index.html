@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="color-scheme" content="light">
+  <title>Nession · AI Conversation / #2254</title>
+  <meta name="description" content="Mock prototype: text-native Nession business components inside AI Conversation.">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<div class="app is-empty" id="app">
+  <header class="topbar">
+    <div class="brand"><span class="brand-logo" aria-hidden="true">n</span><span>Nession</span><small>AI CONVERSATION · #2254</small></div>
+    <div class="top-actions">
+      <button class="small-btn" id="show-invalid" title="演示非法 UI 指令的安全回退">异常演示</button>
+      <button class="small-btn" id="toggle-inspector" aria-expanded="false" aria-controls="inspector">协议检查</button>
+      <button class="small-btn" id="reset" title="仅重置 Mock 对话数据">重置</button>
+    </div>
+  </header>
+  <div class="surface">
+    <main class="conversation" id="conversation" aria-label="AI 对话">
+      <section class="welcome" id="welcome">
+        <div class="eyebrow">TEXT IS THE INTERFACE</div>
+        <h1>让工作随着对话浮现。</h1>
+        <p>不用寻找页面或功能。告诉 AI 你想做什么，真实的业务组件就会出现在对话里，并且可以直接交互。</p>
+        <div class="prompts">
+          <button class="prompt-chip" data-prompt="查看在线 Agent">查看 Agent →</button>
+          <button class="prompt-chip" data-prompt="显示所有 Session">查看 Session →</button>
+          <button class="prompt-chip" data-prompt="看看当前 Git 变更">查看 Git 变更 →</button>
+        </div>
+      </section>
+      <div class="feed" id="feed" role="log" aria-label="对话消息" aria-live="polite"></div>
+    </main>
+    <aside class="inspector" id="inspector" hidden aria-label="协议检查器">
+      <div class="inspect-head"><strong>Content Inspector</strong><button class="small-btn" id="close-inspector" aria-label="关闭检查器">✕</button></div>
+      <div class="inspect-tabs">
+        <button class="active" data-inspect-tab="state">组件状态</button>
+        <button data-inspect-tab="source">消息 Text</button>
+        <button data-inspect-tab="segments">解析片段</button>
+        <button data-inspect-tab="events">事件</button>
+      </div>
+      <div class="inspect-body"><div class="inspect-chip">Mock only · No model/backend</div><pre id="inspect-output">尚未发生交互</pre></div>
+      <div class="inspector-foot">所有消息仍为 type=text；该检查器展示解析后状态而非传输协议。</div>
+    </aside>
+  </div>
+  <footer class="composer-shell">
+    <form class="composer" id="composer" autocomplete="off">
+      <textarea id="prompt" rows="1" aria-label="输入消息" placeholder="向 Nession 提问，或粘贴 nession-ui 文本…" spellcheck="false"></textarea>
+      <button class="send-btn" type="submit" id="send" aria-label="发送消息">↑</button>
+    </form>
+    <div class="composer-caption">交互原型 · AI 与业务数据均为模拟 · 仅使用 Text Content</div>
+  </footer>
+  <div class="toast" id="toast" role="status" hidden></div>
+</div>
+<script type="module" src="./app.mjs"></script>
+</body>
+</html>
