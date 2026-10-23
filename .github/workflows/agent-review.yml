@@ -18,6 +18,11 @@ on:
         description: 64-hex Outbox reviewer action ID
         required: true
         type: string
+      dispatch_ticket:
+        description: Optional signed dispatcher ticket for trusted result ingest
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -97,6 +102,25 @@ jobs:
         with:
           name: review-admission-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/review-admission.json
+          if-no-files-found: error
+          retention-days: 3
+      - name: Record the signed dispatcher claim for trusted ingest
+        if: inputs.dispatch_ticket != ''
+        env:
+          ACTION_ID: ${{ inputs.action_id }}
+          DISPATCH_TICKET: ${{ inputs.dispatch_ticket }}
+        run: |
+          set -euo pipefail
+          jq -n --arg action "$ACTION_ID" --arg ticket "$DISPATCH_TICKET" \
+            '{schema_version:1,kind:"reviewer_dispatch_claim",
+              action_id:$action,dispatch_ticket:$ticket}' \
+            > "$RUNNER_TEMP/review-claim.json"
+      - name: Upload the signed dispatcher claim
+        if: inputs.dispatch_ticket != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-claim-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/review-claim.json
           if-no-files-found: error
           retention-days: 3
 
