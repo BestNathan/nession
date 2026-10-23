@@ -1,6 +1,11 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {createHash,generateKeyPairSync} from 'node:crypto';
+import {sealClaudeNativeSession,openClaudeNativeSession}
+  from '../providers/claude-native-store.mjs';
 import {bindQwenDeveloper,qwenDeveloperModel,qwenGatewayEndpoint,
   verifyQwenNativeContinuation} from './qwen-developer-policy.mjs';
 
@@ -65,4 +70,37 @@ assert.throws(()=>verifyQwenNativeContinuation(continuation,plan,
   {...metadata,source_sha:'c'.repeat(40)}),/incompatible/);
 assert.throws(()=>verifyQwenNativeContinuation(continuation,plan,
   {...metadata,session_id:'bad'}),/incompatible/);
-console.log('Qwen Developer runtime binding: exact model/endpoint/CLI and native Resume denials pass');
+// This is an actual ciphertext restore proof, not only JSON-shape comparison.
+// A model-version change must be rejected by the native Session cryptographic
+// provenance check before any Claude CLI --resume invocation.
+const root=fs.mkdtempSync(path.join(os.tmpdir(),'qwen-developer-binding-'));
+try {
+  const seed=path.join(root,'seed'),projectKey='-workspace';
+  const project=path.join(seed,'projects',projectKey);
+  fs.mkdirSync(project,{recursive:true,mode:0o700});
+  const nativeMarker='PRIVATE_NATIVE_CONTEXT_MARKER';
+  fs.writeFileSync(path.join(project,metadata.session_id+'.jsonl'),
+    JSON.stringify({sessionId:metadata.session_id,type:'user',message:nativeMarker})+'\n',
+    {flag:'wx',mode:0o600});
+  const pair=generateKeyPairSync('rsa',{modulusLength:2048});
+  const publicKeyPem=pair.publicKey.export({type:'spki',format:'pem'});
+  const privateKeyPem=pair.privateKey.export({type:'pkcs8',format:'pem'});
+  const nativeMetadata={...metadata,project_key:projectKey,
+    cwd_sha256:createHash('sha256').update('/workspace').digest('hex'),
+    run_id:admission.run_id,attempt:1};
+  const sealed=sealClaudeNativeSession({configDir:seed,metadata:nativeMetadata,
+    publicKeyPem});
+  assert.ok(!JSON.stringify(sealed).includes(nativeMarker),'native plaintext escaped ciphertext');
+  const target=path.join(root,'restored');
+  assert.equal(openClaudeNativeSession({record:sealed,privateKeyPem,
+    expected:nativeMetadata,configDir:target}).session_id,metadata.session_id);
+  assert.ok(fs.readFileSync(path.join(target,'projects',projectKey,
+    metadata.session_id+'.jsonl'),'utf8').includes(nativeMarker));
+  assert.throws(()=>openClaudeNativeSession({record:sealed,privateKeyPem,
+    expected:{...nativeMetadata,harness_digest:'e'.repeat(64)},
+    configDir:path.join(root,'changed-model')}),/incompatible/);
+  assert.throws(()=>openClaudeNativeSession({record:sealed,privateKeyPem,
+    expected:{...nativeMetadata,cli_version:'2.1.35'},
+    configDir:path.join(root,'changed-cli')}),/incompatible/);
+} finally {fs.rmSync(root,{recursive:true,force:true});}
+console.log('Qwen Developer runtime binding: model/endpoint/CLI and cryptographic native Resume denials pass');
