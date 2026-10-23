@@ -123,9 +123,9 @@ jobs:
               const provider=identity.provider==="cursor"?"cursor":
                 identity.agent_id==="accept-qwen-01"?"qwen":null;
               if(!provider)throw Error("Acceptor has no verified runtime provider");
-              process.stdout.write("provider="+provider+"\\n");
-              process.stdout.write("environment="+identity.environment+"\\n");
-              process.stdout.write("agent_id="+identity.agent_id+"\\n");
+              process.stdout.write("provider="+provider+"\n");
+              process.stdout.write("environment="+identity.environment+"\n");
+              process.stdout.write("agent_id="+identity.agent_id+"\n");
             }
           ' >> "$GITHUB_OUTPUT"
 
