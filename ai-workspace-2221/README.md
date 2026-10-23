@@ -2,7 +2,7 @@
 
 **Requirement:** [#2221](https://github.com/BestNathan/nession/issues/2221) · **Protocol:** [PROTOCOL.md](PROTOCOL.md) · **Live design prototype:** [index.html](index.html)
 
-The one shared orphan-history `prototype` branch contains the UI design assets. This directory is not an implementation PR and no Nession Server, System One gateway, Session API or Terminal runtime is contacted. **All Agent/Session data, judgments, rankings and API effects are mocked in-browser.**
+The one shared orphan-history `prototype` branch contains the UI design assets. This directory is not an implementation PR. The main Workspace interactions, Agent/Session facts and live judgments remain **in-browser mocks** (no Server, System One gateway, Session API or Terminal runtime connections). **Separately, the read-only Jev Replay presents historical responses from genuine TypeSafe API tests**, embedded as sanitized static evidence. Opening the replay does not issue any API request.
 
 ## What is implemented in the progressive prototype
 
@@ -31,6 +31,28 @@ The one shared orphan-history `prototype` branch contains the UI design assets. 
 
 Run `node ai-workspace-2221/smoke-test.mjs` from the shared `prototype` branch checkout (or `node smoke-test.mjs` from this directory). It has **no npm dependencies** and reads the checked-in `index.html`. The script exercises **47 local JavaScript event/state invariants**: Scene reuse, discovery candidates, filtered ordinal resolution, contextual recommendations, disabled offline Agent, in-flight stale-decision discard, inline create/draft/confirmed result, next-action handoff and Standard/AI continuity. The script does not start Chromium, contact TypeSafe or run real backend APIs, and is **not** production Acceptance evidence.
 
+## Archived real Jev test replay — directly accessible in the prototype
+
+Open the prototype's **「真实测试回放」** entry in the top bar, or use the direct URL fragment **[index.html#jev-replay](index.html#jev-replay)** (mobile and desktop). The dialog is read-only and lets you walk through each archived inference in five clickable stages:
+
+1. **用户目标** — exact fixture utterance and the prompt variant used.
+2. **View State** — bounded View context from the Task's pinned fixture.
+3. **Action Space** — the **actual candidates submitted for that fixture**; unseen future actions are absent.
+4. **Jev Choice** — the recorded selected action/`none`, model confidence, HTTP round-trip latency; initial-run raw `choice` and expected-choice probability where archived.
+5. **结果验证** — compare expected and selected action, with pass/fail analysis and direct links to the original Task Run, `task-results` record and pinned source snapshot.
+
+You can switch between three suites, browse any case, move backward/forward by stage, filter the **strict vs progressive** A/B variants, and click the initial Session-creation **state-chain illustration**. That chain intentionally connects **separate fixture requests for explanation**: it is **not** a real single-call-chain Nession session.
+
+| Archived live suite | Calls | Outcomes | Source |
+|---|---:|---|---|
+| Initial progressive decision fixtures | 12 | 10/12 matched | [Run #39907128502](https://github.com/BestNathan/nession/actions/runs/39907128502) |
+| Prompt A/B, same five scenarios | 10 | Strict 3/5; progressive 4/5 | [Run #39908609159](https://github.com/BestNathan/nession/actions/runs/39908609159) |
+| Relevance-gated progressive routing | 10 | 10/10 matched | [Run #39908810295](https://github.com/BestNathan/nession/actions/runs/39908810295) |
+
+The static data file [`jev-replay-data.js`](jev-replay-data.js) was generated from the **immutable Task Result Ingest records**, with inputs recovered from the pinned Task source files. It intentionally contains **no API credentials**, and does not ask TypeSafe/Jev to infer anything while browsing. The UI and styles are [`jev-replay.js`](jev-replay.js) and [`jev-replay.css`](jev-replay.css). Data values are recorded observations, not model predictions reproduced locally.
+
+Run `node ai-workspace-2221/jev-replay.test.mjs` to check the **17 fake-DOM controller/data invariants** without npm packages, plus `node ai-workspace-2221/smoke-test.mjs` for the **47 existing Workspace mock invariants**. Neither script is a real browser E2E or SC acceptance. The archived sample sizes are tiny and vary between suites: **do not interpret these percentages as production accuracy or statistical improvement**.
+
 ## Goal advancement state-machine refinement
 
 The original 12-call real Jev diagnostic reached **10/12**, missing only the two **root Session-create goals** (it chose `none` instead of opening Agent). The [protocol §4.7](PROTOCOL.md) corrects the question to **select one currently exposed action that advances the final goal** rather than insist on exact final-action matching. This changes **decision semantics**, not View exposure: the root still has no Create leaf.
@@ -47,7 +69,7 @@ The **five independent AI Workspace concepts** are `AIWorkspace`, `AIWorkspaceSc
 
 ### Fidelity
 
-The mock's local intent detection is deliberately **not** Jev and not a credible measurement of its Chinese accuracy. It constructs a Jev-shaped QuestionPlan for inspection and simulates the decision. `illustrativeScore` is **not** a measured model probability. The prototype is a conversation artifact; source-aligned integration Cases and actual browser/real-provider evaluation remain Pending in Issue #2221.
+The Workspace's local intent detection is deliberately **not** Jev and not a credible measurement of Chinese accuracy. It builds a Jev-shaped QuestionPlan but simulates decisions; `illustrativeScore` is **not** a measured model probability. The separate Replay displays **past real Jev observations**, never current Workspace inference. Source-aligned backend Cases and browser acceptance remain Pending in Issue #2221.
 
 Development preview (external third party; cache may lag): https://raw.githack.com/BestNathan/nession/prototype/ai-workspace-2221/index.html
 
