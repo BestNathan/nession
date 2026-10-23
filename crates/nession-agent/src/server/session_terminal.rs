@@ -121,7 +121,23 @@ impl SessionControlState {
         self.generation
     }
 
+    /// Take the lease, or restate it when this client already holds it.
+    ///
+    /// **Re-acquiring as the holder is a no-op on purpose** (#2286). Ordinary
+    /// use activates the terminal repeatedly — a window regains focus, a
+    /// surface is switched back to, the user clicks into the grid — and every
+    /// one of those is a legitimate request to be the controller. If each one
+    /// minted a new generation, the client's own in-flight input and resize
+    /// would be fenced by its own next click: the resize it just sent would be
+    /// refused as stale, and the session would thrash between "who owns the
+    /// pane" states while nothing changed about who is actually using it.
+    ///
+    /// A **different** client still advances the generation, which is what
+    /// fences the previous controller's late frames.
     pub fn acquire(&mut self, client_id: &str) -> u64 {
+        if self.controller_client_id.as_deref() == Some(client_id) {
+            return self.generation;
+        }
         self.generation = self.generation.saturating_add(1);
         self.controller_client_id = Some(client_id.to_string());
         self.generation
@@ -408,7 +424,20 @@ impl SessionStreamState {
         (self.epoch, seq)
     }
 
-    pub fn record_resize(&mut self, session_name: &str, cols: u16, rows: u16) -> (u64, u64) {
+    /// Record an authoritative resize at the generation that authorized it.
+    ///
+    /// The generation travels with the event so a client can tell a size it
+    /// asked for from a size chosen under a lease the session has since left
+    /// (#2286 SC-03). The event keeps its place in the timeline either way —
+    /// the cursor must stay contiguous — so a superseded resize is replayed
+    /// and skipped by the renderer, not dropped from the log.
+    pub fn record_resize(
+        &mut self,
+        session_name: &str,
+        cols: u16,
+        rows: u16,
+        control_generation: Option<u64>,
+    ) -> (u64, u64) {
         self.next_seq = self.next_seq.saturating_add(1);
         let seq = self.next_seq;
         let event = TerminalStreamEventPayload::Resize {
@@ -417,6 +446,7 @@ impl SessionStreamState {
             stream_seq: seq,
             cols,
             rows,
+            control_generation,
         };
         self.push_event(event);
         (self.epoch, seq)
@@ -573,6 +603,37 @@ mod tests {
         assert!(control.authorize_mutation("b", Some(2)));
     }
 
+    /// #2286: activation is frequent and the holder restating it must not
+    /// invalidate its own in-flight input/resize. Only a *different* client
+    /// advances the generation.
+    #[test]
+    fn reacquiring_as_the_holder_keeps_the_generation() {
+        let mut control = SessionControlState::new();
+        let g1 = control.ensure_controller("a");
+        let again = control.acquire("a");
+        assert_eq!(again, g1);
+        assert!(control.authorize_mutation("a", Some(g1)));
+
+        let g2 = control.acquire("b");
+        assert_eq!(g2, g1 + 1);
+        assert!(control.authorize_mutation("b", Some(g2)));
+        assert!(!control.authorize_mutation("a", Some(g1)));
+    }
+
+    /// A generation taken over and then restated by the client that now holds
+    /// it stays put: the ordinary PC → phone → PC flow acquires on every
+    /// foreground activation, and only the transitions may fence frames.
+    #[test]
+    fn the_restated_generation_survives_repeated_activation() {
+        let mut control = SessionControlState::new();
+        control.ensure_controller("pc");
+        let phone = control.acquire("phone");
+        let back_to_pc = control.acquire("pc");
+        assert_eq!(back_to_pc, phone + 1);
+        assert_eq!(control.acquire("pc"), back_to_pc);
+        assert_eq!(control.acquire("pc"), back_to_pc);
+    }
+
     #[test]
     fn stream_records_monotonic_seq() {
         let mut stream = SessionStreamState::new();
@@ -581,11 +642,38 @@ mod tests {
         // test to whatever it happened to be rather than to the property.
         let epoch = stream.epoch;
         let (_, s1) = stream.record_output("s", "YQ==".to_string());
-        let (_, s2) = stream.record_resize("s", 80, 24);
+        let (_, s2) = stream.record_resize("s", 80, 24, None);
         assert_eq!(s1, 1);
         assert_eq!(s2, 2);
         let tail = stream.replay_since(epoch, 0).expect("same epoch");
         assert_eq!(tail.events.len(), 2);
+    }
+
+    /// #2286 SC-03: a resize is recorded with the lease generation that
+    /// authorized it, so replay and live delivery can both identify a size the
+    /// session has already left. The sequence number is still consumed — the
+    /// event is superseded by the renderer, never dropped from the timeline.
+    #[test]
+    fn a_recorded_resize_states_the_generation_that_authorized_it() {
+        let mut stream = SessionStreamState::new();
+        let epoch = stream.epoch;
+        let (_, seq) = stream.record_resize("s", 120, 30, Some(7));
+        let replay = stream.replay_since(epoch, 0).unwrap();
+        assert_eq!(replay.events.len(), 1);
+        match &replay.events[0] {
+            TerminalStreamEventPayload::Resize {
+                stream_seq,
+                cols,
+                rows,
+                control_generation,
+                ..
+            } => {
+                assert_eq!(*stream_seq, seq);
+                assert_eq!((*cols, *rows), (120, 30));
+                assert_eq!(*control_generation, Some(7));
+            }
+            other => panic!("expected a resize event, got {other:?}"),
+        }
     }
 
     #[test]
@@ -602,7 +690,7 @@ mod tests {
         assert_eq!(future.first_available_seq, 1);
 
         stream.record_output("s", "one".to_owned());
-        stream.record_resize("s", 80, 24);
+        stream.record_resize("s", 80, 24, None);
         assert_eq!(stream.cursor(), 2);
         let head = stream.replay_since(epoch, 2).unwrap();
         assert!(head.complete);
@@ -652,7 +740,7 @@ mod tests {
         let (_, first) = stream.record_output("s", "first".to_owned());
         assert_eq!(first, 1);
         assert_eq!(stream.cursor(), first);
-        let (_, second) = stream.record_resize("s", 120, 30);
+        let (_, second) = stream.record_resize("s", 120, 30, None);
         assert_eq!(second, 2);
         assert_eq!(stream.cursor(), second);
         let from_head = stream.replay_since(epoch, stream.cursor()).unwrap();

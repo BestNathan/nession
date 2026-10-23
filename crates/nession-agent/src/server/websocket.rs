@@ -82,6 +82,8 @@ enum SubscriberEvent {
         rows: u16,
         stream_epoch: u64,
         stream_seq: u64,
+        /// The ControlLease generation that authorized the resize (#2286).
+        control_generation: Option<u64>,
     },
 }
 
@@ -232,6 +234,7 @@ fn fan_out_recorded_resize(
     rows: u16,
     stream_epoch: u64,
     stream_seq: u64,
+    control_generation: Option<u64>,
 ) -> usize {
     fan_out_session_event(
         peers,
@@ -240,6 +243,7 @@ fn fan_out_recorded_resize(
             rows,
             stream_epoch,
             stream_seq,
+            control_generation,
         },
     )
 }
@@ -532,11 +536,13 @@ fn spawn_output_forwarder(
                     rows,
                     stream_epoch,
                     stream_seq,
+                    control_generation,
                 } => terminal_resize_frame(
                     &session_name,
                     cols,
                     rows,
                     Some((stream_epoch, stream_seq)),
+                    control_generation,
                 ),
             };
             if let Some(json) = json {
@@ -822,12 +828,13 @@ fn terminal_resize_frame(
     cols: u16,
     rows: u16,
     position: Option<(u64, u64)>,
+    control_generation: Option<u64>,
 ) -> Option<String> {
     let payload = TerminalResizePayload {
         session_name: session_name.to_string(),
         cols,
         rows,
-        control_generation: None,
+        control_generation,
         stream_epoch: position.map(|(epoch, _)| epoch),
         stream_seq: position.map(|(_, seq)| seq),
     };
@@ -855,7 +862,7 @@ async fn send_terminal_resize_msg(
     cols: u16,
     rows: u16,
 ) -> bool {
-    let Some(json) = terminal_resize_frame(session_name, cols, rows, None) else {
+    let Some(json) = terminal_resize_frame(session_name, cols, rows, None, None) else {
         return true;
     };
     !matches!(
@@ -887,8 +894,11 @@ async fn send_recorded_resize_msg(
     cols: u16,
     rows: u16,
     position: (u64, u64),
+    control_generation: Option<u64>,
 ) {
-    let Some(json) = terminal_resize_frame(session_name, cols, rows, Some(position)) else {
+    let Some(json) =
+        terminal_resize_frame(session_name, cols, rows, Some(position), control_generation)
+    else {
         return;
     };
     if outbound.send_terminal(WsMessage::Text(json)).await.is_err() {
@@ -2830,23 +2840,31 @@ p2p_routes! { ctx, msg_type, payload_value;
                             session
                                 .control
                                 .authorize_mutation(&client_id, payload.control_generation),
+                            // The generation this resize was admitted under. It
+                            // is recorded with the event so a client that has
+                            // since taken over can recognise a size chosen
+                            // under a lease the session has left (#2286 SC-03).
+                            // Captured at admission, not at record time: the
+                            // lease may move across the backend await, and the
+                            // event must say who asked, not who owns now.
+                            session.control.generation,
                             Arc::clone(&session.backend),
                         )
                     });
                 match role_and_backend {
-                    Some((session_terminal::TerminalRole::Observer, _, _)) => {
+                    Some((session_terminal::TerminalRole::Observer, _, _, _)) => {
                         return ctx.err(
                             "observer_resize",
                             "observers must not resize the live session",
                         );
                     }
-                    Some((_, false, _)) => {
+                    Some((_, false, _, _)) => {
                         return ctx.err(
                             "not_controller",
                             "terminal resize requires an active controller lease",
                         );
                     }
-                    Some((_, true, backend)) => {
+                    Some((_, true, authorized_generation, backend)) => {
                         // The guard is scoped here rather than written as the
                         // `match` scrutinee, because a scrutinee's temporaries
                         // live until the end of the **whole match** — so
@@ -2878,6 +2896,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                             &payload.session_name,
                                             payload.cols,
                                             payload.rows,
+                                            Some(authorized_generation),
                                         );
                                         // Record and enqueue within the SAME lock
                                         // as record_output + fan-out. A resize
@@ -2893,6 +2912,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                             payload.rows,
                                             position.0,
                                             position.1,
+                                            Some(authorized_generation),
                                         );
                                         if detached > 0 {
                                             warn!(
@@ -2914,6 +2934,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                         payload.cols,
                                         payload.rows,
                                         position,
+                                        Some(authorized_generation),
                                     )
                                     .await;
                                 }
@@ -4207,7 +4228,7 @@ mod tests {
         stream.record_output("demo", before);
         // A resize consumes a sequence but cannot be reconstructed as a VT
         // reset; we still recover the full ordered OUTPUT prefix, Partial.
-        stream.record_resize("demo", 120, 30);
+        stream.record_resize("demo", 120, 30, Some(1));
         let prefix = atomic_output_prefix(&stream).expect("prefix complete");
         let cut = stream.cursor();
         assert_eq!(prefix.bytes, b"GAP-001\\r\\n");
@@ -4271,11 +4292,11 @@ mod tests {
             base64::engine::general_purpose::STANDARD.encode(&first),
         );
         assert_eq!(fan_out_peers(&mut peers, (first.clone(), epoch, seq1)), 0);
-        let (resize_epoch, seq2) = stream.record_resize("demo", 132, 40);
+        let (resize_epoch, seq2) = stream.record_resize("demo", 132, 40, Some(2));
         assert_eq!(resize_epoch, epoch);
         assert_eq!(seq2, seq1 + 1);
         assert_eq!(
-            fan_out_recorded_resize(&mut peers, 132, 40, resize_epoch, seq2),
+            fan_out_recorded_resize(&mut peers, 132, 40, resize_epoch, seq2, Some(2)),
             0
         );
         let last = b"AFTER-RESIZE".to_vec();
@@ -4295,6 +4316,7 @@ mod tests {
                 rows: 40,
                 stream_epoch: epoch,
                 stream_seq: seq2,
+                control_generation: Some(2),
             },
             SubscriberEvent::Output((last, last_epoch, seq3)),
         ];
@@ -4345,7 +4367,14 @@ mod tests {
             assert!(matches!(fast_rx.try_recv(), Ok(SubscriberEvent::Output(_))));
         }
         assert_eq!(
-            fan_out_recorded_resize(&mut peers, 90, 30, 7, SUBSCRIBER_QUEUE_SLOTS as u64 + 1),
+            fan_out_recorded_resize(
+                &mut peers,
+                90,
+                30,
+                7,
+                SUBSCRIBER_QUEUE_SLOTS as u64 + 1,
+                None
+            ),
             1,
         );
         assert_eq!(peers.len(), 1);
@@ -4361,6 +4390,7 @@ mod tests {
                 rows: 30,
                 stream_epoch: 7,
                 stream_seq: SUBSCRIBER_QUEUE_SLOTS as u64 + 1,
+                control_generation: None,
             }
         );
     }
@@ -6541,7 +6571,8 @@ mod tests {
     /// because a round trip passes for any self-consistent shape.
     #[test]
     fn a_level_resize_frame_carries_no_position() {
-        let json = terminal_resize_frame("work", 80, 24, None).expect("a resize frame serialises");
+        let json =
+            terminal_resize_frame("work", 80, 24, None, None).expect("a resize frame serialises");
         let frame: serde_json::Value = serde_json::from_str(&json).unwrap();
         let payload = frame.get("payload").expect("the frame carries a payload");
         assert!(
@@ -6549,8 +6580,13 @@ mod tests {
             "a level resize emitted a stream position: {json}"
         );
 
-        let json =
-            terminal_resize_frame("work", 80, 24, Some((7, 9))).expect("a resize frame serialises");
+        assert!(
+            payload.get("control_generation").is_none(),
+            "a level resize has no lease generation: {json}"
+        );
+
+        let json = terminal_resize_frame("work", 80, 24, Some((7, 9)), Some(4))
+            .expect("a resize frame serialises");
         let frame: serde_json::Value = serde_json::from_str(&json).unwrap();
         let payload = frame.get("payload").expect("the frame carries a payload");
         assert_eq!(
@@ -6564,6 +6600,12 @@ mod tests {
                 .get("stream_seq")
                 .and_then(serde_json::Value::as_u64),
             Some(9)
+        );
+        assert_eq!(
+            payload
+                .get("control_generation")
+                .and_then(serde_json::Value::as_u64),
+            Some(4)
         );
     }
 

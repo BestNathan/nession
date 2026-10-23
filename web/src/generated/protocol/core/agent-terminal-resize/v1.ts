@@ -21,7 +21,24 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
-export type TerminalResizePayload = { session_name: string, cols: number, rows: number, control_generation?: number | null, 
+export type TerminalResizePayload = { session_name: string, cols: number, rows: number, 
+/**
+ * The ControlLease generation this frame belongs to (#1095, #2286).
+ *
+ * Client → Agent: the lease the sender believes it holds. The Agent admits
+ * the resize only when it still holds that exact generation, so a
+ * debounced or delayed resize from a controller that has since been taken
+ * over cannot move the shared pane.
+ *
+ * Agent → client on a **recorded** resize: the generation that authorized
+ * the resize. A client that has since acquired a newer generation ignores
+ * the frame: it describes a size chosen under a lease the session has
+ * already left, and applying it after the new controller's own fit would
+ * revert the grid until something resized again (#2286 SC-03). Absent on a
+ * **level** frame (a tmux `%window-resize` echo, which no client requested)
+ * and from providers built before this field existed.
+ */
+control_generation?: number | null, 
 /**
  * Monotonic stream identity (#1094), present when this resize is an
  * **event in the session's stream** rather than a size the client is being
@@ -46,7 +63,24 @@ stream_epoch?: number | null, stream_seq?: number | null, };
 // ── Operations ──
 
 /** The payload a caller sends. */
-export type TerminalResizeCall = { session_name: string, cols: number, rows: number, control_generation?: number | null, 
+export type TerminalResizeCall = { session_name: string, cols: number, rows: number, 
+/**
+ * The ControlLease generation this frame belongs to (#1095, #2286).
+ *
+ * Client → Agent: the lease the sender believes it holds. The Agent admits
+ * the resize only when it still holds that exact generation, so a
+ * debounced or delayed resize from a controller that has since been taken
+ * over cannot move the shared pane.
+ *
+ * Agent → client on a **recorded** resize: the generation that authorized
+ * the resize. A client that has since acquired a newer generation ignores
+ * the frame: it describes a size chosen under a lease the session has
+ * already left, and applying it after the new controller's own fit would
+ * revert the grid until something resized again (#2286 SC-03). Absent on a
+ * **level** frame (a tmux `%window-resize` echo, which no client requested)
+ * and from providers built before this field existed.
+ */
+control_generation?: number | null, 
 /**
  * Monotonic stream identity (#1094), present when this resize is an
  * **event in the session's stream** rather than a size the client is being

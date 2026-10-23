@@ -66,7 +66,16 @@ complete?: boolean | null,
  */
 recovery?: TerminalResumeRecovery | null, events: Array<TerminalStreamEventPayload>, };
 export type TerminalResumeRecovery = "complete" | "checkpoint-required" | "unavailable";
-export type TerminalStreamEventPayload = { "kind": "output", session_name: string, stream_epoch: number, stream_seq: number, data: string, } | { "kind": "resize", session_name: string, stream_epoch: number, stream_seq: number, cols: number, rows: number, };
+export type TerminalStreamEventPayload = { "kind": "output", session_name: string, stream_epoch: number, stream_seq: number, data: string, } | { "kind": "resize", session_name: string, stream_epoch: number, stream_seq: number, cols: number, rows: number, 
+/**
+ * The generation that authorized the resize (#2286).
+ *
+ * Replay carries it for the same reason the live frame does: a stale
+ * resize re-delivered while a newer controller owns the session must
+ * not move that controller's grid. Absent only from a provider that
+ * recorded the event before this field existed.
+ */
+control_generation?: number | null, };
 
 // ── Operations ──
 

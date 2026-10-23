@@ -110,6 +110,7 @@ function makeMockWs(): RelayServerTransport {
     sendRelayInput: vi.fn(),
     isReady: vi.fn(() => true),
     sendRelayResize: vi.fn(),
+    getControlState: vi.fn(() => ({ role: 'controller' as const })),
     onRelayOutput: vi.fn().mockReturnValue(() => {}),
     onRelayResize: vi.fn().mockReturnValue(() => {}),
     onRelayInputAck: vi.fn().mockReturnValue(() => {}),
@@ -517,6 +518,54 @@ describe('ConnectionManager', () => {
       cm.dispose();
     });
 
+    it('does not apply a recorded resize from a lease the client has left (#2286 SC-03)', () => {
+      // The agent records the lease generation with every resize it applies.
+      // A frame from an older generation describes a size the session has
+      // already left; applying it after the new controller's fit would revert
+      // the grid until something resized again. The sequence is still consumed
+      // (the reconciler advances either way), so a later frame is not held.
+      const { api, resizeHandlers } = makeAgentApi();
+      (api.getControlState as ReturnType<typeof vi.fn>).mockReturnValue({
+        role: 'controller',
+        generation: 9,
+      });
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'sess-1', agentApi: api, ...attached,
+      });
+      const onResize = vi.fn();
+      cm.onResize = onResize;
+      cm.seedStreamCursor(1, 4);
+
+      resizeHandlers[0]?.({
+        cols: 120, rows: 40, streamEpoch: 1, streamSeq: 5, controlGeneration: 8,
+      });
+      expect(onResize).not.toHaveBeenCalled();
+
+      resizeHandlers[0]?.({
+        cols: 100, rows: 30, streamEpoch: 1, streamSeq: 6, controlGeneration: 9,
+      });
+      expect(onResize).toHaveBeenCalledWith(100, 30, { streamEpoch: 1, streamSeq: 6 });
+      cm.dispose();
+    });
+
+    it('applies a generation-less resize as before (legacy provider)', () => {
+      const { api, resizeHandlers } = makeAgentApi();
+      (api.getControlState as ReturnType<typeof vi.fn>).mockReturnValue({
+        role: 'controller',
+        generation: 9,
+      });
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'sess-1', agentApi: api, ...attached,
+      });
+      const onResize = vi.fn();
+      cm.onResize = onResize;
+      cm.seedStreamCursor(1, 4);
+
+      resizeHandlers[0]?.({ cols: 120, rows: 40, streamEpoch: 1, streamSeq: 5 });
+      expect(onResize).toHaveBeenCalledWith(120, 40, { streamEpoch: 1, streamSeq: 5 });
+      cm.dispose();
+    });
+
     it('routes resize outbound through agentApi.sendResize', () => {
       const { api } = makeAgentApi();
       const manager = new ConnectionManager({
@@ -548,6 +597,25 @@ describe('ConnectionManager', () => {
       expect(api.sendResize).toHaveBeenCalledTimes(2);
       manager.sendResize(120, 40);
       expect(api.sendResize).toHaveBeenCalledTimes(3);
+      manager.dispose();
+    });
+
+    it('restates the same size after adopting the lease (#2286)', () => {
+      // While this client was an observer the pane may have moved to another
+      // device's size without this client sending anything, so the numbers it
+      // holds are a *change* now even though they equal its last statement.
+      const { api } = makeAgentApi();
+      const manager = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'sess-1', agentApi: api, ...attached,
+      });
+      manager.sendResize(120, 40);
+      manager.sendResize(120, 40);
+      expect(api.sendResize).toHaveBeenCalledTimes(1);
+
+      manager.restateResize();
+      manager.sendResize(120, 40);
+      expect(api.sendResize).toHaveBeenCalledTimes(2);
+      expect(api.sendResize).toHaveBeenLastCalledWith('test', 120, 40);
       manager.dispose();
     });
 
@@ -1416,6 +1484,77 @@ describe('ConnectionManager', () => {
       cm.sendResize(120, 40);
 
       expect(ws.sendRelayResize).toHaveBeenCalledWith('test', 120, 40);
+      cm.dispose();
+    });
+
+    it('states the ControlLease generation with a Relay resize (#2286)', () => {
+      const ws = makeMockWs();
+      (ws.getControlState as ReturnType<typeof vi.fn>).mockReturnValue({
+        role: 'controller',
+        generation: 4,
+      });
+      const cm = new ConnectionManager({
+        mode: 'relay', sessionName: 'test', sessionId: 'sess-1', serverConnection: ws, ...attached,
+      });
+
+      cm.sendResize(120, 40);
+
+      expect(ws.sendRelayResize).toHaveBeenCalledWith('test', 120, 40, 4);
+      cm.dispose();
+    });
+
+    it('refuses to send a Relay resize from an observer (#2286)', () => {
+      // The relay socket is shared by every browser; unlike the direct Agent
+      // API there is no per-client gate below this one. An observer's viewport
+      // change is local only, and the Agent would refuse the frame anyway.
+      const ws = makeMockWs();
+      (ws.getControlState as ReturnType<typeof vi.fn>).mockReturnValue({
+        role: 'observer',
+        generation: 4,
+      });
+      const cm = new ConnectionManager({
+        mode: 'relay', sessionName: 'test', sessionId: 'sess-1', serverConnection: ws, ...attached,
+      });
+
+      cm.sendResize(120, 40);
+
+      expect(ws.sendRelayResize).not.toHaveBeenCalled();
+      cm.dispose();
+    });
+
+    it('does not apply a Relay resize recorded under a lease this client has left (#2286)', () => {
+      // Route parity: the same fence the direct path applies must hold when the
+      // Server forwards the Agent's recorded frame (#2286 SC-06).
+      const onResize = vi.fn();
+      let resizeHandler: (
+        cols: number,
+        rows: number,
+        position?: { streamEpoch: number; streamSeq: number },
+        controlGeneration?: number,
+      ) => void = () => {};
+      const ws = makeMockWs();
+      (ws.onRelayResize as ReturnType<typeof vi.fn>).mockImplementation(
+        (_sid: string, cb: typeof resizeHandler) => {
+          resizeHandler = cb;
+          return () => {};
+        },
+      );
+      (ws.getControlState as ReturnType<typeof vi.fn>).mockReturnValue({
+        role: 'controller',
+        generation: 9,
+      });
+
+      const cm = new ConnectionManager({
+        mode: 'relay', sessionName: 'test', sessionId: 'sess-1', serverConnection: ws,
+      });
+      cm.onResize = onResize;
+      cm.seedStreamCursor(1, 4);
+
+      resizeHandler(120, 40, { streamEpoch: 1, streamSeq: 5 }, 8);
+      expect(onResize).not.toHaveBeenCalled();
+
+      resizeHandler(100, 30, { streamEpoch: 1, streamSeq: 6 }, 9);
+      expect(onResize).toHaveBeenCalledWith(100, 30, { streamEpoch: 1, streamSeq: 6 });
       cm.dispose();
     });
 

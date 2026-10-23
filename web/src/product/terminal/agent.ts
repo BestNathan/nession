@@ -76,6 +76,11 @@ export interface TerminalResizeFrame {
   rows: number;
   streamEpoch?: number;
   streamSeq?: number;
+  /**
+   * The ControlLease generation that authorized a **recorded** resize
+   * (#2286). Absent on a level frame and from an older agent.
+   */
+  controlGeneration?: number;
 }
 
 export interface TerminalStreamResumeResult {
@@ -550,14 +555,30 @@ export function createTerminalAgentApi(surface: PluginSurface): TerminalAgentApi
           rows: number;
           stream_epoch?: unknown;
           stream_seq?: unknown;
+          control_generation?: unknown;
         };
         // Both or neither: the agent sets them together, and a frame that
         // carried only one would be a position nothing can be placed at — so
         // it is read as the level it still is rather than half-applied as an
         // event (#1303).
         const position = readAgentStreamPosition(p);
+        // Absent is "the provider did not state a lease" (#2286); it is never
+        // invented, because a fabricated generation could suppress a real
+        // resize.
+        const generation = p.control_generation;
+        const controlGeneration =
+          typeof generation === 'number'
+          && Number.isSafeInteger(generation)
+          && generation >= 0
+            ? generation
+            : undefined;
         if (position) {
-          cb({ cols: p.cols, rows: p.rows, ...position });
+          cb({
+            cols: p.cols,
+            rows: p.rows,
+            ...position,
+            ...(controlGeneration !== undefined ? { controlGeneration } : {}),
+          });
           return;
         }
         cb({ cols: p.cols, rows: p.rows });
