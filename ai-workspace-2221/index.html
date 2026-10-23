@@ -395,6 +395,113 @@
   const bump = () => {state.revision++;renderInspector();};
   const toast = (message) => {const el=$('toast');el.textContent=message;el.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),2800);};
 
+
+  // AI Workspace-only registry. Business APIs remain authoritative.
+  const registryVersion='ai-prototype-v2';
+  const registry=Object.freeze({
+    'agent.list':{semantic:['agent.list.show','agent.select'],presentation:'standalone',instance:'perScope'},
+    'session.list':{semantic:['session.list.show'],presentation:'standalone',instance:'perScope'},
+    'session.create':{semantic:['session.create.open','session.create.submit'],presentation:'adaptive',instance:'multiple'},
+    'session.open':{semantic:['session.open'],presentation:'handoff',instance:'perScope'}
+  });
+  const action=(id,cap,act,kind,label,options={})=>({
+    candidateId:id,capabilityId:cap,actionId:act,kind,label,
+    placement:registry[cap]?.presentation||'standalone',
+    eligibility:options.eligibility||'enabled',reason:options.reason||null,
+    target:options.target||{},requiresConfirmation:kind==='mutation',
+    preconditionVersion:String(dataEpoch)
+  });
+  function deriveActionSpace(){
+    const s=focused(),list=[];
+    const add=x=>{if(!list.find(y=>y.candidateId===x.candidateId))list.push(x);};
+    add(action('discover:agents','agent.list','agent.list.show','navigation','Agent 列表'));
+    add(action('discover:sessions','session.list','session.list.show','navigation','Session 列表'));
+    add(action('discover:create','session.create','session.create.open','interaction','创建 Session'));
+    state.scenes.forEach(x=>add(action('scene:'+x.id,x.type,x.type+'.focus','navigation','返回 '+x.title,{target:{sceneId:x.id}})));
+    if(s?.type==='agent.list'){
+      if(s.flow?.view==='session.create'){
+        const fl=s.flow,a=agents.find(x=>x.id===fl.draft.agentId);
+        add(action('agent:create:back','agent.list','agent.list.back','interaction','返回 Agent 列表',{target:{sceneId:s.id}}));
+        if(fl.status==='complete'&&fl.result){
+          add(action('agent:create:open-result','session.open','session.open','handoff','打开刚创建的 Session',{target:{sceneId:s.id,resource:{kind:'session',id:fl.result.id}}}));
+          add(action('agent:create:again','session.create','session.create.open','interaction','再创建一个',{target:{sceneId:s.id}}));
+        }else{
+          const valid=!!a&&a.status==='online'&&/^[A-Za-z0-9_.-]{1,64}$/.test(fl.draft.name.trim())
+            &&!sessions.some(x=>x.id===fl.draft.agentId+':'+fl.draft.name.trim())&&fl.status!=='submitting';
+          add(action('agent:create:submit','session.create','session.create.submit','mutation','提交创建',{target:{sceneId:s.id},eligibility:valid?'enabled':'needs_input',reason:valid?null:'需要在线 Agent、有效名称和无重复会话'}));
+        }
+      }else{
+        visibleAgentIds().forEach(id=>{
+          const a=agents.find(x=>x.id===id);
+          add(action('agent:select:'+id,'agent.list','agent.select','interaction','选择 '+a.name,{target:{sceneId:s.id,resource:{kind:'agent',id}}}));
+        });
+        const a=agents.find(x=>x.id===s.selectedAgentId);
+        if(a)add(action('agent:selected:create','session.create','session.create.open','interaction','在 '+a.name+' 创建 Session',{target:{sceneId:s.id,resource:{kind:'agent',id:a.id}},eligibility:a.status==='online'?'enabled':'disabled',reason:a.status==='online'?null:'Agent 离线'}));
+      }
+    }
+    if(s?.type==='session.create'){
+      if(s.status==='complete'&&s.result)add(action('standalone:open-result','session.open','session.open','handoff','打开刚创建的 Session',{target:{sceneId:s.id,resource:{kind:'session',id:s.result.id}}}));
+      else{
+        const a=agents.find(x=>x.id===s.draft.agentId),v=!!a&&a.status==='online'&&/^[A-Za-z0-9_.-]{1,64}$/.test(s.draft.name.trim())&&!sessions.some(x=>x.id===s.draft.agentId+':'+s.draft.name.trim())&&s.status!=='submitting';
+        add(action('standalone:submit','session.create','session.create.submit','mutation','提交创建',{target:{sceneId:s.id},eligibility:v?'enabled':'needs_input'}));
+      }
+    }
+    if(s?.type==='session.list')sessions.forEach(x=>add(action('session:open:'+x.id,'session.open','session.open','handoff','打开 '+x.name,{target:{sceneId:s.id,resource:{kind:'session',id:x.id}}})));
+    return {
+      revision:state.revision,registryVersion,
+      dependencyFingerprint:JSON.stringify([state.activeSceneId,s?.selectedAgentId,s?.flow?.view,s?.flow?.draft?.name,s?.flow?.draft?.agentId,s?.flow?.status,activeSearch,dataEpoch]),
+      discovery:list.filter(x=>x.candidateId.startsWith('discover:')),
+      contextual:list.filter(x=>!x.candidateId.startsWith('discover:')&&!x.candidateId.startsWith('scene:')),
+      navigation:list.filter(x=>x.candidateId.startsWith('scene:')),
+      eligible:list.filter(x=>x.eligibility==='enabled'),all:list
+    };
+  }
+  function rankActions(space){
+    const s=focused(),priorities=s?.type==='agent.list'?
+      (s.flow?.status==='complete'?['agent:create:open-result','agent:create:again','agent:create:back']:
+       s.flow?.view==='session.create'?['agent:create:submit','agent:create:back']:['agent:selected:create','discover:sessions']):
+      s?.type==='session.create'?(s.status==='complete'?['standalone:open-result','discover:sessions']:['standalone:submit','discover:agents']):
+      s?.type==='session.list'?['discover:agents','discover:create']:['discover:agents','discover:sessions'];
+    let matches=priorities.map(id=>space.eligible.find(x=>x.candidateId===id)).filter(Boolean);
+    if(!matches.length)matches=space.discovery.filter(x=>x.eligibility==='enabled').slice(0,2);
+    return {mock:true,judgment:'action.rank',sourceRevision:space.revision,
+      suggested:matches.slice(0,3).map((x,i)=>({candidateId:x.candidateId,actionId:x.actionId,label:x.label,illustrativeScore:Number((.91-i*.14).toFixed(2))}))};
+  }
+  function buildJevPlan(question,projection,space){
+    const pool=space.eligible.filter(x=>x.kind!=='mutation'&&!x.actionId.endsWith('.focus')).slice(0,30);
+    const criteria={};
+    pool.forEach((c,i)=>{criteria['c'+i]=c.actionId+' / '+c.label+' / '+JSON.stringify(c.target)});
+    criteria.none='None of the registered actions match the user utterance';
+    return {
+      model:'jev-1.13.0',
+      state:{utterance:question,projection,actionSpaceRevision:space.revision,registryVersion},
+      questions:{requested_action:{type:'choice',instructions:'Which registered action matches the utterance and context? Choose none if ambiguous.',criteria}},
+      localCandidateMap:pool.map((c,i)=>({choice:'c'+i,candidateId:c.candidateId}))
+    };
+  }
+  function renderSuggestions(){
+    const space=deriveActionSpace();
+    latestRecommendation=rankActions(space);
+    const suggested=latestRecommendation.suggested;
+    if(!suggested.length)return '';
+    return '<section class="suggested-actions"><div class="suggest-head"><strong>下一步可以</strong><span>动态 Action Space · Mock 排序</span></div><div class="suggest-buttons">'+
+      suggested.map((x,i)=>'<button type="button" class="suggest-action '+(i===0?'primary':'')+'" data-action-candidate="'+escapeHtml(x.candidateId)+'">'+escapeHtml(x.label)+(i===0?' →':'')+'</button>').join('')+'</div></section>';
+  }
+  function performCandidate(id){
+    const c=deriveActionSpace().all.find(x=>x.candidateId===id);
+    if(!c||c.eligibility!=='enabled'){toast('这个动作已失效或当前不可用');return;}
+    if(c.kind==='mutation'){toast('请在表单中明确提交，模型建议不自动执行');return;}
+    if(id==='discover:agents')activate('agent.list');
+    else if(id==='discover:sessions')activate('session.list');
+    else if(id==='discover:create'){if(focused()?.type==='agent.list')openAgentCreateInline(null,'Action Space');else activate('session.create');}
+    else if(id.startsWith('scene:'))activateId(c.target.sceneId);
+    else if(id.startsWith('agent:select:'))setAgentSelected(c.target.resource.id);
+    else if(id==='agent:selected:create')openAgentCreateInline(c.target.resource.id,'Action Space');
+    else if(id==='agent:create:again')openAgentCreateInline(null,'Action Space');
+    else if(id==='agent:create:back')backToAgentList();
+    else if(c.kind==='handoff'&&c.target.resource)openSession(c.target.resource.id);
+  }
+
   const keyFor = (type, scope='all') => `${type}:${scope}`;
   function activate(type, scope='all', opts={}) {
     const key=keyFor(type,scope);
@@ -561,13 +668,14 @@
     $('workStage').classList.toggle('hidden',!hasScenes);
     if(hasScenes) {if($('composerRoot').parentElement!==$('dockAnchor')) $('dockAnchor').appendChild($('composerRoot'));}
     else {if($('composerRoot').parentElement!==$('emptyAnchor'))$('emptyAnchor').appendChild($('composerRoot'));}
-    if(!hasScenes) return;
+    if(!hasScenes){renderInspector();return;}
     $('workCount').textContent=`${state.scenes.length} 个工作项 · 当前 ${itemIndex()+1}/${state.scenes.length}`;
     renderTabs();
     const idx=itemIndex();
     renderPreview($('prevPreview'),state.scenes[idx-1],'left');renderPreview($('nextPreview'),state.scenes[idx+1],'right');
     $('prevButton').disabled=idx<=0;$('nextButton').disabled=idx>=state.scenes.length-1;
     $('mainCard').innerHTML=renderScene(focused());
+    renderInspector();
     $('carouselDots').innerHTML=state.scenes.map((i,n)=>`<button class="dot ${n===idx?'active':''}" data-focus="${escapeHtml(i.id)}" aria-label="第 ${n+1} 个 Scene：${escapeHtml(i.title)}" title="${escapeHtml(i.title)}"></button>`).join('');
   }
   function cardHead(item,eyebrow,subtitle,buttons=''){
@@ -615,6 +723,9 @@
   }
   function renderInspector(){
     if(!inspectorOpen)return;
+    $('debugQuestionPlan').textContent=latestQuestionPlan?JSON.stringify(latestQuestionPlan,null,2):'暂无请求';
+    $('debugActionSpace').textContent=JSON.stringify(deriveActionSpace(),null,2);
+    $('debugRanking').textContent=JSON.stringify(latestRecommendation||rankActions(deriveActionSpace()),null,2);
     $('debugRequest').textContent=latestRequest?JSON.stringify(latestRequest,null,2):'尚无请求';
     $('debugDecision').textContent=latestDecision?JSON.stringify(latestDecision,null,2):'尚无决策';
     $('debugState').textContent=JSON.stringify(snapshot(),null,2);
@@ -646,6 +757,7 @@
   });
   document.addEventListener('click',e=>{
     const btn=e.target.closest('button');if(!btn)return;
+    if(btn.dataset.actionCandidate)performCandidate(btn.dataset.actionCandidate);
     if(btn.dataset.focus)activateId(btn.dataset.focus);
     if(btn.dataset.agentSelect)setAgentSelected(btn.dataset.agentSelect);
     if(btn.dataset.createAgent)openAgentCreateInline(btn.dataset.createAgent,'Agent 行内操作');
