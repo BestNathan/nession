@@ -161,6 +161,16 @@ await assert.rejects(()=>runReviewSlice({admission:qwenAdmission,
   runner:createClaudeReviewRunner({model:'qwen3.7-plus',workspace:'/tmp',
     spawn:claudeSpawn(1,[]),env:{}}),
   taskId:TASK,runId:RUN,runAttempt:ATTEMPT,env:{}}),/restricted Claude Code CLI failed/);
+// A real failure line is bounded and credential-redacted, never a bare status.
+const diagnosticRunner=createClaudeReviewRunner({model:'qwen3.7-plus',workspace:'/tmp',
+  env:{ANTHROPIC_AUTH_TOKEN:'SECRET_TOKEN'},
+  spawn:()=>({status:1,signal:null,stdout:'',error:null,
+    stderr:'Error: Invalid API key: SECRET_TOKEN\n'})});
+await assert.rejects(()=>diagnosticRunner('prompt',{tools:['read','grep']}),(error)=>{
+  assert.match(error.message,/restricted Claude Code CLI failed \(status=1: Error: Invalid API key: \[redacted\]\)/);
+  assert.equal(error.message.includes('SECRET_TOKEN'),false);
+  return true;
+});
 const editLines=[
   JSON.stringify({type:'assistant',message:{content:[
     {type:'tool_use',id:'r1',name:'Read'},{type:'tool_use',id:'e1',name:'Edit'}]}}),
