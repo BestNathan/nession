@@ -17,6 +17,7 @@ import { auditStagedRunStore } from '../../../run-store-integrity.mjs';
 import { publish } from '../../../run-store-cas-push.mjs';
 
 const REPO = 'BestNathan/nession';
+const OWNER = REPO.split('/')[0];
 const ISSUE = 1997;
 const SHA = /^[a-f0-9]{40}$/;
 function fail(reason) { throw new Error('Publisher review ingest: ' + reason); }
@@ -34,10 +35,11 @@ export async function fetchControlledPublication({ fetcher }) {
   const pullCommits = await read('pulls/' + P.original_pr + '/commits?per_page=100');
   const originalCommit = await read('commits/' + P.original_pr_sha);
   const currentFiles = await read('pulls/' + P.original_pr + '/files?per_page=100');
-  // GitHub's head filter is "owner:branch" (not "owner/branch"); the wrong
-  // separator silently returns no PRs and the verifier fails closed.
+  // GitHub's head filter is "owner:branch" (not "repository:branch" and not
+  // "owner/branch"); a wrong separator or slug silently returns no PRs and
+  // the verifier fails closed.
   const branchPulls = await read(
-    'pulls?head=' + encodeURIComponent(REPO + ':' + P.branch) + '&state=all');
+    'pulls?head=' + encodeURIComponent(OWNER + ':' + P.branch) + '&state=all');
   return verifyControlledOriginalPublication({
     sourceRun, sourceJobs, ownerComment,
     intent: readControlledIntent(await read('contents/' +
