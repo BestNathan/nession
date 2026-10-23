@@ -256,6 +256,7 @@
     }
     @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition-duration: .001ms !important; animation-duration: .001ms !important; } }
   </style>
+  <link rel="stylesheet" href="./jev-replay.css">
 </head>
 <body>
 <div class="app" id="app">
@@ -1035,5 +1036,7 @@
   render();log('READY','纯 HTML 原型已准备好；System 1 和接口使用 Mock');
 })();
 </script>
+<script src="./jev-replay-data.js"></script>
+<script src="./jev-replay.js"></script>
 </body>
 </html>
