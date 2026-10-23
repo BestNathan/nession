@@ -534,6 +534,7 @@
       existing.status='ready';
       existing.facts={visibleAgentIds:agents.map(a=>a.id),availableActions:['agent.select','session.create'],fetchedAt:Date.now(),pendingQuestion:state.selectedAgentId?'选择要执行的操作':'选择一个 Agent，或指定操作'};
       dataEpoch++;bump(existing);render();log('STATE WRITEBACK',`AgentList 更新了 ${agents.length} 个 Agent 的选项与可用操作`);
+      if(state.activeSceneId===existing.id&&['resolving','awaiting_data'].includes(state.pendingGoal?.status))advancePendingGoal('agent-view-loaded');
     },forced?330:520);
   }
   function fetchSessionList(item, forced=false){
@@ -541,12 +542,13 @@
     const id=item.id;
     setTimeout(()=>{const i=getScene(id);if(!i)return;i.status='ready';i.facts={sessionIds:sessions.map(s=>s.id),availableActions:['session.open'],fetchedAt:Date.now()};dataEpoch++;bump(i);render();log('STATE WRITEBACK','SessionList 更新 Session 数据与操作');},forced?300:430);
   }
-  function setAgentSelected(id){
+  function setAgentSelected(id,options={}){
     const agent=agents.find(a=>a.id===id);if(!agent)return;
     state.selectedAgentId=id;userInteractionEpoch++;
     const list=state.scenes.find(i=>i.type==='agent.list');
     if(list){list.selectedAgentId=id;list.facts.pendingQuestion='接下来在这个 Agent 上做什么？';}
     bump();render();log('STATE WRITEBACK',`选中 ${agent.name} (${id})`);toast(`已选择 ${agent.name}`);
+    if(!options.fromGoal&&state.pendingGoal?.status==='awaiting_selection')advancePendingGoal('user-selected-agent');
   }
   // A parent Scene owns its operations. Opening a form is a subview, not a new Scene.
   function openAgentCreateInline(agentId=null,origin='Agent operation'){
@@ -554,18 +556,18 @@
     if(agentId && agents.find(a=>a.id===agentId)?.status!=='online'){toast('此 Agent 已离线，无法创建 Session');return;}
     let flow=item.flow;
     if(!flow){
-      flow={view:'list',status:'ready',draft:{agentId:agentId||state.selectedAgentId||'',name:''},result:null,error:''};
+      flow={view:'list',status:'ready',draft:{agentId:agentId||item.selectedAgentId||'',name:''},result:null,error:''};
       item.flow=flow;
     }
     if(flow.status==='submitting'){toast('创建正在进行中');return;}
     const change=!!agentId && !!flow.draft.agentId && flow.draft.agentId!==agentId;
     if(change&&flow.draft.name.trim()&&flow.status!=='complete'&&!confirm('切换 Agent 会清空当前 Session 草稿，继续吗？'))return;
     if(change||flow.status==='complete'){
-      flow={view:'list',status:'ready',draft:{agentId:agentId||state.selectedAgentId||'',name:''},result:null,error:''};
+      flow={view:'list',status:'ready',draft:{agentId:agentId||item.selectedAgentId||'',name:''},result:null,error:''};
       item.flow=flow;
     }
     userInteractionEpoch++;flow.view='session.create';
-    flow.draft.agentId=agentId||flow.draft.agentId||state.selectedAgentId||'';
+    flow.draft.agentId=agentId||flow.draft.agentId||item.selectedAgentId||'';
     if(agentId){state.selectedAgentId=agentId;item.selectedAgentId=agentId;}
     bump();render();
     log('IN-SCENE ACTION',`${origin}: ${item.id} 内创建 Session，Scene 总数仍为 ${state.scenes.length}`);
@@ -687,9 +689,10 @@
       return match?{intent:'session.open',params:{sessionId:match.target.resource.id},confidence:.94}:choose('clarification.required');
     }
     if(create){
+      const goal=state.pendingGoal;
       const matching=eligible.find(c=>c.actionId==='session.create.open'&&
         (agentId?c.target.resource?.id===agentId:c.target.resource?.id===focused()?.selectedAgentId));
-      if(matching)return {intent:'session.create.open',params:{agentId:matching.target.resource?.id},confidence:.96};
+      if(matching&&(!goal?.agentHint||goalAgentMatches(goal,agents.find(a=>a.id===matching.target.resource?.id)||{})))return {intent:'session.create.open',params:{agentId:matching.target.resource?.id},confidence:.96};
       if(eligible.some(c=>c.candidateId==='agent:create:again'))
         return {intent:'session.create.open',params:{repeat:true},confidence:.95};
       // Leaf not yet exposed: the only valid step is entering the Agent capability.
@@ -750,7 +753,16 @@
         clarification='Agent 已离线，无法创建 Session。';render();toast(clarification);
       }else if(focused()?.type==='agent.list'&&!/单独|独立|新场景|新 scene|new scene/i.test(question)){
         openAgentCreateInline(id,'System One contextual intent');
-        if(state.pendingGoal?.status==='resolving'){state.pendingGoal.status='awaiting_user_commit';state.pendingGoal.ownerSceneId=focused()?.id;bump();render();}
+        if(state.pendingGoal?.status==='resolving'){
+          const goal=state.pendingGoal;
+          const flow=focused()?.flow;
+          if(flow?.view==='session.create'){
+            if(goal.nameHint&&!flow.draft.name)flow.draft.name=goal.nameHint;
+            goal.status='awaiting_user_commit';goal.ownerSceneId=focused()?.id;
+            goal.steps.push({candidateId:'agent:selected:create',source:'current-view'});
+            bump();render();
+          }
+        }
       }else {clarification='当前页面未暴露独立创建入口，请先进入 Agent 并选择目标。';bump();render();}
     }else if(decision.intent==='session.open'){
       if(sessions.some(x=>x.id===decision.params.sessionId))openSession(decision.params.sessionId);
@@ -789,7 +801,7 @@
     const idx=itemIndex();
     renderPreview($('prevPreview'),state.scenes[idx-1],'left');renderPreview($('nextPreview'),state.scenes[idx+1],'right');
     $('prevButton').disabled=idx<=0;$('nextButton').disabled=idx>=state.scenes.length-1;
-    $('mainCard').innerHTML=renderScene(focused())+(clarification?'<div class="clarification-inline" role="status">'+escapeHtml(clarification)+'</div>':'');
+    $('mainCard').innerHTML=renderScene(focused())+(state.pendingGoal&&['resolving','awaiting_data','awaiting_selection','awaiting_user_commit','suspended'].includes(state.pendingGoal.status)?'<div class="clarification-inline" role="status">目标 · '+escapeHtml(state.pendingGoal.utterance)+' · '+escapeHtml(state.pendingGoal.status)+(state.pendingGoal.status==='awaiting_user_commit'?'（请确认表单并手动提交）':'')+'</div>':'')+(clarification?'<div class="clarification-inline" role="status">'+escapeHtml(clarification)+'</div>':'');
     renderInspector();
     $('carouselDots').innerHTML=state.scenes.map((i,n)=>`<button class="dot ${n===idx?'active':''}" data-focus="${escapeHtml(i.id)}" aria-label="第 ${n+1} 个 Scene：${escapeHtml(i.title)}" title="${escapeHtml(i.title)}"></button>`).join('');
   }
@@ -893,11 +905,11 @@
       const pos=e.target.selectionStart;render();const newInput=$('agentSearch');if(newInput){newInput.focus();newInput.setSelectionRange(pos,pos);}
     }
     const ctx=formContext();if(!ctx)return;
-    if(e.target.id==='formName'){ctx.form.draft.name=e.target.value;ctx.form.error='';bump();}
+    if(e.target.id==='formName'){userInteractionEpoch++;ctx.form.draft.name=e.target.value;ctx.form.error='';bump();}
   });
   document.addEventListener('change',e=>{
     const ctx=formContext();if(!ctx)return;
-    if(e.target.id==='formAgent'){ctx.form.draft.agentId=e.target.value;if(e.target.value){state.selectedAgentId=e.target.value;if(ctx.inline)ctx.item.selectedAgentId=e.target.value;}ctx.form.error='';bump();render();log('STATE WRITEBACK',`SessionCreate 选择 Agent: ${e.target.value} · Scene ${ctx.item.id}`);}
+    if(e.target.id==='formAgent'){userInteractionEpoch++;ctx.form.draft.agentId=e.target.value;if(e.target.value){state.selectedAgentId=e.target.value;if(ctx.inline)ctx.item.selectedAgentId=e.target.value;}ctx.form.error='';bump();render();log('STATE WRITEBACK',`SessionCreate 选择 Agent: ${e.target.value} · Scene ${ctx.item.id}`);}
   });
   document.addEventListener('submit',e=>{
     if(e.target.id!=='createSessionForm')return;
@@ -921,6 +933,7 @@
       const agent=agents.find(a=>a.id===agentId);if(agent)agent.sessions++;
       state.lastOperation={type:'session.create',status:'success',sessionId:result.id,ownerSceneId:item.id};
       state.selectedSessionId=result.id;
+      if(state.pendingGoal?.status==='awaiting_user_commit'&&state.pendingGoal.ownerSceneId===item.id)state.pendingGoal.status='completed';
       bump();render();log('STATE WRITEBACK',`成功：${name} · owner ${item.id} · ${state.scenes.length} 个 Scene`);
       toast(`已创建 Session：${name}（模拟）`);
     },650);
