@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "kind": "agent_execution_trace",
+  "identity": {
+    "workflow_id": "requirement-acceptance",
+    "github_run_id": 39906882820,
+    "github_run_attempt": 1,
+    "unique_run_name": "39906882820-1-issue-2225-staging",
+    "repository": "BestNathan/nession"
+  },
+  "task": {
+    "id": "issue-2225-staging",
+    "type": "acceptance",
+    "issue": 2225,
+    "target_sha": "1790d9fc08ae6f6f97028e53d99f1687e4de40bd"
+  },
+  "agent": {
+    "id": "legacy-acceptance-deepseek",
+    "role": "acceptor",
+    "provider": "deepseek",
+    "harness_sha256": null
+  },
+  "timing": {
+    "started_at": "2026-10-23T05:39:00.944Z",
+    "finished_at": "2026-10-23T05:45:09.261Z"
+  },
+  "coverage": {
+    "model": "unobserved",
+    "tools": "unobserved",
+    "skills": "unobserved",
+    "mcp": "unobserved"
+  },
+  "events": []
+}
