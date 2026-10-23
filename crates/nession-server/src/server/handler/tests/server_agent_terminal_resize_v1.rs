@@ -44,12 +44,12 @@ async fn agent_terminal_resize_broadcasts_to_attached_clients() {
     let parsed1: serde_json::Value = serde_json::from_str(msg1.message.to_text().unwrap()).unwrap();
     let parsed2: serde_json::Value = serde_json::from_str(msg2.message.to_text().unwrap()).unwrap();
 
-    assert_eq!(parsed1["msg_type"], "terminal.resize");
-    assert_eq!(parsed1["payload"]["session_id"], "a1:dev");
+    assert_eq!(parsed1["msg_type"], "agent.terminal.resize");
+    assert_eq!(parsed1["payload"]["session_name"], "dev");
     assert_eq!(parsed1["payload"]["cols"], 120);
     assert_eq!(parsed1["payload"]["rows"], 40);
-    assert_eq!(parsed2["msg_type"], "terminal.resize");
-    assert_eq!(parsed2["payload"]["session_id"], "a1:dev");
+    assert_eq!(parsed2["msg_type"], "agent.terminal.resize");
+    assert_eq!(parsed2["payload"]["session_name"], "dev");
 }
 
 #[tokio::test]
