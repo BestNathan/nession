@@ -12,16 +12,16 @@ const EXPECTED = 'SC-99';
 export function smokeContext(sha) {
   if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error('Smoke target requires exact commit SHA');
   return {
-    issue: { number: 1556, title: 'Synthetic provider smoke fixture (not a real requirement)' },
+    issue: { number: 1556, title: 'Applicable staging verification — synthetic provider smoke fixture' },
     stage: 'staging',
     target_ref: sha,
     deployment: null,
     ci_evidence: null,
-    requirement_body: 'Synthetic fixture: the external deployment outcome is unknown. No positive or negative test, deployment, or CI evidence is supplied. This run must not update an Issue.',
+    requirement_body: 'Synthetic staging acceptance fixture: the selected target SHA and stage are applicable. There is no waiver, exclusion, or reason that this criterion is inapplicable. The outcome of its external deployment verification is unknown because no signed receipt, deployment observation, positive test, negative test, or CI evidence has been supplied. Missing evidence is not proof of fulfillment or disproof. This run must not update any Issue.',
     criteria: [{
       criterion: EXPECTED,
       stage: 'staging',
-      text: 'An external service has independently verified deployment of an isolated synthetic canary with a signed external receipt; the receipt and any independent observations are not available in this context.',
+      text: 'For this applicable staging target, an independent external service must attest deployment of the isolated synthetic canary with a signed receipt. Whether this verification happened is unknown: no receipt and no independent deployment observation are available in this context.',
     }],
   };
 }
@@ -55,6 +55,9 @@ export function verifySmoke({ context, result, telemetry, provider }) {
 
 export function selfTest() {
   const context = smokeContext('a'.repeat(40));
+  assert.match(context.requirement_body,/no waiver, exclusion, or reason that this criterion is inapplicable/);
+  assert.match(context.criteria[0].text,/Whether this verification happened is unknown/);
+  assert.doesNotMatch(context.issue.title,/not a real requirement/i);
   const fixture = {
     context, provider: 'deepseek',
     result: { criteria: [{ criterion: EXPECTED, result: 'Pending', evidence: [], summary: 'No evidence supplied' }] },
@@ -85,6 +88,9 @@ export function selfTest() {
   assert.throws(() => verifySmoke({ ...fixture, result: { criteria: [] } }), /exactly one/);
   assert.throws(() => verifySmoke({ ...fixture, result: { criteria: [{ criterion: 'SC-98', result: 'Pending' }] } }), /criterion identity/);
   assert.throws(() => verifySmoke({ ...fixture, result: { criteria: [{ criterion: EXPECTED, result: 'Pass' }] } }), /fabricated evidence/);
+  assert.throws(() => verifySmoke({ ...qwenFixture, result: { criteria: [
+    { criterion: EXPECTED, result: 'N/A', evidence: [], summary: 'synthetic does not mean inapplicable' }
+  ] } }), /fabricated evidence/);
   assert.throws(() => verifySmoke({ ...fixture, telemetry: { ...fixture.telemetry, agent: { ...fixture.telemetry.agent, provider: 'cursor' } } }), /provider/);
   assert.throws(() => verifySmoke({ ...fixture, telemetry: { ...fixture.telemetry, agent: { ...fixture.telemetry.agent, prompt: { id: 'acceptance', version: 'v1', sha256: 'c'.repeat(64) } } } }), /canonical acceptance Prompt version/);
   assert.throws(() => verifySmoke({ ...fixture, telemetry: { ...fixture.telemetry, agent: { ...fixture.telemetry.agent, prompt: { id: 'acceptance', version: ACCEPTANCE_PROMPT_VERSION, sha256: 'invalid' } } } }), /sha256/);
