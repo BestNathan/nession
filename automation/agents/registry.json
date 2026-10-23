@@ -96,7 +96,7 @@
     "review-qwen-01": {
       "role": "reviewer",
       "provider": "claude-code",
-      "environment": "agent-review-qwen-01"
+      "environment": "dev-claude-qwen"
     },
     "accept-cursor-01": {
       "role": "acceptor",

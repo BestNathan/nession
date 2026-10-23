@@ -52,7 +52,7 @@ export function digest(value) {
 export function validateRegistry(registry) {
   if (!registry || registry.schema_version !== 1) deny('unsupported registry schema');
   if (!registry.roles || !registry.instances || !Array.isArray(registry.external_dependencies)) deny('missing registry sections');
-  const environments = new Set();
+  const environments = new Map();
   for (const [role, config] of Object.entries(registry.roles)) {
     validId(role, 'role');
     uniqueStrings(config?.tasks, 'tasks', ID);
@@ -65,8 +65,12 @@ export function validateRegistry(registry) {
     if (!Object.hasOwn(registry.roles, config?.role)) deny('unknown role for ' + agentId);
     if (!PROVIDERS.has(config?.provider)) deny('unsupported provider for ' + agentId);
     if (!nonEmptyString(config?.environment) || !ID.test(config.environment)) deny('invalid environment for ' + agentId);
-    if (environments.has(config.environment)) deny('duplicate environment binding: ' + config.environment);
-    environments.add(config.environment);
+    // An Environment is a provider credential binding. Multiple instances of
+    // the same provider may share it; a different provider must not.
+    const boundProvider = environments.get(config.environment);
+    if (boundProvider && boundProvider !== config.provider)
+      deny('environment bound to a different provider: ' + config.environment);
+    environments.set(config.environment, config.provider);
     const allowedKeys = new Set(['role', 'provider', 'environment']);
     if (Object.keys(config).some((key) => !allowedKeys.has(key))) deny('unexpected/secret instance property for ' + agentId);
   }

@@ -17,8 +17,10 @@ assert.equal(id.provider, 'cursor');
 assert.throws(() => resolveIdentity(registry, 'dev-cursor-01', 'review', 'agent-dev-cursor-01'), /unauthorized/);
 assert.throws(() => resolveIdentity(registry, 'dev-cursor-01', 'implement', 'agent-review-cursor-01'), /environment/);
 assert.throws(() => resolveIdentity(registry, 'unknown', 'implement', 'cursor'), /unregistered/);
+assert.doesNotThrow(() => validateRegistry({ ...registry, instances: { ...registry.instances,
+  'another-agent': { role: 'reviewer', provider: 'cursor', environment: id.environment } } }));
 assert.throws(() => validateRegistry({ ...registry, instances: { ...registry.instances,
-  'another-agent': { role: 'reviewer', provider: 'cursor', environment: id.environment } } }), /duplicate environment/);
+  'another-agent': { role: 'reviewer', provider: 'claude-code', environment: id.environment } } }), /different provider/);
 assert.throws(() => validateRegistry({ ...registry, instances: { ...registry.instances,
   'another-agent': { role: 'reviewer', provider: 'cursor', environment: 'agent-another', api_key: 'oops' } } }), /secret/);
 assert.equal(canonicalJson({ z: 1, a: { q: 2 } }), canonicalJson({ a: { q: 2 }, z: 1 }));
