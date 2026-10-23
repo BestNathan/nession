@@ -11,6 +11,7 @@ run-record-index-contract-selftest
 acceptance-ci-evidence-selftest
 acceptance-postrun-waker-selftest
 acceptance-quota-recovery-selftest
+acceptance-admission-selftest
 trusted-case-discovery-selftest
 e2e-run-ingest-selftest
 e2e-test-run-ingest-selftest
