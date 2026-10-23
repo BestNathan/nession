@@ -108,7 +108,7 @@ check('archived model selected none for the original root goal',
  h.node('jrDetail').innerHTML.includes('none · 无匹配动作'));
 h.press({jrSuite:'comparison'});
 check('A/B comparison includes both variants for same five cases',
- h.node('jrExtra').innerHTML.includes('两种策略逐例对照') &&
+ h.node('jrExtra').innerHTML.includes('严格匹配 vs 渐进推进') &&
  h.node('jrList').innerHTML.includes('baseline') &&
  h.node('jrList').innerHTML.includes('progressive'));
 h.press({jrFilter:'progressive'});
