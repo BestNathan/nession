@@ -48,6 +48,11 @@ test('SC-08: shell, full-screen TUI, resize, exit, capture bootstrap and P2P/Rel
   } finally {
     await secondContext.close();
   }
+  // The second attach was a foreground activation and took the ControlLease
+  // (#2286); a real gesture on the original terminal takes it back before it
+  // types again.
+  await page.locator('.xterm').click();
+  await expect(page.getByTestId('terminal-observer-bar')).toBeHidden({ timeout: 20000 });
   // The original client survives the second subscriber's attach and close.
   await command(page, "printf 'SC08-SURVIVED-%s\\n' 2307");
   await expect.poll(() => countInBuffer(page, 'SC08-SURVIVED-2307'), { timeout: 20000 }).toBe(1);
