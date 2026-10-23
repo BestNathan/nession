@@ -17,6 +17,18 @@ assert.deepEqual(resolveAgentDefault(registry,'reviewer',{
 assert.equal(resolveAgentDefault(registry,'reviewer',{
   configured:'review-cursor-01',override:'review-qwen-01',
 }).agent_id,'review-qwen-01');
+assert.equal(resolveAgentDefault(registry,'acceptor',{
+  configured:'accept-qwen-01',legacy:'accept-cursor-01',
+}).environment,'dev-claude-qwen');
+assert.equal(resolveAgentDefault(registry,'auditor',{
+  configured:'audit-qwen-01',legacy:'audit-cursor-01',
+}).provider,'claude-code');
+assert.equal(resolveAgentDefault(registry,'auditor',{
+  configured:'audit-deepseek-01',
+}).environment,'deepseek');
+assert.throws(()=>resolveAgentDefault(registry,'acceptor',{
+  configured:'audit-qwen-01',
+}),/wrong-role/);
 assert.throws(()=>resolveAgentDefault(registry,'reviewer',{
   configured:'review-does-not-exist',legacy:'review-cursor-01',
 }),/unregistered/);
@@ -31,4 +43,4 @@ assert.throws(()=>resolveAgentDefault(registry,'admin',{legacy:'review-qwen-01'}
 assert.throws(()=>resolveAgentDefault(registry,'reviewer',{
   configured:42,legacy:'review-cursor-01',
 }),/invalid configured/);
-console.log('GitHub variable Agent defaults: 11 contract cases passed');
+console.log('GitHub variable Agent defaults: 16 contract cases passed');
