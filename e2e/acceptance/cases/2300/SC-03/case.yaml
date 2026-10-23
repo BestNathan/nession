@@ -1,0 +1,12 @@
+schema_version: 1
+issue: 2300
+criterion: SC-03
+stage: pre-merge
+runtime: full-stack-local
+# The Rust integration suite owns a private tmux socket per test; no shared
+# Nession runtime state is mutated.
+isolation: shared
+verifiers:
+  - type: runtime
+    entry: verify.cjs
+result_policy: all-pass
