@@ -1,0 +1,11 @@
+schema_version: 1
+issue: 2307
+criterion: SC-06
+stage: post-merge
+runtime: full-stack-local
+# Real and simulated peers with private fixtures; no shared runtime state.
+isolation: shared
+verifiers:
+  - type: runtime
+    entry: verify.cjs
+result_policy: all-pass
