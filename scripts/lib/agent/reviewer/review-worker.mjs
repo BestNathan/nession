@@ -106,8 +106,26 @@ export function createClaudeReviewRunner({
         .filter((value) => typeof value === 'string' && value.length > 0);
       let diagnostic = String(proc.stderr ?? '').split('\n')
         .map((line) => line.trim()).filter(Boolean).slice(-3).join(' | ');
+      // A stream-json run reports an API failure on stdout as a final result
+      // record; include its bounded terminal reason so a failed activation is
+      // diagnosable without exposing model output.
+      let failure = null;
+      for (const line of String(proc.stdout ?? '').split('\n')) {
+        try {
+          const event = JSON.parse(line);
+          if (event?.type === 'result') failure = event;
+        } catch {}
+      }
+      if (failure) {
+        const api = [
+          typeof failure.terminal_reason === 'string' ? 'terminal=' + failure.terminal_reason : '',
+          failure.api_error_status != null ? 'api_status=' + failure.api_error_status : '',
+          typeof failure.result === 'string' ? failure.result : '',
+        ].filter(Boolean).join(' | ');
+        if (api) diagnostic = [api, diagnostic].filter(Boolean).join(' | ');
+      }
       for (const value of secret) diagnostic = diagnostic.replaceAll(value, '[redacted]');
-      diagnostic = diagnostic.slice(0, 400);
+      diagnostic = diagnostic.slice(0, 600);
       fail('restricted Claude Code CLI failed (' + (detail || 'no diagnostics') +
         (diagnostic ? ': ' + diagnostic : '') + ')');
     }

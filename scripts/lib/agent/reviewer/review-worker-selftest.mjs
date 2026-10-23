@@ -171,6 +171,20 @@ await assert.rejects(()=>diagnosticRunner('prompt',{tools:['read','grep']}),(err
   assert.equal(error.message.includes('SECRET_TOKEN'),false);
   return true;
 });
+// A stream-json API failure carries its terminal reason on stdout.
+const apiDiagnosticRunner=createClaudeReviewRunner({model:'qwen3.7-plus',workspace:'/tmp',
+  env:{ANTHROPIC_AUTH_TOKEN:'SECRET_TOKEN'},
+  spawn:()=>({status:1,signal:null,error:null,
+    stderr:'[claude-code:unrecognized_model] {"model":"qwen3.7-plus"}\n',
+    stdout:JSON.stringify({type:'result',terminal_reason:'api_error',api_error_status:401,
+      result:'API Error: 401 invalid token SECRET_TOKEN'})})});
+await assert.rejects(()=>apiDiagnosticRunner('prompt',{tools:['read','grep']}),(error)=>{
+  assert.match(error.message,/terminal=api_error/);
+  assert.match(error.message,/api_status=401/);
+  assert.match(error.message,/\[redacted\]/);
+  assert.equal(error.message.includes('SECRET_TOKEN'),false);
+  return true;
+});
 const editLines=[
   JSON.stringify({type:'assistant',message:{content:[
     {type:'tool_use',id:'r1',name:'Read'},{type:'tool_use',id:'e1',name:'Edit'}]}}),
