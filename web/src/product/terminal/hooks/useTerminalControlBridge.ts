@@ -24,7 +24,7 @@ export function useTerminalControlBridge(
 ): {
   control: TerminalControlState;
   /** Explicit fallback: the observer bar's Take control. */
-  takeControl: () => Promise<void>;
+  takeControl: () => Promise<boolean>;
   /**
    * Automatic takeover on meaningful foreground activation (#2286).
    *
@@ -54,33 +54,11 @@ export function useTerminalControlBridge(
     });
   }, [agentTerminalApi, sessionName, setControl]);
 
-  const takeControl = useCallback(async () => {
-    if (!agentTerminalApi || !sessionName) {
-      return;
-    }
-    const result = await agentTerminalApi.acquireControl(sessionName);
-    if (result.ok) {
-      setControl({
-        role: 'controller',
-        generation: result.generation,
-        controllerClientId: undefined,
-        sessionName,
-      });
-    }
-  }, [agentTerminalApi, sessionName, setControl]);
-
-  const adoptControl = useCallback(async (): Promise<boolean> => {
+  const takeControl = useCallback(async (): Promise<boolean> => {
     if (!agentTerminalApi || !sessionName) {
       return false;
     }
     const before = controlRef.current;
-    // A holder that already knows its generation has nothing to acquire. The
-    // check is deliberately on *both* facts: the atom defaults to `controller`
-    // before any lease has been stated, and a client that merely assumes it
-    // owns the session must still ask.
-    if (before.role === 'controller' && before.generation !== undefined) {
-      return false;
-    }
     const result = await agentTerminalApi.acquireControl(sessionName);
     if (!result.ok) {
       return false;
@@ -92,11 +70,22 @@ export function useTerminalControlBridge(
       sessionName,
     });
     // The Agent makes a holder's re-acquire idempotent, so an unchanged
-    // generation means this client already owned the session and only lacked
-    // the generation locally: no handoff happened, and there is no reason to
-    // restate the size.
+    // generation means this client already owned the session: no handoff
+    // happened and there is no reason to restate the size.
     return before.role !== 'controller' || before.generation !== result.generation;
   }, [agentTerminalApi, sessionName, setControl]);
+
+  const adoptControl = useCallback(async (): Promise<boolean> => {
+    const before = controlRef.current;
+    // A holder that already knows its generation has nothing to acquire. The
+    // check is deliberately on *both* facts: the atom defaults to `controller`
+    // before any lease has been stated, and a client that merely assumes it
+    // owns the session must still ask.
+    if (before.role === 'controller' && before.generation !== undefined) {
+      return false;
+    }
+    return takeControl();
+  }, [takeControl]);
 
   return { control, takeControl, adoptControl };
 }

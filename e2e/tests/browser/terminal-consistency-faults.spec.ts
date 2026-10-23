@@ -304,6 +304,15 @@ for (const mode of ['Relay', 'P2P'] as const) {
       await second.close();
     }
 
+    // #2286: the bootstrap client's attach was a foreground activation, so it
+    // took the lease; closing it released a holder that was not this page.
+    // Reclaim control with a real gesture before driving the Session again —
+    // a displaced client observes until it is activated.
+    await page.locator('.xterm').click();
+    await expect(page.getByTestId('terminal-observer-bar')).toHaveCount(0, {
+      timeout: 20_000,
+    });
+
     // The controller suppresses the PTY half of a resize while the webfont is
     // still loading (`metricsAreProvisional`), but still resizes the local
     // grid. Wait for the face before measuring, or the grid moves while the
@@ -520,10 +529,13 @@ test('two clients: a stalled observer never blocks the controller (#2144)', asyn
     // meaningful foreground activation, so it becomes the Controller without
     // an explicit Take control. The displaced client is the observer, and the
     // lease is visible as state on both sides (#2157).
-    await submitTerminalCommand(controller, `printf 'MULTI-%s-LIVE\\n' 2144`);
-    await expect.poll(async () => countInBuffer(observer, 'MULTI-2144-LIVE')).toBe(1);
-    await expect(observer.getByTestId('terminal-observer-bar')).toHaveCount(0, { timeout: 15_000 });
-    await expect(controller.getByTestId('terminal-observer-bar')).toBeVisible({ timeout: 15_000 });
+    await expect(observer.getByTestId('terminal-observer-bar')).toHaveCount(0, { timeout: 20_000 });
+    await expect(controller.getByTestId('terminal-observer-bar')).toBeVisible({ timeout: 20_000 });
+
+    // Output still reaches both clients; the command comes from whoever holds
+    // the lease now, which the takeover above has already established.
+    await submitTerminalCommand(observer, `printf 'MULTI-%s-LIVE\\n' 2144`);
+    await expect.poll(async () => countInBuffer(controller, 'MULTI-2144-LIVE')).toBe(1);
 
     // The retained manual fallback moves control back for the observer checks
     // below: an explicit Take control is still how a displaced user seizes the

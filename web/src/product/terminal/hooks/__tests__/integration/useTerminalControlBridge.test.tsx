@@ -50,12 +50,15 @@ describe('useTerminalControlBridge', () => {
     const source = makeSource({ role: 'observer', generation: 3, controllerClientId: 'other' });
     const { result } = renderHook(() => useTerminalControlBridge('sess', source));
 
+    let moved: boolean | undefined;
     await act(async () => {
-      await result.current.takeControl();
+      moved = await result.current.takeControl();
     });
 
     expect(source.acquireControl).toHaveBeenCalledExactlyOnceWith('sess');
     expect(result.current.control.role).toBe('controller');
+    // The manual fallback is a takeover, so the caller restates its viewport.
+    expect(moved).toBe(true);
   });
 
   it('does nothing without a source (no session yet)', async () => {
