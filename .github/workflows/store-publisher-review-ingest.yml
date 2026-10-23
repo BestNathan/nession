@@ -9,8 +9,15 @@ on:
     branches: [main]
     types: [completed]
   # The controlled publication predates this workflow and is pinned to its
-  # original Run/PR, so a one-shot owner wake is the activation path.
+  # original Run/PR, so a one-shot owner wake is the activation path. The
+  # optional reviewer binds a registered Reviewer for this handoff only; the
+  # library validates it and records the change immutably.
   workflow_dispatch:
+    inputs:
+      reviewer:
+        description: Optional registered Reviewer to bind at this handoff
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -95,13 +102,22 @@ jobs:
       - name: Apply the publication handoff through the canonical Store CAS
         env:
           STORE_APP_TOKEN: ${{ steps.writer.outputs.token }}
+          REVIEWER: ${{ inputs.reviewer }}
         run: |
           set -euo pipefail
           test -n "$STORE_APP_TOKEN"
+          reviewer_args=()
+          if [[ -n "${REVIEWER:-}" ]]; then
+            [[ "$REVIEWER" =~ ^[a-z][a-z0-9-]{1,80}$ ]] || {
+              echo '::error::invalid reviewer id' >&2; exit 1;
+            }
+            reviewer_args=(--reviewer "$REVIEWER")
+          fi
           export AGENT_STORE_REMOTE="https://x-access-token:${STORE_APP_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           node scripts/lib/agent/publisher/publication-ingest.mjs \
             apply-store "$AGENT_STORE_REMOTE" \
             "$RUNNER_TEMP/readback/publisher-readback.json" \
+            "${reviewer_args[@]}" \
             > "$RUNNER_TEMP/ingest-result.json"
           unset STORE_APP_TOKEN AGENT_STORE_REMOTE
           jq -e '
