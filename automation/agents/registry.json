@@ -93,6 +93,11 @@
       "provider": "cursor",
       "environment": "agent-review-cursor-01"
     },
+    "review-qwen-01": {
+      "role": "reviewer",
+      "provider": "claude-code",
+      "environment": "agent-review-qwen-01"
+    },
     "accept-cursor-01": {
       "role": "acceptor",
       "provider": "cursor",

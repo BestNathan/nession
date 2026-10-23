@@ -3,6 +3,7 @@
  // No PR review, provider call, Store write, Issue comment, or model-chosen
 // next role is authorized by this module.
 import {createHash} from 'node:crypto';
+import {readFileSync} from 'node:fs';
 import {CONTROLLED_1997_POLICY as POLICY} from '../publisher/controlled-proposal.mjs';
 import {CONTROLLED_PUBLISHER_BRANCH,
   validateControlledPublisherIntent} from '../publisher/store-intent.mjs';
@@ -46,6 +47,17 @@ const CANONICAL_ADMISSION_IDENTITY=Object.freeze({
   status:'await_native_reviewer',
   agent_id:'review-cursor-01',
 });
+const REVIEWER_PROVIDERS=new Set(['cursor','claude-code']);
+// The reviewer identity is registry-owned, never caller- or model-supplied.
+// A second registered reviewer (Qwen) is therefore a first-class identity, not
+// a special case, and an unregistered/developer ID fails closed.
+export function resolveReviewerIdentity(agentId='review-cursor-01'){
+  const registry=JSON.parse(readFileSync('automation/agents/registry.json','utf8'));
+  const instance=registry.instances?.[agentId];
+  if(!instance||instance.role!=='reviewer'||!REVIEWER_PROVIDERS.has(instance.provider))
+    fail('unregistered reviewer identity');
+  return Object.freeze({agent_id:agentId,role:instance.role,provider:instance.provider});
+}
 // Consumers (Reviewer prompt/task/worker) must reject any task that did not
 // come from this exact builder; accepting a hand-built lookalike would let a
 // model or caller choose the reviewed target. The identity fields are
@@ -75,7 +87,8 @@ export function assertAuthenticatedReviewerAdmission(task){
   return assertReviewerAdmission(task);
 }
 
-export function admitOriginalControlledReviewerTarget(params){
+export function admitOriginalControlledReviewerTarget(params, reviewerAgentId='review-cursor-01'){
+  const reviewer=resolveReviewerIdentity(reviewerAgentId);
   if(!only(params,['publisherRun','ownerComment','pullRequest',
     'headCommit','files','treeEntry','storeIntent']))
     fail('unexpected source fields (model/Issue content cannot select a role)');
@@ -149,7 +162,7 @@ export function admitOriginalControlledReviewerTarget(params){
     schema_version:1,kind:'authenticated_reviewer_admission_only',
     status:'await_native_reviewer',
     repository:REPO,issue:1997,
-    role:'reviewer',agent_id:'review-cursor-01',task:'review',
+    role:'reviewer',agent_id:reviewer.agent_id,task:'review',
     pr_number:PR_NUMBER,
     target_sha:PR_SHA,
     base_sha_at_publication:intent.target_main_sha,
@@ -162,5 +175,5 @@ export function admitOriginalControlledReviewerTarget(params){
   };
   // Never claim a Reviewer action: only a future independently authenticated
   // Reviewer Workflow may return a schema-validated changes_requested/approved.
-  return Object.freeze(assertReviewerAdmission(task));
+  return Object.freeze(assertReviewerAdmission(task,{agent_id:reviewer.agent_id}));
 }
