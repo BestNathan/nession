@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Trusted main, bounded scheduled replay of stranded Acceptance failed jobs.
+// Trusted main, bounded scheduled replay of stranded Acceptance failed jobs
+// and of deferred initial PR runs whose ready-transition wake was missed.
 import assert from 'node:assert/strict';
 const REPO='BestNathan/nession',SHA=/^[a-f0-9]{40}$/,MAX=4,MAX_ATTEMPTS=3,MAX_REQUESTS=26;
 const ACCEPT='.github/workflows/acceptance-orchestrator.yml';
@@ -29,7 +30,7 @@ export function candidates(runs,pulls){
   }
   const eligible=[];
   for(const r of latest.values()){
-    if(r.status!=='completed'||r.conclusion!=='failure'||
+    if(r.status!=='completed'||!['failure','cancelled'].includes(r.conclusion)||
       r.run_attempt>=MAX_ATTEMPTS)continue;
     const matches=pulls.filter(p=>p.state==='open'&&id(p.number)&&
       p.head?.sha===r.head_sha&&p.head?.ref===r.head_branch&&
@@ -52,18 +53,33 @@ export function proof(runs,file,name,sha,pr,headBranch){
     .sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at))||b.id-a.id);
   return accepted[0]?.status==='completed'&&accepted[0]?.conclusion==='success';
 }
-export function recoverablePrepareJobs(result,run){
-  // Read jobs for this exact run_attempt, not the latest general Jobs listing.
-  // A failed PR/SC/Agent gate is not a quota-recoverable prepare failure.
+// Read jobs for this exact run_attempt, not the latest general Jobs listing.
+// A failed PR/SC/Agent gate is not a quota-recoverable prepare failure.
+function trustedAttemptJobs(result,run){
   if(!result||!Array.isArray(result.jobs)||result.jobs.length>100||
     !Number.isSafeInteger(result.total_count)||
     result.total_count!==result.jobs.length||result.total_count>100||
     !source(run))return false;
-  if(result.jobs.some(j=>j.run_id!==run.id||j.run_attempt!==run.run_attempt||
-      !id(j.id)))return false;
+  return !result.jobs.some(j=>j.run_id!==run.id||j.run_attempt!==run.run_attempt||
+    !id(j.id));
+}
+export function recoverablePrepareJobs(result,run){
+  if(!trustedAttemptJobs(result,run))return false;
   const failures=result.jobs.filter(j=>j.conclusion==='failure');
   return failures.length===1&&failures[0].name==='prepare-pre-merge'&&
     failures[0].status==='completed';
+}
+// A deliberately deferred PR run is cancelled on purpose by its trusted
+// admission classifier. Only the exact-attempt job evidence (prepare success,
+// executed defer job, successful classification step) authorizes a replay.
+export function deferredPrepareJobs(result,run){
+  if(!trustedAttemptJobs(result,run)||run.conclusion!=='cancelled')return false;
+  const prepare=result.jobs.find(j=>j.name==='prepare-pre-merge');
+  const defer=result.jobs.find(j=>j.name==='defer-pre-merge');
+  return Boolean(prepare&&prepare.status==='completed'&&prepare.conclusion==='success'&&
+    defer&&defer.status==='completed'&&['success','cancelled'].includes(defer.conclusion)&&
+    (prepare.steps??[]).some(s=>s.name==='Classify exact-head source barrier'&&
+      s.conclusion==='success'));
 }
 export async function reconcile(request,log=()=>{}){
   const root='repos/'+REPO+'/';
@@ -74,7 +90,8 @@ export async function reconcile(request,log=()=>{}){
   };
   const response=await bounded(root+'actions/workflows/acceptance-orchestrator.yml/runs?event=pull_request_target&per_page=100');
   ok(Array.isArray(response.workflow_runs)&&response.workflow_runs.length<=100,'invalid run list');
-  if(!response.workflow_runs.some(r=>source(r)&&r.conclusion==='failure'))
+  if(!response.workflow_runs.some(r=>source(r)&&
+    (r.conclusion==='failure'||r.conclusion==='cancelled')))
     return {candidates:0,retried:0,api_calls:calls};
   const pulls=await bounded(root+'pulls?state=open&per_page=100');
   const selected=candidates(response.workflow_runs,pulls);
@@ -86,8 +103,11 @@ export async function reconcile(request,log=()=>{}){
     // authenticated below, immediately before the POST.
     const jobs=await bounded(root+'actions/runs/'+run.id+'/attempts/'+
       run.run_attempt+'/jobs?per_page=100');
-    if(!recoverablePrepareJobs(jobs,run)){
-      log('Skip non-preparation or stale failed-job evidence for PR #'+pr.number);
+    const replayMode=run.conclusion==='failure'
+      ? (recoverablePrepareJobs(jobs,run)?'failed':null)
+      : (deferredPrepareJobs(jobs,run)?'all':null);
+    if(!replayMode){
+      log('Skip non-preparation, stale or non-deferred evidence for PR #'+pr.number);
       continue;
     }
     let valid=true;
@@ -108,11 +128,13 @@ export async function reconcile(request,log=()=>{}){
       current.head_sha!==run.head_sha||current.head_branch!==run.head_branch||
       current.run_attempt!==run.run_attempt||
       current.run_attempt>=MAX_ATTEMPTS||current.status!=='completed'||
-      current.conclusion!=='failure')continue;
-    await bounded(root+'actions/runs/'+run.id+'/rerun-failed-jobs','POST');
+      current.conclusion!==run.conclusion)continue;
+    await bounded(root+'actions/runs/'+run.id+
+      (replayMode==='all'?'/rerun':'/rerun-failed-jobs'),'POST');
     retried++;
-    log('Requested failed jobs replay; PR #'+pr.number+' sha '+run.head_sha+
-      ' original run '+run.id+' attempt '+run.run_attempt);
+    log('Requested '+(replayMode==='all'?'deferred':'failed')+' Acceptance replay; PR #'+
+      pr.number+' sha '+run.head_sha+' original run '+run.id+' attempt '+
+      run.run_attempt);
   }
   return {candidates:selected.length,retried,api_calls:calls};
 }
@@ -152,6 +174,9 @@ function check(file,name,extra={}){
 }
 async function selfTest(){
   assert.equal(candidates([run()],[pull()]).length,1);
+  assert.equal(candidates([run({conclusion:'cancelled'})],[pull()]).length,1,
+    'a deliberately deferred (cancelled) run is a recovery candidate');
+  assert.equal(candidates([run({conclusion:'cancelled',run_attempt:3})],[pull()]).length,0);
   for(const bad of [
     run({head_sha:'b'.repeat(40)}),run({head_repository:{full_name:'evil/repo'}}),
     run({event:'push'}),run({status:'in_progress',conclusion:null}),
@@ -177,11 +202,11 @@ async function selfTest(){
     file,name,'a'.repeat(40),7,'fix/a'),false);
   }
   const seen=[];
-  function mocked({live=run(),freshPR=pull(),badProof=false,jobs={jobs:[job()],total_count:1}}={}){
+  function mocked({live=run(),runs=[run()],freshPR=pull(),badProof=false,jobs={jobs:[job()],total_count:1}}={}){
     return async(path,method='GET')=>{
       seen.push(method+' '+path);
       if(method==='POST')return {};
-      if(path.includes('acceptance-orchestrator.yml/runs'))return {workflow_runs:[run()]};
+      if(path.includes('acceptance-orchestrator.yml/runs'))return {workflow_runs:runs};
       if(path.includes('/pulls?'))return [pull()];
       if(path.endsWith('pulls/7'))return freshPR;
       if(path.endsWith('actions/runs/9'))return live;
@@ -201,6 +226,33 @@ async function selfTest(){
   assert.equal(seen.filter(x=>x.startsWith('POST ')).length,0);
   assert.equal((await reconcile(mocked({badProof:true}))).retried,0);
   assert.equal(recoverablePrepareJobs({jobs:[job()],total_count:1},run()),true);
+  const deferredPrepare={id:77,run_id:9,run_attempt:1,name:'prepare-pre-merge',
+    status:'completed',conclusion:'success',
+    steps:[{name:'Classify exact-head source barrier',conclusion:'success'}]};
+  const deferJob={id:78,run_id:9,run_attempt:1,name:'defer-pre-merge',
+    status:'completed',conclusion:'cancelled'};
+  const deferredJobs={jobs:[deferredPrepare,deferJob],total_count:2};
+  const cancelledRun=run({conclusion:'cancelled'});
+  assert.equal(deferredPrepareJobs(deferredJobs,cancelledRun),true);
+  assert.equal(deferredPrepareJobs(deferredJobs,run()),false,
+    'a failure run is not a deferred run');
+  for(const rejectedDeferred of [
+    {jobs:[deferredPrepare],total_count:1},
+    {jobs:[{...deferredPrepare,conclusion:'failure'},deferJob],total_count:2},
+    {jobs:[{...deferredPrepare,steps:[]},deferJob],total_count:2},
+    {jobs:[deferredPrepare,{...deferJob,conclusion:'skipped'}],total_count:2},
+    {jobs:[deferredPrepare,deferJob],total_count:3},
+  ])assert.equal(deferredPrepareJobs(rejectedDeferred,cancelledRun),false);
+  seen.length=0;
+  const deferredResult=await reconcile(mocked({live:cancelledRun,runs:[cancelledRun],jobs:deferredJobs}));
+  assert.equal(deferredResult.retried,1);
+  assert.equal(seen.filter(x=>x==='POST repos/'+REPO+'/actions/runs/9/rerun').length,1,
+    'deferred runs replay all jobs');
+  assert.equal(seen.filter(x=>x.includes('rerun-failed-jobs')).length,0);
+  seen.length=0;
+  assert.equal((await reconcile(mocked({live:cancelledRun}))).retried,0,
+    'cancelled run without deferral evidence is not replayed');
+  assert.equal(seen.filter(x=>x.startsWith('POST ')).length,0);
   const rejected=[
     {jobs:[],total_count:0},
     {jobs:[job({run_attempt:2})],total_count:1},
