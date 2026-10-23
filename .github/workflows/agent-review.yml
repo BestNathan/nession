@@ -67,8 +67,8 @@ jobs:
               override:process.env.REVIEWER_OVERRIDE,
               legacy:"review-qwen-01"
             });
-            process.stdout.write("environment="+identity.environment+"\\n");
-            process.stdout.write("reviewer="+identity.agent_id+"\\n");
+            process.stdout.write("environment="+identity.environment+"\n");
+            process.stdout.write("reviewer="+identity.agent_id+"\n");
           ' >> "$GITHUB_OUTPUT"
       - name: Verify deterministic Reviewer contracts
         run: ./gates/run agent-provider-contract
