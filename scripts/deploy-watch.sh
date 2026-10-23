@@ -17,8 +17,8 @@ set -euo pipefail
 
 # ── Config ──────────────────────────────────────────────────────────────
 REPO="BestNathan/nession"
-STAGING_WORKFLOW="staging.yml"
-PROD_WORKFLOW="release.yml"
+STAGING_WORKFLOW="release-staging.yml"
+PROD_WORKFLOW="release-production.yml"
 K8S_NS="nession"
 # Deployment name → pod component label (component is stable across envs)
 STAGING_DEPLOYS=(
