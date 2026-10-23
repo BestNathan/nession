@@ -48,7 +48,8 @@ async fn read_command(rx: &mut BufReader<DuplexStream>) -> String {
 }
 
 async fn next_event(client: &mut TmuxClient) -> TmuxEvent {
-    tokio::time::timeout(Duration::from_secs(2), client.events().recv())
+    let events = client.events().expect("the test owns the event stream");
+    tokio::time::timeout(Duration::from_secs(2), events.recv())
         .await
         .expect("an event must arrive")
         .expect("the event stream must stay open")
@@ -116,6 +117,7 @@ async fn concurrent_commands_are_resolved_in_wire_order_with_interleaved_output(
 
     assert_eq!(first.expect("first reply"), b"first");
     assert_eq!(second.expect("second reply"), b"second");
+    assert_eq!(next_event(&mut client).await, TmuxEvent::Handshaken);
     assert_eq!(
         next_event(&mut client).await,
         TmuxEvent::Output(PaneOutput {
@@ -183,6 +185,7 @@ async fn an_error_block_reports_tmuxs_own_message() {
 async fn output_is_byte_exact_and_size_changes_are_deduplicated() {
     let (mut client, _rx, mut tx) = wire();
     send(&mut tx, WELCOME).await;
+    assert_eq!(next_event(&mut client).await, TmuxEvent::Handshaken);
 
     // A non-UTF-8 byte and an octal-escaped control byte, in one %output.
     send_bytes(&mut tx, b"%output %0 \xff\xfe\\015\n").await;
@@ -205,9 +208,12 @@ async fn output_is_byte_exact_and_size_changes_are_deduplicated() {
         },
     );
     assert!(
-        tokio::time::timeout(Duration::from_millis(100), client.events().recv())
-            .await
-            .is_err(),
+        tokio::time::timeout(
+            Duration::from_millis(100),
+            client.events().expect("the test owns the stream").recv(),
+        )
+        .await
+        .is_err(),
         "a repeated size must not be a second event",
     );
     client.close().await;
@@ -234,10 +240,79 @@ async fn source_loss_fails_every_pending_command_and_is_stated() {
         other => panic!("a lost source must fail the waiter: {other:?}"),
     }
     match next_event(&mut client).await {
+        TmuxEvent::Handshaken => {}
+        other => panic!("the welcome must precede the loss: {other:?}"),
+    }
+    match next_event(&mut client).await {
         TmuxEvent::SourceLost { .. } => {}
         other => panic!("the source loss must be an event: {other:?}"),
     }
     assert!(client.is_closed());
+    client.close().await;
+}
+
+#[tokio::test]
+async fn a_capture_is_published_in_stream_order_between_output() {
+    // The bootstrap barrier is an ordering fact, not a race: output before the
+    // capture's block, the capture body, and output after it arrive on one
+    // stream, so the consumer can drop exactly the pre-capture prefix.
+    let (mut client, mut rx, mut tx) = wire();
+    send(&mut tx, WELCOME).await;
+    assert_eq!(next_event(&mut client).await, TmuxEvent::Handshaken);
+
+    let queued = client.send_command_queued(
+        ControlCommand::CapturePane {
+            target: "work".to_string(),
+            lines: 10,
+        },
+        true,
+    );
+    let fake = async {
+        let command = read_command(&mut rx).await;
+        assert_eq!(command, "capture-pane -t work -p -S -10 -E - -e -J\n");
+        send(&mut tx, "%output %0 before\\015\n").await;
+        // Output emitted while the capture's block is open was generated
+        // *after* the pane read, so it is live and is not part of the body.
+        send(
+            &mut tx,
+            "%begin 2 1 0\nline one\n%output %0 inside\\015\nline two\n%end 2 1 0\n",
+        )
+        .await;
+        send(&mut tx, "%output %0 after\\015\n").await;
+    };
+    let (accepted, ()) = tokio::join!(queued, fake);
+    accepted.expect("the capture command was written");
+
+    assert_eq!(
+        next_event(&mut client).await,
+        TmuxEvent::Output(PaneOutput {
+            pane_id: "%0".to_string(),
+            data: b"before\r".to_vec(),
+        }),
+    );
+    // The barrier boundary: everything before this event is inside the pane
+    // read, everything after it is live.
+    assert_eq!(next_event(&mut client).await, TmuxEvent::CaptureStarted);
+    assert_eq!(
+        next_event(&mut client).await,
+        TmuxEvent::Output(PaneOutput {
+            pane_id: "%0".to_string(),
+            data: b"inside\r".to_vec(),
+        }),
+    );
+    assert_eq!(
+        next_event(&mut client).await,
+        TmuxEvent::Capture {
+            body: b"line one\nline two".to_vec(),
+        },
+    );
+    assert_eq!(
+        next_event(&mut client).await,
+        TmuxEvent::Output(PaneOutput {
+            pane_id: "%0".to_string(),
+            data: b"after\r".to_vec(),
+        }),
+    );
     client.close().await;
 }
 

@@ -1106,8 +1106,9 @@ enum BootstrapCut {
     /// The **control-channel attach barrier** (`ControlModeSession::attach`).
     ///
     /// The capture is taken on the control channel and `%output` the capture
-    /// covers is dropped from the live stream (`ControlRouter`'s barrier), so
-    /// the session stream created with this attach records only events after
+    /// covers is dropped from the live stream (`TmuxClient`'s ordered
+    /// `CaptureStarted`/`Capture` events, consumed by the session's bootstrap),
+    /// so the session stream created with this attach records only events after
     /// the snapshot. The cut is therefore exact at stream position 0 — and at
     /// no other position, because the capture is a screen projection, not a
     /// replay of the Agent's event log.

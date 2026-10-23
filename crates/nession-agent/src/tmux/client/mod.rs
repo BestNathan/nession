@@ -75,6 +75,11 @@ pub const DEFAULT_COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
 const EVENT_CHANNEL_CAPACITY: usize = 256;
 const WRITE_CHANNEL_CAPACITY: usize = 64;
 
+/// Identity source for production attachments (see [`TmuxClient::connect`]).
+/// One process, one sequence; it only has to order attachments against each
+/// other, so process start is the right origin.
+static NEXT_ATTACHMENT_GENERATION: AtomicU64 = AtomicU64::new(1);
+
 /// Why a command did not produce a tmux reply.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum TmuxClientError {
@@ -103,6 +108,11 @@ struct PendingCommand {
     id: u64,
     /// The caller stopped waiting; the reply is still owed to this slot.
     abandoned: bool,
+    /// This command's response body is a bootstrap capture. Its completed body
+    /// is also published as an ordered `TmuxEvent::Capture`, which is what the
+    /// capture barrier consumes: the event and the output around it share one
+    /// stream, so no post-capture output can be mistaken for pre-capture data.
+    capture: bool,
     reply: Option<oneshot::Sender<Result<Vec<u8>, TmuxClientError>>>,
 }
 
@@ -127,6 +137,18 @@ impl ClientState {
             closed: AtomicBool::new(false),
             next_id: AtomicU64::new(1),
         }
+    }
+
+    /// Whether the next block to close answers a live bootstrap capture.
+    ///
+    /// The front of the queue is the command the next block replies to. An
+    /// abandoned (timed-out) capture is a tombstone, not a barrier: its block
+    /// still has to be consumed, and nothing is waiting for its body.
+    fn next_block_is_capture(&self) -> bool {
+        self.lock()
+            .front()
+            .map(|entry| entry.capture && !entry.abandoned)
+            .unwrap_or(false)
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, VecDeque<PendingCommand>> {
@@ -164,6 +186,14 @@ enum WriteOp {
         line: Vec<u8>,
         pending: PendingCommand,
     },
+    /// A command whose caller does not wait for the reply. The acknowledgement
+    /// only says the command was registered and written, which is the fact an
+    /// input frame needs; its tmux reply is still consumed in order.
+    Queued {
+        line: Vec<u8>,
+        pending: PendingCommand,
+        accepted: oneshot::Sender<Result<(), TmuxClientError>>,
+    },
     Close,
 }
 
@@ -175,7 +205,7 @@ pub struct TmuxClient {
     generation: u64,
     state: Arc<ClientState>,
     write_tx: mpsc::Sender<WriteOp>,
-    events: mpsc::Receiver<TmuxEvent>,
+    events: Option<mpsc::Receiver<TmuxEvent>>,
     child: Option<tokio::process::Child>,
     reader_task: Option<JoinHandle<()>>,
     writer_task: Option<JoinHandle<()>>,
@@ -183,9 +213,19 @@ pub struct TmuxClient {
 
 impl TmuxClient {
     /// Attach over the initial production transport (`tmux -C` pipes).
-    pub fn connect(tmux: &TmuxDep, session_name: &str, generation: u64) -> anyhow::Result<Self> {
+    ///
+    /// The attachment's identity is minted here rather than by the caller: it
+    /// only has to distinguish a replacement from its predecessor, and the
+    /// process is the scope that outlives both. Tests construct through
+    /// [`TmuxClient::from_io`] with an explicit generation when they need a
+    /// fixed one.
+    pub fn connect(tmux: &TmuxDep, session_name: &str) -> anyhow::Result<Self> {
         let io = PipeTransport::connect(tmux, session_name)?;
-        Ok(Self::from_io(session_name, io, generation))
+        Ok(Self::from_io(
+            session_name,
+            io,
+            NEXT_ATTACHMENT_GENERATION.fetch_add(1, Ordering::Relaxed),
+        ))
     }
 
     /// The transport-independent constructor: the same client over any byte
@@ -202,7 +242,7 @@ impl TmuxClient {
             generation,
             state,
             write_tx,
-            events,
+            events: Some(events),
             child: io.child,
             reader_task: Some(reader_task),
             writer_task: Some(writer_task),
@@ -217,14 +257,29 @@ impl TmuxClient {
         self.generation
     }
 
+    /// The attached process, for the drop-path detach fallback (#1011). The
+    /// client itself never kills it; only `close` reaps it after a graceful
+    /// detach.
+    pub fn child_pid(&self) -> Option<u32> {
+        self.child.as_ref().and_then(tokio::process::Child::id)
+    }
+
     pub fn is_closed(&self) -> bool {
         self.state.closed.load(Ordering::Acquire)
     }
 
-    /// The one ordered source-event stream. Output, authoritative resize, exit
-    /// and source loss arrive here in wire order.
-    pub fn events(&mut self) -> &mut mpsc::Receiver<TmuxEvent> {
-        &mut self.events
+    /// The one ordered source-event stream. Handshake, output, capture,
+    /// authoritative resize, exit and source loss arrive here in wire order.
+    ///
+    /// There is one consumer by design: taking the receiver moves the stream to
+    /// the task that forwards it into the Agent's stream owner.
+    pub fn take_events(&mut self) -> Option<mpsc::Receiver<TmuxEvent>> {
+        self.events.take()
+    }
+
+    /// Borrow the event stream for a caller that forwards it inline.
+    pub fn events(&mut self) -> Option<&mut mpsc::Receiver<TmuxEvent>> {
+        self.events.as_mut()
     }
 
     /// Run one typed command and wait for its `%end`/`%error`.
@@ -243,6 +298,15 @@ impl TmuxClient {
         command: ControlCommand,
         timeout: Duration,
     ) -> Result<Vec<u8>, TmuxClientError> {
+        self.command_with_options(command, timeout, false).await
+    }
+
+    async fn command_with_options(
+        &self,
+        command: ControlCommand,
+        timeout: Duration,
+        capture: bool,
+    ) -> Result<Vec<u8>, TmuxClientError> {
         if self.is_closed() {
             return Err(TmuxClientError::Closed);
         }
@@ -255,6 +319,7 @@ impl TmuxClient {
                 pending: PendingCommand {
                     id,
                     abandoned: false,
+                    capture,
                     reply: Some(reply),
                 },
             })
@@ -270,6 +335,41 @@ impl TmuxClient {
                 self.state.abandon(id);
                 Err(TmuxClientError::Timeout(timeout))
             }
+        }
+    }
+
+    /// Queue a typed command without waiting for tmux's reply.
+    ///
+    /// The command still occupies its place in the reply order (its block is
+    /// consumed there); the caller only learns that it was **written**, which
+    /// is what input needs. A full queue or a closed transport is reported
+    /// before the caller assumes the bytes left.
+    pub async fn send_command_queued(
+        &self,
+        command: ControlCommand,
+        capture: bool,
+    ) -> Result<(), TmuxClientError> {
+        if self.is_closed() {
+            return Err(TmuxClientError::Closed);
+        }
+        let id = self.state.next_id.fetch_add(1, Ordering::Relaxed);
+        let (accepted, accepted_rx) = oneshot::channel();
+        self.write_tx
+            .send(WriteOp::Queued {
+                line: command.encode(),
+                pending: PendingCommand {
+                    id,
+                    abandoned: false,
+                    capture,
+                    reply: None,
+                },
+                accepted,
+            })
+            .await
+            .map_err(|_| TmuxClientError::Closed)?;
+        match accepted_rx.await {
+            Ok(result) => result,
+            Err(_) => Err(TmuxClientError::Closed),
         }
     }
 
@@ -302,10 +402,14 @@ impl TmuxClient {
     /// The body is the response block's raw lines joined with `\n` (no trailing
     /// newline), which is what the bootstrap barrier forwards.
     pub async fn capture_pane(&self, lines: u32) -> Result<Vec<u8>, TmuxClientError> {
-        self.command(ControlCommand::CapturePane {
-            target: self.session_name.clone(),
-            lines,
-        })
+        self.command_with_options(
+            ControlCommand::CapturePane {
+                target: self.session_name.clone(),
+                lines,
+            },
+            DEFAULT_COMMAND_TIMEOUT,
+            true,
+        )
         .await
     }
 
@@ -356,6 +460,34 @@ async fn run_writer<W: AsyncWrite + Unpin>(
                     state.fail_all(TmuxClientError::Transport(err.to_string()));
                     return;
                 }
+            }
+            WriteOp::Queued {
+                line,
+                pending,
+                accepted,
+            } => {
+                {
+                    let mut queue = state.lock();
+                    if queue.len() >= MAX_PENDING_COMMANDS {
+                        drop(queue);
+                        let _ = accepted.send(Err(TmuxClientError::QueueFull));
+                        continue;
+                    }
+                    queue.push_back(pending);
+                }
+                if let Err(err) = writer.write_all(&line).await {
+                    let error = TmuxClientError::Transport(err.to_string());
+                    let _ = accepted.send(Err(error.clone()));
+                    state.fail_all(error);
+                    return;
+                }
+                if let Err(err) = writer.flush().await {
+                    let error = TmuxClientError::Transport(err.to_string());
+                    let _ = accepted.send(Err(error.clone()));
+                    state.fail_all(error);
+                    return;
+                }
+                let _ = accepted.send(Ok(()));
             }
             WriteOp::Close => {
                 let _ = writer.write_all(b"detach-client\n").await;
@@ -410,14 +542,27 @@ async fn run_reader<R: AsyncRead + Unpin>(
                         lose(&state, &events, "response block closed twice".to_string()).await;
                         return;
                     };
-                    if !close_block(&state, block, false, &mut welcomed) {
-                        lose(
-                            &state,
-                            &events,
-                            "response block with no pending command".to_string(),
-                        )
-                        .await;
-                        return;
+                    match close_block(&state, block, false, &mut welcomed) {
+                        BlockOutcome::Desync => {
+                            lose(
+                                &state,
+                                &events,
+                                "response block with no pending command".to_string(),
+                            )
+                            .await;
+                            return;
+                        }
+                        BlockOutcome::Handshaken => {
+                            if !emit(&state, &events, TmuxEvent::Handshaken).await {
+                                return;
+                            }
+                        }
+                        BlockOutcome::Capture(body) => {
+                            if !emit(&state, &events, TmuxEvent::Capture { body }).await {
+                                return;
+                            }
+                        }
+                        BlockOutcome::Delivered => {}
                     }
                 }
                 Some(ControlMessage::Error {
@@ -429,7 +574,10 @@ async fn run_reader<R: AsyncRead + Unpin>(
                         lose(&state, &events, "response block closed twice".to_string()).await;
                         return;
                     };
-                    if !close_block(&state, block, true, &mut welcomed) {
+                    if matches!(
+                        close_block(&state, block, true, &mut welcomed),
+                        BlockOutcome::Desync
+                    ) {
                         lose(
                             &state,
                             &events,
@@ -509,6 +657,15 @@ async fn run_reader<R: AsyncRead + Unpin>(
                     triple: (timestamp, id, flags),
                     body: Vec::new(),
                 });
+                // The block that just opened answers the queue's front. If that
+                // is a live bootstrap capture, this is the barrier: `%output`
+                // from here on was generated after the pane read.
+                if welcomed
+                    && state.next_block_is_capture()
+                    && !emit(&state, &events, TmuxEvent::CaptureStarted).await
+                {
+                    return;
+                }
             }
             Some(ControlMessage::Output { pane_id, data }) => {
                 if !emit_output(&state, &events, pane_id, &data).await {
@@ -571,34 +728,50 @@ impl OpenBlock {
     }
 }
 
-/// Resolve the head waiter for one completed block. `false` means the block had
-/// no waiter even though the welcome pair is past — a desync, not a reply.
+/// Resolve the head waiter for one completed block. A block with no waiter
+/// after the welcome pair is a desync, not a reply.
 fn close_block(
     state: &Arc<ClientState>,
     block: OpenBlock,
     is_error: bool,
     welcomed: &mut bool,
-) -> bool {
+) -> BlockOutcome {
     // The first block a control client receives is tmux's own empty welcome
     // pair; it answers no command, whatever is already queued behind it.
     if !*welcomed {
         *welcomed = true;
-        return true;
+        return BlockOutcome::Handshaken;
     }
-    match state.lock().pop_front() {
-        None => false,
-        Some(entry) if entry.abandoned => true,
-        Some(entry) => {
-            if is_error {
-                entry.resolve(Err(TmuxClientError::Rejected(
-                    String::from_utf8_lossy(&block.body).into_owned(),
-                )));
-            } else {
-                entry.resolve(Ok(block.body));
-            }
-            true
-        }
+    let Some(entry) = state.lock().pop_front() else {
+        return BlockOutcome::Desync;
+    };
+    let capture = entry.capture;
+    if entry.abandoned {
+        return BlockOutcome::Delivered;
     }
+    if is_error {
+        entry.resolve(Err(TmuxClientError::Rejected(
+            String::from_utf8_lossy(&block.body).into_owned(),
+        )));
+        return BlockOutcome::Delivered;
+    }
+    entry.resolve(Ok(block.body.clone()));
+    if capture {
+        BlockOutcome::Capture(block.body)
+    } else {
+        BlockOutcome::Delivered
+    }
+}
+
+enum BlockOutcome {
+    /// A command reply (or an abandoned/tombstoned one) was consumed.
+    Delivered,
+    /// The welcome pair closed; no command was answered.
+    Handshaken,
+    /// A capture body completed and must be published in stream order.
+    Capture(Vec<u8>),
+    /// The block had no waiter after the welcome: a desync.
+    Desync,
 }
 
 fn note_size(reported: &mut Option<(u16, u16)>, cols: u16, rows: u16) -> bool {
