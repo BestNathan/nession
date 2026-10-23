@@ -776,16 +776,17 @@ export class TerminalController {
   }
 
   /**
-   * Resize only the local xterm grid, without touching the transport.
+   * Apply the measured local grid in the same FIFO as terminal.write/remote
+   * authoritative resizes (#2283). Calling xterm.resize directly during an
+   * unfinished parser callback mutates the grid beneath older ANSI output.
    *
-   * Split out from resize() because the two halves want opposite timing: the
-   * local grid must follow a container size change in the SAME frame (otherwise
-   * xterm keeps painting at the old pixel size and the mismatch is visible as a
-   * flicker), while the PTY notification must be debounced so a drag doesn't
-   * flood tmux. See ResizeController.
+   * The container's measurement and remote size publication are still
+   * immediate/debounced respectively; the *buffer mutation* may wait for an
+   * outstanding xterm parser write. This trades a short visual fit delay for
+   * deterministic terminal history and cursor correctness.
    */
   resizeLocal(cols: number, rows: number): void {
-    this._terminal?.resize(cols, rows);
+    this.writer.resize(cols, rows);
   }
 
   /** Notify the transport (→ PTY) of a new size, without touching xterm. */
@@ -827,7 +828,7 @@ export class TerminalController {
    * it was never produced for.
    */
   resizeLocalOrdered(cols: number, rows: number): void {
-    this.writer.resize(cols, rows);
+    this.resizeLocal(cols, rows);
   }
 
   focus(): void {
@@ -906,16 +907,13 @@ export class TerminalController {
 /**
  * ResizeObserver wrapper: container size → cols/rows → controller.resize().
  *
- * The local xterm grid is applied on EVERY fire, synchronously. It has to be:
- * xterm paints at cols*cellW × rows*cellH, so any delay leaves it painting at
- * the previous container's pixel size — visible as a flicker (bare container
- * background where the terminal hasn't grown yet, or overflow where it hasn't
- * shrunk). The mobile input panel opens with no animation, which exposes that
- * gap as a hard flash rather than hiding it behind a transition.
+ * Every measurement is published as soon as it is observed; the xterm grid
+ * mutation is serialized with unfinished parser writes (#2283). Rendering may
+ * briefly lag a rapid drag while xterm finishes parsing older output, but an
+ * older ANSI write must never run across an untracked local grid mutation.
  *
  * Only the PTY notification is debounced (200ms), so dragging a window doesn't
- * flood tmux with intermediate sizes. The first fire skips the debounce so tmux
- * is at the right size before the session attaches.
+ * flood tmux with intermediate sizes. The first fire skips that debounce.
  *
  * Exported so consumers can type/instantiate the resize controller when
  * composing the terminal at the boundary.
@@ -970,11 +968,9 @@ export class ResizeController {
         const grid = this.reportedGrid();
         if (grid === null) { continue; }
 
-        // Local grid first, on EVERY fire — the container has already changed
-        // size, so xterm must repaint at the new size in this same frame or
-        // the mismatch shows as a flicker. That half is never deferred: it is
-        // drawing, and the cell box xterm has right now is the one it draws
-        // with.
+        // Enqueue the latest local grid in the terminal writer FIFO. The
+        // measured viewport becomes known now, but xterm may finish an older
+        // in-flight ANSI parser callback before mutating the buffer (#2283).
         this.controller.resizeLocal(grid.cols, grid.rows);
 
         if (this.isFirstFire) {
