@@ -267,6 +267,7 @@
         <button id="modeStandard" class="mode-button" type="button" aria-pressed="false">普通模式</button>
         <button id="modeAI" class="mode-button" type="button" aria-pressed="true">AI 模式</button>
       </div>
+      <button class="quiet-button scene-reset hidden" id="resetButton" type="button" aria-label="清空所有 Scene" title="清空场景（不删除 Session）">×</button>
       <button class="icon-button" id="inspectButton" type="button" title="查看 Workspace State" aria-label="查看 Workspace State" aria-pressed="false"></button>
     </div>
   </header>
@@ -277,19 +278,11 @@
     </section>
 
     <section class="work-stage hidden" id="workStage" aria-label="AI 工作区">
-      <div class="workspace-titlebar">
-        <div class="workspace-heading"><strong>工作区</strong><span id="workCount">0 个工作项</span></div>
-        <div class="workspace-header-actions"><button type="button" class="quiet-button" id="resetButton">清空工作区 <span aria-hidden="true">×</span></button></div>
+      <div class="stage-frame" id="stageFrame" role="group" aria-label="Scene 交互画布，点击边缘预览或横向滑动切换">
+        <button type="button" class="side-card unavailable" id="prevPreview" aria-label="切换到上一个场景"></button>
+        <div class="main-card" id="mainCard" role="region" aria-label="当前场景" tabindex="-1"></div>
+        <button type="button" class="side-card unavailable" id="nextPreview" aria-label="切换到下一个场景"></button>
       </div>
-      <div class="item-tabs" id="itemTabs" role="tablist" aria-label="工作区 Item"></div>
-      <div class="stage-frame" id="stageFrame">
-        <button type="button" class="stage-nav left" id="prevButton" aria-label="上一个工作项"></button>
-        <button type="button" class="side-card unavailable" id="prevPreview" aria-label="切换到上一个工作项"></button>
-        <div class="main-card" id="mainCard" role="tabpanel" aria-label="当前工作项"></div>
-        <button type="button" class="side-card unavailable" id="nextPreview" aria-label="切换到下一个工作项"></button>
-        <button type="button" class="stage-nav right" id="nextButton" aria-label="下一个工作项"></button>
-      </div>
-      <div class="carousel-bottom" id="carouselDots" aria-label="工作区位置"></div>
       <div id="dockAnchor" class="docked-composer"></div>
       <div class="question-progress hidden" id="questionProgress"><span class="spinner"></span><span>System 1 · 模拟决策中</span></div>
     </section>
@@ -341,8 +334,6 @@
   };
   $('sendButton').innerHTML = svg('arrow');
   $('inspectButton').innerHTML = svg('inspect');
-  $('prevButton').innerHTML = svg('chevronLeft');
-  $('nextButton').innerHTML = svg('chevronRight');
 
   const agents = [
     {id:'agent-dev-01', name:'devbox-01', detail:'Ubuntu 24.04 · 10.0.0.12', status:'online', sessions:3},
@@ -863,34 +854,37 @@
     $('sendButton').innerHTML=flag?'<span class="spinner" style="border-top-color:white;width:15px;height:15px"></span>':svg('arrow');
   }
   const itemIndex=()=>state.scenes.findIndex(i=>i.id===state.activeSceneId);
-  function renderTabs(){
-    $('itemTabs').innerHTML=state.scenes.map((i,n)=>`<button type="button" class="item-tab ${i.id===state.activeSceneId?'active':''}" role="tab" aria-selected="${i.id===state.activeSceneId}" data-focus="${escapeHtml(i.id)}" title="切换到 ${escapeHtml(i.title)}">${svg(i.type==='agent.list'?'server':i.type==='session.list'?'terminal':i.type==='session.create'?'plus':'eye')} <span>${escapeHtml(i.title)}</span><span class="item-tab-count">${String(n+1).padStart(2,'0')}</span></button>`).join('');
-  }
   function renderPreview(el,item,position){
-    if(!item){el.classList.add('unavailable');el.innerHTML='';el.removeAttribute('data-focus');return;}
-    el.classList.remove('unavailable');el.setAttribute('data-focus',item.id);
-    const sub=item.type==='agent.list'?(item.flow?.view==='session.create'?'内部操作 · 创建 Session':`${item.facts.visibleAgentIds?.length||0} Agents · ${item.selectedAgentId?'已选择节点':'可选节点'}`):item.type==='session.create'?(item.draft.name?`草稿 · ${item.draft.name}`:'未完成的 Session 表单'):item.type==='session.list'?`${item.facts.sessionIds?.length||0} Sessions`:'等待用户说明';
-    el.innerHTML=`<div class="side-type">${position==='left'?'PREVIOUS SCENE':'NEXT SCENE'}</div><div class="side-heading">${escapeHtml(item.title)}</div><div class="side-description">${escapeHtml(sub)}</div><div class="side-mini-lines"><i></i><i></i><i></i></div><div style="margin-top:auto;font-size:10px;color:#abb3bd">点击切换 →</div>`;
+    if(!item){
+      el.classList.add('unavailable');el.innerHTML='';el.removeAttribute('data-focus');el.removeAttribute('title');return;
+    }
+    el.classList.remove('unavailable');
+    el.setAttribute('data-focus',item.id);
+    el.setAttribute('aria-label',`切换到${position==='left'?'上一个':'下一个'}场景：${item.title}`);
+    el.setAttribute('title',item.title);
+    const icon=item.type==='agent.list'?'server':item.type==='session.list'?'terminal':item.type==='session.create'?'plus':'eye';
+    el.innerHTML=`<span class="scene-peek-icon">${svg(icon)}</span><span class="scene-peek-label">${escapeHtml(item.title)}</span><span class="scene-peek-arrow" aria-hidden="true">${position==='left'?'←':'→'}</span>`;
   }
   function render(){
     if(state.mode!=='ai')return;
     const hasScenes=state.scenes.length>0;
     $('emptyStage').classList.toggle('hidden',hasScenes);
     $('workStage').classList.toggle('hidden',!hasScenes);
+    $('resetButton').classList.toggle('hidden',!hasScenes);
     if(hasScenes) {if($('composerRoot').parentElement!==$('dockAnchor')) $('dockAnchor').appendChild($('composerRoot'));}
     else {if($('composerRoot').parentElement!==$('emptyAnchor'))$('emptyAnchor').appendChild($('composerRoot'));}
     if(!hasScenes){$('emptySubhint').textContent=clarification||'试试输入「看看 Agent 列表」';renderInspector();return;}
-    $('workCount').textContent=`${state.scenes.length} 个 Scene · 当前 ${itemIndex()+1}/${state.scenes.length}`;
-    renderTabs();
     const idx=itemIndex();
-    renderPreview($('prevPreview'),state.scenes[idx-1],'left');renderPreview($('nextPreview'),state.scenes[idx+1],'right');
-    $('prevButton').disabled=idx<=0;$('nextButton').disabled=idx>=state.scenes.length-1;
+    $('stageFrame').classList.toggle('has-prev',idx>0);
+    $('stageFrame').classList.toggle('has-next',idx<state.scenes.length-1);
+    renderPreview($('prevPreview'),state.scenes[idx-1],'left');
+    renderPreview($('nextPreview'),state.scenes[idx+1],'right');
+    $('mainCard').setAttribute('aria-label',`当前场景：${focused().title}，第 ${idx+1} / ${state.scenes.length} 个`);
     $('mainCard').innerHTML=renderScene(focused())+(state.pendingGoal&&['resolving','awaiting_data','awaiting_selection','awaiting_input','awaiting_user_commit','suspended'].includes(state.pendingGoal.status)?'<div class="clarification-inline" role="status">目标 · '+escapeHtml(state.pendingGoal.utterance)+' · '+escapeHtml(state.pendingGoal.status)+(state.pendingGoal.status==='awaiting_user_commit'?'（请确认表单并手动提交）':'')+'</div>':'')+(clarification?'<div class="clarification-inline" role="status">'+escapeHtml(clarification)+'</div>':'');
     renderInspector();
-    $('carouselDots').innerHTML=state.scenes.map((i,n)=>`<button class="dot ${n===idx?'active':''}" data-focus="${escapeHtml(i.id)}" aria-label="第 ${n+1} 个 Scene：${escapeHtml(i.title)}" title="${escapeHtml(i.title)}"></button>`).join('');
   }
   function cardHead(item,eyebrow,subtitle,buttons=''){
-    return `<div class="card-header"><div><div class="card-eyebrow">${escapeHtml(eyebrow)} <span style="color:#c2c8cf">/</span> SCENE ${String(itemIndex()+1).padStart(2,'0')}</div><h2 class="card-title">${escapeHtml(item.title)}</h2><p class="card-subtitle">${escapeHtml(subtitle)}</p></div><div class="card-header-end">${buttons}</div></div>`;
+    return `<div class="card-header"><div><div class="card-eyebrow">${escapeHtml(eyebrow)}</div><h2 class="card-title">${escapeHtml(item.title)}</h2><p class="card-subtitle">${escapeHtml(subtitle)}</p></div><div class="card-header-end">${buttons}</div></div>`;
   }
   function renderScene(item){
     if(!item)return '';
@@ -957,8 +951,6 @@
   $('inspectButton').addEventListener('click',()=>openInspector(!inspectorOpen));
   $('closeDebug').addEventListener('click',()=>openInspector(false));
   $('debugOverlay').addEventListener('click',()=>openInspector(false));
-  $('prevButton').addEventListener('click',()=>{const i=itemIndex();if(i>0)activateId(state.scenes[i-1].id);});
-  $('nextButton').addEventListener('click',()=>{const i=itemIndex();if(i<state.scenes.length-1)activateId(state.scenes[i+1].id);});
   $('resetButton').addEventListener('click',()=>{if(!confirm('清空 AI 工作区 Scene？这不会删除任何真实 Session。'))return;userInteractionEpoch++;state.scenes=[];state.activeSceneId=null;state.selectedAgentId=null;state.pendingGoal=null;state.lastOperation=null;clarification='';activeSearch='';bump();render();log('RESET','清空了 UI 工作区 Scene（模拟）');});
   document.addEventListener('keydown',e=>{
     if(e.key==='Escape'&&inspectorOpen){openInspector(false);return;}
