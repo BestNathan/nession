@@ -34,6 +34,14 @@
 //! The wire grammar and byte bounds live in [`read_control_line`] and
 //! `tmux::parser`; they are shared with the client. This module does not
 //! decode Control Mode records itself any more.
+//!
+//! ## Transport selection (#2307)
+//!
+//! New control attachments use `tmux -C` over pipes. Setting
+//! `NESSION_TMUX_CONTROL_TRANSPORT=pty` selects the `-CC + PTY` transport
+//! instead; it is a controlled opt-in for parity evaluation, and any other
+//! value (including unset) keeps the production default. A failed `-CC` launch
+//! is reported as an error — never a silent fallback to `-C`.
 
 use anyhow::{Context, Result};
 use std::sync::{Arc, Mutex};
@@ -43,7 +51,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tracing::warn;
 
-use super::client::{ControlCommand, TmuxClient, TmuxEvent};
+use super::client::{ControlCommand, ControlTransport, TmuxClient, TmuxEvent};
 use super::ops::TmuxDep;
 
 /// Buffer capacity for the output channel — bytes-per-batch parsed from tmux.
@@ -70,6 +78,33 @@ const CAPTURE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// A malformed or unbounded Control Mode line must never exhaust Agent memory.
 pub(crate) const MAX_CONTROL_LINE_BYTES: usize = 16 * 1024 * 1024;
+
+/// Environment variable selecting the transport for new control attachments.
+///
+/// `-C + Pipe` is the production default; `pty` selects `-CC + PTY`. This is
+/// the controlled opt-in parity evaluation uses — not a user setting, and not a
+/// fallback: a `-CC` launch that fails is an error.
+const TRANSPORT_ENV: &str = "NESSION_TMUX_CONTROL_TRANSPORT";
+
+/// The transport a new attachment uses (#2307 slice D).
+fn configured_transport(width: u16, height: u16) -> ControlTransport {
+    transport_for(std::env::var(TRANSPORT_ENV).ok().as_deref(), width, height)
+}
+
+/// Pure mapping from the selection's value, so the default and the opt-in are
+/// testable without mutating process environment.
+fn transport_for(value: Option<&str>, width: u16, height: u16) -> ControlTransport {
+    match value {
+        // The PTY carries the size the window was just set to, so the attach
+        // cannot move the shared window as a side effect.
+        #[cfg(unix)]
+        Some("pty") => ControlTransport::Pty {
+            cols: width,
+            rows: height,
+        },
+        _ => ControlTransport::Pipe,
+    }
+}
 
 /// The size tmux last *reported* for this session's window, shared between the
 /// event forwarder — where the report arrives, as `%layout-change` — and the
@@ -144,7 +179,8 @@ impl ControlModeSession {
             .resize_window(session_name, width, height)
             .await?;
 
-        let mut client = TmuxClient::connect(tmux, session_name)?;
+        let mut client =
+            TmuxClient::connect_with(tmux, session_name, configured_transport(width, height))?;
         let mut events = client
             .take_events()
             .context("control client event stream was already taken")?;
@@ -607,6 +643,26 @@ mod tests {
     use tokio::io::{duplex, AsyncBufReadExt, AsyncWriteExt, BufReader, DuplexStream};
 
     const WELCOME: &str = "%begin 1 0 0\n%end 1 0 0\n";
+
+    #[test]
+    fn the_transport_selection_keeps_pipe_as_the_default() {
+        assert_eq!(transport_for(None, 80, 24), ControlTransport::Pipe);
+        assert_eq!(transport_for(Some("pipe"), 80, 24), ControlTransport::Pipe);
+        assert_eq!(
+            transport_for(Some("nonsense"), 80, 24),
+            ControlTransport::Pipe,
+            "an unrecognized value must not change the production default"
+        );
+        #[cfg(unix)]
+        assert_eq!(
+            transport_for(Some("pty"), 120, 40),
+            ControlTransport::Pty {
+                cols: 120,
+                rows: 40
+            },
+            "the PTY carries the size the window is already at"
+        );
+    }
 
     /// A client over an in-memory wire that plays tmux, plus the tmux side.
     fn boot_wire() -> (TmuxClient, BufReader<DuplexStream>, DuplexStream) {
