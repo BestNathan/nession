@@ -12,6 +12,7 @@ Load related Skills only when needed:
 - Gate selection/failures -> `nession-gates`
 - CI/staging/release/deploy -> `nession-cicd`
 - UI/design/browser proof -> `nession-web-design`
+- interactive design prototypes on the shared orphan `prototype` branch -> [nession-prototype](../nession-prototype/SKILL.md)
 - missing tools/setup -> `nession-env`
 - review -> `nession-code-review`
 
@@ -52,6 +53,8 @@ cd .claude/worktrees/feat-<slug>
 Use `fix/<slug>` for fixes. Use `chore/` / `docs/` where appropriate.
 
 Only base on `origin/staging` when the change genuinely depends on unreleased staging code.
+
+**Standalone interactive mock prototypes are a separate artifact flow.** The [nession-prototype](../nession-prototype/SKILL.md) Skill owns its isolated worktree based on the shared orphan `origin/prototype`, fast-forward publication, and Issue backlink. Do not merge mock prototype assets into `main`/`staging`. Edits to this Skill or production code still follow the normal development branch/PR workflow.
 
 Verify:
 
