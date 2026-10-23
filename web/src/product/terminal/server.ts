@@ -253,14 +253,9 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
       connection.subscribe(TERMINAL_RESIZE_WIRE, (payload) => {
         this.handleRelayResize(payload as Record<string, unknown>);
       }),
-      // The Server's own authoritative tmux resize notification is NOT the
-      // client→Agent command above. server_agent_terminal_resize_v1.rs emits
-      // "terminal.resize" with a full "agent:session" id (#2286); previously
-      // this plugin never subscribed, so Relay observers stayed at an old
-      // grid even after the Agent and Controller had moved the shared pane.
-      connection.subscribe('terminal.resize', (payload) => {
-        this.handleServerResize(payload as Record<string, unknown>);
-      }),
+      // Server and Agent now share the canonical agent.terminal.resize
+      // notification and short session_name (server_agent_terminal_resize_v1).
+      // Do not subscribe to legacy terminal.resize: it has no protocol owner.
       // Spelled as a literal rather than through a constant, like the direct
       // path in ./agent and for the same measured reason: `just check-protocol`
       // resolves a subscription by reading a dotted literal at the call site,
@@ -569,18 +564,6 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
         }
       }
     }
-  }
-
-  private handleServerResize(payload: Record<string, unknown>): void {
-    // ServerTerminalResizePayload identifies a session as agent:session;
-    // our registered Relay callbacks use only the short session name. Split
-    // only at the *first* colon: session names themselves may contain colons.
-    // A frame without its full authenticated server identity is not this wire.
-    const full = payload.session_id;
-    if (typeof full !== 'string') { return; }
-    const separator = full.indexOf(':');
-    if (separator <= 0 || separator >= full.length - 1) { return; }
-    this.handleRelayResize({ ...payload, session_name: full.slice(separator + 1) });
   }
 
   private handleRelayResize(payload: Record<string, unknown>): void {
