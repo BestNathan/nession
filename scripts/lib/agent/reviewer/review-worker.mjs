@@ -77,7 +77,7 @@ export function createCursorReviewRunner({
 // Claude Code (Qwen) adapter for the same Slice contract. Restricted mode
 // confines file tools to the disposable workspace; only Read/Grep are exposed.
 export function createClaudeReviewRunner({
-  model, workspace, env = process.env, spawn = spawnSync, timeoutMs = 480000,
+  model, workspace, env = process.env, spawn = spawnSync, timeoutMs = 900000,
 }) {
   return async (prompt, { tools } = {}) => {
     if (!Array.isArray(tools) || tools.length !== REVIEW_TOOLS.length ||
@@ -86,7 +86,7 @@ export function createClaudeReviewRunner({
     const nativeTools = tools.map((tool) => CLAUDE_TOOL[tool]);
     if (nativeTools.some((tool) => !tool)) fail('unsupported reviewer tool');
     const args = ['-p', prompt, '--output-format', 'stream-json', '--verbose',
-      '--no-session-persistence', '--max-turns', '24', '--model', model,
+      '--no-session-persistence', '--max-turns', '48', '--model', model,
       '--strict-mcp-config', ...claudeCliToolPolicy(nativeTools, { restricted: true })];
     const proc = spawn('claude', args, {
       cwd: workspace, encoding: 'utf8', timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024,

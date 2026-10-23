@@ -132,6 +132,7 @@ assert.equal(qwenSlice.artifact.outcome,'approved');
 assert.equal(qwenSlice.artifact.target_sha,admission.target_sha);
 assert.ok(capturedClaude.args.includes('--restricted'));
 assert.ok(capturedClaude.args.includes('--no-session-persistence'));
+assert.equal(capturedClaude.args[capturedClaude.args.indexOf('--max-turns')+1],'48');
 assert.equal(capturedClaude.args[capturedClaude.args.indexOf('--tools')+1],'Grep,Read');
 // Canonical telemetry for a completed Slice (unobserved stays null).
 const telemetryDir=fs.mkdtempSync(path.join(os.tmpdir(),'nession-review-telemetry-'));
