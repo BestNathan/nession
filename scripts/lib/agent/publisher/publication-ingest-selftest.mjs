@@ -100,15 +100,19 @@ for(const bad of [
 ]) assert.throws(()=>assertTrustedMainWorkflow(bad),/trusted main-only Store Ingest required/);
 const fixture=JSON.parse(fs.readFileSync(
   'scripts/lib/agent/publisher/fixtures/1997-v16-state.json','utf8'));
-const temp=fs.mkdtempSync(path.join(os.tmpdir(),'publisher-ingest-'));
-try {
-  const issueDir=path.join(temp,'workflows','issues','1997');
+function seedStore(root) {
+  const issueDir=path.join(root,'workflows','issues','1997');
   fs.mkdirSync(path.join(issueDir,'states'),{recursive:true});
   const bytes=Buffer.from(JSON.stringify(fixture,null,2)+'\n');
   fs.writeFileSync(path.join(issueDir,'states','00000016.json'),bytes);
   fs.writeFileSync(path.join(issueDir,'head.json'),JSON.stringify({version:16,
     path:'workflows/issues/1997/states/00000016.json',
     sha256:createHash('sha256').update(bytes).digest('hex')},null,2)+'\n');
+  return issueDir;
+}
+const temp=fs.mkdtempSync(path.join(os.tmpdir(),'publisher-ingest-'));
+try {
+  const issueDir=seedStore(temp);
   const result=applyPublisherReviewHandoff({storeRoot:temp,readback,registry});
   assert.equal(result.changed,true);
   assert.equal(result.version,17);
@@ -130,6 +134,40 @@ try {
   assert.throws(()=>applyPublisherReviewHandoff({storeRoot:path.join(temp,'missing'),
     readback,registry}),/invalid root|ENOENT/);
 } finally { fs.rmSync(temp,{recursive:true,force:true}); }
+
+// #2262: an owner-authorized override binds a different registered Reviewer at
+// the same handoff and the queued action targets that identity.
+for (const [reviewerAgentId, matcher] of [
+  ['review-ghost-01',/replacement reviewer is not a registered reviewer/],
+  ['dev-cursor-01',/replacement reviewer is not a registered reviewer/],
+  ['review-cursor-01',/replacement reviewer is already assigned/],
+]) {
+  const negative=fs.mkdtempSync(path.join(os.tmpdir(),'publisher-ingest-bound-'));
+  try {
+    seedStore(negative);
+    assert.throws(()=>applyPublisherReviewHandoff({storeRoot:negative,readback,registry,
+      reviewerAgentId}),matcher);
+  } finally { fs.rmSync(negative,{recursive:true,force:true}); }
+}
+const boundTemp=fs.mkdtempSync(path.join(os.tmpdir(),'publisher-ingest-bound-'));
+try {
+  const boundDir=seedStore(boundTemp);
+  const bound=applyPublisherReviewHandoff({storeRoot:boundTemp,readback,registry,
+    reviewerAgentId:'review-qwen-01'});
+  assert.equal(bound.changed,true);
+  assert.equal(bound.version,17);
+  assert.equal(bound.reviewer_agent_id,'review-qwen-01');
+  const boundState=JSON.parse(fs.readFileSync(path.join(boundDir,'states','00000017.json'),'utf8'));
+  assert.equal(boundState.assignments.reviewer,'review-qwen-01');
+  assert.equal(boundState.transitions.find(x=>x.kind==='publisher').reviewer_agent_id,
+    'review-qwen-01');
+  assert.equal(boundState.outbox.find(x=>x.status==='pending').task.agent_id,
+    'review-qwen-01');
+  assert.equal(applyPublisherReviewHandoff({storeRoot:boundTemp,readback,registry,
+    reviewerAgentId:'review-qwen-01'}).changed,false);
+  assert.throws(()=>applyPublisherReviewHandoff({storeRoot:boundTemp,readback,registry}),
+    /conflicting publication replay/);
+} finally { fs.rmSync(boundTemp,{recursive:true,force:true}); }
 
 // The same handoff through the canonical Store writer: a disposable bare Git
 // remote stands in for agent-store, and the CAS push must create exactly one

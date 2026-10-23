@@ -68,14 +68,15 @@ function verifiedReadback(readback) {
 
 // The Store write is the canonical state-store CAS. The Git commit/push stays
 // with the main-owned workflow writer, exactly like controller-start.mjs.
-export function applyPublisherReviewHandoff({ storeRoot, readback, registry }) {
+export function applyPublisherReviewHandoff({ storeRoot, readback, registry, reviewerAgentId = null }) {
   const verified = verifiedReadback(readback);
   if (typeof storeRoot !== 'string' || !storeRoot) fail('Store checkout required');
   const current = readIssueWorkflowState(storeRoot, ISSUE);
   if (current.state === null) fail('initialized Issue workflow state required');
   const event = { kind: 'publisher', outcome: 'published', issue: ISSUE,
     run_id: verified.original_publisher_run_id, run_attempt: 1,
-    target_sha: verified.current_pr_sha };
+    target_sha: verified.current_pr_sha,
+    ...(reviewerAgentId != null ? { reviewer_agent_id: reviewerAgentId } : {}) };
   const trusted = { workflow_run_id: event.run_id, attempt: event.run_attempt,
     issue: event.issue, source_sha: event.target_sha, role: 'publisher' };
   const next = acceptPublisherPublication(current.state, current.version, event, trusted, registry);
@@ -135,11 +136,12 @@ function openStoreRemote(remote) {
 // run-store audit proves exactly one state + head change, and the canonical
 // CAS push publishes without force or rewriting history. The workflow supplies
 // the authenticated remote; this function never logs it.
-export function applyPublicationToRemote({ remote, readback, registry,
+export function applyPublicationToRemote({ remote, readback, registry, reviewerAgentId = null,
   publishStore = publish, onCandidate = null }) {
   const { temp, work } = openStoreRemote(remote);
   try {
-    const applied = applyPublisherReviewHandoff({ storeRoot: work, readback, registry });
+    const applied = applyPublisherReviewHandoff({ storeRoot: work, readback, registry,
+      reviewerAgentId });
     if (!applied.changed) return { ...applied, commit_sha: null, replayed: true };
     git(work, ['add', '-A']);
     const audit = auditStagedRunStore(work, STORE_REF);
@@ -194,11 +196,13 @@ async function main() {
       reviewer_agent_id: result.reviewer_agent_id }));
     return;
   }
-  if (command === 'apply-store' && args.length === 2) {
+  if (command === 'apply-store' &&
+      (args.length === 2 || (args.length === 4 && args[2] === '--reviewer'))) {
     assertTrustedMainWorkflow();
+    const reviewerAgentId = args.length === 4 ? args[3] : null;
     const readback = JSON.parse(fs.readFileSync(args[1], 'utf8'));
     const result = applyPublicationToRemote({
-      remote: args[0], readback, registry: loadRegistry(),
+      remote: args[0], readback, registry: loadRegistry(), reviewerAgentId,
     });
     console.log(JSON.stringify({ changed: result.changed, version: result.version,
       target_sha: result.target_sha, reviewer_action_id: result.reviewer_action_id,
@@ -206,7 +210,7 @@ async function main() {
       replayed: result.replayed }));
     return;
   }
-  fail('usage: fetch --out FILE | apply STORE READBACK_JSON | apply-store REMOTE READBACK_JSON');
+  fail('usage: fetch --out FILE | apply STORE READBACK_JSON | apply-store REMOTE READBACK_JSON [--reviewer ID]');
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {

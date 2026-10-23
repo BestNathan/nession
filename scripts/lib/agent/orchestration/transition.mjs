@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 
 const SHA = /^[a-f0-9]{40}$/;
+const ID = /^[a-z][a-z0-9-]{1,80}$/;
 const PHASES = new Set(['ready', 'review', 'repair', 'quality', 'acceptance', 'waiting-merge', 'post-merge-acceptance', 'done', 'blocked']);
 const OUTCOMES = {
   developer: new Set(['implementation_ready']),
@@ -31,10 +32,22 @@ export function advanceWorkflow(state, event, trusted, config = {}) {
     reject('invalid event envelope');
   }
   if (Object.hasOwn(event, 'next_role') || Object.hasOwn(event, 'nextRole')) reject('model cannot select the next role');
+  if (event.reviewer_agent_id != null) {
+    // An owner-authorized publication may bind a different registered
+    // Reviewer. The outbox acceptance validates that identity against the
+    // registry before this policy records it.
+    if (event.kind !== 'publisher') reject('reviewer binding only applies to publication');
+    if (!ID.test(event.reviewer_agent_id)) reject('invalid replacement reviewer');
+  }
   const current = state ?? { issue: event.issue, phase: 'ready', target_sha: null, repair_attempts: 0, transitions: [] };
   if (!PHASES.has(current.phase) || current.issue !== event.issue || !Array.isArray(current.transitions)) reject('invalid current state');
   const key = eventKey(event);
-  if (current.transitions.some((x) => x.key === key)) return { state: current, actions: [], duplicate: true };
+  const prior = current.transitions.find((x) => x.key === key);
+  if (prior) {
+    if ((prior.reviewer_agent_id ?? null) !== (event.reviewer_agent_id ?? null))
+      reject('conflicting reviewer replay');
+    return { state: current, actions: [], duplicate: true };
+  }
   const next = { ...current, transitions: [...current.transitions] };
   const maxRepairs = config.max_repairs ?? 3;
   if (!Number.isInteger(maxRepairs) || maxRepairs < 0 || maxRepairs > 10) reject('invalid retry policy');
@@ -49,7 +62,13 @@ export function advanceWorkflow(state, event, trusted, config = {}) {
     // The trusted provenance for a publication binds the Publisher Run to the
     // published PR head, not to that Run's own main checkout SHA. The handoff
     // policy therefore transitions to review only; it never infers a role or a
-    // second PR from the result.
+    // second PR from the result. An owner-authorized override changes the
+    // recorded Reviewer assignment before the dispatch action is materialized.
+    if (event.reviewer_agent_id != null) {
+      if (!current.assignments || typeof current.assignments.reviewer !== 'string')
+        reject('replacement reviewer requires an initialized assignment');
+      next.assignments = { ...current.assignments, reviewer: event.reviewer_agent_id };
+    }
     next.phase = 'review';
     next.target_sha = event.target_sha;
     actions = [{ type: 'dispatch', role: 'reviewer', task: 'review', sha: event.target_sha }];
@@ -96,7 +115,8 @@ export function advanceWorkflow(state, event, trusted, config = {}) {
     reject('stale SHA or illegal state transition: ' + current.phase + ' / ' + event.kind);
   }
   next.transitions.push({ key, kind: event.kind, run_id: event.run_id, attempt: event.run_attempt,
-    target_sha: event.target_sha, outcome: event.outcome });
+    target_sha: event.target_sha, outcome: event.outcome,
+    ...(event.reviewer_agent_id != null ? { reviewer_agent_id: event.reviewer_agent_id } : {}) });
   return { state: next, actions, duplicate: false };
 }
 
