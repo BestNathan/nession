@@ -1,0 +1,143 @@
+{
+  "schema_version": 1,
+  "trust": "untrusted-task-observation",
+  "provenance": "github-workflow-run-and-independent-exact-source",
+  "task_id": "jev-progressive-2221-20261023",
+  "source_sha": "ce28bd12b46b4dd506220be69f159445d11edd4d",
+  "source_digest": "c6056806d0f160e5a2504b47bf6963bd0f0eb3d28593cc6c12ef176ff8659a80",
+  "entry": "probe.mjs",
+  "workflow": {
+    "id": 39903934883,
+    "attempt": 1,
+    "url": "https://github.com/BestNathan/nession/actions/runs/39903934883",
+    "event": "push",
+    "branch": "task/jev-progressive-2221-20261023",
+    "conclusion": "success"
+  },
+  "execution": {
+    "status": "Success",
+    "exit_code": 0,
+    "started_at": "2026-10-23T05:06:50.300Z",
+    "finished_at": "2026-10-23T05:06:50.335Z",
+    "result": {
+      "kind": "systemone-progressive-protocol-fixture",
+      "issue": 2221,
+      "model": "jev-1.13.0",
+      "authUsed": false,
+      "realJevCalls": 0,
+      "evaluatedCases": 12,
+      "passedCases": 12,
+      "liveModelAccuracy": "NOT_TESTED",
+      "keyInjection": "FORBIDDEN_BY_NESSION_TASK_POLICY",
+      "cases": [
+        {
+          "name": "root-goal",
+          "stage": "root",
+          "expected": "entry:agents",
+          "criteriaCount": 3,
+          "passed": true,
+          "requestDigest": "8c184dd245e9ddec"
+        },
+        {
+          "name": "root-list",
+          "stage": "root",
+          "expected": "entry:sessions",
+          "criteriaCount": 3,
+          "passed": true,
+          "requestDigest": "581061176c0885b8"
+        },
+        {
+          "name": "agent-loading",
+          "stage": "agent-loading",
+          "expected": "clarify",
+          "criteriaCount": 1,
+          "passed": true,
+          "requestDigest": "21f8b1fa12e320d4"
+        },
+        {
+          "name": "agent-loaded-target",
+          "stage": "agent-loaded",
+          "expected": "agent:select:agent-bj-03",
+          "criteriaCount": 4,
+          "passed": true,
+          "requestDigest": "ad25bc13465b3b7e"
+        },
+        {
+          "name": "agent-selected-create",
+          "stage": "agent-selected",
+          "expected": "agent:selected:create",
+          "criteriaCount": 3,
+          "passed": true,
+          "requestDigest": "918c27cddfa72560"
+        },
+        {
+          "name": "form-draft",
+          "stage": "form",
+          "expected": "clarify",
+          "criteriaCount": 2,
+          "passed": true,
+          "requestDigest": "03f33e266f3a2897"
+        },
+        {
+          "name": "form-valid",
+          "stage": "form-valid",
+          "expected": "form:submit",
+          "criteriaCount": 3,
+          "passed": true,
+          "requestDigest": "14f45728c6f1d47a"
+        },
+        {
+          "name": "result",
+          "stage": "result",
+          "expected": "result:open",
+          "criteriaCount": 3,
+          "passed": true,
+          "requestDigest": "5264c5255cd6e3ce"
+        },
+        {
+          "name": "filtered-second",
+          "stage": "agent-loaded",
+          "expected": "agent:select:agent-mac-02",
+          "criteriaCount": 3,
+          "passed": true,
+          "requestDigest": "f156ea12b6d541e6"
+        },
+        {
+          "name": "ambiguous-target",
+          "stage": "agent-loaded",
+          "expected": "clarify",
+          "criteriaCount": 3,
+          "passed": true,
+          "requestDigest": "21a6c8a472b31397"
+        },
+        {
+          "name": "offline-target",
+          "stage": "agent-selected",
+          "expected": "clarify",
+          "criteriaCount": 2,
+          "passed": true,
+          "requestDigest": "27f1f0691cd12c9e"
+        },
+        {
+          "name": "revisit-scene",
+          "stage": "other-scene",
+          "expected": "nav:agent",
+          "criteriaCount": 2,
+          "passed": true,
+          "requestDigest": "a5733c0b4b1867d5"
+        }
+      ],
+      "expectedChain": [
+        "entry:agents",
+        "agent:select:agent-bj-03",
+        "agent:selected:create",
+        "form:submit",
+        "result:open"
+      ],
+      "description": "These checks prove bounded candidate/question generation only, NOT actual Jev judgment quality."
+    }
+  },
+  "cleanup_on_success": true,
+  "acceptance_result": null,
+  "source_snapshot_path": "sources/ce28bd12b46b4dd506220be69f159445d11edd4d/jev-progressive-2221-20261023.json"
+}
