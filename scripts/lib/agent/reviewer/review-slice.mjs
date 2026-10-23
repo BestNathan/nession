@@ -13,7 +13,11 @@ export const REVIEW_TOOLS = Object.freeze(['read', 'grep']);
 const PRIVILEGED = ['STORE_APP_TOKEN','STORE_WRITER_PRIVATE_KEY','ACTIONS_DISPATCH_TOKEN',
   'GITHUB_TOKEN','GH_TOKEN','AGENT_STORE_CONTROLLER_REMOTE','CURSOR_RESUME_PRIVATE_KEY_B64',
   'PUBLISHER_APP_PRIVATE_KEY','RUN_STORE_WRITER_PRIVATE_KEY'];
-const WRITE_TOOLS = ['edit','write','shell','exec','terminal','apply_patch','delete'];
+// Native tool names differ by provider (Claude Code uses Bash/Edit/Write).
+// Fail closed on any observed mutation/shell capability, not only the
+// logical names the cursor SDK reports.
+const WRITE_TOOLS = ['edit','write','shell','exec','terminal','apply_patch','delete',
+  'bash','notebookedit','multiedit','task'];
 const HEX64 = /^[a-f0-9]{64}$/;
 function fail(message) { throw new Error('Reviewer Slice: ' + message); }
 

@@ -68,6 +68,8 @@ await deny({runner:async()=>({result:{status:'finished',result:verdictText},meta
   /native Agent identity/);
 await deny({runner:async()=>session(verdictText,{tool_calls:['read','edit']})},
   /write\/shell tool/);
+await deny({runner:async()=>session(verdictText,{tool_calls:['grep','Bash']})},
+  /write\/shell tool/);
 await deny({runner:async()=>session(verdictText,{tool_calls:['grep','shell']})},
   /write\/shell tool/);
 await deny({runner:async()=>session(verdictText,{tool_calls:[]})},/no read-only inspection/);
