@@ -29,7 +29,15 @@ The one shared orphan-history `prototype` branch contains the UI design assets. 
 
 ## Reproducible mock smoke checks
 
-Run `node ai-workspace-2221/smoke-test.mjs` from the shared `prototype` branch checkout (or `node smoke-test.mjs` from this directory). It has **no npm dependencies** and reads the checked-in `index.html`. The script exercises **36 local JavaScript event/state invariants**: Scene reuse, discovery candidates, filtered ordinal resolution, contextual recommendations, disabled offline Agent, in-flight stale-decision discard, inline create/draft/confirmed result, next-action handoff and Standard/AI continuity. The script does not start Chromium, contact TypeSafe or run real backend APIs, and is **not** production Acceptance evidence.
+Run `node ai-workspace-2221/smoke-test.mjs` from the shared `prototype` branch checkout (or `node smoke-test.mjs` from this directory). It has **no npm dependencies** and reads the checked-in `index.html`. The script exercises **44 local JavaScript event/state invariants**: Scene reuse, discovery candidates, filtered ordinal resolution, contextual recommendations, disabled offline Agent, in-flight stale-decision discard, inline create/draft/confirmed result, next-action handoff and Standard/AI continuity. The script does not start Chromium, contact TypeSafe or run real backend APIs, and is **not** production Acceptance evidence.
+
+## Goal advancement state-machine refinement
+
+The original 12-call real Jev diagnostic reached **10/12**, missing only the two **root Session-create goals** (it chose `none` instead of opening Agent). The [protocol §4.7](PROTOCOL.md) corrects the question to **select one currently exposed action that advances the final goal** rather than insist on exact final-action matching. This changes **decision semantics**, not View exposure: the root still has no Create leaf.
+
+The prototype now records source View revision and Action Space fingerprint per applied goal step; it avoids repeating the same candidate for an unchanged snapshot, waits when no candidate is available, and preserves the original Goal across explicit form-slot updates such as **「名称叫 dev-test」**. An unrelated user intent suspends the old Goal; returning to its Scene and saying **「继续」** restores the unfinished form without replaying earlier operations. The backend mutation remains explicitly user-committed.
+
+`smoke-test.mjs` runs **44 local mocked event/state checks**; it does not prove real Jev, Chromium rendering, or Nession backend execution. Live provider measurements must be reported separately.
 
 ## Architecture constraints
 
