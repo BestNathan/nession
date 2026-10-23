@@ -1,0 +1,2 @@
+Durable Worker fixture: complete
+Previous value: pending
