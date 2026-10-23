@@ -129,6 +129,24 @@ check('returning to AI mode restores original Scene',
   state().mode === 'ai' && state().scenes[0].sceneId === stableId);
 await ask('查看 Session 列表');
 check('independent SessionList opens a second Scene', state().scenes.length === 2);
+check('immersive layout removes title, Tab navigation and carousel dots',
+  !html.includes('id="itemTabs"') && !html.includes('id="workCount"') &&
+  !html.includes('id="carouselDots"') && html.includes('Immersive Scene canvas'));
+check('the active Scene has an edge peek for its neighbor instead of another large card',
+  el('prevPreview').innerHTML.includes('Agent') && html.includes('scene-peek-label'));
+const otherSceneId=state().activeSceneId;
+click({focus:stableId});
+check('clicking edge Scene preview can activate the previous Scene',
+  state().activeSceneId===stableId);
+dispatch('touchstart', {touches:[{clientX:220,clientY:180}],target:{closest:()=>false}}, 'mainCard');
+dispatch('touchend', {changedTouches:[{clientX:80,clientY:178}]}, 'mainCard');
+check('swiping horizontally returns to adjacent Scene',
+  state().activeSceneId===otherSceneId);
+dispatch('wheel', {deltaX:-140,deltaY:8,target:{closest:()=>false}}, 'stageFrame');
+check('desktop horizontal trackpad gesture switches Scene without affecting the domain record',
+  state().activeSceneId===stableId && state().scenes.length===2);
+click({focus:otherSceneId});
+
 await ask('查看 Session 列表');
 check('repeated SessionList reuses existing Scene', state().scenes.length === 2);
 await ask('一些不相关的输入');
