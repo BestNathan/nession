@@ -196,6 +196,9 @@ async function main() {
       reviewer_agent_id: result.reviewer_agent_id }));
     return;
   }
+  // The owner-only Store / Publisher Review Ingest workflow passes --reviewer
+  // from its optional owner input; the library validates the identity and
+  // records the assignment immutably, while an empty input keeps it unchanged.
   if (command === 'apply-store' &&
       (args.length === 2 || (args.length === 4 && args[2] === '--reviewer'))) {
     assertTrustedMainWorkflow();
