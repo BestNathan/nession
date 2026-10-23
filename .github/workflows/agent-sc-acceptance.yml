@@ -111,9 +111,9 @@ jobs:
             const legacy={cursor:"accept-cursor-01",qwen:"accept-qwen-01"};
             if(given==="deepseek") {
               // Existing explicit DeepSeek workflow contract remains available.
-              process.stdout.write("provider=deepseek\\n");
-              process.stdout.write("environment=deepseek\\n");
-              process.stdout.write("agent_id=legacy-acceptance-deepseek\\n");
+              process.stdout.write("provider=deepseek\n");
+              process.stdout.write("environment=deepseek\n");
+              process.stdout.write("agent_id=legacy-acceptance-deepseek\n");
             } else {
               const identity=resolveAgentDefault(registry,"acceptor",{
                 configured:process.env.ACCEPTOR_DEFAULT,
