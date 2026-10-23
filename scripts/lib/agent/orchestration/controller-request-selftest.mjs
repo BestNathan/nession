@@ -32,7 +32,7 @@ assert.throws(()=>buildControllerRequest({...inputs,developer:''},context,regist
   {developer:'dev-qwen-01'}),/requires #2274/);
 
 assert.throws(()=>buildControllerRequest({...inputs,developer:'review-cursor-01'},
-  context,registry),/role or ID/);
+  context,registry),/wrong-role/);
 assert.throws(()=>buildControllerRequest({...inputs,inject:'secret'},context,registry),
   /extra/);
 assert.throws(()=>buildControllerRequest({...inputs,input_sha:'main'},context,registry),
