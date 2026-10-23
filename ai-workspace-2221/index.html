@@ -668,7 +668,7 @@
       flow.draft.name=g.nameHint;
       g.steps.push({step:'prefill',source:'explicit-utterance',view:'session.create.form'});
     }
-    g.resolvedAgentId=target;g.ownerSceneId=focused()?.id;g.status='awaiting_user_commit';g.userEpoch=userInteractionEpoch;
+    g.resolvedAgentId=target;g.ownerSceneId=focused()?.id;g.status=/^[A-Za-z0-9_.-]{1,64}$/.test(flow.draft.name.trim())?'awaiting_user_commit':'awaiting_input';g.userEpoch=userInteractionEpoch;
     clarification='';bump();render();
     log('GOAL COMMIT BARRIER','表单已准备好；后端创建仍须用户明确提交');
   }
@@ -763,7 +763,7 @@
             const goal=state.pendingGoal,flow=focused()?.type==='session.create'?focused():focused()?.flow;
             if(flow){
               if(goal.nameHint&&!flow.draft.name)flow.draft.name=goal.nameHint;
-              goal.status='awaiting_user_commit';goal.ownerSceneId=focused()?.id;
+              goal.status=/^[A-Za-z0-9_.-]{1,64}$/.test(flow.draft.name.trim())?'awaiting_user_commit':'awaiting_input';goal.ownerSceneId=focused()?.id;
               goal.steps.push({candidateId:candidate.candidateId,source:'current-view'});
               bump();render();
             }
@@ -807,7 +807,7 @@
     const idx=itemIndex();
     renderPreview($('prevPreview'),state.scenes[idx-1],'left');renderPreview($('nextPreview'),state.scenes[idx+1],'right');
     $('prevButton').disabled=idx<=0;$('nextButton').disabled=idx>=state.scenes.length-1;
-    $('mainCard').innerHTML=renderScene(focused())+(state.pendingGoal&&['resolving','awaiting_data','awaiting_selection','awaiting_user_commit','suspended'].includes(state.pendingGoal.status)?'<div class="clarification-inline" role="status">目标 · '+escapeHtml(state.pendingGoal.utterance)+' · '+escapeHtml(state.pendingGoal.status)+(state.pendingGoal.status==='awaiting_user_commit'?'（请确认表单并手动提交）':'')+'</div>':'')+(clarification?'<div class="clarification-inline" role="status">'+escapeHtml(clarification)+'</div>':'');
+    $('mainCard').innerHTML=renderScene(focused())+(state.pendingGoal&&['resolving','awaiting_data','awaiting_selection','awaiting_input','awaiting_user_commit','suspended'].includes(state.pendingGoal.status)?'<div class="clarification-inline" role="status">目标 · '+escapeHtml(state.pendingGoal.utterance)+' · '+escapeHtml(state.pendingGoal.status)+(state.pendingGoal.status==='awaiting_user_commit'?'（请确认表单并手动提交）':'')+'</div>':'')+(clarification?'<div class="clarification-inline" role="status">'+escapeHtml(clarification)+'</div>':'');
     renderInspector();
     $('carouselDots').innerHTML=state.scenes.map((i,n)=>`<button class="dot ${n===idx?'active':''}" data-focus="${escapeHtml(i.id)}" aria-label="第 ${n+1} 个 Scene：${escapeHtml(i.title)}" title="${escapeHtml(i.title)}"></button>`).join('');
   }
@@ -911,11 +911,16 @@
       const pos=e.target.selectionStart;render();const newInput=$('agentSearch');if(newInput){newInput.focus();newInput.setSelectionRange(pos,pos);}
     }
     const ctx=formContext();if(!ctx)return;
-    if(e.target.id==='formName'){userInteractionEpoch++;ctx.form.draft.name=e.target.value;ctx.form.error='';bump();}
+    if(e.target.id==='formName'){userInteractionEpoch++;ctx.form.draft.name=e.target.value;ctx.form.error='';
+      if(state.pendingGoal?.ownerSceneId===ctx.item.id&&['awaiting_input','awaiting_user_commit'].includes(state.pendingGoal.status))
+        state.pendingGoal.status=/^[A-Za-z0-9_.-]{1,64}$/.test(e.target.value.trim())?'awaiting_user_commit':'awaiting_input';
+      bump();}
   });
   document.addEventListener('change',e=>{
     const ctx=formContext();if(!ctx)return;
-    if(e.target.id==='formAgent'){userInteractionEpoch++;ctx.form.draft.agentId=e.target.value;if(e.target.value){state.selectedAgentId=e.target.value;if(ctx.inline)ctx.item.selectedAgentId=e.target.value;}ctx.form.error='';bump();render();log('STATE WRITEBACK',`SessionCreate 选择 Agent: ${e.target.value} · Scene ${ctx.item.id}`);}
+    if(e.target.id==='formAgent'){userInteractionEpoch++;ctx.form.draft.agentId=e.target.value;
+      if(state.pendingGoal?.ownerSceneId===ctx.item.id&&['awaiting_input','awaiting_user_commit'].includes(state.pendingGoal.status))
+        state.pendingGoal.status=/^[A-Za-z0-9_.-]{1,64}$/.test(ctx.form.draft.name.trim())&&agents.find(a=>a.id===e.target.value)?.status==='online'?'awaiting_user_commit':'awaiting_input';if(e.target.value){state.selectedAgentId=e.target.value;if(ctx.inline)ctx.item.selectedAgentId=e.target.value;}ctx.form.error='';bump();render();log('STATE WRITEBACK',`SessionCreate 选择 Agent: ${e.target.value} · Scene ${ctx.item.id}`);}
   });
   document.addEventListener('submit',e=>{
     if(e.target.id!=='createSessionForm')return;
