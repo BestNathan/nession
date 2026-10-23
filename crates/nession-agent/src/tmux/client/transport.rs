@@ -149,7 +149,7 @@ impl PipeTransport {
 ///
 /// With `-CC`, tmux starts the stream with the DCS introducer
 /// `ESC P 1000 p` (“enter passthrough”) and ends it with ST `ESC \`. Neither is
-/// a Control Mode record: passed to [`read_control_line`](super::control)
+/// a Control Mode record: passed to [`read_control_line`](super::framing)
 /// untouched, the introducer corrupts the welcome pair's first line and the
 /// closing ST looks like a record truncated by EOF. This transport removes the
 /// introducer and the *closing* ST, and normalises the `CRLF` tmux writes as a

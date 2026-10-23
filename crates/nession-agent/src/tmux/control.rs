@@ -31,9 +31,10 @@
 //! `%output` byte stream, so per-client viewports could not be rendered
 //! coherently.
 //!
-//! The wire grammar and byte bounds live in [`read_control_line`] and
-//! `tmux::parser`; they are shared with the client. This module does not
-//! decode Control Mode records itself any more.
+//! The wire grammar, byte bounds and Control Mode record decoding live in
+//! `tmux::client` (which this module drives) and `tmux::parser`; this module
+//! receives typed events and owns the session-level barrier and size guard.
+//! It does not decode Control Mode records itself.
 //!
 //! ## Transport selection (#2307)
 //!
@@ -46,7 +47,6 @@
 use anyhow::{Context, Result};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::io::{AsyncBufRead, AsyncBufReadExt};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tracing::warn;
@@ -75,9 +75,6 @@ const WELCOME_TIMEOUT: Duration = Duration::from_secs(5);
 /// pathological (a flooded reader, a loaded CI runner) without turning a wedged
 /// server into a hung attach.
 const CAPTURE_TIMEOUT: Duration = Duration::from_secs(10);
-
-/// A malformed or unbounded Control Mode line must never exhaust Agent memory.
-pub(crate) const MAX_CONTROL_LINE_BYTES: usize = 16 * 1024 * 1024;
 
 /// Environment variable selecting the transport for new control attachments.
 ///
@@ -571,69 +568,6 @@ impl super::session::TmuxSession for ControlModeSession {
     async fn close(&mut self) -> Result<()> {
         ControlModeSession::close(self).await
     }
-}
-
-/// Read one bounded Control Mode record as raw bytes (#2300).
-///
-/// Shared with [`super::client`], which consumes the same framing: `%output`
-/// need not be UTF-8 and must not be subjected to a String conversion.
-pub(crate) async fn read_control_line<R: AsyncBufRead + Unpin>(
-    reader: &mut R,
-    line: &mut Vec<u8>,
-) -> std::io::Result<usize> {
-    loop {
-        let available = reader.fill_buf().await?;
-        if available.is_empty() {
-            // A line without its newline is NOT a protocol record. Treating a
-            // torn suffix as complete lets an output frame cross the Agent
-            // stream boundary with missing bytes (#2300).
-            return if line.is_empty() {
-                Ok(0)
-            } else {
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::UnexpectedEof,
-                    "tmux Control Mode stdout ended mid-record",
-                ))
-            };
-        }
-        let terminator = available.iter().position(|byte| *byte == b'\n');
-        let take = terminator.map_or(available.len(), |index| index + 1);
-        if take > MAX_CONTROL_LINE_BYTES.saturating_sub(line.len()) {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "tmux Control Mode line exceeds bounded frame limit",
-            ));
-        }
-        let chunk = available.get(..take).ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "invalid tmux Control Mode frame length",
-            )
-        })?;
-        line.extend_from_slice(chunk);
-        reader.consume(take);
-        if terminator.is_some() {
-            return Ok(line.len());
-        }
-    }
-}
-
-/// Only unparseable records with a known protocol tag are fatal. Unknown
-/// extension notifications remain forward compatible.
-pub(crate) fn malformed_known_record(line: &[u8]) -> bool {
-    const KNOWN: [&[u8]; 8] = [
-        b"%output",
-        b"%begin",
-        b"%end",
-        b"%error",
-        b"%session-changed",
-        b"%layout-change",
-        b"%window-resize",
-        b"%exit",
-    ];
-    KNOWN.iter().any(|prefix| {
-        line == *prefix || (line.starts_with(prefix) && line.get(prefix.len()) == Some(&b' '))
-    })
 }
 
 #[cfg(test)]
