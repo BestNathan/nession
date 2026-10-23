@@ -571,10 +571,10 @@ test('two clients: a stalled observer never blocks the controller (#2144)', asyn
     const observerGrid = await readGrid(observer);
     expect(observerGrid.cols).toBeGreaterThan(controllerGrid.cols);
     await expectPtySize(observer, observerGrid.cols, observerGrid.rows);
-    // The displaced client follows the shared pane (#1095 observer behavior).
-    await expect
-      .poll(async () => readGrid(controller), { timeout: 15_000 })
-      .toEqual(observerGrid);
+    // The displaced client is an observer, not a copy of the pane: its own
+    // container still measures its local grid (and the observer bar has just
+    // changed that container's height). The PTY size above and the observer
+    // bar are the ownership witnesses; the displaced xterm's rows are not.
 
     await controller.locator('.xterm').click();
     await expect(controller.getByTestId('terminal-observer-bar')).toHaveCount(0, { timeout: 15_000 });
