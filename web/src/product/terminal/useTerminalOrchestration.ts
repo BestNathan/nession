@@ -261,6 +261,10 @@ export function useTerminalOrchestration({
     if (!controller) {
       return;
     }
+    // ControlLease, not ResizeObserver, owns the shared pane dimensions.
+    // A displaced client must follow Agent/tmux resize notifications rather
+    // than its own passive browser layout until foreground takeover (#2286).
+    controller.setObserverReadOnly(terminalControl.role === 'observer');
     const remoteEnabled = !(effectiveMode === 'p2p' && terminalControl.role === 'observer');
     controller.setRemoteInputEnabled(remoteEnabled);
   }, [controller, effectiveMode, terminalControl.role]);
