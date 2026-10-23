@@ -29,7 +29,7 @@ The one shared orphan-history `prototype` branch contains the UI design assets. 
 
 ## Reproducible mock smoke checks
 
-Run `node ai-workspace-2221/smoke-test.mjs` from the shared `prototype` branch checkout (or `node smoke-test.mjs` from this directory). It has **no npm dependencies** and reads the checked-in `index.html`. The script exercises **35 local JavaScript event/state invariants**: Scene reuse, discovery candidates, filtered ordinal resolution, contextual recommendations, disabled offline Agent, in-flight stale-decision discard, inline create/draft/confirmed result, next-action handoff and Standard/AI continuity. The script does not start Chromium, contact TypeSafe or run real backend APIs, and is **not** production Acceptance evidence.
+Run `node ai-workspace-2221/smoke-test.mjs` from the shared `prototype` branch checkout (or `node smoke-test.mjs` from this directory). It has **no npm dependencies** and reads the checked-in `index.html`. The script exercises **36 local JavaScript event/state invariants**: Scene reuse, discovery candidates, filtered ordinal resolution, contextual recommendations, disabled offline Agent, in-flight stale-decision discard, inline create/draft/confirmed result, next-action handoff and Standard/AI continuity. The script does not start Chromium, contact TypeSafe or run real backend APIs, and is **not** production Acceptance evidence.
 
 ## Architecture constraints
 
