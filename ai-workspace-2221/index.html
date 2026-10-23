@@ -469,14 +469,28 @@
       suggested:matches.slice(0,3).map((x,i)=>({candidateId:x.candidateId,actionId:x.actionId,label:x.label,illustrativeScore:Number((.91-i*.14).toFixed(2))}))};
   }
   function buildJevPlan(question,projection,space){
+    // A goal describes the destination; a Choice returns ONE legal step at the current View.
     const pool=space.eligible.filter(x=>x.kind!=='mutation'&&!x.actionId.endsWith('.focus')).slice(0,30);
+    if(!pool.length)return null; // wait for View data; no "none-only" Jev request
     const criteria={};
-    pool.forEach((c,i)=>{criteria['c'+i]=c.actionId+' / '+c.label+' / '+JSON.stringify(c.target)});
-    criteria.none='None of the registered actions match the user utterance';
+    pool.forEach((c,i)=>{
+      const entryAffordance=c.actionId==='agent.list.show'?
+        '进入 Agent 发现/选择节点；以后可以访问该节点的操作，当前不能执行内部操作':
+        c.actionId==='session.list.show'?
+        '进入 Session 列表，查看已有会话及其可用操作':
+        c.label;
+      criteria['c'+i]=c.actionId+' / '+entryAffordance+' / target='+JSON.stringify(c.target);
+    });
+    criteria.none='没有任何当前动作能合理推进目标，或目标不明确，或者必须等待数据/用户输入';
     return {
       model:'jev-1.13.0',
-      state:{utterance:question,projection,actionSpaceRevision:space.revision,registryVersion},
-      questions:{requested_action:{type:'choice',instructions:'Which registered action matches the utterance and context? Choose none if ambiguous.',criteria}},
+      state:{utterance:question,goal:projection.pendingGoal?{
+        originalUtterance:projection.pendingGoal.utterance,status:projection.pendingGoal.status,
+        lastStep:projection.pendingGoal.steps?.at(-1)?.candidateId||null
+      }:null,projection,actionSpaceRevision:space.revision,registryVersion},
+      questions:{requested_action:{type:'choice',
+        instructions:'用户可能描述一个需要多个页面才能完成的最终目标。只在当前已暴露候选中选择一个能推动目标前进的下一步，可以先选择能力入口、发现资源或选择节点。不要因为最终创建动作尚未呈现就选 none，也不能选择未列出的未来动作。只有全部候选都无法推进目标、目标有歧义或必须等待数据时才选 none。模型选择不构成业务提交授权。',
+        criteria}},
       localCandidateMap:pool.map((c,i)=>({choice:'c'+i,candidateId:c.candidateId}))
     };
   }
