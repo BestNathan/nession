@@ -179,6 +179,74 @@ The goal is neither an upfront `A→A2→A21` plan nor an alternate authority fo
 
 `A_t = Validate(Expose(shell, activeView(S_t), sceneLinks), registry, facts, auth)`. On a committed View transition `S_(t+1)`, recalculate `A_(t+1)` and retire any candidates absent from the new exposure. **No required subset relation between `A_t` and `A_(t+1)`.** Candidates for an unopened deeper View are never valid merely because its Capability is registered. Background Scene internal operations remain inaccessible until that Scene is focused.
 
+## 4.7 Goal advancement state machine (normative, 2026-10-23)
+
+**Model question:** “Which **currently exposed step** makes safe progress toward the original desired outcome?” It is **not** “Which current candidate is identical to the user's final verb?”. This correction is based on the first live `jev-1.13.0` run: 10/12 correct, with both failures at the root because the model chose `none` instead of the Agent entry for a Session-creation goal. See [Issue #2221 live evaluation](https://github.com/BestNathan/nession/issues/2221#issuecomment-6358333394).
+
+### Separating three decisions
+
+1. **Goal recognition**: extract the user's objective and optional explicit hints into bounded, provenance-tagged `PendingGoal`; do not synthesize any executable descendant action.
+2. **Next exposed step**: System One chooses one eligible `ActionCandidate` from the current `ActionSpace` (or `none`). A root `agent.list.show` entry may be the correct next step toward future Session creation even though `session.create.open` is **not** currently exposed.
+3. **Transition application**: validate the returned candidate ID, revision, ownership, permission and scope, then apply one deterministic Router/Reducer transition; the next rendered View recomputes its Action Space. Business mutations still require a separate explicit commit.
+
+The provider's Choice instructions SHOULD read:
+
+> The user's utterance may express a final objective requiring multiple views. Choose exactly one **currently exposed** action that **advances** that objective, including a prerequisite capability entry, resource discovery, or selection. Never choose an unexposed future child action. Return `none` only when no offered action can reasonably advance the goal, a target is ambiguous, or the required facts have not loaded. Do not interpret a field-edit request as authorization to submit a mutation.
+
+Candidate descriptions for entries should specify their **semantic affordance** (e.g. “Enter Agent list to discover/select an Agent and then access Agent-scoped operations”), without exposing or making any hidden descendant action *selectable*. No lengthy speculative chain/plan needs to be transmitted to the model.
+
+### Transition table
+
+| Current status | Event/guard | State transition | Side effects |
+|---|---|---|---|
+| — | New user objective | `resolving` | Record original utterance + bounded hints |
+| `resolving` | Valid chosen capability entry | `awaiting_data` | Mount/focus View; request facts |
+| `awaiting_data` | Correct View facts loaded, bound to Scene + revision | `resolving` | Derive new View Action Space and schedule one safe decision |
+| `resolving` | Exactly one eligible target selected | `resolving` | Commit selected resource; derive new Action Space |
+| `resolving` | Missing or ambiguous target | `awaiting_selection` | Ask only for missing information; no guessed resource |
+| `awaiting_selection` | User selects a currently exposed resource | `resolving` | Validate target, continue with newly exposed actions |
+| `resolving` | Valid form View prepared, missing required fields | `awaiting_input` | Prefill only explicit verified fields; do not submit |
+| `awaiting_input` | User supplies valid fields | `awaiting_user_commit` | Submit becomes enabled; no automatic execution |
+| `resolving` / `awaiting_input` | Valid form with all required inputs | `awaiting_user_commit` | Require explicit user commit |
+| `awaiting_user_commit` | User explicitly submits, backend confirms | `completed` | Record authoritative outcome; expose result actions |
+| Any unfinished | User redirects, cancels, changes active Scene or relevant target | `suspended` / `cancelled` | Older in-flight decisions invalidated |
+| Any unfinished | Provider outage, budget exceeded, repeated/no-op transition or stale facts | `suspended` | Stay interactive, offer clarification/retry; no business mutation |
+
+An **empty eligible View Action Space while loading** is not an inference opportunity: `awaiting_data` should wait for the data event, **without** sending an empty/only-`none` Jev question. `none` from a nonempty real candidate space is a meaningful **clarification** outcome, not evidence that a desired future leaf is forbidden forever.
+
+### Deterministic progress and liveness guard
+
+```ts
+interface GoalStepReceipt {
+  goalId: string;
+  candidateId: string;
+  sourceViewInstanceId: string;
+  sourceViewRevision: number;
+  actionSpaceFingerprint: string;
+  targetSnapshotId?: string;
+  effect: 'navigate'|'select'|'prepare';
+}
+
+function advance(goal, state, actionSpace): Transition {
+  if (!goalIsActive(goal) || state.userEpoch !== goal.userEpoch) return suspend('superseded');
+  if (goal.remainingSteps <= 0) return suspend('step_budget_exhausted');
+  if (actionSpace.isLoading || actionSpace.eligible.length === 0) return awaitData();
+  const decision = systemOne.chooseCurrentStep(goal, actionSpace); // async; validate on return
+  if (decision === 'none') return clarifyOrWait();
+  assertCurrentlyExposedAndEligible(decision.candidateId, actionSpace);
+  assertNotPreviouslyAppliedToSameFingerprint(goal, decision.candidateId, actionSpace);
+  return reducer.applyPreparedUIAction(decision.candidateId); // NO backend mutation
+}
+```
+
+For production the asynchronous decision is scheduled separately, never called synchronously inside the reducer. The pseudocode means a **single state transition per validated decision**, followed by recomputation. Record receipts for the exact candidate, View revision and source fingerprint to prevent loop/replay, and cap safe automatic steps for each goal. If the next step is a mutation, stop at `awaiting_user_commit` (or clarify); never invoke business API through the model decision path.
+
+### Interruption, continuation, and scope
+
+A second utterance that is an unambiguous **slot update for the active form** (e.g. “名称叫 dev-test”) continues its existing `PendingGoal` and changes the draft only. A new unrelated user intent **suspends** that goal and gives the user's newest task priority; its draft remains in its Scene. A later “继续刚才创建的 Session” can resume **only after revalidating the owning Scene, current View, draft and exposed action set**; it must not re-run already completed steps. User clicks remain deterministic and can resume an `awaiting_selection` goal without model latency.
+
+**Verification requirements:** test the same initial objective across S0 Entry → S1 loading → S2 rows → S3 contextual Create → S4 form; test root guidance with actual Jev, terminal commit barrier, field updates without goal reset, interruption/resume, duplicate candidate, stale source revision, and no repeating the same action without progress. A short benchmark over one prompt is directional evidence, **not** a calibrated accuracy result.
+
 ## 5. Intent + recommendation judgments
 
 Two independently triggered kinds, both bounded:
