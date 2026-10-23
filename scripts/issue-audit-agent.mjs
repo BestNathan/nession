@@ -44,14 +44,29 @@ function estimateCost(usage) {
   return { usd, rates };
 }
 
+function auditBackend() {
+  return process.env.ISSUE_AUDIT_PROVIDER === 'qwen' ? 'qwen' : 'deepseek';
+}
+function telemetryProvider() {
+  return auditBackend() === 'qwen' ? 'claude-code' : 'deepseek';
+}
+function backendMapping() {
+  return auditBackend() === 'qwen' ? 'qwen-configured-gateway' : 'claude-sonnet* -> deepseek-flash';
+}
+function providerCostBasis() {
+  return auditBackend() === 'qwen'
+    ? 'Claude CLI list-equivalent cost; not the Qwen gateway bill'
+    : 'Claude list-equivalent from the request model; not the DeepSeek bill';
+}
+
 function ensureProviderConfig() {
   const missing = [];
-  if (!process.env.ANTHROPIC_BASE_URL) missing.push('ANTHROPIC_BASE_URL (deepseek Environment variable)');
+  if (!process.env.ANTHROPIC_BASE_URL) missing.push('ANTHROPIC_BASE_URL (selected Environment variable)');
   if (!process.env.ANTHROPIC_AUTH_TOKEN && !process.env.ANTHROPIC_API_KEY) {
-    missing.push('ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY (deepseek Environment secret)');
+    missing.push('ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY (selected Environment secret)');
   }
   if (missing.length) {
-    throw new Error(`DeepSeek Claude Code configuration is incomplete:\n- ${missing.join('\n- ')}\nFix the GitHub Environment named deepseek; this workflow will not fall back to another provider.`);
+    throw new Error(`Claude Code provider configuration is incomplete:\n- ${missing.join('\n- ')}\nFix the selected GitHub Environment; this workflow will not fall back to another provider.`);
   }
 }
 
@@ -73,7 +88,7 @@ function appendSummary(record) {
   ];
   if (record.agent?.invoked) {
     lines.push(
-      `- DeepSeek configured model: \`${record.agent.model ?? 'unknown'}\``,
+      `- Configured model: \`${record.agent.model ?? 'unknown'}\``,
       `- Claude request model: \`${record.agent.claude_request_model ?? 'unknown'}\``,
       `- Backend mapping: \`${record.agent.backend_mapping ?? 'unknown'}\``,
       `- Session: \`${record.agent.session_id ?? 'unknown'}\``,
@@ -110,7 +125,7 @@ function writeRecord(outDir, record) {
           issue: record.issue.number,
         },
         agent: {
-          provider: agent.provider || 'deepseek',
+          provider: agent.provider || telemetryProvider(),
           prompt: promptTelemetry(renderIssueAuditPrompt({ number: record.issue.number, url: '', labels: [], body: '' }, { errors: [] }, 'deepseek')),
           model: {
             id: agent.model ?? null,
@@ -147,7 +162,11 @@ function writeRecord(outDir, record) {
 }
 
 function claudeRequestModel() {
-  return process.env.ISSUE_AUDIT_CLAUDE_MODEL || 'claude-sonnet-5';
+  const selected=process.env.ISSUE_AUDIT_CLAUDE_MODEL ||
+    (auditBackend() === 'qwen' ? process.env.ANTHROPIC_MODEL : 'claude-sonnet-5');
+  if(auditBackend() === 'qwen' && !/^qwen[a-z0-9._-]*$/i.test(selected || ''))
+    throw Error('Qwen Issue Audit requires an explicit Qwen model in its GitHub Environment');
+  return selected;
 }
 
 function runAgent(issue) {
@@ -241,10 +260,10 @@ async function main() {
       result: 'agent-error',
       agent: {
         invoked: true,
-        provider: 'deepseek',
+        provider: telemetryProvider(),
         model: process.env.ANTHROPIC_MODEL || 'gateway-default',
         claude_request_model: claudeRequestModel(),
-        backend_mapping: 'claude-sonnet* -> deepseek-flash',
+        backend_mapping: backendMapping(),
         session_id: failed?.session_id ?? failed?.sessionId ?? null,
         num_turns: failed?.num_turns ?? failed?.numTurns ?? null,
         started_at: agentStartedAt.toISOString(),
@@ -252,7 +271,7 @@ async function main() {
         duration_ms: failed?.duration_ms ?? failed?.durationMs ?? (Date.now() - agentStartedAt.getTime()),
         usage,
         reported_cost_usd: failed?.total_cost_usd != null && Number.isFinite(Number(failed.total_cost_usd)) ? Number(failed.total_cost_usd) : null,
-        reported_cost_basis: 'Claude list-equivalent from the request model; not the DeepSeek bill',
+        reported_cost_basis: providerCostBasis(),
         estimated_cost_usd: estimated.usd,
         pricing_usd_per_mtok: estimated.rates,
         terminal_reason: failed?.terminal_reason ?? failed?.subtype ?? null,
@@ -274,10 +293,10 @@ async function main() {
     result: after.ok && readVerificationTier(afterIssue).explicit ? 'repaired' : 'contract-fail',
     agent: {
       invoked: true,
-      provider: 'deepseek',
+      provider: telemetryProvider(),
       model: process.env.ANTHROPIC_MODEL || 'gateway-default',
       claude_request_model: claudeRequestModel(),
-      backend_mapping: 'claude-sonnet* -> deepseek-flash',
+      backend_mapping: backendMapping(),
       session_id: claude.session_id ?? claude.sessionId ?? null,
       num_turns: claude.num_turns ?? claude.numTurns ?? null,
       started_at: agentStartedAt.toISOString(),
@@ -285,7 +304,7 @@ async function main() {
       duration_ms: claude.duration_ms ?? claude.durationMs ?? (Date.now() - agentStartedAt.getTime()),
       usage,
       reported_cost_usd: claude.total_cost_usd != null && Number.isFinite(Number(claude.total_cost_usd)) ? Number(claude.total_cost_usd) : null,
-      reported_cost_basis: 'Claude list-equivalent from the request model; not the DeepSeek bill',
+      reported_cost_basis: providerCostBasis(),
       estimated_cost_usd: estimated.usd,
       pricing_usd_per_mtok: estimated.rates,
     },
