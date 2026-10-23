@@ -37,36 +37,3 @@ jobs:
       target_ref: ${{ github.sha }}
       deployment: controlled-live-1997
     secrets: inherit
-
-  # One-time exact-source re-evaluation of #2225 after installing the trusted
-  # GitOps/ACR/Kubernetes collector on main. This does not accept user-supplied
-  # verdicts or arbitrary target refs; the canonical updater remains the writer.
-  accept-2225-original-pr:
-    if: >-
-      github.repository == 'BestNathan/nession' &&
-      github.ref == 'refs/heads/main' &&
-      github.actor == 'BestNathan' &&
-      github.event.action == 'created' &&
-      github.event.issue.number == 2225 &&
-      !github.event.issue.pull_request &&
-      github.event.comment.user.login == 'BestNathan' &&
-      github.event.comment.body == '/nession reverify staging-acr issue=2225'
-    uses: ./.github/workflows/agent-sc-acceptance.yml
-    with:
-      issue_number: '2225'
-      stage: pre-merge
-      provider: deepseek
-      target_ref: cb6b991b4c8ea9b54648393b200e6e22de780d09
-    secrets: inherit
-
-  accept-2225-merged-staging:
-    needs: accept-2225-original-pr
-    if: needs.accept-2225-original-pr.result == 'success'
-    uses: ./.github/workflows/agent-sc-acceptance.yml
-    with:
-      issue_number: '2225'
-      stage: staging
-      provider: deepseek
-      target_ref: 1790d9fc08ae6f6f97028e53d99f1687e4de40bd
-      deployment: staging
-    secrets: inherit
