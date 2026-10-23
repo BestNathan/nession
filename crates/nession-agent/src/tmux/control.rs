@@ -672,10 +672,19 @@ impl ControlRouter {
                 }
             }
             Some(ControlMessage::Exit) => effects.push(Effect::Exit),
-            // Session/layout notifications keep their pre-#1228 treatment
-            // (ignored), interleaved or not.
-            Some(ControlMessage::SessionChanged { .. })
-            | Some(ControlMessage::LayoutChange { .. }) => {}
+            // tmux 3.6b reports a resized pane with %layout-change rather than
+            // %window-resize. Notifications can interleave a command's
+            // %begin/%end block; ignoring them here leaves other viewers at
+            // stale geometry even though the owning controller and PTY have
+            // already changed (#2286, #2144).
+            Some(ControlMessage::LayoutChange { layout, .. }) => {
+                if let Some((cols, rows)) = crate::tmux::parser::layout_size(&layout) {
+                    if self.note_size(cols, rows) {
+                        effects.push(Effect::Resize(cols, rows));
+                    }
+                }
+            }
+            Some(ControlMessage::SessionChanged { .. }) => {}
             // A %begin, a non-matching %end/%error, or anything unparsed:
             // not a real response marker (tmux never nests blocks), so it is
             // data — collected for the capture, ignored in a generic block.
@@ -1388,6 +1397,26 @@ mod tests {
                 router.route("%layout-change @0 nonsense nonsense *\n", true),
                 Vec::new()
             );
+        }
+
+        #[test]
+        fn layout_change_inside_command_response_updates_observers_once() {
+            let mut router = ControlRouter::new();
+            welcome(&mut router);
+            assert!(router.route("%begin 200 9 1\\n", true).is_empty());
+
+            // Real tmux 3.6b emits a layout notification even while another
+            // control command's response is open. The notification must not
+            // be swallowed as capture text (nor change the response block).
+            let layout = "%layout-change @0 a87d,177x49,0,0,0 a87d,177x49,0,0,0 *\\n";
+            assert_eq!(router.route(layout, true), vec![Effect::Resize(177, 49)]);
+            assert!(router.route(layout, true).is_empty());
+            assert_eq!(router.route("%end 200 9 1\\n", true).len(), 1);
+            assert_eq!(router.reported_size, Some((177, 49)));
+
+            // A subsequent real resize must not be masked by the dedupe.
+            let next = "%layout-change @0 b25d,124x30,0,0,0 b25d,124x30,0,0,0 *\\n";
+            assert_eq!(router.route(next, true), vec![Effect::Resize(124, 30)]);
         }
 
         #[test]
