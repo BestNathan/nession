@@ -13,12 +13,9 @@ on:
         type: string
       provider:
         description: Issue Audit Agent provider
-        required: true
-        default: cursor
-        type: choice
-        options:
-          - cursor
-          - deepseek
+        required: false
+        default: ''
+        type: string
       simulate_missing_provider_config:
         description: 'Negative-path smoke test: blank selected provider config before preflight'
         required: false
@@ -46,6 +43,7 @@ jobs:
       needs_agent: ${{ steps.tier.outputs.needs_agent }}
       allow_agent: ${{ steps.target.outputs.allow_agent }}
       provider: ${{ steps.target.outputs.provider }}
+      environment: ${{ steps.target.outputs.environment }}
       mode: ${{ steps.target.outputs.mode }}
     steps:
       - uses: actions/checkout@v4
@@ -68,24 +66,51 @@ jobs:
           REPO_OWNER: ${{ github.repository_owner }}
           INPUT_ISSUE: ${{ inputs.issue_number }}
           INPUT_PROVIDER: ${{ inputs.provider }}
+          DEFAULT_AUDITOR: ${{ vars.AGENT_DEFAULT_AUDITOR }}
         run: |
           set -euo pipefail
+          # Resolve the default from trusted main and the registered role.
+          # No ambient PR/Issue text may select a model or credential Environment.
+          routing="$(node --input-type=module -e '
+            import {readFileSync} from "node:fs";
+            import {resolveAgentDefault} from "./scripts/lib/agent/default-routing.mjs";
+            const registry=JSON.parse(readFileSync("automation/agents/registry.json","utf8"));
+            const override=process.env.EVENT_NAME==="workflow_dispatch"
+              ? process.env.INPUT_PROVIDER : "";
+            const aliases={cursor:"audit-cursor-01",deepseek:"audit-deepseek-01",
+              qwen:"audit-qwen-01"};
+            const identity=resolveAgentDefault(registry,"auditor",{
+              configured:process.env.DEFAULT_AUDITOR,
+              override:aliases[override] || override,
+              legacy:"audit-cursor-01"
+            });
+            const backend=identity.provider==="cursor"?"cursor":
+              identity.environment==="dev-claude-qwen"?"qwen":
+              identity.environment==="deepseek"?"deepseek":null;
+            if(!backend)throw Error("No verified Auditor backend for selected Environment");
+            const environment=backend==="cursor" && !process.env.DEFAULT_AUDITOR &&
+              (!override || override==="cursor") ? "cursor" : identity.environment;
+            console.log(JSON.stringify({provider:backend,environment}));
+          ')"
+          provider="$(jq -er .provider <<< "$routing")"
+          environment="$(jq -er .environment <<< "$routing")"
           if [[ "${EVENT_NAME}" == "issue_comment" ]]; then
             # The trusted main-owned command parser validates exact body,
             # author association, sender identity and non-PR, open Issue.
             # Rejected comments are a no-op with no Agent credentials.
-            node scripts/issue-audit-command.mjs resolve \
-              "$GITHUB_EVENT_PATH" "$GITHUB_REPOSITORY" "$GITHUB_ACTOR"
+            ISSUE_AUDIT_PROVIDER_SELECTION="$provider" \
+              ISSUE_AUDIT_ENVIRONMENT_SELECTION="$environment" \
+              node scripts/issue-audit-command.mjs resolve \
+                "$GITHUB_EVENT_PATH" "$GITHUB_REPOSITORY" "$GITHUB_ACTOR"
             exit 0
           fi
           echo "mode=single" >> "$GITHUB_OUTPUT"
           if [[ "${EVENT_NAME}" == "workflow_dispatch" ]]; then
             issue_number="${INPUT_ISSUE}"
             allow_agent=true
-            provider="${INPUT_PROVIDER:-cursor}"
+            : # registered routing was resolved above
           else
             issue_number="${EVENT_ISSUE}"
-            provider=cursor
             # Never trust issue.author_association as the editor identity.
             # A collaborator opening their *own* Issue retains the normal
             # automatic path; editors other than the Owner use /audit comment.
@@ -108,13 +133,14 @@ jobs:
             exit 1
           fi
           case "${provider}" in
-            cursor|deepseek) ;;
+            cursor|deepseek|qwen) ;;
             *) echo "Unsupported Issue Audit provider: ${provider}" >&2; exit 1 ;;
           esac
 
           echo "issue_number=${issue_number}" >> "${GITHUB_OUTPUT}"
           echo "allow_agent=${allow_agent}" >> "${GITHUB_OUTPUT}"
           echo "provider=${provider}" >> "${GITHUB_OUTPUT}"
+          echo "environment=${environment}" >> "${GITHUB_OUTPUT}"
 
       - name: Self-test Issue Contract
         if: github.event_name != 'issue_comment' || steps.target.outputs.authorized == 'true'
@@ -208,7 +234,7 @@ jobs:
       (github.event_name == 'workflow_dispatch' && inputs.simulate_missing_provider_config == true)
     runs-on: ubuntu-latest
     timeout-minutes: ${{ needs.contract.outputs.mode == 'tree' && 60 || 20 }}
-    environment: ${{ needs.contract.outputs.provider }}
+    environment: ${{ needs.contract.outputs.environment }}
     permissions:
       contents: read
       issues: write
@@ -229,7 +255,7 @@ jobs:
       CURSOR_SDK_VERSION: ${{ vars.CURSOR_SDK_VERSION || 'latest' }}
 
       ISSUE_AUDIT_MAX_TURNS: ${{ needs.contract.outputs.mode == 'tree' && '120' || (vars.ISSUE_AUDIT_MAX_TURNS || '20') }}
-      ISSUE_AUDIT_CLAUDE_MODEL: ${{ vars.ISSUE_AUDIT_CLAUDE_MODEL || 'claude-sonnet-5' }}
+      ISSUE_AUDIT_CLAUDE_MODEL: ${{ vars.ISSUE_AUDIT_CLAUDE_MODEL || (needs.contract.outputs.provider == 'qwen' && vars.ANTHROPIC_MODEL) || 'claude-sonnet-5' }}
       ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
       ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -282,16 +308,16 @@ jobs:
                 exit 1
               fi
               ;;
-            deepseek)
+            deepseek|qwen)
               missing=()
               [[ -n "${ANTHROPIC_BASE_URL}" ]] || missing+=("ANTHROPIC_BASE_URL")
               if [[ -z "${ANTHROPIC_AUTH_TOKEN}" && -z "${ANTHROPIC_API_KEY}" ]]; then
                 missing+=("ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY")
               fi
               if (( ${#missing[@]} > 0 )); then
-                printf 'DeepSeek Environment is missing required Claude Code configuration:\n' >&2
+                printf 'Claude Gateway Environment is missing required configuration:\n' >&2
                 printf ' - %s\n' "${missing[@]}" >&2
-                echo 'Fix the GitHub Environment named deepseek. No provider fallback is configured or attempted.' >&2
+                echo 'Fix the selected GitHub Environment. No provider fallback is configured or attempted.' >&2
                 exit 1
               fi
               ;;
@@ -307,7 +333,7 @@ jobs:
               npm install --prefix "${sdk_root}" "@cursor/sdk@${CURSOR_SDK_VERSION}"
               echo "CURSOR_SDK_ROOT=${sdk_root}" >> "${GITHUB_ENV}"
               ;;
-            deepseek)
+            deepseek|qwen)
               npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION:-latest}"
               claude --version
               ;;
@@ -322,7 +348,7 @@ jobs:
             cursor)
               node scripts/issue-audit-cursor.mjs "${ISSUE_NUMBER}" "${RUNNER_TEMP}/issue-audit"
               ;;
-            deepseek)
+            deepseek|qwen)
               node scripts/issue-audit-agent.mjs "${ISSUE_NUMBER}" "${RUNNER_TEMP}/issue-audit"
               ;;
           esac
