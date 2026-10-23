@@ -115,6 +115,15 @@ h.press({jrFilter:'progressive'});
 check('variant filter shows only progressive cases',
  !h.node('jrList').innerHTML.includes('baseline ·') &&
  h.node('jrList').innerHTML.includes('progressive ·'));
+h.press({jrFilter:'all'});
+h.press({jrCompare:'root-specific',jrVariant:'baseline'});
+check('A/B strict-result cell opens archived failing root case',
+  h.node('jrRightHeader').innerHTML.includes('与期望不一致') &&
+  h.node('jrDetail').innerHTML.includes('none'));
+h.press({jrCompare:'root-specific',jrVariant:'progressive'});
+check('A/B progressive-result cell opens passing decision for same user goal',
+  h.node('jrRightHeader').innerHTML.includes('模型选择命中') &&
+  h.node('jrDetail').innerHTML.includes('entry:agents'));
 h.press({jrSuite:'relevance'});
 check('relevance suite shows recorded 10/10 results and unrelated questions',
  h.node('jrList').innerHTML.includes('写一首关于秋天的诗') &&
