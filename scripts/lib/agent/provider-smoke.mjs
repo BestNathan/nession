@@ -12,7 +12,7 @@ const EXPECTED = 'SC-99';
 export function smokeContext(sha) {
   if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error('Smoke target requires exact commit SHA');
   return {
-    issue: { number: 1556, title: 'Synthetic provider smoke fixture (not a real requirement)' },
+    issue: { number: 1556, title: 'Applicable staging verification — synthetic provider smoke fixture' },
     stage: 'staging',
     target_ref: sha,
     deployment: null,
@@ -57,6 +57,7 @@ export function selfTest() {
   const context = smokeContext('a'.repeat(40));
   assert.match(context.requirement_body,/no waiver, exclusion, or reason that this criterion is inapplicable/);
   assert.match(context.criteria[0].text,/Whether this verification happened is unknown/);
+  assert.doesNotMatch(context.issue.title,/not a real requirement/i);
   const fixture = {
     context, provider: 'deepseek',
     result: { criteria: [{ criterion: EXPECTED, result: 'Pending', evidence: [], summary: 'No evidence supplied' }] },
