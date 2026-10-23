@@ -615,7 +615,7 @@
     const agentHint=/北京|beijing|bj-|京节点/i.test(q)?'北京':/macbook|\bmac\b/i.test(q)?'macbook':
       /devbox|开发机/i.test(q)?'devbox':/tokyo|东京/i.test(q)?'tokyo':null;
     return {goalId:'goal-'+(++goalSequence),utterance,status:'resolving',ownerSceneId:null,
-      agentHint,nameHint:match?.[1]||null,resolvedAgentId:null,userEpoch:userInteractionEpoch,
+      agentHint,nameHint:match?.[1]||null,independent:/单独|独立|新场景|new scene/i.test(q),resolvedAgentId:null,userEpoch:userInteractionEpoch,
       steps:[],automaticStepBudget:4};
   }
   function suspendGoal(status,message){
@@ -660,14 +660,15 @@
     latestQuestionPlan=buildJevPlan(g.utterance,snapshot(),space);
     g.steps.push({candidateId:open.candidateId,revision:space.revision,trigger});
     log('SYSTEM ONE STEP (MOCK)','选择新暴露的动作 '+open.candidateId);
-    openAgentCreateInline(target,'Pending Goal · progressive action');
-    const flow=focused()?.flow;
-    if(flow?.view!=='session.create'){suspendGoal('suspended','无法进入当前 View 的创建子界面。');return;}
+    if(g.independent)activate('session.create',target,{forceNew:true});
+    else openAgentCreateInline(target,'Pending Goal · progressive action');
+    const flow=focused()?.type==='session.create'?focused():focused()?.flow;
+    if(!flow||(focused()?.type!=='session.create'&&flow.view!=='session.create')){suspendGoal('suspended','无法进入当前 View 的创建子界面。');return;}
     if(g.nameHint&&!flow.draft.name){
       flow.draft.name=g.nameHint;
       g.steps.push({step:'prefill',source:'explicit-utterance',view:'session.create.form'});
     }
-    g.resolvedAgentId=target;g.status='awaiting_user_commit';g.userEpoch=userInteractionEpoch;
+    g.resolvedAgentId=target;g.ownerSceneId=focused()?.id;g.status='awaiting_user_commit';g.userEpoch=userInteractionEpoch;
     clarification='';bump();render();
     log('GOAL COMMIT BARRIER','表单已准备好；后端创建仍须用户明确提交');
   }
@@ -751,16 +752,21 @@
       const id=decision.params.agentId;
       if(id&&agents.find(a=>a.id===id)?.status==='offline'){
         clarification='Agent 已离线，无法创建 Session。';render();toast(clarification);
-      }else if(focused()?.type==='agent.list'&&!/单独|独立|新场景|新 scene|new scene/i.test(question)){
-        openAgentCreateInline(id,'System One contextual intent');
-        if(state.pendingGoal?.status==='resolving'){
-          const goal=state.pendingGoal;
-          const flow=focused()?.flow;
-          if(flow?.view==='session.create'){
-            if(goal.nameHint&&!flow.draft.name)flow.draft.name=goal.nameHint;
-            goal.status='awaiting_user_commit';goal.ownerSceneId=focused()?.id;
-            goal.steps.push({candidateId:'agent:selected:create',source:'current-view'});
-            bump();render();
+      }else if(focused()?.type==='agent.list'){
+        const origin=focused();
+        const candidate=deriveActionSpace().view.find(c=>c.actionId==='session.create.open'&&c.target.resource?.id===(id||origin.selectedAgentId)&&c.eligibility==='enabled');
+        if(!candidate){clarification='当前 View 尚未暴露可执行的创建入口。';bump();render();}
+        else{
+          if(/单独|独立|新场景|new scene/i.test(question))activate('session.create',id||origin.selectedAgentId,{forceNew:true});
+          else openAgentCreateInline(id,'System One contextual intent');
+          if(state.pendingGoal?.status==='resolving'){
+            const goal=state.pendingGoal,flow=focused()?.type==='session.create'?focused():focused()?.flow;
+            if(flow){
+              if(goal.nameHint&&!flow.draft.name)flow.draft.name=goal.nameHint;
+              goal.status='awaiting_user_commit';goal.ownerSceneId=focused()?.id;
+              goal.steps.push({candidateId:candidate.candidateId,source:'current-view'});
+              bump();render();
+            }
           }
         }
       }else {clarification='当前页面未暴露独立创建入口，请先进入 Agent 并选择目标。';bump();render();}
