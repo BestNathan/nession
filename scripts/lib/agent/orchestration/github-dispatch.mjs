@@ -126,7 +126,7 @@ function dispatchInputs(body, ticket) {
   // the plan (never as an undeclared input GitHub would reject).
   if (body.role === 'reviewer') {
     if (body.schema_version !== 1) reject('a Reviewer dispatch cannot resume a native Session');
-    return { action_id: body.action_id, reviewer: body.agent_id };
+    return { action_id: body.action_id, reviewer: body.agent_id, dispatch_ticket: ticket };
   }
   return { action_id: body.action_id, issue_number: String(body.issue),
     agent_id: body.agent_id, task: body.task, input_sha: body.input_sha,
@@ -140,10 +140,11 @@ function planTicket(plan) {
 function planMatchesBody(plan, body, ticket) {
   if (plan.workflow_id !== PROVIDERS[body.role].workflow) return false;
   if (body.role === 'reviewer') {
-    return own(plan.inputs, ['action_id', 'reviewer']) &&
-      Object.keys(plan.inputs).length === 2 &&
+    return own(plan.inputs, ['action_id', 'reviewer', 'dispatch_ticket']) &&
+      Object.keys(plan.inputs).length === 3 &&
       plan.inputs.action_id === body.action_id &&
-      plan.inputs.reviewer === body.agent_id && body.schema_version === 1;
+      plan.inputs.reviewer === body.agent_id &&
+      plan.inputs.dispatch_ticket === ticket && body.schema_version === 1;
   }
   return plan.inputs.dispatch_ticket === ticket &&
     plan.inputs.action_id === body.action_id &&
