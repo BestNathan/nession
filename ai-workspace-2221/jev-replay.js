@@ -107,8 +107,8 @@
       return '<button type="button" data-jr-compare="' + escape(c.id) +
         '" class="jr-compare-row"><span>' + escape(c.utterance) + '</span>' +
         '<span class="' + (c.result.hit?'jr-pass':'jr-fail') + '">严格 ' +
-        (c.result.hit?'✓':'×') + '</span><span class="' + (b.result.hit?'jr-pass':'jr-fail') +
-        '">渐进 ' + (b.result.hit?'✓':'×') + '</span></button>';
+        (c.result.hit?'✓':'×') + '<small style="display:block;font-size:9px;color:#82909e;overflow-wrap:anywhere">' + escape(c.result.selected) + '</small></span><span class="' + (b.result.hit?'jr-pass':'jr-fail') +
+        '">渐进 ' + (b.result.hit?'✓':'×') + '<small style="display:block;font-size:9px;color:#82909e;overflow-wrap:anywhere">' + escape(b.result.selected) + '</small></span></button>';
     }).join('') + '</div>';
   }
   function firstRunPath() {
@@ -188,6 +188,7 @@
         (c.result.confidence==null?'未记录':(c.result.confidence*100).toFixed(0)+'%') +
         '</span><span class="jr-pill">' + escape(c.result.elapsedMs) + ' ms · 请求往返耗时</span>' +
         (c.result.choice?'<span class="jr-pill">原始 choice = '+escape(c.result.choice)+'</span>':'') +
+        (c.result.expectedProbability!=null?'<span class="jr-pill">期望候选概率 '+(c.result.expectedProbability*100).toFixed(0)+'%</span>':'') +
         '</div><p class="jr-step-label">选择与 confidence、耗时来自真实 Jev Task 归档。' +
         (c.result.choice?'choice 字段为真实返回值。':'该 Task 仅归档了映射后的候选 ID，未保留原始 choice 键。') +
         '</p></div>';
