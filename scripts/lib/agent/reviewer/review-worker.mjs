@@ -214,7 +214,7 @@ async function main() {
       if (!process.env.ANTHROPIC_BASE_URL ||
           (!process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_AUTH_TOKEN))
         fail('missing Claude gateway credentials');
-      const model = process.env.ACCEPTANCE_CLAUDE_MODEL || process.env.ANTHROPIC_MODEL;
+      const model = process.env.ANTHROPIC_MODEL || process.env.ACCEPTANCE_CLAUDE_MODEL;
       if (!/^qwen[a-z0-9._-]*$/i.test(model ?? '')) fail('Qwen model must be explicit');
       runner = createClaudeReviewRunner({ model, workspace, env: process.env });
     } else fail('unsupported reviewer Provider');
