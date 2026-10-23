@@ -53,6 +53,14 @@ test('SC-08: shell, full-screen TUI, resize, exit, capture bootstrap and P2P/Rel
   // types again.
   await page.locator('.xterm').click();
   await expect(page.getByTestId('terminal-observer-bar')).toBeHidden({ timeout: 20000 });
+  // Taking control repaints and may make the terminal answer a query (DA/CPR);
+  // those response bytes reach the shell as typed input, so let them land and
+  // discard the line before typing the survival marker (observed: the reply
+  // was concatenated onto the marker and the shell ran `0cprintf`).
+  await page.waitForTimeout(1000);
+  await command(page, '\u0003');
+  await page.waitForTimeout(300);
+  await command(page, '\u0015');
   // The original client survives the second subscriber's attach and close.
   await command(page, "printf 'SC08-SURVIVED-%s\\n' 2307");
   await expect.poll(() => countInBuffer(page, 'SC08-SURVIVED-2307'), { timeout: 20000 }).toBe(1);
