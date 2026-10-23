@@ -3,6 +3,7 @@
 // All GitHub sources are unprivileged shaped fixtures; the Store is a
 // disposable local checkout seeded from the real #1997 v16 state.
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -10,7 +11,8 @@ import path from 'node:path';
 import { CONTROLLED_1997_POLICY as SOURCE } from './controlled-proposal.mjs';
 import { planControlledPublisherIntent, CONTROLLED_PUBLISHER_INTENT_PATH } from './store-intent.mjs';
 import { CONTROLLED_ORIGINAL_PUBLICATION as P } from './publication-readback.mjs';
-import { fetchControlledPublication, applyPublisherReviewHandoff } from './publication-ingest.mjs';
+import { fetchControlledPublication, applyPublisherReviewHandoff,
+  applyPublicationToRemote } from './publication-ingest.mjs';
 
 const REPO='BestNathan/nession';
 const sourceRun={
@@ -112,4 +114,49 @@ try {
   assert.throws(()=>applyPublisherReviewHandoff({storeRoot:path.join(temp,'missing'),
     readback,registry}),/invalid root|ENOENT/);
 } finally { fs.rmSync(temp,{recursive:true,force:true}); }
-console.log('Publisher review ingest: verified readback, CAS handoff, idempotent replay and unverified-state negatives passed');
+
+// The same handoff through the canonical Store writer: a disposable bare Git
+// remote stands in for agent-store, and the CAS push must create exactly one
+// immutable version commit and replay idempotently.
+const remoteTemp=fs.mkdtempSync(path.join(os.tmpdir(),'publisher-store-remote-'));
+try {
+  const bare=path.join(remoteTemp,'agent-store.git');
+  execFileSync('git',['init','--bare','-q',bare]);
+  const seed=path.join(remoteTemp,'seed');
+  execFileSync('git',['init','-q',seed]);
+  const gitAt=(cwd,...args)=>execFileSync('git',['-C',cwd,...args],
+    {encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim();
+  gitAt(seed,'checkout','-q','-b','agent-store');
+  const seedIssue=path.join(seed,'workflows','issues','1997');
+  fs.mkdirSync(path.join(seedIssue,'states'),{recursive:true});
+  const seedBytes=Buffer.from(JSON.stringify(fixture,null,2)+'\n');
+  fs.writeFileSync(path.join(seedIssue,'states','00000016.json'),seedBytes);
+  fs.writeFileSync(path.join(seedIssue,'head.json'),JSON.stringify({version:16,
+    path:'workflows/issues/1997/states/00000016.json',
+    sha256:createHash('sha256').update(seedBytes).digest('hex')},null,2)+'\n');
+  gitAt(seed,'add','-A');
+  gitAt(seed,'-c','user.name=fixture','-c','user.email=fixture@example.invalid',
+    'commit','-q','-m','seed v16');
+  gitAt(seed,'remote','add','origin',bare);
+  gitAt(seed,'push','-q','origin','agent-store');
+  const remoteResult=applyPublicationToRemote({remote:bare,readback,registry});
+  assert.equal(remoteResult.changed,true);
+  assert.equal(remoteResult.version,17);
+  assert.match(remoteResult.commit_sha,/^[a-f0-9]{40}$/);
+  assert.equal(remoteResult.replayed,false);
+  const verifyDir=path.join(remoteTemp,'verify');
+  execFileSync('git',['clone','-q','--branch','agent-store','--single-branch',bare,verifyDir]);
+  const remoteState=JSON.parse(fs.readFileSync(
+    path.join(verifyDir,'workflows','issues','1997','states','00000017.json'),'utf8'));
+  assert.equal(remoteState.phase,'review');
+  assert.equal(remoteState.target_sha,P.original_pr_sha);
+  assert.equal(remoteState.outbox.filter(x=>x.status==='pending').length,1);
+  const remoteReplay=applyPublicationToRemote({remote:bare,readback,registry});
+  assert.equal(remoteReplay.changed,false);
+  assert.equal(remoteReplay.replayed,true);
+  assert.throws(()=>applyPublicationToRemote({remote:path.join(remoteTemp,'missing.git'),
+    readback,registry}),/agent-store remote unavailable/);
+  assert.throws(()=>applyPublicationToRemote({remote:'not a trusted url with spaces',
+    readback,registry}),/invalid trusted Store remote/);
+} finally { fs.rmSync(remoteTemp,{recursive:true,force:true}); }
+console.log('Publisher review ingest: verified readback, CAS handoff, remote CAS write, idempotent replay and unverified-state negatives passed');
