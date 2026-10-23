@@ -70,7 +70,7 @@ export function commitDispatchIntent({remote,issue,actionId,registry,signer,sour
     }
     if(sourceVerifier!==null){
       if(typeof sourceVerifier!=='function')fail('invalid main SHA source verifier');
-      sourceVerifier(candidate.task.sha);
+      sourceVerifier(candidate.task.sha,candidate.task.role);
     }
     const {plan,prepared}=prepareGitHubDispatch(state,actionId,registry,signer);
     const published=persist(dir,prepared,previous.version,issue);
