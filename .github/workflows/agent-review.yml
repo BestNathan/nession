@@ -1,5 +1,8 @@
 name: Agent / Review
 
+env:
+  NSESSION_AGENT_WORKFLOW_ID: agent-review
+
 # Trusted, read-only Reviewer Slice. Owner/main dispatch only. The admission is
 # prepared from independently fetched facts + the committed Store intent, and
 # the model runs inside an OS-isolated container with only Read/Grep.
@@ -158,7 +161,7 @@ jobs:
             -e NESSION_REVIEWER_ISOLATED=docker-v1 \
             -e GITHUB_ACTIONS -e GITHUB_REPOSITORY -e GITHUB_RUN_ID \
             -e GITHUB_RUN_ATTEMPT -e GITHUB_EVENT_NAME -e GITHUB_WORKFLOW -e GITHUB_REF \
-            -e NESSION_REVIEW_ACTION_ID \
+            -e NSESSION_AGENT_WORKFLOW_ID -e NESSION_REVIEW_ACTION_ID \
             -e CURSOR_API_KEY -e CURSOR_MODEL -e CURSOR_MODEL_FAST -e CURSOR_SDK_VERSION \
             -e ANTHROPIC_BASE_URL -e ANTHROPIC_AUTH_TOKEN -e ANTHROPIC_API_KEY \
             -e ANTHROPIC_MODEL -e ACCEPTANCE_CLAUDE_MODEL \
@@ -168,7 +171,17 @@ jobs:
             node:24-bookworm \
             node /trusted-code/scripts/lib/agent/reviewer/review-worker.mjs \
               /admission/review-admission.json /output
-      - name: Upload the canonical result, verdict and telemetry
+      - name: Upload canonical telemetry for Metrics ingest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-telemetry-reviewer-slice-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/review-output/agent-telemetry.json
+            ${{ runner.temp }}/review-output/agent-execution-trace.json
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Upload the canonical result and verdict
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -176,7 +189,5 @@ jobs:
           path: |
             ${{ runner.temp }}/review-output/agent-result.json
             ${{ runner.temp }}/review-output/review-verdict.json
-            ${{ runner.temp }}/review-output/agent-telemetry.json
-            ${{ runner.temp }}/review-output/agent-execution-trace.json
           if-no-files-found: warn
           retention-days: 14
