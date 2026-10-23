@@ -2922,6 +2922,21 @@ p2p_routes! { ctx, msg_type, payload_value;
                                         }
                                         (position, has_subscriber_queue)
                                     });
+                                // Relay observers do not consume the P2P peer
+                                // stream. Broadcast the successfully admitted,
+                                // current-controller size through the Agent's
+                                // central resize reporter as well, so they do
+                                // not depend solely on an eventual tmux
+                                // %layout-change (which may be interleaved
+                                // with a command response or coalesced away).
+                                // The reporter is a per-session latest-size
+                                // level; this is not a second Agent stream seq.
+                                if recorded.is_some() {
+                                    let full_id =
+                                        format!("{}:{}", ctx.agent_id, payload.session_name);
+                                    ctx.resize.publish(&full_id, payload.cols, payload.rows);
+                                }
+
                                 // Compatibility only: an old attachment with
                                 // no sequenced forwarder retains the original
                                 // single-connection delivery. Never duplicate
