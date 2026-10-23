@@ -14,9 +14,9 @@ on:
         required: true
         type: string
       developer:
-        description: 'Registered Developer ID'
-        required: true
-        default: dev-cursor-01
+        description: 'Optional registered Developer override (Qwen awaits #2274)'
+        required: false
+        default: ''
         type: string
       reviewer:
         description: 'Optional registered Reviewer override (empty = GitHub default)'
