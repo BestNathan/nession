@@ -523,7 +523,7 @@
   function activateId(id){
     const item=getScene(id);
     if(!item || item.id===state.activeSceneId)return;
-    userInteractionEpoch++;state.activeSceneId=id;bump();render();log('FOCUS SCENE',`${item.title} · 用户手动切换`);
+    userInteractionEpoch++;if(state.pendingGoal&&['resolving','awaiting_data'].includes(state.pendingGoal.status))state.pendingGoal.status='suspended';state.activeSceneId=id;bump();render();log('FOCUS SCENE',`${item.title} · 用户手动切换`);
   }
   function fetchAgentList(item, forced=false){
     if(item.status==='loading'&&!forced)return;
@@ -881,7 +881,7 @@
   $('debugOverlay').addEventListener('click',()=>openInspector(false));
   $('prevButton').addEventListener('click',()=>{const i=itemIndex();if(i>0)activateId(state.scenes[i-1].id);});
   $('nextButton').addEventListener('click',()=>{const i=itemIndex();if(i<state.scenes.length-1)activateId(state.scenes[i+1].id);});
-  $('resetButton').addEventListener('click',()=>{if(!confirm('清空 AI 工作区 Scene？这不会删除任何真实 Session。'))return;userInteractionEpoch++;state.scenes=[];state.activeSceneId=null;state.selectedAgentId=null;activeSearch='';bump();render();log('RESET','清空了 UI 工作区 Scene（模拟）');});
+  $('resetButton').addEventListener('click',()=>{if(!confirm('清空 AI 工作区 Scene？这不会删除任何真实 Session。'))return;userInteractionEpoch++;state.scenes=[];state.activeSceneId=null;state.selectedAgentId=null;state.pendingGoal=null;state.lastOperation=null;clarification='';activeSearch='';bump();render();log('RESET','清空了 UI 工作区 Scene（模拟）');});
   document.addEventListener('keydown',e=>{
     if(e.key==='Escape'&&inspectorOpen){openInspector(false);return;}
     if(state.mode!=='ai'||!state.scenes.length||inspectorOpen)return;
