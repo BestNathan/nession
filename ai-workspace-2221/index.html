@@ -692,6 +692,7 @@
     userInteractionEpoch++;state.mode=mode;bump();$('aiMain').classList.toggle('hidden',mode!=='ai');$('standardPage').classList.toggle('hidden',mode!=='standard');
     $('modeAI').setAttribute('aria-pressed',String(mode==='ai'));
     $('modeStandard').setAttribute('aria-pressed',String(mode==='standard'));
+    $('resetButton').classList.toggle('hidden',mode!=='ai'||!state.scenes.length);
     if(mode==='standard')renderStandard();else render();
     log('MODE',mode==='ai'?'切换 AI 模式，保留工作区状态':'切换普通模式，AI Scenes 暂存');
   }
@@ -1112,6 +1113,20 @@
       toast(`已创建 Session：${name}（模拟）`);
     },650);
   });
+  // Desktop trackpad: only deliberate horizontal gestures navigate Scenes.
+  // Vertical scroll in the active Scene remains native and uninterrupted.
+  let lastHorizontalNavigation=0;
+  $('stageFrame').addEventListener('wheel',e=>{
+    if(state.mode!=='ai'||inspectorOpen||Math.abs(e.deltaX)<52||
+       Math.abs(e.deltaX)<=Math.abs(e.deltaY)*1.35||
+       e.target.closest('textarea,input,select,[contenteditable="true"]'))return;
+    const now=Date.now();
+    if(now-lastHorizontalNavigation<500)return;
+    const next=itemIndex()+(e.deltaX>0?1:-1);
+    if(next<0||next>=state.scenes.length)return;
+    lastHorizontalNavigation=now;
+    activateId(state.scenes[next].id);
+  },{passive:true});
   // Touch: swiping the active panel navigates Scenes without hijacking form scrolling.
   let touchX=null,touchY=null;
   $('mainCard').addEventListener('touchstart',e=>{if(e.touches.length!==1||e.target.closest('input,select,textarea,button'))return;touchX=e.touches[0].clientX;touchY=e.touches[0].clientY;},{passive:true});
