@@ -3,7 +3,7 @@
 // This module never selects a target, writes GitHub/Issue/Store, merges or
 // approves. It renders the canonical review Prompt, offers the Provider only
 // read-only tools, validates the verdict and emits the canonical Agent result.
-import { assertAuthenticatedReviewerAdmission } from './pr-admission.mjs';
+import { assertReviewerAdmission, resolveReviewerIdentity } from './pr-admission.mjs';
 import { renderReviewPrompt, reviewModelResult } from '../tasks/review.mjs';
 import { parseAgentResult } from '../orchestration/result-artifact.mjs';
 
@@ -25,35 +25,47 @@ export function assertUnprivilegedReviewerEnvironment(env) {
 
 // The caller owns Provider mechanics (SDK loading, workspace, model). This
 // function owns what a Review Slice may ask for and what it may return.
-export async function runReviewSlice({ admission, runner, taskId, runId, runAttempt, env = process.env }) {
+const NATIVE_ID={
+  cursor:/^agent-[a-zA-Z0-9-]{4,100}$/,
+  'claude-code':/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+};
+export async function runReviewSlice({ admission, runner, taskId, runId, runAttempt,
+  provider, env = process.env }) {
   assertUnprivilegedReviewerEnvironment(env);
   if (!HEX64.test(taskId ?? '')) fail('missing signed reviewer action ID');
   if (!Number.isSafeInteger(runId) || runId <= 0 ||
       !Number.isSafeInteger(runAttempt) || runAttempt <= 0)
     fail('missing authenticated source Run/Attempt');
   if (typeof runner !== 'function') fail('missing read-only Provider runner');
+  // The provider comes from the registered reviewer identity, never the model.
+  const identity = resolveReviewerIdentity(admission?.agent_id);
+  const expectedProvider = provider ?? identity.provider;
+  if (expectedProvider !== identity.provider)
+    fail('provider does not match the registered reviewer identity');
+  if (!NATIVE_ID[expectedProvider]) fail('unsupported reviewer Provider');
   // Admission validation (and the exact PR/Issue/target binding) happens here.
-  const prompt = renderReviewPrompt(admission);
+  const prompt = renderReviewPrompt(admission, { agent_id: identity.agent_id });
   const session = await runner(prompt.text, { tools: [...REVIEW_TOOLS] });
   const meta = session?.meta ?? {};
   if (session?.result?.status !== 'finished' || meta.status !== 'finished')
     fail('Provider session did not finish');
-  if (!/^agent-[a-zA-Z0-9-]{4,100}$/.test(meta.agent_id ?? ''))
+  if (!NATIVE_ID[expectedProvider].test(meta.agent_id ?? ''))
     fail('missing native Agent identity');
   const calls = (meta.tool_calls ?? []).map((name) => String(name).toLowerCase());
   if (calls.some((name) => WRITE_TOOLS.some((tool) => name.includes(tool))))
     fail('write/shell tool observed in a read-only review');
   if (!calls.some((name) => REVIEW_TOOLS.some((tool) => name.includes(tool))))
     fail('no read-only inspection observed');
-  const verdict = reviewModelResult(admission, session.result.result);
-  const artifact = reviewerResultArtifact({ admission, verdict, taskId, runId, runAttempt });
-  return Object.freeze({ prompt, meta, verdict, artifact });
+  const verdict = reviewModelResult(admission, session.result.result, { agent_id: identity.agent_id });
+  const artifact = reviewerResultArtifact({ admission, verdict, taskId, runId, runAttempt,
+    reviewerIdentity: { agent_id: identity.agent_id } });
+  return Object.freeze({ provider: expectedProvider, prompt, meta, verdict, artifact });
 }
 
 // Canonical Agent result artifact. parseAgentResult (the trusted owner) must
 // accept it, so the Slice cannot invent a result shape the Ingest rejects.
-export function reviewerResultArtifact({ admission, verdict, taskId, runId, runAttempt }) {
-  assertAuthenticatedReviewerAdmission(admission);
+export function reviewerResultArtifact({ admission, verdict, taskId, runId, runAttempt, reviewerIdentity }) {
+  assertReviewerAdmission(admission, reviewerIdentity);
   if (verdict?.kind !== 'reviewer' || verdict.issue !== admission.issue ||
       verdict.pr_number !== admission.pr_number ||
       verdict.target_sha !== admission.target_sha ||

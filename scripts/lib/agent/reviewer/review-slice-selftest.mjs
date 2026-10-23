@@ -88,7 +88,7 @@ for(const patch of [
   {pr_number:2175},{expected_file_mode:'100755'},
 ])await assert.rejects(()=>runReviewSlice({admission:{...admission,...patch},
   runner:async()=>session(),taskId:TASK,runId:RUN,runAttempt:ATTEMPT,env:{}}),
-  /authenticated reviewer admission/);
+  /authenticated reviewer admission|unregistered reviewer identity/);
 
 assert.throws(()=>reviewerResultArtifact({admission,verdict:{
   kind:'reviewer',issue:1664,pr_number:2176,target_sha:admission.target_sha,outcome:'approved'},

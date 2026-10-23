@@ -10,6 +10,7 @@ import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {claudeCliToolPolicy} from './harness/native.mjs';
 import {normalizeClaudeUsage} from './providers/claude-code.mjs';
+import {parseNativeEvents} from './providers/claude-stream.mjs';
 import {providerScopedRunName} from './telemetry/run-name.mjs';
 import {normalizeNativeTrace,writeExecutionTrace} from './telemetry/execution-trace.mjs';
 import {buildAgentWorkflowTelemetry,writeAgentWorkflowTelemetry} from '../../agent-workflow-telemetry.mjs';
@@ -47,19 +48,6 @@ export function checkSyntheticEdit(root,events){
   // This deliberately does NOT eval/require/execute model-edited JavaScript.
   if(fs.readFileSync(target,'utf8')!==EXPECTED)fail('exact synthetic code repair not observed');
   return {edit_verified:true,native_read:true,native_edit:true};
-}
-export function parseNativeEvents(stdout){
-  if(typeof stdout!=='string'||stdout.length>8*1024*1024)fail('invalid native event stream');
-  const events=[];
-  for(const line of stdout.split(/\r?\n/).filter(Boolean)){
-    let value;
-    try{value=JSON.parse(line);}catch{fail('malformed native event stream');}
-    if(!value||typeof value!=='object'||Array.isArray(value))fail('invalid native event envelope');
-    events.push(value);
-  }
-  const result=events.filter(e=>e.type==='result');
-  if(result.length!==1)fail('exactly one Provider result required');
-  return {events,envelope:result[0]};
 }
 function canaryArgs(model){
   return ['-p',PROMPT,'--output-format','stream-json','--verbose',
