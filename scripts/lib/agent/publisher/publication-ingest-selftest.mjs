@@ -53,11 +53,13 @@ const responses=new Map([
   ['pulls/'+P.original_pr+'/commits?per_page=100',pullCommits],
   ['commits/'+P.original_pr_sha,originalCommit],
   ['pulls/'+P.original_pr+'/files?per_page=100',currentFiles],
-  ['pulls?head='+encodeURIComponent(REPO+'/'+P.branch)+'&state=all',branchPulls],
+  ['pulls?head='+encodeURIComponent(REPO+':'+P.branch)+'&state=all',branchPulls],
   [intentPath,{encoding:'base64',
     content:Buffer.from(JSON.stringify(intent)).toString('base64')}],
 ]);
+const requested=[];
 const fetcher=async endpoint=>{
+  requested.push(endpoint);
   if(!responses.has(endpoint))throw Error('unexpected GitHub read: '+endpoint);
   return responses.get(endpoint);
 };
@@ -70,6 +72,10 @@ assert.equal(readback.original_pr,P.original_pr);
 assert.equal(readback.original_pr_sha,P.original_pr_sha);
 assert.equal(readback.current_pr_sha,P.original_pr_sha);
 assert.deepEqual(await fetchControlledPublication({fetcher}),readback);
+// GitHub's head filter must use "owner:branch"; "owner/branch" silently
+// returns no PR and the real ingest then fails closed.
+assert.ok(requested.includes('pulls?head='+encodeURIComponent(REPO+':'+P.branch)+'&state=all'));
+assert.equal(requested.some(x=>x.includes(encodeURIComponent(REPO+'/'+P.branch))),false);
 await assert.rejects(()=>fetchControlledPublication({fetcher:async()=>({})}),
   /Publisher original PR readback|Trusted Publisher intent|immutable Publisher intent/);
 await assert.rejects(()=>fetchControlledPublication({fetcher:async endpoint=>{

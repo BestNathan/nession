@@ -34,8 +34,10 @@ export async function fetchControlledPublication({ fetcher }) {
   const pullCommits = await read('pulls/' + P.original_pr + '/commits?per_page=100');
   const originalCommit = await read('commits/' + P.original_pr_sha);
   const currentFiles = await read('pulls/' + P.original_pr + '/files?per_page=100');
+  // GitHub's head filter is "owner:branch" (not "owner/branch"); the wrong
+  // separator silently returns no PRs and the verifier fails closed.
   const branchPulls = await read(
-    'pulls?head=' + encodeURIComponent(REPO + '/' + P.branch) + '&state=all');
+    'pulls?head=' + encodeURIComponent(REPO + ':' + P.branch) + '&state=all');
   return verifyControlledOriginalPublication({
     sourceRun, sourceJobs, ownerComment,
     intent: readControlledIntent(await read('contents/' +
