@@ -93,9 +93,16 @@ export function relayServerHandle(
   service: WebSocketService,
   terminalServerApi: TerminalServerApi,
 ): RelayServerTransport {
-  const stale = (): boolean => service.isDisposed;
+  // Socket-generation integers are scoped to their own WebSocketService.
+  const stale = (): boolean =>
+    service.isDisposed || terminalServerApi.isBoundTo?.(service) === false;
   return {
-    onConnectionStateChange: (cb) => service.onConnectionStateChange(cb),
+    onConnectionStateChange: (cb) => {
+      if (stale()) { return () => {}; }
+      return service.onConnectionStateChange((state) => {
+        if (!stale()) { cb(state); }
+      });
+    },
     isReady: () => !stale() && service.connectionState === 'connected',
     beginRelay: (sessionId, opts) => {
       if (stale()) { return; }
@@ -132,15 +139,21 @@ export function relayServerHandle(
     },
     onRelayOutput: (sessionName, cb) => {
       if (stale()) { return () => {}; }
-      return terminalServerApi.onRelayOutput(sessionName, cb);
+      return terminalServerApi.onRelayOutput(sessionName, (...args) => {
+        if (!stale()) { cb(...args); }
+      });
     },
     onRelayResize: (sessionName, cb) => {
       if (stale()) { return () => {}; }
-      return terminalServerApi.onRelayResize(sessionName, cb);
+      return terminalServerApi.onRelayResize(sessionName, (...args) => {
+        if (!stale()) { cb(...args); }
+      });
     },
     onRelayInputAck: (sessionName, cb) => {
       if (stale()) { return () => {}; }
-      return terminalServerApi.onRelayInputAck(sessionName, cb);
+      return terminalServerApi.onRelayInputAck(sessionName, (ack) => {
+        if (!stale()) { cb(ack); }
+      });
     },
     resumeRelayStream: (sessionName, epoch, afterSeq) => {
       if (stale() || service.connectionState !== 'connected') {
