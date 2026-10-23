@@ -12,9 +12,9 @@
 //! - `SessionStreamState`/epoch/seq/replay/ACK stay with the Agent stream owner.
 //!   The client emits [`TmuxEvent`]s in source order and assigns nothing.
 //! - The byte framing and the `Control Mode` message grammar are **not
-//!   re-implemented here**: the reader reuses `control::read_control_line` and
-//!   the parser in `tmux::parser`, including the #2300 bounded-byte contract
-//!   and its fatal/forward-compatible record split.
+//!   re-implemented here**: the reader reuses [`framing`] and the parser in
+//!   `tmux::parser`, including the #2300 bounded-byte contract and its
+//!   fatal/forward-compatible record split.
 //!
 //! ## Transports
 //!
@@ -55,16 +55,17 @@ use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
-use super::control::{malformed_known_record, read_control_line};
 use super::ops::TmuxDep;
 use super::parser::{decode_tmux_output, layout_size, parse_control_line_bytes, ControlMessage};
 
 pub mod commands;
 pub mod events;
+mod framing;
 pub mod transport;
 
 pub use commands::ControlCommand;
 pub use events::{PaneOutput, TmuxEvent};
+use framing::{malformed_known_record, read_control_line};
 #[cfg(unix)]
 pub use transport::PtyTransport;
 pub use transport::{ClientChild, ClientIo, ControlTransport, PipeTransport};
