@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/BestNathan/nession/blob/prototype/ai-conversation-2254/schema.v1.json",
+  "title": "Nession Text UI Directive Envelope v1 (prototype)",
+  "oneOf": [
+    {
+      "title": "Render registered business component",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "v",
+        "op",
+        "component"
+      ],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "op": {
+          "const": "render"
+        },
+        "component": {
+          "$ref": "#/$defs/componentId"
+        },
+        "input": {
+          "type": "object",
+          "maxProperties": 16
+        }
+      }
+    },
+    {
+      "title": "Reference existing component instance",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "v",
+        "op",
+        "component",
+        "ref"
+      ],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "op": {
+          "const": "reference"
+        },
+        "component": {
+          "$ref": "#/$defs/componentId"
+        },
+        "ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "context": {
+          "type": "object",
+          "maxProperties": 16
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "componentId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)+$"
+    }
+  }
+}
