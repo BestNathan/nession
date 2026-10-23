@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "kind": "agent_workflow_run",
+  "identity": {
+    "workflow_id": "requirement-acceptance",
+    "github_workflow": "Acceptance / Orchestrator",
+    "github_run_id": 39901950244,
+    "github_run_attempt": 2,
+    "job": "execute",
+    "repository": "BestNathan/nession",
+    "event": "pull_request_target",
+    "unique_run_name": "39901950244-2-issue-2245-pre-merge"
+  },
+  "task": {
+    "id": "issue-2245-pre-merge",
+    "type": "acceptance",
+    "issue": 2245,
+    "stage": "pre-merge",
+    "target_ref": "5219a846fab95aa6e155615a9ae308691bc07cd2",
+    "deployment": null
+  },
+  "agent": {
+    "provider": "deepseek",
+    "id": "legacy-acceptance-deepseek",
+    "role": "acceptor",
+    "harness_sha256": null,
+    "checkpoint_id": null,
+    "model": {
+      "id": "deepseek-flash[1m]",
+      "request_model": "claude-sonnet-5",
+      "backend_mapping": "claude-sonnet* -> deepseek-flash"
+    },
+    "run_id": "ddce9b92-2581-44e1-8cb7-dc68c7f2ca46",
+    "request_id": null,
+    "status": "finished",
+    "prompt": {
+      "id": "acceptance",
+      "version": "v2",
+      "sha256": "3d13f51b1b6f91d29fec89bcec3a480ee0711e5ffdb1643560835a926171cf26"
+    }
+  },
+  "execution": {
+    "turns": 23,
+    "model_requests": null,
+    "tools": {
+      "observed": false,
+      "total": null,
+      "unique": null,
+      "by_name": null
+    }
+  },
+  "tokens": {
+    "input": 44309,
+    "output": 9743,
+    "cache_read": 478592,
+    "cache_write": 0,
+    "reasoning": null,
+    "total": 532644
+  },
+  "cost": {
+    "raw_usd": null,
+    "charged_usd": null,
+    "estimated_usd": null
+  },
+  "timing": {
+    "started_at": "2026-10-23T04:52:24.004Z",
+    "finished_at": "2026-10-23T04:53:30.573Z",
+    "agent_duration_ms": 66061,
+    "workflow_duration_ms": null
+  },
+  "result": {
+    "status": "completed",
+    "pass": 2,
+    "pending": 0,
+    "fail": 0,
+    "na": 0
+  }
+}
