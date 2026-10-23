@@ -65,6 +65,16 @@ assert.equal(positive.status,'await_native_reviewer');
 assert.equal(positive.kind,'authenticated_reviewer_admission_only');
 assert.ok(!Object.hasOwn(positive,'next_role'));
 assert.ok(!Object.hasOwn(positive,'review_outcome'));
+// A second registered reviewer is a first-class identity with the same target.
+const qwen=admitOriginalControlledReviewerTarget(input,'review-qwen-01');
+assert.equal(qwen.agent_id,'review-qwen-01');
+assert.equal(qwen.role,'reviewer');
+assert.equal(qwen.status,'await_native_reviewer');
+assert.equal(qwen.kind,'authenticated_reviewer_admission_only');
+assert.equal(qwen.target_sha,HEAD);
+for(const agentId of ['dev-cursor-01','unknown-agent','review-cursor-99'])
+  assert.throws(()=>admitOriginalControlledReviewerTarget(input,agentId),
+    /unregistered reviewer identity/);
 function deny(patch,pattern=/Trusted Reviewer source:/){
   assert.throws(()=>admitOriginalControlledReviewerTarget({...input,...patch}),pattern);
 }
