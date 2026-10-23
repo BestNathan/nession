@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "feee63bea629d8bac5ee27cffdc75629af98e05b",
+  "run_id": 39994359656,
+  "run_attempt": 1,
+  "plan_digest": "4b70fc151a956636efb416c7d4206a366a00dd6ddafeaf84bad4686343010546",
+  "artifact_digest": "sha256:433b57c413a43ec41de67cc058c5b5f6cf28dc64565202cf9d1c0796926431d8",
+  "results": [
+    {
+      "id": "terminal-attach-bootstrap",
+      "result": "Error",
+      "discovered": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 0
+    },
+    {
+      "id": "terminal-consistency-faults",
+      "result": "Error",
+      "discovered": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 0
+    },
+    {
+      "id": "terminal-io",
+      "result": "Error",
+      "discovered": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 0
+    }
+  ]
+}
