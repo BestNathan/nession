@@ -195,6 +195,22 @@ The provider's Choice instructions SHOULD read:
 
 Candidate descriptions for entries should specify their **semantic affordance** (e.g. “Enter Agent list to discover/select an Agent and then access Agent-scoped operations”), without exposing or making any hidden descendant action *selectable*. No lengthy speculative chain/plan needs to be transmitted to the model.
 
+### Semantic relevance gate and live Jev evidence
+
+**Intermediate-step selection is conditional on capability relevance.** A root entry must have a **clear semantic affordance** related to the user's desired outcome, not merely be a possible starting point. “创建 Session” is related to the Agent entry because Nession Sessions require selecting an Agent; “写一首诗” is related to neither Agent nor Session operations and should return `none`. Never bias System One toward **always** selecting an entry rather than clarifying.
+
+A Jev `choice` instruction should combine **both** conditions in one decision:
+
+> The user's request may describe a final goal that requires multiple views. First determine whether one of the currently exposed capabilities **meaningfully relates** to that goal or a necessary prerequisite. If so, choose **exactly one currently exposed** step that safely advances the goal. For new Session creation, entering the Agent list to choose the target is valid even when Create is not yet exposed. Do not select unexposed future actions, and never treat the model's selection as authorization to submit mutations. If none of the exposed capabilities can clearly help, or the target is ambiguous, choose `none`. Do not traverse arbitrary capabilities merely to avoid `none`.
+
+Keep each entry's **affordance description** separate from its executable actions: “Enter Agent to discover/select nodes and subsequently access node-scoped Session operations” describes *why* the entry may be relevant; it does not add `session.create.open` to the current candidate list.
+
+**Recorded live experiments** (fixed English/Chinese Nession UI fixtures, model `jev-1.13.0`, read-only authenticated Tasks, no backend Session actions):
+- [Baseline vs. progressive instructions](https://github.com/BestNathan/nession/actions/runs/39908609159), 5 matched scenarios per variant: strict immediate-match guidance **3/5**, progressive-step guidance **4/5**. Progressive repaired both root Session-creation goals but incorrectly chose Agent for an unrelated poetry request.
+- [Relevance-controlled progressive guidance](https://github.com/BestNathan/nession/actions/runs/39908810295), 10 fixed scenarios: **10/10** (root create, discovery, session listing, clearly unrelated content, ambiguous request). Evidence is archived on `task-results` under `runs/jev-goal-relevance-2221-20261023/39908810295-1/record.json`. It is a small directional probe, **not** a statistical accuracy guarantee or official SC Acceptance.
+
+**Provider implementation invariant:** Treat `choice=none` as a negative/clarification decision after checking relevance; never automatically map `none` to the Agent entry. A prediction's confidence cannot replace eligibility, domain authorization, or exact candidate ID validation. Use a balanced Chinese evaluation set with root positive/negative cases, target ambiguity, and multi-view progression before applying confidence thresholds.
+
 ### Transition table
 
 | Current status | Event/guard | State transition | Side effects |
