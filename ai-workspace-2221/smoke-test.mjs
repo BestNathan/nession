@@ -99,7 +99,7 @@ check('out-of-range ordinal clarifies and does not create Scene',
 await ask('选择第一个');
 check('first visible Agent is selected', state().selectedAgentId === 'agent-mac-02');
 check('selected Agent creates a contextual next action',
-  space().contextual.some(a => a.candidateId === 'agent:selected:create' && a.eligibility === 'enabled'));
+  space().view.some(a => a.candidateId === 'agent:selected:create' && a.eligibility === 'enabled'));
 click({ createAgent: 'agent-tokyo-04' });
 check('offline Agent cannot launch create', state().scenes[0].activeView === 'agent.list');
 holdIntent = true;
@@ -114,7 +114,7 @@ click({ createAgent: 'agent-mac-02' });
 check('inline create maintains the same Scene ID', state().scenes[0].sceneId === stableId && state().scenes.length === 1);
 dispatch('input', { id: 'formName', value: 'contract-smoke' });
 check('incomplete/complete form changes legal submit eligibility',
-  space().contextual.some(a => a.actionId === 'session.create.submit' && a.eligibility === 'enabled'));
+  space().view.some(a => a.actionId === 'session.create.submit' && a.eligibility === 'enabled'));
 dispatch('submit', { id: 'createSessionForm' });
 check('confirmed Session ID and owning Scene stored',
   state().lastConfirmedOutcome?.resource?.id === 'agent-mac-02:contract-smoke' &&
