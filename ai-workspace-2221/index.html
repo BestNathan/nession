@@ -361,7 +361,7 @@
     lastOperation:null, currentQuestion:null, lastDecision:null, pendingGoal:null,
   };
   let events=[], latestRequest=null, latestDecision=null, latestQuestionPlan=null, latestRecommendation=null, busy=false, toastTimer=null;
-  let dataEpoch=1, clarification='', userInteractionEpoch=0;
+  let dataEpoch=1, clarification='', userInteractionEpoch=0, goalSequence=0;
   let inspectorOpen=false, activeSearch='';
   const visibleAgentIds=()=>agents.filter(a=>!activeSearch||a.name.toLowerCase().includes(activeSearch.toLowerCase())).map(a=>a.id);
   const snapshot = () => ({
@@ -604,6 +604,72 @@
     const item=[...state.scenes].reverse().find(i=>i.type==='agent.list'&&i.facts.visibleAgentIds?.length);
     return item===focused()?visibleAgentIds()[index]||null:null;
   }
+
+  // Pending Goal is a continuation reference, not a precomputed workflow or a future action.
+  function parseCreationGoal(utterance){
+    if(!/(创建|新建|增加|create|new|再创建)/i.test(utterance)||!/(session|会话|终端|窗口)/i.test(utterance))return null;
+    const q=utterance.toLowerCase();
+    const match=utterance.match(/(?:名叫|名称(?:是|叫)?|叫|name(?:d)?(?:\s+is|\s*[:=])?)\s*([a-zA-Z0-9_.-]{1,64})/i);
+    const agentHint=/北京|beijing|bj-|京节点/i.test(q)?'北京':/macbook|\bmac\b/i.test(q)?'macbook':
+      /devbox|开发机/i.test(q)?'devbox':/tokyo|东京/i.test(q)?'tokyo':null;
+    return {goalId:'goal-'+(++goalSequence),utterance,status:'resolving',ownerSceneId:null,
+      agentHint,nameHint:match?.[1]||null,resolvedAgentId:null,userEpoch:userInteractionEpoch,
+      steps:[],automaticStepBudget:4};
+  }
+  function suspendGoal(status,message){
+    const g=state.pendingGoal;if(!g)return;
+    g.status=status;if(message)clarification=message;bump();render();
+    log('GOAL '+status.toUpperCase(),message||g.goalId);
+  }
+  function goalAgentMatches(g,a){
+    return g.agentHint==='北京'?a.id==='agent-bj-03':g.agentHint==='macbook'?a.id==='agent-mac-02':
+      g.agentHint==='devbox'?a.id==='agent-dev-01':g.agentHint==='tokyo'?a.id==='agent-tokyo-04':false;
+  }
+  function advancePendingGoal(trigger='view-change'){
+    const g=state.pendingGoal;
+    if(!g||!['resolving','awaiting_data','awaiting_selection'].includes(g.status))return;
+    const scene=focused();if(!scene||scene.type!=='agent.list')return;
+    g.ownerSceneId=scene.id;
+    if(scene.status!=='ready'){g.status='awaiting_data';bump();return;}
+    let space=deriveActionSpace(),target=scene.selectedAgentId;
+    if(g.agentHint){
+      const matched=space.view.filter(c=>c.actionId==='agent.select'&&c.eligibility==='enabled')
+        .map(c=>agents.find(a=>a.id===c.target.resource?.id))
+        .filter(a=>a&&goalAgentMatches(g,a));
+      if(matched.length!==1){
+        suspendGoal('awaiting_selection','目标节点不在当前可见 Agent 列表中，请手动选择或调整筛选。');return;
+      }
+      target=matched[0].id;
+    }
+    if(!target){suspendGoal('awaiting_selection','请先从当前 Agent 列表选择节点，再继续创建 Session。');return;}
+    if(scene.selectedAgentId!==target){
+      const selected=space.view.find(c=>c.candidateId==='agent:select:'+target&&c.eligibility==='enabled');
+      if(!selected||g.steps.length>=g.automaticStepBudget){suspendGoal('suspended','当前 View 尚未暴露目标选择动作。');return;}
+      latestQuestionPlan=buildJevPlan(g.utterance,snapshot(),space);
+      g.steps.push({candidateId:selected.candidateId,revision:space.revision,trigger});
+      log('SYSTEM ONE STEP (MOCK)','选择当前 View 动作 '+selected.candidateId);
+      setAgentSelected(target,{fromGoal:true});
+    }
+    space=deriveActionSpace();
+    const open=space.view.find(c=>c.actionId==='session.create.open'&&c.eligibility==='enabled'&&c.target.resource?.id===target);
+    if(!open||g.steps.length>=g.automaticStepBudget){
+      suspendGoal('suspended','创建入口尚未由当前 View 暴露。');return;
+    }
+    latestQuestionPlan=buildJevPlan(g.utterance,snapshot(),space);
+    g.steps.push({candidateId:open.candidateId,revision:space.revision,trigger});
+    log('SYSTEM ONE STEP (MOCK)','选择新暴露的动作 '+open.candidateId);
+    openAgentCreateInline(target,'Pending Goal · progressive action');
+    const flow=focused()?.flow;
+    if(flow?.view!=='session.create'){suspendGoal('suspended','无法进入当前 View 的创建子界面。');return;}
+    if(g.nameHint&&!flow.draft.name){
+      flow.draft.name=g.nameHint;
+      g.steps.push({step:'prefill',source:'explicit-utterance',view:'session.create.form'});
+    }
+    g.resolvedAgentId=target;g.status='awaiting_user_commit';g.userEpoch=userInteractionEpoch;
+    clarification='';bump();render();
+    log('GOAL COMMIT BARRIER','表单已准备好；后端创建仍须用户明确提交');
+  }
+
   function localIntentModel(question, submittedState){
     const q=question.trim().toLowerCase();
     let agentId=resolveOrdinal(q);
