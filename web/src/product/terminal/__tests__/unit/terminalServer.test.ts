@@ -384,6 +384,45 @@ describe('TerminalServerPlugin', () => {
   });
 
   describe('onRelayResize', () => {
+    it('routes Server-owned terminal.resize full session IDs to short-name Relay listeners (#2286)', () => {
+      const cb = vi.fn();
+      const unrelated = vi.fn();
+      const nested = vi.fn();
+      plugin.onRelayResize('work', cb);
+      plugin.onRelayResize('other', unrelated);
+      plugin.onRelayResize('team:work', nested);
+
+      // This is the actual Server broadcast produced by
+      // server_agent_terminal_resize_v1.rs, NOT agent.terminal.resize.
+      surface.pushMessage('terminal.resize', {
+        session_id: 'agent-1:work',
+        cols: 124,
+        rows: 30,
+      });
+      expect(cb).toHaveBeenCalledExactlyOnceWith(124, 30);
+      expect(unrelated).not.toHaveBeenCalled();
+      expect(nested).not.toHaveBeenCalled();
+
+      // A session itself can contain ':': only the agent prefix is stripped.
+      surface.pushMessage('terminal.resize', {
+        session_id: 'agent-2:team:work',
+        cols: 177,
+        rows: 49,
+      });
+      expect(nested).toHaveBeenCalledExactlyOnceWith(177, 49);
+      expect(cb).toHaveBeenCalledTimes(1);
+
+      for (const malformed of ['work', ':work', 'agent:', '']) {
+        surface.pushMessage('terminal.resize', {
+          session_id: malformed,
+          cols: 200,
+          rows: 60,
+        });
+      }
+      expect(cb).toHaveBeenCalledTimes(1);
+      expect(nested).toHaveBeenCalledTimes(1);
+    });
+
     it('routes resize frames per session with cols/rows passthrough', () => {
       const cbWork = vi.fn();
       const cbOther = vi.fn();
