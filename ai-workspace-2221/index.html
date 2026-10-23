@@ -786,7 +786,7 @@
       busy=false;setBusy(false);bump();render();return;
     }
     if(state.pendingGoal&&!['completed','cancelled'].includes(state.pendingGoal.status))
-      state.pendingGoal.status='suspended';
+      transitionGoal(state.pendingGoal,'suspended','new-user-intent');
     const newGoal=parseCreationGoal(question);
     if(newGoal)state.pendingGoal=newGoal;
     bump();
