@@ -27,6 +27,10 @@ The one shared orphan-history `prototype` branch contains the UI design assets. 
 7. Return to Agent Scene, filter list to a subset and try **「选择第二个」**: the reference is resolved using **the currently visible filtered order**, not all backend Agents. An invalid index yields clarification.
 8. Submit an unknown question: inspect the clarification without any additional Scene.
 
+## Reproducible mock smoke checks
+
+Run `node ai-workspace-2221/smoke-test.mjs` from the shared `prototype` branch checkout (or `node smoke-test.mjs` from this directory). It has **no npm dependencies** and reads the checked-in `index.html`. The script exercises **18 local JavaScript event/state invariants**: Scene reuse, discovery candidates, filtered ordinal resolution, contextual recommendations, disabled offline Agent, in-flight stale-decision discard, inline create/draft/confirmed result, next-action handoff and Standard/AI continuity. The script does not start Chromium, contact TypeSafe or run real backend APIs, and is **not** production Acceptance evidence.
+
 ## Architecture constraints
 
 The **five independent AI Workspace concepts** are `AIWorkspace`, `AIWorkspaceScene`, `AIWorkspaceCapability`, `AIWorkspaceView`, and `AIWorkspaceRouter`. Action Space Builder, Decision Adapter and Reducer are internal responsibilities. They do not rename or extend the existing Logical Workspace/Standard Workspace Capability registry. Reuse canonical domain services and existing Runtime through adapters; never duplicate authorization or backend resource ownership.
