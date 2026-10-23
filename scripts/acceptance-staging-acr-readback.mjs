@@ -193,10 +193,10 @@ export async function collectStagingAcrEvidence({repo, sha, get, getText}) {
     assert.equal(release.get(name)?.conclusion, 'success', name + ' was not successful');
   }
   const runtimeJob = runtime.get('private-k8s-readback');
-  const deployments = parseRuntimeLog(await getText(repo, runtimeJob.id), sha.slice(0, 7));
+  const deployments = parseRuntimeLog(await getText(prefix + '/actions/jobs/' + runtimeJob.id + '/logs'), sha.slice(0, 7));
   for (const [jobName, job] of anonymous) {
     const tag = jobName.slice('anonymous-readback ('.length, -1).replace(', ', '-');
-    verifyAnonymousLog(await getText(repo, job.id), tag);
+    verifyAnonymousLog(await getText(prefix + '/actions/jobs/' + job.id + '/logs'), tag);
   }
   return { kind: 'verified_staging_acr_readback', schema_version: 1,
     issue: 2225, criterion: 'SC-04', stage: 'staging', target_sha: sha,
