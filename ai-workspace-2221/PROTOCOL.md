@@ -476,6 +476,16 @@ The HTML prototype must be runnable without credentials/network and expose:
 
 This is a **design artifact in the one shared orphan-history `prototype` branch**; no production code or CI changes. Do not merge the earlier draft implementation PR #2222 as evidence of this protocol. Required implementation steps: deterministic core unit cases, provider adapter with pinned real Jev fixture evaluation, GitHub Case catalog admission, source-aligned browser acceptance, then product authorization.
 
+## 11.1 Scene-first immersive canvas and manual navigation
+
+The Scene is the primary visual and semantic work surface, **not a tab inside a persistent AI dashboard**. Once a Scene is activated, its View receives nearly the full available viewport. The AI composer docks below that work surface. Product chrome must not reserve persistent rows for a Workspace title, Scene tab bar, page dots, background Scene tree, or redundant instructional banners.
+
+An AI Workspace with one Scene renders only that Scene. With multiple Scenes, the **immediate previous and next Scene** may display small low-emphasis, independently clickable **edge peeks** whose sole job is to reveal navigability; the active Scene must be substantially larger, fully interactive, and visually dominant. A peek is an index/locator, never a second mounted interactive View. Rendering these locators must not fetch inactive Scene resources or add background-scene leaf operations to the current Action Space.
+
+**Manual navigation contract:** explicit edge preview click, desktop keyboard left/right outside editable inputs, deliberate horizontal trackpad movement, and horizontal swipe on touch are allowed. Vertical scrolling and active form input must keep their natural behaviors. Movement applies only `SCENE_FOCUS(sceneId)`; it is never interpreted as a backend operation or a new intent, never automatically advances, and leaves Scene-local drafts/selections/results intact. Screen-reader accessible labels provide adjacent Scene identity and index; **a persistent visible page-count widget is not required**. On narrow devices, compact edge previews can overlay only the very outside of the main panel so the Scene remains nearly full width.
+
+This is a presentation constraint on existing `AIWorkspaceScene` / `AIWorkspaceRouter` boundaries, not a new Scene state machine or capability contract. The `prototype/ai-workspace-2221/index.html` version in this branch implements a CSS-first demonstration; browser-level sizing, hit targets, accessibility and gestures remain subject to actual Chromium/mobile Acceptance.
+
 ## 12. Archived real Jev decision replay in the design prototype
 
 **Entry points:** open the top-bar **「真实测试回放」** control in [`index.html`](index.html), or follow [`index.html#jev-replay`](index.html#jev-replay) directly. A link is also exposed in the shared `prototype/index.html` gallery.
