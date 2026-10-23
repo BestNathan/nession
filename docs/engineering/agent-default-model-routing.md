@@ -7,10 +7,10 @@ committed workflow and not through a user-side CLI:
 
 | Repository Variable | Example | Current consumer |
 | --- | --- | --- |
-| `AGENT_DEFAULT_REVIEWER` | `review-qwen-01` | `Agent / Review` |
-| `AGENT_DEFAULT_ACCEPTOR` | `accept-qwen-01` | `Agent / SC Acceptance` and the acceptance orchestrator |
+| `AGENT_DEFAULT_REVIEWER` | `review-qwen-01` | `Agent / Review` and new `Acceptance / Agent Controller` requests |
+| `AGENT_DEFAULT_ACCEPTOR` | `accept-qwen-01` | `Agent / SC Acceptance`, acceptance orchestrator and new Controller requests |
 | `AGENT_DEFAULT_AUDITOR` | `audit-qwen-01` | `Agent / Issue Audit`, including `/audit` comments |
-| `AGENT_DEFAULT_DEVELOPER` | `dev-qwen-01` | **Reserved** until the durable Developer Worker supports non-Cursor providers |
+| `AGENT_DEFAULT_DEVELOPER` | `dev-qwen-01` | Read/validated at Controller request; Qwen deliberately rejected until #2274 |
 
 The registered IDs, roles, providers and credential Environment bindings live
 in [automation/agents/registry.json](../../automation/agents/registry.json).
@@ -43,8 +43,7 @@ acceptance orchestrator for migration. Explicit authorized workflow dispatch
 inputs may select a registered alternative; invalid choices fail closed.
 
 **Durability:** the existing Issue-centric Developer flow currently executes
-the specifically scoped Cursor-native #1997 Worker. Do **not** switch its
-default to Qwen by changing this reserved variable alone. Implement and prove
+the specifically scoped Cursor-native #1997 Worker. The Controller reads this variable for new requests but refuses a Qwen Developer until #2274 is proven. Do **not** switch the Developer default to Qwen before then. Implement and prove
 the Provider-neutral Developer execution, checkpoint and Resume path before
 wiring `AGENT_DEFAULT_DEVELOPER` into that flow. Existing immutable Store
 assignments are not changed by Repository Variables.
