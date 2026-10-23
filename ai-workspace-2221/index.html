@@ -272,7 +272,7 @@
 
   <main id="aiMain" class="ai-main">
     <section class="empty-stage" id="emptyStage">
-      <div class="empty-content"><div class="empty-caption">你想让 Nession 做什么？</div><div id="emptyAnchor" style="width:100%"></div><div class="empty-subhint">试试输入「看看 Agent 列表」</div></div>
+      <div class="empty-content"><div class="empty-caption">你想让 Nession 做什么？</div><div id="emptyAnchor" style="width:100%"></div><div class="empty-subhint" id="emptySubhint">试试输入「看看 Agent 列表」</div></div>
     </section>
 
     <section class="work-stage hidden" id="workStage" aria-label="AI 工作区">
@@ -361,7 +361,7 @@
     lastOperation:null, currentQuestion:null, lastDecision:null,
   };
   let events=[], latestRequest=null, latestDecision=null, latestQuestionPlan=null, latestRecommendation=null, busy=false, toastTimer=null;
-  let dataEpoch=1, clarification='';
+  let dataEpoch=1, clarification='', userInteractionEpoch=0;
   let inspectorOpen=false, activeSearch='';
   const visibleAgentIds=()=>agents.filter(a=>!activeSearch||a.name.toLowerCase().includes(activeSearch.toLowerCase())).map(a=>a.id);
   const snapshot = () => ({
@@ -522,7 +522,7 @@
   function activateId(id){
     const item=getScene(id);
     if(!item || item.id===state.activeSceneId)return;
-    state.activeSceneId=id;bump();render();log('FOCUS SCENE',`${item.title} · 用户手动切换`);
+    userInteractionEpoch++;state.activeSceneId=id;bump();render();log('FOCUS SCENE',`${item.title} · 用户手动切换`);
   }
   function fetchAgentList(item, forced=false){
     if(item.status==='loading'&&!forced)return;
@@ -542,7 +542,7 @@
   }
   function setAgentSelected(id){
     const agent=agents.find(a=>a.id===id);if(!agent)return;
-    state.selectedAgentId=id;
+    state.selectedAgentId=id;userInteractionEpoch++;
     const list=state.scenes.find(i=>i.type==='agent.list');
     if(list){list.selectedAgentId=id;list.facts.pendingQuestion='接下来在这个 Agent 上做什么？';}
     bump();render();log('STATE WRITEBACK',`选中 ${agent.name} (${id})`);toast(`已选择 ${agent.name}`);
@@ -563,7 +563,7 @@
       flow={view:'list',status:'ready',draft:{agentId:agentId||state.selectedAgentId||'',name:''},result:null,error:''};
       item.flow=flow;
     }
-    flow.view='session.create';
+    userInteractionEpoch++;flow.view='session.create';
     flow.draft.agentId=agentId||flow.draft.agentId||state.selectedAgentId||'';
     if(agentId){state.selectedAgentId=agentId;item.selectedAgentId=agentId;}
     bump();render();
@@ -572,7 +572,7 @@
   function backToAgentList(){
     const item=focused();
     if(item?.type!=='agent.list'||!item.flow)return;
-    item.flow.view='list';bump();render();
+    userInteractionEpoch++;item.flow.view='list';bump();render();
     log('IN-SCENE BACK',`返回 ${item.id} 的 Agent 列表，保留草稿`);
   }
   function formContext(){
@@ -622,28 +622,47 @@
       return {intent:'session.list.show',params:{scope:'all'},confidence:.78};
     return {intent:'clarification.required',params:{message:'此原型目前支持查看 Agent、查看 Session，以及创建 Session。'},confidence:.46};
   }
+
   async function ask(question){
     if(!question.trim()||busy)return;
-    busy=true;setBusy(true);state.currentQuestion=question;bump();
-    const submittedState=structuredClone(snapshot());
-    latestRequest={state:submittedState,question};renderInspector();
-    log('SYSTEM 1 REQUEST (MOCK)',`state revision ${submittedState.revision} + question: ${question}`);
+    busy=true;setBusy(true);clarification='';state.currentQuestion=question;bump();
+    const projection=structuredClone(snapshot()),space=deriveActionSpace();
+    const plan=buildJevPlan(question,projection,space);
+    latestQuestionPlan=plan;
+    latestRequest={state:projection,question,actionSpaceRevision:space.revision,registryVersion};
+    const epoch=userInteractionEpoch,sceneBefore=state.activeSceneId,
+      selectedBefore=focused()?.selectedAgentId||null,snapshotBefore=projection.visibleSelection?.snapshotId;
+    renderInspector();
+    log('JEV QUESTION PLAN (MOCK)','typed choice criteria '+Object.keys(plan.questions.requested_action.criteria).length+' · rev '+space.revision);
     await new Promise(resolve=>setTimeout(resolve,420));
-    const decision=localIntentModel(question,submittedState);
-    latestDecision=decision;state.lastDecision=decision.intent;bump();setBusy(false);
-    log('SYSTEM 1 DECISION (MOCK)',`${decision.intent} · confidence ${decision.confidence}`);
+    if(epoch!==userInteractionEpoch||sceneBefore!==state.activeSceneId||
+        selectedBefore!==(focused()?.selectedAgentId||null)||
+        snapshotBefore!==snapshot().visibleSelection?.snapshotId){
+      latestDecision={type:'discarded',reason:'stale context / user click superseded model',requestRevision:space.revision};
+      state.lastDecision='stale.discarded';setBusy(false);renderInspector();
+      log('STALE MODEL RESULT','旧决策未覆盖当前 Scene');toast('过期推理已丢弃');return;
+    }
+    // Mock only: this heuristic substitutes for a Jev choice distribution; no remote inference.
+    const decision=localIntentModel(question,projection);
+    const allowed=plan.localCandidateMap.map(x=>({id:x.candidateId,action:space.all.find(c=>c.candidateId===x.candidateId)?.actionId}));
+    const valid=decision.intent==='clarification.required'||allowed.some(x=>x.action===decision.intent);
+    latestDecision={mock:true,judgment:'intent.resolve',chosen:decision.intent,candidateId:allowed.find(x=>x.action===decision.intent)?.id||'none',confidence:decision.confidence,accepted:valid,requestRevision:space.revision};
+    state.lastDecision=valid?decision.intent:'clarification.required';bump();setBusy(false);
+    log('SYSTEM ONE DECISION (MOCK)',state.lastDecision+' · confidence '+decision.confidence);
+    if(!valid){clarification='当前意图不在已注册的合法动作空间中。';render();toast(clarification);return;}
     if(decision.intent==='agent.list.show')activate('agent.list');
     else if(decision.intent==='session.list.show')activate('session.list');
     else if(decision.intent==='session.create.open'){
       const id=decision.params.agentId;
-      if(id && agents.find(a=>a.id===id)?.status==='offline'){
-        toast('此 Agent 已离线，请重新选择');activate('agent.list');
-      }else if(focused()?.type==='agent.list'&&!/独立工作项|新工作区|new item/i.test(question))openAgentCreateInline(id,'System 1 follow-up');
-      else activate('session.create',id||'all', {forceNew:/再创建|另建|another/.test(question)});
-    } else if(decision.intent==='agent.select'){
+      if(id&&agents.find(a=>a.id===id)?.status==='offline'){
+        clarification='Agent 已离线，无法创建 Session。';render();toast(clarification);
+      }else if(focused()?.type==='agent.list'&&!/单独|独立|新场景|新 scene|new scene/i.test(question)){
+        openAgentCreateInline(id,'System One contextual intent');
+      }else activate('session.create',id||'all',{forceNew:/单独|独立|新场景|another/i.test(question)});
+    }else if(decision.intent==='agent.select'){
       setAgentSelected(decision.params.agentId);
       const list=state.scenes.find(i=>i.type==='agent.list');if(list)activateId(list.id);else activate('agent.list');
-    } else {clarification='无法可靠定位能力，请明确需求；不会创建无效 Scene。';bump();render();toast(clarification);}
+    }else{clarification='还需要更明确的操作目标。';bump();render();toast(clarification);}
     $('questionInput').focus();
   }
   function setBusy(flag){
@@ -668,13 +687,13 @@
     $('workStage').classList.toggle('hidden',!hasScenes);
     if(hasScenes) {if($('composerRoot').parentElement!==$('dockAnchor')) $('dockAnchor').appendChild($('composerRoot'));}
     else {if($('composerRoot').parentElement!==$('emptyAnchor'))$('emptyAnchor').appendChild($('composerRoot'));}
-    if(!hasScenes){renderInspector();return;}
-    $('workCount').textContent=`${state.scenes.length} 个工作项 · 当前 ${itemIndex()+1}/${state.scenes.length}`;
+    if(!hasScenes){$('emptySubhint').textContent=clarification||'试试输入「看看 Agent 列表」';renderInspector();return;}
+    $('workCount').textContent=`${state.scenes.length} 个 Scene · 当前 ${itemIndex()+1}/${state.scenes.length}`;
     renderTabs();
     const idx=itemIndex();
     renderPreview($('prevPreview'),state.scenes[idx-1],'left');renderPreview($('nextPreview'),state.scenes[idx+1],'right');
     $('prevButton').disabled=idx<=0;$('nextButton').disabled=idx>=state.scenes.length-1;
-    $('mainCard').innerHTML=renderScene(focused());
+    $('mainCard').innerHTML=renderScene(focused())+(clarification?'<div class="clarification-inline" role="status">'+escapeHtml(clarification)+'</div>':'');
     renderInspector();
     $('carouselDots').innerHTML=state.scenes.map((i,n)=>`<button class="dot ${n===idx?'active':''}" data-focus="${escapeHtml(i.id)}" aria-label="第 ${n+1} 个 Scene：${escapeHtml(i.title)}" title="${escapeHtml(i.title)}"></button>`).join('');
   }
@@ -694,12 +713,12 @@
     if(item.status==='loading')return head+`<div class="card-body"><div class="loading-state"><span class="spinner"></span>正在获取 Agent 列表（Mock API）…</div></div>`;
     const currentList=agents.filter(a=>!activeSearch || a.name.toLowerCase().includes(activeSearch.toLowerCase()));
     const rows=currentList.map(a=>`<div class="agent-row ${a.id===state.selectedAgentId?'selected':''}"><div class="node-name"><span class="node-icon">${svg('server')}</span><div style="min-width:0"><span class="node-name-text">${escapeHtml(a.name)}</span><span class="node-small">${escapeHtml(a.detail)}</span></div></div><span class="pill ${a.status}">${a.status==='online'?'在线':'离线'}</span><span class="metric">${a.sessions} 个</span><div class="row-actions"><button type="button" class="text-button ${a.id===state.selectedAgentId?'primary-action':''}" data-agent-select="${escapeHtml(a.id)}">${a.id===state.selectedAgentId?'已选':'选择'}</button><button type="button" class="text-button primary-action" data-create-agent="${escapeHtml(a.id)}" ${a.status!=='online'?'disabled':''} title="在当前 Agent Scene 内创建 Session（不新增 Scene）">${svg('plus')}</button></div></div>`).join('');
-    return head+`<div class="card-body"><div class="toolbar"><div class="toolbar-left"><span>${agents.length} 个 Agent · ${agents.filter(a=>a.status==='online').length} 在线</span></div><input aria-label="搜索 Agent" class="search" id="agentSearch" value="${escapeHtml(activeSearch)}" placeholder="搜索节点..."/></div><div class="table-shell"><div class="rowhead"><span>Agent</span><span>状态</span><span>Session</span><span style="text-align:right">操作</span></div>${rows||'<div class="no-data">没有匹配的节点</div>'}</div><div class="hint-strip">${state.selectedAgentId?`已选择 <strong>${escapeHtml(agents.find(a=>a.id===state.selectedAgentId)?.name||'')}</strong>。现在输入「在这个节点创建 Session」，或点击右侧 <strong>＋</strong>，在同一个工作项内操作。`:'选择一个 Agent 后，这个选择将被写入 Workspace State，并传给下一轮 System 1。'}</div></div>`;
+    return head+`<div class="card-body"><div class="toolbar"><div class="toolbar-left"><span>${agents.length} 个 Agent · ${agents.filter(a=>a.status==='online').length} 在线</span></div><input aria-label="搜索 Agent" class="search" id="agentSearch" value="${escapeHtml(activeSearch)}" placeholder="搜索节点..."/></div><div class="table-shell"><div class="rowhead"><span>Agent</span><span>状态</span><span>Session</span><span style="text-align:right">操作</span></div>${rows||'<div class="no-data">没有匹配的节点</div>'}</div>${renderSuggestions()}<div class="hint-strip">${state.selectedAgentId?`已选择 <strong>${escapeHtml(agents.find(a=>a.id===state.selectedAgentId)?.name||'')}</strong>。现在输入「在这个节点创建 Session」，或点击右侧 <strong>＋</strong>，在同一个工作项内操作。`:'选择一个 Agent 后，这个选择将被写入 Workspace State，并传给下一轮 System 1。'}</div></div>`;
   }
   function renderSessions(item){
     const head=cardHead(item,'CAPABILITY / SESSIONS','继续已有工作，无须新建 Terminal Runtime',`<button class="soft-button" data-refresh="sessions">${svg('refresh')} 刷新</button>`);
     if(item.status==='loading')return head+`<div class="card-body"><div class="loading-state"><span class="spinner"></span>正在获取 Session 列表（Mock API）…</div></div>`;
-    return head+`<div class="card-body"><div class="toolbar"><div class="toolbar-left">${sessions.length} 个 Session</div></div><div class="table-shell"><div class="rowhead"><span>Session</span><span>状态</span><span>所在节点</span><span style="text-align:right">操作</span></div>${sessions.map(s=>`<div class="session-row"><div class="node-name"><span class="node-icon">${svg('terminal')}</span><div style="min-width:0"><span class="node-name-text">${escapeHtml(s.name)}</span><span class="node-small">${escapeHtml(s.id)}</span></div></div><span class="pill ${s.status==='active'?'online':''}">${s.status==='active'?'运行中':'已分离'}</span><span class="metric" title="Agent ID">${escapeHtml(agents.find(a=>a.id===s.agentId)?.name||'--')}</span><div class="row-actions"><button class="text-button primary-action" data-open-session="${escapeHtml(s.id)}">打开 →</button></div></div>`).join('')}</div><div class="hint-strip">「打开」会演示切换到普通模式中的 Terminal 工作区，不会真的连接或创建 Session。</div></div>`;
+    return head+`<div class="card-body"><div class="toolbar"><div class="toolbar-left">${sessions.length} 个 Session</div></div><div class="table-shell"><div class="rowhead"><span>Session</span><span>状态</span><span>所在节点</span><span style="text-align:right">操作</span></div>${sessions.map(s=>`<div class="session-row"><div class="node-name"><span class="node-icon">${svg('terminal')}</span><div style="min-width:0"><span class="node-name-text">${escapeHtml(s.name)}</span><span class="node-small">${escapeHtml(s.id)}</span></div></div><span class="pill ${s.status==='active'?'online':''}">${s.status==='active'?'运行中':'已分离'}</span><span class="metric" title="Agent ID">${escapeHtml(agents.find(a=>a.id===s.agentId)?.name||'--')}</span><div class="row-actions"><button class="text-button primary-action" data-open-session="${escapeHtml(s.id)}">打开 →</button></div></div>`).join('')}</div>${renderSuggestions()}<div class="hint-strip">「打开」会演示切换到普通模式中的 Terminal 工作区，不会真的连接或创建 Session。</div></div>`;
   }
   function renderCreate(item){
     const inline=item.type==='agent.list';
@@ -709,10 +728,10 @@
       inline?'在原有 Agent Scene 内完成创建；Scene 总数不变':'创建独立 Session 任务；离开后草稿仍会保留',back);
     const path=inline?`<div class="embedded-path"><strong>Agent 列表</strong>　›　创建 Session</div><h3 class="embedded-heading">创建 Session</h3><div class="in-item-chip">当前工作项 ${escapeHtml(item.id)} · 不新增 Scene</div>`:'';
     if(flow.status==='complete'&&flow.result){
-      return head+`<div class="card-body"><div class="form-area">${path}<div class="status-panel" style="margin:0"><span class="success-icon">${svg('check')}</span><div class="success-title">Session 创建成功</div><div class="success-sub">${escapeHtml(flow.result.name)} · ${escapeHtml(agents.find(a=>a.id===flow.result.agentId)?.name||'')}<br>这是 Mock 执行结果，已回写原有 Scene State。</div><div class="result-actions"><button class="button-dark" data-open-session="${escapeHtml(flow.result.id)}">打开 Session →</button>${inline?'<button class="soft-button" data-cancel-create>返回 Agent 列表</button>':'<button class="soft-button" data-show-sessions>查看所有 Session</button>'}</div></div></div></div>`;
+      return head+`<div class="card-body"><div class="form-area">${path}${renderSuggestions()}<div class="status-panel" style="margin:0"><span class="success-icon">${svg('check')}</span><div class="success-title">Session 创建成功</div><div class="success-sub">${escapeHtml(flow.result.name)} · ${escapeHtml(agents.find(a=>a.id===flow.result.agentId)?.name||'')}<br>这是 Mock 执行结果，已回写原有 Scene State。</div><div class="result-actions"><button class="button-dark" data-open-session="${escapeHtml(flow.result.id)}">打开 Session →</button>${inline?'<button class="soft-button" data-cancel-create>返回 Agent 列表</button>':'<button class="soft-button" data-show-sessions>查看所有 Session</button>'}</div></div></div></div>`;
     }
     const options=agents.filter(a=>a.status==='online').map(a=>`<option value="${escapeHtml(a.id)}" ${a.id===flow.draft.agentId?'selected':''}>${escapeHtml(a.name)}</option>`).join('');
-    return head+`<div class="card-body"><form id="createSessionForm" class="form-area" novalidate>${path}<p class="form-intro">${inline?'这是 Agent 列表内的操作。表单执行和返回都不会新增工作区 Scene。':'该表单属于当前独立 Workspace Scene，离开后仍可恢复草稿。'}</p><div class="form-field"><label class="form-label" for="formAgent">执行节点</label><select class="form-control" id="formAgent" name="agent"><option value="">请选择 Agent</option>${options}</select><div class="form-field-tip">Agent 由列表接口提供，模型不生成 Agent 数据。</div></div><div class="form-field"><label class="form-label" for="formName">Session 名称</label><input class="form-control" id="formName" name="sessionName" value="${escapeHtml(flow.draft.name)}" autocomplete="off" placeholder="例如：my-workspace" maxlength="64"><div class="form-field-tip">支持字母、数字、点、短横线和下划线。</div></div><div class="selected-info">${svg('eye')}当前已选择：${escapeHtml(agents.find(a=>a.id===flow.draft.agentId)?.name||'未指定 Agent')} · 草稿自动保留</div>${flow.error?`<div class="status-message" role="alert">${escapeHtml(flow.error)}</div>`:''}<div class="form-actions"><button class="button-dark" type="submit" ${flow.status==='submitting'?'disabled':''}>${flow.status==='submitting'?'正在创建…':'创建 Session'}</button><button class="soft-button" type="button" data-cancel-create>返回 Agent 列表</button></div></form></div>`;
+    return head+`<div class="card-body"><form id="createSessionForm" class="form-area" novalidate>${path}<p class="form-intro">${inline?'这是 Agent 列表内的操作。表单执行和返回都不会新增工作区 Scene。':'该表单属于当前独立 Workspace Scene，离开后仍可恢复草稿。'}</p><div class="form-field"><label class="form-label" for="formAgent">执行节点</label><select class="form-control" id="formAgent" name="agent"><option value="">请选择 Agent</option>${options}</select><div class="form-field-tip">Agent 由列表接口提供，模型不生成 Agent 数据。</div></div><div class="form-field"><label class="form-label" for="formName">Session 名称</label><input class="form-control" id="formName" name="sessionName" value="${escapeHtml(flow.draft.name)}" autocomplete="off" placeholder="例如：my-workspace" maxlength="64"><div class="form-field-tip">支持字母、数字、点、短横线和下划线。</div></div><div class="selected-info">${svg('eye')}当前已选择：${escapeHtml(agents.find(a=>a.id===flow.draft.agentId)?.name||'未指定 Agent')} · 草稿自动保留</div>${flow.error?`<div class="status-message" role="alert">${escapeHtml(flow.error)}</div>`:''}<div class="form-actions"><button class="button-dark" type="submit" ${flow.status==='submitting'?'disabled':''}>${flow.status==='submitting'?'正在创建…':'创建 Session'}</button><button class="soft-button" type="button" data-cancel-create>返回 Agent 列表</button></div></form>${renderSuggestions()}</div>`;
   }
   function renderStandard(){
     $('standardAgents').innerHTML=agents.map(a=>`<button class="standard-item" type="button" data-standard-agent="${escapeHtml(a.id)}">${svg('server')} ${escapeHtml(a.name)}</button>`).join('');
@@ -772,7 +791,7 @@
   document.addEventListener('input',e=>{
     const item=focused();
     if(e.target.id==='agentSearch'){
-      activeSearch=e.target.value;
+      activeSearch=e.target.value;userInteractionEpoch++;
       // Preserve focus and caret through lightweight rerender.
       const pos=e.target.selectionStart;render();const newInput=$('agentSearch');if(newInput){newInput.focus();newInput.setSelectionRange(pos,pos);}
     }
