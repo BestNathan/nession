@@ -198,4 +198,41 @@ check('standalone Scene starts with bound target and user commit barrier',
   space().view.some(x => x.actionId === 'session.create.submit' && x.eligibility === 'enabled'));
 check('inactive Agent Scene row actions do not leak into the standalone View',
   !space().view.some(x => x.actionId === 'agent.select'));
+
+dispatch('click', el('resetButton'), 'resetButton');
+await ask('创建 Session');
+check('root goal uses intermediate-step Jev routing instructions',
+  el('debugQuestionPlan').textContent.includes('推动目标前进的下一步') &&
+  el('debugQuestionPlan').textContent.includes('agent.list.show'));
+check('missing target pauses before form, without exposing future leaf',
+  state().pendingGoal.status === 'awaiting_selection' &&
+  !space().view.some(x => x.actionId === 'session.create.open'));
+click({agentSelect:'agent-dev-01'});
+check('after visible row selection goal waits for missing name',
+  state().pendingGoal.status === 'awaiting_input');
+const goalId=state().pendingGoal.goalId,ownerScene=state().activeSceneId;
+await ask('名称叫 followup-test');
+check('slot-only utterance updates current form without resetting goal or invoking model',
+  state().pendingGoal.goalId === goalId &&
+  state().pendingGoal.status === 'awaiting_user_commit' &&
+  state().scenes.length === 1 &&
+  decision().judgment === 'slot.update' && decision().modelCalled === false);
+check('slot update retains explicit commit barrier; no backend outcome',
+  !state().lastConfirmedOutcome?.resource?.id?.endsWith('followup-test') &&
+  space().view.some(x => x.actionId === 'session.create.submit' && x.eligibility === 'enabled'));
+await ask('查看 Session 列表');
+check('unrelated user intent suspends existing goal, preserves its owning Scene',
+  state().pendingGoal.goalId === goalId &&
+  state().pendingGoal.status === 'suspended' &&
+  state().scenes.length === 2);
+click({focus:ownerScene});
+await ask('继续');
+check('resume restores original Scene form and goal without replaying earlier steps',
+  state().pendingGoal.goalId === goalId &&
+  state().pendingGoal.status === 'awaiting_user_commit' &&
+  state().scenes.find(x=>x.sceneId===ownerScene)?.activeView === 'session.create');
+check('automated step receipts pin View revision and action-space fingerprint',
+  state().pendingGoal.steps.every(x=>x.step==='prefill' || x.fingerprint !== undefined) &&
+  state().pendingGoal.steps.some(x=>x.sourceViewInstanceId));
+
 console.log('\nPASS: ' + count + ' local mock state/event checks. Browser and real-provider acceptance remain pending.');
