@@ -19,6 +19,11 @@ const TRUSTED_TELEMETRY_SOURCES = new Map([
     events: new Set(['workflow_dispatch']),
     workflow_dispatch_main_only: true,
   }],
+  ['.github/workflows/agent-review.yml', {
+    workflow_id: 'agent-review',
+    events: new Set(['workflow_dispatch']),
+    workflow_dispatch_main_only: true,
+  }],
   ['.github/workflows/acceptance-verified-stage.yml', {
     workflow_id: 'requirement-acceptance',
     events: new Set(['issue_comment']),
@@ -302,7 +307,21 @@ function selfTest() {
     repository: { full_name: 'BestNathan/nession' },
   }, 'BestNathan/nession'), /trusted only from main/);
 
-  console.log('agent-workflow-telemetry-contract self-test: 9 cases passed');
+  assert.equal(validateTelemetrySourceRun({
+    id: 19, run_attempt: 1,
+    path: '.github/workflows/agent-review.yml',
+    event: 'workflow_dispatch', head_branch: 'main',
+    repository: { full_name: 'BestNathan/nession' },
+  }, 'BestNathan/nession').workflow_id, 'agent-review');
+
+  assert.throws(() => validateTelemetrySourceRun({
+    id: 20, run_attempt: 1,
+    path: '.github/workflows/agent-review.yml',
+    event: 'workflow_dispatch', head_branch: 'feature',
+    repository: { full_name: 'BestNathan/nession' },
+  }, 'BestNathan/nession'), /trusted only from main/);
+
+  console.log('agent-workflow-telemetry-contract self-test: 11 cases passed');
 }
 
 const command = process.argv[2] ?? 'check';
