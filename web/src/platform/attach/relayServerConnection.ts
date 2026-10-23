@@ -73,6 +73,7 @@ export type RelayServerTransport = RelayServerHandle &
     | 'onRelayResize'
     | 'onRelayInputAck'
     | 'resumeRelayStream'
+    | 'getControlState'
   >;
 
 /**
@@ -133,10 +134,17 @@ export function relayServerHandle(
       if (stale()) { return; }
       terminalServerApi.sendRelayInput(sessionName, data, opts);
     },
-    sendRelayResize: (sessionName, cols, rows) => {
+    sendRelayResize: (sessionName, cols, rows, controlGeneration) => {
       if (stale()) { return; }
-      terminalServerApi.sendRelayResize(sessionName, cols, rows);
+      terminalServerApi.sendRelayResize(sessionName, cols, rows, controlGeneration);
     },
+    // A stale handle relays nothing, so its lease view is the inert one: an
+    // observer may not resize. The live handle forwards the capability's own
+    // level, which is the Agent's statement (#2157).
+    getControlState: (sessionName) =>
+      stale()
+        ? { role: 'observer', sessionName }
+        : terminalServerApi.getControlState(sessionName),
     onRelayOutput: (sessionName, cb) => {
       if (stale()) { return () => {}; }
       return terminalServerApi.onRelayOutput(sessionName, (...args) => {

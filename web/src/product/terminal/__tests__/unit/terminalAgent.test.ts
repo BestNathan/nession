@@ -426,6 +426,48 @@ describe('createTerminalAgentApi', () => {
       });
     });
 
+    it('carries the lease generation on a recorded resize (#2286)', () => {
+      const cb = vi.fn();
+      api.onResize(cb);
+
+      surface.pushMessage('agent.terminal.resize', {
+        session_name: 'work',
+        cols: 150,
+        rows: 50,
+        stream_epoch: 5,
+        stream_seq: 8,
+        control_generation: 4,
+      });
+
+      expect(cb).toHaveBeenCalledWith({
+        cols: 150,
+        rows: 50,
+        streamEpoch: 5,
+        streamSeq: 8,
+        controlGeneration: 4,
+      });
+    });
+
+    it('never invents a lease generation from a malformed field (#2286)', () => {
+      const cb = vi.fn();
+      api.onResize(cb);
+
+      for (const controlGeneration of ['4', -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+        surface.pushMessage('agent.terminal.resize', {
+          session_name: 'work',
+          cols: 150,
+          rows: 50,
+          stream_epoch: 5,
+          stream_seq: 8,
+          control_generation: controlGeneration,
+        });
+      }
+
+      for (const call of cb.mock.calls) {
+        expect(call[0]).not.toHaveProperty('controlGeneration');
+      }
+    });
+
     it('reads a half-written position as the level it still is (#1303)', () => {
       // The agent sets both fields together, so one without the other is not a
       // position — and half-applying it would put a resize in the timeline at

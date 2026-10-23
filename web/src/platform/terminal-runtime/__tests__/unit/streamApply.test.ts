@@ -56,4 +56,64 @@ describe('streamApply', () => {
       streamSeq: 2,
     });
   });
+
+  it('carries the recorded lease generation through replay (#2286 SC-03)', () => {
+    const [event] = parseStreamEvents([
+      {
+        kind: 'resize',
+        session_name: 's',
+        stream_epoch: 1,
+        stream_seq: 3,
+        cols: 100,
+        rows: 30,
+        control_generation: 8,
+      },
+    ]);
+    expect(event).toEqual({
+      kind: 'resize',
+      streamEpoch: 1,
+      streamSeq: 3,
+      cols: 100,
+      rows: 30,
+      controlGeneration: 8,
+    });
+
+    const onResize = vi.fn();
+    applyTerminalStreamEvents(
+      [event!],
+      { onOutput: vi.fn(), onResize },
+    );
+    expect(onResize).toHaveBeenCalledWith(
+      100,
+      30,
+      { streamEpoch: 1, streamSeq: 3 },
+      8,
+    );
+  });
+
+  it('reads an absent or malformed generation as unstated, not as zero', () => {
+    const [absent] = parseStreamEvents([
+      {
+        kind: 'resize',
+        session_name: 's',
+        stream_epoch: 1,
+        stream_seq: 3,
+        cols: 100,
+        rows: 30,
+      },
+    ]);
+    const [malformed] = parseStreamEvents([
+      {
+        kind: 'resize',
+        session_name: 's',
+        stream_epoch: 1,
+        stream_seq: 4,
+        cols: 100,
+        rows: 30,
+        control_generation: 'eight',
+      },
+    ]);
+    expect(absent && 'controlGeneration' in absent).toBe(false);
+    expect(malformed && 'controlGeneration' in malformed).toBe(false);
+  });
 });

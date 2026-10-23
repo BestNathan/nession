@@ -162,6 +162,17 @@ describe('TerminalServerPlugin', () => {
         { type: 'agent.terminal.resize', payload: { session_name: 'work', cols: 120, rows: 40 } },
       ]);
     });
+
+    it('sendRelayResize states the lease generation when it has one (#2286)', () => {
+      plugin.sendRelayResize('work', 120, 40, 4);
+
+      expect(surface.sent).toEqual([
+        {
+          type: 'agent.terminal.resize',
+          payload: { session_name: 'work', cols: 120, rows: 40, control_generation: 4 },
+        },
+      ]);
+    });
   });
 
   describe('Relay parser-applied output ACK (#2103)', () => {
@@ -394,6 +405,22 @@ describe('TerminalServerPlugin', () => {
       surface.pushMessage('agent.terminal.resize', { session_name: 'work' });
 
       expect(cb).toHaveBeenCalledWith(0, 0);
+    });
+
+    it('carries the recorded lease generation through the relay (#2286)', () => {
+      const cb = vi.fn();
+      plugin.onRelayResize('work', cb);
+
+      surface.pushMessage('agent.terminal.resize', {
+        session_name: 'work',
+        cols: 100,
+        rows: 30,
+        stream_epoch: 31,
+        stream_seq: 2,
+        control_generation: 6,
+      });
+
+      expect(cb).toHaveBeenCalledWith(100, 30, { streamEpoch: 31, streamSeq: 2 }, 6);
     });
   });
 

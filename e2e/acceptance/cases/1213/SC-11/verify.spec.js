@@ -4,7 +4,7 @@ const {
   verifiedRuntime, createAndAttach, attachExisting, command, countInBuffer,
 } = require('../../../shared/foreground-resume-browser.cjs');
 
-test('SC-11: background controller loses ownership to independent peer and stays Observer after recovery', async ({ page, context, browser }, info) => {
+test('SC-11: background controller loses ownership to independent peer and stays Observer after a bare reconnect', async ({ page, context, browser }, info) => {
   test.setTimeout(110000);
   const { runtime, sha, contract } = verifiedRuntime('SC-11');
   // Observe actual A physical transports before initial navigation.
@@ -37,28 +37,22 @@ test('SC-11: background controller loses ownership to independent peer and stays
     const peer = await peerContext.newPage();
     await attachExisting(peer, expect, runtime, name, 'P2P');
     const observerB = peer.getByTestId('terminal-observer-bar');
-    // P2P attach completion and React's terminal-control subscription are
-    // separate async boundaries. A one-shot isVisible() immediately after
-    // xterm appears may return false before the second client's Observer
-    // lease is rendered, silently skipping the intended takeover. Prove the
-    // Observer precondition and perform the explicit handoff unconditionally.
-    await expect(observerB).toBeVisible({ timeout: 20000 });
-    await observerB.getByRole('button', { name: 'Take control' }).click();
+    // #2286: attaching the session's terminal on this device is a meaningful
+    // foreground activation, so the peer becomes the Controller automatically
+    // and A, hidden, is the observer. No explicit Take control is required in
+    // the ordinary sequential-use flow.
     await expect(observerB).toBeHidden({ timeout: 20000 });
     await expect(observerA).toBeVisible({ timeout: 20000 });
 
-    await page.evaluate(() => {
-      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
-      document.dispatchEvent(new Event('visibilitychange'));
-    });
-
-    // Force a genuine A transport replacement, while B remains connected.
+    // While A is *backgrounded*, its transport is genuinely replaced. A
+    // reconnect is not a foreground activation: it must not silently seize the
+    // Controller back (#1213 SC-11, preserved by #2286's event admission).
     const prior = await page.evaluate(() => window.__nession1213Sockets.length);
     try {
       await context.setOffline(true);
       await page.evaluate(() => {
         for (const ws of window.__nession1213Sockets) {
-          if (ws.readyState === WebSocket.OPEN) ws.close(4000, 'foreground client transport lost');
+          if (ws.readyState === WebSocket.OPEN) ws.close(4000, 'background client transport lost');
         }
       });
       await expect(observerA).toBeVisible();
@@ -82,12 +76,26 @@ test('SC-11: background controller loses ownership to independent peer and stays
     await expect.poll(() => countInBuffer(peer, 'VALID-CONTROLLER-1213'), { timeout: 25000 }).toBe(1);
     await expect.poll(() => countInBuffer(page, 'VALID-CONTROLLER-1213'), { timeout: 25000 }).toBe(1);
     await expect(observerA).toBeVisible();
+
+    // #2286 contrast, asserted last so it cannot affect the reconnect proof:
+    // returning A's terminal to the foreground *is* a meaningful activation,
+    // and it does take the lease. The old explicit Take control is now the
+    // fallback for a deliberately displaced observer.
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await expect(observerA).toBeHidden({ timeout: 20000 });
+    await expect(observerB).toBeVisible({ timeout: 20000 });
+
     const evidence = {
       issue: 1213, criterion: 'SC-11', target_sha: sha, contract_sha256: contract,
       selected_session: name, two_independent_browser_contexts: true,
-      mode: 'P2P', control_transferred_while_backgrounded: true,
-      foreground_and_reconnect_kept_observer: true, observer_input_not_delivered: true,
+      mode: 'P2P', control_transferred_to_attached_peer: true,
+      reconnect_kept_observer_while_backgrounded: true,
+      observer_input_not_delivered: true,
       controller_input_delivered: true,
+      foreground_activation_took_control_afterward: true,
     };
     await info.attach('sc-11-control-handoff-evidence.json', {
       body: Buffer.from(JSON.stringify(evidence)), contentType: 'application/json',

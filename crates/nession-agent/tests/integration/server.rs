@@ -3417,14 +3417,23 @@ async fn integration_input_from_a_stale_lease_is_refused_without_writing() {
     let epoch = session.epoch;
     let held = session.control_generation;
 
-    // The lease moves on without this client: another client takes it, or this
-    // one hands it back and takes it again. Either way the generation the
-    // client is holding is no longer the one the agent is on.
+    // The lease moves on without this client: a *different* client takes it.
+    // (Re-acquiring as the same holder must not move the generation — that is
+    // the idempotent takeover #2286 added, so it cannot be used to build the
+    // stale generation this test needs.)
+    let (mut other_sink, mut other_stream) = session.dial().await.unwrap();
+    let _: nession_agent::server::websocket::Message<ClientAttachResponse> = round_trip(
+        &mut other_sink,
+        &mut other_stream,
+        &attach_to(&session.session_name),
+    )
+    .await
+    .unwrap();
     let acquired: nession_agent::server::websocket::Message<
         nession_agent::server::websocket::TerminalControlAcquireResponse,
     > = round_trip(
-        &mut session.sink,
-        &mut session.stream,
+        &mut other_sink,
+        &mut other_stream,
         &new_message(
             msg_types::TERMINAL_CONTROL_ACQUIRE,
             nession_agent::server::websocket::TerminalControlAcquirePayload {
@@ -3464,8 +3473,27 @@ async fn integration_input_from_a_stale_lease_is_refused_without_writing() {
 
     // The same command under the generation the agent is actually on, so the
     // assertion below is about the refusal rather than about a frame that could
-    // never have been written. The refused frame moved no cursor, so this one
-    // still starts at 1.
+    // never have been written. Take the lease back first: the *other* client
+    // holds it now, so this is a real takeover and it moves the generation. The
+    // refused frame moved no cursor, so this one still starts at 1.
+    let recovered: nession_agent::server::websocket::Message<
+        nession_agent::server::websocket::TerminalControlAcquireResponse,
+    > = round_trip(
+        &mut session.sink,
+        &mut session.stream,
+        &new_message(
+            msg_types::TERMINAL_CONTROL_ACQUIRE,
+            nession_agent::server::websocket::TerminalControlAcquirePayload {
+                session_name: session.session_name.clone(),
+            },
+        ),
+    )
+    .await
+    .unwrap();
+    assert!(
+        recovered.payload.generation > acquired.payload.generation,
+        "taking the lease back from the other client must advance the generation"
+    );
     let ack = session
         .send(epoch, 1, 1, &session.append("current"))
         .await
@@ -3475,6 +3503,224 @@ async fn integration_input_from_a_stale_lease_is_refused_without_writing() {
         session.witness_lines(1).await,
         "current\n",
         "the refused frame's bytes reached the PTY"
+    );
+
+    session.handle.shutdown().await.ok();
+}
+
+/// #2286 SC-03: a resize a controller sends after the lease has moved past it
+/// is refused **by name** and never reaches tmux; the new controller's resize
+/// is recorded with the generation that authorized it, so peers can tell it
+/// from a size chosen under a lease the session has left.
+///
+/// The witnesses are real: tmux's own window size proves the stale request did
+/// not move the pane, and the `agent.terminal.resize` frame the old controller
+/// receives proves the recorded event states the new generation.
+#[tokio::test]
+async fn integration_resize_from_a_stale_lease_is_refused_and_tagged() {
+    let mut session = SequencedSession::start("resize-stale-lease").await.unwrap();
+    let held = session.control_generation;
+    let tmux = SessionManager::new();
+    let before = tmux
+        .tmux_dep()
+        .ops()
+        .window_size(&session.session_name)
+        .await
+        .expect("the session has a tmux window");
+
+    // #2286: the ordinary flow re-acquires on every meaningful activation. As
+    // the current holder that must be a no-op — otherwise the client's own
+    // next click would fence the resize it just sent.
+    let restated: nession_agent::server::websocket::Message<
+        nession_agent::server::websocket::TerminalControlAcquireResponse,
+    > = round_trip(
+        &mut session.sink,
+        &mut session.stream,
+        &new_message(
+            msg_types::TERMINAL_CONTROL_ACQUIRE,
+            nession_agent::server::websocket::TerminalControlAcquirePayload {
+                session_name: session.session_name.clone(),
+            },
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        restated.payload.generation, held,
+        "a holder restating its own lease must not advance the generation"
+    );
+
+    let (mut other_sink, mut other_stream) = session.dial().await.unwrap();
+    let _: nession_agent::server::websocket::Message<ClientAttachResponse> = round_trip(
+        &mut other_sink,
+        &mut other_stream,
+        &attach_to(&session.session_name),
+    )
+    .await
+    .unwrap();
+    let acquired: nession_agent::server::websocket::Message<
+        nession_agent::server::websocket::TerminalControlAcquireResponse,
+    > = round_trip(
+        &mut other_sink,
+        &mut other_stream,
+        &new_message(
+            msg_types::TERMINAL_CONTROL_ACQUIRE,
+            nession_agent::server::websocket::TerminalControlAcquirePayload {
+                session_name: session.session_name.clone(),
+            },
+        ),
+    )
+    .await
+    .unwrap();
+    let current = acquired.payload.generation;
+    assert!(current > held, "the takeover must advance the generation");
+
+    // The previous controller's delayed resize always was going to be in
+    // flight: the debounce is 200 ms and a takeover can land inside it. The
+    // Agent must refuse it **by name** while it still believes it holds g1.
+    let stale = new_message(
+        msg_types::TERMINAL_RESIZE,
+        nession_agent::server::websocket::TerminalResizePayload {
+            session_name: session.session_name.clone(),
+            cols: 140,
+            rows: 45,
+            control_generation: Some(held),
+            stream_epoch: None,
+            stream_seq: None,
+        },
+    );
+    let refused: nession_agent::server::websocket::Message<serde_json::Value> =
+        round_trip(&mut session.sink, &mut session.stream, &stale)
+            .await
+            .unwrap();
+    assert_eq!(refused.msg_type, msg_types::ERROR);
+    assert_eq!(
+        refused.payload["code"], "observer_resize",
+        "a client that no longer holds the lease is an observer, not a controller"
+    );
+
+    // Take the lease back, which advances the generation again. The same
+    // client now holds g3, and its *older* g1 frame must still be refused —
+    // this is the fencing that matters when the device that lost control is
+    // the one that regains it.
+    let recovered: nession_agent::server::websocket::Message<
+        nession_agent::server::websocket::TerminalControlAcquireResponse,
+    > = round_trip(
+        &mut session.sink,
+        &mut session.stream,
+        &new_message(
+            msg_types::TERMINAL_CONTROL_ACQUIRE,
+            nession_agent::server::websocket::TerminalControlAcquirePayload {
+                session_name: session.session_name.clone(),
+            },
+        ),
+    )
+    .await
+    .unwrap();
+    let current = recovered.payload.generation;
+    assert!(
+        current > acquired.payload.generation,
+        "taking the lease back must advance the generation"
+    );
+    let refused: nession_agent::server::websocket::Message<serde_json::Value> =
+        round_trip(&mut session.sink, &mut session.stream, &stale)
+            .await
+            .unwrap();
+    assert_eq!(refused.msg_type, msg_types::ERROR);
+    assert_eq!(
+        refused.payload["code"], "not_controller",
+        "the refusal must name the stale lease rather than the session"
+    );
+    assert_eq!(
+        tmux.tmux_dep()
+            .ops()
+            .window_size(&session.session_name)
+            .await
+            .unwrap(),
+        before,
+        "a refused resize moved the shared tmux window"
+    );
+
+    // The client that actually holds the lease can move it, and the recorded
+    // event carries the generation that authorized it.
+    let accepted = new_message(
+        msg_types::TERMINAL_RESIZE,
+        nession_agent::server::websocket::TerminalResizePayload {
+            session_name: session.session_name.clone(),
+            cols: 100,
+            rows: 30,
+            control_generation: Some(current),
+            stream_epoch: None,
+            stream_seq: None,
+        },
+    );
+    let reply: nession_agent::server::websocket::Message<serde_json::Value> =
+        round_trip(&mut session.sink, &mut session.stream, &accepted)
+            .await
+            .unwrap();
+    assert_ne!(
+        reply.msg_type,
+        msg_types::ERROR,
+        "the holder's resize was refused"
+    );
+
+    // The other client is still attached as an observer, and receives the
+    // authoritative event on the same ordered lane as output.
+    let mut broadcast = None;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while tokio::time::Instant::now() < deadline {
+        let Some(frame) = next_frame_within(&mut other_stream, Duration::from_secs(2))
+            .await
+            .unwrap()
+        else {
+            break;
+        };
+        if frame.get("msg_type").and_then(serde_json::Value::as_str)
+            == Some(msg_types::TERMINAL_RESIZE)
+        {
+            broadcast = Some(frame);
+            break;
+        }
+    }
+    let frame = broadcast.expect("the recorded resize never reached the observer");
+    let payload = frame.get("payload").expect("a resize frame has a payload");
+    assert_eq!(
+        payload.get("cols").and_then(serde_json::Value::as_u64),
+        Some(100)
+    );
+    assert_eq!(
+        payload
+            .get("control_generation")
+            .and_then(serde_json::Value::as_u64),
+        Some(current),
+        "the broadcast resize does not state the generation that authorized it"
+    );
+    assert!(
+        payload
+            .get("stream_seq")
+            .and_then(serde_json::Value::as_u64)
+            .is_some(),
+        "the recorded resize must keep its place in the ordered stream"
+    );
+
+    // tmux follows the holder; the pane is the application-visible truth.
+    let mut pane = before;
+    for _ in 0..50 {
+        pane = tmux
+            .tmux_dep()
+            .ops()
+            .window_size(&session.session_name)
+            .await
+            .unwrap();
+        if pane == (100, 30) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(
+        pane,
+        (100, 30),
+        "the accepted resize never reached the pane"
     );
 
     session.handle.shutdown().await.ok();
