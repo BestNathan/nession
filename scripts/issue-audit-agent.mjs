@@ -208,6 +208,17 @@ async function selfTest() {
   assert.equal(args[args.indexOf('--model') + 1], 'claude-sonnet-5');
   assert.match(args[1], /By turn 8, stop investigating/);
   assert.equal(args[args.indexOf('--disallowedTools') + 1], 'Bash');
+  const previousBackend=process.env.ISSUE_AUDIT_PROVIDER;
+  process.env.ISSUE_AUDIT_PROVIDER='qwen';
+  process.env.ISSUE_AUDIT_CLAUDE_MODEL='qwen3-coder-plus';
+  assert.equal(claudeRequestModel(),'qwen3-coder-plus');
+  assert.equal(telemetryProvider(),'claude-code');
+  assert.equal(backendMapping(),'qwen-configured-gateway');
+  process.env.ISSUE_AUDIT_CLAUDE_MODEL='claude-sonnet-5';
+  assert.throws(()=>claudeRequestModel(),/explicit Qwen model/);
+  if(previousBackend==null)delete process.env.ISSUE_AUDIT_PROVIDER;
+  else process.env.ISSUE_AUDIT_PROVIDER=previousBackend;
+
   if (previous == null) delete process.env.ISSUE_AUDIT_CLAUDE_MODEL;
   else process.env.ISSUE_AUDIT_CLAUDE_MODEL = previous;
   if (oldRepo == null) delete process.env.GITHUB_REPOSITORY;
