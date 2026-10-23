@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 39996094729,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/2286-observer-authoritative-grid",
+    "target_sha": "f237dd53f36f51ce1443e2b2233fec96c72d77b2",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/39996094729",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "e6ba021b445accfda0aed009ff0f83683c60e5dd2fcc1e3f785304ad92dac409"
+  },
+  "record": "runs/2026-10-23/39996094729-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "d7b0ee0698f1c9acb93d6a1cf9f6b717fe1d043da5f6348f23b2e1c22bd27363"
+}
