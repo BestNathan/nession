@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "531c914d556f61447c1270dd2c4c25c894e60e5c44ae0001251baf122bf94d8f",
+  "run_id": 40024311070,
+  "run_attempt": 1,
+  "issue": 2307,
+  "criterion": "SC-06",
+  "criterion_text": "Reattach, WebSocket/P2P/Relay replacement and PC↔mobile subscriber transitions do not leak/kill unrelated tmux sessions or leave stale Client generations writing; one stalled consumer cannot indefinitely block the Client or healthy peers.",
+  "stage": "post-merge",
+  "target_sha": "a474519a238eb53d20e581adaf7d06dd0740da71",
+  "contract_sha256": "209b23fcadf30044fe0722c55678f9607dbb3d4503c5c25259485743d49efd6d",
+  "case_revision": "a474519a238eb53d20e581adaf7d06dd0740da71",
+  "case_tree_sha": "e1ac785b09b6c900d9f2212a07b27c5e551d628f",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-23T21:09:07.855Z",
+  "finished_at": "2026-10-23T21:09:22.243Z",
+  "duration_ms": 14388,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Stalled/subscriber transitions neither block the Client nor healthy peers, reattach keeps its identity without a stale writer, and teardown targets only the attachment it owns",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "stalled fan-out, non-draining subscriber, forwarder shutdown and credit isolation passed at exact SHA a474519a238eb53d20e581adaf7d06dd0740da71"
+        },
+        {
+          "type": "runtime",
+          "value": "a same-connection second attach is answered and leaves the connection usable; agent reconnection passed against real sockets"
+        },
+        {
+          "type": "runtime",
+          "value": "ControlLease generation fencing rejects stale writers and restates the holder generation; the control attachment detaches only the pid it spawned"
+        }
+      ],
+      "duration_ms": 14375,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40024311070,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "a474519a238eb53d20e581adaf7d06dd0740da71",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40024311070",
+    "record_path": "runs/2026-10-23/40024311070-1/2307/SC-06.json",
+    "source_result_sha256": "ca4a34b464638d98cd6d2eea19713fc6287c38648b0df8d237fa38b4765f447d"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40024311070-1",
+    "sha256": "ca4a34b464638d98cd6d2eea19713fc6287c38648b0df8d237fa38b4765f447d",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40024311070",
+    "durability": "time-limited; object archival not configured"
+  }
+}
