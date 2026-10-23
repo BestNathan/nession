@@ -19,6 +19,8 @@ For product-facing work read:
 
 Do not infer product design from one existing component if canonical product/design guidance says otherwise.
 
+For a **clickable exploration of unresolved interaction/product behavior**, use [nession-prototype](../nession-prototype/SKILL.md) for mock construction, the shared orphan `prototype` branch and Issue backlinks. [nession-writing-requirements](../nession-writing-requirements/SKILL.md) owns **whether/when** the Issue needs a prototype. A mock artifact is not the production UI, a design Gate run or a trusted browser/Acceptance receipt.
+
 ## 2. Find the owner before styling
 
 Classify the need:

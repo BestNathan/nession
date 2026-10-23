@@ -6,6 +6,7 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {startDevelopment} from './outbox.mjs';
+import {resolveAgentDefault} from '../default-routing.mjs';
 import {decodeResultZip} from './result-artifact.mjs';
 const REPO='BestNathan/nession',ISSUE=/^[1-9][0-9]*$/,SHA=/^[a-f0-9]{40}$/,HEX=/^[a-f0-9]{64}$/;
 const WORKFLOW='Acceptance / Agent Controller';
@@ -25,8 +26,29 @@ function request(input){
   return {issue:Number(input.issue_number),sha:input.input_sha,
     developer:input.developer,reviewer:input.reviewer,acceptor:input.acceptor};
 }
-export function buildControllerRequest(input,run,registry){
-  const valid=request(input);
+export function buildControllerRequest(input,run,registry,defaults={}) {
+  if(!fields(input,['issue_number','input_sha','developer','reviewer','acceptor']))
+    fail('invalid or extra Issue/Agent request fields');
+  // Only the trusted Controller start may supply Repository Variables.
+  // The stored request records resolved identities, never a mutable default.
+  const developer=resolveAgentDefault(registry,'developer',{
+    configured:defaults.developer??'',override:input.developer??'',
+    legacy:'dev-cursor-01',
+  });
+  // The production Developer worker still has authenticated Cursor-only
+  // #1997 native-state semantics; fail before Store initialization on Qwen.
+  if(developer.agent_id!=='dev-cursor-01')
+    fail('non-Cursor durable Developer requires #2274 production Worker proof');
+  const reviewer=resolveAgentDefault(registry,'reviewer',{
+    configured:defaults.reviewer??'',override:input.reviewer??'',
+    legacy:'review-cursor-01',
+  });
+  const acceptor=resolveAgentDefault(registry,'acceptor',{
+    configured:defaults.acceptor??'',override:input.acceptor??'',
+    legacy:'accept-cursor-01',
+  });
+  const valid=request({...input,developer:developer.agent_id,
+    reviewer:reviewer.agent_id,acceptor:acceptor.agent_id});
   if(!fields(run,['repository','workflow','workflow_path','event','ref','head_sha',
     'run_id','attempt','actor'])||run.repository!==REPO||
     run.workflow!==WORKFLOW||run.workflow_path!==PATH||
@@ -108,7 +130,11 @@ if(process.argv[1]&&fileURLToPath(import.meta.url)===path.resolve(process.argv[1
     if(command==='prepare'&&args.length===1){
       if(process.env.GITHUB_ACTIONS!=='true')fail('GitHub Actions context required');
       const {input,run}=sourceContext();
-      const doc=buildControllerRequest(input,run,registry);
+      const doc=buildControllerRequest(input,run,registry,{
+        developer:process.env.CONTROLLER_DEFAULT_DEVELOPER??'',
+        reviewer:process.env.CONTROLLER_DEFAULT_REVIEWER??'',
+        acceptor:process.env.CONTROLLER_DEFAULT_ACCEPTOR??'',
+      });
       fs.writeFileSync(args[0],JSON.stringify(doc,null,2)+'\n',{flag:'wx',mode:0o600});
       console.log('Validated read-only Controller request: '+doc.request.issue);
     }else if(command==='verify-source'&&args.length===5){

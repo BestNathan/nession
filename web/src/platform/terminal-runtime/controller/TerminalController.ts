@@ -793,6 +793,43 @@ export class TerminalController {
     this.transport?.sendResize(cols, rows);
   }
 
+  /**
+   * This client just acquired (or restated) the session's ControlLease (#2286).
+   *
+   * The lease is the authority for which client's viewport drives the shared
+   * PTY, so adoption is where the client stops following the previous
+   * controller's size and states its own:
+   *
+   * 1. the transport forgets the size it last sent, because that number may be
+   *    the one it stated at attach while *another* device was moving the pane;
+   *    deduping against it would leave the PTY at the other device's size;
+   * 2. the viewport is measured again **now** (`remeasure`, not the remembered
+   *    size) and both the local grid and the PTY are moved to it.
+   *
+   * The local grid is applied synchronously and the PTY notification is not
+   * debounced here: adoption is a discrete handoff, not a drag.
+   */
+  adoptControl(): void {
+    this.transport?.restateResize?.();
+    // Ordered: a takeover can land while xterm is still parsing output. The
+    // handoff is discrete, so there is no flicker argument for mutating the
+    // buffer synchronously here — it must not cross an unfinished parse
+    // (#2286 SC-04). The continuous drag path keeps its immediate fit.
+    this.resizeController?.remeasure({ ordered: true });
+  }
+
+  /**
+   * Resize the local grid **through the parser writer** (#2286 SC-04).
+   *
+   * A discrete geometry change (adoption, authoritative application) may wait
+   * for the current `terminal.write` callback without any visual cost; applying
+   * it directly would let output that is still being parsed land under a grid
+   * it was never produced for.
+   */
+  resizeLocalOrdered(cols: number, rows: number): void {
+    this.writer.resize(cols, rows);
+  }
+
   focus(): void {
     // On mobile the IME textarea is the real input target; focusing xterm would
     // only bounce through the helper-textarea redirect.
@@ -1058,8 +1095,12 @@ export class ResizeController {
   /** Recompute cols/rows from the last observed container size and the LIVE
    *  cell size (used after font-size changes, when the container hasn't
    *  resized). Refreshes the stashed cell size so later observer fires also
-   *  use it. */
-  remeasure(): void {
+   *  use it.
+   *
+   *  `ordered` applies the grid through the parser writer instead of directly
+   *  — the adoption path, where correctness is worth a deferred frame (#2286
+   *  SC-04). */
+  remeasure({ ordered = false }: { ordered?: boolean } = {}): void {
     this.fontMetricsSettled = true;
     const { width, height } = this.lastContainer;
     if (width <= 0 || height <= 0) { return; }
@@ -1072,7 +1113,11 @@ export class ResizeController {
     if (grid === null) { return; }
     // One geometry for the grid and for what the session is told — the capsule
     // band is excluded from both (#1503).
-    this.controller.resizeLocal(grid.cols, grid.rows);
+    if (ordered) {
+      this.controller.resizeLocalOrdered(grid.cols, grid.rows);
+    } else {
+      this.controller.resizeLocal(grid.cols, grid.rows);
+    }
     this.reportSize();
   }
 

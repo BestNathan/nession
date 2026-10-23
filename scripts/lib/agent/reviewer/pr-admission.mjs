@@ -3,6 +3,7 @@
  // No PR review, provider call, Store write, Issue comment, or model-chosen
 // next role is authorized by this module.
 import {createHash} from 'node:crypto';
+import {readFileSync} from 'node:fs';
 import {CONTROLLED_1997_POLICY as POLICY} from '../publisher/controlled-proposal.mjs';
 import {CONTROLLED_PUBLISHER_BRANCH,
   validateControlledPublisherIntent} from '../publisher/store-intent.mjs';
@@ -20,6 +21,7 @@ const ORIGINAL_TREE_SHA='34ba295f4b6d0becffd6bc1d3e178a54325c0410';
 const FILE_MODE='100644';
 const REPO_PATH='.github/workflows/store-controlled-publisher.yml';
 const FILE='e2e/fixtures/agent-development/1997-canary.txt';
+const HEX40=/^[a-f0-9]{40}$/;
 const HEX64=/^[a-f0-9]{64}$/;
 const only=(x,fields)=>x&&typeof x==='object'&&!Array.isArray(x)&&
   Object.keys(x).length===fields.length&&Object.keys(x).every(k=>fields.includes(k));
@@ -35,7 +37,58 @@ export const CONTROLLED_REVIEWER_PR=PR_NUMBER;
 export const CONTROLLED_REVIEWER_SHA=PR_SHA;
 export const CONTROLLED_REVIEWER_PUBLISH_RUN=PUBLISH_RUN;
 
-export function admitOriginalControlledReviewerTarget(params){
+const ADMISSION_FIELDS=['schema_version','kind','status','repository','issue',
+  'role','agent_id','task','pr_number','target_sha','base_sha_at_publication',
+  'publisher_run_id','publisher_attempt','publisher_intent_sha256',
+  'original_worker_run_id','native_checkpoint_commit_sha','expected_file',
+  'expected_file_sha256','expected_file_mode'];
+const CANONICAL_ADMISSION_IDENTITY=Object.freeze({
+  kind:'authenticated_reviewer_admission_only',
+  status:'await_native_reviewer',
+  agent_id:'review-cursor-01',
+});
+const REVIEWER_PROVIDERS=new Set(['cursor','claude-code']);
+// The reviewer identity is registry-owned, never caller- or model-supplied.
+// A second registered reviewer (Qwen) is therefore a first-class identity, not
+// a special case, and an unregistered/developer ID fails closed.
+export function resolveReviewerIdentity(agentId='review-cursor-01'){
+  const registry=JSON.parse(readFileSync('automation/agents/registry.json','utf8'));
+  const instance=registry.instances?.[agentId];
+  if(!instance||instance.role!=='reviewer'||!REVIEWER_PROVIDERS.has(instance.provider))
+    fail('unregistered reviewer identity');
+  return Object.freeze({agent_id:agentId,role:instance.role,provider:instance.provider});
+}
+// Consumers (Reviewer prompt/task/worker) must reject any task that did not
+// come from this exact builder; accepting a hand-built lookalike would let a
+// model or caller choose the reviewed target. The identity fields are
+// parameterized only for an explicitly-labeled smoke admission; the target,
+// file and Publisher facts are always the same authenticated #2176 facts.
+export function assertReviewerAdmission(task,identity=CANONICAL_ADMISSION_IDENTITY){
+  const expected={...CANONICAL_ADMISSION_IDENTITY,...identity};
+  if(!only(task,ADMISSION_FIELDS)||task.schema_version!==1||
+     task.kind!==expected.kind||task.status!==expected.status||
+     task.repository!==REPO||task.issue!==1997||
+     task.role!=='reviewer'||task.agent_id!==expected.agent_id||
+     task.task!=='review'||
+     task.pr_number!==PR_NUMBER||task.target_sha!==PR_SHA||
+     task.base_sha_at_publication!==ORIGINAL_MAIN_SHA||
+     !HEX40.test(task.target_sha??'')||
+     !HEX40.test(task.native_checkpoint_commit_sha??'')||
+     !HEX64.test(task.publisher_intent_sha256??'')||
+     !HEX64.test(task.expected_file_sha256??'')||
+     !Number.isSafeInteger(task.publisher_run_id)||task.publisher_run_id<=0||
+     !Number.isSafeInteger(task.publisher_attempt)||task.publisher_attempt<=0||
+     !Number.isSafeInteger(task.original_worker_run_id)||task.original_worker_run_id<=0||
+     task.expected_file!==FILE||task.expected_file_mode!==FILE_MODE)
+    fail('not an authenticated reviewer admission');
+  return task;
+}
+export function assertAuthenticatedReviewerAdmission(task){
+  return assertReviewerAdmission(task);
+}
+
+export function admitOriginalControlledReviewerTarget(params, reviewerAgentId='review-cursor-01'){
+  const reviewer=resolveReviewerIdentity(reviewerAgentId);
   if(!only(params,['publisherRun','ownerComment','pullRequest',
     'headCommit','files','treeEntry','storeIntent']))
     fail('unexpected source fields (model/Issue content cannot select a role)');
@@ -109,7 +162,7 @@ export function admitOriginalControlledReviewerTarget(params){
     schema_version:1,kind:'authenticated_reviewer_admission_only',
     status:'await_native_reviewer',
     repository:REPO,issue:1997,
-    role:'reviewer',agent_id:'review-cursor-01',task:'review',
+    role:'reviewer',agent_id:reviewer.agent_id,task:'review',
     pr_number:PR_NUMBER,
     target_sha:PR_SHA,
     base_sha_at_publication:intent.target_main_sha,
@@ -122,5 +175,5 @@ export function admitOriginalControlledReviewerTarget(params){
   };
   // Never claim a Reviewer action: only a future independently authenticated
   // Reviewer Workflow may return a schema-validated changes_requested/approved.
-  return Object.freeze(task);
+  return Object.freeze(assertReviewerAdmission(task,{agent_id:reviewer.agent_id}));
 }

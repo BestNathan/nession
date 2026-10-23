@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { TerminalPane } from '@/product/terminal/TerminalPane';
@@ -51,14 +51,30 @@ export function TerminalRegion({
     streamState,
     terminalControl,
     onTakeControl,
+    onTerminalGesture,
     inputDrop,
     dismissInputDrop,
-  } = useTerminalOrchestration({ onError });
+  } = useTerminalOrchestration({ onError, foreground: !hidden });
+
+  // A real gesture **inside the terminal grid** is a request to work here, and
+  // therefore to control the session (#2286). Pointer and key events on the
+  // surrounding chrome — the capsule, the observer bar, an overlay — are
+  // deliberately excluded: they are not terminal activation.
+  const handleTerminalGesture = (
+    event: ReactPointerEvent<HTMLDivElement> | ReactKeyboardEvent<HTMLDivElement>,
+  ) => {
+    const target = event.target;
+    if (target instanceof Element && target.closest('.xterm')) {
+      onTerminalGesture();
+    }
+  };
 
   return (
     <div
       data-testid="terminal"
       className={cn('flex min-h-0 flex-1 flex-col', hidden && 'hidden')}
+      onPointerDownCapture={handleTerminalGesture}
+      onKeyDownCapture={handleTerminalGesture}
     >
       {!sessionId ? (
         <div className={cn('flex min-h-0 flex-1 items-center justify-center text-muted-foreground', chromeSansRole('secondary'))}>

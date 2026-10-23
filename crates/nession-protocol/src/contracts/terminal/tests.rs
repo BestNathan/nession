@@ -347,3 +347,48 @@ fn resume_recovery_verdict_is_additive_and_legacy_response_stays_byte_identical(
         "unavailable"
     );
 }
+
+/// #2286: a recorded resize states the ControlLease generation that authorized
+/// it, so a client holding a newer lease can recognise the event as superseded
+/// without dropping its sequence number.
+#[test]
+fn a_recorded_resize_event_states_the_generation_that_authorized_it() {
+    let event = TerminalStreamEventPayload::Resize {
+        session_name: "work".to_string(),
+        stream_epoch: 9,
+        stream_seq: 4,
+        cols: 120,
+        rows: 40,
+        control_generation: Some(3),
+    };
+    let json = serde_json::to_string(&event).unwrap();
+    assert!(json.contains(r#""kind":"resize""#), "wire shape: {json}");
+    assert!(
+        json.contains(r#""control_generation":3"#),
+        "wire shape: {json}"
+    );
+    let back: TerminalStreamEventPayload = serde_json::from_str(&json).unwrap();
+    assert_eq!(back, event);
+}
+
+/// The addition is additive: a provider that recorded the event before the
+/// field existed replays a frame that a current client still accepts, and the
+/// absent field never appears as a null.
+#[test]
+fn a_replayed_resize_without_a_generation_keeps_the_old_wire_shape() {
+    let event = TerminalStreamEventPayload::Resize {
+        session_name: "work".to_string(),
+        stream_epoch: 9,
+        stream_seq: 4,
+        cols: 120,
+        rows: 40,
+        control_generation: None,
+    };
+    let json = serde_json::to_string(&event).unwrap();
+    assert!(
+        !json.contains("control_generation"),
+        "absent must stay absent: {json}"
+    );
+    let back: TerminalStreamEventPayload = serde_json::from_str(&json).unwrap();
+    assert_eq!(back, event);
+}

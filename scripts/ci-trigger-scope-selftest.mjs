@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import {prPaths} from './lib/workflow-pr-paths.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const sources = {};
@@ -17,25 +18,6 @@ for (const [name,filename] of Object.entries({
   scenario:'e2e-scenario-smoke.yml',
 })) sources[name] = fs.readFileSync(path.join(root,'.github/workflows',filename),'utf8');
 
-function prPaths(source) {
-  const lines = source.split('\n');
-  const start = lines.indexOf('  pull_request:');
-  assert.ok(start >= 0,'pull_request trigger missing');
-  let end = start+1;
-  while (end < lines.length && (!lines[end] || lines[end].startsWith('    '))) end++;
-  const group = lines.slice(start+1,end);
-  const i = group.findIndex(line=>line === '    paths:');
-  assert.ok(i>=0,'pull_request.paths missing');
-  const paths=[];
-  for(let j=i+1;j<group.length;j++){
-    const line=group[j];
-    if(line.startsWith('      #')||!line.trim())continue;
-    if(!line.startsWith('      - '))break;
-    paths.push(line.slice(8).replace(/^['"]|['"]$/g,''));
-  }
-  assert.ok(paths.length>0,'empty pull_request.paths');
-  return paths;
-}
 function classifier() {
   const lines=sources.quality.split('\n');
   const i=lines.indexOf('      - name: Select impacted checks from the exact PR diff');

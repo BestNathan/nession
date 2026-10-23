@@ -8,6 +8,7 @@ import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {createHash,randomBytes,randomUUID} from 'node:crypto';
 import {runClaudeCli,normalizeClaudeUsage} from './claude-code.mjs';
+import {qwenDeveloperModel,qwenGatewayEndpoint} from '../orchestration/qwen-developer-policy.mjs';
 import {sealClaudeNativeSession,openClaudeNativeSession,discoverClaudeNativeProject} from './claude-native-store.mjs';
 import {buildAgentWorkflowTelemetry,writeAgentWorkflowTelemetry} from '../../../agent-workflow-telemetry.mjs';
 
@@ -35,12 +36,13 @@ function version(){
   if(!match)fail('unrecognized Claude Code CLI version');
   return match[1];
 }
-function model(){
-  const v=process.env.ACCEPTANCE_CLAUDE_MODEL||process.env.ANTHROPIC_MODEL;
-  if(typeof v!=='string'||!/^qwen[a-z0-9._-]*$/i.test(v))
-    fail('explicit authorized Qwen model required; no Claude-model substitution');
-  return v;
+export function qwenNativeResumeModel(env=process.env){
+  // Native Resume must follow the same Environment model binding as the
+  // Developer Worker. A stale Acceptance alias cannot silently retarget it.
+  qwenGatewayEndpoint(env);
+  return qwenDeveloperModel(env);
 }
+const model=()=>qwenNativeResumeModel();
 function harness(sourceSha,cliVersion,requestedModel){
   return sha(JSON.stringify({schema_version:1,provider:'claude-code',backend:'qwen',
     source_sha:sourceSha,cli_version:cliVersion,model:requestedModel,

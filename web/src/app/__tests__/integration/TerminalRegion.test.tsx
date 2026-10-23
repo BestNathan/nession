@@ -1,10 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, act } from '@testing-library/react';
 import { Provider, createStore } from 'jotai';
 import { TerminalRegion } from '@/app/TerminalRegion';
 import { sessionIdAtom, attachInfoAtom } from '@/product/session/state';
 import { inputDropAtomFamily } from '@/product/terminal/state/ui';
 import type { ConnectionState } from '@/platform/socket/types';
+import { terminalServerApi } from '@/product/terminal/server';
 
 const { wsListeners, surfaceProps } = vi.hoisted(() => ({
   wsListeners: [] as Array<(state: ConnectionState) => void>,
@@ -95,6 +96,14 @@ function renderTerminal(hidden: boolean, store = createStore()) {
 describe('TerminalRegion', () => {
   beforeEach(() => {
     wsListeners.length = 0;
+    // The useWebSocket double models the already installed Server transport:
+    // it has no real PluginSurface install, so the singleton cannot compare
+    // its identity. Model that ownership explicitly while testing UI state.
+    // A separate two-real-socket test proves the production isBoundTo fence.
+    vi.spyOn(terminalServerApi, 'isBoundTo').mockReturnValue(true);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('toggles CSS hidden without unmounting the keep-alive root', () => {

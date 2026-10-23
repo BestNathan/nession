@@ -1,0 +1,142 @@
+name: Store / Publisher Review Ingest
+
+# #2255. Read-only producer plus a separate Store writer. The producer verifies
+# the pinned controlled publication through independent GitHub reads; the
+# writer mints the existing Store App only after that verified artifact exists.
+on:
+  workflow_run:
+    workflows: ["Store / Controlled Publisher"]
+    branches: [main]
+    types: [completed]
+  # The controlled publication predates this workflow and is pinned to its
+  # original Run/PR, so a one-shot owner wake is the activation path. The
+  # optional reviewer binds a registered Reviewer for this handoff only; the
+  # library validates it and records the change immutably.
+  workflow_dispatch:
+    inputs:
+      reviewer:
+        description: Optional registered Reviewer to bind at this handoff
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: store-publisher-review-ingest
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.ref == 'refs/heads/main' &&
+      github.run_attempt == 1 &&
+      (
+        (github.event_name == 'workflow_dispatch' && github.actor == 'BestNathan') ||
+        (github.event_name == 'workflow_run' &&
+         github.event.workflow_run.conclusion == 'success' &&
+         github.event.workflow_run.event == 'issue_comment' &&
+         github.event.workflow_run.head_branch == 'main' &&
+         github.event.workflow_run.actor.login == 'BestNathan' &&
+         github.event.workflow_run.repository.full_name == 'BestNathan/nession' &&
+         github.event.workflow_run.head_repository.full_name == 'BestNathan/nession')
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout trusted main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify deterministic ingest contracts
+        run: ./gates/run agent-provider-contract
+      - name: Verify the publication and emit the bounded readback
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node scripts/lib/agent/publisher/publication-ingest.mjs fetch \
+            --out "$RUNNER_TEMP/publisher-readback.json"
+      - name: Upload the verified readback
+        uses: actions/upload-artifact@v4
+        with:
+          name: publisher-publication-readback-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/publisher-readback.json
+          if-no-files-found: error
+          retention-days: 3
+
+  ingest:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout trusted main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Download the verified readback from this run
+        uses: actions/download-artifact@v4
+        with:
+          name: publisher-publication-readback-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/readback
+      - name: Mint repository-scoped Store App only after the readback exists
+        id: writer
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.RUN_STORE_WRITER_APP_ID }}
+          private-key: ${{ secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY }}
+          repositories: nession
+          permission-contents: write
+      - name: Apply the publication handoff through the canonical Store CAS
+        env:
+          STORE_APP_TOKEN: ${{ steps.writer.outputs.token }}
+          REVIEWER: ${{ inputs.reviewer }}
+        run: |
+          set -euo pipefail
+          test -n "$STORE_APP_TOKEN"
+          reviewer_args=()
+          if [[ -n "${REVIEWER:-}" ]]; then
+            [[ "$REVIEWER" =~ ^[a-z][a-z0-9-]{1,80}$ ]] || {
+              echo '::error::invalid reviewer id' >&2; exit 1;
+            }
+            reviewer_args=(--reviewer "$REVIEWER")
+          fi
+          export AGENT_STORE_REMOTE="https://x-access-token:${STORE_APP_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          node scripts/lib/agent/publisher/publication-ingest.mjs \
+            apply-store "$AGENT_STORE_REMOTE" \
+            "$RUNNER_TEMP/readback/publisher-readback.json" \
+            "${reviewer_args[@]}" \
+            > "$RUNNER_TEMP/ingest-result.json"
+          unset STORE_APP_TOKEN AGENT_STORE_REMOTE
+          jq -e '
+            (.version >= 17) and
+            (.target_sha | test("^[a-f0-9]{40}$")) and
+            (if .changed then
+               (.reviewer_action_id | test("^[a-f0-9]{64}$")) and
+               (.commit_sha | test("^[a-f0-9]{40}$"))
+             else .replayed == true end)
+          ' "$RUNNER_TEMP/ingest-result.json" > /dev/null
+          {
+            echo "## Publisher -> Reviewer Store handoff"
+            echo
+            echo "- Publication: PR #2176 at $(jq -r .target_sha "$RUNNER_TEMP/ingest-result.json")"
+            echo "- Store version: $(jq -r .version "$RUNNER_TEMP/ingest-result.json")"
+            echo "- Changed: $(jq -r .changed "$RUNNER_TEMP/ingest-result.json")"
+            echo "- Review action: $(jq -r .reviewer_action_id "$RUNNER_TEMP/ingest-result.json")"
+            echo "- Reviewer agent: $(jq -r .reviewer_agent_id "$RUNNER_TEMP/ingest-result.json")"
+            echo "- Verified agent-store commit: $(jq -r .commit_sha "$RUNNER_TEMP/ingest-result.json")"
+            echo
+            echo "No Reviewer was dispatched and no model ran."
+          } >> "$GITHUB_STEP_SUMMARY"

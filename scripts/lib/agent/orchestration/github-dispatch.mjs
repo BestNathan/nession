@@ -120,6 +120,42 @@ export function verifyDispatchTicket(ticket, keyring, {now=Date.now(),allowExpir
   }
   return parsed.body;
 }
+function dispatchInputs(body, ticket) {
+  // Each Agent workflow declares its own inputs. The reviewer workflow accepts
+  // only the reviewer identity and the action ID; the signed ticket stays on
+  // the plan (never as an undeclared input GitHub would reject).
+  if (body.role === 'reviewer') {
+    if (body.schema_version !== 1) reject('a Reviewer dispatch cannot resume a native Session');
+    return { action_id: body.action_id, reviewer: body.agent_id };
+  }
+  return { action_id: body.action_id, issue_number: String(body.issue),
+    agent_id: body.agent_id, task: body.task, input_sha: body.input_sha,
+    dispatch_ticket: ticket,
+    ...(body.schema_version === 2 ? { resume_from: Buffer.from(canonical(body.resume_from))
+      .toString('base64url') } : {}) };
+}
+function planTicket(plan) {
+  return plan?.ticket ?? plan?.inputs?.dispatch_ticket;
+}
+function planMatchesBody(plan, body, ticket) {
+  if (plan.workflow_id !== PROVIDERS[body.role].workflow) return false;
+  if (body.role === 'reviewer') {
+    return own(plan.inputs, ['action_id', 'reviewer']) &&
+      Object.keys(plan.inputs).length === 2 &&
+      plan.inputs.action_id === body.action_id &&
+      plan.inputs.reviewer === body.agent_id && body.schema_version === 1;
+  }
+  return plan.inputs.dispatch_ticket === ticket &&
+    plan.inputs.action_id === body.action_id &&
+    plan.inputs.issue_number === String(body.issue) &&
+    plan.inputs.agent_id === body.agent_id &&
+    plan.inputs.task === body.task &&
+    plan.inputs.input_sha === body.input_sha &&
+    (body.schema_version === 2 ?
+      plan.inputs.resume_from === Buffer.from(canonical(body.resume_from)).toString('base64url') :
+      !Object.hasOwn(plan.inputs, 'resume_from'));
+}
+
 export function planGitHubDispatch(state,actionId,registry,signer) {
   const {ticket,body}=issueDispatchTicket(state,actionId,registry,signer);
   const spec=PROVIDERS[body.role];
@@ -128,11 +164,7 @@ export function planGitHubDispatch(state,actionId,registry,signer) {
   // return HTTP 204 with NO downstream run ID.
   return {
     repository:REPOSITORY,workflow_id:spec.workflow,ref:'main',
-    return_run_details:true,
-    inputs:{action_id:body.action_id,issue_number:String(body.issue),agent_id:body.agent_id,
-      task:body.task,input_sha:body.input_sha,dispatch_ticket:ticket,
-      ...(body.schema_version===2?{resume_from:Buffer.from(canonical(body.resume_from))
-        .toString('base64url')}:{})},
+    return_run_details:true,ticket,inputs:dispatchInputs(body,ticket),
   };
 }
 
@@ -142,28 +174,30 @@ export function planGitHubDispatch(state,actionId,registry,signer) {
 // reconcile GitHub evidence and MUST NOT call workflow_dispatch a second time.
 export function prepareGitHubDispatch(state,actionId,registry,signer) {
   const plan=planGitHubDispatch(state,actionId,registry,signer);
-  const verified=verifyDispatchTicket(plan.inputs.dispatch_ticket,{
+  const ticket=planTicket(plan);
+  const verified=verifyDispatchTicket(ticket,{
     [signer.key_id]:signer.key,
   },{now:signer.now??Date.now()});
   const intent={status:'prepared',dispatch_id:actionId,
     issuer_run_id:verified.issuer_run_id,
-    ticket_sha256:createHash('sha256').update(plan.inputs.dispatch_ticket).digest('hex')};
+    ticket_sha256:createHash('sha256').update(ticket).digest('hex')};
   const prepared=recordDispatchIntent(state,state.version,actionId,intent);
   return {plan,prepared,intent};
 }
 export function verifyPersistedDispatchIntent({state,plan,keyring,now=Date.now()}) {
   validateDevelopmentState(state);
+  const ticket=planTicket(plan);
   if(!plan||plan.repository!==REPOSITORY||plan.ref!=='main'||
-      !plan.return_run_details||!plan.inputs)
+      !plan.return_run_details||!plan.inputs||typeof ticket!=='string')
     reject('invalid prepared dispatch plan');
-  const body=verifyDispatchTicket(plan.inputs.dispatch_ticket,keyring,{now});
+  const body=verifyDispatchTicket(ticket,keyring,{now});
   const action=state.outbox.find(x=>x.id===body.action_id);
   if(!action||action.status!=='dispatching'||action.task.type!=='dispatch'||
       action.receipt?.status!=='prepared'||
       action.receipt.dispatch_id!==body.action_id||
       action.receipt.issuer_run_id!==body.issuer_run_id||
       action.receipt.ticket_sha256!==
-        createHash('sha256').update(plan.inputs.dispatch_ticket).digest('hex')||
+        createHash('sha256').update(ticket).digest('hex')||
       action.task.role!==body.role||action.task.agent_id!==body.agent_id||
       action.task.task!==body.task||action.task.sha!==body.input_sha||
       state.assignments[body.role]!==body.agent_id||
@@ -174,15 +208,7 @@ export function verifyPersistedDispatchIntent({state,plan,keyring,now=Date.now()
         body.schema_version!==1)) {
     reject('dispatch intent not persisted at a newer Store state');
   }
-  if(plan.workflow_id!==PROVIDERS[body.role].workflow||
-      plan.inputs.action_id!==body.action_id||
-      plan.inputs.issue_number!==String(body.issue)||
-      plan.inputs.agent_id!==body.agent_id||
-      plan.inputs.task!==body.task||
-      plan.inputs.input_sha!==body.input_sha||
-      (body.schema_version===2?
-        plan.inputs.resume_from!==Buffer.from(canonical(body.resume_from)).toString('base64url'):
-        Object.hasOwn(plan.inputs,'resume_from'))) {
+  if(!planMatchesBody(plan,body,ticket)) {
     reject('plan diverges from persisted dispatch intent');
   }
   return Object.freeze({action_id:body.action_id,issuer_run_id:body.issuer_run_id,
@@ -217,23 +243,14 @@ export function createGitHubDispatchClient(token,{api='https://api.github.com',f
   }
   if (api!=='https://api.github.com') reject('unsupported dispatch API origin');
   return async function dispatch(plan) {
+    const ticket=planTicket(plan);
     if (!plan || plan.repository!==REPOSITORY || plan.ref!=='main' ||
         !plan.return_run_details || !Object.values(PROVIDERS).some(x=>x.workflow===plan.workflow_id) ||
-        !own(plan.inputs,['action_id','issue_number','agent_id','task','input_sha',
-          'dispatch_ticket','resume_from']) ||
-        ![6,7].includes(Object.keys(plan.inputs).length) ||
-        !HEX64.test(plan.inputs.action_id??'')) {
+        typeof ticket!=='string') {
       reject('invalid or unapproved GitHub dispatch plan');
     }
-    const body=verifyDispatchTicket(plan.inputs.dispatch_ticket,keyring,{now});
-    if (plan.workflow_id!==PROVIDERS[body.role].workflow ||
-        plan.inputs.action_id!==body.action_id ||
-        plan.inputs.issue_number!==String(body.issue) ||
-        plan.inputs.agent_id!==body.agent_id || plan.inputs.task!==body.task ||
-        plan.inputs.input_sha!==body.input_sha ||
-        (body.schema_version===2 ?
-          plan.inputs.resume_from!==Buffer.from(canonical(body.resume_from)).toString('base64url') :
-          Object.hasOwn(plan.inputs,'resume_from'))) {
+    const body=verifyDispatchTicket(ticket,keyring,{now});
+    if (!planMatchesBody(plan,body,ticket)) {
       reject('dispatch plan does not match the signed Outbox ticket');
     }
     const response=await fetchFn(api+'/repos/'+REPOSITORY+'/actions/workflows/'+

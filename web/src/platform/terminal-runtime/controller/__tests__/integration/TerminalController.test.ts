@@ -890,6 +890,71 @@ describe('TerminalController', () => {
     expect(transport.sendResize).not.toHaveBeenCalled();
   });
 
+  it('adopting control restates the measured viewport even when it was already sent (#2286)', async () => {
+    // While this client was an observer the pane could have been moved to
+    // another device's size. Adoption must therefore (a) forget the dedup
+    // baseline and (b) measure **now**, not reuse what it last stated — the
+    // two halves the PTY-follows-the-active-device contract turns on.
+    const restore = installCapturingResizeObserver();
+    try {
+      const transport = makeTransport();
+      const restateResize = vi.fn();
+      transport.restateResize = restateResize;
+      const controller = new TerminalController(makeSession(), () => transport);
+      controller.attach(host());
+      await flush(); // RAF fires → observe() captures the callback
+
+      const entry = {
+        contentRect: { width: 1024, height: 600 },
+      } as unknown as ResizeObserverEntry;
+      capturedCallback!([entry], capturedObserver!);
+      expect(transport.sendResize).toHaveBeenLastCalledWith(128, 37);
+      transport.sendResize.mockClear();
+
+      controller.adoptControl();
+
+      expect(restateResize).toHaveBeenCalledTimes(1);
+      expect(transport.sendResize).toHaveBeenCalledWith(128, 37);
+      expect(controller.terminal!.cols).toBe(128);
+      expect(controller.terminal!.rows).toBe(37);
+    } finally {
+      restore();
+    }
+  });
+
+  it('orders the adoption resize behind an unfinished parser write (#2286 SC-04)', async () => {
+    // A takeover can land while xterm is mid-parse. The discrete handoff must
+    // not mutate the buffer under output that was produced for the old grid;
+    // it waits for the parser callback, exactly like an authoritative resize.
+    const restore = installCapturingResizeObserver();
+    try {
+      const transport = makeTransport();
+      const controller = new TerminalController(makeSession(), () => transport);
+      controller.attach(host());
+      await flush();
+
+      const entry = {
+        contentRect: { width: 1024, height: 600 },
+      } as unknown as ResizeObserverEntry;
+      capturedCallback!([entry], capturedObserver!);
+
+      const parser = delayedParser(controller);
+      const resize = vi.spyOn(controller.terminal!, 'resize');
+      resize.mockClear();
+
+      transport.onOutput!(new Uint8Array([0x41]));
+      expect(parser.callbacks).toHaveLength(1);
+
+      controller.adoptControl();
+      expect(resize).not.toHaveBeenCalled();
+
+      parser.finish();
+      expect(resize).toHaveBeenCalledWith(128, 37);
+    } finally {
+      restore();
+    }
+  });
+
   it('sendResize notifies the transport without touching the xterm grid', () => {
     const transport = makeTransport();
     const controller = new TerminalController(makeSession(), () => transport);

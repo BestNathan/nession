@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url';
 const COMMANDS=new Map([['/audit','single'],['/audit tree','tree']]);
 const TRUSTED=new Set(['OWNER','MEMBER','COLLABORATOR']);
 const SHA=/^[a-zA-Z0-9][a-zA-Z0-9-]{0,38}$/;
-export function resolveAuditComment(event,repo,actor){
+export function resolveAuditComment(event,repo,actor,provider='cursor',environment='cursor'){
   if(!event||!repo||!actor||event.action!=='created')return null;
   if(event.repository?.full_name!==repo||!event.issue||
     event.issue.pull_request!=null||!Number.isSafeInteger(event.issue.number)||
@@ -20,10 +20,12 @@ export function resolveAuditComment(event,repo,actor){
     !TRUSTED.has(c.author_association))return null;
   const mode=COMMANDS.get(c.body);
   if(!mode)return null;
-  return {mode,issue_number:event.issue.number,provider:'cursor',comment_id:c.id};
+  return {mode,issue_number:event.issue.number,provider,environment,comment_id:c.id};
 }
 export function formatAuditOutputs(resolved){
   if(!resolved || !['single','tree'].includes(resolved.mode) ||
+    !['cursor','deepseek','qwen'].includes(resolved.provider) ||
+    !/^[a-z][a-z0-9-]{1,80}$/.test(resolved.environment ?? '') ||
     !Number.isSafeInteger(resolved.issue_number) || resolved.issue_number<=0)
     throw Error('invalid authorized Issue Audit routing payload');
   return Object.entries({...resolved,allow_agent:'true',authorized:'true'})
@@ -38,6 +40,11 @@ function main(){
     assert.match(outputs,/(^|\n)allow_agent=true\n/);
     assert.match(outputs,/(^|\n)mode=tree\n/);
     assert.match(outputs,/(^|\n)issue_number=1645\n/);
+    assert.match(outputs,/(^|\n)environment=cursor\n/);
+    assert.equal(resolveAuditComment(evt,'x/y','owner','qwen','dev-claude-qwen').environment,
+      'dev-claude-qwen');
+    assert.throws(()=>formatAuditOutputs({...resolveAuditComment(evt,'x/y','owner'),
+      provider:'unknown'}),/invalid authorized/);
     assert.throws(()=>formatAuditOutputs(null),/invalid authorized/);
     assert.throws(()=>formatAuditOutputs({...resolveAuditComment(evt,'x/y','owner'),issue_number:0}),/invalid authorized/);
     assert.throws(()=>formatAuditOutputs({...resolveAuditComment(evt,'x/y','owner'),mode:'all'}),/invalid authorized/);
@@ -60,7 +67,9 @@ function main(){
   }
   if(process.argv[2]!=='resolve')throw Error('usage: issue-audit-command.mjs resolve EVENT_PATH REPO ACTOR | self-test');
   const event=JSON.parse(fs.readFileSync(process.argv[3],'utf8'));
-  const resolved=resolveAuditComment(event,process.argv[4],process.argv[5]);
+  const resolved=resolveAuditComment(event,process.argv[4],process.argv[5],
+    process.env.ISSUE_AUDIT_PROVIDER_SELECTION || 'cursor',
+    process.env.ISSUE_AUDIT_ENVIRONMENT_SELECTION || 'cursor');
   if(!resolved){console.log('ignored-untrusted-or-noncommand');return;}
   const out=process.env.GITHUB_OUTPUT;
   if(!out)throw Error('GITHUB_OUTPUT missing');

@@ -14,19 +14,19 @@ on:
         required: true
         type: string
       developer:
-        description: 'Registered Developer ID'
-        required: true
-        default: dev-cursor-01
+        description: 'Optional registered Developer override (Qwen awaits #2274)'
+        required: false
+        default: ''
         type: string
       reviewer:
-        description: 'Registered Reviewer ID'
-        required: true
-        default: review-cursor-01
+        description: 'Optional registered Reviewer override (empty = GitHub default)'
+        required: false
+        default: ''
         type: string
       acceptor:
-        description: 'Registered Acceptor ID'
-        required: true
-        default: accept-cursor-01
+        description: 'Optional registered Acceptor override (empty = GitHub default)'
+        required: false
+        default: ''
         type: string
 
 permissions:
@@ -75,6 +75,10 @@ jobs:
               .repository_url == ("https://api.github.com/repos/" + env.GITHUB_REPOSITORY)
             ' >/dev/null
       - name: Export validated sanitized request (no Store private key)
+        env:
+          CONTROLLER_DEFAULT_DEVELOPER: ${{ vars.AGENT_DEFAULT_DEVELOPER }}
+          CONTROLLER_DEFAULT_REVIEWER: ${{ vars.AGENT_DEFAULT_REVIEWER }}
+          CONTROLLER_DEFAULT_ACCEPTOR: ${{ vars.AGENT_DEFAULT_ACCEPTOR }}
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/controller-request"

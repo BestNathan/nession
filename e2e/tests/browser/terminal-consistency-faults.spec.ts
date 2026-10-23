@@ -304,6 +304,15 @@ for (const mode of ['Relay', 'P2P'] as const) {
       await second.close();
     }
 
+    // #2286: the bootstrap client's attach was a foreground activation, so it
+    // took the lease; closing it released a holder that was not this page.
+    // Reclaim control with a real gesture before driving the Session again —
+    // a displaced client observes until it is activated.
+    await page.locator('.xterm').click();
+    await expect(page.getByTestId('terminal-observer-bar')).toHaveCount(0, {
+      timeout: 20_000,
+    });
+
     // The controller suppresses the PTY half of a resize while the webfont is
     // still loading (`metricsAreProvisional`), but still resizes the local
     // grid. Wait for the face before measuring, or the grid moves while the
@@ -516,18 +525,30 @@ test('two clients: a stalled observer never blocks the controller (#2144)', asyn
     await attachToSession(observer, sessionName, 'Relay');
     await waitForInteractiveShell(observer);
 
-    // SC-01: the controller's output reaches the observer, and the lease the
-    // Agent stated is visible as state — the view-only affordance — rather
-    // than inferred from the route (#2157).
-    await submitTerminalCommand(controller, `printf 'MULTI-%s-LIVE\\n' 2144`);
-    await expect.poll(async () => countInBuffer(observer, 'MULTI-2144-LIVE')).toBe(1);
-    await expect(observer.getByTestId('terminal-observer-bar')).toBeVisible();
-    await expect(controller.getByTestId('terminal-observer-bar')).toHaveCount(0);
+    // #2286 SC-02: opening the session's terminal on the second device is a
+    // meaningful foreground activation, so it becomes the Controller without
+    // an explicit Take control. The displaced client is the observer, and the
+    // lease is visible as state on both sides (#2157).
+    await expect(observer.getByTestId('terminal-observer-bar')).toHaveCount(0, { timeout: 20_000 });
+    await expect(controller.getByTestId('terminal-observer-bar')).toBeVisible({ timeout: 20_000 });
 
-    // SC-03: the observer's input and resize never reach the PTY. Its client
-    // knows it is the observer and refuses them locally; the Agent enforces
-    // the same rule. The controller's buffer and tty are the witnesses that
-    // neither attempt reached the shared session.
+    // Output still reaches both clients; the command comes from whoever holds
+    // the lease now, which the takeover above has already established.
+    await submitTerminalCommand(observer, `printf 'MULTI-%s-LIVE\\n' 2144`);
+    await expect.poll(async () => countInBuffer(controller, 'MULTI-2144-LIVE')).toBe(1);
+
+    // The retained manual fallback moves control back for the observer checks
+    // below: an explicit Take control is still how a displaced user seizes the
+    // session while the other device remains attached.
+    await controller.getByRole('button', { name: 'Take control' }).click();
+    await expect(controller.getByTestId('terminal-observer-bar')).toHaveCount(0, { timeout: 10_000 });
+    await expect(observer.getByTestId('terminal-observer-bar')).toBeVisible({ timeout: 10_000 });
+
+    // SC-03: the observer's input and passive viewport change neither reach
+    // the PTY nor move the lease. Its client knows it is the observer and
+    // refuses them locally; the Agent enforces the same rule. The controller's
+    // buffer and tty are the witnesses that neither attempt reached the shared
+    // session, and a resize is not a foreground activation (#2286).
     await submitTerminalCommand(observer, `printf 'OBSERVER-%s-INPUT\\n' 2144`);
     await expect.poll(async () => countInBuffer(controller, 'OBSERVER-2144-INPUT')).toBe(0);
     const controllerGrid = await readGrid(controller);
@@ -538,17 +559,27 @@ test('two clients: a stalled observer never blocks the controller (#2144)', asyn
       expect((await readGrid(observer)).cols).toBeGreaterThan(controllerGrid.cols);
     }).toPass({ timeout: 15_000 });
     await expectPtySize(controller, controllerGrid.cols, controllerGrid.rows);
+    await expect(observer.getByTestId('terminal-observer-bar')).toBeVisible();
 
-    // SC-02: acquiring control over the relay moves the lease, and both
-    // clients see it — the observer's bar leaves, the controller's appears,
-    // and acquiring back restores the original holder for the rest of the
-    // fixture.
-    await observer.getByRole('button', { name: 'Take control' }).click();
-    await expect(observer.getByTestId('terminal-observer-bar')).toHaveCount(0, { timeout: 10_000 });
-    await expect(controller.getByTestId('terminal-observer-bar')).toBeVisible({ timeout: 10_000 });
-    await controller.getByRole('button', { name: 'Take control' }).click();
-    await expect(controller.getByTestId('terminal-observer-bar')).toHaveCount(0, { timeout: 10_000 });
-    await expect(observer.getByTestId('terminal-observer-bar')).toBeVisible({ timeout: 10_000 });
+    // #2286 SC-02 PC → phone → PC: a real gesture on the observer's terminal
+    // takes the lease automatically, and the shared PTY follows *its measured*
+    // viewport — not the size the previous controller left behind. A gesture
+    // on the first client returns ownership and the PTY follows it back.
+    await observer.locator('.xterm').click();
+    await expect(observer.getByTestId('terminal-observer-bar')).toHaveCount(0, { timeout: 15_000 });
+    await expect(controller.getByTestId('terminal-observer-bar')).toBeVisible({ timeout: 15_000 });
+    const observerGrid = await readGrid(observer);
+    expect(observerGrid.cols).toBeGreaterThan(controllerGrid.cols);
+    await expectPtySize(observer, observerGrid.cols, observerGrid.rows);
+    // The displaced client follows the shared pane (#1095 observer behavior).
+    await expect
+      .poll(async () => readGrid(controller), { timeout: 15_000 })
+      .toEqual(observerGrid);
+
+    await controller.locator('.xterm').click();
+    await expect(controller.getByTestId('terminal-observer-bar')).toHaveCount(0, { timeout: 15_000 });
+    await expect(observer.getByTestId('terminal-observer-bar')).toBeVisible({ timeout: 15_000 });
+    await expectPtySize(controller, controllerGrid.cols, controllerGrid.rows);
 
     // SC-02: stall the observer's main thread — its socket stops draining —
     // and prove the controller still receives the burst's retained tail

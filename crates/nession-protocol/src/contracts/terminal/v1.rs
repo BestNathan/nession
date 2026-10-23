@@ -118,6 +118,20 @@ pub struct TerminalResizePayload {
     pub session_name: String,
     pub cols: u16,
     pub rows: u16,
+    /// The ControlLease generation this frame belongs to (#1095, #2286).
+    ///
+    /// Client → Agent: the lease the sender believes it holds. The Agent admits
+    /// the resize only when it still holds that exact generation, so a
+    /// debounced or delayed resize from a controller that has since been taken
+    /// over cannot move the shared pane.
+    ///
+    /// Agent → client on a **recorded** resize: the generation that authorized
+    /// the resize. A client that has since acquired a newer generation ignores
+    /// the frame: it describes a size chosen under a lease the session has
+    /// already left, and applying it after the new controller's own fit would
+    /// revert the grid until something resized again (#2286 SC-03). Absent on a
+    /// **level** frame (a tmux `%window-resize` echo, which no client requested)
+    /// and from providers built before this field existed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub control_generation: Option<u64>,
     /// Monotonic stream identity (#1094), present when this resize is an
@@ -283,6 +297,14 @@ pub enum TerminalStreamEventPayload {
         stream_seq: u64,
         cols: u16,
         rows: u16,
+        /// The generation that authorized the resize (#2286).
+        ///
+        /// Replay carries it for the same reason the live frame does: a stale
+        /// resize re-delivered while a newer controller owns the session must
+        /// not move that controller's grid. Absent only from a provider that
+        /// recorded the event before this field existed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        control_generation: Option<u64>,
     },
 }
 

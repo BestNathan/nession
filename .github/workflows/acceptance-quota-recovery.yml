@@ -1,6 +1,7 @@
 name: Acceptance / Quota Recovery
 
-# Reconcile failures stranded after a temporary GitHub API rate limit.
+# Reconcile failures stranded after a temporary GitHub API rate limit, and
+# deferred initial PR runs whose ready-transition wake was missed.
 # Bounded historical discovery; never fabricates an Acceptance verdict.
 on:
   schedule:

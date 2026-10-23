@@ -13,6 +13,7 @@ import { verifyWake } from './agent-evidence-waker.mjs';
 import {collectHistoricalRecovery,selfTestHistoricalRecovery} from './acceptance-telemetry-recovery-proof.mjs';
 import {collectWorkflowRegressions,selfTestRegressions} from './acceptance-telemetry-regression-proof.mjs';
 import {parseReplayDenialLog,attestReplayDenial,makeDenialReceipt,DENIAL_LOG_PREFIX} from './metrics-replay-denial-receipt.mjs';
+import { buildAgentWorkflowTelemetry, validateAgentWorkflowTelemetry, telemetryStoragePath } from './agent-workflow-telemetry.mjs';
 import {parsePolicyObservabilityLog,attestPolicyObservability,makePolicyObservabilityReceipt,
   POLICY_WORKFLOW,POLICY_WORKFLOW_NAME,POLICY_OBSERVE_JOB,POLICY_TRIGGER_EVENTS,
   POLICY_OBSERVABILITY_LOG_PREFIX} from './run-store-policy-observability-receipt.mjs';
@@ -34,6 +35,7 @@ import {collectVerifiedCiCostStudy,selfTestCiCostStudy} from './acceptance-ci-co
 import {collectPublicPagesObservation,selfTestPublicPagesObservation} from './acceptance-pages-deployment-receipt.mjs';
 import {collectPublicPagesE2E,selfTestPublicPagesE2E,shouldCollectPublicPagesE2E} from './acceptance-pages-e2e-readback.mjs';
 import {collectPublicWorkflowPublications,selfTestPublicWorkflowPublication,shouldCollectPublicWorkflowPublication} from './acceptance-pages-workflow-receipt.mjs';
+import {collectStagingAcrEvidence,shouldCollectStagingAcr,selfTestStagingAcrEvidence} from './acceptance-staging-acr-readback.mjs';
 import {collectDevelopmentReadback} from './acceptance-development-readback.mjs';
 import {selfTestDevelopmentReadback} from './acceptance-development-readback-selftest.mjs';
 import os from 'node:os';
@@ -69,6 +71,13 @@ export function parentEvidenceDiscovery(issue) {
   if(!Number.isSafeInteger(parent)||parent<=0||parent===Number(issue?.number))
     return null;
   return parent;
+}
+
+export function parentEvidenceEligible(contract) {
+  // A parent contributes only its own declared browser obligations; `none`,
+  // legacy/missing and invalid declarations have nothing to contribute and
+  // must not block the child's unrelated post-merge acceptance.
+  return Boolean(contract && !contract.errors?.length && contract.selectedIds?.length);
 }
 
 function requireText(value, label) {
@@ -149,7 +158,7 @@ function compactRuns(runs, expectedSha) {
   return retainedRuns(runs, expectedSha).runs.map(compactRun);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], historicalRecovery = null, historicalRegressions = null, exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], acceptanceRoutingProof = null, replayDenials = [], storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [], fullRegressionReceipts = [], verifiedCiCostStudy = null, historicalBrowserDesignProof = null, exactHeadStepsBySha = new Map(), batchReceiptsBySha = new Map(), ancestryReceipts = [], reuseComparison = null, publicPagesObservations = [], publicPagesE2EObservations = [], publicWorkflowPublications = [], developmentReadback = [] }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], historicalRecovery = null, historicalRegressions = null, exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], acceptanceRoutingProof = null, replayDenials = [], storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [], fullRegressionReceipts = [], verifiedCiCostStudy = null, historicalBrowserDesignProof = null, exactHeadStepsBySha = new Map(), batchReceiptsBySha = new Map(), ancestryReceipts = [], reuseComparison = null, publicPagesObservations = [], publicPagesE2EObservations = [], publicWorkflowPublications = [], developmentReadback = [], stagingAcrReadback = null, verifiedAgentTelemetryRecords = [] }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -183,7 +192,10 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     target_sha: sha,
     direct_runs: directRunsAtSha.runs.map(compactRun),
     direct_runs_dropped: directRunsAtSha.dropped,
+    ...(verifiedAgentTelemetryRecords.length
+      ? { verified_agent_telemetry_records: verifiedAgentTelemetryRecords } : {}),
     verified_development_checkpoint_readbacks: developmentReadback,
+    verified_staging_acr_readback: stagingAcrReadback,
     verified_public_pages_agent_observations: publicPagesObservations,
     verified_public_pages_e2e_observations: publicPagesE2EObservations,
     verified_public_pages_workflow_publications: publicWorkflowPublications,
@@ -320,6 +332,64 @@ export async function collectAuthenticatedReplayDenials(repo,sha,runs,
 // observability receipt from the trusted observe job's own log, the same
 // bounded way the replay denial above is attested. The receipt can only ever
 // support Pending — never Pass.
+export function collectVerifiedAgentTelemetryRecords({ metricsRoot, repo, sha, runs,
+  readdir = fs.readdirSync, readFile = fs.readFileSync } = {}) {
+  if (typeof metricsRoot !== 'string' || !fs.existsSync(metricsRoot)) return [];
+  const records = [];
+  const seen = new Set();
+  const workflowsRoot = path.join(metricsRoot, 'raw', 'workflows');
+  if (!fs.existsSync(workflowsRoot)) return [];
+  for (const run of (Array.isArray(runs) ? runs : []).slice(0, 200)) {
+    if (run?.head_sha !== sha || run?.status !== 'completed' || run?.conclusion !== 'success') continue;
+    const id = Number(run.id), attempt = Number(run.run_attempt);
+    if (!Number.isSafeInteger(id) || !Number.isSafeInteger(attempt)) continue;
+    for (const workflowId of readdir(workflowsRoot).sort()) {
+      const workflowDir = path.join(workflowsRoot, workflowId);
+      if (!fs.lstatSync(workflowDir).isDirectory()) continue;
+      for (const date of readdir(workflowDir).sort()) {
+        const dateDir = path.join(workflowDir, date);
+        if (!fs.lstatSync(dateDir).isDirectory()) continue;
+        for (const name of readdir(dateDir).sort()) {
+          if (!name.startsWith(id + '-' + attempt + '-') || !name.endsWith('.json')) continue;
+          const rel = path.posix.join('raw', 'workflows', workflowId, date, name);
+          if (seen.has(rel)) continue;
+          let record;
+          try { record = JSON.parse(readFile(path.join(dateDir, name), 'utf8')); }
+          catch { continue; }
+          try { validateAgentWorkflowTelemetry(record); } catch { continue; }
+          if (record.identity?.github_run_id !== id ||
+              record.identity?.github_run_attempt !== attempt ||
+              record.identity?.repository !== repo ||
+              record.identity?.github_workflow !== run.name ||
+              telemetryStoragePath(record) !== rel) continue;
+          seen.add(rel);
+          records.push({
+            kind: 'verified_agent_telemetry_record',
+            workflow_id: record.identity.workflow_id,
+            github_workflow: record.identity.github_workflow,
+            event: record.identity.event,
+            run_id: id,
+            attempt,
+            path: rel,
+            agent: record.agent ? {
+              provider: record.agent.provider, id: record.agent.id,
+              role: record.agent.role, model: record.agent.model,
+              prompt: record.agent.prompt,
+            } : null,
+            task: record.task ? {
+              id: record.task.id, type: record.task.type, issue: record.task.issue,
+              pr: record.task.pr ?? null, target_ref: record.task.target_ref ?? null,
+              action_id: record.task.action_id ?? null,
+            } : null,
+            result: record.result ?? null,
+          });
+        }
+      }
+    }
+  }
+  return records;
+}
+
 export async function collectStorePolicyObservability(repo,sha,runs,
   request=githubGet,getText=githubJobLog){
   if(repo!=='BestNathan/nession'||!/^[a-f0-9]{40}$/.test(sha)||
@@ -1205,6 +1275,18 @@ async function collectCommand(workspace, outFile) {
   const repo = requireText(process.env.GITHUB_REPOSITORY, 'GITHUB_REPOSITORY');
   const sha = execFileSync('git', ['-C', workspace, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   const directRuns = await workflowRunsForSha(repo, sha);
+  // Canonical Agent telemetry persisted by the trusted Metrics ingest is only
+  // valid when its identity matches this exact run/attempt/repository and its
+  // canonical storage path. The metrics branch is already checked out at
+  // provider-metrics by the acceptance workflow.
+  const verifiedAgentTelemetryRecords = collectVerifiedAgentTelemetryRecords({
+    metricsRoot: path.join(workspace, 'provider-metrics'), repo, sha, runs: directRuns,
+  });
+  // SC-04 reads independently attested GitOps, anonymous ACR and VPN/K8s
+  // source runs. No VPN/Kubernetes credentials enter the Acceptance Agent.
+  const stagingAcrReadback=shouldCollectStagingAcr(
+    process.env.ISSUE_NUMBER, process.env.ACCEPTANCE_STAGE, sha)
+      ? await collectStagingAcrEvidence({repo,sha,get:githubGet,getText:githubJobLog}) : null;
   const developmentReadback=await collectDevelopmentReadback({repo,
     issue:Number(process.env.ISSUE_NUMBER??0),stage:process.env.ACCEPTANCE_STAGE,
     targetSha:sha,workspace,get:githubGet,readLog:githubJobLog});
@@ -1410,14 +1492,14 @@ async function collectCommand(workspace, outFile) {
           if(parent?.number!==parentNumber||parent?.pull_request)
             throw Error('invalid related Issue provenance target');
           const contract=parseIssueE2E(parent.body,{requireDeclaration:true});
-          if(contract?.errors?.length||!contract?.selectedIds?.length)
-            throw Error('parent Issue lacks authenticated E2E obligations');
-          const proof=await collectLinkedIssueE2EEvidence(repo,parentNumber,githubGet,undefined,sha);
-          linkedIssueE2E.push(...proof.map(item=>({
-            ...item,behavior_owner_issue:parentNumber,
-            related_child_issue:Number(issueNumber),
-            relationship_provenance:'candidate parent only; source Plan and protected receipts remain authoritative',
-          })));
+          if(parentEvidenceEligible(contract)){
+            const proof=await collectLinkedIssueE2EEvidence(repo,parentNumber,githubGet,undefined,sha);
+            linkedIssueE2E.push(...proof.map(item=>({
+              ...item,behavior_owner_issue:parentNumber,
+              related_child_issue:Number(issueNumber),
+              relationship_provenance:'candidate parent only; source Plan and protected receipts remain authoritative',
+            })));
+          }
         }
       }
     }
@@ -1446,7 +1528,7 @@ async function collectCommand(workspace, outFile) {
       .concat(ancestryReceipts.flatMap(entry => entry.e2e_selected_run_receipts)),
     fullGateProvisionReceipts, selectedRunReceipts, targetPushE2eRuns });
   const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls,
-    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, historicalRecovery, historicalRegressions, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts, acceptanceRoutingProof, replayDenials, storePolicyObservability, ancestryRuns, acceptanceBatchReceipts, selectedRunReceiptsBySha, selectedRunReceipts, notRequiredRunReceiptsBySha, notRequiredRunReceipts, fullGateProvisionReceipts, fullRegressionReceipts, verifiedCiCostStudy, historicalBrowserDesignProof, exactHeadStepsBySha, batchReceiptsBySha, ancestryReceipts, reuseComparison, publicPagesObservations, publicPagesE2EObservations, publicWorkflowPublications, developmentReadback });
+    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, historicalRecovery, historicalRegressions, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts, acceptanceRoutingProof, replayDenials, storePolicyObservability, ancestryRuns, acceptanceBatchReceipts, selectedRunReceiptsBySha, selectedRunReceipts, notRequiredRunReceiptsBySha, notRequiredRunReceipts, fullGateProvisionReceipts, fullRegressionReceipts, verifiedCiCostStudy, historicalBrowserDesignProof, exactHeadStepsBySha, batchReceiptsBySha, ancestryReceipts, reuseComparison, publicPagesObservations, publicPagesE2EObservations, publicWorkflowPublications, developmentReadback, stagingAcrReadback, verifiedAgentTelemetryRecords });
   fs.writeFileSync(outFile, JSON.stringify(evidence, null, 2) + '\n');
   console.log(
     'collected acceptance CI evidence for ' + sha +
@@ -1456,6 +1538,7 @@ async function collectCommand(workspace, outFile) {
 }
 
 async function selfTest() {
+  selfTestStagingAcrEvidence();
   await selfTestDevelopmentReadback();
   selfTestPublicPagesObservation();
   selfTestPublicWorkflowPublication();
@@ -2267,6 +2350,52 @@ async function selfTest() {
     title:'Issue (#1702)',body:'Not a child'}),null);
   assert.equal(parentEvidenceDiscovery({number:1759,
     title:'Issue (#xyz)',body:'Child of #1702'}),null);
+  // A parent contributes evidence only when it owns declared obligations.
+  assert.equal(parentEvidenceEligible({errors:[],selectedIds:['terminal-attach']}),true);
+  assert.equal(parentEvidenceEligible({errors:[],selectedIds:[]}),false);
+  assert.equal(parentEvidenceEligible({errors:['missing declaration'],selectedIds:[]}),false);
+  assert.equal(parentEvidenceEligible(null),false);
+  // Canonical Agent telemetry is a receipt only when its identity and
+  // canonical storage path match the exact run/attempt at the target SHA.
+  const telemetryRoot=fs.mkdtempSync(path.join(os.tmpdir(),'agent-telemetry-evidence-'));
+  try {
+    const summary=buildAgentWorkflowTelemetry({
+      workflow_id:'agent-review',github_workflow:'Agent / Review',
+      github_run_id:39951010624,github_run_attempt:1,job:'review',
+      repository:'BestNathan/nession',event:'workflow_dispatch',
+      task:{id:'issue-1997-review',type:'review',issue:1997,pr:2176,
+        target_ref:'a'.repeat(40),action_id:'b'.repeat(64)},
+      agent:{provider:'claude-code',id:'review-qwen-01',role:'reviewer',
+        model:{id:'qwen3.7-plus'},status:'finished'},
+      result:{status:'review-approved'},
+    });
+    const rel=telemetryStoragePath(summary);
+    fs.mkdirSync(path.dirname(path.join(telemetryRoot,rel)),{recursive:true});
+    fs.writeFileSync(path.join(telemetryRoot,rel),JSON.stringify(summary,null,2)+'\n');
+    const run={id:39951010624,run_attempt:1,head_sha:'a'.repeat(40),status:'completed',
+      conclusion:'success',name:'Agent / Review'};
+    const collected=collectVerifiedAgentTelemetryRecords({metricsRoot:telemetryRoot,
+      repo:'BestNathan/nession',sha:'a'.repeat(40),runs:[run]});
+    assert.equal(collected.length,1);
+    assert.equal(collected[0].workflow_id,'agent-review');
+    assert.equal(collected[0].agent.id,'review-qwen-01');
+    assert.equal(collected[0].task.target_ref,'a'.repeat(40));
+    assert.equal(collected[0].path,rel);
+    assert.deepEqual(collectVerifiedAgentTelemetryRecords({metricsRoot:telemetryRoot,
+      repo:'attacker/nession',sha:'a'.repeat(40),runs:[run]}),[]);
+    assert.deepEqual(collectVerifiedAgentTelemetryRecords({metricsRoot:telemetryRoot,
+      repo:'BestNathan/nession',sha:'a'.repeat(40),runs:[{...run,conclusion:'failure'}]}),[]);
+    assert.deepEqual(collectVerifiedAgentTelemetryRecords({metricsRoot:telemetryRoot,
+      repo:'BestNathan/nession',sha:'a'.repeat(40),runs:[{...run,name:'Agent / Development'}]}),[]);
+    assert.deepEqual(collectVerifiedAgentTelemetryRecords({metricsRoot:path.join(telemetryRoot,'missing'),
+      repo:'BestNathan/nession',sha:'a'.repeat(40),runs:[run]}),[]);
+    const moved=path.join(telemetryRoot,'raw','workflows','agent-review','1999-01-01',
+      '39951010624-1-x.json');
+    fs.mkdirSync(path.dirname(moved),{recursive:true});
+    fs.writeFileSync(moved,JSON.stringify(summary,null,2)+'\n');
+    assert.equal(collectVerifiedAgentTelemetryRecords({metricsRoot:telemetryRoot,
+      repo:'BestNathan/nession',sha:'a'.repeat(40),runs:[run]}).length,1);
+  } finally { fs.rmSync(telemetryRoot,{recursive:true,force:true}); }
   assert.throws(() => normalizeCiEvidence({ targetSha: '' }), /targetSha is required/);
   // Real criteria select only pinned source SHA ancestors; unrelated report
   // logs cannot inject extra proof targets.

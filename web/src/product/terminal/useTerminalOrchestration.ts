@@ -28,6 +28,7 @@ import {
   type ReconnectBanner,
 } from '@/product/terminal/state/ui';
 import { useTerminalControlBridge } from '@/product/terminal/hooks/useTerminalControlBridge';
+import { useTerminalActivation } from '@/product/terminal/hooks/useTerminalActivation';
 
 function useSessionEnvSourcing(opts: {
   envRefs: EnvFileRef[];
@@ -106,12 +107,19 @@ export interface UseTerminalOrchestrationOptions {
   onError: (error: Error) => void;
   rendererType?: 'webgl' | 'canvas';
   scrollbackMode?: 'legacy' | 'local-buffer';
+  /**
+   * Whether the Terminal surface is the foreground surface for the selected
+   * session. Hidden surfaces stay attached; only a foreground one may take the
+   * ControlLease automatically (#2286).
+   */
+  foreground?: boolean;
 }
 
 export function useTerminalOrchestration({
   onError,
   rendererType = 'canvas',
   scrollbackMode = 'local-buffer',
+  foreground = true,
 }: UseTerminalOrchestrationOptions) {
   const [sessionId] = useAtom(sessionIdAtom);
   const [sessionName] = useAtom(sessionNameAtom);
@@ -162,7 +170,7 @@ export function useTerminalOrchestration({
     (snapshot?.forcedRelay ?? false) || attachInfo?.mode !== 'p2p' ? 'relay' : 'p2p';
   const controlSource = agentTerminalApi
     ?? (effectiveMode === 'relay' ? terminalServerApi : null);
-  const { control: terminalControl, takeControl } = useTerminalControlBridge(
+  const { control: terminalControl, takeControl, adoptControl } = useTerminalControlBridge(
     sessionName,
     controlSource,
   );
@@ -201,6 +209,30 @@ export function useTerminalOrchestration({
   // the viewport's layout-effect attach, which is what starts the first
   // `client.attach` this flag is read by.
   controllerRef.current = controller;
+
+  // Automatic takeover on meaningful foreground activation (#2286). The hook
+  // owns the triggers that are not a DOM gesture (open/attach, surface return,
+  // window focus, visibility); the composition adds the terminal-surface
+  // gesture. Adopting the lease is also what makes this client state its own
+  // measured viewport: the pane follows the active device, not the last packet.
+  const adoptViewport = useCallback(() => {
+    controllerRef.current?.adoptControl();
+  }, []);
+  const { onTerminalGesture } = useTerminalActivation({
+    sessionName,
+    foreground,
+    attached: terminalState === 'attached',
+    adoptControl,
+    onAdopted: adoptViewport,
+  });
+  // The retained manual fallback is a takeover too: it must state this
+  // client's measured viewport rather than leave the pane at the previous
+  // controller's size (#2286).
+  const takeControlAndAdopt = useCallback(async () => {
+    if (await takeControl()) {
+      adoptViewport();
+    }
+  }, [takeControl, adoptViewport]);
 
   const banner = useReconnectBanner({
     sessionId, terminalState, effectiveMode, serverConnection: relayServer,
@@ -246,7 +278,9 @@ export function useTerminalOrchestration({
     streamState: snapshot?.streamState ?? 'unavailable',
     fileOps,
     terminalControl,
-    onTakeControl: takeControl,
+    onTakeControl: takeControlAndAdopt,
+    /** A real pointer/key gesture on the terminal surface (auto takeover). */
+    onTerminalGesture,
     /**
      * Input this Session lost, for the surface to state (#1307 SC-09), and how
      * to put it away. The dismissal is the whole action: the bytes are already
