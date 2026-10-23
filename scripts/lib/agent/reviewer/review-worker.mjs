@@ -94,13 +94,22 @@ export function createClaudeReviewRunner({
         ANTHROPIC_DEFAULT_SONNET_MODEL: model },
     });
     if (proc.error || proc.status !== 0) {
-      // Safe diagnostics only: no raw model text, prompt or tool output.
+      // Safe diagnostics only: no raw model text, prompt or tool output. The
+      // CLI's own failure line is bounded and credential-redacted so a real
+      // activation error is diagnosable instead of a bare status code.
       const detail = [
         proc.error?.code ? 'spawn=' + proc.error.code : '',
         proc.signal ? 'signal=' + proc.signal : '',
         Number.isInteger(proc.status) ? 'status=' + proc.status : '',
       ].filter(Boolean).join(', ');
-      fail('restricted Claude Code CLI failed (' + (detail || 'no diagnostics') + ')');
+      const secret = [env.ANTHROPIC_AUTH_TOKEN, env.ANTHROPIC_API_KEY]
+        .filter((value) => typeof value === 'string' && value.length > 0);
+      let diagnostic = String(proc.stderr ?? '').split('\n')
+        .map((line) => line.trim()).filter(Boolean).slice(-3).join(' | ');
+      for (const value of secret) diagnostic = diagnostic.replaceAll(value, '[redacted]');
+      diagnostic = diagnostic.slice(0, 400);
+      fail('restricted Claude Code CLI failed (' + (detail || 'no diagnostics') +
+        (diagnostic ? ': ' + diagnostic : '') + ')');
     }
     const { events, envelope } = parseNativeEvents(proc.stdout);
     if (envelope.is_error === true) fail('Provider returned error');
