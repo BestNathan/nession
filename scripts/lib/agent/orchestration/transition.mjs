@@ -4,6 +4,9 @@ const SHA = /^[a-f0-9]{40}$/;
 const PHASES = new Set(['ready', 'review', 'repair', 'quality', 'acceptance', 'waiting-merge', 'post-merge-acceptance', 'done', 'blocked']);
 const OUTCOMES = {
   developer: new Set(['implementation_ready']),
+  // A publication is host-attested, never model-supplied: the caller proves the
+  // Publisher Run produced the exact PR head before offering this event.
+  publisher: new Set(['published']),
   reviewer: new Set(['approved', 'changes_requested']),
   quality: new Set(['passed', 'failed']),
   acceptance: new Set(['passed', 'failed', 'pending']),
@@ -38,6 +41,15 @@ export function advanceWorkflow(state, event, trusted, config = {}) {
   let actions;
   if (event.kind === 'developer' && event.outcome === 'implementation_ready' &&
       ['ready', 'repair'].includes(current.phase)) {
+    next.phase = 'review';
+    next.target_sha = event.target_sha;
+    actions = [{ type: 'dispatch', role: 'reviewer', task: 'review', sha: event.target_sha }];
+  } else if (event.kind === 'publisher' && event.outcome === 'published' &&
+      current.phase === 'ready' && current.target_sha == null) {
+    // The trusted provenance for a publication binds the Publisher Run to the
+    // published PR head, not to that Run's own main checkout SHA. The handoff
+    // policy therefore transitions to review only; it never infers a role or a
+    // second PR from the result.
     next.phase = 'review';
     next.target_sha = event.target_sha;
     actions = [{ type: 'dispatch', role: 'reviewer', task: 'review', sha: event.target_sha }];

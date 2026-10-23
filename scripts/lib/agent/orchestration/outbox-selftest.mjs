@@ -3,7 +3,7 @@ import { readFileSync, mkdtempSync, rmSync, mkdirSync, symlinkSync, writeFileSyn
 import os from 'node:os';
 import path from 'node:path';
 import { startDevelopment,recordDispatch,failedDispatch,acceptTaskResult,
-  reconcileOutbox,validateDevelopmentState } from './outbox.mjs';
+  acceptPublisherPublication,reconcileOutbox,validateDevelopmentState } from './outbox.mjs';
 import { readIssueWorkflowState, writeIssueWorkflowState,issueStatePath } from './state-store.mjs';
 import { advanceWorkflow } from './transition.mjs';
 
@@ -143,6 +143,67 @@ try {
   writeFileSync(badFile,'{"schema_version":1,"issue":1696}');
   assert.throws(()=>readIssueWorkflowState(folder,issue),/head target missing|digest mismatch|invalid state/);
 } finally {rmSync(folder,{recursive:true,force:true});}
+
+// #2252: a trusted publication retires the real #1997 v16 Developer proposal
+// chain (including the ordinal-3 resume #2137 forbids re-dispatching) and
+// enqueues exactly one Reviewer action bound to the published PR head.
+{
+  const fixture=JSON.parse(readFileSync(
+    'scripts/lib/agent/publisher/fixtures/1997-v16-state.json','utf8'));
+  const prHead='3d8e3807cc01f6082734b8d0ba458217c28f60a4';
+  const published={kind:'publisher',outcome:'published',issue:1997,
+    run_id:39609600546,run_attempt:1,target_sha:prHead};
+  const trusted={workflow_run_id:39609600546,attempt:1,issue:1997,
+    source_sha:prHead,role:'publisher'};
+  assert.equal(fixture.version,16);
+  assert.equal(fixture.phase,'ready');
+  const live=reconcileOutbox(fixture).pending;
+  assert.equal(live.length,1);
+  assert.ok(live[0].id.startsWith('fea8efa4'));
+  assert.throws(()=>acceptPublisherPublication(fixture,17,published,trusted,registry),
+    /stale state CAS/);
+  assert.throws(()=>acceptPublisherPublication(fixture,16,
+    {...published,next_role:'developer'},trusted,registry),/model cannot/);
+  assert.throws(()=>acceptPublisherPublication(fixture,16,published,
+    {...trusted,role:'developer'},registry),/authenticated publication/);
+  assert.throws(()=>acceptPublisherPublication(fixture,16,published,
+    {...trusted,source_sha:'f'.repeat(40)},registry),/authenticated publication|untrusted source provenance/);
+  const handed=acceptPublisherPublication(fixture,16,published,trusted,registry);
+  assert.equal(handed.version,17);
+  assert.equal(handed.phase,'review');
+  assert.equal(handed.target_sha,prHead);
+  assert.equal(handed.outbox.some(x=>x.id.startsWith('fea8efa4')),false);
+  const pending=reconcileOutbox(handed).pending;
+  assert.equal(pending.length,1);
+  assert.equal(pending[0].task.role,'reviewer');
+  assert.equal(pending[0].task.task,'review');
+  assert.equal(pending[0].task.sha,prHead);
+  assert.equal(pending[0].task.agent_id,fixture.assignments.reviewer);
+  // The failed historical run that is independent of the superseded chain
+  // remains live for audit; the chain's yielded ancestors and attested failed
+  // sibling are retired with it (immutable prior state versions keep them).
+  assert.equal(handed.outbox.some(x=>x.id.startsWith('95b467a9')),true);
+  assert.equal(handed.outbox.some(x=>x.id.startsWith('3f4abb86')),false);
+  assert.equal(acceptPublisherPublication(handed,handed.version,published,trusted,registry),handed);
+  assert.throws(()=>acceptPublisherPublication(handed,handed.version,
+    {...published,target_sha:'f'.repeat(40)},{...trusted,source_sha:'f'.repeat(40)},registry),
+    /conflicting publication replay/);
+  assert.throws(()=>acceptPublisherPublication(handed,handed.version,
+    {...published,run_id:39609600547,target_sha:'f'.repeat(40)},
+    {...trusted,workflow_run_id:39609600547,source_sha:'f'.repeat(40)},registry),
+    /ready proposal phase/);
+  const unknownReviewer={...fixture,assignments:{...fixture.assignments,reviewer:'review-ghost-01'}};
+  assert.throws(()=>acceptPublisherPublication(unknownReviewer,16,published,trusted,registry),
+    /role or ID is not registered/);
+  const inFlight=recordDispatch(fixture,16,live[0].id,{status:'accepted',dispatch_id:live[0].id});
+  assert.throws(()=>acceptPublisherPublication(inFlight,inFlight.version,published,trusted,registry),
+    /in-flight dispatch/);
+  const ambiguous={...fixture,outbox:[...fixture.outbox,{id:'2'.repeat(64),
+    task:{type:'dispatch',role:'developer',task:'implement',sha:'a'.repeat(40),
+      agent_id:'dev-cursor-01'},status:'pending',attempts:0,receipt:null}]};
+  assert.throws(()=>acceptPublisherPublication(ambiguous,16,published,trusted,registry),
+    /exactly one pending Developer proposal/);
+}
 
 const symlinkDir=mkdtempSync(path.join(os.tmpdir(),'agent-outbox-symlink-'));
 try {

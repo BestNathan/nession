@@ -92,6 +92,27 @@ assert.equal(state.phase, 'post-merge-acceptance');
 assert.equal(actions[0].when, 'merged');
 drive(event('acceptance', 'passed', 9, 'c'.repeat(40)));
 assert.equal(state.phase, 'done');
+// #2252: an authenticated publication is the deterministic proposal→review
+// handoff. It binds the exact published PR head and never replays.
+const publication = event('publisher', 'published', 10, 'e'.repeat(40));
+const publishAttest = (e) => ({ workflow_run_id: e.run_id, attempt: e.run_attempt,
+  role: 'publisher', issue: e.issue, source_sha: e.target_sha });
+const handoff = advanceWorkflow(null, publication, publishAttest(publication));
+assert.equal(handoff.state.phase, 'review');
+assert.equal(handoff.state.target_sha, 'e'.repeat(40));
+assert.deepEqual(handoff.actions, [{ type: 'dispatch', role: 'reviewer', task: 'review',
+  sha: 'e'.repeat(40) }]);
+assert.equal(advanceWorkflow(handoff.state, publication, publishAttest(publication)).duplicate, true);
+assert.throws(() => advanceWorkflow(null, { ...publication, target_sha: 'f'.repeat(40) },
+  publishAttest(publication)), /untrusted source provenance/);
+assert.throws(() => advanceWorkflow(null, { ...publication, next_role: 'developer' },
+  publishAttest(publication)), /model cannot/);
+assert.throws(() => advanceWorkflow(null, publication, { ...publishAttest(publication),
+  role: 'developer' }), /untrusted source provenance/);
+assert.throws(() => advanceWorkflow(null, { ...publication, outcome: 'yielded' },
+  publishAttest(publication)), /invalid event envelope/);
+assert.throws(() => advanceWorkflow(handoff.state, { ...publication, run_id: 11 },
+  publishAttest({ ...publication, run_id: 11 })), /illegal state transition/);
 assert.equal(authorizeCommentCommand('/agent review', 'write').role, 'reviewer');
 assert.throws(() => authorizeCommentCommand('/agent review', 'read'), /authority/);
 assert.throws(() => authorizeCommentCommand('/agent merge', 'write'), /unsupported/);
