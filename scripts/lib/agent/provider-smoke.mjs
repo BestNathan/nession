@@ -17,11 +17,11 @@ export function smokeContext(sha) {
     target_ref: sha,
     deployment: null,
     ci_evidence: null,
-    requirement_body: 'Synthetic fixture: the external deployment outcome is unknown. No positive or negative test, deployment, or CI evidence is supplied. This run must not update an Issue.',
+    requirement_body: 'Synthetic staging acceptance fixture: the selected target SHA and stage are applicable. There is no waiver, exclusion, or reason that this criterion is inapplicable. The outcome of its external deployment verification is unknown because no signed receipt, deployment observation, positive test, negative test, or CI evidence has been supplied. Missing evidence is not proof of fulfillment or disproof. This run must not update any Issue.',
     criteria: [{
       criterion: EXPECTED,
       stage: 'staging',
-      text: 'An external service has independently verified deployment of an isolated synthetic canary with a signed external receipt; the receipt and any independent observations are not available in this context.',
+      text: 'For this applicable staging target, an independent external service must attest deployment of the isolated synthetic canary with a signed receipt. Whether this verification happened is unknown: no receipt and no independent deployment observation are available in this context.',
     }],
   };
 }
@@ -55,6 +55,8 @@ export function verifySmoke({ context, result, telemetry, provider }) {
 
 export function selfTest() {
   const context = smokeContext('a'.repeat(40));
+  assert.match(context.requirement_body,/no waiver, exclusion, or reason that this criterion is inapplicable/);
+  assert.match(context.criteria[0].text,/Whether this verification happened is unknown/);
   const fixture = {
     context, provider: 'deepseek',
     result: { criteria: [{ criterion: EXPECTED, result: 'Pending', evidence: [], summary: 'No evidence supplied' }] },
