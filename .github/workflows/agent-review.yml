@@ -11,8 +11,8 @@ on:
     inputs:
       reviewer:
         description: Registered reviewer agent ID
-        required: true
-        default: review-qwen-01
+        required: false
+        default: ''
         type: string
       action_id:
         description: 64-hex Outbox reviewer action ID
@@ -53,17 +53,23 @@ jobs:
       - name: Resolve the registered reviewer environment
         id: identity
         env:
-          REVIEWER: ${{ inputs.reviewer }}
+          REVIEWER_OVERRIDE: ${{ inputs.reviewer }}
+          DEFAULT_REVIEWER: ${{ vars.AGENT_DEFAULT_REVIEWER }}
         run: |
           set -euo pipefail
-          [[ "$REVIEWER" =~ ^[a-z][a-z0-9-]*$ ]] || { echo '::error::invalid reviewer id' >&2; exit 1; }
-          node -e '
-            const registry = require("./automation/agents/registry.json");
-            const instance = registry.instances[process.argv[1]];
-            if (!instance || instance.role !== "reviewer") throw Error("unregistered reviewer");
-            process.stdout.write("environment=" + instance.environment + "\n");
-            process.stdout.write("reviewer=" + process.argv[1] + "\n");
-          ' "$REVIEWER" >> "$GITHUB_OUTPUT"
+          node scripts/lib/agent/default-routing-selftest.mjs
+          node --input-type=module -e '
+            import {readFileSync} from "node:fs";
+            import {resolveAgentDefault} from "./scripts/lib/agent/default-routing.mjs";
+            const registry=JSON.parse(readFileSync("automation/agents/registry.json","utf8"));
+            const identity=resolveAgentDefault(registry,"reviewer",{
+              configured:process.env.DEFAULT_REVIEWER,
+              override:process.env.REVIEWER_OVERRIDE,
+              legacy:"review-qwen-01"
+            });
+            process.stdout.write("environment="+identity.environment+"\\n");
+            process.stdout.write("reviewer="+identity.agent_id+"\\n");
+          ' >> "$GITHUB_OUTPUT"
       - name: Verify deterministic Reviewer contracts
         run: ./gates/run agent-provider-contract
       - name: Fetch the admitted PR commit (trusted read)
@@ -76,7 +82,7 @@ jobs:
       - name: Prepare the reviewer admission
         env:
           GH_TOKEN: ${{ github.token }}
-          REVIEWER: ${{ inputs.reviewer }}
+          REVIEWER: ${{ steps.identity.outputs.reviewer }}
         run: |
           set -euo pipefail
           node scripts/lib/agent/reviewer/prepare-admission.mjs \
