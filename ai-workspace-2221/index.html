@@ -670,31 +670,54 @@
     log('GOAL COMMIT BARRIER','表单已准备好；后端创建仍须用户明确提交');
   }
 
-  function localIntentModel(question, submittedState){
-    const q=question.trim().toLowerCase();
+  function localIntentModel(question,submittedState,space){
+    // Heuristic MOCK: it may choose only one currently exposed ActionCandidate.
+    const q=question.trim().toLowerCase(),eligible=space.eligible;
+    const choose=(intent,params={})=>eligible.some(c=>c.actionId===intent)?
+      {intent,params,confidence:.93}:{intent:'clarification.required',params:{},confidence:.4};
+    const hasOrdinal=/第一|第二|第三|第四|第\s*[1-4]|first|second|third|fourth/i.test(q);
     let agentId=resolveOrdinal(q);
-    if(!agentId){const names=agents.filter(a=>q.includes(a.name.toLowerCase()));if(names.length===1)agentId=names[0].id;}
-    if(/(打开|进入|attach|open)/.test(q)&&/(刚创建|刚才创建|刚才的|新建的|刚建的)/.test(q)&&/session|会话|终端/i.test(q)&&submittedState.lastConfirmedOutcome?.resource?.kind==='session')return {intent:'session.open',params:{sessionId:submittedState.lastConfirmedOutcome.resource.id},confidence:.96};
-    if(/(选择|选中|用这个|用第二|用第一|use the|select)/.test(q)&&agentId&&!/(创建|新建|create|new)/.test(q))
-      return {intent:'agent.select',params:{agentId},confidence:.97};
-    if(/(创建|新建|增加|create|new)/.test(q) && /(session|会话|终端|窗口)/.test(q))
-      return {intent:'session.create.open',params:{agentId:agentId||submittedState.selectedAgentId||null},confidence:.96};
-    if(/(查看|看看|显示|列出|打开|返回|回到|show|list|back to|open|有哪些|多少)/.test(q) && /(agent|节点|主机|机器)/.test(q))
-      return {intent:'agent.list.show',params:{scope:'all'},confidence:.98};
-    if(/(查看|看看|显示|列出|打开|返回|回到|show|list|back to|open|有哪些|多少)/.test(q) && /(session|会话)/.test(q))
-      return {intent:'session.list.show',params:{scope:'all'},confidence:.97};
-    if(agentId && /(创建|新建|create)/.test(q))
-      return {intent:'session.create.open',params:{agentId},confidence:.90};
-    if(/(agent|节点)/.test(q)&&!/(删除|remove|delete|kill)/.test(q))
-      return {intent:'agent.list.show',params:{scope:'all'},confidence:.81};
-    if(/(session|会话)/.test(q)&&!/(删除|remove|delete|kill)/.test(q))
-      return {intent:'session.list.show',params:{scope:'all'},confidence:.78};
-    return {intent:'clarification.required',params:{message:'此原型目前支持查看 Agent、查看 Session，以及创建 Session。'},confidence:.46};
+    if(!agentId){
+      const names=agents.filter(a=>q.includes(a.name.toLowerCase()));
+      if(names.length===1)agentId=names[0].id;
+    }
+    const create=/(创建|新建|增加|create|new|再创建)/i.test(q)&&/(session|会话|终端|窗口)/i.test(q);
+    if(/(打开|进入|attach|open)/.test(q)&&/(刚创建|刚才创建|刚才的|新建的|刚建的)/.test(q)&&/session|会话|终端/i.test(q)){
+      const match=eligible.find(c=>c.actionId==='session.open'&&c.target.resource?.id===submittedState.lastConfirmedOutcome?.resource?.id);
+      return match?{intent:'session.open',params:{sessionId:match.target.resource.id},confidence:.94}:choose('clarification.required');
+    }
+    if(create){
+      const matching=eligible.find(c=>c.actionId==='session.create.open'&&
+        (agentId?c.target.resource?.id===agentId:c.target.resource?.id===focused()?.selectedAgentId));
+      if(matching)return {intent:'session.create.open',params:{agentId:matching.target.resource?.id},confidence:.96};
+      if(eligible.some(c=>c.candidateId==='agent:create:again'))
+        return {intent:'session.create.open',params:{repeat:true},confidence:.95};
+      // Leaf not yet exposed: the only valid step is entering the Agent capability.
+      return choose('agent.list.show',{scope:'all'});
+    }
+    if(/(选择|选中|用这个|用第二|用第一|use the|select)/.test(q)||hasOrdinal){
+      const row=eligible.find(c=>c.actionId==='agent.select'&&c.target.resource?.id===agentId);
+      return row?{intent:'agent.select',params:{agentId},confidence:.96}:choose('clarification.required');
+    }
+    const view=/(查看|看看|显示|列出|返回|回到|show|list|有哪些|多少)/.test(q);
+    if(view&&/(agent|节点|主机|机器)/.test(q))return choose('agent.list.show',{scope:'all'});
+    if(view&&/(session|会话)/.test(q))return choose('session.list.show',{scope:'all'});
+    if(/(agent|节点)/.test(q))return choose('agent.list.show',{scope:'all'});
+    if(/(session|会话)/.test(q))return choose('session.list.show',{scope:'all'});
+    return {intent:'clarification.required',params:{},confidence:.36};
   }
-
   async function ask(question){
     if(!question.trim()||busy)return;
-    busy=true;setBusy(true);clarification='';state.currentQuestion=question;bump();
+    busy=true;setBusy(true);clarification='';state.currentQuestion=question;
+    if(/取消.*(目标|创建)|不创建了/.test(question)){
+      if(state.pendingGoal)state.pendingGoal.status='cancelled';
+      busy=false;setBusy(false);bump();render();return;
+    }
+    if(state.pendingGoal&&!['completed','cancelled'].includes(state.pendingGoal.status))
+      state.pendingGoal.status='suspended';
+    const newGoal=parseCreationGoal(question);
+    if(newGoal)state.pendingGoal=newGoal;
+    bump();
     const projection=structuredClone(snapshot()),space=deriveActionSpace();
     const plan=buildJevPlan(question,projection,space);
     latestQuestionPlan=plan;
@@ -712,14 +735,14 @@
       log('STALE MODEL RESULT','旧决策未覆盖当前 Scene');toast('过期推理已丢弃');return;
     }
     // Mock only: this heuristic substitutes for a Jev choice distribution; no remote inference.
-    const decision=localIntentModel(question,projection);
+    const decision=localIntentModel(question,projection,space);
     const allowed=plan.localCandidateMap.map(x=>({id:x.candidateId,action:space.all.find(c=>c.candidateId===x.candidateId)?.actionId}));
     const valid=decision.intent==='clarification.required'||allowed.some(x=>x.action===decision.intent);
     latestDecision={mock:true,judgment:'intent.resolve',chosen:decision.intent,candidateId:allowed.find(x=>x.action===decision.intent)?.id||'none',confidence:decision.confidence,accepted:valid,requestRevision:space.revision};
     state.lastDecision=valid?decision.intent:'clarification.required';bump();setBusy(false);
     log('SYSTEM ONE DECISION (MOCK)',state.lastDecision+' · confidence '+decision.confidence);
     if(!valid){clarification='当前意图不在已注册的合法动作空间中。';render();toast(clarification);return;}
-    if(decision.intent==='agent.list.show')activate('agent.list');
+    if(decision.intent==='agent.list.show'){activate('agent.list');if(state.pendingGoal?.status==='resolving')advancePendingGoal('entry-selected');}
     else if(decision.intent==='session.list.show')activate('session.list');
     else if(decision.intent==='session.create.open'){
       const id=decision.params.agentId;
@@ -727,7 +750,8 @@
         clarification='Agent 已离线，无法创建 Session。';render();toast(clarification);
       }else if(focused()?.type==='agent.list'&&!/单独|独立|新场景|新 scene|new scene/i.test(question)){
         openAgentCreateInline(id,'System One contextual intent');
-      }else activate('session.create',id||'all',{forceNew:/单独|独立|新场景|another/i.test(question)});
+        if(state.pendingGoal?.status==='resolving'){state.pendingGoal.status='awaiting_user_commit';state.pendingGoal.ownerSceneId=focused()?.id;bump();render();}
+      }else {clarification='当前页面未暴露独立创建入口，请先进入 Agent 并选择目标。';bump();render();}
     }else if(decision.intent==='session.open'){
       if(sessions.some(x=>x.id===decision.params.sessionId))openSession(decision.params.sessionId);
       else {clarification='最近确认的 Session 已不可用';bump();render();}
