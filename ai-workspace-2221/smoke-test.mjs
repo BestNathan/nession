@@ -135,4 +135,47 @@ await ask('一些不相关的输入');
 check('unknown intent clarifies without allocating a Scene', state().scenes.length === 2);
 // Restart the workspace and drive a high-level goal through newly exposed steps.
 dispatch('click', el('resetButton'), 'resetButton');
+
+await ask('在北京节点创建一个名叫 dev-test 的 Session');
+const g = state().pendingGoal;
+check('high-level goal enters Agent Scene, not a root SessionCreate action',
+  state().scenes.length === 1 && state().scenes[0].rootCapabilityId === 'agent.list');
+check('goal selects only a visible Agent row then its exposed Create action',
+  g?.steps?.[0]?.candidateId === 'agent:select:agent-bj-03' &&
+  g?.steps?.[1]?.candidateId === 'agent:selected:create');
+check('goal pauses at explicit form commit barrier with prefilled name',
+  g?.status === 'awaiting_user_commit' &&
+  state().scenes[0].activeView === 'session.create' &&
+  state().scenes[0].viewInstances[1].draft.hasName);
+check('nested Agent row actions retract when Create View is active',
+  !space().view.some(c => c.actionId === 'agent.select' || c.actionId === 'session.create.open') &&
+  space().view.some(c => c.actionId === 'session.create.submit' && c.eligibility === 'enabled'));
+check('goal did not auto-create any Session',
+  !state().lastConfirmedOutcome?.resource?.id?.endsWith('dev-test'));
+holdIntent = true;
+await ask('查看 Session 列表', false);
+check('late intent pending while form remains editable', pending.length === 1);
+dispatch('input', {id:'formName', value:'dev-test-manual'});
+holdIntent = false;
+pending.shift()();
+for (let i = 0; i < 15; i++) await Promise.resolve();
+check('form edit invalidates an older focus-changing System One decision',
+  decision().type === 'discarded' && state().scenes.length === 1);
+dispatch('submit', {id:'createSessionForm'});
+check('only explicit user submit creates the confirmed result',
+  state().lastConfirmedOutcome?.resource?.id === 'agent-bj-03:dev-test-manual');
+check('success retracts Create submit and reveals result-specific handoff',
+  !space().view.some(c => c.actionId === 'session.create.submit') &&
+  space().view.some(c => c.actionId === 'session.open' && c.target.resource?.id === 'agent-bj-03:dev-test-manual'));
+dispatch('click', el('resetButton'), 'resetButton');
+await ask('创建 Session');
+check('target-free create opens Agent entry but pauses for selection',
+  state().scenes.length === 1 &&
+  state().pendingGoal.status === 'awaiting_selection' &&
+  !space().view.some(c => c.actionId === 'session.create.open'));
+click({agentSelect:'agent-mac-02'});
+check('manual Agent selection resumes pending goal to Create form',
+  state().pendingGoal.status === 'awaiting_user_commit' &&
+  state().scenes[0].activeView === 'session.create');
+
 console.log('\nPASS: ' + count + ' local mock state/event checks. Browser and real-provider acceptance remain pending.');
