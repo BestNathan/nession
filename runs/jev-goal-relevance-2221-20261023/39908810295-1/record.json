@@ -1,0 +1,117 @@
+{
+  "schema_version": 1,
+  "trust": "untrusted-task-observation",
+  "provenance": "github-workflow-run-and-independent-exact-source",
+  "task_id": "jev-goal-relevance-2221-20261023",
+  "source_sha": "093b34b5c8c7bb392741272f756f2f25e9ef4ba0",
+  "source_digest": "d6b48b83b8e6c796aa425867c450aa3cb46f2cbed1032acd535133ec9df4c3e4",
+  "entry": "evaluate.mjs",
+  "workflow": {
+    "id": 39908810295,
+    "attempt": 1,
+    "url": "https://github.com/BestNathan/nession/actions/runs/39908810295",
+    "event": "push",
+    "branch": "task/jev-goal-relevance-2221-20261023",
+    "conclusion": "success"
+  },
+  "execution": {
+    "status": "Success",
+    "exit_code": 0,
+    "started_at": "2026-10-23T05:59:31.603Z",
+    "finished_at": "2026-10-23T05:59:32.423Z",
+    "result": {
+      "kind": "jev-progressive-relevance-evaluation",
+      "issue": 2221,
+      "model": "jev-1.13.0",
+      "liveCalls": 10,
+      "successes": 10,
+      "results": [
+        {
+          "name": "create-Beijing",
+          "expected": "entry:agents",
+          "actual": "entry:agents",
+          "hit": true,
+          "confidence": 1,
+          "latencyMs": 165
+        },
+        {
+          "name": "create-general",
+          "expected": "entry:agents",
+          "actual": "entry:agents",
+          "hit": true,
+          "confidence": 1,
+          "latencyMs": 71
+        },
+        {
+          "name": "create-Mac",
+          "expected": "entry:agents",
+          "actual": "entry:agents",
+          "hit": true,
+          "confidence": 1,
+          "latencyMs": 90
+        },
+        {
+          "name": "list-sessions",
+          "expected": "entry:sessions",
+          "actual": "entry:sessions",
+          "hit": true,
+          "confidence": 1,
+          "latencyMs": 57
+        },
+        {
+          "name": "list-agents",
+          "expected": "entry:agents",
+          "actual": "entry:agents",
+          "hit": true,
+          "confidence": 1,
+          "latencyMs": 65
+        },
+        {
+          "name": "nonsense-poem",
+          "expected": "none",
+          "actual": "none",
+          "hit": true,
+          "confidence": 0.95,
+          "latencyMs": 58
+        },
+        {
+          "name": "nonsense-food",
+          "expected": "none",
+          "actual": "none",
+          "hit": true,
+          "confidence": 0.98,
+          "latencyMs": 90
+        },
+        {
+          "name": "nonsense-math",
+          "expected": "none",
+          "actual": "none",
+          "hit": true,
+          "confidence": 1,
+          "latencyMs": 61
+        },
+        {
+          "name": "ambiguous",
+          "expected": "none",
+          "actual": "none",
+          "hit": true,
+          "confidence": 0.7,
+          "latencyMs": 58
+        },
+        {
+          "name": "return-help",
+          "expected": "entry:agents",
+          "actual": "entry:agents",
+          "hit": true,
+          "confidence": 0.88,
+          "latencyMs": 73
+        }
+      ],
+      "errors": [],
+      "note": "Routing fixture, no actual Nession mutations or SC acceptance."
+    }
+  },
+  "cleanup_on_success": true,
+  "acceptance_result": null,
+  "source_snapshot_path": "sources/093b34b5c8c7bb392741272f756f2f25e9ef4ba0/jev-goal-relevance-2221-20261023.json"
+}
