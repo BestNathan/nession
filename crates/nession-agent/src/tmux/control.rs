@@ -65,7 +65,7 @@ use super::parser::{decode_tmux_output, parse_control_line_bytes, ControlMessage
 const OUTPUT_CHANNEL_CAPACITY: usize = 256;
 
 /// A malformed or unbounded Control Mode line must never exhaust Agent memory.
-const MAX_CONTROL_LINE_BYTES: usize = 16 * 1024 * 1024;
+pub(crate) const MAX_CONTROL_LINE_BYTES: usize = 16 * 1024 * 1024;
 /// Bound the aggregate pre-capture replay buffer, not just its event count.
 const MAX_PRE_BARRIER_BYTES: usize = 2 * 1024 * 1024;
 /// Capture is a best-effort bootstrap; excessive history is a bounded fault.
@@ -810,7 +810,7 @@ impl ControlRouter {
 /// Only unparseable records with a known protocol tag are fatal. Unknown
 /// extension notifications remain forward compatible, and capture response
 /// bodies remain raw bytes (they are handled before this check).
-fn malformed_known_record(line: &[u8]) -> bool {
+pub(crate) fn malformed_known_record(line: &[u8]) -> bool {
     const KNOWN: [&[u8]; 8] = [
         b"%output",
         b"%begin",
@@ -836,7 +836,7 @@ fn strip_eol_bytes(line: &[u8]) -> &[u8] {
 
 /// Read the outer protocol framing as bounded raw bytes: %output need not be
 /// UTF-8 and must not be subjected to a String conversion (#2300).
-async fn read_control_line<R: AsyncBufRead + Unpin>(
+pub(crate) async fn read_control_line<R: AsyncBufRead + Unpin>(
     reader: &mut R,
     line: &mut Vec<u8>,
 ) -> std::io::Result<usize> {
