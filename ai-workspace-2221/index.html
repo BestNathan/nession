@@ -446,6 +446,7 @@
         add(action('standalone:submit','session.create','session.create.submit','mutation','提交创建',{target:{sceneId:s.id},eligibility:v?'enabled':'needs_input'}));
       }
     }
+    if(state.lastOperation?.sessionId && sessions.some(x=>x.id===state.lastOperation.sessionId))add(action('recent:session:open','session.open','session.open','handoff','打开刚创建的 Session',{target:{resource:{kind:'session',id:state.lastOperation.sessionId}}}));
     if(s?.type==='session.list')sessions.forEach(x=>add(action('session:open:'+x.id,'session.open','session.open','handoff','打开 '+x.name,{target:{sceneId:s.id,resource:{kind:'session',id:x.id}}})));
     return {
       revision:state.revision,registryVersion,
@@ -488,6 +489,7 @@
       suggested.map((x,i)=>'<button type="button" class="suggest-action '+(i===0?'primary':'')+'" data-action-candidate="'+escapeHtml(x.candidateId)+'">'+escapeHtml(x.label)+(i===0?' →':'')+'</button>').join('')+'</div></section>';
   }
   function performCandidate(id){
+    userInteractionEpoch++;
     const c=deriveActionSpace().all.find(x=>x.candidateId===id);
     if(!c||c.eligibility!=='enabled'){toast('这个动作已失效或当前不可用');return;}
     if(c.kind==='mutation'){toast('请在表单中明确提交，模型建议不自动执行');return;}
@@ -508,7 +510,7 @@
     let item=state.scenes.find(i=>i.key===key && !(opts.forceNew && i.status==='complete'));
     const reused=!!item;
     if(!item){
-      item={id:`scene-${++seq}`,type,key,title:({ 'agent.list':'Agent 列表','session.list':'Session 列表','session.create':'创建 Session','clarify':'需要进一步说明' })[type]||type,createdAt:Date.now(),status:'ready',facts:{},selectedAgentId:null,draft:{agentId:scope==='all'?(state.selectedAgentId||''):scope,name:''},result:null,flow:null};
+      item={id:`scene-${++seq}`,type,key,title:({ 'agent.list':'Agent 列表','session.list':'Session 列表','session.create':'创建 Session','clarify':'需要进一步说明' })[type]||type,createdAt:Date.now(),status:'ready',facts:{},selectedAgentId:null,draft:{agentId:scope==='all'?'':scope,name:''},result:null,flow:null};
       state.scenes.push(item);
     }
     state.activeSceneId=item.id;
@@ -582,11 +584,12 @@
     return null;
   }
   function openSession(id){
+    userInteractionEpoch++;
     const s=sessions.find(s=>s.id===id);if(!s)return;
     state.selectedSessionId=id;bump();log('SESSION OPEN',`切换到 ${s.name} · 普通模式示意`);setMode('standard');
   }
   function setMode(mode){
-    state.mode=mode;bump();$('aiMain').classList.toggle('hidden',mode!=='ai');$('standardPage').classList.toggle('hidden',mode!=='standard');
+    userInteractionEpoch++;state.mode=mode;bump();$('aiMain').classList.toggle('hidden',mode!=='ai');$('standardPage').classList.toggle('hidden',mode!=='standard');
     $('modeAI').setAttribute('aria-pressed',String(mode==='ai'));
     $('modeStandard').setAttribute('aria-pressed',String(mode==='standard'));
     if(mode==='standard')renderStandard();else render();
@@ -606,6 +609,7 @@
     const q=question.trim().toLowerCase();
     let agentId=resolveOrdinal(q);
     if(!agentId){const names=agents.filter(a=>q.includes(a.name.toLowerCase()));if(names.length===1)agentId=names[0].id;}
+    if(/(打开|进入|attach|open)/.test(q)&&/(刚创建|刚才创建|刚才的|新建的|刚建的)/.test(q)&&/session|会话|终端/i.test(q)&&submittedState.lastConfirmedOutcome?.resource?.kind==='session')return {intent:'session.open',params:{sessionId:submittedState.lastConfirmedOutcome.resource.id},confidence:.96};
     if(/(选择|选中|用这个|用第二|用第一|use the|select)/.test(q)&&agentId&&!/(创建|新建|create|new)/.test(q))
       return {intent:'agent.select',params:{agentId},confidence:.97};
     if(/(创建|新建|增加|create|new)/.test(q) && /(session|会话|终端|窗口)/.test(q))
@@ -659,6 +663,9 @@
       }else if(focused()?.type==='agent.list'&&!/单独|独立|新场景|新 scene|new scene/i.test(question)){
         openAgentCreateInline(id,'System One contextual intent');
       }else activate('session.create',id||'all',{forceNew:/单独|独立|新场景|another/i.test(question)});
+    }else if(decision.intent==='session.open'){
+      if(sessions.some(x=>x.id===decision.params.sessionId))openSession(decision.params.sessionId);
+      else {clarification='最近确认的 Session 已不可用';bump();render();}
     }else if(decision.intent==='agent.select'){
       setAgentSelected(decision.params.agentId);
       const list=state.scenes.find(i=>i.type==='agent.list');if(list)activateId(list.id);else activate('agent.list');
@@ -744,7 +751,8 @@
     if(!inspectorOpen)return;
     $('debugQuestionPlan').textContent=latestQuestionPlan?JSON.stringify(latestQuestionPlan,null,2):'暂无请求';
     $('debugActionSpace').textContent=JSON.stringify(deriveActionSpace(),null,2);
-    $('debugRanking').textContent=JSON.stringify(latestRecommendation||rankActions(deriveActionSpace()),null,2);
+    const rankSpace=deriveActionSpace();
+    $('debugRanking').textContent=JSON.stringify(latestRecommendation?.sourceRevision===rankSpace.revision?latestRecommendation:rankActions(rankSpace),null,2);
     $('debugRequest').textContent=latestRequest?JSON.stringify(latestRequest,null,2):'尚无请求';
     $('debugDecision').textContent=latestDecision?JSON.stringify(latestDecision,null,2):'尚无决策';
     $('debugState').textContent=JSON.stringify(snapshot(),null,2);
@@ -766,7 +774,7 @@
   $('debugOverlay').addEventListener('click',()=>openInspector(false));
   $('prevButton').addEventListener('click',()=>{const i=itemIndex();if(i>0)activateId(state.scenes[i-1].id);});
   $('nextButton').addEventListener('click',()=>{const i=itemIndex();if(i<state.scenes.length-1)activateId(state.scenes[i+1].id);});
-  $('resetButton').addEventListener('click',()=>{if(!confirm('清空 AI 工作区 Scene？这不会删除任何真实 Session。'))return;state.scenes=[];state.activeSceneId=null;state.selectedAgentId=null;activeSearch='';bump();render();log('RESET','清空了 UI 工作区 Scene（模拟）');});
+  $('resetButton').addEventListener('click',()=>{if(!confirm('清空 AI 工作区 Scene？这不会删除任何真实 Session。'))return;userInteractionEpoch++;state.scenes=[];state.activeSceneId=null;state.selectedAgentId=null;activeSearch='';bump();render();log('RESET','清空了 UI 工作区 Scene（模拟）');});
   document.addEventListener('keydown',e=>{
     if(e.key==='Escape'&&inspectorOpen){openInspector(false);return;}
     if(state.mode!=='ai'||!state.scenes.length||inspectorOpen)return;
