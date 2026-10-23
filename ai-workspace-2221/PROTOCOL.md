@@ -476,4 +476,41 @@ The HTML prototype must be runnable without credentials/network and expose:
 
 This is a **design artifact in the one shared orphan-history `prototype` branch**; no production code or CI changes. Do not merge the earlier draft implementation PR #2222 as evidence of this protocol. Required implementation steps: deterministic core unit cases, provider adapter with pinned real Jev fixture evaluation, GitHub Case catalog admission, source-aligned browser acceptance, then product authorization.
 
+## 12. Archived real Jev decision replay in the design prototype
+
+**Entry points:** open the top-bar **「真实测试回放」** control in [`index.html`](index.html), or follow [`index.html#jev-replay`](index.html#jev-replay) directly. A link is also exposed in the shared `prototype/index.html` gallery.
+
+The replay provides a **read-only interactive audit of past TypeSafe/Jev decisions**, not a live provider feature in the Workspace. It does not access Nession domain APIs, execute Task workflows or use `TYPESAFE_API_KEY`.
+
+The visible evidence flow is:
+
+```text
+Pinned .task/evaluate.mjs fixture
+  → GitHub Write+-gated Task Runner and scoped test credential
+  → POST /v1/systemone (jev-1.13.0) [historical run, not invoked during playback]
+  → trusted Task Result Ingest on task-results
+  → sanitized replay fixture (static JS)
+  → user opens one case: Goal → View State → Action Space → actual Choice → expected comparison
+```
+
+The currently embedded **32 separate actual provider decisions** come from:
+
+| Source Task Run | Strategy | Archived outcome |
+|---|---|---|
+| [#39907128502](https://github.com/BestNathan/nession/actions/runs/39907128502) | Initial decision fixtures | 10/12 matching expected |
+| [#39908609159](https://github.com/BestNathan/nession/actions/runs/39908609159) | Identical 5 scenarios, strict vs progressive prompts | 3/5 strict and 4/5 progressive |
+| [#39908810295](https://github.com/BestNathan/nession/actions/runs/39908810295) | Progressive with semantic relevance gate | 10/10 matching expected |
+
+[Data](jev-replay-data.js) contains sanitized output fields (selected candidate, confidence, elapsed HTTP-request time, expected answer; initial batch also retains raw Choice and expected probability) and bounded State/Action candidates reconstructed from the pinned Task source snapshots. [View controller](jev-replay.js) and [styles](jev-replay.css) are standalone; the interactive Workspace continues to use its **mock local intent resolver** and no real business effects.
+
+**Interpretation rules:**
+- Suite percentages represent **different, small hand-constructed test samples**. Do not treat them as a statistically controlled comparison or production System One accuracy.
+- The initial Session path illustration is a **sequence of different independent fixtures** arranged to explain UI transitions; **not one real end-to-end inference/session trace**.
+- A recorded Choice equivalent to `session.create.submit` is **a model selection only**, not permission to create a backend Session.
+- The replay never interpolates, guesses or re-infers missing provider outputs. A field not recorded in the Task output is labeled unavailable.
+- The Task source and archived results are linked from the replay. Actual confidential Secret bytes are never included.
+- The replay is a design-evidence visualization, not trustworthy implementation Acceptance of SC-03/SC-24/SC-34/SC-35.
+
+**Repeatable local checks:** `node ai-workspace-2221/jev-replay.test.mjs` (19 synthetic-DOM/schema checks) and `node ai-workspace-2221/smoke-test.mjs` (47 Workspace mock checks). Real Chromium/browser acceptance remains separate.
+
 References: [TypeSafe Jev official capabilities](https://typesafe-jev.com/en/capabilities/), [Issue #2221](https://github.com/BestNathan/nession/issues/2221), [Nession product model](https://github.com/BestNathan/nession/blob/main/docs/design/product-model.md).
