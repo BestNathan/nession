@@ -1,0 +1,147 @@
+{
+  "schema_version": 1,
+  "trust": "untrusted-task-observation",
+  "provenance": "github-workflow-run-and-independent-exact-source",
+  "task_id": "jev-goal-fsm-2221-20261023",
+  "source_sha": "bcc0a4afd978ea0027bd626b4605194adfaf8fe8",
+  "source_digest": "aa4c208e0da1403d1fc64ff1b6b272f24e86f644bef318f37864c5b4bb2f445a",
+  "entry": "evaluate.mjs",
+  "workflow": {
+    "id": 39908609159,
+    "attempt": 1,
+    "url": "https://github.com/BestNathan/nession/actions/runs/39908609159",
+    "event": "push",
+    "branch": "task/jev-goal-fsm-2221-20261023",
+    "conclusion": "success"
+  },
+  "execution": {
+    "status": "Success",
+    "exit_code": 0,
+    "started_at": "2026-10-23T05:57:16.934Z",
+    "finished_at": "2026-10-23T05:57:17.916Z",
+    "result": {
+      "kind": "jev-goal-fsm-comparison",
+      "issue": 2221,
+      "model": "jev-1.13.0",
+      "liveProviderCalls": 10,
+      "summary": [
+        {
+          "strategy": "baseline",
+          "completed": 5,
+          "correct": 3
+        },
+        {
+          "strategy": "progressive",
+          "completed": 5,
+          "correct": 4
+        }
+      ],
+      "results": [
+        {
+          "strategy": "baseline",
+          "case": "root-specific",
+          "expected": "entry:agents",
+          "selected": "none",
+          "correct": false,
+          "confidence": 0.33,
+          "elapsedMs": 203,
+          "tokens": 570
+        },
+        {
+          "strategy": "baseline",
+          "case": "root-generic",
+          "expected": "entry:agents",
+          "selected": "none",
+          "correct": false,
+          "confidence": 0.45,
+          "elapsedMs": 85,
+          "tokens": 556
+        },
+        {
+          "strategy": "baseline",
+          "case": "root-list",
+          "expected": "entry:sessions",
+          "selected": "entry:sessions",
+          "correct": true,
+          "confidence": 1,
+          "elapsedMs": 68,
+          "tokens": 562
+        },
+        {
+          "strategy": "baseline",
+          "case": "root-irrelevant",
+          "expected": "none",
+          "selected": "none",
+          "correct": true,
+          "confidence": 0.51,
+          "elapsedMs": 84,
+          "tokens": 563
+        },
+        {
+          "strategy": "baseline",
+          "case": "agent-selected",
+          "expected": "view:create",
+          "selected": "view:create",
+          "correct": true,
+          "confidence": 0.95,
+          "elapsedMs": 101,
+          "tokens": 574
+        },
+        {
+          "strategy": "progressive",
+          "case": "root-specific",
+          "expected": "entry:agents",
+          "selected": "entry:agents",
+          "correct": true,
+          "confidence": 0.92,
+          "elapsedMs": 73,
+          "tokens": 644
+        },
+        {
+          "strategy": "progressive",
+          "case": "root-generic",
+          "expected": "entry:agents",
+          "selected": "entry:agents",
+          "correct": true,
+          "confidence": 0.49,
+          "elapsedMs": 123,
+          "tokens": 630
+        },
+        {
+          "strategy": "progressive",
+          "case": "root-list",
+          "expected": "entry:sessions",
+          "selected": "entry:sessions",
+          "correct": true,
+          "confidence": 1,
+          "elapsedMs": 58,
+          "tokens": 635
+        },
+        {
+          "strategy": "progressive",
+          "case": "root-irrelevant",
+          "expected": "none",
+          "selected": "entry:agents",
+          "correct": false,
+          "confidence": 0.89,
+          "elapsedMs": 75,
+          "tokens": 637
+        },
+        {
+          "strategy": "progressive",
+          "case": "agent-selected",
+          "expected": "view:create",
+          "selected": "view:create",
+          "correct": true,
+          "confidence": 0.74,
+          "elapsedMs": 77,
+          "tokens": 647
+        }
+      ],
+      "errors": []
+    }
+  },
+  "cleanup_on_success": true,
+  "acceptance_result": null,
+  "source_snapshot_path": "sources/bcc0a4afd978ea0027bd626b4605194adfaf8fe8/jev-goal-fsm-2221-20261023.json"
+}
