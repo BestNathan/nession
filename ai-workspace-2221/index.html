@@ -475,9 +475,9 @@
     const criteria={};
     pool.forEach((c,i)=>{
       const entryAffordance=c.actionId==='agent.list.show'?
-        '进入 Agent 发现/选择节点；以后可以访问该节点的操作，当前不能执行内部操作':
+        '进入 Agent 能力发现并选择工作节点；选中节点后才可能逐步访问该节点上的 Session 创建等操作（当前尚不可执行）':
         c.actionId==='session.list.show'?
-        '进入 Session 列表，查看已有会话及其可用操作':
+        '进入 Session 列表，查看或打开已有会话（不是创建新会话）':
         c.label;
       criteria['c'+i]=c.actionId+' / '+entryAffordance+' / target='+JSON.stringify(c.target);
     });
@@ -489,7 +489,7 @@
         lastStep:projection.pendingGoal.steps?.at(-1)?.candidateId||null
       }:null,projection,actionSpaceRevision:space.revision,registryVersion},
       questions:{requested_action:{type:'choice',
-        instructions:'用户可能描述一个需要多个页面才能完成的最终目标。只在当前已暴露候选中选择一个能推动目标前进的下一步，可以先选择能力入口、发现资源或选择节点。不要因为最终创建动作尚未呈现就选 none，也不能选择未列出的未来动作。只有全部候选都无法推进目标、目标有歧义或必须等待数据时才选 none。模型选择不构成业务提交授权。',
+        instructions:'你控制 Nession 的渐进式工作界面。用户可能描述最终目标，需先打开能力入口、加载资源或选择目标。仅从当前候选中选择一个与目标有明确语义关系、确实能推进目标的安全下一步。新建 Session 应先进入 Agent 节点能力选择节点；严禁选择未暴露的深层动作，也不自动提交业务变更。先判断目标是否属于所列能力或其明确的前置操作。对于写诗、菜谱、数学等无关请求或歧义目标，必须选 none；不能仅因入口或许有帮助就选择它。',
         criteria}},
       localCandidateMap:pool.map((c,i)=>({choice:'c'+i,candidateId:c.candidateId}))
     };
