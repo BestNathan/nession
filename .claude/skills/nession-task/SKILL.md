@@ -12,7 +12,7 @@ This Skill owns the **one-time script lifecycle**, not product development, E2E 
 1. Permanent runner/tooling lives on `main`; ephemeral input lives **only** on `task/<id>` and is **never merged to main or staging**.
 2. One branch = one `.task/task.json` = one entry script. Only that manifest selects the executable. Never infer an entry from git diff, glob order, or arbitrary shell supplied through workflow inputs.
 3. Results/snapshots live only on the **separate orphan branch `task-results`**; do not put Task artifacts in `acceptance-results`.
-4. Untrusted task scripts run with `contents: read`, no repository write token, no production secrets, and no privileged deployment runtime. They may not close Issues, edit Success Criteria, or generate authoritative Acceptance Pass.
+4. All Task scripts run with `contents: read`, no repository write token and no privileged deployment runtime. **Optional allowlisted test credentials** are available only for tasks initiated by a GitHub-authenticated **Write+** repository collaborator/owner; others always run secretless. Task code still may not close Issues, edit Success Criteria, or generate authoritative Acceptance Pass.
 5. Only trusted `main` ingestion verifies pinned source/run metadata and appends records; uploaded task artifacts are untrusted input even if the Actions run is green.
 6. A failed Task is evidence of a failed execution, not a successful Acceptance Result. Always report exact SHA, run ID/attempt, and archival status.
 
@@ -44,6 +44,29 @@ Create `.task/task.json`:
 Create `.task/replay.mjs` (or a small module tree inside `.task/`). `entry` is a relative path inside `.task/`, **not** a shell command. The runner validates path containment, symlinks, file/size bounds, runtime and the pinned checkout SHA before execution. No dynamic URL, arbitrary action name, executable outside `.task/`, or inline script in Actions input is supported.
 
 Node entry scripts receive `TASK_ID`, `TASK_SOURCE_SHA`, `TASK_ARGS_JSON`, `TASK_OUTPUT_DIR`, and `TASK_RESULT_PATH`. Write a compact JSON object to `TASK_RESULT_PATH` for a structured result; logs are for diagnostics only. Never include credentials, private terminal buffers, tokens or unbounded logs in task results.
+
+### Optional trusted-submitter test Secret (initial policy)
+
+A Task that needs TypeSafe can **optionally** request the single currently allowlisted `TYPESAFE_API_KEY` in its manifest (no separate `trust: trusted` or manual approval flag):
+
+```json
+{
+  "schema_version": 1,
+  "id": "jev-2221-probe",
+  "runtime": "node24",
+  "entry": "probe.mjs",
+  "timeout_minutes": 10,
+  "cleanup_on_success": true,
+  "args": { "issue": 2221 },
+  "secrets": ["TYPESAFE_API_KEY"]
+}
+```
+
+The **main-owned** Task workflow checks the GitHub-authenticated `github.actor` (and `github.triggering_actor` on reruns) with the repository collaborator permission API. Only an approved **human actor with Write/Maintain/Admin** access may run a Task with the allowlisted Secret. Git commit `author`/`committer` strings, historical contributors and Task-declared trust flags are **never** proof of permission. No additional human approval occurs for authorized writers. Missing/unverifiable permission fails closed; a Task requesting secrets is rejected, not silently run without them. Bot identities are not trusted for credentialed Tasks under this initial policy.
+
+The workflow validates the exact source SHA, task ID and manifest **before** selecting the credentialed execution step. Plain Tasks are always secretless, including when pushed by a writer. The trusted runner forwards **only the explicitly requested allowlisted Secret** to the child process; no broad environment inheritance or elevated GitHub token. A requester with write permission is thereby trusted with the Secret, so only give Write permission to users you trust to use/export that credential. Use only disposable/test-grade credentials, never production/deploy secrets. The privileged task itself must avoid printing the Secret or writing it to artifacts.
+
+Task results, including authenticated-Task observations, remain **untrusted diagnostic evidence** under `task-results`; this is not SC Acceptance proof. This policy is intentionally narrow for initial TypeSafe experiments and can be revisited as needed.
 
 ## Execute automatically (normal path)
 
@@ -111,7 +134,7 @@ Never auto-delete a branch before the trusted evidence store is confirmed. The c
 
 - For regression verification against a running stack, prefer `e2e/scenarios` or source-aligned `e2e/acceptance/cases/<issue>/<SC>`; this Task mechanism does not replace their runtime and case contracts.
 - Permanent migrations, product fixes, reusable diagnostics or a test that should become a Gate must go through normal feature/fix PRs, not a `task/*` branch.
-- If a Task needs `issues: write`, network secrets, production access or branch mutation, split the script's read-only evidence collection from an existing trusted workflow. Do not add permissions to the untrusted runner.
+- If a Task needs `issues: write`, production/deployment credentials, or branch mutation, split its read-only observation from an existing trusted workflow. For allowlisted **test API keys only**, use the Write+ actor-gated `secrets` manifest contract above; do not elevate the Task's GitHub token.
 - Never report a Task result as Requirement Acceptance Pass. Use the `nession-acceptance` workflow and its deterministic updater to judge SCs.
 - Before deleting, verify exact Task ID, source SHA, Run ID/attempt, successful ingest and persisted source snapshot.
 

@@ -28,6 +28,12 @@ function fmt(n) {
   return Intl.NumberFormat('en-US', { notation: Math.abs(n) > 9999 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(n);
 }
 function pct(n) { return typeof n === 'number' && Number.isFinite(n) ? Math.round(n * 100) + '%' : 'N/A'; }
+function duration(ms) {
+  if (ms === null || ms === undefined || typeof ms !== 'number' || !Number.isFinite(ms)) return 'N/A';
+  if (ms < 1000) return Math.round(ms) + 'ms';
+  if (ms < 60000) return (ms / 1000).toFixed(1).replace(/\.0$/, '') + 's';
+  return (ms / 60000).toFixed(1).replace(/\.0$/, '') + 'm';
+}
 function date(n) { if (!n || Number.isNaN(Date.parse(n))) return 'Unavailable'; return new Date(n).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric', timeZone:'UTC' }); }
 function section(kicker, title, hint) {
   const wrapper = node('section', 'section');
@@ -110,8 +116,9 @@ function renderAgents(){
   const stats=section('OBSERVED USAGE','Work in numbers','7-day window · missing measurements are N/A, not zero.');
   stats.append(grid([metric('Agent runs',fmt(s.runs_7d),'workflow summary'),
     metric('Tokens',fmt(s.tokens_7d),'observed '+fmt(s.tokens_observed_runs)+' runs'),
+    metric('Agent duration',duration(s.duration_7d),'avg '+duration(s.duration_avg_7d)+' · observed '+fmt(s.duration_observed_runs)+' runs'),
     metric('Tool calls',fmt(s.tools_7d),'observed '+fmt(s.tools_observed_runs)+' runs'),
-    metric('Cost in USD',s.cost_7d===null?'Unobserved':'$'+fmt(s.cost_7d),'no estimation inferred')],'four'));root.append(stats);
+    metric('Cost in USD',s.cost_7d===null?'Unobserved':'$'+fmt(s.cost_7d),'observed '+fmt(s.cost_observed_runs)+' runs · no estimation')],'three'));root.append(stats);
   const summary30=section('OBSERVED TIME WINDOWS','7 days and 30 days','Canonical workflow totals · generated '+date(w.generated_at)+' · metrics revision '+(snapshot.source?.metrics_sha?.slice(0,12)||'unavailable'));
   summary30.append(grid([metric('7-day runs',fmt(s.runs_7d),'observed workflow runs'),metric('30-day runs',fmt(s.runs_30d),'observed workflow runs')],'two'));
   root.append(summary30);
@@ -409,13 +416,23 @@ function renderRepository(){
 }
 function renderEvidence(){
   root.append(pageHead('TRUST AND RECORDS','Evidence, not claims.','Run Stores keep the records behind engineering activity. Their existence does not prove append-only protection or independent integrity attestation.'));
-  const sectionEl=section('ORPHAN RUN STORES','Where evidence lives','Branch availability reflects a bounded read; integrity is a separate, stricter guarantee.');
-  sectionEl.append(grid((snapshot.evidence?.stores||[]).map(s=>{
-    const c=node('article','source-card');attach(c,node('div','eyebrow',s.name),
-      node('strong','',s.purpose),node('p','',s.state==='present'?'Ref observed':'Ref not verified / unavailable'),
-      node('p','', 'Integrity: not independently verified by this public site'));
-    if(s.state==='present')c.append(ext('View public branch  ↗',s.url));return c;
-  }),'two'));root.append(sectionEl);
+  const sectionEl=section('ORPHAN RUN STORES','Where evidence lives','Only existing public refs are inventoried. Counts are bounded read-only facts; integrity is a separate, stricter guarantee.');
+  const stores=snapshot.evidence?.stores||[];
+  if(!stores.length){
+    sectionEl.append(empty('No existing store refs observed','The bounded public read found no present store refs. This is not evidence that no records exist.'));
+  }else{
+    sectionEl.append(grid(stores.map(s=>{
+      const c=node('article','source-card');attach(c,node('div','eyebrow',s.name),
+        node('strong','',s.purpose),
+        node('p','', 'Ref observed · '+s.sha.slice(0,12)),
+        node('p','', 'Updated '+date(s.updated_at)+' · '+(s.freshness?.state||'unavailable')),
+        node('p','', 'Records '+(s.records===null?'unavailable':fmt(s.records))+(s.truncated?' · truncated':'')),
+        node('p','', 'Lineage: public '+s.name+' ref at '+s.sha.slice(0,12)),
+        node('p','', 'Integrity: not independently verified by this public site'));
+      c.append(ext('View public branch  ↗',s.url));return c;
+    }),'two'));
+  }
+  root.append(sectionEl);
   const caveat=section('PROVENANCE','Trust has boundaries','View the canonical requirements for writer authorization and integrity audits.');
   const p=node('div','panel');attach(p,node('p','', 'The current Pages build only shows branch metadata. Immutable records, authorized writers and signed independent anchors require their own live server-side evidence. This site never claims an audit passed merely because a ref exists.'),
     node('div','divider'),ext('Run Store governance — Issue #1690  ↗','https://github.com/BestNathan/nession/issues/1690'));caveat.append(p);root.append(caveat);

@@ -54,6 +54,9 @@ export function assessChangedPaths(paths) {
       components.add('web');
     } else if (/^e2e\//.test(p)) {
       components.add('e2e');
+    } else if (/^pages\//.test(p)) {
+      // The public Pages app is its own runtime/build component (#1782).
+      components.add('pages');
     } else if (/^\.github\/workflows\//.test(p)) {
       components.add('workflow');
     } else if (/^(scripts\/|gates\/|automation\/|Cargo\.|justfile$)/.test(p)) {
@@ -128,6 +131,10 @@ function selfTest() {
   assert.equal(assessChangedPaths(['crates/nession-agent/src/a.rs']).floor, VERIFICATION_TIERS[0]);
   assert.equal(assessChangedPaths(['crates/nession-agent/src/a.rs','web/src/App.tsx']).floor, VERIFICATION_TIERS[1]);
   assert.equal(assessChangedPaths(['.github/workflows/acceptance-cases.yml']).floor, VERIFICATION_TIERS[1]);
+  assert.equal(assessChangedPaths(['pages/scripts/build.mjs']).needsAudit, false);
+  assert.deepEqual(assessChangedPaths(['pages/scripts/build.mjs']).components,['pages']);
+  assert.equal(assessChangedPaths(['pages/scripts/build.mjs','e2e/helpers/pagesStandalone.ts']).floor,
+    VERIFICATION_TIERS[1]);
   assert.equal(assessChangedPaths(['unmapped/file']).needsAudit, true);
   assert.throws(() => assessChangedPaths([]), /unverified/);
   const parent = issue(1645, VERIFICATION_TIERS[2]);

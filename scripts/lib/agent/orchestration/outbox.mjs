@@ -250,6 +250,95 @@ export function acceptTaskResult(state, expectedVersion, result, source, registr
     ...advanced.state, schema_version:1, version, outbox:[...outbox,...spawned],
   });
 }
+// The live Outbox keeps one proposal chain per Developer. A trusted
+// publication retires that chain: the pending resume can never be dispatched
+// again (#2137), and every yielded ancestor plus any failed attested sibling
+// under it is pruned so no orphan continuation remains. The immutable prior
+// state versions written by state-store retain the full audit trail.
+function supersededProposalChain(state, pending) {
+  const removed = new Set([pending.id]);
+  let parentId = pending.task.continuation?.parent_action_id;
+  for (let i = 0; parentId && i < MAX_SLICES; i++) {
+    const parent = state.outbox.find(x => x.id === parentId);
+    if (!parent || removed.has(parent.id) || parent.status !== 'yielded')
+      reject('broken superseded Developer lineage');
+    removed.add(parent.id);
+    parentId = parent.task.continuation?.parent_action_id;
+  }
+  if (parentId) reject('exhausted superseded Developer lineage');
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const item of state.outbox) {
+      if (removed.has(item.id)) continue;
+      if (removed.has(item.task.continuation?.parent_action_id)) {
+        removed.add(item.id);
+        changed = true;
+      }
+    }
+  }
+  return removed;
+}
+
+// A publication is accepted only from an authenticated Publisher Run whose
+// observed PR head is the event target. It supersedes exactly one pending
+// Developer proposal and enqueues the single Reviewer dispatch selected by
+// advanceWorkflow; the caller cannot choose the next role.
+export function acceptPublisherPublication(state, expectedVersion, event, trusted, registry) {
+  validateDevelopmentState(state);
+  validateRegistry(registry);
+  if (expectedVersion !== state.version) reject('stale state CAS');
+  if (event?.kind !== 'publisher' || event?.outcome !== 'published' ||
+      !positive(event?.run_id) || !positive(event?.run_attempt) ||
+      !SHA.test(event?.target_sha ?? '') || event?.issue !== state.issue ||
+      trusted?.role !== 'publisher' || trusted?.workflow_run_id !== event.run_id ||
+      trusted?.attempt !== event.run_attempt || trusted?.issue !== event.issue ||
+      trusted?.source_sha !== event.target_sha) reject('authenticated publication required');
+  const prior = state.transitions.find(x => x.kind === 'publisher' &&
+    x.run_id === event.run_id && x.attempt === event.run_attempt);
+  if (prior) {
+    if (prior.target_sha !== event.target_sha || prior.outcome !== event.outcome ||
+        (prior.reviewer_agent_id ?? null) !== (event.reviewer_agent_id ?? null))
+      reject('conflicting publication replay');
+    return state; // the same authenticated publication is idempotent
+  }
+  if (state.phase !== 'ready' || state.target_sha != null)
+    reject('publication requires the ready proposal phase');
+  if (state.outbox.some(x => ['dispatching', 'dispatched'].includes(x.status)))
+    reject('publication cannot race an in-flight dispatch');
+  const proposals = state.outbox.filter(x =>
+    x.status === 'pending' && x.task.type === 'dispatch' && x.task.role === 'developer');
+  if (proposals.length !== 1) reject('exactly one pending Developer proposal is required');
+  if (state.outbox.some(x =>
+    x.status === 'pending' && x.task.type === 'dispatch' && x.task.role === 'reviewer'))
+    reject('a Reviewer action is already pending');
+  if (event.reviewer_agent_id != null) {
+    const replacement = registry.instances?.[event.reviewer_agent_id];
+    if (typeof event.reviewer_agent_id !== 'string' || !replacement ||
+        replacement.role !== 'reviewer')
+      reject('replacement reviewer is not a registered reviewer');
+    resolveIdentity(registry, event.reviewer_agent_id, 'review', replacement.environment);
+    if (state.assignments.reviewer === event.reviewer_agent_id)
+      reject('replacement reviewer is already assigned');
+  }
+  const advanced = advanceWorkflow(state, event, trusted);
+  if (advanced.duplicate) reject('duplicate publication event');
+  const superseded = supersededProposalChain(state, proposals[0]);
+  const version = state.version + 1;
+  const outbox = advanced.state.outbox.filter(x => !superseded.has(x.id));
+  if (outbox.length + advanced.actions.length > MAX_OUTBOX) reject('outbox size limit exceeded');
+  const assignments = advanced.state.assignments ?? state.assignments;
+  const spawned = advanced.actions.map((action, index) => {
+    const entry = makeAction(state.issue, version, action, assignments, index);
+    if (entry.task.type === 'dispatch') {
+      boundRole(registry, entry.task.agent_id, entry.task.role, entry.task.task);
+    }
+    return entry;
+  });
+  return validateDevelopmentState({
+    ...advanced.state, schema_version: 1, version, outbox: [...outbox, ...spawned],
+  });
+}
 // Persist this transition *before* any non-idempotent workflow_dispatch API
 // call. A crash after GitHub accepts but before its HTTP response is ambiguous:
 // reconciliation must authenticate the original downstream Run, NEVER replay

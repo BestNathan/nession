@@ -44,8 +44,11 @@ jobs:
       issue_numbers: ${{ steps.discover.outputs.issue_numbers }}
       has_requirements: ${{ steps.discover.outputs.has_requirements }}
       head_sha: ${{ steps.context.outputs.head_sha }}
-      quality_run_id: ${{ steps.quality.outputs.run_id }}
-      e2e_run_id: ${{ steps.e2e.outputs.run_id }}
+      # ready | waiting | blocked | superseded | error. Only `ready` may run
+      # the evaluator; `waiting|superseded` defer without a failure verdict.
+      admission: ${{ steps.admission.outputs.state }}
+      quality_run_id: ${{ steps.barrier.outputs.quality_run_id }}
+      e2e_run_id: ${{ steps.barrier.outputs.e2e_run_id }}
     steps:
       # pull_request_target is credentialed. Always execute trusted main tooling;
       # never checkout or execute PR-head code in this orchestration job.
@@ -84,60 +87,91 @@ jobs:
             echo "has_requirements=false" >> "${GITHUB_OUTPUT}"
           fi
 
-      - name: Check completed Quality Gate on exact PR head
-        id: quality
+      - name: Classify exact-head source barrier
+        id: barrier
         if: steps.discover.outputs.has_requirements == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         shell: bash
         run: |
           set -euo pipefail
-          # One bounded snapshot check only: workflow_run events later replay
-          # failed Acceptance jobs when source workflows finish.
-          runs="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci-quality.yml \
-            --commit "$HEAD_SHA" --event pull_request --limit 20 \
-            --json databaseId,status,conclusion)"
-          run="$(jq -c '.[0] // empty' <<< "$runs")"
-          [[ -n "$run" ]] || { echo "::error::Quality Gate has not completed; awaiting workflow_run reconciliation"; exit 1; }
-          status="$(jq -r .status <<< "$run")"
-          result="$(jq -r '.conclusion // ""' <<< "$run")"
-          [[ "$status" == completed && "$result" == success ]] || {
-            echo "::error::Quality Gate not yet verified success for $HEAD_SHA (state=$status, result=$result)"; exit 1;
-          }
-          run_id="$(jq -r .databaseId <<< "$run")"
-          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          # Applicability is read from each source workflow's own
+          # pull_request.paths. An absent run is `waiting` only when the exact
+          # diff is applicable; a filtered-out source is explicit not-required.
+          # No inference may turn an absent run into a Pass.
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" > "$RUNNER_TEMP/pr.json"
+          changed_files="$(jq -r '.changed_files // empty' "$RUNNER_TEMP/pr.json")"
+          [[ "$changed_files" =~ ^[0-9]+$ ]] || { echo "::error::Cannot read PR changed-file count"; exit 1; }
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files?per_page=100" --paginate \
+            | jq -s 'add // [] | map(.filename) | unique' > "$RUNNER_TEMP/pr-files.json"
+          listed="$(jq length "$RUNNER_TEMP/pr-files.json")"
+          [[ "$listed" =~ ^[0-9]+$ ]] || { echo "::error::Cannot read PR changed-file list"; exit 1; }
+          truncated=false
+          if (( changed_files > listed )); then truncated=true; fi
+          applicability="$(node scripts/acceptance-source-applicability.mjs classify \
+            "$RUNNER_TEMP/pr-files.json" --truncated="$truncated")"
+          echo "Source applicability: $applicability"
+          for workflow in ci-quality.yml e2e-tests.yml; do
+            file="$(basename "$workflow" .yml)"
+            gh run list --repo "$GITHUB_REPOSITORY" --workflow "$workflow" \
+              --commit "$HEAD_SHA" --event pull_request --limit 20 \
+              --json databaseId,headSha,event,status,conclusion \
+              > "$RUNNER_TEMP/$file-runs.json"
+          done
+          verdict="$(node scripts/acceptance-dependency-state.mjs classify \
+            "$RUNNER_TEMP/ci-quality-runs.json" "$RUNNER_TEMP/e2e-tests-runs.json" "$HEAD_SHA" \
+            --quality-applicable="$(jq -r .quality <<< "$applicability")" \
+            --e2e-applicable="$(jq -r .e2e <<< "$applicability")")"
+          state="$(jq -r .state <<< "$verdict")"
+          echo "state=$state" >> "$GITHUB_OUTPUT"
+          case "$state" in
+            ready)
+              echo "quality_run_id=$(jq -r '.quality.run_id // ""' <<< "$verdict")" >> "$GITHUB_OUTPUT"
+              echo "e2e_run_id=$(jq -r '.e2e.run_id // ""' <<< "$verdict")" >> "$GITHUB_OUTPUT"
+              ;;
+            waiting|superseded)
+              # Deferred, not failed: no evaluator, Agent, or verdict runs.
+              # The defer job cancels this run so the event never reports a
+              # passing acceptance gate; the trusted source-completion waker
+              # replays this exact run when exact-head evidence is ready.
+              echo "::notice::Acceptance deferred: $verdict"
+              echo "Acceptance deferred: $verdict" >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            blocked)
+              echo "::error::Acceptance source already failed at the exact PR head: $verdict"
+              exit 1
+              ;;
+            *) echo "::error::Unrecognized acceptance source barrier state: $state"; exit 1 ;;
+          esac
 
-      - name: Check completed E2E Tests on exact PR head
-        id: e2e
-        if: steps.discover.outputs.has_requirements == 'true'
+      - name: Record pre-merge admission
+        id: admission
+        if: always() && steps.discover.outcome == 'success'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        shell: bash
+          HAS_REQUIREMENTS: ${{ steps.discover.outputs.has_requirements }}
+          BARRIER_STATE: ${{ steps.barrier.outputs.state }}
         run: |
           set -euo pipefail
-          # One bounded snapshot check only: workflow_run events later replay
-          # failed Acceptance jobs when source workflows finish.
-          runs="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow e2e-tests.yml \
-            --commit "$HEAD_SHA" --event pull_request --limit 20 \
-            --json databaseId,status,conclusion)"
-          run="$(jq -c '.[0] // empty' <<< "$runs")"
-          [[ -n "$run" ]] || { echo "::error::E2E Tests has not completed; awaiting workflow_run reconciliation"; exit 1; }
-          status="$(jq -r .status <<< "$run")"
-          result="$(jq -r '.conclusion // ""' <<< "$run")"
-          [[ "$status" == completed && "$result" == success ]] || {
-            echo "::error::E2E Tests not yet verified success for $HEAD_SHA (state=$status, result=$result)"; exit 1;
-          }
-          run_id="$(jq -r .databaseId <<< "$run")"
-          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          if [[ "$HAS_REQUIREMENTS" != 'true' ]]; then
+            echo "state=ready" >> "$GITHUB_OUTPUT"
+          elif [[ -n "$BARRIER_STATE" ]]; then
+            echo "state=${BARRIER_STATE}" >> "$GITHUB_OUTPUT"
+          else
+            # A barrier failure already reported its cause; downstream jobs
+            # must stay skipped rather than infer an admission.
+            echo "state=error" >> "$GITHUB_OUTPUT"
+          fi
 
 
       # Verify only the Issues actually implemented by this PR. A workflow
       # dependency PR must not claim another PR's selected-E2E verdicts.
       # Require exact-head Issue projection before invoking an Acceptance Agent.
       - name: Verify exact-head Issue E2E obligations before Agent review
-        if: steps.discover.outputs.has_requirements == 'true'
+        if: >-
+          steps.discover.outputs.has_requirements == 'true' &&
+          steps.barrier.outputs.state == 'ready'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -159,17 +193,58 @@ jobs:
               echo "Legacy Issue #$issue retains existing full-E2E eligibility"
             fi
           done
-  # Acceptance Agent provider policy. `ACCEPTANCE_PROVIDER` selects the
-  # reusable workflow's trusted executor (`cursor` | `deepseek`); unset keeps
-  # the historical default, `cursor`. It is a repository variable rather than a
-  # PR input because every trigger (pull_request_target, push, repository
-  # dispatch, Post-Run Waker) must resolve the same provider, and PR-controlled
-  # values must never choose the write-capable evaluator. An unsupported value
-  # fails closed in `agent-sc-acceptance.yml`; there is no implicit fallback.
-  # Set it to `deepseek` only while the Cursor quota is exhausted.
+
+  # A PR event that cannot yet reach a genuine evaluation must not report a
+  # failure or a passed gate. Cancelling the run is the only GitHub-native
+  # terminal state that is neither; the run is replayed by the trusted
+  # source-completion waker once the exact-head barrier is ready.
+  defer-pre-merge:
+    needs: prepare-pre-merge
+    if: >-
+      needs.prepare-pre-merge.result == 'success' &&
+      needs.prepare-pre-merge.outputs.admission != 'ready'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Defer evaluation until exact-head source evidence is ready
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ADMISSION: ${{ needs.prepare-pre-merge.outputs.admission }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Acceptance deferred (${ADMISSION})"
+            echo "No evaluator, Agent, or acceptance verdict ran for this PR event."
+            echo "The trusted source-completion waker replays this exact run when exact-head evidence is ready."
+          } >> "$GITHUB_STEP_SUMMARY"
+          if ! gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/cancel"; then
+            echo "::error::Failed to cancel the deferred Acceptance run"
+            exit 1
+          fi
+          # Cancellation is asynchronous and does not abort the current job
+          # immediately. Block until the run is terminal, then verify it is
+          # genuinely cancelled instead of leaving a green run that never
+          # evaluated anything.
+          timeout 90 gh run watch "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            > /dev/null 2>&1 || true
+          conclusion="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --jq '.conclusion // "none"')"
+          [[ "$conclusion" == cancelled ]] || {
+            echo "::error::Deferred Acceptance run was not cancelled (conclusion=${conclusion})"
+            exit 1
+          }
+          echo "Deferred Acceptance run is cancelled; evaluation remains deferred"
+
+  # New tasks use the repository default Acceptor instance, resolved on trusted main.
+  # Legacy ACCEPTANCE_PROVIDER stays as an explicit compatibility override until
+  # all historical callers migrate. A configured but unregistered ID fails closed.
   pre-merge-acceptance:
     needs: prepare-pre-merge
-    if: needs.prepare-pre-merge.outputs.has_requirements == 'true'
+    if: >-
+      needs.prepare-pre-merge.outputs.has_requirements == 'true' &&
+      needs.prepare-pre-merge.outputs.admission == 'ready'
     strategy:
       fail-fast: false
       matrix:
@@ -178,7 +253,7 @@ jobs:
     with:
       issue_number: ${{ matrix.issue_number }}
       stage: pre-merge
-      provider: ${{ vars.ACCEPTANCE_PROVIDER || 'cursor' }}
+      provider: ${{ vars.AGENT_DEFAULT_ACCEPTOR || vars.ACCEPTANCE_PROVIDER || '' }}
       target_ref: ${{ needs.prepare-pre-merge.outputs.head_sha }}
       deployment: ''
     secrets: inherit
@@ -188,6 +263,7 @@ jobs:
     if: >-
       always() &&
       needs.prepare-pre-merge.result == 'success' &&
+      needs.prepare-pre-merge.outputs.admission == 'ready' &&
       (needs.pre-merge-acceptance.result == 'success' || needs.pre-merge-acceptance.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
@@ -334,7 +410,7 @@ jobs:
     with:
       issue_number: ${{ matrix.issue_number }}
       stage: ${{ needs.prepare-merged-agent.outputs.stage }}
-      provider: ${{ vars.ACCEPTANCE_PROVIDER || 'cursor' }}
+      provider: ${{ vars.AGENT_DEFAULT_ACCEPTOR || vars.ACCEPTANCE_PROVIDER || '' }}
       target_ref: ${{ github.sha }}
       deployment: ''
     secrets: inherit
@@ -427,7 +503,7 @@ jobs:
     with:
       issue_number: ${{ matrix.issue_number }}
       stage: post-merge
-      provider: ${{ vars.ACCEPTANCE_PROVIDER || 'cursor' }}
+      provider: ${{ vars.AGENT_DEFAULT_ACCEPTOR || vars.ACCEPTANCE_PROVIDER || '' }}
       target_ref: ${{ needs.prepare-post-merge-provider-evidence.outputs.target_sha }}
       provider_source_run_id: ${{ needs.prepare-post-merge-provider-evidence.outputs.source_run_id }}
       provider_source_run_attempt: ${{ needs.prepare-post-merge-provider-evidence.outputs.source_run_attempt }}
@@ -538,7 +614,8 @@ jobs:
           echo "Reconciled E2E proof by rerunning failed Acceptance jobs for PR #$PR_NUMBER" >> "$GITHUB_STEP_SUMMARY"
 
   # Source Quality/E2E workflow_run completion is the waker for a previously
-  # failed (not yet ready) Acceptance run. A single SHA check replaces polling.
+  # failed or deliberately deferred Acceptance run. A single SHA check replaces
+  # polling; only a verified ready transition may replay the exact PR-head run.
   reconcile-completed-quality-e2e:
     concurrency:
       group: acceptance-pr-reconcile
@@ -587,10 +664,22 @@ jobs:
           jq -e --arg sha "$TARGET_SHA" --arg repo "$GITHUB_REPOSITORY" '
             .state == "open" and .head.sha == $sha and .head.repo.full_name == $repo' \
             "$RUNNER_TEMP/pr.json" > /dev/null || exit 0
-          # Only an exact-head, newest-run pair of completed successes can
-          # authorize the existing failed-only Acceptance rerun. Pending is
-          # not Pass; failed and superseded dependencies do not wake an Agent.
+          # Only an exact-head, newest-run pair of applicable completed
+          # successes can authorize an Acceptance replay. Pending is not Pass;
+          # failed and superseded dependencies do not wake an Agent. A source
+          # filtered out by its own pull_request.paths is explicit
+          # not-required, never an inferred Pass or an endless wait.
           ./gates/run acceptance-postrun-waker-selftest
+          changed_files="$(jq -r '.changed_files // empty' "$RUNNER_TEMP/pr.json")"
+          [[ "$changed_files" =~ ^[0-9]+$ ]] || exit 1
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$pr/files?per_page=100" --paginate \
+            | jq -s 'add // [] | map(.filename) | unique' > "$RUNNER_TEMP/pr-files.json"
+          listed="$(jq length "$RUNNER_TEMP/pr-files.json")"
+          [[ "$listed" =~ ^[0-9]+$ ]] || exit 1
+          truncated=false
+          if (( changed_files > listed )); then truncated=true; fi
+          applicability="$(node scripts/acceptance-source-applicability.mjs classify \
+            "$RUNNER_TEMP/pr-files.json" --truncated="$truncated")"
           for workflow in ci-quality.yml e2e-tests.yml; do
             file="$(basename "$workflow" .yml)"
             gh run list --repo "$GITHUB_REPOSITORY" --workflow "$workflow" \
@@ -599,12 +688,14 @@ jobs:
               > "$RUNNER_TEMP/$file-runs.json"
           done
           verdict="$(node scripts/acceptance-dependency-state.mjs classify \
-            "$RUNNER_TEMP/ci-quality-runs.json" "$RUNNER_TEMP/e2e-tests-runs.json" "$TARGET_SHA")"
+            "$RUNNER_TEMP/ci-quality-runs.json" "$RUNNER_TEMP/e2e-tests-runs.json" "$TARGET_SHA" \
+            --quality-applicable="$(jq -r .quality <<< "$applicability")" \
+            --e2e-applicable="$(jq -r .e2e <<< "$applicability")")"
           state="$(jq -r .state <<< "$verdict")"
           case "$state" in
             ready) ;;
             waiting|blocked|superseded)
-              echo "Acceptance source barrier: $verdict (no premature rerun)" >> "$GITHUB_STEP_SUMMARY"
+              echo "Acceptance source barrier: $verdict (no premature replay)" >> "$GITHUB_STEP_SUMMARY"
               exit 0
               ;;
             *) echo "::error::Unrecognized dependency barrier state"; exit 1 ;;
@@ -643,4 +734,27 @@ jobs:
           if [[ "$replay" == true ]]; then
             gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/rerun-failed-jobs"
             echo "Replayed failed Acceptance after both Quality/E2E completion events" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          # A deliberately deferred initial PR run is cancelled, not failed.
+          # Replay all of its jobs only when the exact-attempt job evidence
+          # proves the trusted classifier deferred, and re-read the run
+          # immediately before the write so a concurrent wake cannot double it.
+          attempt="$(jq -r '.run_attempt // empty' <<< "$run_json")"
+          conclusion="$(jq -r '.conclusion // empty' <<< "$run_json")"
+          if [[ "$conclusion" == cancelled && "$attempt" =~ ^[1-9][0-9]*$ ]]; then
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/attempts/$attempt/jobs?per_page=100" \
+              > "$RUNNER_TEMP/acceptance-target-jobs.json"
+            deferred="$(node scripts/acceptance-dependency-state.mjs deferred \
+              "$RUNNER_TEMP/acceptance-target-jobs.json" \
+              "$RUNNER_TEMP/acceptance-target-run.json" "$TARGET_SHA")"
+            if [[ "$deferred" == true ]]; then
+              current="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id")"
+              current_state="$(jq -r '(.status // "") + "/" + (.conclusion // "") + "/" + ((.run_attempt // 0) | tostring)' <<< "$current")"
+              if [[ "$current_state" == "completed/cancelled/$attempt" ]]; then
+                gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/rerun"
+                echo "Replayed deferred Acceptance after both applicable source completions" >> "$GITHUB_STEP_SUMMARY"
+              else
+                echo "Deferred Acceptance changed before replay; no duplicate dispatch" >> "$GITHUB_STEP_SUMMARY"
+              fi
+            fi
           fi

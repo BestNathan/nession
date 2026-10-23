@@ -20,6 +20,97 @@ describe('relayServerHandle', () => {
     globalThis.WebSocket = OriginalWebSocket;
   });
 
+  it('rejects a live superseded service even when both physical generations equal 1 (#2102)', async () => {
+    vi.stubGlobal('WebSocket', MockWebSocket);
+    const previous = new WebSocketService('ws://old/ws', [terminalServerApi]);
+    const oldHandle = relayServerHandle(previous, terminalServerApi);
+    const firstConnected = previous.connect();
+    const oldSocket = MockWebSocket.instances[0];
+    oldSocket.open();
+    await firstConnected;
+    expect(previous.isDisposed).toBe(false);
+    expect(oldHandle.isReady()).toBe(true);
+    const oldOutput = vi.fn();
+    const oldResize = vi.fn();
+    const oldInputAck = vi.fn();
+    const oldState = vi.fn();
+    // Registrations made WHILE A was owner must also become inert if A stays
+    // physically connected but B takes over the singleton.
+    oldHandle.onRelayOutput('work', oldOutput);
+    oldHandle.onRelayResize('work', oldResize);
+    oldHandle.onRelayInputAck('work', oldInputAck);
+    oldHandle.onConnectionStateChange(oldState);
+
+    // StrictMode/app instance swap can install the newer service before old
+    // dispose; their local physical generations are BOTH 1.
+    const current = new WebSocketService('ws://new/ws', [terminalServerApi]);
+    const newHandle = relayServerHandle(current, terminalServerApi);
+    const secondConnected = current.connect();
+    const newSocket = MockWebSocket.instances[1];
+    newSocket.open();
+    await secondConnected;
+    expect(previous.physicalGeneration).toBe(current.physicalGeneration);
+    expect(previous.isDisposed).toBe(false);
+    expect(oldHandle.isReady()).toBe(false);
+    expect(newHandle.isReady()).toBe(true);
+
+    const staleReady = vi.fn();
+    oldHandle.onRelayReady?.('work', staleReady);
+    oldHandle.beginRelay('agent:work');
+    expect(oldHandle.beginRelayTracked?.('agent:work')).toBeNull();
+    oldHandle.sendRelayInput('work', 'ignored');
+    oldHandle.sendRelayResize('work', 80, 24);
+    oldHandle.endRelay('agent:work');
+    // After #2103 the same stale handle must also be unable to send a
+    // parser-applied ACK into the *new* owner's Agent tunnel.
+    expect(oldHandle.sendRelayOutputApplied?.('work', {
+      subscriberGeneration: 9, streamEpoch: 11,
+      rendererGeneration: 1, appliedThrough: 1,
+    })).toBe(false);
+    expect(frames(oldSocket)).toHaveLength(0);
+    expect(frames(newSocket)).toHaveLength(0);
+
+    const liveReady = vi.fn();
+    newHandle.onRelayReady?.('work', liveReady);
+    newHandle.beginRelay('agent:work');
+    const begin = frames(newSocket)[0];
+    expect(begin?.msg_type).toBe('server.session.relay.begin');
+    newSocket.message(JSON.stringify({
+      msg_type: 'server.session.relay.ready', id: 'ready-new',
+      timestamp: 0,
+      payload: {
+        session_name: 'work',
+        browser_client_id: 'client-1',
+        relay_request_id: begin.id,
+        route_id: '123e4567-e89b-42d3-a456-426614174000',
+        subscriber_generation: 9,
+        stream_epoch: 11,
+      },
+    }));
+    expect(liveReady).toHaveBeenCalledTimes(1);
+    expect(staleReady).not.toHaveBeenCalled();
+
+    newSocket.message(JSON.stringify({
+      msg_type: 'agent.terminal.output', id: 'out-1', timestamp: 0,
+      payload: { session_name: 'work', data: 'aGk=' },
+    }));
+    newSocket.message(JSON.stringify({
+      msg_type: 'agent.terminal.resize', id: 'resize-1', timestamp: 0,
+      payload: { session_name: 'work', cols: 80, rows: 24 },
+    }));
+    newSocket.message(JSON.stringify({
+      msg_type: 'agent.terminal.input.ack', id: 'ack-1', timestamp: 0,
+      payload: { session_name: 'work', input_epoch: 1, applied_through: 1 },
+    }));
+    expect(oldOutput).not.toHaveBeenCalled();
+    expect(oldResize).not.toHaveBeenCalled();
+    expect(oldInputAck).not.toHaveBeenCalled();
+    oldSocket.serverClose();
+    expect(oldState).not.toHaveBeenCalled();
+    current.dispose();
+    previous.dispose();
+  });
+
   it('tracks the physical begin envelope and fences server proof/ACK after socket loss (#2103)', async () => {
     vi.stubGlobal('WebSocket', MockWebSocket);
     const service = new WebSocketService('ws://server/ws', [terminalServerApi]);

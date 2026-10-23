@@ -200,8 +200,16 @@ export class ConnectionManager implements TerminalTransport {
             this.onOutput?.(data, bootstrap, position);
           }
         },
-        onResize: (cols, rows, position) => {
+        onResize: (cols, rows, position, controlGeneration) => {
           if (this.disposed || !this.isCurrentGeneration()) { return; }
+          // A size chosen under a lease the session has left is not a size this
+          // client can be asked to render: after a takeover the current
+          // controller's fit is the truth, and a stale recorded resize (live or
+          // replayed) would revert the grid until something resized again
+          // (#2286 SC-03). The frame still consumed its sequence number in the
+          // reconciler — this is an *application* decision, never a drop from
+          // the timeline.
+          if (!this.admitsResizeGeneration(controlGeneration)) { return; }
           if (position === undefined) {
             this.onResize?.(cols, rows);
           } else {
@@ -434,9 +442,55 @@ export class ConnectionManager implements TerminalTransport {
         this.lastSentResize = { cols, rows };
       } catch { /* transport reconnecting — coalesced via the isAttached gate */ }
     } else if (this.mode === 'relay' && this.serverConnection?.isReady()) {
-      this.serverConnection.sendRelayResize(this.sessionName, cols, rows);
+      // The relay's transport is a shared server socket; unlike the direct API
+      // it has no per-client lease gate of its own. An observer's viewport
+      // change must stay local (the Agent would refuse the resize anyway), and
+      // a controller states the generation so a delayed frame from a lease it
+      // has lost is refused by name rather than as an anonymous observer.
+      const state = this.serverConnection.getControlState(this.sessionName);
+      if (state.role === 'observer') { return; }
+      if (state.generation !== undefined) {
+        this.serverConnection.sendRelayResize(
+          this.sessionName,
+          cols,
+          rows,
+          state.generation,
+        );
+      } else {
+        this.serverConnection.sendRelayResize(this.sessionName, cols, rows);
+      }
       this.lastSentResize = { cols, rows };
     }
+  }
+
+  /**
+   * The lease moved to this client: the next resize must be stated even when
+   * its size is the one this transport last sent.
+   *
+   * The dedup exists for repeats this client can prove are repeats — a drag
+   * that returns to a size, a debounced fire landing on the attach size. A
+   * takeover is not one of those: the pane may have moved to another device's
+   * size without this client ever sending anything, so the same numbers now
+   * describe a *change* (#2286).
+   */
+  restateResize(): void {
+    this.lastSentResize = null;
+  }
+
+  /**
+   * Whether a resize recorded under `controlGeneration` may be applied.
+   *
+   * Absent means legacy (a provider that does not state the lease) and is
+   * applied as before. A generation at or ahead of the one this client holds
+   * is the current word on the pane; anything older describes a size chosen
+   * under a lease the session has left (#2286 SC-03).
+   */
+  private admitsResizeGeneration(controlGeneration: number | undefined): boolean {
+    if (controlGeneration === undefined) { return true; }
+    const current = this.mode === 'p2p'
+      ? this.agentApi?.getControlState(this.sessionName).generation
+      : this.serverConnection?.getControlState(this.sessionName).generation;
+    return current === undefined || controlGeneration >= current;
   }
 
   /**
@@ -521,6 +575,9 @@ export class ConnectionManager implements TerminalTransport {
           rows: frame.rows,
           streamEpoch: frame.streamEpoch,
           streamSeq: frame.streamSeq,
+          ...(frame.controlGeneration !== undefined
+            ? { controlGeneration: frame.controlGeneration }
+            : {}),
         });
         return;
       }
@@ -732,7 +789,12 @@ export class ConnectionManager implements TerminalTransport {
 
     this.relayUnsubResize = svc.onRelayResize(
       this.sessionName,
-      (cols: number, rows: number, position?: TerminalStreamPosition) => {
+      (
+        cols: number,
+        rows: number,
+        position?: TerminalStreamPosition,
+        controlGeneration?: number,
+      ) => {
         if (this.disposed || !this.isCurrentGeneration()) { return; }
         this.observeRelayPosition(position, 'resize');
         if (position) {
@@ -740,6 +802,7 @@ export class ConnectionManager implements TerminalTransport {
             cols, rows,
             streamEpoch: position.streamEpoch,
             streamSeq: position.streamSeq,
+            ...(controlGeneration !== undefined ? { controlGeneration } : {}),
           });
         } else {
           this.reconciler.acceptLevelResize(cols, rows);

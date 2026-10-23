@@ -54,7 +54,9 @@ test('SC-10: real P2P cursor resume and explicit truncated retention window', as
   await page.locator('.xterm').evaluate(el => el.setAttribute('data-sc10-terminal-instance', 'before'));
 
   // A separate P2P peer keeps the Agent's attached stream active while A's
-  // physical WebSockets disappear. It is an observer: no control transfer.
+  // physical WebSockets disappear. Its attach is a foreground activation, so
+  // it takes the lease; A takes it back immediately below and the peer remains
+  // an observer for the rest of the Case (#2286).
   const peerContext = await browser.newContext();
   try {
     const peer = await peerContext.newPage();
@@ -63,6 +65,14 @@ test('SC-10: real P2P cursor resume and explicit truncated retention window', as
     await expect.poll(async () => peer.evaluate(() => window.__sc10.epochs.length), {
       timeout: 12000,
     }).toBeGreaterThan(0);
+
+    // #2286: attaching the peer is a meaningful foreground activation, so it
+    // takes the ControlLease automatically. This Case drives A, so a real
+    // gesture on A's terminal takes ownership back — the ordinary sequential
+    // handoff. The peer stays attached as an observer (no further activation),
+    // which is the role this Case needs it to play.
+    await page.locator('.xterm').click();
+    await expect(page.getByTestId('terminal-observer-bar')).toBeHidden({ timeout: 20000 });
 
     // The peer does NOT have to re-display A's pre-attach history for the
     // retention/replay invariant. What matters is that an independent P2P

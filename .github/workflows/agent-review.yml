@@ -1,0 +1,229 @@
+name: Agent / Review
+
+env:
+  NSESSION_AGENT_WORKFLOW_ID: agent-review
+
+# Trusted, read-only Reviewer Slice. Owner/main dispatch only. The admission is
+# prepared from independently fetched facts + the committed Store intent, and
+# the model runs inside an OS-isolated container with only Read/Grep.
+on:
+  workflow_dispatch:
+    inputs:
+      reviewer:
+        description: Registered reviewer agent ID
+        required: false
+        default: ''
+        type: string
+      action_id:
+        description: 64-hex Outbox reviewer action ID
+        required: true
+        type: string
+      dispatch_ticket:
+        description: Optional signed dispatcher ticket for trusted result ingest
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: agent-review-${{ inputs.action_id }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.ref == 'refs/heads/main' &&
+      (
+        github.actor == 'BestNathan' ||
+        (github.event_name == 'workflow_dispatch' && github.actor == 'github-actions[bot]')
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      environment: ${{ steps.identity.outputs.environment }}
+      reviewer: ${{ steps.identity.outputs.reviewer }}
+    steps:
+      - name: Checkout trusted main
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Resolve the registered reviewer environment
+        id: identity
+        env:
+          REVIEWER_OVERRIDE: ${{ inputs.reviewer }}
+          DEFAULT_REVIEWER: ${{ vars.AGENT_DEFAULT_REVIEWER }}
+        run: |
+          set -euo pipefail
+          node scripts/lib/agent/default-routing-selftest.mjs
+          node --input-type=module -e '
+            import {readFileSync} from "node:fs";
+            import {resolveAgentDefault} from "./scripts/lib/agent/default-routing.mjs";
+            const registry=JSON.parse(readFileSync("automation/agents/registry.json","utf8"));
+            const identity=resolveAgentDefault(registry,"reviewer",{
+              configured:process.env.DEFAULT_REVIEWER,
+              override:process.env.REVIEWER_OVERRIDE,
+              legacy:"review-qwen-01"
+            });
+            process.stdout.write("environment="+identity.environment+"\n");
+            process.stdout.write("reviewer="+identity.agent_id+"\n");
+          ' >> "$GITHUB_OUTPUT"
+      - name: Verify deterministic Reviewer contracts
+        run: ./gates/run agent-provider-contract
+      - name: Fetch the admitted PR commit (trusted read)
+        run: git fetch --quiet --no-tags origin refs/pull/2176/head
+      - name: Clone the public agent-store for the immutable intent
+        run: |
+          set -euo pipefail
+          git clone --quiet --no-tags --single-branch --branch agent-store \
+            -- https://github.com/BestNathan/nession.git "$RUNNER_TEMP/agent-store"
+      - name: Prepare the reviewer admission
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REVIEWER: ${{ steps.identity.outputs.reviewer }}
+        run: |
+          set -euo pipefail
+          node scripts/lib/agent/reviewer/prepare-admission.mjs \
+            --store "$RUNNER_TEMP/agent-store" \
+            --out "$RUNNER_TEMP/review-admission.json" \
+            --reviewer "$REVIEWER"
+      - name: Upload the verified admission
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-admission-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/review-admission.json
+          if-no-files-found: error
+          retention-days: 3
+      - name: Record the signed dispatcher claim for trusted ingest
+        if: inputs.dispatch_ticket != ''
+        env:
+          ACTION_ID: ${{ inputs.action_id }}
+          DISPATCH_TICKET: ${{ inputs.dispatch_ticket }}
+        run: |
+          set -euo pipefail
+          jq -n --arg action "$ACTION_ID" --arg ticket "$DISPATCH_TICKET" \
+            '{schema_version:1,kind:"reviewer_dispatch_claim",
+              action_id:$action,dispatch_ticket:$ticket}' \
+            > "$RUNNER_TEMP/review-claim.json"
+      - name: Upload the signed dispatcher claim
+        if: inputs.dispatch_ticket != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-claim-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/review-claim.json
+          if-no-files-found: error
+          retention-days: 3
+
+  review:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: ${{ needs.prepare.outputs.environment }}
+    steps:
+      - name: Checkout trusted main
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Fetch the admitted PR commit (trusted read)
+        run: git fetch --quiet --no-tags origin refs/pull/2176/head
+      - name: Download the verified admission
+        uses: actions/download-artifact@v4
+        with:
+          name: review-admission-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/admission
+      - name: Install the pinned Claude Code CLI for the claude-code provider
+        if: needs.prepare.outputs.reviewer == 'review-qwen-01'
+        env:
+          CLAUDE_CODE_VERSION: ${{ vars.CLAUDE_CODE_VERSION || 'latest' }}
+        run: |
+          set -euo pipefail
+          # The package's postinstall is required for the CLI to start; the
+          # first real Slice failed because --ignore-scripts skipped it.
+          npm install --prefix "$RUNNER_TEMP/claude-cli" --no-audit --no-fund \
+            "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION"
+          "$RUNNER_TEMP/claude-cli/node_modules/.bin/claude" --version
+      - name: Install the pinned Cursor SDK for the cursor provider
+        if: needs.prepare.outputs.reviewer == 'review-cursor-01'
+        env:
+          CURSOR_SDK_VERSION: ${{ vars.CURSOR_SDK_VERSION || '1.0.37' }}
+        run: |
+          set -euo pipefail
+          [[ "$CURSOR_SDK_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]] || {
+            echo '::error::Worker requires a pinned numeric CURSOR_SDK_VERSION' >&2; exit 1;
+          }
+          npm install --prefix "$RUNNER_TEMP/review-sdk" --ignore-scripts --no-audit --no-fund \
+            "@cursor/sdk@$CURSOR_SDK_VERSION"
+      - name: Run the read-only Reviewer Slice in an OS-isolated container
+        env:
+          NESSION_REVIEW_ACTION_ID: ${{ inputs.action_id }}
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+          CURSOR_MODEL: ${{ vars.CURSOR_MODEL || 'composer-2.5' }}
+          CURSOR_MODEL_FAST: ${{ vars.CURSOR_MODEL_FAST || 'true' }}
+          CURSOR_SDK_VERSION: ${{ vars.CURSOR_SDK_VERSION || '1.0.37' }}
+          ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
+          ACCEPTANCE_CLAUDE_MODEL: ${{ vars.ACCEPTANCE_CLAUDE_MODEL }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/review-output" "$RUNNER_TEMP/review-sdk" "$RUNNER_TEMP/claude-cli"
+          chmod 0700 "$RUNNER_TEMP/review-output"
+          docker run --rm --read-only \
+            --cap-drop=ALL --security-opt=no-new-privileges \
+            --pids-limit=256 --memory=2g --cpus=2 \
+            --network=bridge --tmpfs /tmp:rw,nosuid,nodev,size=2g \
+            --user "$(id -u):$(id -g)" --workdir /workspace \
+            -v "$GITHUB_WORKSPACE:/workspace:ro" \
+            -v "$RUNNER_TEMP/review-output:/output:rw" \
+            -v "$RUNNER_TEMP/admission:/admission:ro" \
+            -v "$RUNNER_TEMP/claude-cli:/claude-cli:ro" \
+            -v "$RUNNER_TEMP/review-sdk:/sdk:ro" \
+            -e NESSION_REVIEWER_ISOLATED=docker-v1 \
+            -e GITHUB_ACTIONS -e GITHUB_REPOSITORY -e GITHUB_RUN_ID \
+            -e GITHUB_RUN_ATTEMPT -e GITHUB_EVENT_NAME -e GITHUB_WORKFLOW -e GITHUB_REF \
+            -e NSESSION_AGENT_WORKFLOW_ID -e NESSION_REVIEW_ACTION_ID \
+            -e CURSOR_API_KEY -e CURSOR_MODEL -e CURSOR_MODEL_FAST -e CURSOR_SDK_VERSION \
+            -e ANTHROPIC_BASE_URL -e ANTHROPIC_AUTH_TOKEN -e ANTHROPIC_API_KEY \
+            -e ANTHROPIC_MODEL -e ACCEPTANCE_CLAUDE_MODEL \
+            -e GITHUB_WORKSPACE=/workspace -e RUNNER_TEMP=/tmp \
+            -e CURSOR_SDK_ROOT=/sdk -e HOME=/tmp \
+            -e PATH=/claude-cli/node_modules/.bin:/usr/local/bin:/usr/bin:/bin \
+            node:24-bookworm \
+            node /workspace/scripts/lib/agent/reviewer/review-worker.mjs \
+              /admission/review-admission.json /output
+      - name: Upload canonical telemetry for Metrics ingest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-telemetry-reviewer-slice-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/review-output/agent-telemetry.json
+            ${{ runner.temp }}/review-output/agent-execution-trace.json
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Upload the canonical result and verdict
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reviewer-slice-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/review-output/agent-result.json
+            ${{ runner.temp }}/review-output/review-verdict.json
+          if-no-files-found: warn
+          retention-days: 14

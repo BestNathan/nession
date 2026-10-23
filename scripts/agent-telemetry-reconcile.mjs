@@ -17,6 +17,8 @@ const SOURCES=Object.freeze([
     events:['push','workflow_dispatch'],branches:['main']},
   {file:'agent-develop.yml',name:'Agent / Development',id:'agent-develop',
     events:['workflow_dispatch'],branches:['main']},
+  {file:'agent-review.yml',name:'Agent / Review',id:'agent-review',
+    events:['workflow_dispatch'],branches:['main']},
   {file:'agent-cursor-resume-seed.yml',name:'Agent / Cursor Resume Seed',id:'agent-cursor-resume-seed',
     events:['push','workflow_dispatch'],branches:['main']},
   {file:'agent-cursor-resume-verify.yml',name:'Agent / Cursor Resume Verify',id:'agent-cursor-resume-verify',

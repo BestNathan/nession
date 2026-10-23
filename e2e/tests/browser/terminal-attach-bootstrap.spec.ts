@@ -88,6 +88,12 @@ test.describe('Attach bootstrap (#321)', () => {
 
       // Live output still flows to both. Printed now, so this marker can only
       // reach the second client through the stream.
+      //
+      // #2286: the second client's attach is a meaningful foreground
+      // activation, so it took the lease. This test drives the session from
+      // the first client, so take it back with a real gesture on its terminal.
+      await page.locator('.xterm').click();
+      await expect(page.getByTestId('terminal-observer-bar')).toBeHidden({ timeout: 20_000 });
       await submitTerminalCommand(page, typedForm('a2'));
       await expect
         .poll(async () => countInBuffer(other, renderedForm('a2')), { timeout: 15_000 })

@@ -9,6 +9,10 @@ on:
     paths:
       - .github/workflows/agent-claude-resume-seed.yml
       - .github/workflows/agent-claude-resume-verify.yml
+      - scripts/lib/agent/orchestration/qwen-developer-policy.mjs
+      - scripts/lib/agent/providers/claude-resume-fixture.mjs
+      - scripts/lib/agent/providers/claude-native-store.mjs
+      - scripts/lib/agent/providers/claude-store-bridge.mjs
 
 env:
   NSESSION_AGENT_WORKFLOW_ID: agent-claude-resume-seed

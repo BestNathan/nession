@@ -98,6 +98,41 @@ async function optionalRef(branch) {
     return {state:'present',sha:result?.object?.sha};
   } catch(e){console.error('Optional ref unavailable:',branch,e.message);return {state:'unavailable'};}
 }
+// Bounded, read-only inventory facts for an existing store ref: the commit
+// timestamp and a capped blob count. The tree API's own truncation flag is
+// preserved, so the public site never presents a partial count as complete.
+async function optionalStoreMeta(ref){
+  if(ref?.state!=='present'||!/^[a-f0-9]{40}$/.test(ref.sha||''))
+    return {updated_at:null,records:null,truncated:false};
+  const [updatedAt,counts]=await Promise.all([
+    (async()=>{
+      try{
+        const commit=await api('/git/commits/'+ref.sha);
+        return typeof commit?.committer?.date==='string'?commit.committer.date:null;
+      }catch(error){
+        console.error('Optional store commit time unavailable:',ref.sha,error.message);
+        return null;
+      }
+    })(),
+    (async()=>{
+      try{
+        const tree=await api('/git/trees/'+ref.sha+'?recursive=1');
+        if(!Array.isArray(tree?.tree))return {records:null,truncated:false};
+        let records=0,truncated=tree.truncated===true;
+        for(const entry of tree.tree){
+          if(entry?.type!=='blob')continue;
+          if(records>=5000){truncated=true;break;}
+          records+=1;
+        }
+        return {records,truncated};
+      }catch(error){
+        console.error('Optional store tree count unavailable:',ref.sha,error.message);
+        return {records:null,truncated:false};
+      }
+    })(),
+  ]);
+  return {updated_at:updatedAt,...counts};
+}
 const [repository,agent,registry,issues,pulls,workflowRuns,allRefs] = await Promise.all([
   optionalJson(join(metrics,'metrics.json')),
   optionalJson(join(metrics,'agent-metrics.json')),
@@ -123,6 +158,10 @@ async function optionalAgentStoreReadiness(ref) {
   }
 }
 const agentStoreSource=await optionalAgentStoreReadiness(allRefs[3]);
+const storeMeta=Object.fromEntries(await Promise.all(
+  ['metrics','acceptance-results','task-results','agent-store'].map(async (name,index)=>
+    [name,await optionalStoreMeta(allRefs[index])])
+));
 const generatedAt=new Date().toISOString();
 const selectedIssueNumbers=Array.isArray(issues)?issues
   .filter(x=>Number.isSafeInteger(x?.number)&&x.number>0&&!x.pull_request)
@@ -141,7 +180,7 @@ const acceptanceE2E=await loadPinnedE2E({root:acceptance,expectedSha:acceptanceS
 const refs=Object.fromEntries(['metrics','acceptance-results','task-results','agent-store'].map((name,index)=>[name,allRefs[index]]));
 const result=validateProjection(makeProjection({
   repository,agent,registry,issues,pulls,workflowRuns,issueTimelines,prReviews,
-  issueRunSource,acceptanceE2E,agentStoreSource,refs,
+  issueRunSource,acceptanceE2E,agentStoreSource,refs,storeMeta,
   meta:{ generated_at:generatedAt,main_sha:process.env.SOURCE_MAIN_SHA,metrics_sha:process.env.METRICS_SHA,
     acceptance_results_sha:acceptanceSha }
 }));

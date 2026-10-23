@@ -11,7 +11,7 @@ const fixture={
  agents:{available:true,generated_at:'2026-10-14T12:00:00Z',freshness:{state:'unavailable',age_hours:null},distribution:{
     '7d':{providers:{available:true,items:[{name:'cursor',count:2},{name:'claude-code',count:1}]},workflows:{available:true,items:[{name:'issue-audit',count:3}]}},
     '30d':{providers:{available:true,items:[{name:'cursor',count:10},{name:'claude-code',count:4}]},workflows:{available:true,items:[{name:'issue-audit',count:14}]}}
-  },roster:[{id:'dev-qwen-01',role:'developer',provider:'claude-code',observed_7d:3},{id:'review-cursor-01',role:'reviewer',provider:'cursor',observed_7d:null}],summary:{runs_7d:3,runs_30d:14,tokens_7d:45000,tokens_observed_runs:2,tools_7d:20,tools_observed_runs:3,cost_7d:null}},
+  },roster:[{id:'dev-qwen-01',role:'developer',provider:'claude-code',observed_7d:3},{id:'review-cursor-01',role:'reviewer',provider:'cursor',observed_7d:null}],summary:{runs_7d:3,runs_30d:14,tokens_7d:45000,tokens_observed_runs:2,duration_7d:5100,duration_observed_runs:2,duration_avg_7d:2550,tools_7d:20,tools_observed_runs:3,cost_7d:null,cost_observed_runs:0}},
  work:{issues_status:'available',pulls_status:'available',agent_run_source:'available',
    agent_store_readiness:{status:'empty',sha:'d'.repeat(40),url:'https://github.com/BestNathan/nession/tree/agent-store'},
    lineage:{schema_version:1,status:'unavailable',edges:[],truncated:false},
@@ -25,7 +25,7 @@ const fixture={
     agent_id:'review-cursor-01',role:'acceptor',provider:'cursor',tokens_total:1200,duration_ms:3400,
     observed_at:'2026-10-14T12:00:00Z',verification:'github_run_verified',pr_linkage:'unlinked',
     url:'https://github.com/BestNathan/nession/actions/runs/81'}],pr_references:{status:'available',prs:[{number:1787,url:'https://github.com/BestNathan/nession/pull/1787',relation:'github_cross_reference'}]}}],pulls:[{number:1787,title:'Pages MVP',url:'https://github.com/BestNathan/nession/pull/1787',state:'open',updated_at:'2026-10-14T12:00:00Z',workflow:{head_sha:'a'.repeat(40),ci:{run_id:42,attempt:1,status:'success',url:'https://github.com/BestNathan/nession/actions/runs/42'},e2e:null},review:{status:'available',latest:{review_id:89,commit_sha:'a'.repeat(40),state:'changes_requested',submitted_at:'2026-10-14T12:00:00Z',url:'https://github.com/BestNathan/nession/pull/1787#pullrequestreview-89'}}}]},
- evidence:{stores:[{name:'metrics',purpose:'Repository and Agent telemetry',state:'present',sha:'b'.repeat(40),url:'https://github.com/BestNathan/nession/tree/metrics'},{name:'agent-store',purpose:'Durable Agent checkpoints',state:'missing',sha:null,url:'https://github.com/BestNathan/nession/tree/agent-store'}]}
+ evidence:{stores:[{name:'metrics',purpose:'Repository and Agent telemetry',state:'present',sha:'b'.repeat(40),url:'https://github.com/BestNathan/nession/tree/metrics',updated_at:'2026-10-14T12:00:00Z',freshness:{state:'fresh',age_hours:0},records:42,truncated:false}]}
 };
 // Browser fixture for the independent, source-only workflow definitions UI.
 const topology={

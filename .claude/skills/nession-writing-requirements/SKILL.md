@@ -11,6 +11,7 @@ This Skill owns **issue structure and requirement capture**. It does not own imp
 
 See `docs/architecture/acceptance-sc-format.md` for canonical examples and migration rules.
 
+- interactive prototype delivery -> [nession-prototype](../nession-prototype/SKILL.md)
 - implementation -> `nession-development`
 - acceptance execution -> `nession-acceptance`
 - Gate semantics -> `nession-gates`
@@ -68,6 +69,38 @@ Before creating anything:
 When reopening, explain what the earlier implementation fixed, what invariant still remains false, and what evidence/Acceptance must change. Preserve the existing issue's Acceptance history instead of fragmenting one invariant across new issues.
 
 Do not create a new Bug merely because an old issue is closed; closure state is not proof that its invariant is satisfied.
+
+## 2a. Decide whether the Requirement needs an interactive prototype
+
+For every **user-facing Requirement** or **Bug that changes a product interaction**, explicitly make a **prototype decision at Issue drafting time**—after dedupe and before treating the interaction contract as settled. The decision belongs to **this Skill**; creating, testing and publishing the artifact belongs to [nession-prototype](../nession-prototype/SKILL.md).
+
+Do not treat "UI-related" as an automatic mandate to prototype every ticket:
+
+| Decision | When to use | What to do |
+|---|---|---|
+| **Required** | The user explicitly requests a prototype; a **new interaction paradigm** or navigation/surface model; AI/intent-driven or dynamic components; multi-step flow with ambiguous state, placement, return/reuse, permission or confirmation semantics; substantial desktop/mobile behavior tradeoff; or two plausible UX designs need user validation | Record the open decisions and walkthrough; produce a clickable prototype **before relying on the design for production implementation or final product sign-off**, unless the product owner explicitly defers it |
+| **Optional** | Existing UI pattern is mostly understood but a new visual composition or a localized interaction tradeoff would benefit from a quick hands-on comparison | State what decision the prototype would resolve; build if it changes product confidence or the user requests it |
+| **Not needed** | No new user interaction (backend/CI/protocol/internal refactor); a precise, already-settled UI pattern; copy/spacing fixes or a narrowly reproducible bug adequately proven by existing tests/visual evidence | Record a short reason when UI-facing; proceed with the relevant development/design/Acceptance workflow |
+
+Quick test: **Could two implementers satisfy the written Success Criteria with materially different user experiences?** If yes, prototype the disputed experience or specify it more precisely. A prototype is valuable for testing behavior, **not** for replacing a missing Requirement contract.
+
+### Record the decision in the Issue
+
+For UI/interaction issues, put a concise `### Prototype` subsection inside `## Requirements: ...` (or a small analogous section in a Bug's Description) with:
+
+~~~markdown
+### Prototype
+- Decision: Required | Optional | Not needed
+- Reason / interaction uncertainty: <specific question, or why unnecessary>
+- Scenario to validate: <entry -> actions -> states -> expected result>
+- Status: Planned | In progress | Reviewed | Deferred | Not needed
+- Artifact: <immutable prototype branch SHA + source and browser preview once published>
+- Fidelity / verification: <mock vs live; static/smoke/browser checks and gaps>
+~~~
+
+Before building a **Required** prototype, settle the Issue owner, observable interaction questions and representative Success Criteria. It is fine to create the Issue **first** and attach the prototype during discussion. Use [nession-prototype](../nession-prototype/SKILL.md) to create the actual artifact; the existing shared orphan `prototype` branch must **not** be mistaken for a production feature branch or PR head. If the product owner explicitly waives/defers an otherwise Required prototype, record **why**, what remains uncertain and how the behavior will be validated instead.
+
+After publishing, replace placeholders with a **pinned immutable commit** link, an accessible preview if verified, and an honest mock/browser-fidelity note. Refresh the reference when the prototype changes. In production implementation Issues, **do not tick Success Criteria or mark Acceptance Pass based only on a mock prototype, screenshots, or parser smoke tests.** If delivering the prototype itself is an explicit requirement, give that deliverable its own observable SC and normal Acceptance Plan/Report ownership. Prototype evidence is design evidence; trusted production proof remains with `nession-acceptance`.
 
 ## 3. Requirement format
 
@@ -179,7 +212,7 @@ Do not use current implementation limitations as product requirements unless the
 
 ## 7. Conversation history
 
-When requirements evolve, preserve meaningful decisions in an issue comment rather than repeatedly bloating the canonical body.
+When requirements evolve, preserve meaningful decisions in an issue comment rather than repeatedly bloating the canonical body. Revisit the **Prototype** decision if interaction scope, product uncertainty or previously approved behavior changes; update its pinned artifact reference when a revised prototype is published.
 
 Recommended comment:
 
@@ -201,7 +234,7 @@ The issue body should remain the current canonical requirement, not a chronologi
 
 When the user changes a requirement:
 
-1. update the canonical issue body;
+1. update the canonical issue body (including the Prototype decision and pinned link if the interaction changed);
 2. update/add affected SC rows;
 3. preserve already-valid acceptance evidence only when the criterion meaning did not change;
 4. add a conversation-history comment describing the decision;

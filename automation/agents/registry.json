@@ -93,6 +93,11 @@
       "provider": "cursor",
       "environment": "agent-review-cursor-01"
     },
+    "review-qwen-01": {
+      "role": "reviewer",
+      "provider": "claude-code",
+      "environment": "dev-claude-qwen"
+    },
     "accept-cursor-01": {
       "role": "acceptor",
       "provider": "cursor",
@@ -107,6 +112,26 @@
       "role": "developer",
       "provider": "claude-code",
       "environment": "dev-claude-qwen"
+    },
+    "accept-qwen-01": {
+      "role": "acceptor",
+      "provider": "claude-code",
+      "environment": "dev-claude-qwen"
+    },
+    "audit-qwen-01": {
+      "role": "auditor",
+      "provider": "claude-code",
+      "environment": "dev-claude-qwen"
+    },
+    "audit-deepseek-01": {
+      "role": "auditor",
+      "provider": "claude-code",
+      "environment": "deepseek"
+    },
+    "accept-deepseek-01": {
+      "role": "acceptor",
+      "provider": "claude-code",
+      "environment": "deepseek"
     }
   },
   "external_dependencies": []

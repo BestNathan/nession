@@ -199,6 +199,7 @@ function makeRelayHandle(state: ConnectionState): RelayServerTransport {
     onRelayOutput: () => () => {},
     onRelayResize: () => () => {},
     onRelayInputAck: () => () => {},
+    getControlState: () => ({ role: 'controller' as const }),
     resumeRelayStream: vi.fn().mockRejectedValue(new Error('no Relay stream baseline')),
   };
 }
@@ -670,6 +671,7 @@ describe('useSessionRuntime integration', () => {
       onRelayOutput: () => () => {},
       onRelayResize: () => () => {},
       onRelayInputAck: () => () => {},
+      getControlState: () => ({ role: 'controller' as const }),
     resumeRelayStream: vi.fn().mockRejectedValue(new Error('no Relay stream baseline')),
     } satisfies RelayServerTransport & { emit(state: ConnectionState): void };
 

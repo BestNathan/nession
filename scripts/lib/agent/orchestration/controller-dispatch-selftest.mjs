@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // #2010 main-owned trusted dispatch authority, key separation and fail-closed tests.
 import assert from 'node:assert/strict';
-import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey,CONTROLLED_DISPATCH_COMMENT,CONTROLLED_RECOVERY_COMMENT,CONTROLLED_NATIVE_RECOVERY_COMMENT}
+import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey,sourceAllowed,CONTROLLED_DISPATCH_COMMENT,CONTROLLED_RECOVERY_COMMENT,CONTROLLED_NATIVE_RECOVERY_COMMENT}
   from './controller-dispatch.mjs';
+import {CONTROLLED_ORIGINAL_PUBLICATION} from '../publisher/publication-readback.mjs';
 import {CONTROLLED_V2_CONTINUATION,CONTROLLED_V2_CONTINUATION_COMMENT} from './development-resume.mjs';
 
 const sha='a'.repeat(40),actionId='b'.repeat(64),issue=1997,runId=12345;
@@ -110,6 +111,25 @@ assert.notDeepEqual(key,other);
 assert.deepEqual(parseDispatchKey(key.toString('base64')),key);
 assert.throws(()=>deriveDispatchKey('fake'),/private key/);
 assert.throws(()=>parseDispatchKey('fake'),/HMAC|base64/);
+// #2262 follow-up: Reviewer actions point at the published PR head, not a main
+// ancestor; they must descend from the original published main SHA instead.
+const sourceSha='c'.repeat(40),publishedMain=CONTROLLED_ORIGINAL_PUBLICATION.publisher_main_sha;
+const calls=[];
+const accept=args=>{calls.push(args.join(' '));};
+sourceAllowed(sourceSha,'developer',{run:accept,mainSha:'d'.repeat(40)});
+assert.ok(calls.includes('merge-base --is-ancestor '+sourceSha+' '+'d'.repeat(40)));
+calls.length=0;
+sourceAllowed(sourceSha,'reviewer',{run:accept,mainSha:'d'.repeat(40)});
+assert.ok(calls.includes('merge-base --is-ancestor '+publishedMain+' '+sourceSha));
+const denyMerge=args=>{calls.push(args.join(' '));if(args[0]==='merge-base')throw Error('not ancestor');};
+assert.throws(()=>sourceAllowed(sourceSha,'developer',{run:denyMerge,mainSha:'d'.repeat(40)}),
+  /reachable trusted main ancestor/);
+assert.throws(()=>sourceAllowed(sourceSha,'reviewer',{run:denyMerge,mainSha:'d'.repeat(40)}),
+  /published branch history/);
+assert.throws(()=>sourceAllowed(sourceSha,'acceptor',{run:accept}),/dispatch role/);
+assert.throws(()=>sourceAllowed('main','reviewer',{run:accept}),/invalid dispatch source SHA/);
+assert.throws(()=>sourceAllowed(sourceSha,'reviewer',{run:args=>{
+  if(args[0]==='cat-file')throw Error('missing');}}),/not a commit/);
 key.fill(0);
 second.fill(0);
 other.fill(0);

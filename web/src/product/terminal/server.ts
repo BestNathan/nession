@@ -38,7 +38,12 @@ import { readAgentStreamPosition } from './streamPosition';
  * byte ceiling cut it short (#1305).
  */
 type RelayOutputCallback = (data: Uint8Array, bootstrap?: TerminalBootstrap, position?: TerminalStreamPosition) => void;
-type RelayResizeCallback = (cols: number, rows: number, position?: TerminalStreamPosition) => void;
+type RelayResizeCallback = (
+  cols: number,
+  rows: number,
+  position?: TerminalStreamPosition,
+  controlGeneration?: number,
+) => void;
 type RelayInputAckCallback = (ack: InputAckFields) => void;
 
 /**
@@ -151,6 +156,8 @@ export interface TerminalServerApi {
   beginRelayTracked(sessionId: string, opts?: RelayBeginOptions): SentSocketMessage | null;
   /** Parsed Server-owned proof, stamped with the receiving physical socket generation. */
   onRelayReady(sessionName: string, cb: (proof: RelaySubscriptionProof, physicalGeneration: number) => void): () => void;
+  /** Real owning plugin surface; socket generation numbers can collide. */
+  isBoundTo?(connection: PluginSurface): boolean;
   endRelay(sessionId: string): void;
   /**
    * Relay terminal input — base64-wrapped, mirroring the server wire.
@@ -160,7 +167,12 @@ export interface TerminalServerApi {
    * before the contract always sent.
    */
   sendRelayInput(sessionName: string, data: string, opts?: RelayInputOptions): void;
-  sendRelayResize(sessionName: string, cols: number, rows: number): void;
+  sendRelayResize(
+    sessionName: string,
+    cols: number,
+    rows: number,
+    controlGeneration?: number,
+  ): void;
   /**
    * Relay the existing versioned Agent output.applied contract. Only a caller
    * holding a verified parser cursor and current Agent-authored subscription
@@ -311,6 +323,11 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
     return this.addMapCallback(this.readyCallbacks, sessionName, cb);
   }
 
+  /** Old live services must never borrow a newer terminal-server binding. */
+  isBoundTo(connection: PluginSurface): boolean {
+    return this.connection === connection;
+  }
+
   private relayBeginPayload(sessionId: string, opts?: RelayBeginOptions): Record<string, unknown> {
     const payload: Record<string, unknown> = { session_id: sessionId };
     if (opts?.relayUrl) {
@@ -361,8 +378,22 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
     });
   }
 
-  sendRelayResize(sessionName: string, cols: number, rows: number): void {
-    this.requireConnection().send(TERMINAL_RESIZE_WIRE, { session_name: sessionName, cols, rows });
+  sendRelayResize(
+    sessionName: string,
+    cols: number,
+    rows: number,
+    controlGeneration?: number,
+  ): void {
+    // The generation travels with the request exactly as it does on the direct
+    // path (#2286): the Agent refuses a resize from a lease it has moved past,
+    // and a delayed frame from a previous controller must name the lease it
+    // believed it held rather than arrive as an anonymous observer request.
+    this.requireConnection().send(TERMINAL_RESIZE_WIRE, {
+      session_name: sessionName,
+      cols,
+      rows,
+      ...(controlGeneration !== undefined ? { control_generation: controlGeneration } : {}),
+    });
   }
 
   sendRelayOutputApplied(sessionName: string, ack: TerminalOutputAppliedAck): boolean {
@@ -539,10 +570,21 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
 
     const callbacks = this.resizeCallbacks.get(sessionId);
     if (callbacks) {
+      const generation = payload.control_generation;
+      const controlGeneration =
+        typeof generation === 'number'
+        && Number.isSafeInteger(generation)
+        && generation >= 0
+          ? generation
+          : undefined;
       for (const entry of callbacks) {
         const position = readAgentStreamPosition(payload);
         if (position) {
-          entry.cb(cols, rows, position);
+          if (controlGeneration !== undefined) {
+            entry.cb(cols, rows, position, controlGeneration);
+          } else {
+            entry.cb(cols, rows, position);
+          }
         } else {
           // Preserve the historical two-argument Relay level-resize contract.
           entry.cb(cols, rows);

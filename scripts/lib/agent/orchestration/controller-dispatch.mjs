@@ -14,6 +14,7 @@ import {verifyNativeResumeFailureLive} from './native-resume-failure.mjs';
 import {CONTROLLED_CONTINUATION,CONTROLLED_CONTINUATION_COMMENT,
   CONTROLLED_V2_CONTINUATION,CONTROLLED_V2_CONTINUATION_COMMENT} from './development-resume.mjs';
 import {CONTROLLED_FAILED_RUN,verifyKnownFailureLive} from './failed-worker-recover.mjs';
+import {CONTROLLED_ORIGINAL_PUBLICATION} from '../publisher/publication-readback.mjs';
 
 const REPO='BestNathan/nession';
 const WORKFLOW='.github/workflows/agent-controller-dispatch.yml';
@@ -91,13 +92,31 @@ async function api(token,resource) {
   if(!r.ok)fail('GitHub authority read failed ('+r.status+')');
   return r.json();
 }
-function sourceStillAllowed(sha){
-  if(!HEX40.test(sha??''))fail('invalid dispatch source SHA');
-  try{
-    execFileSync('git',['cat-file','-e',sha+'^{commit}'],{stdio:'ignore',timeout:5000});
-    execFileSync('git',['merge-base','--is-ancestor',sha,process.env.GITHUB_SHA],
-      {stdio:'ignore',timeout:5000});
-  }catch{fail('Developer source SHA is not a reachable trusted main ancestor');}
+function sourceStillAllowed(sha, role) {
+  return sourceAllowed(sha, role);
+}
+// A Developer action points at a source commit that must be reachable from
+// current main. A Reviewer action points at the published PR head, which is
+// not a main ancestor; the trusted ingest wrote that action after verifying the
+// publication, so require the target to descend from the original published
+// main SHA instead. Exported for deterministic fixtures.
+export function sourceAllowed(sha, role, { run = (args) => execFileSync('git', args,
+  { stdio: 'ignore', timeout: 5000 }), mainSha = process.env.GITHUB_SHA,
+  publishedMainSha = CONTROLLED_ORIGINAL_PUBLICATION.publisher_main_sha } = {}) {
+  if (!HEX40.test(sha ?? '')) fail('invalid dispatch source SHA');
+  if (role !== 'developer' && role !== 'reviewer') fail('invalid dispatch role');
+  try {
+    run(['cat-file', '-e', sha + '^{commit}']);
+  } catch {
+    fail('dispatch source SHA is not a commit');
+  }
+  try {
+    if (role === 'reviewer') run(['merge-base', '--is-ancestor', publishedMainSha, sha]);
+    else run(['merge-base', '--is-ancestor', sha, mainSha]);
+  } catch {
+    if (role === 'reviewer') fail('Reviewer target is not on the published branch history');
+    fail('Developer source SHA is not a reachable trusted main ancestor');
+  }
 }
 async function main(){
   if(process.argv.length!==3||process.argv[2]!=='dispatch')

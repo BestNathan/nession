@@ -9,7 +9,9 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {claudeCliToolPolicy} from './harness/native.mjs';
+import {qwenDeveloperModel,qwenGatewayEndpoint} from './orchestration/qwen-developer-policy.mjs';
 import {normalizeClaudeUsage} from './providers/claude-code.mjs';
+import {parseNativeEvents} from './providers/claude-stream.mjs';
 import {providerScopedRunName} from './telemetry/run-name.mjs';
 import {normalizeNativeTrace,writeExecutionTrace} from './telemetry/execution-trace.mjs';
 import {buildAgentWorkflowTelemetry,writeAgentWorkflowTelemetry} from '../../agent-workflow-telemetry.mjs';
@@ -24,11 +26,7 @@ const PROMPT='Read calc.js using the Read tool. The function incorrectly subtrac
   'Do not create or edit any other file. Finish with a short confirmation. '+
   'Do not use Bash, network tools, plugins or external tools.';
 function fail(message){throw new Error('Qwen Developer Canary: '+message);}
-function providerModel(env){
-  const model=env.ACCEPTANCE_CLAUDE_MODEL || env.ANTHROPIC_MODEL;
-  if(!/^qwen[a-z0-9._-]*$/i.test(model??''))fail('Qwen model must be explicit');
-  return model;
-}
+function providerModel(env){return qwenDeveloperModel(env);}
 export function checkSyntheticEdit(root,events){
   if(!Array.isArray(events))fail('missing real Provider event sequence');
   const tools=events.filter(x=>x?.type==='assistant'&&Array.isArray(x?.message?.content))
@@ -47,19 +45,6 @@ export function checkSyntheticEdit(root,events){
   // This deliberately does NOT eval/require/execute model-edited JavaScript.
   if(fs.readFileSync(target,'utf8')!==EXPECTED)fail('exact synthetic code repair not observed');
   return {edit_verified:true,native_read:true,native_edit:true};
-}
-export function parseNativeEvents(stdout){
-  if(typeof stdout!=='string'||stdout.length>8*1024*1024)fail('invalid native event stream');
-  const events=[];
-  for(const line of stdout.split(/\r?\n/).filter(Boolean)){
-    let value;
-    try{value=JSON.parse(line);}catch{fail('malformed native event stream');}
-    if(!value||typeof value!=='object'||Array.isArray(value))fail('invalid native event envelope');
-    events.push(value);
-  }
-  const result=events.filter(e=>e.type==='result');
-  if(result.length!==1)fail('exactly one Provider result required');
-  return {events,envelope:result[0]};
 }
 function canaryArgs(model){
   return ['-p',PROMPT,'--output-format','stream-json','--verbose',
@@ -140,7 +125,7 @@ async function run(dir){
 }
 function selfTest(){
   assert.equal(providerModel({ANTHROPIC_MODEL:'qwen3.7-plus'}),'qwen3.7-plus');
-  assert.throws(()=>providerModel({ANTHROPIC_MODEL:'claude-sonnet-5'}),/Qwen model/);
+  assert.throws(()=>providerModel({ANTHROPIC_MODEL:'claude-sonnet-5'}),/Qwen/);
   const a=canaryArgs('qwen3.7-plus').join(' ');
   for(const flag of ['--restricted','--tools','--permission-mode dontAsk','--strict-mcp-config',
     '--disallowedTools mcp__*','--no-session-persistence']){

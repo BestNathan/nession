@@ -156,10 +156,16 @@ export class StreamReconciler {
     if (this.disposed) {
       return;
     }
-    const { streamEpoch, streamSeq, cols, rows } = frame;
+    const { streamEpoch, streamSeq, cols, rows, controlGeneration } = frame;
     this.accept(streamEpoch, streamSeq, {
       kind: 'resize',
-      apply: () => this.sink.onResize(cols, rows, { streamEpoch, streamSeq }),
+      apply: () =>
+        this.sink.onResize(
+          cols,
+          rows,
+          { streamEpoch, streamSeq },
+          controlGeneration,
+        ),
       bytes: PENDING_FRAME_OVERHEAD,
     });
   }
@@ -724,6 +730,8 @@ export interface LiveResizeFrame {
   rows: number;
   streamEpoch: number;
   streamSeq: number;
+  /** The lease generation that authorized the resize (#2286), when stated. */
+  controlGeneration?: number;
 }
 
 /** The part of `agent.terminal.stream.resume`'s reply the cursor depends on. */
@@ -752,7 +760,12 @@ export interface StreamSink {
     bootstrap?: TerminalBootstrap,
     position?: TerminalStreamPosition,
   ) => void;
-  onResize: (cols: number, rows: number, position?: TerminalStreamPosition) => void;
+  onResize: (
+    cols: number,
+    rows: number,
+    position?: TerminalStreamPosition,
+    controlGeneration?: number,
+  ) => void;
   /**
    * The consumer's buffer now has a hole in it that no later request can
    * fill (#1304).

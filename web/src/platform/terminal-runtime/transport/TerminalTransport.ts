@@ -49,6 +49,15 @@ export interface TerminalTransport {
   flushAllOutbound(): void;
 
   /**
+   * This client just became the Controller: the next resize must be stated
+   * even if its size is the one this transport last sent (#2286).
+   *
+   * Optional so a transport that does not dedup or does not carry a lease can
+   * ignore it; the caller that adopts control still reports the measured size.
+   */
+  restateResize?(): void;
+
+  /**
    * Bytes from the agent. `bootstrap` is present when they are the session's
    * **history** rather than its live output (#321): a bootstrap replaces the
    * consumer's buffer, live output appends to it. Absent means append — which
@@ -66,7 +75,12 @@ export interface TerminalTransport {
    * Relay / legacy bootstrap / level resize have no position yet (#1938).
    */
   onOutput: ((data: Uint8Array, bootstrap?: TerminalBootstrap, position?: TerminalStreamPosition) => void) | null;
-  onResize: ((cols: number, rows: number, position?: TerminalStreamPosition) => void) | null;
+  onResize: ((
+    cols: number,
+    rows: number,
+    position?: TerminalStreamPosition,
+    controlGeneration?: number,
+  ) => void) | null;
   onError: ((err: Error) => void) | null;
 
   dispose(): void;
