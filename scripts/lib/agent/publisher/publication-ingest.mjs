@@ -159,12 +159,16 @@ export function applyPublicationToRemote({ remote, readback, registry,
   }
 }
 
-function assertTrustedMainWorkflow() {
-  if (process.env.GITHUB_ACTIONS !== 'true' ||
-      process.env.GITHUB_REPOSITORY !== REPO ||
-      process.env.GITHUB_REF !== 'refs/heads/main' ||
-      process.env.GITHUB_EVENT_NAME !== 'workflow_run' ||
-      process.env.GITHUB_WORKFLOW !== 'Store / Publisher Review Ingest')
+// The automatic wake is a completed Publisher workflow_run. The controlled
+// publication predates this workflow, so a one-shot owner wake uses
+// workflow_dispatch; both are main-only, and the workflow job's actor guard is
+// the authority check. This function rejects every other event/ref/workflow.
+export function assertTrustedMainWorkflow(env = process.env) {
+  if (env.GITHUB_ACTIONS !== 'true' ||
+      env.GITHUB_REPOSITORY !== REPO ||
+      env.GITHUB_REF !== 'refs/heads/main' ||
+      !['workflow_run', 'workflow_dispatch'].includes(env.GITHUB_EVENT_NAME) ||
+      env.GITHUB_WORKFLOW !== 'Store / Publisher Review Ingest')
     fail('trusted main-only Store Ingest required');
 }
 
