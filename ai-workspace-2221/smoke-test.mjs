@@ -86,7 +86,11 @@ inspect();
 await ask('查看 Agent 列表');
 check('opens exactly one Agent Scene', state().scenes.length === 1);
 const stableId = state().scenes[0].sceneId;
-check('discovery candidates present', space().discovery.some(a => a.actionId === 'session.list.show'));
+check('root entry candidates present', space().entry.some(a => a.actionId === 'session.list.show'));
+check('root never exposes a SessionCreate leaf', !space().all.some(a => a.actionId === 'session.create.open'));
+check('AgentList loaded exposes row actions, not a global create action',
+  space().view.some(a => a.actionId === 'agent.select') &&
+  !space().entry.some(a => a.actionId === 'session.create.open'));
 dispatch('input', { id: 'agentSearch', value: 'mac', selectionStart: 3 });
 check('filtered snapshot order is the visible list', state().visibleSelection.orderedResourceIds.join(',') === 'agent-mac-02');
 await ask('选择第二个');
@@ -129,4 +133,6 @@ await ask('查看 Session 列表');
 check('repeated SessionList reuses existing Scene', state().scenes.length === 2);
 await ask('一些不相关的输入');
 check('unknown intent clarifies without allocating a Scene', state().scenes.length === 2);
+// Restart the workspace and drive a high-level goal through newly exposed steps.
+dispatch('click', el('resetButton'), 'resetButton');
 console.log('\nPASS: ' + count + ' local mock state/event checks. Browser and real-provider acceptance remain pending.');
