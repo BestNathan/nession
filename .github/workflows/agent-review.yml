@@ -128,8 +128,11 @@ jobs:
           CLAUDE_CODE_VERSION: ${{ vars.CLAUDE_CODE_VERSION || 'latest' }}
         run: |
           set -euo pipefail
-          npm install --prefix "$RUNNER_TEMP/claude-cli" --ignore-scripts --no-audit --no-fund \
+          # The package's postinstall is required for the CLI to start; the
+          # first real Slice failed because --ignore-scripts skipped it.
+          npm install --prefix "$RUNNER_TEMP/claude-cli" --no-audit --no-fund \
             "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION"
+          "$RUNNER_TEMP/claude-cli/node_modules/.bin/claude" --version
       - name: Install the pinned Cursor SDK for the cursor provider
         if: needs.prepare.outputs.reviewer == 'review-cursor-01'
         env:
