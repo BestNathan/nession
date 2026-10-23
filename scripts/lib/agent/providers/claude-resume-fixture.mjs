@@ -36,12 +36,13 @@ function version(){
   if(!match)fail('unrecognized Claude Code CLI version');
   return match[1];
 }
-function model(){
+export function qwenNativeResumeModel(env=process.env){
   // Native Resume must follow the same Environment model binding as the
   // Developer Worker. A stale Acceptance alias cannot silently retarget it.
-  qwenGatewayEndpoint(process.env);
-  return qwenDeveloperModel(process.env);
+  qwenGatewayEndpoint(env);
+  return qwenDeveloperModel(env);
 }
+const model=()=>qwenNativeResumeModel();
 function harness(sourceSha,cliVersion,requestedModel){
   return sha(JSON.stringify({schema_version:1,provider:'claude-code',backend:'qwen',
     source_sha:sourceSha,cli_version:cliVersion,model:requestedModel,
