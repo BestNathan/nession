@@ -231,6 +231,9 @@ check('resume restores original Scene form and goal without replaying earlier st
   state().pendingGoal.goalId === goalId &&
   state().pendingGoal.status === 'awaiting_user_commit' &&
   state().scenes.find(x=>x.sceneId===ownerScene)?.activeView === 'session.create');
+check('Goal state changes are recorded as validated transition receipts',
+  state().pendingGoal.transitions?.some(t => t.to === 'suspended' && t.cause === 'new-user-intent') &&
+  state().pendingGoal.transitions?.some(t => t.cause === 'explicit-resume'));
 check('automated step receipts pin View revision and action-space fingerprint',
   state().pendingGoal.steps.every(x=>x.step==='prefill' || x.fingerprint !== undefined) &&
   state().pendingGoal.steps.some(x=>x.sourceViewInstanceId));
