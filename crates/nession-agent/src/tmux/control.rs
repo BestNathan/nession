@@ -1403,19 +1403,19 @@ mod tests {
         fn layout_change_inside_command_response_updates_observers_once() {
             let mut router = ControlRouter::new();
             welcome(&mut router);
-            assert!(router.route("%begin 200 9 1\\n", true).is_empty());
+            assert!(router.route("%begin 200 9 1\n", true).is_empty());
 
             // Real tmux 3.6b emits a layout notification even while another
             // control command's response is open. The notification must not
             // be swallowed as capture text (nor change the response block).
-            let layout = "%layout-change @0 a87d,177x49,0,0,0 a87d,177x49,0,0,0 *\\n";
+            let layout = "%layout-change @0 a87d,177x49,0,0,0 a87d,177x49,0,0,0 *\n";
             assert_eq!(router.route(layout, true), vec![Effect::Resize(177, 49)]);
             assert!(router.route(layout, true).is_empty());
-            assert_eq!(router.route("%end 200 9 1\\n", true).len(), 1);
+            assert_eq!(router.route("%end 200 9 1\n", true).len(), 1);
             assert_eq!(router.reported_size, Some((177, 49)));
 
             // A subsequent real resize must not be masked by the dedupe.
-            let next = "%layout-change @0 b25d,124x30,0,0,0 b25d,124x30,0,0,0 *\\n";
+            let next = "%layout-change @0 b25d,124x30,0,0,0 b25d,124x30,0,0,0 *\n";
             assert_eq!(router.route(next, true), vec![Effect::Resize(124, 30)]);
         }
 
