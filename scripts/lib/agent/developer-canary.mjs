@@ -9,6 +9,7 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {claudeCliToolPolicy} from './harness/native.mjs';
+import {qwenDeveloperModel,qwenGatewayEndpoint} from './orchestration/qwen-developer-policy.mjs';
 import {normalizeClaudeUsage} from './providers/claude-code.mjs';
 import {parseNativeEvents} from './providers/claude-stream.mjs';
 import {providerScopedRunName} from './telemetry/run-name.mjs';
@@ -25,11 +26,7 @@ const PROMPT='Read calc.js using the Read tool. The function incorrectly subtrac
   'Do not create or edit any other file. Finish with a short confirmation. '+
   'Do not use Bash, network tools, plugins or external tools.';
 function fail(message){throw new Error('Qwen Developer Canary: '+message);}
-function providerModel(env){
-  const model=env.ACCEPTANCE_CLAUDE_MODEL || env.ANTHROPIC_MODEL;
-  if(!/^qwen[a-z0-9._-]*$/i.test(model??''))fail('Qwen model must be explicit');
-  return model;
-}
+function providerModel(env){return qwenDeveloperModel(env);}
 export function checkSyntheticEdit(root,events){
   if(!Array.isArray(events))fail('missing real Provider event sequence');
   const tools=events.filter(x=>x?.type==='assistant'&&Array.isArray(x?.message?.content))
@@ -128,7 +125,7 @@ async function run(dir){
 }
 function selfTest(){
   assert.equal(providerModel({ANTHROPIC_MODEL:'qwen3.7-plus'}),'qwen3.7-plus');
-  assert.throws(()=>providerModel({ANTHROPIC_MODEL:'claude-sonnet-5'}),/Qwen model/);
+  assert.throws(()=>providerModel({ANTHROPIC_MODEL:'claude-sonnet-5'}),/Qwen/);
   const a=canaryArgs('qwen3.7-plus').join(' ');
   for(const flag of ['--restricted','--tools','--permission-mode dontAsk','--strict-mcp-config',
     '--disallowedTools mcp__*','--no-session-persistence']){

@@ -23,6 +23,8 @@ on:
       - .github/workflows/agent-sc-acceptance.yml
       - .github/workflows/agent-review.yml
       - scripts/lib/agent/developer-canary.mjs
+      - scripts/lib/agent/orchestration/qwen-developer-policy.mjs
+      - scripts/lib/agent/orchestration/qwen-developer-policy-selftest.mjs
       - scripts/lib/agent/harness/native.mjs
       - scripts/lib/agent/telemetry/run-name.mjs
       # The main-only Provider Smoke is also the authenticated source of
