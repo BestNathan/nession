@@ -641,6 +641,41 @@
     return g.agentHint==='北京'?a.id==='agent-bj-03':g.agentHint==='macbook'?a.id==='agent-mac-02':
       g.agentHint==='devbox'?a.id==='agent-dev-01':g.agentHint==='tokyo'?a.id==='agent-tokyo-04':false;
   }
+  function recordGoalStep(goal,candidate,space,trigger){
+    if(goal.steps.length>=goal.automaticStepBudget){suspendGoal('suspended','安全续行步骤预算已用完，请手动继续');return false;}
+    const fingerprint=space.dependencyFingerprint;
+    if(goal.steps.some(x=>x.candidateId===candidate.candidateId&&x.fingerprint===fingerprint)){
+      suspendGoal('suspended','当前状态未取得新的进展，已停止重复选择动作');return false;
+    }
+    goal.steps.push({candidateId:candidate.candidateId,sourceViewInstanceId:candidate.source.viewInstanceId||null,
+      sourceViewRevision:candidate.source.viewRevision??null,fingerprint,trigger});
+    return true;
+  }
+  function applyGoalFollowup(question){
+    const goal=state.pendingGoal,scene=focused(),ctx=formContext();
+    if(!goal||!scene||goal.ownerSceneId!==scene.id)return false;
+    const name=question.match(/^(?:(?:把)?(?:Session\s*)?(?:名称|名字)(?:改成|设为|设置为|是|叫|用|为)?|改名为|name\s*(?:is|to|=))\s*[:：]?\s*([A-Za-z0-9_.-]{1,64})\s*$/i);
+    if(name&&ctx&&['awaiting_input','awaiting_user_commit'].includes(goal.status)){
+      userInteractionEpoch++;
+      ctx.form.draft.name=name[1];ctx.form.error='';
+      goal.status=/^[A-Za-z0-9_.-]{1,64}$/.test(name[1])?'awaiting_user_commit':'awaiting_input';
+      goal.userEpoch=userInteractionEpoch;
+      state.currentQuestion=question;
+      latestDecision={mock:true,judgment:'slot.update',chosen:'view.draft.update',modelCalled:false};
+      bump();render();log('GOAL SLOT UPDATE','当前表单名称已更新，保持原 Goal 和 Scene');
+      return true;
+    }
+    if(/^(继续|继续刚才的操作|恢复刚才的操作)$/.test(question.trim())&&goal.status==='suspended'){
+      goal.status=ctx?(ctx.form.draft.name?'awaiting_user_commit':'awaiting_input'):'resolving';
+      goal.userEpoch=userInteractionEpoch;
+      clarification='';bump();render();
+      if(goal.status==='resolving')advancePendingGoal('resume');
+      log('GOAL RESUMED','只恢复未完成的操作，不重放已提交的业务动作');
+      return true;
+    }
+    return false;
+  }
+
   function advancePendingGoal(trigger='view-change'){
     const g=state.pendingGoal;
     if(!g||!['resolving','awaiting_data','awaiting_selection'].includes(g.status))return;
@@ -662,7 +697,7 @@
       const selected=space.view.find(c=>c.candidateId==='agent:select:'+target&&c.eligibility==='enabled');
       if(!selected||g.steps.length>=g.automaticStepBudget){suspendGoal('suspended','当前 View 尚未暴露目标选择动作。');return;}
       latestQuestionPlan=buildJevPlan(g.utterance,snapshot(),space);
-      g.steps.push({candidateId:selected.candidateId,revision:space.revision,trigger});
+      if(!recordGoalStep(g,selected,space,trigger))return;
       log('SYSTEM ONE STEP (MOCK)','选择当前 View 动作 '+selected.candidateId);
       setAgentSelected(target,{fromGoal:true});
     }
@@ -672,7 +707,7 @@
       suspendGoal('suspended','创建入口尚未由当前 View 暴露。');return;
     }
     latestQuestionPlan=buildJevPlan(g.utterance,snapshot(),space);
-    g.steps.push({candidateId:open.candidateId,revision:space.revision,trigger});
+    if(!recordGoalStep(g,open,space,trigger))return;
     log('SYSTEM ONE STEP (MOCK)','选择新暴露的动作 '+open.candidateId);
     if(g.independent)activate('session.create',target,{forceNew:true});
     else openAgentCreateInline(target,'Pending Goal · progressive action');
@@ -727,6 +762,7 @@
   async function ask(question){
     if(!question.trim()||busy)return;
     busy=true;setBusy(true);clarification='';state.currentQuestion=question;
+    if(applyGoalFollowup(question)){setBusy(false);return;}
     if(/取消.*(目标|创建)|不创建了/.test(question)){
       if(state.pendingGoal)state.pendingGoal.status='cancelled';
       busy=false;setBusy(false);bump();render();return;
@@ -738,6 +774,12 @@
     bump();
     const projection=structuredClone(snapshot()),space=deriveActionSpace();
     const plan=buildJevPlan(question,projection,space);
+    if(!plan){
+      latestQuestionPlan={status:'awaiting_data',reason:'no currently enabled action'};
+      if(state.pendingGoal)state.pendingGoal.status='awaiting_data';
+      setBusy(false);bump();render();log('MODEL SKIPPED','没有可执行候选：等待 View 数据更新');
+      return;
+    }
     latestQuestionPlan=plan;
     latestRequest={state:projection,question,actionSpaceRevision:space.revision,registryVersion};
     const epoch=userInteractionEpoch,sceneBefore=state.activeSceneId,
