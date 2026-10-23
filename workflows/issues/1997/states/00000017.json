@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "issue": 1997,
+  "version": 17,
+  "phase": "review",
+  "target_sha": "3d8e3807cc01f6082734b8d0ba458217c28f60a4",
+  "repair_attempts": 0,
+  "transitions": [
+    {
+      "key": "21222e3ce27da3d5f5d31e562d5282e90810a266879d8c50424b0178407b40e5",
+      "kind": "publisher",
+      "run_id": 39609600546,
+      "attempt": 1,
+      "target_sha": "3d8e3807cc01f6082734b8d0ba458217c28f60a4",
+      "outcome": "published",
+      "reviewer_agent_id": "review-qwen-01"
+    }
+  ],
+  "assignments": {
+    "developer": "dev-cursor-01",
+    "reviewer": "review-qwen-01",
+    "acceptor": "accept-cursor-01"
+  },
+  "outbox": [
+    {
+      "id": "95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae",
+      "task": {
+        "type": "dispatch",
+        "role": "developer",
+        "task": "implement",
+        "sha": "220266b9233ec97b1beacbc54e5cc7f82d3cece2",
+        "agent_id": "dev-cursor-01"
+      },
+      "status": "failed",
+      "attempts": 1,
+      "receipt": {
+        "status": "failed",
+        "dispatch_id": "95b467a90a33b503dc19fb59f3a50378860e6e1eaa2961a0929ca97ae020edae",
+        "source_run_id": 39267659650,
+        "source_attempt": 1,
+        "failure_code": "native_sdk_sandbox_unavailable"
+      }
+    },
+    {
+      "id": "555b3351ddb8c7ddbc23ba789f8a8a9560a01cc3112834f15492382e13af4434",
+      "task": {
+        "type": "dispatch",
+        "role": "reviewer",
+        "task": "review",
+        "sha": "3d8e3807cc01f6082734b8d0ba458217c28f60a4",
+        "agent_id": "review-qwen-01"
+      },
+      "status": "pending",
+      "attempts": 0,
+      "receipt": null
+    }
+  ]
+}
