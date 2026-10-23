@@ -21,6 +21,7 @@ export const CATALOG = [
   ['store-agent-dispatch-reconcile', 'store-agent-dispatch-reconcile.yml', 'Store / Agent Dispatch Reconcile', 'store-agent-dispatch-reconcile.yml', 'Store / Agent Dispatch Reconcile', 'store'],
   ['store-agent-development-ingest', 'store-agent-development-ingest.yml', 'Store / Agent Development Ingest', 'store-agent-development-ingest.yml', 'Store / Agent Development Ingest', 'store'],
   ['store-controlled-publisher', 'store-controlled-publisher.yml', 'Store / Controlled Publisher', 'store-controlled-publisher.yml', 'Store / Controlled Publisher', 'store'],
+  ['store-publisher-review-ingest', 'store-publisher-review-ingest.yml', 'Store / Publisher Review Ingest', 'store-publisher-review-ingest.yml', 'Store / Publisher Review Ingest', 'store'],
   ['agent-sc-acceptance', 'acceptance.yml', 'Acceptance', 'agent-sc-acceptance.yml', 'Agent / SC Acceptance', 'agent'],
   ['agent-issue-audit', 'issue-audit.yml', 'Issue Audit Agent', 'agent-issue-audit.yml', 'Agent / Issue Audit', 'agent'],
   ['agent-provider-smoke', 'agent-provider-smoke.yml', 'AI Agent Provider Smoke', 'agent-provider-smoke.yml', 'Agent / Provider Smoke', 'agent'],
