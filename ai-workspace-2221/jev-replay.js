@@ -32,8 +32,10 @@
   trigger.type = 'button';
   trigger.className = 'jr-launch';
   trigger.setAttribute('aria-haspopup','dialog');
+  trigger.setAttribute('aria-label','查看真实 Jev 测试回放');
+  trigger.setAttribute('title','查看 2026-10-23 的真实 Jev 决策过程');
   trigger.setAttribute('aria-expanded','false');
-  trigger.innerHTML = '<span class="jr-dot" aria-hidden="true"></span><span>真实测试回放</span>';
+  trigger.innerHTML = '<span class="jr-dot" aria-hidden="true"></span><span class="jr-long">真实测试回放</span><span class="jr-short">回放</span>';
   const inspect = document.getElementById('inspectButton');
   if (inspect) topbar.insertBefore(trigger, inspect);
   else topbar.appendChild(trigger);
@@ -101,14 +103,16 @@
     if(s.id!=='comparison')return '';
     const cases=s.cases.filter(x=>x.variant==='baseline');
     const other=s.cases.filter(x=>x.variant==='progressive');
-    return '<div class="jr-compare"><div class="jr-compare-top">同一批场景 · 两种策略逐例对照（点击切换）</div>' +
+    return '<div class="jr-compare"><div class="jr-compare-top">相同用例 · 严格匹配 vs 渐进推进（点击具体结果查看完整过程）</div>' +
     cases.map(c => {
       const b=other.find(x=>x.id===c.id);
-      return '<button type="button" data-jr-compare="' + escape(c.id) +
-        '" class="jr-compare-row"><span>' + escape(c.utterance) + '</span>' +
-        '<span class="' + (c.result.hit?'jr-pass':'jr-fail') + '">严格 ' +
-        (c.result.hit?'✓':'×') + '<small style="display:block;font-size:9px;color:#82909e;overflow-wrap:anywhere">' + escape(c.result.selected) + '</small></span><span class="' + (b.result.hit?'jr-pass':'jr-fail') +
-        '">渐进 ' + (b.result.hit?'✓':'×') + '<small style="display:block;font-size:9px;color:#82909e;overflow-wrap:anywhere">' + escape(b.result.selected) + '</small></span></button>';
+      const choice=(entry,label) =>
+        '<button type="button" class="jr-compare-choice ' + (entry.result.hit?'jr-pass':'jr-fail') +
+        '" data-jr-compare="' + escape(c.id) + '" data-jr-variant="' + escape(entry.variant) + '">' +
+        escape(label) + ' ' + (entry.result.hit?'✓':'×') + '<small>' +
+        escape(entry.result.selected) + '</small></button>';
+      return '<div class="jr-compare-row"><span>' + escape(c.utterance) + '</span>' +
+        choice(c,'严格') + choice(b,'渐进') + '</div>';
     }).join('') + '</div>';
   }
   function firstRunPath() {
@@ -276,7 +280,7 @@
     if(d.jrCase){selectedId=d.jrCase;stage=0;return render();}
     if(d.jrStage!=null){stage=Math.max(0,Math.min(4,Number(d.jrStage)));return render();}
     if(d.jrCompare){
-      const v=variant==='progressive'?'progressive':'baseline';
+      const v=d.jrVariant==='progressive'?'progressive':'baseline';
       variant='all';selectedId=v+':'+d.jrCompare;stage=4;return render();
     }
     if(btn.hasAttribute('data-jr-prev')){stage=Math.max(0,stage-1);return render();}
