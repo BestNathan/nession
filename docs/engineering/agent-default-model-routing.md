@@ -1,0 +1,64 @@
+# GitHub Actions Agent defaults
+
+The default Agent for **new** CI operations is selected in GitHub, not in a
+committed workflow and not through a user-side CLI:
+
+[Repository Actions Variables](https://github.com/BestNathan/nession/settings/variables/actions)
+
+| Repository Variable | Example | Current consumer |
+| --- | --- | --- |
+| `AGENT_DEFAULT_REVIEWER` | `review-qwen-01` | `Agent / Review` |
+| `AGENT_DEFAULT_ACCEPTOR` | `accept-qwen-01` | `Agent / SC Acceptance` and the acceptance orchestrator |
+| `AGENT_DEFAULT_AUDITOR` | `audit-qwen-01` | `Agent / Issue Audit`, including `/audit` comments |
+| `AGENT_DEFAULT_DEVELOPER` | `dev-qwen-01` | **Reserved** until the durable Developer Worker supports non-Cursor providers |
+
+The registered IDs, roles, providers and credential Environment bindings live
+in [automation/agents/registry.json](../../automation/agents/registry.json).
+The trusted selection contract lives in
+[scripts/lib/agent/default-routing.mjs](../../scripts/lib/agent/default-routing.mjs).
+A non-empty unknown/wrong-role ID is an error, **never** an instruction to run
+an arbitrary executable or fall back to Cursor.
+
+Set each Agent's model, endpoint and credentials in its registered GitHub
+Environment (Settings > Environments > select environment):
+
+- `ANTHROPIC_MODEL` or role-specific `ACCEPTANCE_CLAUDE_MODEL` /
+  `ISSUE_AUDIT_CLAUDE_MODEL`: an explicit Qwen model for Qwen paths.
+- `ANTHROPIC_BASE_URL`: the approved Anthropic-compatible gateway endpoint.
+- `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY`: **Environment Secret**,
+  never a repository variable or committed file.
+
+For the currently registered Qwen identities, the Environment is
+`dev-claude-qwen`. Several roles may share one credential Environment if
+they share the same provider. Changing its `ANTHROPIC_MODEL` affects future
+runs using that Environment; use separate Environments when different roles
+need independent models. The configuration is read at job start, so a
+previously running job is not retroactively reconfigured.
+
+**Compatibility:** until a given Repository Variable is set, Review uses the
+prior `review-qwen-01` default and the other supported entrypoints continue
+their historical `cursor` Environment selection. The legacy
+`ACCEPTANCE_PROVIDER` repository variable remains supported by the
+acceptance orchestrator for migration. Explicit authorized workflow dispatch
+inputs may select a registered alternative; invalid choices fail closed.
+
+**Durability:** the existing Issue-centric Developer flow currently executes
+the specifically scoped Cursor-native #1997 Worker. Do **not** switch its
+default to Qwen by changing this reserved variable alone. Implement and prove
+the Provider-neutral Developer execution, checkpoint and Resume path before
+wiring `AGENT_DEFAULT_DEVELOPER` into that flow. Existing immutable Store
+assignments are not changed by Repository Variables.
+
+## Verify a change
+
+1. Set one supported Repository Variable to a registered ID.
+2. Check the corresponding trusted GitHub Actions workflow's selected
+   Environment, provider selection and verified result/telemetry.
+3. To roll back **new** runs, restore the previous ID in the same GitHub
+   Settings page; existing accepted Tasks retain their original assignments.
+4. If the Environment is missing an API key, endpoint or the explicit Qwen
+   model, the selected workflow must fail before model invocation. Never copy
+   secrets into Issues, logs or telemetry.
+
+This is runtime configuration, not a GitOps desired-state change; no
+commit/PR/deployment is required for a later default change.
