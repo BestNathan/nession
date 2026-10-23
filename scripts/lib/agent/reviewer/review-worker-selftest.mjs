@@ -12,7 +12,7 @@ import { CONTROLLED_1997_POLICY as POLICY } from '../publisher/controlled-propos
 import { reviewModelResult } from '../tasks/review.mjs';
 import { runReviewSlice } from './review-slice.mjs';
 import { assertIsolatedReviewerProcess, createClaudeReviewRunner, createCursorReviewRunner,
-  readReviewAdmission } from './review-worker.mjs';
+  readReviewAdmission, writeReviewTelemetry } from './review-worker.mjs';
 
 const admission=Object.freeze({
   schema_version:1,kind:'authenticated_reviewer_admission_only',
@@ -58,11 +58,19 @@ const goodEnv={NESSION_REVIEWER_ISOLATED:'docker-v1',GITHUB_WORKSPACE:'/workspac
   CURSOR_SDK_ROOT:'/sdk',RUNNER_TEMP:'/tmp',CURSOR_API_KEY:'provider-only-key'};
 assert.doesNotThrow(()=>assertIsolatedReviewerProcess(goodEnv,{dockerenv:true}));
 assert.throws(()=>assertIsolatedReviewerProcess(goodEnv,{dockerenv:false}),/OS-isolated Docker worker/);
-for(const [key,value] of [
-  ['NESSION_REVIEWER_ISOLATED','local'],['GITHUB_WORKSPACE','/tmp'],
-  ['CURSOR_SDK_ROOT','/tmp'],['RUNNER_TEMP','/var/tmp'],
-]) assert.throws(()=>assertIsolatedReviewerProcess({...goodEnv,[key]:value},{dockerenv:true}),
+assert.throws(()=>assertIsolatedReviewerProcess({...goodEnv,NESSION_REVIEWER_ISOLATED:'local'},{dockerenv:true}),
   /OS-isolated Docker worker/);
+assert.throws(()=>assertIsolatedReviewerProcess({...goodEnv,GITHUB_WORKSPACE:'/tmp'},{dockerenv:true}),
+  /OS-isolated Docker worker/);
+assert.throws(()=>assertIsolatedReviewerProcess({...goodEnv,RUNNER_TEMP:'/var/tmp'},{dockerenv:true}),
+  /OS-isolated Docker worker/);
+// The Cursor SDK mount is required only for the cursor provider.
+assert.throws(()=>assertIsolatedReviewerProcess({...goodEnv,CURSOR_SDK_ROOT:'/tmp'},
+  {dockerenv:true,provider:'cursor'}),/missing mounted Cursor SDK/);
+const {CURSOR_SDK_ROOT,...noSdk}=goodEnv;
+assert.doesNotThrow(()=>assertIsolatedReviewerProcess(noSdk,{dockerenv:true,provider:'claude-code'}));
+assert.throws(()=>assertIsolatedReviewerProcess(noSdk,{dockerenv:true,provider:'cursor'}),
+  /missing mounted Cursor SDK/);
 for(const key of ['GITHUB_TOKEN','GH_TOKEN','STORE_WRITER_PRIVATE_KEY','PUBLISHER_APP_PRIVATE_KEY'])
   assert.throws(()=>assertIsolatedReviewerProcess({...goodEnv,[key]:'leak'},{dockerenv:true}),
     /privileged credential leaked/);
@@ -125,6 +133,24 @@ assert.equal(qwenSlice.artifact.target_sha,admission.target_sha);
 assert.ok(capturedClaude.args.includes('--restricted'));
 assert.ok(capturedClaude.args.includes('--no-session-persistence'));
 assert.equal(capturedClaude.args[capturedClaude.args.indexOf('--tools')+1],'Grep,Read');
+// Canonical telemetry for a completed Slice (unobserved stays null).
+const telemetryDir=fs.mkdtempSync(path.join(os.tmpdir(),'nession-review-telemetry-'));
+try{
+  writeReviewTelemetry({outDir:telemetryDir,admission:qwenAdmission,slice:qwenSlice,
+    identity:{agent_id:'review-qwen-01',provider:'claude-code'},taskId:TASK,
+    env:{GITHUB_RUN_ID:'39780000001',GITHUB_RUN_ATTEMPT:'1',GITHUB_WORKFLOW:'Agent / Review',
+      GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_REPOSITORY:'BestNathan/nession'}});
+  const summary=JSON.parse(fs.readFileSync(path.join(telemetryDir,'agent-telemetry.json'),'utf8'));
+  assert.equal(summary.agent.provider,'claude-code');
+  assert.equal(summary.agent.id,'review-qwen-01');
+  assert.equal(summary.agent.prompt.id,'review');
+  assert.equal(summary.task.pr,2176);
+  assert.equal(summary.task.target_ref,admission.target_sha);
+  assert.equal(summary.result.status,'review-approved');
+  const trace=JSON.parse(fs.readFileSync(path.join(telemetryDir,'agent-execution-trace.json'),'utf8'));
+  assert.equal(trace.kind,'agent_execution_trace');
+  assert.equal(trace.agent.provider,'claude-code');
+}finally{fs.rmSync(telemetryDir,{recursive:true,force:true});}
 // Provider identity is registry-owned: a cursor-shaped session id on the Qwen
 // admission, and an explicit provider override, both fail closed.
 await assert.rejects(()=>runReviewSlice({admission:qwenAdmission,runner,

@@ -1,7 +1,8 @@
 name: Task / Ephemeral Runner
 
-# This workflow is a read-only execution sandbox for untrusted task/* source.
-# Trusted source/run verification and task-results writes live in task-result-ingest.yml.
+# Task source is pinned by SHA. GitHub-authenticated Write+ actors may request
+# allowlisted credentials; all other tasks remain secretless and read-only.
+# Result records are still untrusted observations ingested by task-result-ingest.yml.
 on:
   push:
     branches:
@@ -51,9 +52,38 @@ jobs:
           node-version: '24'
       - name: Verify runner contract
         run: node trusted/scripts/task-runner.mjs self-test
-      - name: Run one manifest-selected Task
+      - name: Classify authenticated task initiator
+        id: actor
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+        run: node trusted/scripts/task-runner.mjs actor-trust
+      - name: Check exact-source Task credential request
+        id: route
+        env:
+          TASK_ACTOR_TRUSTED: ${{ steps.actor.outputs.trusted }}
+        run: |
+          set -euo pipefail
+          task_id="${REQUESTED_ID#task/}"
+          node trusted/scripts/task-runner.mjs route \
+            "${GITHUB_WORKSPACE}/workspace" "${SOURCE_SHA}" "${task_id}"
+      - name: Run ordinary Task (no secrets)
+        if: steps.route.outputs.credentialed == 'false'
         env:
           TASK_OUTPUT: ${{ runner.temp }}/task-execution
+        run: |
+          set -euo pipefail
+          task_id="${REQUESTED_ID#task/}"
+          node trusted/scripts/task-runner.mjs execute \
+            "${GITHUB_WORKSPACE}/workspace" "${SOURCE_SHA}" "${task_id}" "${TASK_OUTPUT}"
+      - name: Run Write+ Task with requested allowlisted secret
+        if: steps.route.outputs.credentialed == 'true'
+        env:
+          TASK_OUTPUT: ${{ runner.temp }}/task-execution
+          TASK_APPROVED_SECRETS: TYPESAFE_API_KEY
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
         run: |
           set -euo pipefail
           task_id="${REQUESTED_ID#task/}"

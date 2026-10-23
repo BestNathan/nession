@@ -12,8 +12,12 @@ import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { loadCursorSdk, runCursorSession } from '../providers/cursor.mjs';
+import { normalizeClaudeUsage } from '../providers/claude-code.mjs';
 import { parseNativeEvents, toolUseNames } from '../providers/claude-stream.mjs';
 import { claudeCliToolPolicy } from '../harness/native.mjs';
+import { promptTelemetry } from '../telemetry/prompt.mjs';
+import { normalizeNativeTrace, writeExecutionTrace } from '../telemetry/execution-trace.mjs';
+import { buildAgentWorkflowTelemetry, writeAgentWorkflowTelemetry } from '../../../agent-workflow-telemetry.mjs';
 import { assertReviewerAdmission, resolveReviewerIdentity } from './pr-admission.mjs';
 import { REVIEW_TOOLS, assertUnprivilegedReviewerEnvironment, runReviewSlice } from './review-slice.mjs';
 
@@ -43,11 +47,14 @@ export function readReviewAdmission(file) {
 
 // Same OS-isolation contract as the Developer slice: no host SDK sandbox,
 // no ambient credentials, only the disposable container and provider key.
-export function assertIsolatedReviewerProcess(env, { dockerenv = false } = {}) {
+// A Cursor SDK mount is required only for the cursor provider.
+export function assertIsolatedReviewerProcess(env, { dockerenv = false, provider = null } = {}) {
   assertUnprivilegedReviewerEnvironment(env);
   if (env.NESSION_REVIEWER_ISOLATED !== 'docker-v1' || env.GITHUB_WORKSPACE !== '/workspace' ||
-      env.CURSOR_SDK_ROOT !== '/sdk' || env.RUNNER_TEMP !== '/tmp' || !dockerenv)
+      env.RUNNER_TEMP !== '/tmp' || !dockerenv)
     fail('OS-isolated Docker worker is mandatory, not local SDK sandbox');
+  if (provider === 'cursor' && env.CURSOR_SDK_ROOT !== '/sdk')
+    fail('missing mounted Cursor SDK for the cursor provider');
 }
 
 // Adapts the real Cursor SDK to the Slice's injected runner contract. The
@@ -99,9 +106,63 @@ export function createClaudeReviewRunner({
     if (envelope.is_error === true) fail('Provider returned error');
     return {
       result: { status: 'finished', result: envelope.result, session_id: envelope.session_id },
-      meta: { status: 'finished', agent_id: envelope.session_id, tool_calls: toolUseNames(events) },
+      meta: {
+        status: 'finished', agent_id: envelope.session_id, tool_calls: toolUseNames(events),
+        turns: Number.isSafeInteger(envelope.num_turns) ? envelope.num_turns : null,
+        usage: normalizeClaudeUsage(envelope),
+        model: { id: model }, native_events: events,
+        started_at: null, finished_at: null,
+      },
     };
   };
+}
+
+// Canonical sanitized telemetry for the Review Slice. Unobserved values stay
+// null; no raw model text, tool arguments or prompts enter the summary.
+export function writeReviewTelemetry({ outDir, admission, slice, identity, taskId, env = process.env }) {
+  if (!HEX64.test(taskId ?? '')) fail('missing signed reviewer action ID');
+  const meta = slice.meta ?? {};
+  const outcome = String(slice.verdict?.outcome ?? '').replace(/_/g, '-');
+  const summary = buildAgentWorkflowTelemetry({
+    workflow_id: 'agent-review',
+    github_workflow: env.GITHUB_WORKFLOW ?? 'Agent / Review',
+    github_run_id: Number(env.GITHUB_RUN_ID),
+    github_run_attempt: Number(env.GITHUB_RUN_ATTEMPT),
+    repository: env.GITHUB_REPOSITORY ?? 'BestNathan/nession',
+    event: env.GITHUB_EVENT_NAME ?? 'workflow_dispatch',
+    job: 'reviewer',
+    task: {
+      id: 'issue-1997-review', type: 'review', issue: admission.issue,
+      pr: admission.pr_number, target_ref: admission.target_sha, action_id: taskId,
+      native_session_id: meta.agent_id, native_resumed: false,
+    },
+    agent: {
+      provider: identity.provider, id: identity.agent_id, role: 'reviewer',
+      model: meta.model ?? null, run_id: meta.run_id ?? null, status: meta.status,
+      prompt: promptTelemetry(slice.prompt),
+    },
+    execution: {
+      turns: meta.turns ?? null, tool_calls: meta.tool_calls ?? [], tools_observed: true,
+    },
+    tokens: meta.usage ?? {},
+    cost: meta.cost ?? { raw_usd: null, charged_usd: null, estimated_usd: null },
+    timing: {
+      started_at: meta.started_at ?? new Date().toISOString(),
+      finished_at: meta.finished_at ?? new Date().toISOString(),
+      agent_duration_ms: null,
+    },
+    result: { status: 'review-' + outcome },
+  });
+  writeAgentWorkflowTelemetry(path.join(outDir, 'agent-telemetry.json'), summary);
+  const trace = normalizeNativeTrace(
+    identity.provider === 'cursor' ? 'cursor' : 'claude-code',
+    meta.native_events ?? [], summary,
+    {
+      model: meta.usage ? 'observed' : 'unobserved',
+      tools: 'partial', skills: 'unobserved', mcp: 'unobserved',
+    },
+  );
+  writeExecutionTrace(path.join(outDir, 'agent-execution-trace.json'), trace);
 }
 
 async function main() {
@@ -114,6 +175,8 @@ async function main() {
   const runAttempt = Number(process.env.GITHUB_RUN_ATTEMPT);
   const identity = resolveReviewerIdentity(admission.agent_id);
   const provider = identity.provider;
+  assertIsolatedReviewerProcess(process.env,
+    { dockerenv: fs.existsSync('/.dockerenv'), provider });
   const out = path.resolve(process.argv[3]);
   const temp = fs.mkdtempSync(path.join(process.env.RUNNER_TEMP, 'nession-review-'));
   const workspace = path.join(temp, 'workspace');
@@ -168,6 +231,7 @@ async function main() {
       prompt_template_sha256: slice.prompt.template_sha256,
       native_agent_id: slice.meta.agent_id, tool_calls: slice.meta.tool_calls,
     });
+    writeReviewTelemetry({ outDir: out, admission, slice, identity, taskId, env: process.env });
     console.log('Read-only Reviewer Slice finished with a host-bound verdict; no review was published');
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
