@@ -14,6 +14,19 @@ The one shared orphan-history `prototype` branch contains the UI design assets. 
 - **Continuity:** stable Scene ID across embedded View transitions, form draft retention, explicit submit, confirmed-result handoff, bounded goal steps, stale model result rejection after form edits, local Standard/AI mode switching.
 - **Strict ownership:** Agent/Session records, server permissions, backend mutations and Terminal handoff remain **mocks**. `AIWorkspace`, `AIWorkspaceScene`, `AIWorkspaceCapability`, `AIWorkspaceView`, `AIWorkspaceRouter` are AI-specific concepts independent from old Logical Workspace and Standard UI registries.
 
+## Immersive Scene layout (2026-10-23 revision)
+
+The visible AI Workspace is now a **Scene-first canvas**. The centered composer remains the only entry point before any Scene opens; afterward the **active Scene occupies nearly all available width and height** between the top bar and docked composer.
+
+- **No workspace heading, persistent Scene tabs, or bottom page dots.** These were removed from the rendered HTML, not merely renamed.
+- **Only the adjacent Scene(s) appear**, as narrow, low-contrast left/right edge previews. Their labels and icons indicate that another Scene exists; the main Scene stays visually dominant and fully interactive.
+- Click an edge preview, press **← / →** when focus is outside an editor, swipe horizontally across the Scene on touch, or use deliberate horizontal trackpad movement to switch. There is **no automatic advancement**. Adjacent Scene selection only changes `activeSceneId`; it never creates, duplicates, or destroys Agent/Session resources.
+- The active Scene expands to full available width when no neighbors exist, with subtle framing and larger content typography. On mobile, the tiny edge previews overlay the far sides rather than reducing the main Scene to a narrow card.
+- Supporting text like redundant “工作区” labels, mock-workflow explanations and tab counters was visually removed. Only actual Scene operations, domain data, clarifications and optional contextual action choices remain.
+- Reset is a subtle top-bar control and is hidden when no AI Scene is active. The separate historical Jev replay and state inspector remain available for prototype review.
+
+To verify, run `node ai-workspace-2221/smoke-test.mjs` (**52 synthetic state/event checks**, including edge navigation, touch and horizontal wheel). No Chromium screenshot/E2E acceptance is claimed by this local harness.
+
 ## Suggested interaction sequence
 
 1. Enter **「查看 Agent 列表」**. Inspect one Scene and its initial Action Space.
@@ -29,7 +42,7 @@ The one shared orphan-history `prototype` branch contains the UI design assets. 
 
 ## Reproducible mock smoke checks
 
-Run `node ai-workspace-2221/smoke-test.mjs` from the shared `prototype` branch checkout (or `node smoke-test.mjs` from this directory). It has **no npm dependencies** and reads the checked-in `index.html`. The script exercises **47 local JavaScript event/state invariants**: Scene reuse, discovery candidates, filtered ordinal resolution, contextual recommendations, disabled offline Agent, in-flight stale-decision discard, inline create/draft/confirmed result, next-action handoff and Standard/AI continuity. The script does not start Chromium, contact TypeSafe or run real backend APIs, and is **not** production Acceptance evidence.
+Run `node ai-workspace-2221/smoke-test.mjs` from the shared `prototype` branch checkout (or `node smoke-test.mjs` from this directory). It has **no npm dependencies** and reads the checked-in `index.html`. The script exercises **52 local JavaScript event/state invariants**: Scene reuse, discovery candidates, filtered ordinal resolution, contextual recommendations, disabled offline Agent, in-flight stale-decision discard, inline create/draft/confirmed result, next-action handoff and Standard/AI continuity. The script does not start Chromium, contact TypeSafe or run real backend APIs, and is **not** production Acceptance evidence.
 
 ## Archived real Jev test replay — directly accessible in the prototype
 
@@ -59,7 +72,7 @@ The original 12-call real Jev diagnostic reached **10/12**, missing only the two
 
 The prototype now uses an explicit validated PendingGoal transition graph, records transition causes, and pins source View revision and Action Space fingerprint per applied goal step; it avoids repeating the same candidate for an unchanged snapshot, waits when no candidate is available, and preserves the original Goal across explicit form-slot updates such as **「名称叫 dev-test」**. An unrelated user intent suspends the old Goal; returning to its Scene and saying **「继续」** restores the unfinished form without replaying earlier operations. The backend mutation remains explicitly user-committed.
 
-`smoke-test.mjs` runs **47 local mocked event/state checks**; it does not prove real Jev, Chromium rendering, or Nession backend execution. Live provider measurements must be reported separately.
+`smoke-test.mjs` runs **52 local mocked event/state checks**; it does not prove real Jev, Chromium rendering, or Nession backend execution. Live provider measurements must be reported separately.
 
 **Real Jev follow-up evidence:** [immediate-match vs progressive prompt experiment](https://github.com/BestNathan/nession/actions/runs/39908609159) was 3/5 vs 4/5; the progressive prompt fixed initial creation routing but falsely selected Agent for poetry. [Relevance-gated progressive test](https://github.com/BestNathan/nession/actions/runs/39908810295) was **10/10** on a fixed root-positive/negative sample. These are small distinct evaluations; neither establishes production accuracy, backend authority or SC acceptance.
 
