@@ -358,7 +358,7 @@
   const state = {
     schemaVersion:2, revision:0, mode:'ai', activeSceneId:null, scenes:[],
     selectedAgentId:null, selectedSessionId:sessions[0].id,
-    lastOperation:null, currentQuestion:null, lastDecision:null,
+    lastOperation:null, currentQuestion:null, lastDecision:null, pendingGoal:null,
   };
   let events=[], latestRequest=null, latestDecision=null, latestQuestionPlan=null, latestRecommendation=null, busy=false, toastTimer=null;
   let dataEpoch=1, clarification='', userInteractionEpoch=0;
@@ -372,6 +372,7 @@
       status:state.lastOperation.status,resource:{kind:'session',id:state.lastOperation.sessionId}
     }:null,
     pendingClarification:clarification||null,
+    pendingGoal:state.pendingGoal?{...state.pendingGoal}:null,
     visibleSelection:focused()?.type==='agent.list'?{
       sceneId:focused().id,snapshotId:'agents:'+dataEpoch+':'+activeSearch+':'+visibleAgentIds().join(','),
       orderedResourceIds:visibleAgentIds(),selectedResourceId:focused().selectedAgentId||null
@@ -397,7 +398,7 @@
 
 
   // AI Workspace-only registry. Business APIs remain authoritative.
-  const registryVersion='ai-prototype-v2';
+  const registryVersion='ai-prototype-progressive-v3';
   const registry=Object.freeze({
     'agent.list':{semantic:['agent.list.show','agent.select'],presentation:'standalone',instance:'perScope'},
     'session.list':{semantic:['session.list.show'],presentation:'standalone',instance:'perScope'},
@@ -405,66 +406,65 @@
     'session.open':{semantic:['session.open'],presentation:'handoff',instance:'perScope'}
   });
   const action=(id,cap,act,kind,label,options={})=>({
-    candidateId:id,capabilityId:cap,actionId:act,kind,label,
+    candidateId:id,capabilityId:cap,actionId:act,kind,label,source:options.source||{kind:'entry'},role:options.role||'available',
     placement:registry[cap]?.presentation||'standalone',
     eligibility:options.eligibility||'enabled',reason:options.reason||null,
     target:options.target||{},requiresConfirmation:kind==='mutation',
     preconditionVersion:String(dataEpoch)
   });
   function deriveActionSpace(){
-    const s=focused(),list=[];
-    const add=x=>{if(!list.find(y=>y.candidateId===x.candidateId))list.push(x);};
-    add(action('discover:agents','agent.list','agent.list.show','navigation','Agent 列表'));
-    add(action('discover:sessions','session.list','session.list.show','navigation','Session 列表'));
-    add(action('discover:create','session.create','session.create.open','interaction','创建 Session'));
-    state.scenes.forEach(x=>add(action('scene:'+x.id,x.type,x.type+'.focus','navigation','返回 '+x.title,{target:{sceneId:x.id}})));
-    if(s?.type==='agent.list'){
+    const s=focused(),all=[],add=c=>{if(!all.some(x=>x.candidateId===c.candidateId))all.push(c);};
+    // The composer exposes only root capability ENTRIES, never their deeper actions.
+    add(action('entry:agents','agent.list','agent.list.show','entry','Agent 列表',{source:{kind:'entry'}}));
+    add(action('entry:sessions','session.list','session.list.show','entry','Session 列表',{source:{kind:'entry'}}));
+    for(const scene of state.scenes)
+      add(action('scene:'+scene.id,scene.type,scene.type+'.focus','navigation','返回 '+scene.title,{source:{kind:'scene-navigation'},target:{sceneId:scene.id}}));
+    const src={kind:'view',sceneId:s?.id,viewInstanceId:s?.type==='agent.list'&&s.flow?.view==='session.create'?s.id+'/create':s?.id+'/root',viewRevision:s?.revision||0};
+    const expose=(id,cap,act,kind,label,opt={})=>add(action(id,cap,act,kind,label,{...opt,source:src}));
+    if(s?.type==='agent.list'&&s.status==='ready'){
       if(s.flow?.view==='session.create'){
         const fl=s.flow,a=agents.find(x=>x.id===fl.draft.agentId);
-        add(action('agent:create:back','agent.list','agent.list.back','interaction','返回 Agent 列表',{target:{sceneId:s.id}}));
+        expose('agent:create:back','agent.list','agent.list.back','interaction','返回 Agent 列表',{role:'required',target:{sceneId:s.id}});
         if(fl.status==='complete'&&fl.result){
-          add(action('agent:create:open-result','session.open','session.open','handoff','打开刚创建的 Session',{target:{sceneId:s.id,resource:{kind:'session',id:fl.result.id}}}));
-          add(action('agent:create:again','session.create','session.create.open','interaction','再创建一个',{target:{sceneId:s.id}}));
+          expose('agent:create:open-result','session.open','session.open','handoff','打开刚创建的 Session',{target:{sceneId:s.id,resource:{kind:'session',id:fl.result.id}}});
+          expose('agent:create:again','session.create','session.create.open','interaction','再创建一个',{target:{sceneId:s.id}});
         }else{
-          const valid=!!a&&a.status==='online'&&/^[A-Za-z0-9_.-]{1,64}$/.test(fl.draft.name.trim())
-            &&!sessions.some(x=>x.id===fl.draft.agentId+':'+fl.draft.name.trim())&&fl.status!=='submitting';
-          add(action('agent:create:submit','session.create','session.create.submit','mutation','提交创建',{target:{sceneId:s.id},eligibility:valid?'enabled':'needs_input',reason:valid?null:'需要在线 Agent、有效名称和无重复会话'}));
+          const valid=!!a&&a.status==='online'&&/^[A-Za-z0-9_.-]{1,64}$/.test(fl.draft.name.trim())&&!sessions.some(x=>x.id===fl.draft.agentId+':'+fl.draft.name.trim())&&fl.status!=='submitting';
+          expose('agent:create:submit','session.create','session.create.submit','mutation','提交创建',{role:'required',target:{sceneId:s.id},eligibility:valid?'enabled':'needs_input'});
         }
       }else{
-        visibleAgentIds().forEach(id=>{
+        for(const id of visibleAgentIds()){
           const a=agents.find(x=>x.id===id);
-          add(action('agent:select:'+id,'agent.list','agent.select','interaction','选择 '+a.name,{target:{sceneId:s.id,resource:{kind:'agent',id}}}));
-        });
+          expose('agent:select:'+id,'agent.list','agent.select','interaction','选择 '+a.name,{target:{sceneId:s.id,resource:{kind:'agent',id}}});
+        }
         const a=agents.find(x=>x.id===s.selectedAgentId);
-        if(a)add(action('agent:selected:create','session.create','session.create.open','interaction','在 '+a.name+' 创建 Session',{target:{sceneId:s.id,resource:{kind:'agent',id:a.id}},eligibility:a.status==='online'?'enabled':'disabled',reason:a.status==='online'?null:'Agent 离线'}));
+        if(a)expose('agent:selected:create','session.create','session.create.open','interaction','在 '+a.name+' 创建 Session',
+          {target:{sceneId:s.id,resource:{kind:'agent',id:a.id}},eligibility:a.status==='online'?'enabled':'disabled',reason:a.status==='online'?null:'Agent 离线'});
       }
     }
     if(s?.type==='session.create'){
-      if(s.status==='complete'&&s.result)add(action('standalone:open-result','session.open','session.open','handoff','打开刚创建的 Session',{target:{sceneId:s.id,resource:{kind:'session',id:s.result.id}}}));
+      if(s.status==='complete'&&s.result)expose('standalone:open-result','session.open','session.open','handoff','打开刚创建的 Session',{target:{sceneId:s.id,resource:{kind:'session',id:s.result.id}}});
       else{
-        const a=agents.find(x=>x.id===s.draft.agentId),v=!!a&&a.status==='online'&&/^[A-Za-z0-9_.-]{1,64}$/.test(s.draft.name.trim())&&!sessions.some(x=>x.id===s.draft.agentId+':'+s.draft.name.trim())&&s.status!=='submitting';
-        add(action('standalone:submit','session.create','session.create.submit','mutation','提交创建',{target:{sceneId:s.id},eligibility:v?'enabled':'needs_input'}));
+        const a=agents.find(x=>x.id===s.draft.agentId),valid=!!a&&a.status==='online'&&/^[A-Za-z0-9_.-]{1,64}$/.test(s.draft.name.trim())&&!sessions.some(x=>x.id===s.draft.agentId+':'+s.draft.name.trim())&&s.status!=='submitting';
+        expose('standalone:submit','session.create','session.create.submit','mutation','提交创建',{role:'required',target:{sceneId:s.id},eligibility:valid?'enabled':'needs_input'});
       }
     }
-    if(state.lastOperation?.sessionId && sessions.some(x=>x.id===state.lastOperation.sessionId))add(action('recent:session:open','session.open','session.open','handoff','打开刚创建的 Session',{target:{resource:{kind:'session',id:state.lastOperation.sessionId}}}));
-    if(s?.type==='session.list')sessions.forEach(x=>add(action('session:open:'+x.id,'session.open','session.open','handoff','打开 '+x.name,{target:{sceneId:s.id,resource:{kind:'session',id:x.id}}})));
-    return {
-      revision:state.revision,registryVersion,
-      dependencyFingerprint:JSON.stringify([state.activeSceneId,s?.selectedAgentId,s?.flow?.view,s?.flow?.draft?.name,s?.flow?.draft?.agentId,s?.flow?.status,activeSearch,dataEpoch]),
-      discovery:list.filter(x=>x.candidateId.startsWith('discover:')),
-      contextual:list.filter(x=>!x.candidateId.startsWith('discover:')&&!x.candidateId.startsWith('scene:')),
-      navigation:list.filter(x=>x.candidateId.startsWith('scene:')),
-      eligible:list.filter(x=>x.eligibility==='enabled'),all:list
-    };
+    if(s?.type==='session.list'&&s.status==='ready')
+      for(const sess of sessions)expose('session:open:'+sess.id,'session.open','session.open','handoff','打开 '+sess.name,{target:{sceneId:s.id,resource:{kind:'session',id:sess.id}}});
+    const entry=all.filter(x=>x.source.kind==='entry'),view=all.filter(x=>x.source.kind==='view'),navigation=all.filter(x=>x.source.kind==='scene-navigation');
+    return {revision:state.revision,registryVersion,
+      dependencyFingerprint:JSON.stringify([state.activeSceneId,s?.revision||0,s?.selectedAgentId,s?.flow?.view,s?.flow?.status,s?.flow?.draft?.name,activeSearch,dataEpoch]),
+      entry,view,navigation,eligible:all.filter(x=>x.eligibility==='enabled'),all};
   }
   function rankActions(space){
-    const s=focused(),priorities=s?.type==='agent.list'?
+    const s=focused(),preferred=s?.type==='agent.list'?
       (s.flow?.status==='complete'?['agent:create:open-result','agent:create:again','agent:create:back']:
-       s.flow?.view==='session.create'?['agent:create:submit','agent:create:back']:['agent:selected:create','discover:sessions']):
-      s?.type==='session.create'?(s.status==='complete'?['standalone:open-result','discover:sessions']:['standalone:submit','discover:agents']):
-      s?.type==='session.list'?['discover:agents','discover:create']:['discover:agents','discover:sessions'];
-    let matches=priorities.map(id=>space.eligible.find(x=>x.candidateId===id&&x.kind!=='mutation')).filter(Boolean);
-    if(!matches.length)matches=space.discovery.filter(x=>x.eligibility==='enabled').slice(0,2);
+       s.flow?.view==='session.create'?['agent:create:back']:['agent:selected:create']):
+      s?.type==='session.create'?(s.status==='complete'?['standalone:open-result']:[]):
+      s?.type==='session.list'?[]:['entry:agents','entry:sessions'];
+    let matches=preferred.map(id=>space.eligible.find(x=>x.candidateId===id&&x.kind!=='mutation')).filter(Boolean);
+    if(!matches.length&&s?.type==='agent.list'&&s.flow?.view==='session.create')matches=space.view.filter(x=>x.kind!=='mutation'&&x.eligibility==='enabled');
+    if(!matches.length)matches=space.entry.filter(x=>x.eligibility==='enabled').slice(0,2);
     return {mock:true,judgment:'action.rank',sourceRevision:space.revision,
       suggested:matches.slice(0,3).map((x,i)=>({candidateId:x.candidateId,actionId:x.actionId,label:x.label,illustrativeScore:Number((.91-i*.14).toFixed(2))}))};
   }
@@ -493,9 +493,8 @@
     const c=deriveActionSpace().all.find(x=>x.candidateId===id);
     if(!c||c.eligibility!=='enabled'){toast('这个动作已失效或当前不可用');return;}
     if(c.kind==='mutation'){toast('请在表单中明确提交，模型建议不自动执行');return;}
-    if(id==='discover:agents')activate('agent.list');
-    else if(id==='discover:sessions')activate('session.list');
-    else if(id==='discover:create'){if(focused()?.type==='agent.list')openAgentCreateInline(null,'Action Space');else activate('session.create');}
+    if(id==='entry:agents')activate('agent.list');
+    else if(id==='entry:sessions')activate('session.list');
     else if(id.startsWith('scene:'))activateId(c.target.sceneId);
     else if(id.startsWith('agent:select:'))setAgentSelected(c.target.resource.id);
     else if(id==='agent:selected:create')openAgentCreateInline(c.target.resource.id,'Action Space');
