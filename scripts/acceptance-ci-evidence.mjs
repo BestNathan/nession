@@ -72,6 +72,13 @@ export function parentEvidenceDiscovery(issue) {
   return parent;
 }
 
+export function parentEvidenceEligible(contract) {
+  // A parent contributes only its own declared browser obligations; `none`,
+  // legacy/missing and invalid declarations have nothing to contribute and
+  // must not block the child's unrelated post-merge acceptance.
+  return Boolean(contract && !contract.errors?.length && contract.selectedIds?.length);
+}
+
 function requireText(value, label) {
   const text = String(value ?? '').trim();
   if (!text) throw new Error(label + ' is required');
@@ -1417,14 +1424,14 @@ async function collectCommand(workspace, outFile) {
           if(parent?.number!==parentNumber||parent?.pull_request)
             throw Error('invalid related Issue provenance target');
           const contract=parseIssueE2E(parent.body,{requireDeclaration:true});
-          if(contract?.errors?.length||!contract?.selectedIds?.length)
-            throw Error('parent Issue lacks authenticated E2E obligations');
-          const proof=await collectLinkedIssueE2EEvidence(repo,parentNumber,githubGet,undefined,sha);
-          linkedIssueE2E.push(...proof.map(item=>({
-            ...item,behavior_owner_issue:parentNumber,
-            related_child_issue:Number(issueNumber),
-            relationship_provenance:'candidate parent only; source Plan and protected receipts remain authoritative',
-          })));
+          if(parentEvidenceEligible(contract)){
+            const proof=await collectLinkedIssueE2EEvidence(repo,parentNumber,githubGet,undefined,sha);
+            linkedIssueE2E.push(...proof.map(item=>({
+              ...item,behavior_owner_issue:parentNumber,
+              related_child_issue:Number(issueNumber),
+              relationship_provenance:'candidate parent only; source Plan and protected receipts remain authoritative',
+            })));
+          }
         }
       }
     }
@@ -2275,6 +2282,11 @@ async function selfTest() {
     title:'Issue (#1702)',body:'Not a child'}),null);
   assert.equal(parentEvidenceDiscovery({number:1759,
     title:'Issue (#xyz)',body:'Child of #1702'}),null);
+  // A parent contributes evidence only when it owns declared obligations.
+  assert.equal(parentEvidenceEligible({errors:[],selectedIds:['terminal-attach']}),true);
+  assert.equal(parentEvidenceEligible({errors:[],selectedIds:[]}),false);
+  assert.equal(parentEvidenceEligible({errors:['missing declaration'],selectedIds:[]}),false);
+  assert.equal(parentEvidenceEligible(null),false);
   assert.throws(() => normalizeCiEvidence({ targetSha: '' }), /targetSha is required/);
   // Real criteria select only pinned source SHA ancestors; unrelated report
   // logs cannot inject extra proof targets.
