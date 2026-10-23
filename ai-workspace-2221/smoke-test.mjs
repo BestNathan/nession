@@ -202,7 +202,7 @@ check('inactive Agent Scene row actions do not leak into the standalone View',
 dispatch('click', el('resetButton'), 'resetButton');
 await ask('创建 Session');
 check('root goal uses intermediate-step Jev routing instructions',
-  el('debugQuestionPlan').textContent.includes('推动目标前进的下一步') &&
+  el('debugQuestionPlan').textContent.includes('与目标有明确语义关系') &&
   el('debugQuestionPlan').textContent.includes('agent.list.show'));
 check('missing target pauses before form, without exposing future leaf',
   state().pendingGoal.status === 'awaiting_selection' &&
@@ -235,4 +235,11 @@ check('automated step receipts pin View revision and action-space fingerprint',
   state().pendingGoal.steps.every(x=>x.step==='prefill' || x.fingerprint !== undefined) &&
   state().pendingGoal.steps.some(x=>x.sourceViewInstanceId));
 
+dispatch('click', el('resetButton'), 'resetButton');
+await ask('写一首关于秋天的诗');
+check('unrelated goal does not spuriously enter Agent, and clarifies without a Scene',
+  state().scenes.length === 0 && decision().chosen === 'clarification.required');
+check('choice instructions include relevance gating and no-match semantics',
+  el('debugQuestionPlan').textContent.includes('无关请求') &&
+  el('debugQuestionPlan').textContent.includes('none'));
 console.log('\nPASS: ' + count + ' local mock state/event checks. Browser and real-provider acceptance remain pending.');
