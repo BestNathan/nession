@@ -17,12 +17,9 @@ on:
           - post-merge
       provider:
         description: Acceptance Agent provider when deterministic evidence is not supplied
-        required: true
-        default: cursor
-        type: choice
-        options:
-          - cursor
-          - deepseek
+        required: false
+        default: ''
+        type: string
       target_ref:
         description: Exact commit/ref/deployment source being accepted
         required: true
@@ -48,7 +45,7 @@ on:
         type: string
       provider:
         required: false
-        default: cursor
+        default: ''
         type: string
       target_ref:
         required: true
@@ -81,11 +78,63 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  resolve:
+    name: Resolve selected Acceptor on trusted main
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      provider: ${{ steps.identity.outputs.provider }}
+      environment: ${{ steps.identity.outputs.environment }}
+      agent_id: ${{ steps.identity.outputs.agent_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Resolve registered default or authorized legacy override
+        id: identity
+        env:
+          ACCEPTOR_OVERRIDE: ${{ inputs.provider }}
+          ACCEPTOR_DEFAULT: ${{ vars.AGENT_DEFAULT_ACCEPTOR }}
+        run: |
+          set -euo pipefail
+          node scripts/lib/agent/default-routing-selftest.mjs
+          node --input-type=module -e '
+            import {readFileSync} from "node:fs";
+            import {resolveAgentDefault} from "./scripts/lib/agent/default-routing.mjs";
+            const registry=JSON.parse(readFileSync("automation/agents/registry.json","utf8"));
+            const given=process.env.ACCEPTOR_OVERRIDE;
+            const legacy={cursor:"accept-cursor-01",qwen:"accept-qwen-01"};
+            if(given==="deepseek") {
+              // Existing explicit DeepSeek workflow contract remains available.
+              process.stdout.write("provider=deepseek\\n");
+              process.stdout.write("environment=deepseek\\n");
+              process.stdout.write("agent_id=legacy-acceptance-deepseek\\n");
+            } else {
+              const identity=resolveAgentDefault(registry,"acceptor",{
+                configured:process.env.ACCEPTOR_DEFAULT,
+                override:legacy[given] || given,
+                legacy:"accept-cursor-01"
+              });
+              const provider=identity.provider==="cursor"?"cursor":
+                identity.agent_id==="accept-qwen-01"?"qwen":null;
+              if(!provider)throw Error("Acceptor has no verified runtime provider");
+              process.stdout.write("provider="+provider+"\\n");
+              process.stdout.write("environment="+identity.environment+"\\n");
+              process.stdout.write("agent_id="+identity.agent_id+"\\n");
+            }
+          ' >> "$GITHUB_OUTPUT"
+
   execute:
+    needs: resolve
     name: Execute acceptance
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    environment: ${{ inputs.provider == 'deepseek' && 'deepseek' || 'cursor' }}
+    environment: ${{ needs.resolve.outputs.environment }}
     permissions:
       actions: read
       contents: read
@@ -97,7 +146,7 @@ jobs:
     env:
       ISSUE_NUMBER: ${{ inputs.issue_number }}
       ACCEPTANCE_STAGE: ${{ inputs.stage }}
-      ACCEPTANCE_PROVIDER: ${{ inputs.provider }}
+      ACCEPTANCE_PROVIDER: ${{ needs.resolve.outputs.provider }}
       TARGET_REF: ${{ inputs.target_ref }}
       DEPLOYMENT: ${{ inputs.deployment }}
       DETERMINISTIC_RESULT_JSON: ${{ inputs.deterministic_result_json }}
@@ -110,7 +159,7 @@ jobs:
       CURSOR_SDK_VERSION: ${{ vars.CURSOR_SDK_VERSION || 'latest' }}
 
       ACCEPTANCE_MAX_TURNS: ${{ vars.ACCEPTANCE_MAX_TURNS || '20' }}
-      ACCEPTANCE_CLAUDE_MODEL: ${{ vars.ACCEPTANCE_CLAUDE_MODEL || 'claude-sonnet-5' }}
+      ACCEPTANCE_CLAUDE_MODEL: ${{ vars.ACCEPTANCE_CLAUDE_MODEL || (needs.resolve.outputs.provider == 'qwen' && vars.ANTHROPIC_MODEL) || 'claude-sonnet-5' }}
       ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
       ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -166,7 +215,7 @@ jobs:
             *) echo "Unsupported acceptance stage: ${ACCEPTANCE_STAGE}" >&2; exit 1 ;;
           esac
           case "${ACCEPTANCE_PROVIDER}" in
-            cursor|deepseek) ;;
+            cursor|deepseek|qwen) ;;
             *) echo "Unsupported Acceptance provider: ${ACCEPTANCE_PROVIDER}" >&2; exit 1 ;;
           esac
 
@@ -235,13 +284,13 @@ jobs:
                 exit 1
               }
               ;;
-            deepseek)
+            deepseek|qwen)
               [[ -n "${ANTHROPIC_BASE_URL}" ]] || {
-                echo 'DeepSeek Environment is missing ANTHROPIC_BASE_URL; no provider fallback is allowed.' >&2
+                echo 'Claude Gateway Environment is missing ANTHROPIC_BASE_URL; no provider fallback is allowed.' >&2
                 exit 1
               }
               [[ -n "${ANTHROPIC_AUTH_TOKEN}" || -n "${ANTHROPIC_API_KEY}" ]] || {
-                echo 'DeepSeek Environment is missing ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY.' >&2
+                echo 'Claude Gateway Environment is missing ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY.' >&2
                 exit 1
               }
               ;;
@@ -258,7 +307,7 @@ jobs:
               npm install --prefix "${sdk_root}" "@cursor/sdk@${CURSOR_SDK_VERSION}"
               echo "CURSOR_SDK_ROOT=${sdk_root}" >> "${GITHUB_ENV}"
               ;;
-            deepseek)
+            deepseek|qwen)
               npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION:-latest}"
               claude --version
               ;;
