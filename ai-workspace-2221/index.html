@@ -700,6 +700,9 @@
     const scene=focused();if(!scene||scene.type!=='agent.list')return;
     g.ownerSceneId=scene.id;
     if(scene.status!=='ready'){transitionGoal(g,'awaiting_data','view-loading');bump();return;}
+    if(g.status==='awaiting_data')transitionGoal(g,'resolving','view-data-ready');
+    if(g.status==='awaiting_selection'&&trigger==='user-selected-agent')
+      transitionGoal(g,'resolving','target-selected');
     let space=deriveActionSpace(),target=scene.selectedAgentId;
     if(g.agentHint){
       const matched=space.view.filter(c=>c.actionId==='agent.select'&&c.eligibility==='enabled')
