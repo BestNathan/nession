@@ -1,0 +1,103 @@
+name: CI / WireGuard K8s Staging Readback (temporary)
+
+on:
+  push:
+    branches:
+      - test/wireguard-ci-k8s-2225-20261023
+    paths:
+      - .github/workflows/ci-wg-k8s-2225-smoke.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: private-k8s-evidence-smoke
+  cancel-in-progress: false
+
+jobs:
+  private-k8s-readback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Validate CI Secret availability (values never printed)
+        env:
+          WG_CI_CONF: ${{ secrets.WG_CI_CONF }}
+          KUBE_CONFIG_CI: ${{ secrets.KUBE_CONFIG_CI }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${WG_CI_CONF:-}" ]] || { echo "::error::WG_CI_CONF unavailable as repository-level secret"; exit 1; }
+          [[ -n "${KUBE_CONFIG_CI:-}" ]] || { echo "::error::KUBE_CONFIG_CI unavailable as repository-level secret"; exit 1; }
+          echo "Both CI secrets are non-empty and available to this job. No secret values logged."
+
+      - name: Install WireGuard and kubectl client
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq wireguard-tools
+          if ! command -v kubectl >/dev/null; then
+            echo "::error::kubectl not installed on runner"; exit 1
+          fi
+
+      - name: Establish WireGuard tunnel (do not expose configuration)
+        env:
+          WG_CI_CONF: ${{ secrets.WG_CI_CONF }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          sudo install -m 600 /dev/null /etc/wireguard/ci.conf
+          if [[ "$WG_CI_CONF" == *'[Interface]'* ]]; then
+            printf '%s\n' "$WG_CI_CONF" | sudo tee /etc/wireguard/ci.conf >/dev/null
+          else
+            printf '%s' "$WG_CI_CONF" | base64 -d | sudo tee /etc/wireguard/ci.conf >/dev/null
+          fi
+          sudo chmod 600 /etc/wireguard/ci.conf
+          sudo wg-quick up ci
+          echo "WireGuard interface activated (key and peer configuration redacted)."
+
+      - name: Verify Kubernetes identity and observe staging deployments
+        env:
+          KUBE_CONFIG_CI: ${{ secrets.KUBE_CONFIG_CI }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          export KUBECONFIG="$RUNNER_TEMP/nession-ci-kubeconfig"
+          if [[ "$KUBE_CONFIG_CI" == *'apiVersion:'* ]]; then
+            printf '%s\n' "$KUBE_CONFIG_CI" > "$KUBECONFIG"
+          else
+            printf '%s' "$KUBE_CONFIG_CI" | base64 -d > "$KUBECONFIG"
+          fi
+          chmod 600 "$KUBECONFIG"
+          command() { builtin command "$@"; }
+          kubectl --request-timeout=20s auth can-i get deployments -n nession --quiet || { echo "::error::Kubeconfig lacks permission to read staging deployments"; exit 1; }
+          # Secrets and mutation authority are not acceptable for CI evidence collection.
+          for action in "get secrets" "list secrets" "create deployments" "delete pods" "create pods/exec"; do
+            if kubectl --request-timeout=20s auth can-i $action -n nession --quiet; then
+              echo "::error::CI kubeconfig is overprivileged ($action). Provision a read-only service account."; exit 1
+            fi
+          done
+          kubectl --request-timeout=20s -n nession get deployments \
+            nession-server-staging nession-agent-staging nession-ui-staging \
+            -o json | jq -c '{
+              deployments: [.items[] | {
+                name: .metadata.name,
+                generation: .metadata.generation,
+                observedGeneration: .status.observedGeneration,
+                replicas: (.spec.replicas // 1),
+                readyReplicas: (.status.readyReplicas // 0),
+                images: [.spec.template.spec.containers[].image]
+              }]
+            }'
+          echo "Read-only staging Kubernetes API observation completed."
+
+      - name: Remove temporary VPN and kubeconfig
+        if: always()
+        shell: bash
+        run: |
+          sudo wg-quick down ci >/dev/null 2>&1 || true
+          sudo rm -f /etc/wireguard/ci.conf
+          rm -f "$RUNNER_TEMP/nession-ci-kubeconfig"
+          echo "Temporary VPN and kubeconfig files cleared."
