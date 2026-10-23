@@ -46,6 +46,13 @@ function harness(hash='') {
     createElement:()=>new FakeNode(),
     addEventListener:(event,fn)=>(listeners['doc:'+event]??=[]).push(fn)
   };
+  // In a real DOM, appended nodes become retrievable by getElementById().
+  for (const parent of [node('top-actions'),node('app')]) {
+    for (const method of ['appendChild','insertBefore']) {
+      const base=parent[method].bind(parent);
+      parent[method]=child=>{nodes.set(child.id,child);return base(child);};
+    }
+  }
   runInNewContext(data,{window:win});
   runInNewContext(ui,{window:win,document,location,history}, {timeout:2500});
   const fire=(target,event='click',payload={})=>{
@@ -117,7 +124,7 @@ h.press({jrStage:'4'});
 check('relevance-gated poetry case correctly selects none',
  h.node('jrDetail').innerHTML.includes('none') &&
  h.node('jrRightHeader').innerHTML.includes('模型选择命中'));
-h.fire(h.node('jrClose'));
+h.press({},'jrClose');
 check('close hides replay and restores aria-hidden',
  !h.ready() && h.node('jevReplayOverlay').getAttribute('aria-hidden')==='true');
 const direct=harness('#jev-replay');
