@@ -13,6 +13,27 @@ const ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const MAX_REPORT_BYTES = 32 * 1024 * 1024;
 const MAX_TESTS = 30000;
 const MAX_IDS = 64;
+const MAX_FAILURE_SIGNATURES_PER_ID = 8;
+
+// Extract only a safe assertion frame basename and numeric position. Never
+// copy arbitrary error text, source paths, titles, stdout, URLs or snapshots.
+function safeFailureFrame(test) {
+  for (const result of test?.results ?? []) {
+    for (const error of [...(result.errors ?? []), ...(result.error ? [result.error] : [])]) {
+      const loc = error?.location;
+      if (loc && Number.isSafeInteger(loc.line) && loc.line > 0) {
+        const basename = String(loc.file ?? '').replace(/\\/g, '/').split('/').at(-1);
+        if (/^[A-Za-z0-9_.-]{1,100}\.spec\.[cm]?[jt]s$/.test(basename)) {
+          return basename + ':' + loc.line + (Number.isSafeInteger(loc.column) && loc.column > 0 ? ':' + loc.column : '');
+        }
+      }
+      const frame = /(?:^|[/\\])([A-Za-z0-9_.-]{1,100}\.spec\.[cm]?[jt]s):([1-9]\d{0,5}):([1-9]\d{0,5})/m
+        .exec(String(error?.stack ?? ''));
+      if (frame) return frame[1] + ':' + frame[2] + ':' + frame[3];
+    }
+  }
+  return null;
+}
 const MAX_SUITES = 10000;
 const positive = n => Number.isSafeInteger(n) && n > 0;
 
@@ -48,9 +69,16 @@ export function makeCandidate(report, { sha, run_id, run_attempt }) {
             throw new Error('report exceeds canonical E2E ID budget');
           }
           const r = results.get(id) ?? { id, total: 0, failed: 0, skipped: 0, flaky: 0,
-            expected: 0, other: 0 };
+            expected: 0, other: 0, failures: [] };
           r.total++;
-          if (test.status === 'unexpected') r.failed++;
+          if (test.status === 'unexpected') {
+            r.failed++;
+            const stableFrame = safeFailureFrame(test);
+            if (stableFrame && r.failures.length < MAX_FAILURE_SIGNATURES_PER_ID) {
+              r.failures.push({ kind: 'assertion_failed', assertion_code: 'playwright_unexpected',
+                stable_frame: stableFrame, affected_invariant: id, environment_specific: false });
+            }
+          }
           else if (test.status === 'skipped') r.skipped++;
           else if (test.status === 'flaky') r.flaky++;
           else if (test.status === 'expected') r.expected++;
@@ -89,7 +117,8 @@ function selfTest() {
     suites: [
       { file: 'tests/browser/session-lifecycle.spec.ts', specs: [{
         file: 'tests/browser/session-lifecycle.spec.ts', title: 'secret password 123',
-        tests: [{ status: 'unexpected', errors: [{ message: 'secret password=abc' }] },
+        tests: [{ status: 'unexpected', results: [{ errors: [{ message: 'secret password=abc',
+            location: { file: '/tmp/private/session-lifecycle.spec.ts', line: 42, column: 9 } }] }] },
           { status: 'expected' }],
       }] },
       { file: 'tests/browser/terminal-attach.spec.ts', suites: [{
@@ -104,8 +133,12 @@ function selfTest() {
   assert.equal(one.unknown_files, 1);
   assert.deepEqual(one.results.map(x => x.id), ['session-lifecycle', 'terminal-attach']);
   assert.equal(one.results[0].failed, 1);
-  assert.equal(one.results[1].flaky, 1);
   const serialized = JSON.stringify(one);
+  assert.deepEqual(one.results[0].failures, [{ kind: 'assertion_failed',
+    assertion_code: 'playwright_unexpected', stable_frame: 'session-lifecycle.spec.ts:42:9',
+    affected_invariant: 'session-lifecycle', environment_specific: false }]);
+  assert.equal(serialized.includes('/tmp/private'), false, 'candidate must not leak raw source paths');
+  assert.equal(one.results[1].flaky, 1);
   assert.ok(!serialized.includes('password') && !serialized.includes('secret') &&
     !serialized.includes('arbitrary.html'), 'untrusted secret or paths leaked');
   assert.equal(makeCandidate(null, context).status, 'REPORT_UNAVAILABLE');
