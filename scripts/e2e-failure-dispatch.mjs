@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { commitE2EFailureDispatch, readE2EFailureAdmission } from './lib/agent/orchestration/e2e-failure-ledger.mjs';
+import { commitE2EFailureDispatch, readE2EFailureAdmission, recordE2EFailureObservation } from './lib/agent/orchestration/e2e-failure-ledger.mjs';
 
 const REPO = 'BestNathan/nession';
 const SHA40 = /^[a-f0-9]{40}$/;
@@ -167,7 +167,6 @@ function selfTest() {
       outcomes: [{ status: 'ANALYSIS_CLAIMED', fingerprint: fp,
         analysis_id: digest + ':1', epoch: 1 }] };
     // Build the exact state that a successful admission CAS would leave behind.
-    const { recordE2EFailureObservation } = awaitLedger();
     const observation = { authenticated: true,
       source: { repository: REPO, workflow_path: '.github/workflows/e2e-full-regression.yml',
         event: 'schedule', branch: 'main', conclusion: 'failure', run_id: 501,
@@ -188,11 +187,6 @@ function selfTest() {
     assert.throws(() => validatePlan({ ...plan, dispatches: [{ ...plan.dispatches[0], source_sha: 'main' }] }), /invalid or duplicate/);
     console.log('e2e-failure-dispatch self-test: PASS');
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
-}
-
-// Kept as a function to make the self-test independent of a live Store.
-function awaitLedger() {
-  return { recordE2EFailureObservation: globalThis.__unusedRecordE2EFailureObservation };
 }
 
 function main() {
