@@ -5,7 +5,9 @@
 //! tear down or heal the server underneath a control-mode attach.
 
 use anyhow::{anyhow, Result};
-use nession_agent::tmux::client::{ControlTransport, TmuxClient, TmuxEvent};
+use nession_agent::tmux::client::{
+    ControlCommand, ControlTransport, EventIngressLimits, EventStream, TmuxClient, TmuxEvent,
+};
 use nession_agent::tmux::cmd::TmuxCmd;
 use nession_agent::tmux::control::ControlModeSession;
 use nession_agent::tmux::ops::TmuxDep;
@@ -384,7 +386,7 @@ async fn the_bootstrap_capture_and_the_live_stream_join_exactly() -> Result<()> 
 async fn attach_over(
     guard: &ControlTestSession,
     transport: ControlTransport,
-) -> Result<(TmuxClient, mpsc::Receiver<TmuxEvent>)> {
+) -> Result<(TmuxClient, EventStream)> {
     let mut client = TmuxClient::connect_with(guard.dep(), guard.name(), transport)?;
     let mut events = client
         .take_events()
@@ -398,11 +400,7 @@ async fn attach_over(
 }
 
 /// Collect pane output until every needle appears or the deadline passes.
-async fn output_until(
-    events: &mut mpsc::Receiver<TmuxEvent>,
-    needles: &[&str],
-    total: Duration,
-) -> String {
+async fn output_until(events: &mut EventStream, needles: &[&str], total: Duration) -> String {
     let deadline = tokio::time::Instant::now() + total;
     let mut seen = Vec::new();
     loop {
@@ -426,11 +424,7 @@ async fn output_until(
 }
 
 /// Wait for a `Resize` reporting exactly `size`, ignoring other events.
-async fn resize_until(
-    events: &mut mpsc::Receiver<TmuxEvent>,
-    size: (u16, u16),
-    total: Duration,
-) -> Result<()> {
+async fn resize_until(events: &mut EventStream, size: (u16, u16), total: Duration) -> Result<()> {
     let deadline = tokio::time::Instant::now() + total;
     loop {
         let left = deadline.saturating_duration_since(tokio::time::Instant::now());
@@ -524,5 +518,133 @@ async fn both_transports_deliver_equivalent_output_capture_and_resize_events() -
 
         client.close().await;
     }
+    Ok(())
+}
+
+/// #2380 SC-04: a real tmux burst with a stopped consumer reaches the bounded
+/// byte budget, fails closed with a stated source loss, and leaves a healthy
+/// peer attachment unaffected.
+#[tokio::test]
+async fn event_ingress_budget_fails_closed_under_a_real_burst() -> Result<()> {
+    // The file's macOS skip: control-mode clients can crash the Homebrew tmux
+    // server while parallel tests run; the Case executes this on Linux CI.
+    if cfg!(target_os = "macos") {
+        return Ok(());
+    }
+
+    let flood = ControlTestSession::new("ingress-budget").await?;
+    let _ = flood
+        .dep()
+        .cmd()
+        .output(&["send-keys", "-t", flood.name(), "yes", "Enter"])
+        .await?;
+
+    let limits = EventIngressLimits {
+        max_queued_bytes: 8 * 1024,
+        admission_timeout: Duration::from_millis(200),
+    };
+    let mut client =
+        TmuxClient::connect_with_limits(flood.dep(), flood.name(), ControlTransport::Pipe, limits)?;
+    let mut events = client
+        .take_events()
+        .ok_or_else(|| anyhow!("event stream already taken"))?;
+    let welcome = tokio::time::timeout(Duration::from_secs(5), events.recv())
+        .await
+        .map_err(|_| anyhow!("no welcome pair within 5s"))?
+        .ok_or_else(|| anyhow!("event stream ended before the welcome"))?;
+    assert_eq!(welcome, TmuxEvent::Handshaken);
+
+    // Stop consuming. The flood fills the byte budget; the reader must fail
+    // closed at its admission deadline rather than grow without bound.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while !client.is_closed() && tokio::time::Instant::now() < deadline {
+        sleep(Duration::from_millis(50)).await;
+    }
+    assert!(
+        client.is_closed(),
+        "a stopped consumer must make the attachment fail closed"
+    );
+
+    // The terminal event is a stated source loss, after the events already
+    // admitted in order.
+    let mut last = None;
+    while let Ok(Some(event)) =
+        tokio::time::timeout(Duration::from_millis(500), events.recv()).await
+    {
+        last = Some(event);
+    }
+    match last {
+        Some(TmuxEvent::SourceLost { reason }) => {
+            assert!(
+                reason.contains("budget"),
+                "the loss names the budget: {reason}"
+            );
+        }
+        other => panic!("the terminal event must state the loss: {other:?}"),
+    }
+
+    // A healthy peer attachment on its own session is unaffected.
+    let peer = ControlTestSession::new("ingress-healthy").await?;
+    let (mut peer_client, _peer_events) = attach_over(&peer, ControlTransport::Pipe).await?;
+    assert_eq!(
+        peer_client
+            .command(ControlCommand::RefreshClient)
+            .await
+            .expect("the healthy peer answers"),
+        b""
+    );
+    peer_client.close().await;
+    client.close().await;
+    Ok(())
+}
+
+/// #2378 SC-02: tmux does not escape command output. A pane line beginning
+/// with `%` — including one that looks like a malformed or different-triple
+/// control record — is capture body, and the attachment survives it.
+#[tokio::test]
+async fn real_tmux_capture_preserves_percent_prefixed_pane_lines() -> Result<()> {
+    if cfg!(target_os = "macos") {
+        return Ok(());
+    }
+    let guard = ControlTestSession::new("percent-capture").await?;
+    let _ = guard
+        .dep()
+        .cmd()
+        .output(&[
+            "send-keys",
+            "-t",
+            guard.name(),
+            "printf '%s\\n' '%hello' '%begin fake' '%end fake' '%%percent'",
+            "Enter",
+        ])
+        .await?;
+
+    let mut client = TmuxClient::connect_with(guard.dep(), guard.name(), ControlTransport::Pipe)?;
+    let mut events = client
+        .take_events()
+        .ok_or_else(|| anyhow!("event stream already taken"))?;
+    let welcome = tokio::time::timeout(Duration::from_secs(5), events.recv())
+        .await
+        .map_err(|_| anyhow!("no welcome pair within 5s"))?
+        .ok_or_else(|| anyhow!("event stream ended before the welcome"))?;
+    assert_eq!(welcome, TmuxEvent::Handshaken);
+
+    let needles = ["%hello", "%begin fake", "%end fake", "%%percent"];
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let mut last;
+    loop {
+        last = String::from_utf8_lossy(&client.capture_pane(200).await?).into_owned();
+        if needles.iter().all(|needle| last.contains(needle)) {
+            break;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            panic!("capture body lost %-prefixed pane lines: {last}");
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    // The attachment still answers after those lines were reconstructed.
+    assert_eq!(client.command(ControlCommand::RefreshClient).await?, b"");
+    client.close().await;
     Ok(())
 }

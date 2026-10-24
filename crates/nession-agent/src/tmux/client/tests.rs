@@ -13,7 +13,41 @@ use super::*;
 
 const WELCOME: &str = "%begin 1 0 0\n%end 1 0 0\n";
 
+/// A writer that never accepts bytes, so the ordered writer task parks in
+/// `write_all` exactly as a child that stopped draining stdin would.
+struct StalledWriter;
+
+impl tokio::io::AsyncWrite for StalledWriter {
+    fn poll_write(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+        _buf: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        std::task::Poll::Pending
+    }
+
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::task::Poll::Pending
+    }
+
+    fn poll_shutdown(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+}
+
 fn wire() -> (TmuxClient, BufReader<DuplexStream>, DuplexStream) {
+    wire_with_limits(EventIngressLimits::default())
+}
+
+fn wire_with_limits(
+    limits: EventIngressLimits,
+) -> (TmuxClient, BufReader<DuplexStream>, DuplexStream) {
     let (client_reader, tmux_tx) = duplex(1 << 16);
     let (client_writer, tmux_rx) = duplex(1 << 16);
     let io = ClientIo {
@@ -22,7 +56,7 @@ fn wire() -> (TmuxClient, BufReader<DuplexStream>, DuplexStream) {
         child: None,
     };
     (
-        TmuxClient::from_io("work", io, 1),
+        TmuxClient::from_io_with_limits("work", io, 1, limits),
         BufReader::new(tmux_rx),
         tmux_tx,
     )
@@ -53,6 +87,139 @@ async fn next_event(client: &mut TmuxClient) -> TmuxEvent {
         .await
         .expect("an event must arrive")
         .expect("the event stream must stay open")
+}
+
+/// A client whose ordered writer never drains; the returned half keeps the
+/// client's read side open so no accidental source loss resolves the waiters.
+fn stalled_client() -> (TmuxClient, DuplexStream) {
+    let (client_reader, tmux_tx) = duplex(1 << 16);
+    let io = ClientIo {
+        reader: Box::new(client_reader),
+        writer: Box::new(StalledWriter),
+        child: None,
+    };
+    (TmuxClient::from_io("work", io, 1), tmux_tx)
+}
+
+/// Fill the writer channel behind a stalled writer: one operation is held by
+/// the writer task and the remaining slots queue behind it. The caller futures
+/// are cancelled on return; the queued operations remain in the channel.
+async fn stall_with_pending_commands(client: &TmuxClient, count: usize) {
+    let fillers = futures_util::future::join_all((0..count).map(|_| {
+        client.command_with_timeout(ControlCommand::RefreshClient, Duration::from_secs(60))
+    }));
+    tokio::pin!(fillers);
+    tokio::select! {
+        _ = tokio::time::sleep(Duration::from_millis(150)) => {}
+        _ = &mut fillers => panic!("commands behind a stalled writer must stay pending"),
+    }
+}
+
+/// #2379 SC-01: a full writer behind a non-draining child returns the caller
+/// at its configured deadline instead of suspending at channel admission.
+#[tokio::test]
+async fn a_command_admission_deadline_bounds_a_stalled_writer() {
+    let (client, _tmux_tx) = stalled_client();
+    stall_with_pending_commands(&client, WRITE_CHANNEL_CAPACITY + 1).await;
+
+    let started = std::time::Instant::now();
+    let outcome = client
+        .command_with_timeout(ControlCommand::RefreshClient, Duration::from_millis(250))
+        .await;
+    let elapsed = started.elapsed();
+
+    assert!(
+        matches!(outcome, Err(TmuxClientError::AdmissionTimeout(_))),
+        "a full writer must report admission timeout, not hang: {outcome:?}"
+    );
+    assert!(
+        elapsed < Duration::from_secs(2),
+        "admission outlived its configured deadline: {elapsed:?}"
+    );
+}
+
+/// #2379 SC-02: a lost source resolves every pending waiter with a scoped
+/// error — written commands report the loss, queued ones report the close —
+/// instead of leaving any caller suspended behind a dead attachment.
+#[tokio::test]
+async fn source_loss_completes_every_pending_waiter() {
+    let (mut client, mut rx, mut tx) = wire();
+    send(&mut tx, WELCOME).await;
+
+    let mut pending = Box::pin(futures_util::future::join_all((0..4).map(|_| {
+        client.command_with_timeout(ControlCommand::RefreshClient, Duration::from_secs(60))
+    })));
+    tokio::select! {
+        _ = tokio::time::sleep(Duration::from_millis(150)) => {}
+        _ = &mut pending => panic!("the replies are outstanding"),
+    }
+    // Consume the four command lines, then lose the source.
+    for _ in 0..4 {
+        assert_eq!(read_command(&mut rx).await, "refresh-client\n");
+    }
+    drop(tx);
+
+    let results = pending.await;
+    assert_eq!(results.len(), 4);
+    for result in results {
+        assert!(
+            matches!(
+                result,
+                Err(TmuxClientError::SourceLost(_)) | Err(TmuxClientError::Closed)
+            ),
+            "a pending waiter must learn the attachment ended: {result:?}"
+        );
+    }
+    assert!(client.is_closed());
+    client.close().await;
+}
+
+/// #2379 SC-02: `close` is bounded even when the write channel is full and the
+/// writer is parked, and the client ends closed.
+#[tokio::test]
+async fn close_is_bounded_with_a_stalled_writer() {
+    let (mut client, _tmux_tx) = stalled_client();
+    stall_with_pending_commands(&client, WRITE_CHANNEL_CAPACITY + 1).await;
+
+    let started = std::time::Instant::now();
+    client.close().await;
+    let elapsed = started.elapsed();
+
+    assert!(client.is_closed(), "close must retire the attachment");
+    assert!(
+        elapsed < Duration::from_secs(6),
+        "close outlived its bounded phases: {elapsed:?}"
+    );
+}
+
+/// #2379 SC-03: cancelling a caller after its command was written does not let
+/// that command's reply be delivered to the next caller.
+#[tokio::test]
+async fn a_cancelled_command_does_not_steal_the_next_reply() {
+    let (mut client, mut rx, mut tx) = wire();
+    send(&mut tx, WELCOME).await;
+    assert_eq!(next_event(&mut client).await, TmuxEvent::Handshaken);
+
+    let mut first = Box::pin(client.command(ControlCommand::RefreshClient));
+    tokio::select! {
+        result = &mut first => panic!("the first command cannot complete yet: {result:?}"),
+        line = read_command(&mut rx) => assert_eq!(line, "refresh-client\n"),
+    }
+    // The caller is gone; its command is still in the reply order.
+    drop(first);
+    send(&mut tx, "%begin 2 1 0\nfirst\n%end 2 1 0\n").await;
+
+    let (second, ()) = tokio::join!(client.command(ControlCommand::RefreshClient), async {
+        let line = read_command(&mut rx).await;
+        assert_eq!(line, "refresh-client\n");
+        send(&mut tx, "%begin 3 2 0\nsecond\n%end 3 2 0\n").await;
+    });
+
+    assert_eq!(
+        second.expect("the next caller gets its own block"),
+        b"second"
+    );
+    client.close().await;
 }
 
 #[tokio::test]
@@ -224,6 +391,68 @@ async fn a_layout_change_inside_a_response_block_still_resizes() {
     client.close().await;
 }
 
+/// #2378: every response line is a line, including empty ones.
+///
+/// `OpenBlock::push` used `body.is_empty()` as the "a line was seen" predicate,
+/// so a leading (or consecutive) empty line appended zero bytes and every later
+/// line lost the separator that distances it from the start.
+#[tokio::test]
+async fn a_response_body_preserves_leading_and_embedded_empty_lines() {
+    let (mut client, mut rx, mut tx) = wire();
+    send(&mut tx, WELCOME).await;
+    assert_eq!(next_event(&mut client).await, TmuxEvent::Handshaken);
+
+    let (result, command) = tokio::join!(client.capture_pane(10), async {
+        let command = read_command(&mut rx).await;
+        send(&mut tx, "%begin 2 1 0\n\n\nLINE\n\nA\n\n%end 2 1 0\n").await;
+        command
+    });
+
+    assert_eq!(command, "capture-pane -t work -p -S -10 -E - -e -J\n");
+    assert_eq!(
+        result.expect("the reply still belongs to its own block"),
+        b"\n\nLINE\n\nA\n",
+        "empty lines before, between and after content are response bytes"
+    );
+}
+
+/// #2378 SC-02: tmux does not escape command output, so a captured pane line
+/// may begin with `%`, may look like a malformed control record, or may even
+/// name a different response triple. None of those is a notification or a
+/// protocol fault while a block is open; they are body bytes.
+#[tokio::test]
+async fn percent_prefixed_body_lines_are_content_not_notifications() {
+    let (mut client, mut rx, mut tx) = wire();
+    send(&mut tx, WELCOME).await;
+    assert_eq!(next_event(&mut client).await, TmuxEvent::Handshaken);
+
+    let (result, command) = tokio::join!(client.capture_pane(10), async {
+        let command = read_command(&mut rx).await;
+        send(
+            &mut tx,
+            "%begin 2 1 0\n%hello\n%begin fake\n%end fake\n%%percent\n%end 9 9 9\n%end 2 1 0\n",
+        )
+        .await;
+        command
+    });
+
+    assert_eq!(command, "capture-pane -t work -p -S -10 -E - -e -J\n");
+    assert_eq!(
+        result.expect("a %-prefixed body must not be a protocol fault"),
+        b"%hello\n%begin fake\n%end fake\n%%percent\n%end 9 9 9"
+    );
+
+    // The block ended only at its own terminator; the attachment is usable.
+    let (result, command) = tokio::join!(client.command(ControlCommand::RefreshClient), async {
+        let command = read_command(&mut rx).await;
+        send(&mut tx, "%begin 3 2 0\nok\n%end 3 2 0\n").await;
+        command
+    });
+    assert_eq!(command, "refresh-client\n");
+    assert_eq!(result.expect("the next reply is matched"), b"ok");
+    client.close().await;
+}
+
 #[tokio::test]
 async fn output_is_byte_exact_and_size_changes_are_deduplicated() {
     let (mut client, _rx, mut tx) = wire();
@@ -260,6 +489,131 @@ async fn output_is_byte_exact_and_size_changes_are_deduplicated() {
         "a repeated size must not be a second event",
     );
     client.close().await;
+}
+
+/// #2380 SC-01: the ordered ingress is bounded by aggregate payload bytes, and
+/// taking an event releases exactly its credit.
+#[tokio::test]
+async fn event_ingress_is_bounded_by_aggregate_bytes_and_releases_on_take() {
+    let limits = EventIngressLimits {
+        max_queued_bytes: 4 * 1024,
+        admission_timeout: Duration::from_secs(60),
+    };
+    let (mut client, _rx, mut tx) = wire_with_limits(limits);
+    send(&mut tx, WELCOME).await;
+    assert_eq!(next_event(&mut client).await, TmuxEvent::Handshaken);
+
+    // Each output costs 64 overhead + 2 pane-id bytes + 1001 decoded bytes =
+    // 1067; three fit in 4096, a fourth does not.
+    let payload = "x".repeat(1000);
+    for _ in 0..10 {
+        send(&mut tx, &format!("%output %0 {payload}\015\n")).await;
+    }
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let queued = client.events().expect("the stream").rx.len();
+    assert_eq!(
+        queued, 3,
+        "the aggregate byte budget, not the item count, bounds the queue"
+    );
+
+    // Taking one releases its credit, so the reader admits the next in order.
+    let first = client
+        .events()
+        .expect("the stream")
+        .recv()
+        .await
+        .expect("an admitted event");
+    assert!(matches!(first, TmuxEvent::Output(_)));
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(
+        client.events().expect("the stream").rx.len(),
+        3,
+        "the released credit admitted exactly one more event"
+    );
+}
+
+/// #2380 SC-02: an event larger than the whole budget cannot be admitted; the
+/// attachment fails closed and states the loss instead of buffering it.
+#[tokio::test]
+async fn an_event_larger_than_the_budget_fails_closed() {
+    let limits = EventIngressLimits {
+        max_queued_bytes: 1024,
+        admission_timeout: Duration::from_secs(60),
+    };
+    let (mut client, mut rx, mut tx) = wire_with_limits(limits);
+    send(&mut tx, WELCOME).await;
+    assert_eq!(next_event(&mut client).await, TmuxEvent::Handshaken);
+
+    let oversized = "y".repeat(4096);
+    let (result, line) = tokio::join!(client.command(ControlCommand::RefreshClient), async {
+        let line = read_command(&mut rx).await;
+        send(&mut tx, &format!("%output %0 {oversized}\015\n")).await;
+        line
+    });
+    assert_eq!(line, "refresh-client\n");
+    match result {
+        Err(TmuxClientError::SourceLost(reason)) => {
+            assert!(
+                reason.contains("budget"),
+                "the loss names the budget: {reason}"
+            );
+        }
+        other => panic!("an oversized event must fail closed: {other:?}"),
+    }
+    assert!(client.is_closed());
+    assert!(matches!(
+        next_event(&mut client).await,
+        TmuxEvent::SourceLost { .. }
+    ));
+}
+
+/// #2380 SC-02/SC-03: a consumer that stops taking events makes the reader
+/// fail closed at its admission deadline; the events already admitted stay in
+/// order and the stated loss is the terminal event (control events are not
+/// starved past the bound).
+#[tokio::test]
+async fn a_stalled_consumer_fails_closed_at_the_admission_deadline() {
+    let limits = EventIngressLimits {
+        max_queued_bytes: 4 * 1024,
+        admission_timeout: Duration::from_millis(150),
+    };
+    let (mut client, mut rx, mut tx) = wire_with_limits(limits);
+    send(&mut tx, WELCOME).await;
+    assert_eq!(next_event(&mut client).await, TmuxEvent::Handshaken);
+
+    let payload = "z".repeat(1000);
+    let (result, line) = tokio::join!(client.command(ControlCommand::RefreshClient), async {
+        let line = read_command(&mut rx).await;
+        for _ in 0..10 {
+            send(&mut tx, &format!("%output %0 {payload}\015\n")).await;
+        }
+        line
+    });
+    assert_eq!(line, "refresh-client\n");
+    match result {
+        Err(TmuxClientError::SourceLost(reason)) => {
+            assert!(
+                reason.contains("consumer stalled"),
+                "the loss names the stalled consumer: {reason}"
+            );
+        }
+        other => panic!("a stalled consumer must fail closed: {other:?}"),
+    }
+
+    let mut last = None;
+    while let Ok(Some(event)) = tokio::time::timeout(
+        Duration::from_millis(500),
+        client.events().expect("the stream").recv(),
+    )
+    .await
+    {
+        last = Some(event);
+    }
+    assert!(
+        matches!(last, Some(TmuxEvent::SourceLost { .. })),
+        "the terminal event must state the loss: {last:?}"
+    );
 }
 
 #[tokio::test]
