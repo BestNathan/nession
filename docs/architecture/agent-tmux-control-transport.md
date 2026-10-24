@@ -69,6 +69,26 @@ cannot change the protocol, only the carrier.
   used: every attached client is fed the same `%output` stream, so per-client
   viewports could not be rendered coherently (shared window, last writer wins).
 
+## Command response body framing (measured 2026-10-24, tmux 3.6b)
+
+`capture-pane` output arrives between `%begin <ts> <id> <flags>` and the
+matching `%end`/`%error`. Measured on tmux 3.6b:
+
+- output lines are **not escaped**: a pane line may begin with `%`, may be
+  empty, and may look like a malformed or differently-triple'd control record;
+- notifications were not observed **inside** a response block. Continuous pane
+  output, a blocking `wait-for`, and a window resize from another client all
+  landed before or after the block, never between its `%begin` and `%end`.
+
+The client therefore treats every line inside an open block as response body
+unless it is the matching terminator or a well-formed notification handled by
+its own arm. An unparseable or malformed `%` line is content, not a protocol
+fault (#2378). Known-tag collisions remain an inherent protocol ambiguity: a
+body line that is exactly a well-formed `%output`/`%layout-change`/... is
+indistinguishable from that notification, and tmux provides no escape for it.
+Empty lines are real lines: the body joins them with `\n` and tracks "a line
+was seen" separately from byte length.
+
 ## Invariants to preserve
 
 - One session-owned attachment; a P2P/Relay subscriber coming or going never
@@ -77,5 +97,8 @@ cannot change the protocol, only the carrier.
   bounded pending commands, tombstones for timed-out replies.
 - The bootstrap capture and the live stream join exactly: output the snapshot
   covers is dropped, interleaved output is live, neither is duplicated.
+- Response-body framing is line-aware: empty lines are preserved and, inside a
+  block, only the matching terminator ends it — an unparseable `%` line is
+  content, never a protocol fault.
 - A framing/source failure fails closed; it never claims continuity or a
   verified checkpoint afterwards.
