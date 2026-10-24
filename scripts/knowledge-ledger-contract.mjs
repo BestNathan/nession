@@ -58,7 +58,7 @@ function scalar(input) {
 }
 // Deliberate safe YAML subset: Skill-like scalar fields and JSON-compatible
 // inline string arrays; both are ordinary YAML. No anchors, tags or nesting.
-export function parseKnowledge(content,filename) {
+export function parseKnowledge(content,filename,{requireVerifiedSource=true}={}) {
   if(!content.startsWith('---\n'))fail(filename+': missing YAML frontmatter');
   const end=content.indexOf('\n---\n',4);
   if(end<0)fail(filename+': missing frontmatter closing fence');
@@ -88,7 +88,7 @@ export function parseKnowledge(content,filename) {
     if(!ID.test(tag)||categories.has(tag))fail(filename+': duplicate/invalid category '+tag);
     categories.add(tag);
   }
-  if(data.status==='verified'&&!data.sources.some(s=>/^https:\/\/github\.com\/BestNathan\/nession\/blob\/[a-f0-9]{40}\//.test(s)))fail(filename+': verified assertion needs exact-SHA canonical source');
+  if(requireVerifiedSource&&data.status==='verified'&&!data.sources.some(s=>/^https:\/\/github\.com\/BestNathan\/nession\/blob\/[a-f0-9]{40}\//.test(s)))fail(filename+': verified assertion needs exact-SHA canonical source');
   for(const s of data.sources) {
     if(!/^https:\/\/github\.com\/BestNathan\/nession\/blob\/[a-f0-9]{40}\//.test(s)&&
        !/^https:\/\/github\.com\/BestNathan\/nession\/(?:issues|pull)\/[1-9]\d*$/.test(s))
@@ -270,7 +270,7 @@ function verify(root,baseline=null) {
       }
       if(e.action!=='delete'){
         const atCommit=git(root,'show',commit+':'+e.path)+'\n';
-        const data=parseKnowledge(atCommit,e.path);
+        // Historical snapshots remain immutable evidence: validate their schema and every source they do contain,\n        // but enforce the current verified-source policy only on the live tree via indexFor(root).\n        const data=parseKnowledge(atCommit,e.path,{requireVerifiedSource:false});
         if(data.title!==e.title||data.updated_at!==e.at||
            JSON.stringify([...data.categories].sort())!==JSON.stringify([...e.categories].sort()))
           fail('article and appended CHANGELOG event disagree: '+e.path);
@@ -328,7 +328,9 @@ function fixture() {
     assert.doesNotThrow(()=>assertIndexCurrent(d));
     put('index.json','{}');
     assert.throws(()=>assertIndexCurrent(d),/index.json differs/);
-    assert.throws(()=>parseKnowledge(article.replace('sources: ["https://github.com/BestNathan/nession/blob/'+'a'.repeat(40)+'/AGENTS.md"]','sources: []'),file),/verified assertion needs exact-SHA/);
+    const missingVerifiedSource=article.replace('sources: ["https://github.com/BestNathan/nession/blob/'+'a'.repeat(40)+'/AGENTS.md"]','sources: []');
+    assert.throws(()=>parseKnowledge(missingVerifiedSource,file),/verified assertion needs exact-SHA/);
+    assert.doesNotThrow(()=>parseKnowledge(missingVerifiedSource,file,{requireVerifiedSource:false}));
     assert.throws(()=>parseKnowledge(article,'topics/engineering/repository-instruction-architecture.md'),/complete title/);
     assert.throws(()=>parseKnowledge(article.replace('title:', 'id: short\n'+'title:'),file),/unknown field/);
     assert.throws(()=>parseKnowledge(article.replace('"architecture", "knowledge"','"architecture", "architecture"'),file),/duplicate/);
