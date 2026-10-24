@@ -23,11 +23,11 @@ function safeFailureFrame(test) {
       const loc = error?.location;
       if (loc && Number.isSafeInteger(loc.line) && loc.line > 0) {
         const basename = String(loc.file ?? '').replace(/\\/g, '/').split('/').at(-1);
-        if (/^[A-Za-z0-9_.-]{1,100}\.spec\\.[cm]?[jt]s$/.test(basename)) {
+        if (/^[A-Za-z0-9_.-]{1,100}\.spec\.[cm]?[jt]s$/.test(basename)) {
           return basename + ':' + loc.line + (Number.isSafeInteger(loc.column) && loc.column > 0 ? ':' + loc.column : '');
         }
       }
-      const frame = /(?:^|[/\\])([A-Za-z0-9_.-]{1,100}\.spec\\.[cm]?[jt]s):([1-9]\d{0,5}):([1-9]\d{0,5})/m
+      const frame = /(?:^|[/\\])([A-Za-z0-9_.-]{1,100}\.spec\.[cm]?[jt]s):([1-9]\d{0,5}):([1-9]\d{0,5})/m
         .exec(String(error?.stack ?? ''));
       if (frame) return frame[1] + ':' + frame[2] + ':' + frame[3];
     }
