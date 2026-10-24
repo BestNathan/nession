@@ -59,7 +59,7 @@ function validateAuthenticatedObservation(o) {
   if (!o || o.authenticated !== true || o.source?.repository !== REPO ||
       o.source?.workflow_path !== '.github/workflows/e2e-full-regression.yml' ||
       o.source?.event !== 'schedule' || o.source?.branch !== 'main' ||
-      o.source?.conclusion !== 'failure' || !POSITIVE(o.source?.run_id) ||
+      o.source?.conclusion !== 'failure' || !Number.isFinite(Date.parse(o.source?.completed_at ?? '')) || !POSITIVE(o.source?.run_id) ||
       !POSITIVE(o.source?.run_attempt) || !HEX40.test(o.source?.target_sha ?? '') ||
       !/^sha256:[a-f0-9]{64}$/.test(o.artifact?.digest ?? '') ||
       !POSITIVE(o.artifact?.id) || !Array.isArray(o.results) || o.results.length > 64) {
@@ -122,7 +122,7 @@ function appendObservation(root, p, observation, fingerprintValue, outcome, now)
     fingerprint: fingerprintValue ?? null,
     outcome: outcome.action,
     reason: outcome.reason ?? null,
-    observed_at: new Date(now).toISOString(),
+    observed_at: observation.source.completed_at,
     result_ids: observation.results.map(x => x.test_id),
     // Do not persist raw logs, traces, stack payloads, or model-authored text here.
   };
@@ -153,7 +153,8 @@ export function recordE2EFailureObservation(root, observation, {
     environment_id: representative.environment_id,
   }) : { status: 'INSUFFICIENT_SIGNATURE', reason: 'failure is not classified as actionable product evidence' };
   if (fp.status !== 'FINGERPRINTED') {
-    const p = paths('unfingerprinted', observation.source.run_id, observation.source.run_attempt);
+    const unknownKey = hash([observation.source.run_id, observation.source.run_attempt, observation.source.target_sha]);
+    const p = paths(unknownKey, observation.source.run_id, observation.source.run_attempt);
     const outcome = { action: 'TRIAGE_REQUIRED', reason: fp.reason };
     const observationPath = appendObservation(root, p, observation, null, outcome, nowMs);
     return { status: 'TRIAGE_REQUIRED', fingerprint: null, observation_path: observationPath, dispatch_allowed: false };
@@ -208,7 +209,7 @@ function selfTest() {
       authenticated: true,
       source: { repository: REPO, workflow_path: '.github/workflows/e2e-full-regression.yml',
         event: 'schedule', branch: 'main', conclusion: 'failure', run_id: 501,
-        run_attempt: 1, target_sha: sha },
+        run_attempt: 1, target_sha: sha, completed_at: '2026-10-24T11:59:00Z' },
       artifact: { id: 77, digest: 'sha256:' + digestValue },
       classification: 'product_assertion_failure',
       results: [{ test_id: 'terminal-attach', kind: 'assertion_failed', actionable: true,
