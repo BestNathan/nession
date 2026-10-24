@@ -150,7 +150,7 @@ jobs:
             "$GITHUB_WORKSPACE/agent-store-repo" \
             "$RUNNER_TEMP/full-failure-intake/admission-result.json" \
             | tee "$RUNNER_TEMP/full-failure-intake/admission-summary.json"
-          git -C agent-store-repo add e2e-failures e2e-failure-observations
+          git -C agent-store-repo add -A
           node trusted/scripts/run-store-integrity.mjs staged agent-store "$GITHUB_WORKSPACE/agent-store-repo"
           if ! git -C agent-store-repo diff --cached --quiet; then
             git -C agent-store-repo config user.name "nession-store-writer"
