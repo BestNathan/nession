@@ -143,6 +143,45 @@ function appendObservation(root, p, observation, fingerprintValue, outcome, now)
   return pth;
 }
 
+// Read the authenticated projection for a fingerprint from a trusted Store checkout.
+export function readE2EFailureAdmission(root, fingerprintValue) {
+  const digest = keyFor(fingerprintValue);
+  const p = paths(digest, 1, 1);
+  const current = readCurrent(root, p, digest);
+  return current.state ? { state: current.state, version: current.version } : null;
+}
+
+// Commit the write-ahead dispatch fence BEFORE any workflow_dispatch POST.
+// A replay never returns permission to send a second POST.
+export function commitE2EFailureDispatch(root, fingerprintValue, {
+  now = new Date().toISOString(),
+} = {}) {
+  const digest = keyFor(fingerprintValue);
+  if (!Number.isFinite(Date.parse(now))) fail('invalid dispatch commit time');
+  const p = paths(digest, 1, 1);
+  const current = readCurrent(root, p, digest);
+  const state = current.state;
+  if (!state) fail('missing durable admission claim');
+  if (state.dispatch_intent?.status !== 'pending') {
+    return { status: 'DISPATCH_ALREADY_COMMITTED', dispatch_allowed: false,
+      fingerprint: state.fingerprint, analysis_id: state.analysis_id, version: current.version };
+  }
+  if (state.status !== 'claimed' || Date.parse(state.lease_expires_at) <= Date.parse(now)) {
+    return { status: 'ADMISSION_RECONCILE_REQUIRED', dispatch_allowed: false,
+      fingerprint: state.fingerprint, analysis_id: state.analysis_id, version: current.version };
+  }
+  const next = {
+    ...state,
+    version: current.version + 1,
+    status: 'in_flight',
+    dispatch_intent: { ...state.dispatch_intent, status: 'committed', committed_at: now },
+  };
+  writeState(root, p, current.version, next);
+  return { status: 'DISPATCH_COMMITTED', dispatch_allowed: true,
+    fingerprint: next.fingerprint, analysis_id: next.analysis_id, version: next.version,
+    source: next.latest_observation };
+}
+
 // One invocation records the observation and decides the durable singleflight outcome.
 // The remote agent-store CAS publisher must commit this working tree; a CAS conflict
 // means re-read latest Store and re-run this function, never blindly dispatch.
