@@ -151,7 +151,7 @@ export function logEntries(text) {
   return events;
 }
 export function validateArticleLinks(root, articleFiles=paths(root,'topics').filter(f=>f.endsWith('.md'))) {
-  const articleSet=new Set(articleFiles),incoming=new Map(articleFiles.map(f=>[f,0]));
+  const articleSet=new Set(articleFiles),incoming=new Map(articleFiles.map(f=>[f,0])),headingCache=new Map();
   const slugHeading=(s)=>s.toLowerCase().normalize('NFKC').trim()
     .replace(/[\`*_~]/g,'').replace(/[^\p{L}\p{N}\s-]/gu,'').replace(/\s+/g,'-').replace(/-+/g,'-');
   for(const file of articleFiles) {
@@ -173,7 +173,7 @@ export function validateArticleLinks(root, articleFiles=paths(root,'topics').fil
         let fragment;
         try { fragment=decodeURIComponent(fragmentRaw); }
         catch { fail(file+': malformed link fragment '+raw); }
-        if(!headings.has(fragment.toLowerCase()) && !/^[a-f0-9-]{8,}$/i.test(fragment))
+        if(!headingsFor(targetFile).has(fragment.toLowerCase()) && !/^[a-f0-9-]{8,}$/i.test(fragment))
           fail(file+': broken local heading anchor '+raw);
       }
       if(articleSet.has(targetFile)&&targetFile!==file)incoming.set(targetFile,(incoming.get(targetFile)||0)+1);
