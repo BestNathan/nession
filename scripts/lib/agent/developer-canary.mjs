@@ -51,25 +51,32 @@ function canaryArgs(model){
     '--no-session-persistence','--max-turns','8','--model',model,
     '--strict-mcp-config',...claudeCliToolPolicy(['Read','Edit','Write'],{restricted:true})];
 }
-function canaryIdentity(env,startedAt,finishedAt,envelope,events,result){
+function canaryIdentity(env,startedAt,finishedAt,envelope,events,result,{stage=false}={}){
   const {GITHUB_RUN_ID,GITHUB_RUN_ATTEMPT,GITHUB_SHA,GITHUB_REPOSITORY}=env;
   if(!/^[1-9]\d*$/.test(GITHUB_RUN_ID??'')||
       !/^[1-9]\d*$/.test(GITHUB_RUN_ATTEMPT??'')||
       !SHA.test(GITHUB_SHA??'')||GITHUB_REPOSITORY!=='BestNathan/nession') {
     fail('trusted main source identity is missing');
   }
+  const workflowId=stage?'agent-staging-developer-canary':'agent-provider-smoke';
+  const taskId=stage?'issue-2319-staging-qwen-canary':TASK;
+  const targetRef=stage?env.STAGING_TARGET_SHA:GITHUB_SHA;
+  if(stage&&(!SHA.test(targetRef??'')||
+    env.GITHUB_WORKFLOW!=='Agent / Staging Developer Canary'||
+    env.GITHUB_EVENT_NAME!=='workflow_run'||env.GITHUB_REF!=='refs/heads/main'||
+    env.GITHUB_RUN_ATTEMPT!=='1'))fail('staging Worker source identity missing');
   const nativeToolNames=events.filter(x=>x?.type==='assistant')
     .flatMap(x=>x.message?.content??[])
     .filter(x=>x?.type==='tool_use')
     .map(x=>x.name);
   const started=new Date(startedAt).getTime(),ended=new Date(finishedAt).getTime();
   return buildAgentWorkflowTelemetry({
-    workflow_id:'agent-provider-smoke',github_workflow:'Agent / Provider Smoke',
-    job:'qwen-developer-canary',repository:GITHUB_REPOSITORY,event:'push',
+    workflow_id:workflowId,github_workflow:stage?'Agent / Staging Developer Canary':'Agent / Provider Smoke',
+    job:'qwen-developer-canary',repository:GITHUB_REPOSITORY,event:stage?'workflow_run':'push',
     github_run_id:Number(GITHUB_RUN_ID),github_run_attempt:Number(GITHUB_RUN_ATTEMPT),
-    unique_run_name:providerScopedRunName({workflowId:'agent-provider-smoke',
-      runId:GITHUB_RUN_ID,runAttempt:GITHUB_RUN_ATTEMPT,taskId:TASK,provider:'claude-code'}),
-    task:{id:TASK,type:'develop',issue:ISSUE,target_ref:GITHUB_SHA},
+    unique_run_name:providerScopedRunName({workflowId,
+      runId:GITHUB_RUN_ID,runAttempt:GITHUB_RUN_ATTEMPT,taskId,provider:'claude-code'}),
+    task:{id:taskId,type:'develop',issue:stage?2319:ISSUE,target_ref:targetRef},
     agent:{provider:'claude-code',id:'dev-qwen-01',role:'developer',
       model:{id:providerModel(env),request_model:providerModel(env)},
       run_id:envelope?.session_id??null,status:result.edit_verified?'finished':'error'},
@@ -78,17 +85,19 @@ function canaryIdentity(env,startedAt,finishedAt,envelope,events,result){
     tokens:normalizeClaudeUsage(envelope),
     cost:{raw_usd:null,charged_usd:null,estimated_usd:null},
     timing:{started_at:startedAt,finished_at:finishedAt,agent_duration_ms:ended-started},
-    result:{status:result.edit_verified?'canary-pass':'canary-error'},
+    result:{status:result.edit_verified?(stage?'staging-canary-pass':'canary-pass'):'canary-error'},
   });
 }
-async function run(dir){
+async function run(dir,{stage=false}={}){
   const env=process.env,model=providerModel(env);
   if(env.GITHUB_REPOSITORY!=='BestNathan/nession'||env.GITHUB_REF!=='refs/heads/main'||
-      env.GITHUB_EVENT_NAME!=='push'||!SHA.test(env.GITHUB_SHA??'')) {
-    fail('only trusted main push may run credentialed Developer Canary');
+      !SHA.test(env.GITHUB_SHA??'')||
+      (stage ? (env.GITHUB_WORKFLOW!=='Agent / Staging Developer Canary'||
+        env.GITHUB_EVENT_NAME!=='workflow_run'||env.GITHUB_RUN_ATTEMPT!=='1'||
+        !SHA.test(env.STAGING_TARGET_SHA??'')) : env.GITHUB_EVENT_NAME!=='push')) {
+    fail('only admitted trusted main Workflow may run credentialed Developer Canary');
   }
-  if(!env.ANTHROPIC_BASE_URL ||
-      (!env.ANTHROPIC_API_KEY&&!env.ANTHROPIC_AUTH_TOKEN))fail('missing Qwen Gateway credentials');
+  qwenGatewayEndpoint(env);
   if(!dir||!path.isAbsolute(dir))fail('metrics directory must be absolute');
   const root=fs.mkdtempSync(path.join(env.RUNNER_TEMP||os.tmpdir(),'qwen-developer-canary-'));
   let events=[],envelope=null,sourceResult={edit_verified:false},error=null;
@@ -111,7 +120,7 @@ async function run(dir){
   finally{
     fs.mkdirSync(dir,{recursive:true});
     const finishedAt=new Date().toISOString();
-    const summary=canaryIdentity(env,startedAt,finishedAt,envelope,events,sourceResult);
+    const summary=canaryIdentity(env,startedAt,finishedAt,envelope,events,sourceResult,{stage});
     writeAgentWorkflowTelemetry(path.join(dir,'agent-telemetry.json'),summary);
     const trace=normalizeNativeTrace('claude-code',events,summary,{
       model:events.some(e=>e.type==='assistant'&&e.message?.usage)?'observed':'unobserved',
@@ -158,6 +167,8 @@ function selfTest(){
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   (process.argv[2]==='self-test'?Promise.resolve(selfTest()):
-    process.argv[2]==='run'?run(process.argv[3]):Promise.reject(Error('usage: self-test | run METRICS_DIR')))
+    process.argv[2]==='run'?run(process.argv[3]):
+    process.argv[2]==='staging'?run(process.argv[3],{stage:true}):
+    Promise.reject(Error('usage: self-test | run METRICS_DIR | staging METRICS_DIR')))
     .catch(e=>{console.error(e.message);process.exitCode=1;});
 }
