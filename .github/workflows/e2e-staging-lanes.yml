@@ -110,12 +110,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          while IFS=$'\t' read -r lane sha; do
-            [[ -n "${lane}" && -n "${sha}" ]] || continue
-            echo "Dispatching full-stack Full at the deployed revision: ${lane} ${sha}"
+          # The source-aligned full-stack suite is lane-independent, and the
+          # Full workflow admits one execution at a time. Dispatch each unique
+          # deployed SHA once; the admission receipt still records every lane.
+          while IFS= read -r sha; do
+            [[ -n "${sha}" ]] || continue
+            lanes="$(jq -r --arg sha "${sha}" \
+              '[.admitted[] as $lane | select(.admitted_shas[$lane] == $sha) | $lane] | join(",")' \
+              "$RUNNER_TEMP/admission.json")"
+            echo "Dispatching full-stack Full at ${sha} for lanes: ${lanes}"
             gh workflow run e2e-full-regression.yml --ref main \
               -f target_ref=staging -f target_sha="${sha}"
-          done < <(jq -r '.admitted[] as $lane | [$lane, .admitted_shas[$lane]] | @tsv' \
+          done < <(jq -r '[.admitted[] as $lane | .admitted_shas[$lane]] | unique[]' \
             "$RUNNER_TEMP/admission.json")
 
       - uses: actions/upload-artifact@v4
