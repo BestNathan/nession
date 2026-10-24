@@ -42,6 +42,7 @@ export const CATALOG = [
   ['acceptance-case-smoke', 'acceptance-case-smoke.yml', 'Acceptance Case Smoke', 'acceptance-case-smoke.yml', 'Acceptance / Case Smoke', 'acceptance'],
   ['e2e-tests', 'e2e.yml', 'E2E Tests', 'e2e-tests.yml', 'E2E / Tests', 'e2e'],
   ['e2e-full-regression', 'e2e-full-regression.yml', 'E2E / Full Regression', 'e2e-full-regression.yml', 'E2E / Full Regression', 'e2e'],
+  ['e2e-staging-lanes', 'e2e-staging-lanes.yml', 'E2E / Staging Lanes', 'e2e-staging-lanes.yml', 'E2E / Staging Lanes', 'e2e'],
   ['e2e-scenario-smoke', 'e2e-scenario-smoke.yml', 'E2E Scenario Smoke', 'e2e-scenario-smoke.yml', 'E2E / Scenario Smoke', 'e2e'],
   ['e2e-scenario-ingest', 'e2e-run-ingest.yml', 'E2E Run Ingest', 'e2e-scenario-ingest.yml', 'E2E / Scenario Ingest', 'e2e'],
   ['e2e-test-ingest', 'e2e-test-run-ingest.yml', 'E2E Test Run Ingest', 'e2e-test-ingest.yml', 'E2E / Test Ingest', 'e2e'],
