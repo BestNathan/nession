@@ -15,6 +15,7 @@ gate_check() {
   gate_run_invariant node e2e/runner/drivers/browser-report.mjs self-test
   gate_run_invariant node scripts/e2e-full-failure-manifest.mjs self-test
   gate_require_path './scripts/main-full-release-gate.mjs' 'Restore Main Full release verification policy.' || return $?
+  # Fail closed if a release cannot prove exact-Main-SHA Full / per-ID receipts.
   gate_run_invariant node scripts/main-full-release-gate.mjs self-test
   gate_run_invariant node scripts/e2e-failure-intake-contract.mjs self-test
   gate_run_invariant node scripts/e2e-full-failure-ingest.mjs self-test
