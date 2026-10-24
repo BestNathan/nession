@@ -5,8 +5,8 @@ source "${GATE_DIR}/../lib/common.sh"
 GATE_ID='knowledge-ledger-contract'
 GATE_NAME='Knowledge ledger schema and immutable-history detector'
 GATE_COMMAND='node scripts/knowledge-ledger-contract.mjs self-test && node scripts/knowledge-ledger-publish.mjs self-test'
-GATE_SUCCESS='knowledge revisions, event history, CAS delta and digests pass positive/negative fixtures'
-GATE_FAILURE='knowledge record/schema/history contract failed'
+GATE_SUCCESS='frontmatter, topic/category index, global changelog and safe Git publication pass fixtures'
+GATE_FAILURE='knowledge frontmatter/index/changelog contract failed'
 GATE_REPAIR='repair the canonical knowledge-ledger-contract.mjs rules and negative fixtures'
 GATE_OWNER='scripts/knowledge-ledger-contract.mjs + docs/engineering/knowledge-ledger.md'
 gate_check() {
