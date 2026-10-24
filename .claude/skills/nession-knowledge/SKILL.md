@@ -74,8 +74,9 @@ git fetch origin refs/heads/knowledge:refs/remotes/origin/knowledge
 git merge-base --is-ancestor origin/knowledge HEAD || { echo 'Remote advanced: reconcile before push' >&2; exit 1; }
 git push origin HEAD:refs/heads/knowledge   # no --force
 ```
-7. **Readback and receipt:** refetch after push, verify exact entry/event/index and Markdown digest, note published SHA. Because a record cannot contain its own commit SHA, append a second post-commit `receipts/<event-id>.json` referencing the published event commit, then fast-forward push/read back its SHA. Attach the event, revision, exact commit and receipt links to the owning Issue/PR. If receipt fails, report **pending** (do not claim end-to-end completion).
-8. **Retry/repair:** existing identical immutable revision/event is idempotent; divergent reuse is a failure. A stale branch tip, missing receipts, changed predecessor, unexpected deletion or failed source check blocks publication; do not force reset/push or erase history.
+7. **Trusted publish:** after local commit validation, use `node scripts/knowledge-ledger-publish.mjs publish <ledger-worktree> <expected-remote-head-SHA>` in an authorized operator environment. It enforces remote exact-head, no-force publication and validated receipt readback. Never provide write credentials to untrusted PR/Agent code. A stale head fails; reconcile without blind replay.
+8. **Readback and receipt:** the publisher appends and validates exactly one post-commit receipt per new revision. Check its returned ledger head, pinned entry/event/index/digest and immutable receipt, then attach those URLs to the owning Issue/PR. A `RECEIPT_PENDING` failure must be reconciled; do not manufacture a second divergent receipt or claim completion.
+9. **Retry/repair:** existing identical immutable revision/event is idempotent; divergent reuse is a failure. A stale branch tip, missing receipts, changed predecessor, unexpected deletion or failed source check blocks publication; do not force reset/push or erase history.
 
 This public branch is **not** a private memory store. No tokens, private sessions/checkpoints, secrets, prompts, tenant information, or local machine credentials. A non-force Git push only guards concurrent fast-forward, not an authorized adversary: stronger ref ACLs and independent anchoring are separate security work, not implied by the Skill.
 
