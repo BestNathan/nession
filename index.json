@@ -1,5 +1,35 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-24T02:57:50.613Z",
-  "entries": []
+  "updated_at": "2026-10-24T03:00:28.623Z",
+  "entries": [
+    {
+      "id": "repository-instruction-architecture",
+      "title": "Repository instruction architecture",
+      "summary": "One canonical owner for root, scoped, task-local and executable instruction layers",
+      "category": "engineering",
+      "tags": [
+        "agents",
+        "skills",
+        "instructions"
+      ],
+      "status": "verified",
+      "revision": "v0001",
+      "path": "entries/repository-instruction-architecture/v0001.md",
+      "metadata_path": "entries/repository-instruction-architecture/v0001.json",
+      "updated_at": "2026-10-24T03:00:28.623Z",
+      "content_sha256": "2453aa6f958d3641446e9db35eff531b1b803fc102e1da406a3983c3a3256b66",
+      "sources": [
+        {
+          "url": "https://github.com/BestNathan/nession/blob/2183bea6ce998e7c000a983facdbec8d3a217331/docs/engineering/instruction-architecture.md",
+          "sha": "2183bea6ce998e7c000a983facdbec8d3a217331",
+          "role": "canonical"
+        },
+        {
+          "url": "https://github.com/BestNathan/nession/blob/2183bea6ce998e7c000a983facdbec8d3a217331/AGENTS.md",
+          "sha": "2183bea6ce998e7c000a983facdbec8d3a217331",
+          "role": "instructions"
+        }
+      ]
+    }
+  ]
 }

@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "id": "repository-instruction-architecture",
+  "action": "create",
+  "recorded_at": "2026-10-24T03:00:28.623Z",
+  "actor": "repository-contributor",
+  "reason": "Seed one verified and exact-SHA-sourced knowledge entry to prove bootstrap lifecycle",
+  "source_issue": "https://github.com/BestNathan/nession/issues/2325",
+  "previous_revision": null,
+  "new_revision": "v0001",
+  "content_sha256": "2453aa6f958d3641446e9db35eff531b1b803fc102e1da406a3983c3a3256b66",
+  "source_commit": "2183bea6ce998e7c000a983facdbec8d3a217331"
+}
