@@ -5,6 +5,7 @@
 //! tear down or heal the server underneath a control-mode attach.
 
 use anyhow::{anyhow, Result};
+use nession_agent::tmux::client::{ControlTransport, TmuxClient, TmuxEvent};
 use nession_agent::tmux::cmd::TmuxCmd;
 use nession_agent::tmux::control::ControlModeSession;
 use nession_agent::tmux::ops::TmuxDep;
@@ -368,5 +369,160 @@ async fn the_bootstrap_capture_and_the_live_stream_join_exactly() -> Result<()> 
     );
 
     let _ = session.close().await;
+    Ok(())
+}
+
+// ── Transport parity (#2307 slice D) ────────────────────────────────────────
+//
+// One client API, two transports. The pipe transport is the production
+// default; the PTY transport is `tmux -CC` on a real pty. These prove the
+// Control Mode grammar, the typed event stream and the capture are the same
+// observable thing over both, and run on Linux CI (the macOS skip is the
+// fixture's, for the reason above).
+
+/// Attach over one transport and consume the welcome pair.
+async fn attach_over(
+    guard: &ControlTestSession,
+    transport: ControlTransport,
+) -> Result<(TmuxClient, mpsc::Receiver<TmuxEvent>)> {
+    let mut client = TmuxClient::connect_with(guard.dep(), guard.name(), transport)?;
+    let mut events = client
+        .take_events()
+        .ok_or_else(|| anyhow!("event stream already taken"))?;
+    let welcome = tokio::time::timeout(Duration::from_secs(5), events.recv())
+        .await
+        .map_err(|_| anyhow!("{transport:?}: no welcome pair within 5s"))?
+        .ok_or_else(|| anyhow!("{transport:?}: event stream ended before the welcome"))?;
+    assert_eq!(welcome, TmuxEvent::Handshaken, "{transport:?}");
+    Ok((client, events))
+}
+
+/// Collect pane output until every needle appears or the deadline passes.
+async fn output_until(
+    events: &mut mpsc::Receiver<TmuxEvent>,
+    needles: &[&str],
+    total: Duration,
+) -> String {
+    let deadline = tokio::time::Instant::now() + total;
+    let mut seen = Vec::new();
+    loop {
+        let text = String::from_utf8_lossy(&seen);
+        if needles.iter().all(|needle| text.contains(needle)) {
+            return text.into_owned();
+        }
+        drop(text);
+        let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if left.is_zero() {
+            break;
+        }
+        match tokio::time::timeout(left.min(Duration::from_millis(200)), events.recv()).await {
+            Ok(Some(TmuxEvent::Output(chunk))) => seen.extend_from_slice(&chunk.data),
+            Ok(Some(_)) => {}
+            Ok(None) => break,
+            Err(_) => {}
+        }
+    }
+    String::from_utf8_lossy(&seen).into_owned()
+}
+
+/// Wait for a `Resize` reporting exactly `size`, ignoring other events.
+async fn resize_until(
+    events: &mut mpsc::Receiver<TmuxEvent>,
+    size: (u16, u16),
+    total: Duration,
+) -> Result<()> {
+    let deadline = tokio::time::Instant::now() + total;
+    loop {
+        let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if left.is_zero() {
+            return Err(anyhow!("no {size:?} resize within {total:?}"));
+        }
+        match tokio::time::timeout(left.min(Duration::from_millis(200)), events.recv()).await {
+            Ok(Some(TmuxEvent::Resize { cols, rows })) if (cols, rows) == size => return Ok(()),
+            Ok(Some(_)) => {}
+            Ok(None) => return Err(anyhow!("the event stream ended before {size:?}")),
+            Err(_) => {}
+        }
+    }
+}
+
+#[tokio::test]
+async fn both_transports_deliver_equivalent_output_capture_and_resize_events() -> Result<()> {
+    if cfg!(target_os = "macos") {
+        return Ok(());
+    }
+    let guard = ControlTestSession::new("ctrl-transport-parity").await?;
+    let marker = "PARITY_2307D_MARKER";
+    // A pane line carrying a *real* ST (`ESC \`) inside it: the OSC-8 hyperlink
+    // terminator. `capture-pane -e` writes this body verbatim, so it is the
+    // exact byte the transport's terminal-framing filter must not eat.
+    let hyperlink = "OSC8\x1b]8;;https://example.com\x1b\\TEXT";
+
+    for transport in [
+        ControlTransport::Pipe,
+        ControlTransport::Pty {
+            cols: 200,
+            rows: 60,
+        },
+    ] {
+        let (mut client, mut events) = attach_over(&guard, transport).await?;
+
+        // Input reaches the pane, and the pane's `%output` reaches the typed
+        // client — byte for byte, over either transport. The hyperlink's raw
+        // escapes are octal-escaped in `%output`, so they arrive unescaped by
+        // the Control Mode decoder.
+        client
+            .send_input(
+                b"printf 'OSC8\\033]8;;https://example.com\\033\\\\TEXT\\033]8;;\\033\\\\\\n'\n",
+            )
+            .await?;
+        client
+            .send_input(format!("printf '{marker}\\n'\n").as_bytes())
+            .await?;
+        let output = output_until(&mut events, &[marker, hyperlink], Duration::from_secs(5)).await;
+        assert!(
+            output.contains(marker),
+            "{transport:?}: pane output did not reach the typed client: {output:?}"
+        );
+        assert!(
+            output.contains(hyperlink),
+            "{transport:?}: the pane's raw escape bytes were lost in transit: {output:?}"
+        );
+
+        // The capture runs on the same control channel and sees the same pane,
+        // byte-exact — including the hyperlink's ST, which the `-CC` transport
+        // strips only when it is the stream's closing framing.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        let mut captured = Vec::new();
+        while tokio::time::Instant::now() < deadline {
+            captured = client.capture_pane(200).await?;
+            let text = String::from_utf8_lossy(&captured);
+            if text.contains(marker) && text.contains(hyperlink) {
+                break;
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+        let capture_text = String::from_utf8_lossy(&captured);
+        assert!(
+            capture_text.contains(marker),
+            "{transport:?}: the control-channel capture does not contain the pane's \
+             output: {capture_text:?}"
+        );
+        assert!(
+            capture_text.contains(hyperlink),
+            "{transport:?}: the capture body's ST was eaten as terminal framing: \
+             {capture_text:?}"
+        );
+
+        // A window move is one ordered `Resize` event on either transport.
+        guard
+            .dep()
+            .ops()
+            .resize_window(guard.name(), 120, 40)
+            .await?;
+        resize_until(&mut events, (120, 40), Duration::from_secs(5)).await?;
+
+        client.close().await;
+    }
     Ok(())
 }

@@ -80,6 +80,20 @@ Target contract in #1649 separates:
 - `method`: `agent | case` — the proof mechanism.
 - `evidence`: authenticated typed references/observations supporting a `Pass | Fail | Pending | N/A` result.
 
+**SC stage selection is evidence-driven, not workflow-topology-driven.**
+Default to PR head for deterministic/protocol/security proofs, use a trusted
+isolated staging SHA for provider/Store/multi-Run integration, reserve main
+merged-SHA for an explicitly justified main-only dispatch/identity/handoff
+property, and require a genuine deployed revision for production observations.
+The current main-only `Agent / Development` workflow is a staging-runner
+implementation gap, not a reason to declare Developer functional correctness
+main-only. Staging provider integration must first have a main-owned trusted
+runner, stage-scoped secrets and Store namespace, authenticated exact Run/SHA
+and independent result ingestion; until then the corresponding SC stays
+Pending. Do not substitute a read-only model verdict for a required
+runtime Case, or change a historical SC stage without recording why earlier
+evidence no longer applies.
+
 `method: agent` reads code, tests, and CI output **using read-only tools**. It may prove static/architectural SCs with concrete, reproducible references; unsupported claims are `Pending`. Agent judgment must not silently substitute for a declared runtime Case.
 
 `method: case` runs the source-aligned `e2e/acceptance/cases/<issue>/<SC>/case.yaml` via the canonical E2E Runner, provisioning full-stack runtime only when required by the Case. A Case can use Browser, Protocol, Terminal and Process verifiers. Missing cases, all-skipped tests, or absent assertions **never** produce Pass.

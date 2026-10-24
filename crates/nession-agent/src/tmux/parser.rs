@@ -4,7 +4,7 @@
 #[derive(Debug, Clone, PartialEq)]
 pub enum ControlMessage {
     /// 终端输出: %output %<pane_id> <data>
-    Output { pane_id: String, data: String },
+    Output { pane_id: String, data: Vec<u8> },
     /// 命令开始: %begin <timestamp> <id> <flags>
     Begin { timestamp: u64, id: u64, flags: u64 },
     /// 命令结束: %end <timestamp> <id> <flags>
@@ -33,19 +33,29 @@ pub enum ControlMessage {
 
 /// 解析 tmux control mode 的一行输出
 pub fn parse_control_line(line: &str) -> Option<ControlMessage> {
-    // Strip only line terminator (\n or \r\n), preserving trailing whitespace
-    // that may be meaningful in %output ANSI data (e.g., trailing \r for cursor control).
-    let line = if let Some(stripped) = line.strip_suffix("\r\n") {
-        stripped
-    } else if let Some(stripped) = line.strip_suffix('\n') {
-        stripped
-    } else {
-        line
-    };
+    parse_control_line_bytes(line.as_bytes())
+}
 
-    if line.starts_with("%output ") {
-        parse_output(line)
-    } else if line.starts_with("%begin ") {
+/// Parse a Control Mode record without interpreting the pane's bytes as UTF-8.
+///
+/// tmux escapes control characters and backslash in %output, but the remaining
+/// bytes are not required to be UTF-8. A String-based reader can terminate the
+/// entire terminal stream on a legal non-UTF-8 pane output (#2300).
+pub fn parse_control_line_bytes(line: &[u8]) -> Option<ControlMessage> {
+    // Only strip the record delimiter. A trailing CR inside a pane's data is
+    // meaningful (and normally escaped as octal by tmux).
+    let line = line
+        .strip_suffix(b"\r\n")
+        .or_else(|| line.strip_suffix(b"\n"))
+        .unwrap_or(line);
+
+    if line.starts_with(b"%output ") {
+        return parse_output(line);
+    }
+    // Other protocol fields are textual: never use lossy conversion, because
+    // invented tokens could be mistaken for %begin/%end response markers.
+    let line = std::str::from_utf8(line).ok()?;
+    if line.starts_with("%begin ") {
         parse_command_response(line, "begin")
     } else if line.starts_with("%end ") {
         parse_command_response(line, "end")
@@ -64,14 +74,14 @@ pub fn parse_control_line(line: &str) -> Option<ControlMessage> {
     }
 }
 
-fn parse_output(line: &str) -> Option<ControlMessage> {
-    let mut parts = line.splitn(3, ' ');
+fn parse_output(line: &[u8]) -> Option<ControlMessage> {
+    let mut parts = line.splitn(3, |byte| *byte == b' ');
     let _tag = parts.next()?;
-    let pane_id = parts.next()?;
+    let pane_id = std::str::from_utf8(parts.next()?).ok()?;
     let data = parts.next()?;
     Some(ControlMessage::Output {
         pane_id: pane_id.to_string(),
-        data: data.to_string(),
+        data: data.to_vec(),
     })
 }
 
@@ -174,6 +184,45 @@ fn parse_window_resize(line: &str) -> Option<ControlMessage> {
     })
 }
 
+/// Decode the octal-quoted bytes that tmux places in %output.
+///
+/// Unlike the legacy permissive helper, malformed protocol escapes are a
+/// fault, never literal bytes: forwarding them would make a corrupt record
+/// look like a healthy contiguous Agent output event (#2300).
+pub fn decode_tmux_output(bytes: &[u8]) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut offset = 0;
+    while let Some(&value) = bytes.get(offset) {
+        if value != b'\\' {
+            out.push(value);
+            offset += 1;
+            continue;
+        }
+        let &next = bytes.get(offset + 1)?;
+        if next == b'\\' {
+            out.push(b'\\');
+            offset += 2;
+            continue;
+        }
+        let digits = (
+            bytes.get(offset + 1),
+            bytes.get(offset + 2),
+            bytes.get(offset + 3),
+        );
+        let (Some(&a), Some(&b), Some(&c)) = digits else {
+            return None;
+        };
+        if !(b'0'..=b'7').contains(&a) || !(b'0'..=b'7').contains(&b) || !(b'0'..=b'7').contains(&c)
+        {
+            return None;
+        }
+        let decoded = (u16::from(a - b'0') << 6) | (u16::from(b - b'0') << 3) | u16::from(c - b'0');
+        out.push(u8::try_from(decoded).ok()?);
+        offset += 4;
+    }
+    Some(out)
+}
+
 /// 反转义 tmux control mode 的数据
 ///
 /// tmux 使用八进制转义特殊字符:
@@ -186,8 +235,12 @@ fn parse_window_resize(line: &str) -> Option<ControlMessage> {
 /// Non-escape characters are passed through verbatim. Malformed escapes
 /// (e.g. lone `\` at end of string, incomplete octal) are preserved literally.
 pub fn unescape_tmux_data(data: &str) -> Vec<u8> {
-    let mut result = Vec::with_capacity(data.len());
-    let bytes = data.as_bytes();
+    unescape_tmux_bytes(data.as_bytes())
+}
+
+/// Undo tmux octal quoting without any intermediate Unicode conversion.
+pub fn unescape_tmux_bytes(bytes: &[u8]) -> Vec<u8> {
+    let mut result = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while let Some(&b) = bytes.get(i) {
         if b == b'\\' {
@@ -234,7 +287,7 @@ mod tests {
         assert!(matches!(
             msg,
             Some(ControlMessage::Output { pane_id, data })
-            if pane_id == "%0" && data == "hello world"
+            if pane_id == "%0" && data.as_slice() == b"hello world"
         ));
     }
 
@@ -244,7 +297,7 @@ mod tests {
         assert!(matches!(
             msg,
             Some(ControlMessage::Output { data, .. })
-            if data == "\\033[31mred\\033[0m"
+            if data.as_slice() == b"\\033[31mred\\033[0m"
         ));
     }
 
@@ -393,7 +446,7 @@ mod tests {
         assert!(matches!(
             msg,
             Some(ControlMessage::Output { data, .. })
-            if data == "hello \r"
+            if data.as_slice() == b"hello \r"
         ));
     }
 
@@ -403,7 +456,7 @@ mod tests {
         assert!(matches!(
             msg,
             Some(ControlMessage::Output { data, .. })
-            if data == "line with trailing spaces   "
+            if data.as_slice() == b"line with trailing spaces   "
         ));
     }
 
@@ -460,6 +513,44 @@ mod tests {
         // 不完整的八进制序列,保留反斜杠字面量
         let data = unescape_tmux_data("\\0");
         assert_eq!(data, b"\\0");
+    }
+
+    #[test]
+    fn strict_output_escape_decoder_rejects_malformed_or_overflowing_records() {
+        assert_eq!(
+            decode_tmux_output(b"a\\033\\377"),
+            Some(b"a\x1b\xff".to_vec())
+        );
+        for broken in [
+            b"hello\\".as_slice(),
+            b"hello\\0".as_slice(),
+            b"hello\\08x".as_slice(),
+            b"hello\\400".as_slice(),
+            b"hello\\777".as_slice(),
+        ] {
+            assert!(decode_tmux_output(broken).is_none(), "{broken:?}");
+        }
+    }
+
+    #[test]
+    fn binary_output_preserves_invalid_utf8_across_the_protocol_layer() {
+        let input = b"%output %0 hello\xff\\033\\000\\134\xfe\n";
+        let msg = parse_control_line_bytes(input);
+        let Some(ControlMessage::Output { pane_id, data }) = msg else {
+            panic!("valid byte-oriented pane output must parse");
+        };
+        assert_eq!(pane_id, "%0");
+        assert_eq!(unescape_tmux_bytes(&data), b"hello\xff\x1b\x00\\\xfe");
+    }
+
+    #[test]
+    fn record_delimiter_never_eats_pane_whitespace() {
+        let msg = parse_control_line_bytes(b"%output %0 a  \r\n");
+        assert!(matches!(
+            msg,
+            Some(ControlMessage::Output { data, .. })
+            if data == b"a  ".as_slice()
+        ));
     }
 
     #[test]
