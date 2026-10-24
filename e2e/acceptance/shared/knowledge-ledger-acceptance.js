@@ -17,14 +17,62 @@ function fm(text,file){assert.ok(text.startsWith('---\n'),file+' frontmatter sta
 function ev(type,value){return {type,value:String(value).replace(/[\r\n]+/g,' ').trim()};}
 function queryCheck(c,ledger){const idx=index(ledger),all=articles(idx),log=fs.readFileSync(path.join(ledger,'CHANGELOG.md'),'utf8');assert.ok(all.length);assert.ok(idx.topics.engineering?.length);assert.ok(idx.categories.knowledge?.length);let source=false;for(const a of all){const data=fm(fs.readFileSync(path.join(ledger,a.path),'utf8'),a.path);assert.equal(a.title,data.title);assert.equal(data.topic,a.path.split('/')[1]);assert.equal(path.basename(a.path,'.md'),slug(data.title));assert.ok(!Object.hasOwn(data,'id'));assert.ok(idx.categories[data.categories[0]]?.includes(a.path));assert.ok(log.includes(' | '+data.title+'\n'));assert.ok(data.sources.length);if(data.sources.some(s=>/^https:\/\/github\.com\/BestNathan\/nession\/blob\/[a-f0-9]{40}\//.test(s)))source=true;}assert.ok(source);return {idx,all,audit:check(c,ledger)};}
 function reject(c,ledger,label,mutate){mutate();const r=cap(process.execPath,[c.checker,'check',ledger,ROOT],{cwd:c.trusted});git(ledger,'reset','--hard','HEAD');git(ledger,'clean','-fd');assert.notEqual(r.status,0,label+' unexpectedly passed');return ev('negative-fixture',label+' rejected');}
-function negatives(c,ledger){const target=articles(index(ledger)).find(a=>a.status==='verified');assert.ok(target);const file=path.join(ledger,target.path),original=fs.readFileSync(file,'utf8'),proof=[];
-proof.push(reject(c,ledger,'synthetic ID/malformed frontmatter',()=>fs.writeFileSync(file,original.replace(/^title:/m,'id: synthetic\ntitle:'))));
-proof.push(reject(c,ledger,'shortened/unrelated title-derived filename',()=>fs.renameSync(file,path.join(path.dirname(file),'short-name.md'))));
-proof.push(reject(c,ledger,'topic/category index drift',()=>fs.writeFileSync(path.join(ledger,'index.json'),'{}\n')));
-proof.push(reject(c,ledger,'missing article changelog event',()=>{const p=path.join(ledger,'CHANGELOG.md'),t=fs.readFileSync(p,'utf8'),i=t.lastIndexOf('\n## ');assert.ok(i>0);fs.writeFileSync(p,t.slice(0,i).trimEnd()+'\n');}));
-proof.push(reject(c,ledger,'verified article missing exact-SHA source',()=>fs.writeFileSync(file,original.replace(/^sources:.*$/m,'sources: []'))));
-proof.push(reject(c,ledger,'secret-like content in public knowledge',()=>fs.writeFileSync(file,original+'\nSynthetic test marker: '+'gh'+'p_'+'A'.repeat(36)+'\n')));
-const base=git(ledger,'rev-parse','HEAD');git(ledger,'config','user.name','Nession Acceptance Fixture');git(ledger,'config','user.email','nession-acceptance@example.invalid');const lp=path.join(ledger,'CHANGELOG.md'),before=fs.readFileSync(lp,'utf8'),marker='v1 commits remain in Git history';assert.ok(before.includes(marker));fs.writeFileSync(lp,before.replace(marker,'v1 history was rewritten'));git(ledger,'add','CHANGELOG.md');git(ledger,'commit','-m','fixture: rewrite historical changelog');const tamper=cap(process.execPath,[c.checker,'check',ledger,ROOT],{cwd:c.trusted});git(ledger,'reset','--hard',base);git(ledger,'clean','-fd');assert.notEqual(tamper.status,0,'historical log rewrite commit unexpectedly passed');proof.push(ev('negative-fixture','committed historical CHANGELOG rewrite rejected'));return proof;}
+function negatives(c,ledger){
+  const target=articles(index(ledger)).find(a=>a.status==='verified');
+  assert.ok(target);
+  const file=path.join(ledger,target.path),original=fs.readFileSync(file,'utf8'),proof=[];
+  proof.push(reject(c,ledger,'synthetic ID/malformed frontmatter',()=>fs.writeFileSync(file,original.replace(/^title:/m,'id: synthetic\ntitle:'))));
+  proof.push(reject(c,ledger,'shortened/unrelated title-derived filename',()=>fs.renameSync(file,path.join(path.dirname(file),'short-name.md'))));
+  proof.push(reject(c,ledger,'topic/category index drift',()=>fs.writeFileSync(path.join(ledger,'index.json'),'{}\n')));
+  proof.push(reject(c,ledger,'missing article changelog event',()=>{const p=path.join(ledger,'CHANGELOG.md'),t=fs.readFileSync(p,'utf8'),i=t.lastIndexOf('\n## ');assert.ok(i>0);fs.writeFileSync(p,t.slice(0,i).trimEnd()+'\n');}));
+  proof.push(reject(c,ledger,'verified article missing exact-SHA source',()=>fs.writeFileSync(file,original.replace(/^sources:.*$/m,'sources: []'))));
+
+  // Exercise the actual secret scanner, not an earlier index/hash mismatch:
+  // create a valid atomic ledger commit whose only policy violation is secret-like content.
+  const secretBase=git(ledger,'rev-parse','HEAD');
+  git(ledger,'config','user.name','Nession Acceptance Fixture');
+  git(ledger,'config','user.email','nession-acceptance@example.invalid');
+  const secretAt=new Date().toISOString();
+  assert.ok(Date.parse(secretAt)>=Date.parse('2026-10-24T12:24:00Z'));
+  fs.writeFileSync(file,original.replace(/^updated_at:.*$/m,'updated_at: '+secretAt)+
+    '\nSynthetic test marker: '+'gh'+'p_'+'A'.repeat(36)+'\n');
+  const logPath=path.join(ledger,'CHANGELOG.md'),oldLog=fs.readFileSync(logPath,'utf8');
+  const event=[
+    '## '+secretAt+' | update | '+target.title,
+    '- Path: '+target.path,
+    '- Topic: '+target.path.split('/')[1],
+    '- Categories: '+target.categories.join(', '),
+    '- Reason: disposable negative fixture for the public-ledger secret scanner',
+    '- Source: '+ISSUE,
+  ].join('\n');
+  fs.writeFileSync(logPath,oldLog.trimEnd()+'\n\n'+event+'\n');
+  run(process.execPath,[c.checker,'index',ledger],{cwd:c.trusted});
+  git(ledger,'add','CHANGELOG.md','index.json',target.path);
+  git(ledger,'commit','-m','fixture: test secret scanner with valid ledger transaction');
+  const secretResult=cap(process.execPath,[c.checker,'check',ledger,ROOT],{cwd:c.trusted});
+  const secretOutput=String(secretResult.stderr||secretResult.stdout);
+  git(ledger,'reset','--hard',secretBase);
+  git(ledger,'clean','-fd');
+  assert.notEqual(secretResult.status,0,'secret-like public knowledge unexpectedly passed');
+  assert.match(secretOutput,/public knowledge contains secret-like text/,
+    'secret scanner did not reject the otherwise-valid transaction: '+secretOutput);
+  proof.push(ev('negative-fixture','structurally valid atomic commit with secret-like content rejected by explicit secret scanner'));
+
+  const base=git(ledger,'rev-parse','HEAD');
+  git(ledger,'config','user.name','Nession Acceptance Fixture');
+  git(ledger,'config','user.email','nession-acceptance@example.invalid');
+  const lp=path.join(ledger,'CHANGELOG.md'),before=fs.readFileSync(lp,'utf8'),marker='v1 commits remain in Git history';
+  assert.ok(before.includes(marker));
+  fs.writeFileSync(lp,before.replace(marker,'v1 history was rewritten'));
+  git(ledger,'add','CHANGELOG.md');
+  git(ledger,'commit','-m','fixture: rewrite historical changelog');
+  const tamper=cap(process.execPath,[c.checker,'check',ledger,ROOT],{cwd:c.trusted});
+  git(ledger,'reset','--hard',base);
+  git(ledger,'clean','-fd');
+  assert.notEqual(tamper.status,0,'historical log rewrite unexpectedly passed');
+  proof.push(ev('negative-fixture','committed historical CHANGELOG rewrite rejected'));
+  return proof;
+}
 function tooling(c){const a=cap(process.execPath,[c.checker,'self-test'],{cwd:c.trusted}),b=cap(process.execPath,[c.publisher,'self-test'],{cwd:c.trusted});assert.equal(a.status,0,'validator tests failed '+(a.stderr||a.stdout));assert.equal(b.status,0,'publisher tests failed '+(b.stderr||b.stdout));return {a:String(a.stdout).trim(),b:String(b.stdout).trim()};}
 function audit(){const c=ctx();return clone(c,ledger=>{const r=check(c,ledger),head=git(ledger,'rev-parse','HEAD'),parents=git(ledger,'rev-list','--parents','-n','1',head).split(/\s+/);assert.equal(parents.length,2);assert.equal(git(ledger,'rev-list','--max-parents=0','HEAD'),ROOT);return {status:'pass',summary:'Live knowledge ledger passed the trusted read-only contract audit with intact orphan ancestry.',evidence:[ev('runtime','target_sha='+c.target),ev('knowledge-ledger','live_head='+head+'; parent='+parents[1]),ev('knowledge-ledger','pinned_root='+ROOT+'; topics='+r.topics+'; current_articles='+r.knowledge+'; changelog_events='+r.events)]};});}
 function model(){const c=ctx();return clone(c,ledger=>{const r=queryCheck(c,ledger);return {status:'pass',summary:'Live v2 ledger passed contract and topic/category/full-title/path/exact-source query checks.',evidence:[ev('runtime','target_sha='+c.target),ev('knowledge-ledger','live_head='+r.audit.head),ev('knowledge-ledger','topics='+r.audit.topics+'; current_articles='+r.all.length),ev('knowledge-ledger','topic=engineering, category=knowledge, full title/path and exact-SHA source lookups passed')]};});}
