@@ -192,12 +192,16 @@ function verify(root,baseline=null) {
       if(!next.startsWith(prev)||next===prev)fail('global changelog must only append in every knowledge commit');
       const added=logEntries(next).slice(logEntries(prev).length);
       const modified=changes.filter(x=>x.file.startsWith('topics/'));
+      const deletedIds=new Set(modified.filter(x=>x.status==='D'&&ENTRY.test(x.file))
+        .map(x=>ENTRY.exec(x.file)[2]));
       for(const {file,status} of modified) {
         if(!ENTRY.test(file)||!['A','M','D'].includes(status))fail('unrecognized topic mutation '+file);
         const match=added.filter(e=>e.path===file);
-        if(match.length!==1|| (status==='A'&&match[0].action!=='create')||
-          (status==='M'&&match[0].action!=='update')||
-          (status==='D'&&match[0].action!=='delete'))
+        const action=match[0]?.action,id=ENTRY.exec(file)[2];
+        if(match.length!==1||
+          (status==='A'&&action!=='create'&&!(action==='move'&&deletedIds.has(id)))||
+          (status==='M'&&action!=='update')||
+          (status==='D'&&action!=='delete'))
           fail('knowledge modification needs one matching changelog event: '+file);
       }
       if(added.length!==modified.length)fail('changelog entries must map 1:1 to changed knowledge files');
