@@ -890,6 +890,60 @@ describe('TerminalController', () => {
     expect(transport.sendResize).not.toHaveBeenCalled();
   });
 
+  it('serializes local grid fit behind an unfinished xterm parser write (#2283)', () => {
+    // Red-before: resizeLocal previously called xterm.resize directly even if
+    // the writer's current output had not completed parsing.
+    const transport = makeTransport();
+    const controller = new TerminalController(makeSession(), () => transport);
+    controller.attach(host());
+
+    const parser = delayedParser(controller);
+    const resize = vi.spyOn(controller.terminal!, 'resize').mockImplementation(() => {});
+    transport.onOutput!(new Uint8Array([0x41]));
+    expect(parser.callbacks).toHaveLength(1);
+
+    controller.resizeLocal(120, 40);
+    expect(resize).not.toHaveBeenCalled();
+    expect(transport.sendResize).not.toHaveBeenCalled();
+
+    parser.finish();
+    expect(resize).toHaveBeenCalledOnce();
+    expect(resize).toHaveBeenCalledWith(120, 40);
+
+    resize.mockRestore();
+    parser.spy.mockRestore();
+    controller.dispose();
+  });
+
+  it('keeps a ResizeObserver fit behind the existing xterm parse callback (#2283)', async () => {
+    const restore = installCapturingResizeObserver();
+    try {
+      const transport = makeTransport();
+      const controller = new TerminalController(makeSession(), () => transport);
+      controller.attach(host());
+      await flush();
+
+      const parser = delayedParser(controller);
+      const resize = vi.spyOn(controller.terminal!, 'resize').mockImplementation(() => {});
+      transport.onOutput!(new Uint8Array([0x1b, 0x5b, 0x48]));
+      expect(parser.callbacks).toHaveLength(1);
+
+      const entry = {
+        contentRect: { width: 1024, height: 600 },
+      } as unknown as ResizeObserverEntry;
+      capturedCallback!([entry], capturedObserver!);
+      expect(resize).not.toHaveBeenCalled();
+
+      parser.finish();
+      expect(resize).toHaveBeenCalledWith(128, 37);
+      resize.mockRestore();
+      parser.spy.mockRestore();
+      controller.dispose();
+    } finally {
+      restore();
+    }
+  });
+
   it('adopting control restates the measured viewport even when it was already sent (#2286)', async () => {
     // While this client was an observer the pane could have been moved to
     // another device's size. Adoption must therefore (a) forget the dedup
