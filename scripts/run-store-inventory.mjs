@@ -392,7 +392,7 @@ function selfTest(){
     {...trusted,GITHUB_EVENT_NAME:'push',GITHUB_REPOSITORY:'attacker/fork'},
     {...trusted,GITHUB_EVENT_NAME:'push',GITHUB_SHA:'main'},
   ]) assert.throws(()=>assertTrustedLiveContext(invalid),/trusted main/);
-  assert.equal(success.writers,11);
+  assert.equal(success.writers,12);
   const agentStore=manifest.stores.find(x=>x.ref==='agent-store');
   assert.equal(agentStore.lifecycle,'active');
   const unknownAgentWriter=JSON.parse(JSON.stringify(manifest));
