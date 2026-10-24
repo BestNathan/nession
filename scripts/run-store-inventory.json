@@ -210,6 +210,16 @@
           "app_id_variable": "RUN_STORE_WRITER_APP_ID",
           "app_private_key_secret": "RUN_STORE_WRITER_APP_PRIVATE_KEY",
           "app_scope": "nession: contents write"
+        },
+        {
+          "workflow": ".github/workflows/e2e-full-failure-ingest.yml",
+          "mode": "e2e_failure_admission",
+          "event": "main_workflow_run",
+          "source": "scoped GitHub App installation token",
+          "credential_boundary": "main-owned privileged job; no model-provided writer token",
+          "app_id_variable": "RUN_STORE_WRITER_APP_ID",
+          "app_private_key_secret": "RUN_STORE_WRITER_APP_PRIVATE_KEY",
+          "app_scope": "nession: contents write"
         }
       ],
       "rollout_blocker": "Current live limited-trust Writer/CAS use is evidenced by #1664; cross-writer server-side Ruleset authorization for agent-store, independent external/WORM anchoring, and production tamper drills remain deferred and UNPROVEN under #1690. Public Git may contain only sealed native session ciphertext.",
