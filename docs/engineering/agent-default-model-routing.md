@@ -8,7 +8,7 @@ committed workflow and not through a user-side CLI:
 | Repository Variable | Example | Current consumer |
 | --- | --- | --- |
 | `AGENT_DEFAULT_REVIEWER` | `review-qwen-01` | `Agent / Review` and new `Acceptance / Agent Controller` requests |
-| `AGENT_DEFAULT_ACCEPTOR` | `accept-qwen-01` | `Agent / SC Acceptance`, acceptance orchestrator and new Controller requests |
+| `AGENT_DEFAULT_ACCEPTOR` | `accept-qwen-01` | `Agent / SC Acceptance`, acceptance orchestrator, Post-Run Waker and new Controller requests |
 | `AGENT_DEFAULT_AUDITOR` | `audit-qwen-01` | `Agent / Issue Audit`, including `/audit` comments |
 | `AGENT_DEFAULT_DEVELOPER` | `dev-qwen-01` | Read/validated at Controller request; Qwen deliberately rejected until #2274 |
 
