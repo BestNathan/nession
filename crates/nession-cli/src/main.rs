@@ -17,6 +17,67 @@ const DEFAULT_SERVER_URL: &str = "ws://127.0.0.1:8080";
 /// Default auth token (empty string, should be overridden).
 const DEFAULT_AUTH_TOKEN: &str = "";
 
+/// Canonical environment name for the CLI's remote Server target.
+pub(crate) const SERVER_URL_ENV: &str = "NESSION_SERVER_URL";
+
+/// Canonical environment name for the CLI's remote credential.
+pub(crate) const AUTH_TOKEN_ENV: &str = "NESSION_AUTH_TOKEN";
+
+/// Legacy (pre-#2267) spelling of [`SERVER_URL_ENV`], kept as a deprecated
+/// alias so an existing environment keeps working.
+pub(crate) const SERVER_URL_LEGACY_ENV: &str = "NENSION_SERVER_URL";
+
+/// Legacy (pre-#2267) spelling of [`AUTH_TOKEN_ENV`], kept as a deprecated
+/// alias so an existing environment keeps working.
+pub(crate) const AUTH_TOKEN_LEGACY_ENV: &str = "NENSION_AUTH_TOKEN";
+
+/// The precedence every `agents`/`sessions` command uses for its target:
+///
+/// 1. the explicit global flag;
+/// 2. [`SERVER_URL_ENV`];
+/// 3. [`SERVER_URL_LEGACY_ENV`];
+/// 4. [`DEFAULT_SERVER_URL`].
+///
+/// One function for all commands, so a command cannot resolve a target a
+/// different way than the one beside it. The legacy names are aliases with the
+/// same value semantics, not a second chain: when both are set the canonical
+/// one wins, which is deterministic and documented in the help text.
+///
+/// There is deliberately no client config file in this chain (#2267): the
+/// agent/server daemon configs describe daemons, not where this CLI connects,
+/// and silently borrowing one would point a remote operator at localhost.
+fn resolve_server_url(cli_url: Option<String>) -> String {
+    cli_url
+        .or_else(environment_server_url)
+        .unwrap_or_else(|| DEFAULT_SERVER_URL.to_string())
+}
+
+/// The credential half of [`resolve_server_url`]'s chain.
+fn resolve_auth_token(cli_token: Option<String>) -> String {
+    cli_token
+        .or_else(environment_auth_token)
+        .unwrap_or_else(|| DEFAULT_AUTH_TOKEN.to_string())
+}
+
+/// The environment-provided target, without the loopback default.
+///
+/// `agent start`/`restart` consume the same global flag as a *daemon* override:
+/// an explicit flag or environment value replaces the config file's value, and
+/// absence leaves the config alone. This is the part of the old Clap `env`
+/// behavior that must be preserved; the default belongs only to remote client
+/// commands, where it is an actual target rather than a file override.
+fn environment_server_url() -> Option<String> {
+    std::env::var(SERVER_URL_ENV)
+        .ok()
+        .or_else(|| std::env::var(SERVER_URL_LEGACY_ENV).ok())
+}
+
+fn environment_auth_token() -> Option<String> {
+    std::env::var(AUTH_TOKEN_ENV)
+        .ok()
+        .or_else(|| std::env::var(AUTH_TOKEN_LEGACY_ENV).ok())
+}
+
 #[derive(Parser)]
 #[command(name = "nession")]
 #[command(version = env!("CARGO_PKG_VERSION"))]
@@ -25,16 +86,18 @@ struct Cli {
     #[command(subcommand)]
     command: Commands,
 
-    /// Server URL (ws:// or wss://). Overrides config and NENSION_SERVER_URL env var.
-    #[arg(long, global = true, env = "NENSION_SERVER_URL")]
+    /// Server URL (ws:// or wss://). Overrides NESSION_SERVER_URL, the legacy
+    /// NENSION_SERVER_URL alias, and the ws://127.0.0.1:8080 default.
+    #[arg(long, global = true)]
     server_url: Option<String>,
 
-    /// Auth token for server authentication. Overrides config and NENSION_AUTH_TOKEN env var.
+    /// Auth token for server authentication. Overrides NESSION_AUTH_TOKEN, the
+    /// legacy NENSION_AUTH_TOKEN alias, and the empty default.
     ///
     /// A value passed here is visible in shell history and in process listings
-    /// while the command runs. For repeatable operation prefer `config set
-    /// auth_token` or the environment variable.
-    #[arg(long, global = true, env = "NENSION_AUTH_TOKEN")]
+    /// while the command runs. For repeatable operation prefer the
+    /// environment variable or `config agent set auth_token`.
+    #[arg(long, global = true)]
     auth_token: Option<String>,
 }
 
@@ -279,16 +342,6 @@ enum ConfigSubAction {
     },
 }
 
-/// Resolve the effective server URL from CLI flag, env, or default.
-fn resolve_server_url(cli_url: Option<String>) -> String {
-    cli_url.unwrap_or_else(|| DEFAULT_SERVER_URL.to_string())
-}
-
-/// Resolve the effective auth token from CLI flag, env, or default.
-fn resolve_auth_token(cli_token: Option<String>) -> String {
-    cli_token.unwrap_or_else(|| DEFAULT_AUTH_TOKEN.to_string())
-}
-
 fn should_skip_background_check() -> bool {
     if std::env::var("NESSION_NO_UPDATE_CHECK").is_ok() {
         return true;
@@ -343,8 +396,8 @@ async fn main() -> Result<()> {
                     config,
                     foreground,
                     pid_file,
-                    cli.server_url,
-                    cli.auth_token,
+                    cli.server_url.or_else(environment_server_url),
+                    cli.auth_token.or_else(environment_auth_token),
                     auth_token_stdin,
                 )
                 .await?
@@ -379,8 +432,8 @@ async fn main() -> Result<()> {
                     config,
                     foreground,
                     pid_file,
-                    cli.server_url,
-                    cli.auth_token,
+                    cli.server_url.or_else(environment_server_url),
+                    cli.auth_token.or_else(environment_auth_token),
                 )
                 .await?
             }
@@ -634,12 +687,13 @@ mod tests {
     }
 
     fn background_command_for(cli: &Cli) -> Command {
+        let auth_token = cli.auth_token.clone().or_else(environment_auth_token);
         commands::agent::background_child_command(
             std::path::Path::new("/bin/true"),
             "agent-config.toml",
             "agent.pid",
             cli.server_url.as_deref(),
-            cli.auth_token.as_deref(),
+            auth_token.as_deref(),
         )
     }
 
@@ -685,15 +739,19 @@ mod tests {
         );
     }
 
-    /// The same property for a credential that arrived through Clap's
+    /// The same property for a credential that arrived through the canonical
     /// environment source: the source changes who typed it, not the channel.
     #[test]
     fn an_env_sourced_token_is_absent_from_the_child_argv() {
         let _env = lock_env();
-        let _setting = EnvSetting::set("NENSION_AUTH_TOKEN", SECRET);
+        let _setting = EnvSetting::set(AUTH_TOKEN_ENV, SECRET);
         let cli = parsed_cli(&["nession", "agent", "start"]);
+        assert!(
+            cli.auth_token.is_none(),
+            "environment sources resolve in the contract, not in Clap"
+        );
         assert_eq!(
-            cli.auth_token.as_deref(),
+            environment_auth_token().as_deref(),
             Some(SECRET),
             "the environment source must reach the resolved override"
         );
@@ -701,5 +759,56 @@ mod tests {
         let command = background_command_for(&cli);
 
         assert_no_secret_in_child_vector(&command);
+    }
+
+    /// #2267: with no flag and no environment, the CLI still targets the
+    /// documented loopback default.
+    #[test]
+    fn the_default_target_is_the_loopback_server() {
+        let _env = lock_env();
+        let _server = EnvSetting::unset(SERVER_URL_ENV);
+        let _server_legacy = EnvSetting::unset(SERVER_URL_LEGACY_ENV);
+        let _token = EnvSetting::unset(AUTH_TOKEN_ENV);
+        let _token_legacy = EnvSetting::unset(AUTH_TOKEN_LEGACY_ENV);
+
+        assert_eq!(resolve_server_url(None), DEFAULT_SERVER_URL);
+        assert_eq!(resolve_auth_token(None), DEFAULT_AUTH_TOKEN);
+    }
+
+    /// The chain is flag > canonical env > legacy env > default, and the
+    /// canonical name is what a conflict between the two names resolves to.
+    #[test]
+    fn the_canonical_environment_names_win_over_the_legacy_aliases() {
+        let _env = lock_env();
+        let _server = EnvSetting::set(SERVER_URL_ENV, "ws://canonical:1");
+        let _server_legacy = EnvSetting::set(SERVER_URL_LEGACY_ENV, "ws://legacy:2");
+        let _token = EnvSetting::set(AUTH_TOKEN_ENV, "canonical-token");
+        let _token_legacy = EnvSetting::set(AUTH_TOKEN_LEGACY_ENV, "legacy-token");
+
+        assert_eq!(resolve_server_url(None), "ws://canonical:1");
+        assert_eq!(resolve_auth_token(None), "canonical-token");
+
+        // An explicit flag still wins over both names.
+        assert_eq!(
+            resolve_server_url(Some("ws://flag:3".to_string())),
+            "ws://flag:3"
+        );
+        assert_eq!(
+            resolve_auth_token(Some("flag-token".to_string())),
+            "flag-token"
+        );
+    }
+
+    /// The legacy spelling alone still works — it is an alias, not dead input.
+    #[test]
+    fn the_legacy_environment_names_still_resolve() {
+        let _env = lock_env();
+        let _server = EnvSetting::unset(SERVER_URL_ENV);
+        let _server_legacy = EnvSetting::set(SERVER_URL_LEGACY_ENV, "ws://legacy-only:4");
+        let _token = EnvSetting::unset(AUTH_TOKEN_ENV);
+        let _token_legacy = EnvSetting::set(AUTH_TOKEN_LEGACY_ENV, "legacy-only-token");
+
+        assert_eq!(resolve_server_url(None), "ws://legacy-only:4");
+        assert_eq!(resolve_auth_token(None), "legacy-only-token");
     }
 }
