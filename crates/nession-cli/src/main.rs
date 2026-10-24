@@ -221,6 +221,10 @@ enum SessionsAction {
         mode: Option<String>,
     },
     /// Create a new tmux session on an agent
+    ///
+    /// Creation takes no dimensions: every session starts at the Agent's
+    /// default size and the first client to attach states the size it ends up
+    /// with (#2268).
     Create {
         /// Agent ID to create the session on
         #[arg(short = 'a', long)]
@@ -229,14 +233,6 @@ enum SessionsAction {
         /// Name for the new session
         #[arg(short = 'n', long)]
         name: String,
-
-        /// Terminal width in columns
-        #[arg(long, default_value_t = 80)]
-        width: u16,
-
-        /// Terminal height in rows
-        #[arg(long, default_value_t = 24)]
-        height: u16,
     },
     /// Kill a tmux session on an agent
     Kill {
@@ -488,23 +484,11 @@ async fn main() -> Result<()> {
                 )
                 .await?;
             }
-            SessionsAction::Create {
-                agent_id,
-                name,
-                width,
-                height,
-            } => {
+            SessionsAction::Create { agent_id, name } => {
                 let server_url = resolve_server_url(cli.server_url);
                 let auth_token = resolve_auth_token(cli.auth_token);
-                commands::client::create_session(
-                    &server_url,
-                    &auth_token,
-                    &agent_id,
-                    &name,
-                    width,
-                    height,
-                )
-                .await?;
+                commands::client::create_session(&server_url, &auth_token, &agent_id, &name)
+                    .await?;
             }
             SessionsAction::Kill { session_id, force } => {
                 // Prompt for confirmation unless --force is set
