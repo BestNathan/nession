@@ -3,6 +3,20 @@
   "topics": {
     "engineering": [
       {
+        "title": "Karpathy LLM Wiki principles for Nession project knowledge",
+        "description": "How Nession adapts the LLM Wiki pattern into source-grounded, incrementally maintained project knowledge",
+        "path": "topics/engineering/karpathy-llm-wiki-principles-for-nession-project-knowledge.md",
+        "status": "verified",
+        "categories": [
+          "agents",
+          "knowledge",
+          "provenance",
+          "research",
+          "skills"
+        ],
+        "updated_at": "2026-10-24T05:34:00.000Z"
+      },
+      {
         "title": "Nession instruction architecture and knowledge ownership",
         "description": "Root/scoped/Skill instructions and a separate sourced project knowledge ledger",
         "path": "topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md",
@@ -13,21 +27,30 @@
           "knowledge",
           "skills"
         ],
-        "updated_at": "2026-10-24T04:03:25.360Z"
+        "updated_at": "2026-10-24T05:34:00.000Z"
       }
     ]
   },
   "categories": {
     "agents": [
+      "topics/engineering/karpathy-llm-wiki-principles-for-nession-project-knowledge.md",
       "topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md"
     ],
     "instructions": [
       "topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md"
     ],
     "knowledge": [
+      "topics/engineering/karpathy-llm-wiki-principles-for-nession-project-knowledge.md",
       "topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md"
     ],
+    "provenance": [
+      "topics/engineering/karpathy-llm-wiki-principles-for-nession-project-knowledge.md"
+    ],
+    "research": [
+      "topics/engineering/karpathy-llm-wiki-principles-for-nession-project-knowledge.md"
+    ],
     "skills": [
+      "topics/engineering/karpathy-llm-wiki-principles-for-nession-project-knowledge.md",
       "topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md"
     ]
   }
