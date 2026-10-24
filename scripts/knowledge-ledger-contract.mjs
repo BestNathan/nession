@@ -103,8 +103,9 @@ function verify(root,base=null) {
       // event and content bytes. A string matching a SHA shape is not proof.
       try {
         command(root,'merge-base','--is-ancestor',r.commit_sha,'HEAD');
-        const atCommit=command(root,'show',r.commit_sha+':'+r.record_path);
-        if(sha256(Buffer.from(atCommit+'\n'))!==r.content_sha256)problem('receipt historical bytes mismatch '+filename);
+        const blob=spawnSync('git',['-C',root,'show',r.commit_sha+':'+r.record_path],{encoding:'buffer'});
+        if(blob.status!==0||!Buffer.isBuffer(blob.stdout)||sha256(blob.stdout)!==r.content_sha256)
+          problem('receipt historical bytes mismatch '+filename);
         command(root,'cat-file','-e',r.commit_sha+':'+r.event_path);
       }catch(e){problem('receipt ancestry/source mismatch '+filename+': '+e.message);}
     }
