@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "445e9c116bb55de44627d926c691add0edee340faac038dc0b3ccfdcf2b83efe",
+  "run_id": 40126390287,
+  "run_attempt": 1,
+  "issue": 2387,
+  "criterion": "SC-02",
+  "criterion_text": "With the Agent consumer deliberately stalled under large tmux output, a bounded-time overload/recovery outcome occurs within configured resource limits, without silent byte loss, false healthy stream state or misreported capture cut.",
+  "stage": "staging",
+  "target_sha": "3349a21b04509199a461276adec236c764e521b8",
+  "contract_sha256": "35023dd15956a0c7952b9136815481582c49eb646370f89be18e2c93754802f8",
+  "case_revision": "3349a21b04509199a461276adec236c764e521b8",
+  "case_tree_sha": "5f9c669e11cb2ba29addb5fb0d7bd13eac0ca09b",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-24T19:42:41.678Z",
+  "finished_at": "2026-10-24T19:43:22.181Z",
+  "duration_ms": 40503,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "a stalled Agent output consumer exhausts the aggregate handoff budget and the ControlModeSession output stream ends in bounded time, with the admitted backlog readable in order and no healthy-looking stall",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "tmux executable: tmux 3.4"
+        },
+        {
+          "type": "runtime",
+          "value": "deterministic byte-budget and full-queue deadline tests passed at exact checkout SHA 3349a21b04509199a461276adec236c764e521b8"
+        },
+        {
+          "type": "runtime",
+          "value": "real isolated tmux output flood with a stopped consumer closed the handoff within its configured limits"
+        }
+      ],
+      "duration_ms": 40475,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40126390287,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "3349a21b04509199a461276adec236c764e521b8",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40126390287",
+    "record_path": "runs/2026-10-24/40126390287-1/2387/SC-02.json",
+    "source_result_sha256": "2bb366df97169350db6664f2c8205635ac554767d2678d106b6f2eb1cf3a14fd"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40126390287-1",
+    "sha256": "2bb366df97169350db6664f2c8205635ac554767d2678d106b6f2eb1cf3a14fd",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40126390287",
+    "durability": "time-limited; object archival not configured"
+  }
+}

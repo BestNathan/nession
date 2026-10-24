@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "f5750707b23b5c8653e96f7db9b2a881025515cb1930a445fbaa95184c9b7eab",
+  "run_id": 40126390287,
+  "run_attempt": 1,
+  "issue": 2388,
+  "criterion": "SC-02",
+  "criterion_text": "For real isolated tmux, output and resize remain semantically ordered at the Agent epoch/seq boundary under stalled and recovering subscribers; P2P/Relay observe no silent gap, stale geometry or false continuity.",
+  "stage": "staging",
+  "target_sha": "3349a21b04509199a461276adec236c764e521b8",
+  "contract_sha256": "7a924ec81cbca4c7345c4a678508de2d813221d91fae18c4d3d3ba52e05c299e",
+  "case_revision": "3349a21b04509199a461276adec236c764e521b8",
+  "case_tree_sha": "d32df8fc93da7f739c46af1c8e21bed24c8aa9de",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-24T19:43:42.700Z",
+  "finished_at": "2026-10-24T19:43:51.284Z",
+  "duration_ms": 8584,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "a stalled resize consumer never suspends the single ordered forwarder: output keeps flowing past more than 16 distinct resizes, the final authoritative size survives, and peer-driven reflow still reaches the other client with no silent geometry gap",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "tmux executable: tmux 3.4"
+        },
+        {
+          "type": "runtime",
+          "value": "deterministic stalled-resize foregrounding test passed at exact checkout SHA 3349a21b04509199a461276adec236c764e521b8"
+        },
+        {
+          "type": "runtime",
+          "value": "real isolated tmux: output after 21 distinct resizes arrived while the resize lane was never read, then the final level was (101,30)"
+        },
+        {
+          "type": "runtime",
+          "value": "peer-driven resize and the shared-window last-writer-wins contract remained intact"
+        }
+      ],
+      "duration_ms": 8570,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40126390287,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "3349a21b04509199a461276adec236c764e521b8",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40126390287",
+    "record_path": "runs/2026-10-24/40126390287-1/2388/SC-02.json",
+    "source_result_sha256": "71726f1fdefbe89edf25bea8baaa75a65ee89dec9c673f8865d1134deeb87170"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40126390287-1",
+    "sha256": "71726f1fdefbe89edf25bea8baaa75a65ee89dec9c673f8865d1134deeb87170",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40126390287",
+    "durability": "time-limited; object archival not configured"
+  }
+}
