@@ -451,9 +451,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       packages: write
-      # Emit the immutable source -> digest provenance artifact consumed by the
-      # trusted deployment identity collector (#1616/#2323).
-      actions: write
     steps:
       - uses: docker/login-action@v3
         with:
@@ -470,34 +467,6 @@ jobs:
             docker buildx imagetools create -t ${IMG}:${prefix}-${SHORT_SHA} \
               ${IMG}:${prefix}-${SHORT_SHA}-amd64 ${IMG}:${prefix}-${SHORT_SHA}-arm64
           done
-
-      # The immutable multi-arch index digest is the deployment identity. This
-      # artifact binds the exact source SHA to the three role tags; a consumer
-      # must still validate it and the observed pod imageIDs (#1616).
-      - name: Emit build provenance
-        run: |
-          set -euo pipefail
-          IMG="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession"
-          SHORT_SHA="${{ needs.versions.outputs.short_sha }}"
-          digest() {
-            docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "${IMG}:$1-${SHORT_SHA}"
-          }
-          agent="$(digest agent)"
-          server="$(digest server)"
-          ui="$(digest ui)"
-          out="${RUNNER_TEMP}/nession-build-provenance.json"
-          jq -n --arg sha "${GITHUB_SHA}" --arg short "${SHORT_SHA}" \
-            --arg agent "${agent}" --arg server "${server}" --arg ui "${ui}" \
-            '{schema_version:1,kind:"nession_build_provenance",source_sha:$sha,images:{
-              agent:{tag:("agent-"+$short),digest:$agent},
-              server:{tag:("server-"+$short),digest:$server},
-              ui:{tag:("ui-"+$short),digest:$ui}}}' > "$out"
-          cat "$out" >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: nession-build-provenance
-          path: ${{ runner.temp }}/nession-build-provenance.json
-          retention-days: 90
 
   # Deploy to the retained staging environment (gitops/environments/staging).
   # ArgoCD consumes the gitops branch; no more kustomize commits on main.
@@ -568,3 +537,57 @@ jobs:
         run: |
           GHCR_IMAGE="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession"
           bash scripts/mirror-container-images.sh "$GHCR_IMAGE" "$ACR_IMAGE" "${{ needs.versions.outputs.short_sha }}" "${{ needs.versions.outputs.short_sha }}" "${{ matrix.image }}"
+
+  # Bind the exact source SHA to the immutable digest of every registry this
+  # build was published to. The staging lane pulls from ACR while on-demand
+  # lanes pull GHCR; a mirror may rebuild the index, so both digests are
+  # recorded and the deployment identity collector selects the observed one.
+  provenance:
+    needs: [versions, mirror-acr]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      packages: read
+      actions: write
+    env:
+      ACR_REGISTRY: crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com
+      ACR_IMAGE: crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession
+    steps:
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.ACR_REGISTRY }}
+          username: ${{ secrets.ALIYUN_ACR_USERNAME }}
+          password: ${{ secrets.ALIYUN_ACR_PASSWORD }}
+      - name: Emit per-registry build provenance
+        run: |
+          set -euo pipefail
+          GHCR_IMAGE="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession"
+          SHORT_SHA="${{ needs.versions.outputs.short_sha }}"
+          digest() {
+            docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "$1"
+          }
+          images='{}'
+          for role in agent server ui; do
+            ghcr_digest="$(digest "${GHCR_IMAGE}:${role}-${SHORT_SHA}")"
+            acr_digest="$(digest "${ACR_IMAGE}:${role}-${SHORT_SHA}")"
+            images="$(jq -c --arg role "$role" --arg tag "${role}-${SHORT_SHA}" \
+              --arg ghcr "$GHCR_IMAGE" --arg ghcr_digest "$ghcr_digest" \
+              --arg acr "$ACR_IMAGE" --arg acr_digest "$acr_digest" \
+              '. + {($role): {tag: $tag, digests: {($ghcr): $ghcr_digest, ($acr): $acr_digest}}}' \
+              <<< "$images")"
+          done
+          out="${RUNNER_TEMP}/nession-build-provenance.json"
+          jq -n --arg sha "${GITHUB_SHA}" --argjson images "$images" \
+            '{schema_version:1,kind:"nession_build_provenance",source_sha:$sha,images:$images}' > "$out"
+          cat "$out" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nession-build-provenance
+          path: ${{ runner.temp }}/nession-build-provenance.json
+          retention-days: 90
