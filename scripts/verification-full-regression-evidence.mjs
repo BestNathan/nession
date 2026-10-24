@@ -62,13 +62,13 @@ export function attestFullRegression({targetSha,run,job,log}){
     provenance:'GitHub full-regression trusted workflow + exact main SHA + job verifier steps + per-ID canonical receipt'};
 }
 export async function collectFullRegression({
-  repo=REPO,sha,get,getText,pageSize=100,maxPages=5,maxReceipts=10
+  repo=REPO,sha,get,getText,pageSize=20,maxPages=5,maxReceipts=10
 }){
   if(repo!==REPO||!SHA.test(sha)||typeof get!=='function'||typeof getText!=='function')
     throw Error('invalid full-regression read scope');
   // Bound API work, but page through admission-only successes. They are not
   // Full Regression evidence and must never consume the receipt lookback.
-  if(!Number.isSafeInteger(pageSize)||pageSize<1||pageSize>100||
+  if(!Number.isSafeInteger(pageSize)||pageSize<1||pageSize>20||
     !Number.isSafeInteger(maxPages)||maxPages<1||maxPages>5||
     !Number.isSafeInteger(maxReceipts)||maxReceipts<1||maxReceipts>10)
     throw Error('invalid Full Regression collector bounds');
@@ -192,7 +192,7 @@ async function collectorSelfTest(){
   assert.equal(result[0].run_id,100);
   assert.equal(logReads.length,1,'admission-only runs must not have logs read as Full evidence');
   await assert.rejects(()=>collectFullRegression({repo:REPO,sha,get:async()=>({workflow_runs:[]}),
-    getText:async()=>'',pageSize:101}));
+    getText:async()=>'',pageSize:21}));
   console.log('Full Regression collector: skips admission-only successes and paginates to real receipt');
 }
 
