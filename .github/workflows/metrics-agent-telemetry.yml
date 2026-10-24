@@ -48,6 +48,9 @@ jobs:
             (github.event.workflow_run.name == 'Agent / Development' &&
              github.event.workflow_run.event == 'workflow_dispatch' &&
              github.event.workflow_run.head_branch == 'main') ||
+            (github.event.workflow_run.name == 'Agent / Staging Developer Canary' &&
+             github.event.workflow_run.event == 'workflow_run' &&
+             github.event.workflow_run.head_branch == 'main') ||
             (github.event.workflow_run.name == 'Agent / Review' &&
              github.event.workflow_run.event == 'workflow_dispatch' &&
              github.event.workflow_run.head_branch == 'main') ||
