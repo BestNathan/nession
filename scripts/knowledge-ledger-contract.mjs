@@ -185,7 +185,7 @@ function verify(root,baseline=null) {
   if(!SHA.test(current))fail('invalid checkout');
   git(root,'merge-base','--is-ancestor',LEGACY_CHECKPOINT,current);
   git(root,'merge-base','--is-ancestor',TITLE_BASE,current);
-  const roots=command(root,'rev-list','--max-parents=0',current).split('\n').filter(Boolean);
+  const roots=git(root,'rev-list','--max-parents=0',current).split('\n').filter(Boolean);
   if(roots.length!==1||roots[0]!=='c91b60925b94792827198a31de739eeb50700cc3')fail('orphan root changed');
   if(baseline) {
     if(!SHA.test(baseline))fail('expected baseline must be an exact SHA');
