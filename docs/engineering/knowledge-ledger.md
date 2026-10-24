@@ -88,6 +88,16 @@ Before writing: search for existing IDs, inspect current sources/decision owner,
 3. Fast-forward push atomically advances the branch commit, then read back the branch SHA, relevant event, revision, source digest and pointer. Publish SHA receipt after the readback, without claiming that a self-declared author string proves authorization.
 4. On failure, leave source revision and event unchanged; report pending/manual reconciliation with expected and actual heads. No auto “repair” that deletes history. A divergent replay is a conflict; byte-identical replay is idempotent.
 
+### Controlled publication helper
+
+From a clean isolated worktree based on the existing knowledge ref, create and commit your immutable revision and event with the derived index. Execute the canonical validator first. Then, using a **trusted operator context** with Git credentials separately provisioned, run:
+
+```sh
+node scripts/knowledge-ledger-publish.mjs publish <knowledge-worktree> <exact-previous-knowledge-ref-SHA>
+```
+
+This verifies remote expected-head identity, validates all changes, refuses a stale ref and any non-fast-forward push, re-reads the remote, appends separate post-commit receipts, validates those and re-reads their commit. A failed receipt push is explicitly `RECEIPT_PENDING`; retry/reconcile, never treat the earlier record commit as a completed transaction. Running it from a PR head or granting secrets to an Agent is prohibited; the helper does not authenticate the operator or grant GitHub permissions. The required regression fixtures run under the `knowledge-ledger-contract` Quality Gate.
+
 ### Trust limits
 
 Append-only is **a validated writer contract, not a GitHub server guarantee**. A collaborator with write permission may still fast-forward delete records or rewrite a branch unless separately constrained. #1690 documents stronger orphan-store governance, but does not currently confer authorization/ruleset evidence on this new `knowledge` ref. Never advertise cryptographic immutability, audit independence, or validated writer identity without real protection and independent audit evidence.
