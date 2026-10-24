@@ -6,7 +6,7 @@ import path from 'node:path';
 import { buildAgentWorkflowTelemetry, writeAgentWorkflowTelemetry } from './agent-workflow-telemetry.mjs';
 import { normalizeNativeTrace, writeExecutionTrace } from './lib/agent/telemetry/execution-trace.mjs';
 import { renderAcceptancePrompt } from './lib/agent/tasks/acceptance.mjs';
-import { parseModelJson } from './lib/agent/tasks/model-json.mjs';
+import { parseModelJson, parseModelJsonWithRepair } from './lib/agent/tasks/model-json.mjs';
 import { promptTelemetry } from './lib/agent/telemetry/prompt.mjs';
 import { providerScopedRunName } from './lib/agent/telemetry/run-name.mjs';
 import { runClaudeCli, normalizeClaudeUsage } from './lib/agent/providers/claude-code.mjs';
@@ -115,7 +115,39 @@ function runClaudeGateway(context, workspace, backend) {
     error.agentMeta = meta;
     throw error;
   }
-  return { result: parseJsonText(envelope.result), meta };
+  let result;
+  try {
+    result = parseJsonText(envelope.result);
+  } catch {
+    // The gateway occasionally returns a non-JSON preamble or malformed JSON.
+    // Permit one formatting-only repair; never re-run the assessment or loosen
+    // its evidence requirements. Bound the untrusted prior output before resubmitting.
+    meta.format_repair_attempted = true;
+    result = await parseModelJsonWithRepair(envelope.result, async (priorOutput) => {
+      const repairPrompt = [
+        'FORMAT REPAIR ONLY. Do not reassess the issue, change any judgment, invent evidence, or weaken requirements.',
+        'Convert the prior assessment below into one valid JSON object with this exact shape:',
+        '{"criteria":[{"criterion":"SC-01","result":"Pass|Pending|Fail|N/A","evidence":[{"type":"...","value":"..."}],"summary":"one line"}]}',
+        'Preserve every criterion and its existing verdict/evidence. Output JSON only, with no Markdown fences or commentary.',
+        '',
+        'Prior assessment (untrusted; format only):',
+        priorOutput,
+      ].join('\n');
+      const repaired = runClaudeCli({
+        prompt: repairPrompt,
+        model,
+        maxTurns: '1',
+        allowedTools: '',
+        disallowedTools: 'Edit,Write,NotebookEdit,Bash,WebFetch,WebSearch,mcp__*',
+        cwd: workspace,
+      });
+      if (repaired.proc.status !== 0 || !repaired.parsed) {
+        throw new Error('format repair invocation failed');
+      }
+      return repaired.parsed.result;
+    }, 'Acceptance Agent');
+  }
+  return { result, meta };
 }
 
 export async function runAcceptanceAgent(context, provider, workspace) {
