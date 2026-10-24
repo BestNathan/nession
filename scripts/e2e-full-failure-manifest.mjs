@@ -22,7 +22,7 @@ function safeFailureFrame(test) {
     for (const error of [...(result.errors ?? []), ...(result.error ? [result.error] : [])]) {
       const loc = error?.location;
       if (loc && Number.isSafeInteger(loc.line) && loc.line > 0) {
-        const basename = String(loc.file ?? '').replace(/\\\\/g, '/').split('/').at(-1);
+        const basename = String(loc.file ?? '').replace(/\\/g, '/').split('/').at(-1);
         if (/^[A-Za-z0-9_.-]{1,100}\\.spec\\.[cm]?[jt]s$/.test(basename)) {
           return basename + ':' + loc.line + (Number.isSafeInteger(loc.column) && loc.column > 0 ? ':' + loc.column : '');
         }
