@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 40122914474,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/tmux-adapter-handoff",
+    "target_sha": "427a6ca0254df54570f622d2e8ae7ff8674ede1c",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/40122914474",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "35d02831a684263ae3d01b741971065fa0aa700fb57f7c560eb4f1a9aabddf56"
+  },
+  "record": "runs/2026-10-24/40122914474-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "51b6305263292ad87a86c8af1e5f37c3aa55ca468827f29c7b211b40a8187315"
+}
