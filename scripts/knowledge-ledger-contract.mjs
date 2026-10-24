@@ -70,7 +70,7 @@ export function parseKnowledge(content,filename) {
   const match=ENTRY.exec(filename);
   if(!match||match[1]!==data.topic||match[2]!==data.id||!ID.test(data.id)||!ID.test(data.topic))
     fail(filename+': topic/id must match path');
-  if(!data.title.trim()||!data.description.trim()||!ACTIONS)fail(filename+': blank title/description');
+  if(!data.title.trim()||!data.description.trim())fail(filename+': blank title/description');
   if(!['verified','candidate'].includes(data.status))fail(filename+': unsupported status');
   if(!utc(data.created_at)||!utc(data.updated_at)||Date.parse(data.created_at)>Date.parse(data.updated_at))fail(filename+': invalid UTC times');
   const categories=new Set();
@@ -78,7 +78,7 @@ export function parseKnowledge(content,filename) {
     if(!ID.test(tag)||categories.has(tag))fail(filename+': duplicate/invalid category '+tag);
     categories.add(tag);
   }
-  if(data.status==='verified'&&!data.sources.length)fail(filename+': verified assertion has no source');
+  if(data.status==='verified'&&!data.sources.some(s=>/^https:\/\/github\.com\/BestNathan\/nession\/blob\/[a-f0-9]{40}\//.test(s)))fail(filename+': verified assertion needs exact-SHA canonical source');
   for(const s of data.sources) {
     if(!/^https:\/\/github\.com\/BestNathan\/nession\/blob\/[a-f0-9]{40}\//.test(s)&&
        !/^https:\/\/github\.com\/BestNathan\/nession\/(?:issues|pull)\/[1-9]\d*$/.test(s))
@@ -137,6 +137,14 @@ export function logEntries(text) {
   return events;
 }
 function verify(root,baseline=null) {
+  for(const entry of fs.readdirSync(root)){
+    if(!['README.md','topics','index.json','CHANGELOG.md','schema'].includes(entry))
+      fail('legacy/unexpected active knowledge path: '+entry);
+  }
+  const schemas=paths(root,'schema');
+  if(schemas.length!==1||schemas[0]!=='schema/v2.json'||
+     JSON.parse(fs.readFileSync(path.join(root,schemas[0]),'utf8')).schema_version!==2)
+    fail('exactly one schema/v2.json must be active');
   const expected=indexFor(root),actual=JSON.parse(fs.readFileSync(path.join(root,'index.json'),'utf8'));
   if(JSON.stringify(actual)!==JSON.stringify(expected))fail('index.json differs from topic/category-derived index');
   const changeText=fs.readFileSync(path.join(root,'CHANGELOG.md'),'utf8'),events=logEntries(changeText);
