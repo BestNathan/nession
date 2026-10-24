@@ -59,6 +59,7 @@ export const CATALOG = [
   ['release-staging', 'staging.yml', 'Staging', 'release-staging.yml', 'Release / Staging Artifacts', 'delivery'],
   ['release-production', 'release.yml', 'Release', 'release-production.yml', 'Release / Production', 'delivery'],
   ['deploy-manual', 'deploy.yml', 'Deploy', 'deploy-manual.yml', 'Deploy / Manual', 'delivery'],
+  ['deploy-identity', 'deploy-identity.yml', 'Deploy / Identity', 'deploy-identity.yml', 'Deploy / Identity', 'delivery'],
   ['task-runner', 'task-runner.yml', 'Ephemeral Task Runner', 'task-runner.yml', 'Task / Ephemeral Runner', 'task'],
   ['task-result-ingest', 'task-result-ingest.yml', 'Task Result Ingest', 'task-result-ingest.yml', 'Task / Result Ingest', 'task'],
   ['store-governance-audit', 'store-governance-audit.yml', 'Store / Governance Audit', 'store-governance-audit.yml', 'Store / Governance Audit', 'store'],
