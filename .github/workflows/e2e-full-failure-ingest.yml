@@ -122,3 +122,44 @@ jobs:
             node trusted/scripts/run-store-cas-push.mjs acceptance-results "$GITHUB_WORKSPACE/results-repo"
           fi
           echo "Authenticated failed Full Regression observation appended; no Agent dispatch or Pass issued." >> "$GITHUB_STEP_SUMMARY"
+      - name: Mint scoped App token for durable Agent Store admission
+        id: agent_store_app
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.RUN_STORE_WRITER_APP_ID }}
+          private-key: ${{ secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY }}
+          repositories: nession
+          permission-contents: write
+      - name: CAS-publish per-ID admission observations to existing agent-store
+        env:
+          STORE_PUSH_TOKEN: ${{ steps.agent_store_app.outputs.token }}
+          RECORD_PATH: ${{ steps.records.outputs.record }}
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+          SOURCE_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$STORE_PUSH_TOKEN" ]]
+          case "$RECORD_PATH" in runs/*/full-regression/*-*.json) ;; *) echo "::error::Unsafe record path" >&2; exit 1 ;; esac
+          mkdir agent-store-repo
+          git -C agent-store-repo init
+          git -C agent-store-repo remote add origin "https://x-access-token:$STORE_PUSH_TOKEN@github.com/$GITHUB_REPOSITORY.git"
+          git -C agent-store-repo fetch --depth=1 origin agent-store
+          git -C agent-store-repo checkout -B agent-store FETCH_HEAD
+          node trusted/scripts/e2e-failure-admission-ingest.mjs self-test
+          node trusted/scripts/e2e-failure-admission-ingest.mjs ingest \
+            "$RUNNER_TEMP/full-failure-intake/records/record.json" \
+            "$GITHUB_WORKSPACE/agent-store-repo" \
+            "$RUNNER_TEMP/full-failure-intake/admission-result.json" \
+            | tee "$RUNNER_TEMP/full-failure-intake/admission-summary.json"
+          git -C agent-store-repo add -A
+          node trusted/scripts/run-store-integrity.mjs staged agent-store "$GITHUB_WORKSPACE/agent-store-repo"
+          if ! git -C agent-store-repo diff --cached --quiet; then
+            git -C agent-store-repo config user.name "nession-store-writer"
+            git -C agent-store-repo config user.email "nession-store-writer@users.noreply.github.com"
+            git -C agent-store-repo commit -m "e2e: admit authenticated per-ID failure observations $SOURCE_RUN_ID attempt $SOURCE_ATTEMPT"
+            node trusted/scripts/run-store-cas-push.mjs agent-store "$GITHUB_WORKSPACE/agent-store-repo"
+          fi
+          jq -e '.dispatch_allowed == false and .agent_invocations == 0 and .bug_writes == 0' \
+            "$RUNNER_TEMP/full-failure-intake/admission-result.json" >/dev/null
+          echo "Per-ID CAS admission projection published; Agent dispatch remains disabled until the trusted outbox/dispatcher slice." >> "$GITHUB_STEP_SUMMARY"

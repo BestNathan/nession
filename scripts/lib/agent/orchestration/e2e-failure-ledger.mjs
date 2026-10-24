@@ -123,7 +123,20 @@ function appendObservation(root, p, observation, fingerprintValue, outcome, now)
     classification: observation.classification,
     observed_at: observation.source.completed_at,
     result_ids: observation.results.map(x => x.test_id),
-    // Do not persist raw logs, traces, stack payloads, or model-authored text here.
+    acceptance_record_path: observation.source.acceptance_record_path ?? null,
+    failure_signatures: observation.results.map(x => ({
+      test_id: x.test_id,
+      kind: x.kind,
+      actionable: x.actionable === true,
+      signature: x.actionable === true ? {
+        assertion_code: x.assertion_code,
+        stable_frame: x.stable_frame,
+        affected_invariant: x.affected_invariant,
+        environment_specific: x.environment_specific === true,
+      } : null,
+    })),
+    // Only the trusted allowlisted signature fields survive; no assertion text,
+    // stack, trace, stdout, title, URL or model-authored text is persisted.
   };
   const pth = p.observation;
   putOnce(root, pth, record);
@@ -142,7 +155,8 @@ export function recordE2EFailureObservation(root, observation, {
       leaseMs < 60_000 || leaseMs > 24 * 60 * 60 * 1000) fail('invalid clock or lease');
   const nowMs = Date.parse(now);
   const actionable = observation.classification === 'product_assertion_failure' ||
-    observation.classification === 'actionable_test_timeout';
+    observation.classification === 'actionable_test_timeout' ||
+    observation.classification === 'candidate_test_failure';
   const representative = observation.results.find(x => x.actionable === true);
   const fp = actionable && representative ? fingerprint({
     test_id: representative.test_id, kind: representative.kind,

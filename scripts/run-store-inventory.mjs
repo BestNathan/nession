@@ -120,7 +120,7 @@ export function checkInventory(manifest,workflows){
       const rollout=store.controller_rollout;
       const requestPath='.github/workflows/acceptance-agent-controller.yml';
       const writerPath='.github/workflows/store-agent-controller-ingest.yml';
-      if(store.lifecycle!=='active'||store.writers.length!==5||
+      if(store.lifecycle!=='active'||store.writers.length!==6||
           rollout.phase!=='live-verified-limited-trust'||
           rollout.request_workflow!==requestPath||
           rollout.trusted_writer_workflow!==writerPath)
@@ -165,6 +165,7 @@ export function checkInventory(manifest,workflows){
         ['.github/workflows/agent-controller-dispatch.yml',['controller_dispatch','owner_main_dispatch_or_issue_comment']],
         ['.github/workflows/store-agent-development-ingest.yml',['encrypted_checkpoint_ingest','main_workflow_run_or_owner_comment']],
         ['.github/workflows/store-agent-dispatch-reconcile.yml',['failed_dispatch_reconcile','main_workflow_run']],
+        ['.github/workflows/e2e-full-failure-ingest.yml',['e2e_failure_admission','main_workflow_run']],
       ]);
       if(store.writers.length!==approved.size)fail('incomplete live agent-store writer roster');
       for(const writer of store.writers){
@@ -392,7 +393,7 @@ function selfTest(){
     {...trusted,GITHUB_EVENT_NAME:'push',GITHUB_REPOSITORY:'attacker/fork'},
     {...trusted,GITHUB_EVENT_NAME:'push',GITHUB_SHA:'main'},
   ]) assert.throws(()=>assertTrustedLiveContext(invalid),/trusted main/);
-  assert.equal(success.writers,12);
+  assert.equal(success.writers,13);
   const agentStore=manifest.stores.find(x=>x.ref==='agent-store');
   assert.equal(agentStore.lifecycle,'active');
   const unknownAgentWriter=JSON.parse(JSON.stringify(manifest));
@@ -681,7 +682,7 @@ function selfTest(){
   assert.throws(()=>checkInventory(manifest,unsupported),/upstream dependency/);
   assert.deepEqual(findStorePushes('git -C result push origin acceptance-results\n'+
     'git push origin HEAD:metrics').map(x=>x.ref),['acceptance-results','metrics']);
-  console.log('Run Store inventory: 4 active refs, 6 legacy plus 5 live agent-store scoped App writers, explicit deferred server authorization, no silent App fallback, negative fixtures passed');
+  console.log('Run Store inventory: 4 active refs, 6 legacy plus 6 live agent-store scoped App writers, explicit deferred server authorization, no silent App fallback, negative fixtures passed');
 }
 function gh(endpoint){
   try{

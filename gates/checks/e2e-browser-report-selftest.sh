@@ -17,5 +17,6 @@ gate_check() {
   gate_run_invariant node scripts/e2e-failure-intake-contract.mjs self-test
   gate_run_invariant node scripts/e2e-full-failure-ingest.mjs self-test
   gate_run_invariant node scripts/lib/agent/orchestration/e2e-failure-ledger.mjs self-test
+  gate_run_invariant node scripts/e2e-failure-admission-ingest.mjs self-test
 }
 gate_main "$@"
