@@ -2545,7 +2545,13 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 // it sends itself. A *peer* reflowing the pane
                                 // is a different actor, and still arrives
                                 // through `resize_rx` below.
-                                while let Some((cols, rows)) = resize_rx.recv().await {
+                                // `resize_rx` is a level (#2388): it holds the
+                                // latest authoritative size, and a consumer
+                                // that fell behind reads the final size rather
+                                // than replaying stale intermediate ones. The
+                                // source forwarder never waits on it.
+                                while resize_rx.changed().await.is_ok() {
+                                    let (cols, rows) = *resize_rx.borrow_and_update();
                                     let full_id =
                                         format!("{agent_id_resize}:{session_name_resize}");
                                     resize_reporter.publish(&full_id, cols, rows);

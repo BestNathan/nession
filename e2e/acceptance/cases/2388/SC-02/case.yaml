@@ -1,0 +1,13 @@
+schema_version: 1
+issue: 2388
+criterion: SC-02
+stage: staging
+runtime: full-stack-local
+# Each cargo test owns a private -S tmux socket per the integration harness;
+# no shared Nession runtime state is mutated. Staging: the Case runs on the
+# staging push and projects into the Acceptance Report from that merged SHA.
+isolation: shared
+verifiers:
+  - type: runtime
+    entry: verify.cjs
+result_policy: all-pass

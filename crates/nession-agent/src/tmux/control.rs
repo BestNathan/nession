@@ -47,7 +47,7 @@
 use anyhow::{Context, Result};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch, Semaphore};
 use tokio::task::JoinHandle;
 use tracing::warn;
 
@@ -56,8 +56,19 @@ use super::ops::TmuxDep;
 
 /// Buffer capacity for the output channel — bytes-per-batch parsed from tmux.
 const OUTPUT_CHANNEL_CAPACITY: usize = 256;
-/// Buffer capacity for the resize channel — one (cols, rows) tuple per event.
-const RESIZE_CHANNEL_CAPACITY: usize = 16;
+/// Aggregate payload bytes the adapter may hand to the Agent output consumer
+/// before it must wait for a take (#2387). The Agent drains this channel into
+/// the session stream log; a count-only queue could hold 256 × the 16 MiB
+/// control-line bound, so the handoff needs its own byte bound. 32 MiB matches
+/// the typed client's ingress budget, which the adaptive pipeline cannot widen
+/// by queueing the same payload again downstream.
+const DEFAULT_OUTPUT_BUDGET_BYTES: usize = 32 * 1024 * 1024;
+/// Per-chunk bookkeeping charged with the payload, so many tiny chunks cannot
+/// occupy the credit for free.
+const OUTPUT_OVERHEAD_BYTES: usize = 64;
+/// How long one output handoff may wait for credit or queue space before the
+/// consumer is declared stalled and the source retires (#2387).
+const OUTPUT_ADMISSION_TIMEOUT: Duration = Duration::from_secs(10);
 /// Bound the aggregate pre-capture replay buffer, not just its event count.
 const MAX_PRE_BARRIER_BYTES: usize = 2 * 1024 * 1024;
 /// Cap on `%output` chunks held back while the bootstrap capture is in
@@ -75,6 +86,127 @@ const WELCOME_TIMEOUT: Duration = Duration::from_secs(5);
 /// pathological (a flooded reader, a loaded CI runner) without turning a wedged
 /// server into a hung attach.
 const CAPTURE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Limits for the ControlModeSession output handoff (#2387).
+///
+/// Byte credit and the queue are separate resources: the queue is bounded by
+/// item count, the credit by aggregate payload. Both legs of one send share an
+/// absolute deadline, so a stalled Agent consumer produces a bounded,
+/// truthful stream end instead of an uncharged queue or a suspended forwarder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct OutputHandoffLimits {
+    max_queued_bytes: usize,
+    admission_timeout: Duration,
+}
+
+impl Default for OutputHandoffLimits {
+    fn default() -> Self {
+        Self {
+            max_queued_bytes: DEFAULT_OUTPUT_BUDGET_BYTES,
+            admission_timeout: OUTPUT_ADMISSION_TIMEOUT,
+        }
+    }
+}
+
+/// One output chunk with the credit it holds until the consumer takes it.
+struct BudgetedOutput {
+    data: Vec<u8>,
+    bytes: u32,
+}
+
+/// The Agent's half of the output handoff. Taking a chunk releases exactly the
+/// credit that chunk holds, so the adapter's byte accounting cannot drift.
+pub struct OutputStream {
+    rx: mpsc::Receiver<BudgetedOutput>,
+    credit: Arc<Semaphore>,
+}
+
+impl OutputStream {
+    pub async fn recv(&mut self) -> Option<Vec<u8>> {
+        let chunk = self.rx.recv().await?;
+        self.credit.add_permits(chunk.bytes as usize);
+        Some(chunk.data)
+    }
+
+    /// Whether the forwarder has ended (source lost, session retired, or the
+    /// handoff stalled past its deadline). Buffered chunks remain readable;
+    /// after them `recv` returns `None`.
+    pub fn is_closed(&self) -> bool {
+        self.rx.is_closed()
+    }
+}
+
+/// The forwarder's half of the output handoff: byte credit plus the ordered
+/// queue, both under one deadline (#2387).
+struct OutputSink {
+    tx: mpsc::Sender<BudgetedOutput>,
+    credit: Arc<Semaphore>,
+    limits: OutputHandoffLimits,
+}
+
+enum OutputOutcome {
+    Sent,
+    /// The Agent consumer or the session is gone; no one can take more.
+    Closed,
+    /// Credit or queue space did not arrive before the deadline.
+    Overloaded,
+}
+
+impl OutputSink {
+    async fn send(&self, data: Vec<u8>) -> OutputOutcome {
+        let bytes = data.len().saturating_add(OUTPUT_OVERHEAD_BYTES);
+        let Ok(permits) = u32::try_from(bytes) else {
+            return OutputOutcome::Overloaded;
+        };
+        if bytes > self.limits.max_queued_bytes {
+            return OutputOutcome::Overloaded;
+        }
+        let deadline = tokio::time::Instant::now() + self.limits.admission_timeout;
+        let permit = match tokio::time::timeout_at(
+            deadline,
+            Arc::clone(&self.credit).acquire_many_owned(permits),
+        )
+        .await
+        {
+            Ok(Ok(permit)) => permit,
+            Ok(Err(_)) => return OutputOutcome::Closed,
+            Err(_) => return OutputOutcome::Overloaded,
+        };
+        // A timed-out or cancelled send drops the chunk unsent; dropping the
+        // permit then refunds its credit. `forget` transfers the charge to the
+        // queued chunk, which `OutputStream::recv` releases.
+        match tokio::time::timeout_at(
+            deadline,
+            self.tx.send(BudgetedOutput {
+                data,
+                bytes: permits,
+            }),
+        )
+        .await
+        {
+            Ok(Ok(())) => {
+                permit.forget();
+                OutputOutcome::Sent
+            }
+            Ok(Err(_)) => OutputOutcome::Closed,
+            Err(_) => OutputOutcome::Overloaded,
+        }
+    }
+}
+
+/// One byte-bounded output handoff and its consumer half.
+fn output_handoff(limits: OutputHandoffLimits) -> (OutputSink, OutputStream) {
+    let (tx, rx) = mpsc::channel(OUTPUT_CHANNEL_CAPACITY);
+    let credit = Arc::new(Semaphore::new(limits.max_queued_bytes));
+    (
+        OutputSink {
+            tx,
+            credit: Arc::clone(&credit),
+            limits,
+        },
+        OutputStream { rx, credit },
+    )
+}
 
 /// Environment variable selecting the transport for new control attachments.
 ///
@@ -152,11 +284,13 @@ impl ControlModeSession {
     /// out — the attach proceeds without a bootstrap, which is the state every
     /// attach was in before #321.
     ///
-    /// Returns `(session, output_receiver, resize_receiver, capture)`. The
-    /// output receiver yields raw ANSI byte chunks ready to forward to xterm.js.
-    /// The resize receiver yields `(cols, rows)` each time the window's size
-    /// changes. When the tmux process exits (or the forwarder ends), both
-    /// receivers close.
+    /// Returns `(session, output_stream, resize_receiver, capture)`. The output
+    /// stream yields raw ANSI byte chunks ready to forward to xterm.js, bounded
+    /// by aggregate payload bytes (#2387); taking a chunk releases its credit.
+    /// The resize receiver is a **level**: it holds the latest authoritative
+    /// `(cols, rows)` and `changed()` fires when a new size supersedes it
+    /// (#2388). When the tmux process exits, or the output handoff stalls past
+    /// its budget, both receivers close.
     pub async fn attach(
         tmux: &TmuxDep,
         session_name: &str,
@@ -165,8 +299,8 @@ impl ControlModeSession {
         capture_lines: Option<u32>,
     ) -> Result<(
         Self,
-        mpsc::Receiver<Vec<u8>>,
-        mpsc::Receiver<(u16, u16)>,
+        OutputStream,
+        watch::Receiver<(u16, u16)>,
         Option<Vec<u8>>,
     )> {
         // Resize the window before attaching so tmux renders at the right
@@ -182,8 +316,11 @@ impl ControlModeSession {
             .take_events()
             .context("control client event stream was already taken")?;
         let observed: ObservedWindowSize = Arc::new(Mutex::new(Some((width, height))));
-        let (output_tx, output_rx) = mpsc::channel(OUTPUT_CHANNEL_CAPACITY);
-        let (resize_tx, resize_rx) = mpsc::channel(RESIZE_CHANNEL_CAPACITY);
+        let (output_tx, output_rx) = output_handoff(OutputHandoffLimits::default());
+        // The initial value is the attach size, which is not a change to
+        // announce; the first `changed()` is a size tmux actually reported
+        // (#2388).
+        let (resize_tx, resize_rx) = watch::channel((width, height));
 
         let capture = match capture_lines {
             None => None,
@@ -355,11 +492,22 @@ impl PreCaptureBuffer {
         self.chunks.len() <= PRE_BARRIER_BUFFER_CHUNKS && self.bytes <= MAX_PRE_BARRIER_BYTES
     }
 
-    async fn flush(&mut self, output_tx: &mpsc::Sender<Vec<u8>>) {
+    /// Flush the held-back output through the bounded handoff.
+    ///
+    /// A false result means the Agent consumer stalled past the handoff budget
+    /// (or the session retired); the remaining chunks are dropped and the
+    /// downstream stream ends, which the Agent turns into a stated
+    /// terminal-stream-lost. Never an unbounded await (#2387).
+    async fn flush(&mut self, output: &OutputSink) -> bool {
+        let mut all_sent = true;
         for chunk in self.chunks.drain(..) {
-            let _ = output_tx.send(chunk).await;
+            if !matches!(output.send(chunk).await, OutputOutcome::Sent) {
+                all_sent = false;
+                break;
+            }
         }
         self.bytes = 0;
+        all_sent
     }
 
     fn clear(&mut self) {
@@ -385,8 +533,8 @@ async fn take_bootstrap(
     events: &mut EventStream,
     session_name: &str,
     lines: u32,
-    output_tx: &mpsc::Sender<Vec<u8>>,
-    resize_tx: &mpsc::Sender<(u16, u16)>,
+    output: &OutputSink,
+    resize_tx: &watch::Sender<(u16, u16)>,
     observed: &ObservedWindowSize,
 ) -> Option<Vec<u8>> {
     let mut buffered = PreCaptureBuffer::new();
@@ -402,19 +550,19 @@ async fn take_bootstrap(
     let handshaken = loop {
         match tokio::time::timeout_at(handshake_deadline, events.recv()).await {
             Ok(Some(TmuxEvent::Handshaken)) => break true,
-            Ok(Some(TmuxEvent::Output(output))) => {
+            Ok(Some(TmuxEvent::Output(chunk))) => {
                 if abandoned {
                     // The bound was exceeded: the capture is abandoned, so
                     // there is no snapshot this output is covered by.
-                    let _ = output_tx.send(output.data).await;
-                } else if !buffered.push(output.data) {
+                    let _ = output.send(chunk.data).await;
+                } else if !buffered.push(chunk.data) {
                     warn!("bootstrap: pre-capture buffer overflow for {session_name}");
-                    buffered.flush(output_tx).await;
+                    buffered.flush(output).await;
                     abandoned = true;
                 }
             }
             Ok(Some(TmuxEvent::Resize { cols, rows })) => {
-                note_and_forward(resize_tx, observed, cols, rows).await;
+                note_and_forward(resize_tx, observed, cols, rows);
             }
             // Neither can precede the capture command being written.
             Ok(Some(TmuxEvent::CaptureStarted | TmuxEvent::Capture { .. })) => {}
@@ -425,7 +573,7 @@ async fn take_bootstrap(
     };
     if !handshaken {
         warn!("bootstrap: control handshake did not complete for {session_name}");
-        buffered.flush(output_tx).await;
+        buffered.flush(output).await;
         return None;
     }
     if abandoned {
@@ -444,7 +592,7 @@ async fn take_bootstrap(
         .await
     {
         warn!("bootstrap: control-channel capture write failed for {session_name}: {err}");
-        buffered.flush(output_tx).await;
+        buffered.flush(output).await;
         return None;
     }
 
@@ -459,7 +607,7 @@ async fn take_bootstrap(
             // after it will be forwarded either — but the bytes already held
             // back are still the only copy of that output.
             Ok(None) | Ok(Some(TmuxEvent::Exited | TmuxEvent::SourceLost { .. })) => {
-                buffered.flush(output_tx).await;
+                buffered.flush(output).await;
                 return None;
             }
             Ok(Some(event)) => event,
@@ -467,12 +615,12 @@ async fn take_bootstrap(
         match event {
             // The pane read happened here: later output is live.
             TmuxEvent::CaptureStarted => barrier_passed = true,
-            TmuxEvent::Output(output) => {
+            TmuxEvent::Output(chunk) => {
                 if barrier_passed || abandoned {
-                    let _ = output_tx.send(output.data).await;
-                } else if !buffered.push(output.data) {
+                    let _ = output.send(chunk.data).await;
+                } else if !buffered.push(chunk.data) {
                     warn!("bootstrap: pre-capture buffer overflow for {session_name}");
-                    buffered.flush(output_tx).await;
+                    buffered.flush(output).await;
                     abandoned = true;
                     barrier_passed = true;
                 }
@@ -487,7 +635,7 @@ async fn take_bootstrap(
                 return if body.is_empty() { None } else { Some(body) };
             }
             TmuxEvent::Resize { cols, rows } => {
-                note_and_forward(resize_tx, observed, cols, rows).await;
+                note_and_forward(resize_tx, observed, cols, rows);
             }
             TmuxEvent::Handshaken => {}
             // Caught above, where the buffered output can still be flushed.
@@ -497,27 +645,36 @@ async fn take_bootstrap(
 
     // A failed or timed-out capture leaves the held-back output as the only
     // copy of what it covers.
-    buffered.flush(output_tx).await;
+    buffered.flush(output).await;
     None
 }
 
 /// Forward source events for the life of the attachment, in client order.
+///
+/// This is the **single ordered consumer**: a blocking wait here stops output,
+/// resize and source-loss handling behind it. The output handoff is byte- and
+/// deadline-bounded (#2387); resize is a level delivered through a watch
+/// channel that never waits (#2388).
 async fn forward_events(
     mut events: EventStream,
-    output_tx: mpsc::Sender<Vec<u8>>,
-    resize_tx: mpsc::Sender<(u16, u16)>,
+    output: OutputSink,
+    resize_tx: watch::Sender<(u16, u16)>,
     observed: ObservedWindowSize,
 ) {
     while let Some(event) = events.recv().await {
         match event {
-            TmuxEvent::Output(output) => {
-                if output_tx.send(output.data).await.is_err() {
-                    // Receiver dropped — the session is being torn down.
+            TmuxEvent::Output(chunk) => {
+                if !matches!(output.send(chunk.data).await, OutputOutcome::Sent) {
+                    // The Agent consumer stalled past the handoff budget, or
+                    // the session is being torn down. Ending the forwarder
+                    // closes the output stream, which the Agent turns into a
+                    // stated terminal-stream-lost rather than a healthy-looking
+                    // freeze.
                     break;
                 }
             }
             TmuxEvent::Resize { cols, rows } => {
-                note_and_forward(&resize_tx, &observed, cols, rows).await;
+                note_and_forward(&resize_tx, &observed, cols, rows);
             }
             TmuxEvent::Exited | TmuxEvent::SourceLost { .. } => break,
             // All three belong to a bootstrap capture consumed in
@@ -533,20 +690,36 @@ async fn forward_events(
     }
 }
 
-async fn note_and_forward(
-    resize_tx: &mpsc::Sender<(u16, u16)>,
+/// Record and publish the window's authoritative size.
+///
+/// Resize is a **level, not a sequence of records**: the latest size is the
+/// authoritative one, and the Agent already publishes it to peers as a level
+/// (`SubscriberIssuedFlow`/resize-reporter latest-wins). A watch channel
+/// therefore holds the final size without blocking the single forwarder and
+/// without inventing a stream cursor; a stalled consumer that never saw an
+/// intermediate size is superseded by the final one by definition (#2388).
+/// Omitting a *transient* size cannot leave the pane at a size the client is
+/// not looking at, because the final report is always delivered.
+fn note_and_forward(
+    resize_tx: &watch::Sender<(u16, u16)>,
     observed: &ObservedWindowSize,
     cols: u16,
     rows: u16,
 ) {
-    // Scoped so the guard is not held across the send: a lock across an await
-    // in this loop would stall every later event behind a slow consumer.
     if let Ok(mut size) = observed.lock() {
         *size = Some((cols, rows));
     }
-    // Best-effort: an internal send whose only failure is "the receiver is
-    // gone". No tmux operation class applies.
-    let _ = resize_tx.send((cols, rows)).await;
+    // Best-effort: the only failure is "the receiver is gone" (session
+    // teardown). `send_if_modified` keeps a repeated size from waking the
+    // consumer as if it were news.
+    let _ = resize_tx.send_if_modified(|current| {
+        if *current == (cols, rows) {
+            false
+        } else {
+            *current = (cols, rows);
+            true
+        }
+    });
 }
 
 #[async_trait::async_trait]
@@ -626,8 +799,11 @@ mod tests {
         // (#2378) — the same contract the typed client enforces.
         let (mut client, mut tmux_rx, mut tmux_tx) = boot_wire();
         let mut events = client.take_events().expect("the test owns the events");
-        let (output_tx, mut output_rx) = mpsc::channel(16);
-        let (resize_tx, _resize_rx) = mpsc::channel(4);
+        let (output_tx, mut output_rx) = output_handoff(OutputHandoffLimits {
+            max_queued_bytes: 1 << 20,
+            admission_timeout: Duration::from_secs(2),
+        });
+        let (resize_tx, _resize_rx) = watch::channel((80, 24));
         let observed: ObservedWindowSize = Arc::new(Mutex::new(Some((80, 24))));
 
         let fake = async {
@@ -702,8 +878,11 @@ mod tests {
         // output is the only copy of what it covers.
         let (mut client, mut tmux_rx, mut tmux_tx) = boot_wire();
         let mut events = client.take_events().expect("the test owns the events");
-        let (output_tx, mut output_rx) = mpsc::channel(16);
-        let (resize_tx, _resize_rx) = mpsc::channel(4);
+        let (output_tx, mut output_rx) = output_handoff(OutputHandoffLimits {
+            max_queued_bytes: 1 << 20,
+            admission_timeout: Duration::from_secs(2),
+        });
+        let (resize_tx, _resize_rx) = watch::channel((80, 24));
         let observed: ObservedWindowSize = Arc::new(Mutex::new(Some((80, 24))));
 
         let fake = async {
@@ -743,6 +922,151 @@ mod tests {
             .expect("the held-back output is flushed")
             .expect("the output channel stays open");
         assert_eq!(live, b"before");
+        client.close().await;
+    }
+
+    /// #2387 SC-01/SC-02: the output handoff is bounded by aggregate payload
+    /// bytes, and a stalled Agent consumer fails the handoff at its deadline
+    /// instead of growing an uncharged queue or suspending the forwarder.
+    #[tokio::test]
+    async fn a_stalled_output_consumer_fails_closed_at_the_handoff_deadline() {
+        let (sink, mut stream) = output_handoff(OutputHandoffLimits {
+            max_queued_bytes: 1024,
+            admission_timeout: Duration::from_millis(150),
+        });
+        // 400 payload + 64 overhead = 464 charged; two fit in 1024.
+        let chunk = vec![b'x'; 400];
+        assert!(matches!(
+            sink.send(chunk.clone()).await,
+            OutputOutcome::Sent
+        ));
+        assert!(matches!(
+            sink.send(chunk.clone()).await,
+            OutputOutcome::Sent
+        ));
+
+        let started = std::time::Instant::now();
+        assert!(
+            matches!(sink.send(chunk.clone()).await, OutputOutcome::Overloaded),
+            "a stalled consumer must exhaust its credit at the deadline"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "the handoff outlived its configured deadline: {:?}",
+            started.elapsed()
+        );
+
+        // Taking one chunk releases exactly its credit; one more send fits.
+        assert_eq!(stream.recv().await.as_deref(), Some(&chunk[..]));
+        assert!(matches!(sink.send(chunk).await, OutputOutcome::Sent));
+
+        // A payload larger than the whole budget is never admitted.
+        let oversized = vec![b'y'; 4096];
+        assert!(matches!(
+            sink.send(oversized).await,
+            OutputOutcome::Overloaded
+        ));
+
+        // Dropping the forwarder's half closes the stream after the admitted
+        // chunks; every take released its credit.
+        drop(sink);
+        while stream.recv().await.is_some() {}
+    }
+
+    /// #2387 SC-01: byte credit alone does not bound the item-count queue. With
+    /// a large byte budget and tiny chunks the queue fills while credit is
+    /// free; the send must share the same deadline and fail closed.
+    #[tokio::test]
+    async fn a_full_output_queue_fails_closed_at_the_handoff_deadline() {
+        let (sink, mut stream) = output_handoff(OutputHandoffLimits {
+            max_queued_bytes: 1024 * 1024,
+            admission_timeout: Duration::from_millis(150),
+        });
+        for _ in 0..OUTPUT_CHANNEL_CAPACITY {
+            assert!(matches!(
+                sink.send(vec![b'x'; 8]).await,
+                OutputOutcome::Sent
+            ));
+        }
+        let started = std::time::Instant::now();
+        assert!(matches!(
+            sink.send(vec![b'x'; 8]).await,
+            OutputOutcome::Overloaded
+        ));
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "a full queue pinned the forwarder past its deadline: {:?}",
+            started.elapsed()
+        );
+
+        // The failed send refunded its credit and freed no slot; taking one
+        // chunk frees both, and the next send is admitted in order.
+        assert!(stream.recv().await.is_some());
+        assert!(matches!(
+            sink.send(vec![b'x'; 8]).await,
+            OutputOutcome::Sent
+        ));
+    }
+
+    /// #2388 SC-01: a live-but-stalled resize consumer cannot suspend the
+    /// single ordered forwarder; output after more than 16 distinct resizes
+    /// still arrives, and the stalled consumer reads the final authoritative
+    /// size when it resumes.
+    #[tokio::test]
+    async fn a_stalled_resize_consumer_does_not_block_output() {
+        let (mut client, _tmux_rx, mut tmux_tx) = boot_wire();
+        let events = client.take_events().expect("the test owns the events");
+        let (output, mut output_rx) = output_handoff(OutputHandoffLimits {
+            max_queued_bytes: 1 << 20,
+            admission_timeout: Duration::from_secs(2),
+        });
+        let (resize_tx, mut resize_rx) = watch::channel((80, 24));
+        let observed: ObservedWindowSize = Arc::new(Mutex::new(Some((80, 24))));
+        let forwarder = tokio::spawn(forward_events(
+            events,
+            output,
+            resize_tx,
+            Arc::clone(&observed),
+        ));
+
+        // The resize receiver stays alive but is never read (capacity 16 in the
+        // old queue): the 17th distinct resize must not strand the forwarder.
+        tmux_tx
+            .write_all(WELCOME.as_bytes())
+            .await
+            .expect("welcome");
+        for width in 81u16..=101 {
+            tmux_tx
+                .write_all(format!("%layout-change @0 a87d,{width}x30,0,0,0\n").as_bytes())
+                .await
+                .expect("resize notification");
+        }
+        tmux_tx
+            .write_all(b"%output %0 AFTER-RESIZES\n")
+            .await
+            .expect("post-resize output");
+
+        let chunk = tokio::time::timeout(Duration::from_secs(2), output_rx.recv())
+            .await
+            .expect("output must not wait for the resize consumer")
+            .expect("the output stream stays open until the source ends");
+        assert!(
+            String::from_utf8_lossy(&chunk).contains("AFTER-RESIZES"),
+            "the output after 21 distinct resizes was lost"
+        );
+
+        // The stalled consumer, once it resumes, reads the final level — not a
+        // replay of stale intermediate sizes and not a fabricated cursor.
+        assert_eq!(
+            *resize_rx.borrow_and_update(),
+            (101, 30),
+            "the final authoritative size must survive a stalled consumer"
+        );
+
+        // The forwarder is still alive and the session still owns the source.
+        assert!(!forwarder.is_finished());
+        drop(tmux_tx);
+        forwarder.abort();
         client.close().await;
     }
 
