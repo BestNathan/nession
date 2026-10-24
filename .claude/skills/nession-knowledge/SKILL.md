@@ -158,6 +158,8 @@ On conflicts, fetch and reconcile **both current knowledge and global log**. Do 
 
 At Requirement creation or material revision, record the `Knowledge Impact` decision (`None | Read | Create | Update | Supersede`), affected full article titles / topics / categories, rationale, owner/timing and evidence. After implementation/review, publish any necessary current-article change with a global log entry and link the knowledge commit to the Issue. An `Update` is an **edit of the current article**, not a new article version. Unaffected requirements may state `None` with a reason. Do not mark knowledge evidence complete just because a model suggested text.
 
+For browser/E2E scope, keep the owning Issue's `E2E Verification` (`New` and `Regression`) and `E2E Report` sections explicit. If no browser behavior is affected, declare a justified `- none: ...` in both lists. Missing E2E scope is unresolved, not an implicit `not-required`; this prevents CI from silently choosing either a full regression or a skip.
+
 ## Audit and stop conditions
 
 The trusted read-only `CI / Knowledge Ledger Audit` checks the live ref every six hours and on demand. It anchors the original orphan Git history and verifies topics, categories, global log, index consistency and Git diffs. This is detection, not server-side ref protection. Stop on missing ref, stale source, metadata conflict, invalid log, failed CAS/readback or unknown authority. Report **Pending** rather than reconstructing certainty.
