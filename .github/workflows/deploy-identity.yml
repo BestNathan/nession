@@ -147,8 +147,8 @@ jobs:
           RUN_ID=$(jq -r --arg sha "$DEPLOYED_SHA" '
             [.workflow_runs[]
               | select((.path | split("@")[0]) == ".github/workflows/release-staging.yml")
-              # A workflow-only staging change is paths-ignore'd, so the
-              # workflow's own trusted dispatch escape hatch may be the build
+              # A workflow-only staging change is ignored by paths-ignore, so
+              # the trusted workflow dispatch escape hatch may be the build
               # that produced the deployed images. Both events bind the same
               # exact SHA/branch/workflow identity.
               | select(.event == "push" or .event == "workflow_dispatch")
