@@ -91,7 +91,6 @@ function selfTest() {
     number:17, title:'Refs #1702', body:'Refs #1702',
     head:{sha:'a'.repeat(40),repo:{full_name:'BestNathan/nession'}},
     base:{sha:'b'.repeat(40),ref:'staging'} }};
-  assert.equal(prepare(event,[],'.').mode,'unresolved');
   assert.equal(pathsCannotAffectE2E(['docs/architecture/notes.md']), true);
   assert.equal(pathsCannotAffectE2E(['.github/workflows/agent-controller-dispatch.yml']), true);
   assert.equal(pathsCannotAffectE2E(['.github/workflows/ci-quality.yml','README.md']), true);
@@ -118,6 +117,7 @@ function selfTest() {
     git('add','.');
     git('commit','-qm','baseline');
     const base = git('rev-parse','HEAD');
+    git('update-ref','refs/remotes/origin/staging',base);
     fs.mkdirSync(join(tmp,'.github','workflows'), { recursive:true });
     fs.writeFileSync(join(tmp,'.github','workflows','agent-controller-dispatch.yml'),
       'name: metadata-only fixture\\n');
@@ -130,8 +130,8 @@ function selfTest() {
     });
     assert.equal(prepare(withShas(metadataHead),[],tmp).mode,'not-required');
     assert.equal(prepare(withShas(metadataHead),[],tmp).reason,'verified-metadata-only-diff');
-    assert.equal(prepare(withShas(base),[],tmp).mode,'unresolved',
-      'checking out a different HEAD must not mark tests unnecessary');
+    assert.throws(() => prepare(withShas(base),[],tmp), /current PR base and head SHA are identical/,
+      'identical base/head must not mark tests unnecessary');
     fs.mkdirSync(join(tmp,'web','src'),{recursive:true});
     fs.writeFileSync(join(tmp,'web','src','App.tsx'),'export default null;\\n');
     git('add','.');
@@ -149,7 +149,76 @@ function selfTest() {
   }
   assert.throws(()=>prepare({...event,pull_request:{...event.pull_request,head:{sha:'x'}}},[],'.'),/identity/);
   assert.throws(()=>prepare(event,[{number:999,body:'',state:'open'}],'.'),/unrelated/);
-  assert.equal(prepare(event,[{number:1702,body:'old issue',state:'open'}],'.').mode,'unresolved');
+  // Reproduce a PR whose webhook base SHA is stale after the target branch
+  // added an E2E spec. The PR merged the advancing base into its head; only the
+  // head-owned Case files count as PR changes, regardless of merge-parent order.
+  const mergeTmp = fs.mkdtempSync(join(tmpdir(), 'nession-issue-e2e-base-merge-'));
+  try {
+    const git = (...args) => execFileSync('git', args, {
+      cwd: mergeTmp, encoding:'utf8', stdio:['ignore','pipe','ignore'],
+    }).trim();
+    git('init','-q','-b','staging');
+    git('config','user.name','CI Fixture');
+    git('config','user.email','ci@example.invalid');
+    fs.mkdirSync(join(mergeTmp,'e2e','tests','browser'),{recursive:true});
+    fs.writeFileSync(join(mergeTmp,'e2e','tests','browser','baseline.spec.ts'),'// base-owned baseline\n');
+    git('add','.'); git('commit','-qm','old target base');
+    const staleBase = git('rev-parse','HEAD');
+    git('checkout','-qb','feature');
+    fs.mkdirSync(join(mergeTmp,'e2e','acceptance','cases','42'),{recursive:true});
+    fs.writeFileSync(join(mergeTmp,'e2e','acceptance','cases','42','case.yaml'),'schema_version: 1\n');
+    git('add','.'); git('commit','-qm','feature adds acceptance case');
+    const featureHead = git('rev-parse','HEAD');
+    git('checkout','staging');
+    fs.writeFileSync(join(mergeTmp,'e2e','tests','browser','terminal-consistency-faults.spec.ts'),'// added on target branch only\n');
+    git('add','.'); git('commit','-qm','target branch adds browser spec');
+    const currentBase = git('rev-parse','HEAD');
+    git('checkout','feature');
+    git('merge','--no-ff','staging','-m','merge advancing base into feature');
+    const mergeHead = git('rev-parse','HEAD');
+    git('update-ref','refs/remotes/origin/staging',currentBase);
+    git('checkout','--detach',mergeHead);
+
+    const noE2E = [
+      '## E2E Verification','### New','- none: no new browser test',
+      '### Regression','- none: no browser behavior affected',
+      '## E2E Report','| ID | Type | Result | Evidence |','|---|---|---|---|',
+    ].join('\n');
+    const fixtureEvent = sha => ({
+      repository:{full_name:'BestNathan/nession'},
+      pull_request:{
+        number:42,title:'Refs #42',body:'Refs #42',
+        head:{sha,repo:{full_name:'BestNathan/nession'}},
+        base:{sha:staleBase,ref:'staging'},
+      },
+    });
+    const issue = {number:42,body:noE2E,state:'open'};
+    const plan = prepare(fixtureEvent(mergeHead),[issue],mergeTmp);
+    assert.equal(plan.base_sha,currentBase,'plan must bind current base ref, not stale event SHA');
+    assert.equal(plan.target_sha,mergeHead);
+    assert.equal(plan.mode,'not-required',
+      'the base-only terminal-consistency-faults spec must not be attributed to the Case-only PR');
+
+    fs.writeFileSync(join(mergeTmp,'e2e','tests','browser','head-owned-new.spec.ts'),'// genuinely PR-owned E2E ID\n');
+    git('add','.'); git('commit','-qm','feature adds new browser spec');
+    const headOwned = git('rev-parse','HEAD');
+    assert.throws(() => prepare(fixtureEvent(headOwned),[issue],mergeTmp),
+      /changed E2E ID missing from linked Issue New\/Regression obligations: head-owned-new/,
+      'a truly head-owned new test must still require an Issue declaration');
+
+    // Also cover the opposite merge-parent order: feature first, advancing base second.
+    git('checkout','-B','feature-first-parent',featureHead);
+    git('merge','--no-ff','staging','-m','merge advancing base as second parent');
+    const oppositeMerge = git('rev-parse','HEAD');
+    git('update-ref','refs/remotes/origin/staging',currentBase);
+    git('checkout','--detach',oppositeMerge);
+    const oppositePlan = prepare(fixtureEvent(oppositeMerge),[issue],mergeTmp);
+    assert.equal(oppositePlan.base_sha,currentBase);
+    assert.equal(oppositePlan.mode,'not-required',
+      'upstream E2E IDs must not be attributed when the base is second parent');
+  } finally {
+    fs.rmSync(mergeTmp,{recursive:true,force:true});
+  }
   console.log('Issue E2E planner adapter: unresolved legacy source does not force full, source identity and unrelated Issue rejected');
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
