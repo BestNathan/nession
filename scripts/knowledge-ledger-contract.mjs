@@ -314,13 +314,14 @@ function fixture() {
       .replace('# '+secondTitle,'# '+secondTitle)+'\nSee [architecture](./'+slug+'.md#'+slugHeadingForFixture(title)+').\n');
     put(file,article+'\nSee [related fixture](./'+secondSlug+'.md).\n');
     assert.equal(validateArticleLinks(d,[file,secondFile]).orphans,0);
-    assert.throws(()=>validateArticleLinks(d,[file,secondFile].map(f=>f===secondFile?f:file)),/orphan article/);
+    assert.throws(()=>validateArticleLinks(d,[file]),/orphan article/);
     put(secondFile,fs.readFileSync(path.join(d,secondFile),'utf8').replace('./'+slug+'.md#'+slugHeadingForFixture(title),'./missing.md'));
     assert.throws(()=>validateArticleLinks(d,[file,secondFile]),/broken local link/);
     put(secondFile,fs.readFileSync(path.join(d,secondFile),'utf8').replace('./missing.md','./'+slug+'.md#not-a-real-heading'));
     assert.throws(()=>validateArticleLinks(d,[file,secondFile]),/broken local heading anchor/);
     put(secondFile,fs.readFileSync(path.join(d,secondFile),'utf8').replace('./'+slug+'.md#not-a-real-heading','./'+slug+'.md'));
-    put('index.json',JSON.stringify(idx));
+    const updatedIdx=indexFor(d);
+    put('index.json',JSON.stringify(updatedIdx));
     assert.doesNotThrow(()=>assertIndexCurrent(d));
     put('index.json','{}');
     assert.throws(()=>assertIndexCurrent(d),/index.json differs/);
