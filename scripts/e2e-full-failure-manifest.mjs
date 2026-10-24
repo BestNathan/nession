@@ -118,7 +118,7 @@ function selfTest() {
       { file: 'tests/browser/session-lifecycle.spec.ts', specs: [{
         file: 'tests/browser/session-lifecycle.spec.ts', title: 'secret password 123',
         tests: [{ status: 'unexpected', results: [{ errors: [{ message: 'secret password=abc',
-            location: { file: '/tmp/private/terminal-attach.spec.ts', line: 42, column: 9 } }] }] },
+            location: { file: '/tmp/private/session-lifecycle.spec.ts', line: 42, column: 9 } }] }] },
           { status: 'expected' }],
       }] },
       { file: 'tests/browser/terminal-attach.spec.ts', suites: [{
@@ -134,7 +134,7 @@ function selfTest() {
   assert.deepEqual(one.results.map(x => x.id), ['session-lifecycle', 'terminal-attach']);
   assert.equal(one.results[0].failed, 1);
   assert.deepEqual(one.results[0].failures, [{ kind: 'assertion_failed',
-    assertion_code: 'playwright_unexpected', stable_frame: 'terminal-attach.spec.ts:42:9',
+    assertion_code: 'playwright_unexpected', stable_frame: 'session-lifecycle.spec.ts:42:9',
     affected_invariant: 'session-lifecycle', environment_specific: false }]);
   assert.equal(serialized.includes('/tmp/private'), false, 'candidate must not leak raw source paths');
   assert.equal(one.results[1].flaky, 1);
