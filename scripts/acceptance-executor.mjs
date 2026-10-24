@@ -347,7 +347,7 @@ function updateReport(body, contract, resultMap, meta) {
   }));
 }
 
-export function applyAcceptanceResultToBody(body, normalized) {
+export function applyAcceptanceResultToBody(body, normalized, options = {}) {
   const contract = parseContract(body);
   if (contractDigest(contract) !== normalized.contract_sha256) {
     throw new Error('requirement contract changed after acceptance started; refusing stale result');
@@ -364,13 +364,24 @@ export function applyAcceptanceResultToBody(body, normalized) {
     : stageExpected;
   if (expected.length === 0) throw new Error('acceptance result selects no criteria');
   if (new Set(expected).size !== expected.length) throw new Error('acceptance result has duplicate selected criteria');
+  const deploymentBinding = options.deploymentBinding ?? null;
   const proofSource = String(normalized.source ?? '');
   const proofMethod = /^agent(?:-|$)/.test(proofSource) ? 'agent'
     : proofSource === 'case-runner' ? 'case' : null;
   for (const id of expected) {
     if (!stageExpected.includes(id)) throw new Error('selected criterion ' + id + ' is unknown or belongs to another stage');
-    if (contract.plan && (!proofMethod || !isProofEligible(contract.plan.get(id), stage, proofMethod))) {
-      throw new Error(id + ' selected method does not match authenticated Acceptance Plan proof source ' + proofSource);
+    if (contract.plan) {
+      const entry = contract.plan.get(id);
+      const eligible = proofMethod && (entry?.when === 'deployed'
+        ? deploymentProofEligible(entry, {
+          environment: deploymentBinding?.environment_id,
+          attested: deploymentBinding?.attested === true,
+          method: proofMethod,
+        })
+        : isProofEligible(entry, stage, proofMethod));
+      if (!eligible) {
+        throw new Error(id + ' selected method does not match authenticated Acceptance Plan proof source ' + proofSource);
+      }
     }
   }
   const resultMap = new Map();
