@@ -99,6 +99,7 @@ export async function inspectMainFullHistory({
   let lastScheduledFullCompletedAt=null;
   let runsInspected=0;
   let pagesInspected=0;
+  let historyBoundaryReached=false;
   for(let page=1;page<=maxPages;page++){
     const q=new URLSearchParams({branch:'main',per_page:String(pageSize),page:String(page)});
     const response=await get('/repos/'+repo+'/actions/workflows/e2e-full-regression.yml/runs?'+q);
@@ -143,8 +144,16 @@ export async function inspectMainFullHistory({
     }
     // Runs are returned newest-first. Inspect the whole page for overlapping
     // work, then stop when the latest page containing a real Full is complete.
-    if(foundScheduledFullOnPage||runs.length<pageSize)break;
+    if(foundScheduledFullOnPage||runs.length<pageSize){
+      historyBoundaryReached=true;
+      break;
+    }
   }
+  // Exhausting the bounded scan is not evidence that no scheduled Full exists.
+  // Admission-only ticks can fill the entire window and hide older real Fulls.
+  // Never turn an incomplete history read into an immediately eligible run.
+  if(!historyBoundaryReached)
+    throw Error('HISTORY_EXHAUSTED: Main Full history scan cannot establish due time');
   return {lastScheduledFullCompletedAt,fullInFlight:false,
     inFlightRunId:null,inFlightRunAttempt:null,pagesInspected,runsInspected};
 }
@@ -253,6 +262,27 @@ async function historySelfTest(){
   });
   assert.equal(active.fullInFlight,true,'manual Full jobs also prevent overlap');
   assert.equal(active.inFlightRunId,900);
+  // Nine full pages of admission-only successful workflow runs must not be
+  // mistaken for the initial no-history state and trigger extra Full work.
+  let exhaustedPages=0;
+  await assert.rejects(()=>inspectMainFullHistory({repo:REPO,currentRunId:9999,
+    get:async(requestPath)=>{
+      const url=new URL(requestPath,'https://api.github.com');
+      if(url.pathname.endsWith('/workflows/e2e-full-regression.yml/runs')){
+        const page=Number(url.searchParams.get('page'));
+        exhaustedPages++;
+        return {workflow_runs:Array.from({length:20},(_,i)=>mkRun(2000-page*20-i))};
+      }
+      const parts=url.pathname.split('/');
+      const runId=Number(parts[parts.indexOf('runs')+1]);
+      return {jobs:[mkJob(runId,'completed','skipped')]};
+    }
+  }),/HISTORY_EXHAUSTED/);
+  assert.equal(exhaustedPages,9,'scan remains bounded while failing closed');
+  const empty=await inspectMainFullHistory({repo:REPO,currentRunId:9999,
+    get:async()=>({workflow_runs:[]})});
+  assert.equal(empty.lastScheduledFullCompletedAt,null,
+    'a real exhausted API list (rather than scan limit) permits first-run admission');
   await assert.rejects(()=>inspectMainFullHistory({repo:REPO,currentRunId:1,
     get:async()=>({workflow_runs:[]}),pageSize:21}));
   console.log('Main Full schedule recovery: bounded pagination, skipped admission, failed-attempt cadence, and in-flight exclusion passed');
