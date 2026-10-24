@@ -188,6 +188,17 @@ function assertIndexCurrent(root) {
   if(JSON.stringify(actual)!==JSON.stringify(expected))fail('index.json differs from topic/category-derived index');
   return expected;
 }
+function latestEventForArticle(entry,events) {
+  const latest=events.filter(e=>e.path===entry.path).at(-1);
+  if(!latest||latest.action==='delete'||latest.title!==entry.title)
+    fail('current article missing changelog event: '+entry.path);
+  if(latest.topic!==entry.path.split('/')[1]||
+     JSON.stringify([...latest.categories].sort())!==JSON.stringify([...entry.categories].sort()))
+    fail('article metadata differs from latest changelog event: '+entry.path);
+  if(['create','update','rename','move'].includes(latest.action)&&latest.at!==entry.updated_at)
+    fail('article timestamp differs from latest changelog event: '+entry.path);
+  return latest;
+}
 function verify(root,baseline=null) {
   for(const entry of fs.readdirSync(root)){
     if(!['.git','README.md','topics','index.json','CHANGELOG.md','schema'].includes(entry))
@@ -201,16 +212,7 @@ function verify(root,baseline=null) {
   const expected=assertIndexCurrent(root);
   validateArticleLinks(root);
   const changeText=fs.readFileSync(path.join(root,'CHANGELOG.md'),'utf8'),events=logEntries(changeText);
-  for(const list of Object.values(expected.topics))for(const entry of list){
-    const history=events.filter(e=>e.path===entry.path);
-    const latest=history.at(-1);
-    if(!latest||latest.action==='delete'||latest.title!==entry.title)fail('current article has no full-title CHANGELOG event: '+entry.path);
-    if(latest.topic!==entry.path.split('/')[1]||
-       JSON.stringify([...latest.categories].sort())!==JSON.stringify([...entry.categories].sort()))
-      fail('current topic/category metadata differs from latest changelog event: '+entry.path);
-    if(['create','update','rename','move'].includes(latest.action)&&latest.at!==entry.updated_at)
-      fail('current updated_at must match last change event timestamp: '+entry.path);
-  }
+  for(const list of Object.values(expected.topics))for(const entry of list)latestEventForArticle(entry,events);
   for(const file of paths(root,'topics').concat(['CHANGELOG.md'])) {
     const text=fs.readFileSync(path.join(root,file),'utf8');
     if(/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|github_pat_[a-zA-Z0-9_]{20,}|gh[pousr]_[a-zA-Z0-9]{30,}/.test(text))
@@ -331,6 +333,9 @@ function fixture() {
     assert.throws(()=>parseKnowledge(article.replace('"architecture", "knowledge"','"architecture", "architecture"'),file),/duplicate/);
     const log=HEADER+'## '+at+' | create | '+title+'\n- Path: '+file+'\n- Topic: engineering\n- Categories: architecture, knowledge\n- Reason: Initial article\n- Source: https://github.com/BestNathan/nession/issues/2325\n';
     assert.equal(logEntries(log)[0].title,title);
+    const currentEntry={path,title,topic:'engineering',categories:['architecture','knowledge'],updated_at:at};
+    assert.equal(latestEventForArticle(currentEntry,logEntries(log)).action,'create');
+    assert.throws(()=>latestEventForArticle(currentEntry,[]),/missing changelog event/);
     assert.throws(()=>logEntries(log.replace(slug+'.md','short.md')),/full title/);
     console.log('knowledge-ledger-contract: full title slug, Unicode, no synthetic IDs, topic/category index, global log fixtures passed');
   }finally{fs.rmSync(d,{recursive:true,force:true});}
