@@ -184,8 +184,8 @@ export function validateArticleLinks(root, articleFiles=paths(root,'topics').fil
   return {articles:articleFiles.length,localLinks:'valid',orphans:0};
 }
 function assertIndexCurrent(root) {
-  const expected=assertIndexCurrent(root);
-  validateArticleLinks(root);
+  const expected=indexFor(root),actual=JSON.parse(fs.readFileSync(path.join(root,'index.json'),'utf8'));
+  if(JSON.stringify(actual)!==JSON.stringify(expected))fail('index.json differs from topic/category-derived index');
   return expected;
 }
 function verify(root,baseline=null) {
@@ -198,8 +198,8 @@ function verify(root,baseline=null) {
   const schema=JSON.parse(fs.readFileSync(path.join(root,'schema/v2.json'),'utf8'));
   if(schema.schema_version!==2||schema.filename!=='title-slug'||schema.primary_index!=='topic')
     fail('missing complete-title filename schema contract');
-  const expected=indexFor(root),actual=JSON.parse(fs.readFileSync(path.join(root,'index.json'),'utf8'));
-  if(JSON.stringify(actual)!==JSON.stringify(expected))fail('index.json differs from topic/category-derived index');
+  const expected=assertIndexCurrent(root);
+  validateArticleLinks(root);
   const changeText=fs.readFileSync(path.join(root,'CHANGELOG.md'),'utf8'),events=logEntries(changeText);
   for(const list of Object.values(expected.topics))for(const entry of list){
     const history=events.filter(e=>e.path===entry.path);
