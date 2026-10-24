@@ -1,0 +1,69 @@
+name: Acceptance / Staging Developer Admission
+
+# #2319: read-only staging SHA admission, hosted by trusted main tooling.
+# No provider call, GitHub/Store writer, signing key, staging source execution
+# or Acceptance verdict. The later Worker must independently authenticate the
+# Run/Attempt and artifact before any signed Store-backed dispatch.
+on:
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: 'Exact current staging merge SHA to verify (40 hex chars)'
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: staging-developer-admission-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  admit:
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'BestNathan' &&
+      github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout only trusted main admission code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify deterministic staging admission policy
+        run: node scripts/lib/agent/orchestration/staging-developer-admission-selftest.mjs
+      - name: Fetch authenticated GitHub Run and exact current staging ref
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STAGING_TARGET_SHA: ${{ inputs.target_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$STAGING_TARGET_SHA" =~ ^[a-f0-9]{40}$ ]] ||
+            { echo "::error::Expected a 40-character staging merge SHA"; exit 1; }
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]] ||
+            { echo "::error::Untrusted workflow checkout"; exit 1; }
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            > "$RUNNER_TEMP/staging-source-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/staging" \
+            > "$RUNNER_TEMP/staging-ref.json"
+          node scripts/lib/agent/orchestration/staging-developer-admission.mjs verify \
+            "$RUNNER_TEMP/staging-source-run.json" \
+            "$RUNNER_TEMP/staging-ref.json" \
+            "$RUNNER_TEMP/staging-developer-admission.json"
+      - name: Publish non-authoritative read-only admission
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-development-admission-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/staging-developer-admission.json
+          if-no-files-found: error
+          retention-days: 7
