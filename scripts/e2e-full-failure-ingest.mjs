@@ -98,7 +98,7 @@ function verify({ event, run, workflow, jobs, artifacts, candidate, archiveSha25
     agent_dispatch: 'NOT_AUTHORIZED',
     source: { repository: REPO, workflow_path: WORKFLOW_PATH, workflow_id: run.workflow_id,
       event: run.event, branch: run.head_branch, run_id: run.id, run_attempt: run.run_attempt,
-      source_sha: run.head_sha, conclusion: run.conclusion, run_url: run.html_url },
+      source_sha: run.head_sha, conclusion: run.conclusion, completed_at: job.completed_at, run_url: run.html_url },
     artifact: { id: artifact.id, name: artifact.name, digest: artifact.digest,
       size_bytes: artifact.size_in_bytes, expires_at: artifact.expires_at,
       retention: 'GitHub Actions artifact; time-limited' },
