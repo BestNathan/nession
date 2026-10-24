@@ -17,18 +17,17 @@ knowledge (independent orphan branch)
 ├── schema/v2.json
 ├── topics/
 │   └── engineering/
-│       └── repository-instruction-architecture.md
-├── index.json                     # derived; topic -> entries, category -> IDs
+│       └── nession-instruction-architecture-and-knowledge-ownership.md
+├── index.json                     # derived; topic -> current files, category -> article paths
 └── CHANGELOG.md                  # ONE append-only ledger-wide change log
 ```
 
-Each knowledge ID has **one current Markdown file**, `topics/<topic>/<id>.md`. A topic is a single primary navigation/ownership path. `categories` are reusable **tags**, not mutually exclusive directory trees. No article revision files, per-article event logs or receipt documents. Git commits provide historical snapshots; the global changelog records **what changed, when, why and in which topic/category**.
+Each knowledge **title** determines the entire Markdown filename: `topics/<topic>/<title-slug>.md`. For example `Nession instruction architecture and knowledge ownership` becomes `topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md`. A slug uses the whole lowercased title with whitespace/punctuation converted into `-` (Chinese/Unicode characters remain intact). **Never invent or abbreviate an `id`, and do not put `id` in frontmatter.** A topic is the primary navigation path; `categories` are reusable multi-value tags. Category index entries point to full article paths. No article revision files, per-article event logs or receipt documents. Git commits provide historical snapshots; the global changelog records **what changed, when, why and in which topic/category**.
 
 Each Markdown article uses Skill-style YAML frontmatter with a small, executable subset:
 
 ```markdown
 ---
-id: terminal-transport
 title: "Terminal transport and recovery"
 description: "Correctness and recovery contract for streamed terminal output"
 topic: terminal
@@ -58,27 +57,27 @@ Always fetch the explicit orphan branch. GitHub default-branch code search does 
 ```sh
 git fetch origin refs/heads/knowledge:refs/remotes/origin/knowledge
 git show origin/knowledge:index.json                    # topic-first catalog
-git show origin/knowledge:topics/engineering/repository-instruction-architecture.md
+git show origin/knowledge:topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md
 git grep -n -i 'tmux' origin/knowledge -- topics/         # full text
 git show origin/knowledge:CHANGELOG.md                  # cross-topic changes in time order
 git log --format='%H %cI %s' origin/knowledge -- topics/  # exact prior content
 ```
 
-For a topic, choose `index.json.topics[topic]`; for tag filtering use `index.json.categories[category]`; combine filters by ID. Normal answers use `status: verified` records and cite current authoritative source, article ID/topic and observed knowledge Git SHA. For “what changed?” search `CHANGELOG.md` by ID, topic, category and timestamp. For “what was true before?” select a historical Git commit; do not invent vNNNN identifiers.
+For a topic, choose `index.json.topics[topic]`; for tag filtering use `index.json.categories[category]` (array of **current Markdown paths**). Combine filters by path or complete title; no synthetic short ID is used. Normal answers use `status: verified` records and cite current authoritative source, full title/topic and observed knowledge Git SHA. For “what changed?” search `CHANGELOG.md` by title, topic, category and timestamp. For “what was true before?” select a historical Git commit; do not invent vNNNN identifiers.
 
 ## Edit / update
 
-1. Inspect the relevant topic, categories, current entry and authoritative sources. Reuse an existing ID when the concept remains the same. Confirm no duplicate entry exists in another topic.
+1. Inspect the relevant topic, categories, complete title, current entry and authoritative sources. Before creating anything, check for an existing article with the same concept/title. **Do not assign a separate ID.**
 2. Work in an isolated `origin/knowledge` worktree, **not** product `main` or shared `knowledge` checkout. Keep the root checkout read-only:
 ```sh
 git fetch origin refs/heads/knowledge:refs/remotes/origin/knowledge
 git worktree add -b kb-<issue>-<subject> .claude/worktrees/kb-<issue>-<subject> origin/knowledge
 ```
-3. Create/update the **single** `topics/<topic>/<id>.md`, maintaining frontmatter and human-readable Markdown. Rename by explicitly accounting for both old and new topic paths in the log. Deletion must state why the article is no longer current; history remains in Git.
-4. **Append** one global `CHANGELOG.md` event per changed knowledge file, oldest to newest, using UTC time. Never edit old log entries. Every event records `Path`, `Topic`, `Categories`, `Reason`, `Source` (owning Issue/PR):
+3. Create/update the **single** `topics/<topic>/<title-slug>.md`, deriving its entire basename from `title` (never truncate). To rename a title, rename its file and append one `rename` event with `Previous path` pointing to the old filename. Use `move` when the primary topic changes. For a normal content edit use `update`; deleted articles remain in Git history.
+4. **Append** one global `CHANGELOG.md` event per change transaction, oldest to newest, using UTC time and the **full article title in its heading**. Never edit old log entries. Events record `Path`, `Topic`, `Categories`, `Reason`, `Source` (owning Issue/PR); `rename` and `move` additionally need `Previous path`:
 ```markdown
-## 2026-10-24T10:00:00Z | update | terminal-transport
-- Path: topics/terminal/terminal-transport.md
+## 2026-10-24T10:00:00Z | update | Terminal transport and recovery
+- Path: topics/terminal/terminal-transport-and-recovery.md
 - Topic: terminal
 - Categories: architecture, transport, recovery
 - Reason: Clarify terminal recovery invariant after source change
@@ -91,7 +90,7 @@ On conflicts, fetch and reconcile **both current knowledge and global log**. Do 
 
 ## Requirement integration
 
-At Requirement creation or material revision, record the `Knowledge Impact` decision (`None | Read | Create | Update | Supersede`), affected topic/knowledge IDs/categories, rationale, owner/timing and evidence. After implementation/review, publish any necessary current-article change with a global log entry and link the knowledge commit to the Issue. An `Update` is an **edit of the current article**, not a new article version. Unaffected requirements may state `None` with a reason. Do not mark knowledge evidence complete just because a model suggested text.
+At Requirement creation or material revision, record the `Knowledge Impact` decision (`None | Read | Create | Update | Supersede`), affected full article titles / topics / categories, rationale, owner/timing and evidence. After implementation/review, publish any necessary current-article change with a global log entry and link the knowledge commit to the Issue. An `Update` is an **edit of the current article**, not a new article version. Unaffected requirements may state `None` with a reason. Do not mark knowledge evidence complete just because a model suggested text.
 
 ## Audit and stop conditions
 

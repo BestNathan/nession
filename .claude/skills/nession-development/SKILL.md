@@ -70,7 +70,7 @@ Before implementation:
 
 1. read the nearest scoped `AGENTS.md`;
 2. inspect the issue/requirement and current implementation;
-3. inspect the Requirement's `Knowledge Impact` decision; query affected knowledge IDs before changing stable architecture, and attach the current knowledge article, global CHANGELOG entry and published knowledge commit SHA before closure (see `nession-knowledge`);
+3. inspect the Requirement's `Knowledge Impact` decision; query articles by full title/topic/categories before changing stable architecture, and attach the current knowledge article, global CHANGELOG entry and published knowledge commit SHA before closure (see `nession-knowledge`);
 4. discover relevant Gates with `./gates/run --list`;
 5. use `./gates/run --describe <id>` for likely invariants;
 6. identify the canonical code/doc owner instead of adding parallel policy.
