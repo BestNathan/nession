@@ -299,6 +299,82 @@ async function historySelfTest(){
   console.log('Main Full schedule recovery: bounded pagination, skipped admission, failed-attempt cadence, and in-flight exclusion passed');
 }
 
+
+// Per-lane scheduled admission. Every lane must carry the authenticated
+// deployed identity from the trusted store; ancestry is supplied by the
+// caller and an ambiguous identity is an explicit error, never a skip.
+export function stagingLaneAdmission({
+  now, mainSha, lanes, cfg, lastAdmitted = {}, inFlight = {}, ancestry = {},
+}) {
+  const nowMs = Date.parse(now);
+  if (!Number.isFinite(nowMs)) throw new Error('invalid schedule timestamp');
+  if (!SHA.test(mainSha)) throw new Error('main SHA must be a 40-character hex SHA');
+  if (!Array.isArray(lanes) || lanes.length === 0) {
+    throw new Error('at least one registered staging lane is required');
+  }
+  if (!cfg || typeof cfg !== 'object' || !Number.isSafeInteger(cfg.staging)) {
+    throw new Error('invalid lane interval configuration');
+  }
+  const seen = new Set();
+  const decisions = [];
+  for (const lane of lanes) {
+    const environmentId = String(lane?.environment_id ?? '');
+    if (!LANE.test(environmentId)) throw new Error('invalid staging lane ' + environmentId);
+    if (seen.has(environmentId)) throw new Error('duplicate staging lane ' + environmentId);
+    seen.add(environmentId);
+    if (lane.attested !== true) {
+      decisions.push({ environment_id: environmentId, decision: 'INDETERMINATE',
+        reason: 'deployed identity not authenticated' });
+      continue;
+    }
+    const deployedSha = String(lane.deployed_source_sha ?? '');
+    if (!SHA.test(deployedSha)) {
+      decisions.push({ environment_id: environmentId, decision: 'INDETERMINATE',
+        reason: 'deployed source SHA is invalid' });
+      continue;
+    }
+    const hours = Number.isSafeInteger(cfg.lanes?.[environmentId])
+      ? cfg.lanes[environmentId] : cfg.staging;
+    if (inFlight[environmentId] === true) {
+      decisions.push({ environment_id: environmentId, decision: 'FULL_IN_FLIGHT' });
+      continue;
+    }
+    const last = lastAdmitted[environmentId] ?? null;
+    const lastMs = last == null ? null : Date.parse(last);
+    if (last != null && !Number.isFinite(lastMs)) {
+      throw new Error('invalid last admitted timestamp for ' + environmentId);
+    }
+    const nextDueMs = lastMs == null ? nowMs : lastMs + hours * 3600000;
+    if (nowMs < nextDueMs) {
+      decisions.push({ environment_id: environmentId, decision: 'NOT_DUE',
+        next_due_at: new Date(nextDueMs).toISOString() });
+      continue;
+    }
+    const counts = ancestry[environmentId] ?? {};
+    const eligibility = stagingEligibility({
+      ready: lane.ready !== false,
+      attested: true,
+      mainSha,
+      deployedSha,
+      ahead: counts.ahead,
+      behind: counts.behind,
+    });
+    decisions.push({
+      environment_id: environmentId,
+      ...eligibility,
+      decision: eligibility.decision === 'ELIGIBLE' ? 'ADMIT' : eligibility.decision,
+      next_due_at: new Date(nowMs + hours * 3600000).toISOString(),
+    });
+  }
+  const admitted = decisions.filter((entry) => entry.decision === 'ADMIT');
+  return {
+    now: new Date(nowMs).toISOString(),
+    main_sha: mainSha,
+    lanes: decisions,
+    admitted: admitted.map((entry) => entry.environment_id),
+  };
+}
+
 async function selfTest(){
   assert.deepEqual(config({}),{staging:2,main:12,lanes:{}});
   assert.deepEqual(config({E2E_STAGING_INTERVAL_HOURS:'3',E2E_MAIN_INTERVAL_HOURS:'24',
@@ -340,6 +416,58 @@ async function selfTest(){
   assert.equal(eligible({ahead:null,behind:0}).decision,'INDETERMINATE');
   assert.deepEqual(countAncestry(a,b,(_,args)=>args[2]===a+'..'+b?'4\n':'2\n'),{ahead:4,behind:2});
   assert.throws(()=>countAncestry('main',b));
+  const laneMain = 'c'.repeat(40);
+  const laneCfg = { staging: 2, main: 12, lanes: { 'staging-01': 6 } };
+  const laneBase = {
+    now: '2026-10-25T04:00:00Z', mainSha: laneMain, cfg: laneCfg,
+    lanes: [
+      { environment_id: 'staging', deployed_source_sha: 'a'.repeat(40), attested: true },
+      { environment_id: 'staging-01', deployed_source_sha: 'b'.repeat(40), attested: true },
+    ],
+    ancestry: { staging: { ahead: 3, behind: 0 }, 'staging-01': { ahead: 0, behind: 0 } },
+  };
+  const admission = stagingLaneAdmission(laneBase);
+  assert.deepEqual(admission.admitted, ['staging']);
+  assert.equal(admission.lanes[0].decision, 'ADMIT');
+  assert.equal(admission.lanes[1].decision, 'SKIPPED_NOT_AHEAD');
+  assert.equal(stagingLaneAdmission({ ...laneBase,
+    lanes: [{ environment_id: 'staging', deployed_source_sha: 'a'.repeat(40), attested: false }],
+  }).lanes[0].decision, 'INDETERMINATE');
+  assert.equal(stagingLaneAdmission({ ...laneBase,
+    lanes: [{ environment_id: 'staging', deployed_source_sha: 'a'.repeat(40), attested: true, ready: false }],
+    ancestry: { staging: { ahead: 1, behind: 0 } },
+  }).lanes[0].decision, 'NOT_READY');
+  const notDue = stagingLaneAdmission({ ...laneBase, lastAdmitted: {
+    staging: '2026-10-25T03:30:00Z', 'staging-01': '2026-10-25T03:30:00Z',
+  } });
+  assert.equal(notDue.lanes[0].decision, 'NOT_DUE');
+  assert.equal(notDue.lanes[1].decision, 'NOT_DUE');
+  const staggered = stagingLaneAdmission({ ...laneBase, lastAdmitted: {
+    staging: '2026-10-25T03:30:00Z', 'staging-01': '2026-10-24T23:00:00Z',
+  } });
+  assert.equal(staggered.lanes[1].decision, 'NOT_DUE');
+  assert.equal(staggered.lanes[1].next_due_at, '2026-10-25T05:00:00.000Z');
+  assert.equal(stagingLaneAdmission({ ...laneBase,
+    inFlight: { staging: true },
+  }).lanes[0].decision, 'FULL_IN_FLIGHT');
+  const diverged = stagingLaneAdmission({ ...laneBase,
+    lanes: [{ environment_id: 'staging', deployed_source_sha: 'a'.repeat(40), attested: true }],
+    ancestry: { staging: { ahead: 2, behind: 2 } },
+  }).lanes[0];
+  assert.equal(diverged.decision, 'ADMIT');
+  assert.equal(diverged.diverged, true);
+  assert.throws(() => stagingLaneAdmission({ ...laneBase, mainSha: 'main' }), /40-character/);
+  assert.throws(() => stagingLaneAdmission({ ...laneBase, lanes: [] }), /at least one/);
+  assert.throws(() => stagingLaneAdmission({ ...laneBase,
+    lanes: [{ environment_id: 'Bad Lane', attested: true, deployed_source_sha: 'a'.repeat(40) }],
+  }), /invalid staging lane/);
+  assert.throws(() => stagingLaneAdmission({ ...laneBase,
+    lanes: [laneBase.lanes[0], laneBase.lanes[0]],
+  }), /duplicate staging lane/);
+  assert.throws(() => stagingLaneAdmission({ ...laneBase,
+    lastAdmitted: { staging: 'not-a-time' },
+  }), /invalid last admitted timestamp/);
+
   await historySelfTest();
   console.log('e2e-regression-policy self-test: PASS');
 }
@@ -375,6 +503,15 @@ async function main(){
     console.log(JSON.stringify(result));
     return;
   }
+  if(action==='staging-admission'){
+    const input=JSON.parse(fs.readFileSync(process.argv[3],'utf8'));
+    const result=stagingLaneAdmission({now:input.now,mainSha:input.main_sha,
+      lanes:input.lanes,cfg:config(process.env),
+      lastAdmitted:input.last_admitted??{},inFlight:input.in_flight??{},
+      ancestry:input.ancestry??{}});
+    console.log(JSON.stringify(result));
+    return;
+  }
   if(action==='staging-ancestry'){
     const [mainSha,deployedSha]=process.argv.slice(3);
     const counts=countAncestry(mainSha,deployedSha);
@@ -383,7 +520,7 @@ async function main(){
     })));
     return;
   }
-  throw new Error('usage: self-test | admit-main | admit-main-history | staging-ancestry');
+  throw new Error('usage: self-test | admit-main | admit-main-history | staging-ancestry | staging-admission INPUT_JSON');
 }
 
 if(process.argv[1]?.endsWith('e2e-regression-policy.mjs')){
