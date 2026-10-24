@@ -42,6 +42,15 @@ export function config(env = process.env) {
 
 // The hourly cron is a wake-up signal only. Compute cadence from the last real
 // scheduled Full job completion so delayed/dropped ticks recover automatically.
+// Legacy admission retained until the workflow-only migration switches to
+// admit-main-history. Do not remove before that router change is merged.
+export function isDue(now,hours){
+  const parsed=new Date(now);
+  if(!Number.isFinite(parsed.getTime()))throw Error('invalid schedule timestamp');
+  if(!Number.isSafeInteger(hours)||hours<1||hours>168)throw Error('invalid interval');
+  return Math.floor(parsed.getTime()/3600000)%hours===0;
+}
+
 export function mainScheduleDecision({now,intervalHours,lastFullCompletedAt=null,fullInFlight=false}){
   const nowMs=Date.parse(now);
   if(!Number.isFinite(nowMs))throw new Error('invalid schedule timestamp');
@@ -257,6 +266,12 @@ async function selfTest(){
   for(const raw of ['-1','0','2.5','abc','169','01'])assert.throws(()=>interval(raw,2));
   assert.throws(()=>config({E2E_STAGING_LANE_INTERVALS_JSON:'[]'}));
   assert.throws(()=>config({E2E_STAGING_LANE_INTERVALS_JSON:'{"../../secret":2}'}));
+  // Preserve the existing CLI's contract while the workflow-only router migrates.
+  assert.equal(isDue('2026-10-24T00:07:00Z',12),true);
+  assert.equal(isDue('2026-10-24T12:07:00Z',12),true);
+  assert.equal(isDue('2026-10-24T10:07:00Z',12),false);
+  assert.equal(isDue('2026-10-24T10:07:00Z',2),true);
+  assert.equal(isDue('2026-10-24T11:07:00Z',2),false);
 
   const recent=mainScheduleDecision({now:'2026-10-24T20:00:00Z',
     intervalHours:12,lastFullCompletedAt:'2026-10-24T09:00:00Z'});
@@ -293,6 +308,16 @@ async function main(){
   if(action==='self-test')return await selfTest();
   const cfg=config();
   if(action==='admit-main'){
+    const due=isDue(new Date(),cfg.main);
+    const result={decision:due?'ELIGIBLE':'NOT_DUE',interval_hours:cfg.main};
+    if(process.env.GITHUB_OUTPUT){
+      fs.appendFileSync(process.env.GITHUB_OUTPUT,
+        'run='+String(due)+'\ninterval_hours='+cfg.main+'\n');
+    }
+    console.log(JSON.stringify(result));
+    return;
+  }
+  if(action==='admit-main-history'){
     const currentRunId=Number(process.env.GITHUB_RUN_ID);
     const history=await inspectMainFullHistory({repo:REPO,currentRunId,get:githubActionsGet});
     const decision=mainScheduleDecision({now:new Date().toISOString(),intervalHours:cfg.main,
@@ -317,7 +342,7 @@ async function main(){
     })));
     return;
   }
-  throw new Error('usage: self-test | admit-main | staging-ancestry');
+  throw new Error('usage: self-test | admit-main | admit-main-history | staging-ancestry');
 }
 
 if(process.argv[1]?.endsWith('e2e-regression-policy.mjs')){
