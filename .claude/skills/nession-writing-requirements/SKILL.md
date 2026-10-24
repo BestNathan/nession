@@ -35,6 +35,50 @@ The Issue Audit Agent should assess scope, touched components, trust/security im
 
 **Do not create boilerplate Success Criteria** requiring "merged SHA Full Quality + Full E2E + all Cases + Orchestrator green" for ordinary children. Default to `when: pr` and source-aligned relevant evidence. `when: merged` describes the point where a *specific invariant* becomes provable; it **does not imply Full E2E**. Only explicit L3 milestones require authenticated all-ID Full Regression. Missing or inapplicable Full Regression is `Not Required`, never a fabricated `Full Pass`. Preserve meaningful historical SC IDs and evidence; don't erase failed or pending results to relabel an Issue.
 
+## SC proof timing: earliest safe boundary (mandatory authoring review)
+
+Choose `when` from **where the invariant first becomes verifiable with authenticated
+evidence**, not from where today's Worker happens to run. Before writing each
+Acceptance Plan entry, ask what concrete observation proves the SC, whether it
+needs credentials/external services, and why an earlier isolated boundary
+cannot supply equivalent evidence.
+
+| Proof needed | Earliest safe `when` | Typical `method` |
+| --- | --- | --- |
+| Parsing, validation, type/identity policy, source-specific regression, local isolated behavior | `pr` (exact PR head) | `agent` for read-only code/CI evidence; `case` when execution assertions are needed |
+| Real cross-component, gateway, Store CAS, multi-Run recovery or failure injection requiring a trusted integration lane | `merged, branch: staging` (exact staging SHA) | `case` with an executed verifier and trustworthy receipts; `agent` only when assessing already-authenticated independent evidence suffices |
+| A property **specific to main's** trusted dispatch identity, branch protection, final merge integration or main-only permission boundary | `merged, branch: main` (exact main SHA) | minimal targeted `case` or authenticated `agent` evidence |
+| A behavior that depends on actual production rollout and its remote environment | `deployed, environment: ...` | `case` after independent deployment/revision attestation; currently not supported by the live deployment-identity router |
+
+**Main-proof exception:** For every new `when: merged, branch: main` SC,
+record in normal Requirement prose (not extra Acceptance Plan YAML keys):
+(1) the exact main-only property, (2) why PR/staging evidence cannot prove
+it, (3) the minimal Run/Artifact/SHA/Store observation needed, and (4) its
+rollback or `Pending` policy. “Current workflow is main-only”, “CI is slow”,
+“all suites green”, or “the implementation is not done yet” **are not reasons**.
+A main smoke should target only residual main-specific risk, never re-run
+every integration Case by default.
+
+**Staging safety is a prerequisite, not a shortcut:** production GitHub
+Environment secrets, signing keys, Store write credentials and privileged
+`pull_request_target` authority must never be handed to a PR head or an
+untrusted staging tree. Real provider/Store checks must use a trusted
+main-owned executor, isolated staging credentials and Store namespace,
+authenticated source Run/Attempt/SHA and a read-only result path; only the
+canonical trusted ingester/projector may record Acceptance. If that lane
+doesn't exist yet, declare the integration SC **Pending** with an explicit
+staging-runner prerequisite. Implement the safe lane before accepting or
+promoting the feature. Do not silently move the SC back to main or claim a
+read-only model assessment is a real runtime Case.
+
+For large workflows, split distinct proof boundaries into distinct,
+stable SCs: e.g., PR fail-closed policy, staging real cross-Run recovery, and
+minimal main dispatch receipt. Preserve existing SC IDs and historical
+failures/results when amending a live Issue; explain the contract/stage change
+in an Issue comment because its digest and prior evidence may no longer
+apply. An open parent requirement does not automatically impose full-system
+L3 or post-merge proof on each narrow child PR.
+
 Issue `ai:enabled` remains a separate Worker execution authorization. Verification tiers never confer Worker or Store permissions.
 
 ## 1. Classify first
