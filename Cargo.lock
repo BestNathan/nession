@@ -1949,6 +1949,7 @@ dependencies = [
  "chrono",
  "futures-util",
  "if-addrs",
+ "libc",
  "mime_guess",
  "nession-claude-code",
  "nession-common",

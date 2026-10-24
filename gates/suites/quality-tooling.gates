@@ -1,5 +1,6 @@
 # Original quality.yml tooling assertions, each as one canonical Gate ID.
 instruction-contract
+knowledge-ledger-contract
 gate-runtime-contract
 agent-workflow-telemetry
 workflow-conventions

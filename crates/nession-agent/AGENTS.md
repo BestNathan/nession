@@ -13,6 +13,8 @@ Nession never relies on the user's default tmux server.
 - Do not use `TMUX_TMPDIR` as isolation.
 - Do not introduce direct tmux process spawns outside the canonical owner.
 - Cleanup targets Nession-owned resources and proves socket ownership before broad server cleanup.
+- Control Mode transport, selection and tradeoffs:
+  [docs/architecture/agent-tmux-control-transport.md](../../docs/architecture/agent-tmux-control-transport.md).
 
 The deterministic enforcement owner is `scripts/check-tmux-socket.sh`:
 

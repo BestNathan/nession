@@ -63,6 +63,24 @@
             "scope": "nession: contents write",
             "trusted_job_only": true
           }
+        },
+        {
+          "workflow": ".github/workflows/e2e-full-failure-ingest.yml",
+          "source": "github-actions GITHUB_TOKEN (legacy) or scoped GitHub App installation token (app rollout)",
+          "execution": "main-owned workflow_run",
+          "depends_on": [
+            ".github/workflows/e2e-full-regression.yml"
+          ],
+          "permissions": [
+            "contents: write"
+          ],
+          "app_token": {
+            "when": "RUN_STORE_WRITER_MODE unset or app; legacy explicitly rolls back",
+            "app_id_variable": "RUN_STORE_WRITER_APP_ID",
+            "private_key_secret": "RUN_STORE_WRITER_APP_PRIVATE_KEY",
+            "scope": "nession: contents write",
+            "trusted_job_only": true
+          }
         }
       ]
     },
@@ -186,6 +204,16 @@
         {
           "workflow": ".github/workflows/store-agent-dispatch-reconcile.yml",
           "mode": "failed_dispatch_reconcile",
+          "event": "main_workflow_run",
+          "source": "scoped GitHub App installation token",
+          "credential_boundary": "main-owned privileged job; no model-provided writer token",
+          "app_id_variable": "RUN_STORE_WRITER_APP_ID",
+          "app_private_key_secret": "RUN_STORE_WRITER_APP_PRIVATE_KEY",
+          "app_scope": "nession: contents write"
+        },
+        {
+          "workflow": ".github/workflows/e2e-full-failure-ingest.yml",
+          "mode": "e2e_failure_admission",
           "event": "main_workflow_run",
           "source": "scoped GitHub App installation token",
           "credential_boundary": "main-owned privileged job; no model-provided writer token",

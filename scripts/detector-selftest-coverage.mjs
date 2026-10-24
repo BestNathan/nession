@@ -23,6 +23,7 @@ const pairs = [
   ['acceptance-runtime-contract', ['e2e-cli-selftest'], 'tooling'],
   ['gate-runtime-contract', ['gate-runtime-contract'], 'tooling'],
   ['instruction-contract', ['instruction-contract'], 'tooling'],
+  ['knowledge-ledger-contract', ['knowledge-ledger-contract'], 'tooling'],
   ['gate-router-contract', ['gate-router-contract'], 'tooling'],
   ['gate-consumer-parity', ['gate-consumer-parity'], 'tooling'],
   ['workflow-conventions', ['workflow-conventions'], 'tooling'],
@@ -71,6 +72,7 @@ function check(loaded) {
   // design must continue running its independent negative source fixtures.
   const special = [
     ['gates/checks/instruction-contract.sh', 'node --test scripts/instruction-contract.test.mjs'],
+    ['gates/checks/knowledge-ledger-contract.sh', 'node scripts/knowledge-ledger-contract.mjs self-test'],
     ['gates/checks/gate-runtime-contract.sh', 'gates/lib/common-selftest.sh'],
     ['gates/checks/gate-runtime-contract.sh', 'gates/run-selftest.sh'],
     ['design/scripts/design-gate.mjs', 'node --test design/scripts/*.test.mjs'],

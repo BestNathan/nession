@@ -15,3 +15,21 @@ export function parseModelJson(raw, label = 'Agent') {
     throw new Error(label + ' output did not contain valid JSON');
   }
 }
+
+
+// One bounded, formatting-only retry. The callback receives at most 16 KiB of
+// the original output; the caller must not turn a failed repair into a verdict.
+export async function parseModelJsonWithRepair(raw, repair, label = 'Agent') {
+  try {
+    return parseModelJson(raw, label);
+  } catch (initialError) {
+    if (typeof repair !== 'function') throw initialError;
+    const bounded = String(raw ?? '').slice(0, 16 * 1024);
+    try {
+      const repaired = await repair(bounded);
+      return parseModelJson(repaired, label);
+    } catch {
+      throw new Error(label + ' output remained invalid after one format-repair attempt');
+    }
+  }
+}

@@ -1,104 +1,116 @@
-//! tmux control mode session 管理
+//! tmux Control Mode session — the backend one attached nession Session owns.
 //!
-//! Uses `tmux -C attach` to control a tmux session, parsing structured
-//! messages instead of raw PTY output.
+//! This is the adapter between the Agent's backend trait and
+//! [`TmuxClient`](super::client::TmuxClient), which owns the control attachment,
+//! its byte framing, ordered command/reply matching and ordered source events.
+//! The session adds the two things above the client:
+//!
+//! - **bootstrap barrier** (#1228/#2124): the capture is written after tmux's
+//!   welcome pair and its body is published in stream order between the output
+//!   it covers and the output after it, so `attach` can drop exactly the
+//!   pre-capture prefix. The ordering is the client's wire order, not a race
+//!   between a reader and a waiter;
+//! - **window-size guard** (#1490/#1349): a resize to the size tmux last
+//!   reported is not written, because the shared window would reflow and every
+//!   attached client would repaint for a move that did not happen.
 //!
 //! Terminal size (cols/rows) is bidirectional: the client tells tmux its
 //! desired size on attach and when the browser window resizes; tmux confirms
 //! the new size on the control channel, and the agent broadcasts it to all
-//! attached clients. Last writer wins — the most recent resize sets
-//! the size for everyone.
+//! attached clients. Last writer wins — the most recent resize sets the size
+//! for everyone.
 //!
-//! **The confirmation is a `%layout-change`, not a `%window-resize`.** This
-//! module said the latter for as long as it existed and it was never true of
-//! the tmux the image pins: 3.6b emits no `%window-resize` at all (measured
-//! 2026-10-01 — a control client attached and resized underneath printed
-//! `%layout-change @0 a87d,100x30,0,0,0` and nothing else). Everything here
-//! used to depend on that line, including the resize-lane publish, so a peer
-//! reflowing the shared window reached no other client (#1349).
-//! [`ControlMessage::WindowResize`] is still routed for a tmux that sends it.
+//! **The confirmation is a `%layout-change`, not a `%window-resize`.** 3.6b
+//! emits no `%window-resize` at all (measured 2026-10-01 — a control client
+//! attached and resized underneath printed
+//! `%layout-change @0 a87d,100x30,0,0,0` and nothing else). The parser still
+//! understands `%window-resize` for a tmux that sends it.
 //!
-//! **That is a decision, not an accident.**
-//! `2026-08-15-viewport-fit-terminal-migration-design.md` §2 chose it
-//! explicitly ("accept last-writer-wins … No arbitration"), superseding the
-//! earlier fixed-200×60 model. The resource being resized is the tmux
-//! **window**: one per session, one pane, shared by every attached client.
+//! tmux also has a per-client mechanism (`refresh-client -C`), and this backend
+//! deliberately does not use it — every attached client is fed the same
+//! `%output` byte stream, so per-client viewports could not be rendered
+//! coherently.
 //!
-//! tmux also has a per-client mechanism (`refresh-client -C`), and this
-//! backend deliberately does not use it — every attached client is fed the
-//! same `%output` byte stream, so per-client viewports could not be rendered
-//! coherently. See [`ControlModeSession::resize`].
+//! The wire grammar, byte bounds and Control Mode record decoding live in
+//! `tmux::client` (which this module drives) and `tmux::parser`; this module
+//! receives typed events and owns the session-level barrier and size guard.
+//! It does not decode Control Mode records itself.
 //!
-//! # The bootstrap barrier (#1228)
+//! ## Transport selection (#2307)
 //!
-//! `attach` can take the session's history **on the control channel itself**
-//! (`capture_lines`), and that is what makes the snapshot join the live
-//! stream exactly. tmux executes a command synchronously between queueing
-//! its `%begin` and the response text, and a control client's wire is
-//! ordered, so a `%output` queued before the capture's `%begin` is output
-//! the pane read includes, and one queued after — including interleaved
-//! *inside* a long response block — is output it does not. The reader loop
-//! holds pre-barrier output back and drops it when the capture lands; the
-//! returned receiver therefore starts where the snapshot ends. Measured on
-//! tmux 3.6b: the indices before the response block are exactly the
-//! capture's tail, the indices after it start at the next one.
-//!
-//! The pre-#1228 shape captured from a *separate* tmux process, whose
-//! ordering against the control client's `%output` stream nothing
-//! constrained: whatever the pane produced between the control attach and
-//! the capture arrived twice.
+//! New control attachments use `tmux -C` over pipes. Setting
+//! `NESSION_TMUX_CONTROL_TRANSPORT=pty` selects the `-CC + PTY` transport
+//! instead; it is a controlled opt-in for parity evaluation, and any other
+//! value (including unset) keeps the production default. A failed `-CC` launch
+//! is reported as an error — never a silent fallback to `-C`.
 
 use anyhow::{Context, Result};
-use std::collections::VecDeque;
-use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, ChildStdout};
-use tokio::sync::{mpsc, oneshot, watch};
+use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 use tracing::warn;
 
+use super::client::{ControlCommand, ControlTransport, TmuxClient, TmuxEvent};
 use super::ops::TmuxDep;
-use super::parser::{decode_tmux_output, parse_control_line_bytes, ControlMessage};
 
 /// Buffer capacity for the output channel — bytes-per-batch parsed from tmux.
 const OUTPUT_CHANNEL_CAPACITY: usize = 256;
-
-/// A malformed or unbounded Control Mode line must never exhaust Agent memory.
-const MAX_CONTROL_LINE_BYTES: usize = 16 * 1024 * 1024;
-/// Bound the aggregate pre-capture replay buffer, not just its event count.
-const MAX_PRE_BARRIER_BYTES: usize = 2 * 1024 * 1024;
-/// Capture is a best-effort bootstrap; excessive history is a bounded fault.
-const MAX_CAPTURE_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
-
 /// Buffer capacity for the resize channel — one (cols, rows) tuple per event.
 const RESIZE_CHANNEL_CAPACITY: usize = 16;
-
+/// Bound the aggregate pre-capture replay buffer, not just its event count.
+const MAX_PRE_BARRIER_BYTES: usize = 2 * 1024 * 1024;
 /// Cap on `%output` chunks held back while the bootstrap capture is in
-/// flight. The capture is written the moment the welcome pair arrives, so
-/// the window is milliseconds and this never approaches the cap in practice;
-/// an overflow degrades to the pre-#1228 behaviour (flush, no capture) —
+/// flight. The capture is written the moment the welcome pair arrives, so the
+/// window is milliseconds and this never approaches the cap in practice; an
+/// overflow degrades to the pre-#1228 behaviour (flush, no capture) —
 /// duplication risk over a gap.
 const PRE_BARRIER_BUFFER_CHUNKS: usize = OUTPUT_CHANNEL_CAPACITY;
 
-/// The welcome pair is the tmux server's first write on a local socket, and
-/// a child that dies before it drops the sender and skips the wait
-/// immediately — 5s is the "something is wrong" bound, not the expectation.
+/// The welcome pair is the tmux server's first write on a local socket, and a
+/// child that dies before it drops the sender and skips the wait immediately —
+/// 5s is the "something is wrong" bound, not the expectation.
 const WELCOME_TIMEOUT: Duration = Duration::from_secs(5);
-
 /// A 5000-line capture over a local socket is milliseconds; 10s bounds the
-/// pathological (a flooded reader, a loaded CI runner) without turning a
-/// wedged server into a hung attach.
+/// pathological (a flooded reader, a loaded CI runner) without turning a wedged
+/// server into a hung attach.
 const CAPTURE_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Environment variable selecting the transport for new control attachments.
+///
+/// `-C + Pipe` is the production default; `pty` selects `-CC + PTY`. This is
+/// the controlled opt-in parity evaluation uses — not a user setting, and not a
+/// fallback: a `-CC` launch that fails is an error.
+const TRANSPORT_ENV: &str = "NESSION_TMUX_CONTROL_TRANSPORT";
+
+/// The transport a new attachment uses (#2307 slice D).
+fn configured_transport(width: u16, height: u16) -> ControlTransport {
+    transport_for(std::env::var(TRANSPORT_ENV).ok().as_deref(), width, height)
+}
+
+/// Pure mapping from the selection's value, so the default and the opt-in are
+/// testable without mutating process environment.
+fn transport_for(value: Option<&str>, width: u16, height: u16) -> ControlTransport {
+    match value {
+        // The PTY carries the size the window was just set to, so the attach
+        // cannot move the shared window as a side effect.
+        #[cfg(unix)]
+        Some("pty") => ControlTransport::Pty {
+            cols: width,
+            rows: height,
+        },
+        _ => ControlTransport::Pipe,
+    }
+}
+
 /// The size tmux last *reported* for this session's window, shared between the
-/// reader task — where the report arrives, as `%layout-change` — and the
+/// event forwarder — where the report arrives, as `%layout-change` — and the
 /// backend, which decides from it whether a resize is worth issuing.
 ///
-/// `None` means "not known": no report has arrived yet, or the reader has
+/// `None` means "not known": no report has arrived yet, or the source has
 /// ended. Both are treated the same way — a resize is issued rather than
 /// suppressed — because a suppressed resize leaves the pane at a size the
-/// client is not looking at, and that is worse than a redundant one.
+/// client is not looking at, which is worse than a redundant one.
 ///
 /// It is deliberately **not** "the size this backend last asked for": the
 /// window is shared (`window-size latest`), so a peer moving it makes the last
@@ -109,52 +121,42 @@ type ObservedWindowSize = Arc<Mutex<Option<(u16, u16)>>>;
 /// tmux control mode session — **one per nession session**, shared by every
 /// attached web client. The agent's session map is keyed by session name, so a
 /// second client attaching joins the existing backend as a subscriber instead
-/// of spawning a second `tmux -C attach` (`server/websocket.rs`).
-///
-/// Spawns a `tmux -C attach` subprocess and pipes structured messages
-/// (parsed to raw ANSI bytes) through an mpsc channel. The caller drives
-/// input via `write_input` and resizes the shared tmux window via `resize`.
+/// of spawning a second attachment.
 pub struct ControlModeSession {
     session_name: String,
-    child: Child,
-    stdin: ChildStdin,
+    client: TmuxClient,
     viewport: (u16, u16),
     /// What tmux last said the window's size is — see [`ObservedWindowSize`].
     observed: ObservedWindowSize,
-    /// The tmux this client is attached to — held rather than resolved per
-    /// call because [`Drop`] cannot reach the process, and a client attached
-    /// to one addressing must be detached from the same one (#991 step 6).
+    /// Forwards client events into the output/resize channels for the rest of
+    /// the attachment's life.
+    forwarder: Option<JoinHandle<()>>,
+    /// The tmux this client is attached to — held rather than resolved per call
+    /// because [`Drop`] cannot await, and a client attached to one addressing
+    /// must be detached from the same one (#991 step 6).
     tmux: TmuxDep,
 }
 
 impl ControlModeSession {
     /// Attach to a tmux session in control mode.
     ///
-    /// First resizes the tmux window to `width`×`height`, then spawns
-    /// `tmux -C attach -t <session_name>` and starts a background task
-    /// that parses `%output` messages and sends unescaped ANSI bytes on the
-    /// returned channel.
+    /// First resizes the tmux window to `width`×`height`, then attaches through
+    /// [`TmuxClient`] and starts forwarding source events.
     ///
     /// `capture_lines` is the bootstrap barrier (#1228): `Some(n)` takes the
     /// session's history **on the control channel** and returns it as the
-    /// fourth tuple element, and the output receiver then yields only
-    /// output the capture does not cover — see the module docs for why the
-    /// wire's own order makes that exact. `None` skips the capture entirely.
-    /// A capture that fails, times out, or comes back empty is also `None`
-    /// on the way out — the attach proceeds without a bootstrap, which is
-    /// the state every attach was in before #321.
+    /// fourth tuple element, and the output receiver then yields only output
+    /// the capture does not cover — see the module docs for why the wire's own
+    /// order makes that exact. `None` skips the capture entirely. A capture
+    /// that fails, times out, or comes back empty is also `None` on the way
+    /// out — the attach proceeds without a bootstrap, which is the state every
+    /// attach was in before #321.
     ///
     /// Returns `(session, output_receiver, resize_receiver, capture)`. The
-    /// output receiver yields raw ANSI byte chunks ready to forward to
-    /// xterm.js. The resize receiver yields `(cols, rows)` pairs each time
-    /// the window's size changes — see the module docs for which notification
-    /// that actually is — so the caller can propagate the
-    /// new size to clients (e.g. as a `terminal.resize` message). When the
-    /// tmux subprocess exits (or the reader task drops the senders), both
+    /// output receiver yields raw ANSI byte chunks ready to forward to xterm.js.
+    /// The resize receiver yields `(cols, rows)` each time the window's size
+    /// changes. When the tmux process exits (or the forwarder ends), both
     /// receivers close.
-    ///
-    /// `tmux` is the caller's addressing — the same one the session was
-    /// created on, and the one a test substitutes a fake binary into.
     pub async fn attach(
         tmux: &TmuxDep,
         session_name: &str,
@@ -167,190 +169,108 @@ impl ControlModeSession {
         mpsc::Receiver<(u16, u16)>,
         Option<Vec<u8>>,
     )> {
-        // Resize tmux window to client's requested size BEFORE attaching.
-        // This ensures tmux renders at the correct dimensions from the first
-        // frame, avoiding a flash of wrong-sized content.
-        //
-        // Through the owner rather than a locally built argument vector: this
-        // used to call `util::run_tmux_command(tmux, session, &[...])`, a
-        // caller-supplies-the-argv runner whose one caller this was — exactly
-        // the `run(args)` shape #991 rules out, since a caller holding the
-        // vector can encode a wrong flag or drop the target with nothing to
-        // catch it.
+        // Resize the window before attaching so tmux renders at the right
+        // dimensions from the first frame. Through the operation owner, not a
+        // locally built argv (#991).
         tmux.ops()
             .resize_window(session_name, width, height)
             .await?;
 
-        let mut child = tmux
-            .cmd()
-            .tokio()
-            .args(["-C", "attach", "-t", session_name])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .with_context(|| format!("failed to spawn tmux -C attach -t {session_name}"))?;
-
-        let mut stdin = child.stdin.take().context("child stdin was not piped")?;
-        let stdout = child.stdout.take().context("child stdout was not piped")?;
-
+        let mut client =
+            TmuxClient::connect_with(tmux, session_name, configured_transport(width, height))?;
+        let mut events = client
+            .take_events()
+            .context("control client event stream was already taken")?;
+        let observed: ObservedWindowSize = Arc::new(Mutex::new(Some((width, height))));
         let (output_tx, output_rx) = mpsc::channel(OUTPUT_CHANNEL_CAPACITY);
         let (resize_tx, resize_rx) = mpsc::channel(RESIZE_CHANNEL_CAPACITY);
-        let (decision_tx, decision_rx) = watch::channel(BarrierDecision::Pending);
-        let (welcome_tx, welcome_rx) = oneshot::channel();
-        let (capture_tx, capture_rx) = oneshot::channel();
-        // Seeded with the size `resize_window` just set: that call returned
-        // `Ok`, so the window is at it — and tmux does not re-report a size it
-        // never saw change, so waiting for a `%layout-change` to confirm what
-        // we just did would leave the first re-assertion of that size looking
-        // like news.
-        let observed: ObservedWindowSize = Arc::new(Mutex::new(Some((width, height))));
-        tokio::spawn(read_output_loop(
-            stdout,
+
+        let capture = match capture_lines {
+            None => None,
+            Some(lines) => {
+                take_bootstrap(
+                    &client,
+                    &mut events,
+                    session_name,
+                    lines,
+                    &output_tx,
+                    &resize_tx,
+                    &observed,
+                )
+                .await
+            }
+        };
+
+        // The barrier is over (or was not requested): everything still on the
+        // stream is live, in the same order the client produced it.
+        let forwarder = tokio::spawn(forward_events(
+            events,
             output_tx,
             resize_tx,
             Arc::clone(&observed),
-            BarrierChannels {
-                decision_rx,
-                welcome_tx: Some(welcome_tx),
-                capture_tx: Some(capture_tx),
-            },
         ));
 
-        let capture = match capture_lines {
-            None => {
-                let _ = decision_tx.send(BarrierDecision::Skipped);
-                None
-            }
-            Some(lines) => {
-                // The capture command goes out only after tmux's welcome
-                // pair: the first response block a control client gets is
-                // the empty one the server opens itself, and waiting for it
-                // is what makes the *next* `%begin` unambiguously ours.
-                match tokio::time::timeout(WELCOME_TIMEOUT, welcome_rx).await {
-                    Ok(Ok(())) => {
-                        let _ = decision_tx.send(BarrierDecision::Requested);
-                        // The same capture `TmuxOps::capture_pane` runs as a
-                        // separate process, spelled for the control channel —
-                        // one line, no argv. The flags are `capture_pane_args`'s;
-                        // keeping the two in step is a manual act.
-                        let cmd =
-                            format!("capture-pane -t {session_name} -p -S -{lines} -E - -e -J\n");
-                        if let Err(e) = stdin.write_all(cmd.as_bytes()).await {
-                            warn!(
-                                "bootstrap: control-channel capture write failed for {session_name}: {e:#}"
-                            );
-                            let _ = decision_tx.send(BarrierDecision::Skipped);
-                            None
-                        } else {
-                            match tokio::time::timeout(CAPTURE_TIMEOUT, capture_rx).await {
-                                Ok(Ok(text)) => text.filter(|text| !text.is_empty()),
-                                // The sender is gone: the subprocess died
-                                // mid-capture. The reader's EOF already let
-                                // the buffer go.
-                                Ok(Err(_)) => None,
-                                Err(_) => {
-                                    warn!(
-                                        "bootstrap: control-channel capture timed out for {session_name}"
-                                    );
-                                    let _ = decision_tx.send(BarrierDecision::Skipped);
-                                    None
-                                }
-                            }
-                        }
-                    }
-                    // No welcome: a child that exited instantly (the
-                    // fake-binary test seam) arrives here on the dropped
-                    // sender, a wedged server on the timeout. No capture;
-                    // the decision tells the reader to let the buffer go.
-                    _ => {
-                        let _ = decision_tx.send(BarrierDecision::Skipped);
-                        None
-                    }
-                }
-            }
-        };
-
-        let session = Self {
-            session_name: session_name.to_string(),
-            child,
-            stdin,
-            viewport: (width, height),
-            observed,
-            tmux: tmux.clone(),
-        };
-
-        Ok((session, output_rx, resize_rx, capture))
+        Ok((
+            Self {
+                session_name: session_name.to_string(),
+                client,
+                viewport: (width, height),
+                observed,
+                forwarder: Some(forwarder),
+                tmux: tmux.clone(),
+            },
+            output_rx,
+            resize_rx,
+            capture,
+        ))
     }
 
     /// Send raw input bytes to the tmux session using `send-keys -H` (hex).
     ///
-    /// Using `-H` with hex-encoded bytes avoids shell escaping issues and lets us
-    /// forward any byte value (control codes, high bytes, non-UTF-8) unchanged.
-    /// `send-keys -l` (literal characters) was insufficient because it required
-    /// single-quote escaping AND newlines in the input broke the outer tmux
-    /// command framing.
+    /// The bytes are byte-exact for any value (control codes, high bytes,
+    /// non-UTF-8), and this returns once the command is **written** — not when
+    /// tmux answers. tmux's answer still occupies its place in the reply order
+    /// and is consumed there; waiting for it here would serialize keystrokes
+    /// behind a round trip.
     pub async fn write_input(&mut self, data: &[u8]) -> Result<()> {
         if data.is_empty() {
             return Ok(());
         }
-        // Format each byte as two lowercase hex digits, separated by spaces:
-        // "hello" -> "68 65 6c 6c 6f"
-        let mut hex = String::with_capacity(data.len() * 3);
-        for (i, byte) in data.iter().enumerate() {
-            if i > 0 {
-                hex.push(' ');
-            }
-            hex.push_str(&format!("{byte:02x}"));
-        }
-        let cmd = format!("send-keys -t {} -H {}\n", self.session_name, hex);
-        self.stdin.write_all(cmd.as_bytes()).await?;
-        self.stdin.flush().await?;
-        Ok(())
+        self.client
+            .send_command_queued(
+                ControlCommand::SendKeysHex {
+                    target: self.session_name.clone(),
+                    data: data.to_vec(),
+                },
+                false,
+            )
+            .await
+            .map_err(|err| anyhow::anyhow!("control input failed: {err}"))
     }
 
     /// Resize the tmux **window** and trigger a full redraw.
     ///
-    /// Sends two commands via control-mode stdin:
-    /// 1. `resize-window` — changes the window size (**affects all clients**)
-    /// 2. `refresh-client` — triggers a full pane redraw so the reflowed
-    ///    content is sent as `%output` messages immediately
+    /// This is not a per-client viewport: one window, one pane, shared by every
+    /// client on the session, so this moves the pane for all of them and the
+    /// most recent caller wins.
     ///
-    /// This is not a per-client viewport: one window, one pane, shared by
-    /// every client on the session, so this moves the pane for all of them and
-    /// the most recent caller wins.  The module docs carry the decision and why
-    /// `refresh-client -C` is deliberately not used.
-    ///
-    /// **Idempotent for the size the window is already at** (#1490). Unlike
-    /// `attach`'s one-shot `resize-window` — argv, no client yet, no redraw —
-    /// this path is a live control client's and it writes two commands:
-    /// `resize-window` on an unchanged size still reflows the pane, and the
-    /// `refresh-client` after it repaints **every client of the session**. So a
-    /// request that moves nothing still costs a full redraw of a window several
-    /// clients may be looking at, and a re-attach asks for the size the pane is
-    /// already at — once per reload.
-    ///
-    /// The comparison is against the size tmux reported, not the one this
-    /// backend last asked for — see [`ObservedWindowSize`].
+    /// **Idempotent for the size the window is already at** (#1490). A request
+    /// that moves nothing would still reflow the pane and repaint every client,
+    /// so the comparison against tmux's own last report decides whether
+    /// anything is written.
     pub async fn resize(&mut self, width: u16, height: u16) -> Result<()> {
         if self.window_is_at(width, height) {
-            // The viewport is still this client's stated size: nothing was
-            // written, and a later real resize compares against tmux's report
-            // again rather than against this.
             self.viewport = (width, height);
             return Ok(());
         }
         self.viewport = (width, height);
-        let cmd = format!(
-            "resize-window -t {} -x {} -y {}\nrefresh-client\n",
-            self.session_name, width, height
-        );
-        self.stdin.write_all(cmd.as_bytes()).await?;
-        self.stdin.flush().await?;
-        // tmux confirms it with a `%layout-change` carrying this same size; in
-        // the window before that arrives, a repeat of this request is a repeat
-        // of something already done. A write that failed returned above, so
-        // this is only ever set for a command tmux received.
+        self.client
+            .resize_window(width, height)
+            .await
+            .map_err(|err| anyhow::anyhow!("control resize failed: {err}"))?;
+        // tmux confirms with a `%layout-change` carrying this size; the event
+        // forwarder records it. Until then a repeat of this request is treated
+        // as already done, because the write above returned.
         if let Ok(mut size) = self.observed.lock() {
             *size = Some((width, height));
         }
@@ -378,71 +298,253 @@ impl ControlModeSession {
         &self.session_name
     }
 
-    /// Close the tmux subprocess gracefully. Idempotent.
+    /// Close the attachment gracefully. Idempotent.
     ///
-    /// Sends `detach-client` to the control-mode stdin so tmux cleanly
-    /// disconnects the client.  SIGKILL is NEVER used because it can crash
-    /// the tmux server on macOS (observed with Homebrew tmux 3.6b).
-    ///
-    /// **Cleanup**, and the three steps are the teardown of a client that is
-    /// already on its way out: what ends it is this client's stdin closing
-    /// (control mode exits on EOF), which is why the failures below are
-    /// dropped rather than propagated, and why `Ok` here is not a claim that
-    /// tmux confirmed anything. The one thing the class forbids — masking a
-    /// primary error — cannot happen: nothing else in this function can fail.
+    /// The detach is written through the ordered command writer and the child
+    /// is waited for; SIGKILL is never used because it can crash the tmux
+    /// server on macOS (observed with Homebrew tmux 3.6b).
     pub async fn close(&mut self) -> Result<()> {
-        // Send graceful detach — the tmux subprocess will exit cleanly.
-        //
-        // Not a tmux *spawn*: this is a line written to a control-mode client's
-        // stdin, so there is no exit status and no stderr to classify — tmux's
-        // answer to a bad line arrives asynchronously on the same pipe the
-        // output comes back on, and a failure here means the pipe is already
-        // gone (EPIPE), i.e. the client has already detached. `ops.rs`'s module
-        // docs carry the same point for why `send-keys -H` over this transport
-        // is not `TmuxOps::send_keys`.
-        let _ = self.stdin.write_all(b"detach-client\n").await;
-        let _ = self.stdin.flush().await;
-        // Wait briefly for the subprocess to process the detach and exit.
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        // Reap the control-mode child. Not a tmux call — it is the process this
-        // backend spawned, so no tmux operation class applies.
-        // Use wait() instead of start_kill() to avoid SIGKILL.
-        let _ = self.child.wait().await;
+        self.client.close().await;
+        if let Some(task) = self.forwarder.take() {
+            task.abort();
+        }
         Ok(())
     }
 }
 
 impl Drop for ControlModeSession {
+    /// The last-resort detach for a session dropped without `close`.
+    ///
+    /// `Drop` cannot await, so it uses the same blocking `detach-client -t
+    /// client-<pid>` route as before (#1011): `-s <session>` would detach every
+    /// client of the session, including one a user attached by hand, and
+    /// `-t <session>` detaches nothing at all. The class and silence are
+    /// unchanged.
     fn drop(&mut self) {
-        // **Cleanup** (#991): teardown, so the failure is allowed and the shape
-        // is `let _ =` rather than `?` — a `Drop` cannot report anything, and
-        // must not panic.
-        //
-        // It also does not have to succeed: what ends this client is its stdin
-        // closing below (control mode exits on EOF), and the SIGKILL route this
-        // deliberately avoids is the one with a documented hazard — SIGKILL on
-        // a control-mode client crashes the tmux server on macOS (Homebrew tmux
-        // 3.6b: "server exited unexpectedly"), so an unclean detach is the
-        // lesser risk here but still not a state a caller has to hear about.
-        //
-        // The target is the client **this backend spawned**, resolved from the
-        // child's pid (#1011). It used to name the session, which
-        // `detach-client -t` does not accept: measured on tmux 3.6b that
-        // answers `can't find client: <session>` (exit 1) and detaches nothing,
-        // so the detach was a no-op from the day it was written. `-s <session>`
-        // is not the repair — it detaches *every* client of the session,
-        // including one a user attached by hand.
-        //
-        // [`close`](ControlModeSession::close) reaches the same end through the
-        // control-mode stdin instead, which is the transport this backend
-        // already owns; this path keeps a subprocess because `Drop` cannot
-        // await. The class and the silence are unchanged.
-        if let Some(pid) = self.child.id() {
+        if let Some(pid) = self.client.child_pid() {
             let _ = self.tmux.ops().detach_client_by_pid_blocking(pid);
         }
-        // Let the child process exit on its own — drop order will close
-        // stdin (EOF → child exits), then child (reaped by tokio/lanchd).
     }
+}
+
+/// Output held back while the bootstrap capture is in flight.
+///
+/// The two exits are different facts: a capture that lands **is** the buffer's
+/// content (drop it), while a capture that fails, times out or is skipped
+/// leaves the buffer as the only copy (flush it live). Overflow degrades to the
+/// pre-#1228 behaviour: flush, abandon the capture — duplication risk over a
+/// gap.
+struct PreCaptureBuffer {
+    chunks: Vec<Vec<u8>>,
+    bytes: usize,
+}
+
+impl PreCaptureBuffer {
+    fn new() -> Self {
+        Self {
+            chunks: Vec::new(),
+            bytes: 0,
+        }
+    }
+
+    /// Hold one chunk. `false` means the bound was exceeded and the caller
+    /// must flush and abandon the capture.
+    fn push(&mut self, data: Vec<u8>) -> bool {
+        self.bytes = self.bytes.saturating_add(data.len());
+        self.chunks.push(data);
+        self.chunks.len() <= PRE_BARRIER_BUFFER_CHUNKS && self.bytes <= MAX_PRE_BARRIER_BYTES
+    }
+
+    async fn flush(&mut self, output_tx: &mpsc::Sender<Vec<u8>>) {
+        for chunk in self.chunks.drain(..) {
+            let _ = output_tx.send(chunk).await;
+        }
+        self.bytes = 0;
+    }
+
+    fn clear(&mut self) {
+        self.chunks.clear();
+        self.bytes = 0;
+    }
+}
+
+/// Take the bootstrap capture through the ordered stream.
+///
+/// Returns the capture body, or `None` for a skipped/failed/empty capture.
+///
+/// The wire order is the barrier (#1228): `%output` before the capture's
+/// `%begin` is what the pane read includes, so it is buffered and dropped when
+/// the capture lands; output *inside* or after the response block was generated
+/// after the read, so it is live. [`TmuxEvent::CaptureStarted`] is that
+/// boundary — dropping everything up to [`TmuxEvent::Capture`] would also drop
+/// the interleaved output, which the capture does not contain.
+async fn take_bootstrap(
+    client: &TmuxClient,
+    events: &mut mpsc::Receiver<TmuxEvent>,
+    session_name: &str,
+    lines: u32,
+    output_tx: &mpsc::Sender<Vec<u8>>,
+    resize_tx: &mpsc::Sender<(u16, u16)>,
+    observed: &ObservedWindowSize,
+) -> Option<Vec<u8>> {
+    let mut buffered = PreCaptureBuffer::new();
+    let mut barrier_passed = false;
+    let mut abandoned = false;
+
+    // The capture command goes out only after tmux's welcome pair: the first
+    // response block is the server's own empty one, and waiting for it is what
+    // makes the next block unambiguously ours (#1228). Output cannot precede
+    // the welcome on a healthy attachment, but if it does it is pre-barrier
+    // output and belongs in the same buffer.
+    let handshake_deadline = tokio::time::Instant::now() + WELCOME_TIMEOUT;
+    let handshaken = loop {
+        match tokio::time::timeout_at(handshake_deadline, events.recv()).await {
+            Ok(Some(TmuxEvent::Handshaken)) => break true,
+            Ok(Some(TmuxEvent::Output(output))) => {
+                if abandoned {
+                    // The bound was exceeded: the capture is abandoned, so
+                    // there is no snapshot this output is covered by.
+                    let _ = output_tx.send(output.data).await;
+                } else if !buffered.push(output.data) {
+                    warn!("bootstrap: pre-capture buffer overflow for {session_name}");
+                    buffered.flush(output_tx).await;
+                    abandoned = true;
+                }
+            }
+            Ok(Some(TmuxEvent::Resize { cols, rows })) => {
+                note_and_forward(resize_tx, observed, cols, rows).await;
+            }
+            // Neither can precede the capture command being written.
+            Ok(Some(TmuxEvent::CaptureStarted | TmuxEvent::Capture { .. })) => {}
+            Ok(Some(TmuxEvent::Exited | TmuxEvent::SourceLost { .. })) | Ok(None) | Err(_) => {
+                break false;
+            }
+        }
+    };
+    if !handshaken {
+        warn!("bootstrap: control handshake did not complete for {session_name}");
+        buffered.flush(output_tx).await;
+        return None;
+    }
+    if abandoned {
+        // The bound was already exceeded and the buffer flushed; a capture now
+        // would only be a slower way to the same `None`.
+        return None;
+    }
+    if let Err(err) = client
+        .send_command_queued(
+            ControlCommand::CapturePane {
+                target: session_name.to_string(),
+                lines,
+            },
+            true,
+        )
+        .await
+    {
+        warn!("bootstrap: control-channel capture write failed for {session_name}: {err}");
+        buffered.flush(output_tx).await;
+        return None;
+    }
+
+    let deadline = tokio::time::Instant::now() + CAPTURE_TIMEOUT;
+    loop {
+        let event = match tokio::time::timeout_at(deadline, events.recv()).await {
+            Err(_) => {
+                warn!("bootstrap: control-channel capture timed out for {session_name}");
+                break;
+            }
+            // The source ended mid-capture: no capture will land, and nothing
+            // after it will be forwarded either — but the bytes already held
+            // back are still the only copy of that output.
+            Ok(None) | Ok(Some(TmuxEvent::Exited | TmuxEvent::SourceLost { .. })) => {
+                buffered.flush(output_tx).await;
+                return None;
+            }
+            Ok(Some(event)) => event,
+        };
+        match event {
+            // The pane read happened here: later output is live.
+            TmuxEvent::CaptureStarted => barrier_passed = true,
+            TmuxEvent::Output(output) => {
+                if barrier_passed || abandoned {
+                    let _ = output_tx.send(output.data).await;
+                } else if !buffered.push(output.data) {
+                    warn!("bootstrap: pre-capture buffer overflow for {session_name}");
+                    buffered.flush(output_tx).await;
+                    abandoned = true;
+                    barrier_passed = true;
+                }
+            }
+            TmuxEvent::Capture { body } => {
+                if abandoned {
+                    return None;
+                }
+                // The capture carries everything the buffer holds: dropping it
+                // is the barrier.
+                buffered.clear();
+                return if body.is_empty() { None } else { Some(body) };
+            }
+            TmuxEvent::Resize { cols, rows } => {
+                note_and_forward(resize_tx, observed, cols, rows).await;
+            }
+            TmuxEvent::Handshaken => {}
+            // Caught above, where the buffered output can still be flushed.
+            TmuxEvent::Exited | TmuxEvent::SourceLost { .. } => return None,
+        }
+    }
+
+    // A failed or timed-out capture leaves the held-back output as the only
+    // copy of what it covers.
+    buffered.flush(output_tx).await;
+    None
+}
+
+/// Forward source events for the life of the attachment, in client order.
+async fn forward_events(
+    mut events: mpsc::Receiver<TmuxEvent>,
+    output_tx: mpsc::Sender<Vec<u8>>,
+    resize_tx: mpsc::Sender<(u16, u16)>,
+    observed: ObservedWindowSize,
+) {
+    while let Some(event) = events.recv().await {
+        match event {
+            TmuxEvent::Output(output) => {
+                if output_tx.send(output.data).await.is_err() {
+                    // Receiver dropped — the session is being torn down.
+                    break;
+                }
+            }
+            TmuxEvent::Resize { cols, rows } => {
+                note_and_forward(&resize_tx, &observed, cols, rows).await;
+            }
+            TmuxEvent::Exited | TmuxEvent::SourceLost { .. } => break,
+            // All three belong to a bootstrap capture consumed in
+            // `take_bootstrap`; a later one would be a direct caller's reply,
+            // not a source fact.
+            TmuxEvent::Handshaken | TmuxEvent::CaptureStarted | TmuxEvent::Capture { .. } => {}
+        }
+    }
+    // Nothing is updating this any more, so it stops being a fact a resize can
+    // be suppressed with: from here a requested size is issued, not compared.
+    if let Ok(mut size) = observed.lock() {
+        *size = None;
+    }
+}
+
+async fn note_and_forward(
+    resize_tx: &mpsc::Sender<(u16, u16)>,
+    observed: &ObservedWindowSize,
+    cols: u16,
+    rows: u16,
+) {
+    // Scoped so the guard is not held across the send: a lock across an await
+    // in this loop would stall every later event behind a slow consumer.
+    if let Ok(mut size) = observed.lock() {
+        *size = Some((cols, rows));
+    }
+    // Best-effort: an internal send whose only failure is "the receiver is
+    // gone". No tmux operation class applies.
+    let _ = resize_tx.send((cols, rows)).await;
 }
 
 #[async_trait::async_trait]
@@ -468,544 +570,181 @@ impl super::session::TmuxSession for ControlModeSession {
     }
 }
 
-/// The attach flow's instruction to the reader loop's bootstrap barrier
-/// (#1228), delivered over a `watch` because the reader must react to a
-/// change even when the wire is quiet — a skipped capture flushes the
-/// buffer immediately rather than at the next `%output`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum BarrierDecision {
-    /// `attach` has not said yet; `%output` buffers.
-    Pending,
-    /// A capture command was written; its `%begin` is the barrier.
-    Requested,
-    /// No capture is coming; flush the buffer and go live.
-    Skipped,
-}
-
-/// One thing the reader loop must do after the router consumed a line, in
-/// wire order.
-#[derive(Debug, PartialEq)]
-enum Effect {
-    /// Bytes for the live output stream.
-    Live(Vec<u8>),
-    /// The window's size changed — from either notification, see the module
-    /// docs.
-    Resize(u16, u16),
-    /// tmux's welcome pair completed; the capture command may be written.
-    WelcomeDone,
-    /// The capture resolved: `Some` is the snapshot text (empty when the
-    /// pane has no history), `None` is a failed or abandoned capture — the
-    /// attach proceeds without a bootstrap.
-    CaptureResolved(Option<Vec<u8>>),
-    /// The tmux server is gone (`%exit`).
-    Exit,
-    /// Non-fatal and worth a log line.
-    Note(&'static str),
-    /// The tmux wire cannot be trusted beyond this record; terminate the
-    /// control reader so no later output can be labelled contiguous.
-    ProtocolFault(&'static str),
-}
-
-/// Where the reader is relative to the capture's `%begin`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum BarrierPhase {
-    /// The capture's `%begin` has not arrived; `%output` buffers.
-    Buffering,
-    /// Inside the capture's response block; interleaved `%output` is
-    /// post-barrier and therefore live.
-    InCapture,
-    /// Past the barrier; `%output` forwards.
-    Live,
-}
-
-/// The line-by-line state machine behind the bootstrap barrier, split from
-/// the I/O so the barrier semantics are unit-testable without a tmux.
-///
-/// The rules, each with its reason:
-///
-/// * `%output` before the capture's `%begin` is *inside* the capture —
-///   tmux executes the command synchronously between queueing `%begin` and
-///   the response text, so anything the client was told about earlier is
-///   output the pane read includes. Buffered, then dropped when the capture
-///   lands, flushed as live if the capture fails or is skipped.
-/// * `%output` interleaved *inside* the response block is **post**-barrier:
-///   the pane read already happened. Forwarded live.
-/// * Response data is raw — tmux does not escape it (measured: a pane line
-///   `%begin-fake` arrives verbatim inside a block) — so a block closes only
-///   on an `%end`/`%error` whose (timestamp, id, flags) triple matches its
-///   `%begin` exactly, and a line inside a block that parses as some other
-///   response marker is treated as data. The residue: a pane line spelling
-///   `%output ...` inside the capture block is misrouted as a notification,
-///   and one spelling the matching triple closes the block early. Both need
-///   the line to appear during one command's response; accepted and
-///   documented, unfixable at this layer.
-struct ControlRouter {
-    /// The (timestamp, id, flags) of the response block currently open.
-    open_block: Option<(u64, u64, u64)>,
-    /// The first block a control client gets is tmux's own empty welcome
-    /// pair; only after it can `attach` know the next `%begin` answers its
-    /// own command.
-    welcomed: bool,
-    /// `%output` held back before the barrier, in arrival order.
-    pre_barrier: VecDeque<Vec<u8>>,
-    pre_barrier_bytes: usize,
-    /// Data lines of the capture's response block.
-    capture_lines: Vec<Vec<u8>>,
-    capture_bytes: usize,
-    phase: BarrierPhase,
-    /// The capture was skipped or its buffer overflowed: the eventual
-    /// response block (if one still arrives) is generic.
-    capture_abandoned: bool,
-    /// The last size this router reported, so the next report of the same size
-    /// is not a report (#1349). `None` until one has been seen, which every
-    /// first size is news against.
-    reported_size: Option<(u16, u16)>,
-}
-
-impl ControlRouter {
-    fn new() -> Self {
-        Self {
-            open_block: None,
-            welcomed: false,
-            pre_barrier: VecDeque::new(),
-            pre_barrier_bytes: 0,
-            capture_lines: Vec::new(),
-            capture_bytes: 0,
-            phase: BarrierPhase::Buffering,
-            capture_abandoned: false,
-            reported_size: None,
-        }
-    }
-
-    /// Note a window size, answering whether it is news.
-    ///
-    /// A layout change is not always a *size* change — splitting a pane emits
-    /// one too — and tmux 3.6b emits **two** `%layout-change` lines for a single
-    /// `resize-window` (measured). Neither is a second resize, and what a
-    /// consumer of [`Effect::Resize`] needs is how big the window is, so saying
-    /// it twice says nothing more. The size is the whole of the dedupe; there is
-    /// no per-session state to keep downstream because there is none to keep
-    /// here.
-    fn note_size(&mut self, cols: u16, rows: u16) -> bool {
-        if self.reported_size == Some((cols, rows)) {
-            return false;
-        }
-        self.reported_size = Some((cols, rows));
-        true
-    }
-
-    /// Consume one line as it arrived on the control channel.
-    /// `capture_requested` is the attach flow's current decision.
-    #[cfg(test)]
-    fn route(&mut self, line: &str, capture_requested: bool) -> Vec<Effect> {
-        self.route_bytes(line.as_bytes(), capture_requested)
-    }
-
-    fn route_bytes(&mut self, line: &[u8], capture_requested: bool) -> Vec<Effect> {
-        let line = strip_eol_bytes(line);
-        let msg = parse_control_line_bytes(line);
-        let mut effects = Vec::new();
-        if let Some(open) = self.open_block {
-            self.route_in_block(open, line, msg, &mut effects);
-            return effects;
-        }
-        if msg.is_none() && malformed_known_record(line) {
-            effects.push(Effect::ProtocolFault("malformed tmux Control Mode record"));
-            return effects;
-        }
-        match msg {
-            Some(ControlMessage::Begin {
-                timestamp,
-                id,
-                flags,
-            }) => {
-                self.open_block = Some((timestamp, id, flags));
-                if capture_requested
-                    && self.welcomed
-                    && self.phase == BarrierPhase::Buffering
-                    && !self.capture_abandoned
-                {
-                    self.phase = BarrierPhase::InCapture;
-                }
-            }
-            Some(ControlMessage::Output { data, .. }) => {
-                if let Some(bytes) = decode_tmux_output(&data) {
-                    self.route_output(bytes, &mut effects);
-                } else {
-                    effects.push(Effect::ProtocolFault("invalid tmux output escape"));
-                }
-            }
-            Some(ControlMessage::WindowResize { cols, rows, .. }) => {
-                if self.note_size(cols, rows) {
-                    effects.push(Effect::Resize(cols, rows));
-                }
-            }
-            // **The signal tmux actually sends.** `%window-resize` is not
-            // emitted by 3.6b at all — the arm above is kept for a tmux that
-            // does, but on the pinned runtime every window size change arrives
-            // here instead, and the layout string carries the size (measured:
-            // `resize-window` to 100x30 produced `%layout-change @0
-            // a87d,100x30,0,0,0`, and no `%window-resize`). Ignoring this is why
-            // a peer reflowing the shared window reached no other client
-            // (#1349).
-            //
-            // `note_size` is the dedupe — see its doc: a layout change is not
-            // always a size change, and 3.6b sends two lines for one resize.
-            Some(ControlMessage::LayoutChange { layout, .. }) => {
-                if let Some((cols, rows)) = crate::tmux::parser::layout_size(&layout) {
-                    if self.note_size(cols, rows) {
-                        effects.push(Effect::Resize(cols, rows));
-                    }
-                }
-            }
-            Some(ControlMessage::Exit) => effects.push(Effect::Exit),
-            // Stray %end/%error with no open block, session notifications,
-            // unknown lines — all ignored, as before #1228.
-            _ => {}
-        }
-        effects
-    }
-
-    /// One line inside an open response block. `open` is the block's
-    /// (timestamp, id, flags) triple.
-    fn route_in_block(
-        &mut self,
-        open: (u64, u64, u64),
-        line: &[u8],
-        msg: Option<ControlMessage>,
-        effects: &mut Vec<Effect>,
-    ) {
-        match msg {
-            Some(ControlMessage::End {
-                timestamp,
-                id,
-                flags,
-            })
-            | Some(ControlMessage::Error {
-                timestamp,
-                id,
-                flags,
-            }) if (timestamp, id, flags) == open => {
-                self.open_block = None;
-                let is_error = matches!(msg, Some(ControlMessage::Error { .. }));
-                self.close_block(is_error, effects);
-            }
-            Some(ControlMessage::Output { data, .. }) => {
-                if let Some(bytes) = decode_tmux_output(&data) {
-                    self.route_output(bytes, effects);
-                } else {
-                    effects.push(Effect::ProtocolFault("invalid tmux output escape"));
-                }
-            }
-            Some(ControlMessage::WindowResize { cols, rows, .. }) => {
-                if self.note_size(cols, rows) {
-                    effects.push(Effect::Resize(cols, rows));
-                }
-            }
-            Some(ControlMessage::Exit) => effects.push(Effect::Exit),
-            // tmux 3.6b reports a resized pane with %layout-change rather than
-            // %window-resize. Notifications can interleave a command's
-            // %begin/%end block; ignoring them here leaves other viewers at
-            // stale geometry even though the owning controller and PTY have
-            // already changed (#2286, #2144).
-            Some(ControlMessage::LayoutChange { layout, .. }) => {
-                if let Some((cols, rows)) = crate::tmux::parser::layout_size(&layout) {
-                    if self.note_size(cols, rows) {
-                        effects.push(Effect::Resize(cols, rows));
-                    }
-                }
-            }
-            Some(ControlMessage::SessionChanged { .. }) => {}
-            // A %begin, a non-matching %end/%error, or anything unparsed:
-            // not a real response marker (tmux never nests blocks), so it is
-            // data — collected for the capture, ignored in a generic block.
-            _ => {
-                if self.phase == BarrierPhase::InCapture && !self.capture_abandoned {
-                    // The capture command's output can be arbitrarily large.
-                    // Never buffer all of it while a slow/malicious pane runs.
-                    if line.len() > MAX_CAPTURE_RESPONSE_BYTES.saturating_sub(self.capture_bytes) {
-                        self.capture_lines.clear();
-                        self.capture_bytes = 0;
-                        effects.push(Effect::CaptureResolved(None));
-                        effects.push(Effect::ProtocolFault(
-                            "capture response byte budget exceeded",
-                        ));
-                    } else {
-                        self.capture_bytes += line.len();
-                        self.capture_lines.push(line.to_vec());
-                    }
-                }
-            }
-        }
-    }
-
-    /// One `%output`'s bytes, from any block state.
-    fn route_output(&mut self, bytes: Vec<u8>, effects: &mut Vec<Effect>) {
-        match self.phase {
-            BarrierPhase::Live | BarrierPhase::InCapture => effects.push(Effect::Live(bytes)),
-            BarrierPhase::Buffering => {
-                self.pre_barrier_bytes = self.pre_barrier_bytes.saturating_add(bytes.len());
-                self.pre_barrier.push_back(bytes);
-                if self.pre_barrier.len() > PRE_BARRIER_BUFFER_CHUNKS
-                    || self.pre_barrier_bytes > MAX_PRE_BARRIER_BYTES
-                {
-                    self.pre_barrier_bytes = 0;
-                    // Overflow: degrade to the pre-#1228 behaviour — flush
-                    // everything as live and abandon the capture. The window
-                    // is milliseconds, so reaching this means the capture is
-                    // not coming in any useful sense.
-                    effects.extend(self.pre_barrier.drain(..).map(Effect::Live));
-                    self.capture_abandoned = true;
-                    self.phase = BarrierPhase::Live;
-                    effects.push(Effect::CaptureResolved(None));
-                    effects.push(Effect::Note(
-                        "bootstrap barrier buffer overflowed; capture abandoned",
-                    ));
-                }
-            }
-        }
-    }
-
-    /// A response block closed. `is_error` distinguishes `%error` from `%end`.
-    fn close_block(&mut self, is_error: bool, effects: &mut Vec<Effect>) {
-        if !self.welcomed {
-            self.welcomed = true;
-            effects.push(Effect::WelcomeDone);
-        }
-        if self.phase != BarrierPhase::InCapture {
-            return;
-        }
-        self.phase = BarrierPhase::Live;
-        if self.capture_abandoned {
-            return;
-        }
-        self.pre_barrier_bytes = 0;
-        self.capture_bytes = 0;
-        if is_error {
-            // No capture: the buffered output is the only copy — flush it.
-            effects.extend(self.pre_barrier.drain(..).map(Effect::Live));
-            effects.push(Effect::CaptureResolved(None));
-        } else {
-            // The capture carries everything the buffer holds: drop it.
-            self.pre_barrier.clear();
-            let mut bytes = Vec::new();
-            for (index, line) in self.capture_lines.drain(..).enumerate() {
-                if index > 0 {
-                    bytes.push(b'\n');
-                }
-                bytes.extend_from_slice(&line);
-            }
-            if !bytes.is_empty() {
-                bytes.push(b'\n');
-            }
-            effects.push(Effect::CaptureResolved(Some(bytes)));
-        }
-    }
-
-    /// The decision went to `Skipped` — no capture is coming, or the attach
-    /// stopped waiting for one. The buffer's contents are live now.
-    fn on_skipped(&mut self) -> Vec<Effect> {
-        self.capture_abandoned = true;
-        self.pre_barrier_bytes = 0;
-        self.capture_bytes = 0;
-        self.capture_lines.clear();
-        if self.phase != BarrierPhase::Live {
-            self.phase = BarrierPhase::Live;
-        }
-        self.pre_barrier.drain(..).map(Effect::Live).collect()
-    }
-}
-
-/// Only unparseable records with a known protocol tag are fatal. Unknown
-/// extension notifications remain forward compatible, and capture response
-/// bodies remain raw bytes (they are handled before this check).
-fn malformed_known_record(line: &[u8]) -> bool {
-    const KNOWN: [&[u8]; 8] = [
-        b"%output",
-        b"%begin",
-        b"%end",
-        b"%error",
-        b"%session-changed",
-        b"%layout-change",
-        b"%window-resize",
-        b"%exit",
-    ];
-    KNOWN.iter().any(|prefix| {
-        line == *prefix || (line.starts_with(prefix) && line.get(prefix.len()) == Some(&b' '))
-    })
-}
-
-/// The parser strips the terminator itself; data lines need the same
-/// treatment, and the two must agree on what one is.
-fn strip_eol_bytes(line: &[u8]) -> &[u8] {
-    line.strip_suffix(b"\r\n")
-        .or_else(|| line.strip_suffix(b"\n"))
-        .unwrap_or(line)
-}
-
-/// Read the outer protocol framing as bounded raw bytes: %output need not be
-/// UTF-8 and must not be subjected to a String conversion (#2300).
-async fn read_control_line<R: AsyncBufRead + Unpin>(
-    reader: &mut R,
-    line: &mut Vec<u8>,
-) -> std::io::Result<usize> {
-    loop {
-        let available = reader.fill_buf().await?;
-        if available.is_empty() {
-            // A line without its newline is NOT a protocol record. Treating
-            // a torn suffix as complete lets an output frame cross the Agent
-            // stream boundary with missing bytes (#2300).
-            return if line.is_empty() {
-                Ok(0)
-            } else {
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::UnexpectedEof,
-                    "tmux Control Mode stdout ended mid-record",
-                ))
-            };
-        }
-        let terminator = available.iter().position(|byte| *byte == b'\n');
-        let take = terminator.map_or(available.len(), |index| index + 1);
-        if take > MAX_CONTROL_LINE_BYTES.saturating_sub(line.len()) {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "tmux Control Mode line exceeds bounded frame limit",
-            ));
-        }
-        let chunk = available.get(..take).ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "invalid tmux Control Mode frame length",
-            )
-        })?;
-        line.extend_from_slice(chunk);
-        reader.consume(take);
-        if terminator.is_some() {
-            return Ok(line.len());
-        }
-    }
-}
-
-/// The oneshots the barrier resolves on, bundled because the reader loop's
-/// parameter list is already at the edge of readable.
-struct BarrierChannels {
-    decision_rx: watch::Receiver<BarrierDecision>,
-    welcome_tx: Option<oneshot::Sender<()>>,
-    capture_tx: Option<oneshot::Sender<Option<Vec<u8>>>>,
-}
-
-/// Background reader: parse control mode lines, forward ANSI bytes and
-/// window-resize events, and run the bootstrap barrier (#1228) — see
-/// [`ControlRouter`] for the rules.
-async fn read_output_loop(
-    stdout: ChildStdout,
-    output_tx: mpsc::Sender<Vec<u8>>,
-    resize_tx: mpsc::Sender<(u16, u16)>,
-    observed: ObservedWindowSize,
-    mut barrier: BarrierChannels,
-) {
-    let mut router = ControlRouter::new();
-    let mut reader = BufReader::new(stdout);
-    let mut line = Vec::new();
-    'reader: loop {
-        // Preserve a partly read frame when select! chooses a watch update:
-        // read_control_line may already have consumed bytes from BufReader.
-        // Clearing here would lose that prefix before any Agent seq exists.
-        let effects = tokio::select! {
-            read = read_control_line(&mut reader, &mut line) => {
-                match read {
-                    Ok(0) => break, // EOF - tmux subprocess exited
-                    Ok(_) => {
-                        let requested =
-                            matches!(*barrier.decision_rx.borrow(), BarrierDecision::Requested);
-                        let effects = router.route_bytes(&line, requested);
-                        line.clear(); // complete record only, never a cancelled partial
-                        effects
-                    }
-                    Err(err) => {
-                        warn!("control-mode reader: failed to read bounded protocol frame: {err}");
-                        break;
-                    },
-                }
-            }
-            changed = barrier.decision_rx.changed() => {
-                // The sender is gone (the attach flow died) or the capture
-                // was skipped: either way the buffer's contents are live
-                // now. `Requested` needs no reaction — the router reads it
-                // per line.
-                if changed.is_err()
-                    || matches!(*barrier.decision_rx.borrow(), BarrierDecision::Skipped)
-                {
-                    router.on_skipped()
-                } else {
-                    continue;
-                }
-            }
-        };
-        for effect in effects {
-            match effect {
-                Effect::Live(bytes) => {
-                    if output_tx.send(bytes).await.is_err() {
-                        // Receiver dropped - session is being torn down.
-                        break 'reader;
-                    }
-                }
-                Effect::Resize(cols, rows) => {
-                    // tmux is the authority on this window's size, and this is
-                    // where it speaks: the backend's resize guard decides from
-                    // this value whether a request would move anything
-                    // (`ControlModeSession::resize`).
-                    //
-                    // Scoped so the guard is not held across the send below —
-                    // a lock across an await in this loop would stall every
-                    // reader behind whoever is asking about the size.
-                    if let Ok(mut size) = observed.lock() {
-                        *size = Some((cols, rows));
-                    }
-                    // Best-effort, and **not a tmux result at all**: this is
-                    // an internal `mpsc` send to the caller's resize
-                    // receiver, whose only failure is "the receiver is
-                    // gone". No tmux operation class applies — the tmux
-                    // call that produced this event already returned, and
-                    // its result was the line above. Keeping the reader
-                    // alive after a dropped receiver is the decision: output
-                    // continues until the output channel closes too.
-                    let _ = resize_tx.send((cols, rows)).await;
-                }
-                Effect::WelcomeDone => {
-                    if let Some(tx) = barrier.welcome_tx.take() {
-                        let _ = tx.send(());
-                    }
-                }
-                Effect::CaptureResolved(capture) => {
-                    if let Some(tx) = barrier.capture_tx.take() {
-                        let _ = tx.send(capture);
-                    }
-                }
-                Effect::Exit => break 'reader,
-                Effect::Note(note) => warn!("control-mode reader: {note}"),
-                Effect::ProtocolFault(reason) => {
-                    warn!("control-mode reader: protocol fault ({reason}); retiring stream");
-                    break 'reader;
-                }
-            }
-        }
-    }
-    // Nothing is updating this any more, so it stops being a fact a resize can
-    // be suppressed with: from here a requested size is issued, not compared.
-    if let Ok(mut size) = observed.lock() {
-        *size = None;
-    }
-}
-
-// `attach` spawns a separate `tmux resize-window` process — it runs *before*
-// the control-mode client exists, so there is no stdin to write to yet.
-// `resize` writes `resize-window` to the control-mode stdin instead. Two
-// routes, one shared window. Covered by tests/integration/control_mode.rs.
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tmux::client::ClientIo;
+    use tokio::io::{duplex, AsyncBufReadExt, AsyncWriteExt, BufReader, DuplexStream};
+
+    const WELCOME: &str = "%begin 1 0 0\n%end 1 0 0\n";
+
+    #[test]
+    fn the_transport_selection_keeps_pipe_as_the_default() {
+        assert_eq!(transport_for(None, 80, 24), ControlTransport::Pipe);
+        assert_eq!(transport_for(Some("pipe"), 80, 24), ControlTransport::Pipe);
+        assert_eq!(
+            transport_for(Some("nonsense"), 80, 24),
+            ControlTransport::Pipe,
+            "an unrecognized value must not change the production default"
+        );
+        #[cfg(unix)]
+        assert_eq!(
+            transport_for(Some("pty"), 120, 40),
+            ControlTransport::Pty {
+                cols: 120,
+                rows: 40
+            },
+            "the PTY carries the size the window is already at"
+        );
+    }
+
+    /// A client over an in-memory wire that plays tmux, plus the tmux side.
+    fn boot_wire() -> (TmuxClient, BufReader<DuplexStream>, DuplexStream) {
+        let (client_reader, tmux_tx) = duplex(1 << 16);
+        let (client_writer, tmux_rx) = duplex(1 << 16);
+        let io = ClientIo {
+            reader: Box::new(client_reader),
+            writer: Box::new(client_writer),
+            child: None,
+        };
+        (
+            TmuxClient::from_io("work", io, 1),
+            BufReader::new(tmux_rx),
+            tmux_tx,
+        )
+    }
+
+    #[tokio::test]
+    async fn the_bootstrap_drops_the_output_its_capture_covers_and_keeps_the_interleaved_output() {
+        // The barrier's exact cut, without a tmux: output before the capture's
+        // `%begin` is inside the pane read (dropped), output inside the
+        // response block was generated after it (live).
+        let (mut client, mut tmux_rx, mut tmux_tx) = boot_wire();
+        let mut events = client.take_events().expect("the test owns the events");
+        let (output_tx, mut output_rx) = mpsc::channel(16);
+        let (resize_tx, _resize_rx) = mpsc::channel(4);
+        let observed: ObservedWindowSize = Arc::new(Mutex::new(Some((80, 24))));
+
+        let fake = async {
+            tmux_tx
+                .write_all(WELCOME.as_bytes())
+                .await
+                .expect("welcome");
+            let mut command = String::new();
+            tmux_rx
+                .read_line(&mut command)
+                .await
+                .expect("capture command");
+            assert_eq!(command, "capture-pane -t work -p -S -10 -E - -e -J\n");
+            tmux_tx
+                .write_all(b"%output %0 before\n")
+                .await
+                .expect("pre-capture output");
+            tmux_tx
+                .write_all(b"%begin 2 1 0\nline one\n%output %0 inside\nline two\n%end 2 1 0\n")
+                .await
+                .expect("capture block");
+            // Written in the same batch: the barrier returns at the capture,
+            // so this is what the forwarder sees next.
+            tmux_tx
+                .write_all(b"%output %0 after\n")
+                .await
+                .expect("post-capture output");
+        };
+
+        let (capture, ()) = tokio::join!(
+            take_bootstrap(
+                &client,
+                &mut events,
+                "work",
+                10,
+                &output_tx,
+                &resize_tx,
+                &observed,
+            ),
+            fake,
+        );
+
+        assert_eq!(
+            capture.as_deref(),
+            Some(&b"line one\nline two"[..]),
+            "the capture body is the response block's data lines"
+        );
+        let live = tokio::time::timeout(Duration::from_secs(2), output_rx.recv())
+            .await
+            .expect("interleaved output is live")
+            .expect("the output channel stays open");
+        assert_eq!(live, b"inside", "the interleaved output is not covered");
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), output_rx.recv())
+                .await
+                .is_err(),
+            "the pre-capture output was dropped, not forwarded"
+        );
+        // What follows the capture in the stream is still in order for the
+        // forwarder that takes over after the barrier.
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(2), events.recv())
+                .await
+                .expect("post-capture output is published")
+                .expect("the event stream stays open"),
+            TmuxEvent::Output(crate::tmux::client::PaneOutput {
+                pane_id: "%0".to_string(),
+                data: b"after".to_vec(),
+            }),
+        );
+        client.close().await;
+    }
+
+    #[tokio::test]
+    async fn a_capture_that_never_lands_flushes_the_output_it_would_have_covered() {
+        // Source loss mid-capture: no snapshot is coming, so the held-back
+        // output is the only copy of what it covers.
+        let (mut client, mut tmux_rx, mut tmux_tx) = boot_wire();
+        let mut events = client.take_events().expect("the test owns the events");
+        let (output_tx, mut output_rx) = mpsc::channel(16);
+        let (resize_tx, _resize_rx) = mpsc::channel(4);
+        let observed: ObservedWindowSize = Arc::new(Mutex::new(Some((80, 24))));
+
+        let fake = async {
+            tmux_tx
+                .write_all(WELCOME.as_bytes())
+                .await
+                .expect("welcome");
+            let mut command = String::new();
+            tmux_rx
+                .read_line(&mut command)
+                .await
+                .expect("capture command");
+            tmux_tx
+                .write_all(b"%output %0 before\n")
+                .await
+                .expect("pre-capture output");
+            // End the source without ever closing the capture's block.
+            drop(tmux_tx);
+        };
+
+        let (capture, ()) = tokio::join!(
+            take_bootstrap(
+                &client,
+                &mut events,
+                "work",
+                10,
+                &output_tx,
+                &resize_tx,
+                &observed,
+            ),
+            fake,
+        );
+
+        assert!(capture.is_none(), "there was no capture to return");
+        let live = tokio::time::timeout(Duration::from_secs(2), output_rx.recv())
+            .await
+            .expect("the held-back output is flushed")
+            .expect("the output channel stays open");
+        assert_eq!(live, b"before");
+        client.close().await;
+    }
 
     #[cfg(unix)]
     #[tokio::test]
@@ -1016,18 +755,10 @@ mod tests {
         // process-wide tmux before #991 step 6.
         //
         // **This one runs on macOS too**, which the control-mode integration
-        // tests (skipped by `cfg!(target_os = "macos")` because a real tmux
-        // server can be crashed by parallel control-mode clients) cannot. There
-        // is no server here: every tmux invocation is the fake, which records
-        // its argv and exits. So the shape that has no local coverage on this
-        // machine — the backend's own wiring — has a test that does, and the
-        // macOS skip keeps applying exactly where it was needed: to real tmux.
+        // tests (skipped on macOS because a real tmux server can be crashed by
+        // parallel control-mode clients) cannot.
         let dir = tempfile::tempdir().expect("tempdir");
         let child_pid = dir.path().join("child.pid");
-        // `-C attach` records its own pid — the process this backend spawned,
-        // which is what it later resolves its client by — and `list-clients`
-        // hands it back the way tmux does (measured: `#{client_pid}` is the
-        // attaching process, so the client we own is the one carrying it).
         let fake = crate::test_support::FakeTmux::new(
             dir.path(),
             &format!(
@@ -1047,8 +778,6 @@ mod tests {
         assert_eq!(session.viewport(), (80, 24));
         assert!(capture.is_none(), "no capture was requested");
 
-        // `resize-window` is awaited, `-C attach` is a spawned child that the
-        // reader loop may not have seen finish yet.
         let calls = fake
             .wait_for_calls(3, std::time::Duration::from_secs(10))
             .await;
@@ -1082,11 +811,6 @@ mod tests {
             .expect("the attach branch records its pid")
             .trim()
             .to_string();
-
-        // `-s <session>` would detach *every* client of the session, including
-        // one a user attached by hand, and `-t <session>` detaches nothing at
-        // all (#1011). The only correct target is the client this backend owns,
-        // named from the pid it spawned.
         assert!(
             calls.iter().any(|args| args
                 == &vec![
@@ -1097,582 +821,5 @@ mod tests {
             "a control-mode client must detach the client it spawned ({pid}), on \
              the tmux it attached to: {calls:?}"
         );
-        assert!(
-            !calls.iter().any(|args| args
-                == &vec![
-                    "detach-client".to_string(),
-                    "-t".to_string(),
-                    "nession-fake-sess".to_string(),
-                ]),
-            "and never the session, which is the #1011 no-op: {calls:?}"
-        );
-    }
-
-    /// A requested capture that never gets its welcome — the fake exits
-    /// before writing one — resolves to no capture **immediately**, not
-    /// after `WELCOME_TIMEOUT`.
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn a_child_that_dies_before_the_welcome_skips_the_capture_at_once() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let fake = crate::test_support::FakeTmux::new(dir.path(), "exit 0");
-        let started = std::time::Instant::now();
-        let (_session, _rx, _resize_rx, capture) =
-            ControlModeSession::attach(&fake.dep(), "nession-fake-sess", 80, 24, Some(5000))
-                .await
-                .expect("the injected binary accepts the resize and the attach");
-        assert!(capture.is_none(), "the child died before the welcome");
-        assert!(
-            started.elapsed() < WELCOME_TIMEOUT,
-            "a dead child must not wait out the welcome timeout: {:?}",
-            started.elapsed()
-        );
-    }
-
-    /// A fake whose control client appends everything written to its control
-    /// channel — the only place `resize` and the capture reach tmux — so a
-    /// test can assert on the commands rather than on the argv of a spawn.
-    #[cfg(unix)]
-    fn recording_fake(
-        dir: &std::path::Path,
-        log: &std::path::Path,
-        preamble: &str,
-    ) -> crate::test_support::FakeTmux {
-        crate::test_support::FakeTmux::new(
-            dir,
-            &format!(
-                "case \"$1\" in \
-                 attach|-C) {preamble}while IFS= read -r line; do printf '%s\\n' \"$line\" >> \"{log}\"; done; exit 0;; \
-                 *) exit 0;; esac",
-                log = log.display(),
-            ),
-        )
-    }
-
-    /// Wait for the fake's control-channel log, which the child writes as it
-    /// reads: EOF (the session's stdin closing) is what ends it.
-    #[cfg(unix)]
-    async fn control_channel_log(path: &std::path::Path) -> String {
-        for _ in 0..100 {
-            if let Ok(text) = std::fs::read_to_string(path) {
-                if !text.is_empty() {
-                    return text;
-                }
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-        std::fs::read_to_string(path).unwrap_or_default()
-    }
-
-    /// A resize to the size the window already has writes nothing: the two
-    /// commands it would otherwise send reflow the pane and repaint **every**
-    /// client of the session, for a size that is already on screen (#1490).
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn a_resize_to_the_size_the_window_already_has_writes_nothing() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let log = dir.path().join("control-stdin.log");
-        let fake = recording_fake(dir.path(), &log, "");
-
-        let (mut session, _rx, _resize_rx, _capture) =
-            ControlModeSession::attach(&fake.dep(), "nession-fake-sess", 80, 24, None)
-                .await
-                .expect("the injected binary accepts the attach");
-
-        // What a re-attach asks for: the size the window is already at, set by
-        // the attach's own `resize-window`.
-        session
-            .resize(80, 24)
-            .await
-            .expect("an idempotent resize succeeds");
-        // A different size still moves it.
-        session
-            .resize(100, 30)
-            .await
-            .expect("a real resize is written");
-        // ...and having just been asked for, that is where the window is now.
-        session
-            .resize(100, 30)
-            .await
-            .expect("a repeat writes nothing");
-        assert_eq!(session.viewport(), (100, 30));
-        drop(session);
-
-        let written = control_channel_log(&log).await;
-        assert_eq!(
-            written.matches("resize-window").count(),
-            1,
-            "one size change, one resize-window: {written:?}"
-        );
-        assert!(
-            written.contains("resize-window -t nession-fake-sess -x 100 -y 30\n"),
-            "the size that did change is the one written: {written:?}"
-        );
-        assert_eq!(
-            written.matches("refresh-client").count(),
-            1,
-            "and exactly one repaint, for that one change: {written:?}"
-        );
-    }
-
-    /// The guard reads what tmux reported, not what this backend last asked
-    /// for. A peer reflowing the shared window makes the last request stale,
-    /// and a client asking for that size must get it back rather than be told
-    /// the window is already there.
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn a_peer_moving_the_window_makes_the_next_request_a_real_resize() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let log = dir.path().join("control-stdin.log");
-        let fake = recording_fake(
-            dir.path(),
-            &log,
-            "printf '%s\\n' '%layout-change @0 a87d,100x30,0,0,0'; ",
-        );
-
-        let (mut session, _rx, _resize_rx, _capture) =
-            ControlModeSession::attach(&fake.dep(), "nession-fake-sess", 80, 24, None)
-                .await
-                .expect("the injected binary accepts the attach");
-
-        let mut took_the_report = false;
-        for _ in 0..100 {
-            if session.window_is_at(100, 30) {
-                took_the_report = true;
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-        assert!(took_the_report, "the reader records the size tmux reports");
-
-        // 80x24 is what this client last asked for — and the window is at the
-        // peer's size, so the request is a real resize and must be written.
-        session.resize(80, 24).await.expect("the resize is written");
-        drop(session);
-
-        let written = control_channel_log(&log).await;
-        assert!(
-            written.contains("resize-window -t nession-fake-sess -x 80 -y 24\n"),
-            "a stale last request must not suppress the resize: {written:?}"
-        );
-    }
-
-    mod barrier {
-        use super::*;
-
-        /// The live bytes a route produced, in order.
-        fn live(effects: &[Effect]) -> Vec<Vec<u8>> {
-            effects
-                .iter()
-                .filter_map(|e| match e {
-                    Effect::Live(bytes) => Some(bytes.clone()),
-                    _ => None,
-                })
-                .collect()
-        }
-
-        fn resolved(effects: &[Effect]) -> Option<&Option<Vec<u8>>> {
-            effects.iter().find_map(|e| match e {
-                Effect::CaptureResolved(capture) => Some(capture),
-                _ => None,
-            })
-        }
-
-        fn welcome(router: &mut ControlRouter) {
-            let effects = router.route("%begin 100 1 0\n", false);
-            assert_eq!(effects, vec![], "the welcome block opens quietly");
-            let effects = router.route("%end 100 1 0\n", false);
-            assert!(
-                effects.contains(&Effect::WelcomeDone),
-                "the first block's end is the welcome: {effects:?}"
-            );
-        }
-
-        #[test]
-        fn raw_non_utf8_output_reaches_live_bytes_without_string_conversion() {
-            let mut router = ControlRouter::new();
-            router.on_skipped();
-            let effects = router.route_bytes(b"%output %0 a\xff\\033\\134\xfe\n", false);
-            assert_eq!(live(&effects), vec![b"a\xff\x1b\\\xfe".to_vec()]);
-        }
-
-        #[tokio::test]
-        async fn control_line_reader_preserves_split_non_utf8_frames() {
-            let (mut tx, rx) = tokio::io::duplex(5);
-            let written = tokio::spawn(async move {
-                tx.write_all(b"%output %0 a\xff\\033\n").await.unwrap();
-            });
-            let mut reader = BufReader::new(rx);
-            let mut frame = Vec::new();
-            assert!(read_control_line(&mut reader, &mut frame).await.unwrap() > 0);
-            assert_eq!(frame, b"%output %0 a\xff\\033\n");
-            written.await.unwrap();
-        }
-
-        #[tokio::test]
-        async fn a_cancelled_read_preserves_consumed_prefix_until_newline() {
-            // The initial incomplete record must fit before the read future
-            // starts, otherwise write_all itself would block on this fixture.
-            let (mut tx, rx) = tokio::io::duplex(64);
-            tx.write_all(b"%output %0 A").await.unwrap();
-            let mut reader = BufReader::new(rx);
-            let mut frame = Vec::new();
-
-            // The reader has consumed an incomplete prefix when another
-            // select! arm fires, e.g. a bootstrap barrier decision.
-            tokio::select! {
-                biased;
-                read = read_control_line(&mut reader, &mut frame) => {
-                    panic!("partial record should not finish: {read:?}");
-                }
-                () = tokio::time::sleep(Duration::from_millis(20)) => {}
-            }
-            assert_eq!(frame, b"%output %0 A");
-            tx.write_all(b"\\033\n").await.unwrap();
-            assert_eq!(
-                read_control_line(&mut reader, &mut frame).await.unwrap(),
-                b"%output %0 A\\033\n".len()
-            );
-            assert_eq!(frame, b"%output %0 A\\033\n");
-        }
-
-        #[tokio::test]
-        async fn truncated_control_record_is_not_routed_as_complete_output() {
-            let (mut tx, rx) = tokio::io::duplex(16);
-            tx.write_all(b"%output %0 A").await.unwrap();
-            drop(tx);
-            let mut reader = BufReader::new(rx);
-            let err = read_control_line(&mut reader, &mut Vec::new())
-                .await
-                .expect_err("EOF before newline is a framing fault");
-            assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
-        }
-
-        #[test]
-        fn invalid_output_escape_and_known_malformed_header_retire_stream() {
-            let mut router = ControlRouter::new();
-            router.on_skipped();
-            let malformed = router.route_bytes(b"%output %0 bad\\08x\n", false);
-            assert_eq!(
-                malformed,
-                vec![Effect::ProtocolFault("invalid tmux output escape")]
-            );
-            let invalid_header = router.route_bytes(b"%output\n", false);
-            assert_eq!(
-                invalid_header,
-                vec![Effect::ProtocolFault("malformed tmux Control Mode record")]
-            );
-            // tmux may introduce new notifications; they are not a reason to
-            // discard a healthy stream.
-            assert!(router
-                .route_bytes(b"%new-tmux-feature foo\n", false)
-                .is_empty());
-        }
-
-        #[test]
-        fn output_before_anything_buffers() {
-            let mut router = ControlRouter::new();
-            let effects = router.route("%output %0 GAP-001\\012", false);
-            assert_eq!(live(&effects), Vec::<Vec<u8>>::new());
-            assert_eq!(router.pre_barrier.len(), 1);
-        }
-
-        #[test]
-        fn the_capture_boundary_drops_what_the_capture_carries() {
-            let mut router = ControlRouter::new();
-            welcome(&mut router);
-
-            // Two chunks arrive before the capture's %begin: they are inside
-            // the capture, so they must never go live.
-            router.route("%output %0 GAP-001\\012", true);
-            router.route("%output %0 GAP-002\\012", true);
-
-            assert_eq!(router.route("%begin 200 9 1\n", true), vec![]);
-            assert_eq!(router.route("GAP-001\n", true), vec![]);
-            assert_eq!(router.route("GAP-002\n", true), vec![]);
-            let effects = router.route("%end 200 9 1\n", true);
-
-            assert_eq!(
-                resolved(&effects),
-                Some(&Some(b"GAP-001\nGAP-002\n".to_vec())),
-                "the snapshot is the response's data lines: {effects:?}"
-            );
-            assert_eq!(
-                live(&effects),
-                Vec::<Vec<u8>>::new(),
-                "the pre-barrier buffer is dropped, not replayed"
-            );
-            assert!(router.pre_barrier.is_empty());
-        }
-
-        #[test]
-        fn output_interleaved_in_the_capture_block_is_post_barrier() {
-            let mut router = ControlRouter::new();
-            welcome(&mut router);
-            router.route("%begin 200 9 1\n", true);
-
-            let effects = router.route("%output %0 GAP-042\\012", true);
-            assert_eq!(
-                live(&effects),
-                vec![b"GAP-042\n".to_vec()],
-                "the pane read happened at %begin, so interleaved output is new"
-            );
-        }
-
-        #[test]
-        fn output_after_the_capture_is_live() {
-            let mut router = ControlRouter::new();
-            welcome(&mut router);
-            router.route("%begin 200 9 1\n", true);
-            router.route("GAP-001\n", true);
-            router.route("%end 200 9 1\n", true);
-
-            let effects = router.route("%output %0 GAP-002\\012", true);
-            assert_eq!(live(&effects), vec![b"GAP-002\n".to_vec()]);
-        }
-
-        #[test]
-        fn an_errored_capture_flushes_the_buffer_instead_of_dropping_it() {
-            let mut router = ControlRouter::new();
-            welcome(&mut router);
-            router.route("%output %0 GAP-001\\012", true);
-            router.route("%output %0 GAP-002\\012", true);
-            router.route("%begin 200 9 1\n", true);
-
-            let effects = router.route("%error 200 9 1\n", true);
-            assert_eq!(
-                live(&effects),
-                vec![b"GAP-001\n".to_vec(), b"GAP-002\n".to_vec()],
-                "no capture means the buffer is the only copy — in order"
-            );
-            assert_eq!(resolved(&effects), Some(&None));
-        }
-
-        #[test]
-        fn a_skipped_capture_flushes_the_buffer() {
-            let mut router = ControlRouter::new();
-            welcome(&mut router);
-            router.route("%output %0 GAP-001\\012", false);
-
-            let effects = router.on_skipped();
-            assert_eq!(live(&effects), vec![b"GAP-001\n".to_vec()]);
-
-            let effects = router.route("%output %0 GAP-002\\012", false);
-            assert_eq!(live(&effects), vec![b"GAP-002\n".to_vec()]);
-        }
-
-        #[test]
-        fn a_capture_skipped_mid_block_abandons_it() {
-            let mut router = ControlRouter::new();
-            welcome(&mut router);
-            router.route("%output %0 GAP-001\\012", true);
-            router.route("%begin 200 9 1\n", true);
-            router.route("GAP-001\n", true);
-
-            // The attach gave up waiting (its timeout) — the buffer is live,
-            // and the block's remaining data is ignored.
-            let effects = router.on_skipped();
-            assert_eq!(live(&effects), vec![b"GAP-001\n".to_vec()]);
-            let effects = router.route("GAP-002\n", true);
-            assert_eq!(effects, vec![]);
-            let effects = router.route("%end 200 9 1\n", true);
-            assert_eq!(resolved(&effects), None, "abandoned: nothing resolves");
-        }
-
-        #[test]
-        fn the_block_closes_only_on_the_exact_triple() {
-            let mut router = ControlRouter::new();
-            welcome(&mut router);
-            router.route("%begin 200 9 1\n", true);
-            router.route("GAP-001\n", true);
-
-            // A data line spelling %end with a *different* triple is data —
-            // response data is raw, and tmux never nests blocks.
-            let effects = router.route("%end 200 9 4\n", true);
-            assert_eq!(effects, vec![]);
-            let effects = router.route("%end 200 9 1\n", true);
-            assert_eq!(
-                resolved(&effects),
-                Some(&Some(b"GAP-001\n%end 200 9 4\n".to_vec())),
-                "the look-alike line is in the capture: {effects:?}"
-            );
-        }
-
-        #[test]
-        fn pane_data_spelling_output_inside_the_block_is_misrouted() {
-            // The documented residue: response data is raw, so a pane line
-            // spelling `%output ...` during the capture block is forwarded as
-            // if tmux had sent it. Pinned so a future protocol fix knows what
-            // it is changing.
-            let mut router = ControlRouter::new();
-            welcome(&mut router);
-            router.route("%begin 200 9 1\n", true);
-            let effects = router.route("%output %0 not-a-notification", true);
-            assert_eq!(live(&effects), vec![b"not-a-notification".to_vec()]);
-        }
-
-        #[test]
-        fn aggregate_pre_barrier_bytes_are_bounded_even_with_few_frames() {
-            let mut router = ControlRouter::new();
-            let mut effects = Vec::new();
-            router.route_output(vec![b'x'; MAX_PRE_BARRIER_BYTES + 1], &mut effects);
-            assert!(router.pre_barrier.is_empty());
-            assert_eq!(router.pre_barrier_bytes, 0);
-            assert!(effects
-                .iter()
-                .any(|e| matches!(e, Effect::CaptureResolved(None))));
-            assert!(effects
-                .iter()
-                .any(|e| matches!(e, Effect::Live(bytes) if bytes.len() > MAX_PRE_BARRIER_BYTES)));
-        }
-
-        #[test]
-        fn oversized_capture_fails_closed_instead_of_growing_without_bound() {
-            let mut router = ControlRouter::new();
-            welcome(&mut router);
-            router.route("%begin 200 9 1", true);
-            let effects = router.route_bytes(&vec![b'x'; MAX_CAPTURE_RESPONSE_BYTES + 1], true);
-            assert!(effects
-                .iter()
-                .any(|e| matches!(e, Effect::ProtocolFault(_))));
-            assert!(router.capture_lines.is_empty());
-            assert_eq!(router.capture_bytes, 0);
-        }
-
-        #[test]
-        fn buffer_overflow_degrades_to_flushing_everything_live() {
-            let mut router = ControlRouter::new();
-            for _ in 0..PRE_BARRIER_BUFFER_CHUNKS {
-                router.route("%output %0 x", false);
-            }
-            let effects = router.route("%output %0 x", false);
-            assert_eq!(
-                live(&effects).len(),
-                PRE_BARRIER_BUFFER_CHUNKS + 1,
-                "the whole buffer flushes on overflow"
-            );
-            assert_eq!(resolved(&effects), Some(&None));
-            assert!(effects.iter().any(|e| matches!(e, Effect::Note(_))));
-
-            let effects = router.route("%output %0 after", false);
-            assert_eq!(live(&effects), vec![b"after".to_vec()]);
-        }
-
-        #[test]
-        fn the_welcome_blocks_data_is_ignored() {
-            let mut router = ControlRouter::new();
-            router.route("%begin 100 1 0\n", false);
-            assert_eq!(router.route("stray\n", false), vec![]);
-            let effects = router.route("%end 100 1 0\n", false);
-            assert_eq!(effects, vec![Effect::WelcomeDone]);
-        }
-
-        #[test]
-        fn an_empty_capture_resolves_to_empty_text() {
-            let mut router = ControlRouter::new();
-            welcome(&mut router);
-            router.route("%begin 200 9 1\n", true);
-            let effects = router.route("%end 200 9 1\n", true);
-            assert_eq!(resolved(&effects), Some(&Some(Vec::new())));
-        }
-
-        /// **The path that actually fires on the pinned tmux** (#1349).
-        /// `%window-resize` is not emitted by 3.6b at all, so a peer reflowing
-        /// the shared window reached no other client until this arm stopped
-        /// ignoring `%layout-change`.
-        #[test]
-        fn a_layout_change_reports_the_window_size() {
-            let mut router = ControlRouter::new();
-            welcome(&mut router);
-            let effects = router.route(
-                "%layout-change @0 a87d,100x30,0,0,0 a87d,100x30,0,0,0 *\n",
-                true,
-            );
-            assert_eq!(effects, vec![Effect::Resize(100, 30)]);
-        }
-
-        /// A layout change is not always a *size* change, and 3.6b sends **two**
-        /// lines for one `resize-window` (measured). Reporting the second would
-        /// be telling every client to resize to the size it already has.
-        #[test]
-        fn the_same_size_twice_is_reported_once() {
-            let mut router = ControlRouter::new();
-            welcome(&mut router);
-            assert_eq!(
-                router.route(
-                    "%layout-change @0 a87d,100x30,0,0,0 a87d,100x30,0,0,0 *\n",
-                    true
-                ),
-                vec![Effect::Resize(100, 30)]
-            );
-            assert_eq!(
-                router.route(
-                    "%layout-change @0 a87d,100x30,0,0,0 a87d,100x30,0,0,0 *\n",
-                    true
-                ),
-                Vec::new()
-            );
-            // A different size is news again — the dedupe is about repetition,
-            // not about reporting once per session.
-            assert_eq!(
-                router.route(
-                    "%layout-change @0 b25d,80x24,0,0,0 b25d,80x24,0,0,0 *\n",
-                    true
-                ),
-                vec![Effect::Resize(80, 24)]
-            );
-        }
-
-        /// A pane split moves no client, so a layout change with no readable
-        /// size must produce nothing rather than a guess.
-        #[test]
-        fn a_layout_change_with_no_size_reports_nothing() {
-            let mut router = ControlRouter::new();
-            welcome(&mut router);
-            assert_eq!(
-                router.route("%layout-change @0 nonsense nonsense *\n", true),
-                Vec::new()
-            );
-        }
-
-        #[test]
-        fn layout_change_inside_command_response_updates_observers_once() {
-            let mut router = ControlRouter::new();
-            welcome(&mut router);
-            assert!(router.route("%begin 200 9 1\n", true).is_empty());
-
-            // Real tmux 3.6b emits a layout notification even while another
-            // control command's response is open. The notification must not
-            // be swallowed as capture text (nor change the response block).
-            let layout = "%layout-change @0 a87d,177x49,0,0,0 a87d,177x49,0,0,0 *\n";
-            assert_eq!(router.route(layout, true), vec![Effect::Resize(177, 49)]);
-            assert!(router.route(layout, true).is_empty());
-            assert_eq!(router.route("%end 200 9 1\n", true).len(), 1);
-            assert_eq!(router.reported_size, Some((177, 49)));
-
-            // A subsequent real resize must not be masked by the dedupe.
-            let next = "%layout-change @0 b25d,124x30,0,0,0 b25d,124x30,0,0,0 *\n";
-            assert_eq!(router.route(next, true), vec![Effect::Resize(124, 30)]);
-        }
-
-        #[test]
-        fn resize_events_pass_through_mid_block() {
-            let mut router = ControlRouter::new();
-            welcome(&mut router);
-            router.route("%begin 200 9 1\n", true);
-            let effects = router.route("%window-resize @1 120 40\n", true);
-            assert_eq!(effects, vec![Effect::Resize(120, 40)]);
-        }
-
-        #[test]
-        fn the_decision_arriving_after_output_still_flushes_in_order() {
-            // Output buffered while Pending, then Skipped: order is arrival
-            // order, or the client's screen replays scrambled.
-            let mut router = ControlRouter::new();
-            router.route("%output %0 one", false);
-            router.route("%output %0 two", false);
-            let effects = router.on_skipped();
-            assert_eq!(live(&effects), vec![b"one".to_vec(), b"two".to_vec()]);
-        }
     }
 }

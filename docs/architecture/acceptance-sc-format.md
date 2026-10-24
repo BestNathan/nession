@@ -50,6 +50,48 @@ acceptance:
 Existing runner compatibility needs a stage. It is **derived**, never copied into the new Report: `pr → pre-merge`, `merged/staging → staging`, `merged/main → post-merge`, `deployed/environment → post-merge` **for compatibility bookkeeping only**. A deployed SC is not executed on a plain main push. Real rollout must be bound to an independently verified environment/revision/digest before proving it.
 
 
+## Minimize proof latency without weakening trust
+
+**Pick the earliest safe proof boundary per SC; runtime topology is not a
+requirement.** In particular, a Developer Worker that currently runs only
+on `main` does **not** imply that functional correctness requires
+`when: merged, branch: main`.
+
+| Kind of invariant | Preferred boundary | What counts as proof |
+| --- | --- | --- |
+| Model/Registry binding, malformed configuration rejection, CLI/version/Harness mismatch | PR head | deterministic negative and regression cases pinned to that head |
+| Real isolated Qwen Developer edit, checkpoint persistence and replay, multiple Jobs/Runs, tamper tests | staging merge | authenticated staging Runner with provider credentials scoped to staging, exact SHA/Run/Attempt, ciphertext and Store CAS observations |
+| The final trusted main Dispatcher/Outbox receipt and downstream integration | main merge | narrow real main Run, signed Store receipt and Publisher→Reviewer handoff; no generic full-suite rerun |
+| Live production behavior | deployed artifact/revision | actual authenticated release and remote observation; **not** a main push |
+
+Only select `method: agent` for read-only inspection of concrete existing
+code, CI and authenticated receipts. A generated summary is not a substitute
+for an executed runtime assertion: use `method: case` and its required
+source-aligned Case for a real behavioral verifier.
+
+### When staging integration infrastructure is missing
+
+A staging proof must not borrow the privileged `main` Worker to sidestep the
+stage contract. Establish a trusted main-owned, isolated staging executor,
+with limited staging Environment credentials, distinct State/Store namespace,
+no untrusted PR code with secrets, an immutable input SHA and authenticated
+Run/Artifact/CAS receipts; the existing trusted ingest/projector remains
+the sole result writer. Until verified, keep the staging SC `Pending` and
+make this missing lane an explicit prerequisite. Never convert that
+`Pending` to `N/A`, model opinion, or an unrelated passing `main` canary.
+
+For exceptional `merged/main` SCs the Issue's Requirements prose must
+identify the **main-only invariant**, why PR or staging cannot prove it,
+the exact minimal expected evidence and how missing or negative evidence
+blocks completion. `when: merged` is not a requirement for Full E2E, and
+it does not imply successful production deployment.
+
+A proof plan migration must preserve each meaningful SC ID, the original
+Run/Attempt/SHA evidence and failures, and record why prior evidence is
+not yet interchangeable. Changing the plan modifies the SC contract
+digest; historical evidence stays historical and must not be silently
+retargeted to a different branch/stage.
+
 ## Risk-based verification tiers and Full E2E
 
 Nession classifies issue verification scope using one label: `verification:scoped` (L1), `verification:integration` (L2), or `verification:full` (L3). Labels are mutually exclusive; legacy unlabelled issues default to L1 until a trusted reassessment. The read-only assessment helper and negative fixtures live in `scripts/verification-tier-policy.mjs`.
