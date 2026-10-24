@@ -149,7 +149,14 @@ function verify(root,baseline=null) {
   if(JSON.stringify(actual)!==JSON.stringify(expected))fail('index.json differs from topic/category-derived index');
   const changeText=fs.readFileSync(path.join(root,'CHANGELOG.md'),'utf8'),events=logEntries(changeText);
   for(const list of Object.values(expected.topics))for(const entry of list){
-    if(!events.some(e=>e.id===entry.id&&e.path===entry.path&&e.action!=='delete'))fail('knowledge absent from global changelog: '+entry.id);
+    const history=events.filter(e=>e.id===entry.id&&e.path===entry.path);
+    const latest=history.at(-1);
+    if(!latest||latest.action==='delete')fail('current knowledge absent/retracted in global changelog: '+entry.id);
+    if(latest.topic!==entry.path.split('/')[1]||
+       JSON.stringify([...latest.categories].sort())!==JSON.stringify([...entry.categories].sort()))
+      fail('current topic/category metadata differs from latest changelog event: '+entry.id);
+    if(['create','update','move'].includes(latest.action)&&latest.at!==entry.updated_at)
+      fail('current updated_at must match last change event timestamp: '+entry.id);
   }
   for(const file of paths(root,'topics').concat(['CHANGELOG.md'])) {
     const text=fs.readFileSync(path.join(root,file),'utf8');
