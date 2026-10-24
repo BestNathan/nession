@@ -348,46 +348,68 @@ async fn an_error_block_reports_tmuxs_own_message() {
     client.close().await;
 }
 
-/// #2286/#2144: a `%layout-change` that interleaves another command's
-/// response block is a source event, not response body.
+/// #2378 SC-02 (reopened): a notification-shaped line inside an open response
+/// block is capture body, not a live source event.
 ///
-/// tmux 3.6b reports a pane resize with `%layout-change`, and it can arrive
-/// between `%begin` and `%end` of a command the client is waiting for. The old
-/// router ignored it there, leaving passive peers at stale geometry even though
-/// the pane had already moved. The client must emit the resize and still
-/// resolve the command with its own (empty) body.
+/// tmux 3.6b does not escape command output, and it does not interleave
+/// notifications inside a response block (measured on both `-C` and `-CC`: a
+/// resize driven from another client while `wait-for` held a block open
+/// arrived after `%end`). A captured pane line can therefore be exactly
+/// `%exit`, `%output …`, `%layout-change …`, `%window-resize …` or `%begin …`.
+///
+/// The previous behaviour routed those parsed records as notifications. That
+/// fabricated output or geometry for `%output`/`%layout-change` and, for a
+/// pane line reading `%exit`, closed the whole attachment: the capture command
+/// never returned and its bytes were lost. This test is the red-before witness
+/// for that collision and now pins the measured contract.
 #[tokio::test]
-async fn a_layout_change_inside_a_response_block_still_resizes() {
+async fn notification_shaped_body_lines_are_content_not_source_events() {
     let (mut client, mut rx, mut tx) = wire();
     send(&mut tx, WELCOME).await;
-
-    let (result, command) = tokio::join!(client.command(ControlCommand::RefreshClient), async {
-        let command = read_command(&mut rx).await;
-        send(&mut tx, "%begin 2 1 0\n").await;
-        send(
-            &mut tx,
-            "%layout-change @0 a87d,177x49,0,0,0 a87d,177x49,0,0,0 *\n",
-        )
-        .await;
-        send(&mut tx, "%end 2 1 0\n").await;
-        command
-    },);
-
-    assert_eq!(command, "refresh-client\n");
-    assert_eq!(
-        result.expect("the command's own block is still its reply"),
-        b"",
-        "the layout notification must not become the response body"
-    );
     assert_eq!(next_event(&mut client).await, TmuxEvent::Handshaken);
+
+    let body = "%exit\n%output %0 hello\n\
+                %layout-change @0 a87d,177x49,0,0,0 a87d,177x49,0,0,0 *\n\
+                %window-resize @0 100 30\n%begin 2 9 0\n\n%unknown foo";
+    let (result, command) = tokio::join!(client.capture_pane(10), async {
+        let command = read_command(&mut rx).await;
+        send(&mut tx, &format!("%begin 2 1 0\n{body}\n%end 2 1 0\n")).await;
+        command
+    });
+
+    assert_eq!(command, "capture-pane -t work -p -S -10 -E - -e -J\n");
+    assert_eq!(
+        result.expect("a notification-shaped body must not close the attachment"),
+        body.as_bytes(),
+        "every in-block line, including a well-formed notification, is capture bytes"
+    );
+    // The barrier pair carries the same bytes; nothing else may be invented.
+    assert_eq!(next_event(&mut client).await, TmuxEvent::CaptureStarted);
     assert_eq!(
         next_event(&mut client).await,
-        TmuxEvent::Resize {
-            cols: 177,
-            rows: 49
-        },
-        "a layout change inside a response block must reach observers"
+        TmuxEvent::Capture {
+            body: body.as_bytes().to_vec(),
+        }
     );
+    assert!(
+        tokio::time::timeout(
+            Duration::from_millis(100),
+            client.events().expect("the stream").recv(),
+        )
+        .await
+        .is_err(),
+        "no fabricated resize, output or exit may escape from capture bytes"
+    );
+    assert!(!client.is_closed());
+
+    // The attachment is still usable for the next command.
+    let (result, command) = tokio::join!(client.command(ControlCommand::RefreshClient), async {
+        let command = read_command(&mut rx).await;
+        send(&mut tx, "%begin 3 2 0\n%end 3 2 0\n").await;
+        command
+    });
+    assert_eq!(command, "refresh-client\n");
+    assert_eq!(result.expect("the next reply is matched"), b"");
     client.close().await;
 }
 
@@ -616,6 +638,147 @@ async fn a_stalled_consumer_fails_closed_at_the_admission_deadline() {
     );
 }
 
+/// #2380 SC-02 (reopened): byte credit alone does not bound a stalled
+/// consumer.
+///
+/// With a large byte budget and tiny events, the 256-slot event channel fills
+/// while most of the credit is still free. Bounding only the credit
+/// acquisition left `tx.send` able to park a live-but-stalled consumer
+/// forever: no terminal `SourceLost` was produced within any deadline. The
+/// send now shares the admission deadline, and the loss is stated either as
+/// the terminal event in order or as the failure record `recv` surfaces when
+/// the queue was too full to carry it.
+#[tokio::test]
+async fn a_full_event_queue_fails_closed_at_the_admission_deadline() {
+    let limits = EventIngressLimits {
+        max_queued_bytes: 1024 * 1024,
+        admission_timeout: Duration::from_millis(150),
+    };
+    let (mut client, mut rx, mut tx) = wire_with_limits(limits);
+    send(&mut tx, WELCOME).await;
+    assert_eq!(next_event(&mut client).await, TmuxEvent::Handshaken);
+
+    let started = std::time::Instant::now();
+    let (result, line) = tokio::join!(client.command(ControlCommand::RefreshClient), async {
+        let line = read_command(&mut rx).await;
+        // 67 charged bytes each (64 overhead + 2 pane-id + 1 payload): far
+        // inside the byte budget, but past the count-bounded channel.
+        for _ in 0..(EVENT_CHANNEL_CAPACITY + 8) {
+            send(&mut tx, "%output %0 x\r\n").await;
+        }
+        line
+    });
+    let elapsed = started.elapsed();
+
+    assert_eq!(line, "refresh-client\n");
+    match result {
+        Err(TmuxClientError::SourceLost(reason)) => assert!(
+            reason.contains("consumer stalled"),
+            "the loss names the stalled consumer: {reason}"
+        ),
+        other => panic!("a full event queue must fail closed: {other:?}"),
+    }
+    assert!(
+        elapsed < Duration::from_secs(3),
+        "the waiter must learn the loss within the admission deadline: {elapsed:?}"
+    );
+    assert!(client.is_closed());
+
+    // The admitted events stay ordered. The terminal loss is observable even
+    // though the full queue could not carry the terminal event at admission
+    // time, and every admitted charge is released exactly once.
+    let mut events = client.take_events().expect("the test owns the stream");
+    let mut count = 0usize;
+    let mut last = None;
+    while let Ok(Some(event)) =
+        tokio::time::timeout(Duration::from_millis(500), events.recv()).await
+    {
+        count += 1;
+        last = Some(event);
+    }
+    assert_eq!(
+        count,
+        EVENT_CHANNEL_CAPACITY + 1,
+        "the count bound admits exactly its slots plus the terminal loss"
+    );
+    assert!(
+        matches!(last, Some(TmuxEvent::SourceLost { .. })),
+        "the terminal event states the loss: {last:?}"
+    );
+    assert_eq!(
+        events.budget.queued.load(Ordering::Acquire),
+        0,
+        "every admitted charge is released on take; the failed send refunded its own"
+    );
+}
+
+/// #2380 SC-02 (reopened): the admission permit owns one event's byte charge.
+/// Dropping it — a failed, timed-out or cancelled send — refunds that charge
+/// instead of leaking budget.
+#[tokio::test]
+async fn a_dropped_admission_permit_refunds_its_credit() {
+    let budget = EventBudget::new(1024);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+    let permit = match budget.acquire_until(100, deadline).await {
+        Admission::Granted(permit) => permit,
+        Admission::Overloaded | Admission::Closed => panic!("the credit is available"),
+    };
+    assert_eq!(budget.queued.load(Ordering::Acquire), 100);
+    drop(permit);
+    assert_eq!(
+        budget.queued.load(Ordering::Acquire),
+        0,
+        "an unarmed permit refunds its charge"
+    );
+
+    // Disarming transfers the charge to the queued event instead.
+    let permit = match budget.acquire_until(100, deadline).await {
+        Admission::Granted(permit) => permit,
+        Admission::Overloaded | Admission::Closed => panic!("the credit is available"),
+    };
+    permit.disarm();
+    assert_eq!(
+        budget.queued.load(Ordering::Acquire),
+        100,
+        "a disarmed permit leaves the charge to the consumer's release"
+    );
+}
+
+/// #2380 SC-02 (reopened): a source that failed states its loss exactly once,
+/// even when the queue was too full to carry the terminal event. Admitted
+/// events come first, in order; the recorded loss is terminal; the stream
+/// then ends.
+#[tokio::test]
+async fn a_recorded_source_loss_is_stated_after_the_admitted_events() {
+    let budget = Arc::new(EventBudget::new(1024));
+    let (tx, rx) = mpsc::channel(1);
+    let mut stream = EventStream {
+        rx,
+        budget: Arc::clone(&budget),
+    };
+    tx.send(BudgetedEvent {
+        event: TmuxEvent::Output(PaneOutput {
+            pane_id: "%0".to_string(),
+            data: b"kept".to_vec(),
+        }),
+        bytes: 0,
+    })
+    .await
+    .expect("the admitted event");
+    drop(tx);
+    budget.record_failure("event ingress budget exhausted; consumer stalled");
+
+    assert!(matches!(
+        stream.recv().await,
+        Some(TmuxEvent::Output(output)) if output.data == b"kept"
+    ));
+    assert!(matches!(
+        stream.recv().await,
+        Some(TmuxEvent::SourceLost { ref reason }) if reason.contains("consumer stalled")
+    ));
+    assert!(stream.recv().await.is_none(), "the loss is stated once");
+}
+
 #[tokio::test]
 async fn source_loss_fails_every_pending_command_and_is_stated() {
     let (mut client, mut rx, mut tx) = wire();
@@ -668,8 +831,9 @@ async fn a_capture_is_published_in_stream_order_between_output() {
         let command = read_command(&mut rx).await;
         assert_eq!(command, "capture-pane -t work -p -S -10 -E - -e -J\n");
         send(&mut tx, "%output %0 before\\015\n").await;
-        // Output emitted while the capture's block is open was generated
-        // *after* the pane read, so it is live and is not part of the body.
+        // tmux does not interleave live output inside a response block
+        // (measured on both transports), so an output-shaped line there is
+        // capture body — not a live event and not a second copy (#2378).
         send(
             &mut tx,
             "%begin 2 1 0\nline one\n%output %0 inside\\015\nline two\n%end 2 1 0\n",
@@ -692,15 +856,8 @@ async fn a_capture_is_published_in_stream_order_between_output() {
     assert_eq!(next_event(&mut client).await, TmuxEvent::CaptureStarted);
     assert_eq!(
         next_event(&mut client).await,
-        TmuxEvent::Output(PaneOutput {
-            pane_id: "%0".to_string(),
-            data: b"inside\r".to_vec(),
-        }),
-    );
-    assert_eq!(
-        next_event(&mut client).await,
         TmuxEvent::Capture {
-            body: b"line one\nline two".to_vec(),
+            body: b"line one\n%output %0 inside\\015\nline two".to_vec(),
         },
     );
     assert_eq!(

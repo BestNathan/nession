@@ -38,6 +38,9 @@ try {
     'tmux::client::tests::event_ingress_is_bounded_by_aggregate_bytes_and_releases_on_take',
     'tmux::client::tests::an_event_larger_than_the_budget_fails_closed',
     'tmux::client::tests::a_stalled_consumer_fails_closed_at_the_admission_deadline',
+    'tmux::client::tests::a_full_event_queue_fails_closed_at_the_admission_deadline',
+    'tmux::client::tests::a_dropped_admission_permit_refunds_its_credit',
+    'tmux::client::tests::a_recorded_source_loss_is_stated_after_the_admitted_events',
   ]) {
     expectOk(deterministic, name);
   }
@@ -50,10 +53,10 @@ try {
 
   process.stdout.write(JSON.stringify({
     status: 'pass',
-    summary: 'aggregate-byte ingress admission and its stalled-consumer disposition are deterministic; a real isolated tmux burst fails closed at the budget and a healthy peer remains answerable',
+    summary: 'aggregate-byte and count-bound ingress admission with one absolute deadline are deterministic, including a full event queue under a large byte budget and exact credit refund; a real isolated tmux burst fails closed at the budget and a healthy peer remains answerable',
     evidence: [
       {type: 'runtime', value: 'tmux executable: ' + version},
-      {type: 'runtime', value: 'deterministic byte-budget/overload tests passed at exact checkout SHA ' + process.env.NESSION_ACCEPTANCE_TARGET_SHA},
+      {type: 'runtime', value: 'deterministic byte-budget, full-queue, credit-refund and terminal-loss tests passed at exact checkout SHA ' + process.env.NESSION_ACCEPTANCE_TARGET_SHA},
       {type: 'runtime', value: 'real isolated tmux burst with a stopped consumer produced a stated SourceLost and the peer answered refresh-client'},
     ],
   }) + '\n');

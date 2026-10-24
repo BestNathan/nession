@@ -598,53 +598,145 @@ async fn event_ingress_budget_fails_closed_under_a_real_burst() -> Result<()> {
     Ok(())
 }
 
-/// #2378 SC-02: tmux does not escape command output. A pane line beginning
-/// with `%` — including one that looks like a malformed or different-triple
-/// control record — is capture body, and the attachment survives it.
+/// Both supported Control Mode transports, sized to the fixture's window so an
+/// attach cannot move the shared pane as a side effect.
+fn both_transports() -> [ControlTransport; 2] {
+    [
+        ControlTransport::Pipe,
+        ControlTransport::Pty {
+            cols: 200,
+            rows: 60,
+        },
+    ]
+}
+
+/// #2378 SC-02 (reopened): tmux does not escape command output. A pane line
+/// that is exactly a valid tmux notification — `%exit`, `%output …`,
+/// `%layout-change …`, `%window-resize …`, `%begin …` — is capture body, and
+/// the attachment survives it on both transports.
+///
+/// Red-before: routing the `%exit` body line as the notification closed the
+/// attachment, so the capture command never returned its bytes. The old test
+/// covered only malformed/different-triple records, which never hit that arm.
 #[tokio::test]
-async fn real_tmux_capture_preserves_percent_prefixed_pane_lines() -> Result<()> {
+async fn real_tmux_capture_preserves_notification_shaped_pane_lines() -> Result<()> {
+    // The file's macOS skip: control-mode clients can crash the Homebrew tmux
+    // server while parallel tests run; the Case executes this on Linux CI.
     if cfg!(target_os = "macos") {
         return Ok(());
     }
-    let guard = ControlTestSession::new("percent-capture").await?;
-    let _ = guard
-        .dep()
-        .cmd()
-        .output(&[
-            "send-keys",
-            "-t",
-            guard.name(),
-            "printf '%s\\n' '%hello' '%begin fake' '%end fake' '%%percent'",
-            "Enter",
-        ])
-        .await?;
+    let needles = [
+        "%exit",
+        "%output %0 hello",
+        "%layout-change @0 a87d,177x49,0,0,0",
+        "%window-resize @0 100 30",
+        "%begin 9 9 0",
+        "%unknown foo",
+        "NOTIF-CAPTURE-END",
+    ];
+    for transport in both_transports() {
+        let guard = ControlTestSession::new("notif-capture").await?;
+        let _ = guard
+            .dep()
+            .cmd()
+            .output(&[
+                "send-keys",
+                "-t",
+                guard.name(),
+                "printf '%s\\n' '%exit' '%output %0 hello' \
+                 '%layout-change @0 a87d,177x49,0,0,0 a87d,177x49,0,0,0 *' \
+                 '%window-resize @0 100 30' '%begin 9 9 0' '%unknown foo' \
+                 'NOTIF-CAPTURE-END'",
+                "Enter",
+            ])
+            .await?;
 
-    let mut client = TmuxClient::connect_with(guard.dep(), guard.name(), ControlTransport::Pipe)?;
-    let mut events = client
-        .take_events()
-        .ok_or_else(|| anyhow!("event stream already taken"))?;
-    let welcome = tokio::time::timeout(Duration::from_secs(5), events.recv())
-        .await
-        .map_err(|_| anyhow!("no welcome pair within 5s"))?
-        .ok_or_else(|| anyhow!("event stream ended before the welcome"))?;
-    assert_eq!(welcome, TmuxEvent::Handshaken);
+        let (mut client, mut events) = attach_over(&guard, transport).await?;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        let mut body;
+        loop {
+            body = String::from_utf8_lossy(&client.capture_pane(200).await?).into_owned();
+            if needles.iter().all(|needle| body.contains(needle)) {
+                break;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                panic!("{transport:?}: capture lost notification-shaped pane lines: {body}");
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
 
-    let needles = ["%hello", "%begin fake", "%end fake", "%%percent"];
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    let mut last;
-    loop {
-        last = String::from_utf8_lossy(&client.capture_pane(200).await?).into_owned();
-        if needles.iter().all(|needle| last.contains(needle)) {
-            break;
+        // A `%exit` pane line must not close the attachment or fabricate a
+        // resize/exit event; the client still answers.
+        assert!(
+            !client.is_closed(),
+            "{transport:?}: a %exit body line must not close the attachment"
+        );
+        assert_eq!(
+            client.command(ControlCommand::RefreshClient).await?,
+            b"",
+            "{transport:?}: the attachment must stay usable"
+        );
+        while let Ok(Some(event)) =
+            tokio::time::timeout(Duration::from_millis(50), events.recv()).await
+        {
+            assert!(
+                !matches!(event, TmuxEvent::Resize { .. } | TmuxEvent::Exited),
+                "{transport:?}: a body line fabricated a source event: {event:?}"
+            );
         }
-        if tokio::time::Instant::now() >= deadline {
-            panic!("capture body lost %-prefixed pane lines: {last}");
-        }
-        sleep(Duration::from_millis(100)).await;
+        client.close().await;
     }
+    Ok(())
+}
 
-    // The attachment still answers after those lines were reconstructed.
-    assert_eq!(client.command(ControlCommand::RefreshClient).await?, b"");
-    client.close().await;
+/// #2378 SC-02 (reopened): a real, independently generated resize while a
+/// capture response is open does not enter the body on either transport.
+///
+/// If tmux interleaved a notification inside the block, the measured contract
+/// would absorb it as body bytes — the capture would then contain text the
+/// pane never held. The resize itself must still reach the event stream after
+/// (never inside) the block.
+#[tokio::test]
+async fn real_tmux_resize_during_a_capture_never_enters_the_body() -> Result<()> {
+    if cfg!(target_os = "macos") {
+        return Ok(());
+    }
+    for transport in both_transports() {
+        let guard = ControlTestSession::new("capture-resize").await?;
+        // A capture response large enough to span multiple writes while the
+        // resize is generated from an independent tmux client.
+        let _ = guard
+            .dep()
+            .cmd()
+            .output(&[
+                "send-keys",
+                "-t",
+                guard.name(),
+                "for i in $(seq 1 20000); do echo \"history-$i\"; done",
+                "Enter",
+            ])
+            .await?;
+        sleep(Duration::from_millis(500)).await;
+
+        let (mut client, mut events) = attach_over(&guard, transport).await?;
+        let (body, resized) = tokio::join!(client.capture_pane(20_000), async {
+            sleep(Duration::from_millis(2)).await;
+            guard.dep().ops().resize_window(guard.name(), 132, 44).await
+        });
+        let body = String::from_utf8_lossy(&body?).into_owned();
+        resized?;
+
+        assert!(
+            !body.contains("%layout-change") && !body.contains("%window-resize"),
+            "{transport:?}: a live notification entered the response body: {body}"
+        );
+        assert!(
+            body.contains("history-20000"),
+            "{transport:?}: the capture lost pane content: {}",
+            &body[body.len().saturating_sub(200)..]
+        );
+        resize_until(&mut events, (132, 44), Duration::from_secs(5)).await?;
+        client.close().await;
+    }
     Ok(())
 }

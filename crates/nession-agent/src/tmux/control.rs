@@ -374,10 +374,12 @@ impl PreCaptureBuffer {
 ///
 /// The wire order is the barrier (#1228): `%output` before the capture's
 /// `%begin` is what the pane read includes, so it is buffered and dropped when
-/// the capture lands; output *inside* or after the response block was generated
-/// after the read, so it is live. [`TmuxEvent::CaptureStarted`] is that
-/// boundary — dropping everything up to [`TmuxEvent::Capture`] would also drop
-/// the interleaved output, which the capture does not contain.
+/// the capture lands; output after the block is live. tmux serves control
+/// commands synchronously and does not interleave live output inside a
+/// response block (measured on both transports, see the transport doc), so the
+/// block is entirely capture body. [`TmuxEvent::CaptureStarted`] is the
+/// boundary: dropping everything up to [`TmuxEvent::Capture`] would also drop
+/// the output that follows the read.
 async fn take_bootstrap(
     client: &TmuxClient,
     events: &mut EventStream,
@@ -615,10 +617,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_bootstrap_drops_the_output_its_capture_covers_and_keeps_the_interleaved_output() {
+    async fn the_bootstrap_drops_the_output_its_capture_covers_and_keeps_the_output_after_it() {
         // The barrier's exact cut, without a tmux: output before the capture's
-        // `%begin` is inside the pane read (dropped), output inside the
-        // response block was generated after it (live).
+        // `%begin` is inside the pane read (dropped), and everything the block
+        // contains is the capture body. tmux does not interleave live output
+        // inside a response block (measured on -C and -CC), so an
+        // output-shaped line there is body bytes, not a second live copy
+        // (#2378) — the same contract the typed client enforces.
         let (mut client, mut tmux_rx, mut tmux_tx) = boot_wire();
         let mut events = client.take_events().expect("the test owns the events");
         let (output_tx, mut output_rx) = mpsc::channel(16);
@@ -667,19 +672,14 @@ mod tests {
 
         assert_eq!(
             capture.as_deref(),
-            Some(&b"line one\nline two"[..]),
-            "the capture body is the response block's data lines"
+            Some(&b"line one\n%output %0 inside\nline two"[..]),
+            "the capture body is every line of the response block"
         );
-        let live = tokio::time::timeout(Duration::from_secs(2), output_rx.recv())
-            .await
-            .expect("interleaved output is live")
-            .expect("the output channel stays open");
-        assert_eq!(live, b"inside", "the interleaved output is not covered");
         assert!(
             tokio::time::timeout(Duration::from_millis(100), output_rx.recv())
                 .await
                 .is_err(),
-            "the pre-capture output was dropped, not forwarded"
+            "neither the covered output nor an in-block output-shaped line is forwarded live"
         );
         // What follows the capture in the stream is still in order for the
         // forwarder that takes over after the barrier.

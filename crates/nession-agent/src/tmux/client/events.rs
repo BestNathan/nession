@@ -27,16 +27,18 @@ pub enum TmuxEvent {
     Output(PaneOutput),
     /// The response block of the command marked as a bootstrap capture **opened**
     /// (`%begin`). tmux executes a control command synchronously, so output
-    /// before this event is what the pane read includes; output after it is
-    /// generated after the read and is live. The barrier needs both boundaries:
-    /// dropping everything up to [`TmuxEvent::Capture`] would also drop the
-    /// interleaved output, which the capture does not contain.
+    /// before this event is what the pane read includes; output after the
+    /// block is generated after the read and is live. The barrier needs both
+    /// boundaries: dropping everything up to [`TmuxEvent::Capture`] would also
+    /// drop the output that follows the read.
     CaptureStarted,
     /// The response body of a command marked as a bootstrap capture, in stream
     /// order. Output delivered before [`TmuxEvent::CaptureStarted`] is covered
-    /// by the capture; output after that point is live, whether it arrived
-    /// inside the response block or after it. A capture that fails produces no
-    /// event, so the barrier falls back on its own deadline.
+    /// by the capture; output after the block is live. tmux does not
+    /// interleave notifications inside a response block (measured on `-C` and
+    /// `-CC`), so the block — including notification-shaped lines — is body.
+    /// A capture that fails produces no event, so the barrier falls back on its
+    /// own deadline.
     Capture { body: Vec<u8> },
     /// The window's authoritative size changed. Deduplicated: tmux 3.6b emits
     /// two `%layout-change` lines for one `resize-window`, and a layout change

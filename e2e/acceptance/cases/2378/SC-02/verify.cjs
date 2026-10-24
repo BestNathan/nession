@@ -1,9 +1,13 @@
 'use strict';
 
 // Exact-SHA source-aligned Case for #2378 SC-02: prove that tmux command
-// output is framed as body even when a captured pane line begins with `%`.
-// The deterministic client tests cover the framing; the real isolated tmux
-// test proves the measured tmux 3.6b wire behavior on the release checkout.
+// output is framed as body even when a captured pane line is exactly a valid
+// tmux notification (`%exit`, `%output …`, `%layout-change …`,
+// `%window-resize …`, `%begin …`). The deterministic client tests cover the
+// framing and the red-before `%exit` collision; the real isolated tmux tests
+// prove the measured tmux 3.6b wire behavior on the release checkout,
+// including that an independently generated resize while a capture response
+// is open never enters the body.
 const path = require('node:path');
 const {spawnSync} = require('node:child_process');
 const root = path.resolve(__dirname, '../../../../..');
@@ -38,30 +42,39 @@ try {
   ], 120000) + checked('cargo', [
     'test', '-p', 'nession-agent', '--lib',
     'tmux::client::tests::percent_prefixed_body_lines_are_content_not_notifications',
+  ], 120000) + checked('cargo', [
+    'test', '-p', 'nession-agent', '--lib',
+    'tmux::client::tests::notification_shaped_body_lines_are_content_not_source_events',
   ], 120000);
   expectOk(unit, 'tmux::client::tests::a_response_body_preserves_leading_and_embedded_empty_lines');
   expectOk(unit, 'tmux::client::tests::percent_prefixed_body_lines_are_content_not_notifications');
+  expectOk(unit, 'tmux::client::tests::notification_shaped_body_lines_are_content_not_source_events');
 
   const real = checked('cargo', [
     'test', '-p', 'nession-agent', '--test', 'integration',
-    'control_mode::real_tmux_capture_preserves_percent_prefixed_pane_lines', '--', '--nocapture',
-  ], 120000);
-  expectOk(real, 'control_mode::real_tmux_capture_preserves_percent_prefixed_pane_lines');
+    'control_mode::real_tmux_capture_preserves_notification_shaped_pane_lines', '--', '--nocapture',
+  ], 180000) + checked('cargo', [
+    'test', '-p', 'nession-agent', '--test', 'integration',
+    'control_mode::real_tmux_resize_during_a_capture_never_enters_the_body', '--', '--nocapture',
+  ], 180000);
+  expectOk(real, 'control_mode::real_tmux_capture_preserves_notification_shaped_pane_lines');
+  expectOk(real, 'control_mode::real_tmux_resize_during_a_capture_never_enters_the_body');
 
   process.stdout.write(JSON.stringify({
     status: 'pass',
-    summary: 'tmux output is framed as body: empty lines and %-prefixed pane lines are preserved by the typed client and by a real isolated tmux capture',
+    summary: 'tmux output is framed as body: empty lines and notification-shaped pane lines (%exit, %output, %layout-change, %window-resize, %begin) are preserved by the typed client and by real isolated tmux captures on both transports, and an independently generated resize never enters the body',
     evidence: [
       {type: 'runtime', value: 'tmux executable: ' + version},
-      {type: 'runtime', value: 'deterministic Client framing tests passed at exact checkout SHA ' + process.env.NESSION_ACCEPTANCE_TARGET_SHA},
-      {type: 'runtime', value: 'real isolated tmux capture preserved %hello, %begin fake, %end fake, %%percent and the attachment stayed usable'},
+      {type: 'runtime', value: 'deterministic Client framing and %exit-collision tests passed at exact checkout SHA ' + process.env.NESSION_ACCEPTANCE_TARGET_SHA},
+      {type: 'runtime', value: 'real isolated tmux -C and -CC captures preserved notification-shaped lines and the attachment stayed usable'},
+      {type: 'runtime', value: 'a real resize during an open capture response arrived after the block and never entered the body'},
     ],
   }) + '\n');
 } catch (error) {
   process.stdout.write(JSON.stringify({
     status: 'fail',
     summary: String(error.message || error).slice(-4400),
-    evidence: [{type: 'runtime', value: '%-prefixed capture-body framing was not established'}],
+    evidence: [{type: 'runtime', value: 'notification-shaped capture-body framing was not established'}],
   }) + '\n');
   process.exitCode = 1;
 }
