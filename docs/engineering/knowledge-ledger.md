@@ -1,118 +1,53 @@
-# Project Knowledge Ledger — ownership and history contract
+# Nession Project Knowledge — topic-first current knowledge
 
-**Owner:** project knowledge lifecycle and schema. **Requirement:** [#2325](https://github.com/BestNathan/nession/issues/2325). **Repository:** `BestNathan/nession`. **Storage ref:** `refs/heads/knowledge` (an independent orphan Git history).
+**Owner:** `nession-knowledge` Skill and `scripts/knowledge-ledger-contract.mjs`. **Requirement:** [#2325](https://github.com/BestNathan/nession/issues/2325). **Storage:** independent Git orphan branch `refs/heads/knowledge`. Never merge this branch into `main` or `staging`.
 
-## Purpose and precedence
+## Goals and source hierarchy
 
-The ledger stores concise reusable **validated, sourced project knowledge**, not a second repository implementation or a universal store. Use it to recover stable decisions, architecture context, invariant rationale and operational lessons across Issue/Agent runs.
+Knowledge stores durable, curated, **current** project explanations. It must be sourced, concise, searchable, readable and conservative about authority. Explicit current owner decisions, repository instructions, implementation/Gates and canonical documentation are stronger evidence than a derived article. An unverified LLM note is `candidate`, never a canonical contract.
 
-Authority, highest first:
-
-1. Explicit current user/owner decisions; nearest scoped `AGENTS.md`, root `AGENTS.md` and Vision/Principles as appropriate.
-2. Current executable code, protocol/schema, Gate and its verified tests for implemented behavior.
-3. Current canonical docs under `docs/` owned by that subsystem and exact-SHA acceptance/provenance records.
-4. Verified knowledge with explicit source pointers, reviewed validity and timestamps.
-5. Candidate knowledge, historical Issues, old PRs, model summaries and stale/undated notes as **discovery leads only**.
-
-A newer entry does not defeat a verified canonical owner automatically. If sources conflict, cite both, label the knowledge non-authoritative, and route correction to the owning code/doc/Issue. **No unsourced LLM claim may become `verified`.**
-
-## Storage layout
-
-Only the branch `knowledge` holds ledger records; `main` holds this policy and the Skill, never a duplicate copy of mutable knowledge. Do not merge/cherry-pick product history into the orphan ref.
+## Canonical model (v2)
 
 ```text
-knowledge (orphan)
-├── README.md
-├── schema/v1.json
-├── index.json                     # derived, mutable pointer/cache
-├── entries/<stable-id>/
-│   ├── v0001.md                   # immutable human-readable claim
-│   ├── v0001.json                 # immutable metadata and markdown SHA-256
-│   └── v0002.*                    # later create-only revision
-├── events/YYYY/MM/DD/<event-id>.json # immutable transition log
-└── receipts/<event-id>.json       # optional post-commit SHA receipt
+README.md
+schema/v2.json
+topics/<primary-topic>/<stable-knowledge-id>.md
+index.json                           # derived search cache
+CHANGELOG.md                         # append-only global time/change index
 ```
 
-IDs: lowercase `[a-z0-9]+(-[a-z0-9]+)*`, unique across domains and never reused. Revision: `vNNNN` monotonically increasing per ID (do not wrap or fill an earlier gap). `index.json` stores one current pointer per ID and is **rebuildable from validated immutable metadata + event order**; its own timestamp is not provenance.
+- **Article:** exactly one mutable *current* Markdown file per globally unique `id`. Git alone stores older content via previous commits; there are **no vNNNN article files, per-article event folders, or per-entry receipts**.
+- **Topic:** one stable primary knowledge area, expressed in the document path and `topic:` frontmatter. Used for navigation and primary grouping, e.g. `architecture`, `engineering`, `terminal`, `ci`, `agents`.
+- **Categories:** zero or more normalized, lowercase hyphenated **tags** in `categories: ["architecture", "protocol"]`. Tags overlap topics freely. They are searchable facets, not a parallel folder taxonomy.
+- **Frontmatter:** Skill-style YAML fence with a canonical, safe parseable subset: `id`, `title`, `description`, `topic`, `categories`, `status` (`verified|candidate`), UTC `created_at`/`updated_at`, `sources`. List-valued fields are JSON-compatible YAML inline string arrays. Put substantive context, decisions, rationale, links, examples and limitations in the Markdown body.
+- **Index:** deterministic JSON `schema_version:2`, `topics: {topic: [current article summaries]}`, `categories: {tag: [knowledge IDs]}`. Rebuild from frontmatter using `node scripts/knowledge-ledger-contract.mjs index <worktree>`; never hand-author it. Search the topic first, optionally filter by category/verified status.
+- **One global change log:** `CHANGELOG.md`, append-only. Records UTC timestamp, action, ID, path, topic, categories, reason and Issue/PR URL. Chronological browsing is a *second indexing method* independent of the current-state topic index.
 
-### Mandatory per-revision metadata (`entries/<id>/<revision>.json`)
-
-```json
-{
-  "schema_version": 1,
-  "id": "terminal-tmux-control-mode",
-  "revision": "v0001",
-  "title": "tmux control-mode boundary",
-  "summary": "Short precise reusable assertion with scope and caveats",
-  "category": "architecture",
-  "tags": ["terminal", "tmux"],
-  "status": "candidate",
-  "created_at": "2026-10-24T02:57:50Z",
-  "recorded_at": "2026-10-24T02:57:50Z",
-  "verified_at": null,
-  "effective_at": null,
-  "supersedes": null,
-  "sources": [
-    {"url": "https://github.com/BestNathan/nession/blob/<full-sha>/docs/architecture/...md", "sha": "<full-commit-sha>", "role": "canonical"}
-  ],
-  "content_sha256": "<sha256-of-matching-v0001.md>"
-}
-```
-
-The example is a **format sketch**, not a real verified claim. Validate structured fields and source existence at the owning exact SHA. Timestamp strings must be UTC ISO 8601 with `Z`; `created_at` remains the first revision time. `recorded_at` is when a revision was committed and `effective_at` is the domain-effective time if independently known; do not substitute one for the other. `verified_at` is non-null only when sources were reviewed. Status is `candidate | verified | superseded | retracted`. A status change requires a new revision and event; never edit old metadata.
-
-### Mandatory event fields
-
-`events/<UTC-year>/<month>/<day>/<event-id>.json` records `schema_version, id, action, recorded_at, actor, reason, source_issue, previous_revision, new_revision, content_sha256` and optional `effective_at, source_pr, source_commit, external_evidence`. Action: `create | verify | revise | supersede | retract`. Actor is provenance/audit metadata **not authentication**. Event path is unique (use stable ID, revision and a collision-safe unique suffix), create-only. Record `null` where a value truly does not apply. Bootstrap is a special event with no knowledge revision.
-
-The commit containing entry+event+index must be all-or-nothing. Its Git SHA cannot appear inside its own immutable event without a circular reference: publish a separate post-commit receipt with `event_path, record_path, content_sha256, commit_sha, branch, written_at` after validating the first commit, or include the SHA in Issue evidence pinned to the exact original record commit. A second receipt commit is a new append-only operation.
-
-## Read and search
-
-1. Fetch the **explicit** `knowledge` ref. GitHub's ordinary code search only covers the default branch and is not an orphan-branch knowledge search.
-2. Read `index.json`, select only `status: verified` for default answers; filter category/tags/ID, then open the exact `entries/<id>/<revision>.md` and `.json`.
-3. For free-text search use `git grep -n -i <phrase> origin/knowledge -- entries`; for a time interval use `git log --since --until origin/knowledge -- events/` plus event timestamps, distinguishing history time from effective time.
-4. Verify source links and `content_sha256`; quote ID, revision, timestamp and canonical evidence in downstream work. For missing/orphan-ref unavailable, report **unknown**, not “no matching knowledge.”
-5. Candidate/historical/retracted records require an explicit historical query and are never silently returned as authoritative current truth.
-
-See [nession-knowledge Skill](../../.claude/skills/nession-knowledge/SKILL.md) for exact commands.
-
-## Update protocol and stability
-
-The executable read-only validator is `scripts/knowledge-ledger-contract.mjs`: `check <ledger-worktree> [<base-sha>]` validates schema, UTC events, immutable record digests, source SHAs, index pointers, receipt references and (with the base SHA) every intermediate Git commit delta (so edit-then-restore remains detectable), receipt ancestry/record source paths, and high-confidence secret signatures. `./gates/run knowledge-ledger-contract` runs deterministic positive/negative isolated fixtures through Quality Tooling. This cannot enforce GitHub writer permissions or substitute for server-side branch protection.
-
-Before writing: search for existing IDs, inspect current sources/decision owner, classify new/verify/revise/supersede/retract and determine whether change is justified. Stable IDs survive updates; create a new ID only for a different concept. Prefer targeted one-topic records, no pasted raw Issue dumps. No secret or session data on this public ref.
-
-1. From a dedicated worktree based on the existing `origin/knowledge`, create the next immutable revision Markdown + metadata JSON and exactly one new event; update only `index.json` pointers, then validate structural/content hashes and forbidden path changes against the old head.
-2. Fetch latest remote HEAD and reconcile concurrent updates. A stale write must **fail closed** unless its candidate and all affected pointers are revalidated against the new head. Never `--force`, `reset` the remote, change history or clobber an unrelated ID. Compare source/old revision on every retry.
-3. Fast-forward push atomically advances the branch commit, then read back the branch SHA, relevant event, revision, source digest and pointer. Publish SHA receipt after the readback, without claiming that a self-declared author string proves authorization.
-4. On failure, leave source revision and event unchanged; report pending/manual reconciliation with expected and actual heads. No auto “repair” that deletes history. A divergent replay is a conflict; byte-identical replay is idempotent.
-
-### Controlled publication helper
-
-From a clean isolated worktree based on the existing knowledge ref, create and commit your immutable revision and event with the derived index. Execute the canonical validator first. Then, using a **trusted operator context** with Git credentials separately provisioned, run:
-
-```sh
-node scripts/knowledge-ledger-publish.mjs publish <knowledge-worktree> <exact-previous-knowledge-ref-SHA>
-```
-
-This verifies remote expected-head identity, validates all changes, refuses a stale ref and any non-fast-forward push, re-reads the remote, appends separate post-commit receipts, validates those and re-reads their commit. A failed receipt push is explicitly `RECEIPT_PENDING`; retry/reconcile, never treat the earlier record commit as a completed transaction. Running it from a PR head or granting secrets to an Agent is prohibited; the helper does not authenticate the operator or grant GitHub permissions. The required regression fixtures run under the `knowledge-ledger-contract` Quality Gate.
-
-### Trust limits
-
-Append-only is **a validated writer contract, not a GitHub server guarantee**. A collaborator with write permission may still fast-forward delete records or rewrite a branch unless separately constrained. #1690 documents stronger orphan-store governance, but does not currently confer authorization/ruleset evidence on this new `knowledge` ref. Never advertise cryptographic immutability, audit independence, or validated writer identity without real protection and independent audit evidence.
-
-## Knowledge impact in Requirements
-
-For every new Requirement or materially changed contract, record:
+Example:
 
 ```markdown
-### Knowledge Impact
-- Decision: None | Read | Create | Update | Supersede
-- Related knowledge: <stable IDs, or explicit search scope and no matches>
-- Reason: <which durable fact/decision is affected or why none>
-- Owner and timing: <Issue/SC and point where knowledge becomes valid>
-- Evidence: <source/PR or pending validation; then immutable revision + event + commit SHA receipt>
+## 2026-10-24T10:00:00Z | update | terminal-transport
+- Path: topics/terminal/terminal-transport.md
+- Topic: terminal
+- Categories: architecture, recovery
+- Reason: New terminal control-mode recovery decision confirmed by Issue
+- Source: https://github.com/BestNathan/nession/issues/2325
 ```
 
-At issue creation, the impact is a **plan**, not a verified knowledge change. Reassess at implementation and review, and at acceptance/Issue closure: unresolved required updates remain `Pending`. A completed implementation may generate no knowledge write when source truth was unchanged; explain `None`. Do not publish a future-state assertion as verified before its canonical code/decision source actually exists. If retiring a claim, supersede/retract with reason and preserve its historical versions.
+All old log entries remain readable, even when the current article is deleted or moved; Git SHA allows reconstructing exact earlier content. The log is **not** a copy of the article or a mutable `last_updated` record. A commit changing article content must append matching events atomically, and must regenerate the index.
+
+## Trust and atomicity
+
+Normal editor workflow is `edit current Markdown -> append one log record -> regenerate index -> validate -> commit -> publish`. The canonical validator checks frontmatter/path constraints, unique IDs, content/source requirements, topic index, category index, timestamped log entries, and per-commit historical mutations. No article revisions or separate receipt pushes are required. Every successful publication is identified by the resulting Git commit SHA.
+
+Use `node scripts/knowledge-ledger-publish.mjs publish <knowledge-worktree> <expected-remote-sha>` from a trusted operator environment. It fails on stale `knowledge` head and never force-pushes. If concurrent edits happen, reconcile both the affected current articles and the global log, regenerate the index, and revalidate. Failed readback is **Pending**, not a Pass. Do not execute PR-head writer code with GitHub credentials.
+
+The trusted `CI / Knowledge Ledger Audit` workflow runs every six hours and on source changes. It anchors old history outside the orphan ref, detects unexpected ancestors/changed paths, validates the current tree and captures a bounded receipt. A normal Git branch and scheduled audit do **not** establish server-side immutability: protected Rulesets and a trusted writer identity require separate operational setup and live tests (#1690 is about other orphan stores).
+
+## Migration: existing v1 knowledge
+
+Exactly one audited fast-forward migration commit removes the active `entries/<id>/vNNNN.*`, `events/`, and `receipts/` v1 tree and creates **one current article per ID** at `topics/<topic>/<id>.md`, `index.json` v2, `CHANGELOG.md`, and `schema/v2.json`. The fixed last v1 checkpoint `56a85f84f39ca806c58a4f410a0c4a72bade51a3` is pinned in the main-owned validator. All pre-migration data remains retrievable with `git show <old-sha>:<old-path>`, but no duplicate active knowledge files remain. From the migration onward, per-commit global log verification applies. Never rewrite the orphan branch to erase old Git history.
+
+## Requirement ownership
+
+Every new or materially revised Requirement records `### Knowledge Impact`: `Decision`, `Related knowledge` (ID/topic/category or explicit search scope), `Reason`, `Owner and timing`, `Evidence`. At implementation/review/acceptance, reassess the plan, publish affected articles and log changes, link resulting commit and keep unverified or unpublished work `Pending`. A `None` decision is valid when justified. See [nession-writing-requirements](../../.claude/skills/nession-writing-requirements/SKILL.md).

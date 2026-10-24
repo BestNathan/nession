@@ -1,180 +1,243 @@
 #!/usr/bin/env node
-// Validates the curated orphan knowledge ledger without requiring credentials.
+// Canonical v2 project knowledge contract. One current Markdown per knowledge ID,
+// topic-first navigation, category tags and ONE append-only global CHANGELOG.
+// Git commits, not per-article vNNNN files, preserve historical snapshots.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import path from 'node:path';
 import os from 'node:os';
-import { createHash } from 'node:crypto';
+import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const idOk = s => typeof s === 'string' && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(s);
-const revOk = s => typeof s === 'string' && /^v[0-9]{4}$/.test(s);
-const shaOk = s => typeof s === 'string' && /^[a-f0-9]{40}$/i.test(s);
-const hashOk = s => typeof s === 'string' && /^[a-f0-9]{64}$/i.test(s);
-const utcOk = s => typeof s === 'string' && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z$/.test(s) && Number.isFinite(Date.parse(s));
-const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
-function scan(dir) {
-  if (!fs.existsSync(dir)) return [];
-  const out = [];
-  const visit = (p, prefix) => {
-    for (const ent of fs.readdirSync(p, {withFileTypes:true})) {
-      if (ent.isSymbolicLink()) throw Error('symlink not permitted: '+ent.name);
-      const rel = prefix ? prefix+'/'+ent.name : ent.name, file = path.join(p,ent.name);
-      if (ent.isDirectory()) visit(file,rel);
-      else if (ent.isFile()) out.push(rel);
-      else throw Error('unsupported filesystem object: '+rel);
+const LEGACY_CHECKPOINT = '56a85f84f39ca806c58a4f410a0c4a72bade51a3';
+const ID=/^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const UTC=/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z$/;
+const ENTRY=/^topics\/([a-z0-9]+(?:-[a-z0-9]+)*)\/([a-z0-9]+(?:-[a-z0-9]+)*)\.md$/;
+const SHA=/^[a-f0-9]{40}$/;
+const ACTIONS=new Set(['create','update','delete','move','migrate']);
+const HEADER='# Knowledge Changelog\n\n';
+const fail=(message)=>{throw Error('knowledge-ledger: '+message);};
+function utc(s) { return typeof s==='string' && UTC.test(s) && Number.isFinite(Date.parse(s)); }
+function git(root,...args) {
+  const p=spawnSync('git',['-C',root,...args],{encoding:'utf8',maxBuffer:2*1024*1024,env:{...process.env,GIT_NO_REPLACE_OBJECTS:'1'}});
+  if(p.status!==0)fail('git '+args[0]+' failed: '+(p.stderr||p.stdout).trim());
+  return p.stdout.trimEnd();
+}
+function paths(root,part) {
+  const start=path.join(root,part),out=[];
+  if(!fs.existsSync(start))return out;
+  function visit(dir,prefix) {
+    for(const entry of fs.readdirSync(dir,{withFileTypes:true})){
+      const rel=prefix?prefix+'/'+entry.name:entry.name,full=path.join(dir,entry.name);
+      if(entry.isSymbolicLink())fail('symlink is forbidden: '+rel);
+      if(entry.isDirectory())visit(full,rel);
+      else if(entry.isFile())out.push(part+'/'+rel);
+      else fail('unsupported file type: '+rel);
     }
-  };
-  visit(dir,''); return out.sort();
+  }
+  visit(start,'');return out.sort();
 }
-function command(root,...args) {
-  const p=spawnSync('git',['-C',root,...args],{encoding:'utf8'});
-  if (p.status!==0) throw Error('git '+args.join(' ')+': '+(p.stderr||p.stdout).trim());
-  return p.stdout.trim();
+function scalar(input) {
+  const v=input.trim();
+  if(v.startsWith('"')) {
+    try { const x=JSON.parse(v);if(typeof x!=='string')fail('invalid YAML quoted scalar');return x; }
+    catch { fail('invalid quoted scalar '+v); }
+  }
+  if(v.startsWith("'")&&v.endsWith("'"))return v.slice(1,-1).replaceAll("''","'");
+  if(!v || /[{}\[\]&#*!|>]/.test(v))fail('unsupported frontmatter scalar '+v);
+  return v;
 }
-function verify(root,base=null) {
-  const bad=[];
-  const problem=x=>bad.push(x);
-  const load=p=>{
-    try{return JSON.parse(fs.readFileSync(path.join(root,p),'utf8'));}
-    catch(e){problem('bad JSON or missing '+p+': '+e.message);return null;}
-  };
+// Deliberate safe YAML subset: Skill-like scalar fields and JSON-compatible
+// inline string arrays; both are ordinary YAML. No anchors, tags or nesting.
+export function parseKnowledge(content,filename) {
+  if(!content.startsWith('---\n'))fail(filename+': missing YAML frontmatter');
+  const end=content.indexOf('\n---\n',4);
+  if(end<0)fail(filename+': missing frontmatter closing fence');
+  const front=content.slice(4,end).split('\n'),data={};
+  for(const line of front) {
+    const m=/^([a-z_]+):[ \t]*(.*)$/.exec(line);
+    if(!m)fail(filename+': invalid YAML line '+line);
+    const [,key,raw]=m;
+    if(Object.hasOwn(data,key))fail(filename+': repeated field '+key);
+    if(!['id','title','description','topic','categories','sources','status','created_at','updated_at'].includes(key))fail(filename+': unknown field '+key);
+    if(key==='categories'||key==='sources') {
+      let a;try{a=JSON.parse(raw);}catch{fail(filename+': '+key+' must be a YAML/JSON inline list');}
+      if(!Array.isArray(a)||a.some(x=>typeof x!=='string'))fail(filename+': malformed '+key);
+      data[key]=a;
+    }else data[key]=scalar(raw);
+  }
+  for(const k of ['id','title','description','topic','categories','sources','status','created_at','updated_at'])
+    if(!Object.hasOwn(data,k))fail(filename+': missing '+k);
+  const match=ENTRY.exec(filename);
+  if(!match||match[1]!==data.topic||match[2]!==data.id||!ID.test(data.id)||!ID.test(data.topic))
+    fail(filename+': topic/id must match path');
+  if(!data.title.trim()||!data.description.trim())fail(filename+': blank title/description');
+  if(!['verified','candidate'].includes(data.status))fail(filename+': unsupported status');
+  if(!utc(data.created_at)||!utc(data.updated_at)||Date.parse(data.created_at)>Date.parse(data.updated_at))fail(filename+': invalid UTC times');
+  const categories=new Set();
+  for(const tag of data.categories) {
+    if(!ID.test(tag)||categories.has(tag))fail(filename+': duplicate/invalid category '+tag);
+    categories.add(tag);
+  }
+  if(data.status==='verified'&&!data.sources.some(s=>/^https:\/\/github\.com\/BestNathan\/nession\/blob\/[a-f0-9]{40}\//.test(s)))fail(filename+': verified assertion needs exact-SHA canonical source');
+  for(const s of data.sources) {
+    if(!/^https:\/\/github\.com\/BestNathan\/nession\/blob\/[a-f0-9]{40}\//.test(s)&&
+       !/^https:\/\/github\.com\/BestNathan\/nession\/(?:issues|pull)\/[1-9]\d*$/.test(s))
+      fail(filename+': source needs exact SHA or Issue/PR URL: '+s);
+  }
+  const body=content.slice(end+5).trim();
+  if(!body||!body.startsWith('# '))fail(filename+': Markdown needs a titled body');
+  return data;
+}
+export function indexFor(root) {
+  const byTopic={},byCategory={},ids=new Set();
+  for(const file of paths(root,'topics')) {
+    if(!ENTRY.test(file))fail('invalid topic knowledge filename '+file);
+    const data=parseKnowledge(fs.readFileSync(path.join(root,file),'utf8'),file);
+    if(ids.has(data.id))fail('duplicate global knowledge ID '+data.id);
+    ids.add(data.id);
+    const summary={id:data.id,title:data.title,description:data.description,path:file,
+      status:data.status,categories:data.categories,updated_at:data.updated_at};
+    (byTopic[data.topic]??=[]).push(summary);
+    for(const category of data.categories)(byCategory[category]??=[]).push(data.id);
+  }
+  for(const list of Object.values(byTopic))list.sort((a,b)=>a.id.localeCompare(b.id));
+  for(const list of Object.values(byCategory))list.sort();
+  return {schema_version:2,topics:Object.fromEntries(Object.entries(byTopic).sort(([a],[b])=>a.localeCompare(b))),
+    categories:Object.fromEntries(Object.entries(byCategory).sort(([a],[b])=>a.localeCompare(b)))};
+}
+export function logEntries(text) {
+  if(!text.startsWith(HEADER))fail('CHANGELOG.md must start with canonical header');
+  const rest=text.slice(HEADER.length);
+  if(!rest.trim())return [];
+  const blocks=rest.split(/(?=^## )/gm).filter(x=>x.trim());
+  const events=[],seen=new Set();
+  for(const block of blocks) {
+    const lines=block.trimEnd().split('\n');
+    const m=/^## (\S+) \| (create|update|delete|move|migrate) \| ([a-z0-9-]+)$/.exec(lines[0]);
+    if(!m||!utc(m[1])||!ID.test(m[3]))fail('invalid change event heading '+lines[0]);
+    const [,at,action,id]=m,meta={};
+    for(const line of lines.slice(1)) {
+      if(!line.trim())continue;
+      const mm=/^- (Path|Topic|Categories|Reason|Source): (.+)$/.exec(line);
+      if(!mm||Object.hasOwn(meta,mm[1]))fail('invalid change log metadata '+line);
+      meta[mm[1]]=mm[2];
+    }
+    for(const key of ['Path','Topic','Categories','Reason','Source'])if(!meta[key])fail('missing log field '+key);
+    if(!ENTRY.test(meta.Path)||meta.Path.split('/')[1]!==meta.Topic||meta.Path.split('/')[2]!==id+'.md')fail('incorrect change log topic/id/path');
+    if(!/^https:\/\/github\.com\/BestNathan\/nession\/(?:issues|pull)\/[1-9]\d*$/.test(meta.Source))
+      fail('change log Source must link owning Issue or PR');
+    const categories=meta.Categories==='none'?[]:meta.Categories.split(',').map(x=>x.trim());
+    if(categories.some(x=>!ID.test(x)))fail('invalid change log categories');
+    const key=at+'|'+action+'|'+id;
+    if(seen.has(key))fail('duplicate change event '+key);
+    if(events.length&&Date.parse(at)<Date.parse(events.at(-1).at))fail('CHANGELOG events must be chronological');
+    seen.add(key);
+    events.push({at,action,id,path:meta.Path,topic:meta.Topic,categories,reason:meta.Reason,source:meta.Source});
+  }
+  return events;
+}
+function verify(root,baseline=null) {
+  for(const entry of fs.readdirSync(root)){
+    if(!['.git','README.md','topics','index.json','CHANGELOG.md','schema'].includes(entry))
+      fail('legacy/unexpected active knowledge path: '+entry);
+  }
+  const schemas=paths(root,'schema');
+  if(schemas.length!==1||schemas[0]!=='schema/v2.json'||
+     JSON.parse(fs.readFileSync(path.join(root,schemas[0]),'utf8')).schema_version!==2)
+    fail('exactly one schema/v2.json must be active');
+  const expected=indexFor(root),actual=JSON.parse(fs.readFileSync(path.join(root,'index.json'),'utf8'));
+  if(JSON.stringify(actual)!==JSON.stringify(expected))fail('index.json differs from topic/category-derived index');
+  const changeText=fs.readFileSync(path.join(root,'CHANGELOG.md'),'utf8'),events=logEntries(changeText);
+  for(const list of Object.values(expected.topics))for(const entry of list){
+    const history=events.filter(e=>e.id===entry.id&&e.path===entry.path);
+    const latest=history.at(-1);
+    if(!latest||latest.action==='delete')fail('current knowledge absent/retracted in global changelog: '+entry.id);
+    if(latest.topic!==entry.path.split('/')[1]||
+       JSON.stringify([...latest.categories].sort())!==JSON.stringify([...entry.categories].sort()))
+      fail('current topic/category metadata differs from latest changelog event: '+entry.id);
+    if(['create','update','move'].includes(latest.action)&&latest.at!==entry.updated_at)
+      fail('current updated_at must match last change event timestamp: '+entry.id);
+  }
+  for(const file of paths(root,'topics').concat(['CHANGELOG.md'])) {
+    const text=fs.readFileSync(path.join(root,file),'utf8');
+    if(/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|github_pat_[a-zA-Z0-9_]{20,}|gh[pousr]_[a-zA-Z0-9]{30,}/.test(text))
+      fail('public knowledge contains secret-like text: '+file);
+  }
+  // Immutable pre-v2 history is anchored by an exact commit in trusted main.
+  // There is exactly one migration commit; after it, articles are mutable but
+  // every change must have a same-commit global changelog event.
+  const current=git(root,'rev-parse','HEAD');
+  if(!SHA.test(current))fail('invalid checkout');
+  git(root,'merge-base','--is-ancestor',LEGACY_CHECKPOINT,current);
+  if(baseline) {
+    if(!SHA.test(baseline))fail('expected baseline must be an exact SHA');
+    git(root,'merge-base','--is-ancestor',baseline,current);
+  }
+  const commits=git(root,'rev-list','--reverse','--first-parent',LEGACY_CHECKPOINT+'..HEAD').split('\n').filter(Boolean);
+  if(!commits.length)fail('schema v2 migration has not occurred');
+  let parent=LEGACY_CHECKPOINT;
+  for(const [i,commit] of commits.entries()) {
+    const parents=git(root,'rev-list','--parents','-n','1',commit).split(' ');
+    if(parents.length!==2||parents[1]!==parent)fail('nonlinear knowledge history: '+commit);
+    const changes=git(root,'diff','--name-status','--no-renames',parent,commit).split('\n').filter(Boolean)
+      .map(s=>{const [status,file]=s.split('\t');return {status,file};});
+    if(i===0) {
+      if(!changes.some(x=>x.file==='schema/v2.json'&&x.status==='A')||
+         !changes.some(x=>x.file==='CHANGELOG.md'&&x.status==='A')||
+         !changes.some(x=>x.file.startsWith('topics/')&&x.status==='A'))
+        fail('first descendant must be one-time v2 migration');
+    } else {
+      const prev=git(root,'show',parent+':CHANGELOG.md')+'\n';
+      const next=git(root,'show',commit+':CHANGELOG.md')+'\n';
+      if(!next.startsWith(prev)||next===prev)fail('global changelog must only append in every knowledge commit');
+      const added=logEntries(next).slice(logEntries(prev).length);
+      const modified=changes.filter(x=>x.file.startsWith('topics/'));
+      const deletedIds=new Set(modified.filter(x=>x.status==='D'&&ENTRY.test(x.file))
+        .map(x=>ENTRY.exec(x.file)[2]));
+      for(const {file,status} of modified) {
+        if(!ENTRY.test(file)||!['A','M','D'].includes(status))fail('unrecognized topic mutation '+file);
+        const match=added.filter(e=>e.path===file);
+        const action=match[0]?.action,id=ENTRY.exec(file)[2];
+        if(match.length!==1||
+          (status==='A'&&action!=='create'&&!(action==='move'&&deletedIds.has(id)))||
+          (status==='M'&&action!=='update')||
+          (status==='D'&&action!=='delete'))
+          fail('knowledge modification needs one matching changelog event: '+file);
+      }
+      if(added.length!==modified.length)fail('changelog entries must map 1:1 to changed knowledge files');
+      for(const change of changes)if(!change.file.startsWith('topics/')&&
+         !(change.file==='CHANGELOG.md'&&change.status==='M')&&
+         !(change.file==='index.json'&&change.status==='M'))
+        fail('forbidden post-migration path change: '+change.file);
+      if(!modified.length)fail('no knowledge files changed in changelog commit');
+    }
+    parent=commit;
+  }
+  return {topics:Object.keys(expected.topics).length,knowledge:Object.values(expected.topics).reduce((s,x)=>s+x.length,0),events:events.length,head:current};
+}
+function fixture() {
+  const d=fs.mkdtempSync(path.join(os.tmpdir(),'knowledge-v2-'));
+  const put=(file,text)=>{const p=path.join(d,file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,text);};
+  const at='2026-10-24T03:00:00Z';
+  const record='---\nid: terminal-architecture\ntitle: Terminal architecture\ndescription: Session and terminal architecture\ntopic: terminal\ncategories: ["architecture", "protocol"]\nsources: ["https://github.com/BestNathan/nession/blob/'+'a'.repeat(40)+'/AGENTS.md"]\nstatus: verified\ncreated_at: '+at+'\nupdated_at: '+at+'\n---\n\n# Terminal architecture\n\nA stable sourced description.\n';
   try {
-    const schema=load('schema/v1.json'), index=load('index.json');
-    if (schema?.schema_version!==1) problem('unsupported ledger schema');
-    if (index?.schema_version!==1 || !Array.isArray(index?.entries)) return [...bad,'invalid index shape'];
-    if (!utcOk(index.updated_at)) problem('index missing UTC updated_at');
-    const eventNames=scan(path.join(root,'events')).filter(x=>x.endsWith('.json'));
-    const events=[];
-    for(const filename of eventNames){
-      const e=load('events/'+filename);if(!e)continue;
-      if(e.schema_version!==1 || !idOk(e.id) || !['create','verify','revise','supersede','retract'].includes(e.action)) problem('invalid event: '+filename);
-      if(!utcOk(e.recorded_at) || filename.slice(0,10)!==e.recorded_at?.slice(0,10).replaceAll('-','/')) problem('invalid event UTC date: '+filename);
-      if(!e.actor || !e.reason || typeof e.source_issue!=='string' || !e.source_issue.startsWith('https://github.com/')) problem('event missing lineage: '+filename);
-      events.push({...e,eventPath:'events/'+filename});
-    }
-    const entries=scan(path.join(root,'entries')), meta=new Map(), byId=new Map();
-    for(const filename of entries.filter(x=>x.endsWith('.json'))){
-      const match=/^([a-z0-9]+(?:-[a-z0-9]+)*)\/(v[0-9]{4})\.json$/.exec(filename);
-      if(!match){problem('invalid revision path: '+filename);continue;}
-      const [,id,rev]=match, m=load('entries/'+filename), doc='entries/'+id+'/'+rev+'.md';
-      if(!m)continue;
-      if(!fs.existsSync(path.join(root,doc))){problem('missing Markdown '+doc);continue;}
-      const digest=sha256(fs.readFileSync(path.join(root,doc)));
-      if(m.schema_version!==1 || m.id!==id || m.revision!==rev || !['candidate','verified','superseded','retracted'].includes(m.status) || !hashOk(m.content_sha256) || m.content_sha256!==digest) problem('revision/hash mismatch: '+filename);
-      if(!utcOk(m.created_at)||!utcOk(m.recorded_at)||(m.verified_at!==null&&!utcOk(m.verified_at))||(m.effective_at!==null&&!utcOk(m.effective_at))) problem('invalid revision UTC: '+filename);
-      if(!m.title || !m.category || !Array.isArray(m.tags)||!Array.isArray(m.sources)) problem('incomplete revision metadata: '+filename);
-      if(m.status==='verified'){
-        if(!utcOk(m.verified_at)||!m.sources?.length) problem('verified without proof: '+filename);
-        for(const s of m.sources||[]) if(!shaOk(s.sha)||typeof s.url!=='string'||!s.url.startsWith('https://github.com/')||!s.url.includes('/'+s.sha+'/')) problem('unversioned source: '+filename);
-      }
-      const matching=events.filter(e=>e.id===id&&e.new_revision===rev&&e.content_sha256===digest);
-      if(matching.length!==1 || matching[0].recorded_at!==m.recorded_at) problem('missing/ambiguous revision event: '+filename);
-      meta.set(id+'@'+rev,{...m,doc,metadata:'entries/'+filename});
-      if(!byId.has(id))byId.set(id,[]);
-      byId.get(id).push(rev);
-    }
-    for(const filename of entries.filter(x=>x.endsWith('.md'))) if(!entries.includes(filename.replace(/\.md$/,'.json'))) problem('Markdown missing metadata: '+filename);
-    for(const e of events){
-      if(e.id==='knowledge-ledger-bootstrap' && e.new_revision===null) continue;
-      if(!meta.has(e.id+'@'+e.new_revision)) problem('orphaned event '+e.eventPath);
-      if(e.new_revision==='v0001' && e.previous_revision!==null) problem('first event has predecessor '+e.eventPath);
-      if(e.new_revision!=='v0001' && !meta.has(e.id+'@'+e.previous_revision)) problem('revision missing predecessor '+e.eventPath);
-    }
-    const ids=new Set();
-    for(const e of index.entries){
-      if(!idOk(e.id)||!revOk(e.revision)||ids.has(e.id)){problem('duplicate/invalid index id');continue;}
-      ids.add(e.id);
-      const m=meta.get(e.id+'@'+e.revision);
-      if(!m || m.doc!==e.path || m.metadata!==e.metadata_path || m.status!==e.status || m.content_sha256!==e.content_sha256 || m.title!==e.title || m.category!==e.category) problem('index mismatch '+e.id);
-      if(e.revision!==byId.get(e.id)?.sort().at(-1)) problem('stale index '+e.id);
-    }
-    for(const [id,versions] of byId){
-      if(!ids.has(id))problem('missing index entry '+id);
-      const sorted=versions.sort();
-      for(let i=0;i<sorted.length;i++)if(sorted[i]!=='v'+String(i+1).padStart(4,'0'))problem('revision gap '+id);
-    }
-    for(const filename of scan(path.join(root,'receipts')).filter(x=>x.endsWith('.json'))){
-      const r=load('receipts/'+filename);if(!r)continue;
-      if(r.schema_version!==1 || !shaOk(r.commit_sha) || !hashOk(r.content_sha256) || !utcOk(r.written_at) || r.branch!=='refs/heads/knowledge'||!events.some(e=>e.eventPath===r.event_path)||typeof r.record_path!=='string'||!fs.existsSync(path.join(root,r.record_path))||sha256(fs.readFileSync(path.join(root,r.record_path)))!==r.content_sha256) {
-        problem('invalid receipt '+filename);continue;
-      }
-      // The receipt must refer to a real ancestor commit containing the exact
-      // event and content bytes. A string matching a SHA shape is not proof.
-      try {
-        command(root,'merge-base','--is-ancestor',r.commit_sha,'HEAD');
-        const blob=spawnSync('git',['-C',root,'show',r.commit_sha+':'+r.record_path],{encoding:'buffer'});
-        if(blob.status!==0||!Buffer.isBuffer(blob.stdout)||sha256(blob.stdout)!==r.content_sha256)
-          problem('receipt historical bytes mismatch '+filename);
-        command(root,'cat-file','-e',r.commit_sha+':'+r.event_path);
-      }catch(e){problem('receipt ancestry/source mismatch '+filename+': '+e.message);}
-    }
-    // Reject high-confidence secret formats in the entire public ledger.
-    // This is a defense-in-depth filter, never a substitute for secret scanning.
-    for(const group of ['entries','events','receipts']){
-      for(const filename of scan(path.join(root,group))){
-        const content=fs.readFileSync(path.join(root,group,filename),'utf8');
-        if(/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{30,}/.test(content))
-          problem('public ledger contains secret-like material '+group+'/'+filename);
-      }
-    }
-    if(base){
-      if(!shaOk(base))throw Error('trusted audit baseline must be an exact commit SHA');
-      command(root,'merge-base','--is-ancestor',base,'HEAD');
-      // Check EACH first-parent commit, not only base..HEAD final diff.
-      // A malicious fast-forward edit followed by a restore must still fail.
-      const chain=command(root,'rev-list','--reverse','--first-parent',base+'..HEAD').split('\n').filter(Boolean);
-      let parent=base;
-      for(const commit of chain){
-        const parents=command(root,'rev-list','--parents','-n','1',commit).split(' ');
-        if(parents.length!==2||parents[1]!==parent)problem('nonlinear/orphan history graft '+commit);
-        const diff=command(root,'diff','--name-status','--no-renames',parent,commit).split('\n').filter(Boolean);
-        let addedEvent=false,addedEntry=false,indexModified=false;
-        for(const line of diff){
-          const [action,filename]=line.split('\t');
-          if(action==='M'&&filename==='index.json'){indexModified=true;continue;}
-          if(action==='A'&&/^(entries\/|events\/|schema\/|receipts\/)/.test(filename)){
-            if(filename.startsWith('events/'))addedEvent=true;
-            if(filename.startsWith('entries/'))addedEntry=true;
-            continue;
-          }
-          problem('forbidden historical mutation '+commit+': '+line);
-        }
-        if(indexModified&&(!addedEntry||!addedEvent))
-          problem('index advanced without new entry/event in same commit '+commit);
-        parent=commit;
-      }
-    }
-  }catch(e){problem('contract error: '+e.message);}
-  return bad;
+    put('topics/terminal/terminal-architecture.md',record);
+    put('CHANGELOG.md',HEADER+'## '+at+' | create | terminal-architecture\n- Path: topics/terminal/terminal-architecture.md\n- Topic: terminal\n- Categories: architecture, protocol\n- Reason: Initial recorded knowledge\n- Source: https://github.com/BestNathan/nession/issues/2325\n');
+    put('index.json',JSON.stringify(indexFor(d),null,2)+'\n');
+    assert.equal(indexFor(d).topics.terminal[0].id,'terminal-architecture');
+    assert.equal(indexFor(d).categories.architecture[0],'terminal-architecture');
+    assert.equal(logEntries(fs.readFileSync(path.join(d,'CHANGELOG.md'),'utf8')).length,1);
+    assert.throws(()=>parseKnowledge(record.replace('topic: terminal','topic: web'),'topics/terminal/terminal-architecture.md'),/topic\/id/);
+    assert.throws(()=>parseKnowledge(record.replace('["architecture", "protocol"]','["architecture", "architecture"]'),'topics/terminal/terminal-architecture.md'),/category/);
+    assert.throws(()=>parseKnowledge(record.replace('sources: ["https:','sources: ["http:'),'topics/terminal/terminal-architecture.md'),/source/);
+    assert.throws(()=>logEntries(HEADER+'## '+at+' | create | invalid\n- Path: foo\n'),/topic\/id|field/);
+    console.log('knowledge-ledger-contract: v2 topic index, category tags, frontmatter and global log fixtures passed');
+  }finally{fs.rmSync(d,{recursive:true,force:true});}
 }
-function selfTest(){
-  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'nession-knowledge-'));
-  const put=(p,s)=>{const f=path.join(dir,p);fs.mkdirSync(path.dirname(f),{recursive:true});fs.writeFileSync(f,s);};
-  const stamp='2026-10-24T03:00:00Z',id='sample-knowledge',rev='v0001',md='# Test sourced fact\n',hash=sha256(md);
-  const meta={schema_version:1,id,revision:rev,title:'Fact',category:'engineering',tags:['test'],status:'verified',created_at:stamp,recorded_at:stamp,verified_at:stamp,effective_at:null,sources:[{url:'https://github.com/BestNathan/nession/blob/'+ 'a'.repeat(40) +'/AGENTS.md',sha:'a'.repeat(40)}],content_sha256:hash};
-  const event={schema_version:1,id,action:'create',recorded_at:stamp,actor:'fixture',reason:'regression',source_issue:'https://github.com/BestNathan/nession/issues/2325',previous_revision:null,new_revision:rev,content_sha256:hash};
-  const index={schema_version:1,updated_at:stamp,entries:[{id,title:'Fact',category:'engineering',revision:rev,status:'verified',path:'entries/'+id+'/'+rev+'.md',metadata_path:'entries/'+id+'/'+rev+'.json',content_sha256:hash}]};
-  const writeJson=(p,obj)=>put(p,JSON.stringify(obj,null,2)+'\n');
-  const ep='entries/'+id+'/'+rev,ev='events/2026/10/24/test.json';
-  try{
-    writeJson('schema/v1.json',{schema_version:1});put(ep+'.md',md);writeJson(ep+'.json',meta);writeJson(ev,event);writeJson('index.json',index);
-    assert.deepEqual(verify(dir),[],'good ledger');
-    put(ep+'.md','bad');assert.ok(verify(dir).some(s=>s.includes('revision/hash mismatch')),'tampered content');
-    put(ep+'.md',md);writeJson('index.json',{...index,entries:[{...index.entries[0],revision:'v0002'}]});assert.ok(verify(dir).some(s=>s.includes('index')),'stale pointer');
-    writeJson('index.json',index);fs.rmSync(path.join(dir,ev));assert.ok(verify(dir).some(s=>s.includes('revision event')),'missing event');
-    writeJson(ev,{...event,recorded_at:'2026-10-25T03:00:00Z'});assert.ok(verify(dir).some(s=>s.includes('event UTC date')),'event timestamp mismatch');
-    writeJson(ev,event);assert.deepEqual(verify(dir),[],'restored baseline');
-    command(dir,'init','-q');command(dir,'config','user.name','Fixture');command(dir,'config','user.email','fixture@example.invalid');
-    command(dir,'add','.');command(dir,'commit','-qm','baseline');const base=command(dir,'rev-parse','HEAD');
-    put(ep+'.md','tamper');command(dir,'add','.');command(dir,'commit','-qm','illegal edit');
-    assert.ok(verify(dir,base).some(s=>s.includes('forbidden historical mutation')),'destructive fast-forward');
-    put(ep+'.md',md);command(dir,'add','.');command(dir,'commit','-qm','restore corrupted bytes');
-    assert.ok(verify(dir,base).some(s=>s.includes('forbidden historical mutation')),'history edit then restoration still rejected');
-    console.log('knowledge-ledger-contract: history-path and content integrity fixtures passed');
-  }finally{fs.rmSync(dir,{recursive:true,force:true});}
-}
-const [action,root,base]=process.argv.slice(2);
-if(action==='self-test') selfTest();
-else if(action==='check' && root){const errors=verify(path.resolve(root),base||null);if(errors.length){for(const e of errors)console.error(e);process.exitCode=1;}else console.log('knowledge-ledger-contract: PASS');}
-else{console.error('usage: knowledge-ledger-contract.mjs self-test | check <knowledge-worktree> [<base-sha>]');process.exitCode=2;}
+const [cmd,root,base]=process.argv.slice(2);
+try {
+  if(cmd==='self-test')fixture();
+  else if(cmd==='index'&&root){const file=path.join(path.resolve(root),'index.json');fs.writeFileSync(file,JSON.stringify(indexFor(path.resolve(root)),null,2)+'\n');console.log('knowledge topic/category index refreshed');}
+  else if(cmd==='check'&&root){const r=verify(path.resolve(root),base||null);console.log('knowledge-ledger-contract: PASS '+JSON.stringify(r));}
+  else fail('usage: self-test | index <ledger-worktree> | check <ledger-worktree> [<expected-base-sha>]');
+}catch(error){console.error(error.message);process.exitCode=1;}

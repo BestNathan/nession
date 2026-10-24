@@ -170,6 +170,34 @@ function validateBug(issue, errors) {
   if (root != null && investigation != null) errors.push('Bug must use either Root Cause or Investigation Status, not both');
 }
 
+// Apply to newly created Requirements after the knowledge-governance rollout.
+// Old Issues and fixtures lacking creation time retain their established format.
+const KNOWLEDGE_IMPACT_REQUIRED_FROM = Date.parse('2026-10-25T00:00:00Z');
+function validateKnowledgeImpact(issue, sectionMap, errors) {
+  const created=Date.parse(issue.createdAt ?? issue.created_at ?? '');
+  const required=Number.isFinite(created) && created>=KNOWLEDGE_IMPACT_REQUIRED_FROM;
+  if (!required) return;
+  const text=findSection(sectionMap,['knowledge impact']);
+  if (text==null) {
+    errors.push('missing Knowledge Impact assessment for new Requirement');
+    return;
+  }
+  const fields=new Map();
+  for (const match of text.matchAll(/^\s*-\s*(Decision|Related knowledge|Reason|Owner and timing|Evidence):\s*(.+)\s*$/gim)) {
+    const key=match[1].toLowerCase(),value=match[2].trim();
+    if(fields.has(key))errors.push('duplicate Knowledge Impact field '+match[1]);
+    fields.set(key,value);
+  }
+  for (const name of ['decision','related knowledge','reason','owner and timing','evidence']) {
+    if(!fields.get(name))errors.push('Knowledge Impact missing '+name);
+  }
+  const decision=fields.get('decision')||'';
+  if(decision && !['None','Read','Create','Update','Supersede'].includes(decision))
+    errors.push('Knowledge Impact unsupported Decision '+decision);
+  if(decision==='None' && !fields.get('reason'))
+    errors.push('Knowledge Impact None requires a reason');
+}
+
 function validateRequirement(issue, errors) {
   if (!/^requirement\s*:/i.test(String(issue.title ?? ''))) errors.push('Requirement title must start with `Requirement:`');
   const map = sections(issue.body);
@@ -191,6 +219,7 @@ function validateRequirement(issue, errors) {
     if (!row.evidence) errors.push(`${id} has empty Acceptance evidence`);
   }
 
+  validateKnowledgeImpact(issue, map, errors);
   if (!map.has('product alignment')) errors.push('missing ## Product alignment section');
   if (!/^\*\*Status:\*\*\s*(Draft|In Discussion|Approved)\b/im.test(normalizeBody(issue.body))) {
     errors.push('missing specification status: `**Status:** Draft | In Discussion | Approved`');
@@ -211,7 +240,7 @@ export function auditIssue(issue) {
 
 function fetchIssue(number, repo = process.env.GITHUB_REPOSITORY) {
   if (!repo) throw new Error('GITHUB_REPOSITORY is required');
-  const text = execFileSync('gh', ['issue', 'view', String(number), '--repo', repo, '--json', 'number,title,body,labels,state,url,author'], {
+  const text = execFileSync('gh', ['issue', 'view', String(number), '--repo', repo, '--json', 'number,title,body,labels,state,url,author,createdAt'], {
     encoding: 'utf8', env: process.env,
   });
   return JSON.parse(text);
@@ -285,7 +314,13 @@ function selfTest() {
   assert.equal(auditIssue({ ...withE2E,body:withE2E.body.replace('- none: no new test','- pages-workflows').replace('## E2E Report\n| ID','## E2E Report\n| pages-workflows | New | Pending | missing CI evidence |\n| ID') }).ok,false);
 
   assert.equal(auditIssue({ ...withE2E, body: withE2E.body.replace('- none: documentation only', '') }).ok, false);
-  console.log('issue-contract self-test: 12 cases passed');
+  const recent={...v2,createdAt:'2026-10-25T00:00:01Z'};
+  assert.ok(auditIssue(recent).errors.some(e=>e.includes('missing Knowledge Impact')));
+  const assessed={...recent,body:recent.body+'\n\n### Knowledge Impact\n- Decision: None\n- Related knowledge: none, checked project ledger\n- Reason: existing architectural truth remains unchanged\n- Owner and timing: Issue author at creation\n- Evidence: relevant canonical doc and exact SHA reviewed\n'};
+  assert.equal(auditIssue(assessed).ok,true,auditIssue(assessed).errors.join('; '));
+  assert.ok(auditIssue({...assessed,body:assessed.body.replace('- Decision: None','- Decision: Unknown')}).errors.some(e=>e.includes('unsupported Decision')));
+  assert.ok(auditIssue({...assessed,body:assessed.body.replace('- Owner and timing: Issue author at creation','')}).errors.some(e=>e.includes('missing owner and timing')));
+  console.log('issue-contract self-test: base cases and four knowledge impact compatibility/negative fixtures passed');
 }
 
 function writeResult(result, outputPath) {

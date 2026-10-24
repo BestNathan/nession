@@ -1,6 +1,7 @@
 name: E2E / Full Regression
 
-# Separate system/release verification, never an implicit per-merge gate.
+# Separate system/regression observation: periodic Main health is NOT the
+# exact-main-promotion release gate (#2323). Default every 12h via GitHub Vars.
 on:
   workflow_dispatch:
     inputs:
@@ -13,8 +14,10 @@ on:
         description: Optional exact 40-character SHA reachable from branch
         required: false
         type: string
+  # Cron cannot interpolate vars. Use one cheap fixed hourly admission that
+  # reads E2E_MAIN_INTERVAL_HOURS, not a mandatory expensive hourly Full suite.
   schedule:
-    - cron: '0 2 * * 0'
+    - cron: '7 * * * *'
 
 permissions:
   contents: read
@@ -24,7 +27,36 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  admit:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate configurable Main Full interval
+        id: decide
+        env:
+          E2E_MAIN_INTERVAL_HOURS: ${{ vars.E2E_MAIN_INTERVAL_HOURS }}
+          E2E_STAGING_INTERVAL_HOURS: ${{ vars.E2E_STAGING_INTERVAL_HOURS }}
+          E2E_STAGING_LANE_INTERVALS_JSON: ${{ vars.E2E_STAGING_LANE_INTERVALS_JSON }}
+        run: |
+          node scripts/e2e-regression-policy.mjs self-test
+          node scripts/e2e-regression-policy.mjs admit-main
+
   full:
+    needs: admit
+    if: >-
+      ${{ always() &&
+          (github.event_name == 'workflow_dispatch' ||
+           (needs.admit.result == 'success' && needs.admit.outputs.run == 'true')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 65
     env:
