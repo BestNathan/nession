@@ -30,6 +30,10 @@ struct Cli {
     server_url: Option<String>,
 
     /// Auth token for server authentication. Overrides config and NENSION_AUTH_TOKEN env var.
+    ///
+    /// A value passed here is visible in shell history and in process listings
+    /// while the command runs. For repeatable operation prefer `config set
+    /// auth_token` or the environment variable.
     #[arg(long, global = true, env = "NENSION_AUTH_TOKEN")]
     auth_token: Option<String>,
 }
@@ -100,6 +104,13 @@ enum AgentAction {
         /// Path to PID file
         #[arg(long)]
         pid_file: Option<String>,
+
+        /// Internal: read the auth token handed off by the parent over stdin.
+        ///
+        /// The child half of the background-start handoff (#2269), not a
+        /// user-facing input method. Hidden so it is not advertised as one.
+        #[arg(long, hide = true)]
+        auth_token_stdin: bool,
     },
     /// Stop the agent
     Stop {
@@ -318,6 +329,7 @@ async fn main() -> Result<()> {
                 config,
                 foreground,
                 pid_file,
+                auth_token_stdin,
             } => {
                 let config = config.unwrap_or_else(|| {
                     nession_common::paths::agent_config_path()
@@ -331,8 +343,15 @@ async fn main() -> Result<()> {
                         .to_string_lossy()
                         .into_owned()
                 });
-                commands::agent::start(config, foreground, pid_file, cli.server_url, cli.auth_token)
-                    .await?
+                commands::agent::start(
+                    config,
+                    foreground,
+                    pid_file,
+                    cli.server_url,
+                    cli.auth_token,
+                    auth_token_stdin,
+                )
+                .await?
             }
             AgentAction::Stop { pid_file } => {
                 let pid_file = pid_file.unwrap_or_else(|| {
@@ -543,4 +562,160 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::{OsStr, OsString};
+    use std::process::Command;
+    use std::sync::Mutex;
+
+    /// The credential these tests use. Distinctive enough that a substring
+    /// search over the child's vector cannot pass by accident.
+    const SECRET: &str = "fake-auth-token-for-2269";
+
+    /// `NENSION_AUTH_TOKEN` is process-global; serialise the tests that set it.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Set or clear an environment variable and restore whatever was there
+    /// before, including on a panic, so one test cannot change what another
+    /// observes.
+    struct EnvSetting {
+        key: &'static str,
+        previous: Option<OsString>,
+    }
+
+    impl EnvSetting {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+
+        fn unset(key: &'static str) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::remove_var(key);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvSetting {
+        fn drop(&mut self) {
+            match self.previous.take() {
+                Some(previous) => std::env::set_var(self.key, previous),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
+    fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+        ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn parsed_cli(args: &[&str]) -> Cli {
+        Cli::try_parse_from(args).expect("the CLI must accept this invocation")
+    }
+
+    /// The actual argument vector and environment a background start passes to
+    /// its re-executed child, with the binary name in front.
+    fn child_vector(command: &Command) -> (Vec<OsString>, Vec<(OsString, Option<OsString>)>) {
+        let mut argv = vec![command.get_program().to_owned()];
+        argv.extend(command.get_args().map(OsStr::to_owned));
+        let env = command
+            .get_envs()
+            .map(|(key, value)| (key.to_owned(), value.map(OsStr::to_owned)))
+            .collect();
+        (argv, env)
+    }
+
+    fn assert_no_secret_in_child_vector(command: &Command) {
+        let (argv, env) = child_vector(command);
+        assert!(
+            !argv
+                .iter()
+                .any(|arg| arg.to_string_lossy().contains(SECRET)),
+            "the re-exec child's argv must not carry the credential: {argv:?}"
+        );
+        assert!(
+            !env.iter()
+                .any(|(key, value)| key.to_string_lossy().contains(SECRET)
+                    || value
+                        .as_ref()
+                        .is_some_and(|value| value.to_string_lossy().contains(SECRET))),
+            "the re-exec child's environment must not carry the credential: {env:?}"
+        );
+    }
+
+    fn background_command_for(cli: &Cli) -> Command {
+        commands::agent::background_child_command(
+            std::path::Path::new("/bin/true"),
+            "agent-config.toml",
+            "agent.pid",
+            cli.server_url.as_deref(),
+            cli.auth_token.as_deref(),
+        )
+    }
+
+    /// The internal argument the parent appends and the hidden flag the child
+    /// parses are two spellings of one name; this is what keeps them equal.
+    #[test]
+    fn the_child_is_told_to_read_the_handoff_channel() {
+        let cli = parsed_cli(&[
+            "nession",
+            "agent",
+            "start",
+            crate::utils::secret_handoff::AUTH_TOKEN_STDIN_ARG,
+        ]);
+
+        match cli.command {
+            Commands::Agent {
+                action:
+                    AgentAction::Start {
+                        auth_token_stdin, ..
+                    },
+            } => assert!(auth_token_stdin),
+            _ => panic!("parsed something other than agent start"),
+        }
+    }
+
+    /// #2269: a credential typed as a flag must not survive into the long-lived
+    /// child's argv.
+    #[test]
+    fn a_flag_sourced_token_is_absent_from_the_child_argv() {
+        let _env = lock_env();
+        let _setting = EnvSetting::unset("NENSION_AUTH_TOKEN");
+        let cli = parsed_cli(&["nession", "--auth-token", SECRET, "agent", "start"]);
+        assert_eq!(cli.auth_token.as_deref(), Some(SECRET));
+
+        let command = background_command_for(&cli);
+
+        assert_no_secret_in_child_vector(&command);
+        let (argv, _) = child_vector(&command);
+        assert!(
+            argv.iter()
+                .any(|arg| arg == crate::utils::secret_handoff::AUTH_TOKEN_STDIN_ARG),
+            "the child must be pointed at the handoff channel instead: {argv:?}"
+        );
+    }
+
+    /// The same property for a credential that arrived through Clap's
+    /// environment source: the source changes who typed it, not the channel.
+    #[test]
+    fn an_env_sourced_token_is_absent_from_the_child_argv() {
+        let _env = lock_env();
+        let _setting = EnvSetting::set("NENSION_AUTH_TOKEN", SECRET);
+        let cli = parsed_cli(&["nession", "agent", "start"]);
+        assert_eq!(
+            cli.auth_token.as_deref(),
+            Some(SECRET),
+            "the environment source must reach the resolved override"
+        );
+
+        let command = background_command_for(&cli);
+
+        assert_no_secret_in_child_vector(&command);
+    }
 }
