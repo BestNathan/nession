@@ -288,9 +288,9 @@ async function main() {
     const prepared = prepareAnalysisInput(event, env, args[1], args[2]);
     fs.mkdirSync(args[3], { recursive: true });
     fs.writeFileSync(path.join(args[3], 'analysis-input.json'),
-      JSON.stringify(prepared.input, null, 2) + '\\n', { flag: 'wx', mode: 0o600 });
+      JSON.stringify(prepared.input, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
     fs.writeFileSync(path.join(args[3], 'analysis-claim.json'),
-      JSON.stringify(prepared.claim, null, 2) + '\\n', { flag: 'wx', mode: 0o600 });
+      JSON.stringify(prepared.claim, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
     console.log(JSON.stringify({ analysis_id: prepared.input.analysis_id,
       source_sha: prepared.input.source.source_sha, input_written: true, claim_written: true }));
     return;
