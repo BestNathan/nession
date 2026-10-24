@@ -323,22 +323,13 @@ async fn attach_and_run<T: crate::terminal::TerminalTransport>(
 /// carried no credential, and the Agent refuses an uncredentialed connection
 /// (#1013). A consumer that never contacts the Server has nothing to present.
 ///
-/// # ⚠ `--width` and `--height` do not do anything
-///
-/// They are accepted and ignored, and **always have been** — including on the
-/// direct-agent path this replaces, which passed them to an Agent function whose
-/// own doc says the parameters are ignored. Every session is created at
-/// `SESSION_WIDTH` × `SESSION_HEIGHT` (200×60) and resized by the first client
-/// to attach; the size a session has is a property of whoever attached last, not
-/// of who created it (the sizing decision of 2026-08-15).
-///
-/// Verified rather than inferred: a session created with `--width 111` came up
-/// at 200 on both paths.
-///
-/// They are still here, still named in the shell, and still passed through,
-/// because **what to do about them is a product decision this change must not
-/// take on its own** — either they go, or a create-time size becomes something
-/// the Agent honours, and that second one edits a deliberate design.
+/// Creation takes no dimensions (#2268). Every session starts at
+/// `SESSION_WIDTH` × `SESSION_HEIGHT` (200×60) and the first client to attach
+/// states the size it ends up with; a create-time size was accepted and
+/// ignored on every path since the sizing decision of 2026-08-15, so the
+/// options have been removed rather than kept as phantom controls. The
+/// `session create` command now rejects them instead of silently succeeding
+/// with a size it does not apply.
 ///
 /// # Arguments
 ///
@@ -346,15 +337,11 @@ async fn attach_and_run<T: crate::terminal::TerminalTransport>(
 /// * `auth_token` - Authentication token
 /// * `agent_id` - ID of the agent to create the session on
 /// * `session_name` - Name for the new session
-/// * `_width` - Ignored; see above
-/// * `_height` - Ignored; see above
 pub async fn create_session(
     server_url: &str,
     auth_token: &str,
     agent_id: &str,
     session_name: &str,
-    _width: u16,
-    _height: u16,
 ) -> Result<()> {
     let mut client = connect(server_url, auth_token).await?;
     println!("Creating session '{session_name}' on agent '{agent_id}'...");

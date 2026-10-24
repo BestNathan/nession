@@ -154,7 +154,7 @@ nession server start|status|stop
 ```bash
 nession agents list
 nession sessions list [--agent-id <id>]
-nession sessions create --agent-id <id> --name dev [--width 120 --height 40]
+nession sessions create --agent-id <id> --name dev
 nession sessions attach --session-id <agent_id>:<session_name> [--mode p2p|relay]
 nession sessions kill   --session-id <agent_id>:<session_name> [--force]
 ```

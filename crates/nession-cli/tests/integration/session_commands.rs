@@ -15,8 +15,50 @@ fn test_sessions_create_help() {
     assert!(stdout.contains("Create a new tmux session"));
     assert!(stdout.contains("--agent-id"));
     assert!(stdout.contains("--name"));
-    assert!(stdout.contains("--width"));
-    assert!(stdout.contains("--height"));
+    assert!(
+        !stdout.contains("--width") && !stdout.contains("--height"),
+        "creation states no dimensions; the first attach owns the size (#2268): {stdout}"
+    );
+}
+
+/// #2268: the removed options must fail as options, not silently succeed as
+/// ignored input. The command must not reach the Server.
+#[test]
+fn test_sessions_create_rejects_removed_dimensions() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--bin",
+            "nession",
+            "--",
+            "--server-url",
+            "ws://localhost:59999",
+            "sessions",
+            "create",
+            "--agent-id",
+            "test-agent",
+            "--name",
+            "test-session",
+            "--width",
+            "111",
+        ])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(
+        !output.status.success(),
+        "an ignored dimension must not read as a successful create"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unexpected argument"),
+        "the parser must name the removed option: {stderr}"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("Creating session"),
+        "the command must fail before contacting the Server: {stdout}"
+    );
 }
 
 #[test]
