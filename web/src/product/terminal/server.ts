@@ -253,6 +253,9 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
       connection.subscribe(TERMINAL_RESIZE_WIRE, (payload) => {
         this.handleRelayResize(payload as Record<string, unknown>);
       }),
+      // Server and Agent now share the canonical agent.terminal.resize
+      // notification and short session_name (server_agent_terminal_resize_v1).
+      // Do not subscribe to legacy terminal.resize: it has no protocol owner.
       // Spelled as a literal rather than through a constant, like the direct
       // path in ./agent and for the same measured reason: `just check-protocol`
       // resolves a subscription by reading a dotted literal at the call site,

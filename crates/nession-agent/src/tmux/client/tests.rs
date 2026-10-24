@@ -181,6 +181,49 @@ async fn an_error_block_reports_tmuxs_own_message() {
     client.close().await;
 }
 
+/// #2286/#2144: a `%layout-change` that interleaves another command's
+/// response block is a source event, not response body.
+///
+/// tmux 3.6b reports a pane resize with `%layout-change`, and it can arrive
+/// between `%begin` and `%end` of a command the client is waiting for. The old
+/// router ignored it there, leaving passive peers at stale geometry even though
+/// the pane had already moved. The client must emit the resize and still
+/// resolve the command with its own (empty) body.
+#[tokio::test]
+async fn a_layout_change_inside_a_response_block_still_resizes() {
+    let (mut client, mut rx, mut tx) = wire();
+    send(&mut tx, WELCOME).await;
+
+    let (result, command) = tokio::join!(client.command(ControlCommand::RefreshClient), async {
+        let command = read_command(&mut rx).await;
+        send(&mut tx, "%begin 2 1 0\n").await;
+        send(
+            &mut tx,
+            "%layout-change @0 a87d,177x49,0,0,0 a87d,177x49,0,0,0 *\n",
+        )
+        .await;
+        send(&mut tx, "%end 2 1 0\n").await;
+        command
+    },);
+
+    assert_eq!(command, "refresh-client\n");
+    assert_eq!(
+        result.expect("the command's own block is still its reply"),
+        b"",
+        "the layout notification must not become the response body"
+    );
+    assert_eq!(next_event(&mut client).await, TmuxEvent::Handshaken);
+    assert_eq!(
+        next_event(&mut client).await,
+        TmuxEvent::Resize {
+            cols: 177,
+            rows: 49
+        },
+        "a layout change inside a response block must reach observers"
+    );
+    client.close().await;
+}
+
 #[tokio::test]
 async fn output_is_byte_exact_and_size_changes_are_deduplicated() {
     let (mut client, _rx, mut tx) = wire();

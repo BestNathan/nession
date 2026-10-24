@@ -346,6 +346,77 @@ async fn integration_client_attach_creates_pty() {
     handle.shutdown().await.ok();
 }
 
+/// #2268 SC-03: the size a created session has is the attaching client's.
+///
+/// Creation states no dimensions (the manager ignores any it is handed), so the
+/// window starts at the Agent's default. The first attach resizes it to the
+/// size that client states — which is why the CLI no longer offers a create-time
+/// `--width`/`--height`: they were a second, losing owner of this decision.
+///
+/// The create size here (80×24) is deliberately different from the attach size
+/// (111×41), so the assertion can only pass if the attach moved the pane.
+#[tokio::test]
+async fn integration_attach_supplies_the_effective_session_size() {
+    let (addr, handle, credentials) = start_server(0).await.unwrap();
+
+    let tmux = SessionManager::new();
+    let session = TestSession::new("attach-size");
+    let session_name = session.name().to_string();
+    tmux.create_session(&session_name, 80, 24, "/tmp", &[])
+        .await
+        .unwrap();
+
+    let (mut sink, mut stream) = connect_for(&credentials, addr, &session_name)
+        .await
+        .unwrap();
+
+    let attach = ClientAttachPayload {
+        session_name: session_name.clone(),
+        width: 111,
+        height: 41,
+        // The size is meant, so it is authoritative (#1265).
+        size_known: None,
+        env_snapshots: Vec::new(),
+        needs_bootstrap: None,
+    };
+    let req = new_message(msg_types::CLIENT_ATTACH, attach);
+    let resp: nession_agent::server::websocket::Message<ClientAttachResponse> =
+        round_trip(&mut sink, &mut stream, &req).await.unwrap();
+    assert_eq!(resp.msg_type, msg_types::OK);
+
+    // tmux is the application-visible truth; the resize is applied by the
+    // attach path, so allow it the same bounded settle the other resize tests
+    // use rather than asserting on the first read.
+    let mut pane = (0, 0);
+    for _ in 0..50 {
+        pane = tmux
+            .tmux_dep()
+            .ops()
+            .window_size(&session_name)
+            .await
+            .expect("the session has a tmux window");
+        if pane == (111, 41) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(
+        pane,
+        (111, 41),
+        "the attaching client's size did not become the shared pane size"
+    );
+
+    let detach = ClientDetachPayload {
+        session_name: session_name.clone(),
+    };
+    let req = new_message(msg_types::CLIENT_DETACH, detach);
+    let _: nession_agent::server::websocket::Message<ClientDetachResponse> =
+        round_trip(&mut sink, &mut stream, &req).await.unwrap();
+
+    tmux.kill_session(&session_name).await.ok();
+    handle.shutdown().await.ok();
+}
+
 /// #1226: a second `agent.attach` on the SAME connection must be answered,
 /// and the connection must survive it.
 ///

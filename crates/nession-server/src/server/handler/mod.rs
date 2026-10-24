@@ -31,9 +31,8 @@ use nession_protocol::contracts::session::v1::{
     ClientSessionCreatePayload, ClientSessionCreateResponsePayload, ClientSessionEnvActivePayload,
     ClientSessionEnvApplyPayload, ClientSessionEnvQueryPayload, ClientSessionEnvResponsePayload,
     ClientSessionEnvUnsetPayload, ClientSessionKillPayload, ServerSessionListPayload,
-    ServerSessionListReply, ServerTerminalResizePayload, SessionEnvActiveResponse,
-    SessionEnvQueryResponse, SessionRefusal, WebSessionInfo, WebSessionKillResponse,
-    WebSessionsListResponse,
+    ServerSessionListReply, SessionEnvActiveResponse, SessionEnvQueryResponse, SessionRefusal,
+    WebSessionInfo, WebSessionKillResponse, WebSessionsListResponse,
 };
 use nession_protocol::ProtocolMessage;
 
