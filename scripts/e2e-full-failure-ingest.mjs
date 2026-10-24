@@ -80,7 +80,7 @@ function verify({ event, run, workflow, jobs, artifacts, candidate, archiveSha25
       for (const failure of item.failures) {
         assert.ok(failure && failure.kind === 'assertion_failed' &&
           failure.assertion_code === 'playwright_unexpected' &&
-          /^[A-Za-z0-9_.-]{1,100}\\.spec\\.[cm]?[jt]s:[1-9][0-9]{0,5}(?::[1-9][0-9]{0,5})?$/.test(failure.stable_frame ?? '') &&
+          /^[A-Za-z0-9_.-]{1,100}\.spec\.[cm]?[jt]s:[1-9][0-9]{0,5}(?::[1-9][0-9]{0,5})?$/.test(failure.stable_frame ?? '') &&
           failure.affected_invariant === item.id &&
           failure.environment_specific === false,
           'unsafe or malformed sanitized failure signature');
