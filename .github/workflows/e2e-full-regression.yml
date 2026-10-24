@@ -29,10 +29,20 @@ concurrency:
 jobs:
   admit:
     if: github.event_name == 'schedule'
+    concurrency:
+      group: e2e-full-regression-admission
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      actions: read
     runs-on: ubuntu-latest
     timeout-minutes: 3
     outputs:
       run: ${{ steps.decide.outputs.run }}
+      decision: ${{ steps.decide.outputs.decision }}
+      interval_hours: ${{ steps.decide.outputs.interval_hours }}
+      last_full_completed_at: ${{ steps.decide.outputs.last_full_completed_at }}
+      next_due_at: ${{ steps.decide.outputs.next_due_at }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -44,15 +54,19 @@ jobs:
       - name: Validate configurable Main Full interval
         id: decide
         env:
+          GH_TOKEN: ${{ github.token }}
           E2E_MAIN_INTERVAL_HOURS: ${{ vars.E2E_MAIN_INTERVAL_HOURS }}
           E2E_STAGING_INTERVAL_HOURS: ${{ vars.E2E_STAGING_INTERVAL_HOURS }}
           E2E_STAGING_LANE_INTERVALS_JSON: ${{ vars.E2E_STAGING_LANE_INTERVALS_JSON }}
         run: |
           node scripts/e2e-regression-policy.mjs self-test
-          node scripts/e2e-regression-policy.mjs admit-main
+          node scripts/e2e-regression-policy.mjs admit-main-history
 
   full:
     needs: admit
+    concurrency:
+      group: e2e-full-regression-execution
+      cancel-in-progress: false
     if: >-
       ${{ always() &&
           (github.event_name == 'workflow_dispatch' ||
