@@ -75,6 +75,20 @@ function verify({ event, run, workflow, jobs, artifacts, candidate, archiveSha25
       assert.ok(Number.isSafeInteger(item[k]) && item[k] >= 0, 'invalid count: ' + k);
     }
     assert.equal(item.failed + item.skipped + item.flaky + item.expected + item.other, item.total);
+    if (item.failures !== undefined) {
+      assert.ok(Array.isArray(item.failures) && item.failures.length <= 8, 'invalid bounded failure signatures');
+      for (const failure of item.failures) {
+        assert.ok(failure && failure.kind === 'assertion_failed' &&
+          failure.assertion_code === 'playwright_unexpected' &&
+          /^[A-Za-z0-9_.-]{1,100}\\.spec\\.[cm]?[jt]s:[1-9][0-9]{0,5}(?::[1-9][0-9]{0,5})?$/.test(failure.stable_frame ?? '') &&
+          failure.affected_invariant === item.id &&
+          failure.environment_specific === false,
+          'unsafe or malformed sanitized failure signature');
+        assert.deepEqual(Object.keys(failure).sort(),
+          ['affected_invariant','assertion_code','environment_specific','kind','stable_frame'].sort(),
+          'unexpected failure signature fields');
+      }
+    }
   }
   const record = {
     schema_version: 1,
