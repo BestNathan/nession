@@ -36,6 +36,18 @@ Evaluate only criteria whose declared stage matches the environment/boundary bei
 
 Do not mark a criterion Pass because implementation exists; execute/observe the criterion's actual proof.
 
+**Boundary review before accepting an SC:** PR-head deterministic evidence is the
+default; choose merged staging for real integrated provider/Store/Run recovery
+once an isolated trusted staging runner can produce exact-SHA receipts; reserve
+merged main for a truly main-specific identity/dispatch/handoff property, and
+deployed for a verified rollout. The current main-only Developer workflow
+does not justify moving staging-correctness SCs to main. If the safe staging
+provider lane is not available, keep the SC Pending and document the blocked
+trusted-runner prerequisite instead of accepting an unrelated main Canary.
+A read-only `method: agent` verdict cannot substitute for an unexecuted
+source-aligned `method: case` runtime proof. Never give untrusted staging/PR
+code privileged GitHub, model, or Store write credentials.
+
 ## Execute through the trusted workflow
 
 Model-backed **Agent / SC Acceptance** evaluation is routed through `.github/workflows/agent-sc-acceptance.yml`. Source-aligned Issue/SC **Acceptance / Cases** use `.github/workflows/acceptance-cases.yml` and the single canonical `./e2e/run acceptance --issue N --sc SC-NN --sha SHA --stage STAGE --profile full-stack-local --issue-json CONTRACT --output RECORD` interface. Regression tests use `./e2e/run test`, observational reproduction uses `./e2e/run scenario`/`compare`; CI alone may execute live stack paths. The underlying `e2e/acceptance/evaluator/run-case.mjs` is internal to the CLI and does not receive Issue-write credentials.
