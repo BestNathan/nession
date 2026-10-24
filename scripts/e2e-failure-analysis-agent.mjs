@@ -89,7 +89,21 @@ export function prepareAnalysisInput(event, env, agentStoreRoot, acceptanceRoot)
       acceptance?.artifact?.digest !== observation.artifact.digest) {
     fail('canonical acceptance-results receipt does not match admission observation');
   }
-  const signatures = (observation.failure_signatures ?? []).filter(x =>
+  const signatures = (observation.failure_signatures ?? []).filter(x => {
+    const candidateResult = acceptance.candidate?.results?.find(item => item.id === x.test_id);
+    const matchingSignature = (candidateResult?.failures ?? []).some(sig =>
+      sig?.kind === x.signature?.kind &&
+      sig?.assertion_code === x.signature?.assertion_code &&
+      sig?.stable_frame === x.signature?.stable_frame &&
+      sig?.affected_invariant === x.signature?.affected_invariant &&
+      sig?.environment_specific === x.signature?.environment_specific);
+    return matchingSignature &&
+      x.actionable === true && x.signature?.kind === 'assertion_failed' &&
+      x.signature?.assertion_code === 'playwright_unexpected' &&
+      FRAME.test(x.signature?.stable_frame ?? '') &&
+      x.signature?.affected_invariant === x.test_id &&
+      x.signature?.environment_specific === false;
+  });
     x.actionable === true && x.signature?.kind === 'assertion_failed' &&
     x.signature?.assertion_code === 'playwright_unexpected' &&
     FRAME.test(x.signature?.stable_frame ?? '') &&
