@@ -82,6 +82,13 @@ function deploymentFor(overlay, roleName, deployments) {
 }
 
 function imageIdFor(overlay, roleName, deploymentName, image, pods) {
+  // A cluster registry mirror may resolve the deployment image to another
+  // repository, so the pod status image string can differ from the GitOps
+  // image while keeping the same immutable role tag. Match the role tag and
+  // let the attestation bind the digest to trusted per-registry provenance.
+  const tagSuffix = ':' + image.slice(image.lastIndexOf(':') + 1);
+  const matchesTag = (entry) =>
+    typeof entry?.image === 'string' && entry.image.endsWith(tagSuffix);
   const matching = pods.filter((pod) => {
     const owner = pod?.metadata?.ownerReferences?.[0];
     return owner?.kind === 'ReplicaSet' &&
@@ -98,8 +105,8 @@ function imageIdFor(overlay, roleName, deploymentName, image, pods) {
     }
     if (pod.status?.phase !== 'Running') fail(roleName + ' pod is not Running');
     const statuses = list(pod.status?.containerStatuses, roleName + ' pod container statuses');
-    const status = statuses.find((entry) => entry?.image === image && entry?.ready === true);
-    if (!status && statuses.some((entry) => entry?.image === image)) {
+    const status = statuses.find((entry) => matchesTag(entry) && entry?.ready === true);
+    if (!status && statuses.some(matchesTag)) {
       fail(roleName + ' pod container is not ready');
     }
     if (!status) continue;
@@ -298,6 +305,36 @@ function selfTest() {
   assert.equal(positive.workloads.length, 3);
   assert.equal(positive.workloads[0].image_id,
     'ghcr.io/bestnathan/nession@sha256:' + '1'.repeat(64));
+
+  // A registry mirror may rewrite the pod status image reference while the
+  // immutable role tag stays the same. The observer matches the tag suffix;
+  // attestation still binds the digest to trusted provenance.
+  const mirrorFixtures = kubernetesFixtures();
+  for (const pod of mirrorFixtures.pods.items) {
+    const roleName = pod.metadata.name.split('-')[1];
+    pod.status.containerStatuses[0].image =
+      'mirror.example.com/nession:' + roleName + '-abcdef1';
+  }
+  const mirrorObservation = observationFromKubernetes({
+    overlay: parseEnvironmentOverlay(OVERLAY_PATH, OVERLAY_TEXT),
+    environmentId: 'staging',
+    clusterContext: 'home-k8s',
+    observedAt: '2026-10-24T16:00:00Z',
+    deployments: mirrorFixtures.deployments,
+    pods: mirrorFixtures.pods,
+  });
+  assert.equal(mirrorObservation.workloads.length, 3);
+  const wrongTagFixtures = kubernetesFixtures();
+  wrongTagFixtures.pods.items[0].status.containerStatuses[0].image =
+    'mirror.example.com/nession:agent-0000000';
+  assert.throws(() => observationFromKubernetes({
+    overlay: parseEnvironmentOverlay(OVERLAY_PATH, OVERLAY_TEXT),
+    environmentId: 'staging',
+    clusterContext: 'home-k8s',
+    observedAt: '2026-10-24T16:00:00Z',
+    deployments: wrongTagFixtures.deployments,
+    pods: wrongTagFixtures.pods,
+  }), /no ready pod reports the agent deployment image/);
 
   const reject = (mutations, pattern) => {
     const fixtures = kubernetesFixtures(mutations);
