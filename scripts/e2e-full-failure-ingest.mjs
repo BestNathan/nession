@@ -130,12 +130,16 @@ function selfTest() {
   const candidate = { schema_version: 1, kind: 'e2e_full_failure_candidate',
     provenance: 'UNATTESTED_ARTIFACT_ONLY', run_id: 501, run_attempt: 2, target_sha: sha,
     status: 'FAILED_TESTS_OBSERVED', results: [{ id: 'terminal-attach', total: 2,
-      failed: 1, skipped: 0, flaky: 0, expected: 1, other: 0 }] };
+      failed: 1, skipped: 0, flaky: 0, expected: 1, other: 0,
+      failures: [{ kind: 'assertion_failed', assertion_code: 'playwright_unexpected',
+        stable_frame: 'terminal-attach.spec.ts:42:9', affected_invariant: 'terminal-attach',
+        environment_specific: false }] }] };
   const input = { event: { repository: { full_name: REPO }, workflow_run: { id: 501,
     run_attempt: 2, head_sha: sha } }, run, workflow: { id: 9, path: WORKFLOW_PATH, name: WORKFLOW_NAME },
     jobs: { jobs: [job] }, artifacts: { artifacts: [artifact] }, candidate, archiveSha256: d };
   const result = verify(input);
   assert.equal(result.record.agent_dispatch, 'NOT_AUTHORIZED');
+  assert.equal(result.record.candidate.results[0].failures[0].stable_frame, 'terminal-attach.spec.ts:42:9');
   assert.match(result.record_path, new RegExp(sha));
   for (const bad of [
     { ...input, run: { ...run, event: 'workflow_dispatch' } },
