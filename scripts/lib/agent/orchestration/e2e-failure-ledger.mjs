@@ -233,6 +233,21 @@ function selfTest() {
     const replay = recordE2EFailureObservation(root, observation, { now: '2026-10-24T12:04:00Z' });
     assert.equal(replay.status, 'ANALYSIS_IN_FLIGHT');
     assert.equal(replay.analysis_id, first.analysis_id, 'same Run/Attempt replay must not create a second analysis');
+    const ledgerDir = path.join(root, 'e2e-failures', first.fingerprint.slice(5));
+    const headFile = path.join(ledgerDir, 'head.json');
+    const head = JSON.parse(fs.readFileSync(headFile, 'utf8'));
+    const stateFile = path.join(root, head.path);
+    const expiredState = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+    expiredState.lease_expires_at = '2026-10-24T11:00:00.000Z';
+    fs.writeFileSync(stateFile, bytes(expiredState));
+    head.sha256 = hash(bytes(expiredState));
+    fs.writeFileSync(headFile, bytes(head));
+    const expired = recordE2EFailureObservation(root, { ...observation, source: {
+      ...observation.source, run_id: 505 } }, { now: '2026-10-24T12:05:00Z' });
+    assert.equal(expired.status, 'ADMISSION_RECONCILE_REQUIRED');
+    assert.equal(expired.analysis_id, first.analysis_id);
+    assert.equal(JSON.parse(fs.readFileSync(headFile, 'utf8')).version, 1,
+      'expired lease must not advance claim or mint a second dispatch intent');
     const nonActionable = recordE2EFailureObservation(root, { ...observation, source: {
       ...observation.source, run_id: 503 }, classification: 'setup_or_ci_error' },
     { now: '2026-10-24T12:02:00Z' });
