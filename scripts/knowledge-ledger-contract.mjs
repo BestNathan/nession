@@ -154,6 +154,7 @@ export function validateArticleLinks(root, articleFiles=paths(root,'topics').fil
   const articleSet=new Set(articleFiles),incoming=new Map(articleFiles.map(f=>[f,0])),headingCache=new Map();
   const slugHeading=(s)=>s.toLowerCase().normalize('NFKC').trim()
     .replace(/[\`*_~]/g,'').replace(/[^\p{L}\p{N}\s-]/gu,'').replace(/\s+/g,'-').replace(/-+/g,'-');
+    const headingsFor=(file)=>{if(!headingCache.has(file)){const text=fs.readFileSync(path.join(root,file),'utf8');const hs=new Set(text.split('\n').filter(line=>/^#{1,6}\\s+/.test(line)).map(line=>slugHeading(line.replace(/^#{1,6}\\s+/,'').replace(/\\s+#+\\s*$/,''))));headingCache.set(file,hs);}return headingCache.get(file);};
   for(const file of articleFiles) {
     const content=fs.readFileSync(path.join(root,file),'utf8');
     const headings=new Set([...content.matchAll(/^#{1,6}\s+(.+?)\s*#*\s*$/gm)].map(m=>slugHeading(m[1])));
@@ -173,7 +174,7 @@ export function validateArticleLinks(root, articleFiles=paths(root,'topics').fil
         let fragment;
         try { fragment=decodeURIComponent(fragmentRaw); }
         catch { fail(file+': malformed link fragment '+raw); }
-        if(targetFile===file && !headings.has(fragment.toLowerCase()) && !/^[a-f0-9-]{8,}$/i.test(fragment))
+        if(!headingsFor(targetFile).has(fragment.toLowerCase()))
           fail(file+': broken local heading anchor '+raw);
       }
       if(articleSet.has(targetFile)&&targetFile!==file)incoming.set(targetFile,(incoming.get(targetFile)||0)+1);
