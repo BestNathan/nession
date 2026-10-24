@@ -53,16 +53,23 @@ use std::collections::VecDeque;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout};
 use tokio::sync::{mpsc, oneshot, watch};
 use tracing::warn;
 
 use super::ops::TmuxDep;
-use super::parser::{parse_control_line, unescape_tmux_data, ControlMessage};
+use super::parser::{decode_tmux_output, parse_control_line_bytes, ControlMessage};
 
 /// Buffer capacity for the output channel — bytes-per-batch parsed from tmux.
 const OUTPUT_CHANNEL_CAPACITY: usize = 256;
+
+/// A malformed or unbounded Control Mode line must never exhaust Agent memory.
+const MAX_CONTROL_LINE_BYTES: usize = 16 * 1024 * 1024;
+/// Bound the aggregate pre-capture replay buffer, not just its event count.
+const MAX_PRE_BARRIER_BYTES: usize = 2 * 1024 * 1024;
+/// Capture is a best-effort bootstrap; excessive history is a bounded fault.
+const MAX_CAPTURE_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 
 /// Buffer capacity for the resize channel — one (cols, rows) tuple per event.
 const RESIZE_CHANNEL_CAPACITY: usize = 16;
@@ -494,6 +501,9 @@ enum Effect {
     Exit,
     /// Non-fatal and worth a log line.
     Note(&'static str),
+    /// The tmux wire cannot be trusted beyond this record; terminate the
+    /// control reader so no later output can be labelled contiguous.
+    ProtocolFault(&'static str),
 }
 
 /// Where the reader is relative to the capture's `%begin`.
@@ -538,8 +548,10 @@ struct ControlRouter {
     welcomed: bool,
     /// `%output` held back before the barrier, in arrival order.
     pre_barrier: VecDeque<Vec<u8>>,
+    pre_barrier_bytes: usize,
     /// Data lines of the capture's response block.
-    capture_lines: Vec<String>,
+    capture_lines: Vec<Vec<u8>>,
+    capture_bytes: usize,
     phase: BarrierPhase,
     /// The capture was skipped or its buffer overflowed: the eventual
     /// response block (if one still arrives) is generic.
@@ -556,7 +568,9 @@ impl ControlRouter {
             open_block: None,
             welcomed: false,
             pre_barrier: VecDeque::new(),
+            pre_barrier_bytes: 0,
             capture_lines: Vec::new(),
+            capture_bytes: 0,
             phase: BarrierPhase::Buffering,
             capture_abandoned: false,
             reported_size: None,
@@ -582,12 +596,21 @@ impl ControlRouter {
 
     /// Consume one line as it arrived on the control channel.
     /// `capture_requested` is the attach flow's current decision.
+    #[cfg(test)]
     fn route(&mut self, line: &str, capture_requested: bool) -> Vec<Effect> {
-        let line = strip_eol(line);
-        let msg = parse_control_line(line);
+        self.route_bytes(line.as_bytes(), capture_requested)
+    }
+
+    fn route_bytes(&mut self, line: &[u8], capture_requested: bool) -> Vec<Effect> {
+        let line = strip_eol_bytes(line);
+        let msg = parse_control_line_bytes(line);
         let mut effects = Vec::new();
         if let Some(open) = self.open_block {
             self.route_in_block(open, line, msg, &mut effects);
+            return effects;
+        }
+        if msg.is_none() && malformed_known_record(line) {
+            effects.push(Effect::ProtocolFault("malformed tmux Control Mode record"));
             return effects;
         }
         match msg {
@@ -606,7 +629,11 @@ impl ControlRouter {
                 }
             }
             Some(ControlMessage::Output { data, .. }) => {
-                self.route_output(unescape_tmux_data(&data), &mut effects);
+                if let Some(bytes) = decode_tmux_output(&data) {
+                    self.route_output(bytes, &mut effects);
+                } else {
+                    effects.push(Effect::ProtocolFault("invalid tmux output escape"));
+                }
             }
             Some(ControlMessage::WindowResize { cols, rows, .. }) => {
                 if self.note_size(cols, rows) {
@@ -644,7 +671,7 @@ impl ControlRouter {
     fn route_in_block(
         &mut self,
         open: (u64, u64, u64),
-        line: &str,
+        line: &[u8],
         msg: Option<ControlMessage>,
         effects: &mut Vec<Effect>,
     ) {
@@ -664,7 +691,11 @@ impl ControlRouter {
                 self.close_block(is_error, effects);
             }
             Some(ControlMessage::Output { data, .. }) => {
-                self.route_output(unescape_tmux_data(&data), effects);
+                if let Some(bytes) = decode_tmux_output(&data) {
+                    self.route_output(bytes, effects);
+                } else {
+                    effects.push(Effect::ProtocolFault("invalid tmux output escape"));
+                }
             }
             Some(ControlMessage::WindowResize { cols, rows, .. }) => {
                 if self.note_size(cols, rows) {
@@ -690,7 +721,19 @@ impl ControlRouter {
             // data — collected for the capture, ignored in a generic block.
             _ => {
                 if self.phase == BarrierPhase::InCapture && !self.capture_abandoned {
-                    self.capture_lines.push(line.to_string());
+                    // The capture command's output can be arbitrarily large.
+                    // Never buffer all of it while a slow/malicious pane runs.
+                    if line.len() > MAX_CAPTURE_RESPONSE_BYTES.saturating_sub(self.capture_bytes) {
+                        self.capture_lines.clear();
+                        self.capture_bytes = 0;
+                        effects.push(Effect::CaptureResolved(None));
+                        effects.push(Effect::ProtocolFault(
+                            "capture response byte budget exceeded",
+                        ));
+                    } else {
+                        self.capture_bytes += line.len();
+                        self.capture_lines.push(line.to_vec());
+                    }
                 }
             }
         }
@@ -701,8 +744,12 @@ impl ControlRouter {
         match self.phase {
             BarrierPhase::Live | BarrierPhase::InCapture => effects.push(Effect::Live(bytes)),
             BarrierPhase::Buffering => {
+                self.pre_barrier_bytes = self.pre_barrier_bytes.saturating_add(bytes.len());
                 self.pre_barrier.push_back(bytes);
-                if self.pre_barrier.len() > PRE_BARRIER_BUFFER_CHUNKS {
+                if self.pre_barrier.len() > PRE_BARRIER_BUFFER_CHUNKS
+                    || self.pre_barrier_bytes > MAX_PRE_BARRIER_BYTES
+                {
+                    self.pre_barrier_bytes = 0;
                     // Overflow: degrade to the pre-#1228 behaviour — flush
                     // everything as live and abandon the capture. The window
                     // is milliseconds, so reaching this means the capture is
@@ -732,6 +779,8 @@ impl ControlRouter {
         if self.capture_abandoned {
             return;
         }
+        self.pre_barrier_bytes = 0;
+        self.capture_bytes = 0;
         if is_error {
             // No capture: the buffered output is the only copy — flush it.
             effects.extend(self.pre_barrier.drain(..).map(Effect::Live));
@@ -739,11 +788,17 @@ impl ControlRouter {
         } else {
             // The capture carries everything the buffer holds: drop it.
             self.pre_barrier.clear();
-            let mut text = self.capture_lines.join("\n");
-            if !text.is_empty() {
-                text.push('\n');
+            let mut bytes = Vec::new();
+            for (index, line) in self.capture_lines.drain(..).enumerate() {
+                if index > 0 {
+                    bytes.push(b'\n');
+                }
+                bytes.extend_from_slice(&line);
             }
-            effects.push(Effect::CaptureResolved(Some(text.into_bytes())));
+            if !bytes.is_empty() {
+                bytes.push(b'\n');
+            }
+            effects.push(Effect::CaptureResolved(Some(bytes)));
         }
     }
 
@@ -751,6 +806,9 @@ impl ControlRouter {
     /// stopped waiting for one. The buffer's contents are live now.
     fn on_skipped(&mut self) -> Vec<Effect> {
         self.capture_abandoned = true;
+        self.pre_barrier_bytes = 0;
+        self.capture_bytes = 0;
+        self.capture_lines.clear();
         if self.phase != BarrierPhase::Live {
             self.phase = BarrierPhase::Live;
         }
@@ -758,15 +816,73 @@ impl ControlRouter {
     }
 }
 
+/// Only unparseable records with a known protocol tag are fatal. Unknown
+/// extension notifications remain forward compatible, and capture response
+/// bodies remain raw bytes (they are handled before this check).
+fn malformed_known_record(line: &[u8]) -> bool {
+    const KNOWN: [&[u8]; 8] = [
+        b"%output",
+        b"%begin",
+        b"%end",
+        b"%error",
+        b"%session-changed",
+        b"%layout-change",
+        b"%window-resize",
+        b"%exit",
+    ];
+    KNOWN.iter().any(|prefix| {
+        line == *prefix || (line.starts_with(prefix) && line.get(prefix.len()) == Some(&b' '))
+    })
+}
+
 /// The parser strips the terminator itself; data lines need the same
 /// treatment, and the two must agree on what one is.
-fn strip_eol(line: &str) -> &str {
-    if let Some(stripped) = line.strip_suffix("\r\n") {
-        stripped
-    } else if let Some(stripped) = line.strip_suffix('\n') {
-        stripped
-    } else {
-        line
+fn strip_eol_bytes(line: &[u8]) -> &[u8] {
+    line.strip_suffix(b"\r\n")
+        .or_else(|| line.strip_suffix(b"\n"))
+        .unwrap_or(line)
+}
+
+/// Read the outer protocol framing as bounded raw bytes: %output need not be
+/// UTF-8 and must not be subjected to a String conversion (#2300).
+async fn read_control_line<R: AsyncBufRead + Unpin>(
+    reader: &mut R,
+    line: &mut Vec<u8>,
+) -> std::io::Result<usize> {
+    loop {
+        let available = reader.fill_buf().await?;
+        if available.is_empty() {
+            // A line without its newline is NOT a protocol record. Treating
+            // a torn suffix as complete lets an output frame cross the Agent
+            // stream boundary with missing bytes (#2300).
+            return if line.is_empty() {
+                Ok(0)
+            } else {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "tmux Control Mode stdout ended mid-record",
+                ))
+            };
+        }
+        let terminator = available.iter().position(|byte| *byte == b'\n');
+        let take = terminator.map_or(available.len(), |index| index + 1);
+        if take > MAX_CONTROL_LINE_BYTES.saturating_sub(line.len()) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "tmux Control Mode line exceeds bounded frame limit",
+            ));
+        }
+        let chunk = available.get(..take).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "invalid tmux Control Mode frame length",
+            )
+        })?;
+        line.extend_from_slice(chunk);
+        reader.consume(take);
+        if terminator.is_some() {
+            return Ok(line.len());
+        }
     }
 }
 
@@ -790,19 +906,26 @@ async fn read_output_loop(
 ) {
     let mut router = ControlRouter::new();
     let mut reader = BufReader::new(stdout);
-    let mut line = String::new();
+    let mut line = Vec::new();
     'reader: loop {
-        line.clear();
+        // Preserve a partly read frame when select! chooses a watch update:
+        // read_control_line may already have consumed bytes from BufReader.
+        // Clearing here would lose that prefix before any Agent seq exists.
         let effects = tokio::select! {
-            read = reader.read_line(&mut line) => {
+            read = read_control_line(&mut reader, &mut line) => {
                 match read {
                     Ok(0) => break, // EOF - tmux subprocess exited
                     Ok(_) => {
                         let requested =
                             matches!(*barrier.decision_rx.borrow(), BarrierDecision::Requested);
-                        router.route(&line, requested)
+                        let effects = router.route_bytes(&line, requested);
+                        line.clear(); // complete record only, never a cancelled partial
+                        effects
                     }
-                    Err(_) => break,
+                    Err(err) => {
+                        warn!("control-mode reader: failed to read bounded protocol frame: {err}");
+                        break;
+                    },
                 }
             }
             changed = barrier.decision_rx.changed() => {
@@ -861,6 +984,10 @@ async fn read_output_loop(
                 }
                 Effect::Exit => break 'reader,
                 Effect::Note(note) => warn!("control-mode reader: {note}"),
+                Effect::ProtocolFault(reason) => {
+                    warn!("control-mode reader: protocol fault ({reason}); retiring stream");
+                    break 'reader;
+                }
             }
         }
     }
@@ -1162,6 +1289,87 @@ mod tests {
         }
 
         #[test]
+        fn raw_non_utf8_output_reaches_live_bytes_without_string_conversion() {
+            let mut router = ControlRouter::new();
+            router.on_skipped();
+            let effects = router.route_bytes(b"%output %0 a\xff\\033\\134\xfe\n", false);
+            assert_eq!(live(&effects), vec![b"a\xff\x1b\\\xfe".to_vec()]);
+        }
+
+        #[tokio::test]
+        async fn control_line_reader_preserves_split_non_utf8_frames() {
+            let (mut tx, rx) = tokio::io::duplex(5);
+            let written = tokio::spawn(async move {
+                tx.write_all(b"%output %0 a\xff\\033\n").await.unwrap();
+            });
+            let mut reader = BufReader::new(rx);
+            let mut frame = Vec::new();
+            assert!(read_control_line(&mut reader, &mut frame).await.unwrap() > 0);
+            assert_eq!(frame, b"%output %0 a\xff\\033\n");
+            written.await.unwrap();
+        }
+
+        #[tokio::test]
+        async fn a_cancelled_read_preserves_consumed_prefix_until_newline() {
+            // The initial incomplete record must fit before the read future
+            // starts, otherwise write_all itself would block on this fixture.
+            let (mut tx, rx) = tokio::io::duplex(64);
+            tx.write_all(b"%output %0 A").await.unwrap();
+            let mut reader = BufReader::new(rx);
+            let mut frame = Vec::new();
+
+            // The reader has consumed an incomplete prefix when another
+            // select! arm fires, e.g. a bootstrap barrier decision.
+            tokio::select! {
+                biased;
+                read = read_control_line(&mut reader, &mut frame) => {
+                    panic!("partial record should not finish: {read:?}");
+                }
+                () = tokio::time::sleep(Duration::from_millis(20)) => {}
+            }
+            assert_eq!(frame, b"%output %0 A");
+            tx.write_all(b"\\033\n").await.unwrap();
+            assert_eq!(
+                read_control_line(&mut reader, &mut frame).await.unwrap(),
+                b"%output %0 A\\033\n".len()
+            );
+            assert_eq!(frame, b"%output %0 A\\033\n");
+        }
+
+        #[tokio::test]
+        async fn truncated_control_record_is_not_routed_as_complete_output() {
+            let (mut tx, rx) = tokio::io::duplex(16);
+            tx.write_all(b"%output %0 A").await.unwrap();
+            drop(tx);
+            let mut reader = BufReader::new(rx);
+            let err = read_control_line(&mut reader, &mut Vec::new())
+                .await
+                .expect_err("EOF before newline is a framing fault");
+            assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+        }
+
+        #[test]
+        fn invalid_output_escape_and_known_malformed_header_retire_stream() {
+            let mut router = ControlRouter::new();
+            router.on_skipped();
+            let malformed = router.route_bytes(b"%output %0 bad\\08x\n", false);
+            assert_eq!(
+                malformed,
+                vec![Effect::ProtocolFault("invalid tmux output escape")]
+            );
+            let invalid_header = router.route_bytes(b"%output\n", false);
+            assert_eq!(
+                invalid_header,
+                vec![Effect::ProtocolFault("malformed tmux Control Mode record")]
+            );
+            // tmux may introduce new notifications; they are not a reason to
+            // discard a healthy stream.
+            assert!(router
+                .route_bytes(b"%new-tmux-feature foo\n", false)
+                .is_empty());
+        }
+
+        #[test]
         fn output_before_anything_buffers() {
             let mut router = ControlRouter::new();
             let effects = router.route("%output %0 GAP-001\\012", false);
@@ -1301,6 +1509,34 @@ mod tests {
             router.route("%begin 200 9 1\n", true);
             let effects = router.route("%output %0 not-a-notification", true);
             assert_eq!(live(&effects), vec![b"not-a-notification".to_vec()]);
+        }
+
+        #[test]
+        fn aggregate_pre_barrier_bytes_are_bounded_even_with_few_frames() {
+            let mut router = ControlRouter::new();
+            let mut effects = Vec::new();
+            router.route_output(vec![b'x'; MAX_PRE_BARRIER_BYTES + 1], &mut effects);
+            assert!(router.pre_barrier.is_empty());
+            assert_eq!(router.pre_barrier_bytes, 0);
+            assert!(effects
+                .iter()
+                .any(|e| matches!(e, Effect::CaptureResolved(None))));
+            assert!(effects
+                .iter()
+                .any(|e| matches!(e, Effect::Live(bytes) if bytes.len() > MAX_PRE_BARRIER_BYTES)));
+        }
+
+        #[test]
+        fn oversized_capture_fails_closed_instead_of_growing_without_bound() {
+            let mut router = ControlRouter::new();
+            welcome(&mut router);
+            router.route("%begin 200 9 1", true);
+            let effects = router.route_bytes(&vec![b'x'; MAX_CAPTURE_RESPONSE_BYTES + 1], true);
+            assert!(effects
+                .iter()
+                .any(|e| matches!(e, Effect::ProtocolFault(_))));
+            assert!(router.capture_lines.is_empty());
+            assert_eq!(router.capture_bytes, 0);
         }
 
         #[test]

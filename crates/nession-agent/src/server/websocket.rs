@@ -2437,6 +2437,57 @@ p2p_routes! { ctx, msg_type, payload_value;
                                         break;
                                     }
                                 }
+                                // The tmux Control Mode reader is the origin of
+                                // this epoch's output. Its EOF (including a
+                                // malformed record or lost child) must not
+                                // leave a healthy-looking, permanently attached
+                                // stream whose Agent seq stopped advancing.
+                                //
+                                // Retire only the generation we read: a newer
+                                // re-attach may already own this same name.
+                                // Never hold the SessionMap lock across I/O.
+                                let retired = {
+                                    let mut guard = sessions_lock(&sessions_for_output);
+                                    let still_ours = guard.get(&session_name_clone)
+                                        .is_some_and(|session| session.stream.epoch == stream_epoch);
+                                    if still_ours {
+                                        guard.remove(&session_name_clone)
+                                    } else {
+                                        None
+                                    }
+                                };
+                                if let Some(session) = retired {
+                                    warn!(
+                                        "terminal session {session_name_clone}: tmux control reader ended; \
+                                         retiring epoch {stream_epoch} so the next attach requires a new cut"
+                                    );
+                                    let notice = serde_json::to_string(&make_error(
+                                        "terminal-stream-lost",
+                                        "terminal_stream_unavailable",
+                                        "tmux Control Mode output source ended; reattach the terminal to restore output",
+                                    )).ok();
+                                    if let Some(json) = notice {
+                                        for peer in &session.peers {
+                                            // Terminal lane, not a lossy size
+                                            // level. The timeout bounds a
+                                            // stalled client's recovery notice.
+                                            let sent = tokio::time::timeout(
+                                                std::time::Duration::from_millis(500),
+                                                peer.outbound.send_terminal(WsMessage::Text(json.clone())),
+                                            ).await;
+                                            if !matches!(sent, Ok(Ok(()))) {
+                                                warn!(
+                                                    "terminal session {session_name_clone}:                                                      could not deliver source-loss notice to subscriber"
+                                                );
+                                            }
+                                        }
+                                    }
+                                    if let Err(error) = session.backend.lock().await.close().await {
+                                        warn!(
+                                            "terminal session {session_name_clone}:                                              failed to retire broken tmux client: {error:#}"
+                                        );
+                                    }
+                                }
                             });
 
                             // Spawn a second task that forwards the window's
