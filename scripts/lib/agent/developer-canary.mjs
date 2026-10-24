@@ -140,6 +140,22 @@ function selfTest(){
     '--disallowedTools mcp__*','--no-session-persistence']){
     assert.ok(a.includes(flag),'required Claude flag absent: '+flag);
   }
+  const stageEnv={
+    GITHUB_REPOSITORY:'BestNathan/nession',GITHUB_REF:'refs/heads/main',
+    GITHUB_WORKFLOW:'Agent / Staging Developer Canary',
+    GITHUB_EVENT_NAME:'workflow_run',GITHUB_RUN_ID:'401',
+    GITHUB_RUN_ATTEMPT:'1',GITHUB_SHA:'b'.repeat(40),
+    STAGING_TARGET_SHA:'a'.repeat(40),ANTHROPIC_MODEL:'qwen3.7-plus',
+  };
+  const stageRecord=canaryIdentity(stageEnv,'2026-01-01T00:00:00.000Z',
+    '2026-01-01T00:00:01.000Z',{num_turns:2,session_id:'synthetic'},[],
+    {edit_verified:true},{stage:true});
+  assert.equal(stageRecord.identity.workflow_id,'agent-staging-developer-canary');
+  assert.equal(stageRecord.task.target_ref,stageEnv.STAGING_TARGET_SHA);
+  assert.equal(stageRecord.result.status,'staging-canary-pass');
+  assert.throws(()=>canaryIdentity({...stageEnv,GITHUB_EVENT_NAME:'pull_request_target'},
+    '2026-01-01T00:00:00.000Z','2026-01-01T00:00:01.000Z',{},[],
+    {edit_verified:true},{stage:true}),/staging Worker source/);
   const argv=canaryArgs('qwen3.7-plus');
   const nativeVisible=argv[argv.indexOf('--tools')+1];
   assert.equal(nativeVisible,'Edit,Read,Write');
