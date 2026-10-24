@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "6dc8f69664da967bae0cc46ed17d162e712a6c8551880fc98ad4f8b555454f1c",
+  "run_id": 40053556184,
+  "run_attempt": 1,
+  "issue": 2300,
+  "criterion": "SC-03",
+  "criterion_text": "The pinned real tmux/PTY integration and relevant terminal regression suite demonstrate no loss, duplication or false Parser Applied continuity; no unrelated stream/resize semantics regress.",
+  "stage": "post-merge",
+  "target_sha": "61b90dd1cbb81316a003829262e18dd189eee7ee",
+  "contract_sha256": "829eca0b87654f28151975fce2f09919903a86ee344d8855ebd0f542f0ad2743",
+  "case_revision": "61b90dd1cbb81316a003829262e18dd189eee7ee",
+  "case_tree_sha": "5ab8e5fc472c938ae38d0eb4f528195c4220ea47",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-24T02:18:50.905Z",
+  "finished_at": "2026-10-24T02:19:14.239Z",
+  "duration_ms": 23334,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Real isolated tmux/PTY ControlModeSession attach, output, capture/live barrier and resize tests passed",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "tmux executable: tmux 3.4"
+        },
+        {
+          "type": "runtime",
+          "value": "ControlModeSession tests passed: 7 at exact checkout SHA 61b90dd1cbb81316a003829262e18dd189eee7ee"
+        },
+        {
+          "type": "runtime",
+          "value": "Verified actual PTY attach/output; capture/live GAP-001..060 exactly-once join; peer resize notification"
+        }
+      ],
+      "duration_ms": 17654,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40053556184,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "61b90dd1cbb81316a003829262e18dd189eee7ee",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40053556184",
+    "record_path": "runs/2026-10-24/40053556184-1/2300/SC-03.json",
+    "source_result_sha256": "411674634043285e9ece0bc8d2a2cb4c7a152b64026d809e1a3f95ee60a31363"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40053556184-1",
+    "sha256": "411674634043285e9ece0bc8d2a2cb4c7a152b64026d809e1a3f95ee60a31363",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40053556184",
+    "durability": "time-limited; object archival not configured"
+  }
+}
