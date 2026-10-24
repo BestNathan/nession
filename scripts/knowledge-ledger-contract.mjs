@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Canonical v2 project knowledge contract. One current Markdown per knowledge ID,
+// Canonical v2 project knowledge contract. One current Markdown per complete title,
 // topic-first navigation, category tags and ONE append-only global CHANGELOG.
 // Git commits, not per-article vNNNN files, preserve historical snapshots.
 import assert from 'node:assert/strict';
@@ -150,6 +150,44 @@ export function logEntries(text) {
   }
   return events;
 }
+export function validateArticleLinks(root, articleFiles=paths(root,'topics').filter(f=>f.endsWith('.md'))) {
+  const articleSet=new Set(articleFiles),incoming=new Map(articleFiles.map(f=>[f,0]));
+  const slugHeading=(s)=>s.toLowerCase().normalize('NFKC').trim()
+    .replace(/[\`*_~]/g,'').replace(/[^\p{L}\p{N}\s-]/gu,'').replace(/\s+/g,'-').replace(/-+/g,'-');
+  for(const file of articleFiles) {
+    const content=fs.readFileSync(path.join(root,file),'utf8');
+    const headings=new Set([...content.matchAll(/^#{1,6}\s+(.+?)\s*#*\s*$/gm)].map(m=>slugHeading(m[1])));
+    const links=[...content.matchAll(/!?\[[^\]]*\]\(([^)\s]+)(?:\s+["'][^)]*["'])?\)/g)].map(m=>m[1].replace(/^<|>$/g,''));
+    for(const raw of links) {
+      if(/^(?:https?:|mailto:|tel:|data:|\/\/)/i.test(raw))continue;
+      const [pathname,fragmentRaw]=raw.split('#',2);
+      let target;
+      try { target=decodeURIComponent(pathname||''); }
+      catch { fail(file+': malformed local link '+raw); }
+      const targetFile=target?path.posix.normalize(path.posix.join(path.posix.dirname(file),target)):file;
+      if(targetFile==='..'||targetFile.startsWith('../')||targetFile.startsWith('/'))
+        fail(file+': local link escapes knowledge root: '+raw);
+      if(!fs.existsSync(path.join(root,targetFile))||!fs.statSync(path.join(root,targetFile)).isFile())
+        fail(file+': broken local link '+raw+' -> '+targetFile);
+      if(fragmentRaw) {
+        let fragment;
+        try { fragment=decodeURIComponent(fragmentRaw); }
+        catch { fail(file+': malformed link fragment '+raw); }
+        if(!headings.has(fragment.toLowerCase()) && !/^[a-f0-9-]{8,}$/i.test(fragment))
+          fail(file+': broken local heading anchor '+raw);
+      }
+      if(articleSet.has(targetFile)&&targetFile!==file)incoming.set(targetFile,(incoming.get(targetFile)||0)+1);
+    }
+  }
+  for(const file of articleFiles)if((incoming.get(file)||0)===0)
+    fail('orphan article has no incoming cross-link: '+file);
+  return {articles:articleFiles.length,localLinks:'valid',orphans:0};
+}
+function assertIndexCurrent(root) {
+  const expected=assertIndexCurrent(root);
+  validateArticleLinks(root);
+  return expected;
+}
 function verify(root,baseline=null) {
   for(const entry of fs.readdirSync(root)){
     if(!['.git','README.md','topics','index.json','CHANGELOG.md','schema'].includes(entry))
@@ -259,6 +297,7 @@ function fixture() {
   const d=fs.mkdtempSync(path.join(os.tmpdir(),'nession-knowledge-title-'));
   const put=(file,text)=>{const p=path.join(d,file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,text);};
   const at='2026-10-24T03:00:00Z';
+  const slugHeadingForFixture=(s)=>s.toLowerCase().replace(/[^\\p{L}\\p{N}\\s-]/gu,'').trim().replace(/\\s+/g,'-');
   const title='Nession instruction architecture and knowledge ownership',slug=titleSlug(title);
   const file='topics/engineering/'+slug+'.md';
   const article='---\ntitle: "'+title+'"\ndescription: Full descriptive name\ntopic: engineering\ncategories: ["architecture", "knowledge"]\nsources: ["https://github.com/BestNathan/nession/blob/'+'a'.repeat(40)+'/AGENTS.md"]\nstatus: verified\ncreated_at: '+at+'\nupdated_at: '+at+'\n---\n\n# '+title+'\n\nCurrent knowledge.\n';
@@ -269,6 +308,23 @@ function fixture() {
     const idx=indexFor(d);
     assert.equal(idx.topics.engineering[0].title,title);
     assert.deepEqual(idx.categories.knowledge,[file]);
+    const secondTitle='Knowledge link fixture',secondSlug=titleSlug(secondTitle);
+    const secondFile='topics/engineering/'+secondSlug+'.md';
+    put(secondFile,article.replaceAll(title,secondTitle).replaceAll(slug,secondSlug)
+      .replace('# '+secondTitle,'# '+secondTitle)+'\nSee [architecture](./'+slug+'.md#'+slugHeadingForFixture(title)+').\n');
+    put(file,article+'\nSee [related fixture](./'+secondSlug+'.md).\n');
+    assert.equal(validateArticleLinks(d,[file,secondFile]).orphans,0);
+    assert.throws(()=>validateArticleLinks(d,[file,secondFile].map(f=>f===secondFile?f:file)),/orphan article/);
+    put(secondFile,fs.readFileSync(path.join(d,secondFile),'utf8').replace('./'+slug+'.md#'+slugHeadingForFixture(title),'./missing.md'));
+    assert.throws(()=>validateArticleLinks(d,[file,secondFile]),/broken local link/);
+    put(secondFile,fs.readFileSync(path.join(d,secondFile),'utf8').replace('./missing.md','./'+slug+'.md#not-a-real-heading'));
+    assert.throws(()=>validateArticleLinks(d,[file,secondFile]),/broken local heading anchor/);
+    put(secondFile,fs.readFileSync(path.join(d,secondFile),'utf8').replace('./'+slug+'.md#not-a-real-heading','./'+slug+'.md'));
+    put('index.json',JSON.stringify(idx));
+    assert.doesNotThrow(()=>assertIndexCurrent(d));
+    put('index.json','{}');
+    assert.throws(()=>assertIndexCurrent(d),/index.json differs/);
+    assert.throws(()=>parseKnowledge(article.replace('sources: ["https://github.com/BestNathan/nession/blob/'+'a'.repeat(40)+'/AGENTS.md"]','sources: []'),file),/verified assertion needs exact-SHA/);
     assert.throws(()=>parseKnowledge(article,'topics/engineering/repository-instruction-architecture.md'),/complete title/);
     assert.throws(()=>parseKnowledge(article.replace('title:', 'id: short\n'+'title:'),file),/unknown field/);
     assert.throws(()=>parseKnowledge(article.replace('"architecture", "knowledge"','"architecture", "architecture"'),file),/duplicate/);
