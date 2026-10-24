@@ -129,5 +129,7 @@ function main() {
   throw new Error('usage: self-test | admit-main | staging-ancestry');
 }
 
-try { main(); }
-catch (error) { console.error('e2e-regression-policy: ' + error.message); process.exitCode = 2; }
+if (process.argv[1]?.endsWith('e2e-regression-policy.mjs')) {
+  try { main(); }
+  catch (error) { console.error('e2e-regression-policy: ' + error.message); process.exitCode = 2; }
+}
