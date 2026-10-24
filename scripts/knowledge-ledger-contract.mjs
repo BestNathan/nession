@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Canonical v2 project knowledge contract. One current Markdown per knowledge ID,
+// Canonical v2 project knowledge contract. One current Markdown per complete title,
 // topic-first navigation, category tags and ONE append-only global CHANGELOG.
 // Git commits, not per-article vNNNN files, preserve historical snapshots.
 import assert from 'node:assert/strict';
@@ -150,6 +150,56 @@ export function logEntries(text) {
   }
   return events;
 }
+export function validateArticleLinks(root, articleFiles=paths(root,'topics').filter(f=>f.endsWith('.md'))) {
+  const articleSet=new Set(articleFiles),incoming=new Map(articleFiles.map(f=>[f,0])),headingCache=new Map();
+  const slugHeading=(s)=>s.toLowerCase().normalize('NFKC').trim()
+    .replace(/[\`*_~]/g,'').replace(/[^\p{L}\p{N}\s-]/gu,'').replace(/\s+/g,'-').replace(/-+/g,'-');
+    const headingsFor=(file)=>{if(!headingCache.has(file)){const text=fs.readFileSync(path.join(root,file),'utf8');const hs=new Set(text.split('\n').filter(line=>/^#{1,6}\s+/.test(line)).map(line=>slugHeading(line.replace(/^#{1,6}\s+/,'').replace(/\s+#+\s*$/,''))));headingCache.set(file,hs);}return headingCache.get(file);};
+  for(const file of articleFiles) {
+    const content=fs.readFileSync(path.join(root,file),'utf8');
+    const headings=new Set([...content.matchAll(/^#{1,6}\s+(.+?)\s*#*\s*$/gm)].map(m=>slugHeading(m[1])));
+    const links=[...content.matchAll(/!?\[[^\]]*\]\(([^)\s]+)(?:\s+["'][^)]*["'])?\)/g)].map(m=>m[1].replace(/^<|>$/g,''));
+    for(const raw of links) {
+      if(/^(?:https?:|mailto:|tel:|data:|\/\/)/i.test(raw))continue;
+      const [pathname,fragmentRaw]=raw.split('#',2);
+      let target;
+      try { target=decodeURIComponent(pathname||''); }
+      catch { fail(file+': malformed local link '+raw); }
+      const targetFile=target?path.posix.normalize(path.posix.join(path.posix.dirname(file),target)):file;
+      if(targetFile==='..'||targetFile.startsWith('../')||targetFile.startsWith('/'))
+        fail(file+': local link escapes knowledge root: '+raw);
+      if(!fs.existsSync(path.join(root,targetFile))||!fs.statSync(path.join(root,targetFile)).isFile())
+        fail(file+': broken local link '+raw+' -> '+targetFile);
+      if(fragmentRaw) {
+        let fragment;
+        try { fragment=decodeURIComponent(fragmentRaw); }
+        catch { fail(file+': malformed link fragment '+raw); }
+        if(!headingsFor(targetFile).has(fragment.toLowerCase()))
+          fail(file+': broken local heading anchor '+raw);
+      }
+      if(articleSet.has(targetFile)&&targetFile!==file)incoming.set(targetFile,(incoming.get(targetFile)||0)+1);
+    }
+  }
+  for(const file of articleFiles)if((incoming.get(file)||0)===0)
+    fail('orphan article has no incoming cross-link: '+file);
+  return {articles:articleFiles.length,localLinks:'valid',orphans:0};
+}
+function assertIndexCurrent(root) {
+  const expected=indexFor(root),actual=JSON.parse(fs.readFileSync(path.join(root,'index.json'),'utf8'));
+  if(JSON.stringify(actual)!==JSON.stringify(expected))fail('index.json differs from topic/category-derived index');
+  return expected;
+}
+function latestEventForArticle(entry,events) {
+  const latest=events.filter(e=>e.path===entry.path).at(-1);
+  if(!latest||latest.action==='delete'||latest.title!==entry.title)
+    fail('current article missing changelog event: '+entry.path);
+  if(latest.topic!==entry.path.split('/')[1]||
+     JSON.stringify([...latest.categories].sort())!==JSON.stringify([...entry.categories].sort()))
+    fail('article metadata differs from latest changelog event: '+entry.path);
+  if(['create','update','rename','move'].includes(latest.action)&&latest.at!==entry.updated_at)
+    fail('article timestamp differs from latest changelog event: '+entry.path);
+  return latest;
+}
 function verify(root,baseline=null) {
   for(const entry of fs.readdirSync(root)){
     if(!['.git','README.md','topics','index.json','CHANGELOG.md','schema'].includes(entry))
@@ -160,19 +210,10 @@ function verify(root,baseline=null) {
   const schema=JSON.parse(fs.readFileSync(path.join(root,'schema/v2.json'),'utf8'));
   if(schema.schema_version!==2||schema.filename!=='title-slug'||schema.primary_index!=='topic')
     fail('missing complete-title filename schema contract');
-  const expected=indexFor(root),actual=JSON.parse(fs.readFileSync(path.join(root,'index.json'),'utf8'));
-  if(JSON.stringify(actual)!==JSON.stringify(expected))fail('index.json differs from topic/category-derived index');
+  const expected=assertIndexCurrent(root);
+  validateArticleLinks(root);
   const changeText=fs.readFileSync(path.join(root,'CHANGELOG.md'),'utf8'),events=logEntries(changeText);
-  for(const list of Object.values(expected.topics))for(const entry of list){
-    const history=events.filter(e=>e.path===entry.path);
-    const latest=history.at(-1);
-    if(!latest||latest.action==='delete'||latest.title!==entry.title)fail('current article has no full-title CHANGELOG event: '+entry.path);
-    if(latest.topic!==entry.path.split('/')[1]||
-       JSON.stringify([...latest.categories].sort())!==JSON.stringify([...entry.categories].sort()))
-      fail('current topic/category metadata differs from latest changelog event: '+entry.path);
-    if(['create','update','rename','move'].includes(latest.action)&&latest.at!==entry.updated_at)
-      fail('current updated_at must match last change event timestamp: '+entry.path);
-  }
+  for(const list of Object.values(expected.topics))for(const entry of list)latestEventForArticle(entry,events);
   for(const file of paths(root,'topics').concat(['CHANGELOG.md'])) {
     const text=fs.readFileSync(path.join(root,file),'utf8');
     if(/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|github_pat_[a-zA-Z0-9_]{20,}|gh[pousr]_[a-zA-Z0-9]{30,}/.test(text))
@@ -259,6 +300,7 @@ function fixture() {
   const d=fs.mkdtempSync(path.join(os.tmpdir(),'nession-knowledge-title-'));
   const put=(file,text)=>{const p=path.join(d,file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,text);};
   const at='2026-10-24T03:00:00Z';
+  const slugHeadingForFixture=(s)=>s.toLowerCase().replace(/[^a-z0-9\s-]/g,'').trim().replace(/\s+/g,'-');
   const title='Nession instruction architecture and knowledge ownership',slug=titleSlug(title);
   const file='topics/engineering/'+slug+'.md';
   const article='---\ntitle: "'+title+'"\ndescription: Full descriptive name\ntopic: engineering\ncategories: ["architecture", "knowledge"]\nsources: ["https://github.com/BestNathan/nession/blob/'+'a'.repeat(40)+'/AGENTS.md"]\nstatus: verified\ncreated_at: '+at+'\nupdated_at: '+at+'\n---\n\n# '+title+'\n\nCurrent knowledge.\n';
@@ -269,11 +311,32 @@ function fixture() {
     const idx=indexFor(d);
     assert.equal(idx.topics.engineering[0].title,title);
     assert.deepEqual(idx.categories.knowledge,[file]);
+    const secondTitle='Knowledge link fixture',secondSlug=titleSlug(secondTitle);
+    const secondFile='topics/engineering/'+secondSlug+'.md';
+    put(secondFile,article.replaceAll(title,secondTitle).replaceAll(slug,secondSlug)
+      .replace('# '+secondTitle,'# '+secondTitle)+'\nSee [architecture](./'+slug+'.md#'+slugHeadingForFixture(title)+').\n');
+    put(file,article+'\nSee [related fixture](./'+secondSlug+'.md).\n');
+    assert.equal(validateArticleLinks(d,[file,secondFile]).orphans,0);
+    assert.throws(()=>validateArticleLinks(d,[file]),/orphan article/);
+    put(secondFile,fs.readFileSync(path.join(d,secondFile),'utf8').replace('./'+slug+'.md#'+slugHeadingForFixture(title),'./missing.md'));
+    assert.throws(()=>validateArticleLinks(d,[file,secondFile]),/broken local link/);
+    put(secondFile,fs.readFileSync(path.join(d,secondFile),'utf8').replace('./missing.md','./'+slug+'.md#not-a-real-heading'));
+    assert.throws(()=>validateArticleLinks(d,[file,secondFile]),/broken local heading anchor/);
+    put(secondFile,fs.readFileSync(path.join(d,secondFile),'utf8').replace('./'+slug+'.md#not-a-real-heading','./'+slug+'.md'));
+    const updatedIdx=indexFor(d);
+    put('index.json',JSON.stringify(updatedIdx));
+    assert.doesNotThrow(()=>assertIndexCurrent(d));
+    put('index.json','{}');
+    assert.throws(()=>assertIndexCurrent(d),/index.json differs/);
+    assert.throws(()=>parseKnowledge(article.replace('sources: ["https://github.com/BestNathan/nession/blob/'+'a'.repeat(40)+'/AGENTS.md"]','sources: []'),file),/verified assertion needs exact-SHA/);
     assert.throws(()=>parseKnowledge(article,'topics/engineering/repository-instruction-architecture.md'),/complete title/);
     assert.throws(()=>parseKnowledge(article.replace('title:', 'id: short\n'+'title:'),file),/unknown field/);
     assert.throws(()=>parseKnowledge(article.replace('"architecture", "knowledge"','"architecture", "architecture"'),file),/duplicate/);
     const log=HEADER+'## '+at+' | create | '+title+'\n- Path: '+file+'\n- Topic: engineering\n- Categories: architecture, knowledge\n- Reason: Initial article\n- Source: https://github.com/BestNathan/nession/issues/2325\n';
     assert.equal(logEntries(log)[0].title,title);
+    const currentEntry={path:file,title,topic:'engineering',categories:['architecture','knowledge'],updated_at:at};
+    assert.equal(latestEventForArticle(currentEntry,logEntries(log)).action,'create');
+    assert.throws(()=>latestEventForArticle(currentEntry,[]),/missing changelog event/);
     assert.throws(()=>logEntries(log.replace(slug+'.md','short.md')),/full title/);
     console.log('knowledge-ledger-contract: full title slug, Unicode, no synthetic IDs, topic/category index, global log fixtures passed');
   }finally{fs.rmSync(d,{recursive:true,force:true});}
