@@ -270,7 +270,9 @@ function verify(root,baseline=null) {
       }
       if(e.action!=='delete'){
         const atCommit=git(root,'show',commit+':'+e.path)+'\n';
-        // Historical snapshots remain immutable evidence: validate their schema and every source they do contain,\n        // but enforce the current verified-source policy only on the live tree via indexFor(root).\n        const data=parseKnowledge(atCommit,e.path,{requireVerifiedSource:false});
+        // Historical snapshots remain immutable evidence: validate their schema and every source they do contain,
+        // but enforce the current verified-source policy only on the live tree via indexFor(root).
+        const data=parseKnowledge(atCommit,e.path,{requireVerifiedSource:false});
         if(data.title!==e.title||data.updated_at!==e.at||
            JSON.stringify([...data.categories].sort())!==JSON.stringify([...e.categories].sort()))
           fail('article and appended CHANGELOG event disagree: '+e.path);
