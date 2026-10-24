@@ -80,4 +80,4 @@ For every publication, article edits, index regeneration and changelog append mu
 
 ## Explicit implementation boundary
 
-The current schema and validator remain the executable source of truth. Relative-link checks, meaningful article reachability/orphans and semantic consistency are contract targets until implemented with deterministic fixtures or a trusted Agent audit. Documentation alone does not make these checks live. Track missing executable checks in Issue #2343 and do not claim completion without CI evidence.
+The current schema and validator remain the executable source of truth. The validator now checks local Markdown links and same-article heading anchors, detects articles without incoming cross-links, and includes negative fixtures for broken links, orphan articles, missing verified sources, index drift and missing changelog events. These checks still require green CI evidence on the current PR head before they can be treated as passing in main. Semantic consistency remains a separate Agent-review responsibility and must not be inferred from deterministic contract success.
