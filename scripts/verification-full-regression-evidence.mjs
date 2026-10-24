@@ -61,32 +61,53 @@ export function attestFullRegression({targetSha,run,job,log}){
     status:'Pass',source_event:run.event,
     provenance:'GitHub full-regression trusted workflow + exact main SHA + job verifier steps + per-ID canonical receipt'};
 }
-export async function collectFullRegression({repo=REPO,sha,get,getText}){
+export async function collectFullRegression({
+  repo=REPO,sha,get,getText,pageSize=100,maxPages=5,maxReceipts=10
+}){
   if(repo!==REPO||!SHA.test(sha)||typeof get!=='function'||typeof getText!=='function')
     throw Error('invalid full-regression read scope');
-  // A dispatch may verify an older SHA or another branch while the trusted
-  // workflow itself still runs from main; do not filter on its workflow SHA.
-  const q=new URLSearchParams({branch:'main',per_page:'20'});
-  const result=await get('/repos/'+repo+'/actions/workflows/e2e-full-regression.yml/runs?'+q);
-  if(!Array.isArray(result?.workflow_runs)||result.workflow_runs.length>20)
-    throw Error('unbounded Full Regression source runs');
+  // Bound API work, but page through admission-only successes. They are not
+  // Full Regression evidence and must never consume the receipt lookback.
+  if(!Number.isSafeInteger(pageSize)||pageSize<1||pageSize>100||
+    !Number.isSafeInteger(maxPages)||maxPages<1||maxPages>5||
+    !Number.isSafeInteger(maxReceipts)||maxReceipts<1||maxReceipts>10)
+    throw Error('invalid Full Regression collector bounds');
   const receipts=[];
-  for(const run of result.workflow_runs.filter(r=>r.status==='completed'&&r.conclusion==='success').slice(0,10)){
-    if(run.head_branch!=='main')continue;
-    const jobList=await get('/repos/'+repo+'/actions/runs/'+run.id+
-      '/attempts/'+run.run_attempt+'/jobs?per_page=100');
-    const matches=jobList?.jobs?.filter(j=>j.name==='full')??[];
-    if(matches.length!==1)throw Error('unverified Full Regression job');
-    const log=await getText('/repos/'+repo+'/actions/jobs/'+matches[0].id+'/logs',8*1024*1024);
-    // Unrelated scheduled/manual Full runs for other pinned SHAs are not
-    // counterfeit results for this request: skip, but never promote them.
-    const sourceLines=log.split(/\r?\n/).filter(line=>line.includes(PREFIX));
-    if(sourceLines.length!==1)continue;
-    let candidate;
-    try{candidate=JSON.parse(sourceLines[0].slice(sourceLines[0].indexOf(PREFIX)+PREFIX.length).trim())}
-    catch{continue;}
-    if(candidate?.sha!==sha)continue;
-    receipts.push(attestFullRegression({targetSha:sha,run,job:matches[0],log}));
+  for(let page=1;page<=maxPages&&receipts.length<maxReceipts;page++){
+    const q=new URLSearchParams({branch:'main',per_page:String(pageSize),page:String(page)});
+    const result=await get('/repos/'+repo+'/actions/workflows/e2e-full-regression.yml/runs?'+q);
+    if(!Array.isArray(result?.workflow_runs)||result.workflow_runs.length>pageSize)
+      throw Error('unbounded Full Regression source runs');
+    const runs=result.workflow_runs;
+    for(const run of runs){
+      if(run.status!=='completed'||run.conclusion!=='success'||run.head_branch!=='main'||
+        !Number.isSafeInteger(run.id)||run.id<1||
+        !Number.isSafeInteger(run.run_attempt)||run.run_attempt<1)continue;
+      const jobList=await get('/repos/'+repo+'/actions/runs/'+run.id+
+        '/attempts/'+run.run_attempt+'/jobs?per_page=100');
+      if(!Array.isArray(jobList?.jobs)||jobList.jobs.length>100)
+        throw Error('unbounded Full Regression jobs');
+      const matches=jobList.jobs.filter(j=>j.name==='full');
+      // The hourly admission-only workflow run has a skipped "full" job.
+      // Skip it before it can displace an older actual Full run.
+      if(matches.length!==1)continue;
+      const job=matches[0];
+      if(job.run_id!==run.id||job.run_attempt!==run.run_attempt||
+        job.head_sha!==run.head_sha||job.status!=='completed'||job.conclusion!=='success')continue;
+      const log=await getText('/repos/'+repo+'/actions/jobs/'+job.id+'/logs',8*1024*1024);
+      if(typeof log!=='string'||log.length>8*1024*1024)continue;
+      const sourceLines=log.split(/\\r?\\n/).filter(line=>line.includes(PREFIX));
+      if(sourceLines.length!==1)continue;
+      let candidate;
+      try{candidate=JSON.parse(sourceLines[0].slice(sourceLines[0].indexOf(PREFIX)+PREFIX.length).trim())}
+      catch{continue;}
+      // Unrelated scheduled/manual Full runs for other pinned SHAs are not
+      // counterfeit results for this request: keep searching the bounded window.
+      if(candidate?.sha!==sha)continue;
+      receipts.push(attestFullRegression({targetSha:sha,run,job,log}));
+      if(receipts.length>=maxReceipts)break;
+    }
+    if(runs.length<pageSize)break;
   }
   return receipts;
 }
@@ -118,4 +139,59 @@ function selfTest(){
   ])assert.throws(()=>attestFullRegression({...source,...wrong}));
   console.log('Full Regression: exact SHA, real steps, all-ID assertion and forged-run negatives passed');
 }
-if(process.argv[2]==='self-test')selfTest();
+
+async function collectorSelfTest(){
+  const sha='a'.repeat(40);
+  const mkRun=(id)=>({name:'E2E / Full Regression',
+    path:'.github/workflows/e2e-full-regression.yml',event:'schedule',
+    head_branch:'main',head_sha:sha,id,run_attempt:1,
+    repository:{full_name:REPO},head_repository:{full_name:REPO},
+    status:'completed',conclusion:'success'});
+  // Ten newer admission-only green Workflow Runs must not evict an older
+  // authentic Full Regression from the eligible evidence window.
+  const admissionRuns=Array.from({length:10},(_,i)=>mkRun(120-i));
+  const fullRun=mkRun(100);
+  const fullReceipt={schema_version:1,kind:'e2e_full_per_id',status:'Pass',sha,
+    run_id:100,run_attempt:1,catalog_digest:'b'.repeat(64),id_count:1,
+    tests:2,assertions:5,results:[{id:'terminal-attach',result:'Pass',
+      discovered:2,passed:2,failed:0,skipped:0,flaky:0,assertions:5}]};
+  const logReads=[];
+  const pages=[];
+  const fullJob={id:700,name:'full',run_id:100,run_attempt:1,head_sha:sha,
+    status:'completed',conclusion:'success',
+    steps:REQUIRED.map(name=>({name,status:'completed',conclusion:'success'}))};
+  const result=await collectFullRegression({
+    repo:REPO,sha,pageSize:10,maxPages:5,
+    get:async(path)=>{
+      const url=new URL(path,'https://example.invalid');
+      if(url.pathname.endsWith('/actions/workflows/e2e-full-regression.yml/runs')){
+        const page=Number(url.searchParams.get('page'));
+        pages.push(page);
+        if(page===1)return {workflow_runs:admissionRuns};
+        if(page===2)return {workflow_runs:[fullRun]};
+        return {workflow_runs:[]};
+      }
+      const match=url.pathname.match(/\\/actions\\/runs\\/(\\d+)\\/attempts\\/(\\d+)\\/jobs$/);
+      if(!match)throw Error('unexpected collector API path: '+path);
+      const id=Number(match[1]);
+      if(id===100)return {jobs:[fullJob]};
+      const skippedFull={name:'full',run_id:id,run_attempt:1,head_sha:sha,
+        status:'completed',conclusion:'skipped',steps:[]};
+      return {jobs:[{name:'admit',run_id:id,run_attempt:1,head_sha:sha,
+        status:'completed',conclusion:'success'},skippedFull]};
+    },
+    getText:async(path)=>{
+      logReads.push(path);
+      return PREFIX+JSON.stringify(fullReceipt)+'\\n';
+    }
+  });
+  assert.deepEqual(pages,[1,2]);
+  assert.equal(result.length,1);
+  assert.equal(result[0].run_id,100);
+  assert.equal(logReads.length,1,'admission-only runs must not have logs read as Full evidence');
+  assert.throws(()=>collectFullRegression({repo:REPO,sha,get:async()=>({workflow_runs:[]}),
+    getText:async()=>'',pageSize:101}));
+  console.log('Full Regression collector: skips admission-only successes and paginates to real receipt');
+}
+
+if(process.argv[2]==='self-test'){selfTest();await collectorSelfTest();}
