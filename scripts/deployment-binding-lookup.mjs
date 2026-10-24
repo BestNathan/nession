@@ -20,6 +20,50 @@ function fail(message) {
 // Choose the newest authenticated attestation for exactly one environment and
 // source SHA. A stale deployment (different SHA) or a tie between two distinct
 // executions is not a trustworthy binding.
+
+function bindingOf(chosen) {
+  return {
+    environment_id: chosen.item.environment_id,
+    attested: true,
+    attestation_execution_id: chosen.execution_id,
+    gitops_revision: chosen.item.gitops_revision,
+    image_digests: Object.fromEntries(
+      chosen.item.images.map((image) => [image.role, image.digest])),
+    source_sha: chosen.item.source_sha,
+    attestation_path: chosen.path,
+  };
+}
+
+// Scheduler view: the newest authenticated attestation for a lane, regardless
+// of which source SHA it carries. The caller compares that SHA to pinned Main.
+export function latestDeploymentBinding({ environmentId, records }) {
+  const environment = String(environmentId ?? '');
+  if (!ENVIRONMENT.test(environment)) fail('invalid deployment environment');
+  if (!Array.isArray(records)) fail('deployment records must be an array');
+  const candidates = [];
+  for (const entry of records) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      fail('deployment record entry must be an object');
+    }
+    const path = String(entry.path ?? '');
+    if (!RECORD_PATH.test(path)) fail('unsafe deployment record path: ' + path);
+    const stored = validateStoredRecord(entry.record);
+    if (stored.item.environment_id !== environment) continue;
+    const observedAt = Date.parse(stored.item.observed_at);
+    if (!Number.isFinite(observedAt)) fail('deployment record has an invalid observation timestamp');
+    candidates.push({ path, ...stored, observedAt });
+  }
+  if (candidates.length === 0) {
+    fail('no deployment attestation exists for environment ' + environment);
+  }
+  const newest = Math.max(...candidates.map((candidate) => candidate.observedAt));
+  const top = candidates.filter((candidate) => candidate.observedAt === newest);
+  if (new Set(top.map((candidate) => candidate.execution_id)).size !== 1) {
+    fail('ambiguous deployment attestation at the newest observation timestamp');
+  }
+  return bindingOf(top[0]);
+}
+
 export function selectDeploymentBinding({ environmentId, sourceSha, records }) {
   const environment = String(environmentId ?? '');
   if (!ENVIRONMENT.test(environment)) fail('invalid deployment environment');
@@ -53,17 +97,7 @@ export function selectDeploymentBinding({ environmentId, sourceSha, records }) {
   if (new Set(top.map((candidate) => candidate.execution_id)).size !== 1) {
     fail('ambiguous deployment attestation at the newest observation timestamp');
   }
-  const chosen = top[0];
-  return {
-    environment_id: chosen.item.environment_id,
-    attested: true,
-    attestation_execution_id: chosen.execution_id,
-    gitops_revision: chosen.item.gitops_revision,
-    image_digests: Object.fromEntries(
-      chosen.item.images.map((image) => [image.role, image.digest])),
-    source_sha: chosen.item.source_sha,
-    attestation_path: chosen.path,
-  };
+  return bindingOf(top[0]);
 }
 
 const RECEIPT = {
@@ -191,7 +225,24 @@ function selfTest() {
     records: [{ path: path100, record: { ...storedRecord(), execution_id: 'f'.repeat(64) } }],
   }), /execution_id does not match/);
 
-  console.log('deployment binding lookup: environment/SHA selection and ambiguity fixtures passed');
+  const latest = latestDeploymentBinding({
+    environmentId: 'staging-01',
+    records: [
+      { path: path100, record: storedRecord() },
+      { path: path101, record: storedRecord({ runId: 101, observedAt: '2026-10-25T02:00:00Z' }) },
+    ],
+  });
+  assert.equal(latest.attestation_path, path101);
+  assert.equal(latest.source_sha, 'a'.repeat(40));
+  assert.throws(() => latestDeploymentBinding({
+    environmentId: 'staging-01', records: [{ path: path200, record: storedRecord({ runId: 200, environment: 'staging' }) }],
+  }), /no deployment attestation exists for environment staging-01/);
+  assert.throws(() => latestDeploymentBinding({
+    environmentId: 'staging-01',
+    records: [{ path: path100, record: storedRecord() }, { path: path101, record: storedRecord({ runId: 101 }) }],
+  }), /ambiguous deployment attestation/);
+
+  console.log('deployment binding lookup: environment/SHA selection, latest and ambiguity fixtures passed');
 }
 
 // Read compact deployment records from a checked-out acceptance-results tree.
@@ -225,6 +276,18 @@ function main() {
     fs.writeFileSync(output, JSON.stringify(collectDeploymentRecords(root)) + '\n');
     return;
   }
+  if (process.argv[2] === 'latest') {
+    const [environmentId, recordsFile, output] = process.argv.slice(3);
+    if (!environmentId || !recordsFile) {
+      throw new Error('usage: latest ENVIRONMENT RECORDS_JSON [OUTPUT]');
+    }
+    const records = JSON.parse(fs.readFileSync(recordsFile, 'utf8'));
+    const binding = latestDeploymentBinding({ environmentId, records });
+    const json = JSON.stringify(binding, null, 2) + '\n';
+    if (output) fs.writeFileSync(output, json);
+    else process.stdout.write(json);
+    return;
+  }
   if (process.argv[2] === 'select') {
     const [environmentId, sourceSha, recordsFile, output] = process.argv.slice(3);
     if (!environmentId || !sourceSha || !recordsFile) {
@@ -237,7 +300,7 @@ function main() {
     else process.stdout.write(json);
     return;
   }
-  throw new Error('usage: self-test | collect STORE_ROOT OUTPUT | select ENVIRONMENT SOURCE_SHA RECORDS_JSON [OUTPUT]');
+  throw new Error('usage: self-test | collect STORE_ROOT OUTPUT | latest ENVIRONMENT RECORDS_JSON [OUTPUT] | select ENVIRONMENT SOURCE_SHA RECORDS_JSON [OUTPUT]');
 }
 
 if (process.argv[1]?.endsWith('deployment-binding-lookup.mjs')) {
