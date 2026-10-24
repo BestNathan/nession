@@ -12,6 +12,8 @@ The trusted controller must resolve a deployment identity from an authenticated 
 - A verifier asserting a particular source SHA must prove the deployed source-to-image relationship from trusted build provenance; otherwise return `Error`, not `Pass` or `N/A`.
 - On promotion to production, compare **deployed** digest/revision and approval record. A main merge alone is never a deployment.
 
+The executable policy for this chain is `scripts/deployment-identity-policy.mjs` (Gate `deployment-identity-selftest`). It parses a trusted GitOps overlay, validates trusted build provenance, and binds one full source SHA to three immutable digests and three ready observed workloads (exact namespace, workload name, UID, generation and imageID). It performs no cluster or registry I/O, does not emit evidence by itself, and does not enable a remote profile; a trusted workflow must still supply authenticated inputs.
+
 ## Trust and runner isolation
 
 1. Reuse the **existing project VPN access path** from a trusted main-controlled workflow and protected environment where that execution environment supports it. Do not provision a second VPN or dedicated runner group by default. Only propose additional runner/network infrastructure if a concrete limitation of the existing path is demonstrated.
