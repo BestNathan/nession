@@ -167,7 +167,7 @@ function selfTest() {
 
 function main() {
   if (process.argv[2] === 'self-test') return selfTest();
-  if (process.argv[2] !== 'ingest' || process.argv.length !== 5) {
+  if (process.argv[2] !== 'ingest' || process.argv.length !== 6) {
     fail('usage: self-test | ingest RECORD_JSON ABSOLUTE_AGENT_STORE_ROOT OUTPUT_JSON');
   }
   const [, , , recordPath, storeRoot, outputPath] = process.argv;
