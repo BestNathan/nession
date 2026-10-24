@@ -297,7 +297,7 @@ function fixture() {
   const d=fs.mkdtempSync(path.join(os.tmpdir(),'nession-knowledge-title-'));
   const put=(file,text)=>{const p=path.join(d,file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,text);};
   const at='2026-10-24T03:00:00Z';
-  const slugHeadingForFixture=(s)=>s.toLowerCase().replace(/[^\\p{L}\\p{N}\\s-]/gu,'').trim().replace(/\\s+/g,'-');
+  const slugHeadingForFixture=(s)=>s.toLowerCase().replace(/[^a-z0-9\s-]/g,'').trim().replace(/\s+/g,'-');
   const title='Nession instruction architecture and knowledge ownership',slug=titleSlug(title);
   const file='topics/engineering/'+slug+'.md';
   const article='---\ntitle: "'+title+'"\ndescription: Full descriptive name\ntopic: engineering\ncategories: ["architecture", "knowledge"]\nsources: ["https://github.com/BestNathan/nession/blob/'+'a'.repeat(40)+'/AGENTS.md"]\nstatus: verified\ncreated_at: '+at+'\nupdated_at: '+at+'\n---\n\n# '+title+'\n\nCurrent knowledge.\n';
