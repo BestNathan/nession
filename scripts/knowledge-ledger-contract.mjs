@@ -138,7 +138,7 @@ export function logEntries(text) {
 }
 function verify(root,baseline=null) {
   for(const entry of fs.readdirSync(root)){
-    if(!['README.md','topics','index.json','CHANGELOG.md','schema'].includes(entry))
+    if(!['.git','README.md','topics','index.json','CHANGELOG.md','schema'].includes(entry))
       fail('legacy/unexpected active knowledge path: '+entry);
   }
   const schemas=paths(root,'schema');
