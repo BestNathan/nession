@@ -108,6 +108,30 @@ Two consequences are deliberate:
 Empty lines are real lines: the body joins them with `\n` and tracks "a line
 was seen" separately from byte length.
 
+## Adapter handoff bounds (#2387/#2388)
+
+The typed client's ordered stream ends in `ControlModeSession`, which hands two
+things to the Agent. Both handoffs are bounded so a stalled consumer cannot
+freeze the single ordered forwarder or hold unaccounted memory:
+
+- **Output** — the handoff carries an aggregate byte budget (32 MiB default)
+  and a 10 s deadline covering both credit acquisition and the queue send.
+  Taking a chunk releases exactly the credit it holds; a failed, timed-out or
+  cancelled send refunds it. On overload the forwarder ends, closing the stream;
+  the Agent retires the epoch and reports `terminal-stream-lost` — never a
+  healthy-looking freeze. The client's own 32 MiB ingress budget is not a
+  whole-pipeline bound because it releases on receive; this second budget owns
+  the adapter-to-Agent queue.
+- **Resize** — a **level, not a record stream**. The forwarder publishes the
+  latest authoritative size through a `watch` channel that never waits; a
+  stalled consumer reads the final size when it resumes. Intermediate sizes are
+  superseded by the final one by definition, so coalescing invents no stream
+  cursor and cannot leave the pane at a size no client is looking at. The
+  Agent's resize reporter and peer fanout are already last-writer-wins levels,
+  so no ordering contract is weakened. A count-bounded queue with a blocking
+  send is not acceptable here: it could suspend output and source-loss handling
+  behind a resize consumer that is alive but not reading.
+
 ## Invariants to preserve
 
 - One session-owned attachment; a P2P/Relay subscriber coming or going never
@@ -115,7 +139,12 @@ was seen" separately from byte length.
 - Input is loss-intolerant: one ordered writer, byte-exact `send-keys -H`,
   bounded pending commands, tombstones for timed-out replies.
 - The bootstrap capture and the live stream join exactly: output the snapshot
-  covers is dropped, interleaved output is live, neither is duplicated.
+  covers is dropped, output after the block is live, neither is duplicated; an
+  in-block output-shaped line is body (#2378).
+- The adapter-to-Agent output handoff is byte-bounded by its own credit, and a
+  stalled consumer ends the stream in bounded time with a stated loss (#2387).
+- Resize is delivered as the latest authoritative level and never blocks the
+  single ordered forwarder (#2388).
 - Response-body framing is line-aware: empty lines are preserved and, inside a
   block, only the matching terminator is protocol — every other line, including
   a well-formed notification-shaped one, is content, never a protocol fault
