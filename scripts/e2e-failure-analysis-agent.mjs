@@ -282,6 +282,19 @@ function selfTest() {
 async function main() {
   const [command, ...args] = process.argv.slice(2);
   if (command === 'self-test') return selfTest();
+  if (command === 'prepare' && args.length === 4) {
+    const event = JSON.parse(fs.readFileSync(args[0], 'utf8'));
+    const env = process.env;
+    const prepared = prepareAnalysisInput(event, env, args[1], args[2]);
+    fs.mkdirSync(args[3], { recursive: true });
+    fs.writeFileSync(path.join(args[3], 'analysis-input.json'),
+      JSON.stringify(prepared.input, null, 2) + '\\n', { flag: 'wx', mode: 0o600 });
+    fs.writeFileSync(path.join(args[3], 'analysis-claim.json'),
+      JSON.stringify(prepared.claim, null, 2) + '\\n', { flag: 'wx', mode: 0o600 });
+    console.log(JSON.stringify({ analysis_id: prepared.input.analysis_id,
+      source_sha: prepared.input.source.source_sha, input_written: true, claim_written: true }));
+    return;
+  }
   if (command === 'analyze' && args.length === 3) {
     const input = JSON.parse(fs.readFileSync(args[0], 'utf8'));
     const output = await analyze(input, args[1], args[2]);
@@ -289,7 +302,7 @@ async function main() {
       confidence: output.confidence, issue_write_authorized: false }));
     return;
   }
-  fail('usage: self-test | analyze INPUT_JSON SOURCE_WORKSPACE OUTPUT_JSON');
+  fail('usage: self-test | prepare EVENT_JSON AGENT_STORE_ROOT ACCEPTANCE_RESULTS_ROOT OUT_DIR | analyze INPUT_JSON SOURCE_WORKSPACE OUTPUT_JSON');
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main().catch(error => { console.error(error.message); process.exitCode = 2; });
