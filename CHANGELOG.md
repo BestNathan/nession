@@ -50,3 +50,10 @@
 - Categories: agents, knowledge, provenance, research, skills
 - Reason: Downgrade verification status conservatively while investigating the trusted audit's unexpected exact-SHA source predicate failure
 - Source: https://github.com/BestNathan/nession/issues/2343
+
+## 2026-10-24T12:24:00Z | update | Karpathy LLM Wiki principles for Nession project knowledge
+- Path: topics/engineering/karpathy-llm-wiki-principles-for-nession-project-knowledge.md
+- Topic: engineering
+- Categories: agents, knowledge, provenance, research, skills
+- Reason: Restore verified status after confirming the exact-SHA canonical Skill source; trusted audit will rerun after the historical-snapshot validator fix merges
+- Source: https://github.com/BestNathan/nession/issues/2343

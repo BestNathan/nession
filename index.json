@@ -6,7 +6,7 @@
         "title": "Karpathy LLM Wiki principles for Nession project knowledge",
         "description": "How Nession adapts the LLM Wiki pattern into source-grounded, incrementally maintained project knowledge",
         "path": "topics/engineering/karpathy-llm-wiki-principles-for-nession-project-knowledge.md",
-        "status": "candidate",
+        "status": "verified",
         "categories": [
           "agents",
           "knowledge",
@@ -14,7 +14,7 @@
           "research",
           "skills"
         ],
-        "updated_at": "2026-10-24T12:09:00Z"
+        "updated_at": "2026-10-24T12:24:00Z"
       },
       {
         "title": "Nession instruction architecture and knowledge ownership",

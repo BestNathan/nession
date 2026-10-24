@@ -3,9 +3,9 @@ title: "Karpathy LLM Wiki principles for Nession project knowledge"
 description: "How Nession adapts the LLM Wiki pattern into source-grounded, incrementally maintained project knowledge"
 topic: engineering
 categories: ["agents","knowledge","provenance","research","skills"]
-status: candidate
+status: verified
 created_at: 2026-10-24T05:34:00.000Z
-updated_at: 2026-10-24T12:09:00Z
+updated_at: 2026-10-24T12:24:00Z
 sources: ["https://github.com/BestNathan/nession/issues/2343", "https://github.com/BestNathan/nession/blob/413b3cbe6a6bb1de6b64f6db796a488e6f469da0/.claude/skills/nession-knowledge/SKILL.md"]
 ---
 
