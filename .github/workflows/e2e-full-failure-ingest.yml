@@ -134,6 +134,8 @@ jobs:
         env:
           STORE_PUSH_TOKEN: ${{ steps.agent_store_app.outputs.token }}
           RECORD_PATH: ${{ steps.records.outputs.record }}
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+          SOURCE_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
         shell: bash
         run: |
           set -euo pipefail
