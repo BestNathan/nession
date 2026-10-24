@@ -11,7 +11,7 @@ This Skill owns **issue structure and requirement capture**. It does not own imp
 
 See `docs/architecture/acceptance-sc-format.md` for canonical examples and migration rules.
 
-- project knowledge impact -> [nession-knowledge](../nession-knowledge/SKILL.md); every new or materially revised Requirement records a `### Knowledge Impact` decision (`None | Read | Create | Update | Supersede`) with reason, related IDs, owner/timing and evidence; see `docs/engineering/knowledge-ledger.md`.
+- project knowledge impact -> [nession-knowledge](../nession-knowledge/SKILL.md); every new or materially revised Requirement records a `### Knowledge Impact` decision (`None | Read | Create | Update | Supersede`) with **Related knowledge**, **Reason**, **Owner and timing**, and **Evidence**. New Issues created from 2026-10-25 UTC are deterministically checked by `scripts/issue-contract.mjs`; historical Issues remain compatible. See `docs/engineering/knowledge-ledger.md`.
 - interactive prototype delivery -> [nession-prototype](../nession-prototype/SKILL.md)
 - implementation -> `nession-development`
 - acceptance execution -> `nession-acceptance`

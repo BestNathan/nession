@@ -7,7 +7,7 @@ export function fetchGitHubIssue(number, repository = process.env.GITHUB_REPOSIT
   }
   return JSON.parse(execFileSync('gh', [
     'issue', 'view', String(number), '--repo', repository,
-    '--json', 'number,title,body,labels,state,url,author',
+    '--json', 'number,title,body,labels,state,url,author,createdAt',
   ], { encoding: 'utf8', env: process.env }));
 }
 
