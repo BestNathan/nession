@@ -23,6 +23,7 @@ protocol-json-contract
 issue-contract-selftest
 e2e-tests-catalog
 e2e-selected-report-selftest
+e2e-failure-admission-selftest
 issue-e2e-assertion-evidence-selftest
 issue-e2e-verification-selftest
 issue-e2e-obligations-selftest
