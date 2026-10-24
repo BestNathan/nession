@@ -14,6 +14,7 @@ on:
       - Agent / Issue Audit
       - Agent / Provider Smoke
       - Agent / Development
+      - Agent / Staging Developer Canary
       - Agent / Review
       - Agent / Cursor Resume Seed
       - Agent / Cursor Resume Verify
