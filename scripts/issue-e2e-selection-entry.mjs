@@ -126,7 +126,7 @@ function selfTest() {
     const metadataHead = git('rev-parse','HEAD');
     const withShas = (headSha, baseSha = base) => ({
       ...event, pull_request:{ ...event.pull_request,
-        base:{sha:baseSha}, head:{ ...event.pull_request.head,sha:headSha } },
+        base:{...event.pull_request.base,sha:baseSha}, head:{ ...event.pull_request.head,sha:headSha } },
     });
     assert.equal(prepare(withShas(metadataHead),[],tmp).mode,'not-required');
     assert.equal(prepare(withShas(metadataHead),[],tmp).reason,'verified-metadata-only-diff');
