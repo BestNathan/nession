@@ -15,7 +15,7 @@ const SHA=/^[a-f0-9]{40}$/;
 const POSITIVE=/^[1-9][0-9]*$/;
 function fail(message){throw Error('Staging Developer admission: '+message);}
 
-export function validateStagingDeveloperAdmission({context,sourceRun,stagingRef}){
+export function validateStagingDeveloperAdmission({context,sourceRun,stagingRef,registry}){
   if(!context||typeof context!=='object'||
       context.repository!==REPO||context.ref!=='refs/heads/main'||
       context.event!=='workflow_dispatch'||
@@ -43,6 +43,11 @@ export function validateStagingDeveloperAdmission({context,sourceRun,stagingRef}
       stagingRef.object?.sha!==context.target_sha)
     fail('target is not the exact authenticated staging branch tip');
 
+  const identity=registry?.instances?.['dev-qwen-01'];
+  if(!identity||identity.role!=='developer'||identity.provider!=='claude-code'||
+      identity.environment!=='dev-claude-qwen')
+    fail('Qwen Developer is not an approved registered role/provider/Environment');
+
   // Deliberately omit secrets, HMAC/Store state, and any privilege assertion.
   // A future consuming Worker must verify this *GitHub artifact* independently
   // before making a Store-backed task admission decision.
@@ -54,6 +59,7 @@ export function validateStagingDeveloperAdmission({context,sourceRun,stagingRef}
     source_run_id:sourceRun.id,source_run_attempt:sourceRun.run_attempt,
     workflow_path:FILE,workflow_name:WORKFLOW,
     provider_identity:'dev-qwen-01',
+    selected_environment:'dev-claude-qwen-staging',
     status:'provenance_validated_only',
     can_execute_staging_source:false,
     signed_store_dispatch_verified:false,
@@ -85,6 +91,7 @@ function main(){
   const result=validateStagingDeveloperAdmission({
     context,sourceRun:readJson(process.argv[3]),
     stagingRef:readJson(process.argv[4]),
+    registry:readJson('automation/agents/registry.json'),
   });
   fs.writeFileSync(process.argv[5],JSON.stringify(result,null,2)+'\n',{
     flag:'wx',mode:0o600});
