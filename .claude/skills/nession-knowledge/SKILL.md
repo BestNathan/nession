@@ -65,7 +65,7 @@ cd .claude/worktrees/kb-<issue>-<topic>
 git branch --show-current # must NOT be main or knowledge
 ```
 4. **Stage only allowed paths:** create revision `entries/<id>/vNNNN.md` and matching `.json`; `.json` contains stable ID, revision, status, UTC `recorded_at`, canonical `sources`, `content_sha256`. Append `events/YYYY/MM/DD/<id>-<revision>-<unique>.json` (`actor`, action, reason, UTC `recorded_at`, source Issue, old/new revisions). Update the *derived* `index.json` pointer **in the same commit**. Avoid any other file modification. Validate content hashes and that existing immutable paths remain unchanged/deleted. The initial bootstrap is an explicit no-entry exception.
-5. **Review:** check each source link and SHA, conflict/dedupe, effective-time semantics, new event data and absence of secrets/private traces. Confirm index status and target revision. Follow any available executable ledger validator/Gate; **never substitute an LLM summary for a blocking validator**.
+5. **Review:** check each source link and SHA, conflict/dedupe, effective-time semantics, new event data and absence of secrets/private traces. Confirm index status and target revision. Run `node scripts/knowledge-ledger-contract.mjs check <ledger-worktree> <baseline-knowledge-sha>` from a main-based worktree after committing the candidate, plus `./gates/run knowledge-ledger-contract`. Fail on either result; **never substitute an LLM summary for a blocking validator**.
 6. **CAS publication:** commit; fetch latest shared ref; inspect remote advancement. If another writer has moved an affected ID, stop and reconcile; never blind rebase a conflicting update. Otherwise rebase verified disjoint work and push fast-forward:
 ```sh
 git add entries/ events/ index.json
