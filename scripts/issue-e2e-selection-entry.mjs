@@ -23,18 +23,50 @@ export function pathsCannotAffectE2E(paths) {
         !/^\.github\/workflows\/(e2e-|acceptance-case-|ci-web-dist-reuse-proof)/.test(file))
     ));
 }
+function isAncestorOf(repoRoot, ancestor, descendant) {
+  try {
+    execFileSync('git', ['merge-base','--is-ancestor',ancestor,descendant], {
+      cwd:repoRoot, stdio:'ignore',
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Return paths touched by head-owned commits, excluding changes already present
+// on the latest target branch. This also retains runtime changes that were later
+// moved into docs, unlike a net tree diff, and avoids blaming base-side changes
+// incorporated by a merge commit.
+function headOwnedChangedPaths(repoRoot, baseSha, headSha) {
+  const commits = execFileSync('git', ['rev-list','--first-parent',headSha,'^'+baseSha], {
+    cwd:repoRoot, encoding:'utf8', stdio:['ignore','pipe','ignore'],
+  }).trim().split('\n').filter(Boolean).reverse();
+  const paths = [];
+  for (const commit of commits) {
+    const parents = execFileSync('git', ['rev-list','--parents','-n','1',commit], {
+      cwd:repoRoot, encoding:'utf8', stdio:['ignore','pipe','ignore'],
+    }).trim().split(/\s+/).slice(1);
+    if (!parents.length) throw new Error('cannot prove metadata-only change from a root commit');
+    const baseParent = parents.find(parent => isAncestorOf(repoRoot,parent,baseSha));
+    const comparisonParent = baseParent || parents[0];
+    const names = execFileSync('git', ['diff','--no-renames','--name-only','-z',comparisonParent,commit], {
+      cwd:repoRoot, encoding:'utf8', stdio:['ignore','pipe','ignore'],
+    }).split('\0').filter(Boolean);
+    paths.push(...names);
+  }
+  return paths;
+}
+
 function hasVerifiedMetadataOnlyDiff(repoRoot, baseSha, headSha) {
   try {
     const options = { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore','pipe','ignore'] };
-    // Trusted checkout must be the exact PR head; never use GitHub's synthetic
-    // merge ref or infer a "skip" from an unavailable base commit.
+    // Trusted checkout must be the exact PR head; never infer a skip from an
+    // unavailable base or merely from the final tree after runtime files vanish.
     if (execFileSync('git', ['rev-parse','HEAD'], options).trim() !== headSha)
       return false;
-    // Disallow rename detection so a runtime->docs rename exposes BOTH paths.
-    const names = execFileSync('git',
-      ['diff','--no-renames','--name-only','-z',baseSha,headSha], options)
-      .split('\0').filter(Boolean);
-    return pathsCannotAffectE2E(names);
+    const names = headOwnedChangedPaths(repoRoot, baseSha, headSha);
+    return names.length > 0 && pathsCannotAffectE2E(names);
   } catch {
     return false; // fail closed to the existing full E2E fallback
   }
