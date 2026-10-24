@@ -1,0 +1,66 @@
+name: CI / Knowledge Ledger Audit
+
+# The knowledge orphan ref contains public curated project knowledge, not
+# executable source. Run only trusted main-controlled code with READ permissions.
+on:
+  schedule:
+    - cron: '41 */6 * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/ci-knowledge-ledger-audit.yml'
+      - 'scripts/knowledge-ledger-contract.mjs'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    if: github.repository == 'BestNathan/nession' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout trusted main audit implementation
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Audit live knowledge ref against independently pinned root
+        shell: bash
+        run: |
+          set -euo pipefail
+          root='c91b60925b94792827198a31de739eeb50700cc3'
+          git fetch --no-tags origin refs/heads/knowledge:refs/remotes/origin/knowledge
+          ledger="$RUNNER_TEMP/nession-knowledge-audit"
+          git worktree add --detach "$ledger" refs/remotes/origin/knowledge
+          head="$(git -C "$ledger" rev-parse HEAD)"
+          first="$(git -C "$ledger" rev-list --max-parents=0 HEAD)"
+          [[ "$first" == "$root" ]] || {
+            echo "::error::knowledge history root mismatch: $first" >&2
+            exit 1
+          }
+          node scripts/knowledge-ledger-contract.mjs check "$ledger" "$root"
+          {
+            printf 'workflow_source_sha=%s\n' "$GITHUB_SHA"
+            printf 'ledger_ref=refs/heads/knowledge\n'
+            printf 'anchored_root=%s\n' "$root"
+            printf 'observed_head=%s\n' "$head"
+            printf 'checked_at_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            printf 'result=PASS\n'
+          } > "$RUNNER_TEMP/knowledge-ledger-audit.txt"
+          cat "$RUNNER_TEMP/knowledge-ledger-audit.txt"
+      - name: Preserve bounded audit receipt
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: knowledge-ledger-audit-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/knowledge-ledger-audit.txt
+          if-no-files-found: error
+          retention-days: 30

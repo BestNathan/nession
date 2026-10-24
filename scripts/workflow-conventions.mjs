@@ -48,6 +48,7 @@ export const CATALOG = [
   ['ci-quality', 'quality.yml', 'Quality Gate', 'ci-quality.yml', 'CI / Quality Gate', 'ci'],
   ['ci-web-dist-reuse-proof', 'ci-web-dist-reuse-proof.yml', 'CI / Web Dist Reuse Proof', 'ci-web-dist-reuse-proof.yml', 'CI / Web Dist Reuse Proof', 'ci'],
   ['ci-run-store-integrity-audit', 'ci-run-store-integrity-audit.yml', 'CI / Run Store Integrity Audit', 'ci-run-store-integrity-audit.yml', 'CI / Run Store Integrity Audit', 'ci'],
+  ['ci-knowledge-ledger-audit', 'ci-knowledge-ledger-audit.yml', 'CI / Knowledge Ledger Audit', 'ci-knowledge-ledger-audit.yml', 'CI / Knowledge Ledger Audit', 'ci'],
   ['ci-run-store-fixture-evidence', 'ci-run-store-fixture-evidence.yml', 'CI / Run Store Fixture Evidence', 'ci-run-store-fixture-evidence.yml', 'CI / Run Store Fixture Evidence', 'ci'],
   ['ci-pages', 'ci-pages.yml', 'CI / Pages', 'ci-pages.yml', 'CI / Pages', 'ci'],
   ['deploy-pages', 'deploy-pages.yml', 'Deploy / Public Pages', 'deploy-pages.yml', 'Deploy / Public Pages', 'delivery'],
