@@ -66,8 +66,8 @@
         },
         {
           "workflow": ".github/workflows/e2e-full-failure-ingest.yml",
-          "source": "scoped GitHub App installation token",
-          "execution": "main-owned workflow_run for scheduled Main Full Regression failure only",
+          "source": "github-actions GITHUB_TOKEN (legacy) or scoped GitHub App installation token (app rollout)",
+          "execution": "main-owned workflow_run",
           "depends_on": [
             ".github/workflows/e2e-full-regression.yml"
           ],
