@@ -551,6 +551,12 @@ test('two clients: a stalled observer never blocks the controller (#2144)', asyn
     // session, and a resize is not a foreground activation (#2286).
     await submitTerminalCommand(observer, `printf 'OBSERVER-%s-INPUT\\n' 2144`);
     await expect.poll(async () => countInBuffer(controller, 'OBSERVER-2144-INPUT')).toBe(0);
+    // The Take control above removed this client's observer bar, which changes
+    // the terminal container's height (the bar takes a band). Read the grid
+    // only after that layout change has reached xterm: measured on CI, a read
+    // taken in the same tick saw the pre-bar rows (49) while the PTY settled
+    // at the post-bar rows (51), failing the size assertion spuriously.
+    await waitForStableGrid(controller);
     const controllerGrid = await readGrid(controller);
     // Larger than the controller's: tmux follows the largest client, so a
     // leaked observer resize would visibly move the shared pane.
@@ -568,6 +574,9 @@ test('two clients: a stalled observer never blocks the controller (#2144)', asyn
     await observer.locator('.xterm').click();
     await expect(observer.getByTestId('terminal-observer-bar')).toHaveCount(0, { timeout: 15_000 });
     await expect(controller.getByTestId('terminal-observer-bar')).toBeVisible({ timeout: 15_000 });
+    // Same bar-driven container change as above, now on the newly controlling
+    // client: settle before reading the grid its PTY size is asserted against.
+    await waitForStableGrid(observer);
     const observerGrid = await readGrid(observer);
     expect(observerGrid.cols).toBeGreaterThan(controllerGrid.cols);
     await expectPtySize(observer, observerGrid.cols, observerGrid.rows);
@@ -579,7 +588,11 @@ test('two clients: a stalled observer never blocks the controller (#2144)', asyn
     await controller.locator('.xterm').click();
     await expect(controller.getByTestId('terminal-observer-bar')).toHaveCount(0, { timeout: 15_000 });
     await expect(observer.getByTestId('terminal-observer-bar')).toBeVisible({ timeout: 15_000 });
-    await expectPtySize(controller, controllerGrid.cols, controllerGrid.rows);
+    // And back: the bar toggle is layout work on both pages, so the returning
+    // controller's grid must settle before its PTY is asserted against it.
+    await waitForStableGrid(controller);
+    const controllerReturned = await readGrid(controller);
+    await expectPtySize(controller, controllerReturned.cols, controllerReturned.rows);
 
     // SC-02: stall the observer's main thread — its socket stops draining —
     // and prove the controller still receives the burst's retained tail
