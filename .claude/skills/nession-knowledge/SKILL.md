@@ -87,7 +87,7 @@ Lint has two separate, required layers.
 - Each current article has matching changelog history; action/path/title/topic/category/timestamp match the Git tree and article.
 - Every relative Markdown link resolves to an existing file or valid in-file anchor. External HTTPS links are treated as unverified unless checked separately.
 - Sources follow the allowed formats; verified articles include an exact-commit canonical repository source.
-- No accidental orphan articles: every article is reachable through topic/index navigation and has a meaningful incoming cross-link from another article, or an explicit intentional standalone/hub exception.
+- No orphan articles: every article must have a meaningful incoming cross-link from another current article. Topic/index navigation alone does not satisfy this requirement.
 - Detect duplicate concepts/title paths, invalid tags, secret-like content, missing log events, unlogged article mutations and rewritten historical log entries.
 - Negative fixtures prove broken links, orphan pages, missing/invalid sources, index drift and changelog drift are detected.
 
