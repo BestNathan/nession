@@ -173,7 +173,7 @@ export function validateArticleLinks(root, articleFiles=paths(root,'topics').fil
         let fragment;
         try { fragment=decodeURIComponent(fragmentRaw); }
         catch { fail(file+': malformed link fragment '+raw); }
-        if(!headingsFor(targetFile).has(fragment.toLowerCase()) && !/^[a-f0-9-]{8,}$/i.test(fragment))
+        if(targetFile===file && !headings.has(fragment.toLowerCase()) && !/^[a-f0-9-]{8,}$/i.test(fragment))
           fail(file+': broken local heading anchor '+raw);
       }
       if(articleSet.has(targetFile)&&targetFile!==file)incoming.set(targetFile,(incoming.get(targetFile)||0)+1);
