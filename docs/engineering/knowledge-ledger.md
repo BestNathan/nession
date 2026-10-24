@@ -79,7 +79,7 @@ See [nession-knowledge Skill](../../.claude/skills/nession-knowledge/SKILL.md) f
 
 ## Update protocol and stability
 
-The executable read-only validator is `scripts/knowledge-ledger-contract.mjs`: `check <ledger-worktree> [<base-sha>]` validates schema, UTC events, immutable record digests, source SHAs, index pointers, receipt references and (with the base SHA) Git history deltas. `./gates/run knowledge-ledger-contract` runs deterministic positive/negative isolated fixtures through Quality Tooling. This cannot enforce GitHub writer permissions or substitute for server-side branch protection.
+The executable read-only validator is `scripts/knowledge-ledger-contract.mjs`: `check <ledger-worktree> [<base-sha>]` validates schema, UTC events, immutable record digests, source SHAs, index pointers, receipt references and (with the base SHA) every intermediate Git commit delta (so edit-then-restore remains detectable), receipt ancestry/record source paths, and high-confidence secret signatures. `./gates/run knowledge-ledger-contract` runs deterministic positive/negative isolated fixtures through Quality Tooling. This cannot enforce GitHub writer permissions or substitute for server-side branch protection.
 
 Before writing: search for existing IDs, inspect current sources/decision owner, classify new/verify/revise/supersede/retract and determine whether change is justified. Stable IDs survive updates; create a new ID only for a different concept. Prefer targeted one-topic records, no pasted raw Issue dumps. No secret or session data on this public ref.
 

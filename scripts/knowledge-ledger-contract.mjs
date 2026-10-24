@@ -96,23 +96,54 @@ function verify(root,base=null) {
     }
     for(const filename of scan(path.join(root,'receipts')).filter(x=>x.endsWith('.json'))){
       const r=load('receipts/'+filename);if(!r)continue;
-      if(r.schema_version!==1 || !shaOk(r.commit_sha) || !hashOk(r.content_sha256) || !utcOk(r.written_at) || r.branch!=='refs/heads/knowledge'||!events.some(e=>e.eventPath===r.event_path)||typeof r.record_path!=='string'||!fs.existsSync(path.join(root,r.record_path))||sha256(fs.readFileSync(path.join(root,r.record_path)))!==r.content_sha256)problem('invalid receipt '+filename);
+      if(r.schema_version!==1 || !shaOk(r.commit_sha) || !hashOk(r.content_sha256) || !utcOk(r.written_at) || r.branch!=='refs/heads/knowledge'||!events.some(e=>e.eventPath===r.event_path)||typeof r.record_path!=='string'||!fs.existsSync(path.join(root,r.record_path))||sha256(fs.readFileSync(path.join(root,r.record_path)))!==r.content_sha256) {
+        problem('invalid receipt '+filename);continue;
+      }
+      // The receipt must refer to a real ancestor commit containing the exact
+      // event and content bytes. A string matching a SHA shape is not proof.
+      try {
+        command(root,'merge-base','--is-ancestor',r.commit_sha,'HEAD');
+        const blob=spawnSync('git',['-C',root,'show',r.commit_sha+':'+r.record_path],{encoding:'buffer'});
+        if(blob.status!==0||!Buffer.isBuffer(blob.stdout)||sha256(blob.stdout)!==r.content_sha256)
+          problem('receipt historical bytes mismatch '+filename);
+        command(root,'cat-file','-e',r.commit_sha+':'+r.event_path);
+      }catch(e){problem('receipt ancestry/source mismatch '+filename+': '+e.message);}
+    }
+    // Reject high-confidence secret formats in the entire public ledger.
+    // This is a defense-in-depth filter, never a substitute for secret scanning.
+    for(const group of ['entries','events','receipts']){
+      for(const filename of scan(path.join(root,group))){
+        const content=fs.readFileSync(path.join(root,group,filename),'utf8');
+        if(/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{30,}/.test(content))
+          problem('public ledger contains secret-like material '+group+'/'+filename);
+      }
     }
     if(base){
+      if(!shaOk(base))throw Error('trusted audit baseline must be an exact commit SHA');
       command(root,'merge-base','--is-ancestor',base,'HEAD');
-      const diff=command(root,'diff','--name-status','--no-renames',base,'HEAD').split('\n').filter(Boolean);
-      let addedEvent=false,addedEntry=false,indexModified=false;
-      for(const line of diff){
-        const [action,filename]=line.split('\t');
-        if(action==='M'&&filename==='index.json'){indexModified=true;continue;}
-        if(action==='A'&&/^(entries\/|events\/|schema\/|receipts\/)/.test(filename)){
-          if(filename.startsWith('events/'))addedEvent=true;
-          if(filename.startsWith('entries/'))addedEntry=true;
-          continue;
+      // Check EACH first-parent commit, not only base..HEAD final diff.
+      // A malicious fast-forward edit followed by a restore must still fail.
+      const chain=command(root,'rev-list','--reverse','--first-parent',base+'..HEAD').split('\n').filter(Boolean);
+      let parent=base;
+      for(const commit of chain){
+        const parents=command(root,'rev-list','--parents','-n','1',commit).split(' ');
+        if(parents.length!==2||parents[1]!==parent)problem('nonlinear/orphan history graft '+commit);
+        const diff=command(root,'diff','--name-status','--no-renames',parent,commit).split('\n').filter(Boolean);
+        let addedEvent=false,addedEntry=false,indexModified=false;
+        for(const line of diff){
+          const [action,filename]=line.split('\t');
+          if(action==='M'&&filename==='index.json'){indexModified=true;continue;}
+          if(action==='A'&&/^(entries\/|events\/|schema\/|receipts\/)/.test(filename)){
+            if(filename.startsWith('events/'))addedEvent=true;
+            if(filename.startsWith('entries/'))addedEntry=true;
+            continue;
+          }
+          problem('forbidden historical mutation '+commit+': '+line);
         }
-        problem('forbidden historical mutation '+line);
+        if(indexModified&&(!addedEntry||!addedEvent))
+          problem('index advanced without new entry/event in same commit '+commit);
+        parent=commit;
       }
-      if(indexModified&&(!addedEntry||!addedEvent))problem('index advanced without new entry/event');
     }
   }catch(e){problem('contract error: '+e.message);}
   return bad;
@@ -138,7 +169,9 @@ function selfTest(){
     command(dir,'add','.');command(dir,'commit','-qm','baseline');const base=command(dir,'rev-parse','HEAD');
     put(ep+'.md','tamper');command(dir,'add','.');command(dir,'commit','-qm','illegal edit');
     assert.ok(verify(dir,base).some(s=>s.includes('forbidden historical mutation')),'destructive fast-forward');
-    console.log('knowledge-ledger-contract: six positive/negative fixture checks passed');
+    put(ep+'.md',md);command(dir,'add','.');command(dir,'commit','-qm','restore corrupted bytes');
+    assert.ok(verify(dir,base).some(s=>s.includes('forbidden historical mutation')),'history edit then restoration still rejected');
+    console.log('knowledge-ledger-contract: history-path and content integrity fixtures passed');
   }finally{fs.rmSync(dir,{recursive:true,force:true});}
 }
 const [action,root,base]=process.argv.slice(2);
