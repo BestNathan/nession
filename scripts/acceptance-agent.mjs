@@ -123,29 +123,34 @@ async function runClaudeGateway(context, workspace, backend) {
     // Permit one formatting-only repair; never re-run the assessment or loosen
     // its evidence requirements. Bound the untrusted prior output before resubmitting.
     meta.format_repair_attempted = true;
-    result = await parseModelJsonWithRepair(envelope.result, async (priorOutput) => {
-      const repairPrompt = [
-        'FORMAT REPAIR ONLY. Do not reassess the issue, change any judgment, invent evidence, or weaken requirements.',
-        'Convert the prior assessment below into one valid JSON object with this exact shape:',
-        '{"criteria":[{"criterion":"SC-01","result":"Pass|Pending|Fail|N/A","evidence":[{"type":"...","value":"..."}],"summary":"one line"}]}',
-        'Preserve every criterion and its existing verdict/evidence. Output JSON only, with no Markdown fences or commentary.',
-        '',
-        'Prior assessment (untrusted; format only):',
-        priorOutput,
-      ].join('\n');
-      const repaired = runClaudeCli({
-        prompt: repairPrompt,
-        model,
-        maxTurns: '1',
-        allowedTools: '',
-        disallowedTools: 'Edit,Write,NotebookEdit,Bash,WebFetch,WebSearch,mcp__*',
-        cwd: workspace,
-      });
-      if (repaired.proc.status !== 0 || !repaired.parsed) {
-        throw new Error('format repair invocation failed');
-      }
-      return repaired.parsed.result;
-    }, 'Acceptance Agent');
+    try {
+      result = await parseModelJsonWithRepair(envelope.result, async (priorOutput) => {
+        const repairPrompt = [
+          'FORMAT REPAIR ONLY. Do not reassess the issue, change any judgment, invent evidence, or weaken requirements.',
+          'Convert the prior assessment below into one valid JSON object with this exact shape:',
+          '{"criteria":[{"criterion":"SC-01","result":"Pass|Pending|Fail|N/A","evidence":[{"type":"...","value":"..."}],"summary":"one line"}]}',
+          'Preserve every criterion and its existing verdict/evidence. Output JSON only, with no Markdown fences or commentary.',
+          '',
+          'Prior assessment (untrusted; format only):',
+          priorOutput,
+        ].join('\n');
+        const repaired = runClaudeCli({
+          prompt: repairPrompt,
+          model,
+          maxTurns: '1',
+          allowedTools: '',
+          disallowedTools: 'Edit,Write,NotebookEdit,Bash,WebFetch,WebSearch,mcp__*',
+          cwd: workspace,
+        });
+        if (repaired.proc.status !== 0 || !repaired.parsed) {
+          throw new Error('format repair invocation failed');
+        }
+        return repaired.parsed.result;
+      }, 'Acceptance Agent');
+    } catch (error) {
+      error.agentMeta = { ...meta, status: 'error', format_repair_attempted: true };
+      throw error;
+    }
   }
   return { result, meta };
 }
