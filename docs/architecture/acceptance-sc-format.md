@@ -50,6 +50,17 @@ acceptance:
 Existing runner compatibility needs a stage. It is **derived**, never copied into the new Report: `pr → pre-merge`, `merged/staging → staging`, `merged/main → post-merge`, `deployed/environment → post-merge` **for compatibility bookkeeping only**. A deployed SC is not executed on a plain main push. Real rollout must be bound to an independently verified environment/revision/digest before proving it.
 
 
+## Issue lifecycle states
+
+The canonical lifecycle ordering is executable in `scripts/acceptance-lifecycle.mjs` (Gate `acceptance-lifecycle-selftest`). It never skips a state:
+
+1. **Development Complete** — every applicable SC passed in one eligible Staging lane at the exact tested revision. An ordinary Issue may close here; Main promotion and Full Regression are **not** prerequisites.
+2. **Main Promoted** — a batch promotion merge explicitly includes the accepted source SHA. A Main merge without the Staging proof is not Main Promoted.
+3. **Regression Qualified** — Full Regression passed for the exact promoted Main merge SHA. A green run for any other SHA never qualifies a newer Main.
+4. **Released** — the release admitted the same SHA with the required approvals.
+
+A failure after Development Complete opens a Main/integration incident and blocks release; it does not retroactively invalidate the Issue's Staging proof or reopen completed feature Issues. Test and docs-only promotions that cannot affect runtime use an explicit authenticated `Not Required`, never a fabricated Full Pass.
+
 ## Minimize proof latency without weakening trust
 
 **Pick the earliest safe proof boundary per SC; runtime topology is not a

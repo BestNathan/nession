@@ -9,7 +9,7 @@ This Skill owns **issue structure and requirement capture**. It does not own imp
 
 **New Requirement authoring:** use `Success Criteria` for observable outcomes, `Acceptance Plan` for `when × branch/environment × method`, and a three-column `Acceptance Report` for `Result × Evidence`. **Do not duplicate Stage in new Reports.** Compatibility stages are derived from the Plan by `scripts/acceptance-plan.mjs`. Existing Issues without a Plan or with an explicit four-column Report remain unchanged. Production `when: deployed` requires separate authenticated deployment identity and is not inferred from a main merge.
 
-See `docs/architecture/acceptance-sc-format.md` for canonical examples and migration rules.
+See `docs/architecture/acceptance-sc-format.md` for canonical examples and migration rules. Issue lifecycle ordering (**Development Complete → Main Promoted → Regression Qualified → Released**) and the rule that ordinary Issue completion never waits for Main Full Regression are defined there and in `scripts/acceptance-lifecycle.mjs`.
 
 - project knowledge impact -> [nession-knowledge](../nession-knowledge/SKILL.md); every new or materially revised Requirement records a `### Knowledge Impact` decision (`None | Read | Create | Update | Supersede`) with **Related knowledge**, **Reason**, **Owner and timing**, and **Evidence**. New Issues created from 2026-10-25 UTC are deterministically checked by `scripts/issue-contract.mjs`; historical Issues remain compatible. See `docs/engineering/knowledge-ledger.md`.
 - interactive prototype delivery -> [nession-prototype](../nession-prototype/SKILL.md)
