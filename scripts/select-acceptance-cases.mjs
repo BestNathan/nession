@@ -105,6 +105,10 @@ function main() {
   if (mode !== 'select') throw new Error('usage: select-acceptance-cases.mjs <self-test|select ROOT ISSUE_JSON_DIR SELECTED_JSON COVERAGE_JSON>');
   const [caseRoot, issueDir, selectedPath, coveragePath] = process.argv.slice(3);
   if (!caseRoot || !issueDir || !selectedPath || !coveragePath) throw new Error('missing selector paths');
+  const deploymentBindingFile = process.env.DEPLOYMENT_BINDING_FILE ?? '';
+  const deploymentBinding = deploymentBindingFile
+    ? JSON.parse(fs.readFileSync(deploymentBindingFile, 'utf8'))
+    : null;
   const issueNumbers = JSON.parse(process.env.ISSUE_NUMBERS ?? '[]').map(Number);
   const issues = issueNumbers.map(number =>
     JSON.parse(fs.readFileSync(path.join(issueDir, number + '.json'), 'utf8')));
@@ -116,6 +120,7 @@ function main() {
     requested: process.env.MANUAL_CRITERION ?? '',
     runtime: process.env.RUNTIME_PROFILE ?? '',
     sourceCaseRoot: caseRoot,
+    deploymentBinding,
   });
   fs.writeFileSync(selectedPath, JSON.stringify(selected, null, 2) + '\n');
   fs.writeFileSync(coveragePath, JSON.stringify(coverage, null, 2) + '\n');

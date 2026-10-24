@@ -5,6 +5,7 @@
 // receipt by itself.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import path from 'node:path';
 
 import { enrichReceipt, validateStoredRecord } from './deployment-attestation-ingest.mjs';
 
@@ -193,9 +194,35 @@ function selfTest() {
   console.log('deployment binding lookup: environment/SHA selection and ambiguity fixtures passed');
 }
 
+// Read compact deployment records from a checked-out acceptance-results tree.
+// Only the canonical deployment record path participates; other modes and
+// large artifacts are ignored.
+export function collectDeploymentRecords(root) {
+  const records = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(full);
+      } else if (/\/deployment\/[a-z][a-z0-9-]{0,62}\.json$/.test(full)) {
+        const relative = path.relative(root, full).split(path.sep).join('/');
+        records.push({ path: relative, record: JSON.parse(fs.readFileSync(full, 'utf8')) });
+      }
+    }
+  };
+  walk(root);
+  return records;
+}
+
 function main() {
   if (process.argv[2] === 'self-test') {
     selfTest();
+    return;
+  }
+  if (process.argv[2] === 'collect') {
+    const [root, output] = process.argv.slice(3);
+    if (!root || !output) throw new Error('usage: collect STORE_ROOT OUTPUT');
+    fs.writeFileSync(output, JSON.stringify(collectDeploymentRecords(root)) + '\n');
     return;
   }
   if (process.argv[2] === 'select') {
@@ -210,7 +237,7 @@ function main() {
     else process.stdout.write(json);
     return;
   }
-  throw new Error('usage: self-test | select ENVIRONMENT SOURCE_SHA RECORDS_JSON [OUTPUT]');
+  throw new Error('usage: self-test | collect STORE_ROOT OUTPUT | select ENVIRONMENT SOURCE_SHA RECORDS_JSON [OUTPUT]');
 }
 
 if (process.argv[1]?.endsWith('deployment-binding-lookup.mjs')) {
