@@ -133,12 +133,12 @@ function selfTest() {
   assert.equal(one.unknown_files, 1);
   assert.deepEqual(one.results.map(x => x.id), ['session-lifecycle', 'terminal-attach']);
   assert.equal(one.results[0].failed, 1);
+  const serialized = JSON.stringify(one);
   assert.deepEqual(one.results[0].failures, [{ kind: 'assertion_failed',
     assertion_code: 'playwright_unexpected', stable_frame: 'session-lifecycle.spec.ts:42:9',
     affected_invariant: 'session-lifecycle', environment_specific: false }]);
   assert.equal(serialized.includes('/tmp/private'), false, 'candidate must not leak raw source paths');
   assert.equal(one.results[1].flaky, 1);
-  const serialized = JSON.stringify(one);
   assert.ok(!serialized.includes('password') && !serialized.includes('secret') &&
     !serialized.includes('arbitrary.html'), 'untrusted secret or paths leaked');
   assert.equal(makeCandidate(null, context).status, 'REPORT_UNAVAILABLE');
