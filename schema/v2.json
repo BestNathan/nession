@@ -1,9 +1,12 @@
 {
   "schema_version": 2,
-  "knowledge_path": "topics/<topic>/<id>.md",
+  "knowledge_path": "topics/<topic>/<title-slug>.md",
   "frontmatter": "yaml-scalars-and-inline-string-arrays",
   "primary_index": "topic",
   "secondary_index": "categories",
   "changelog": "CHANGELOG.md",
-  "history": "git-commits"
+  "history": "git-commits",
+  "filename": "title-slug",
+  "identity": "full-title-and-topic",
+  "categories_index_values": "article-paths"
 }

@@ -1,12 +1,11 @@
 ---
-id: repository-instruction-architecture
 title: "Nession instruction architecture and knowledge ownership"
 description: "Root/scoped/Skill instructions and a separate sourced project knowledge ledger"
 topic: engineering
 categories: ["agents","instructions","knowledge","skills"]
 status: verified
 created_at: 2026-10-24T03:00:28.623Z
-updated_at: 2026-10-24T03:21:16.985Z
+updated_at: 2026-10-24T04:03:25.360Z
 sources: ["https://github.com/BestNathan/nession/blob/7d7b41ea9124425fb62c7ec22218526e8ec7ebd8/docs/engineering/instruction-architecture.md","https://github.com/BestNathan/nession/blob/7d4cd5bd6fea372244ca690d548e3321b5a00265/docs/engineering/knowledge-ledger.md"]
 ---
 

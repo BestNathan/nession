@@ -3,10 +3,9 @@
   "topics": {
     "engineering": [
       {
-        "id": "repository-instruction-architecture",
         "title": "Nession instruction architecture and knowledge ownership",
         "description": "Root/scoped/Skill instructions and a separate sourced project knowledge ledger",
-        "path": "topics/engineering/repository-instruction-architecture.md",
+        "path": "topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md",
         "status": "verified",
         "categories": [
           "agents",
@@ -14,22 +13,22 @@
           "knowledge",
           "skills"
         ],
-        "updated_at": "2026-10-24T03:21:16.985Z"
+        "updated_at": "2026-10-24T04:03:25.360Z"
       }
     ]
   },
   "categories": {
     "agents": [
-      "repository-instruction-architecture"
+      "topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md"
     ],
     "instructions": [
-      "repository-instruction-architecture"
+      "topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md"
     ],
     "knowledge": [
-      "repository-instruction-architecture"
+      "topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md"
     ],
     "skills": [
-      "repository-instruction-architecture"
+      "topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md"
     ]
   }
 }
