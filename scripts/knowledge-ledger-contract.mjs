@@ -334,7 +334,7 @@ function fixture() {
     assert.throws(()=>parseKnowledge(article.replace('"architecture", "knowledge"','"architecture", "architecture"'),file),/duplicate/);
     const log=HEADER+'## '+at+' | create | '+title+'\n- Path: '+file+'\n- Topic: engineering\n- Categories: architecture, knowledge\n- Reason: Initial article\n- Source: https://github.com/BestNathan/nession/issues/2325\n';
     assert.equal(logEntries(log)[0].title,title);
-    const currentEntry={path,title,topic:'engineering',categories:['architecture','knowledge'],updated_at:at};
+    const currentEntry={path:file,title,topic:'engineering',categories:['architecture','knowledge'],updated_at:at};
     assert.equal(latestEventForArticle(currentEntry,logEntries(log)).action,'create');
     assert.throws(()=>latestEventForArticle(currentEntry,[]),/missing changelog event/);
     assert.throws(()=>logEntries(log.replace(slug+'.md','short.md')),/full title/);
