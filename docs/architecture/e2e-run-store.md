@@ -12,10 +12,13 @@ The source workflow is always checked against its GitHub-owned identity: reposit
 | --- | --- | --- | --- |
 | Acceptance Case | `runs/YYYY-MM-DD/RUN-ATTEMPT/ISSUE/SC.json` | `acceptance-case-results-RUN-ATTEMPT` | 90 days |
 | Terminal Scenario | `runs/YYYY-MM-DD/RUN-ATTEMPT/scenario/NAME-INDEX.json` | `e2e-terminal-scenario-RUN-ATTEMPT` | 14 days |
+| Deployment attestation | `runs/YYYY-MM-DD/RUN-ATTEMPT/deployment/ENVIRONMENT.json` | `nession-deployment-attestation-ENVIRONMENT` | 90 days |
 
 The trusted receipt `evidence` attached to newly ingested records declares **schema_version=1, mode, provider, artifact_name, sha256, digest_scope, retention_days, retrieval_url and durability**. The scope of `sha256` is **validated-source-record-json**, which is the canonical source record fed into the ingestor; it **is not the binary digest of the GitHub artifact ZIP**. The immutable record and its validated checksum remain in the orphan history even after the source artifact expires, subject to repository retention/access policy. Raw browser traces, screenshots, video and full terminal output are **not archived permanently** by this design.
 
 The bounded receipt generator verifies run ID/attempt, full 64-character source record SHA-256, and a GitHub Actions URL belonging to the same authenticated run. Modes have fixed artifact prefixes and retention days. A changed digest, URL, attempt, retention or unexpected envelope field is rejected. Legacy records without the new evidence envelope remain readable; they do not gain retroactive retrieval promises.
+
+**Deployment attestation** records are the durable form of the read-only `Deploy / Identity` observation. The source run must be a successful `workflow_dispatch` from trusted `main`; the index pins that main run SHA **and** the separately attested deployed `source_sha` + `gitops_revision`, so neither substitutes for the other. The artifact name binds the environment (`nession-deployment-attestation-<environment>`), and the trusted ingester rejects an artifact/receipt environment disagreement. The compact record is the validated receipt plus its provenance; a divergent replay fails instead of overwriting.
 
 ## Limits and negative cases
 
