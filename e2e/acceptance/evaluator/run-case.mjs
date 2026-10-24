@@ -93,9 +93,52 @@ export function selectedCase(repoRoot, issue, criterion) {
   return found[0];
 }
 
+
+// A deployed Case record binds the executed target to the exact attested
+// environment. The trusted ingester re-validates the same shape.
+export function deploymentRecord(binding, targetSha) {
+  if (binding == null) return null;
+  if (typeof binding !== 'object' || Array.isArray(binding)) {
+    throw new Error('deployment binding must be an object');
+  }
+  const environment = String(binding.environment_id ?? '');
+  if (!/^[a-z][a-z0-9-]{0,62}$/.test(environment)) {
+    throw new Error('deployment binding environment is invalid');
+  }
+  if (binding.attested !== true) {
+    throw new Error('deployment binding must be attested');
+  }
+  const exact = (value, length, label) => {
+    const text = String(value ?? '');
+    if (!new RegExp('^[0-9a-f]{' + length + '}$').test(text)) {
+      throw new Error(label + ' must be a ' + length + '-character hex digest');
+    }
+    return text;
+  };
+  const digests = binding.image_digests;
+  if (!digests || typeof digests !== 'object' || Array.isArray(digests)) {
+    throw new Error('deployment binding image_digests must be an object');
+  }
+  const imageDigests = {};
+  for (const role of ['agent', 'server', 'ui']) {
+    const value = String(digests[role] ?? '');
+    if (!/^sha256:[0-9a-f]{64}$/.test(value)) {
+      throw new Error(role + ' deployment image digest is not immutable');
+    }
+    imageDigests[role] = value;
+  }
+  return {
+    environment_id: environment,
+    deployed_source_sha: exact(targetSha, 40, 'deployed source SHA'),
+    attestation_execution_id: exact(binding.attestation_execution_id, 64, 'attestation_execution_id'),
+    gitops_revision: exact(binding.gitops_revision, 40, 'gitops_revision'),
+    image_digests: imageDigests,
+  };
+}
+
 // Resolve everything a Case needs before any runtime exists, so a mismatched
 // contract fails fast and never provisions a stack.
-export function prepareCase({ repoRoot, issue, issueNumber, criterion, stage, targetSha, runId }) {
+export function prepareCase({ repoRoot, issue, issueNumber, criterion, stage, targetSha, runId, deploymentBinding = null }) {
   const actualSha = git(repoRoot, ['rev-parse', 'HEAD']);
   if (actualSha !== targetSha) {
     throw new Error('Case target SHA mismatch: checkout ' + actualSha + ', requested ' + targetSha);
@@ -106,7 +149,8 @@ export function prepareCase({ repoRoot, issue, issueNumber, criterion, stage, ta
   const acceptanceContext = buildAcceptanceContext(issue, stage, {
     targetRef: targetSha,
     runId,
-    deployment: stage,
+    deployment: deploymentBinding ? deploymentBinding.environment_id : stage,
+    deploymentBinding,
   });
   const selected = selectedCase(repoRoot, issueNumber, criterion);
   const criterionContract = validateCaseAgainstAcceptanceContext(
@@ -140,11 +184,12 @@ export async function runCase({
   output = null,
   runtime: suppliedRuntime = null,
   home = null,
+  deploymentBinding = null,
 }) {
   const startedAt = nowIso();
   const startedMs = Date.now();
   const prepared = prepareCase({
-    repoRoot, issue, issueNumber, criterion, stage, targetSha, runId,
+    repoRoot, issue, issueNumber, criterion, stage, targetSha, runId, deploymentBinding,
   });
   const { selected, acceptanceContext, criterionContract, caseTree } = prepared;
   const execution = executionId({
@@ -221,6 +266,7 @@ export async function runCase({
     }
   }
 
+  const deployment = deploymentRecord(deploymentBinding, targetSha);
   const record = {
     schema_version: 1,
     kind: 'acceptance_case_result',
@@ -244,6 +290,7 @@ export async function runCase({
     finished_at: nowIso(),
     duration_ms: Date.now() - startedMs,
     verifiers: verifierResults,
+    ...(deployment ? { deployment } : {}),
   };
 
   writeResult(output, record);
@@ -262,6 +309,10 @@ async function main() {
   const runAttempt = positiveInt(arg('run-attempt') || process.env.GITHUB_RUN_ATTEMPT || '1', 'run-attempt');
   const issueJsonPath = path.resolve(arg('issue-json', true));
   const output = arg('output');
+  const deploymentBindingPath = arg('deployment-binding');
+  const deploymentBinding = deploymentBindingPath
+    ? JSON.parse(fs.readFileSync(deploymentBindingPath, 'utf8'))
+    : null;
 
   const issue = JSON.parse(fs.readFileSync(issueJsonPath, 'utf8'));
   const record = await runCase({
@@ -274,6 +325,7 @@ async function main() {
     runId,
     runAttempt,
     output,
+    deploymentBinding,
   });
 
   process.stdout.write(JSON.stringify(record) + '\n');
