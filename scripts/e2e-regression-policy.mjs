@@ -80,7 +80,7 @@ const FULL_WORKFLOW_PATH='.github/workflows/e2e-full-regression.yml';
 function canonicalMainFullRun(run){
   return String(run?.path??'').replace(/@refs\/[^\s]+$/,'')===FULL_WORKFLOW_PATH&&
     run.repository?.full_name===REPO&&run.head_repository?.full_name===REPO&&
-    run.head_branch==='main'&&['schedule','workflow_dispatch'].includes(run.event)&&
+    run.head_branch==='main'&&['schedule','workflow_dispatch','push'].includes(run.event)&&
     Number.isSafeInteger(run.id)&&run.id>0&&
     Number.isSafeInteger(run.run_attempt)&&run.run_attempt>0&&
     SHA.test(run.head_sha??'');
@@ -262,6 +262,17 @@ async function historySelfTest(){
   });
   assert.equal(active.fullInFlight,true,'manual Full jobs also prevent overlap');
   assert.equal(active.inFlightRunId,900);
+  const pushed=mkRun(902,'push','in_progress');
+  const mainPush=await inspectMainFullHistory({repo:REPO,currentRunId:903,
+    get:async(requestPath)=>{
+      const url=new URL(requestPath,'https://api.github.com');
+      if(url.pathname.endsWith('/workflows/e2e-full-regression.yml/runs'))
+        return {workflow_runs:[pushed]};
+      return {jobs:[mkJob(902,'in_progress',null,'2026-10-24T02:00:00Z',null)]};
+    }
+  });
+  assert.equal(mainPush.fullInFlight,true,'exact-Main-SHA push Full prevents periodic overlap');
+  assert.equal(mainPush.inFlightRunId,902);
   // Nine full pages of admission-only successful workflow runs must not be
   // mistaken for the initial no-history state and trigger extra Full work.
   let exhaustedPages=0;
