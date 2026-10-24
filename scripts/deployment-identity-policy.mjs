@@ -165,13 +165,41 @@ export function validateProvenance(provenance) {
     const tag = singleLine(entry.tag, roleName + ' provenance tag');
     if (!TAG.test(tag)) fail(roleName + ' provenance tag is invalid');
     if (!tag.startsWith(roleName + '-')) fail(roleName + ' provenance tag is not role-scoped');
-    const digest = singleLine(entry.digest, roleName + ' provenance digest');
-    if (!DIGEST.test(digest)) fail(roleName + ' provenance digest is not an immutable sha256 digest');
     const short = tag.slice(roleName.length + 1);
     if (/^[0-9a-f]{7,40}$/.test(short) && !sourceSha.startsWith(short)) {
       fail(roleName + ' tag does not match the provenance source SHA');
     }
-    result[roleName] = { tag, digest };
+    // A build can be published to more than one registry. A registry mirror
+    // may legitimately produce a different index digest (for example when it
+    // drops attestation manifests), so the trusted provenance lists one
+    // immutable digest per registry. The legacy single `digest` form remains
+    // valid and binds only the overlay's declared repository.
+    if (entry.digests !== undefined) {
+      if (entry.digest !== undefined) {
+        fail(roleName + ' provenance must not mix digest and digests');
+      }
+      if (!entry.digests || typeof entry.digests !== 'object' || Array.isArray(entry.digests)) {
+        fail(roleName + ' provenance digests must be an object');
+      }
+      const repositories = Object.keys(entry.digests);
+      if (repositories.length === 0) {
+        fail(roleName + ' provenance digests must contain at least one registry');
+      }
+      const digests = {};
+      for (const repository of repositories) {
+        if (!REPOSITORY.test(repository)) fail(roleName + ' provenance registry is invalid');
+        const digest = singleLine(entry.digests[repository], roleName + ' provenance digest');
+        if (!DIGEST.test(digest)) {
+          fail(roleName + ' provenance digest is not an immutable sha256 digest');
+        }
+        digests[repository] = digest;
+      }
+      result[roleName] = { tag, digest: null, digests };
+    } else {
+      const digest = singleLine(entry.digest, roleName + ' provenance digest');
+      if (!DIGEST.test(digest)) fail(roleName + ' provenance digest is not an immutable sha256 digest');
+      result[roleName] = { tag, digest, digests: null };
+    }
   }
   return { source_sha: sourceSha, images: result };
 }
@@ -227,8 +255,16 @@ export function attestDeployment({ overlay, provenance, gitopsRevision, observat
     const declared = overlay.images[roleName];
     const expectedImage = declared.repository + ':' + declared.tag;
     if (workload.image !== expectedImage) fail(roleName + ' workload image tag does not match the trusted overlay');
-    const expectedImageId = declared.repository + '@' + binding.images[roleName].digest;
-    if (workload.image_id !== expectedImageId) {
+    const observedImageId = String(workload.image_id ?? '').match(/^(\S+)@(sha256:[0-9a-f]{64})$/);
+    if (!observedImageId) fail(roleName + ' workload imageID is not an immutable registry digest');
+    const observedRepository = observedImageId[1];
+    if (!REPOSITORY.test(observedRepository)) fail(roleName + ' workload imageID registry is invalid');
+    const allowed = binding.images[roleName].digests ??
+      { [declared.repository]: binding.images[roleName].digest };
+    if (!Object.hasOwn(allowed, observedRepository)) {
+      fail(roleName + ' workload imageID registry is not part of the trusted provenance');
+    }
+    if (allowed[observedRepository] !== observedImageId[2]) {
       fail(roleName + ' workload imageID does not match the immutable provenance digest');
     }
     workloads.set(roleName, {
@@ -240,8 +276,10 @@ export function attestDeployment({ overlay, provenance, gitopsRevision, observat
       observed_generation: observedGeneration,
       ready: true,
       image: expectedImage,
-      image_id: expectedImageId,
-      digest: binding.images[roleName].digest,
+      image_id: workload.image_id,
+      declared_repository: declared.repository,
+      repository: observedRepository,
+      digest: observedImageId[2],
     });
   }
   for (const roleName of ROLES) {
@@ -259,9 +297,10 @@ export function attestDeployment({ overlay, provenance, gitopsRevision, observat
     source_sha: binding.source_sha,
     images: ROLES.map((roleName) => ({
       role: roleName,
-      repository: overlay.images[roleName].repository,
       tag: overlay.images[roleName].tag,
-      digest: binding.images[roleName].digest,
+      declared_repository: overlay.images[roleName].repository,
+      repository: workloads.get(roleName).repository,
+      digest: workloads.get(roleName).digest,
     })),
     workloads: ROLES.map((roleName) => workloads.get(roleName)),
   };
@@ -297,11 +336,13 @@ export function validateAttestation(receipt) {
     if (images.has(roleName)) fail('attestation contains duplicate ' + roleName + ' image');
     const repository = singleLine(image.repository, roleName + ' attestation repository');
     if (!REPOSITORY.test(repository)) fail(roleName + ' attestation repository is invalid');
+    const declaredRepository = singleLine(image.declared_repository, roleName + ' declared repository');
+    if (!REPOSITORY.test(declaredRepository)) fail(roleName + ' declared repository is invalid');
     const tag = singleLine(image.tag, roleName + ' attestation tag');
     if (!TAG.test(tag) || !tag.startsWith(roleName + '-')) fail(roleName + ' attestation tag is invalid');
     const digest = singleLine(image.digest, roleName + ' attestation digest');
     if (!DIGEST.test(digest)) fail(roleName + ' attestation digest is invalid');
-    images.set(roleName, { repository, tag, digest });
+    images.set(roleName, { repository, declared_repository: declaredRepository, tag, digest });
   }
   for (const roleName of ROLES) {
     if (!images.has(roleName)) fail('attestation is missing the ' + roleName + ' image');
@@ -323,7 +364,7 @@ export function validateAttestation(receipt) {
     }
     if (workload.ready !== true) fail(roleName + ' workload is not ready');
     const image = images.get(roleName);
-    if (workload.image !== image.repository + ':' + image.tag) {
+    if (workload.image !== image.declared_repository + ':' + image.tag) {
       fail(roleName + ' workload image disagrees with attestation image');
     }
     if (workload.image_id !== image.repository + '@' + image.digest) {
@@ -342,6 +383,8 @@ export function validateAttestation(receipt) {
       ready: true,
       image: workload.image,
       image_id: workload.image_id,
+      declared_repository: image.declared_repository,
+      repository: image.repository,
       digest: image.digest,
     });
   }
@@ -495,6 +538,49 @@ function selfTest() {
     observation: observationFixture(productionOverlay, productionProvenance, { environmentId: 'production' }),
   });
   assert.equal(productionReceipt.environment_id, 'production');
+
+  // A registry mirror may publish a different index digest than the build
+  // registry. Provenance lists both, and the observed imageID selects the
+  // repository that is actually running.
+  const MIRROR = 'crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession';
+  const mirrorProvenance = provenanceFixture(sourceSha);
+  ROLES.forEach((roleName, index) => {
+    mirrorProvenance.images[roleName] = {
+      tag: roleName + '-abcdef1',
+      digests: {
+        'ghcr.io/bestnathan/nession': mirrorProvenance.images[roleName].digest,
+        [MIRROR]: 'sha256:' + String(index + 4).repeat(64),
+      },
+    };
+  });
+  const mirrorObservation = structuredClone(observation);
+  for (const workload of mirrorObservation.workloads) {
+    workload.image_id = MIRROR + '@' +
+      mirrorProvenance.images[workload.role].digests[MIRROR];
+  }
+  const mirrorReceipt = attestDeployment({
+    overlay, provenance: mirrorProvenance, gitopsRevision: 'b'.repeat(40),
+    observation: mirrorObservation,
+  });
+  assert.equal(mirrorReceipt.images[0].repository, MIRROR);
+  assert.equal(mirrorReceipt.images[0].declared_repository, 'ghcr.io/bestnathan/nession');
+  assert.equal(validateAttestation(mirrorReceipt).source_sha, sourceSha);
+
+  const unknownRegistry = structuredClone(mirrorObservation);
+  unknownRegistry.workloads[1].image_id = 'unknown.example.com/x@sha256:' + '7'.repeat(64);
+  assert.throws(() => attestDeployment({
+    overlay, provenance: mirrorProvenance, gitopsRevision: 'b'.repeat(40),
+    observation: unknownRegistry,
+  }), /registry is not part of the trusted provenance/);
+  const wrongMirrorDigest = structuredClone(mirrorObservation);
+  wrongMirrorDigest.workloads[1].image_id = MIRROR + '@sha256:' + '8'.repeat(64);
+  assert.throws(() => attestDeployment({
+    overlay, provenance: mirrorProvenance, gitopsRevision: 'b'.repeat(40),
+    observation: wrongMirrorDigest,
+  }), /does not match the immutable provenance digest/);
+  const mixedProvenance = structuredClone(mirrorProvenance);
+  mixedProvenance.images.ui.digest = 'sha256:' + '9'.repeat(64);
+  assert.throws(() => validateProvenance(mixedProvenance), /must not mix digest and digests/);
 
   const clone = (value) => structuredClone(value);
   const reject = (mutate, pattern) => {

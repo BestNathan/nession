@@ -224,9 +224,9 @@ const RECEIPT_FIXTURE = {
   observed_at: '2026-10-25T01:00:00Z',
   source_sha: 'abcdef1' + 'a'.repeat(33),
   images: [
-    { role: 'agent', repository: 'ghcr.io/bestnathan/nession', tag: 'agent-abcdef1', digest: 'sha256:' + '1'.repeat(64) },
-    { role: 'server', repository: 'ghcr.io/bestnathan/nession', tag: 'server-abcdef1', digest: 'sha256:' + '2'.repeat(64) },
-    { role: 'ui', repository: 'ghcr.io/bestnathan/nession', tag: 'ui-abcdef1', digest: 'sha256:' + '3'.repeat(64) },
+    { role: 'agent', repository: 'ghcr.io/bestnathan/nession', declared_repository: 'ghcr.io/bestnathan/nession', tag: 'agent-abcdef1', digest: 'sha256:' + '1'.repeat(64) },
+    { role: 'server', repository: 'ghcr.io/bestnathan/nession', declared_repository: 'ghcr.io/bestnathan/nession', tag: 'server-abcdef1', digest: 'sha256:' + '2'.repeat(64) },
+    { role: 'ui', repository: 'ghcr.io/bestnathan/nession', declared_repository: 'ghcr.io/bestnathan/nession', tag: 'ui-abcdef1', digest: 'sha256:' + '3'.repeat(64) },
   ],
   workloads: ['agent', 'server', 'ui'].map((role, index) => ({
     role,
