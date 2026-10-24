@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import {validateStagingDeveloperAdmission} from './staging-developer-admission.mjs';
 
 const repo='BestNathan/nession';
@@ -19,8 +20,10 @@ const sourceRun={
   status:'in_progress',
 };
 const stagingRef={ref:'refs/heads/staging',object:{type:'commit',sha}};
-const verify=(c=context,r=sourceRun,ref=stagingRef)=>
-  validateStagingDeveloperAdmission({context:c,sourceRun:r,stagingRef:ref});
+const registry=JSON.parse(fs.readFileSync('automation/agents/registry.json','utf8'));
+
+const verify=(c=context,r=sourceRun,ref=stagingRef,reg=registry)=>
+  validateStagingDeveloperAdmission({context:c,sourceRun:r,stagingRef:ref,registry:reg});
 
 const out=verify();
 assert.equal(out.target_sha,sha);
@@ -30,6 +33,7 @@ assert.equal(out.status,'provenance_validated_only');
 assert.equal(out.signed_store_dispatch_verified,false);
 assert.equal(out.can_execute_staging_source,false);
 assert.equal(out.acceptance_result,'Pending');
+assert.equal(out.selected_environment,'dev-claude-qwen-staging');
 assert.ok(!JSON.stringify(out).includes(context.ANTHROPIC_AUTH_TOKEN));
 assert.deepEqual(verify(),out);
 for(const [change,error] of [
@@ -63,4 +67,15 @@ for(const changed of [
   assert.throws(()=>verify(context,sourceRun,{...stagingRef,...changed}),/staging branch tip/);
 }
 assert.throws(()=>verify(context,sourceRun,null),/staging branch tip/);
+for(const altered of [
+  {role:'reviewer'},
+  {provider:'cursor'},
+  {environment:'dev-claude-qwen-staging'},
+]){
+  assert.throws(()=>verify(context,sourceRun,stagingRef,{
+    ...registry,instances:{...registry.instances,'dev-qwen-01':{
+      ...registry.instances['dev-qwen-01'],...altered,
+    }},
+  }),/approved registered/);
+}
 console.log('Staging Developer admission: owner main Run, exact staging SHA, fail-closed privacy tests passed');
