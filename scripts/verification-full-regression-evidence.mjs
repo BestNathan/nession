@@ -92,11 +92,11 @@ export async function collectFullRegression({
       // Skip it before it can displace an older actual Full run.
       if(matches.length!==1)continue;
       const job=matches[0];
-      if(job.run_id!==run.id||job.run_attempt!==run.run_attempt||
+      if(!Number.isSafeInteger(job.id)||job.id<1||job.run_id!==run.id||job.run_attempt!==run.run_attempt||
         job.head_sha!==run.head_sha||job.status!=='completed'||job.conclusion!=='success')continue;
       const log=await getText('/repos/'+repo+'/actions/jobs/'+job.id+'/logs',8*1024*1024);
       if(typeof log!=='string'||log.length>8*1024*1024)continue;
-      const sourceLines=log.split(/\\r?\\n/).filter(line=>line.includes(PREFIX));
+      const sourceLines=log.split(/\r?\n/).filter(line=>line.includes(PREFIX));
       if(sourceLines.length!==1)continue;
       let candidate;
       try{candidate=JSON.parse(sourceLines[0].slice(sourceLines[0].indexOf(PREFIX)+PREFIX.length).trim())}
@@ -171,9 +171,11 @@ async function collectorSelfTest(){
         if(page===2)return {workflow_runs:[fullRun]};
         return {workflow_runs:[]};
       }
-      const match=url.pathname.match(/\\/actions\\/runs\\/(\\d+)\\/attempts\\/(\\d+)\\/jobs$/);
-      if(!match)throw Error('unexpected collector API path: '+path);
-      const id=Number(match[1]);
+      const parts=url.pathname.split('/');
+      const runsAt=parts.indexOf('runs');
+      const id=Number(parts[runsAt+1]);
+      if(runsAt<0||parts[runsAt+2]!=='attempts'||parts[runsAt+4]!=='jobs')
+        throw Error('unexpected collector API path: '+path);
       if(id===100)return {jobs:[fullJob]};
       const skippedFull={name:'full',run_id:id,run_attempt:1,head_sha:sha,
         status:'completed',conclusion:'skipped',steps:[]};
@@ -182,14 +184,14 @@ async function collectorSelfTest(){
     },
     getText:async(path)=>{
       logReads.push(path);
-      return PREFIX+JSON.stringify(fullReceipt)+'\\n';
+      return PREFIX+JSON.stringify(fullReceipt)+'\n';
     }
   });
   assert.deepEqual(pages,[1,2]);
   assert.equal(result.length,1);
   assert.equal(result[0].run_id,100);
   assert.equal(logReads.length,1,'admission-only runs must not have logs read as Full evidence');
-  assert.throws(()=>collectFullRegression({repo:REPO,sha,get:async()=>({workflow_runs:[]}),
+  await assert.rejects(()=>collectFullRegression({repo:REPO,sha,get:async()=>({workflow_runs:[]}),
     getText:async()=>'',pageSize:101}));
   console.log('Full Regression collector: skips admission-only successes and paginates to real receipt');
 }
