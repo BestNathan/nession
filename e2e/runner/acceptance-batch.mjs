@@ -89,6 +89,7 @@ export async function executeAcceptanceBatches({
   runAttempt,
   resultsDir,
   contractsDir,
+  deploymentBinding = null,
   runtimeFactory = null,
   runCaseImpl = runCase,
   log = () => {},
@@ -166,6 +167,7 @@ export async function executeAcceptanceBatches({
             runId,
             runAttempt,
             output: path.join(resultsDir, entry.issue + '-' + entry.criterion + '.case.json'),
+            deploymentBinding,
             runtime,
           });
         } catch (error) {

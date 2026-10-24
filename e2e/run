@@ -197,6 +197,14 @@ function compare(args) {
   console.log(JSON.stringify({ status: 'Completed', evaluation: null, differences,
     limitations: 'Environment/seed/clock effects are not comparable without recorded provenance' }, null, 2));
 }
+function deploymentBindingArgs(args) {
+  const file = arg(args, 'deployment-binding');
+  if (!file) return [];
+  if (!path.isAbsolute(file) || !fs.existsSync(file)) {
+    throw new Error('--deployment-binding must be an absolute existing JSON file');
+  }
+  return ['--deployment-binding', file];
+}
 function acceptance(args) {
   const issue = Number(required(args, 'issue'));
   const criterion = required(args, 'sc').toUpperCase();
@@ -235,6 +243,7 @@ function acceptance(args) {
       '--issue', String(issue), '--criterion', criterion, '--target-sha', sha,
       '--stage', stage, '--run-id', process.env.GITHUB_RUN_ID ?? '1',
       '--run-attempt', process.env.GITHUB_RUN_ATTEMPT ?? '1',
+      ...deploymentBindingArgs(args),
       ...(arg(args, 'output') ? ['--output', arg(args, 'output')] : []),
     ]);
   } finally {
@@ -265,6 +274,7 @@ function acceptanceBatch(args) {
     at('e2e', 'acceptance', 'evaluator', 'run-batch.mjs'),
     '--repo-root', root, '--sha', sha, '--stage', stage,
     '--selection', selection, '--contracts-dir', contractsDir, '--results-dir', resultsDir,
+    ...deploymentBindingArgs(args),
     '--run-id', process.env.GITHUB_RUN_ID ?? '1',
     '--run-attempt', process.env.GITHUB_RUN_ATTEMPT ?? '1',
   ]);
