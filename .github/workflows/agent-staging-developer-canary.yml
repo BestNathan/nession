@@ -1,0 +1,129 @@
+name: Agent / Staging Developer Canary
+
+# #2319: trusted-main synthetic Qwen Developer proof against an exact staging
+# SHA. Admission Run is independently authenticated before the protected
+# staging-only Environment is entered. NEVER check out/execute staging code.
+# This is not signed Store/Outbox production Developer work or an SC Pass.
+on:
+  workflow_run:
+    workflows:
+      - Acceptance / Staging Developer Admission
+    types: [completed]
+
+env:
+  NSESSION_AGENT_WORKFLOW_ID: agent-staging-developer-canary
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  verify-source:
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'workflow_dispatch' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.repository.full_name == 'BestNathan/nession' &&
+      github.event.workflow_run.head_repository.full_name == 'BestNathan/nession' &&
+      github.event.workflow_run.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      staging_sha: ${{ steps.source.outputs.staging_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Authenticate main admission Run and GitHub artifact digest
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+          SOURCE_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]] || exit 1
+          [[ "$SOURCE_RUN_ATTEMPT" == 1 ]] || exit 1
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID" \
+            > "$RUNNER_TEMP/staging-source-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID/artifacts?per_page=100" \
+            > "$RUNNER_TEMP/staging-source-artifacts.json"
+          artifact_name="staging-development-admission-$SOURCE_RUN_ID-$SOURCE_RUN_ATTEMPT"
+          artifact_id="$(jq -er --arg name "$artifact_name" '
+            [.artifacts[] | select(.name == $name)] |
+            if length == 1 then .[0].id else error("untrusted admission artifact cardinality") end
+          ' "$RUNNER_TEMP/staging-source-artifacts.json")"
+          [[ "$artifact_id" =~ ^[1-9][0-9]*$ ]] || exit 1
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" \
+            > "$RUNNER_TEMP/staging-admission.zip"
+          node scripts/lib/agent/orchestration/staging-developer-source.mjs verify \
+            "$RUNNER_TEMP/staging-source-run.json" \
+            "$RUNNER_TEMP/staging-source-artifacts.json" \
+            "$RUNNER_TEMP/staging-admission.zip" \
+            "$RUNNER_TEMP/verified-staging.json"
+          target="$(jq -er .target_sha "$RUNNER_TEMP/verified-staging.json")"
+          [[ "$target" =~ ^[a-f0-9]{40}$ ]] || exit 1
+          echo "staging_sha=$target" >> "$GITHUB_OUTPUT"
+          echo "Authenticated exact staging proof target $target; no Store claim or SC Pass" >> "$GITHUB_STEP_SUMMARY"
+
+  synthetic-qwen:
+    needs: verify-source
+    if: needs.verify-source.result == 'success'
+    runs-on: ubuntu-latest
+    environment: dev-claude-qwen-staging
+    timeout-minutes: 15
+    env:
+      STAGING_TARGET_SHA: ${{ needs.verify-source.outputs.staging_sha }}
+      ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL }}
+      ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
+      ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      CLAUDE_CODE_VERSION: ${{ vars.CLAUDE_CODE_VERSION }}
+    steps:
+      - name: Checkout trusted main-only Provider implementation
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Fail closed on absent/misconfigured staging Gateway
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import {qwenDeveloperModel,qwenGatewayEndpoint}
+            from './scripts/lib/agent/orchestration/qwen-developer-policy.mjs';
+          qwenDeveloperModel(process.env);
+          qwenGatewayEndpoint(process.env);
+          if(!/^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/.test(process.env.CLAUDE_CODE_VERSION??''))
+            throw Error('Staging Claude Code version must be explicitly pinned');
+          console.log('Staging-only Qwen Gateway and native CLI version are pinned');
+          NODE
+      - name: Install restricted Claude Code for staging-only model call
+        run: |
+          set -euo pipefail
+          npm install -g "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION"
+          claude --help | grep -q -- '--restricted' ||
+            { echo "::error::Claude CLI must support restricted mode"; exit 1; }
+      - name: Execute bounded synthetic Qwen Read/Edit only
+        run: |
+          set -euo pipefail
+          node scripts/lib/agent/developer-canary.mjs staging \
+            "$RUNNER_TEMP/staging-qwen-telemetry"
+      - name: Upload canonical staging Agent telemetry
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-telemetry-staging-qwen-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/staging-qwen-telemetry/agent-telemetry.json
+            ${{ runner.temp }}/staging-qwen-telemetry/agent-execution-trace.json
+          if-no-files-found: warn
+          retention-days: 14
