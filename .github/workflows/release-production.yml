@@ -121,8 +121,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Prove release Full verifier negative/positive fixtures
-        run: node scripts/main-full-release-gate.mjs self-test
+      - name: Verify canonical Full report contract via Gate Runner
+        run: ./gates/run e2e-browser-report-selftest
       - name: Wait for authenticated exact Main SHA Full evidence
         env:
           GH_TOKEN: ${{ github.token }}
