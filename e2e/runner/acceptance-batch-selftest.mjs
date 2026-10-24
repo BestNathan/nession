@@ -107,6 +107,14 @@ try {
   assert.equal(seen[2], null);
   assert.equal(stops, 1);
 
+  // A deployed execution forwards the trusted binding to every Case.
+  const bindings = [];
+  await run(plan([{ issue: 7, criterion: 'SC-07' }]), {
+    deploymentBinding: { environment_id: 'staging-01', attested: true },
+    runCaseImpl: async (opts) => { bindings.push(opts.deploymentBinding); return record(opts); },
+  });
+  assert.deepEqual(bindings, [{ environment_id: 'staging-01', attested: true }]);
+
   // A shared runtime that cannot start is an error for that batch only; the
   // following isolated Case still produces its own record.
   const failedPlan = plan([{ issue: 1, criterion: 'SC-01' },
