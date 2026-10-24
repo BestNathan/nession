@@ -1,0 +1,223 @@
+name: Deploy / Identity Ingest
+
+# Main-owned write boundary for deployment identity receipts (#1616/#2323).
+# The read-only source workflow never receives store-write authority.
+on:
+  workflow_run:
+    workflows: ["Deploy / Identity"]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  # Shared with Acceptance / Case Ingest and the other trusted store writers.
+  group: acceptance-results-ingest
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout trusted ingestion tooling
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: trusted
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Self-test trusted identity tooling
+        working-directory: trusted
+        run: ./gates/run deployment-identity-selftest
+
+      - name: Download source deployment attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          mkdir -p incoming
+          gh run download "$SOURCE_RUN_ID" -R "$GITHUB_REPOSITORY" -D incoming
+          shopt -s nullglob
+          artifacts=(incoming/nession-deployment-attestation-*)
+          [[ "${#artifacts[@]}" -ge 1 ]] || {
+            echo "::error::no deployment attestation artifact on the source run"; exit 1; }
+          for artifact in "${artifacts[@]}"; do
+            [[ -d "$artifact" ]] || { echo "::error::unexpected artifact path $artifact"; exit 1; }
+            receipts=("$artifact"/*.json)
+            [[ "${#receipts[@]}" -eq 1 ]] || {
+              echo "::error::expected exactly one receipt in $artifact, found ${#receipts[@]}"; exit 1; }
+          done
+          unexpected=$(find incoming -mindepth 1 -maxdepth 1 -type d \
+            ! -name 'nession-deployment-attestation-*' -print)
+          [[ -z "$unexpected" ]] || {
+            echo "::error::unexpected source artifact directories: $unexpected"; exit 1; }
+
+      - name: Validate and prepare immutable records
+        id: records
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          : > "${RUNNER_TEMP}/persisted-records.txt"
+          : > "${RUNNER_TEMP}/records-to-ingest.tsv"
+          count=0
+          for artifact in incoming/nession-deployment-attestation-*; do
+            [[ -d "$artifact" ]] || continue
+            artifact_name="$(basename "$artifact")"
+            receipt="$(find "$artifact" -maxdepth 1 -type f -name '*.json' -print)"
+            # Never create a persistent path until the GitHub-owned source run
+            # identity and artifact environment have been attested.
+            durable_path="$(node trusted/scripts/deployment-attestation-ingest.mjs attest \
+              "$receipt" "$artifact_name" "$GITHUB_EVENT_PATH")"
+            printf '%s\t%s\t%s\n' "$receipt" "$artifact_name" "$durable_path" \
+              >> "${RUNNER_TEMP}/records-to-ingest.tsv"
+            count=$((count + 1))
+          done
+          echo "count=${count}" >> "${GITHUB_OUTPUT}"
+
+      - name: Mint scoped App token for orphan Run Store updates
+        if: (vars.RUN_STORE_WRITER_MODE == '' || vars.RUN_STORE_WRITER_MODE == 'app') && steps.records.outputs.count != '0'
+        id: store_app
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.RUN_STORE_WRITER_APP_ID }}
+          private-key: ${{ secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY }}
+          repositories: nession
+          permission-contents: write
+      - name: Reject unrecognized writer mode or unavailable App token
+        if: steps.records.outputs.count != '0'
+        env:
+          WRITER_MODE: ${{ vars.RUN_STORE_WRITER_MODE }}
+          APP_TOKEN: ${{ steps.store_app.outputs.token }}
+        run: |
+          set -euo pipefail
+          case "$WRITER_MODE" in
+            legacy) ;;
+            ''|app) [[ -n "$APP_TOKEN" ]] || { echo "::error::No App token; refuse legacy fallback" >&2; exit 1; } ;;
+            *) echo "::error::Unsupported RUN_STORE_WRITER_MODE" >&2; exit 1 ;;
+          esac
+
+      - name: Initialize append-only results branch
+        if: steps.records.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ vars.RUN_STORE_WRITER_MODE == 'legacy' && secrets.GITHUB_TOKEN || steps.store_app.outputs.token }}
+        run: |
+          set -euo pipefail
+          mkdir results-repo
+          git -C results-repo init
+          git -C results-repo config user.name "github-actions[bot]"
+          git -C results-repo config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C results-repo remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if git -C results-repo ls-remote --exit-code --heads origin acceptance-results >/dev/null 2>&1; then
+            git -C results-repo fetch --depth=1 origin acceptance-results
+            git -C results-repo checkout -B acceptance-results FETCH_HEAD
+          else
+            git -C results-repo checkout --orphan acceptance-results
+            cat > results-repo/README.md <<'EOF'
+          # Nession Acceptance Results
+
+          This orphan branch stores compact immutable Acceptance Case, Scenario,
+          Test and deployment identity records. Product source and verifier code
+          live on normal product branches; large artifacts remain GitHub Actions
+          artifacts linked by each record.
+
+          Files under `runs/` and `indexes/` are append-only. Never rewrite or
+          force-push this branch.
+          EOF
+          fi
+
+      - name: Append compact immutable records and SHA indexes
+        if: steps.records.outputs.count != '0'
+        env:
+          SOURCE_WORKFLOW_URL: ${{ github.event.workflow_run.html_url }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          while IFS=$'\t' read -r receipt artifact_name durable_path; do
+            destination="results-repo/${durable_path}"
+            mkdir -p "$(dirname "${destination}")"
+            candidate="$(mktemp)"
+            node trusted/scripts/deployment-attestation-ingest.mjs enrich \
+              "${receipt}" "${artifact_name}" "${candidate}" \
+              "${SOURCE_WORKFLOW_URL}" "${durable_path}" "${GITHUB_EVENT_PATH}"
+            node trusted/scripts/deployment-attestation-ingest.mjs validate "${candidate}" >/dev/null
+            if [[ -e "${destination}" ]]; then
+              cmp -s "${destination}" "${candidate}" || {
+                echo "::error::Immutable deployment record collision with divergent bytes: ${durable_path}" >&2
+                exit 1
+              }
+              rm -f "${candidate}"
+            else
+              mv "${candidate}" "${destination}"
+            fi
+            index_candidate="$(mktemp)"
+            index_path="$(node trusted/scripts/deployment-attestation-ingest.mjs index \
+              "${destination}" "${index_candidate}")"
+            [[ "${index_path}" =~ ^indexes/by-sha/[a-f0-9]{40}/deployment/[0-9]+-[0-9]+-[a-z][a-z0-9-]*\.json$ ]] || {
+              echo "::error::Unsafe deployment index path" >&2
+              exit 1
+            }
+            index_destination="results-repo/${index_path}"
+            mkdir -p "$(dirname "${index_destination}")"
+            if [[ -e "${index_destination}" ]]; then
+              cmp -s "${index_destination}" "${index_candidate}" || {
+                echo "::error::Immutable deployment SHA index collision: ${index_path}" >&2
+                exit 1
+              }
+              rm -f "${index_candidate}"
+            else
+              mv "${index_candidate}" "${index_destination}"
+            fi
+            printf '%s\n' "${durable_path}" >> "${RUNNER_TEMP}/persisted-records.txt"
+          done < "${RUNNER_TEMP}/records-to-ingest.tsv"
+
+          git -C results-repo add -A -- runs indexes
+          if [[ -f results-repo/README.md ]]; then git -C results-repo add README.md; fi
+          if git -C results-repo diff --cached --quiet; then
+            echo "Idempotent deployment ingestion retry: identical durable record and index bytes"
+          else
+            git -C results-repo commit -m "deployment: ingest run ${{ github.event.workflow_run.id }} attempt ${{ github.event.workflow_run.run_attempt }}"
+            node trusted/scripts/run-store-cas-push.mjs acceptance-results "${GITHUB_WORKSPACE}/results-repo"
+          fi
+
+      - name: Verify immutable Git bytes before uploading Run Store receipts
+        if: success()
+        run: |
+          set -euo pipefail
+          count=0
+          for file in "${RUNNER_TEMP}"/run-store-receipts/*.json; do
+            [[ -f "$file" ]] || continue
+            node "${GITHUB_WORKSPACE}/trusted/scripts/run-store-receipt-verify.mjs" \
+              "$file" "${GITHUB_WORKSPACE}/results-repo" acceptance-results
+            count=$((count + 1))
+          done
+          echo "Read-only exact Git-byte receipts verified: ${count}; no independent signing/anchor claimed" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Preserve Run Store post-commit receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-store-receipt-${{ github.run_id }}-${{ github.run_attempt }}-deployment
+          path: ${{ runner.temp }}/run-store-receipts
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Summarize ingestion
+        if: always()
+        run: |
+          {
+            echo "## Deployment identity ingestion"
+            echo
+            echo "- Source run: ${{ github.event.workflow_run.html_url }}"
+            echo "- Source conclusion: \`${{ github.event.workflow_run.conclusion }}\`"
+            echo "- Compact records discovered: \`${{ steps.records.outputs.count || '0' }}\`"
+            echo "- Durable branch: \`acceptance-results\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
