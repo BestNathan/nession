@@ -34,6 +34,9 @@ const rules = Object.freeze({
     {path: new RegExp('^workflows/issues/' + ISSUE + '/states/' + VER + '\\.json$'), kind:'immutable'},
     {path: new RegExp('^workflows/issues/' + ISSUE + '/results/' + ISSUE + '-' + ISSUE + '-[a-f0-9]{64}\\.json$'), kind:'immutable'},
     {path: new RegExp('^workflows/issues/' + ISSUE + '/head\\.json$'), kind:'cas-pointer'},
+    {path: /^e2e-failures\/[a-f0-9]{64}\/states\/[0-9]{8}\.json$/, kind:'immutable'},
+    {path: /^e2e-failures\/[a-f0-9]{64}\/head\.json$/, kind:'cas-pointer'},
+    {path: /^e2e-failure-observations\/[1-9][0-9]*-[1-9][0-9]*-[a-f0-9]{64}\.json$/, kind:'immutable'},
   ],
 });
 export const RUN_STORE_INTEGRITY_SCHEMA_VERSION=1;

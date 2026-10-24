@@ -19,6 +19,12 @@ const TRUSTED_TELEMETRY_SOURCES = new Map([
     events: new Set(['workflow_dispatch']),
     workflow_dispatch_main_only: true,
   }],
+  ['.github/workflows/agent-staging-developer-canary.yml', {
+    workflow_id: 'agent-staging-developer-canary',
+    events: new Set(['workflow_run']),
+    workflow_dispatch_main_only: false,
+    allowed_workflow_run_branches: new Set(['main']),
+  }],
   ['.github/workflows/agent-review.yml', {
     workflow_id: 'agent-review',
     events: new Set(['workflow_dispatch']),

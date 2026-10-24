@@ -4,6 +4,7 @@
 import {inflateRawSync} from 'node:zlib';
 
 const CLAIM=['development-worker-claim.json'];
+const STAGING=['staging-developer-admission.json'];
 const RESULT=['ciphertext.json','proof.json','result.json'];
 function fail(s){throw Error('trusted Agent Worker ZIP: '+s);}
 function crc32(bytes){
@@ -15,9 +16,9 @@ function crc32(bytes){
   return (crc^0xffffffff)>>>0;
 }
 export function readWorkerZipMember(zip,wanted){
-  const expected=wanted===CLAIM[0]?CLAIM:RESULT;
+  const expected=wanted===CLAIM[0]?CLAIM:wanted===STAGING[0]?STAGING:RESULT;
   if(!expected.includes(wanted))fail('unapproved Worker ZIP member');
-  const claim=expected===CLAIM,maxZip=claim?256*1024:32*1024*1024;
+  const claim=expected!==RESULT,maxZip=claim?256*1024:32*1024*1024;
   const maxJson=claim?64*1024:wanted==='ciphertext.json'?24*1024*1024:64*1024;
   if(!Buffer.isBuffer(zip)||zip.length<52||zip.length>maxZip)
     fail('unsafe Worker ZIP byte budget');

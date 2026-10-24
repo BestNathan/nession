@@ -79,6 +79,11 @@ assert.equal(classifyRunStorePath(S,'workflows/issues/1664/states/00000001.json'
 assert.equal(classifyRunStorePath(S,'workflows/issues/1664/results/33-1-'+'a'.repeat(64)+'.json'),'immutable');
 assert.equal(classifyRunStorePath(S,'roles/developer/dev-qwen-01/issues/1664/checkpoints/00000001.json'),'immutable');
 assert.equal(classifyRunStorePath(S,'roles/developer/dev-qwen-01/issues/1664/runs/33-1.json'),'immutable');
+assert.equal(classifyRunStorePath(S,'e2e-failures/'+'a'.repeat(64)+'/states/00000001.json'),'immutable');
+assert.equal(classifyRunStorePath(S,'e2e-failures/'+'a'.repeat(64)+'/head.json'),'cas-pointer');
+assert.equal(classifyRunStorePath(S,'e2e-failure-observations/501-1-'+'a'.repeat(64)+'.json'),'immutable');
+assert.throws(()=>validateRunStoreChange(S,'M','e2e-failures/'+'a'.repeat(64)+'/states/00000001.json'),/forbidden/);
+assert.equal(validateRunStoreChange(S,'M','e2e-failures/'+'a'.repeat(64)+'/head.json').kind,'cas-pointer');
 assert.equal(classifyRunStorePath(S,'roles/developer/dev-qwen-01/issues/1664/.head-1.json'),'unclassified');
 assert.throws(()=>classifyRunStorePath(M,'raw/workflows/../../secrets'),/unsafe/);
 assert.throws(()=>classifyRunStorePath(M,'raw\\workflows\\secret'),/unsafe/);

@@ -13,5 +13,10 @@ gate_check() {
   gate_require_command node "Install Node.js to evaluate this Gate." || return $?
   gate_require_path './e2e/runner/drivers/browser-report.mjs' "Restore e2e/runner/drivers/browser-report.mjs." || return $?
   gate_run_invariant node e2e/runner/drivers/browser-report.mjs self-test
+  gate_run_invariant node scripts/e2e-full-failure-manifest.mjs self-test
+  gate_run_invariant node scripts/e2e-failure-intake-contract.mjs self-test
+  gate_run_invariant node scripts/e2e-full-failure-ingest.mjs self-test
+  gate_run_invariant node scripts/lib/agent/orchestration/e2e-failure-ledger.mjs self-test
+  gate_run_invariant node scripts/e2e-failure-admission-ingest.mjs self-test
 }
 gate_main "$@"

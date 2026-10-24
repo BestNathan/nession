@@ -1,0 +1,12 @@
+schema_version: 1
+issue: 2307
+criterion: SC-02
+stage: post-merge
+runtime: full-stack-local
+# The Rust tests own a private tmux socket and server per test; no shared
+# Nession runtime state is mutated, so sharing the job runtime is safe.
+isolation: shared
+verifiers:
+  - type: runtime
+    entry: verify.cjs
+result_policy: all-pass

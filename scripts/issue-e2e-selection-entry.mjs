@@ -23,21 +23,71 @@ export function pathsCannotAffectE2E(paths) {
         !/^\.github\/workflows\/(e2e-|acceptance-case-|ci-web-dist-reuse-proof)/.test(file))
     ));
 }
+function isAncestorOf(repoRoot, ancestor, descendant) {
+  try {
+    execFileSync('git', ['merge-base','--is-ancestor',ancestor,descendant], {
+      cwd:repoRoot, stdio:'ignore',
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Return paths touched by head-owned commits, excluding changes already present
+// on the latest target branch. This also retains runtime changes that were later
+// moved into docs, unlike a net tree diff, and avoids blaming base-side changes
+// incorporated by a merge commit.
+function headOwnedChangedPaths(repoRoot, baseSha, headSha) {
+  const commits = execFileSync('git', ['rev-list','--first-parent',headSha,'^'+baseSha], {
+    cwd:repoRoot, encoding:'utf8', stdio:['ignore','pipe','ignore'],
+  }).trim().split('\n').filter(Boolean).reverse();
+  const paths = [];
+  for (const commit of commits) {
+    const parents = execFileSync('git', ['rev-list','--parents','-n','1',commit], {
+      cwd:repoRoot, encoding:'utf8', stdio:['ignore','pipe','ignore'],
+    }).trim().split(/\s+/).slice(1);
+    if (!parents.length) throw new Error('cannot prove metadata-only change from a root commit');
+    const baseParent = parents.find(parent => isAncestorOf(repoRoot,parent,baseSha));
+    const comparisonParent = baseParent || parents[0];
+    const names = execFileSync('git', ['diff','--no-renames','--name-only','-z',comparisonParent,commit], {
+      cwd:repoRoot, encoding:'utf8', stdio:['ignore','pipe','ignore'],
+    }).split('\0').filter(Boolean);
+    paths.push(...names);
+  }
+  return paths;
+}
+
 function hasVerifiedMetadataOnlyDiff(repoRoot, baseSha, headSha) {
   try {
     const options = { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore','pipe','ignore'] };
-    // Trusted checkout must be the exact PR head; never use GitHub's synthetic
-    // merge ref or infer a "skip" from an unavailable base commit.
+    // Trusted checkout must be the exact PR head; never infer a skip from an
+    // unavailable base or merely from the final tree after runtime files vanish.
     if (execFileSync('git', ['rev-parse','HEAD'], options).trim() !== headSha)
       return false;
-    // Disallow rename detection so a runtime->docs rename exposes BOTH paths.
-    const names = execFileSync('git',
-      ['diff','--no-renames','--name-only','-z',baseSha,headSha], options)
-      .split('\0').filter(Boolean);
-    return pathsCannotAffectE2E(names);
+    const names = headOwnedChangedPaths(repoRoot, baseSha, headSha);
+    return names.length > 0 && pathsCannotAffectE2E(names);
   } catch {
     return false; // fail closed to the existing full E2E fallback
   }
+}
+function currentBaseSha(repoRoot, baseRef) {
+  if (typeof baseRef !== 'string' ||
+      !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(baseRef) ||
+      baseRef.includes('..') || baseRef.includes('@{') || baseRef.endsWith('.lock')) {
+    throw new Error('invalid PR base branch ref');
+  }
+  const remoteRef = 'refs/remotes/origin/' + baseRef;
+  let sha;
+  try {
+    sha = execFileSync('git', ['rev-parse', '--verify', remoteRef + '^{commit}'], {
+      cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    throw new Error('current PR base ref is unavailable: ' + remoteRef);
+  }
+  if (!SHA.test(sha)) throw new Error('current PR base ref did not resolve to an exact SHA');
+  return sha;
 }
 export function prepare(event, issues, repoRoot) {
   const pr = event?.pull_request;
@@ -52,27 +102,27 @@ export function prepare(event, issues, repoRoot) {
         !(event.source_event === 'push' ? ['open','OPEN','closed','CLOSED'].includes(issue.state) : ['open','OPEN'].includes(issue.state)))
       throw Error('unrelated or closed Issue in test plan');
   }
+  // pull_request.base.sha is an event snapshot and can lag when the target
+  // branch advances. Checkout(fetch-depth: 0) provides the current remote
+  // target ref; bind the plan to that immutable SHA rather than the stale
+  // webhook base or merge-base.
+  const baseSha = currentBaseSha(repoRoot, pr.base.ref);
+  if (baseSha === pr.head.sha) throw Error('current PR base and head SHA are identical');
   if (!issues.length || issues.some(i => !i.body?.includes('## E2E Verification'))) {
-    const noImpact = hasVerifiedMetadataOnlyDiff(repoRoot, pr.base.sha, pr.head.sha);
+    const noImpact = hasVerifiedMetadataOnlyDiff(repoRoot, baseSha, pr.head.sha);
     return { schema_version:1, kind:'issue_e2e_selection', pr_number:pr.number,
-      target_sha:pr.head.sha, base_sha:pr.base.sha,
+      target_sha:pr.head.sha, base_sha:baseSha,
       mode:noImpact ? 'not-required' : 'unresolved',
       reason:noImpact ? 'verified-metadata-only-diff' : 'missing-scoped-e2e-obligation-needs-audit',
       selected:[], issues:[] };
   }
-  const effectiveBase=execFileSync('git',['merge-base',pr.base.sha,pr.head.sha],{
-    cwd:repoRoot,encoding:'utf8',stdio:['ignore','pipe','ignore'],
-  }).trim();
-  if(!SHA.test(effectiveBase)||effectiveBase===pr.head.sha)
-    throw Error('PR merge-base does not identify a distinct trusted change');
-  return { ...buildGitPlan(repoRoot,issues,effectiveBase,pr.head.sha),pr_number:pr.number };
+  return { ...buildGitPlan(repoRoot,issues,baseSha,pr.head.sha),pr_number:pr.number };
 }
 function selfTest() {
   const event = { repository:{full_name:'BestNathan/nession'},pull_request:{
     number:17, title:'Refs #1702', body:'Refs #1702',
     head:{sha:'a'.repeat(40),repo:{full_name:'BestNathan/nession'}},
-    base:{sha:'b'.repeat(40)} }};
-  assert.equal(prepare(event,[],'.').mode,'unresolved');
+    base:{sha:'b'.repeat(40),ref:'staging'} }};
   assert.equal(pathsCannotAffectE2E(['docs/architecture/notes.md']), true);
   assert.equal(pathsCannotAffectE2E(['.github/workflows/agent-controller-dispatch.yml']), true);
   assert.equal(pathsCannotAffectE2E(['.github/workflows/ci-quality.yml','README.md']), true);
@@ -99,6 +149,7 @@ function selfTest() {
     git('add','.');
     git('commit','-qm','baseline');
     const base = git('rev-parse','HEAD');
+    git('update-ref','refs/remotes/origin/staging',base);
     fs.mkdirSync(join(tmp,'.github','workflows'), { recursive:true });
     fs.writeFileSync(join(tmp,'.github','workflows','agent-controller-dispatch.yml'),
       'name: metadata-only fixture\\n');
@@ -107,12 +158,12 @@ function selfTest() {
     const metadataHead = git('rev-parse','HEAD');
     const withShas = (headSha, baseSha = base) => ({
       ...event, pull_request:{ ...event.pull_request,
-        base:{sha:baseSha}, head:{ ...event.pull_request.head,sha:headSha } },
+        base:{...event.pull_request.base,sha:baseSha}, head:{ ...event.pull_request.head,sha:headSha } },
     });
     assert.equal(prepare(withShas(metadataHead),[],tmp).mode,'not-required');
     assert.equal(prepare(withShas(metadataHead),[],tmp).reason,'verified-metadata-only-diff');
-    assert.equal(prepare(withShas(base),[],tmp).mode,'unresolved',
-      'checking out a different HEAD must not mark tests unnecessary');
+    assert.throws(() => prepare(withShas(base),[],tmp), /current PR base and head SHA are identical/,
+      'identical base/head must not mark tests unnecessary');
     fs.mkdirSync(join(tmp,'web','src'),{recursive:true});
     fs.writeFileSync(join(tmp,'web','src','App.tsx'),'export default null;\\n');
     git('add','.');
@@ -130,7 +181,76 @@ function selfTest() {
   }
   assert.throws(()=>prepare({...event,pull_request:{...event.pull_request,head:{sha:'x'}}},[],'.'),/identity/);
   assert.throws(()=>prepare(event,[{number:999,body:'',state:'open'}],'.'),/unrelated/);
-  assert.equal(prepare(event,[{number:1702,body:'old issue',state:'open'}],'.').mode,'unresolved');
+  // Reproduce a PR whose webhook base SHA is stale after the target branch
+  // added an E2E spec. The PR merged the advancing base into its head; only the
+  // head-owned Case files count as PR changes, regardless of merge-parent order.
+  const mergeTmp = fs.mkdtempSync(join(tmpdir(), 'nession-issue-e2e-base-merge-'));
+  try {
+    const git = (...args) => execFileSync('git', args, {
+      cwd: mergeTmp, encoding:'utf8', stdio:['ignore','pipe','ignore'],
+    }).trim();
+    git('init','-q','-b','staging');
+    git('config','user.name','CI Fixture');
+    git('config','user.email','ci@example.invalid');
+    fs.mkdirSync(join(mergeTmp,'e2e','tests','browser'),{recursive:true});
+    fs.writeFileSync(join(mergeTmp,'e2e','tests','browser','baseline.spec.ts'),'// base-owned baseline\n');
+    git('add','.'); git('commit','-qm','old target base');
+    const staleBase = git('rev-parse','HEAD');
+    git('checkout','-qb','feature');
+    fs.mkdirSync(join(mergeTmp,'e2e','acceptance','cases','42'),{recursive:true});
+    fs.writeFileSync(join(mergeTmp,'e2e','acceptance','cases','42','case.yaml'),'schema_version: 1\n');
+    git('add','.'); git('commit','-qm','feature adds acceptance case');
+    const featureHead = git('rev-parse','HEAD');
+    git('checkout','staging');
+    fs.writeFileSync(join(mergeTmp,'e2e','tests','browser','terminal-consistency-faults.spec.ts'),'// added on target branch only\n');
+    git('add','.'); git('commit','-qm','target branch adds browser spec');
+    const currentBase = git('rev-parse','HEAD');
+    git('checkout','feature');
+    git('merge','--no-ff','staging','-m','merge advancing base into feature');
+    const mergeHead = git('rev-parse','HEAD');
+    git('update-ref','refs/remotes/origin/staging',currentBase);
+    git('checkout','--detach',mergeHead);
+
+    const noE2E = [
+      '## E2E Verification','### New','- none: no new browser test',
+      '### Regression','- none: no browser behavior affected',
+      '## E2E Report','| ID | Type | Result | Evidence |','|---|---|---|---|',
+    ].join('\n');
+    const fixtureEvent = sha => ({
+      repository:{full_name:'BestNathan/nession'},
+      pull_request:{
+        number:42,title:'Refs #42',body:'Refs #42',
+        head:{sha,repo:{full_name:'BestNathan/nession'}},
+        base:{sha:staleBase,ref:'staging'},
+      },
+    });
+    const issue = {number:42,body:noE2E,state:'open'};
+    const plan = prepare(fixtureEvent(mergeHead),[issue],mergeTmp);
+    assert.equal(plan.base_sha,currentBase,'plan must bind current base ref, not stale event SHA');
+    assert.equal(plan.target_sha,mergeHead);
+    assert.equal(plan.mode,'not-required',
+      'the base-only terminal-consistency-faults spec must not be attributed to the Case-only PR');
+
+    fs.writeFileSync(join(mergeTmp,'e2e','tests','browser','head-owned-new.spec.ts'),'// genuinely PR-owned E2E ID\n');
+    git('add','.'); git('commit','-qm','feature adds new browser spec');
+    const headOwned = git('rev-parse','HEAD');
+    assert.throws(() => prepare(fixtureEvent(headOwned),[issue],mergeTmp),
+      /changed E2E ID missing from linked Issue New\/Regression obligations: head-owned-new/,
+      'a truly head-owned new test must still require an Issue declaration');
+
+    // Cover the opposite merge-parent order: current base first, feature second.
+    git('checkout','-B','target-first-parent',currentBase);
+    git('merge','--no-ff','feature','-m','merge feature as second parent');
+    const baseFirstMerge = git('rev-parse','HEAD');
+    git('update-ref','refs/remotes/origin/staging',currentBase);
+    git('checkout','--detach',baseFirstMerge);
+    const baseFirstPlan = prepare(fixtureEvent(baseFirstMerge),[issue],mergeTmp);
+    assert.equal(baseFirstPlan.base_sha,currentBase);
+    assert.equal(baseFirstPlan.mode,'not-required',
+      'upstream E2E IDs must not be attributed when the base is first parent');
+  } finally {
+    fs.rmSync(mergeTmp,{recursive:true,force:true});
+  }
   console.log('Issue E2E planner adapter: unresolved legacy source does not force full, source identity and unrelated Issue rejected');
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

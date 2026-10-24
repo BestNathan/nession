@@ -46,6 +46,11 @@ if-addrs.workspace = true
 [target.'cfg(target_os = "macos")'.dependencies]
 system-configuration = "0.6"
 
+# The PTY transport (#2307) needs `dup`/`fcntl`/termios on the master fd;
+# portable-pty owns the pty pair but exposes no raw-mode setter.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["full", "test-util"] }
 nession-server = { path = "../nession-server" }

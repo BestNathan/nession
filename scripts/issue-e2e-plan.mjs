@@ -69,22 +69,51 @@ export function buildSelectionPlan({ issues, baseIds, headIds, changedIds = [], 
   return { ...plan, plan_digest: digest(plan) };
 }
 
-export function buildGitPlan(repo, issues, baseSha, targetSha) {
-  if (git(['rev-parse', 'HEAD'], repo) !== targetSha) throw new Error('target HEAD/source checkout mismatch');
-  const collect = sha => catalogFromPaths(git(['ls-tree', '-r', '--name-only', sha, '--', 'e2e/tests'], repo).split('\n').filter(Boolean));
-  const baseIds = collect(baseSha), headIds = collect(targetSha);
-  const changed = git(['diff', '--name-status', baseSha, targetSha, '--', 'e2e/tests'], repo).split('\n').filter(Boolean);
-  const changedIds = [];
-  for (const line of changed) {
-    const [status, p, renamed] = line.split('\t');
-    const filename = renamed || p;
-    if (!/^([AMRTCD])/.test(status)) throw new Error('unrecognized test change status');
-    if (status.startsWith('D')) continue;
-    changedIds.push(...catalogFromPaths([filename]));
+function isAncestor(repo, ancestor, descendant) {
+  try {
+    execFileSync('git', ['merge-base', '--is-ancestor', ancestor, descendant], {
+      cwd: repo, stdio: 'ignore',
+    });
+    return true;
+  } catch {
+    return false;
   }
-  return buildSelectionPlan({ issues, baseIds, headIds, changedIds, baseSha, targetSha });
 }
 
+export function buildGitPlan(repo, issues, baseSha, targetSha) {
+  if (git(['rev-parse', 'HEAD'], repo) !== targetSha) throw new Error('target HEAD/source checkout mismatch');
+  if (!HEX40.test(baseSha) || !HEX40.test(targetSha) || baseSha === targetSha) {
+    throw new Error('Issue E2E plan requires distinct exact base/head SHA');
+  }
+  const collect = sha => catalogFromPaths(git(['ls-tree', '-r', '--name-only', sha, '--', 'e2e/tests'], repo).split('\n').filter(Boolean));
+  const baseIds = collect(baseSha), headIds = collect(targetSha);
+
+  // Inspect commits on the head's first-parent line that are not already part
+  // of the current base. A three-dot tree diff is insufficient after an
+  // update-branch merge: it can blame a base-owned spec on the PR because the
+  // spec is present in the merge result but absent from the old merge-base.
+  const commits = git(['rev-list', '--first-parent', targetSha, '^' + baseSha], repo)
+    .split('\n').filter(Boolean).reverse();
+  const changedIds = new Set();
+  for (const commit of commits) {
+    const parents = git(['rev-list', '--parents', '-n', '1', commit], repo).split(/\s+/).slice(1);
+    if (!parents.length) throw new Error('cannot attribute E2E changes from a root commit: ' + commit);
+    // If a merge incorporates the target base as its second parent, compare
+    // against that base-side parent rather than first-parent feature history.
+    // In the opposite merge direction the first parent is already the base.
+    const baseSideParent = parents.find(parent => isAncestor(repo, parent, baseSha));
+    const comparisonParent = baseSideParent || parents[0];
+    const changed = git(['diff', '--no-renames', '--name-status', comparisonParent, commit, '--', 'e2e/tests'], repo)
+      .split('\n').filter(Boolean);
+    for (const line of changed) {
+      const [status, filename] = line.split('\t');
+      if (!/^[AMRTCD]/.test(status)) throw new Error('unrecognized test change status in ' + commit + ': ' + line);
+      if (status.startsWith('D')) continue;
+      for (const id of catalogFromPaths([filename])) changedIds.add(id);
+    }
+  }
+  return buildSelectionPlan({ issues, baseIds, headIds, changedIds: [...changedIds].sort(), baseSha, targetSha });
+}
 function selfTest() {
   const body = (newIds, regressions) => [
     '## E2E Verification', '### New',

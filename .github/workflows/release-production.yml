@@ -101,6 +101,55 @@ jobs:
           fi
 
   # ═══════════════════════════════════════════════════════════════════
+  # Exact-Main Full proof must precede ANY externally published images,
+  # release, mirror or production deployment (#2323). A scheduled Full
+  # observation or prior-SHA green run is not release qualification.
+  # ═══════════════════════════════════════════════════════════════════
+  regression-ready:
+    needs: version-check
+    if: needs.version-check.outputs.version_changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 95
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify canonical Full report contract via Gate Runner
+        run: ./gates/run e2e-browser-report-selftest
+      - name: Wait for authenticated exact Main SHA Full evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 85); do
+            set +e
+            node scripts/main-full-release-gate.mjs check "$RELEASE_SHA"
+            verdict=$?
+            set -e
+            if [[ "$verdict" -eq 0 ]]; then
+              echo "Exact Main Full receipt verified for $RELEASE_SHA" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            if [[ "$verdict" -ne 3 ]]; then
+              echo "::error::Main Full receipt failed or is untrusted for $RELEASE_SHA"
+              exit 1
+            fi
+            echo "Full evidence pending for $RELEASE_SHA (check $attempt/85)"
+            sleep 60
+          done
+          echo "::error::Exact Main Full evidence timed out for $RELEASE_SHA"
+          exit 1
+
+  # ═══════════════════════════════════════════════════════════════════
   # Check — lint + test
   # ═══════════════════════════════════════════════════════════════════
   rust-check:
@@ -331,7 +380,7 @@ jobs:
 
   # ── amd64 ──────────────────────────────────────────────────────────
   docker-server-amd64:
-    needs: [version-check, build-web, build-linux-amd64]
+    needs: [version-check, regression-ready, build-web, build-linux-amd64]
     if: needs.version-check.outputs.version_changed == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -366,7 +415,7 @@ jobs:
             web-dist=/tmp/web-dist
 
   docker-agent-amd64:
-    needs: [version-check, build-web, build-linux-amd64]
+    needs: [version-check, regression-ready, build-web, build-linux-amd64]
     if: needs.version-check.outputs.version_changed == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -401,7 +450,7 @@ jobs:
             web-dist=/tmp/web-dist
 
   docker-ui-amd64:
-    needs: [version-check, build-web]
+    needs: [version-check, regression-ready, build-web]
     if: needs.version-check.outputs.version_changed == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -434,7 +483,7 @@ jobs:
 
   # ── arm64 ──────────────────────────────────────────────────────────
   docker-server-arm64:
-    needs: [version-check, build-web, build-linux-arm64]
+    needs: [version-check, regression-ready, build-web, build-linux-arm64]
     if: needs.version-check.outputs.version_changed == 'true'
     runs-on: ubuntu-24.04-arm
     permissions:
@@ -469,7 +518,7 @@ jobs:
             web-dist=/tmp/web-dist
 
   docker-agent-arm64:
-    needs: [version-check, build-web, build-linux-arm64]
+    needs: [version-check, regression-ready, build-web, build-linux-arm64]
     if: needs.version-check.outputs.version_changed == 'true'
     runs-on: ubuntu-24.04-arm
     permissions:
@@ -504,7 +553,7 @@ jobs:
             web-dist=/tmp/web-dist
 
   docker-ui-arm64:
-    needs: [version-check, build-web]
+    needs: [version-check, regression-ready, build-web]
     if: needs.version-check.outputs.version_changed == 'true'
     runs-on: ubuntu-24.04-arm
     permissions:
@@ -540,7 +589,7 @@ jobs:
   # ═══════════════════════════════════════════════════════════════════
   merge:
     needs:
-      [version-check,
+      [version-check, regression-ready,
        docker-server-amd64, docker-agent-amd64, docker-ui-amd64,
        docker-server-arm64, docker-agent-arm64, docker-ui-arm64]
     if: needs.version-check.outputs.version_changed == 'true'
@@ -574,7 +623,7 @@ jobs:
   # This job runs under GitHub Environment `production`: configure required
   # reviewers there and promotion pauses for approval before touching gitops.
   promote-production:
-    needs: [version-check, merge]
+    needs: [version-check, regression-ready, merge]
     if: needs.version-check.outputs.version_changed == 'true'
     environment: production
     concurrency:
@@ -653,7 +702,7 @@ jobs:
   # ═══════════════════════════════════════════════════════════════════
   create-release:
     needs:
-      [version-check, merge,
+      [version-check, regression-ready, merge,
        build-linux-amd64, build-linux-arm64, build-macos]
     if: needs.version-check.outputs.version_changed == 'true'
     runs-on: ubuntu-latest
@@ -716,7 +765,7 @@ jobs:
   # This job is independent of GitOps deployment and GitHub Release; an ACR
   # outage must not prevent GHCR-based deployment/rollback.
   mirror-acr:
-    needs: [version-check, merge]
+    needs: [version-check, regression-ready, merge]
     if: needs.version-check.outputs.version_changed == 'true'
     strategy:
       fail-fast: false
