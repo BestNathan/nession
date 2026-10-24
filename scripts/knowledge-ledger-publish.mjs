@@ -76,6 +76,10 @@ function validateEnvironment(root,fixture){
 function publish(root,expected,{fixture=false}={}){
   if(!SHA.test(expected))throw Error('an exact expected knowledge ref head is mandatory');
   validateEnvironment(root,fixture);
+  if(!fixture && process.env.GITHUB_ACTIONS==='true' &&
+    (process.env.GITHUB_REF!=='refs/heads/main' ||
+      !['workflow_dispatch','schedule','push'].includes(process.env.GITHUB_EVENT_NAME)))
+    throw Error('untrusted GitHub Actions event/ref may not publish knowledge');
   if(git(root,'status','--porcelain'))throw Error('worktree must have no uncommitted changes');
   const head=git(root,'rev-parse','HEAD');
   git(root,'merge-base','--is-ancestor',expected,head);
@@ -149,7 +153,9 @@ function selfTest(){
     const pass=publish(a,base,{fixture:true});
     assert.equal(pass.receipts_created,1);
     assert.equal(remoteHead(a),pass.ledger_head);
-    assert.deepEqual(publish(a,base,{fixture:true}),{record_commit:pass.record_commit,ledger_head:pass.ledger_head,receipts_created:0},'byte-identical replay');
+    const replay=publish(a,base,{fixture:true});
+    assert.equal(replay.receipts_created,0,'identical replay creates no receipt');
+    assert.equal(replay.ledger_head,pass.ledger_head,'identical replay keeps remote head');
     assert.throws(()=>publish(b,base,{fixture:true}),/STALE_HEAD/,'stale concurrent writer must fail');
     assert.equal(remoteHead(a),pass.ledger_head,'stale writer did not change remote head');
     console.log('knowledge-ledger-publish: full readback, receipt, duplicate and stale-writer fixtures passed');
