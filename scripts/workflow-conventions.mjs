@@ -17,6 +17,7 @@ const WORKFLOW_DIR = path.join(ROOT, '.github/workflows');
 export const CATALOG = [
   ['agent-controller-dispatch', 'agent-controller-dispatch.yml', 'Agent / Controller Dispatch', 'agent-controller-dispatch.yml', 'Agent / Controller Dispatch', 'agent'],
   ['agent-develop', 'agent-develop.yml', 'Agent / Development', 'agent-develop.yml', 'Agent / Development', 'agent'],
+  ['agent-staging-developer-canary', 'agent-staging-developer-canary.yml', 'Agent / Staging Developer Canary', 'agent-staging-developer-canary.yml', 'Agent / Staging Developer Canary', 'agent'],
   ['agent-review', 'agent-review.yml', 'Agent / Review', 'agent-review.yml', 'Agent / Review', 'agent'],
   ['store-agent-dispatch-reconcile', 'store-agent-dispatch-reconcile.yml', 'Store / Agent Dispatch Reconcile', 'store-agent-dispatch-reconcile.yml', 'Store / Agent Dispatch Reconcile', 'store'],
   ['store-agent-development-ingest', 'store-agent-development-ingest.yml', 'Store / Agent Development Ingest', 'store-agent-development-ingest.yml', 'Store / Agent Development Ingest', 'store'],
