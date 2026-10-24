@@ -1,0 +1,125 @@
+name: E2E / Staging Lanes
+
+# Async early-regression discovery (#2323 SC-10). Enumerates the trusted
+# staging lanes, reads each lane's authenticated deployed revision from the
+# append-only store, and admits a Full run only for a due lane that is ahead of
+# pinned Main. Named lanes must exist in the trusted GitOps inventory.
+#
+# Remote deployed-environment coverage is owned by #1616 / SC-11. Until that
+# executor exists, an admitted lane runs the source-aligned full-stack suite at
+# the exact deployed revision; this is not claimed as a deployed-environment
+# Full Pass.
+on:
+  schedule:
+    # Coarse fixed tick; due decisions come from stored admission receipts, not
+    # from this cron expression.
+    - cron: '23 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: e2e-staging-lanes
+  cancel-in-progress: false
+
+env:
+  STAGING_LANES: staging,staging-01
+
+jobs:
+  admit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Fetch trusted GitOps inventory and history
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin '+refs/heads/*:refs/remotes/origin/*'
+          git fetch --no-tags origin gitops
+          echo "MAIN_SHA=$(git rev-parse origin/main)" >> "$GITHUB_ENV"
+          for lane in ${STAGING_LANES//,/ }; do
+            git cat-file -e "origin/gitops:environments/${lane}/nession/kustomization.yaml" 2>/dev/null \
+              || { echo "::error::lane ${lane} is not registered in trusted GitOps"; exit 1; }
+          done
+
+      - name: Read authenticated deployment records
+        run: |
+          set -euo pipefail
+          git fetch --depth=1 origin acceptance-results
+          echo "STORE_REVISION=$(git rev-parse FETCH_HEAD)" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/store"
+          git archive FETCH_HEAD | tar -x -C "$RUNNER_TEMP/store"
+          node scripts/deployment-binding-lookup.mjs collect \
+            "$RUNNER_TEMP/store" "$RUNNER_TEMP/deployment-records.json"
+
+      - name: Read previous admission state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          artifact_id=$(gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/artifacts?name=staging-lane-admission&per_page=100" \
+            --jq 'sort_by(.created_at) | reverse | .[0].id // empty')
+          if [[ -n "${artifact_id}" ]]; then
+            gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" \
+              > "$RUNNER_TEMP/previous.zip"
+            mkdir -p "$RUNNER_TEMP/previous"
+            unzip -o -q "$RUNNER_TEMP/previous.zip" -d "$RUNNER_TEMP/previous"
+            cp "$RUNNER_TEMP/previous/admission.json" "$RUNNER_TEMP/previous-admission.json"
+            echo "Loaded previous admission receipt artifact ${artifact_id}"
+          fi
+
+      - name: Decide per-lane admission
+        id: decide
+        run: |
+          set -euo pipefail
+          node scripts/staging-lane-scheduler.mjs plan \
+            "$STAGING_LANES" "$MAIN_SHA" \
+            "$RUNNER_TEMP/deployment-records.json" \
+            "$RUNNER_TEMP/previous-admission.json" \
+            "$RUNNER_TEMP/admission.json"
+          echo "admitted=$(jq -c '.admitted' "$RUNNER_TEMP/admission.json")" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Staging lane admission"
+            echo
+            echo "- Pinned Main: \`${MAIN_SHA}\`"
+            echo "- Store revision: \`${STORE_REVISION}\`"
+            echo
+            echo "| Lane | Decision | Deployed SHA | Ahead | Behind | Next due |"
+            echo "|---|---|---|---|---|---|"
+            jq -r '
+              .lanes[] as $lane
+              | (.bindings[] | select(.environment_id == $lane.environment_id)) as $binding
+              | "| \($lane.environment_id) | \($lane.decision) | \($binding.deployed_source_sha[0:8]) | \($lane.ahead // "-") | \($lane.behind // "-") | \($lane.next_due_at // "-") |"
+            ' "$RUNNER_TEMP/admission.json"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Dispatch admitted lane Full runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          while IFS=$'\t' read -r lane sha; do
+            [[ -n "${lane}" && -n "${sha}" ]] || continue
+            echo "Dispatching full-stack Full at the deployed revision: ${lane} ${sha}"
+            gh workflow run e2e-full-regression.yml --ref main \
+              -f target_ref=staging -f target_sha="${sha}"
+          done < <(jq -r '.admitted[] as $lane | [$lane, .admitted_shas[$lane]] | @tsv' \
+            "$RUNNER_TEMP/admission.json")
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: staging-lane-admission
+          path: ${{ runner.temp }}/admission.json
+          retention-days: 90
