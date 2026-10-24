@@ -15,5 +15,6 @@ gate_check() {
   gate_run_invariant node e2e/runner/drivers/browser-report.mjs self-test
   gate_run_invariant node scripts/e2e-full-failure-manifest.mjs self-test
   gate_run_invariant node scripts/e2e-failure-intake-contract.mjs self-test
+  gate_run_invariant node scripts/e2e-full-failure-ingest.mjs self-test
 }
 gate_main "$@"
