@@ -230,6 +230,9 @@ function selfTest() {
     assert.equal(repeated.analysis_id, first.analysis_id);
     assert.equal(repeated.epoch, 1);
     assert.equal(fs.existsSync(path.join(root, repeated.observation_path)), true);
+    const replay = recordE2EFailureObservation(root, observation, { now: '2026-10-24T12:04:00Z' });
+    assert.equal(replay.status, 'ANALYSIS_IN_FLIGHT');
+    assert.equal(replay.analysis_id, first.analysis_id, 'same Run/Attempt replay must not create a second analysis');
     const nonActionable = recordE2EFailureObservation(root, { ...observation, source: {
       ...observation.source, run_id: 503 }, classification: 'setup_or_ci_error' },
     { now: '2026-10-24T12:02:00Z' });
