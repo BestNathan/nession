@@ -51,7 +51,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tracing::warn;
 
-use super::client::{ControlCommand, ControlTransport, TmuxClient, TmuxEvent};
+use super::client::{ControlCommand, ControlTransport, EventStream, TmuxClient, TmuxEvent};
 use super::ops::TmuxDep;
 
 /// Buffer capacity for the output channel — bytes-per-batch parsed from tmux.
@@ -380,7 +380,7 @@ impl PreCaptureBuffer {
 /// the interleaved output, which the capture does not contain.
 async fn take_bootstrap(
     client: &TmuxClient,
-    events: &mut mpsc::Receiver<TmuxEvent>,
+    events: &mut EventStream,
     session_name: &str,
     lines: u32,
     output_tx: &mpsc::Sender<Vec<u8>>,
@@ -501,7 +501,7 @@ async fn take_bootstrap(
 
 /// Forward source events for the life of the attachment, in client order.
 async fn forward_events(
-    mut events: mpsc::Receiver<TmuxEvent>,
+    mut events: EventStream,
     output_tx: mpsc::Sender<Vec<u8>>,
     resize_tx: mpsc::Sender<(u16, u16)>,
     observed: ObservedWindowSize,

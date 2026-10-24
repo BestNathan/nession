@@ -47,12 +47,12 @@
 //! only closes the byte streams (the agent's shutdown path must close).
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, Notify};
 use tokio::task::JoinHandle;
 
 use super::ops::TmuxDep;
@@ -86,7 +86,29 @@ pub const DEFAULT_COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
 /// Ordered event backlog. The Agent's stream owner drains this into its own
 /// bounded log; the channel is the hand-off, not a second retention window.
 const EVENT_CHANNEL_CAPACITY: usize = 256;
+/// Aggregate payload bytes the reader may hand to the stream owner at once.
+/// The event **count** is bounded separately by `EVENT_CHANNEL_CAPACITY`;
+/// without a byte limit, 256 records of the 16 MiB line bound could be held in
+/// decoded payload (#2380). 32 MiB fits two maximum-size control lines while
+/// staying well inside the Agent container's memory envelope.
+pub const DEFAULT_EVENT_BUDGET_BYTES: usize = 32 * 1024 * 1024;
+/// Per-event bookkeeping charged in addition to its payload, so a flood of
+/// small events cannot consume the budget for free.
+const EVENT_OVERHEAD_BYTES: usize = 64;
+/// How long the reader waits for byte credit before it declares the consumer
+/// stalled. Past this the attachment fails closed with an explicit source loss
+/// rather than blocking source accounting indefinitely (#2380).
+pub const DEFAULT_EVENT_ADMISSION_TIMEOUT: Duration = Duration::from_secs(10);
+/// Bound for delivering a terminal event (SourceLost/Exited) when the budget
+/// cannot admit it.
+const EVENT_TERMINAL_EMIT_TIMEOUT: Duration = Duration::from_secs(2);
 const WRITE_CHANNEL_CAPACITY: usize = 64;
+/// How long `close` may spend offering `detach-client` to a writer whose
+/// channel is full before it proceeds to reaping/aborting (#2379).
+const CLOSE_SEND_TIMEOUT: Duration = Duration::from_secs(2);
+/// How long `close` waits for the ordered writer to observe `Close` before it
+/// aborts that task (#2379).
+const CLOSE_TASK_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Identity source for production attachments (see [`TmuxClient::connect`]).
 /// One process, one sequence; it only has to order attachments against each
@@ -102,10 +124,15 @@ pub enum TmuxClientError {
     /// The bounded pending-command queue is full. Nothing was written.
     #[error("tmux control command queue is full ({MAX_PENDING_COMMANDS} pending)")]
     QueueFull,
-    /// No reply block arrived within the budget. The command may still execute;
-    /// its late reply is consumed by a tombstone and never delivered elsewhere.
+    /// No reply block arrived within the budget. The command **was admitted**
+    /// and may still execute; its late reply is consumed by a tombstone and
+    /// never delivered elsewhere.
     #[error("tmux command timed out after {0:?}")]
     Timeout(Duration),
+    /// The command could not be handed to the ordered writer before the
+    /// deadline. Nothing was written and no reply is owed (#2379).
+    #[error("tmux command admission timed out after {0:?}")]
+    AdmissionTimeout(Duration),
     /// tmux answered with `%error`; the body is tmux's own message.
     #[error("tmux rejected the command: {0}")]
     Rejected(String),
@@ -135,6 +162,166 @@ impl PendingCommand {
             let _ = reply.send(result);
         }
     }
+}
+
+/// Limits for the ordered event ingress (#2380).
+///
+/// Count and aggregate bytes are both bounded: `max_queued_bytes` is the
+/// payload the reader may hand to the stream owner before it must wait for the
+/// consumer to take an event; `admission_timeout` is how long it waits before
+/// the attachment fails closed with an explicit source loss.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EventIngressLimits {
+    pub max_queued_bytes: usize,
+    pub admission_timeout: Duration,
+}
+
+impl Default for EventIngressLimits {
+    fn default() -> Self {
+        Self {
+            max_queued_bytes: DEFAULT_EVENT_BUDGET_BYTES,
+            admission_timeout: DEFAULT_EVENT_ADMISSION_TIMEOUT,
+        }
+    }
+}
+
+/// Aggregate byte credit shared by the reader and the event stream.
+struct EventBudget {
+    limit: usize,
+    queued: AtomicUsize,
+    closed: AtomicBool,
+    notify: Notify,
+}
+
+impl EventBudget {
+    fn new(limit: usize) -> Self {
+        Self {
+            limit,
+            queued: AtomicUsize::new(0),
+            closed: AtomicBool::new(false),
+            notify: Notify::new(),
+        }
+    }
+
+    /// Reserve `bytes`, waiting up to `timeout` for the consumer to release
+    /// credit. `false` means the event could not be admitted (oversized or the
+    /// consumer stalled); the caller must fail closed.
+    async fn acquire(&self, bytes: usize, timeout: Duration) -> bool {
+        if bytes > self.limit {
+            return false;
+        }
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            if self.closed.load(Ordering::Acquire) {
+                return false;
+            }
+            let current = self.queued.load(Ordering::Acquire);
+            if current.saturating_add(bytes) <= self.limit
+                && self
+                    .queued
+                    .compare_exchange(
+                        current,
+                        current + bytes,
+                        Ordering::AcqRel,
+                        Ordering::Acquire,
+                    )
+                    .is_ok()
+            {
+                return true;
+            }
+            match tokio::time::timeout_at(deadline, self.notify.notified()).await {
+                Ok(()) => continue,
+                Err(_) => return false,
+            }
+        }
+    }
+
+    fn release(&self, bytes: usize) {
+        self.queued.fetch_sub(bytes, Ordering::AcqRel);
+        // `notify_one` stores a permit, so a release that races the reader's
+        // registration cannot be lost; `notify_waiters` would drop it.
+        self.notify.notify_one();
+    }
+
+    fn close(&self) {
+        self.closed.store(true, Ordering::Release);
+        self.notify.notify_one();
+    }
+}
+
+struct BudgetedEvent {
+    event: TmuxEvent,
+    bytes: usize,
+}
+
+/// The one ordered source-event stream (#2380).
+///
+/// Taking an event releases its byte credit; a consumer that stops taking
+/// events makes the reader wait, then fail closed at its admission deadline.
+pub struct EventStream {
+    rx: mpsc::Receiver<BudgetedEvent>,
+    budget: Arc<EventBudget>,
+}
+
+impl EventStream {
+    pub async fn recv(&mut self) -> Option<TmuxEvent> {
+        let budgeted = self.rx.recv().await?;
+        self.budget.release(budgeted.bytes);
+        Some(budgeted.event)
+    }
+}
+
+/// The reader's half of the ingress: budget admission plus the ordered send.
+struct EventSink {
+    tx: mpsc::Sender<BudgetedEvent>,
+    budget: Arc<EventBudget>,
+    admission_timeout: Duration,
+}
+
+enum EmitOutcome {
+    Sent,
+    Closed,
+    Overloaded,
+}
+
+impl EventSink {
+    async fn send(&self, event: TmuxEvent) -> EmitOutcome {
+        let bytes = event_bytes(&event);
+        if !self.budget.acquire(bytes, self.admission_timeout).await {
+            return EmitOutcome::Overloaded;
+        }
+        match self.tx.send(BudgetedEvent { event, bytes }).await {
+            Ok(()) => EmitOutcome::Sent,
+            Err(_) => {
+                self.budget.release(bytes);
+                EmitOutcome::Closed
+            }
+        }
+    }
+
+    /// Deliver a terminal event even when the configured budget cannot admit
+    /// it. Bounded so a stopped consumer cannot pin the reader here either.
+    async fn send_terminal(&self, event: TmuxEvent) {
+        let budgeted = BudgetedEvent { event, bytes: 0 };
+        match self.tx.try_send(budgeted) {
+            Ok(()) => {}
+            Err(mpsc::error::TrySendError::Full(budgeted)) => {
+                let _ =
+                    tokio::time::timeout(EVENT_TERMINAL_EMIT_TIMEOUT, self.tx.send(budgeted)).await;
+            }
+            Err(mpsc::error::TrySendError::Closed(_)) => {}
+        }
+    }
+}
+
+fn event_bytes(event: &TmuxEvent) -> usize {
+    EVENT_OVERHEAD_BYTES
+        + match event {
+            TmuxEvent::Output(output) => output.data.len() + output.pane_id.len(),
+            TmuxEvent::Capture { body } => body.len(),
+            TmuxEvent::SourceLost { reason } => reason.len(),
+            _ => 0,
+        }
 }
 
 struct ClientState {
@@ -218,7 +405,7 @@ pub struct TmuxClient {
     generation: u64,
     state: Arc<ClientState>,
     write_tx: mpsc::Sender<WriteOp>,
-    events: Option<mpsc::Receiver<TmuxEvent>>,
+    events: Option<EventStream>,
     child: Option<ClientChild>,
     reader_task: Option<JoinHandle<()>>,
     writer_task: Option<JoinHandle<()>>,
@@ -253,10 +440,33 @@ impl TmuxClient {
                 PtyTransport::connect(tmux, session_name, cols, rows)?
             }
         };
-        Ok(Self::from_io(
+        Ok(Self::from_io_with_limits(
             session_name,
             io,
             NEXT_ATTACHMENT_GENERATION.fetch_add(1, Ordering::Relaxed),
+            EventIngressLimits::default(),
+        ))
+    }
+
+    /// As [`Self::connect_with`], with explicit ingress limits (#2380).
+    pub fn connect_with_limits(
+        tmux: &TmuxDep,
+        session_name: &str,
+        transport: ControlTransport,
+        limits: EventIngressLimits,
+    ) -> anyhow::Result<Self> {
+        let io = match transport {
+            ControlTransport::Pipe => PipeTransport::connect(tmux, session_name)?,
+            #[cfg(unix)]
+            ControlTransport::Pty { cols, rows } => {
+                PtyTransport::connect(tmux, session_name, cols, rows)?
+            }
+        };
+        Ok(Self::from_io_with_limits(
+            session_name,
+            io,
+            NEXT_ATTACHMENT_GENERATION.fetch_add(1, Ordering::Relaxed),
+            limits,
         ))
     }
 
@@ -264,10 +474,31 @@ impl TmuxClient {
     /// stream pair. Tests use an in-memory duplex; the PTY transport constructs
     /// this same type over a real PTY.
     pub fn from_io(session_name: &str, io: ClientIo, generation: u64) -> Self {
+        Self::from_io_with_limits(session_name, io, generation, EventIngressLimits::default())
+    }
+
+    /// The transport-independent constructor with explicit ingress limits
+    /// (#2380). Tests use a small budget to exercise stalling deterministically.
+    pub fn from_io_with_limits(
+        session_name: &str,
+        io: ClientIo,
+        generation: u64,
+        limits: EventIngressLimits,
+    ) -> Self {
         let state = Arc::new(ClientState::new());
-        let (events_tx, events) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
+        let budget = Arc::new(EventBudget::new(limits.max_queued_bytes));
+        let (events_tx, events_rx) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
+        let events = EventStream {
+            rx: events_rx,
+            budget: Arc::clone(&budget),
+        };
+        let sink = EventSink {
+            tx: events_tx,
+            budget,
+            admission_timeout: limits.admission_timeout,
+        };
         let (write_tx, write_rx) = mpsc::channel(WRITE_CHANNEL_CAPACITY);
-        let reader_task = tokio::spawn(run_reader(io.reader, Arc::clone(&state), events_tx));
+        let reader_task = tokio::spawn(run_reader(io.reader, Arc::clone(&state), sink));
         let writer_task = tokio::spawn(run_writer(io.writer, Arc::clone(&state), write_rx));
         Self {
             session_name: session_name.to_string(),
@@ -303,14 +534,15 @@ impl TmuxClient {
     /// The one ordered source-event stream. Handshake, output, capture,
     /// authoritative resize, exit and source loss arrive here in wire order.
     ///
-    /// There is one consumer by design: taking the receiver moves the stream to
-    /// the task that forwards it into the Agent's stream owner.
-    pub fn take_events(&mut self) -> Option<mpsc::Receiver<TmuxEvent>> {
+    /// There is one consumer by design: taking the stream moves it to the task
+    /// that forwards it into the Agent's stream owner; taking an event releases
+    /// its ingress byte credit (#2380).
+    pub fn take_events(&mut self) -> Option<EventStream> {
         self.events.take()
     }
 
     /// Borrow the event stream for a caller that forwards it inline.
-    pub fn events(&mut self) -> Option<&mut mpsc::Receiver<TmuxEvent>> {
+    pub fn events(&mut self) -> Option<&mut EventStream> {
         self.events.as_mut()
     }
 
@@ -342,28 +574,37 @@ impl TmuxClient {
         if self.is_closed() {
             return Err(TmuxClientError::Closed);
         }
+        // One end-to-end deadline covers admission into the ordered writer,
+        // the write itself, and the reply (#2379). `mpsc::Sender::send` is
+        // cancel-safe: a send cancelled by the deadline is not queued, so an
+        // admission timeout truthfully means nothing was written.
+        let deadline = tokio::time::Instant::now() + timeout;
         let id = self.state.next_id.fetch_add(1, Ordering::Relaxed);
         let (reply, reply_rx) = oneshot::channel();
         let line = command.encode();
-        self.write_tx
-            .send(WriteOp::Command {
-                line,
-                pending: PendingCommand {
-                    id,
-                    abandoned: false,
-                    capture,
-                    reply: Some(reply),
-                },
-            })
-            .await
-            .map_err(|_| TmuxClientError::Closed)?;
-        match tokio::time::timeout(timeout, reply_rx).await {
+        let op = WriteOp::Command {
+            line,
+            pending: PendingCommand {
+                id,
+                abandoned: false,
+                capture,
+                reply: Some(reply),
+            },
+        };
+        match tokio::time::timeout_at(deadline, self.write_tx.send(op)).await {
+            Err(_) => return Err(TmuxClientError::AdmissionTimeout(timeout)),
+            Ok(Err(_)) => return Err(TmuxClientError::Closed),
+            Ok(Ok(())) => {}
+        }
+        match tokio::time::timeout_at(deadline, reply_rx).await {
             Ok(Ok(result)) => result,
             // The writer resolves the waiter on a write failure or queue-full;
             // a dropped sender means the writer task ended without resolving
             // this command, which only happens after the source is marked lost.
             Ok(Err(_)) => Err(TmuxClientError::Closed),
             Err(_) => {
+                // The command was admitted and may have reached tmux: keep its
+                // place so a late reply can never be handed to the next caller.
                 self.state.abandon(id);
                 Err(TmuxClientError::Timeout(timeout))
             }
@@ -381,27 +622,46 @@ impl TmuxClient {
         command: ControlCommand,
         capture: bool,
     ) -> Result<(), TmuxClientError> {
+        self.send_command_queued_within(command, capture, DEFAULT_COMMAND_TIMEOUT)
+            .await
+    }
+
+    /// As [`Self::send_command_queued`], with an explicit end-to-end budget for
+    /// admission and the writer's acknowledgement (#2379).
+    ///
+    /// A timeout after admission means the command may already have reached
+    /// tmux; its reply keeps its ordered slot and is consumed there.
+    pub async fn send_command_queued_within(
+        &self,
+        command: ControlCommand,
+        capture: bool,
+        timeout: Duration,
+    ) -> Result<(), TmuxClientError> {
         if self.is_closed() {
             return Err(TmuxClientError::Closed);
         }
+        let deadline = tokio::time::Instant::now() + timeout;
         let id = self.state.next_id.fetch_add(1, Ordering::Relaxed);
         let (accepted, accepted_rx) = oneshot::channel();
-        self.write_tx
-            .send(WriteOp::Queued {
-                line: command.encode(),
-                pending: PendingCommand {
-                    id,
-                    abandoned: false,
-                    capture,
-                    reply: None,
-                },
-                accepted,
-            })
-            .await
-            .map_err(|_| TmuxClientError::Closed)?;
-        match accepted_rx.await {
-            Ok(result) => result,
-            Err(_) => Err(TmuxClientError::Closed),
+        let op = WriteOp::Queued {
+            line: command.encode(),
+            pending: PendingCommand {
+                id,
+                abandoned: false,
+                capture,
+                reply: None,
+            },
+            accepted,
+        };
+        match tokio::time::timeout_at(deadline, self.write_tx.send(op)).await {
+            Err(_) => return Err(TmuxClientError::AdmissionTimeout(timeout)),
+            Ok(Err(_)) => return Err(TmuxClientError::Closed),
+            Ok(Ok(())) => {}
+        }
+        match tokio::time::timeout_at(deadline, accepted_rx).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Err(TmuxClientError::Closed),
+            Err(_) => Err(TmuxClientError::Timeout(timeout)),
         }
     }
 
@@ -452,17 +712,33 @@ impl TmuxClient {
     /// the macOS tmux reason `ControlModeSession::close` documents). The wait is
     /// transport-specific and bounded by [`ClientChild::reap`].
     pub async fn close(&mut self) {
-        let _ = self.write_tx.send(WriteOp::Close).await;
+        // Every phase is bounded (#2379): a full write channel or a child that
+        // stopped draining stdin cannot postpone the detach deadline. When the
+        // ordered writer does not observe Close in time it is aborted rather
+        // than left owning stdin after `close` returned.
+        let _ = tokio::time::timeout(CLOSE_SEND_TIMEOUT, self.write_tx.send(WriteOp::Close)).await;
         if let Some(child) = self.child.take() {
             child.reap().await;
         }
-        if let Some(task) = self.writer_task.take() {
-            let _ = tokio::time::timeout(Duration::from_secs(2), task).await;
+        if let Some(mut task) = self.writer_task.take() {
+            if tokio::time::timeout(CLOSE_TASK_TIMEOUT, &mut task)
+                .await
+                .is_err()
+            {
+                task.abort();
+                let _ = task.await;
+            }
+        }
+        self.state.fail_all(TmuxClientError::Closed);
+        // Unblock a reader waiting for ingress credit only after the waiters
+        // have their `Closed`: the attachment is going away and no further
+        // event can be admitted (#2380).
+        if let Some(events) = self.events.as_ref() {
+            events.budget.close();
         }
         if let Some(task) = self.reader_task.take() {
             task.abort();
         }
-        self.state.fail_all(TmuxClientError::Closed);
     }
 }
 
@@ -474,6 +750,14 @@ async fn run_writer<W: AsyncWrite + Unpin>(
     mut rx: mpsc::Receiver<WriteOp>,
 ) {
     while let Some(op) = rx.recv().await {
+        // A retired attachment must not execute operations that were still
+        // queued when its source was lost or it was closed (#2379). Dropping
+        // the operation resolves its waiter through the closed channel, which
+        // is the scoped "not delivered" outcome; it is never written.
+        if state.closed.load(Ordering::Acquire) {
+            drop(op);
+            continue;
+        }
         match op {
             WriteOp::Command { line, pending } => {
                 {
@@ -532,11 +816,7 @@ async fn run_writer<W: AsyncWrite + Unpin>(
 }
 
 /// The reader owns stdout and is the only producer of [`TmuxEvent`]s.
-async fn run_reader<R: AsyncRead + Unpin>(
-    reader: R,
-    state: Arc<ClientState>,
-    events: mpsc::Sender<TmuxEvent>,
-) {
+async fn run_reader<R: AsyncRead + Unpin>(reader: R, state: Arc<ClientState>, events: EventSink) {
     let mut reader = BufReader::new(reader);
     let mut line = Vec::new();
     let mut open: Option<OpenBlock> = None;
@@ -645,24 +925,16 @@ async fn run_reader<R: AsyncRead + Unpin>(
                     finish_with_exit(&state, &events).await;
                     return;
                 }
-                Some(ControlMessage::Begin { .. }) => {
-                    lose(&state, &events, "nested response block".to_string()).await;
-                    return;
-                }
                 _ => {
-                    if malformed {
-                        lose(
-                            &state,
-                            &events,
-                            "malformed tmux Control Mode record".to_string(),
-                        )
-                        .await;
-                        return;
-                    }
-                    if record.first() == Some(&b'%') {
-                        // Unknown/forward-compatible notification.
-                        continue;
-                    }
+                    // Measured on tmux 3.6b (see
+                    // docs/architecture/agent-tmux-control-transport.md):
+                    // command output is not escaped. A captured pane line may
+                    // begin with `%`, may be empty, or may even look like a
+                    // malformed `%begin`/`%end` record. Inside the block, only
+                    // the matching terminator ends it; every other line is
+                    // response body (#2378). A parsed notification keeps the
+                    // arms above; a line that does not parse is content, not a
+                    // protocol fault.
                     let Some(block) = open.as_mut() else {
                         continue;
                     };
@@ -689,6 +961,7 @@ async fn run_reader<R: AsyncRead + Unpin>(
                 open = Some(OpenBlock {
                     triple: (timestamp, id, flags),
                     body: Vec::new(),
+                    has_line: false,
                 });
                 // The block that just opened answers the queue's front. If that
                 // is a live bootstrap capture, this is the barrier: `%output`
@@ -745,18 +1018,23 @@ async fn run_reader<R: AsyncRead + Unpin>(
 struct OpenBlock {
     triple: (u64, u64, u64),
     body: Vec<u8>,
+    /// Whether a response line has been observed. Separate from `body.is_empty()`:
+    /// an empty line appends zero bytes but is still a line, and every later
+    /// line needs the separator that proves it (#2378).
+    has_line: bool,
 }
 
 impl OpenBlock {
     fn push(&mut self, line: &[u8]) -> bool {
-        let needed = line.len() + usize::from(!self.body.is_empty());
+        let needed = line.len() + usize::from(self.has_line);
         if self.body.len().saturating_add(needed) > MAX_RESPONSE_BODY_BYTES {
             return false;
         }
-        if !self.body.is_empty() {
+        if self.has_line {
             self.body.push(b'\n');
         }
         self.body.extend_from_slice(line);
+        self.has_line = true;
         true
     }
 }
@@ -817,7 +1095,7 @@ fn note_size(reported: &mut Option<(u16, u16)>, cols: u16, rows: u16) -> bool {
 
 async fn emit_output(
     state: &Arc<ClientState>,
-    events: &mpsc::Sender<TmuxEvent>,
+    events: &EventSink,
     pane_id: String,
     data: &[u8],
 ) -> bool {
@@ -840,30 +1118,43 @@ async fn emit_output(
     }
 }
 
-async fn emit(
-    state: &Arc<ClientState>,
-    events: &mpsc::Sender<TmuxEvent>,
-    event: TmuxEvent,
-) -> bool {
-    if events.send(event).await.is_err() {
-        // Nobody is reading the source facts any more; the attachment is no
-        // longer useful to anyone and pending commands must not hang.
-        state.fail_all(TmuxClientError::SourceLost(
-            "event consumer dropped".to_string(),
-        ));
-        return false;
+async fn emit(state: &Arc<ClientState>, events: &EventSink, event: TmuxEvent) -> bool {
+    match events.send(event).await {
+        EmitOutcome::Sent => true,
+        // A retired attachment (normal close) needs no further loss statement;
+        // its callers already received `Closed`.
+        EmitOutcome::Closed | EmitOutcome::Overloaded if state.closed.load(Ordering::Acquire) => {
+            false
+        }
+        EmitOutcome::Closed => {
+            // Nobody is reading the source facts any more; the attachment is no
+            // longer useful to anyone and pending commands must not hang.
+            state.fail_all(TmuxClientError::SourceLost(
+                "event consumer dropped".to_string(),
+            ));
+            false
+        }
+        EmitOutcome::Overloaded => {
+            let reason = "event ingress budget exhausted; consumer stalled".to_string();
+            events
+                .send_terminal(TmuxEvent::SourceLost {
+                    reason: reason.clone(),
+                })
+                .await;
+            state.fail_all(TmuxClientError::SourceLost(reason));
+            false
+        }
     }
-    true
 }
 
-async fn finish_with_exit(state: &Arc<ClientState>, events: &mpsc::Sender<TmuxEvent>) {
+async fn finish_with_exit(state: &Arc<ClientState>, events: &EventSink) {
     state.fail_all(TmuxClientError::Closed);
-    let _ = events.send(TmuxEvent::Exited).await;
+    events.send_terminal(TmuxEvent::Exited).await;
 }
 
-async fn lose(state: &Arc<ClientState>, events: &mpsc::Sender<TmuxEvent>, reason: String) {
+async fn lose(state: &Arc<ClientState>, events: &EventSink, reason: String) {
     state.fail_all(TmuxClientError::SourceLost(reason.clone()));
-    let _ = events.send(TmuxEvent::SourceLost { reason }).await;
+    events.send_terminal(TmuxEvent::SourceLost { reason }).await;
 }
 
 fn strip_eol(line: &[u8]) -> &[u8] {
