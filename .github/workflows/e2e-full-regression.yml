@@ -1,8 +1,17 @@
 name: E2E / Full Regression
 
-# Separate system/regression observation: periodic Main health is NOT the
-# exact-main-promotion release gate (#2323). Default every 12h via GitHub Vars.
+# Periodic Main health is independent of postmerge exact-SHA release
+# qualification (#2323). Default every 12h via GitHub Vars.
 on:
+  # Runtime-affecting Main merges need an immediate exact-merge-SHA Full;
+  # docs-only and workflow-router-only changes are not runtime evidence.
+  # Any mixed change containing runtime inputs still triggers Full.
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - '.github/workflows/**'
   workflow_dispatch:
     inputs:
       target_ref:
@@ -70,6 +79,7 @@ jobs:
     if: >-
       ${{ always() &&
           (github.event_name == 'workflow_dispatch' ||
+           github.event_name == 'push' ||
            (needs.admit.result == 'success' && needs.admit.outputs.run == 'true')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 65
@@ -92,7 +102,9 @@ jobs:
         id: pin
         env:
           REQUESTED_REF: ${{ inputs.target_ref }}
-          REQUESTED_SHA: ${{ inputs.target_sha }}
+          # Push qualifies only its immutable merge commit, never a newer
+          # moving origin/main tip. Manual dispatch keeps explicit pinning.
+          REQUESTED_SHA: ${{ github.event_name == 'push' && github.sha || inputs.target_sha }}
         run: |
           set -euo pipefail
           ref="$REQUESTED_REF"
