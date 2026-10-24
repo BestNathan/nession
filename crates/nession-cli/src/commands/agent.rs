@@ -1,6 +1,6 @@
 //! Agent CLI commands implementation.
 
-use crate::utils::{pid_file, process, startup};
+use crate::utils::{pid_file, process, secret_handoff, startup};
 use anyhow::{Context, Result};
 use nession_agent::config::AgentConfig;
 use std::fs;
@@ -16,7 +16,26 @@ pub async fn start(
     pid_file: String,
     server_url_override: Option<String>,
     auth_token_override: Option<String>,
+    auth_token_stdin: bool,
 ) -> Result<()> {
+    // Child half of the background credential handoff (#2269). The parent that
+    // re-executed us resolved the effective token and wrote it to our stdin;
+    // its value wins over whatever this process parsed for itself, because the
+    // parent already applied flag > env > config precedence. Reading it here,
+    // first, also means a child that fails for another reason has still taken
+    // the credential out of the pipe rather than leaving it there.
+    let auth_token_override = if auth_token_stdin {
+        if !foreground {
+            anyhow::bail!(
+                "{} is only valid for the foreground child of a background start",
+                secret_handoff::AUTH_TOKEN_STDIN_ARG
+            );
+        }
+        Some(secret_handoff::read_auth_token()?)
+    } else {
+        auth_token_override
+    };
+
     // Ensure component directories exist before any file operations (PID file)
     nession_common::paths::ensure_component_dirs()
         .context("failed to create nession component directories")?;
@@ -66,37 +85,15 @@ pub async fn start(
         // Get current executable path
         let exe = std::env::current_exe()?;
 
-        // Spawn the agent process with proper daemonization on Unix
-        // not-tmux: re-executes this CLI binary (`nession agent start
-        // --foreground`); the tmux socket is bound by that child at startup.
-        let mut cmd = Command::new(&exe);
-        let mut child_args: Vec<String> = vec![
-            "agent".to_string(),
-            "start".to_string(),
-            "--config".to_string(),
-            config_path.clone(),
-            "--foreground".to_string(),
-            // Forwarded, so the child records its identity where this parent —
-            // and every later `stop`/`status` — looks for it. It was resolved
-            // by the parent and dropped on the way to the child, which then
-            // wrote the *default* path: a background start with a custom
-            // `--pid-file` reported a pid no later command could act on (#1016).
-            "--pid-file".to_string(),
-            pid_file.clone(),
-        ];
-        // Forward CLI/env overrides to the child process so it uses the same values
-        if let Some(ref url) = server_url_override {
-            child_args.push("--server-url".to_string());
-            child_args.push(url.clone());
-        }
-        if let Some(ref token) = auth_token_override {
-            child_args.push("--auth-token".to_string());
-            child_args.push(token.clone());
-        }
-        cmd.args(&child_args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
+        // The token is not an argument (#2269): see `background_child_command`
+        // and `utils::secret_handoff` for the channel it travels over instead.
+        let mut cmd = background_child_command(
+            &exe,
+            &config_path,
+            &pid_file,
+            server_url_override.as_deref(),
+            auth_token_override.as_deref(),
+        );
 
         // On Unix, detach the child process from the parent's session
         #[cfg(unix)]
@@ -117,6 +114,18 @@ pub async fn start(
         marker.arm(&mut cmd);
 
         let mut child = cmd.spawn().context("failed to spawn agent process")?;
+
+        // Hand the credential over after spawn, then close the pipe. The child
+        // blocks on this read before it can load its config, so the write must
+        // not wait for readiness. A failed write leaves a child that can never
+        // start, so it is reaped rather than abandoned.
+        if let Some(token) = auth_token_override.as_deref() {
+            if let Err(error) = secret_handoff::write_auth_token(&mut child, token) {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(error);
+            }
+        }
 
         // Wait for the child to say it is serving — or to die, or for the
         // deadline. This replaces a pair of fixed sleeps followed by "Agent is
@@ -143,6 +152,59 @@ pub async fn start(
     }
 
     Ok(())
+}
+
+/// The command a background start re-executes itself with.
+///
+/// Extracted from [`start`] so the invariant #2269 fixes — the resolved
+/// credential is not in the child's argument vector — is asserted against the
+/// same vector the parent actually spawns, rather than a parallel copy built
+/// for a test.
+///
+/// The credential selects the *channel*, never the value: a start with an
+/// override points the child at stdin with a non-secret argument, and [`start`]
+/// writes the framed token over that pipe after spawning. Nothing derived from
+/// the token itself is spelled into argv or the environment.
+pub(crate) fn background_child_command(
+    exe: &Path,
+    config_path: &str,
+    pid_file: &str,
+    server_url_override: Option<&str>,
+    auth_token_override: Option<&str>,
+) -> Command {
+    let mut cmd = Command::new(exe);
+    let mut child_args: Vec<String> = vec![
+        "agent".to_string(),
+        "start".to_string(),
+        "--config".to_string(),
+        config_path.to_string(),
+        "--foreground".to_string(),
+        // Forwarded, so the child records its identity where this parent —
+        // and every later `stop`/`status` — looks for it. It was resolved
+        // by the parent and dropped on the way to the child, which then
+        // wrote the *default* path: a background start with a custom
+        // `--pid-file` reported a pid no later command could act on (#1016).
+        "--pid-file".to_string(),
+        pid_file.to_string(),
+    ];
+    // Forward CLI/env overrides to the child process so it uses the same values
+    if let Some(url) = server_url_override {
+        child_args.push("--server-url".to_string());
+        child_args.push(url.to_string());
+    }
+    let hands_off_token = auth_token_override.is_some();
+    if hands_off_token {
+        child_args.push(secret_handoff::AUTH_TOKEN_STDIN_ARG.to_string());
+    }
+    cmd.args(&child_args)
+        .stdin(if hands_off_token {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    cmd
 }
 
 /// Stop the agent process.
@@ -243,6 +305,9 @@ pub async fn restart(
         pid_file,
         server_url_override,
         auth_token_override,
+        // `restart` is never the child of a handoff: a background restart
+        // re-executes `agent start`, which is the path that reads the pipe.
+        false,
     )
     .await
 }
@@ -353,4 +418,71 @@ async fn run_agent_foreground(config: AgentConfig) -> Result<()> {
     // variable, nobody watching) and the child of a daemon parent waiting to be
     // told the agent is serving (#1016).
     nession_agent::runtime::run(config, nession_common::readiness::Readiness::from_env()).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The credential these tests use. Distinctive enough that a substring
+    /// search over the child's vector cannot pass by accident.
+    const SECRET: &str = "fake-auth-token-for-2269";
+
+    fn background_command(auth_token_override: Option<&str>) -> Command {
+        background_child_command(
+            Path::new("/bin/true"),
+            "agent-config.toml",
+            "agent.pid",
+            None,
+            auth_token_override,
+        )
+    }
+
+    fn argv(command: &Command) -> Vec<String> {
+        command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    /// #2269 at the vector both flag- and env-sourced credentials feed: the
+    /// credential selects the *channel*, and the value itself never appears in
+    /// the re-executed child's argument vector or environment.
+    #[test]
+    fn a_resolved_credential_is_carried_by_the_channel_not_the_argv() {
+        let command = background_command(Some(SECRET));
+        let argv = argv(&command);
+
+        assert!(
+            !argv.iter().any(|arg| arg.contains(SECRET)),
+            "the re-exec child's argv must not carry the credential: {argv:?}"
+        );
+        assert!(
+            argv.iter()
+                .any(|arg| arg == secret_handoff::AUTH_TOKEN_STDIN_ARG),
+            "the child must be pointed at the handoff channel instead: {argv:?}"
+        );
+        let env: Vec<_> = command.get_envs().collect();
+        assert!(
+            !env.iter()
+                .any(|(_, value)| value
+                    .is_some_and(|value| value.to_string_lossy().contains(SECRET))),
+            "the re-exec child's environment must not carry the credential: {env:?}"
+        );
+    }
+
+    /// Without an override there is no credential to hand off, so the child
+    /// keeps the detached (null) stdin it had before #2269.
+    #[test]
+    fn a_start_without_an_override_has_no_handoff_channel() {
+        let command = background_command(None);
+
+        let argv = argv(&command);
+        assert!(
+            !argv
+                .iter()
+                .any(|arg| arg == secret_handoff::AUTH_TOKEN_STDIN_ARG),
+            "no credential, no channel: {argv:?}"
+        );
+    }
 }

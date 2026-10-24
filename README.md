@@ -149,7 +149,7 @@ nession server start|status|stop
 
 ### 3. Use it
 
-**CLI** (targets the central server; override with `--server-url` / `--auth-token` or `NENSION_SERVER_URL` / `NESSION_AUTH_TOKEN`):
+**CLI** (targets the central server; override with `--server-url` / `--auth-token` or `NENSION_SERVER_URL` / `NENSION_AUTH_TOKEN`):
 
 ```bash
 nession agents list
@@ -158,6 +158,14 @@ nession sessions create --agent-id <id> --name dev [--width 120 --height 40]
 nession sessions attach --session-id <agent_id>:<session_name> [--mode p2p|relay]
 nession sessions kill   --session-id <agent_id>:<session_name> [--force]
 ```
+
+`--auth-token` is convenient for a one-off command, but a value passed as a
+flag is visible in shell history and in process listings while the command
+runs. For repeatable operation, put the token in the config file — the
+`auth_token` key, which `nession config agent set auth_token <token>` writes
+with private permissions — or in `NENSION_AUTH_TOKEN`. A background
+`nession agent start` never passes its resolved token to the child process as
+an argument; the credential goes over a private pipe instead.
 
 **Web UI** — see [Web dashboard](#web-dashboard) below.
 
