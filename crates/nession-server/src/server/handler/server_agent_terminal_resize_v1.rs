@@ -3,7 +3,7 @@
 
 use super::{
     current_timestamp, info, warn, AgentTerminalResizePayload, ConnectionHandler, HandlerAction,
-    ProtocolMessage, ServerTerminalResizePayload,
+    ProtocolMessage,
 };
 
 impl ConnectionHandler {
@@ -42,16 +42,29 @@ impl ConnectionHandler {
             payload.session_id, payload.cols, payload.rows
         );
 
-        let server_payload = ServerTerminalResizePayload {
-            session_id: payload.session_id.clone(),
-            cols: payload.cols,
-            rows: payload.rows,
+        // The browser's Relay plugin subscribes to the canonical
+        // agent.terminal.resize wire (and keys listeners by short session
+        // name), just like its P2P counterpart. Historically this Server
+        // emitted an unowned "terminal.resize" wire with a full agent:session
+        // id; no Relay listener matched either value, so the observer never
+        // received the current tmux grid (#2286, #2144).
+        //
+        // Authorization above already proved that this id begins with the
+        // authenticated agent's exact prefix, including its ':' delimiter.
+        // Do not split from the right: a session name may itself contain ':'.
+        let agent_prefix = format!("{agent_id}:");
+        let Some(session_name) = payload.session_id.strip_prefix(&agent_prefix) else {
+            return Ok(HandlerAction::Reply(None));
         };
         let broadcast_msg = serde_json::json!({
-            "msg_type": "terminal.resize",
+            "msg_type": "agent.terminal.resize",
             "id": uuid::Uuid::new_v4().to_string(),
             "timestamp": current_timestamp(),
-            "payload": server_payload,
+            "payload": {
+                "session_name": session_name,
+                "cols": payload.cols,
+                "rows": payload.rows,
+            },
         });
 
         let sent = self

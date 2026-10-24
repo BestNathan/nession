@@ -955,6 +955,77 @@ describe('TerminalController', () => {
     }
   });
 
+  it('an observer follows tmux resize rather than passive container reflow (#2286 SC-03)', async () => {
+    const restore = installCapturingResizeObserver();
+    try {
+      const transport = makeTransport();
+      const viewport = vi.fn();
+      const controller = new TerminalController(makeSession(), () => transport, {
+        rendererType: 'canvas',
+        events: { onResize: viewport },
+      });
+      controller.attach(host());
+      await flush();
+      const initial = {
+        contentRect: { width: 1024, height: 600 },
+      } as unknown as ResizeObserverEntry;
+      capturedCallback!([initial], capturedObserver!);
+      controller.setObserverReadOnly(true);
+      transport.sendResize.mockClear();
+
+      // The new Controller moves tmux; its notification is the only size the
+      // displaced client's xterm may apply.
+      transport.onResize!(177, 49);
+      expect(controller.terminal!.cols).toBe(177);
+      expect(controller.terminal!.rows).toBe(49);
+
+      // Browser chrome/capsule can change the observer's measured box even
+      // though it no longer holds ControlLease. That is NOT a pane resize.
+      const passive = {
+        contentRect: { width: 1700, height: 1100 },
+      } as unknown as ResizeObserverEntry;
+      capturedCallback!([passive], capturedObserver!);
+      expect(controller.terminal!.cols).toBe(177);
+      expect(controller.terminal!.rows).toBe(49);
+      expect(transport.sendResize).not.toHaveBeenCalled();
+      expect(viewport).toHaveBeenLastCalledWith('agent1:sess', 212, 68);
+
+      // A real takeover, unlike a passive ResizeObserver, must immediately
+      // remeasure the stored box, fit this xterm and send the new PTY size.
+      controller.adoptControl();
+      expect(controller.terminal!.cols).toBe(212);
+      expect(controller.terminal!.rows).toBe(68);
+      expect(transport.sendResize).toHaveBeenCalledWith(212, 68);
+    } finally {
+      restore();
+    }
+  });
+
+  it('pending resize from a displaced Controller never reaches the PTY (#2286 SC-03)', async () => {
+    const restore = installCapturingResizeObserver();
+    try {
+      const transport = makeTransport();
+      const controller = new TerminalController(makeSession(), () => transport);
+      controller.attach(host());
+      await flush();
+      const first = {
+        contentRect: { width: 1024, height: 600 },
+      } as unknown as ResizeObserverEntry;
+      capturedCallback!([first], capturedObserver!);
+      transport.sendResize.mockClear();
+
+      const next = {
+        contentRect: { width: 1100, height: 600 },
+      } as unknown as ResizeObserverEntry;
+      capturedCallback!([next], capturedObserver!); // schedules 200ms timer
+      controller.setObserverReadOnly(true); // lease handed off before timer
+      await new Promise((resolve) => { setTimeout(resolve, 250); });
+      expect(transport.sendResize).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
+  });
+
   it('sendResize notifies the transport without touching the xterm grid', () => {
     const transport = makeTransport();
     const controller = new TerminalController(makeSession(), () => transport);

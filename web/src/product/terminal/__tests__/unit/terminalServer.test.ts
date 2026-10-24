@@ -384,6 +384,41 @@ describe('TerminalServerPlugin', () => {
   });
 
   describe('onRelayResize', () => {
+    it('receives Server-authored canonical resize and rejects the unowned legacy wire (#2286)', () => {
+      const work = vi.fn();
+      const nested = vi.fn();
+      const other = vi.fn();
+      plugin.onRelayResize('work', work);
+      plugin.onRelayResize('team:work', nested);
+      plugin.onRelayResize('other', other);
+
+      // The actual Server broadcast now reuses the registered Agent wire and
+      // provides the short session name authenticated at the Server boundary.
+      surface.pushMessage('agent.terminal.resize', {
+        session_name: 'work',
+        cols: 124,
+        rows: 30,
+      });
+      surface.pushMessage('agent.terminal.resize', {
+        session_name: 'team:work',
+        cols: 177,
+        rows: 49,
+      });
+      expect(work).toHaveBeenCalledExactlyOnceWith(124, 30);
+      expect(nested).toHaveBeenCalledExactlyOnceWith(177, 49);
+      expect(other).not.toHaveBeenCalled();
+
+      // Legacy server "terminal.resize" was never a versioned operation or
+      // notification; subscribing to it violates the protocol-integrity Gate.
+      surface.pushMessage('terminal.resize', {
+        session_id: 'agent:work',
+        cols: 200,
+        rows: 60,
+      });
+      expect(work).toHaveBeenCalledTimes(1);
+      expect(nested).toHaveBeenCalledTimes(1);
+    });
+
     it('routes resize frames per session with cols/rows passthrough', () => {
       const cbWork = vi.fn();
       const cbOther = vi.fn();

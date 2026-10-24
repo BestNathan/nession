@@ -179,6 +179,10 @@ export class TerminalController {
   private useMobileIme: boolean;
   private readonly scrollbackMode: TerminalScrollbackMode;
   private attached = false;
+  /** Only the active Controller may fit xterm to this client's own box.
+   * Observers render the Agent/tmux authoritative shared pane grid (#2286).
+   * Their container measurements are retained for a future takeover. */
+  private observerReadOnly = false;
   /**
    * Whether this xterm holds output of the session's. Latches — the thing it
    * describes arriving is the only transition — and a bootstrap counts,
@@ -769,6 +773,18 @@ export class TerminalController {
 
   // ── Terminal actions ────────────────────────────────────────────────────
 
+  /** Called by the product lease owner, not inferred from DOM focus.
+   * A passive observer reflow must not overwrite the pane's authoritative
+   * geometry; clear any debounce captured under an older Controller lease. */
+  setObserverReadOnly(value: boolean): void {
+    this.observerReadOnly = value;
+    if (value) { this.resizeController?.cancelPending(); }
+  }
+
+  get isObserverReadOnly(): boolean {
+    return this.observerReadOnly;
+  }
+
   /** Resize the local xterm grid optimistically and notify the transport. */
   resize(cols: number, rows: number): void {
     this.resizeLocal(cols, rows);
@@ -810,6 +826,9 @@ export class TerminalController {
    * debounced here: adoption is a discrete handoff, not a drag.
    */
   adoptControl(): void {
+    // The acquisition already succeeded. Re-enable local fit immediately,
+    // before React's control-state effect can observe the new generation.
+    this.setObserverReadOnly(false);
     this.transport?.restateResize?.();
     // Ordered: a takeover can land while xterm is still parsing output. The
     // handoff is discrete, so there is no flicker argument for mutating the
@@ -970,12 +989,13 @@ export class ResizeController {
         const grid = this.reportedGrid();
         if (grid === null) { continue; }
 
-        // Local grid first, on EVERY fire — the container has already changed
-        // size, so xterm must repaint at the new size in this same frame or
-        // the mismatch shows as a flicker. That half is never deferred: it is
-        // drawing, and the cell box xterm has right now is the one it draws
-        // with.
-        this.controller.resizeLocal(grid.cols, grid.rows);
+        // Only the Controller owns the pane's geometry. An observer's
+        // container can resize independently; fitting its xterm now would
+        // overwrite a newer authoritative tmux resize (PC → phone handoff).
+        // We still publish the measurement for a future explicit takeover.
+        if (!this.controller.isObserverReadOnly) {
+          this.controller.resizeLocal(grid.cols, grid.rows);
+        }
 
         if (this.isFirstFire) {
           this.isFirstFire = false;
@@ -996,11 +1016,18 @@ export class ResizeController {
         const reported = this.reportedGrid();
         if (reported !== null) {
           this.controller.publishViewportResize(reported.cols, reported.rows);
-          // PTY notification debounced, so a drag sends one final size.
+          // The Observer's measured box is only a future takeover proposal:
+          // neither its local renderer nor the Agent window follows it.
           if (this.debounceTimer) { clearTimeout(this.debounceTimer); }
-          this.debounceTimer = setTimeout(() => {
-            this.controller.sendResize(reported.cols, reported.rows);
-          }, 200);
+          this.debounceTimer = null;
+          if (!this.controller.isObserverReadOnly) {
+            // PTY notification debounced, so a drag sends one final size.
+            this.debounceTimer = setTimeout(() => {
+              if (!this.controller.isObserverReadOnly) {
+                this.controller.sendResize(reported.cols, reported.rows);
+              }
+            }, 200);
+          }
         }
       }
     });
@@ -1113,6 +1140,10 @@ export class ResizeController {
     if (grid === null) { return; }
     // One geometry for the grid and for what the session is told — the capsule
     // band is excluded from both (#1503).
+    if (this.controller.isObserverReadOnly) {
+      this.controller.publishViewportResize(grid.cols, grid.rows);
+      return;
+    }
     if (ordered) {
       this.controller.resizeLocalOrdered(grid.cols, grid.rows);
     } else {
@@ -1132,7 +1163,15 @@ export class ResizeController {
     // Keep the atom fresh after a font-size zoom so a (re)attach uses the
     // recomputed cell count, not the stale pre-zoom size.
     this.controller.publishViewportResize(reported.cols, reported.rows);
-    this.controller.sendResize(reported.cols, reported.rows);
+    if (!this.controller.isObserverReadOnly) {
+      this.controller.sendResize(reported.cols, reported.rows);
+    }
+  }
+
+  /** Cancel a resize captured under a lease that this client has lost. */
+  cancelPending(): void {
+    if (this.debounceTimer) { clearTimeout(this.debounceTimer); }
+    this.debounceTimer = null;
   }
 
   dispose(): void {
