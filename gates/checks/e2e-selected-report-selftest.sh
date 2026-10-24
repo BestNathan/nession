@@ -17,6 +17,8 @@ gate_check() {
   gate_run_invariant node e2e/runner/selected-report.mjs self-test
   gate_run_invariant node e2e/runner/e2e-full-per-id-receipt.mjs self-test
   gate_run_invariant node scripts/e2e-regression-policy.mjs self-test
+  #2327 duplicate analysis policy fixture
+  gate_run_invariant node scripts/e2e-failure-admission.mjs self-test
   # The real E2E collector imports the reporter while argv[2]='collect'.
   # The reporter must be passive as a library, not run its own CLI.
   gate_run_invariant node --input-type=module -e '
