@@ -3,4 +3,5 @@
 mod attach_session;
 mod client_commands;
 mod session_commands;
+mod target_resolution;
 mod update;
