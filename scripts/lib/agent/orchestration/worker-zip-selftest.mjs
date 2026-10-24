@@ -49,6 +49,14 @@ function pack(spec){
 const claim=pack([{name:'development-worker-claim.json',body:'{"claim":1}\n'}]);
 assert.equal(readWorkerZipMember(claim,'development-worker-claim.json').toString(),
   '{"claim":1}\n');
+const staging=pack([{name:'staging-developer-admission.json',
+  body:'{"kind":"staging_developer_readonly_admission"}\\n'}]);
+assert.match(readWorkerZipMember(staging,'staging-developer-admission.json').toString(),
+  /staging_developer_readonly_admission/);
+assert.throws(()=>readWorkerZipMember(staging,'development-worker-claim.json'),/ZIP/);
+assert.throws(()=>readWorkerZipMember(pack([
+  {name:'staging-developer-admission.json',body:'{}'},
+  {name:'extra.json',body:'{}'}]),'staging-developer-admission.json'),/ZIP/);
 const sample=[
   {name:'proof.json',body:'{"proof":2}\n'},
   {name:'result.json',body:'{"result":3}\n',deflate:true},
