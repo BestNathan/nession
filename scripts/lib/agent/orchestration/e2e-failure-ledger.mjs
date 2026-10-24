@@ -14,7 +14,7 @@ const POSITIVE = n => Number.isSafeInteger(n) && n > 0;
 const ROOT = 'e2e-failures';
 function fail(message) { throw new Error('e2e failure ledger: ' + message); }
 function bytes(value) { return Buffer.from(JSON.stringify(value, null, 2) + '\n'); }
-function hash(value) { return createHash('sha256').update(value).digest('hex'); }
+function hash(value) { return createHash('sha256').update(Buffer.isBuffer(value) ? value : JSON.stringify(value)).digest('hex'); }
 function keyFor(fingerprintValue) {
   if (typeof fingerprintValue !== 'string' || !/^e2e1:[a-f0-9]{64}$/.test(fingerprintValue)) fail('invalid fingerprint');
   return fingerprintValue.slice(5);
