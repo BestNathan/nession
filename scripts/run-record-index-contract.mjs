@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 const hex40=/^[0-9a-f]{40}$/;
 const hex64=/^[0-9a-f]{64}$/;
-const modes=new Set(['test','acceptance','scenario','benchmark']);
+const modes=new Set(['test','acceptance','scenario','benchmark','deployment']);
 const scalar=(x)=>Number.isSafeInteger(x)&&x>0;
 export function validateRunIndex(raw){
   assert.ok(raw&&typeof raw==='object'&&!Array.isArray(raw));
@@ -15,11 +15,23 @@ export function validateRunIndex(raw){
   const source=raw.source;
   assert.equal(source.repository,'BestNathan/nession');
   assert.ok(scalar(source.run_id)&&scalar(source.run_attempt)&&scalar(source.workflow_id));
+  const segment='/' + source.run_id + '-' + source.run_attempt + '/';
+  assert.ok(raw.record.includes(segment),'index record path not bound to source attempt');
+  if(raw.mode==='deployment'){
+    // A deployment attestation is produced by a trusted main workflow, but
+    // targets the deployed source SHA. Both SHAs are pinned independently.
+    assert.match(source.head_sha,hex40);
+    assert.equal(source.head_branch,'main','deployment identity index must come from trusted main');
+    assert.match(raw.target_sha,hex40);
+    assert.match(String(raw.gitops_revision??''),hex40,'deployment index GitOps revision is invalid');
+    assert.match(raw.environment_id,/^[a-z][a-z0-9-]{0,62}$/,'deployment index environment is invalid');
+    assert.ok(raw.record.endsWith('/deployment/'+raw.environment_id+'.json'),
+      'deployment record path must end with /deployment/<environment>.json');
+    return raw;
+  }
   const target=source.head_sha??source.target_sha;
   assert.match(target,hex40);
   if(raw.target_sha!==undefined)assert.equal(raw.target_sha,target,'index source SHA disagrees');
-  const segment='/' + source.run_id + '-' + source.run_attempt + '/';
-  assert.ok(raw.record.includes(segment),'index record path not bound to source attempt');
   if(raw.mode==='acceptance'){
     assert.ok(scalar(raw.issue));
     assert.match(raw.criterion,/^SC-\d{2,}$/);
@@ -67,6 +79,19 @@ export function selfTest(){
     assert.equal(makeRunIndex(candidate).mode,mode);
     assert.throws(()=>makeRunIndex({...candidate,suite:'../../secret'}),/assertion|match|regular expression|expected/i);
   }
-  console.log('shared Run index v1: acceptance/scenario/test/benchmark positive and negative fixtures passed');
+  const deploySource={repository:'BestNathan/nession',run_id:100,run_attempt:2,
+    workflow_id:5,head_sha:'a'.repeat(40),head_branch:'main'};
+  const deploy={schema_version:1,mode:'deployment',source:deploySource,
+    target_sha:'b'.repeat(40),environment_id:'staging-01',gitops_revision:'c'.repeat(40),
+    record:'runs/2026-10-09/100-2/deployment/staging-01.json',execution_id:'d'.repeat(64)};
+  assert.equal(makeRunIndex(deploy).mode,'deployment');
+  assert.notEqual(deploy.target_sha,deploySource.head_sha);
+  assert.throws(()=>makeRunIndex({...deploy,source:{...deploySource,head_branch:'staging'}}),
+    /trusted main/);
+  assert.throws(()=>makeRunIndex({...deploy,environment_id:'Staging_01'}),/environment is invalid/);
+  assert.throws(()=>makeRunIndex({...deploy,gitops_revision:'short'}),/GitOps revision/);
+  assert.throws(()=>makeRunIndex({...deploy,record:'runs/2026-10-09/100-2/deployment/staging.json'}),
+    /deployment record path/);
+  console.log('shared Run index v1: acceptance/scenario/test/benchmark/deployment fixtures passed');
 }
 if(process.argv[1]?.endsWith('run-record-index-contract.mjs')&&process.argv[2]==='self-test')selfTest();

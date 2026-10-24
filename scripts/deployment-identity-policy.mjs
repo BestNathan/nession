@@ -267,8 +267,103 @@ export function attestDeployment({ overlay, provenance, gitopsRevision, observat
   };
 }
 
-function overlayFixture({ environmentId = 'staging', namespace = 'nession', suffix = '-staging', tags } = {}) {
-  const path = 'environments/' + environmentId + '/nession/kustomization.yaml';
+// Re-validate a stored attestation receipt without the original overlay,
+// provenance or cluster JSON. This is the durable-store trust boundary: a
+// receipt is only acceptable when its own fields still form one consistent
+// source -> digest -> ready-workload chain.
+export function validateAttestation(receipt) {
+  if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt)) {
+    fail('attestation receipt must be an object');
+  }
+  if (Number(receipt.schema_version) !== 1 || receipt.kind !== 'nession_deployment_attestation') {
+    fail('unsupported deployment attestation schema');
+  }
+  if (receipt.status !== 'Attested') fail('deployment attestation is not Attested');
+  const environmentId = String(receipt.environment_id ?? '');
+  if (!ENVIRONMENT.test(environmentId)) fail('attestation environment id is invalid');
+  const namespace = singleLine(receipt.namespace, 'attestation namespace');
+  const clusterContext = singleLine(receipt.cluster_context, 'attestation cluster context');
+  const gitopsRevision = String(receipt.gitops_revision ?? '');
+  if (!SHA.test(gitopsRevision)) fail('attestation GitOps revision is invalid');
+  const sourceSha = String(receipt.source_sha ?? '');
+  if (!SHA.test(sourceSha)) fail('attestation source SHA is invalid');
+  const observedAt = singleLine(receipt.observed_at, 'attestation observation timestamp');
+  if (!Number.isFinite(Date.parse(observedAt))) fail('attestation observation timestamp is not ISO-8601');
+  if (!Array.isArray(receipt.images)) fail('attestation images must be an array');
+  if (!Array.isArray(receipt.workloads)) fail('attestation workloads must be an array');
+  const images = new Map();
+  for (const image of receipt.images) {
+    const roleName = role(image?.role, 'attestation image role');
+    if (images.has(roleName)) fail('attestation contains duplicate ' + roleName + ' image');
+    const repository = singleLine(image.repository, roleName + ' attestation repository');
+    if (!REPOSITORY.test(repository)) fail(roleName + ' attestation repository is invalid');
+    const tag = singleLine(image.tag, roleName + ' attestation tag');
+    if (!TAG.test(tag) || !tag.startsWith(roleName + '-')) fail(roleName + ' attestation tag is invalid');
+    const digest = singleLine(image.digest, roleName + ' attestation digest');
+    if (!DIGEST.test(digest)) fail(roleName + ' attestation digest is invalid');
+    images.set(roleName, { repository, tag, digest });
+  }
+  for (const roleName of ROLES) {
+    if (!images.has(roleName)) fail('attestation is missing the ' + roleName + ' image');
+  }
+  const workloads = new Map();
+  for (const workload of receipt.workloads) {
+    const roleName = role(workload?.role, 'attestation workload role');
+    if (workloads.has(roleName)) fail('attestation contains duplicate ' + roleName + ' workload');
+    if (workload.namespace !== namespace) fail(roleName + ' workload namespace disagrees with attestation');
+    const name = singleLine(workload.name, roleName + ' workload name');
+    const uid = singleLine(workload.uid, roleName + ' workload UID');
+    const generation = workload.generation;
+    const observedGeneration = workload.observed_generation;
+    if (!Number.isSafeInteger(generation) || generation < 1) {
+      fail(roleName + ' workload generation is invalid');
+    }
+    if (!Number.isSafeInteger(observedGeneration) || observedGeneration < generation) {
+      fail(roleName + ' workload observed generation is stale');
+    }
+    if (workload.ready !== true) fail(roleName + ' workload is not ready');
+    const image = images.get(roleName);
+    if (workload.image !== image.repository + ':' + image.tag) {
+      fail(roleName + ' workload image disagrees with attestation image');
+    }
+    if (workload.image_id !== image.repository + '@' + image.digest) {
+      fail(roleName + ' workload imageID disagrees with attestation digest');
+    }
+    if (workload.digest !== image.digest) {
+      fail(roleName + ' workload digest disagrees with attestation image');
+    }
+    workloads.set(roleName, {
+      role: roleName,
+      name,
+      namespace,
+      uid,
+      generation,
+      observed_generation: observedGeneration,
+      ready: true,
+      image: workload.image,
+      image_id: workload.image_id,
+      digest: image.digest,
+    });
+  }
+  for (const roleName of ROLES) {
+    if (!workloads.has(roleName)) fail('attestation is missing the ' + roleName + ' workload');
+  }
+  return {
+    schema_version: 1,
+    kind: 'nession_deployment_attestation',
+    status: 'Attested',
+    environment_id: environmentId,
+    namespace,
+    cluster_context: clusterContext,
+    gitops_revision: gitopsRevision,
+    observed_at: new Date(Date.parse(observedAt)).toISOString(),
+    source_sha: sourceSha,
+    images: ROLES.map((roleName) => ({ role: roleName, ...images.get(roleName) })),
+    workloads: ROLES.map((roleName) => workloads.get(roleName)),
+  };
+}
+
+function overlayFixture({ environmentId = 'staging', namespace = 'nession', suffix = '-staging', tags } = {}) {  const path = 'environments/' + environmentId + '/nession/kustomization.yaml';
   const image = (roleName) => 'ghcr.io/bestnathan/nession-' + roleName;
   const tag = (roleName) => (tags ? tags[roleName] : roleName + '-abcdef1');
   return {
@@ -357,6 +452,32 @@ function selfTest() {
   assert.equal(receipt.workloads.length, 3);
   assert.equal(receipt.images.find((image) => image.role === 'server').digest,
     provenance.images.server.digest);
+
+  // Durable-store validation must preserve the same binding without the
+  // original overlay/provenance/cluster inputs.
+  const validated = validateAttestation(receipt);
+  assert.equal(validated.source_sha, sourceSha);
+  assert.equal(validated.workloads[1].digest, provenance.images.server.digest);
+  const badReceipt = (mutate, pattern) => {
+    const copy = structuredClone(receipt);
+    mutate(copy);
+    assert.throws(() => validateAttestation(copy), pattern);
+  };
+  badReceipt((copy) => { copy.kind = 'other'; }, /unsupported deployment attestation schema/);
+  badReceipt((copy) => { copy.status = 'Pending'; }, /not Attested/);
+  badReceipt((copy) => { copy.environment_id = 'Bad_Env'; }, /environment id is invalid/);
+  badReceipt((copy) => { copy.gitops_revision = 'x'.repeat(40); }, /GitOps revision/);
+  badReceipt((copy) => { copy.source_sha = 'x'.repeat(40); }, /source SHA is invalid/);
+  badReceipt((copy) => { copy.observed_at = 'not-a-time'; }, /ISO-8601/);
+  badReceipt((copy) => { copy.images.pop(); }, /missing the ui image/);
+  badReceipt((copy) => { copy.images.push({ ...copy.images[1] }); }, /duplicate server image/);
+  badReceipt((copy) => { copy.images[1].digest = 'sha256:' + 'f'.repeat(64); },
+    /workload imageID disagrees/);
+  badReceipt((copy) => { copy.workloads.pop(); }, /missing the ui workload/);
+  badReceipt((copy) => { copy.workloads[1].ready = false; }, /not ready/);
+  badReceipt((copy) => { copy.workloads[1].observed_generation = 1; }, /stale/);
+  badReceipt((copy) => { copy.workloads[1].namespace = 'nession-staging-01'; }, /namespace disagrees/);
+  badReceipt((copy) => { copy.workloads[2].role = 'server'; }, /duplicate server workload/);
 
   // A version tag is valid only when trusted provenance binds it to a source SHA.
   const productionOverlay = parseEnvironmentOverlay(
