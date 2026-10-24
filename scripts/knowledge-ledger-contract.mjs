@@ -191,65 +191,91 @@ function verify(root,baseline=null) {
     if(!SHA.test(baseline))fail('expected baseline must be an exact SHA');
     git(root,'merge-base','--is-ancestor',baseline,current);
   }
-  const commits=git(root,'rev-list','--reverse','--first-parent',LEGACY_CHECKPOINT+'..HEAD').split('\n').filter(Boolean);
-  if(!commits.length)fail('schema v2 migration has not occurred');
-  let parent=LEGACY_CHECKPOINT;
-  for(const [i,commit] of commits.entries()) {
+  // V2_HEAD contains the last abbreviation-based article. The next commit is
+  // a one-time, append-only title correction. Subsequent commits are ordinary
+  // changes to current Markdown and MUST append the shared changelog.
+  const commits=git(root,'rev-list','--reverse','--first-parent',TITLE_BASE+'..HEAD').split('\n').filter(Boolean);
+  if(!commits.length)fail('title-derived filename migration is missing');
+  let parent=TITLE_BASE;
+  for(const [i,commit] of commits.entries()){
     const parents=git(root,'rev-list','--parents','-n','1',commit).split(' ');
-    if(parents.length!==2||parents[1]!==parent)fail('nonlinear knowledge history: '+commit);
-    const changes=git(root,'diff','--name-status','--no-renames',parent,commit).split('\n').filter(Boolean)
-      .map(s=>{const [status,file]=s.split('\t');return {status,file};});
-    if(i===0) {
-      if(!changes.some(x=>x.file==='schema/v2.json'&&x.status==='A')||
-         !changes.some(x=>x.file==='CHANGELOG.md'&&x.status==='A')||
-         !changes.some(x=>x.file.startsWith('topics/')&&x.status==='A'))
-        fail('first descendant must be one-time v2 migration');
-    } else {
-      const prev=git(root,'show',parent+':CHANGELOG.md')+'\n';
-      const next=git(root,'show',commit+':CHANGELOG.md')+'\n';
-      if(!next.startsWith(prev)||next===prev)fail('global changelog must only append in every knowledge commit');
-      const added=logEntries(next).slice(logEntries(prev).length);
-      const modified=changes.filter(x=>x.file.startsWith('topics/'));
-      const deletedIds=new Set(modified.filter(x=>x.status==='D'&&ENTRY.test(x.file))
-        .map(x=>ENTRY.exec(x.file)[2]));
-      for(const {file,status} of modified) {
-        if(!ENTRY.test(file)||!['A','M','D'].includes(status))fail('unrecognized topic mutation '+file);
-        const match=added.filter(e=>e.path===file);
-        const action=match[0]?.action,id=ENTRY.exec(file)[2];
-        if(match.length!==1||
-          (status==='A'&&action!=='create'&&!(action==='move'&&deletedIds.has(id)))||
-          (status==='M'&&action!=='update')||
-          (status==='D'&&action!=='delete'))
-          fail('knowledge modification needs one matching changelog event: '+file);
+    if(parents.length!==2||parents[1]!==parent)fail('nonlinear knowledge history');
+    const diff=git(root,'diff','--name-status','--no-renames',parent,commit).split('\n')
+      .filter(Boolean).map(x=>{const [status,file]=x.split('\t');return {status,file};});
+    const before=git(root,'show',parent+':CHANGELOG.md')+'\n';
+    const after=git(root,'show',commit+':CHANGELOG.md')+'\n';
+    if(!after.startsWith(before)||after===before)fail('global CHANGELOG was rewritten or not appended');
+    const added=logEntries(after).slice(logEntries(before).length);
+    const articles=diff.filter(c=>c.file.startsWith('topics/'));
+    const used=new Set();
+    for(const e of added){
+      const current=articles.find(c=>c.file===e.path);
+      const previous=e.previous&&articles.find(c=>c.file===e.previous);
+      if(e.action==='rename'||e.action==='move'){
+        if(!current||current.status!=='A'||!previous||previous.status!=='D')
+          fail('renaming requires a deleted/added Markdown path pair');
+        if(e.action==='rename'&&ENTRY.exec(e.previous)[1]!==e.topic)
+          fail('use move if topic changed');
+        if(e.action==='move'&&ENTRY.exec(e.previous)[1]===e.topic)
+          fail('use rename if topic did not change');
+      }else{
+        const status={create:'A',update:'M',delete:'D'}[e.action];
+        if(!status||!current||current.status!==status||e.previous)
+          fail('CHANGELOG action differs from Git tree: '+e.path);
       }
-      if(added.length!==modified.length)fail('changelog entries must map 1:1 to changed knowledge files');
-      for(const change of changes)if(!change.file.startsWith('topics/')&&
-         !(change.file==='CHANGELOG.md'&&change.status==='M')&&
-         !(change.file==='index.json'&&change.status==='M'))
-        fail('forbidden post-migration path change: '+change.file);
-      if(!modified.length)fail('no knowledge files changed in changelog commit');
+      for(const filename of [e.path,e.previous].filter(Boolean)){
+        if(used.has(filename))fail('duplicate change event for '+filename);
+        used.add(filename);
+      }
+      if(e.action!=='delete'){
+        const atCommit=git(root,'show',commit+':'+e.path)+'\n';
+        const data=parseKnowledge(atCommit,e.path);
+        if(data.title!==e.title||data.updated_at!==e.at||
+           JSON.stringify([...data.categories].sort())!==JSON.stringify([...e.categories].sort()))
+          fail('article and appended CHANGELOG event disagree: '+e.path);
+      }
+    }
+    if(!articles.length||used.size!==articles.length)
+      fail('each article mutation requires a matching global log event');
+    for(const change of diff){
+      if(change.file.startsWith('topics/'))continue;
+      if(change.file==='CHANGELOG.md'&&change.status==='M')continue;
+      if(change.file==='index.json'&&change.status==='M')continue;
+      if(i===0&&change.status==='M'&&['schema/v2.json','README.md'].includes(change.file))continue;
+      fail('forbidden knowledge commit modification: '+change.status+' '+change.file);
+    }
+    if(i===0){
+      if(added.length!==1||added[0].action!=='rename'||
+         added[0].previous!=='topics/engineering/repository-instruction-architecture.md')
+        fail('first post-v2 commit must correct the shortened article title filename');
+      if(!diff.some(c=>c.file==='schema/v2.json'&&c.status==='M'))
+        fail('full-title filename migration must update schema/v2.json');
     }
     parent=commit;
   }
   return {topics:Object.keys(expected.topics).length,knowledge:Object.values(expected.topics).reduce((s,x)=>s+x.length,0),events:events.length,head:current};
 }
 function fixture() {
-  const d=fs.mkdtempSync(path.join(os.tmpdir(),'knowledge-v2-'));
+  const d=fs.mkdtempSync(path.join(os.tmpdir(),'nession-knowledge-title-'));
   const put=(file,text)=>{const p=path.join(d,file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,text);};
   const at='2026-10-24T03:00:00Z';
-  const record='---\nid: terminal-architecture\ntitle: Terminal architecture\ndescription: Session and terminal architecture\ntopic: terminal\ncategories: ["architecture", "protocol"]\nsources: ["https://github.com/BestNathan/nession/blob/'+'a'.repeat(40)+'/AGENTS.md"]\nstatus: verified\ncreated_at: '+at+'\nupdated_at: '+at+'\n---\n\n# Terminal architecture\n\nA stable sourced description.\n';
+  const title='Nession instruction architecture and knowledge ownership',slug=titleSlug(title);
+  const file='topics/engineering/'+slug+'.md';
+  const article='---\ntitle: "'+title+'"\ndescription: Full descriptive name\ntopic: engineering\ncategories: ["architecture", "knowledge"]\nsources: ["https://github.com/BestNathan/nession/blob/'+'a'.repeat(40)+'/AGENTS.md"]\nstatus: verified\ncreated_at: '+at+'\nupdated_at: '+at+'\n---\n\n# '+title+'\n\nCurrent knowledge.\n';
   try {
-    put('topics/terminal/terminal-architecture.md',record);
-    put('CHANGELOG.md',HEADER+'## '+at+' | create | terminal-architecture\n- Path: topics/terminal/terminal-architecture.md\n- Topic: terminal\n- Categories: architecture, protocol\n- Reason: Initial recorded knowledge\n- Source: https://github.com/BestNathan/nession/issues/2325\n');
-    put('index.json',JSON.stringify(indexFor(d),null,2)+'\n');
-    assert.equal(indexFor(d).topics.terminal[0].id,'terminal-architecture');
-    assert.equal(indexFor(d).categories.architecture[0],'terminal-architecture');
-    assert.equal(logEntries(fs.readFileSync(path.join(d,'CHANGELOG.md'),'utf8')).length,1);
-    assert.throws(()=>parseKnowledge(record.replace('topic: terminal','topic: web'),'topics/terminal/terminal-architecture.md'),/topic\/id/);
-    assert.throws(()=>parseKnowledge(record.replace('["architecture", "protocol"]','["architecture", "architecture"]'),'topics/terminal/terminal-architecture.md'),/category/);
-    assert.throws(()=>parseKnowledge(record.replace('sources: ["https:','sources: ["http:'),'topics/terminal/terminal-architecture.md'),/source/);
-    assert.throws(()=>logEntries(HEADER+'## '+at+' | create | invalid\n- Path: foo\n'),/topic\/id|field/);
-    console.log('knowledge-ledger-contract: v2 topic index, category tags, frontmatter and global log fixtures passed');
+    assert.equal(slug,'nession-instruction-architecture-and-knowledge-ownership');
+    assert.equal(titleSlug('终端 tmux 控制模式'),'终端-tmux-控制模式');
+    put(file,article);
+    const idx=indexFor(d);
+    assert.equal(idx.topics.engineering[0].title,title);
+    assert.deepEqual(idx.categories.knowledge,[file]);
+    assert.throws(()=>parseKnowledge(article,'topics/engineering/repository-instruction-architecture.md'),/complete title/);
+    assert.throws(()=>parseKnowledge(article.replace('title:', 'id: short\n'+'title:'),file),/unknown field/);
+    assert.throws(()=>parseKnowledge(article.replace('"architecture", "knowledge"','"architecture", "architecture"'),file),/duplicate/);
+    const log=HEADER+'## '+at+' | create | '+title+'\n- Path: '+file+'\n- Topic: engineering\n- Categories: architecture, knowledge\n- Reason: Initial article\n- Source: https://github.com/BestNathan/nession/issues/2325\n';
+    assert.equal(logEntries(log)[0].title,title);
+    assert.throws(()=>logEntries(log.replace(slug+'.md','short.md')),/full title/);
+    console.log('knowledge-ledger-contract: full title slug, Unicode, no synthetic IDs, topic/category index, global log fixtures passed');
   }finally{fs.rmSync(d,{recursive:true,force:true});}
 }
 const [cmd,root,base]=process.argv.slice(2);
