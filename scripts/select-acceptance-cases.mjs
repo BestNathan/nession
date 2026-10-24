@@ -14,7 +14,7 @@ const SELF = fileURLToPath(import.meta.url);
 
 export function selectTrustedCases({
   issueNumbers, issues, stage, targetSha, runId, requested = '',
-  runtime = '', sourceCaseRoot,
+  runtime = '', sourceCaseRoot, deploymentBinding = null,
 }) {
   if (!Array.isArray(issueNumbers) || !Array.isArray(issues)) throw new Error('Issue inputs must be arrays');
   if (!/^[0-9a-f]{40}$/i.test(targetSha)) throw new Error('target must be an exact 40-byte hexadecimal SHA');
@@ -34,7 +34,7 @@ export function selectTrustedCases({
     const issue = issues.find((item) => Number(item.number) === issueNumber);
     if (!issue) throw new Error('missing trusted Issue contract #' + issueNumber);
     const context = buildAcceptanceContext(issue, stage, {
-      targetRef: targetSha, runId, method: 'case',
+      targetRef: targetSha, runId, method: 'case', deploymentBinding,
     });
     const explicit = acceptancePlanSection(issue.body) !== null;
     for (const criterion of context.criteria) {
