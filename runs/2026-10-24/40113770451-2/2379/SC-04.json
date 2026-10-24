@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "e1818b151f6ea0a70254e551015869a880ec1509e8c093f30626251709028fee",
+  "run_id": 40113770451,
+  "run_attempt": 2,
+  "issue": 2379,
+  "criterion": "SC-04",
+  "criterion_text": "Real isolated tmux Pipe and PTY lifecycle integration and existing attach/reconnect regressions demonstrate a healthy Session is unaffected by another stalled attachment.",
+  "stage": "post-merge",
+  "target_sha": "ea03a487733e367bf8d5fab968643ec70396c8b0",
+  "contract_sha256": "5b3de4baf4e13e7478f5c8107bfe006066a3a493e5a51108946052a853255996",
+  "case_revision": "ea03a487733e367bf8d5fab968643ec70396c8b0",
+  "case_tree_sha": "d797dbc5ee1fe86e8a583a38e6e93c117a70f951",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-24T17:08:15.488Z",
+  "finished_at": "2026-10-24T17:08:31.596Z",
+  "duration_ms": 16108,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "stalled-writer admission/close deadlines and pending-waiter completion are deterministic; real isolated tmux Pipe/PTY lifecycle keeps a healthy attachment answering",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "tmux executable: tmux 3.4"
+        },
+        {
+          "type": "runtime",
+          "value": "deterministic stalled-writer fault tests passed at exact checkout SHA ea03a487733e367bf8d5fab968643ec70396c8b0"
+        },
+        {
+          "type": "runtime",
+          "value": "real Control Mode Pipe/PTY tests passed: 9 (attach/output, capture/live join, peer resize)"
+        }
+      ],
+      "duration_ms": 16091,
+      "exit_code": 0
+    }
+  ],
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40113770451,
+      "run_attempt": 2,
+      "event": "push",
+      "head_sha": "ea03a487733e367bf8d5fab968643ec70396c8b0",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40113770451",
+    "record_path": "runs/2026-10-24/40113770451-2/2379/SC-04.json",
+    "source_result_sha256": "5c1fb82524fc7f130bca18dc746ece251e3d6957c024257b486c730a92defa8e"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40113770451-2",
+    "sha256": "5c1fb82524fc7f130bca18dc746ece251e3d6957c024257b486c730a92defa8e",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40113770451",
+    "durability": "time-limited; object archival not configured"
+  }
+}
