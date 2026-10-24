@@ -13,7 +13,7 @@ const WORKFLOW = '.github/workflows/e2e-full-regression.yml';
 const SHA40 = /^[a-f0-9]{40}$/;
 const DIGEST = /^sha256:[a-f0-9]{64}$/;
 const ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const FRAME = /^[A-Za-z0-9_.-]{1,100}\\.spec\\.[cm]?[jt]s:[1-9][0-9]{0,5}(?::[1-9][0-9]{0,5})?$/;
+const FRAME = /^[A-Za-z0-9_.-]{1,100}\.spec\.[cm]?[jt]s:[1-9][0-9]{0,5}(?::[1-9][0-9]{0,5})?$/;
 function fail(message) { throw new Error('e2e-failure-admission-ingest: ' + message); }
 function positive(value) { return Number.isSafeInteger(value) && value > 0; }
 
@@ -173,7 +173,7 @@ function main() {
   const [, , , recordPath, storeRoot, outputPath] = process.argv;
   const record = JSON.parse(fs.readFileSync(recordPath, 'utf8'));
   const result = ingestRecord(record, storeRoot);
-  fs.writeFileSync(outputPath, JSON.stringify(result, null, 2) + '\\n', { flag: 'wx', mode: 0o600 });
+  fs.writeFileSync(outputPath, JSON.stringify(result, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
   console.log(JSON.stringify({ outcomes: result.outcomes.map(x => ({
     status: x.status, fingerprint: x.fingerprint, analysis_id: x.analysis_id ?? null,
     observation_path: x.observation_path,
