@@ -50,9 +50,26 @@ export function fingerprint(observation) {
 // A trusted store worker MUST CAS the returned expected_version before dispatch.
 // Repeated observations are always appended to the immutable E2E Run history,
 // even when an analysis has already occurred.
-export function decideAdmission(existing, incoming, now) {
+export function decideAdmission(existing, incoming, now, linkedIssue = null) {
   if (incoming?.status !== 'FINGERPRINTED' || !/^e2e1:[0-9a-f]{64}$/.test(incoming.fingerprint ?? '')) {
     return { action: 'TRIAGE_REQUIRED', reason: 'insufficient normalized failure identity' };
+  }
+  if (existing == null && linkedIssue != null) {
+    // Trusted GitHub Issue discovery can link a manually created, already open
+    // Bug *before* any model dispatch. Never accept an Issue's unverified prose
+    // or approximate title match as proof that fingerprints are identical.
+    if (linkedIssue.verified !== true ||
+        linkedIssue.fingerprint !== incoming.fingerprint ||
+        !Number.isSafeInteger(linkedIssue.issue_number) || linkedIssue.issue_number < 1) {
+      return { action: 'TRIAGE_REQUIRED', reason: 'existing Bug match not authenticated' };
+    }
+    if (linkedIssue.state === 'open') {
+      return { action: 'LINK_EXISTING_BUG_NO_AGENT', epoch: 1, expected_version: null,
+        bug_issue: linkedIssue.issue_number };
+    }
+    // Closed Bugs require verified-fix history for a new epoch, not a blanket
+    // model suppression merely because a similarly named old Issue exists.
+    return { action: 'TRIAGE_REQUIRED', reason: 'closed Bug needs recurrence policy' };
   }
   if (existing == null) return { action: 'CLAIM_NEW', epoch: 1, expected_version: null };
   if (existing.fingerprint !== incoming.fingerprint) {
@@ -112,6 +129,18 @@ function selfTest() {
   const now = '2026-10-24T12:00:00Z';
   assert.deepEqual(decideAdmission(null, first, now),
     { action: 'CLAIM_NEW', epoch: 1, expected_version: null });
+  assert.deepEqual(decideAdmission(null, first, now, {
+    fingerprint: first.fingerprint, state: 'open', verified: true, issue_number: 142 }),
+  { action: 'LINK_EXISTING_BUG_NO_AGENT', epoch: 1, expected_version: null, bug_issue: 142 });
+  assert.equal(decideAdmission(null, first, now, {
+    fingerprint: first.fingerprint, state: 'open', verified: false, issue_number: 142 }).action,
+    'TRIAGE_REQUIRED');
+  assert.equal(decideAdmission(null, first, now, {
+    fingerprint: first.fingerprint, state: 'closed', verified: true, issue_number: 142 }).action,
+    'TRIAGE_REQUIRED');
+  assert.equal(decideAdmission(null, first, now, {
+    fingerprint: 'e2e1:' + 'f'.repeat(64), state: 'open', verified: true,
+    issue_number: 142 }).action, 'TRIAGE_REQUIRED');
   const stored = { fingerprint: first.fingerprint, version: 2, epoch: 1,
     status: 'analyzed', analysis_id: 'analysis-01', bug_issue: 1234 };
   assert.equal(decideAdmission(stored, repeat, now).action, 'REUSE_ANALYSIS');
