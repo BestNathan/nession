@@ -13,6 +13,7 @@ Load related Skills only when needed:
 - CI/staging/release/deploy -> `nession-cicd`
 - UI/design/browser proof -> `nession-web-design`
 - interactive design prototypes on the shared orphan `prototype` branch -> [nession-prototype](../nession-prototype/SKILL.md)
+- verified project knowledge retrieval and immutable history updates -> [nession-knowledge](../nession-knowledge/SKILL.md)
 - missing tools/setup -> `nession-env`
 - review -> `nession-code-review`
 
@@ -69,9 +70,10 @@ Before implementation:
 
 1. read the nearest scoped `AGENTS.md`;
 2. inspect the issue/requirement and current implementation;
-3. discover relevant Gates with `./gates/run --list`;
-4. use `./gates/run --describe <id>` for likely invariants;
-5. identify the canonical code/doc owner instead of adding parallel policy.
+3. inspect the Requirement's `Knowledge Impact` decision; query affected knowledge IDs before changing stable architecture, and attach any required verified knowledge revision receipt before closure (see `nession-knowledge`);
+4. discover relevant Gates with `./gates/run --list`;
+5. use `./gates/run --describe <id>` for likely invariants;
+6. identify the canonical code/doc owner instead of adding parallel policy.
 
 Do not reconstruct protocol/design/Gate rules from old comments or workflow YAML.
 

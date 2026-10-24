@@ -21,6 +21,8 @@ explicit user/task scope
   -> canonical docs/code/Gate facts
 ```
 
+The separate `knowledge` orphan ref stores traceable curated claims; it is not another instruction layer or an override of canonical docs/code. Its workflow owner is the [nession-knowledge Skill](../../.claude/skills/nession-knowledge/SKILL.md) and its governance owner is [knowledge-ledger.md](knowledge-ledger.md).
+
 A Skill coordinates work; it does not override a path owner's invariant. A contradiction is an instruction-graph bug.
 
 ## Canonical filenames
