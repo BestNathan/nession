@@ -29,3 +29,10 @@
 - Categories: agents, knowledge, provenance, research, skills
 - Reason: Record an implementation-oriented adaptation of the primary-source LLM Wiki pattern for Nession's existing topic-first knowledge ledger
 - Source: https://github.com/BestNathan/nession/issues/2343
+
+## 2026-10-24T06:40:00Z | update | Karpathy LLM Wiki principles for Nession project knowledge
+- Path: topics/engineering/karpathy-llm-wiki-principles-for-nession-project-knowledge.md
+- Topic: engineering
+- Categories: agents, knowledge, provenance, research, skills
+- Reason: Add exact-commit canonical source for verified article status
+- Source: https://github.com/BestNathan/nession/issues/2343

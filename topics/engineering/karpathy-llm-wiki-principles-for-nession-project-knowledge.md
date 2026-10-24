@@ -5,8 +5,8 @@ topic: engineering
 categories: ["agents","knowledge","provenance","research","skills"]
 status: verified
 created_at: 2026-10-24T05:34:00.000Z
-updated_at: 2026-10-24T05:34:00.000Z
-sources: ["https://github.com/BestNathan/nession/issues/2343"]
+updated_at: 2026-10-24T06:40:00Z
+sources: ["https://github.com/BestNathan/nession/issues/2343", "https://github.com/BestNathan/nession/blob/f2c0ae7ccf2ee23cf87c0b4401e6fa99c9b6d414/.claude/skills/nession-knowledge/SKILL.md"]
 ---
 
 # Karpathy LLM Wiki principles for Nession project knowledge
