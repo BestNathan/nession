@@ -120,8 +120,7 @@ function appendObservation(root, p, observation, fingerprintValue, outcome, now)
     source: observation.source,
     artifact: { id: observation.artifact.id, digest: observation.artifact.digest },
     fingerprint: fingerprintValue ?? null,
-    outcome: outcome.action,
-    reason: outcome.reason ?? null,
+    classification: observation.classification,
     observed_at: observation.source.completed_at,
     result_ids: observation.results.map(x => x.test_id),
     // Do not persist raw logs, traces, stack payloads, or model-authored text here.
@@ -166,15 +165,17 @@ export function recordE2EFailureObservation(root, observation, {
   const decision = decideAdmission(current.state, fp, new Date(nowMs).toISOString(), linkedIssue);
   const observationPath = appendObservation(root, p, observation, fp.fingerprint, decision, nowMs);
   let state = current.state;
-  if (['CLAIM_NEW', 'RECONCILE_EXPIRED_CLAIM', 'RETRY_SAME_TASK', 'CLAIM_RECURRENCE'].includes(decision.action)) {
+  if (['CLAIM_NEW', 'RETRY_SAME_TASK', 'CLAIM_RECURRENCE', 'LINK_EXISTING_BUG_NO_AGENT'].includes(decision.action)) {
     const epoch = decision.epoch;
     const analysisId = digest + ':' + epoch;
     state = {
       schema_version: 1, kind: 'e2e_failure_admission_state', fingerprint: fp.fingerprint,
-      version: current.version + 1, epoch, status: 'claimed',
+      version: current.version + 1, epoch,
+      status: decision.action === 'LINK_EXISTING_BUG_NO_AGENT' ? 'issue_linked' : 'claimed',
       analysis_id: analysisId,
       lease_expires_at: new Date(nowMs + leaseMs).toISOString(),
-      dispatch_intent: { id: analysisId, status: 'pending' },
+      dispatch_intent: { id: analysisId, status: decision.action === 'LINK_EXISTING_BUG_NO_AGENT' ? 'acknowledged' : 'pending' },
+      bug_issue: decision.bug_issue ?? decision.prior_bug_issue ?? null,
       first_source: current.state?.first_source ?? {
         run_id: observation.source.run_id, run_attempt: observation.source.run_attempt,
         target_sha: observation.source.target_sha,
@@ -187,7 +188,7 @@ export function recordE2EFailureObservation(root, observation, {
   }
   const typed = {
     CLAIM_NEW: 'ANALYSIS_CLAIMED',
-    RECONCILE_EXPIRED_CLAIM: 'ANALYSIS_CLAIMED',
+    RECONCILE_EXPIRED_CLAIM: 'ADMISSION_RECONCILE_REQUIRED',
     RETRY_SAME_TASK: 'ANALYSIS_CLAIMED',
     CLAIM_RECURRENCE: 'ANALYSIS_CLAIMED',
     REUSE_ANALYSIS: current.state?.status === 'claimed' || current.state?.status === 'in_flight'
