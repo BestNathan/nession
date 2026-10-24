@@ -98,7 +98,7 @@ function selfTest() {
   assert.equal(eligible({ ahead: 2, behind: 0, attested: false }).decision, 'INDETERMINATE');
   assert.equal(eligible({ ahead: null, behind: 0 }).decision, 'INDETERMINATE');
   assert.deepEqual(countAncestry(a, b, (_, args) =>
-    args[3] === a + '..' + b ? '4\n' : '2\n'), { ahead: 4, behind: 2 });
+    args[2] === a + '..' + b ? '4\n' : '2\n'), { ahead: 4, behind: 2 });
   assert.throws(() => countAncestry('main', b));
   console.log('e2e-regression-policy self-test: PASS');
 }
