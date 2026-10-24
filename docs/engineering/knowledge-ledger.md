@@ -57,3 +57,27 @@ Every new or materially revised Requirement records `### Knowledge Impact`: `Dec
 ## Historical title correction
 
 The original v2 article used the shortened filename `repository-instruction-architecture.md`, which was unrelated to the complete displayed title. A normal fast-forward Git change renames it to `nession-instruction-architecture-and-knowledge-ownership.md`, removes the redundant frontmatter ID, appends a title-based `rename` event to the existing global `CHANGELOG.md`, and regenerates the index from frontmatter. Existing history and the earlier changelog event remain unchanged and retrievable at the old Git SHA.
+
+
+## Operational lifecycle: Ingest / Query / Lint
+
+These are the mandatory operating model, not optional labels.
+
+### Ingest
+When a source or project event may change durable knowledge: capture source URL and exact commit where possible; search by topic, category and full text; inspect related articles and links; reconcile existing knowledge rather than blindly append; preserve contradictions as unresolved until evidence/owner authority resolves them; update/create the current article; add cross-links; append one global event per changed article; regenerate the index; validate and publish atomically with expected-head CAS and no force-push. Report affected paths, evidence, commit SHA and gate result.
+
+### Query
+Start from the topic index, refine with reusable category tags, then full-text search. Follow cross-links and inspect sources. Verify implementation questions against current code/tests/canonical docs. Respect source authority and article status; answer with caveats and traceable links. Historical questions use Git history plus the global changelog. Promote durable answers or discovered gaps through Ingest; do not persist every transient answer.
+
+### Lint
+Run deterministic checks for schema/frontmatter, full-title path, topic/category index, source formats, relative-link integrity, article reachability/orphans, duplicate concepts, changelog/tree consistency, append-only history and secret-like content. Negative fixtures must prove broken links, orphan pages, missing sources, index drift and changelog drift fail. Separately run semantic Agent review for contradictions, stale or unsupported claims, duplicate concepts, missing cross-links, authority conflicts and implementation drift. Findings require cited evidence and a proposed fix; repairs go through Ingest and are linted again. Report deterministic and semantic outcomes separately as PASS, FAIL or PENDING.
+
+## Record layout and invariants
+
+The only active published layout is README.md, schema/v2.json, topics/<topic>/<full-title-slug>.md, derived index.json and append-only global CHANGELOG.md. A record is one current Markdown article per full title/topic, not an ID-based record or revision series. Frontmatter fields are exactly title, description, topic, categories, status, created_at, updated_at and sources. The body captures conclusion, evidence/rationale, related-article links and limits/open questions. Categories are multi-select tags; topic is the primary directory/index.
+
+For every publication, article edits, index regeneration and changelog append must be in one commit. The changelog event contains timestamp, action, full title, current path, topic, categories, reason and owning Issue/PR; rename/move also contain previous path. Git commits preserve prior article contents. Never create short IDs, per-article versions, per-article event files or per-article receipts. A failed or unrun audit is PENDING, never PASS.
+
+## Explicit implementation boundary
+
+The current schema and validator remain the executable source of truth. Relative-link checks, meaningful article reachability/orphans and semantic consistency are contract targets until implemented with deterministic fixtures or a trusted Agent audit. Documentation alone does not make these checks live. Track missing executable checks in Issue #2343 and do not claim completion without CI evidence.
