@@ -80,6 +80,7 @@ jobs:
     timeout-minutes: 15
     env:
       STAGING_TARGET_SHA: ${{ needs.verify-source.outputs.staging_sha }}
+      SOURCE_MAIN_SHA: ${{ github.event.workflow_run.head_sha }}
       ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL }}
       ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
       ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
@@ -97,6 +98,8 @@ jobs:
       - name: Fail closed on absent/misconfigured staging Gateway
         run: |
           set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_MAIN_SHA" ]] ||
+            { echo "::error::Staging model Worker did not load authenticated main source"; exit 1; }
           node --input-type=module <<'NODE'
           import {qwenDeveloperModel,qwenGatewayEndpoint}
             from './scripts/lib/agent/orchestration/qwen-developer-policy.mjs';
