@@ -68,6 +68,12 @@ jobs:
           ref: main
           fetch-depth: 0
           persist-credentials: false
+      - name: Pin trusted read-only failure candidate extractor
+        # Copy from trusted Main before the next step detaches to arbitrary
+        # historical/test source, so old SHAs need not contain this script.
+        run: |
+          node scripts/e2e-full-failure-manifest.mjs self-test
+          cp scripts/e2e-full-failure-manifest.mjs "$RUNNER_TEMP/e2e-full-failure-manifest.mjs"
       - name: Resolve immutable branch/SHA target
         id: pin
         env:
@@ -130,6 +136,17 @@ jobs:
           node e2e/runner/e2e-full-per-id-receipt.mjs verify \
             "$RUNNER_TEMP/full-regression-playwright.json" \
             "$RUNNER_TEMP/full-regression-assertions.json" "$TARGET_SHA"
+      - name: Emit non-authoritative failed-run diagnostic candidate
+        if: always() && steps.pin.outputs.target_sha != ''
+        env:
+          PINNED_SHA: ${{ steps.pin.outputs.target_sha }}
+          SOURCE_RUN_ID: ${{ github.run_id }}
+          SOURCE_RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          node "$RUNNER_TEMP/e2e-full-failure-manifest.mjs" emit \
+            "$RUNNER_TEMP/full-regression-playwright.json" \
+            "$RUNNER_TEMP/full-regression-failure-candidate.json" \
+            "$PINNED_SHA" "$SOURCE_RUN_ID" "$SOURCE_RUN_ATTEMPT"
       - name: Preserve full regression report
         if: always()
         uses: actions/upload-artifact@v4
@@ -138,6 +155,7 @@ jobs:
           path: |
             ${{ runner.temp }}/full-regression-playwright.json
             ${{ runner.temp }}/full-regression-assertions.json
+            ${{ runner.temp }}/full-regression-failure-candidate.json
             e2e/playwright-report/
           if-no-files-found: warn
           retention-days: 14
