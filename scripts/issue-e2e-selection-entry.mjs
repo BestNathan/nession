@@ -206,16 +206,16 @@ function selfTest() {
       /changed E2E ID missing from linked Issue New\/Regression obligations: head-owned-new/,
       'a truly head-owned new test must still require an Issue declaration');
 
-    // Also cover the opposite merge-parent order: feature first, advancing base second.
-    git('checkout','-B','feature-first-parent',featureHead);
-    git('merge','--no-ff','staging','-m','merge advancing base as second parent');
-    const oppositeMerge = git('rev-parse','HEAD');
+    // Cover the opposite merge-parent order: current base first, feature second.
+    git('checkout','-B','target-first-parent',currentBase);
+    git('merge','--no-ff','feature','-m','merge feature as second parent');
+    const baseFirstMerge = git('rev-parse','HEAD');
     git('update-ref','refs/remotes/origin/staging',currentBase);
-    git('checkout','--detach',oppositeMerge);
-    const oppositePlan = prepare(fixtureEvent(oppositeMerge),[issue],mergeTmp);
-    assert.equal(oppositePlan.base_sha,currentBase);
-    assert.equal(oppositePlan.mode,'not-required',
-      'upstream E2E IDs must not be attributed when the base is second parent');
+    git('checkout','--detach',baseFirstMerge);
+    const baseFirstPlan = prepare(fixtureEvent(baseFirstMerge),[issue],mergeTmp);
+    assert.equal(baseFirstPlan.base_sha,currentBase);
+    assert.equal(baseFirstPlan.mode,'not-required',
+      'upstream E2E IDs must not be attributed when the base is first parent');
   } finally {
     fs.rmSync(mergeTmp,{recursive:true,force:true});
   }
