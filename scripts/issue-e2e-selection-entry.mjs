@@ -39,6 +39,24 @@ function hasVerifiedMetadataOnlyDiff(repoRoot, baseSha, headSha) {
     return false; // fail closed to the existing full E2E fallback
   }
 }
+function currentBaseSha(repoRoot, baseRef) {
+  if (typeof baseRef !== 'string' ||
+      !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(baseRef) ||
+      baseRef.includes('..') || baseRef.includes('@{') || baseRef.endsWith('.lock')) {
+    throw new Error('invalid PR base branch ref');
+  }
+  const remoteRef = 'refs/remotes/origin/' + baseRef;
+  let sha;
+  try {
+    sha = execFileSync('git', ['rev-parse', '--verify', remoteRef + '^{commit}'], {
+      cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    throw new Error('current PR base ref is unavailable: ' + remoteRef);
+  }
+  if (!SHA.test(sha)) throw new Error('current PR base ref did not resolve to an exact SHA');
+  return sha;
+}
 export function prepare(event, issues, repoRoot) {
   const pr = event?.pull_request;
   if (event?.repository?.full_name !== 'BestNathan/nession' || !pr ||
@@ -52,26 +70,27 @@ export function prepare(event, issues, repoRoot) {
         !(event.source_event === 'push' ? ['open','OPEN','closed','CLOSED'].includes(issue.state) : ['open','OPEN'].includes(issue.state)))
       throw Error('unrelated or closed Issue in test plan');
   }
+  // pull_request.base.sha is an event snapshot and can lag when the target
+  // branch advances. Checkout(fetch-depth: 0) provides the current remote
+  // target ref; bind the plan to that immutable SHA rather than the stale
+  // webhook base or merge-base.
+  const baseSha = currentBaseSha(repoRoot, pr.base.ref);
+  if (baseSha === pr.head.sha) throw Error('current PR base and head SHA are identical');
   if (!issues.length || issues.some(i => !i.body?.includes('## E2E Verification'))) {
-    const noImpact = hasVerifiedMetadataOnlyDiff(repoRoot, pr.base.sha, pr.head.sha);
+    const noImpact = hasVerifiedMetadataOnlyDiff(repoRoot, baseSha, pr.head.sha);
     return { schema_version:1, kind:'issue_e2e_selection', pr_number:pr.number,
-      target_sha:pr.head.sha, base_sha:pr.base.sha,
+      target_sha:pr.head.sha, base_sha:baseSha,
       mode:noImpact ? 'not-required' : 'unresolved',
       reason:noImpact ? 'verified-metadata-only-diff' : 'missing-scoped-e2e-obligation-needs-audit',
       selected:[], issues:[] };
   }
-  const effectiveBase=execFileSync('git',['merge-base',pr.base.sha,pr.head.sha],{
-    cwd:repoRoot,encoding:'utf8',stdio:['ignore','pipe','ignore'],
-  }).trim();
-  if(!SHA.test(effectiveBase)||effectiveBase===pr.head.sha)
-    throw Error('PR merge-base does not identify a distinct trusted change');
-  return { ...buildGitPlan(repoRoot,issues,effectiveBase,pr.head.sha),pr_number:pr.number };
+  return { ...buildGitPlan(repoRoot,issues,baseSha,pr.head.sha),pr_number:pr.number };
 }
 function selfTest() {
   const event = { repository:{full_name:'BestNathan/nession'},pull_request:{
     number:17, title:'Refs #1702', body:'Refs #1702',
     head:{sha:'a'.repeat(40),repo:{full_name:'BestNathan/nession'}},
-    base:{sha:'b'.repeat(40)} }};
+    base:{sha:'b'.repeat(40),ref:'staging'} }};
   assert.equal(prepare(event,[],'.').mode,'unresolved');
   assert.equal(pathsCannotAffectE2E(['docs/architecture/notes.md']), true);
   assert.equal(pathsCannotAffectE2E(['.github/workflows/agent-controller-dispatch.yml']), true);
