@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 40075028979,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/2268-session-create-flags",
+    "target_sha": "e6fa8477d00898501c01468b48ce80a8e8de39ac",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/40075028979",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "fe2b3c2ac7d747fbdeb30a54ca70ac78939fb545b2ca5a2595218f9b8b20ebb9"
+  },
+  "record": "runs/2026-10-24/40075028979-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "147393daa73cbf3da35d9d800ef49acffcd66022988b68bcfef06530b5ac9132"
+}
