@@ -36,3 +36,10 @@
 - Categories: agents, knowledge, provenance, research, skills
 - Reason: Add exact-commit canonical source for verified article status
 - Source: https://github.com/BestNathan/nession/issues/2343
+
+## 2026-10-24T12:05:00Z | update | Karpathy LLM Wiki principles for Nession project knowledge
+- Path: topics/engineering/karpathy-llm-wiki-principles-for-nession-project-knowledge.md
+- Topic: engineering
+- Categories: agents, knowledge, provenance, research, skills
+- Reason: Point verified article provenance at the merged canonical Skill commit after the live audit rejected the previous source reference
+- Source: https://github.com/BestNathan/nession/issues/2343
