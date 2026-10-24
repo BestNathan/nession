@@ -1,0 +1,554 @@
+{
+  "schema_version": 1,
+  "kind": "agent_execution_trace",
+  "identity": {
+    "workflow_id": "agent-provider-smoke",
+    "github_run_id": 40067417855,
+    "github_run_attempt": 1,
+    "unique_run_name": "40067417855-1-issue-1997-review-canary-claude-code",
+    "repository": "BestNathan/nession"
+  },
+  "task": {
+    "id": "issue-1997-review-canary",
+    "type": "review",
+    "issue": 1997,
+    "target_sha": "3d8e3807cc01f6082734b8d0ba458217c28f60a4",
+    "pr": 2176
+  },
+  "agent": {
+    "id": "review-qwen-01",
+    "role": "reviewer",
+    "provider": "claude-code",
+    "harness_sha256": null
+  },
+  "timing": {
+    "started_at": "2026-10-24T05:45:01.325Z",
+    "finished_at": "2026-10-24T05:45:40.643Z"
+  },
+  "coverage": {
+    "model": "observed",
+    "tools": "partial",
+    "skills": "unobserved",
+    "mcp": "unobserved"
+  },
+  "events": [
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "model.usage",
+      "sequence": 0,
+      "identity": {
+        "agent_id": "review-qwen-01",
+        "role": "reviewer",
+        "issue": 1997,
+        "github_run_id": 40067417855,
+        "github_run_attempt": 1
+      },
+      "data": {
+        "usage": {
+          "input": 3017,
+          "output": 0,
+          "cache_read": null,
+          "cache_write": null,
+          "reasoning": null
+        },
+        "request_id": null,
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "tool.started",
+      "sequence": 1,
+      "identity": {
+        "agent_id": "review-qwen-01",
+        "role": "reviewer",
+        "issue": 1997,
+        "github_run_id": 40067417855,
+        "github_run_attempt": 1
+      },
+      "data": {
+        "call_id": "toolu_5dc0311ebf54400ca1cf2fe5",
+        "tool": {
+          "id": "repo.read",
+          "native_name": "Read",
+          "observed": true
+        },
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "model.usage",
+      "sequence": 2,
+      "identity": {
+        "agent_id": "review-qwen-01",
+        "role": "reviewer",
+        "issue": 1997,
+        "github_run_id": 40067417855,
+        "github_run_attempt": 1
+      },
+      "data": {
+        "usage": {
+          "input": 3017,
+          "output": 0,
+          "cache_read": null,
+          "cache_write": null,
+          "reasoning": null
+        },
+        "request_id": null,
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "tool.completed",
+      "sequence": 3,
+      "identity": {
+        "agent_id": "review-qwen-01",
+        "role": "reviewer",
+        "issue": 1997,
+        "github_run_id": 40067417855,
+        "github_run_attempt": 1
+      },
+      "data": {
+        "call_id": "toolu_5dc0311ebf54400ca1cf2fe5",
+        "tool": {
+          "id": "repo.read",
+          "native_name": "Read",
+          "observed": true
+        },
+        "status": "completed",
+        "duration_ms": null,
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "model.usage",
+      "sequence": 4,
+      "identity": {
+        "agent_id": "review-qwen-01",
+        "role": "reviewer",
+        "issue": 1997,
+        "github_run_id": 40067417855,
+        "github_run_attempt": 1
+      },
+      "data": {
+        "usage": {
+          "input": 3017,
+          "output": 0,
+          "cache_read": null,
+          "cache_write": null,
+          "reasoning": null
+        },
+        "request_id": null,
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "tool.started",
+      "sequence": 5,
+      "identity": {
+        "agent_id": "review-qwen-01",
+        "role": "reviewer",
+        "issue": 1997,
+        "github_run_id": 40067417855,
+        "github_run_attempt": 1
+      },
+      "data": {
+        "call_id": "toolu_8bc732ed4f1a4f3a9f8bba46",
+        "tool": {
+          "id": "repo.search",
+          "native_name": "Grep",
+          "observed": true
+        },
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "model.usage",
+      "sequence": 6,
+      "identity": {
+        "agent_id": "review-qwen-01",
+        "role": "reviewer",
+        "issue": 1997,
+        "github_run_id": 40067417855,
+        "github_run_attempt": 1
+      },
+      "data": {
+        "usage": {
+          "input": 3017,
+          "output": 0,
+          "cache_read": null,
+          "cache_write": null,
+          "reasoning": null
+        },
+        "request_id": null,
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "tool.completed",
+      "sequence": 7,
+      "identity": {
+        "agent_id": "review-qwen-01",
+        "role": "reviewer",
+        "issue": 1997,
+        "github_run_id": 40067417855,
+        "github_run_attempt": 1
+      },
+      "data": {
+        "call_id": "toolu_8bc732ed4f1a4f3a9f8bba46",
+        "tool": {
+          "id": "repo.search",
+          "native_name": "Grep",
+          "observed": true
+        },
+        "status": "completed",
+        "duration_ms": null,
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "model.usage",
+      "sequence": 8,
+      "identity": {
+        "agent_id": "review-qwen-01",
+        "role": "reviewer",
+        "issue": 1997,
+        "github_run_id": 40067417855,
+        "github_run_attempt": 1
+      },
+      "data": {
+        "usage": {
+          "input": 3017,
+          "output": 0,
+          "cache_read": null,
+          "cache_write": null,
+          "reasoning": null
+        },
+        "request_id": null,
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "tool.started",
+      "sequence": 9,
+      "identity": {
+        "agent_id": "review-qwen-01",
+        "role": "reviewer",
+        "issue": 1997,
+        "github_run_id": 40067417855,
+        "github_run_attempt": 1
+      },
+      "data": {
+        "call_id": "toolu_2f7915a8d0f643e5acf1280f",
+        "tool": {
+          "id": "repo.search",
+          "native_name": "Grep",
+          "observed": true
+        },
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "model.usage",
+      "sequence": 10,
+      "identity": {
+        "agent_id": "review-qwen-01",
+        "role": "reviewer",
+        "issue": 1997,
+        "github_run_id": 40067417855,
+        "github_run_attempt": 1
+      },
+      "data": {
+        "usage": {
+          "input": 3017,
+          "output": 0,
+          "cache_read": null,
+          "cache_write": null,
+          "reasoning": null
+        },
+        "request_id": null,
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "tool.completed",
+      "sequence": 11,
+      "identity": {
+        "agent_id": "review-qwen-01",
+        "role": "reviewer",
+        "issue": 1997,
+        "github_run_id": 40067417855,
+        "github_run_attempt": 1
+      },
+      "data": {
+        "call_id": "toolu_2f7915a8d0f643e5acf1280f",
+        "tool": {
+          "id": "repo.search",
+          "native_name": "Grep",
+          "observed": true
+        },
+        "status": "completed",
+        "duration_ms": null,
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "model.usage",
+      "sequence": 12,
+      "identity": {
+        "agent_id": "review-qwen-01",
+        "role": "reviewer",
+        "issue": 1997,
+        "github_run_id": 40067417855,
+        "github_run_attempt": 1
+      },
+      "data": {
+        "usage": {
+          "input": 3017,
+          "output": 0,
+          "cache_read": null,
+          "cache_write": null,
+          "reasoning": null
+        },
+        "request_id": null,
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "tool.started",
+      "sequence": 13,
+      "identity": {
+        "agent_id": "review-qwen-01",
+        "role": "reviewer",
+        "issue": 1997,
+        "github_run_id": 40067417855,
+        "github_run_attempt": 1
+      },
+      "data": {
+        "call_id": "toolu_a47165e9814f48b689c3d94c",
+        "tool": {
+          "id": "repo.search",
+          "native_name": "Grep",
+          "observed": true
+        },
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "model.usage",
+      "sequence": 14,
+      "identity": {
+        "agent_id": "review-qwen-01",
+        "role": "reviewer",
+        "issue": 1997,
+        "github_run_id": 40067417855,
+        "github_run_attempt": 1
+      },
+      "data": {
+        "usage": {
+          "input": 3017,
+          "output": 0,
+          "cache_read": null,
+          "cache_write": null,
+          "reasoning": null
+        },
+        "request_id": null,
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "tool.completed",
+      "sequence": 15,
+      "identity": {
+        "agent_id": "review-qwen-01",
+        "role": "reviewer",
+        "issue": 1997,
+        "github_run_id": 40067417855,
+        "github_run_attempt": 1
+      },
+      "data": {
+        "call_id": "toolu_a47165e9814f48b689c3d94c",
+        "tool": {
+          "id": "repo.search",
+          "native_name": "Grep",
+          "observed": true
+        },
+        "status": "completed",
+        "duration_ms": null,
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "model.usage",
+      "sequence": 16,
+      "identity": {
+        "agent_id": "review-qwen-01",
+        "role": "reviewer",
+        "issue": 1997,
+        "github_run_id": 40067417855,
+        "github_run_attempt": 1
+      },
+      "data": {
+        "usage": {
+          "input": 3017,
+          "output": 0,
+          "cache_read": null,
+          "cache_write": null,
+          "reasoning": null
+        },
+        "request_id": null,
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "tool.started",
+      "sequence": 17,
+      "identity": {
+        "agent_id": "review-qwen-01",
+        "role": "reviewer",
+        "issue": 1997,
+        "github_run_id": 40067417855,
+        "github_run_attempt": 1
+      },
+      "data": {
+        "call_id": "toolu_8c11be0159ee4c9bb24d6dd0",
+        "tool": {
+          "id": "repo.search",
+          "native_name": "Grep",
+          "observed": true
+        },
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "model.usage",
+      "sequence": 18,
+      "identity": {
+        "agent_id": "review-qwen-01",
+        "role": "reviewer",
+        "issue": 1997,
+        "github_run_id": 40067417855,
+        "github_run_attempt": 1
+      },
+      "data": {
+        "usage": {
+          "input": 3017,
+          "output": 0,
+          "cache_read": null,
+          "cache_write": null,
+          "reasoning": null
+        },
+        "request_id": null,
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "tool.completed",
+      "sequence": 19,
+      "identity": {
+        "agent_id": "review-qwen-01",
+        "role": "reviewer",
+        "issue": 1997,
+        "github_run_id": 40067417855,
+        "github_run_attempt": 1
+      },
+      "data": {
+        "call_id": "toolu_8c11be0159ee4c9bb24d6dd0",
+        "tool": {
+          "id": "repo.search",
+          "native_name": "Grep",
+          "observed": true
+        },
+        "status": "completed",
+        "duration_ms": null,
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "model.usage",
+      "sequence": 20,
+      "identity": {
+        "agent_id": "review-qwen-01",
+        "role": "reviewer",
+        "issue": 1997,
+        "github_run_id": 40067417855,
+        "github_run_attempt": 1
+      },
+      "data": {
+        "usage": {
+          "input": 3017,
+          "output": 0,
+          "cache_read": null,
+          "cache_write": null,
+          "reasoning": null
+        },
+        "request_id": null,
+        "observation": "native-event"
+      }
+    },
+    {
+      "schema_version": 1,
+      "kind": "agent_execution_event",
+      "type": "model.usage",
+      "sequence": 21,
+      "identity": {
+        "agent_id": "review-qwen-01",
+        "role": "reviewer",
+        "issue": 1997,
+        "github_run_id": 40067417855,
+        "github_run_attempt": 1
+      },
+      "data": {
+        "usage": {
+          "input": 3017,
+          "output": 0,
+          "cache_read": null,
+          "cache_write": null,
+          "reasoning": null
+        },
+        "request_id": null,
+        "observation": "native-event"
+      }
+    }
+  ]
+}
