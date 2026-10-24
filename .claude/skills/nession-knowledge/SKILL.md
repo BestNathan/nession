@@ -91,6 +91,10 @@ At drafting or materially amending any Requirement, use the contract in [knowled
 
 Fill **related IDs/search, rationale, owner, timing and evidence**. At Issue creation this is planned impact; revisit after code/doc decision and acceptance. Product/Security/Protocol changes may require a knowledge revision, but not all Issues do. A pending required knowledge write is disclosed at handoff and closed only after post-write readback receipt, not from a draft or model assertion. Historical knowledge must remain retrievable even after its successor is live.
 
+## Scheduled read-only integrity audit
+
+The main-owned **CI / Knowledge Ledger Audit** workflow (`.github/workflows/ci-knowledge-ledger-audit.yml`) checks the live `knowledge` branch every six hours, on manual dispatch, and when its audit implementation changes. It anchors the original orphan root SHA outside the knowledge ref, checks every descendant commit and exact record/receipt metadata and emits a bounded GitHub Actions receipt. Failed audit evidence **never** authorizes an automatic reset or rewrite. This is detection, not writer authentication, protected history or an independent WORM anchor.
+
 ## Stop conditions
 
 Stop the update if the orphan ref is missing/unavailable, current source truth cannot be verified, the ID has multiple competing owners, a security leak might be included, or an untrusted PR/Agent would need Git write credentials. Keep result `Pending` and name the owner to resolve it.
