@@ -6,6 +6,11 @@ on:
   workflow_run:
     workflows: ["Deploy / Identity"]
     types: [completed]
+  # Backstop for a source run that a GITHUB_TOKEN-triggered dispatch created
+  # (GitHub suppresses its downstream workflow_run events). Schedule-only, so a
+  # privileged Store writer still has no arbitrary ref-selected dispatch.
+  schedule:
+    - cron: '17 * * * *'
 
 permissions:
   actions: read
@@ -18,7 +23,7 @@ concurrency:
 
 jobs:
   ingest:
-    if: github.event.workflow_run.conclusion == 'success'
+    if: github.event_name == 'schedule' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -33,14 +38,67 @@ jobs:
         with:
           node-version: '24'
 
+      - name: Resolve source run
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_run" ]]; then
+            cp "$GITHUB_EVENT_PATH" "$RUNNER_TEMP/source-event.json"
+            {
+              echo "SOURCE_RUN_ID=${{ github.event.workflow_run.id }}"
+              echo "SOURCE_RUN_ATTEMPT=${{ github.event.workflow_run.run_attempt }}"
+              echo "SOURCE_WORKFLOW_URL=${{ github.event.workflow_run.html_url }}"
+              echo "SOURCE_EVENT_PATH=$RUNNER_TEMP/source-event.json"
+            } >> "$GITHUB_ENV"
+            exit 0
+          fi
+          ingested=''
+          if git -C trusted fetch --depth=1 origin acceptance-results 2>/dev/null; then
+            ingested=$(git -C trusted ls-tree -r --name-only FETCH_HEAD || true)
+          fi
+          gh run list --workflow deploy-identity.yml --limit 40 \
+            --json databaseId,attempt,status,conclusion,url \
+            --jq '.[] | select(.status == "completed" and .conclusion == "success")
+              | [.databaseId, .attempt, .url] | @tsv' |
+          while IFS=$'\t' read -r run_id run_attempt run_url; do
+            [[ -n "${run_id}" ]] || continue
+            if grep -q "/${run_id}-${run_attempt}/deployment/" <<< "${ingested}"; then
+              continue
+            fi
+            run="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}")"
+            jq -e --arg repo "${GITHUB_REPOSITORY}" --arg attempt "${run_attempt}" '
+              .repository.full_name == $repo and
+              .head_repository.full_name == $repo and
+              .name == "Deploy / Identity" and
+              (.path | split("@")[0]) == ".github/workflows/deploy-identity.yml" and
+              .event == "workflow_dispatch" and
+              .head_branch == "main" and
+              .status == "completed" and
+              .conclusion == "success" and
+              (.run_attempt | tostring) == $attempt
+            ' <<< "${run}" >/dev/null || {
+              echo "::error::listed source run is not a trusted completed Deploy / Identity run"; exit 1; }
+            jq -n --argjson run "${run}" '{workflow_run: $run}' > "$RUNNER_TEMP/source-event.json"
+            {
+              echo "SOURCE_RUN_ID=${run_id}"
+              echo "SOURCE_RUN_ATTEMPT=${run_attempt}"
+              echo "SOURCE_WORKFLOW_URL=${run_url}"
+              echo "SOURCE_EVENT_PATH=$RUNNER_TEMP/source-event.json"
+            } >> "$GITHUB_ENV"
+            break
+          done
+
       - name: Self-test trusted identity tooling
         working-directory: trusted
         run: ./gates/run deployment-identity-selftest
 
       - name: Download source deployment attestations
+        if: env.SOURCE_RUN_ID != ''
         env:
           GH_TOKEN: ${{ github.token }}
-          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+          SOURCE_RUN_ID: ${{ env.SOURCE_RUN_ID }}
         run: |
           set -euo pipefail
           mkdir -p incoming
@@ -62,6 +120,7 @@ jobs:
 
       - name: Validate and prepare immutable records
         id: records
+        if: env.SOURCE_RUN_ID != ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -76,7 +135,7 @@ jobs:
             # Never create a persistent path until the GitHub-owned source run
             # identity and artifact environment have been attested.
             durable_path="$(node trusted/scripts/deployment-attestation-ingest.mjs attest \
-              "$receipt" "$artifact_name" "$GITHUB_EVENT_PATH")"
+              "$receipt" "$artifact_name" "$SOURCE_EVENT_PATH")"
             printf '%s\t%s\t%s\n' "$receipt" "$artifact_name" "$durable_path" \
               >> "${RUNNER_TEMP}/records-to-ingest.tsv"
             count=$((count + 1))
@@ -84,7 +143,7 @@ jobs:
           echo "count=${count}" >> "${GITHUB_OUTPUT}"
 
       - name: Mint scoped App token for orphan Run Store updates
-        if: (vars.RUN_STORE_WRITER_MODE == '' || vars.RUN_STORE_WRITER_MODE == 'app') && steps.records.outputs.count != '0'
+        if: (vars.RUN_STORE_WRITER_MODE == '' || vars.RUN_STORE_WRITER_MODE == 'app') && env.SOURCE_RUN_ID != '' && steps.records.outputs.count != '0'
         id: store_app
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
         with:
@@ -93,7 +152,7 @@ jobs:
           repositories: nession
           permission-contents: write
       - name: Reject unrecognized writer mode or unavailable App token
-        if: steps.records.outputs.count != '0'
+        if: env.SOURCE_RUN_ID != '' && steps.records.outputs.count != '0'
         env:
           WRITER_MODE: ${{ vars.RUN_STORE_WRITER_MODE }}
           APP_TOKEN: ${{ steps.store_app.outputs.token }}
@@ -106,7 +165,7 @@ jobs:
           esac
 
       - name: Initialize append-only results branch
-        if: steps.records.outputs.count != '0'
+        if: env.SOURCE_RUN_ID != '' && steps.records.outputs.count != '0'
         env:
           GH_TOKEN: ${{ vars.RUN_STORE_WRITER_MODE == 'legacy' && secrets.GITHUB_TOKEN || steps.store_app.outputs.token }}
         run: |
@@ -135,9 +194,9 @@ jobs:
           fi
 
       - name: Append compact immutable records and SHA indexes
-        if: steps.records.outputs.count != '0'
+        if: env.SOURCE_RUN_ID != '' && steps.records.outputs.count != '0'
         env:
-          SOURCE_WORKFLOW_URL: ${{ github.event.workflow_run.html_url }}
+          SOURCE_WORKFLOW_URL: ${{ env.SOURCE_WORKFLOW_URL }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
@@ -147,7 +206,7 @@ jobs:
             candidate="$(mktemp)"
             node trusted/scripts/deployment-attestation-ingest.mjs enrich \
               "${receipt}" "${artifact_name}" "${candidate}" \
-              "${SOURCE_WORKFLOW_URL}" "${durable_path}" "${GITHUB_EVENT_PATH}"
+              "${SOURCE_WORKFLOW_URL}" "${durable_path}" "$SOURCE_EVENT_PATH"
             node trusted/scripts/deployment-attestation-ingest.mjs validate "${candidate}" >/dev/null
             if [[ -e "${destination}" ]]; then
               cmp -s "${destination}" "${candidate}" || {
@@ -184,7 +243,7 @@ jobs:
           if git -C results-repo diff --cached --quiet; then
             echo "Idempotent deployment ingestion retry: identical durable record and index bytes"
           else
-            git -C results-repo commit -m "deployment: ingest run ${{ github.event.workflow_run.id }} attempt ${{ github.event.workflow_run.run_attempt }}"
+            git -C results-repo commit -m "deployment: ingest run ${{ env.SOURCE_RUN_ID }} attempt ${{ env.SOURCE_RUN_ATTEMPT }}"
             node trusted/scripts/run-store-cas-push.mjs acceptance-results "${GITHUB_WORKSPACE}/results-repo"
           fi
 
@@ -216,8 +275,15 @@ jobs:
           {
             echo "## Deployment identity ingestion"
             echo
-            echo "- Source run: ${{ github.event.workflow_run.html_url }}"
-            echo "- Source conclusion: \`${{ github.event.workflow_run.conclusion }}\`"
-            echo "- Compact records discovered: \`${{ steps.records.outputs.count || '0' }}\`"
+            if [[ -n "${SOURCE_RUN_ID:-}" ]]; then
+              echo "- Source run: ${SOURCE_WORKFLOW_URL}"
+              echo "- Source conclusion: \`success\`"
+              echo "- Compact records discovered: \`${{ steps.records.outputs.count || '0' }}\`"
+            elif [[ "${GITHUB_EVENT_NAME}" == "schedule" ]]; then
+              echo "No successful \`Deploy / Identity\` run is pending ingestion."
+            else
+              echo "- Source run: ${SOURCE_WORKFLOW_URL}"
+              echo "- Compact records discovered: \`${{ steps.records.outputs.count || '0' }}\`"
+            fi
             echo "- Durable branch: \`acceptance-results\`"
           } >> "${GITHUB_STEP_SUMMARY}"
