@@ -3,6 +3,7 @@
 // selected main-push run, workflow success alone, or arbitrary branch dispatch
 // with a fully verified all-ID result.
 import assert from 'node:assert/strict';
+import { isTrustedMainFullEvent } from './e2e-regression-policy.mjs';
 
 const SHA=/^[a-f0-9]{40}$/;
 const ID=/^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -16,7 +17,7 @@ const REQUIRED=[
 export function attestFullRegression({targetSha,run,job,log}){
   if(!SHA.test(targetSha)||run?.name!=='E2E / Full Regression'||
     String(run?.path??'').replace(/@refs\/[^\s]+$/,'')!=='.github/workflows/e2e-full-regression.yml'||
-    !['schedule','workflow_dispatch'].includes(run.event)||
+    !isTrustedMainFullEvent(run.event)||
     run.head_branch!=='main'||!SHA.test(run.head_sha??'')||
     run.repository?.full_name!==REPO||run.head_repository?.full_name!==REPO||
     run.status!=='completed'||run.conclusion!=='success'||
@@ -126,6 +127,10 @@ function selfTest(){
       passed:2,failed:0,skipped:0,flaky:0,assertions:5}]};
   const log=PREFIX+JSON.stringify(receipt)+'\n',source={targetSha:sha,run,job,log};
   assert.equal(attestFullRegression(source).status,'Pass');
+  // #2323 SC-12: the immediate post-promotion push route is a trusted Main
+  // Full source, not only the scheduled cadence.
+  assert.equal(attestFullRegression({...source,
+    run:{...run,event:'push'}}).status,'Pass');
   // Trusted main workflow dispatch can exercise a historical/release SHA;
   // the target source is authenticated by pinned checkout + per-ID proof.
   assert.equal(attestFullRegression({...source,run:{...run,head_sha:'d'.repeat(40)},

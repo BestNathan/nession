@@ -1,10 +1,13 @@
 #!/usr/bin/env node
-// Main-owned authenticated intake for scheduled Full Regression failures.
-// This records observations only: it never dispatches an Agent or declares Pass.
+// Main-owned authenticated intake for trusted Main Full Regression failures:
+// the scheduled cadence and the immediate post-promotion push route (#2323
+// SC-12). This records observations only: it never dispatches an Agent or
+// declares Pass.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { isTrustedMainFullEvent, TRUSTED_MAIN_FULL_EVENTS } from './e2e-regression-policy.mjs';
 
 const REPO = 'BestNathan/nession';
 const WORKFLOW_PATH = '.github/workflows/e2e-full-regression.yml';
@@ -27,7 +30,7 @@ function verify({ event, run, workflow, jobs, artifacts, candidate, archiveSha25
   assert.equal(workflow?.path, WORKFLOW_PATH);
   assert.equal(workflow?.name, WORKFLOW_NAME);
   assert.equal(workflow?.id, run?.workflow_id);
-  assert.equal(run?.event, 'schedule', 'only scheduled Main runs are eligible in this first slice');
+  assert.ok(isTrustedMainFullEvent(run?.event), 'only trusted Main Full run events are eligible');
   assert.equal(run?.head_branch, 'main');
   assert.equal(run?.status, 'completed');
   assert.equal(run?.conclusion, 'failure');
@@ -141,8 +144,21 @@ function selfTest() {
   assert.equal(result.record.agent_dispatch, 'NOT_AUTHORIZED');
   assert.equal(result.record.candidate.results[0].failures[0].stable_frame, 'terminal-attach.spec.ts:42:9');
   assert.match(result.record_path, new RegExp(sha));
+  // Both trusted Main routes are eligible failure sources; dedup is by
+  // fingerprint, so the same error from either route lands in one Bug.
+  for (const event of TRUSTED_MAIN_FULL_EVENTS) {
+    assert.equal(verify({ ...input, run: { ...run, event } }).record.source.event, event);
+  }
+  // The workflow guard is the first hop of the same policy. Keep it in parity
+  // with the executable owner instead of silently dropping a route.
+  const guard = fs.readFileSync(
+    new URL('../.github/workflows/e2e-full-failure-ingest.yml', import.meta.url), 'utf8');
+  for (const event of TRUSTED_MAIN_FULL_EVENTS) {
+    assert.ok(guard.includes(`github.event.workflow_run.event == '${event}'`),
+      `workflow guard must admit the ${event} Full source route`);
+  }
   for (const bad of [
-    { ...input, run: { ...run, event: 'workflow_dispatch' } },
+    { ...input, run: { ...run, event: 'pull_request' } },
     { ...input, run: { ...run, head_sha: 'c'.repeat(40) } },
     { ...input, archiveSha256: '0'.repeat(64) },
     { ...input, artifacts: { artifacts: [{ ...artifact, workflow_run: { id: 999, head_sha: sha } }] } },
