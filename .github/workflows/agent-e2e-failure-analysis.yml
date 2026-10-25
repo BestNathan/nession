@@ -1,4 +1,5 @@
 name: Agent / E2E Failure Analysis
+run-name: E2E Failure Analysis ${{ inputs.analysis_id }}
 
 env:
   NSESSION_AGENT_WORKFLOW_ID: agent-e2e-failure-analysis
@@ -10,6 +11,10 @@ env:
 on:
   workflow_dispatch:
     inputs:
+      analysis_id:
+        description: 'Durable analysis id (fingerprint digest:epoch) from the trusted outbox'
+        required: true
+        type: string
       request_json:
         description: 'Bounded dispatch request JSON from the trusted failure outbox'
         required: true
@@ -68,6 +73,7 @@ jobs:
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           ANALYSIS_CLAUDE_MODEL: ${{ vars.ANTHROPIC_MODEL || vars.ACCEPTANCE_CLAUDE_MODEL }}
+          ANALYSIS_ID: ${{ inputs.analysis_id }}
           REQUEST_JSON: ${{ inputs.request_json }}
           PATH: ${{ runner.temp }}/claude-cli/node_modules/.bin:/usr/local/bin:/usr/bin:/bin
         run: |
@@ -75,7 +81,11 @@ jobs:
           [[ -n "${ANALYSIS_CLAUDE_MODEL}" ]] || {
             echo '::error::the analysis gateway model is not configured'; exit 1; }
           mkdir -p "$RUNNER_TEMP/analysis"
+          [[ "${ANALYSIS_ID}" =~ ^[a-f0-9]{64}:[1-9][0-9]*$ ]] || {
+            echo '::error::analysis id is not a durable fingerprint epoch'; exit 1; }
           printf '%s' "$REQUEST_JSON" > "$RUNNER_TEMP/analysis/request.json"
+          jq -e --arg id "${ANALYSIS_ID}"             '.fingerprint == ("e2e1:" + ($id | split(":")[0]))'             "$RUNNER_TEMP/analysis/request.json" >/dev/null || {
+            echo '::error::request fingerprint does not match the analysis id'; exit 1; }
           node scripts/e2e-failure-analysis-agent.mjs run \
             "$RUNNER_TEMP/analysis/request.json" "$GITHUB_WORKSPACE" \
             "$RUNNER_TEMP/analysis/diagnosis.json" "$RUNNER_TEMP/analysis/agent-telemetry.json"
