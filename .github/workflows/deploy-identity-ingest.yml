@@ -7,12 +7,15 @@ on:
     workflows: ["Deploy / Identity"]
     types: [completed]
   # Backstop for a source run that a GITHUB_TOKEN-triggered dispatch created
-  # (GitHub suppresses its downstream workflow_run events). Schedule-only, so a
-  # privileged Store writer still has no arbitrary ref-selected dispatch. Three
-  # ticks an hour drain the at-most-two lane refreshes a scheduler tick can
-  # suppress.
+  # (GitHub suppresses its downstream workflow_run events). Both fallbacks are
+  # unattended, so a privileged Store writer still has no arbitrary
+  # ref-selected dispatch. GitHub drops scheduled deliveries in this
+  # repository (two consecutive ticks were lost after this schedule merged),
+  # so a main push is the reliable trigger: every merge drains the backlog.
   schedule:
     - cron: '7,27,47 * * * *'
+  push:
+    branches: [main]
 
 permissions:
   actions: read
@@ -25,7 +28,7 @@ concurrency:
 
 jobs:
   ingest:
-    if: github.event_name == 'schedule' || github.event.workflow_run.conclusion == 'success'
+    if: github.event_name == 'schedule' || github.event_name == 'push' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -288,7 +291,7 @@ jobs:
               echo "- Source run: ${SOURCE_WORKFLOW_URL}"
               echo "- Source conclusion: \`success\`"
               echo "- Compact records discovered: \`${{ steps.records.outputs.count || '0' }}\`"
-            elif [[ "${GITHUB_EVENT_NAME}" == "schedule" ]]; then
+            elif [[ "${GITHUB_EVENT_NAME}" == "schedule" || "${GITHUB_EVENT_NAME}" == "push" ]]; then
               echo "No successful \`Deploy / Identity\` run is pending ingestion."
             else
               echo "- Source run: ${SOURCE_WORKFLOW_URL}"
