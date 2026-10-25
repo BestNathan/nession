@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "kind": "agent_workflow_run",
+  "identity": {
+    "workflow_id": "requirement-acceptance",
+    "github_workflow": "Agent / SC Acceptance",
+    "github_run_id": 40181089868,
+    "github_run_attempt": 1,
+    "job": "execute",
+    "repository": "BestNathan/nession",
+    "event": "workflow_dispatch",
+    "unique_run_name": "40181089868-1-issue-2218-post-merge"
+  },
+  "task": {
+    "id": "issue-2218-post-merge",
+    "type": "acceptance",
+    "issue": 2218,
+    "stage": "post-merge",
+    "target_ref": "c427ab6a1cb53c1f4b3a0f01bd1db072866fddac",
+    "deployment": null
+  },
+  "agent": {
+    "provider": "claude-code",
+    "id": "legacy-acceptance-claude-code",
+    "role": "acceptor",
+    "harness_sha256": null,
+    "checkpoint_id": null,
+    "model": {
+      "id": "qwen3.7-plus",
+      "request_model": "qwen3.7-plus",
+      "backend_mapping": "qwen-configured-gateway"
+    },
+    "run_id": "f87691d3-4959-44ec-9aa4-c999f13d17b8",
+    "request_id": null,
+    "status": "finished",
+    "prompt": {
+      "id": "acceptance",
+      "version": "v3",
+      "sha256": "849b0133e640731fef0c0fd28ffdc71f3ac858e59a4ce4837802e5eed4b4da5e"
+    }
+  },
+  "execution": {
+    "turns": 1,
+    "model_requests": null,
+    "tools": {
+      "observed": false,
+      "total": null,
+      "unique": null,
+      "by_name": null
+    }
+  },
+  "tokens": {
+    "input": 6,
+    "output": 2175,
+    "cache_read": 8586,
+    "cache_write": 13156,
+    "reasoning": null,
+    "total": 23923
+  },
+  "cost": {
+    "raw_usd": null,
+    "charged_usd": null,
+    "estimated_usd": null
+  },
+  "timing": {
+    "started_at": "2026-10-25T09:33:23.328Z",
+    "finished_at": "2026-10-25T09:34:02.401Z",
+    "agent_duration_ms": 38276,
+    "workflow_duration_ms": null
+  },
+  "result": {
+    "status": "completed",
+    "pass": 1,
+    "pending": 0,
+    "fail": 0,
+    "na": 0
+  }
+}
