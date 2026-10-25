@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "7b34ae06510c11aabeeaa6f3fa16e65f4437bf24f4e8c30f33fb83f0be1e1ccb",
+  "run_id": 40163511714,
+  "run_attempt": 2,
+  "issue": 2378,
+  "criterion": "SC-02",
+  "criterion_text": "Real isolated tmux `-C` and `-CC` capture Cases distinguish literal `%`-prefixed pane content from protocol notifications and preserve all supported capture bytes/line boundaries without breaking forward-compatible notifications.",
+  "stage": "post-merge",
+  "target_sha": "838126231e2d99bd42570bc2baf55f61e1c0cf9c",
+  "contract_sha256": "774f62b94aa5f635a3fd6ef1fae396ae0bb062cdb1fc85ed54922019f69b5f0a",
+  "case_revision": "838126231e2d99bd42570bc2baf55f61e1c0cf9c",
+  "case_tree_sha": "317a84e7227e7098aeefa6f5cfaf8680e73c33be",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-25T04:56:54.873Z",
+  "finished_at": "2026-10-25T04:57:30.144Z",
+  "duration_ms": 35271,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "tmux output is framed as body: empty lines and notification-shaped pane lines (%exit, %output, %layout-change, %window-resize, %begin) are preserved by the typed client and by real isolated tmux captures on both transports, and an independently generated resize never enters the body",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "tmux executable: tmux 3.4"
+        },
+        {
+          "type": "runtime",
+          "value": "deterministic Client framing and %exit-collision tests passed at exact checkout SHA 838126231e2d99bd42570bc2baf55f61e1c0cf9c"
+        },
+        {
+          "type": "runtime",
+          "value": "real isolated tmux -C and -CC captures preserved notification-shaped lines and the attachment stayed usable"
+        },
+        {
+          "type": "runtime",
+          "value": "a real resize during an open capture response arrived after the block and never entered the body"
+        }
+      ],
+      "duration_ms": 35250,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40163511714,
+      "run_attempt": 2,
+      "event": "push",
+      "head_sha": "838126231e2d99bd42570bc2baf55f61e1c0cf9c",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40163511714",
+    "record_path": "runs/2026-10-25/40163511714-2/2378/SC-02.json",
+    "source_result_sha256": "8170b658f78f8e5270ff9e5209713ce642c3a8540bac757011f592bc8c69d48d"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40163511714-2",
+    "sha256": "8170b658f78f8e5270ff9e5209713ce642c3a8540bac757011f592bc8c69d48d",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40163511714",
+    "durability": "time-limited; object archival not configured"
+  }
+}
