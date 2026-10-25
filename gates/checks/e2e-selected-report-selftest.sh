@@ -16,7 +16,7 @@ gate_check() {
   gate_require_command node "Install Node.js and rerun the E2E contract Gate." || return $?
   gate_run_invariant node e2e/runner/selected-report.mjs self-test
   gate_run_invariant node e2e/runner/e2e-full-per-id-receipt.mjs self-test
-  gate_run_invariant node scripts/e2e-regression-policy.mjs self-test
+  gate_run_invariant node scripts/e2e-regression-policy.mjs self-test && node scripts/e2e-full-applicability.mjs self-test
   gate_run_invariant node scripts/verification-full-regression-evidence.mjs self-test
   #2327 duplicate analysis policy fixture
   gate_run_invariant node scripts/e2e-failure-admission.mjs self-test
