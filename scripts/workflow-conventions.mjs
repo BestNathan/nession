@@ -19,6 +19,7 @@ export const CATALOG = [
   ['agent-develop', 'agent-develop.yml', 'Agent / Development', 'agent-develop.yml', 'Agent / Development', 'agent'],
   ['agent-staging-developer-canary', 'agent-staging-developer-canary.yml', 'Agent / Staging Developer Canary', 'agent-staging-developer-canary.yml', 'Agent / Staging Developer Canary', 'agent'],
   ['agent-review', 'agent-review.yml', 'Agent / Review', 'agent-review.yml', 'Agent / Review', 'agent'],
+  ['agent-e2e-failure-analysis', 'agent-e2e-failure-analysis.yml', 'Agent / E2E Failure Analysis', 'agent-e2e-failure-analysis.yml', 'Agent / E2E Failure Analysis', 'agent'],
   ['store-agent-dispatch-reconcile', 'store-agent-dispatch-reconcile.yml', 'Store / Agent Dispatch Reconcile', 'store-agent-dispatch-reconcile.yml', 'Store / Agent Dispatch Reconcile', 'store'],
   ['store-agent-development-ingest', 'store-agent-development-ingest.yml', 'Store / Agent Development Ingest', 'store-agent-development-ingest.yml', 'Store / Agent Development Ingest', 'store'],
   ['store-controlled-publisher', 'store-controlled-publisher.yml', 'Store / Controlled Publisher', 'store-controlled-publisher.yml', 'Store / Controlled Publisher', 'store'],
@@ -35,6 +36,7 @@ export const CATALOG = [
   ['store-agent-controller-ingest', 'store-agent-controller-ingest.yml', 'Store / Agent Controller Ingest', 'store-agent-controller-ingest.yml', 'Store / Agent Controller Ingest', 'store'],
   ['acceptance-orchestrator', 'requirement-acceptance.yml', 'Requirement Acceptance', 'acceptance-orchestrator.yml', 'Acceptance / Orchestrator', 'acceptance'],
   ['acceptance-postrun-waker', 'acceptance-postrun-waker.yml', 'Acceptance / Post-Run Waker', 'acceptance-postrun-waker.yml', 'Acceptance / Post-Run Waker', 'acceptance'],
+  ['acceptance-e2e-failure-bug', 'acceptance-e2e-failure-bug.yml', 'Acceptance / E2E Failure Bug', 'acceptance-e2e-failure-bug.yml', 'Acceptance / E2E Failure Bug', 'acceptance'],
   ['acceptance-verified-stage', 'acceptance-verified-stage.yml', 'Acceptance / Verified Issue Stage', 'acceptance-verified-stage.yml', 'Acceptance / Verified Issue Stage', 'acceptance'],
   ['acceptance-quota-recovery', 'acceptance-quota-recovery.yml', 'Acceptance / Quota Recovery', 'acceptance-quota-recovery.yml', 'Acceptance / Quota Recovery', 'acceptance'],
   ['acceptance-cases', 'acceptance-cases.yml', 'Acceptance Cases', 'acceptance-cases.yml', 'Acceptance / Cases', 'acceptance'],
@@ -247,6 +249,12 @@ export function auditWorkflows(files, catalog = CATALOG, { complete = true, trus
     for (const reference of reusableReferences(content)) {
       if (!files.has(reference)) errors.push(file + ': missing reusable workflow path: ' + reference);
     }
+    // A `trusted/` path exists only when trusted main is checked out under
+    // that path. A narrower copy of the prefix dies at runtime on the first
+    // missing module, and a non-required workflow can stay broken unnoticed.
+    if (/(^|[\s"'])trusted\//m.test(content) && !/^\s*path:\s*trusted\s*$/m.test(content)) {
+      errors.push(file + ': references trusted/ without a path: trusted checkout');
+    }
   }
   // The trusted provenance source allowlist is an independent stable owner.
   // Check that registered source paths still exist; don't reimplement its
@@ -309,6 +317,16 @@ function selfTest() {
   const withoutSubscriber = new Map(old);
   withoutSubscriber.delete('subscriber.yml');
   assert.match(auditWorkflows(withoutSubscriber, catalog).errors.join('\n'), /missing workflow/);
+  // A trusted/ path only resolves when the workflow checks main out there.
+  const trustedPath = new Map(old);
+  trustedPath.set('task.yml', old.get('task.yml') +
+    '\n      - run: node trusted/scripts/run-store-integrity.mjs staged agent-store "$store"');
+  assert.match(auditWorkflows(trustedPath, catalog).errors.join('\n'),
+    /task\.yml: references trusted\/ without a path: trusted checkout/);
+  trustedPath.set('task.yml', old.get('task.yml') +
+    '\n      - uses: actions/checkout@v4\n        with:\n          path: trusted\n' +
+    '      - run: node trusted/scripts/run-store-integrity.mjs staged agent-store "$store"');
+  assert.deepEqual(auditWorkflows(trustedPath, catalog).errors, []);
   assert.match(auditWorkflows(old, catalog, { trustedSources: 'const TRUSTED_TELEMETRY_SOURCES = new Map([\n  [\'.github/workflows/missing.yml\', {}],\n]);' }).errors.join('\n'), /telemetry allowlist references absent/);
   assert.deepEqual(upstreamWorkflowNames('on:\n  workflow_run:\n    workflows:\n      - Model\n      - Task\n').names, ['Model', 'Task']);
   assert.match(auditWorkflows(old, catalog, { ownerDocs: '## 3. Current workflow owners\n- \x60.github/workflows/missing.yml\x60\n## 4. Other' }).errors.join('\n'), /CI\/CD Skill references absent workflow/);
@@ -325,7 +343,7 @@ function selfTest() {
   const staleDoc = new Map(docs);
   staleDoc.set('.claude/skills/nession-acceptance/SKILL.md', 'Actions -> Acceptance');
   assert.match(auditWorkflowDocumentation(staleDoc).join('\n'), /missing current workflow display name/);
-  console.log('workflow-conventions: 10 positive/negative scenarios passed');
+  console.log('workflow-conventions: 11 positive/negative scenarios passed');
 }
 
 function check() {

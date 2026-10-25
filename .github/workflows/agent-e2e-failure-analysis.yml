@@ -1,0 +1,113 @@
+name: Agent / E2E Failure Analysis
+run-name: E2E Failure Analysis ${{ inputs.analysis_id }}
+
+env:
+  NSESSION_AGENT_WORKFLOW_ID: agent-e2e-failure-analysis
+
+# Read-only diagnosis of one authenticated E2E failure fingerprint. The trusted
+# failure outbox dispatches this workflow with a bounded request; the model has
+# no Issue, Store, branch or dispatch authority and never writes a Bug itself.
+# A trusted publisher consumes the diagnosis artifact separately.
+on:
+  workflow_dispatch:
+    inputs:
+      analysis_id:
+        description: 'Durable analysis id (fingerprint digest:epoch) from the trusted outbox'
+        required: true
+        type: string
+      request_json:
+        description: 'Bounded dispatch request JSON from the trusted failure outbox'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: agent-e2e-failure-analysis-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  analyze:
+    if: github.repository == 'BestNathan/nession' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: dev-claude-qwen
+    permissions:
+      contents: read
+      actions: read
+      issues: read
+      pull-requests: read
+    steps:
+      - name: Checkout trusted main
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install the pinned Claude CLI
+        env:
+          CLAUDE_CODE_VERSION: ${{ vars.CLAUDE_CODE_VERSION || 'latest' }}
+        run: |
+          set -euo pipefail
+          npm install --prefix "$RUNNER_TEMP/claude-cli" --no-audit --no-fund \
+            "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION"
+          "$RUNNER_TEMP/claude-cli/node_modules/.bin/claude" --version
+
+      - name: Verify the diagnosis contract
+        run: |
+          set -euo pipefail
+          node scripts/lib/agent/selftest.mjs
+          node scripts/e2e-failure-analysis-agent.mjs self-test
+
+      - name: Run the read-only analysis
+        env:
+          ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANALYSIS_CLAUDE_MODEL: ${{ vars.ANTHROPIC_MODEL || vars.ACCEPTANCE_CLAUDE_MODEL }}
+          ANALYSIS_ID: ${{ inputs.analysis_id }}
+          REQUEST_JSON: ${{ inputs.request_json }}
+          PATH: ${{ runner.temp }}/claude-cli/node_modules/.bin:/usr/local/bin:/usr/bin:/bin
+        run: |
+          set -euo pipefail
+          [[ -n "${ANALYSIS_CLAUDE_MODEL}" ]] || {
+            echo '::error::the analysis gateway model is not configured'; exit 1; }
+          mkdir -p "$RUNNER_TEMP/analysis"
+          [[ "${ANALYSIS_ID}" =~ ^[a-f0-9]{64}:[1-9][0-9]*$ ]] || {
+            echo '::error::analysis id is not a durable fingerprint epoch'; exit 1; }
+          printf '%s' "$REQUEST_JSON" > "$RUNNER_TEMP/analysis/request.json"
+          jq -e --arg id "${ANALYSIS_ID}"             '.fingerprint == ("e2e1:" + ($id | split(":")[0]))'             "$RUNNER_TEMP/analysis/request.json" >/dev/null || {
+            echo '::error::request fingerprint does not match the analysis id'; exit 1; }
+          node scripts/e2e-failure-analysis-agent.mjs run \
+            "$RUNNER_TEMP/analysis/request.json" "$GITHUB_WORKSPACE" \
+            "$RUNNER_TEMP/analysis/diagnosis.json" "$RUNNER_TEMP/analysis/agent-telemetry.json"
+          jq '{fingerprint,failure_category,failed_test_ids}' "$RUNNER_TEMP/analysis/diagnosis.json"
+          echo "Read-only diagnosis produced; no Issue, Store or branch write was attempted." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload canonical Agent telemetry
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-telemetry-e2e-failure-analysis-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/analysis/agent-telemetry.json
+            ${{ runner.temp }}/analysis/agent-execution-trace.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload the bounded diagnosis
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-failure-diagnosis-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/analysis/diagnosis.json
+          if-no-files-found: warn
+          retention-days: 30

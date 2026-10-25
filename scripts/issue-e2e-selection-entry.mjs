@@ -114,7 +114,13 @@ export function prepare(event, issues, repoRoot) {
   // at plan time (sync main into staging first); otherwise the captured plan
   // and the ingest rebuild disagree and the exact-head Issue E2E gate stays
   // closed even though the E2E run itself passed.
-  const baseSha = currentBaseSha(repoRoot, pr.base.ref);
+  // A merged push has no stale webhook snapshot to correct: the merge's own
+  // first parent is the exact base commit, and the push checkout's branch tip
+  // IS the merged SHA, so resolving the current tip would collapse base and
+  // head. A PR event still binds the live target tip, not its event snapshot.
+  const baseSha = event.source_event === 'push'
+    ? pr.base.sha
+    : currentBaseSha(repoRoot, pr.base.ref);
   if (baseSha === pr.head.sha) throw Error('current PR base and head SHA are identical');
   if (!issues.length || issues.some(i => !i.body?.includes('## E2E Verification'))) {
     const noImpact = hasVerifiedMetadataOnlyDiff(repoRoot, baseSha, pr.head.sha);
@@ -178,6 +184,23 @@ function selfTest() {
     git('commit','-qm','runtime changed');
     const runtimeHead = git('rev-parse','HEAD');
     assert.equal(prepare(withShas(runtimeHead),[],tmp).mode,'unresolved');
+    // A merged push binds the merge's own first parent. Resolving the branch
+    // tip instead made base equal head and threw 'invalid PR base branch ref'
+    // for every main/staging push selection.
+    const pushEvent = sha => ({
+      repository:{full_name:'BestNathan/nession'}, source_event:'push',
+      pull_request:{ number:17, title:'Refs #1702', body:'Refs #1702',
+        base:{sha:base}, head:{sha, repo:{full_name:'BestNathan/nession'}} },
+    });
+    // The trusted checkout must be the exact pushed SHA, so detach to each.
+    git('checkout','-q','--detach',metadataHead);
+    const pushMetadata = prepare(pushEvent(metadataHead),[],tmp);
+    assert.equal(pushMetadata.base_sha, base);
+    assert.equal(pushMetadata.mode,'not-required');
+    git('checkout','-q','--detach',runtimeHead);
+    const pushRuntime = prepare(pushEvent(runtimeHead),[],tmp);
+    assert.equal(pushRuntime.base_sha, base);
+    assert.equal(pushRuntime.mode,'unresolved');
     fs.mkdirSync(join(tmp,'docs'),{recursive:true});
     git('mv','web/src/App.tsx','docs/App.md');
     git('commit','-qm','runtime file moved into docs');

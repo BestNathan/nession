@@ -1,6 +1,6 @@
 # SC Acceptance Orchestration — operational contract and future deployment boundary
 
-> **Implementation status:** the constrained `## Acceptance Plan` YAML contract is supported for per-SC `when`, `branch`/`environment`, and `method`; main/staging merged-SHA Agent/Case selection, exact target proof, trusted Case ingestion and Issue result projection are operational. New three-column Acceptance Reports derive the compatibility stage from the Plan; historical four-column Reports and issues without a plan remain supported. **Production `when: deployed` execution remains deferred:** an actual environment/revision/digest and authorization boundary must be implemented independently; main merge is not deployment.
+> **Implementation status:** the constrained `## Acceptance Plan` YAML contract is supported for per-SC `when`, `branch`/`environment`, and `method`; main/staging merged-SHA Agent/Case selection, exact target proof, trusted Case ingestion and Issue result projection are operational. New three-column Acceptance Reports derive the compatibility stage from the Plan; historical four-column Reports and issues without a plan remain supported. **`when: deployed` execution is implemented only as an explicit deployed Case run:** `Acceptance / Cases` with `stage=deployed` and `environment` selects an authenticated deployment record (source SHA, GitOps revision, image digests, workload identity) from `acceptance-results` and evaluates only criteria bound to that environment. It is never inferred from a main merge and is not automatically scheduled; **production** environment access and remote execution remain independent future work (#1616).
 
 ## Problem and decision
 
@@ -62,7 +62,7 @@ Legacy stage migration guidance (not always one-to-one):
 | No parser-applied ACK before xterm write callback | PR head | Agent or Case as explicitly selected | If Agent: concrete tests and implementation trace; if runtime proof required: Case with controlled delayed parser |
 | Reconnect replays without gaps | merged staging SHA | Case | Launch Server+Agent+tmux+Web, simulate disconnection/recovery, assert ordered bytes/sequences |
 | Relay and P2P parity across client switch | merged staging SHA | Case | Simulate route switching and multi-client observation; capture assertions/timeline |
-| Behavior against actual deployed production release | deployed digest | Case | Actual revision identity + safe remote observation; future VPN profile as an independently gated prerequisite |
+| Behavior against actual deployed environment | deployed digest | Case | Explicit deployed run with an authenticated revision/digest record; staging lanes have it today, production access and remote observation remain independently gated (#1616) |
 
 The SC definition, **not the Agent's preference**, decides whether Agent-only proof is sufficient. No automatic Agent fallback if a mandatory Case is absent.
 
@@ -103,7 +103,7 @@ PR / merged push / verified deployment event / explicit manual request
 3. `./e2e/run acceptance` owns real source-aligned Case execution; the main-owned `Acceptance / Cases` and `Acceptance / Case Ingest` workflows preserve independent runtime evidence and trusted immutable record projection.
 4. `Acceptance / Orchestrator` owns the PR/merged-SHA routing and Issue-close Guard. Model-backed execution is separated into `Agent / SC Acceptance` and emits canonical telemetry; the source-run path/name and stable logical workflow ID must be checked when renaming.
 5. Real staging and main integration is documented in Issue #1674 and in the evidence below; a main merge is never assumed to be production deployment.
-6. **Still future:** `when: deployed` requires independently authenticated deployment identity, environment, exact artifact revision/digest, safe runtime profile and trusted event/permission boundary. Do not mark deployed-only SCs Pass from an ordinary `main` push.
+6. **Explicit only:** a deployed criterion requires an explicit deployed run with independently authenticated deployment identity, environment, exact artifact revision/digest and a trusted event/permission boundary. Staging lanes provide that identity today; production and remote execution do not. Do not mark deployed-only SCs Pass from an ordinary `main` push.
 
 Owning implementation detail remains in `nession-acceptance`, `nession-writing-requirements`, `nession-gates`, `e2e/README.md`, and `docs/architecture/acceptance-cases.md`. This document governs cross-boundary design decisions, not an alternate executable validator.
 

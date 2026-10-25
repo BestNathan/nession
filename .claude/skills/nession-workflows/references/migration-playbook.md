@@ -36,7 +36,7 @@ There are **19 active workflows** across six main domains and the separately own
 - Actual LLM Agent invocations and orchestrator runs are subscribed by Metrics / Agent Telemetry Ingest. Only a run that produced real model-call telemetry creates usage data. A no-model orchestrator run must not synthesize token/turn records.
 - Untrusted Case/PR-head code cannot hold Issue-write authority. The main-owned trusted evaluator/projector authenticates exact source run/attempt, target SHA, method and immutable SC contract digest.
 
-The current Issue grammar supports optional Acceptance Plan with when = pr / merged / deployed, method = agent / case, and mandatory explicit staging/main branch for merged conditions. Legacy Acceptance Report stages remain required. **Actual production deployed execution is not implemented**: it will need independently authenticated environment, revision/digest and authorization. A main merge is not a production deployment.
+The current Issue grammar supports optional Acceptance Plan with when = pr / merged / deployed, method = agent / case, and mandatory explicit staging/main branch for merged conditions. Legacy Acceptance Report stages remain required. **Deployed execution exists only as an explicit deployed Case run** bound to an authenticated environment/revision/digest record; staging lanes satisfy that today, production and remote execution do not. A main merge is not a deployment.
 
 ## Names, paths and identity are distinct contracts
 

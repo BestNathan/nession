@@ -51,6 +51,11 @@ const TRUSTED_TELEMETRY_SOURCES = new Map([
     events: new Set(['issues', 'workflow_dispatch']),
     workflow_dispatch_main_only: true,
   }],
+  ['.github/workflows/agent-e2e-failure-analysis.yml', {
+    workflow_id: 'agent-e2e-failure-analysis',
+    events: new Set(['workflow_dispatch']),
+    workflow_dispatch_main_only: true,
+  }],
   ['.github/workflows/agent-provider-smoke.yml', {
     workflow_id: 'agent-provider-smoke',
     events: new Set(['push', 'workflow_dispatch']),

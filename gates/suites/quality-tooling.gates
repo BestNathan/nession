@@ -51,6 +51,7 @@ tmux-socket-isolation-selftest
 server-handler-locality-selftest
 server-handler-concurrency-selftest
 agent-provider-contract
+e2e-failure-analysis-selftest
 agent-checkpoint-store
 run-store-integrity
 run-store-inventory

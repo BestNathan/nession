@@ -9,7 +9,7 @@ Acceptance is the executable phase that proves Requirement Success Criteria. It 
 
 Issue structure belongs to `nession-writing-requirements`; Gate semantics belong to `nession-gates`; Agent execution telemetry belongs to `nession-agent-workflow-metrics`.
 
-For workflow taxonomy and the **implemented** `when × target × method` Agent/Case selection, load `nession-workflows` and its acceptance-orchestration reference. The optional `## Acceptance Plan` is validated and used by the active merged-SHA planner, while new three-column Acceptance Reports derive their compatibility stage from the Plan; historical four-column Reports retain explicit Stage. Production `when: deployed` execution remains deferred until an independently authenticated deployment-identity runner exists.
+For workflow taxonomy and the **implemented** `when × target × method` Agent/Case selection, load `nession-workflows` and its acceptance-orchestration reference. The optional `## Acceptance Plan` is validated and used by the active merged-SHA planner, while new three-column Acceptance Reports derive their compatibility stage from the Plan; historical four-column Reports retain explicit Stage. `when: deployed` is executable as an **explicit deployed run**: `Acceptance / Cases` with `stage=deployed` and `environment` selects an authenticated deployment record from `acceptance-results` (source SHA, GitOps revision, image digests, workload identity) and evaluates only criteria bound to that environment. It is never inferred from a main merge and is not yet automatically scheduled; production environment access and remote execution remain owned by #1616.
 
 ## Lifecycle
 
@@ -26,7 +26,7 @@ Requirement Success Criteria
 
 Read the Requirement's current `Success Criteria` and `Acceptance Report`.
 
-For issues with an explicit `## Acceptance Plan`, the trusted executor also selects by `method`: the read-only Agent evaluates only `agent` SCs; Case Coverage and the Case runner evaluate only `case` SCs. `when: deployed` is deferred until actual deployment identity/runner exists, and does not execute as part of an ordinary main push. New three-column Reports inherit stage from the Plan; any explicit Stage in a historical four-column Report must agree with the Plan. Issues without a plan retain historic behavior.
+For issues with an explicit `## Acceptance Plan`, the trusted executor also selects by `method`: the read-only Agent evaluates only `agent` SCs; Case Coverage and the Case runner evaluate only `case` SCs. `when: deployed` does not execute as part of an ordinary main push: it runs only through an explicit deployed Case run that presents an authenticated deployment record for its environment. New three-column Reports inherit stage from the Plan; any explicit Stage in a historical four-column Report must agree with the Plan. Issues without a plan retain historic behavior.
 
 Evaluate only criteria whose declared stage matches the environment/boundary being accepted:
 
@@ -127,4 +127,4 @@ Security boundary: target Case code is read-only (`contents: read`, `issues: rea
 
 For the full creation, stage selection, verifier choice, evidence quality, archive/promotion and future remote-profile rules, read `docs/architecture/acceptance-cases.md`.
 
-For explicit `when: merged` + `method: agent` SCs, `Acceptance / Orchestrator` selects only eligible Issue/SCs on the exact staging/main push SHA using `scripts/select-merged-agents.mjs`. The reusable Agent evaluator is pinned to trusted main, even when the source event is a staging merge. Legacy Issues without an `Acceptance Plan` are excluded from automatic merged-Agent invocations. This does not implement or imply deployed-production verification; `when: deployed` remains a separate future identity and runtime boundary.
+For explicit `when: merged` + `method: agent` SCs, `Acceptance / Orchestrator` selects only eligible Issue/SCs on the exact staging/main push SHA using `scripts/select-merged-agents.mjs`. The reusable Agent evaluator is pinned to trusted main, even when the source event is a staging merge. Legacy Issues without an `Acceptance Plan` are excluded from automatic merged-Agent invocations. This does not implement or imply deployed-production verification: a deployed criterion is proven only by its explicit deployed run with an authenticated deployment record for that environment.

@@ -291,19 +291,29 @@ export async function workflowStats(repository, cutoff7dMs, cutoff30dMs, token,
     cache.set(key,count);
     return count;
   };
-  const overall=await getJson('/repos/'+repository+'/actions/runs?per_page=1',token);
-  if(!Number.isSafeInteger(overall?.total_count)||overall.total_count<0||
-     !Array.isArray(overall.workflow_runs)||
-     (overall.total_count>0&&overall.workflow_runs.length!==1))
-    fail('invalid global Actions workflow-count response',
-      'verify GitHub Actions metadata and repository token.');
-  const [last_7d,last_30d]=await Promise.all([
-    countRange(start7,end),countRange(start30,end),
+  // GitHub caps `total_count`, so no single response may stand in for the
+  // all-time total: the unfiltered endpoint answered 40000 for a repository
+  // whose exact 30-day count is ~48000, and filtered queries cap at 2500.
+  // Derive every reported count from the same cap-aware split, bounding the
+  // all-time window at the repository creation instant.
+  const metadata=await getJson('/repos/'+repository,token);
+  const createdAt=Date.parse(metadata?.created_at??'');
+  if(!Number.isFinite(createdAt)||createdAt>nowMs)
+    fail('invalid repository creation metadata',
+      'verify the authenticated repository response.');
+  const startAll=Math.max(0,Math.floor(createdAt/1000));
+  // Adjacent, non-overlapping second ranges share one cap-aware method and
+  // compose exactly: 7d + rest-of-30d + older-than-30d. This keeps the work
+  // near one 30-day scan instead of three independent scans (~197 vs ~85
+  // queries at current activity), so the 256-query budget keeps headroom.
+  const [last_7d,restOf30d,older]=await Promise.all([
+    countRange(start7,end),countRange(start30,start7-1),countRange(startAll,start30-1),
   ]);
-  if(last_7d>last_30d||last_30d>overall.total_count)
-    fail('inconsistent GitHub Actions activity counts',
-      'retry with a consistent run-list snapshot and retain source provenance.');
-  return {total:overall.total_count,last_7d,last_30d};
+  const last_30d=last_7d+restOf30d;
+  const total=last_30d+older;
+  if(![last_7d,last_30d,total].every(Number.isSafeInteger))
+    fail('Actions activity count overflow','retain exact integer counts.');
+  return {total,last_7d,last_30d};
 }
 
 function readJson(path, label) {
@@ -709,9 +719,19 @@ async function runSelfTest() {
   for(let day=0;day<10;day++)
     for(let i=0;i<1180;i++)
       events.push(now-Math.floor((day+0.5)*DAY_MS));
+  // Older-than-30d runs prove the composed all-time total includes them.
+  for(let i=0;i<100;i++)
+    events.push(now-Math.floor((34.5+i/100)*DAY_MS));
   const requested=[];
+  const meta=endpoint=>{
+    if(endpoint==='/repos/BestNathan/nession')
+      return {created_at:new Date(now-40*DAY_MS).toISOString()};
+    return null;
+  };
   const cappedMetadata=async endpoint=>{
     requested.push(endpoint);
+    const metadata=meta(endpoint);
+    if(metadata)return metadata;
     if(!endpoint.includes('created='))
       return {total_count:12345,workflow_runs:[{created_at:new Date(now).toISOString()}]};
     const range=decodeURIComponent(endpoint.split('created=')[1]);
@@ -722,33 +742,30 @@ async function runSelfTest() {
   };
   const counts=await workflowStats('BestNathan/nession',cutoff7,cutoff30,
     'fixture-token',now,cappedMetadata);
-  assert.deepEqual(counts,{total:12345,last_7d:8260,last_30d:11800});
+  assert.deepEqual(counts,{total:11900,last_7d:8260,last_30d:11800});
   assert.ok(requested.length>5);
   assert.ok(requested.some(x=>x.includes('per_page=1&created=')));
   assert.ok(!requested.some(x=>x.includes('&page=')));
   assert.deepEqual(await workflowStats('BestNathan/nession',cutoff7,cutoff30,
-    'fixture-token',now,async()=>({total_count:0,workflow_runs:[]})),
+    'fixture-token',now,async endpoint=>meta(endpoint)??{total_count:0,workflow_runs:[]}),
   {total:0,last_7d:0,last_30d:0});
   await assert.rejects(()=>workflowStats('BestNathan/nession',cutoff7,cutoff30,
-    'fixture-token',now,async endpoint=>({
+    'fixture-token',now,async endpoint=>meta(endpoint)??{
       total_count:endpoint.includes('created=')?100:1000,
       workflow_runs:[{created_at:'2026-01-01T00:00:00Z'}],
-    })),/not scoped/);
-  await assert.rejects(()=>workflowStats('BestNathan/nession',cutoff7,cutoff30,
-    'fixture-token',now,async endpoint=>({
-      total_count:endpoint.includes('created=')?1500:1000,
-      workflow_runs:[{created_at:'2026-10-10T00:00:00Z'}],
-    })),/inconsistent/);
+    }),/not scoped/);
+  // A capped single API response can never argue with the composed sums: the
+  // unfiltered total_count is no longer read at all (see the fixture above).
   await assert.rejects(()=>workflowStats('foreign/repo',cutoff7,cutoff30,
-    'fixture-token',now,async()=>({total_count:'12000',workflow_runs:[]})),
-  /invalid global/);
-  // Even when all ≥2,000 matching runs have identical second timestamps,
+    'fixture-token',now,async()=>({total_count:'12000'})),
+  /invalid repository creation metadata/);
+  // Even when all >=2,000 matching runs have identical second timestamps,
   // never claim the capped count is precise.
   await assert.rejects(()=>workflowStats('BestNathan/nession',cutoff7,cutoff30,
-    'fixture-token',now,async endpoint=>({
+    'fixture-token',now,async endpoint=>meta(endpoint)??{
       total_count:endpoint.includes('created=')?2500:3000,
       workflow_runs:[{created_at:new Date(now-1000).toISOString()}],
-    })),/cap reached|not scoped/);
+    }),/cap reached|not scoped/);
 
   const svg = renderSvg(fixture, 'dark');
   for (const required of [

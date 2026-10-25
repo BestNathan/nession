@@ -9,6 +9,7 @@ import { renderAcceptancePrompt } from './lib/agent/tasks/acceptance.mjs';
 import { parseModelJson, parseModelJsonWithRepair } from './lib/agent/tasks/model-json.mjs';
 import { promptTelemetry } from './lib/agent/telemetry/prompt.mjs';
 import { providerScopedRunName } from './lib/agent/telemetry/run-name.mjs';
+import { normalizeAcceptanceResult } from './acceptance-result-contract.mjs';
 import { runClaudeCli, normalizeClaudeUsage } from './lib/agent/providers/claude-code.mjs';
 import { runCursorSession, selectCursorModel } from './lib/agent/providers/cursor.mjs';
 
@@ -162,7 +163,66 @@ export async function runAcceptanceAgent(context, provider, workspace) {
   throw new Error('unsupported Acceptance Agent provider: ' + provider);
 }
 
-function telemetryInput(context, providerMeta, result, status = 'completed') {
+// A model can finish with valid JSON that is still not a usable Acceptance
+// result (missing criteria, or Pass/N/A without concrete evidence). That is an
+// execution failure, not a verdict, so retry the same trusted context once and
+// record both attempts. A valid Pending/Fail is a verdict and is never retried.
+export const MAX_ACCEPTANCE_AGENT_ATTEMPTS = 2;
+
+export async function runAcceptanceAgentWithRetry(context, provider, workspace,
+  runAgent = runAcceptanceAgent) {
+  const attempts = [];
+  let lastError = null;
+  let lastMeta = null;
+  for (let attempt = 1; attempt <= MAX_ACCEPTANCE_AGENT_ATTEMPTS; attempt += 1) {
+    const startedAt = new Date().toISOString();
+    const { result, meta } = await runAgent(context, provider, workspace);
+    let structuralError = null;
+    try {
+      normalizeAcceptanceResult(context, result, 'agent');
+    } catch (error) {
+      structuralError = error instanceof Error ? error.message : String(error);
+    }
+    attempts.push({
+      attempt,
+      status: structuralError ? 'invalid-result' : 'valid',
+      error: structuralError,
+      started_at: startedAt,
+      finished_at: new Date().toISOString(),
+      turns: meta?.turns ?? null,
+      tokens: meta?.tokens ?? null,
+    });
+    if (!structuralError) return { result, meta, attempts };
+    lastError = structuralError;
+    lastMeta = meta;
+  }
+  const error = new Error(
+    'acceptance Agent returned structurally invalid output after one retry: ' + lastError);
+  error.agentMeta = lastMeta;
+  error.agentAttempts = attempts;
+  throw error;
+}
+
+// A retried run spent every attempt's tokens; the top-level summary keeps the
+// real spend while attempts[] preserves the per-attempt breakdown.
+function sumAttemptTokens(attempts) {
+  if (!Array.isArray(attempts) || attempts.length < 2) return null;
+  const totals = {};
+  let any = false;
+  for (const key of ['input', 'output', 'cache_read', 'cache_write', 'reasoning']) {
+    let sum = 0;
+    let seen = false;
+    for (const attempt of attempts) {
+      const value = attempt?.tokens?.[key];
+      if (Number.isFinite(value)) { sum += value; seen = true; }
+    }
+    totals[key] = seen ? sum : null;
+    any = any || seen;
+  }
+  return any ? totals : null;
+}
+
+function telemetryInput(context, providerMeta, result, status = 'completed', attempts = null) {
   const counts = { Pass: 0, Pending: 0, Fail: 0, 'N/A': 0 };
   for (const criterion of result?.criteria ?? []) {
     if (Object.hasOwn(counts, criterion.result)) counts[criterion.result] += 1;
@@ -204,7 +264,7 @@ function telemetryInput(context, providerMeta, result, status = 'completed') {
       tool_calls: providerMeta.tool_calls,
       tools_observed: providerMeta.tools_observed,
     },
-    tokens: providerMeta.tokens,
+    tokens: sumAttemptTokens(attempts) ?? providerMeta.tokens,
     cost: providerMeta.cost,
     timing: providerMeta.timing,
     result: {
@@ -214,11 +274,12 @@ function telemetryInput(context, providerMeta, result, status = 'completed') {
       fail: counts.Fail,
       na: counts['N/A'],
     },
+    ...(attempts ? { attempts } : {}),
   };
 }
 
-function writeAcceptanceTelemetry(file, context, providerMeta, result, status = 'completed') {
-  const summary = buildAgentWorkflowTelemetry(telemetryInput(context, providerMeta, result, status));
+function writeAcceptanceTelemetry(file, context, providerMeta, result, status = 'completed', attempts = null) {
+  const summary = buildAgentWorkflowTelemetry(telemetryInput(context, providerMeta, result, status, attempts));
   writeAgentWorkflowTelemetry(file, summary);
   const nativeEvents = providerMeta.native_events ?? [];
   const seen = (type) => nativeEvents.some(event => event.type === type);
@@ -294,7 +355,36 @@ async function selfTest() {
   assert.throws(() => requestedClaudeGatewayModel('qwen', {ANTHROPIC_MODEL:'claude-sonnet-5'}), /Qwen Environment/);
   assert.throws(() => requestedClaudeGatewayModel('qwen', {ANTHROPIC_MODEL:'glm-5'}), /Qwen Environment/);
   assert.equal(requestedClaudeGatewayModel('deepseek', {}), 'claude-sonnet-5');
-  console.log('acceptance-agent self-test: 18 cases passed');
+  // Structural retry: an unusable result is an execution failure, not a
+  // verdict. Retry once with the same context; never retry a valid verdict.
+  const retryContext = { ...context, criteria: [{ criterion: 'SC-01', text: 'works' }] };
+  const meta = { provider: 'qwen', turns: 1, tokens: { input: 1, output: 1 } };
+  const pending = { criteria: [{ criterion: 'SC-01', result: 'Pending',
+    summary: 'awaiting exact-head evidence', evidence: [] }] };
+  const passing = { criteria: [{ criterion: 'SC-01', result: 'Pass',
+    summary: 'verified', evidence: [{ type: 'file', value: 'scripts/fixture.mjs:1' }] }] };
+  let calls = 0;
+  const pendingRun = await runAcceptanceAgentWithRetry(retryContext, 'qwen', '.',
+    async () => { calls += 1; return { result: pending, meta }; });
+  assert.equal(calls, 1, 'a valid Pending is a verdict and must not be retried');
+  assert.equal(pendingRun.attempts.length, 1);
+  assert.equal(pendingRun.attempts[0].status, 'valid');
+  calls = 0;
+  const recovered = await runAcceptanceAgentWithRetry(retryContext, 'qwen', '.', async () => {
+    calls += 1;
+    return { result: calls === 1 ? { criteria: [] } : passing, meta };
+  });
+  assert.equal(calls, 2, 'structurally invalid output retries exactly once');
+  assert.deepEqual(recovered.attempts.map((attempt) => attempt.status), ['invalid-result', 'valid']);
+  assert.match(recovered.attempts[0].error, /missing criteria/);
+  assert.deepEqual(recovered.result, passing, 'a retry never alters the model result');
+  calls = 0;
+  await assert.rejects(() => runAcceptanceAgentWithRetry(retryContext, 'qwen', '.', async () => {
+    calls += 1;
+    return { result: { criteria: [] }, meta };
+  }), /structurally invalid output after one retry/);
+  assert.equal(calls, 2, 'at most one retry');
+  console.log('acceptance-agent self-test: 19 cases passed');
 }
 
 async function main() {
@@ -305,10 +395,10 @@ async function main() {
   }
   const context = JSON.parse(fs.readFileSync(contextFile, 'utf8'));
   try {
-    const { result, meta } = await runAcceptanceAgent(context, provider, workspace);
+    const { result, meta, attempts } = await runAcceptanceAgentWithRetry(context, provider, workspace);
     fs.writeFileSync(outFile, JSON.stringify(result, null, 2) + '\n');
     if (telemetryFile && meta) {
-      writeAcceptanceTelemetry(telemetryFile, context, meta, result);
+      writeAcceptanceTelemetry(telemetryFile, context, meta, result, 'completed', attempts);
     }
   } catch (error) {
     if (telemetryFile) {
@@ -334,7 +424,9 @@ async function main() {
           agent_duration_ms: null,
         },
       };
-      writeAcceptanceTelemetry(telemetryFile, context, fallbackMeta, { criteria: [] }, 'agent-error');
+      writeAcceptanceTelemetry(telemetryFile, context,
+        error?.agentMeta ?? fallbackMeta, { criteria: [] }, 'agent-error',
+        error?.agentAttempts ?? null);
     }
     throw error;
   }

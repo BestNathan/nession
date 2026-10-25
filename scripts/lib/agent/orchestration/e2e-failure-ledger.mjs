@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { fingerprint, decideAdmission } from '../../../e2e-failure-admission.mjs';
+import { isTrustedMainFullEvent } from '../../../e2e-regression-policy.mjs';
 
 const REPO = 'BestNathan/nession';
 const HEX40 = /^[a-f0-9]{40}$/;
@@ -58,7 +59,7 @@ function putOnce(root, relative, value) {
 function validateAuthenticatedObservation(o) {
   if (!o || o.authenticated !== true || o.source?.repository !== REPO ||
       o.source?.workflow_path !== '.github/workflows/e2e-full-regression.yml' ||
-      o.source?.event !== 'schedule' || o.source?.branch !== 'main' ||
+      !isTrustedMainFullEvent(o.source?.event) || o.source?.branch !== 'main' ||
       o.source?.conclusion !== 'failure' || !Number.isFinite(Date.parse(o.source?.completed_at ?? '')) || !POSITIVE(o.source?.run_id) ||
       !POSITIVE(o.source?.run_attempt) || !HEX40.test(o.source?.target_sha ?? '') ||
       !/^sha256:[a-f0-9]{64}$/.test(o.artifact?.digest ?? '') ||
@@ -216,6 +217,122 @@ export function recordE2EFailureObservation(root, observation, {
     observation_path: observationPath, dispatch_allowed: false, decision };
 }
 
+// Read the current admission projection for one fingerprint. The caller must
+// still hold the Store CAS head; a conflict means re-read, never blind dispatch.
+export function readFailureAdmission(root, fingerprintValue) {
+  const digest = keyFor(fingerprintValue);
+  const p = paths(digest, 0, 0);
+  const current = readCurrent(root, p, digest);
+  return { state: current.state, version: current.version };
+}
+
+// Read the observation that justified the current claim (sanitized fields
+// only). The dispatcher uses it to build the bounded Agent request.
+export function readFailureObservation(root, fingerprintValue, runId, runAttempt) {
+  const digest = keyFor(fingerprintValue);
+  if (!POSITIVE(runId) || !POSITIVE(runAttempt)) fail('invalid observation identity');
+  const relative = paths(digest, runId, runAttempt).observation;
+  const record = readJson(root, relative);
+  if (!record || record.kind !== 'e2e_failure_admission_observation' ||
+      record.fingerprint !== fingerprintValue) fail('missing or mismatched observation record');
+  return record;
+}
+
+// A dispatch POST succeeded but the downstream run could not be observed yet
+// (GitHub has no dispatch response body). The intent becomes `reconcile`: no
+// further POST may happen until a run search proves the original never landed.
+export function markFailureDispatchAmbiguous(root, fingerprintValue, {
+  now = new Date().toISOString(),
+} = {}) {
+  if (!Number.isFinite(Date.parse(now))) fail('invalid dispatch clock');
+  const digest = keyFor(fingerprintValue);
+  const p = paths(digest, 0, 0);
+  const current = readCurrent(root, p, digest);
+  const state = current.state;
+  if (!state) fail('unknown fingerprint admission');
+  if (state.status !== 'claimed' && state.status !== 'in_flight') {
+    fail('admission is not dispatchable: ' + state.status);
+  }
+  if (state.dispatch_intent?.status !== 'pending') fail('dispatch intent is not pending');
+  const next = {
+    ...state,
+    version: current.version + 1,
+    dispatch_intent: { ...state.dispatch_intent, status: 'reconcile' },
+  };
+  writeState(root, p, current.version, next);
+  return { state: next, version: next.version };
+}
+
+// The trusted publisher records the one canonical Bug bound to this
+// fingerprint epoch. The analysis id must match the dispatch that produced the
+// diagnosis, and the intent must already be committed.
+export function recordFailureAnalysisLinked(root, fingerprintValue, {
+  now = new Date().toISOString(), analysisId, bugIssue,
+} = {}) {
+  if (!Number.isFinite(Date.parse(now))) fail('invalid publication clock');
+  if (!POSITIVE(bugIssue)) fail('invalid Bug Issue number');
+  if (typeof analysisId !== 'string' || !/^[a-f0-9]{64}:[1-9][0-9]*$/.test(analysisId)) {
+    fail('invalid analysis id');
+  }
+  const digest = keyFor(fingerprintValue);
+  const p = paths(digest, 0, 0);
+  const current = readCurrent(root, p, digest);
+  const state = current.state;
+  if (!state) fail('unknown fingerprint admission');
+  if (state.analysis_id !== analysisId) fail('analysis id does not match the claim');
+  if (state.dispatch_intent?.status !== 'committed' && state.dispatch_intent?.status !== 'acknowledged') {
+    fail('analysis was never dispatched for this claim');
+  }
+  if (!['in_flight', 'analyzed'].includes(state.status)) {
+    fail('claim is not awaiting a diagnosis: ' + state.status);
+  }
+  const next = {
+    ...state,
+    version: current.version + 1,
+    status: 'issue_linked',
+    bug_issue: bugIssue,
+    dispatch_intent: { ...state.dispatch_intent, status: 'acknowledged' },
+    linked_at: now,
+  };
+  writeState(root, p, current.version, next);
+  return { state: next, version: next.version };
+}
+
+// Write-ahead dispatch intent: the claim exists BEFORE the external dispatch.
+// This transition commits that intent with the exact downstream run identity.
+// A crash after the HTTP POST but before this write is reconciled by adopting
+// the downstream run that already carries the analysis id.
+export function recordFailureDispatchCommitted(root, fingerprintValue, {
+  now = new Date().toISOString(), runId, runAttempt, leaseMs = 60 * 60 * 1000,
+} = {}) {
+  if (!Number.isFinite(Date.parse(now))) fail('invalid dispatch clock');
+  if (!POSITIVE(runId) || !POSITIVE(runAttempt)) fail('invalid dispatch run identity');
+  if (!Number.isSafeInteger(leaseMs) || leaseMs < 60_000 || leaseMs > 24 * 60 * 60 * 1000) {
+    fail('invalid dispatch lease');
+  }
+  const digest = keyFor(fingerprintValue);
+  const p = paths(digest, runId, runAttempt);
+  const current = readCurrent(root, p, digest);
+  const state = current.state;
+  if (!state) fail('unknown fingerprint admission');
+  if (state.status !== 'claimed' && state.status !== 'in_flight') {
+    fail('admission is not dispatchable: ' + state.status);
+  }
+  if (state.dispatch_intent?.status === 'committed' || state.dispatch_intent?.status === 'acknowledged') {
+    fail('dispatch intent is already committed');
+  }
+  const next = {
+    ...state,
+    version: current.version + 1,
+    status: 'in_flight',
+    dispatch_intent: { ...state.dispatch_intent, status: 'committed', run_id: runId, run_attempt: runAttempt },
+    dispatch_run: { run_id: runId, run_attempt: runAttempt },
+    lease_expires_at: new Date(Date.parse(now) + leaseMs).toISOString(),
+  };
+  writeState(root, p, current.version, next);
+  return { state: next, version: next.version };
+}
+
 function selfTest() {
   const root = fs.mkdtempSync(path.join(process.env.RUNNER_TEMP ?? '/tmp', 'e2e-failure-ledger-'));
   try {
@@ -244,6 +361,14 @@ function selfTest() {
     assert.equal(repeated.analysis_id, first.analysis_id);
     assert.equal(repeated.epoch, 1);
     assert.equal(fs.existsSync(path.join(root, repeated.observation_path)), true);
+    // The immediate post-promotion push route is the same trusted Main Full
+    // source (#2323 SC-12): the same signature must join the existing claim,
+    // never mint a second analysis for the same error.
+    const pushRoute = recordE2EFailureObservation(root, { ...observation,
+      source: { ...observation.source, event: 'push', run_id: 506,
+        target_sha: 'd'.repeat(40) } }, { now: '2026-10-24T12:01:30Z' });
+    assert.equal(pushRoute.status, 'ANALYSIS_IN_FLIGHT');
+    assert.equal(pushRoute.analysis_id, first.analysis_id);
     const replay = recordE2EFailureObservation(root, observation, { now: '2026-10-24T12:04:00Z' });
     assert.equal(replay.status, 'ANALYSIS_IN_FLIGHT');
     assert.equal(replay.analysis_id, first.analysis_id, 'same Run/Attempt replay must not create a second analysis');
@@ -271,6 +396,10 @@ function selfTest() {
       authenticated: false }, { now: '2026-10-24T12:03:00Z' }), /authenticated/);
     const badSha = { ...observation, source: { ...observation.source, run_id: 504, target_sha: 'main' } };
     assert.throws(() => recordE2EFailureObservation(root, badSha, { now: '2026-10-24T12:03:00Z' }), /authenticated/);
+    const untrustedEvent = { ...observation, source: {
+      ...observation.source, run_id: 507, event: 'pull_request' } };
+    assert.throws(() => recordE2EFailureObservation(root, untrustedEvent,
+      { now: '2026-10-24T12:03:00Z' }), /authenticated/);
     console.log('e2e-failure-ledger self-test: PASS');
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 }

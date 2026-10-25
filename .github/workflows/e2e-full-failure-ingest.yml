@@ -4,20 +4,26 @@ on:
     workflows: ["E2E / Full Regression"]
     types: [completed]
 permissions:
-  actions: read
+  actions: write
   contents: write
 concurrency:
   group: acceptance-results-ingest
   cancel-in-progress: false
 jobs:
   ingest:
+    # Both trusted Main Full routes feed #2327 dedup (#2323 SC-12): the
+    # scheduled cadence and the immediate post-promotion push. The executable
+    # allowlist is owned by scripts/e2e-regression-policy.mjs; the intake
+    # self-test fails if this guard drifts from it.
     if: >-
       github.repository == 'BestNathan/nession' &&
       github.event.workflow_run.repository.full_name == github.repository &&
       github.event.workflow_run.head_repository.full_name == github.repository &&
       github.event.workflow_run.path == '.github/workflows/e2e-full-regression.yml' &&
       github.event.workflow_run.name == 'E2E / Full Regression' &&
-      github.event.workflow_run.event == 'schedule' &&
+      (github.event.workflow_run.event == 'schedule' ||
+      github.event.workflow_run.event == 'workflow_dispatch' ||
+      github.event.workflow_run.event == 'push') &&
       github.event.workflow_run.head_branch == 'main' &&
       github.event.workflow_run.status == 'completed' &&
       github.event.workflow_run.conclusion == 'failure'
@@ -162,4 +168,52 @@ jobs:
           fi
           jq -e '.dispatch_allowed == false and .agent_invocations == 0 and .bug_writes == 0' \
             "$RUNNER_TEMP/full-failure-intake/admission-result.json" >/dev/null
-          echo "Per-ID CAS admission projection published; Agent dispatch remains disabled until the trusted outbox/dispatcher slice." >> "$GITHUB_STEP_SUMMARY"
+          echo "Per-ID CAS admission projection published; dispatching one analysis per newly claimed fingerprint." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Dispatch one analysis per newly claimed fingerprint
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STORE_PUSH_TOKEN: ${{ steps.agent_store_app.outputs.token }}
+          STORE: ${{ github.workspace }}/agent-store-repo
+          ADMISSION_RESULT: ${{ runner.temp }}/full-failure-intake/admission-result.json
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+          SOURCE_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$STORE_PUSH_TOKEN" ]]
+          dispatch=trusted/scripts/e2e-failure-analysis-dispatch.mjs
+          gh run list --repo "$GITHUB_REPOSITORY" --workflow agent-e2e-failure-analysis.yml             --limit 20 --json databaseId,attempt,displayTitle,event,status             > "$RUNNER_TEMP/analysis-runs.json"
+          while IFS= read -r fingerprint; do
+            [[ -n "$fingerprint" ]] || continue
+            node "$dispatch" plan "$STORE" "$fingerprint" "$RUNNER_TEMP/plan.json"
+            action="$(jq -r .action "$RUNNER_TEMP/plan.json")"
+            if [[ "$action" == RECONCILE ]]; then
+              node "$dispatch" reconcile "$STORE" "$fingerprint"                 "$RUNNER_TEMP/analysis-runs.json" "$RUNNER_TEMP/plan.json"
+              action="$(jq -r .action "$RUNNER_TEMP/plan.json")"
+            fi
+            case "$action" in
+              DISPATCH)
+                analysis_id="$(jq -r .analysis_id "$RUNNER_TEMP/plan.json")"
+                request="$(jq -c .request "$RUNNER_TEMP/plan.json")"
+                echo "Dispatching analysis ${analysis_id} for ${fingerprint}"
+                gh workflow run agent-e2e-failure-analysis.yml --ref main                   -f analysis_id="$analysis_id" -f request_json="$request"
+                # A dispatch POST has no response body. Fence redelivery until a
+                # downstream run search proves whether it landed.
+                node "$dispatch" ambiguous "$STORE" "$fingerprint" > /dev/null
+                ;;
+              ADOPT)
+                node "$dispatch" record "$STORE" "$fingerprint"                   "$(jq -r .run_id "$RUNNER_TEMP/plan.json")"                   "$(jq -r .run_attempt "$RUNNER_TEMP/plan.json")" > /dev/null
+                ;;
+              *)
+                echo "No dispatch for ${fingerprint}: ${action}"
+                ;;
+            esac
+          done < <(jq -r '.outcomes[] | select(.status=="ANALYSIS_CLAIMED") | .fingerprint' "$ADMISSION_RESULT")
+          git -C "$STORE" add -A
+          node trusted/scripts/run-store-integrity.mjs staged agent-store "$STORE"
+          if ! git -C "$STORE" diff --cached --quiet; then
+            git -C "$STORE" -c user.name=nession-store-writer               -c user.email=nession-store-writer@users.noreply.github.com               commit -m "e2e: record failure analysis dispatch intents $SOURCE_RUN_ID attempt $SOURCE_ATTEMPT"
+            node trusted/scripts/run-store-cas-push.mjs agent-store "$STORE"
+          fi
+          echo "Dispatch outbox drained; ambiguous POSTs remain fenced as reconcile until a run search proves the outcome." >> "$GITHUB_STEP_SUMMARY"

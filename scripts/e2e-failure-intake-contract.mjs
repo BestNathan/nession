@@ -5,6 +5,7 @@
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { isTrustedMainFullEvent } from './e2e-regression-policy.mjs';
 
 const SHA = /^[a-f0-9]{40}$/;
 const positive = value => Number.isSafeInteger(value) && value > 0;
@@ -18,7 +19,7 @@ export function verifyFullRegressionFailure({ repository, run, artifact, candida
   if (!run || typeof run !== 'object') return reject('missing authenticated run metadata');
   if (run.path !== '.github/workflows/e2e-full-regression.yml' ||
       run.name !== 'E2E / Full Regression') return reject('workflow is not allowlisted');
-  if (!['schedule', 'workflow_dispatch'].includes(run.event)) return reject('event is not allowlisted');
+  if (!isTrustedMainFullEvent(run.event)) return reject('event is not allowlisted');
   if (run.status !== 'completed' || run.conclusion !== 'failure') return reject('run is not a completed failure');
   if (!positive(run.id) || !positive(run.run_attempt)) return reject('exact run and attempt required');
   if (!SHA.test(String(trustedTargetSha ?? ''))) return reject('trusted target SHA missing');
@@ -87,6 +88,10 @@ function selfTest() {
   assert.equal(accepted.status, 'AUTHENTICATED_CANDIDATE');
   assert.equal(accepted.dispatch_allowed, false, 'authentication alone must never dispatch');
   assert.deepEqual(accepted.observed_failed_ids, ['terminal-attach']);
+  // The immediate post-promotion push route is the second trusted Main Full
+  // source (#2323 SC-12), not only the scheduled cadence.
+  assert.equal(verifyFullRegressionFailure({ ...input, run: { ...run, event: 'push' } }).status,
+    'AUTHENTICATED_CANDIDATE');
   const negatives = [
     { ...input, repository: { full_name: 'attacker/fork' } },
     { ...input, run: { ...run, path: '.github/workflows/attacker.yml' } },

@@ -120,7 +120,7 @@ export function checkInventory(manifest,workflows){
       const rollout=store.controller_rollout;
       const requestPath='.github/workflows/acceptance-agent-controller.yml';
       const writerPath='.github/workflows/store-agent-controller-ingest.yml';
-      if(store.lifecycle!=='active'||store.writers.length!==6||
+      if(store.lifecycle!=='active'||store.writers.length!==7||
           rollout.phase!=='live-verified-limited-trust'||
           rollout.request_workflow!==requestPath||
           rollout.trusted_writer_workflow!==writerPath)
@@ -166,6 +166,7 @@ export function checkInventory(manifest,workflows){
         ['.github/workflows/store-agent-development-ingest.yml',['encrypted_checkpoint_ingest','main_workflow_run_or_owner_comment']],
         ['.github/workflows/store-agent-dispatch-reconcile.yml',['failed_dispatch_reconcile','main_workflow_run']],
         ['.github/workflows/e2e-full-failure-ingest.yml',['e2e_failure_admission','main_workflow_run']],
+        ['.github/workflows/acceptance-e2e-failure-bug.yml',['e2e_failure_bug_publish','main_workflow_run']],
       ]);
       if(store.writers.length!==approved.size)fail('incomplete live agent-store writer roster');
       for(const writer of store.writers){
@@ -393,7 +394,7 @@ function selfTest(){
     {...trusted,GITHUB_EVENT_NAME:'push',GITHUB_REPOSITORY:'attacker/fork'},
     {...trusted,GITHUB_EVENT_NAME:'push',GITHUB_SHA:'main'},
   ]) assert.throws(()=>assertTrustedLiveContext(invalid),/trusted main/);
-  assert.equal(success.writers,14);
+  assert.equal(success.writers,15);
   const agentStore=manifest.stores.find(x=>x.ref==='agent-store');
   assert.equal(agentStore.lifecycle,'active');
   const unknownAgentWriter=JSON.parse(JSON.stringify(manifest));

@@ -152,8 +152,43 @@ export function buildAgentWorkflowTelemetry(input) {
     result: input.result ?? { status: 'unknown' },
   };
 
+  if (input.attempts != null) record.attempts = input.attempts;
   validateAgentWorkflowTelemetry(record);
   return record;
+}
+
+// A structurally invalid model result may be retried once by the owner that
+// observed it. Both attempts travel in the single canonical Run Summary so
+// cost and failure evidence stay with the run they belong to.
+function validateAttempts(attempts) {
+  if (!Array.isArray(attempts) || attempts.length < 1 || attempts.length > 4) {
+    fail('attempts must be a bounded non-empty array');
+  }
+  let validSeen = false;
+  attempts.forEach((attempt, index) => {
+    if (!Number.isInteger(attempt?.attempt) || attempt.attempt !== index + 1) {
+      fail('attempts must be numbered 1..n in order');
+    }
+    if (!['valid', 'invalid-result'].includes(attempt?.status)) {
+      fail('attempt status must be valid or invalid-result');
+    }
+    const error = attempt?.error ?? null;
+    if (error != null && (typeof error !== 'string' || !error.trim() || /[\r\n]/.test(error))) {
+      fail('attempt error must be a single non-empty line');
+    }
+    if (attempt.status === 'valid' && error != null) fail('valid attempt cannot carry an error');
+    if (attempt.status === 'invalid-result' && !error) fail('invalid attempt requires an error');
+    iso(attempt.started_at, 'attempts[' + index + '].started_at');
+    iso(attempt.finished_at, 'attempts[' + index + '].finished_at');
+    if (attempt.turns != null && (!Number.isInteger(attempt.turns) || attempt.turns < 0)) {
+      fail('attempt turns must be a non-negative integer');
+    }
+    if (attempt.status === 'valid') {
+      if (validSeen) fail('only one attempt may be valid');
+      validSeen = true;
+      if (index !== attempts.length - 1) fail('the valid attempt must be the final attempt');
+    }
+  });
 }
 
 export function validateAgentWorkflowTelemetry(record) {
@@ -169,6 +204,7 @@ export function validateAgentWorkflowTelemetry(record) {
   if (!Number.isInteger(record?.identity?.github_run_attempt) || record.identity.github_run_attempt <= 0) {
     fail('identity.github_run_attempt must be a positive integer');
   }
+  if (record.attempts != null) validateAttempts(record.attempts);
   stableId(record?.task?.id, 'task.id');
   stableId(record?.task?.type, 'task.type');
   // New PR-correlated Runs must pin both the real PR number and exact target
@@ -513,8 +549,38 @@ function selfTest() {
   assert.equal(metrics.windows['7d'].runs.total, 1);
   assert.equal(metrics.windows['30d'].tools.total, 3);
   assert.match(renderAgentMetricsSvg(metrics, 'dark'), /Agent Workflow Telemetry/);
+  const retried = buildAgentWorkflowTelemetry({
+    workflow_id: 'requirement-acceptance', github_run_id: 40174627551, github_run_attempt: 1,
+    task: { id: 'issue-2323-pre-merge', type: 'acceptance', issue: 2323, stage: 'pre-merge' },
+    agent: { provider: 'claude-code', status: 'finished' },
+    execution: { turns: 1, tools: summarizeToolCalls([], false) },
+    attempts: [
+      { attempt: 1, status: 'invalid-result', error: 'acceptance result is missing criteria: SC-01',
+        started_at: '2026-10-25T07:56:18Z', finished_at: '2026-10-25T07:56:38Z' },
+      { attempt: 2, status: 'valid', error: null,
+        started_at: '2026-10-25T07:56:39Z', finished_at: '2026-10-25T07:58:10Z' },
+    ],
+  });
+  assert.equal(retried.attempts.length, 2);
+  assert.equal(retried.attempts[0].status, 'invalid-result');
+  for (const attempts of [
+    'nope',
+    [],
+    [{ attempt: 2, status: 'valid', error: null,
+      started_at: '2026-10-25T07:56:39Z', finished_at: '2026-10-25T07:58:10Z' }],
+    [{ attempt: 1, status: 'invalid-result', error: null,
+      started_at: '2026-10-25T07:56:18Z', finished_at: '2026-10-25T07:56:38Z' }],
+    [{ attempt: 1, status: 'valid', error: null,
+      started_at: '2026-10-25T07:56:18Z', finished_at: '2026-10-25T07:56:38Z' },
+     { attempt: 2, status: 'valid', error: null,
+      started_at: '2026-10-25T07:56:39Z', finished_at: '2026-10-25T07:58:10Z' }],
+    [{ attempt: 1, status: 'valid', error: 'late error',
+      started_at: '2026-10-25T07:56:18Z', finished_at: '2026-10-25T07:56:38Z' }],
+  ]) {
+    assert.throws(() => validateAgentWorkflowTelemetry({ ...retried, attempts }), /attempt/);
+  }
   executionTraceSelfTest();
-  console.log('agent-workflow-telemetry self-test: 6 cases passed');
+  console.log('agent-workflow-telemetry self-test: 7 cases passed');
 }
 
 async function main() {

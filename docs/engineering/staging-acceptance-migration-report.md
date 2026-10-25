@@ -42,6 +42,13 @@ Admission receipt (`40136487398`) against pinned Main `e1d8a8aa`:
 
 The lanes are diverged (`behind > 0`) and remain eligible because they contain work not yet in Main.
 
+After the staging→Main promotion, admission receipt `40165138469` against pinned Main `03278f76` reports `SKIPPED_NOT_AHEAD` for **both** lanes (deployed `9830129` and `10b8bb78`, ahead 0): the equal/behind branch is a real decision, not only a fixture.
+
+Two scheduling constraints were observed on 2026-10-25 UTC and are handled by the workflows, not by assumptions:
+
+- **GitHub drops scheduled deliveries.** `E2E / Staging Lanes` (`cron: '23 * * * *'`, workflow `active`) produced no run at 01:23, 02:23, 03:23 or 04:23. It now ticks at `23,53`; a `NOT_DUE` receipt makes the extra tick idempotent. Auditing cadence means reading the admission artifact's timestamps, never the cron expression.
+- **`GITHUB_TOKEN`-created dispatches emit no `workflow_run`.** A lane scheduler that refreshes a stale attestation leaves the receipt un-ingested unless something sweeps. `Deploy / Identity Ingest` now ticks at `7,27,47`, re-binds the source run through the Actions API, and feeds the unchanged trusted ingester; it still has no ref-selected dispatch trigger.
+
 ## 3. Main qualification latency
 
 Successful `E2E / Full Regression` runs: **p50 13.9 min**. Push-triggered exact-Main runs observed 12.3–24.1 min; the scheduled run `40126520270` took 13.9 min. The scheduled tick before it (`40116583608`) admitted but skipped `full` as not due, so the 12-hour cadence gate is not firing hourly.
@@ -59,6 +66,7 @@ These are real runs or their fixtures; none produced a fabricated Pass:
 - Unattested lane → `INDETERMINATE`, never a skip; duplicate lanes, invalid timestamps and ambiguous newest executions are rejected by policy fixtures.
 - Equal/behind lane → `SKIPPED_NOT_AHEAD`; diverged-ahead lane stays eligible (`stagingLaneAdmission` fixtures).
 - Deployed Case projection with a missing, cross-environment or digest-mismatched attestation → rejected (`verifyDeployedProof` fixtures).
+- A requirement crossing 40 cross-referenced PRs made pre-merge acceptance throw `excessive linked PR discovery scope` — an execution error with no verdict that blocked every linked PR (observed on run `40165691256`). Discovery now fetches the newest bounded window and fails closed only on an incomplete timeline (#2424, Bug #2425); the same Issue then evaluated normally in run `40167089786`.
 
 ## 5. Rollback runbook
 

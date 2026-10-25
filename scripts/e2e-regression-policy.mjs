@@ -10,6 +10,18 @@ const SHA = /^[0-9a-f]{40}$/;
 const LANE = /^[a-z][a-z0-9-]{0,62}$/;
 export const DEFAULT_INTERVALS = Object.freeze({ staging: 2, main: 12 });
 
+// Owner of the trusted Main Full Regression run-source policy (#2323 SC-12):
+// the scheduled cadence, the immediate post-promotion push for runtime
+// changes, and a manual re-run of the same Main workflow. Every consumer that
+// accepts a Main Full run as evidence or as a failure source imports this
+// predicate instead of copying the list; a narrower copy is what left the push
+// route half-wired between the workflow guard and its intake/evidence owners.
+export const TRUSTED_MAIN_FULL_EVENTS = Object.freeze(['schedule', 'workflow_dispatch', 'push']);
+
+export function isTrustedMainFullEvent(event) {
+  return TRUSTED_MAIN_FULL_EVENTS.includes(event);
+}
+
 export function interval(value, fallback) {
   const raw = value == null || value === '' ? String(fallback) : String(value);
   if (!/^[1-9][0-9]*$/.test(raw)) throw new Error('invalid E2E interval: expected positive whole hours');
@@ -80,7 +92,7 @@ const FULL_WORKFLOW_PATH='.github/workflows/e2e-full-regression.yml';
 function canonicalMainFullRun(run){
   return String(run?.path??'').replace(/@refs\/[^\s]+$/,'')===FULL_WORKFLOW_PATH&&
     run.repository?.full_name===REPO&&run.head_repository?.full_name===REPO&&
-    run.head_branch==='main'&&['schedule','workflow_dispatch','push'].includes(run.event)&&
+    run.head_branch==='main'&&isTrustedMainFullEvent(run.event)&&
     Number.isSafeInteger(run.id)&&run.id>0&&
     Number.isSafeInteger(run.run_attempt)&&run.run_attempt>0&&
     SHA.test(run.head_sha??'');
@@ -333,6 +345,20 @@ export function stagingLaneAdmission({
         reason: 'deployed source SHA is invalid' });
       continue;
     }
+    // A receipt can lag a redeploy. The caller supplies the GitOps desired
+    // revision; a mismatch is stale evidence, never a skip or a pass.
+    if (lane.desired_sha != null) {
+      if (!SHA.test(String(lane.desired_sha))) {
+        decisions.push({ environment_id: environmentId, decision: 'INDETERMINATE',
+          reason: 'GitOps desired SHA is invalid' });
+        continue;
+      }
+      if (lane.desired_sha !== deployedSha) {
+        decisions.push({ environment_id: environmentId, decision: 'STALE_ATTESTATION',
+          attested_source_sha: deployedSha, desired_source_sha: lane.desired_sha });
+        continue;
+      }
+    }
     const hours = Number.isSafeInteger(cfg.lanes?.[environmentId])
       ? cfg.lanes[environmentId] : cfg.staging;
     if (inFlight[environmentId] === true) {
@@ -407,6 +433,14 @@ async function selfTest(){
   assert.throws(()=>mainScheduleDecision({now:'2026-10-24T00:00:00Z',
     intervalHours:12,lastFullCompletedAt:'invalid'}));
 
+  // One owner for the trusted Main Full source policy: both routes of SC-12
+  // (scheduled cadence and immediate post-promotion push) plus a manual re-run,
+  // and nothing else (a PR-head Full run must never certify Main).
+  assert.deepEqual([...TRUSTED_MAIN_FULL_EVENTS],['schedule','workflow_dispatch','push']);
+  for(const event of TRUSTED_MAIN_FULL_EVENTS)assert.equal(isTrustedMainFullEvent(event),true);
+  for(const event of ['pull_request','pull_request_target','workflow_call','repository_dispatch',undefined])
+    assert.equal(isTrustedMainFullEvent(event),false);
+
   const a='a'.repeat(40),b='b'.repeat(40);
   const eligible=data=>stagingEligibility({ready:true,attested:true,mainSha:a,deployedSha:b,...data});
   assert.equal(eligible({ahead:0,behind:0}).decision,'SKIPPED_NOT_AHEAD');
@@ -433,6 +467,19 @@ async function selfTest(){
   assert.equal(stagingLaneAdmission({ ...laneBase,
     lanes: [{ environment_id: 'staging', deployed_source_sha: 'a'.repeat(40), attested: false }],
   }).lanes[0].decision, 'INDETERMINATE');
+  const stale = stagingLaneAdmission({ ...laneBase,
+    lanes: [{ environment_id: 'staging', deployed_source_sha: 'a'.repeat(40), attested: true,
+      desired_sha: 'b'.repeat(40) }],
+    ancestry: { staging: { ahead: 3, behind: 0 } },
+  }).lanes[0];
+  assert.equal(stale.decision, 'STALE_ATTESTATION');
+  assert.equal(stale.attested_source_sha, 'a'.repeat(40));
+  assert.equal(stale.desired_source_sha, 'b'.repeat(40));
+  assert.equal(stagingLaneAdmission({ ...laneBase,
+    lanes: [{ environment_id: 'staging', deployed_source_sha: 'a'.repeat(40), attested: true,
+      desired_sha: 'a'.repeat(40) }],
+    ancestry: { staging: { ahead: 3, behind: 0 } },
+  }).lanes[0].decision, 'ADMIT');
   assert.equal(stagingLaneAdmission({ ...laneBase,
     lanes: [{ environment_id: 'staging', deployed_source_sha: 'a'.repeat(40), attested: true, ready: false }],
     ancestry: { staging: { ahead: 1, behind: 0 } },

@@ -1,0 +1,164 @@
+name: Acceptance / E2E Failure Bug
+
+# Trusted Bug publication boundary for #2327. A read-only diagnosis Agent never
+# writes an Issue; this main-owned workflow re-validates the diagnosis against
+# the durable claim, creates/updates exactly one canonical Bug per fingerprint
+# and records the ledger link. Schedule and main push are the reliable sweeps:
+# an analysis run dispatched with GITHUB_TOKEN does not emit a downstream
+# workflow_run event.
+on:
+  workflow_run:
+    workflows: ["Agent / E2E Failure Analysis"]
+    types: [completed]
+  schedule:
+    - cron: '13,43 * * * *'
+  push:
+    branches: [main]
+
+permissions:
+  actions: read
+  contents: write
+  issues: write
+
+concurrency:
+  group: acceptance-e2e-failure-bug
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      (github.event_name != 'workflow_run' ||
+        (github.event.workflow_run.name == 'Agent / E2E Failure Analysis' &&
+         github.event.workflow_run.path == '.github/workflows/agent-e2e-failure-analysis.yml' &&
+         github.event.workflow_run.event == 'workflow_dispatch' &&
+         github.event.workflow_run.head_branch == 'main' &&
+         github.event.workflow_run.repository.full_name == github.repository &&
+         github.event.workflow_run.status == 'completed' &&
+         github.event.workflow_run.conclusion == 'success'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout trusted main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Verify the publication contract
+        run: ./gates/run e2e-failure-analysis-selftest
+
+      - name: Mint scoped App token for the admission ledger
+        id: store_app
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.RUN_STORE_WRITER_APP_ID }}
+          private-key: ${{ secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY }}
+          repositories: nession
+          permission-contents: write
+
+      - name: Publish one canonical Bug per validated diagnosis
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STORE_PUSH_TOKEN: ${{ steps.store_app.outputs.token }}
+          SOURCE_RUN_ID: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.id || '' }}
+          SOURCE_ATTEMPT: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.run_attempt || '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$STORE_PUSH_TOKEN" ]]
+          mkdir agent-store-repo
+          git -C agent-store-repo init
+          git -C agent-store-repo remote add origin "https://x-access-token:$STORE_PUSH_TOKEN@github.com/$GITHUB_REPOSITORY.git"
+          git -C agent-store-repo fetch --depth=1 origin agent-store
+          git -C agent-store-repo checkout -B agent-store FETCH_HEAD
+          store="$GITHUB_WORKSPACE/agent-store-repo"
+
+          if [[ -n "$SOURCE_RUN_ID" ]]; then
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID" > "$RUNNER_TEMP/one-run.json"
+            jq '.["workflow_runs"] = [.] | {workflow_runs: .workflow_runs}' "$RUNNER_TEMP/one-run.json" > "$RUNNER_TEMP/analysis-runs.json"
+          else
+            gh run list --repo "$GITHUB_REPOSITORY" --workflow agent-e2e-failure-analysis.yml \
+              --limit 20 --json databaseId,attempt,displayTitle,event,status,conclusion,headBranch \
+              > "$RUNNER_TEMP/analysis-runs.json.tmp"
+            jq '{workflow_runs: [.[] | {id: .databaseId, run_attempt: .attempt,
+              display_title: .displayTitle, event, status, conclusion, head_branch: .headBranch}]}' \
+              "$RUNNER_TEMP/analysis-runs.json.tmp" > "$RUNNER_TEMP/analysis-runs.json"
+          fi
+
+          jq -c '.workflow_runs[] | select(.event == "workflow_dispatch" and .conclusion == "success"
+            and .head_branch == "main" and (.display_title | startswith("E2E Failure Analysis ")))' \
+            "$RUNNER_TEMP/analysis-runs.json" |
+          while IFS= read -r run; do
+            run_id="$(jq -r .id <<< "$run")"
+            run_attempt="$(jq -r .run_attempt <<< "$run")"
+            analysis_id="$(jq -r '.display_title | sub("^E2E Failure Analysis "; "")' <<< "$run")"
+            fingerprint="e2e1:$(cut -d: -f1 <<< "$analysis_id")"
+            label="e2e-fp-$(cut -c1-16 <<< "${fingerprint#e2e1:}")"
+            echo "Candidate analysis ${analysis_id} (run ${run_id}/${run_attempt})"
+            jq '{id, run_attempt, display_title, event, head_branch: .head_branch,
+              name: "Agent / E2E Failure Analysis",
+              path: ".github/workflows/agent-e2e-failure-analysis.yml",
+              repository: {full_name: env.GITHUB_REPOSITORY}}' <<< "$run" \
+              > "$RUNNER_TEMP/analysis-run.json"
+            rm -rf "$RUNNER_TEMP/diagnosis"
+            if ! gh run download "$run_id" -R "$GITHUB_REPOSITORY" \
+              -n "e2e-failure-diagnosis-${run_id}-${run_attempt}" -D "$RUNNER_TEMP/diagnosis" 2>/dev/null; then
+              echo "No diagnosis artifact for ${analysis_id}; skipping"
+              continue
+            fi
+            gh issue list --repo "$GITHUB_REPOSITORY" --state all --limit 20 \
+              --label "$label" --json number,state,body \
+              > "$RUNNER_TEMP/issues.json" 2>/dev/null || echo '[]' > "$RUNNER_TEMP/issues.json"
+            node scripts/e2e-failure-analysis-publish.mjs plan \
+              "$store" "$fingerprint" "$RUNNER_TEMP/analysis-run.json" \
+              "$RUNNER_TEMP/diagnosis/diagnosis.json" "$RUNNER_TEMP/issues.json" \
+              "$RUNNER_TEMP/publish-plan.json"
+            action="$(jq -r .action "$RUNNER_TEMP/publish-plan.json")"
+            case "$action" in
+              CREATE)
+                gh label create "$label" --repo "$GITHUB_REPOSITORY" \
+                  --description "E2E failure fingerprint (automation)" --color "5319e7" --force > /dev/null 2>&1 || true
+                jq -r .draft.title "$RUNNER_TEMP/publish-plan.json" > "$RUNNER_TEMP/title.txt"
+                jq -r .draft.body "$RUNNER_TEMP/publish-plan.json" > "$RUNNER_TEMP/body.md"
+                label_args=()
+                while IFS= read -r draft_label; do
+                  label_args+=(--label "$draft_label")
+                done < <(jq -r '.draft.labels[]' "$RUNNER_TEMP/publish-plan.json")
+                issue_url="$(gh issue create --repo "$GITHUB_REPOSITORY" \
+                  --title "$(cat "$RUNNER_TEMP/title.txt")" \
+                  --body-file "$RUNNER_TEMP/body.md" "${label_args[@]}")"
+                bug_number="${issue_url##*/}"
+                ;;
+              COMMENT|REOPEN)
+                issue_number="$(jq -r .issue_number "$RUNNER_TEMP/publish-plan.json")"
+                jq -r .comment "$RUNNER_TEMP/publish-plan.json" > "$RUNNER_TEMP/comment.md"
+                if [[ "$action" == REOPEN ]]; then
+                  gh issue reopen "$issue_number" --repo "$GITHUB_REPOSITORY"
+                fi
+                gh issue comment "$issue_number" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/comment.md"
+                bug_number="$issue_number"
+                ;;
+              *)
+                echo "No publication for ${analysis_id}: ${action}"
+                continue
+                ;;
+            esac
+            node scripts/e2e-failure-analysis-publish.mjs record \
+              "$store" "$fingerprint" "$analysis_id" "$bug_number"
+            echo "Published Bug #${bug_number} for ${analysis_id}" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+          git -C "$store" add -A
+          node scripts/run-store-integrity.mjs staged agent-store "$store"
+          if ! git -C "$store" diff --cached --quiet; then
+            git -C "$store" -c user.name=nession-store-writer \
+              -c user.email=nession-store-writer@users.noreply.github.com \
+              commit -m "e2e: link failure analyses to canonical Bugs ${SOURCE_RUN_ID:-sweep}"
+            node scripts/run-store-cas-push.mjs agent-store "$store"
+          fi
+          echo "Publisher drained; no analysis is marked analyzed without a canonical Bug link." >> "$GITHUB_STEP_SUMMARY"

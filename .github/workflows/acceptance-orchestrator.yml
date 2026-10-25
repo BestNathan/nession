@@ -625,7 +625,8 @@ jobs:
           github.event.workflow_run.event == 'pull_request' &&
           github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # The bounded re-read may wait up to three minutes for a queued deferral.
+    timeout-minutes: 10
     permissions:
       actions: write
       contents: read
@@ -727,6 +728,15 @@ jobs:
             sort_by(.created_at) | last | .id // empty' "$RUNNER_TEMP/acceptance-runs.json")" || exit 0
           [[ "$id" =~ ^[1-9][0-9]*$ ]] || exit 0
           run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id")"
+          # A deferral can still be queued on a runner when this wake fires.
+          # Wait (bounded) for that exact-head run to reach a terminal state
+          # before applying the unchanged replay/deferred decisions; nothing is
+          # polled for evidence, only for the deferral's own cancellation.
+          for _ in 1 2 3 4 5 6; do
+            [[ "$(jq -r '.status' <<< "$run_json")" == completed ]] && break
+            sleep 30
+            run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id")"
+          done
           printf '%s\n' "$verdict" > "$RUNNER_TEMP/dependency-barrier.json"
           printf '%s\n' "$run_json" > "$RUNNER_TEMP/acceptance-target-run.json"
           replay="$(node scripts/acceptance-dependency-state.mjs replay \
