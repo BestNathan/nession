@@ -46,14 +46,25 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_run" ]]; then
-            cp "$GITHUB_EVENT_PATH" "$RUNNER_TEMP/source-event.json"
+          # Step outputs drive later `if:` guards; the env file only feeds the
+          # shell commands, so a missing source can never skip the normal path.
+          resolve() {
+            echo "run_id=$1" >> "$GITHUB_OUTPUT"
+            echo "run_attempt=$2" >> "$GITHUB_OUTPUT"
+            echo "workflow_url=$3" >> "$GITHUB_OUTPUT"
+            printf 'event_path=%s\n' "$RUNNER_TEMP/source-event.json" >> "$GITHUB_OUTPUT"
             {
-              echo "SOURCE_RUN_ID=${{ github.event.workflow_run.id }}"
-              echo "SOURCE_RUN_ATTEMPT=${{ github.event.workflow_run.run_attempt }}"
-              echo "SOURCE_WORKFLOW_URL=${{ github.event.workflow_run.html_url }}"
+              echo "SOURCE_RUN_ID=$1"
+              echo "SOURCE_RUN_ATTEMPT=$2"
+              echo "SOURCE_WORKFLOW_URL=$3"
               echo "SOURCE_EVENT_PATH=$RUNNER_TEMP/source-event.json"
             } >> "$GITHUB_ENV"
+          }
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_run" ]]; then
+            cp "$GITHUB_EVENT_PATH" "$RUNNER_TEMP/source-event.json"
+            resolve "${{ github.event.workflow_run.id }}" \
+              "${{ github.event.workflow_run.run_attempt }}" \
+              "${{ github.event.workflow_run.html_url }}"
             exit 0
           fi
           ingested=''
@@ -84,12 +95,7 @@ jobs:
             ' <<< "${run}" >/dev/null || {
               echo "::error::listed source run is not a trusted completed Deploy / Identity run"; exit 1; }
             jq -n --argjson run "${run}" '{workflow_run: $run}' > "$RUNNER_TEMP/source-event.json"
-            {
-              echo "SOURCE_RUN_ID=${run_id}"
-              echo "SOURCE_RUN_ATTEMPT=${run_attempt}"
-              echo "SOURCE_WORKFLOW_URL=${run_url}"
-              echo "SOURCE_EVENT_PATH=$RUNNER_TEMP/source-event.json"
-            } >> "$GITHUB_ENV"
+            resolve "${run_id}" "${run_attempt}" "${run_url}"
             break
           done
 
@@ -98,10 +104,10 @@ jobs:
         run: ./gates/run deployment-identity-selftest
 
       - name: Download source deployment attestations
-        if: env.SOURCE_RUN_ID != ''
+        if: steps.source.outputs.run_id != ''
         env:
           GH_TOKEN: ${{ github.token }}
-          SOURCE_RUN_ID: ${{ env.SOURCE_RUN_ID }}
+          SOURCE_RUN_ID: ${{ steps.source.outputs.run_id }}
         run: |
           set -euo pipefail
           mkdir -p incoming
@@ -123,7 +129,7 @@ jobs:
 
       - name: Validate and prepare immutable records
         id: records
-        if: env.SOURCE_RUN_ID != ''
+        if: steps.source.outputs.run_id != ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -146,7 +152,7 @@ jobs:
           echo "count=${count}" >> "${GITHUB_OUTPUT}"
 
       - name: Mint scoped App token for orphan Run Store updates
-        if: (vars.RUN_STORE_WRITER_MODE == '' || vars.RUN_STORE_WRITER_MODE == 'app') && env.SOURCE_RUN_ID != '' && steps.records.outputs.count != '0'
+        if: (vars.RUN_STORE_WRITER_MODE == '' || vars.RUN_STORE_WRITER_MODE == 'app') && steps.source.outputs.run_id != '' && steps.records.outputs.count != '0'
         id: store_app
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
         with:
@@ -155,7 +161,7 @@ jobs:
           repositories: nession
           permission-contents: write
       - name: Reject unrecognized writer mode or unavailable App token
-        if: env.SOURCE_RUN_ID != '' && steps.records.outputs.count != '0'
+        if: steps.source.outputs.run_id != '' && steps.records.outputs.count != '0'
         env:
           WRITER_MODE: ${{ vars.RUN_STORE_WRITER_MODE }}
           APP_TOKEN: ${{ steps.store_app.outputs.token }}
@@ -168,7 +174,7 @@ jobs:
           esac
 
       - name: Initialize append-only results branch
-        if: env.SOURCE_RUN_ID != '' && steps.records.outputs.count != '0'
+        if: steps.source.outputs.run_id != '' && steps.records.outputs.count != '0'
         env:
           GH_TOKEN: ${{ vars.RUN_STORE_WRITER_MODE == 'legacy' && secrets.GITHUB_TOKEN || steps.store_app.outputs.token }}
         run: |
@@ -197,9 +203,9 @@ jobs:
           fi
 
       - name: Append compact immutable records and SHA indexes
-        if: env.SOURCE_RUN_ID != '' && steps.records.outputs.count != '0'
+        if: steps.source.outputs.run_id != '' && steps.records.outputs.count != '0'
         env:
-          SOURCE_WORKFLOW_URL: ${{ env.SOURCE_WORKFLOW_URL }}
+          SOURCE_WORKFLOW_URL: ${{ steps.source.outputs.workflow_url }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
@@ -246,7 +252,7 @@ jobs:
           if git -C results-repo diff --cached --quiet; then
             echo "Idempotent deployment ingestion retry: identical durable record and index bytes"
           else
-            git -C results-repo commit -m "deployment: ingest run ${{ env.SOURCE_RUN_ID }} attempt ${{ env.SOURCE_RUN_ATTEMPT }}"
+            git -C results-repo commit -m "deployment: ingest run ${{ steps.source.outputs.run_id }} attempt ${{ steps.source.outputs.run_attempt }}"
             node trusted/scripts/run-store-cas-push.mjs acceptance-results "${GITHUB_WORKSPACE}/results-repo"
           fi
 
