@@ -11,9 +11,11 @@ name: E2E / Staging Lanes
 # Full Pass.
 on:
   schedule:
-    # Coarse fixed tick; due decisions come from stored admission receipts, not
-    # from this cron expression.
-    - cron: '23 * * * *'
+    # Coarse fixed ticks; due decisions come from stored admission receipts, not
+    # from this cron expression. GitHub does not guarantee every scheduled
+    # delivery (this repository observed four consecutive missing :23 ticks), so
+    # a second tick halves the miss streak; a NOT_DUE receipt makes it a no-op.
+    - cron: '23,53 * * * *'
   workflow_dispatch:
 
 permissions:
