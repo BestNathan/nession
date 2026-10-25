@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "32febfe41e1eae9e1ce716fbf500c6d06c029ad2e111b7125c58774a84ea5f65",
+  "run_id": 40217461540,
+  "run_attempt": 1,
+  "issue": 2459,
+  "criterion": "SC-02",
+  "criterion_text": "In an isolated real tmux test, the current authorized controller's subsequent `resize(120,40)` is not skipped when the shared window is actually `100×30`; after quiescence tmux reports `120×40`, without duplicated output or unrelated detach.",
+  "stage": "staging",
+  "target_sha": "b7c0d0ed7249b4e4ac7a8b84038303c8b1e0f095",
+  "contract_sha256": "3cb67be633b355bad5608e59897d492d40fef311d6f2ea4f2768b99c073b90c1",
+  "case_revision": "b7c0d0ed7249b4e4ac7a8b84038303c8b1e0f095",
+  "case_tree_sha": "581558fe0e9c092ed50b29d95bd638b0dd11a515",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-25T17:40:46.334Z",
+  "finished_at": "2026-10-25T17:41:20.818Z",
+  "duration_ms": 34484,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "After a peer moves the shared window, the authorized client reasserts its size without suppression, the older completion never overwrites the newer tmux report, and real tmux converges without an unrelated detach",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA b7c0d0ed7249b4e4ac7a8b84038303c8b1e0f095: a peer report during a pending refresh reply survives the older completion, and the next same-size request emits resize-window"
+        },
+        {
+          "type": "runtime",
+          "value": "isolated real tmux: two control clients share one window; the authorized resize moves it after the peer move and the peer receives the authoritative size"
+        }
+      ],
+      "duration_ms": 28606,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40217461540,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "b7c0d0ed7249b4e4ac7a8b84038303c8b1e0f095",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40217461540",
+    "record_path": "runs/2026-10-25/40217461540-1/2459/SC-02.json",
+    "source_result_sha256": "ad88e6a0b9b816b356d28b37f0471feb3b9a1e66344efd7b3ad3255cba280321"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40217461540-1",
+    "sha256": "ad88e6a0b9b816b356d28b37f0471feb3b9a1e66344efd7b3ad3255cba280321",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40217461540",
+    "durability": "time-limited; object archival not configured"
+  }
+}
