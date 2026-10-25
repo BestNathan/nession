@@ -185,6 +185,14 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+      - name: Collect trusted deployment records
+        if: steps.records.outputs.count != '0'
+        run: |
+          set -euo pipefail
+          node trusted/scripts/deployment-binding-lookup.mjs collect \
+            results-repo "${RUNNER_TEMP}/deployment-records.json"
+          echo "DEPLOYMENT_RECORDS_JSON=${RUNNER_TEMP}/deployment-records.json" >> "$GITHUB_ENV"
+
       - name: Project only currently eligible results
         if: steps.records.outputs.count != '0'
         env:

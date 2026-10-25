@@ -1,0 +1,197 @@
+name: Deploy / Identity
+
+# Read-only deployment identity attestation (#1616, consumed by #2323).
+# This workflow never deploys, restarts or mutates a cluster. It attests that
+# the source SHA currently deployed on an isolated staging lane matches the
+# trusted build provenance and the observed ready workloads.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'registered staging lane under gitops/environments (staging or staging-01)'
+        required: true
+        default: staging
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: deploy-identity-${{ github.event.inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  attest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate environment and read trusted GitOps state
+        env:
+          ENVIRONMENT: ${{ github.event.inputs.environment }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$ENVIRONMENT" in
+            staging|staging-01) ;;
+            *) echo "::error::unsupported environment: $ENVIRONMENT"; exit 1 ;;
+          esac
+          git fetch --no-tags origin '+refs/heads/*:refs/remotes/origin/*'
+          git fetch --no-tags origin gitops
+          OVERLAY_PATH="environments/$ENVIRONMENT/nession/kustomization.yaml"
+          git cat-file -e "origin/gitops:$OVERLAY_PATH" 2>/dev/null \
+            || { echo "::error::no such environment on gitops: $ENVIRONMENT"; exit 1; }
+          git show "origin/gitops:$OVERLAY_PATH" > "$RUNNER_TEMP/overlay.yaml"
+          git rev-parse origin/gitops > "$RUNNER_TEMP/gitops-revision"
+          NAMESPACE=$(awk '/^namespace:/{print $2; exit}' "$RUNNER_TEMP/overlay.yaml")
+          [[ -n "$NAMESPACE" ]] || { echo "::error::overlay has no namespace"; exit 1; }
+          SHORT=$(awk '/newTag: server-/{sub(/.*server-/,""); print; exit}' "$RUNNER_TEMP/overlay.yaml")
+          [[ "$SHORT" =~ ^[0-9a-f]{7,40}$ ]] \
+            || { echo "::error::overlay server tag is not a commit prefix: $SHORT"; exit 1; }
+          for role in agent server ui; do
+            grep -Eq "newTag: ${role}-${SHORT}[[:space:]]*$" "$RUNNER_TEMP/overlay.yaml" \
+              || { echo "::error::overlay role tags do not share $SHORT"; exit 1; }
+          done
+          FULL=$(git rev-parse --verify --quiet "${SHORT}^{commit}") \
+            || { echo "::error::deployed short SHA is not uniquely resolvable: $SHORT"; exit 1; }
+          [[ "$FULL" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::resolved SHA is invalid"; exit 1; }
+          {
+            echo "NAMESPACE=$NAMESPACE"
+            echo "OVERLAY_PATH=$OVERLAY_PATH"
+            echo "DEPLOYED_SHORT=$SHORT"
+            echo "DEPLOYED_SHA=$FULL"
+          } >> "$GITHUB_ENV"
+          echo "GitOps $(cat "$RUNNER_TEMP/gitops-revision") desires $ENVIRONMENT at $SHORT ($FULL)"
+
+      - name: Validate CI secret availability (values never printed)
+        env:
+          WG_CI_CONF: ${{ secrets.WG_CI_CONF }}
+          KUBE_CONFIG_CI: ${{ secrets.KUBE_CONFIG_CI }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${WG_CI_CONF:-}" ]] || { echo "::error::WG_CI_CONF unavailable as repository-level secret"; exit 1; }
+          [[ -n "${KUBE_CONFIG_CI:-}" ]] || { echo "::error::KUBE_CONFIG_CI unavailable as repository-level secret"; exit 1; }
+          echo "Both CI secrets are non-empty and available to this job. No secret values logged."
+
+      - name: Install WireGuard and kubectl client
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq wireguard-tools
+          command -v kubectl >/dev/null || { echo "::error::kubectl not installed on runner"; exit 1; }
+
+      - name: Establish WireGuard tunnel (do not expose configuration)
+        env:
+          WG_CI_CONF: ${{ secrets.WG_CI_CONF }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          sudo install -m 600 /dev/null /etc/wireguard/ci.conf
+          if [[ "$WG_CI_CONF" == *'[Interface]'* ]]; then
+            printf '%s\n' "$WG_CI_CONF" | sudo tee /etc/wireguard/ci.conf >/dev/null
+          else
+            printf '%s' "$WG_CI_CONF" | base64 -d | sudo tee /etc/wireguard/ci.conf >/dev/null
+          fi
+          sudo chmod 600 /etc/wireguard/ci.conf
+          sudo wg-quick up ci
+          echo "WireGuard interface activated (key and peer configuration redacted)."
+
+      - name: Verify read-only Kubernetes identity
+        env:
+          KUBE_CONFIG_CI: ${{ secrets.KUBE_CONFIG_CI }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          export KUBECONFIG="$RUNNER_TEMP/nession-ci-kubeconfig"
+          if [[ "$KUBE_CONFIG_CI" == *'apiVersion:'* ]]; then
+            printf '%s\n' "$KUBE_CONFIG_CI" > "$KUBECONFIG"
+          else
+            printf '%s' "$KUBE_CONFIG_CI" | base64 -d > "$KUBECONFIG"
+          fi
+          chmod 600 "$KUBECONFIG"
+          kubectl --request-timeout=20s auth can-i get deployments -n "$NAMESPACE" --quiet \
+            || { echo "::error::kubeconfig cannot read deployments in $NAMESPACE"; exit 1; }
+          # Identity observation must never carry secret or mutation authority.
+          for action in "get secrets" "list secrets" "create deployments" "delete pods" "create pods/exec"; do
+            if kubectl --request-timeout=20s auth can-i $action -n "$NAMESPACE" --quiet; then
+              echo "::error::CI kubeconfig is overprivileged ($action). Provision a read-only service account."; exit 1
+            fi
+          done
+          kubectl config current-context > "$RUNNER_TEMP/cluster-context"
+          echo "CLUSTER_CONTEXT=$(cat "$RUNNER_TEMP/cluster-context")" >> "$GITHUB_ENV"
+
+      - name: Observe deployed workloads
+        shell: bash
+        run: |
+          set -euo pipefail
+          export KUBECONFIG="$RUNNER_TEMP/nession-ci-kubeconfig"
+          kubectl --request-timeout=20s -n "$NAMESPACE" get deployments -o json > "$RUNNER_TEMP/deployments.json"
+          kubectl --request-timeout=20s -n "$NAMESPACE" get pods -o json > "$RUNNER_TEMP/pods.json"
+
+      - name: Download trusted build provenance for the deployed source SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          REPO="$GITHUB_REPOSITORY"
+          response=$(gh api "repos/$REPO/actions/workflows/release-staging.yml/runs?head_sha=${DEPLOYED_SHA}&per_page=100")
+          RUN_ID=$(jq -r --arg sha "$DEPLOYED_SHA" '
+            [.workflow_runs[]
+              | select((.path | split("@")[0]) == ".github/workflows/release-staging.yml")
+              # A workflow-only staging change is ignored by paths-ignore, so
+              # the trusted workflow dispatch escape hatch may be the build
+              # that produced the deployed images. Both events bind the same
+              # exact SHA/branch/workflow identity.
+              | select(.event == "push" or .event == "workflow_dispatch")
+              | select(.head_branch == "staging")
+              | select(.head_sha == $sha)
+              | select(.status == "completed")
+              | select(.conclusion == "success")
+              | .id] | sort | join(" ")' <<<"$response")
+          count=$(wc -w <<<"$RUN_ID" | tr -d ' ')
+          [[ "$count" == "1" ]] \
+            || { echo "::error::expected exactly one successful Release / Staging run for $DEPLOYED_SHA, found $count"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/provenance"
+          gh run download "$RUN_ID" -R "$REPO" -n nession-build-provenance -D "$RUNNER_TEMP/provenance"
+          echo "Downloaded provenance from trusted run $RUN_ID (attempt identity is in the run URL)."
+
+      - name: Attest deployment identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/deployment-identity-collect.mjs attest \
+            --overlay-path "$OVERLAY_PATH" \
+            --overlay "$RUNNER_TEMP/overlay.yaml" \
+            --gitops-revision "$(cat "$RUNNER_TEMP/gitops-revision")" \
+            --provenance "$RUNNER_TEMP/provenance/nession-build-provenance.json" \
+            --environment "${{ github.event.inputs.environment }}" \
+            --cluster-context "$CLUSTER_CONTEXT" \
+            --observed-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --deployments "$RUNNER_TEMP/deployments.json" \
+            --pods "$RUNNER_TEMP/pods.json" \
+            --out "$RUNNER_TEMP/deployment-attestation.json"
+          cat "$RUNNER_TEMP/deployment-attestation.json" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nession-deployment-attestation-${{ github.event.inputs.environment }}
+          path: ${{ runner.temp }}/deployment-attestation.json
+          retention-days: 90
+
+      - name: Remove temporary VPN and kubeconfig
+        if: always()
+        shell: bash
+        run: |
+          sudo wg-quick down ci >/dev/null 2>&1 || true
+          sudo rm -f /etc/wireguard/ci.conf
+          rm -f "$RUNNER_TEMP/nession-ci-kubeconfig"
+          echo "Temporary VPN and kubeconfig files cleared."

@@ -7,10 +7,12 @@ Status: **design contract; remote profiles not enabled**. This document specifie
 The trusted controller must resolve a deployment identity from an authenticated GitOps and cluster control plane, **not** from a PR-head file or a caller-supplied label alone:
 
 - `repository`, `source_sha` (40-character commit), `gitops_commit_sha` and `environment`, all pinned.
-- The three running image names and **immutable registry digest** (`server`, `agent`, `ui`); verify the digest against both the desired GitOps revision and each observed pod's `imageID`.
+- The three running image names and **immutable registry digest** (`server`, `agent`, `ui`); verify the digest against both the desired GitOps revision and each observed pod's `imageID`. When one build is published to several registries, or a trusted mirror rewrites the index (for example by dropping attestation manifests), provenance records one immutable digest per registry and attests the digest of the registry actually observed in `imageID`; an unknown registry is rejected.
 - Cluster/context identity, namespace, workload UID, observed generation, rollout revision and readiness timestamp. Never accept a branch name, mutable image tag or a successful GitOps push as proof of live readiness.
 - A verifier asserting a particular source SHA must prove the deployed source-to-image relationship from trusted build provenance; otherwise return `Error`, not `Pass` or `N/A`.
 - On promotion to production, compare **deployed** digest/revision and approval record. A main merge alone is never a deployment.
+
+The executable policy for this chain is `scripts/deployment-identity-policy.mjs` (Gate `deployment-identity-selftest`). It parses a trusted GitOps overlay, validates trusted build provenance, and binds one full source SHA to three immutable digests and three ready observed workloads (exact namespace, workload name, UID, generation and imageID). `scripts/deployment-identity-collect.mjs` is the adapter that maps raw read-only `kubectl get deployments/pods` JSON into that observation shape and rejects mid-rollout or ambiguous pods. Neither script performs cluster or registry I/O, emits evidence by itself, or enables a remote profile; a trusted workflow must still supply authenticated inputs.
 
 ## Trust and runner isolation
 

@@ -34,6 +34,8 @@ Evaluate only criteria whose declared stage matches the environment/boundary bei
 - `staging`
 - `post-merge`
 
+Lifecycle ordering (**Development Complete → Main Promoted → Regression Qualified → Released**) and the rule that ordinary Issue completion never waits for Main Full Regression are canonical in [acceptance-sc-format.md](../../../docs/architecture/acceptance-sc-format.md); the executable policy is `scripts/acceptance-lifecycle.mjs` (Gate `acceptance-lifecycle-selftest`).
+
 Do not mark a criterion Pass because implementation exists; execute/observe the criterion's actual proof.
 
 **Boundary review before accepting an SC:** PR-head deterministic evidence is the

@@ -14,7 +14,7 @@ const SELF = fileURLToPath(import.meta.url);
 
 export function selectTrustedCases({
   issueNumbers, issues, stage, targetSha, runId, requested = '',
-  runtime = '', sourceCaseRoot,
+  runtime = '', sourceCaseRoot, deploymentBinding = null,
 }) {
   if (!Array.isArray(issueNumbers) || !Array.isArray(issues)) throw new Error('Issue inputs must be arrays');
   if (!/^[0-9a-f]{40}$/i.test(targetSha)) throw new Error('target must be an exact 40-byte hexadecimal SHA');
@@ -34,7 +34,7 @@ export function selectTrustedCases({
     const issue = issues.find((item) => Number(item.number) === issueNumber);
     if (!issue) throw new Error('missing trusted Issue contract #' + issueNumber);
     const context = buildAcceptanceContext(issue, stage, {
-      targetRef: targetSha, runId, method: 'case',
+      targetRef: targetSha, runId, method: 'case', deploymentBinding,
     });
     const explicit = acceptancePlanSection(issue.body) !== null;
     for (const criterion of context.criteria) {
@@ -105,6 +105,10 @@ function main() {
   if (mode !== 'select') throw new Error('usage: select-acceptance-cases.mjs <self-test|select ROOT ISSUE_JSON_DIR SELECTED_JSON COVERAGE_JSON>');
   const [caseRoot, issueDir, selectedPath, coveragePath] = process.argv.slice(3);
   if (!caseRoot || !issueDir || !selectedPath || !coveragePath) throw new Error('missing selector paths');
+  const deploymentBindingFile = process.env.DEPLOYMENT_BINDING_FILE ?? '';
+  const deploymentBinding = deploymentBindingFile
+    ? JSON.parse(fs.readFileSync(deploymentBindingFile, 'utf8'))
+    : null;
   const issueNumbers = JSON.parse(process.env.ISSUE_NUMBERS ?? '[]').map(Number);
   const issues = issueNumbers.map(number =>
     JSON.parse(fs.readFileSync(path.join(issueDir, number + '.json'), 'utf8')));
@@ -116,6 +120,7 @@ function main() {
     requested: process.env.MANUAL_CRITERION ?? '',
     runtime: process.env.RUNTIME_PROFILE ?? '',
     sourceCaseRoot: caseRoot,
+    deploymentBinding,
   });
   fs.writeFileSync(selectedPath, JSON.stringify(selected, null, 2) + '\n');
   fs.writeFileSync(coveragePath, JSON.stringify(coverage, null, 2) + '\n');

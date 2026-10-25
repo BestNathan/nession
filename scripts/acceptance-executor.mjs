@@ -5,7 +5,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { validateAcceptancePlan, isProofEligible } from './acceptance-plan.mjs';
+import { validateAcceptancePlan, isProofEligible, deploymentProofEligible } from './acceptance-plan.mjs';
+import { deploymentRecord } from '../e2e/acceptance/evaluator/run-case.mjs';
 import {
   extractSection,
   isAcceptanceIssue,
@@ -72,9 +73,25 @@ export function buildAcceptanceContext(issue, stage, options = {}) {
   const normalizedStage = stageOf(stage);
   const runId = runIdOf(options.runId);
   const contract = parseContract(issue.body);
+  const deploymentBinding = deploymentBindingOf(options.deploymentBinding);
+  const eligible = (entry) => {
+    if (entry?.when === 'deployed') {
+      if (!deploymentBinding) return false;
+      if (!options.method) return true;
+      return deploymentProofEligible(entry, {
+        environment: deploymentBinding.environment_id,
+        attested: deploymentBinding.attested === true,
+        method: options.method,
+      });
+    }
+    // A deployed run selects only the criteria bound to its environment.
+    if (deploymentBinding) return false;
+    if (!options.method) return true;
+    return isProofEligible(entry, normalizedStage, options.method);
+  };
   const criteria = [...contract.criteria.values()]
     .filter((criterion) => contract.rows.get(criterion.id).stage === normalizedStage)
-    .filter((criterion) => !options.method || isProofEligible(contract.plan?.get(criterion.id), normalizedStage, options.method))
+    .filter((criterion) => eligible(contract.plan?.get(criterion.id)))
     .map((criterion) => {
       const row = contract.rows.get(criterion.id);
       return {
@@ -97,9 +114,31 @@ export function buildAcceptanceContext(issue, stage, options = {}) {
       return ref;
     })(),
     deployment: options.deployment ? String(options.deployment).trim() : null,
+    deployment_binding: deploymentBinding,
     ci_evidence: options.ciEvidence ?? null,
     criteria,
     requirement_body: String(issue.body ?? ''),
+  };
+}
+
+// A deployed execution must present the trusted identity of the environment it
+// observed: the environment id plus an `attested` flag supplied by the trusted
+// workflow after verifying the deployment attestation record.
+function deploymentBindingOf(value) {
+  if (value == null) return null;
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('deployment binding must be an object');
+  }
+  const environment = String(value.environment_id ?? '');
+  if (!/^[a-z][a-z0-9-]{0,62}$/.test(environment)) {
+    throw new Error('deployment binding environment is invalid');
+  }
+  if (typeof value.attested !== 'boolean') {
+    throw new Error('deployment binding attested must be a boolean');
+  }
+  return {
+    ...value,
+    environment_id: environment,
   };
 }
 
@@ -308,7 +347,7 @@ function updateReport(body, contract, resultMap, meta) {
   }));
 }
 
-export function applyAcceptanceResultToBody(body, normalized) {
+export function applyAcceptanceResultToBody(body, normalized, options = {}) {
   const contract = parseContract(body);
   if (contractDigest(contract) !== normalized.contract_sha256) {
     throw new Error('requirement contract changed after acceptance started; refusing stale result');
@@ -325,13 +364,24 @@ export function applyAcceptanceResultToBody(body, normalized) {
     : stageExpected;
   if (expected.length === 0) throw new Error('acceptance result selects no criteria');
   if (new Set(expected).size !== expected.length) throw new Error('acceptance result has duplicate selected criteria');
+  const deploymentBinding = options.deploymentBinding ?? null;
   const proofSource = String(normalized.source ?? '');
   const proofMethod = /^agent(?:-|$)/.test(proofSource) ? 'agent'
     : proofSource === 'case-runner' ? 'case' : null;
   for (const id of expected) {
     if (!stageExpected.includes(id)) throw new Error('selected criterion ' + id + ' is unknown or belongs to another stage');
-    if (contract.plan && (!proofMethod || !isProofEligible(contract.plan.get(id), stage, proofMethod))) {
-      throw new Error(id + ' selected method does not match authenticated Acceptance Plan proof source ' + proofSource);
+    if (contract.plan) {
+      const entry = contract.plan.get(id);
+      const eligible = proofMethod && (entry?.when === 'deployed'
+        ? deploymentProofEligible(entry, {
+          environment: deploymentBinding?.environment_id,
+          attested: deploymentBinding?.attested === true,
+          method: proofMethod,
+        })
+        : isProofEligible(entry, stage, proofMethod));
+      if (!eligible) {
+        throw new Error(id + ' selected method does not match authenticated Acceptance Plan proof source ' + proofSource);
+      }
     }
   }
   const resultMap = new Map();
@@ -652,6 +702,53 @@ function selfTest() {
     targetRef: 'b'.repeat(40), runId: 401, method: 'case',
   });
   assert.deepEqual(mainMergedCase.criteria, []);
+  // A deployed run selects only the criteria bound to its exact environment,
+  // and only when the caller supplies a trusted attested binding.
+  const deployedContext = buildAcceptanceContext(plannedIssue, 'post-merge', {
+    targetRef: 'b'.repeat(40), runId: 402, method: 'case',
+    deploymentBinding: { environment_id: 'production', attested: true },
+  });
+  assert.deepEqual(deployedContext.criteria.map((entry) => entry.criterion), ['SC-02']);
+  assert.equal(deployedContext.deployment_binding.environment_id, 'production');
+  assert.deepEqual(buildAcceptanceContext(plannedIssue, 'post-merge', {
+    targetRef: 'b'.repeat(40), runId: 403, method: 'case',
+    deploymentBinding: { environment_id: 'production', attested: false },
+  }).criteria, []);
+  assert.deepEqual(buildAcceptanceContext(plannedIssue, 'post-merge', {
+    targetRef: 'b'.repeat(40), runId: 404, method: 'case',
+    deploymentBinding: { environment_id: 'staging-01', attested: true },
+  }).criteria, []);
+  // A deployed binding never selects branch-stage criteria as well.
+  assert.deepEqual(buildAcceptanceContext(plannedIssue, 'staging', {
+    targetRef: 'b'.repeat(40), runId: 405, method: 'case',
+    deploymentBinding: { environment_id: 'production', attested: true },
+  }).criteria, []);
+  assert.throws(() => buildAcceptanceContext(plannedIssue, 'post-merge', {
+    targetRef: 'b'.repeat(40), runId: 406, method: 'case',
+    deploymentBinding: { environment_id: 'Bad Lane', attested: true },
+  }), /deployment binding environment is invalid/);
+
+  // The Case runner emits the same deployment block the ingester validates.
+  const deploymentFixture = {
+    environment_id: 'staging-01', attested: true,
+    attestation_execution_id: 'e'.repeat(64),
+    gitops_revision: 'f'.repeat(40),
+    image_digests: {
+      agent: 'sha256:' + '1'.repeat(64),
+      server: 'sha256:' + '2'.repeat(64),
+      ui: 'sha256:' + '3'.repeat(64),
+    },
+  };
+  const boundRecord = deploymentRecord(deploymentFixture, 'b'.repeat(40));
+  assert.equal(boundRecord.environment_id, 'staging-01');
+  assert.equal(boundRecord.deployed_source_sha, 'b'.repeat(40));
+  assert.equal(deploymentRecord(null, 'b'.repeat(40)), null);
+  assert.throws(() => deploymentRecord({ ...deploymentFixture, attested: false }, 'b'.repeat(40)),
+    /must be attested/);
+  assert.throws(() => deploymentRecord({ ...deploymentFixture, image_digests: { agent: 'latest' } },
+    'b'.repeat(40)), /not immutable/);
+  assert.throws(() => deploymentRecord({ ...deploymentFixture, gitops_revision: 'short' },
+    'b'.repeat(40)), /40-character/);
   assert.throws(() => normalizeAcceptanceCaseResult(agentOnly, {
     issue: 1360, stage: 'staging', criterion: 'SC-01',
     contract_sha256: agentOnly.contract_sha256, target_sha: agentOnly.target_ref,

@@ -12,9 +12,13 @@ import {
 import { extractSection, isAcceptanceIssue, parseAcceptanceReport, parsePreMergeIssueNumbers } from './requirement-acceptance.mjs';
 import { artifactEvidence, validateArtifactEvidence } from './run-record-artifact-evidence.mjs';
 import { makeRunIndex } from './run-record-index-contract.mjs';
+import { enrichReceipt, validateStoredRecord } from './deployment-attestation-ingest.mjs';
 
 const RESULTS = new Set(['Pass', 'Fail', 'Pending', 'Error']);
 const STAGES = new Set(['pre-merge', 'staging', 'post-merge']);
+const DEPLOYMENT_ROLES = Object.freeze(['agent', 'server', 'ui']);
+const DEPLOYMENT_ENVIRONMENT = /^[a-z][a-z0-9-]{0,62}$/;
+const IMAGE_DIGEST = /^sha256:[0-9a-f]{64}$/;
 
 function positiveInt(value, label) {
   const n = Number(value);
@@ -65,6 +69,47 @@ export function validateCaseRecord(raw) {
   const executionId = sha(raw.execution_id, 64, 'execution_id');
   const runId = positiveInt(raw.run_id, 'run_id');
   const runAttempt = positiveInt(raw.run_attempt, 'run_attempt');
+  // A deployed proof binds the Case to one attested environment and immutable
+  // deployment identity. It is optional for legacy branch-stage records and
+  // required only when the SC's plan says `when: deployed`.
+  let deployment = null;
+  if (raw.deployment !== undefined && raw.deployment !== null) {
+    const block = raw.deployment;
+    if (typeof block !== 'object' || Array.isArray(block)) {
+      throw new Error('deployment binding must be an object');
+    }
+    const environmentId = String(block.environment_id ?? '');
+    if (!DEPLOYMENT_ENVIRONMENT.test(environmentId)) {
+      throw new Error('invalid deployment environment_id');
+    }
+    if (block.deployed_source_sha !== targetSha) {
+      throw new Error('deployment source SHA must equal the Case target_sha');
+    }
+    const attestationExecutionId = sha(
+      block.attestation_execution_id, 64, 'attestation_execution_id');
+    const gitopsRevision = sha(block.gitops_revision, 40, 'gitops_revision');
+    const digests = block.image_digests;
+    if (!digests || typeof digests !== 'object' || Array.isArray(digests)) {
+      throw new Error('deployment image_digests must be an object');
+    }
+    const unknown = Object.keys(digests).filter((role) => !DEPLOYMENT_ROLES.includes(role));
+    if (unknown.length) throw new Error('unknown deployment image role');
+    const normalized = {};
+    for (const role of DEPLOYMENT_ROLES) {
+      const value = String(digests[role] ?? '');
+      if (!IMAGE_DIGEST.test(value)) {
+        throw new Error(role + ' deployment image digest is not immutable');
+      }
+      normalized[role] = value;
+    }
+    deployment = {
+      environment_id: environmentId,
+      deployed_source_sha: targetSha,
+      attestation_execution_id: attestationExecutionId,
+      gitops_revision: gitopsRevision,
+      image_digests: normalized,
+    };
+  }
   if (raw.evidence !== undefined) {
     validateArtifactEvidence(raw.evidence, {
       mode: 'acceptance', run_id: runId, run_attempt: runAttempt,
@@ -114,6 +159,7 @@ export function validateCaseRecord(raw) {
     execution_id: executionId,
     run_id: runId,
     run_attempt: runAttempt,
+    deployment,
   };
 }
 
@@ -160,8 +206,32 @@ export function sourceRunIdentity(event, repository) {
   };
 }
 
-export function assertSourceBoundRecord(record, source) {
+// Lane-aware proof boundary: a `when: deployed` criterion is eligible only
+// with a deployment binding for its declared environment. Legacy branch-stage
+// criteria keep their exact behaviour and must not carry a deployment block.
+export function assertDeploymentBinding(record, planEntry) {
   const item = validateCaseRecord(record);
+  if (planEntry?.when !== 'deployed') {
+    if (item.deployment) {
+      throw new Error('deployment proof is only valid for a when:deployed criterion');
+    }
+    return item;
+  }
+  if (!item.deployment) {
+    throw new Error('deployed criterion requires a deployment proof binding');
+  }
+  const environment = String(planEntry.environment ?? '');
+  if (!DEPLOYMENT_ENVIRONMENT.test(environment)) {
+    throw new Error('deployed criterion has an invalid environment');
+  }
+  if (item.deployment.environment_id !== environment) {
+    throw new Error('cross-lane deployment proof: ' +
+      item.deployment.environment_id + ' != ' + environment);
+  }
+  return item;
+}
+
+export function assertSourceBoundRecord(record, source) {  const item = validateCaseRecord(record);
   if (item.run_id !== source.run_id || item.run_attempt !== source.run_attempt) {
     throw new Error('Case record run identity disagrees with triggering workflow_run');
   }
@@ -377,13 +447,83 @@ export function historicalCaseMayProject(issueBody, criterion) {
     !/^run\s+[1-9]\d*\s*;/i.test(previous.evidence);
 }
 
-export async function applyCaseRecord(record, { repository, token, request = githubRequest }) {
+// A deployed Case may project only against the exact attestation it was
+// executed under. The binding is re-derived from the trusted store record;
+// nothing in the Case result is trusted to name its own environment.
+export function verifyDeployedProof(item, deploymentRecords) {
+  if (!Array.isArray(deploymentRecords)) {
+    throw new Error('deployed Case projection requires trusted deployment records');
+  }
+  const matches = [];
+  for (const entry of deploymentRecords) {
+    if (!entry || typeof entry !== 'object') throw new Error('deployment record entry must be an object');
+    const stored = validateStoredRecord(entry.record);
+    if (stored.execution_id === item.deployment.attestation_execution_id) {
+      matches.push({ ...stored, path: String(entry.path ?? '') });
+    }
+  }
+  if (matches.length !== 1) {
+    throw new Error('deployed Case attestation is missing or ambiguous');
+  }
+  const { item: receipt } = matches[0];
+  if (receipt.environment_id !== item.deployment.environment_id) {
+    throw new Error('deployed Case environment disagrees with the attestation');
+  }
+  if (receipt.source_sha !== item.target_sha) {
+    throw new Error('deployed Case target SHA disagrees with the attestation');
+  }
+  if (receipt.gitops_revision !== item.deployment.gitops_revision) {
+    throw new Error('deployed Case GitOps revision disagrees with the attestation');
+  }
+  for (const role of ['agent', 'server', 'ui']) {
+    const digest = receipt.images.find((image) => image.role === role)?.digest;
+    if (digest !== item.deployment.image_digests[role]) {
+      throw new Error(role + ' deployed Case digest disagrees with the attestation');
+    }
+  }
+  return {
+    environment_id: receipt.environment_id,
+    attested: true,
+    attestation_execution_id: matches[0].execution_id,
+    gitops_revision: receipt.gitops_revision,
+    image_digests: Object.fromEntries(receipt.images.map((image) => [image.role, image.digest])),
+  };
+}
+
+export async function applyCaseRecord(record, { repository, token, request = githubRequest, deploymentRecords = null }) {
   const item = validateCaseRecord(record);
   const [owner, name] = String(repository ?? '').split('/');
   if (!owner || !name) throw new Error('repository must be owner/name');
 
   if (item.stage === 'pre-merge') {
     return { projected: false, reason: 'pre-merge Case records are evidence-only; PR Acceptance owns pre-merge projection' };
+  }
+
+  if (item.deployment) {
+    // Deployed proof: the exact attestation replaces branch ancestry and
+    // Issue↔SHA association as the authorization for projection.
+    const binding = verifyDeployedProof(item, deploymentRecords);
+    const issue = await request('/repos/' + owner + '/' + name + '/issues/' + item.issue, { token });
+    if (!isAcceptanceIssue(issue)) throw new Error('#' + item.issue + ' must be labeled bug or requirement');
+    if (String(issue.state).toLowerCase() !== 'open') {
+      return { projected: false, reason: 'Requirement #' + item.issue + ' is not open' };
+    }
+    const context = buildAcceptanceContext(issue, item.stage, {
+      method: 'case',
+      targetRef: item.target_sha,
+      deployment: item.deployment.environment_id,
+      deploymentBinding: binding,
+      runId: item.run_id,
+    });
+    const normalized = normalizeAcceptanceCaseResult(context, item, 'case-runner');
+    const updatedBody = applyAcceptanceResultToBody(issue.body, normalized, { deploymentBinding: binding });
+    if (updatedBody === issue.body) return { projected: true, changed: false };
+    await request('/repos/' + owner + '/' + name + '/issues/' + item.issue, {
+      token,
+      method: 'PATCH',
+      body: { body: updatedBody },
+    });
+    return { projected: true, changed: true };
   }
 
   const currentSha = await currentStageSha(owner, name, item.stage, token, request);
@@ -727,7 +867,125 @@ async function selfTest() {
   assert.throws(() => caseIndexRecord({...sourceEnriched,
     provenance: {...sourceEnriched.provenance, record_path: 'runs/forged.json'}}),
     /record path differs/);
-  console.log('acceptance Case ingest self-test: provenance and record validation passed');
+  // Lane-aware proof binding: deployed criteria require the exact environment
+  // and immutable deployment identity; legacy criteria must not carry one.
+  const deployment = {
+    environment_id: 'staging-01',
+    deployed_source_sha: 'b'.repeat(40),
+    attestation_execution_id: 'e'.repeat(64),
+    gitops_revision: 'f'.repeat(40),
+    image_digests: {
+      agent: 'sha256:' + '1'.repeat(64),
+      server: 'sha256:' + '2'.repeat(64),
+      ui: 'sha256:' + '3'.repeat(64),
+    },
+  };
+  const deployedEntry = { when: 'deployed', environment: 'staging-01', method: 'case' };
+  const bound = fixtureRecord({ deployment });
+  assert.equal(assertDeploymentBinding(bound, deployedEntry).deployment.environment_id, 'staging-01');
+  assert.throws(() => assertDeploymentBinding(fixtureRecord(), deployedEntry),
+    /requires a deployment proof binding/);
+  assert.throws(() => assertDeploymentBinding(bound, { when: 'pr', method: 'case' }),
+    /only valid for a when:deployed/);
+  assert.throws(() => assertDeploymentBinding(
+    fixtureRecord({ deployment: { ...deployment, environment_id: 'staging' } }), deployedEntry),
+  /cross-lane deployment proof/);
+  assert.throws(() => assertDeploymentBinding(
+    fixtureRecord({ deployment: { ...deployment, deployed_source_sha: 'c'.repeat(40) } }), deployedEntry),
+  /must equal the Case target_sha/);
+  assert.throws(() => validateCaseRecord(fixtureRecord({
+    deployment: { ...deployment, image_digests: { ...deployment.image_digests, agent: 'latest' } },
+  })), /agent deployment image digest is not immutable/);
+  assert.throws(() => validateCaseRecord(fixtureRecord({
+    deployment: { ...deployment, image_digests: { agent: deployment.image_digests.agent } },
+  })), /server deployment image digest is not immutable/);
+  assert.throws(() => validateCaseRecord(fixtureRecord({
+    deployment: { ...deployment, attestation_execution_id: 'short' },
+  })), /attestation_execution_id/);
+  assert.throws(() => validateCaseRecord(fixtureRecord({
+    deployment: { ...deployment, environment_id: 'Staging_01' },
+  })), /invalid deployment environment_id/);
+  // Deployed projection: only the exact stored attestation authorizes it.
+  const deploySource = 'b'.repeat(40);
+  const deployReceipt = {
+    schema_version: 1, kind: 'nession_deployment_attestation', status: 'Attested',
+    environment_id: 'staging-01', namespace: 'nession-staging-01',
+    cluster_context: 'ci', gitops_revision: 'f'.repeat(40),
+    observed_at: '2026-10-25T01:00:00Z', source_sha: deploySource,
+    images: [
+      { role: 'agent', declared_repository: 'ghcr.io/bestnathan/nession', repository: 'ghcr.io/bestnathan/nession', tag: 'agent-bbbbbbb', digest: 'sha256:' + '1'.repeat(64) },
+      { role: 'server', declared_repository: 'ghcr.io/bestnathan/nession', repository: 'ghcr.io/bestnathan/nession', tag: 'server-bbbbbbb', digest: 'sha256:' + '2'.repeat(64) },
+      { role: 'ui', declared_repository: 'ghcr.io/bestnathan/nession', repository: 'ghcr.io/bestnathan/nession', tag: 'ui-bbbbbbb', digest: 'sha256:' + '3'.repeat(64) },
+    ],
+    workloads: ['agent', 'server', 'ui'].map((role, index) => ({
+      role, name: 'nession-' + role, namespace: 'nession-staging-01',
+      uid: 'uid-' + role, generation: 3, observed_generation: 3, ready: true,
+      image: 'ghcr.io/bestnathan/nession:' + role + '-bbbbbbb',
+      image_id: 'ghcr.io/bestnathan/nession@sha256:' + String(index + 1).repeat(64),
+      declared_repository: 'ghcr.io/bestnathan/nession',
+      repository: 'ghcr.io/bestnathan/nession',
+      digest: 'sha256:' + String(index + 1).repeat(64),
+    })),
+  };
+  const deployAttestation = enrichReceipt(deployReceipt, {
+    source: { repository: 'BestNathan/nession', run_id: 700, run_attempt: 1,
+      workflow_id: 7, event: 'workflow_dispatch', head_sha: 'c'.repeat(40), head_branch: 'main' },
+    workflowUrl: 'https://github.com/BestNathan/nession/actions/runs/700',
+    recordPath: 'runs/2026-10-25/700-1/deployment/staging-01.json',
+  });
+  const deployBinding = {
+    environment_id: 'staging-01',
+    deployed_source_sha: deploySource,
+    attestation_execution_id: deployAttestation.execution_id,
+    gitops_revision: deployReceipt.gitops_revision,
+    image_digests: { agent: deployReceipt.images[0].digest, server: deployReceipt.images[1].digest, ui: deployReceipt.images[2].digest },
+  };
+  const deployedIssueBody = [
+    '## Success Criteria', '- [ ] SC-07 Deployed proof.', '',
+    '## Acceptance Plan', '\x60\x60\x60yaml', 'acceptance:', '  SC-07:',
+    '    when: deployed', '    environment: staging-01', '    method: case',
+    '\x60\x60\x60', '',
+    '## Acceptance Report', '| Criterion | Result | Evidence |', '|---|---|---|',
+    '| SC-07 | Pending | - |',
+  ].join('\n').replace(/\\x60/g, '\x60');
+  const deployedIssue = { number: 1799, title: 'deployed', state: 'open',
+    labels: [{ name: 'requirement' }], body: deployedIssueBody };
+  const deployContext = buildAcceptanceContext(deployedIssue, 'post-merge', {
+    method: 'case', targetRef: deploySource, deployment: 'staging-01',
+    deploymentBinding: { ...deployBinding, attested: true }, runId: 100,
+  });
+  const deployedRecord = fixtureRecord({
+    issue: 1799, criterion: 'SC-07', criterion_text: deployContext.criteria[0].text,
+    stage: 'post-merge', target_sha: deploySource, case_revision: deploySource,
+    contract_sha256: deployContext.contract_sha256,
+    deployment: deployBinding,
+  });
+  let deployedBody = deployedIssue.body;
+  let deployedPatched = 0;
+  const deployedApi = async (apiPath, options = {}) => {
+    if (apiPath.endsWith('/issues/1799')) {
+      if (options.method === 'PATCH') { deployedBody = options.body.body; deployedPatched += 1; }
+      return { ...deployedIssue, body: deployedBody };
+    }
+    throw Error('unmocked deployed ingest source: ' + apiPath);
+  };
+  const deployedProjection = await applyCaseRecord(deployedRecord, {
+    repository: 'BestNathan/nession', token: 'offline-proof', request: deployedApi,
+    deploymentRecords: [{ path: 'runs/2026-10-25/700-1/deployment/staging-01.json', record: deployAttestation }],
+  });
+  assert.deepEqual(deployedProjection, { projected: true, changed: true });
+  assert.match(deployedBody, /- \[x\] SC-07/);
+  assert.equal(deployedPatched, 1);
+  assert.throws(() => verifyDeployedProof(deployedRecord, null),
+    /requires trusted deployment records/);
+  assert.throws(() => verifyDeployedProof({
+    ...deployedRecord, deployment: { ...deployBinding, environment_id: 'staging' },
+  }, [{ path: 'x', record: deployAttestation }]), /environment disagrees/);
+  assert.throws(() => verifyDeployedProof({
+    ...deployedRecord, deployment: { ...deployBinding,
+      image_digests: { ...deployBinding.image_digests, agent: 'sha256:' + '9'.repeat(64) } },
+  }, [{ path: 'x', record: deployAttestation }]), /agent deployed Case digest disagrees/);
+  console.log('acceptance Case ingest self-test: provenance, deployment binding and record validation passed');
 }
 
 async function main() {
@@ -779,9 +1037,14 @@ async function main() {
   }
   if (command === 'apply') {
     const record = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
+    const deploymentRecordsPath = process.env.DEPLOYMENT_RECORDS_JSON ?? '';
+    const deploymentRecords = deploymentRecordsPath
+      ? JSON.parse(fs.readFileSync(deploymentRecordsPath, 'utf8'))
+      : null;
     const result = await applyCaseRecord(record, {
       repository: process.env.GITHUB_REPOSITORY,
       token: process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN,
+      deploymentRecords,
     });
     process.stdout.write(JSON.stringify(result) + '\n');
     return;
