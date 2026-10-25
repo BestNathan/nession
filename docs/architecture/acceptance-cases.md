@@ -82,6 +82,8 @@ Every Case result freezes:
 - verifier outcomes and evidence;
 - infrastructure status and duration.
 
+A `when: deployed` criterion additionally requires a `deployment` binding: `environment_id`, `deployed_source_sha` (which must equal `target_sha`), `attestation_execution_id`, `gitops_revision` and the three immutable `image_digests`. The trusted evaluator compares `environment_id` with the Plan's declared environment; a mismatch is a cross-lane rejection. Legacy branch-stage criteria must not carry the block. The receipt owner for the environment/digest identity is the read-only deployment identity chain (`scripts/deployment-identity-policy.mjs` and the `Deploy / Identity` workflow). Projection re-derives the binding from the stored deployment record and rejects a missing, ambiguous or mismatched attestation; branch ancestry and PR association are not used for deployed proof.
+
 Large browser traces/screenshots/logs stay in GitHub Actions artifacts. Compact immutable records are ingested separately.
 
 ## Automatic staging and post-merge execution

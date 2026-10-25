@@ -5,6 +5,7 @@ gate-runtime-contract
 agent-workflow-telemetry
 workflow-conventions
 requirement-acceptance-selftest
+acceptance-lifecycle-selftest
 acceptance-agent-selftest
 acceptance-case-ingest-selftest
 run-record-artifact-evidence-selftest
@@ -23,6 +24,7 @@ protocol-json-contract
 issue-contract-selftest
 e2e-tests-catalog
 e2e-selected-report-selftest
+deployment-identity-selftest
 issue-e2e-assertion-evidence-selftest
 issue-e2e-verification-selftest
 issue-e2e-obligations-selftest

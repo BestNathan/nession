@@ -94,6 +94,10 @@ export function validateAcceptancePlan(body, criteria, reportRows) {
     if (entry.when === 'deployed' && (!entry.environment || entry.branch)) {
       errors.push(id + ' deployed plan requires environment and no branch');
     }
+    if (entry.when === 'deployed' && entry.environment &&
+        !/^[a-z][a-z0-9-]{0,62}$/.test(entry.environment)) {
+      errors.push(id + ' deployed plan environment is invalid');
+    }
     const legacy = reportRows.get(id);
     const stage = planStage(entry);
     // New canonical three-column reports contain outcome/evidence only.
@@ -114,6 +118,16 @@ export function isProofEligible(entry, stage, method) {
   if (entry.method !== method) return false;
   if (entry.when === 'deployed') return false; // real deployment trigger required
   return planStage(entry) === stage;
+}
+
+// A deployed criterion is eligible only for its own authenticated environment.
+// `attested` must come from a trusted deployment identity receipt, never from
+// the Case record or a model verdict.
+export function deploymentProofEligible(entry, { environment, attested, method } = {}) {
+  if (!entry || entry.when !== 'deployed') return false;
+  if (entry.method !== method) return false;
+  if (attested !== true) return false;
+  return entry.environment === environment;
 }
 
 function selfTest() {
@@ -156,6 +170,19 @@ function selfTest() {
   assert.equal(isProofEligible(valid.plan.get('SC-02'), 'staging', 'case'), true);
   assert.equal(isProofEligible(valid.plan.get('SC-03'), 'post-merge', 'agent'), true);
   assert.equal(isProofEligible(valid.plan.get('SC-04'), 'post-merge', 'case'), false);
+  assert.equal(deploymentProofEligible(valid.plan.get('SC-04'),
+    { environment: 'production', attested: true, method: 'case' }), true);
+  assert.equal(deploymentProofEligible(valid.plan.get('SC-04'),
+    { environment: 'production', attested: false, method: 'case' }), false);
+  assert.equal(deploymentProofEligible(valid.plan.get('SC-04'),
+    { environment: 'staging-01', attested: true, method: 'case' }), false);
+  assert.equal(deploymentProofEligible(valid.plan.get('SC-04'),
+    { environment: 'production', attested: true, method: 'agent' }), false);
+  assert.equal(deploymentProofEligible(valid.plan.get('SC-01'),
+    { environment: 'production', attested: true, method: 'agent' }), false);
+  assert.match(validateAcceptancePlan(
+    plan.replace('environment: production', 'environment: 01staging'), criteria, stages).errors.join('\n'),
+  /deployed plan environment is invalid/);
   assert.match(validateAcceptancePlan(plan.replace('method: case', 'method: magic'), criteria, stages).errors.join('\n'), /unsupported method/);
   assert.match(validateAcceptancePlan(plan.replace('branch: staging', 'branch: main'), criteria, stages).errors.join('\n'), /disagrees/);
   assert.match(validateAcceptancePlan(plan.replace('  SC-04:\n    when: deployed\n    environment: production\n    method: case\n', ''), criteria, stages).errors.join('\n'), /missing Acceptance Plan/);

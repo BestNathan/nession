@@ -47,6 +47,10 @@ async function main() {
   const resultsDir = path.resolve(arg('results-dir', true));
   const runId = positiveInt(arg('run-id') || process.env.GITHUB_RUN_ID || '1', 'run-id');
   const runAttempt = positiveInt(arg('run-attempt') || process.env.GITHUB_RUN_ATTEMPT || '1', 'run-attempt');
+  const deploymentBindingPath = arg('deployment-binding');
+  const deploymentBinding = deploymentBindingPath
+    ? JSON.parse(fs.readFileSync(deploymentBindingPath, 'utf8'))
+    : null;
 
   if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error('--sha must be an exact 40-character SHA');
   if (!['pre-merge', 'staging', 'post-merge'].includes(stage)) throw new Error('unsupported --stage');
@@ -65,6 +69,7 @@ async function main() {
     runAttempt,
     resultsDir,
     contractsDir,
+    deploymentBinding,
     log: (line) => process.stderr.write('[acceptance-batch] ' + line + '\n'),
   });
 
