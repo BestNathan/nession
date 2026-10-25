@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "01cea4e62aeab280511f0c5148bad07ba32e86c94e05acce85704d08d7c0bbfe",
+  "run_id": 40161836040,
+  "run_attempt": 1,
+  "issue": 2325,
+  "criterion": "SC-05",
+  "criterion_text": "Negative contract verification rejects malformed frontmatter, synthetic IDs, shortened/unrelated filenames, invalid topic/category index, rewritten/missing global CHANGELOG events, unsourced verified claims, secret-like content, stale CAS and destructive history publication; server-side unauthorized-writer enforcement is owned separately by [#2358](https://github.com/BestNathan/nession/issues/2358).",
+  "stage": "staging",
+  "target_sha": "f73e71b9a0d5cafd7a1b9fe41a4e3d6dd7ab5d36",
+  "contract_sha256": "252e597fac7ff62c7910632f052d210d1d148a421257d9b1318d220c131e0650",
+  "case_revision": "f73e71b9a0d5cafd7a1b9fe41a4e3d6dd7ab5d36",
+  "case_tree_sha": "07a07172229eaa2af55f2f01e53121cc2d4a516b",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-25T04:27:34.188Z",
+  "finished_at": "2026-10-25T04:27:35.280Z",
+  "duration_ms": 1092,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Pass",
+      "summary": "Live ledger and negative fixtures reject malformed metadata, title/path and index drift, missing changelog/source, secret-like content, stale CAS and committed history rewrite.",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "target_sha=f73e71b9a0d5cafd7a1b9fe41a4e3d6dd7ab5d36"
+        },
+        {
+          "type": "knowledge-ledger",
+          "value": "live_head=d920e49d3baa226aa4cd12f4ddc1d9278d3f01ea"
+        },
+        {
+          "type": "knowledge-ledger",
+          "value": "validator fixtures: knowledge-ledger-contract: full title slug, Unicode, no synthetic IDs, topic/category index, global log fixtures passed"
+        },
+        {
+          "type": "knowledge-ledger",
+          "value": "publisher fixtures: knowledge-ledger-publish: force-free stale writer rejected and same-head replay passed"
+        },
+        {
+          "type": "negative-fixture",
+          "value": "synthetic ID/malformed frontmatter rejected"
+        },
+        {
+          "type": "negative-fixture",
+          "value": "shortened/unrelated title-derived filename rejected"
+        },
+        {
+          "type": "negative-fixture",
+          "value": "topic/category index drift rejected"
+        },
+        {
+          "type": "negative-fixture",
+          "value": "missing article changelog event rejected"
+        },
+        {
+          "type": "negative-fixture",
+          "value": "verified article missing exact-SHA source rejected"
+        },
+        {
+          "type": "negative-fixture",
+          "value": "structurally valid atomic commit with secret-like content rejected by explicit secret scanner"
+        },
+        {
+          "type": "negative-fixture",
+          "value": "committed historical CHANGELOG rewrite rejected"
+        }
+      ],
+      "duration_ms": 1079,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40161836040,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "f73e71b9a0d5cafd7a1b9fe41a4e3d6dd7ab5d36",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40161836040",
+    "record_path": "runs/2026-10-25/40161836040-1/2325/SC-05.json",
+    "source_result_sha256": "28a877a3c8aaa92b4e7f3c00f8fe180978fdf8a0cd66fa62d2f53e56ae8f30b9"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40161836040-1",
+    "sha256": "28a877a3c8aaa92b4e7f3c00f8fe180978fdf8a0cd66fa62d2f53e56ae8f30b9",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40161836040",
+    "durability": "time-limited; object archival not configured"
+  }
+}
