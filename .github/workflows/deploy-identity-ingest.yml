@@ -8,9 +8,11 @@ on:
     types: [completed]
   # Backstop for a source run that a GITHUB_TOKEN-triggered dispatch created
   # (GitHub suppresses its downstream workflow_run events). Schedule-only, so a
-  # privileged Store writer still has no arbitrary ref-selected dispatch.
+  # privileged Store writer still has no arbitrary ref-selected dispatch. Three
+  # ticks an hour drain the at-most-two lane refreshes a scheduler tick can
+  # suppress.
   schedule:
-    - cron: '17 * * * *'
+    - cron: '7,27,47 * * * *'
 
 permissions:
   actions: read
@@ -62,6 +64,7 @@ jobs:
             --json databaseId,attempt,status,conclusion,url \
             --jq '.[] | select(.status == "completed" and .conclusion == "success")
               | [.databaseId, .attempt, .url] | @tsv' |
+          tac |
           while IFS=$'\t' read -r run_id run_attempt run_url; do
             [[ -n "${run_id}" ]] || continue
             if grep -q "/${run_id}-${run_attempt}/deployment/" <<< "${ingested}"; then
