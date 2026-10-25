@@ -262,6 +262,41 @@ export function markFailureDispatchAmbiguous(root, fingerprintValue, {
   return { state: next, version: next.version };
 }
 
+// The trusted publisher records the one canonical Bug bound to this
+// fingerprint epoch. The analysis id must match the dispatch that produced the
+// diagnosis, and the intent must already be committed.
+export function recordFailureAnalysisLinked(root, fingerprintValue, {
+  now = new Date().toISOString(), analysisId, bugIssue,
+} = {}) {
+  if (!Number.isFinite(Date.parse(now))) fail('invalid publication clock');
+  if (!POSITIVE(bugIssue)) fail('invalid Bug Issue number');
+  if (typeof analysisId !== 'string' || !/^[a-f0-9]{64}:[1-9][0-9]*$/.test(analysisId)) {
+    fail('invalid analysis id');
+  }
+  const digest = keyFor(fingerprintValue);
+  const p = paths(digest, 0, 0);
+  const current = readCurrent(root, p, digest);
+  const state = current.state;
+  if (!state) fail('unknown fingerprint admission');
+  if (state.analysis_id !== analysisId) fail('analysis id does not match the claim');
+  if (state.dispatch_intent?.status !== 'committed' && state.dispatch_intent?.status !== 'acknowledged') {
+    fail('analysis was never dispatched for this claim');
+  }
+  if (!['in_flight', 'analyzed'].includes(state.status)) {
+    fail('claim is not awaiting a diagnosis: ' + state.status);
+  }
+  const next = {
+    ...state,
+    version: current.version + 1,
+    status: 'issue_linked',
+    bug_issue: bugIssue,
+    dispatch_intent: { ...state.dispatch_intent, status: 'acknowledged' },
+    linked_at: now,
+  };
+  writeState(root, p, current.version, next);
+  return { state: next, version: next.version };
+}
+
 // Write-ahead dispatch intent: the claim exists BEFORE the external dispatch.
 // This transition commits that intent with the exact downstream run identity.
 // A crash after the HTTP POST but before this write is reconciled by adopting
