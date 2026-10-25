@@ -36,6 +36,7 @@ export const CATALOG = [
   ['store-agent-controller-ingest', 'store-agent-controller-ingest.yml', 'Store / Agent Controller Ingest', 'store-agent-controller-ingest.yml', 'Store / Agent Controller Ingest', 'store'],
   ['acceptance-orchestrator', 'requirement-acceptance.yml', 'Requirement Acceptance', 'acceptance-orchestrator.yml', 'Acceptance / Orchestrator', 'acceptance'],
   ['acceptance-postrun-waker', 'acceptance-postrun-waker.yml', 'Acceptance / Post-Run Waker', 'acceptance-postrun-waker.yml', 'Acceptance / Post-Run Waker', 'acceptance'],
+  ['acceptance-e2e-failure-bug', 'acceptance-e2e-failure-bug.yml', 'Acceptance / E2E Failure Bug', 'acceptance-e2e-failure-bug.yml', 'Acceptance / E2E Failure Bug', 'acceptance'],
   ['acceptance-verified-stage', 'acceptance-verified-stage.yml', 'Acceptance / Verified Issue Stage', 'acceptance-verified-stage.yml', 'Acceptance / Verified Issue Stage', 'acceptance'],
   ['acceptance-quota-recovery', 'acceptance-quota-recovery.yml', 'Acceptance / Quota Recovery', 'acceptance-quota-recovery.yml', 'Acceptance / Quota Recovery', 'acceptance'],
   ['acceptance-cases', 'acceptance-cases.yml', 'Acceptance Cases', 'acceptance-cases.yml', 'Acceptance / Cases', 'acceptance'],
