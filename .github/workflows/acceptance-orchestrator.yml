@@ -610,8 +610,21 @@ jobs:
             echo "Acceptance already running or successful; no rerun"
             exit 0
           fi
-          gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$accept_id/rerun-failed-jobs"
-          echo "Reconciled E2E proof by rerunning failed Acceptance jobs for PR #$PR_NUMBER" >> "$GITHUB_STEP_SUMMARY"
+          # A cancelled run is a deferred one (or an external cancel): GitHub
+          # marks its unfinished jobs cancelled, and `defer-pre-merge`'s
+          # decision comes from `prepare-pre-merge`'s admission output. Rerun
+          # the WHOLE run so that job re-evaluates the now-complete sources;
+          # rerunning only the "failed" jobs would reuse the successful stale
+          # `waiting` output and cancel the replay again, stranding the
+          # acceptance (#2461). A genuinely failed run keeps the narrower
+          # failed-job replay.
+          if [[ "$accept_conclusion" == cancelled ]]; then
+            gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$accept_id/rerun"
+            echo "Reconciled E2E proof by replaying the whole deferred Acceptance run for PR #$PR_NUMBER" >> "$GITHUB_STEP_SUMMARY"
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$accept_id/rerun-failed-jobs"
+            echo "Reconciled E2E proof by rerunning failed Acceptance jobs for PR #$PR_NUMBER" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   # Source Quality/E2E workflow_run completion is the waker for a previously
   # failed or deliberately deferred Acceptance run. A single SHA check replaces
