@@ -26,6 +26,10 @@ concurrency:
 
 env:
   STAGING_LANES: staging,staging-01
+  # Repository Variables are not automatic process env; map them explicitly so
+  # the policy reads the effective cadence without a code/Git change.
+  E2E_STAGING_INTERVAL_HOURS: ${{ vars.E2E_STAGING_INTERVAL_HOURS }}
+  E2E_STAGING_LANE_INTERVALS_JSON: ${{ vars.E2E_STAGING_LANE_INTERVALS_JSON }}
 
 jobs:
   admit:
@@ -48,10 +52,21 @@ jobs:
           git fetch --no-tags origin '+refs/heads/*:refs/remotes/origin/*'
           git fetch --no-tags origin gitops
           echo "MAIN_SHA=$(git rev-parse origin/main)" >> "$GITHUB_ENV"
+          desired='{}'
           for lane in ${STAGING_LANES//,/ }; do
-            git cat-file -e "origin/gitops:environments/${lane}/nession/kustomization.yaml" 2>/dev/null \
+            overlay="environments/${lane}/nession/kustomization.yaml"
+            git cat-file -e "origin/gitops:${overlay}" 2>/dev/null \
               || { echo "::error::lane ${lane} is not registered in trusted GitOps"; exit 1; }
+            short=$(git show "origin/gitops:${overlay}" \
+              | awk '/newTag: server-/{sub(/.*server-/,""); print; exit}')
+            [[ "$short" =~ ^[0-9a-f]{7,40}$ ]] \
+              || { echo "::error::lane ${lane} desired tag is not a commit prefix"; exit 1; }
+            full=$(git rev-parse --verify --quiet "${short}^{commit}") \
+              || { echo "::error::lane ${lane} desired SHA is not uniquely resolvable"; exit 1; }
+            desired=$(jq -c --arg lane "$lane" --arg sha "$full" '. + {($lane): $sha}' <<< "$desired")
           done
+          echo "$desired" > "$RUNNER_TEMP/desired-shas.json"
+          echo "DESIRED_SHAS_JSON=$RUNNER_TEMP/desired-shas.json" >> "$GITHUB_ENV"
 
       - name: Read authenticated deployment records
         run: |
@@ -95,6 +110,7 @@ jobs:
             echo
             echo "- Pinned Main: \`${MAIN_SHA}\`"
             echo "- Store revision: \`${STORE_REVISION}\`"
+            echo "- Desired/attested mismatch is reported as STALE_ATTESTATION, never skipped"
             echo
             echo "| Lane | Decision | Deployed SHA | Ahead | Behind | Next due |"
             echo "|---|---|---|---|---|---|"
@@ -104,6 +120,19 @@ jobs:
               | "| \($lane.environment_id) | \($lane.decision) | \($binding.deployed_source_sha[0:8]) | \($lane.ahead // "-") | \($lane.behind // "-") | \($lane.next_due_at // "-") |"
             ' "$RUNNER_TEMP/admission.json"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Refresh stale lane attestations
+        if: steps.decide.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          jq -r '.lanes[] | select(.decision == "STALE_ATTESTATION") | .environment_id' \
+            "$RUNNER_TEMP/admission.json" | while IFS= read -r lane; do
+            [[ -n "${lane}" ]] || continue
+            echo "Refreshing stale attestation for ${lane}"
+            gh workflow run deploy-identity.yml --ref main -f environment="${lane}"
+          done
 
       - name: Dispatch admitted lane Full runs
         env:
