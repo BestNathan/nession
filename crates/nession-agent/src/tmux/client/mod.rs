@@ -190,6 +190,12 @@ struct EventBudget {
     limit: usize,
     queued: AtomicUsize,
     closed: AtomicBool,
+    /// The failure that ended the source, kept until the consumer can be told.
+    /// A terminal event normally carries it in order; when the queue is full a
+    /// stopped consumer cannot receive that event, so the record lets
+    /// [`EventStream::recv`] state the loss when the stream ends instead of
+    /// presenting a clean EOF (#2380 SC-02).
+    failure: Mutex<Option<String>>,
     notify: Notify,
 }
 
@@ -199,21 +205,43 @@ impl EventBudget {
             limit,
             queued: AtomicUsize::new(0),
             closed: AtomicBool::new(false),
+            failure: Mutex::new(None),
             notify: Notify::new(),
         }
     }
 
-    /// Reserve `bytes`, waiting up to `timeout` for the consumer to release
-    /// credit. `false` means the event could not be admitted (oversized or the
-    /// consumer stalled); the caller must fail closed.
-    async fn acquire(&self, bytes: usize, timeout: Duration) -> bool {
-        if bytes > self.limit {
-            return false;
+    fn record_failure(&self, reason: &str) {
+        if let Ok(mut failure) = self.failure.lock() {
+            *failure = Some(reason.to_string());
         }
-        let deadline = tokio::time::Instant::now() + timeout;
+    }
+
+    fn clear_failure(&self) {
+        if let Ok(mut failure) = self.failure.lock() {
+            *failure = None;
+        }
+    }
+
+    fn take_failure(&self) -> Option<String> {
+        self.failure
+            .lock()
+            .ok()
+            .and_then(|mut failure| failure.take())
+    }
+
+    /// Reserve `bytes` before `deadline` for the consumer to release credit.
+    ///
+    /// The granted permit owns the charge until it is disarmed: a send that
+    /// times out, fails or is cancelled refunds it by dropping the permit
+    /// (#2380 SC-02). An oversized event, an exhausted budget and a closed
+    /// ingress are told apart so the caller can state the right outcome.
+    async fn acquire_until(&self, bytes: usize, deadline: tokio::time::Instant) -> Admission<'_> {
+        if bytes > self.limit {
+            return Admission::Overloaded;
+        }
         loop {
             if self.closed.load(Ordering::Acquire) {
-                return false;
+                return Admission::Closed;
             }
             let current = self.queued.load(Ordering::Acquire);
             if current.saturating_add(bytes) <= self.limit
@@ -227,11 +255,15 @@ impl EventBudget {
                     )
                     .is_ok()
             {
-                return true;
+                return Admission::Granted(BytePermit {
+                    budget: self,
+                    bytes,
+                    armed: true,
+                });
             }
             match tokio::time::timeout_at(deadline, self.notify.notified()).await {
                 Ok(()) => continue,
-                Err(_) => return false,
+                Err(_) => return Admission::Overloaded,
             }
         }
     }
@@ -246,6 +278,41 @@ impl EventBudget {
     fn close(&self) {
         self.closed.store(true, Ordering::Release);
         self.notify.notify_one();
+    }
+}
+
+/// Result of trying to reserve aggregate byte credit.
+enum Admission<'a> {
+    /// Credit is held and refunded unless the permit is disarmed.
+    Granted(BytePermit<'a>),
+    /// The budget is exhausted, the event is oversized, or the deadline passed.
+    Overloaded,
+    /// The ingress is closed; nothing will be delivered.
+    Closed,
+}
+
+/// Owns one event's byte charge until the queued event takes it over.
+///
+/// `disarm` transfers the charge to the `BudgetedEvent` (released by
+/// [`EventStream::recv`]); dropping an armed permit refunds it, which is what
+/// keeps accounting honest when a queue send fails, times out or is cancelled.
+struct BytePermit<'a> {
+    budget: &'a EventBudget,
+    bytes: usize,
+    armed: bool,
+}
+
+impl BytePermit<'_> {
+    fn disarm(mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for BytePermit<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            self.budget.release(self.bytes);
+        }
     }
 }
 
@@ -264,10 +331,23 @@ pub struct EventStream {
 }
 
 impl EventStream {
+    /// The next event in wire order.
+    ///
+    /// A source that failed states the loss exactly once: either as the
+    /// terminal event that was enqueued, or — when the queue was too full to
+    /// carry it — as a final `SourceLost` synthesized from the recorded
+    /// failure before the stream reports its end.
     pub async fn recv(&mut self) -> Option<TmuxEvent> {
-        let budgeted = self.rx.recv().await?;
-        self.budget.release(budgeted.bytes);
-        Some(budgeted.event)
+        match self.rx.recv().await {
+            Some(budgeted) => {
+                self.budget.release(budgeted.bytes);
+                Some(budgeted.event)
+            }
+            None => self
+                .budget
+                .take_failure()
+                .map(|reason| TmuxEvent::SourceLost { reason }),
+        }
     }
 }
 
@@ -285,31 +365,63 @@ enum EmitOutcome {
 }
 
 impl EventSink {
+    /// Admit and enqueue one event under **one absolute deadline**.
+    ///
+    /// Byte credit and the queue are separate resources: a large byte budget
+    /// with tiny events fills the count-bounded channel while plenty of credit
+    /// remains, so bounding only the credit acquisition leaves a send that can
+    /// park forever behind a live-but-stalled consumer (#2380 SC-02 reopened).
+    /// Both legs share the same deadline, and a failed or cancelled send
+    /// refunds the charge through the permit.
     async fn send(&self, event: TmuxEvent) -> EmitOutcome {
         let bytes = event_bytes(&event);
-        if !self.budget.acquire(bytes, self.admission_timeout).await {
-            return EmitOutcome::Overloaded;
-        }
-        match self.tx.send(BudgetedEvent { event, bytes }).await {
-            Ok(()) => EmitOutcome::Sent,
-            Err(_) => {
-                self.budget.release(bytes);
-                EmitOutcome::Closed
+        let deadline = tokio::time::Instant::now() + self.admission_timeout;
+        let permit = match self.budget.acquire_until(bytes, deadline).await {
+            Admission::Granted(permit) => permit,
+            Admission::Closed => return EmitOutcome::Closed,
+            Admission::Overloaded => return EmitOutcome::Overloaded,
+        };
+        // `mpsc::Sender::send` is cancel-safe: a timeout drops the unsent
+        // message, and dropping the still-armed permit refunds its credit.
+        match tokio::time::timeout_at(deadline, self.tx.send(BudgetedEvent { event, bytes })).await
+        {
+            Ok(Ok(())) => {
+                permit.disarm();
+                EmitOutcome::Sent
             }
+            Ok(Err(_)) => EmitOutcome::Closed,
+            Err(_) => EmitOutcome::Overloaded,
         }
     }
 
     /// Deliver a terminal event even when the configured budget cannot admit
     /// it. Bounded so a stopped consumer cannot pin the reader here either.
-    async fn send_terminal(&self, event: TmuxEvent) {
+    /// Returns whether the event was enqueued; `false` means the consumer
+    /// still learns the loss from [`EventStream::recv`]'s recorded failure.
+    async fn send_terminal(&self, event: TmuxEvent) -> bool {
         let budgeted = BudgetedEvent { event, bytes: 0 };
         match self.tx.try_send(budgeted) {
-            Ok(()) => {}
+            Ok(()) => true,
             Err(mpsc::error::TrySendError::Full(budgeted)) => {
-                let _ =
-                    tokio::time::timeout(EVENT_TERMINAL_EMIT_TIMEOUT, self.tx.send(budgeted)).await;
+                tokio::time::timeout(EVENT_TERMINAL_EMIT_TIMEOUT, self.tx.send(budgeted))
+                    .await
+                    .is_ok_and(|sent| sent.is_ok())
             }
-            Err(mpsc::error::TrySendError::Closed(_)) => {}
+            Err(mpsc::error::TrySendError::Closed(_)) => false,
+        }
+    }
+
+    /// State a source loss both in order (when the queue can carry it) and in
+    /// the budget's failure record (when it cannot).
+    async fn fail_source_loss(&self, reason: &str) {
+        self.budget.record_failure(reason);
+        if self
+            .send_terminal(TmuxEvent::SourceLost {
+                reason: reason.to_string(),
+            })
+            .await
+        {
+            self.budget.clear_failure();
         }
     }
 }
@@ -900,41 +1012,21 @@ async fn run_reader<R: AsyncRead + Unpin>(reader: R, state: Arc<ClientState>, ev
                         return;
                     }
                 }
-                Some(ControlMessage::Output { pane_id, data }) => {
-                    if !emit_output(&state, &events, pane_id, &data).await {
-                        return;
-                    }
-                }
-                Some(ControlMessage::LayoutChange { layout, .. }) => {
-                    if let Some((cols, rows)) = layout_size(&layout) {
-                        if note_size(&mut reported_size, cols, rows)
-                            && !emit(&state, &events, TmuxEvent::Resize { cols, rows }).await
-                        {
-                            return;
-                        }
-                    }
-                }
-                Some(ControlMessage::WindowResize { cols, rows, .. }) => {
-                    if note_size(&mut reported_size, cols, rows)
-                        && !emit(&state, &events, TmuxEvent::Resize { cols, rows }).await
-                    {
-                        return;
-                    }
-                }
-                Some(ControlMessage::Exit) => {
-                    finish_with_exit(&state, &events).await;
-                    return;
-                }
                 _ => {
-                    // Measured on tmux 3.6b (see
+                    // Measured on tmux 3.6b for both `-C` and `-CC` (see
                     // docs/architecture/agent-tmux-control-transport.md):
-                    // command output is not escaped. A captured pane line may
-                    // begin with `%`, may be empty, or may even look like a
-                    // malformed `%begin`/`%end` record. Inside the block, only
-                    // the matching terminator ends it; every other line is
-                    // response body (#2378). A parsed notification keeps the
-                    // arms above; a line that does not parse is content, not a
-                    // protocol fault.
+                    // command output is not escaped and tmux does not
+                    // interleave notifications inside an open response block —
+                    // an independently generated resize landed after `%end`.
+                    // A captured pane line may therefore be exactly `%exit`,
+                    // `%output …`, `%layout-change …` or `%window-resize …`,
+                    // and routing it as that notification would lose the
+                    // captured bytes, fabricate output/resize, or close the
+                    // attachment (#2378). Inside the block only the matching
+                    // terminator is protocol; every other line is response
+                    // body. A real `%exit` that raced an open block is still
+                    // bounded by the following EOF, which is a stated source
+                    // loss.
                     let Some(block) = open.as_mut() else {
                         continue;
                     };
@@ -1136,12 +1228,10 @@ async fn emit(state: &Arc<ClientState>, events: &EventSink, event: TmuxEvent) ->
         }
         EmitOutcome::Overloaded => {
             let reason = "event ingress budget exhausted; consumer stalled".to_string();
-            events
-                .send_terminal(TmuxEvent::SourceLost {
-                    reason: reason.clone(),
-                })
-                .await;
-            state.fail_all(TmuxClientError::SourceLost(reason));
+            // Resolve waiters first: delivering the terminal event is bounded
+            // but may itself wait out its budget behind a full queue.
+            state.fail_all(TmuxClientError::SourceLost(reason.clone()));
+            events.fail_source_loss(&reason).await;
             false
         }
     }
@@ -1149,12 +1239,12 @@ async fn emit(state: &Arc<ClientState>, events: &EventSink, event: TmuxEvent) ->
 
 async fn finish_with_exit(state: &Arc<ClientState>, events: &EventSink) {
     state.fail_all(TmuxClientError::Closed);
-    events.send_terminal(TmuxEvent::Exited).await;
+    let _ = events.send_terminal(TmuxEvent::Exited).await;
 }
 
 async fn lose(state: &Arc<ClientState>, events: &EventSink, reason: String) {
     state.fail_all(TmuxClientError::SourceLost(reason.clone()));
-    events.send_terminal(TmuxEvent::SourceLost { reason }).await;
+    events.fail_source_loss(&reason).await;
 }
 
 fn strip_eol(line: &[u8]) -> &[u8] {

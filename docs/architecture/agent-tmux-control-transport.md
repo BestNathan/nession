@@ -69,25 +69,68 @@ cannot change the protocol, only the carrier.
   used: every attached client is fed the same `%output` stream, so per-client
   viewports could not be rendered coherently (shared window, last writer wins).
 
-## Command response body framing (measured 2026-10-24, tmux 3.6b)
+## Command response body framing (measured 2026-10-24 and 2026-10-25, tmux 3.6b)
 
 `capture-pane` output arrives between `%begin <ts> <id> <flags>` and the
-matching `%end`/`%error`. Measured on tmux 3.6b:
+matching `%end`/`%error`. Measured on tmux 3.6b over **both** transports (`-C`
+pipe and `-CC` PTY):
 
-- output lines are **not escaped**: a pane line may begin with `%`, may be
-  empty, and may look like a malformed or differently-triple'd control record;
-- notifications were not observed **inside** a response block. Continuous pane
-  output, a blocking `wait-for`, and a window resize from another client all
-  landed before or after the block, never between its `%begin` and `%end`.
+- output lines are **not escaped**: a pane line may be exactly `%exit`,
+  `%output %0 …`, `%layout-change …`, `%window-resize …` or `%begin <ts> <id>
+  <flags>`, may be empty, and may look like a malformed or differently-triple'd
+  control record;
+- notifications do not interleave **inside** a response block. A blocking
+  `wait-for` held a block open while another client resized the window: the
+  resulting `%layout-change` arrived **after** `%end` on both transports, never
+  between `%begin` and `%end`. Continuous pane output and cross-client resize
+  measurements agree.
 
-The client therefore treats every line inside an open block as response body
-unless it is the matching terminator or a well-formed notification handled by
-its own arm. An unparseable or malformed `%` line is content, not a protocol
-fault (#2378). Known-tag collisions remain an inherent protocol ambiguity: a
-body line that is exactly a well-formed `%output`/`%layout-change`/... is
-indistinguishable from that notification, and tmux provides no escape for it.
+**Contract:** inside an open block, only the matching `%end`/`%error` is
+protocol; *every* other line is response body, including a line that parses as
+a well-formed notification. Routing a notification-shaped body line as that
+notification would lose captured bytes, fabricate live output or a resize, or —
+for a pane line that reads `%exit` — close the attachment (#2378 SC-02). The
+old "handle well-formed notifications inside a block" arm was a fidelity bug
+built on a synthetic wire shape tmux does not produce; the earlier synthetic
+resize-inside-block regression is replaced by the measured contract and a real
+`-C`/`-CC` witness.
+
+Two consequences are deliberate:
+
+- a body line exactly `%error <the open block's own triple>` still terminates
+  the block as an error; colliding with the live triple is not a reachable pane
+  line, so this is the only ambiguity left;
+- if tmux really does emit `%exit` while a block is open (server shutdown), the
+  line is body and the attachment ends at the following EOF as a stated source
+  loss instead of a graceful exit. Source loss is truthful and bounded; losing
+  a captured `%exit` line is not acceptable.
+
 Empty lines are real lines: the body joins them with `\n` and tracks "a line
 was seen" separately from byte length.
+
+## Adapter handoff bounds (#2387/#2388)
+
+The typed client's ordered stream ends in `ControlModeSession`, which hands two
+things to the Agent. Both handoffs are bounded so a stalled consumer cannot
+freeze the single ordered forwarder or hold unaccounted memory:
+
+- **Output** — the handoff carries an aggregate byte budget (32 MiB default)
+  and a 10 s deadline covering both credit acquisition and the queue send.
+  Taking a chunk releases exactly the credit it holds; a failed, timed-out or
+  cancelled send refunds it. On overload the forwarder ends, closing the stream;
+  the Agent retires the epoch and reports `terminal-stream-lost` — never a
+  healthy-looking freeze. The client's own 32 MiB ingress budget is not a
+  whole-pipeline bound because it releases on receive; this second budget owns
+  the adapter-to-Agent queue.
+- **Resize** — a **level, not a record stream**. The forwarder publishes the
+  latest authoritative size through a `watch` channel that never waits; a
+  stalled consumer reads the final size when it resumes. Intermediate sizes are
+  superseded by the final one by definition, so coalescing invents no stream
+  cursor and cannot leave the pane at a size no client is looking at. The
+  Agent's resize reporter and peer fanout are already last-writer-wins levels,
+  so no ordering contract is weakened. A count-bounded queue with a blocking
+  send is not acceptable here: it could suspend output and source-loss handling
+  behind a resize consumer that is alive but not reading.
 
 ## Invariants to preserve
 
@@ -96,9 +139,15 @@ was seen" separately from byte length.
 - Input is loss-intolerant: one ordered writer, byte-exact `send-keys -H`,
   bounded pending commands, tombstones for timed-out replies.
 - The bootstrap capture and the live stream join exactly: output the snapshot
-  covers is dropped, interleaved output is live, neither is duplicated.
+  covers is dropped, output after the block is live, neither is duplicated; an
+  in-block output-shaped line is body (#2378).
+- The adapter-to-Agent output handoff is byte-bounded by its own credit, and a
+  stalled consumer ends the stream in bounded time with a stated loss (#2387).
+- Resize is delivered as the latest authoritative level and never blocks the
+  single ordered forwarder (#2388).
 - Response-body framing is line-aware: empty lines are preserved and, inside a
-  block, only the matching terminator ends it — an unparseable `%` line is
-  content, never a protocol fault.
+  block, only the matching terminator is protocol — every other line, including
+  a well-formed notification-shaped one, is content, never a protocol fault
+  and never a live source event (#2378).
 - A framing/source failure fails closed; it never claims continuity or a
   verified checkpoint afterwards.
