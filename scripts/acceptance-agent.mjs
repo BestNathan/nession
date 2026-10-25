@@ -203,6 +203,25 @@ export async function runAcceptanceAgentWithRetry(context, provider, workspace,
   throw error;
 }
 
+// A retried run spent every attempt's tokens; the top-level summary keeps the
+// real spend while attempts[] preserves the per-attempt breakdown.
+function sumAttemptTokens(attempts) {
+  if (!Array.isArray(attempts) || attempts.length < 2) return null;
+  const totals = {};
+  let any = false;
+  for (const key of ['input', 'output', 'cache_read', 'cache_write', 'reasoning']) {
+    let sum = 0;
+    let seen = false;
+    for (const attempt of attempts) {
+      const value = attempt?.tokens?.[key];
+      if (Number.isFinite(value)) { sum += value; seen = true; }
+    }
+    totals[key] = seen ? sum : null;
+    any = any || seen;
+  }
+  return any ? totals : null;
+}
+
 function telemetryInput(context, providerMeta, result, status = 'completed', attempts = null) {
   const counts = { Pass: 0, Pending: 0, Fail: 0, 'N/A': 0 };
   for (const criterion of result?.criteria ?? []) {
@@ -245,7 +264,7 @@ function telemetryInput(context, providerMeta, result, status = 'completed', att
       tool_calls: providerMeta.tool_calls,
       tools_observed: providerMeta.tools_observed,
     },
-    tokens: providerMeta.tokens,
+    tokens: sumAttemptTokens(attempts) ?? providerMeta.tokens,
     cost: providerMeta.cost,
     timing: providerMeta.timing,
     result: {
