@@ -102,3 +102,17 @@ These are real runs or their fixtures; none produced a fabricated Pass:
 - The admitted lane run is the `full-stack-local` suite at the deployed revision, not a remote deployed-environment Full; partial remote coverage must be labeled Partial/Remote, never Full Pass (SC-11 / #1616).
 - The #2327 error-fingerprint dedup integration is not exercised here.
 - GitHub Actions schedule delivery is not real-time; the admission receipt, not the cron tick, owns due decisions.
+
+## 7. Verified state on 2026-10-25
+
+Observations taken after the migration slices landed, at Main `c88181ff1` unless stated. They are measurements of real runs, not fixtures.
+
+| Property | Observed evidence |
+| --- | --- |
+| Fast gate on a scripts/workflow PR | PR #2454 opened 14:54:24Z and merged 15:06:37Z (**12 min 13 s**): `CI / Quality Gate`, `E2E / Tests`, `Acceptance / Case Smoke`, pre-merge acceptance and `Acceptance / Orchestrator` all green, with no Full or multi-arch work in the PR gate. |
+| Lane admission, ahead > 0 | Receipts at 2026-10-24 21:57Z and 2026-10-25 00:23Z report `ADMIT` for both lanes with ahead 8 and behind 47/51 (diverged); the 00:23Z decision dispatched `E2E / Full Regression` `40146509367` at the attested deployed SHA. |
+| Lane admission, ahead = 0 | Receipt `12603133185` against pinned Main `c88181ff1` reports `SKIPPED_NOT_AHEAD` for `staging` (deployed `9830129`, behind 50) and `staging-01` (deployed `10b8bb7`, behind 120), with `next_due_at` +2 h and no dispatch. |
+| Exact-Main Full | `E2E / Full Regression` `40205381678` completed at `c88181ff1` in 13.5 min with 267 tests / 3436 assertions and a Pass per-ID receipt. The `scope` job classified this scripts/workflow merge as applicable (fail-closed), so the `full` job ran. |
+| Failure analysis sources | `e2e-full-failure-ingest.yml` accepts scheduled, manual and post-promotion push Main Full failures, and `scripts/e2e-regression-policy.mjs` owns that event set for every consumer; the intake self-test fails if the workflow guard drifts (#2454). |
+| Non-runtime Main push | A Main push whose only changes are `.md`, `docs/` or `.github/workflows/` paths is classified Not Required: the `scope` job uploads an `e2e-full-not-required-*` receipt and the `full` job is skipped. The merge that adds this section is the first such push since the receipt mechanism landed. |
+| Release gate | Not exercised: no version change has been pushed since `regression-ready` landed, so `release-production.yml` skipped every build, release and deploy job. The gate is wired (`needs: regression-ready` on every publishing job) but its blocking behavior has no execution evidence yet. |
