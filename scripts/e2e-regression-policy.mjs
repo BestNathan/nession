@@ -333,6 +333,20 @@ export function stagingLaneAdmission({
         reason: 'deployed source SHA is invalid' });
       continue;
     }
+    // A receipt can lag a redeploy. The caller supplies the GitOps desired
+    // revision; a mismatch is stale evidence, never a skip or a pass.
+    if (lane.desired_sha != null) {
+      if (!SHA.test(String(lane.desired_sha))) {
+        decisions.push({ environment_id: environmentId, decision: 'INDETERMINATE',
+          reason: 'GitOps desired SHA is invalid' });
+        continue;
+      }
+      if (lane.desired_sha !== deployedSha) {
+        decisions.push({ environment_id: environmentId, decision: 'STALE_ATTESTATION',
+          attested_source_sha: deployedSha, desired_source_sha: lane.desired_sha });
+        continue;
+      }
+    }
     const hours = Number.isSafeInteger(cfg.lanes?.[environmentId])
       ? cfg.lanes[environmentId] : cfg.staging;
     if (inFlight[environmentId] === true) {
@@ -433,6 +447,19 @@ async function selfTest(){
   assert.equal(stagingLaneAdmission({ ...laneBase,
     lanes: [{ environment_id: 'staging', deployed_source_sha: 'a'.repeat(40), attested: false }],
   }).lanes[0].decision, 'INDETERMINATE');
+  const stale = stagingLaneAdmission({ ...laneBase,
+    lanes: [{ environment_id: 'staging', deployed_source_sha: 'a'.repeat(40), attested: true,
+      desired_sha: 'b'.repeat(40) }],
+    ancestry: { staging: { ahead: 3, behind: 0 } },
+  }).lanes[0];
+  assert.equal(stale.decision, 'STALE_ATTESTATION');
+  assert.equal(stale.attested_source_sha, 'a'.repeat(40));
+  assert.equal(stale.desired_source_sha, 'b'.repeat(40));
+  assert.equal(stagingLaneAdmission({ ...laneBase,
+    lanes: [{ environment_id: 'staging', deployed_source_sha: 'a'.repeat(40), attested: true,
+      desired_sha: 'a'.repeat(40) }],
+    ancestry: { staging: { ahead: 3, behind: 0 } },
+  }).lanes[0].decision, 'ADMIT');
   assert.equal(stagingLaneAdmission({ ...laneBase,
     lanes: [{ environment_id: 'staging', deployed_source_sha: 'a'.repeat(40), attested: true, ready: false }],
     ancestry: { staging: { ahead: 1, behind: 0 } },

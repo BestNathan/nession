@@ -12,7 +12,7 @@ import { enrichReceipt } from './deployment-attestation-ingest.mjs';
 
 export function planLaneAdmission({
   now, mainSha, lanes, records, lastAdmitted = {}, inFlight = {},
-  cfg = config(process.env), exec,
+  desiredShas = {}, cfg = config(process.env), exec,
 }) {
   if (!Array.isArray(lanes) || lanes.length === 0) throw new Error('at least one lane is required');
   const laneEntries = [];
@@ -23,6 +23,7 @@ export function planLaneAdmission({
       environment_id: environmentId,
       deployed_source_sha: binding.source_sha,
       attested: true,
+      ...(desiredShas[environmentId] ? { desired_sha: desiredShas[environmentId] } : {}),
     });
     ancestry[environmentId] = countAncestry(mainSha, binding.source_sha, exec);
   }
@@ -112,6 +113,13 @@ function selfTest() {
   assert.equal(notDue.lanes[0].decision, 'NOT_DUE');
   assert.equal(notDue.admitted_at.staging, '2026-10-25T03:30:00Z');
 
+  const stalePlan = planLaneAdmission({
+    now: '2026-10-25T04:00:00Z', mainSha: main, lanes: ['staging'], records,
+    desiredShas: { staging: 'd'.repeat(40) },
+    cfg: { staging: 2, main: 12, lanes: {} }, exec,
+  });
+  assert.equal(stalePlan.lanes[0].decision, 'STALE_ATTESTATION');
+  assert.deepEqual(stalePlan.admitted, []);
   assert.throws(() => planLaneAdmission({
     now: '2026-10-25T04:00:00Z', mainSha: main, lanes: ['staging-02'], records,
     cfg: { staging: 2, main: 12, lanes: {} }, exec,
@@ -135,9 +143,11 @@ function main() {
     const previous = previousFile && fs.existsSync(previousFile)
       ? JSON.parse(fs.readFileSync(previousFile, 'utf8'))
       : {};
+    const desiredPath = process.env.DESIRED_SHAS_JSON ?? '';
+    const desiredShas = desiredPath ? JSON.parse(fs.readFileSync(desiredPath, 'utf8')) : {};
     const result = planLaneAdmission({
       now: new Date().toISOString(), mainSha, lanes, records,
-      lastAdmitted: previous.admitted_at ?? {},
+      lastAdmitted: previous.admitted_at ?? {}, desiredShas,
     });
     fs.writeFileSync(output, JSON.stringify(result, null, 2) + '\n');
     process.stdout.write(JSON.stringify({
