@@ -16,6 +16,12 @@ on:
     # delivery (this repository observed four consecutive missing :23 ticks), so
     # a second tick halves the miss streak; a NOT_DUE receipt makes it a no-op.
     - cron: '23,53 * * * *'
+  # GitHub delivered this workflow's schedule once (00:23 UTC) and then not at
+  # all for the next ten hours, while other scheduled workflows kept running.
+  # A main push is delivered reliably, so every merge also runs the (cheap,
+  # receipt-idempotent) admission decision; the schedule stays the idle path.
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
