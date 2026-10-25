@@ -151,14 +151,16 @@ jobs:
       # disposable calc.js directory via Claude --restricted file-tool scope.
       # No PR head, publisher credential, git remote mutation or SC projection.
       - name: Exercise Qwen Developer with restricted native edit tools
-        if: matrix.provider == 'qwen'
+        # The canary owner admits only the trusted main push workflow; a
+        # dispatch must skip it instead of failing the whole provider job.
+        if: matrix.provider == 'qwen' && github.event_name == 'push'
         run: |
           set -euo pipefail
           claude --help | grep -q -- '--restricted' ||
             { echo 'Claude CLI lacks required restricted mode; no unsafe fallback' >&2; exit 1; }
           node scripts/lib/agent/developer-canary.mjs run "$RUNNER_TEMP/qwen-developer-metrics"
       - name: Upload Qwen Developer canonical telemetry
-        if: always() && matrix.provider == 'qwen'
+        if: always() && matrix.provider == 'qwen' && github.event_name == 'push'
         uses: actions/upload-artifact@v4
         with:
           name: agent-telemetry-provider-smoke-qwen-developer-${{ github.run_id }}-${{ github.run_attempt }}
