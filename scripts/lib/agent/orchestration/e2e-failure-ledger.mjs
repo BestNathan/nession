@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { fingerprint, decideAdmission } from '../../../e2e-failure-admission.mjs';
+import { isTrustedMainFullEvent } from '../../../e2e-regression-policy.mjs';
 
 const REPO = 'BestNathan/nession';
 const HEX40 = /^[a-f0-9]{40}$/;
@@ -58,7 +59,7 @@ function putOnce(root, relative, value) {
 function validateAuthenticatedObservation(o) {
   if (!o || o.authenticated !== true || o.source?.repository !== REPO ||
       o.source?.workflow_path !== '.github/workflows/e2e-full-regression.yml' ||
-      o.source?.event !== 'schedule' || o.source?.branch !== 'main' ||
+      !isTrustedMainFullEvent(o.source?.event) || o.source?.branch !== 'main' ||
       o.source?.conclusion !== 'failure' || !Number.isFinite(Date.parse(o.source?.completed_at ?? '')) || !POSITIVE(o.source?.run_id) ||
       !POSITIVE(o.source?.run_attempt) || !HEX40.test(o.source?.target_sha ?? '') ||
       !/^sha256:[a-f0-9]{64}$/.test(o.artifact?.digest ?? '') ||
@@ -360,6 +361,14 @@ function selfTest() {
     assert.equal(repeated.analysis_id, first.analysis_id);
     assert.equal(repeated.epoch, 1);
     assert.equal(fs.existsSync(path.join(root, repeated.observation_path)), true);
+    // The immediate post-promotion push route is the same trusted Main Full
+    // source (#2323 SC-12): the same signature must join the existing claim,
+    // never mint a second analysis for the same error.
+    const pushRoute = recordE2EFailureObservation(root, { ...observation,
+      source: { ...observation.source, event: 'push', run_id: 506,
+        target_sha: 'd'.repeat(40) } }, { now: '2026-10-24T12:01:30Z' });
+    assert.equal(pushRoute.status, 'ANALYSIS_IN_FLIGHT');
+    assert.equal(pushRoute.analysis_id, first.analysis_id);
     const replay = recordE2EFailureObservation(root, observation, { now: '2026-10-24T12:04:00Z' });
     assert.equal(replay.status, 'ANALYSIS_IN_FLIGHT');
     assert.equal(replay.analysis_id, first.analysis_id, 'same Run/Attempt replay must not create a second analysis');
@@ -387,6 +396,10 @@ function selfTest() {
       authenticated: false }, { now: '2026-10-24T12:03:00Z' }), /authenticated/);
     const badSha = { ...observation, source: { ...observation.source, run_id: 504, target_sha: 'main' } };
     assert.throws(() => recordE2EFailureObservation(root, badSha, { now: '2026-10-24T12:03:00Z' }), /authenticated/);
+    const untrustedEvent = { ...observation, source: {
+      ...observation.source, run_id: 507, event: 'pull_request' } };
+    assert.throws(() => recordE2EFailureObservation(root, untrustedEvent,
+      { now: '2026-10-24T12:03:00Z' }), /authenticated/);
     console.log('e2e-failure-ledger self-test: PASS');
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 }

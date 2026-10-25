@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { recordE2EFailureObservation } from './lib/agent/orchestration/e2e-failure-ledger.mjs';
+import { isTrustedMainFullEvent } from './e2e-regression-policy.mjs';
 
 const REPO = 'BestNathan/nession';
 const WORKFLOW = '.github/workflows/e2e-full-regression.yml';
@@ -24,7 +25,7 @@ function verifyRecord(record) {
       record?.evaluation !== 'NOT_EVALUATED' ||
       record?.agent_dispatch !== 'NOT_AUTHORIZED' ||
       source?.repository !== REPO || source?.workflow_path !== WORKFLOW ||
-      source?.event !== 'schedule' || source?.branch !== 'main' ||
+      !isTrustedMainFullEvent(source?.event) || source?.branch !== 'main' ||
       source?.conclusion !== 'failure' || !positive(source?.run_id) ||
       !positive(source?.run_attempt) || !SHA40.test(source?.source_sha ?? '') ||
       !Number.isFinite(Date.parse(source?.completed_at ?? '')) ||
@@ -151,6 +152,16 @@ function selfTest() {
     const replay = ingestRecord(record, root, { now: '2026-10-24T12:02:00Z' });
     assert.ok(replay.outcomes.every(x => x.status === 'ANALYSIS_IN_FLIGHT'));
     assert.equal(replay.outcomes[0].analysis_id, first.outcomes[0].analysis_id);
+    // The immediate post-promotion push route (#2323 SC-12) must join the same
+    // fingerprint claim as the scheduled route instead of dispatching again.
+    const pushRoute = ingestRecord({ ...record,
+      source: { ...record.source, event: 'push', run_id: 502,
+        completed_at: '2026-10-24T12:04:00Z' } }, root, { now: '2026-10-24T12:05:00Z' });
+    assert.ok(pushRoute.outcomes.every(x => x.status === 'ANALYSIS_IN_FLIGHT'));
+    assert.deepEqual(pushRoute.outcomes.map(x => x.analysis_id),
+      first.outcomes.map(x => x.analysis_id));
+    assert.throws(() => ingestRecord({ ...record,
+      source: { ...record.source, event: 'pull_request' } }, root), /authenticated/);
     assert.throws(() => ingestRecord({ ...record, trust: 'UNATTESTED_ARTIFACT_ONLY' }, root), /authenticated/);
     assert.throws(() => ingestRecord({ ...record, source: { ...record.source, source_sha: 'main' } }, root), /authenticated/);
     const unsafe = structuredClone(record);

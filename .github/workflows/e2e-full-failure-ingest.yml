@@ -11,13 +11,19 @@ concurrency:
   cancel-in-progress: false
 jobs:
   ingest:
+    # Both trusted Main Full routes feed #2327 dedup (#2323 SC-12): the
+    # scheduled cadence and the immediate post-promotion push. The executable
+    # allowlist is owned by scripts/e2e-regression-policy.mjs; the intake
+    # self-test fails if this guard drifts from it.
     if: >-
       github.repository == 'BestNathan/nession' &&
       github.event.workflow_run.repository.full_name == github.repository &&
       github.event.workflow_run.head_repository.full_name == github.repository &&
       github.event.workflow_run.path == '.github/workflows/e2e-full-regression.yml' &&
       github.event.workflow_run.name == 'E2E / Full Regression' &&
-      github.event.workflow_run.event == 'schedule' &&
+      (github.event.workflow_run.event == 'schedule' ||
+      github.event.workflow_run.event == 'workflow_dispatch' ||
+      github.event.workflow_run.event == 'push') &&
       github.event.workflow_run.head_branch == 'main' &&
       github.event.workflow_run.status == 'completed' &&
       github.event.workflow_run.conclusion == 'failure'
