@@ -336,8 +336,17 @@ export async function collectHistoricalE2EForPull(repo,pull,get,readPlan=readHis
     const commitPulls=needsFallback
       ? await get('/repos/'+repo+'/commits/'+sha+'/pulls?per_page=100')
       : [];
-    const commitLinked=verifiedCommitPullAssociation(
-      commitPulls,pull.number,pull.head.sha,!pull.merged_at);
+    // GitHub also lists a *containing* PR under a commit, so a release PR
+    // whose head history includes another PR's commit would otherwise adopt
+    // that PR's E2E run (and its plan.pr_number) as its own history. A commit
+    // that is the head of a different PR is owned by that PR: never recover it
+    // for a containing pull. Commits that are no PR's head (an earlier push of
+    // the same PR) keep the merge-time association fallback.
+    const headOwner=(Array.isArray(commitPulls)?commitPulls:[])
+      .find(pr=>pr?.head?.sha===sha&&goodInt(pr?.number));
+    const commitLinked=(!headOwner||headOwner.number===pull.number)&&
+      verifiedCommitPullAssociation(
+        commitPulls,pull.number,pull.head.sha,!pull.merged_at);
     const runs=candidates.filter(r=>
       r.pull_requests?.some(p=>p.number===pull.number)||commitLinked||testDrill)
       .sort((a,b)=>Number(b.id)-Number(a.id))
@@ -655,6 +664,24 @@ async function selfTest() {
   const mergedHistory=await collectHistoricalE2EForPull(REPO,pr,mergedGet,readPlan,async()=>[],async()=>[]);
   assert.deepEqual(mergedHistory.map(row=>[row.run_id,row.results[0].result]),
     [[10,'Fail'],[20,'Pass']]);
+  // A release/containing pull must not adopt another PR's E2E run merely
+  // because GitHub also lists it under that commit. Commit `a` is the head of
+  // PR 1719; the containing pull 1720 (head `c`) must recover neither run.
+  const containingPr={number:1720,state:'open',merged_at:null,
+    head:{sha:'c'.repeat(40),repo:{full_name:REPO}},base:{repo:{full_name:REPO}}};
+  const ownerPr={...mergedPr,number:1719,head:{sha:a,repo:{full_name:REPO}}};
+  const containingMap=new Map(mergedMap);
+  containingMap.set('/repos/'+REPO+'/pulls/1720/commits?per_page=100',[{sha:a},{sha:b},{sha:'c'.repeat(40)}]);
+  containingMap.set('/repos/'+REPO+'/actions/runs?head_sha='+'c'.repeat(40)+'&per_page=100',{workflow_runs:[]});
+  containingMap.set('/repos/'+REPO+'/commits/'+a+'/pulls?per_page=100',
+    [ownerPr,mergedPr]);
+  containingMap.set('/repos/'+REPO+'/commits/'+b+'/pulls?per_page=100',
+    [mergedPr,containingPr]);
+  const containingGet=async p=>{if(!containingMap.has(p))
+    throw Error('unexpected request '+p);return containingMap.get(p)};
+  assert.deepEqual(await collectHistoricalE2EForPull(REPO,containingPr,containingGet,
+    readPlan,async()=>[],async()=>[]),[],
+  'a containing pull must not adopt another PR-owned commit run');
   assert.throws(()=>verifyHistoricalE2ERun(mergedOld,rec(old,'Fail'),1718,[],b),
     /unrelated or untrusted/);
   assert.deepEqual(verifyHistoricalE2ERun(mergedOld,rec(old,'Fail'),1718,
