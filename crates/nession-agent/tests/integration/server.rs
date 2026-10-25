@@ -544,7 +544,29 @@ async fn a_plain_second_attach_sends_bootstrap_before_ok_when_asked() {
         .send_keys(&session_name, &format!("echo {marker}\n"))
         .await
         .unwrap();
-    tokio::time::sleep(Duration::from_millis(400)).await;
+    // The session shell is started by tmux, so its readiness depends on load;
+    // a fixed sleep raced the instrumented coverage suite on a busy host. Wait
+    // for the marker to actually reach the pane instead of assuming it has.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let pane = TmuxDep::global()
+            .ops()
+            .capture_pane(&session_name, 200)
+            .await
+            .unwrap();
+        let produced = pane
+            .as_deref()
+            .map(|bytes| String::from_utf8_lossy(bytes).contains(marker))
+            .unwrap_or(false);
+        if produced {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the session shell never produced {marker}: {pane:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
 
     // Drop anything the first attach's forwarder still had on the socket, so
     // only the second attach's ordering is under test.
