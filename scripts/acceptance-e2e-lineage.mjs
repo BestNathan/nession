@@ -398,8 +398,13 @@ export async function collectHistoricalE2EForPull(repo,pull,get,readPlan=readHis
 // The PR's own explicit multi-Issue Refs are only a discovery constraint:
 // each returned verdict is independently re-attested from the orphan Run
 // Record, GitHub source run, and immutable Selection Plan artifact.
-const MAX_TIMELINE_PAGES = 3;
+const MAX_TIMELINE_PAGES = 10;
 const MAX_LINKED_PRS = 4;
+// The selector below keeps only the newest MAX_LINKED_PRS qualifying PRs, so
+// discovery fetches one recency window and never treats a long-lived Issue's
+// link count as a failure. The timeline page cap stays fail-closed: an
+// incomplete event list could silently hide the newest links.
+const MAX_DISCOVERY_PRS = 40;
 export function selectCrossReferencedE2EPulls(repo, issueNumber, events, pulls) {
   if (repo!==REPO || !goodInt(issueNumber) || !Array.isArray(events) ||
       !Array.isArray(pulls))throw Error('untrusted Issue/PR discovery input');
@@ -506,20 +511,22 @@ export async function collectLinkedIssueE2EEvidence(repo,issueNumber,get,
   collectPr=collectHistoricalE2EForPull,targetSha=null) {
   if(repo!==REPO||!goodInt(issueNumber))return [];
   const events=[];
+  let timelineComplete=false;
   for(let page=1;page<=MAX_TIMELINE_PAGES;page++){
     const items=await get('/repos/'+repo+'/issues/'+issueNumber+
       '/timeline?per_page=100&page='+page);
     if(!Array.isArray(items))throw Error('GitHub timeline is not an array');
     events.push(...items);
-    if(items.length<100)break;
+    if(items.length<100){timelineComplete=true;break;}
   }
+  if(!timelineComplete)throw Error('excessive Issue timeline scope');
   const numbers=[...new Set(events.filter(x=>
     x.event==='cross-referenced'&&goodInt(x.source?.issue?.number)&&
     x.source.issue.pull_request?.url===
       'https://api.github.com/repos/'+repo+'/pulls/'+x.source.issue.number)
     .map(x=>x.source.issue.number))];
-  if(numbers.length>40)throw Error('excessive linked PR discovery scope');
-  const pulls=await Promise.all(numbers.map(number=>
+  const discovered=numbers.sort((a,b)=>a-b).slice(-MAX_DISCOVERY_PRS);
+  const pulls=await Promise.all(discovered.map(number=>
     get('/repos/'+repo+'/pulls/'+number)));
   const selected=selectCrossReferencedE2EPulls(repo,issueNumber,events,pulls);
   const proofs=[];
@@ -897,6 +904,40 @@ async function selfTest() {
     if(url.includes('/timeline?'))return [];
     throw Error('should not fetch unlinked Pull Request');
   }),[]);
+
+  // A long-lived requirement keeps more linked PRs than the discovery
+  // window. Discovery fetches the newest window instead of failing an
+  // execution that has no verdict; the selector's own newest-4 choice is
+  // unchanged because those candidates are always inside the window.
+  const manyEvents=Array.from({length:45},(_,index)=>({
+    event:'cross-referenced',source:{issue:{number:2000+index,
+      pull_request:{url:'https://api.github.com/repos/'+REPO+
+        '/pulls/'+(2000+index)}}}}));
+  const fetchedNumbers=[];
+  const manyGet=async url=>{
+    if(url.includes('/issues/1702/timeline?'))return manyEvents;
+    const match=url.match(/\/pulls\/(\d+)$/);
+    if(!match)throw Error('unexpected long-lived Issue discovery API '+url);
+    fetchedNumbers.push(Number(match[1]));
+    return {...linked,number:Number(match[1])};
+  };
+  assert.deepEqual(await collectLinkedIssueE2EEvidence(REPO,1702,
+    manyGet,async()=>[]),[]);
+  assert.deepEqual(fetchedNumbers.sort((a,b)=>a-b),
+    Array.from({length:40},(_,index)=>2005+index));
+
+  // An incomplete timeline cannot silently hide the newest links: overflow
+  // of the page cap stays an execution error.
+  let timelinePages=0;
+  await assert.rejects(()=>collectLinkedIssueE2EEvidence(REPO,1702,
+    async url=>{
+      if(!url.includes('/timeline?'))
+        throw Error('should not fetch Pull Requests from an incomplete timeline');
+      timelinePages+=1;
+      return manyEvents.slice(0,100).concat(
+        Array.from({length:100-manyEvents.length},()=>({event:'labeled'})));
+    },async()=>[]),/excessive Issue timeline scope/);
+  assert.equal(timelinePages,10);
 
 
   // Independently join source evidence, immutable orphan projection receipt,
