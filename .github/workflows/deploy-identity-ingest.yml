@@ -74,7 +74,9 @@ jobs:
           if git -C trusted fetch --depth=1 origin acceptance-results 2>/dev/null; then
             ingested=$(git -C trusted ls-tree -r --name-only FETCH_HEAD || true)
           fi
-          gh run list --workflow deploy-identity.yml --limit 40 \
+          # The workspace root is not a git checkout (tooling lives in ./trusted),
+          # so every gh call must name the repository explicitly.
+          gh run list --repo "${GITHUB_REPOSITORY}" --workflow deploy-identity.yml --limit 40 \
             --json databaseId,attempt,status,conclusion,url \
             --jq '.[] | select(.status == "completed" and .conclusion == "success")
               | [.databaseId, .attempt, .url] | @tsv' |
