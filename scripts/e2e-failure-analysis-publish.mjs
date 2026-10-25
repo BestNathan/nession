@@ -22,9 +22,10 @@ function fail(message) { throw new Error('e2e failure analysis publish: ' + mess
 export function plan({ store, fingerprint, analysisRun, diagnosis, issues }) {
   const admission = readFailureAdmission(store, fingerprint);
   const state = admission.state;
-  if (!state) fail('unknown fingerprint admission');
+  if (!state) return { action: 'SKIP', reason: 'unknown fingerprint admission', fingerprint };
   if (!['in_flight', 'analyzed'].includes(state.status)) {
-    fail('claim is not awaiting a diagnosis: ' + state.status);
+    return { action: 'SKIP', reason: 'claim is not awaiting a diagnosis: ' + state.status,
+      fingerprint, state_version: admission.version };
   }
   const dispatched = state.dispatch_run;
   if (!dispatched || dispatched.run_id !== analysisRun?.id || dispatched.run_attempt !== analysisRun?.attempt) {
@@ -119,8 +120,7 @@ function selfTest() {
     const admission = readFailureAdmission(root, fingerprint);
     assert.equal(admission.state.status, 'issue_linked');
     assert.equal(admission.state.bug_issue, 9);
-    assert.throws(() => plan({ store: root, fingerprint, analysisRun, diagnosis, issues: [] }),
-      /not awaiting a diagnosis/);
+    assert.equal(plan({ store: root, fingerprint, analysisRun, diagnosis, issues: [] }).action, 'SKIP');
     assert.throws(() => record({ store: root, fingerprint, analysisId: created.analysis_id, bugIssue: 10 }),
       /not awaiting a diagnosis/);
     console.log('e2e failure analysis publish CLI self-test: passed');
