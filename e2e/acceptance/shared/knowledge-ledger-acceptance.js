@@ -118,7 +118,7 @@ function atomic(){
       run(process.execPath,[c.checker,'index',ledger],{cwd:c.trusted});
       git(ledger,'add','-A');
       const expected=['CHANGELOG.md','index.json',...changedPaths].sort();
-      const staged=git(ledger,'diff','--cached','--name-only').split('\n').sort();
+      const staged=git(ledger,'diff','--cached','--no-renames','--name-only').split('\n').sort();
       assert.deepEqual(staged,expected,'atomic transaction staged unexpected/missing files: '+message);
       git(ledger,'commit','-m',message);
       const sha=git(ledger,'rev-parse','HEAD');
