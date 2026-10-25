@@ -22,7 +22,7 @@ export function acceptanceModelView(context) {
 }
 // One canonical acceptance Prompt version. Executors and verifiers consume
 // this constant instead of copying a literal that drifts on a Prompt bump.
-export const ACCEPTANCE_PROMPT_VERSION = 'v2';
+export const ACCEPTANCE_PROMPT_VERSION = 'v3';
 
 export function renderAcceptancePrompt(context) {
   return renderAgentPrompt({
