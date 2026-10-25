@@ -114,7 +114,7 @@ jobs:
             gh issue list --repo "$GITHUB_REPOSITORY" --state all --limit 20 \
               --label "$label" --json number,state,body \
               > "$RUNNER_TEMP/issues.json" 2>/dev/null || echo '[]' > "$RUNNER_TEMP/issues.json"
-            node trusted/scripts/e2e-failure-analysis-publish.mjs plan \
+            node scripts/e2e-failure-analysis-publish.mjs plan \
               "$store" "$fingerprint" "$RUNNER_TEMP/analysis-run.json" \
               "$RUNNER_TEMP/diagnosis/diagnosis.json" "$RUNNER_TEMP/issues.json" \
               "$RUNNER_TEMP/publish-plan.json"
@@ -148,17 +148,17 @@ jobs:
                 continue
                 ;;
             esac
-            node trusted/scripts/e2e-failure-analysis-publish.mjs record \
+            node scripts/e2e-failure-analysis-publish.mjs record \
               "$store" "$fingerprint" "$analysis_id" "$bug_number"
             echo "Published Bug #${bug_number} for ${analysis_id}" >> "$GITHUB_STEP_SUMMARY"
           done
 
           git -C "$store" add -A
-          node trusted/scripts/run-store-integrity.mjs staged agent-store "$store"
+          node scripts/run-store-integrity.mjs staged agent-store "$store"
           if ! git -C "$store" diff --cached --quiet; then
             git -C "$store" -c user.name=nession-store-writer \
               -c user.email=nession-store-writer@users.noreply.github.com \
               commit -m "e2e: link failure analyses to canonical Bugs ${SOURCE_RUN_ID:-sweep}"
-            node trusted/scripts/run-store-cas-push.mjs agent-store "$store"
+            node scripts/run-store-cas-push.mjs agent-store "$store"
           fi
           echo "Publisher drained; no analysis is marked analyzed without a canonical Bug link." >> "$GITHUB_STEP_SUMMARY"
