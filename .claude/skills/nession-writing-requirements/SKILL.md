@@ -49,7 +49,7 @@ cannot supply equivalent evidence.
 | Parsing, validation, type/identity policy, source-specific regression, local isolated behavior | `pr` (exact PR head) | `agent` for read-only code/CI evidence; `case` when execution assertions are needed |
 | Real cross-component, gateway, Store CAS, multi-Run recovery or failure injection requiring a trusted integration lane | `merged, branch: staging` (exact staging SHA) | `case` with an executed verifier and trustworthy receipts; `agent` only when assessing already-authenticated independent evidence suffices |
 | A property **specific to main's** trusted dispatch identity, branch protection, final merge integration or main-only permission boundary | `merged, branch: main` (exact main SHA) | minimal targeted `case` or authenticated `agent` evidence |
-| A behavior that depends on actual production rollout and its remote environment | `deployed, environment: ...` | `case` after independent deployment/revision attestation; currently not supported by the live deployment-identity router |
+| A behavior that depends on an actual deployed environment and revision | `deployed, environment: <lane>` | `case`, run explicitly through `Acceptance / Cases` `stage=deployed`; requires an authenticated deployment record for that environment and is never inferred from a main merge |
 
 **Main-proof exception:** For every new `when: merged, branch: main` SC,
 record in normal Requirement prose (not extra Acceptance Plan YAML keys):
