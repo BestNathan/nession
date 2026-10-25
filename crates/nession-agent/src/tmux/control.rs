@@ -248,7 +248,21 @@ fn transport_for(value: Option<&str>, width: u16, height: u16) -> ControlTranspo
 /// window is shared (`window-size latest`), so a peer moving it makes the last
 /// request stale, and a guard reading its own request would then skip the
 /// resize that puts the pane back where the asking client can see it.
-type ObservedWindowSize = Arc<Mutex<Option<(u16, u16)>>>;
+///
+/// `generation` orders the source reports against a resize's **post-await**
+/// completion (#2459). A `%layout-change` that arrives while the resize and
+/// refresh replies are still pending is newer than the request that is about
+/// to complete, so it must win. Every source report, and the source-loss
+/// teardown, advance the generation under the same lock that holds the size;
+/// the resize path captures it before issuing and writes its optimistic
+/// completion only when it is unchanged.
+#[derive(Debug, Clone, Copy, Default)]
+struct ObservedWindow {
+    size: Option<(u16, u16)>,
+    generation: u64,
+}
+
+type ObservedWindowSize = Arc<Mutex<ObservedWindow>>;
 
 /// tmux control mode session — **one per nession session**, shared by every
 /// attached web client. The agent's session map is keyed by session name, so a
@@ -315,7 +329,10 @@ impl ControlModeSession {
         let mut events = client
             .take_events()
             .context("control client event stream was already taken")?;
-        let observed: ObservedWindowSize = Arc::new(Mutex::new(Some((width, height))));
+        let observed: ObservedWindowSize = Arc::new(Mutex::new(ObservedWindow {
+            size: Some((width, height)),
+            generation: 0,
+        }));
         let (output_tx, output_rx) = output_handoff(OutputHandoffLimits::default());
         // The initial value is the attach size, which is not a change to
         // announce; the first `changed()` is a size tmux actually reported
@@ -396,33 +413,8 @@ impl ControlModeSession {
     /// so the comparison against tmux's own last report decides whether
     /// anything is written.
     pub async fn resize(&mut self, width: u16, height: u16) -> Result<()> {
-        if self.window_is_at(width, height) {
-            self.viewport = (width, height);
-            return Ok(());
-        }
         self.viewport = (width, height);
-        self.client
-            .resize_window(width, height)
-            .await
-            .map_err(|err| anyhow::anyhow!("control resize failed: {err}"))?;
-        // tmux confirms with a `%layout-change` carrying this size; the event
-        // forwarder records it. Until then a repeat of this request is treated
-        // as already done, because the write above returned.
-        if let Ok(mut size) = self.observed.lock() {
-            *size = Some((width, height));
-        }
-        Ok(())
-    }
-
-    /// Whether tmux's last report of this window's size is the one asked for.
-    ///
-    /// A poisoned lock is "not known", which issues the resize: this guard
-    /// exists to skip work, never to skip the size a client is looking at.
-    fn window_is_at(&self, width: u16, height: u16) -> bool {
-        self.observed
-            .lock()
-            .map(|size| *size == Some((width, height)))
-            .unwrap_or(false)
+        apply_resize(&mut self.client, &self.observed, width, height).await
     }
 
     /// Current viewport (width, height).
@@ -447,6 +439,57 @@ impl ControlModeSession {
         }
         Ok(())
     }
+}
+
+/// Issue the window resize unless tmux's last report already is the requested
+/// size, then record the request as an optimistic completion.
+///
+/// The completion is written **only if no newer source report arrived while
+/// the resize and refresh replies were pending** (#2459). `%layout-change` is
+/// the authoritative size; a peer move during the await supersedes this
+/// request, and writing the older requested size afterwards would make the next
+/// same-size request look already satisfied and skip the command that would put
+/// the pane back.
+async fn apply_resize(
+    client: &mut TmuxClient,
+    observed: &ObservedWindowSize,
+    width: u16,
+    height: u16,
+) -> Result<()> {
+    if window_is_at(observed, width, height) {
+        return Ok(());
+    }
+    // Read before issuing: any report that lands from here on is newer than
+    // this request. A poisoned lock is "not known", so the completion is
+    // skipped and the resize simply stays un-suppressed.
+    let generation = observed
+        .lock()
+        .map(|state| state.generation)
+        .unwrap_or(u64::MAX);
+    client
+        .resize_window(width, height)
+        .await
+        .map_err(|err| anyhow::anyhow!("control resize failed: {err}"))?;
+    // tmux confirms with a `%layout-change` carrying this size; the event
+    // forwarder records it. Until then a repeat of this request is treated as
+    // already done, because the write above returned.
+    if let Ok(mut state) = observed.lock() {
+        if state.generation == generation {
+            state.size = Some((width, height));
+        }
+    }
+    Ok(())
+}
+
+/// Whether tmux's last report of this window's size is the one asked for.
+///
+/// A poisoned lock is "not known", which issues the resize: this guard exists
+/// to skip work, never to skip the size a client is looking at.
+fn window_is_at(observed: &ObservedWindowSize, width: u16, height: u16) -> bool {
+    observed
+        .lock()
+        .map(|state| state.size == Some((width, height)))
+        .unwrap_or(false)
 }
 
 impl Drop for ControlModeSession {
@@ -685,8 +728,9 @@ async fn forward_events(
     }
     // Nothing is updating this any more, so it stops being a fact a resize can
     // be suppressed with: from here a requested size is issued, not compared.
-    if let Ok(mut size) = observed.lock() {
-        *size = None;
+    if let Ok(mut state) = observed.lock() {
+        state.size = None;
+        state.generation += 1;
     }
 }
 
@@ -706,8 +750,9 @@ fn note_and_forward(
     cols: u16,
     rows: u16,
 ) {
-    if let Ok(mut size) = observed.lock() {
-        *size = Some((cols, rows));
+    if let Ok(mut state) = observed.lock() {
+        state.size = Some((cols, rows));
+        state.generation += 1;
     }
     // Best-effort: the only failure is "the receiver is gone" (session
     // teardown). `send_if_modified` keeps a repeated size from waking the
@@ -789,6 +834,94 @@ mod tests {
         )
     }
 
+    /// #2459: a peer's newer `%layout-change` must survive the older resize
+    /// completion. The peer moves the window while this client's
+    /// `refresh-client` reply is still pending; the post-await completion must
+    /// not overwrite it, and the next same-size request must issue the command.
+    #[tokio::test]
+    async fn a_peer_resize_during_the_refresh_reply_is_not_overwritten_by_the_older_completion() {
+        let (mut client, mut tmux_rx, mut tmux_tx) = boot_wire();
+        let (resize_tx, _resize_rx) = watch::channel((80, 24));
+        let observed: ObservedWindowSize = Arc::new(Mutex::new(ObservedWindow {
+            size: Some((80, 24)),
+            generation: 0,
+        }));
+
+        let peer_moves = async {
+            tmux_tx
+                .write_all(WELCOME.as_bytes())
+                .await
+                .expect("welcome");
+            let mut command = String::new();
+            tmux_rx
+                .read_line(&mut command)
+                .await
+                .expect("resize command");
+            assert_eq!(command, "resize-window -t work -x 120 -y 40\n");
+            tmux_tx
+                .write_all(b"%begin 2 1 0\n%end 2 1 0\n")
+                .await
+                .expect("resize reply");
+            command.clear();
+            tmux_rx
+                .read_line(&mut command)
+                .await
+                .expect("refresh command");
+            assert_eq!(command, "refresh-client\n");
+            // The source forwarder records a peer's newer report while this
+            // client's refresh reply is still outstanding.
+            note_and_forward(&resize_tx, &observed, 100, 30);
+            tmux_tx
+                .write_all(b"%begin 3 2 0\n%end 3 2 0\n")
+                .await
+                .expect("refresh reply");
+        };
+
+        let (result, ()) = tokio::join!(apply_resize(&mut client, &observed, 120, 40), peer_moves,);
+        result.expect("the resize command succeeds");
+
+        let observed_size = observed.lock().expect("size state").size;
+        assert_eq!(
+            observed_size,
+            Some((100, 30)),
+            "the newer source report must not be overwritten by the older completion"
+        );
+
+        // Reasserting the requested size must issue the command: tmux is
+        // actually at the peer's size, not at 120x40.
+        let sent = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let sent_by_fake = Arc::clone(&sent);
+        let reassert = async {
+            let mut command = String::new();
+            let read =
+                tokio::time::timeout(Duration::from_secs(2), tmux_rx.read_line(&mut command)).await;
+            if let Ok(Ok(_)) = read {
+                assert_eq!(command, "resize-window -t work -x 120 -y 40\n");
+                sent_by_fake.store(true, std::sync::atomic::Ordering::SeqCst);
+                tmux_tx
+                    .write_all(b"%begin 4 3 0\n%end 4 3 0\n")
+                    .await
+                    .expect("resize reply");
+                command.clear();
+                tmux_rx
+                    .read_line(&mut command)
+                    .await
+                    .expect("refresh command");
+                assert_eq!(command, "refresh-client\n");
+                tmux_tx
+                    .write_all(b"%begin 5 4 0\n%end 5 4 0\n")
+                    .await
+                    .expect("refresh reply");
+            }
+        };
+        let (result, ()) = tokio::join!(apply_resize(&mut client, &observed, 120, 40), reassert,);
+        result.expect("reasserting the size succeeds");
+        assert!(
+            sent.load(std::sync::atomic::Ordering::SeqCst),
+            "a reassertion at the requested size must not be suppressed while tmux is at the peer's size"
+        );
+    }
+
     #[tokio::test]
     async fn the_bootstrap_drops_the_output_its_capture_covers_and_keeps_the_output_after_it() {
         // The barrier's exact cut, without a tmux: output before the capture's
@@ -804,7 +937,10 @@ mod tests {
             admission_timeout: Duration::from_secs(2),
         });
         let (resize_tx, _resize_rx) = watch::channel((80, 24));
-        let observed: ObservedWindowSize = Arc::new(Mutex::new(Some((80, 24))));
+        let observed: ObservedWindowSize = Arc::new(Mutex::new(ObservedWindow {
+            size: Some((80, 24)),
+            generation: 0,
+        }));
 
         let fake = async {
             tmux_tx
@@ -883,7 +1019,10 @@ mod tests {
             admission_timeout: Duration::from_secs(2),
         });
         let (resize_tx, _resize_rx) = watch::channel((80, 24));
-        let observed: ObservedWindowSize = Arc::new(Mutex::new(Some((80, 24))));
+        let observed: ObservedWindowSize = Arc::new(Mutex::new(ObservedWindow {
+            size: Some((80, 24)),
+            generation: 0,
+        }));
 
         let fake = async {
             tmux_tx
@@ -1021,7 +1160,10 @@ mod tests {
             admission_timeout: Duration::from_secs(2),
         });
         let (resize_tx, mut resize_rx) = watch::channel((80, 24));
-        let observed: ObservedWindowSize = Arc::new(Mutex::new(Some((80, 24))));
+        let observed: ObservedWindowSize = Arc::new(Mutex::new(ObservedWindow {
+            size: Some((80, 24)),
+            generation: 0,
+        }));
         let forwarder = tokio::spawn(forward_events(
             events,
             output,
