@@ -216,6 +216,87 @@ export function recordE2EFailureObservation(root, observation, {
     observation_path: observationPath, dispatch_allowed: false, decision };
 }
 
+// Read the current admission projection for one fingerprint. The caller must
+// still hold the Store CAS head; a conflict means re-read, never blind dispatch.
+export function readFailureAdmission(root, fingerprintValue) {
+  const digest = keyFor(fingerprintValue);
+  const p = paths(digest, 0, 0);
+  const current = readCurrent(root, p, digest);
+  return { state: current.state, version: current.version };
+}
+
+// Read the observation that justified the current claim (sanitized fields
+// only). The dispatcher uses it to build the bounded Agent request.
+export function readFailureObservation(root, fingerprintValue, runId, runAttempt) {
+  const digest = keyFor(fingerprintValue);
+  if (!POSITIVE(runId) || !POSITIVE(runAttempt)) fail('invalid observation identity');
+  const relative = paths(digest, runId, runAttempt).observation;
+  const record = readJson(root, relative);
+  if (!record || record.kind !== 'e2e_failure_admission_observation' ||
+      record.fingerprint !== fingerprintValue) fail('missing or mismatched observation record');
+  return record;
+}
+
+// A dispatch POST succeeded but the downstream run could not be observed yet
+// (GitHub has no dispatch response body). The intent becomes `reconcile`: no
+// further POST may happen until a run search proves the original never landed.
+export function markFailureDispatchAmbiguous(root, fingerprintValue, {
+  now = new Date().toISOString(),
+} = {}) {
+  if (!Number.isFinite(Date.parse(now))) fail('invalid dispatch clock');
+  const digest = keyFor(fingerprintValue);
+  const p = paths(digest, 0, 0);
+  const current = readCurrent(root, p, digest);
+  const state = current.state;
+  if (!state) fail('unknown fingerprint admission');
+  if (state.status !== 'claimed' && state.status !== 'in_flight') {
+    fail('admission is not dispatchable: ' + state.status);
+  }
+  if (state.dispatch_intent?.status !== 'pending') fail('dispatch intent is not pending');
+  const next = {
+    ...state,
+    version: current.version + 1,
+    dispatch_intent: { ...state.dispatch_intent, status: 'reconcile' },
+  };
+  writeState(root, p, current.version, next);
+  return { state: next, version: next.version };
+}
+
+// Write-ahead dispatch intent: the claim exists BEFORE the external dispatch.
+// This transition commits that intent with the exact downstream run identity.
+// A crash after the HTTP POST but before this write is reconciled by adopting
+// the downstream run that already carries the analysis id.
+export function recordFailureDispatchCommitted(root, fingerprintValue, {
+  now = new Date().toISOString(), runId, runAttempt, leaseMs = 60 * 60 * 1000,
+} = {}) {
+  if (!Number.isFinite(Date.parse(now))) fail('invalid dispatch clock');
+  if (!POSITIVE(runId) || !POSITIVE(runAttempt)) fail('invalid dispatch run identity');
+  if (!Number.isSafeInteger(leaseMs) || leaseMs < 60_000 || leaseMs > 24 * 60 * 60 * 1000) {
+    fail('invalid dispatch lease');
+  }
+  const digest = keyFor(fingerprintValue);
+  const p = paths(digest, runId, runAttempt);
+  const current = readCurrent(root, p, digest);
+  const state = current.state;
+  if (!state) fail('unknown fingerprint admission');
+  if (state.status !== 'claimed' && state.status !== 'in_flight') {
+    fail('admission is not dispatchable: ' + state.status);
+  }
+  if (state.dispatch_intent?.status === 'committed' || state.dispatch_intent?.status === 'acknowledged') {
+    fail('dispatch intent is already committed');
+  }
+  const next = {
+    ...state,
+    version: current.version + 1,
+    status: 'in_flight',
+    dispatch_intent: { ...state.dispatch_intent, status: 'committed', run_id: runId, run_attempt: runAttempt },
+    dispatch_run: { run_id: runId, run_attempt: runAttempt },
+    lease_expires_at: new Date(Date.parse(now) + leaseMs).toISOString(),
+  };
+  writeState(root, p, current.version, next);
+  return { state: next, version: next.version };
+}
+
 function selfTest() {
   const root = fs.mkdtempSync(path.join(process.env.RUNNER_TEMP ?? '/tmp', 'e2e-failure-ledger-'));
   try {
