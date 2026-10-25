@@ -106,6 +106,14 @@ export function prepare(event, issues, repoRoot) {
   // branch advances. Checkout(fetch-depth: 0) provides the current remote
   // target ref; bind the plan to that immutable SHA rather than the stale
   // webhook base or merge-base.
+  //
+  // Release promotion consequence: the ingest rebuild
+  // (`issue-e2e-source-attestation`) recomputes the base as
+  // `merge-base(pr.base.sha, head)`, while this plan binds the *current* base
+  // tip. A staging -> main release head must therefore contain the main tip
+  // at plan time (sync main into staging first); otherwise the captured plan
+  // and the ingest rebuild disagree and the exact-head Issue E2E gate stays
+  // closed even though the E2E run itself passed.
   const baseSha = currentBaseSha(repoRoot, pr.base.ref);
   if (baseSha === pr.head.sha) throw Error('current PR base and head SHA are identical');
   if (!issues.length || issues.some(i => !i.body?.includes('## E2E Verification'))) {
