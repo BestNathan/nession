@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "5b0c76e8ad76bd20df75aa1c5b5da44874e9dafe877e9b2d5f70c5a49c54b67b",
+  "run_id": 40161134215,
+  "run_attempt": 1,
+  "issue": 2325,
+  "criterion": "SC-02",
+  "criterion_text": "Create/update/delete/rename/move atomically change current Markdown, the derived path-based topic/category index and the **single append-only CHANGELOG.md** with UTC/source/reason; historical snapshots remain in Git and concurrent stale-head publication fails safely.",
+  "stage": "staging",
+  "target_sha": "f5a024c726ac746d5fb37d4999db65ab2e670e37",
+  "contract_sha256": "252e597fac7ff62c7910632f052d210d1d148a421257d9b1318d220c131e0650",
+  "case_revision": "f5a024c726ac746d5fb37d4999db65ab2e670e37",
+  "case_tree_sha": "2de951e1684b7fdb0d7604e49e5e9c5680fa1edc",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Fail",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-25T04:16:51.415Z",
+  "finished_at": "2026-10-25T04:16:52.080Z",
+  "duration_ms": 665,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.js",
+      "result": "Fail",
+      "summary": "AssertionError [ERR_ASSERTION]: atomic transaction staged unexpected/missing files: fixture: atomically rename the complete article title and filename\n+ actual - expected\n\n  [\n    'CHANGELOG.md',\n    'index.json',\n-   'topics/engineering/acceptance-fixture-knowledge-ledger-atomic-publish.md',\n    'topics/engineering/acceptance-fixture-renamed-knowledge-ledger-atomic-publish.md',\n    'topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md'\n  ]\n\n    at commitTransaction (/home/runner/work/nession/nession/workspace/e2e/acceptance/shared/knowledge-ledger-acceptance.js:122:14)\n    at /home/runner/work/nession/nession/workspace/e2e/acceptance/shared/knowledge-ledger-acceptance.js:188:24\n    at clone (/home/runner/work/nession/nession/workspace/e2e/acceptance/shared/knowledge-ledger-acceptance.js:12:255)\n    at atomic (/home/runner/work/nession/nession/workspace/e2e/acceptance/shared/knowledge-ledger-acceptance.js:81:10)\n    at main (/home/runner/work/nession/nession/workspace/e2e/acceptance/shared/knowledge-ledger-acceptance.js:261:119)\n    at Object.<anonymous> (/home/runner/work/nession/nession/workspace/e2e/acceptance/cases/2325/SC-02/verify.js:3:1)\n    at Module._compile (node:internal/modules/cjs/loader:1929:14)\n    at Object..js (node:internal/modules/cjs/loader:2060:10)\n    at Module.load (node:internal/modules/cjs/loader:1651:32)\n    at Module._load (node:internal/modules/cjs/loader:1443:12)",
+      "evidence": [
+        {
+          "type": "knowledge-ledger",
+          "value": "Acceptance verifier failed"
+        }
+      ],
+      "duration_ms": 648,
+      "exit_code": 1,
+      "stderr": "AssertionError [ERR_ASSERTION]: atomic transaction staged unexpected/missing files: fixture: atomically rename the complete article title and filename\n+ actual - expected\n\n  [\n    'CHANGELOG.md',\n    'index.json',\n-   'topics/engineering/acceptance-fixture-knowledge-ledger-atomic-publish.md',\n    'topics/engineering/acceptance-fixture-renamed-knowledge-ledger-atomic-publish.md',\n    'topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md'\n  ]\n\n    at commitTransaction (/home/runner/work/nession/nession/workspace/e2e/acceptance/shared/knowledge-ledger-acceptance.js:122:14)\n    at /home/runner/work/nession/nession/workspace/e2e/acceptance/shared/knowledge-ledger-acceptance.js:188:24\n    at clone (/home/runner/work/nession/nession/workspace/e2e/acceptance/shared/knowledge-ledger-acceptance.js:12:255)\n    at atomic (/home/runner/work/nession/nession/workspace/e2e/acceptance/shared/knowledge-ledger-acceptance.js:81:10)\n    at main (/home/runner/work/nession/nession/workspace/e2e/acceptance/shared/knowledge-ledger-acceptance.js:261:119)\n    at Object.<anonymous> (/home/runner/work/nession/nession/workspace/e2e/acceptance/cases/2325/SC-02/verify.js:3:1)\n    at Module._compile (node:internal/modules/cjs/loader:1929:14)\n    at Object..js (node:internal/modules/cjs/loader:2060:10)\n    at Module.load (node:internal/modules/cjs/loader:1651:32)\n    at Module._load (node:internal/modules/cjs/loader:1443:12)"
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40161134215,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "f5a024c726ac746d5fb37d4999db65ab2e670e37",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40161134215",
+    "record_path": "runs/2026-10-25/40161134215-1/2325/SC-02.json",
+    "source_result_sha256": "dffc7e550bf4971bdb442b747cf33adf57310b9c9c7f4a3c60f3939aa3a1a1da"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40161134215-1",
+    "sha256": "dffc7e550bf4971bdb442b747cf33adf57310b9c9c7f4a3c60f3939aa3a1a1da",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40161134215",
+    "durability": "time-limited; object archival not configured"
+  }
+}
