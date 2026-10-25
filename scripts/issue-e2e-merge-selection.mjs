@@ -3,6 +3,8 @@
 // A main/staging push is NOT implicit authority to run all browser tests.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { prepare, pathsCannotAffectE2E } from './issue-e2e-selection-entry.mjs';
@@ -49,7 +51,7 @@ export function mergedSelection(event,commit,prs,issues,repoRoot) {
   const synthetic={repository:{full_name:REPO},source_event:'push',
     pull_request:{number:target.pr.number,title:target.pr.title,body:target.pr.body,
       merge_commit_sha:target.targetSha,
-      base:{sha:target.baseSha},
+      base:{sha:target.baseSha,ref:event.ref.slice('refs/heads/'.length)},
       head:{sha:target.targetSha,repo:{full_name:REPO}}}};
   const plan=prepare(synthetic,issues,repoRoot);
   if(plan.mode==='unresolved')
@@ -91,6 +93,46 @@ function selfTest(){
       assert.throws(()=>mergeIdentity(e,c,p),/ambiguous/);continue;
     }
     assert.throws(()=>mergeIdentity(e,c,p),/identity|ambiguous/);
+  }
+  // Reproduce the real merged-push selection against a real merge commit:
+  // the plan must bind the merge's first parent, not the branch tip, which is
+  // the pushed SHA itself. Resolving the tip threw 'invalid PR base branch
+  // ref' for every main/staging push (e2e-tests merged selection).
+  const tmp=fs.mkdtempSync(join(tmpdir(),'nession-merged-selection-'));
+  try{
+    const git=(...args)=>execFileSync('git',args,
+      {cwd:tmp,encoding:'utf8',stdio:['ignore','pipe','ignore']}).trim();
+    git('init','-q');
+    git('config','user.name','CI Fixture');
+    git('config','user.email','ci@example.invalid');
+    fs.writeFileSync(join(tmp,'README.md'),'# Fixture\n');
+    git('add','.'); git('commit','-qm','base');
+    const parent=git('rev-parse','HEAD');
+    git('checkout','-q','-b','topic');
+    fs.writeFileSync(join(tmp,'README.md'),'# Fixture\n\nDocs-only change.\n');
+    git('add','.'); git('commit','-qm','topic');
+    const topic=git('rev-parse','HEAD');
+    git('checkout','-q','-');
+    git('merge','-q','--no-ff','-m','merge topic','topic');
+    const merged=git('rev-parse','HEAD');
+    const push={repository:{full_name:REPO},ref:'refs/heads/main',after:merged};
+    const mergeCommit={sha:merged,parents:[parent,topic]};
+    const mergedPr={number:7,title:'Refs #1702',body:'Refs #1702',
+      merged_at:'2026-10-25T00:00:00Z',merge_commit_sha:merged,
+      base:{ref:'main',repo:{full_name:REPO}},
+      head:{sha:topic,repo:{full_name:REPO}}};
+    const issue={number:1702,state:'open',body:[
+      '## E2E Verification','### New','- none: docs-only fixture',
+      '### Regression','- none: docs-only fixture',
+      '## E2E Report','| ID | Type | Result | Evidence |','|---|---|---|---|'].join('\n')};
+    const plan=mergedSelection(push,mergeCommit,[mergedPr],[issue],tmp);
+    assert.equal(plan.source_event,'push');
+    assert.equal(plan.target_sha,merged);
+    assert.equal(plan.base_sha,parent,
+      'merged push must bind the merge first parent, not the pushed tip');
+    assert.equal(plan.mode,'not-required');
+  } finally {
+    fs.rmSync(tmp,{recursive:true,force:true});
   }
   console.log('merge E2E source: exact push/PR parent, no misleading direct-push full fallback');
 }
