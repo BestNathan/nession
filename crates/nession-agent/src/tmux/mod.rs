@@ -1,10 +1,10 @@
-pub mod client;
+pub use nession_tmux::client;
 pub mod cmd;
 pub mod control;
 pub mod env;
 pub mod manager;
 pub mod ops;
-pub mod parser;
+pub use nession_tmux::parser;
 pub mod pty;
 pub mod session;
 pub mod util;

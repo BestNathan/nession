@@ -10,7 +10,7 @@
 //! consumer. The session adapter above the client receives typed events, never
 //! lines, and no longer carries a decoder of its own.
 //!
-//! [`decode_tmux_output`]: super::parser::decode_tmux_output
+//! [`decode_tmux_output`]: crate::parser::decode_tmux_output
 
 use tokio::io::{AsyncBufRead, AsyncBufReadExt};
 

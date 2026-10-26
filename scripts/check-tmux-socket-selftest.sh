@@ -126,6 +126,14 @@ pub fn probe(exe: &std::path::Path) {
     let _ = std::process::Command::new(exe).status();
 }'
 
+# The SDK's own addressed builder is not std/tokio/portable-pty process
+# construction. `TmuxCommand::new(..)` contains the substring `Command::new(`,
+# so the constructor match is boundary-anchored; this fixture keeps it that way.
+compliant "the SDK addressed builder is not process construction" "$RUST_TARGET" \
+    'pub fn probe() {
+    let _ = TmuxCommand::new("tmux", "/tmp/probe/tmux.sock");
+}'
+
 echo ""
 echo "  $pass passed, $fail failed"
 [[ $fail -eq 0 ]] || exit 1

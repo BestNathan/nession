@@ -11,13 +11,16 @@
 #
 # Rules enforced:
 #
-#   1. Rust: no tmux process spawned outside crates/nession-agent/src/tmux/cmd.rs.
+#   1. Rust: no tmux process spawned outside crates/nession-tmux/src/process.rs.
 #      Three spawn forms count, and the second one is the point:
 #        a. `Command::new("tmux")`            — the literal
 #        b. `Command::new(<expression>)`      — e.g. `&self.tmux_bin`. A gate
 #           matching only literals reported SessionManager as clean while all 14
 #           of its create/kill/list calls used a variable.
 #        c. `CommandBuilder::new("tmux")`     — portable-pty's separate API
+#      The constructor match is boundary-anchored: `TmuxCommand::new(..)` is the
+#      SDK's own addressed builder, not std/tokio/portable-pty process
+#      construction, and must not be mistaken for a bypass.
 #   2. Shell/TS: a `tmux` invocation in scripts/**, e2e/**, deploy/** or the
 #      justfile must carry `-S`.
 #   3. Nothing may *set* TMUX_TMPDIR. It is not an isolation mechanism: tmux
@@ -42,8 +45,10 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-# The one file allowed to name tmux in a process constructor.
-CHOKEPOINT="crates/nession-agent/src/tmux/cmd.rs"
+# The one file allowed to name tmux in a process constructor. The tmux-native
+# layer moved here in #2469 slice 1; the Agent's `tmux/cmd.rs` is a wrapper that
+# supplies Nession's socket and server configuration, and must not spawn.
+CHOKEPOINT="crates/nession-tmux/src/process.rs"
 
 # Shell/TS files exempt from rule 2, each for a stated reason.
 #
@@ -98,7 +103,7 @@ while IFS= read -r file; do
         [[ -z ${ln:-} ]] && continue
         report "$file" "$ln" "tmux spawned outside the chokepoint (rule 1a/1c)" "$text" \
             "build it with crate::tmux::cmd::global().tokio() / .std() / .pty() — those add -S <socket>"
-    done < <(grep -nE '(Command|CommandBuilder)::new\(\s*"[^"]*tmux' "$file" 2>/dev/null |
+    done < <(grep -nE '(^|[^[:alnum:]_])(Command|CommandBuilder)::new\(\s*"[^"]*tmux' "$file" 2>/dev/null |
         grep -vE '^[0-9]+:\s*(//|///|\*)')
 
     # 1b: a constructor taking a non-literal, in a file that deals with tmux.
@@ -114,7 +119,7 @@ while IFS= read -r file; do
             sed -n "$((ln > 3 ? ln - 3 : 1)),${ln}p" "$file" | grep -q 'not-tmux' && continue
             report "$file" "$ln" "process spawned from a variable in a tmux file (rule 1b)" "$text" \
                 "if this spawns tmux, use crate::tmux::cmd::global(); otherwise mark the line // not-tmux: <reason>"
-        done < <(grep -nE '(Command|CommandBuilder)::new\(\s*[^"[:space:]]' "$file" 2>/dev/null |
+        done < <(grep -nE '(^|[^[:alnum:]_])(Command|CommandBuilder)::new\(\s*[^"[:space:]]' "$file" 2>/dev/null |
             grep -vE '^[0-9]+:\s*(//|///|\*)')
     fi
 done < <(rust_files)
@@ -157,5 +162,5 @@ if [[ $findings -eq 0 ]]; then
 fi
 echo -e "${RED}${findings} tmux-socket violation(s)${NC}"
 echo -e "${YELLOW}Every tmux call must be addressed with an explicit -S. See"
-echo -e "\"tmux socket 隔离\" in CLAUDE.md and crates/nession-agent/src/tmux/cmd.rs.${NC}"
+echo -e "\"tmux socket 隔离\" in CLAUDE.md and crates/nession-tmux/src/process.rs.${NC}"
 exit 1

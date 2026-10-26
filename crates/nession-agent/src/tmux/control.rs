@@ -324,8 +324,15 @@ impl ControlModeSession {
             .resize_window(session_name, width, height)
             .await?;
 
-        let mut client =
-            TmuxClient::connect_with(tmux, session_name, configured_transport(width, height))?;
+        // The Control Mode client lives in `nession-tmux`; this adapter hands
+        // it the Agent's configured addressing (private socket + server
+        // config), resolved per attach like every other Nession tmux command.
+        let command = tmux.cmd();
+        let mut client = TmuxClient::connect_with(
+            command.as_sdk(),
+            session_name,
+            configured_transport(width, height),
+        )?;
         let mut events = client
             .take_events()
             .context("control client event stream was already taken")?;

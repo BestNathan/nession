@@ -1,7 +1,8 @@
 # Agent tmux Control Mode transport
 
-Owner: [`crates/nession-agent/src/tmux/client/`](../../crates/nession-agent/src/tmux/client/)
-— the typed, session-owned Control Mode client and its transports.
+Owner: [`crates/nession-tmux/src/client/`](../../crates/nession-tmux/src/client/)
+— the typed, session-owned Control Mode client and its transports, in the
+independent `nession-tmux` crate (#2469 slice 1).
 `ControlModeSession` is the session-level adapter above it (bootstrap capture
 barrier, window-size guard). [`TmuxOps`](../../crates/nession-agent/src/tmux/ops.rs)
 stays the operation-semantics owner, and [`TmuxCmd`](../../crates/nession-agent/src/tmux/cmd.rs)

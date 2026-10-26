@@ -1,17 +1,17 @@
 //! Typed operations the control client can execute.
 //!
-//! [`TmuxOps`](crate::tmux::ops::TmuxOps) remains the canonical owner of
-//! **tmux operation semantics**: which flags an operation takes, which target
-//! it addresses and what its answer means. It renders those operations as an
-//! argv subprocess, because most of Nession's tmux traffic is one-shot.
+//! tmux operation semantics — which flags an operation takes, which target it
+//! addresses and what its answer means — belong to the crate's one-shot
+//! operation owner. Most tmux traffic is one-shot and is rendered as an argv
+//! subprocess.
 //!
 //! A control-mode client cannot run an argv: it writes *command lines* into one
 //! long-lived attachment. This enum is the transport-specific adapter for that
 //! form — the same operations, encoded for the control channel. It is
 //! deliberately small (only what the attached session needs) and it does not
-//! introduce new semantics: every variant mirrors the corresponding `TmuxOps`
-//! operation, and the slice that migrates `ControlModeSession` (#2307 C) is the
-//! one that removes the argv-side duplicate from the live path.
+//! introduce new semantics: every variant mirrors the corresponding one-shot
+//! operation, and the migration slice that moves the one-shot owner into this
+//! crate removes the argv-side duplicate from the live path.
 //!
 //! Every command is **one line**, because tmux answers each command with one
 //! `%begin`/`%end` block. A variant that needs two tmux commands (resize asks

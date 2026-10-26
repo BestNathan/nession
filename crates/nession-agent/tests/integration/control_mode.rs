@@ -491,7 +491,7 @@ async fn attach_over(
     guard: &ControlTestSession,
     transport: ControlTransport,
 ) -> Result<(TmuxClient, EventStream)> {
-    let mut client = TmuxClient::connect_with(guard.dep(), guard.name(), transport)?;
+    let mut client = TmuxClient::connect_with(&guard.dep().sdk(), guard.name(), transport)?;
     let mut events = client
         .take_events()
         .ok_or_else(|| anyhow!("event stream already taken"))?;
@@ -647,8 +647,12 @@ async fn event_ingress_budget_fails_closed_under_a_real_burst() -> Result<()> {
         max_queued_bytes: 8 * 1024,
         admission_timeout: Duration::from_millis(200),
     };
-    let mut client =
-        TmuxClient::connect_with_limits(flood.dep(), flood.name(), ControlTransport::Pipe, limits)?;
+    let mut client = TmuxClient::connect_with_limits(
+        &flood.dep().sdk(),
+        flood.name(),
+        ControlTransport::Pipe,
+        limits,
+    )?;
     let mut events = client
         .take_events()
         .ok_or_else(|| anyhow!("event stream already taken"))?;

@@ -13,10 +13,10 @@
 //!   grammar, so this transport removes it before the client's byte framing
 //!   sees it.
 //!
-//! Both spawn through [`TmuxCmd`](crate::tmux::cmd::TmuxCmd) — the single owner
-//! of `-S <private socket>` addressing and inherited-env scrubbing — so neither
-//! transport adds a second tmux process grammar. A failed `-CC` launch is an
-//! error; it never falls back to `-C`.
+//! Both spawn through [`TmuxCommand`] — the single owner of `-S <private
+//! socket>` addressing and inherited-env scrubbing — so neither transport adds
+//! a second tmux process grammar. A failed `-CC` launch is an error; it never
+//! falls back to `-C`.
 
 use std::process::Stdio;
 
@@ -24,7 +24,7 @@ use anyhow::{Context, Result};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::process::{Child, ChildStdin, ChildStdout};
 
-use crate::tmux::ops::TmuxDep;
+use crate::process::TmuxCommand;
 
 /// How long [`ClientChild::reap`] waits for an exiting control client.
 ///
@@ -119,9 +119,8 @@ pub struct PipeTransport;
 impl PipeTransport {
     /// Spawn one control attachment to `session_name` on the caller's private
     /// socket.
-    pub fn connect(tmux: &TmuxDep, session_name: &str) -> Result<ClientIo> {
+    pub fn connect(tmux: &TmuxCommand, session_name: &str) -> Result<ClientIo> {
         let mut child = tmux
-            .cmd()
             .tokio()
             .args(["-C", "attach", "-t", session_name])
             .stdin(Stdio::piped())
@@ -326,7 +325,7 @@ impl<R: AsyncRead + Unpin> AsyncRead for PtyFraming<R> {
 
 #[cfg(unix)]
 mod unix {
-    use super::{ClientChild, ClientIo, PtyChild, PtyFraming, Result, TmuxDep, READ_SCRATCH};
+    use super::{ClientChild, ClientIo, PtyChild, PtyFraming, Result, TmuxCommand, READ_SCRATCH};
     use std::io;
     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
     use std::pin::Pin;
@@ -348,7 +347,7 @@ mod unix {
         /// Open a PTY, spawn one `-CC` attachment to `session_name`, and return
         /// its streams.
         pub fn connect(
-            tmux: &TmuxDep,
+            tmux: &TmuxCommand,
             session_name: &str,
             cols: u16,
             rows: u16,
@@ -364,7 +363,7 @@ mod unix {
 
             set_raw(pty.master.as_ref())?;
 
-            let mut command = tmux.cmd().pty();
+            let mut command = tmux.pty();
             command.args(["-CC", "attach", "-t", session_name]);
             let child = pty
                 .slave
@@ -554,7 +553,7 @@ pub use unix::PtyTransport;
 mod tests {
     use super::*;
     #[cfg(unix)]
-    use crate::tmux::cmd::TmuxCmd;
+    use crate::process::TmuxCommand;
 
     #[tokio::test]
     async fn the_cc_terminal_framing_never_reaches_the_protocol_stream() {
@@ -641,12 +640,12 @@ mod tests {
         // The launch succeeded (the fixture exists and was spawned) but tmux
         // died without a welcome pair. That is not a connect error — it is
         // source loss, and the stream must say so instead of hanging.
-        use crate::tmux::client::{ControlTransport, TmuxClient, TmuxEvent};
+        use crate::client::{ControlTransport, TmuxClient, TmuxEvent};
         let dir = tempfile::tempdir().expect("tempdir");
-        let fake = crate::test_support::FakeTmux::new(dir.path(), "exit 1");
+        let fake = crate::testing::FakeTmux::new(dir.path(), "exit 1");
 
         let mut client = TmuxClient::connect_with(
-            &fake.dep(),
+            &fake.command(),
             "nession-fake-sess",
             ControlTransport::Pty { cols: 80, rows: 24 },
         )
@@ -671,9 +670,9 @@ mod tests {
         // have to hold together for the client to see a welcome pair and a
         // reply. Runs on macOS too, which the real-tmux integration tests do
         // not.
-        use crate::tmux::client::{ControlCommand, ControlTransport, TmuxClient, TmuxEvent};
+        use crate::client::{ControlCommand, ControlTransport, TmuxClient, TmuxEvent};
         let dir = tempfile::tempdir().expect("tempdir");
-        let fake = crate::test_support::FakeTmux::new(
+        let fake = crate::testing::FakeTmux::new(
             dir.path(),
             "case \"$1\" in \
              -CC) printf '\\033P1000p'; \
@@ -685,7 +684,7 @@ mod tests {
         );
 
         let mut client = TmuxClient::connect_with(
-            &fake.dep(),
+            &fake.command(),
             "nession-fake-sess",
             ControlTransport::Pty { cols: 80, rows: 24 },
         )
@@ -729,12 +728,12 @@ mod tests {
         // The same statement for the production transport: a spawn that
         // succeeded and a child that died before the welcome pair is source
         // loss, not a hang.
-        use crate::tmux::client::{ControlTransport, TmuxClient, TmuxEvent};
+        use crate::client::{ControlTransport, TmuxClient, TmuxEvent};
         let dir = tempfile::tempdir().expect("tempdir");
-        let fake = crate::test_support::FakeTmux::new(dir.path(), "exit 1");
+        let fake = crate::testing::FakeTmux::new(dir.path(), "exit 1");
 
         let mut client =
-            TmuxClient::connect_with(&fake.dep(), "nession-fake-sess", ControlTransport::Pipe)
+            TmuxClient::connect_with(&fake.command(), "nession-fake-sess", ControlTransport::Pipe)
                 .expect("the fixture exists, so the pipe spawn succeeds");
         let mut events = client.take_events().expect("the test owns the events");
         let event = tokio::time::timeout(std::time::Duration::from_secs(5), events.recv())
@@ -751,17 +750,16 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn a_missing_tmux_is_an_error_on_both_transports_and_never_a_fallback() {
-        use crate::tmux::client::{ControlTransport, TmuxClient};
-        use crate::tmux::ops::TmuxDep;
+        use crate::client::{ControlTransport, TmuxClient};
         let dir = tempfile::tempdir().expect("tempdir");
-        let missing = TmuxCmd::new(
+        let missing = TmuxCommand::new(
             dir.path()
                 .join("missing-tmux")
                 .to_string_lossy()
                 .into_owned(),
             dir.path().join("tmux.sock"),
         );
-        let dep = TmuxDep::injected(missing);
+        let dep = missing;
 
         for transport in [
             ControlTransport::Pipe,
