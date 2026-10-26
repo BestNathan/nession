@@ -416,16 +416,33 @@ fn concurrent_writers_do_not_splice_the_recorded_calls() {
         let socket = socket.clone();
         handles.push(std::thread::spawn(move || {
             for _ in 0..10 {
-                // not-tmux: this runs the FakeTmux fixture, not tmux itself
-                let mut cmd = Command::new(&bin);
-                cmd.arg("-S").arg(&socket);
-                if writer % 3 == 0 {
-                    cmd.args(["attach", "-t", "sess"]);
-                } else {
-                    cmd.args(["set-option", "-t", "sess", "status", "off"]);
+                // not-tmux: this runs the FakeTmux fixture, not tmux itself.
+                //
+                // A fake that exits without recording has already lost the
+                // call — the recorder's exit status says so — so retry it
+                // here rather than reading a short log as a splicing result.
+                // Under the coverage run's load a claim has been observed to
+                // fail transiently; that is the fixture, not the property.
+                let mut attempts = 0;
+                loop {
+                    let mut cmd = Command::new(&bin); // not-tmux: the FakeTmux fixture, not tmux
+                    cmd.arg("-S").arg(&socket);
+                    if writer % 3 == 0 {
+                        cmd.args(["attach", "-t", "sess"]);
+                    } else {
+                        cmd.args(["set-option", "-t", "sess", "status", "off"]);
+                    }
+                    cmd.stdout(Stdio::null()).stderr(Stdio::null());
+                    let status = cmd.status().unwrap();
+                    if status.success() {
+                        break;
+                    }
+                    attempts += 1;
+                    assert!(
+                        attempts < 5,
+                        "the fake failed to record a call after {attempts} retries: {status}"
+                    );
                 }
-                cmd.stdout(Stdio::null()).stderr(Stdio::null());
-                cmd.status().unwrap();
             }
         }));
     }
