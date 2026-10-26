@@ -93,11 +93,28 @@ jobs:
             .event == "push" and .head_branch == "main" and
             .head_sha == $sha and .status == "completed" and
             .conclusion == "success"' "$RUNNER_TEMP/source.json" > /dev/null
+          # A "Not Required" Full run also concludes success, but its `full`
+          # job is skipped. Only a real exact-SHA Full execution may wake
+          # release qualification; a skipped one authorizes nothing (#2323).
+          wake=true
+          if [[ "$(jq -r .name "$RUNNER_TEMP/source.json")" == 'E2E / Full Regression' ]]; then
+            gh api \
+              "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID/attempts/$SOURCE_ATTEMPT/jobs?per_page=100" \
+              > "$RUNNER_TEMP/source-jobs.json"
+            if ! jq -e '[.jobs[] | select(.name == "full" and .conclusion == "success")] | length == 1' \
+                 "$RUNNER_TEMP/source-jobs.json" > /dev/null; then
+              echo "Full Regression did not execute the Full browser job; no acceptance wake"
+              wake=false
+            fi
+          fi
+          echo "wake=${wake}" >> "$GITHUB_OUTPUT"
+          [[ "$wake" == 'true' ]] || exit 0
           git cat-file -e "$SOURCE_SHA^{commit}"
           git merge-base --is-ancestor "$SOURCE_SHA" HEAD
           echo "target_sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
       - name: Select only outstanding merged-main Agent criteria
         id: select
+        if: steps.verify.outputs.wake == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

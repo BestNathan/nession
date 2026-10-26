@@ -30,6 +30,11 @@ assert.match(yaml,/types: \[completed\]/);
 assert.match(yaml,/workflow_run:\s*\n(?:[^\n]*\n)*?\s+branches: \[main\]/,
   'subscribe only to main upstream runs, not PR completion events');
 assert.match(yaml,/workflows: \["Acceptance \/ Orchestrator", "CI \/ Run Store Fixture Evidence", "E2E \/ Tests", "E2E \/ Full Regression", "Deploy \/ Public Pages"\]/);
+// A Not Required Full run concludes success with the `full` job skipped; only
+// a real exact-SHA Full execution may wake release qualification.
+assert.match(yaml,/Full Regression did not execute the Full browser job/);
+assert.match(yaml,/select\(\.name == "full" and \.conclusion == "success"\)/);
+assert.match(yaml,/if: steps\.verify\.outputs\.wake == 'true'/);
 assert.match(yaml,/ref: main/);
 assert.match(yaml,/persist-credentials: false/);
 
