@@ -260,11 +260,17 @@ fn pane_mode_args(session: &str) -> [&str; 5] {
 /// without it writes the next live byte at the wrong row/column.
 ///
 /// `cursor_x`/`cursor_y` are zero-based and relative to the top-left of the
-/// visible pane, which is also where `capture-pane -p -E -` starts. They are
-/// read with the same one-line format discipline as the modes: an unknown
-/// target prints an empty line and exits 0, so the parse is what tells "no
-/// answer" apart from "cursor at 0 0".
-const PANE_CURSOR_FORMAT: &str = "#{cursor_x} #{cursor_y}";
+/// visible pane. `pane_height` comes with them because the caller has to tell
+/// a cursor parked below the last written row (#2464's empty-row case) from a
+/// cursor that is simply on the last row: the number of blank rows between the
+/// text and the cursor is a function of the pane's height, and the capture it
+/// is applied to also carries scrollback above the visible pane and
+/// `-J`-joined wrapped lines that a bare row index would count as lines.
+///
+/// They are read with the same one-line format discipline as the modes: an
+/// unknown target prints an empty line and exits 0, so the parse is what tells
+/// "no answer" apart from "cursor at 0 0".
+const PANE_CURSOR_FORMAT: &str = "#{cursor_x} #{cursor_y} #{pane_height}";
 
 fn pane_cursor_args(session: &str) -> [&str; 5] {
     ["display-message", "-p", "-t", session, PANE_CURSOR_FORMAT]
@@ -272,14 +278,14 @@ fn pane_cursor_args(session: &str) -> [&str; 5] {
 
 /// Parse the cursor line [`TmuxOps::pane_cursor`] asks for.
 ///
-/// Exactly two non-negative integers: a short or padded answer is a tmux this
+/// Exactly three non-negative integers: a short or padded answer is a tmux this
 /// code cannot trust the position from, and guessing one would recreate the
 /// drift the query exists to remove.
-fn pane_cursor_from_line(line: &str) -> Result<(u16, u16)> {
+fn pane_cursor_from_line(line: &str) -> Result<(u16, u16, u16)> {
     let fields: Vec<&str> = line.split_whitespace().collect();
-    let [x, y] = fields.as_slice() else {
+    let [x, y, height] = fields.as_slice() else {
         anyhow::bail!(
-            "expected 2 pane cursor coordinates, got {}: {line:?}",
+            "expected 3 pane cursor fields, got {}: {line:?}",
             fields.len()
         );
     };
@@ -289,7 +295,10 @@ fn pane_cursor_from_line(line: &str) -> Result<(u16, u16)> {
     let y = y
         .parse::<u16>()
         .with_context(|| format!("cursor_y in {line:?} is not a number"))?;
-    Ok((x, y))
+    let height = height
+        .parse::<u16>()
+        .with_context(|| format!("pane_height in {line:?} is not a number"))?;
+    Ok((x, y, height))
 }
 
 /// Parse the flags line [`TmuxOps::pane_mode_flags`] asks for.
@@ -628,20 +637,24 @@ impl TmuxOps {
         })
     }
 
-    /// The pane cursor's `(x, y)`, zero-based from the top-left of the visible
-    /// pane.
+    /// The pane cursor's `(x, y)` and the pane height, all from the same
+    /// one-line answer; `x`/`y` are zero-based from the top-left of the
+    /// visible pane.
     ///
     /// Read by the bootstrap so a reconstructed screen puts the caret where
     /// the application left it (#2464). A pane whose application moved to an
     /// empty row and paused has a cursor that is not at the end of the last
     /// written line; without this the next live byte lands at the wrong
-    /// row/column.
+    /// row/column. The height is part of the same answer because the blank
+    /// rows between the text and the cursor are `pane_height - 1 - y`, and
+    /// reading it separately would allow a resize between the two queries to
+    /// describe a screen that never existed.
     ///
     /// **This is a separate query from the capture and the modes.** It is a
     /// best-effort position at a nearby boundary, not proof that the bytes
     /// and the coordinates describe one instant; the caller decides whether
     /// the answer is coherent enough to emit (see `send_bootstrap`).
-    pub async fn pane_cursor(&self, session: &str) -> Result<(u16, u16)> {
+    pub async fn pane_cursor(&self, session: &str) -> Result<(u16, u16, u16)> {
         let output = self
             .cmd
             .output(&pane_cursor_args(session))
@@ -1299,9 +1312,10 @@ mod tests {
             "`-p` and `-t` are load-bearing for the reasons window_size_args gives"
         );
         assert_eq!(
-            PANE_CURSOR_FORMAT, "#{cursor_x} #{cursor_y}",
+            PANE_CURSOR_FORMAT, "#{cursor_x} #{cursor_y} #{pane_height}",
             "one query, or a cursor moving between two reads reports a position \
-             that never existed"
+             that never existed; the height is what turns the row into a \
+             distance from the text"
         );
     }
 
@@ -1311,17 +1325,31 @@ mod tests {
         // real answer (the home position), which is why the parse cannot use
         // the empty line as "not answered" — that is what the field count and
         // the integer parse are for.
-        assert_eq!(pane_cursor_from_line("0 0").ok(), Some((0, 0)));
-        assert_eq!(pane_cursor_from_line("11 14").ok(), Some((11, 14)));
-        assert_eq!(pane_cursor_from_line(" 11   14 \n").ok(), Some((11, 14)));
+        assert_eq!(pane_cursor_from_line("0 0 24").ok(), Some((0, 0, 24)));
+        assert_eq!(pane_cursor_from_line("11 14 60").ok(), Some((11, 14, 60)));
+        assert_eq!(
+            pane_cursor_from_line(" 11   14  60 \n").ok(),
+            Some((11, 14, 60))
+        );
     }
 
     #[test]
     fn pane_cursor_refuses_to_invent_a_position() {
-        for line in ["", "11", "11 14 0", "x 14", "11 y", "-1 14", "11 -1"] {
+        for line in [
+            "",
+            "11",
+            "11 14",
+            "11 14 0 0",
+            "x 14 24",
+            "11 y 24",
+            "11 14 z",
+            "-1 14 24",
+            "11 -1 24",
+            "11 14 -1",
+        ] {
             assert!(
                 pane_cursor_from_line(line).is_err(),
-                "{line:?} is not a two-coordinate cursor answer"
+                "{line:?} is not a cursor + height answer"
             );
         }
     }

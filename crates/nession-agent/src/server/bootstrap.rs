@@ -118,13 +118,41 @@ pub fn bound(mut capture: Vec<u8>) -> Bounded {
 /// ending in a bare LF puts it on the next one, a row lower than the pane this
 /// is mirroring.
 ///
-/// `keep_through_row` is the pane's cursor row, zero-based from the top of the
-/// capture (which is the top of the visible pane). An application can move to
-/// an empty row and pause there; trimming that row away would move the caret
-/// up with the text and the next live byte would land at a row the pane never
-/// chose (#2464). So the floor keeps every row through the cursor's own,
-/// terminator included — the caller then places the caret explicitly.
-pub fn strip_trailing_blank_rows(capture: &mut Vec<u8>, keep_through_row: Option<usize>) {
+/// `cursor` is the pane's `(cursor_y, pane_height)`, both zero-based from the
+/// top of the **visible pane**. An application can move to an empty row and
+/// pause there; trimming that row away would move the caret up with the text,
+/// and a client that cannot place the caret absolutely (a truncated capture,
+/// origin mode, an incomplete mode answer) would write the next live byte at a
+/// row the pane never chose (#2464).
+///
+/// **The cursor row is not a line index into the capture.** `capture-pane
+/// -S -<history>` starts above the visible pane, and `-J` joins a wrapped line
+/// into one logical line, so a capture can carry more lines than the pane has
+/// rows and a row can cover several lines. Treating `cursor_y` as a capture
+/// line therefore truncated history: the #1490 reload test, whose fixture
+/// paints twenty lines into a sixteen-row pane, came back with the first
+/// sixteen and lost the four in scrollback. The floor is computed as the
+/// number of **blank rows between the last written line and the cursor** —
+/// `trailing_blank_rows_in_capture - (pane_height - 1 - cursor_y)` — and that
+/// many blank lines are appended after the trimmed text. No capture line is
+/// ever removed by it.
+pub fn strip_trailing_blank_rows(capture: &mut Vec<u8>, cursor: Option<(u16, u16)>) {
+    // The pane's trailing blank rows, measured before the trim removes them.
+    // A blank row never wraps, so counting blank capture lines at the end is
+    // the same count as counting blank screen rows at the end. The capture
+    // terminates its last row with LF (`capture-pane` writes `AAA\n` for a
+    // one-row pane), so the empty segment after a trailing LF is a terminator,
+    // not another row.
+    let mut rows: Vec<&[u8]> = capture.split(|byte| *byte == b'\n').collect();
+    if capture.ends_with(b"\n") {
+        rows.pop();
+    }
+    let trailing_blank_rows = rows
+        .iter()
+        .rev()
+        .take_while(|line| line_is_blank(line))
+        .count();
+
     // The index just past the last line that had something on it, its own
     // terminator excluded — so the stream ends on that line rather than below
     // it. A final line with no terminator at all is handled by the same pass.
@@ -148,26 +176,27 @@ pub fn strip_trailing_blank_rows(capture: &mut Vec<u8>, keep_through_row: Option
             keep = capture.len();
         }
     }
-    if let Some(row) = keep_through_row {
-        // Keep the whole row the cursor is on, including its terminator: the
-        // row's content is what makes the coordinates mean anything. A row
-        // beyond the captured lines keeps the whole capture rather than
-        // pointing past it.
-        let mut line = 0usize;
-        let mut end = capture.len();
-        for (i, byte) in capture.iter().enumerate() {
-            if *byte != b'\n' {
-                continue;
-            }
-            if line == row {
-                end = i + 1;
-                break;
-            }
-            line += 1;
-        }
-        keep = keep.max(end);
-    }
     capture.truncate(keep);
+
+    let Some((cursor_y, pane_height)) = cursor else {
+        return;
+    };
+    // Blank rows below the cursor inside the pane. The text already ends on
+    // the last written row; only the rows between it and the cursor are the
+    // application's choice. For an empty capture the stream starts at the
+    // home row, so the cursor's own row is the distance.
+    let blank_rows = if capture.is_empty() {
+        usize::from(cursor_y)
+    } else {
+        let below_cursor = usize::from(pane_height)
+            .saturating_sub(1)
+            .saturating_sub(usize::from(cursor_y));
+        trailing_blank_rows.saturating_sub(below_cursor)
+    };
+    // One LF per blank row: the trimmed stream ends *on* the last written line,
+    // so each LF moves down one row and the last one leaves the caret on the
+    // row the pane chose.
+    capture.extend(std::iter::repeat_n(b'\n', blank_rows));
 }
 
 /// Whether `line` would draw anything. Escape sequences are skipped whole, so a
@@ -627,17 +656,21 @@ mod tests {
     }
 
     #[test]
-    fn a_cursor_on_an_empty_row_keeps_that_row_and_its_terminator() {
+    fn a_cursor_on_an_empty_row_keeps_that_row_as_a_blank_line() {
         // #2464 R1: the application moved to an empty row and paused without
         // writing anything there. Trimming the trailing blank rows would move
-        // the caret up with the text; the floor keeps the cursor's own row so
-        // the caller's absolute cursor escape lands where the pane chose.
-        let mut capture = b"one\ntwo\n\n\n\n".to_vec();
-        strip_trailing_blank_rows(&mut capture, Some(2));
-        assert_eq!(capture, b"one\ntwo\n\n".to_vec());
+        // the caret up with the text; the stream keeps the blank rows between
+        // the text and the cursor so the caret lands where the pane chose.
+        //
+        // Four rows: `one`, `two`, and two blank rows the pane carries. The
+        // cursor is on the first of them (row 2), so exactly one blank row is
+        // kept; the stream ends **on** that row rather than below it.
+        let mut capture = b"one\ntwo\n\n\n".to_vec();
+        strip_trailing_blank_rows(&mut capture, Some((2, 4)));
+        assert_eq!(capture, b"one\ntwo\n".to_vec());
 
-        // The same capture without a cursor row is the pre-#2464 stream.
-        let mut no_floor = b"one\ntwo\n\n\n\n".to_vec();
+        // The same capture without a cursor is the pre-#2464 stream.
+        let mut no_floor = b"one\ntwo\n\n\n".to_vec();
         strip_trailing_blank_rows(&mut no_floor, None);
         assert_eq!(no_floor, b"one\ntwo".to_vec());
     }
@@ -645,11 +678,40 @@ mod tests {
     #[test]
     fn a_cursor_past_the_captured_rows_keeps_the_whole_capture() {
         // The answer cannot point past the screen it was read beside; keeping
-        // everything is the safe reading rather than truncating at a row that
-        // does not exist.
+        // everything (after the ordinary trim) is the safe reading rather than
+        // truncating at a row that does not exist.
         let mut capture = b"one\ntwo\n".to_vec();
-        strip_trailing_blank_rows(&mut capture, Some(40));
-        assert_eq!(capture, b"one\ntwo\n".to_vec());
+        strip_trailing_blank_rows(&mut capture, Some((40, 41)));
+        assert_eq!(capture, b"one\ntwo".to_vec());
+    }
+
+    #[test]
+    fn history_above_the_visible_pane_is_never_truncated_by_the_cursor_row() {
+        // #1490 reload regression: twenty written rows in a sixteen-row pane,
+        // cursor on the pane's last row. Four rows are scrollback above the
+        // visible pane. Treating `cursor_y` as a capture line index kept the
+        // capture's first sixteen lines and dropped the four in history.
+        let twenty: Vec<String> = (1..=20).map(|i| format!("line-{i:02}")).collect();
+        let mut capture = twenty.join("\n").into_bytes();
+        let expected = capture.clone();
+        strip_trailing_blank_rows(&mut capture, Some((15, 16)));
+        assert_eq!(
+            capture, expected,
+            "a pane-relative row is not a line index into a capture that starts \
+             above the visible pane"
+        );
+    }
+
+    #[test]
+    fn a_wrapped_line_does_not_make_the_cursor_row_a_capture_line() {
+        // `-J` joins a wrapped line into one logical line, so the capture has
+        // fewer lines than the pane has rows. A row-indexed floor would count
+        // the joined line once and land in the middle of the text; the floor
+        // is a number of blank rows, so wrapped content is never truncated.
+        let mut capture = format!("{}\nline-01\nline-02", "x".repeat(400)).into_bytes();
+        let expected = capture.clone();
+        strip_trailing_blank_rows(&mut capture, Some((15, 16)));
+        assert_eq!(capture, expected);
     }
 
     #[test]

@@ -953,7 +953,7 @@ async fn a_plain_bootstrap_restores_a_caret_the_pane_left_on_an_empty_row() {
     // The caret is read after the attach: an attach that changes the window
     // size makes tmux clamp/reset the caret column, so the position the
     // bootstrap must restore is the pane's **post-resize** one.
-    let (cursor_x, cursor_y) = TmuxDep::global()
+    let (cursor_x, cursor_y, _pane_height) = TmuxDep::global()
         .ops()
         .pane_cursor(&session_name)
         .await
@@ -989,6 +989,87 @@ async fn a_plain_bootstrap_restores_a_caret_the_pane_left_on_an_empty_row() {
 
     tmux.kill_session(&session_name).await.ok();
     handle.shutdown().await.ok();
+}
+
+/// #1490/#2464 regression: the caret floor must not truncate scrollback.
+///
+/// `capture-pane -S -<history>` starts above the visible pane and `-J` joins a
+/// wrapped line, so the pane's cursor row is not a line index into the
+/// capture. Treating it as one kept the capture's first `cursor_y + 1` lines
+/// and dropped everything below — the Relay reload test came back with the
+/// first sixteen of twenty written lines. The trim must remove only blank
+/// geometry; it may never remove a written line.
+#[tokio::test]
+async fn a_bootstrap_trim_keeps_history_above_the_visible_pane() {
+    let tmux = SessionManager::new();
+    let session = TestSession::new("bootstrap-history-trim");
+    let session_name = session.name().to_string();
+    tmux.create_session(&session_name, 80, 16, "/tmp", &[])
+        .await
+        .unwrap();
+    // Sixteen rows so twenty printed lines leave four in tmux history, which
+    // is exactly the shape a `-S -5000` capture carries above the visible
+    // pane.
+    TmuxDep::global()
+        .ops()
+        .resize_window(&session_name, 80, 16)
+        .await
+        .expect("the window can be made short");
+
+    let mut setup = String::from("sh -c '");
+    for i in 1..=20 {
+        setup.push_str(&format!("echo TRIM-{i:02}; "));
+    }
+    setup.push_str("cat > /dev/null'\n");
+    TmuxDep::global()
+        .ops()
+        .send_keys(&session_name, &setup)
+        .await
+        .expect("the fixture is typed into the pane");
+
+    let ops = TmuxDep::global().ops();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let captured = loop {
+        let captured = ops
+            .capture_pane(&session_name, nession_agent::tmux::HISTORY_LIMIT_LINES)
+            .await
+            .expect("the capture works against a real tmux")
+            .unwrap_or_default();
+        if String::from_utf8_lossy(&captured).contains("TRIM-20") {
+            break captured;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the fixture never printed its last line: {:?}",
+            String::from_utf8_lossy(&captured)
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+
+    let (_, cursor_y, pane_height) = ops
+        .pane_cursor(&session_name)
+        .await
+        .expect("the cursor query works against a real tmux");
+    let mut trimmed = captured.clone();
+    nession_agent::server::bootstrap::strip_trailing_blank_rows(
+        &mut trimmed,
+        Some((cursor_y, pane_height)),
+    );
+
+    let text = String::from_utf8_lossy(&trimmed);
+    for i in 1..=20 {
+        assert!(
+            text.contains(&format!("TRIM-{i:02}")),
+            "the trim dropped TRIM-{i:02} from a {pane_height}-row pane with \
+             cursor row {cursor_y}: {text:?}"
+        );
+    }
+    assert!(
+        trimmed.len() <= captured.len(),
+        "the floor may only remove blank geometry"
+    );
+
+    tmux.kill_session(&session_name).await.ok();
 }
 
 /// #2124 SC-01/SC-03: a Control-mode first attach's bootstrap names an atomic
