@@ -24,8 +24,20 @@ import { pathToFileURL } from 'node:url';
 export const DEFERRED_REPLAY_LOG_PREFIX = 'ACCEPTANCE_DEFERRED_REPLAY_V1 ';
 export const DEFERRED_REPLAY_WORKFLOW = '.github/workflows/acceptance-orchestrator.yml';
 export const DEFERRED_REPLAY_WORKFLOW_NAME = 'Acceptance / Orchestrator';
-export const DEFERRED_REPLAY_JOB = 'reconcile-completed-quality-e2e';
-export const DEFERRED_REPLAY_EVENT = 'workflow_run';
+// Two trusted main-owned jobs replay a deferred run: the workflow_run waker
+// and the E2E-projection reconcile (repository_dispatch). Whichever wins the
+// race writes the receipt, so both are admissible evidence producers.
+export const DEFERRED_REPLAY_JOBS = Object.freeze([
+  'reconcile-completed-quality-e2e',
+  'reconcile-issue-e2e',
+]);
+export const DEFERRED_REPLAY_EVENTS = Object.freeze([
+  'workflow_run',
+  'repository_dispatch',
+]);
+// The waker paths, kept as named constants for the workflow-shape self-test.
+export const DEFERRED_REPLAY_JOB = DEFERRED_REPLAY_JOBS[0];
+export const DEFERRED_REPLAY_EVENT = DEFERRED_REPLAY_EVENTS[0];
 export const DEFERRED_REPLAY_BRANCH = 'main';
 export const DEFERRED_REPLAY_SOURCE_EVENT = 'pull_request_target';
 export const DEFERRED_REPLAY_RESULT = 'replayed';
@@ -94,9 +106,11 @@ export function validateDeferredReplayReceipt(receipt) {
   return receipt;
 }
 
-// Malformed framing is ignored-marker territory only when the line is not a
-// receipt at all; a framed record that does not validate is a producer defect
-// and throws, as the batch receipt does.
+// A job log contains two kinds of line mentioning the prefix: the workflow's
+// own **source text** (`printf '%s\n' "ACCEPTANCE_DEFERRED_REPLAY_V1 …"`), and
+// the record the step actually writes. Only a line whose tail is a JSON object
+// is a record; source text is skipped. A framed record that does not validate
+// is a producer defect and throws, as the batch receipt does.
 export function parseDeferredReplayLog(log) {
   if (typeof log !== 'string' || log.length > MAX_LOG_BYTES) {
     throw Error('invalid deferred Acceptance replay log size');
@@ -105,7 +119,9 @@ export function parseDeferredReplayLog(log) {
   for (const line of log.split(/\r?\n/)) {
     if (!line.includes(DEFERRED_REPLAY_LOG_PREFIX)) continue;
     const match = line.match(/ACCEPTANCE_DEFERRED_REPLAY_V1 (\{.*\})\s*$/);
-    if (!match || match[1].length > MAX_RECORD_BYTES) {
+    // Not a record: the workflow source text names the prefix too.
+    if (!match) continue;
+    if (match[1].length > MAX_RECORD_BYTES) {
       throw Error('invalid deferred Acceptance replay record framing');
     }
     let record;
@@ -131,13 +147,14 @@ export function attestDeferredReplayReceipt({
       wakerRun?.run_attempt !== receipt.source_run_attempt ||
       wakerRun?.head_sha !== targetSha ||
       wakerRun?.head_branch !== DEFERRED_REPLAY_BRANCH ||
-      wakerRun?.event !== DEFERRED_REPLAY_EVENT ||
+      !DEFERRED_REPLAY_EVENTS.includes(wakerRun?.event) ||
       normalizeWorkflowPath(wakerRun?.path) !== DEFERRED_REPLAY_WORKFLOW ||
       wakerRun?.name !== DEFERRED_REPLAY_WORKFLOW_NAME ||
       wakerRun?.status !== 'completed' || wakerRun?.conclusion !== 'success') {
     throw Error('deferred replay waker identity mismatch');
   }
-  if (wakerJob?.name !== DEFERRED_REPLAY_JOB || wakerJob?.conclusion !== 'success' ||
+  if (!DEFERRED_REPLAY_JOBS.includes(wakerJob?.name) ||
+      wakerJob?.conclusion !== 'success' ||
       wakerJob?.run_id !== wakerRun.id ||
       wakerJob?.run_attempt !== wakerRun.run_attempt) {
     throw Error('deferred replay waker job mismatch');
@@ -227,7 +244,12 @@ function selfTest() {
 
   const log = '2026-10-26T03:27:39Z ' + DEFERRED_REPLAY_LOG_PREFIX +
     JSON.stringify(receipt) + '\n';
-  const parsed = parseDeferredReplayLog(log);
+  // The workflow source text names the prefix; it is not a receipt and must
+  // not make the whole log unparseable (it did, until this fix).
+  const scriptText = '    printf \'%s\\n\' "ACCEPTANCE_DEFERRED_REPLAY_V1 ' +
+    '${replay_receipt}"\n';
+  assert.deepEqual(parseDeferredReplayLog(scriptText), []);
+  const parsed = parseDeferredReplayLog(scriptText + log);
   assert.equal(parsed.length, 1);
   assert.equal(parsed[0].replayed_run_id, 40263312546);
   assert.throws(() => parseDeferredReplayLog(
@@ -235,6 +257,21 @@ function selfTest() {
   assert.throws(() => parseDeferredReplayLog(
     DEFERRED_REPLAY_LOG_PREFIX + JSON.stringify({ ...receipt, result: 'other' }) + '\n'),
     /invalid deferred Acceptance replay receipt/);
+
+  // The CLI producer and the parser are one contract: what emit prints must
+  // parse back, and invalid inputs must fail the step instead of printing.
+  const emitted = emitDeferredReplayReceipt({
+    GITHUB_REPOSITORY: REPO, GITHUB_RUN_ID: '40264172173',
+    GITHUB_RUN_ATTEMPT: '1', TARGET_SHA: prHead, PR_NUMBER: '2465',
+    REPLAYED_RUN_ID: '40263312546', DEFERRED_ATTEMPT: '1',
+    REPLAY_RESULT: 'replayed',
+  });
+  assert.equal(parseDeferredReplayLog(emitted)[0].replayed_run_id, 40263312546);
+  assert.throws(() => emitDeferredReplayReceipt({
+    GITHUB_REPOSITORY: REPO, GITHUB_RUN_ID: '40264172173',
+    GITHUB_RUN_ATTEMPT: '1', TARGET_SHA: 'not-a-sha', PR_NUMBER: '2465',
+    REPLAYED_RUN_ID: '40263312546', DEFERRED_ATTEMPT: '1',
+  }), /invalid deferred Acceptance replay receipt inputs/);
 
   const wakerRun = {
     id: 40264172173, run_attempt: 1, head_sha: mainSha, head_branch: 'main',
@@ -277,6 +314,23 @@ function selfTest() {
   assert.equal(proof.deferral.defer_pre_merge, 'cancelled');
   assert.equal(proof.replay.pre_merge_acceptance, 'success');
 
+  // The E2E-projection reconcile is the other trusted replay producer; a
+  // replay it performs is the same behavioral fact.
+  const projectionProof = attestDeferredReplayReceipt({
+    receipt, wakerRun: { ...wakerRun, event: 'repository_dispatch' },
+    wakerJob: { ...wakerJob, name: 'reconcile-issue-e2e' },
+    deferredRun, deferredJobs, replayJobs, targetSha: mainSha,
+  });
+  assert.equal(projectionProof.replay_attempt, 2);
+  assert.throws(() => attestDeferredReplayReceipt({
+    receipt, wakerRun: { ...wakerRun, event: 'push' }, wakerJob,
+    deferredRun, deferredJobs, replayJobs, targetSha: mainSha,
+  }), /waker identity mismatch/, 'an untrusted event cannot produce evidence');
+  assert.throws(() => attestDeferredReplayReceipt({
+    receipt, wakerRun, wakerJob: { ...wakerJob, name: 'untrusted-job' },
+    deferredRun, deferredJobs, replayJobs, targetSha: mainSha,
+  }), /waker job mismatch/, 'an untrusted job cannot produce evidence');
+
   const attests = (overrides) => () => attestDeferredReplayReceipt({
     receipt, wakerRun, wakerJob, deferredRun, deferredJobs, replayJobs,
     targetSha: mainSha, ...overrides,
@@ -304,8 +358,34 @@ function selfTest() {
   console.log('Deferred Acceptance replay receipt: producer/parser/attestation and fail-closed negatives passed');
 }
 
+// The workflow's replay paths call this instead of hand-building the JSON, so
+// the producer and the parser share one owner. Inputs come from the step
+// environment; an invalid input fails the step rather than printing nothing.
+export function emitDeferredReplayReceipt(env = process.env) {
+  const receipt = makeDeferredReplayReceipt({
+    env,
+    sourceRunId: env.GITHUB_RUN_ID,
+    targetSha: env.TARGET_SHA,
+    pr: env.PR_NUMBER,
+    replayedRunId: env.REPLAYED_RUN_ID,
+    deferredAttempt: env.DEFERRED_ATTEMPT,
+    result: env.REPLAY_RESULT || DEFERRED_REPLAY_RESULT,
+  });
+  if (!receipt) throw Error('invalid deferred Acceptance replay receipt inputs');
+  return DEFERRED_REPLAY_LOG_PREFIX + JSON.stringify(receipt);
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
-  selfTest();
+  if (process.argv[2] === 'emit') {
+    try {
+      console.log(emitDeferredReplayReceipt(process.env));
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : error);
+      process.exitCode = 2;
+    }
+  } else {
+    selfTest();
+  }
 }
 
 export { selfTest as selfTestDeferredReplayReceipt };
