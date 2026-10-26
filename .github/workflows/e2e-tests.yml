@@ -205,6 +205,12 @@ jobs:
           if [[ "$applicable" == 'false' && "$plan_mode" == 'not-required' ]]; then
             browsers=false
           fi
+          # Keep the decision in the job log and the exact-head artifact: the
+          # Acceptance harness never reads step summaries.
+          echo "impact: applicable=${applicable} category=${category} plan=${plan_mode} browsers=${browsers}"
+          mkdir -p "$RUNNER_TEMP/issue-e2e"
+          cp "$RUNNER_TEMP/e2e-scope/classification.json" \
+            "$RUNNER_TEMP/issue-e2e/e2e-impact.json"
           {
             echo "applicable=${applicable}"
             echo "category=${category}"
