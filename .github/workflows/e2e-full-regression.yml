@@ -38,7 +38,7 @@ concurrency:
 jobs:
   scope:
     if: github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: read
@@ -97,7 +97,7 @@ jobs:
     permissions:
       contents: read
       actions: read
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 3
     outputs:
       run: ${{ steps.decide.outputs.run }}
@@ -136,7 +136,7 @@ jobs:
             needs.scope.result == 'success' &&
             needs.scope.outputs.applicable == 'true') ||
            (needs.admit.result == 'success' && needs.admit.outputs.run == 'true')) }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 65
     env:
       RUSTC_WRAPPER: ""

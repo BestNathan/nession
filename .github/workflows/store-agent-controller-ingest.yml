@@ -28,7 +28,7 @@ jobs:
       github.event.workflow_run.actor.login == 'BestNathan' &&
       github.event.workflow_run.repository.full_name == 'BestNathan/nession' &&
       github.event.workflow_run.head_repository.full_name == 'BestNathan/nession'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 12
     env:
       SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
