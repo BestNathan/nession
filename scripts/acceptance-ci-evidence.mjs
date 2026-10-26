@@ -645,7 +645,9 @@ export async function collectFullGateProvisionReceipts(repo,sha,runs,
 // Full decision. The artifact is not evidence the Acceptance harness can read,
 // so the scope job also emits a bounded run-bound log receipt. Re-attest it
 // against the exact push run/attempt, the scope job's own steps, and the fact
-// that the `full` browser job did not execute.
+// that the `full` browser job did not execute. A successful Full workflow run
+// with a skipped `full` job is never evidence that the Full executed; the
+// receipt, the scope steps and the run identity must all agree.
 const FULL_NOT_REQUIRED_WORKFLOW = '.github/workflows/e2e-full-regression.yml';
 const FULL_SCOPE_JOB = 'scope';
 const FULL_SCOPE_STEPS = Object.freeze([
