@@ -8,9 +8,17 @@
 //   2. the replaced tab's in-flight input is refused by name, and its passive
 //      reconnect does not take the lease; A -> B -> A fences B's frame;
 //   3. the lease identity rule is the subscription, not the shared browser id.
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const {
   run, targetSha, cargoTests, assertRan, tmuxVersion,
 } = require('../../../shared/control-mode-cases.cjs');
+
+// Own the Agent's process-wide tmux socket: lazy resolution does not create
+// the directory, and the Acceptance runner's home need not have one.
+const tmuxDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nession-2469-sc07-'));
+const tmuxEnv = { NESSION_TMUX_SOCKET: path.join(tmuxDir, 'tmux.sock') };
 
 run(({ evidence }) => {
   const sha = targetSha();
@@ -27,6 +35,7 @@ run(({ evidence }) => {
   const tabs = cargoTests(
     ['--test', 'integration', 'server::integration_two_tabs_of_one_browser_broadcast_and_take_over'],
     300000,
+    tmuxEnv,
   );
   assertRan(tabs, [
     'server::integration_two_tabs_of_one_browser_broadcast_and_take_over',
@@ -35,6 +44,7 @@ run(({ evidence }) => {
   const fence = cargoTests(
     ['--test', 'integration', 'server::integration_input_from_a_stale_lease_is_refused_without_writing'],
     300000,
+    tmuxEnv,
   );
   assertRan(fence, [
     'server::integration_input_from_a_stale_lease_is_refused_without_writing',

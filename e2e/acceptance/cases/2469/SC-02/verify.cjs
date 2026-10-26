@@ -7,6 +7,9 @@
 //   2. the SDK's admin API creates, lists, proves the environment reached the
 //      shell, and kills a session on one real isolated tmux server;
 //   3. the Agent's SessionManager still creates/lists/kills through that API.
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const {
   run, targetSha, checked, assertRan, tmuxVersion,
 } = require('../../../shared/control-mode-cases.cjs');
@@ -28,10 +31,17 @@ run(({ evidence }) => {
   assertRan(sdk, ['admin_creates_lists_and_kills_a_real_isolated_session']);
 
   // 3. The Agent adapter still drives create/list/kill through the SDK.
+  //
+  // The Agent resolves its process-wide tmux socket lazily in a test binary;
+  // that path does not create the socket directory. Own it here, as the
+  // filtered test harness does, rather than depending on a runner-home that
+  // may not have one.
+  const tmuxDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nession-2469-sc02-'));
   const agent = checked(
     'cargo',
     ['test', '-p', 'nession-agent', '--test', 'integration', 'tmux::'],
     300000,
+    { NESSION_TMUX_SOCKET: path.join(tmuxDir, 'tmux.sock') },
   );
   assertRan(agent, ['tmux::test_create_and_kill_session']);
 
