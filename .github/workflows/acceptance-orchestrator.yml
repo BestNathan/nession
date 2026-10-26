@@ -773,11 +773,37 @@ jobs:
             if [[ "$deferred" == true ]]; then
               current="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id")"
               current_state="$(jq -r '(.status // "") + "/" + (.conclusion // "") + "/" + ((.run_attempt // 0) | tostring)' <<< "$current")"
+              # A replayed deferred Run lives on the PR HEAD, so a merged-main
+              # evaluator's target-SHA window cannot reach it (and retainedRuns
+              # keeps one Run per workflow path). Emit a bounded receipt into
+              # this job's log -- the one channel an evaluator reads -- so the
+              # post-merge collector can re-bind the waker Run/Attempt/Job and
+              # both attempts of the replayed Run (#2461 SC-02).
               if [[ "$current_state" == "completed/cancelled/$attempt" ]]; then
                 gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/rerun"
                 echo "Replayed deferred Acceptance after both applicable source completions" >> "$GITHUB_STEP_SUMMARY"
+                replay_receipt="$(jq -nc \
+                  --arg repository "$GITHUB_REPOSITORY" \
+                  --argjson source_run_id "$GITHUB_RUN_ID" \
+                  --argjson source_run_attempt "$GITHUB_RUN_ATTEMPT" \
+                  --arg target_sha "$TARGET_SHA" \
+                  --argjson pr "$pr" \
+                  --argjson replayed_run_id "$id" \
+                  --argjson deferred_attempt "$attempt" \
+                  '{schema_version:1,kind:"deferred_acceptance_replay",repository:$repository,source_run_id:$source_run_id,source_run_attempt:$source_run_attempt,target_sha:$target_sha,pr:$pr,replayed_run_id:$replayed_run_id,deferred_attempt:$deferred_attempt,result:"replayed"}')"
+                printf '%s\n' "ACCEPTANCE_DEFERRED_REPLAY_V1 ${replay_receipt}"
               else
                 echo "Deferred Acceptance changed before replay; no duplicate dispatch" >> "$GITHUB_STEP_SUMMARY"
+                replay_receipt="$(jq -nc \
+                  --arg repository "$GITHUB_REPOSITORY" \
+                  --argjson source_run_id "$GITHUB_RUN_ID" \
+                  --argjson source_run_attempt "$GITHUB_RUN_ATTEMPT" \
+                  --arg target_sha "$TARGET_SHA" \
+                  --argjson pr "$pr" \
+                  --argjson replayed_run_id "$id" \
+                  --argjson deferred_attempt "$attempt" \
+                  '{schema_version:1,kind:"deferred_acceptance_replay",repository:$repository,source_run_id:$source_run_id,source_run_attempt:$source_run_attempt,target_sha:$target_sha,pr:$pr,replayed_run_id:$replayed_run_id,deferred_attempt:$deferred_attempt,result:"changed_before_replay"}')"
+                printf '%s\n' "ACCEPTANCE_DEFERRED_REPLAY_V1 ${replay_receipt}"
               fi
             fi
           fi

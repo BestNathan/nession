@@ -9,6 +9,8 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {classifyPrDependencies, isDeferredRun} from './acceptance-dependency-state.mjs';
 import {sourceApplicability} from './acceptance-source-applicability.mjs';
+import {DEFERRED_REPLAY_LOG_PREFIX, DEFERRED_REPLAY_JOB}
+  from './acceptance-deferred-replay-receipt.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const source = fs.readFileSync(
@@ -63,6 +65,17 @@ assert.match(waker, /actions\/runs\/\$id\/rerun"/,
   'a deferred run is replayed in full, not as failed-jobs-only');
 assert.match(waker, /current_state/,
   'the waker must re-read the run immediately before the replay write');
+// #2461 SC-02: the replayed run lives on the PR head, so the merged-main
+// evaluator can only learn about it from a receipt in the waker's own log.
+// The producer must use the canonical prefix its collector parses, and the
+// receipt must not precede the full-rerun dispatch it attests.
+assert.ok(waker.includes(DEFERRED_REPLAY_LOG_PREFIX.trim()),
+  'the waker must emit the machine-readable deferred replay receipt');
+assert.ok(waker.indexOf(DEFERRED_REPLAY_LOG_PREFIX.trim()) >
+  waker.indexOf('actions/runs/$id/rerun"'),
+'the replay receipt is emitted only after the full rerun is dispatched');
+assert.ok(waker.includes(DEFERRED_REPLAY_JOB),
+  'the receipt travels in the reconcile job log the collector reads');
 
 // End-to-end shape of the decision the workflow embeds: a workflow-only PR
 // has no E2E obligation, while a Rust PR still waits for both sources.

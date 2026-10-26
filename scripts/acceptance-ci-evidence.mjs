@@ -13,6 +13,12 @@ import { verifyWake } from './agent-evidence-waker.mjs';
 import {collectHistoricalRecovery,selfTestHistoricalRecovery} from './acceptance-telemetry-recovery-proof.mjs';
 import {collectWorkflowRegressions,selfTestRegressions} from './acceptance-telemetry-regression-proof.mjs';
 import {parseReplayDenialLog,attestReplayDenial,makeDenialReceipt,DENIAL_LOG_PREFIX} from './metrics-replay-denial-receipt.mjs';
+import {parseDeferredReplayLog,attestDeferredReplayReceipt,makeDeferredReplayReceipt,
+  DEFERRED_REPLAY_WORKFLOW,DEFERRED_REPLAY_WORKFLOW_NAME,DEFERRED_REPLAY_JOB,
+  DEFERRED_REPLAY_EVENT,DEFERRED_REPLAY_BRANCH,DEFERRED_REPLAY_RESULT,
+  DEFERRED_REPLAY_LOG_PREFIX,DEFERRED_ADMISSION_STEP,REPO,
+  selfTestDeferredReplayReceipt,
+} from './acceptance-deferred-replay-receipt.mjs';
 import { buildAgentWorkflowTelemetry, validateAgentWorkflowTelemetry, telemetryStoragePath } from './agent-workflow-telemetry.mjs';
 import {parsePolicyObservabilityLog,attestPolicyObservability,makePolicyObservabilityReceipt,
   POLICY_WORKFLOW,POLICY_WORKFLOW_NAME,POLICY_OBSERVE_JOB,POLICY_TRIGGER_EVENTS,
@@ -41,6 +47,7 @@ import {selfTestDevelopmentReadback} from './acceptance-development-readback-sel
 import os from 'node:os';
 import path from 'node:path';
 
+const SHA = /^[a-f0-9]{40}$/;
 const MAX_RUNS_PER_SHA = 20;
 const MAX_ASSOCIATED_PULLS = 5;
 const MAX_IMPLEMENTATION_PULLS = 2;
@@ -158,7 +165,7 @@ function compactRuns(runs, expectedSha) {
   return retainedRuns(runs, expectedSha).runs.map(compactRun);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], historicalRecovery = null, historicalRegressions = null, exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], acceptanceRoutingProof = null, replayDenials = [], storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [], fullRegressionReceipts = [], verifiedCiCostStudy = null, historicalBrowserDesignProof = null, exactHeadStepsBySha = new Map(), batchReceiptsBySha = new Map(), ancestryReceipts = [], reuseComparison = null, publicPagesObservations = [], publicPagesE2EObservations = [], publicWorkflowPublications = [], developmentReadback = [], stagingAcrReadback = null, verifiedAgentTelemetryRecords = [] }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], historicalRecovery = null, historicalRegressions = null, exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], acceptanceRoutingProof = null, replayDenials = [], storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [], fullRegressionReceipts = [], verifiedCiCostStudy = null, historicalBrowserDesignProof = null, exactHeadStepsBySha = new Map(), batchReceiptsBySha = new Map(), ancestryReceipts = [], reuseComparison = null, publicPagesObservations = [], publicPagesE2EObservations = [], publicWorkflowPublications = [], developmentReadback = [], stagingAcrReadback = null, verifiedAgentTelemetryRecords = [], deferredAcceptanceReplays = [] }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -200,6 +207,7 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     verified_public_pages_e2e_observations: publicPagesE2EObservations,
     verified_public_pages_workflow_publications: publicWorkflowPublications,
     verified_metrics_replay_denials: replayDenials,
+    verified_deferred_acceptance_replays: deferredAcceptanceReplays,
     store_policy_observability: storePolicyObservability,
     ancestry_runs: ancestryRuns,
     ancestry_receipts: ancestryReceipts,
@@ -320,6 +328,81 @@ export async function collectAuthenticatedReplayDenials(repo,sha,runs,
     const source=await request('/repos/'+repo+'/actions/runs/'+receipt.source_claim.run_id);
     const workflow=await request('/repos/'+repo+'/actions/workflows/'+source.workflow_id);
     evidence.push(attestReplayDenial(receipt,source,recipient,jobs,workflow));
+  }
+  return evidence;
+}
+
+// #2461 SC-02: a deferred pre-merge Acceptance run lives on its PR HEAD, so a
+// merged target's run window cannot reach it — and `retainedRuns` keeps one Run
+// per workflow path, which can drop the waker's workflow_run Run behind a newer
+// orchestrator Run at the same SHA. The waker writes a bounded replay receipt
+// into its own job log; this collector re-reads it and re-binds the waker
+// Run/Attempt/Job and both attempts of the replayed Run through GitHub.
+// Deliberately not issue-gated: any merged criterion about the deferred path
+// needs to tell "no deferral was replayed" from "the channel cannot show it".
+const MAX_DEFERRED_REPLAY_WAKES = 6, DEFERRED_REPLAY_LOG_BYTES = 2097152;
+export async function collectDeferredAcceptanceReplays(repo, sha,
+  runsForSha = workflowRunsForSha, request = githubGet, getText = githubJobLog) {
+  if (repo !== REPO || !SHA.test(String(sha ?? '')))
+    throw Error('invalid deferred Acceptance replay scope');
+  const runs = await runsForSha(repo, sha);
+  if (!Array.isArray(runs)) throw Error('invalid deferred replay run response');
+  const candidates = runs.filter((run) =>
+    run?.name === DEFERRED_REPLAY_WORKFLOW_NAME &&
+    String(run?.path ?? '').replace(/@refs\/[^\s]+$/, '') === DEFERRED_REPLAY_WORKFLOW &&
+    run.event === DEFERRED_REPLAY_EVENT && run.head_sha === sha &&
+    run.head_branch === DEFERRED_REPLAY_BRANCH && run.status === 'completed' &&
+    run.conclusion === 'success')
+    .sort((a, b) => b.id - a.id).slice(0, MAX_DEFERRED_REPLAY_WAKES);
+  const evidence = [];
+  for (const candidate of candidates) {
+    const wakerRun = await request('/repos/' + repo + '/actions/runs/' + candidate.id);
+    if (wakerRun?.id !== candidate.id || wakerRun.head_sha !== sha ||
+        !Number.isSafeInteger(wakerRun.run_attempt) || wakerRun.run_attempt < 1)
+      throw Error('unverified deferred replay waker selection');
+    const jobs = await request('/repos/' + repo + '/actions/runs/' + candidate.id +
+      '/attempts/' + wakerRun.run_attempt + '/jobs?per_page=100');
+    if (!Array.isArray(jobs?.jobs) || jobs.jobs.length > 100)
+      throw Error('unverified deferred replay waker jobs');
+    const matches = jobs.jobs.filter((job) => job?.name === DEFERRED_REPLAY_JOB);
+    if (matches.length !== 1) continue;
+    const wakerJob = matches[0];
+    if (wakerJob.conclusion !== 'success') continue;
+    let log;
+    try {
+      log = await getText('/repos/' + repo + '/actions/jobs/' + wakerJob.id +
+        '/logs', DEFERRED_REPLAY_LOG_BYTES);
+    } catch {
+      continue; // Missing/expired/oversized log cannot be counted as evidence.
+    }
+    let receipts;
+    try {
+      receipts = parseDeferredReplayLog(log);
+    } catch {
+      continue; // The producer is main code; malformed framing proves nothing.
+    }
+    const replayed = receipts.filter((receipt) =>
+      receipt.result === DEFERRED_REPLAY_RESULT);
+    if (replayed.length === 0) continue;
+    if (replayed.length > 1) throw Error('ambiguous deferred replay receipts');
+    const receipt = replayed[0];
+    const deferredRun = await request('/repos/' + repo + '/actions/runs/' +
+      receipt.replayed_run_id);
+    const [deferredAttemptJobs, replayAttemptJobs] = await Promise.all([
+      request('/repos/' + repo + '/actions/runs/' + receipt.replayed_run_id +
+        '/attempts/' + receipt.deferred_attempt + '/jobs?per_page=100'),
+      request('/repos/' + repo + '/actions/runs/' + receipt.replayed_run_id +
+        '/attempts/' + (receipt.deferred_attempt + 1) + '/jobs?per_page=100'),
+    ]);
+    for (const page of [deferredAttemptJobs, replayAttemptJobs]) {
+      if (!Array.isArray(page?.jobs) || page.jobs.length > 100)
+        throw Error('unverified deferred replay attempt jobs');
+    }
+    evidence.push(attestDeferredReplayReceipt({
+      receipt, wakerRun, wakerJob, deferredRun,
+      deferredJobs: deferredAttemptJobs.jobs, replayJobs: replayAttemptJobs.jobs,
+      targetSha: sha,
+    }));
   }
   return evidence;
 }
@@ -1297,6 +1380,11 @@ async function collectCommand(workspace, outFile) {
   // needs to be able to tell "unobservable here" from "absent".
   const storePolicyObservability=process.env.ACCEPTANCE_STAGE==='post-merge'
     ?await collectStorePolicyObservability(repo,sha,directRuns):[];
+  // #2461 SC-02: the replayed deferred run lives on a PR head, unreachable from
+  // the merged target's compacted run window; re-read the main-owned waker's
+  // own replay receipt and re-bind both attempts through GitHub.
+  const deferredAcceptanceReplays=process.env.ACCEPTANCE_STAGE==='post-merge'
+    ?await collectDeferredAcceptanceReplays(repo,sha):[];
   const targetPushE2eRuns=process.env.ACCEPTANCE_STAGE==='post-merge'
     ? await collectTargetPushE2eRuns(repo,sha) : [];
   // #1866 SC-04: job-log batch receipts are readable at every stage; the
@@ -1528,7 +1616,7 @@ async function collectCommand(workspace, outFile) {
       .concat(ancestryReceipts.flatMap(entry => entry.e2e_selected_run_receipts)),
     fullGateProvisionReceipts, selectedRunReceipts, targetPushE2eRuns });
   const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls,
-    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, historicalRecovery, historicalRegressions, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts, acceptanceRoutingProof, replayDenials, storePolicyObservability, ancestryRuns, acceptanceBatchReceipts, selectedRunReceiptsBySha, selectedRunReceipts, notRequiredRunReceiptsBySha, notRequiredRunReceipts, fullGateProvisionReceipts, fullRegressionReceipts, verifiedCiCostStudy, historicalBrowserDesignProof, exactHeadStepsBySha, batchReceiptsBySha, ancestryReceipts, reuseComparison, publicPagesObservations, publicPagesE2EObservations, publicWorkflowPublications, developmentReadback, stagingAcrReadback, verifiedAgentTelemetryRecords });
+    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, historicalRecovery, historicalRegressions, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts, acceptanceRoutingProof, replayDenials, storePolicyObservability, ancestryRuns, acceptanceBatchReceipts, selectedRunReceiptsBySha, selectedRunReceipts, notRequiredRunReceiptsBySha, notRequiredRunReceipts, fullGateProvisionReceipts, fullRegressionReceipts, verifiedCiCostStudy, historicalBrowserDesignProof, exactHeadStepsBySha, batchReceiptsBySha, ancestryReceipts, reuseComparison, publicPagesObservations, publicPagesE2EObservations, publicWorkflowPublications, developmentReadback, stagingAcrReadback, verifiedAgentTelemetryRecords, deferredAcceptanceReplays });
   fs.writeFileSync(outFile, JSON.stringify(evidence, null, 2) + '\n');
   console.log(
     'collected acceptance CI evidence for ' + sha +
@@ -1598,6 +1686,87 @@ async function selfTest() {
   await assert.rejects(()=>collectAuthenticatedReplayDenials(denialRepo,denialSha,
     [candidate],async p=>p.endsWith('/actions/runs/701')?
       {...deniedSource,run_attempt:2}:request(p),async()=>denialLog),/provenance mismatch/);
+
+  // #2461 SC-02: the replayed deferred run lives on a PR head, so the merged
+  // target's run window cannot reach it, and retainedRuns keeps one Run per
+  // workflow path. The waker's own receipt carries it; every identity is
+  // re-bound and a declined replay is not evidence.
+  selfTestDeferredReplayReceipt();
+  const replayMain = 'c'.repeat(40), replayHead = 'd'.repeat(40);
+  const wakerRunId = 811, wakerJobId = 812, replayedId = 813;
+  const replayEnv = { GITHUB_REPOSITORY: denialRepo,
+    GITHUB_RUN_ID: String(wakerRunId), GITHUB_RUN_ATTEMPT: '1' };
+  const replayReceipt = makeDeferredReplayReceipt({ env: replayEnv,
+    sourceRunId: wakerRunId, targetSha: replayHead, pr: 99,
+    replayedRunId: replayedId, deferredAttempt: 1 });
+  const declinedReceipt = makeDeferredReplayReceipt({ env: replayEnv,
+    sourceRunId: wakerRunId, targetSha: replayHead, pr: 99,
+    replayedRunId: replayedId, deferredAttempt: 1,
+    result: 'changed_before_replay' });
+  const wakerRun = { id: wakerRunId, run_attempt: 1, head_sha: replayMain,
+    head_branch: 'main', event: 'workflow_run', status: 'completed',
+    conclusion: 'success', name: DEFERRED_REPLAY_WORKFLOW_NAME,
+    path: DEFERRED_REPLAY_WORKFLOW + '@refs/heads/main' };
+  const wakerJobs = { jobs: [{ id: wakerJobId, name: DEFERRED_REPLAY_JOB,
+    conclusion: 'success', run_id: wakerRunId, run_attempt: 1 }] };
+  const replayedRun = { id: replayedId, event: 'pull_request_target',
+    head_sha: replayHead, status: 'completed', conclusion: 'success',
+    run_attempt: 2, path: DEFERRED_REPLAY_WORKFLOW };
+  const deferredAttemptJobs = { jobs: [
+    { name: 'prepare-pre-merge', conclusion: 'success', steps: [
+      { name: DEFERRED_ADMISSION_STEP, conclusion: 'success' }] },
+    { name: 'defer-pre-merge', conclusion: 'cancelled' }] };
+  const replayAttemptJobs = { jobs: [
+    { name: 'defer-pre-merge', conclusion: 'skipped' },
+    { name: 'pre-merge-acceptance (99) / Execute acceptance',
+      conclusion: 'success' }] };
+  const replayLog = '2026-10-26T03:27:39Z ' + DEFERRED_REPLAY_LOG_PREFIX +
+    JSON.stringify(replayReceipt) + '\n';
+  const replayRequest = async (p) => {
+    if (p.endsWith('/actions/runs/' + wakerRunId)) return wakerRun;
+    if (p.endsWith('/actions/runs/' + wakerRunId + '/attempts/1/jobs?per_page=100'))
+      return wakerJobs;
+    if (p.endsWith('/actions/runs/' + replayedId)) return replayedRun;
+    if (p.endsWith('/actions/runs/' + replayedId + '/attempts/1/jobs?per_page=100'))
+      return deferredAttemptJobs;
+    if (p.endsWith('/actions/runs/' + replayedId + '/attempts/2/jobs?per_page=100'))
+      return replayAttemptJobs;
+    throw Error('unexpected deferred replay API: ' + p);
+  };
+  const wakerList = async () => [wakerRun];
+  const replays = await collectDeferredAcceptanceReplays(denialRepo, replayMain,
+    wakerList, replayRequest, async () => replayLog);
+  assert.equal(replays.length, 1);
+  assert.equal(replays[0].replay_attempt, 2);
+  assert.equal(replays[0].deferral.defer_pre_merge, 'cancelled');
+  assert.equal(replays[0].replay.pre_merge_acceptance, 'success');
+  assert.deepEqual(normalizeCiEvidence({ targetSha: replayMain,
+    deferredAcceptanceReplays: replays }).verified_deferred_acceptance_replays,
+  replays);
+  assert.deepEqual(await collectDeferredAcceptanceReplays(denialRepo, replayMain,
+    async () => [], replayRequest, async () => replayLog), [],
+  'no main waker run at the target SHA means no evidence');
+  assert.deepEqual(await collectDeferredAcceptanceReplays(denialRepo, replayMain,
+    wakerList, replayRequest, async () => 'plain log line\n'), [],
+  'a waker log without a receipt proves nothing');
+  assert.deepEqual(await collectDeferredAcceptanceReplays(denialRepo, replayMain,
+    wakerList, replayRequest,
+    async () => '2026-10-26T03:27:39Z ' + DEFERRED_REPLAY_LOG_PREFIX +
+      JSON.stringify(declinedReceipt) + '\n'), [],
+  'a declined replay is not evidence of a replay');
+  await assert.rejects(() => collectDeferredAcceptanceReplays(denialRepo,
+    replayMain, wakerList, async (p) => p.endsWith('/actions/runs/' + wakerRunId)
+      ? { ...wakerRun, head_sha: replayHead } : replayRequest(p),
+    async () => replayLog), /unverified deferred replay waker selection/);
+  await assert.rejects(() => collectDeferredAcceptanceReplays(denialRepo,
+    replayMain, wakerList, async (p) => p.endsWith('/actions/runs/' + replayedId)
+      ? { ...replayedRun, run_attempt: 3 } : replayRequest(p),
+    async () => replayLog), /target identity mismatch/);
+  assert.deepEqual(await collectDeferredAcceptanceReplays(denialRepo, replayMain,
+    wakerList, replayRequest,
+    async () => '2026-10-26T03:27:39Z ' + DEFERRED_REPLAY_LOG_PREFIX +
+      JSON.stringify({ ...replayReceipt, replayed_run_id: replayMain }) + '\n'), [],
+  'a receipt that cannot validate is never turned into evidence');
 
   // Store policy observability: the failed governance run's only evaluator-
   // visible fact was its conclusion, which made an unobservable capability read
