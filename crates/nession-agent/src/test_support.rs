@@ -238,8 +238,8 @@ impl FakeTmux {
                  fi\n\
                  n=$((n + 1))\n\
                  done\n\
-                 printf '%s\\n' \"$@\" > \"{dir}/{prefix}$n/{record}\"\n\
-                 echo \"{sep}\" >> \"{dir}/{prefix}$n/{record}\"\n\
+                 printf '%s\\n' \"$@\" \"{sep}\" > \"{dir}/{prefix}$n/{record}.tmp\" &&\n\
+                 mv \"{dir}/{prefix}$n/{record}.tmp\" \"{dir}/{prefix}$n/{record}\" || exit 1\n\
                  {script}\n",
                 dir = dir.display(),
                 prefix = CALL_FILE_PREFIX,
@@ -287,9 +287,23 @@ impl FakeTmux {
             };
             // The argv is written after the claim, so a call still being
             // recorded has no terminator: report it only once it is whole.
-            let Some(body) = text.trim_end_matches('\n').strip_suffix(CALL_SEPARATOR) else {
+            //
+            // The terminator is an **end** marker, so a repeated one is still
+            // the same end. The recorder writes it as the last argument of its
+            // single `printf`; a repeated marker (observed once under the
+            // coverage run's load) is one call, not a call whose last argument
+            // is the marker. A separator *inside* the block is left alone —
+            // that is what a genuine splice would look like.
+            let text = text.trim_end_matches('\n');
+            let mut body = text;
+            let mut whole = false;
+            while let Some(stripped) = body.strip_suffix(CALL_SEPARATOR) {
+                whole = true;
+                body = stripped.trim_end_matches('\n');
+            }
+            if !whole {
                 continue;
-            };
+            }
             let entries: Vec<String> = body
                 .trim_matches('\n')
                 .lines()
@@ -400,16 +414,33 @@ fn concurrent_writers_do_not_splice_the_recorded_calls() {
         let socket = socket.clone();
         handles.push(std::thread::spawn(move || {
             for _ in 0..10 {
-                // not-tmux: this runs the FakeTmux fixture, not tmux itself
-                let mut cmd = Command::new(&bin);
-                cmd.arg("-S").arg(&socket);
-                if writer % 3 == 0 {
-                    cmd.args(["attach", "-t", "sess"]);
-                } else {
-                    cmd.args(["set-option", "-t", "sess", "status", "off"]);
+                // not-tmux: this runs the FakeTmux fixture, not tmux itself.
+                //
+                // A fake that exits without recording has already lost the
+                // call — the recorder's exit status says so — so retry it
+                // here rather than reading a short log as a splicing result.
+                // Under the coverage run's load a claim has been observed to
+                // fail transiently; that is the fixture, not the property.
+                let mut attempts = 0;
+                loop {
+                    let mut cmd = Command::new(&bin); // not-tmux: the FakeTmux fixture, not tmux
+                    cmd.arg("-S").arg(&socket);
+                    if writer % 3 == 0 {
+                        cmd.args(["attach", "-t", "sess"]);
+                    } else {
+                        cmd.args(["set-option", "-t", "sess", "status", "off"]);
+                    }
+                    cmd.stdout(Stdio::null()).stderr(Stdio::null());
+                    let status = cmd.status().unwrap();
+                    if status.success() {
+                        break;
+                    }
+                    attempts += 1;
+                    assert!(
+                        attempts < 5,
+                        "the fake failed to record a call after {attempts} retries: {status}"
+                    );
                 }
-                cmd.stdout(Stdio::null()).stderr(Stdio::null());
-                cmd.status().unwrap();
             }
         }));
     }
@@ -426,10 +457,23 @@ fn concurrent_writers_do_not_splice_the_recorded_calls() {
             "a recorded block is not exactly one call: {calls:?}"
         );
     }
+    // Distinguish a writer that never claimed an index from a reader that
+    // skipped a claimed one: the shortfall has been observed under the
+    // coverage run's load and the two have different owners.
+    let claims = std::fs::read_dir(dir.path())
+        .unwrap()
+        .filter_map(std::result::Result::ok)
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(CALL_FILE_PREFIX)
+        })
+        .count();
     assert_eq!(
         calls.len(),
         80,
-        "all 80 calls are recorded, each as its own block: {calls:?}"
+        "all 80 calls are recorded, each as its own block (claims={claims}): {calls:?}"
     );
 }
 
@@ -474,5 +518,51 @@ fn a_call_is_reported_only_after_its_terminator() {
         fake.calls(),
         expected,
         "each call reads back as the argv tmux received, in index order"
+    );
+}
+
+/// A repeated end marker is still one end.
+///
+/// The recorder writes the marker with a second command, and under the
+/// coverage run's load that pair was observed appending it twice to one
+/// record. That is a whole call, not a call whose last argument is the marker;
+/// reading it otherwise fails a test about splicing for a reason that is not
+/// splicing. A separator *inside* the block is left alone — that is what a
+/// splice would leave behind and the concurrency test must still see it.
+#[cfg(unix)]
+#[test]
+fn a_repeated_terminator_still_describes_one_call() {
+    let dir = tempfile::tempdir().unwrap();
+    let fake = FakeTmux::new(dir.path(), "exit 0");
+    let claim = dir.path().join(format!("{CALL_FILE_PREFIX}0"));
+    let record = claim.join(CALL_RECORD_NAME);
+    std::fs::create_dir(&claim).unwrap();
+
+    std::fs::write(
+        &record,
+        "set-option\n-t\nsess\nstatus\noff\n==call==\n==call==\n",
+    )
+    .unwrap();
+    let one: Vec<String> = ["set-option", "-t", "sess", "status", "off"]
+        .into_iter()
+        .map(ToString::to_string)
+        .collect();
+    assert_eq!(
+        fake.calls(),
+        vec![one],
+        "a repeated terminator is the same end, not an argv entry"
+    );
+
+    std::fs::write(
+        &record,
+        "attach\n-t\nsess\n==call==\nset-option\n-t\nsess\nstatus\noff\n==call==\n",
+    )
+    .unwrap();
+    let spliced = fake.calls();
+    assert_eq!(spliced.len(), 1);
+    assert_eq!(
+        spliced[0].len(),
+        9,
+        "the internal separator stays a token so a splice is still visible: {spliced:?}"
     );
 }

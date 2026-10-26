@@ -969,8 +969,16 @@ async fn capture_for_bootstrap(
 /// which is the state every attach was in before this existed. No frame is
 /// sent and the attach proceeds.
 /// `capture-pane` always projects text/modes, never a full VT checkpoint.
-fn tmux_capture_fidelity(truncated: bool, modes_complete: bool) -> TerminalCheckpointFidelity {
-    if truncated || !modes_complete {
+///
+/// A capture whose caret could not be restored is **partial**: the text and
+/// modes may be complete, but a renderer that cannot place the cursor has not
+/// reconstructed the pane's active VT state (#2464).
+fn tmux_capture_fidelity(
+    truncated: bool,
+    modes_complete: bool,
+    cursor_verified: bool,
+) -> TerminalCheckpointFidelity {
+    if truncated || !modes_complete || !cursor_verified {
         TerminalCheckpointFidelity::Partial
     } else {
         TerminalCheckpointFidelity::ScreenOnly
@@ -1173,18 +1181,38 @@ async fn send_bootstrap(
     // fails costs the modes and not the history: a client with the session's
     // text and default modes is strictly better off than one with nothing, and
     // that is the same judgement the capture failure above makes.
-    let (modes, modes_complete) = match tmux.ops().pane_mode_flags(session_name).await {
-        Ok(flags) => (crate::server::bootstrap::mode_escapes(&flags), true),
+    let (flags, modes, modes_complete) = match tmux.ops().pane_mode_flags(session_name).await {
+        Ok(flags) => (
+            Some(flags),
+            crate::server::bootstrap::mode_escapes(&flags),
+            true,
+        ),
         Err(e) => {
             warn!("bootstrap: pane modes for {session_name} failed: {e:#}");
-            (Vec::new(), false)
+            (None, Vec::new(), false)
+        }
+    };
+    // #2464: where the pane left its caret. Deliberately a separate query from
+    // the capture, so it is emitted only when the projection can carry an
+    // absolute position (see `place_cursor` below); a failed query costs the
+    // caret, not the text.
+    let cursor = match tmux.ops().pane_cursor(session_name).await {
+        Ok(position) => Some(position),
+        Err(e) => {
+            warn!("bootstrap: pane cursor for {session_name} failed: {e:#}");
+            None
         }
     };
     // The pane's unwritten screen is dropped before anything else, so what
     // follows counts history rather than geometry — `capture-pane` ends at the
     // bottom of the visible pane, and on a shell that has not filled its screen
-    // most of what it returns is rows nothing was ever written to.
-    crate::server::bootstrap::strip_trailing_blank_rows(&mut capture);
+    // most of what it returns is rows nothing was ever written to. The cursor
+    // row is the floor: an application that paused on an empty row owns that
+    // row, and trimming it would move the caret up with the text (#2464).
+    crate::server::bootstrap::strip_trailing_blank_rows(
+        &mut capture,
+        cursor.map(|(_, y)| usize::from(y)),
+    );
     // The ceiling is applied to the *capture*, before the two translations
     // below. Both of them grow the frame — the escapes by under 100 bytes, the
     // CRs by one per line — and counting either against the ceiling would make
@@ -1192,11 +1220,28 @@ async fn send_bootstrap(
     // to be on and how the lines happened to be split.
     let bounded = crate::server::bootstrap::bound(capture);
     let text = crate::server::bootstrap::as_terminal_stream(&bounded.bytes);
-    let mut bytes = Vec::with_capacity(modes.len() + text.len());
+    // An absolute cursor placement is only meaningful when every input it
+    // depends on is trustworthy: a truncated capture dropped leading rows
+    // (the row indices moved with them), origin mode addresses relative to the
+    // scroll region rather than the screen, and a missing mode answer means
+    // the destination buffer is unknown. In any of those the caret is left
+    // alone and the fidelity below says the reconstruction is partial.
+    let origin = flags.is_some_and(|flags| flags.origin);
+    let place_cursor = cursor.filter(|_| !bounded.truncated && !origin && modes_complete);
+    let mut bytes = Vec::with_capacity(modes.len() + text.len() + 24);
     // Modes first, so the application's screen is entered before its text is
-    // written into it.
+    // written into it. This is also the buffer selection a retained renderer
+    // needs: the client's own reconnect reset ran on whichever buffer it was
+    // showing (#2464).
     bytes.extend_from_slice(&modes);
+    // Then clear the now-selected buffer and home: the client's reset ran
+    // before the buffer switch, so without this the text would be drawn into
+    // whatever the retained renderer had restored.
+    bytes.extend_from_slice(crate::server::bootstrap::SCREEN_RESET);
     bytes.extend_from_slice(&text);
+    if let Some((x, y)) = place_cursor {
+        bytes.extend(crate::server::bootstrap::cursor_escape(x, y));
+    }
     let bounded = crate::server::bootstrap::Bounded {
         bytes,
         truncated: bounded.truncated,
@@ -1205,7 +1250,7 @@ async fn send_bootstrap(
         session_name,
         bounded.bytes,
         bounded.truncated,
-        tmux_capture_fidelity(bounded.truncated, modes_complete),
+        tmux_capture_fidelity(bounded.truncated, modes_complete, place_cursor.is_some()),
         cut,
     );
     let msg = new_message(msg_types::TERMINAL_OUTPUT, payload);
@@ -4072,22 +4117,23 @@ mod tests {
     }
 
     #[test]
-    fn tmux_capture_never_claims_full_vt_and_degrades_on_mode_loss_or_truncation() {
+    fn tmux_capture_never_claims_full_vt_and_degrades_on_mode_or_cursor_loss_or_truncation() {
         assert_eq!(
-            tmux_capture_fidelity(false, true),
+            tmux_capture_fidelity(false, true, true),
             TerminalCheckpointFidelity::ScreenOnly
         );
         assert_eq!(
-            tmux_capture_fidelity(true, true),
+            tmux_capture_fidelity(true, true, true),
             TerminalCheckpointFidelity::Partial
         );
         assert_eq!(
-            tmux_capture_fidelity(false, false),
+            tmux_capture_fidelity(false, false, true),
             TerminalCheckpointFidelity::Partial
         );
         assert_eq!(
-            tmux_capture_fidelity(true, false),
-            TerminalCheckpointFidelity::Partial
+            tmux_capture_fidelity(false, true, false),
+            TerminalCheckpointFidelity::Partial,
+            "text without a verified caret is not the pane's active VT state"
         );
     }
 

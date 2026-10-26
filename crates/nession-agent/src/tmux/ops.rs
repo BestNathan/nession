@@ -251,6 +251,47 @@ fn pane_mode_args(session: &str) -> [&str; 5] {
     ["display-message", "-p", "-t", session, PANE_MODE_FORMAT]
 }
 
+/// The pane cursor's position, as tmux reports it (#2464).
+///
+/// A screen capture restores the pane's *text* and [`PaneModeFlags`] restores
+/// the *modes*, but neither carries where the cursor was left. A pane whose
+/// application moved to an empty row and paused has a cursor that is not at
+/// the end of the last written line, and a client that reconstructs the text
+/// without it writes the next live byte at the wrong row/column.
+///
+/// `cursor_x`/`cursor_y` are zero-based and relative to the top-left of the
+/// visible pane, which is also where `capture-pane -p -E -` starts. They are
+/// read with the same one-line format discipline as the modes: an unknown
+/// target prints an empty line and exits 0, so the parse is what tells "no
+/// answer" apart from "cursor at 0 0".
+const PANE_CURSOR_FORMAT: &str = "#{cursor_x} #{cursor_y}";
+
+fn pane_cursor_args(session: &str) -> [&str; 5] {
+    ["display-message", "-p", "-t", session, PANE_CURSOR_FORMAT]
+}
+
+/// Parse the cursor line [`TmuxOps::pane_cursor`] asks for.
+///
+/// Exactly two non-negative integers: a short or padded answer is a tmux this
+/// code cannot trust the position from, and guessing one would recreate the
+/// drift the query exists to remove.
+fn pane_cursor_from_line(line: &str) -> Result<(u16, u16)> {
+    let fields: Vec<&str> = line.split_whitespace().collect();
+    let [x, y] = fields.as_slice() else {
+        anyhow::bail!(
+            "expected 2 pane cursor coordinates, got {}: {line:?}",
+            fields.len()
+        );
+    };
+    let x = x
+        .parse::<u16>()
+        .with_context(|| format!("cursor_x in {line:?} is not a number"))?;
+    let y = y
+        .parse::<u16>()
+        .with_context(|| format!("cursor_y in {line:?} is not a number"))?;
+    Ok((x, y))
+}
+
 /// Parse the flags line [`TmuxOps::pane_mode_flags`] asks for.
 ///
 /// **Every field is checked, and a wrong count is an error.** tmux expands a
@@ -584,6 +625,39 @@ impl TmuxOps {
         let line = stdout.trim_end_matches(['\r', '\n']);
         pane_mode_flags_from_line(line).with_context(|| {
             format!("tmux display-message -p -t {session} answered no pane mode flags")
+        })
+    }
+
+    /// The pane cursor's `(x, y)`, zero-based from the top-left of the visible
+    /// pane.
+    ///
+    /// Read by the bootstrap so a reconstructed screen puts the caret where
+    /// the application left it (#2464). A pane whose application moved to an
+    /// empty row and paused has a cursor that is not at the end of the last
+    /// written line; without this the next live byte lands at the wrong
+    /// row/column.
+    ///
+    /// **This is a separate query from the capture and the modes.** It is a
+    /// best-effort position at a nearby boundary, not proof that the bytes
+    /// and the coordinates describe one instant; the caller decides whether
+    /// the answer is coherent enough to emit (see `send_bootstrap`).
+    pub async fn pane_cursor(&self, session: &str) -> Result<(u16, u16)> {
+        let output = self
+            .cmd
+            .output(&pane_cursor_args(session))
+            .await
+            .with_context(|| format!("failed to spawn tmux display-message for {session}"))?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "tmux display-message -p -t {session} failed: {} ({})",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let line = stdout.trim_end_matches(['\r', '\n']);
+        pane_cursor_from_line(line).with_context(|| {
+            format!("tmux display-message -p -t {session} answered no pane cursor")
         })
     }
 
@@ -1205,6 +1279,42 @@ mod tests {
             pane_mode_flags_from_line("0 0 0 0 0 0 0 0 0 0 0 2").is_err(),
             "a flag tmux does not produce is not one to act on"
         );
+    }
+
+    #[test]
+    fn pane_cursor_args_ask_for_both_zero_based_coordinates() {
+        let argv = pane_cursor_args("sess");
+        assert_eq!(
+            argv,
+            ["display-message", "-p", "-t", "sess", PANE_CURSOR_FORMAT],
+            "`-p` and `-t` are load-bearing for the reasons window_size_args gives"
+        );
+        assert_eq!(
+            PANE_CURSOR_FORMAT, "#{cursor_x} #{cursor_y}",
+            "one query, or a cursor moving between two reads reports a position \
+             that never existed"
+        );
+    }
+
+    #[test]
+    fn pane_cursor_reads_the_line_tmux_prints() {
+        // Zero-based, whitespace-separated and newline-terminated. 0 0 is a
+        // real answer (the home position), which is why the parse cannot use
+        // the empty line as "not answered" — that is what the field count and
+        // the integer parse are for.
+        assert_eq!(pane_cursor_from_line("0 0").ok(), Some((0, 0)));
+        assert_eq!(pane_cursor_from_line("11 14").ok(), Some((11, 14)));
+        assert_eq!(pane_cursor_from_line(" 11   14 \n").ok(), Some((11, 14)));
+    }
+
+    #[test]
+    fn pane_cursor_refuses_to_invent_a_position() {
+        for line in ["", "11", "11 14 0", "x 14", "11 y", "-1 14", "11 -1"] {
+            assert!(
+                pane_cursor_from_line(line).is_err(),
+                "{line:?} is not a two-coordinate cursor answer"
+            );
+        }
     }
 
     #[test]

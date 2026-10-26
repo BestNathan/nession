@@ -457,6 +457,43 @@ describe('TerminalController', () => {
     h.spy.mockRestore();
   });
 
+  it('returns a retained renderer to the pane buffer and caret named by the bootstrap (#2464)', async () => {
+    const first = makeTransport();
+    const second = makeTransport();
+    const transports = [first, second];
+    const controller = new TerminalController(makeSession(), () => transports.shift()!);
+    controller.attach(host());
+    await flush();
+
+    // A TUI puts the retained xterm on the alternate screen.
+    first.onOutput!(new TextEncoder().encode('\x1b[?1049h'), undefined);
+    await flush();
+    expect(controller.terminal!.buffer.active.type).toBe('alternate');
+
+    // The transport is replaced while the pane has gone back to its normal
+    // screen. The second attach keeps the renderer, and the bootstrap states
+    // the buffer, clears it and places the caret — the Agent started emitting
+    // both in #2464. Neither the client's reset (which ran on the alternate
+    // buffer) nor the text alone can do this.
+    controller.attach(host());
+    await flush();
+    second.onOutput!(
+      new TextEncoder().encode('\x1b[?1049l\x1b[2J\x1b[Hshell\r\n\x1b[2;3H'),
+      {
+        requestedLines: 5000, truncated: false,
+        cutConsistency: 'unverified', fidelity: 'screen-only',
+      },
+    );
+    await flush();
+
+    expect(controller.terminal!.buffer.active.type).toBe('normal');
+    expect(controller.terminal!.buffer.active.getLine(0)?.translateToString(true))
+      .toContain('shell');
+    expect(controller.terminal!.buffer.active.cursorX).toBe(2);
+    expect(controller.terminal!.buffer.active.cursorY).toBe(1);
+    controller.dispose();
+  });
+
   it('replaces scrollback only for an atomic full-VT complete checkpoint (#2008)', () => {
     const transport = makeTransport();
     const controller = new TerminalController(makeSession(), () => transport);
