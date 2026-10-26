@@ -20,7 +20,9 @@ export default defineConfig({
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: 1,
+  // #2205 P1: measured on ubuntu-24.04 (pinned). File-level parallelism is
+  // safe when no test is flaky and the wall clock improves; see #2205.
+  workers: 2,
   reporter: 'html',
   snapshotPathTemplate: '{testDir}/__snapshots__/{testFilePath}/{arg}-{platform}{ext}',
 
