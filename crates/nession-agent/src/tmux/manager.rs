@@ -1,6 +1,6 @@
 //! tmux session lifecycle management: create, list, and kill sessions.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -91,34 +91,6 @@ fn skip_env(key: &str, caller_keys: &[&str]) -> bool {
 // definitions of one contract kept in step by nothing.
 pub use nession_protocol::contracts::session::v1::SessionInfo;
 
-/// Parse one `list-sessions -F` row.
-///
-/// `foreground_command` is last and the split is capped, so a `|` inside the
-/// command stays part of it instead of shifting the row into the unparseable
-/// branch. Session names are the first field and still positional.
-fn parse_session_line(line: &str) -> Option<SessionInfo> {
-    let parts: Vec<&str> = line.splitn(8, '|').collect();
-    if parts.len() != 8 {
-        return None;
-    }
-
-    let working_dir = parts.get(6).copied().unwrap_or_default();
-    let foreground = parts.get(7).copied().unwrap_or_default();
-    Some(SessionInfo {
-        name: parts
-            .first()
-            .map(std::string::ToString::to_string)
-            .unwrap_or_default(),
-        created_at: parts.get(1).and_then(|s| s.parse().ok())?,
-        window_count: parts.get(2).and_then(|s| s.parse().ok())?,
-        attached_clients: parts.get(3).and_then(|s| s.parse().ok())?,
-        width: parts.get(4).and_then(|s| s.parse().ok())?,
-        height: parts.get(5).and_then(|s| s.parse().ok())?,
-        working_dir: (!working_dir.is_empty()).then(|| working_dir.to_string()),
-        foreground_command: (!foreground.is_empty()).then(|| foreground.to_string()),
-    })
-}
-
 /// Manages the lifecycle of tmux sessions (create / list / kill).
 ///
 /// Holds an [`EnvManager`] so that killing a session can clean up any env
@@ -176,6 +148,15 @@ impl SessionManager {
     /// process-wide tmux while creating the session on the injected one.
     pub fn tmux_dep(&self) -> TmuxDep {
         TmuxDep::injected(self.cmd.clone())
+    }
+
+    /// The admin operations bound to this manager's addressing and budgets.
+    fn sdk_ops(&self) -> TmuxOps {
+        TmuxOps::new(self.cmd.as_sdk().clone()).with_timeouts(
+            self.list_timeout,
+            self.kill_timeout,
+            self.create_timeout,
+        )
     }
 
     /// Test seam: replace the whole tmux addressing (binary **and** socket).
@@ -238,40 +219,22 @@ impl SessionManager {
     }
 
     pub async fn list_sessions(&self) -> Result<Vec<SessionInfo>> {
-        // Use | (pipe) as delimiter. Tmux converts tab characters (0x09)
-        // in -F format strings to underscores (0x5F), so \t is unusable.
-        // pane_current_command is last so a | inside it cannot shift the row.
-        let output = tmux_output(
-            &self.cmd,
-            &[
-                "list-sessions",
-                "-F",
-                "#{session_name}|#{session_created}|#{session_windows}|#{session_attached}|#{window_width}|#{window_height}|#{pane_current_path}|#{pane_current_command}",
-            ],
-            self.list_timeout,
-        )
-        .await?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let stderr = stderr.trim();
-            if is_no_sessions_stderr(stderr) {
-                tracing::debug!("tmux list-sessions: {} (no tmux server running)", stderr);
-            } else {
-                tracing::warn!(
-                    "tmux list-sessions exited with {}: {}",
-                    output.status,
-                    stderr
-                );
-            }
-            return Ok(vec![]);
-        }
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let sessions: Vec<SessionInfo> = stdout.lines().filter_map(parse_session_line).collect();
-
-        tracing::info!("tmux list-sessions: {} session(s) found", sessions.len());
-        Ok(sessions)
+        Ok(self
+            .sdk_ops()
+            .list_sessions()
+            .await?
+            .into_iter()
+            .map(|session| SessionInfo {
+                name: session.name,
+                created_at: session.created_at,
+                window_count: session.window_count,
+                attached_clients: session.attached_clients,
+                width: session.width,
+                height: session.height,
+                foreground_command: session.foreground_command,
+                working_dir: session.working_dir,
+            })
+            .collect())
     }
 
     /// Query the current working directory of a tmux session's active pane.
@@ -292,29 +255,8 @@ impl SessionManager {
             .await
     }
 
-    /// `tmux display-message -p -t <session> -F <format>`.
-    ///
-    /// One place for the call, so the two accessors above cannot drift in how
-    /// they address a session or how they treat a failure.
     async fn display_message(&self, session_name: &str, format: &str) -> Result<String> {
-        let output = tmux_output(
-            &self.cmd,
-            &["display-message", "-p", "-t", session_name, "-F", format],
-            self.list_timeout,
-        )
-        .await?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(anyhow::anyhow!(
-                "tmux display-message failed for session {}: {}",
-                session_name,
-                stderr.trim()
-            ));
-        }
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        Ok(stdout.trim().to_string())
+        self.sdk_ops().display_message(session_name, format).await
     }
 
     /// Create a new detached tmux session at [`SESSION_WIDTH`] × [`SESSION_HEIGHT`].
@@ -360,9 +302,9 @@ impl SessionManager {
         working_dir: &str,
         env: &[(String, String)],
     ) -> Result<()> {
-        // Check memory pressure before creating a new session.
-        // This prevents container-level OOM by refusing new sessions when
-        // memory usage is too high, rather than letting the entire container die.
+        // Check memory pressure before creating a new session. This prevents
+        // container-level OOM by refusing new sessions when memory usage is too
+        // high, rather than letting the entire container die.
         crate::memory::check_memory_pressure(self.memory_threshold_percent)?;
 
         match tokio::time::timeout(
@@ -379,6 +321,10 @@ impl SessionManager {
         }
     }
 
+    /// The Nession policy half of create: which environment a session
+    /// inherits, and the cosmetic cleanup that only the fallback path needs.
+    /// The argv and the three-stage delivery are the SDK's
+    /// [`TmuxOps::new_session`].
     async fn create_session_impl(
         &self,
         name: &str,
@@ -389,306 +335,76 @@ impl SessionManager {
     ) -> Result<()> {
         // History depth needs nothing here: it travels as `-f` on every tmux
         // invocation this manager makes (`cmd.rs`), so whichever one starts the
-        // server installs it before the window below exists. A `set-option`
-        // call here could not do the job — tmux documents the option as
-        // applying only to new windows, and on a cold socket there is no server
-        // to set it on. `HISTORY_LIMIT_LINES` carries the measurements.
-
-        // Pass through the agent process environment (PATH, NODE_PATH, etc.)
-        // so tools installed via init container are available in tmux sessions.
-        // Skip TERM — we force xterm-256color below regardless of what the
-        // container has (typically unset or "dumb").
-        // Skip the caller-supplied env keys — those are handled below.
-        // Collect first — std::env::vars() iterator is not Send.
+        // server installs it before the window below exists.
+        //
+        // Pass through the agent process environment (PATH, NODE_PATH, etc.) so
+        // tools installed via an init container are available in sessions.
+        // `skip_env` withholds TERM/LANG/LC_ALL/TMUX/TMUX_TMPDIR and the
+        // caller-supplied keys; TERM and the locale are forced below regardless
+        // of what the container has.
         let caller_keys: Vec<&str> = env.iter().map(|(k, _)| k.as_str()).collect();
-        let process_env: Vec<(String, String)> = std::env::vars().collect();
         let has_ps1 = env.iter().any(|(key, _)| key == "PS1");
         let claude_env = claude_binding_env(name);
 
-        // Stage 1: try with `-e` (tmux ≥ 3.0).  This injects env vars directly
-        // into the shell process so they take effect before bashrc runs — the
-        // only reliable way to set PS1 on Debian (bashrc unconditionally
-        // overwrites it).
-        //
-        // `output_with` because the argv is assembled in loops; a stale-socket
-        // heal + retry (#1225) replays the closure against a fresh command and
-        // gets the same argv.
-        let output = self
-            .cmd
-            .output_with(|cmd| {
-                cmd.args([
-                    "new-session",
-                    "-d",
-                    "-s",
-                    name,
-                    "-x",
-                    &SESSION_WIDTH.to_string(),
-                    "-y",
-                    &SESSION_HEIGHT.to_string(),
-                    "-c",
-                    working_dir,
-                ])
-                .stderr(std::process::Stdio::piped());
+        // Force TERM and locale first so TUI apps render correctly. Containers
+        // default to C/POSIX (no Unicode) and an unset or "dumb" TERM.
+        let mut session_env: Vec<(String, String)> = vec![
+            ("TERM".to_string(), "xterm-256color".to_string()),
+            ("LANG".to_string(), "C.UTF-8".to_string()),
+        ];
+        session_env.extend(std::env::vars().filter(|(key, _)| !skip_env(key, &caller_keys)));
+        session_env.extend(env.iter().cloned());
+        if !has_ps1 {
+            session_env.push(("NESSON_PS1".to_string(), DEFAULT_PS1.to_string()));
+            session_env.push((
+                "PROMPT_COMMAND".to_string(),
+                r#"[ -n "$NESSON_PS1" ] && { PS1="$NESSON_PS1"; unset NESSON_PS1; }"#.to_string(),
+            ));
+        }
+        session_env.extend(claude_env);
 
-                for (key, value) in process_env.iter() {
-                    if skip_env(key, &caller_keys) {
-                        continue;
-                    }
-                    cmd.arg("-e").arg(format!("{key}={value}"));
-                }
-                // Force TERM and locale so TUI apps render correctly.
-                // Containers default to C/POSIX locale (no Unicode) → box-drawing
-                // characters become underscores; TERM is typically unset or "dumb".
-                cmd.arg("-e").arg("TERM=xterm-256color");
-                cmd.arg("-e").arg("LANG=C.UTF-8");
-
-                for (key, value) in env {
-                    cmd.arg("-e").arg(format!("{key}={value}"));
-                }
-                if !has_ps1 {
-                    cmd.arg("-e").arg(format!("NESSON_PS1={DEFAULT_PS1}"));
-                    cmd.arg("-e").arg(
-                        "PROMPT_COMMAND=[ -n \"$NESSON_PS1\" ] && { PS1=\"$NESSON_PS1\"; unset NESSON_PS1; }",
-                    );
-                }
-                for (key, value) in &claude_env {
-                    cmd.arg("-e").arg(format!("{key}={value}"));
-                }
+        let outcome = self
+            .sdk_ops()
+            .new_session(&nession_tmux::ops::NewSession {
+                name: name.to_string(),
+                working_dir: working_dir.to_string(),
+                width: SESSION_WIDTH,
+                height: SESSION_HEIGHT,
+                env: session_env,
             })
             .await?;
-        let use_e = output.status.success();
 
-        if !use_e {
-            // Stage 2 (fallback): `-e` not supported (tmux < 3.0).
-            // Retry without it, then inject via set-environment for future
-            // windows and send-keys for the already-running initial shell.
-            let output2 = self
-                .cmd
-                .output(&[
-                    "new-session",
-                    "-d",
-                    "-s",
-                    name,
-                    "-x",
-                    &SESSION_WIDTH.to_string(),
-                    "-y",
-                    &SESSION_HEIGHT.to_string(),
-                    "-c",
-                    working_dir,
-                ])
-                .await?;
-            if !output2.status.success() {
-                // Surface tmux's actual stderr so the failure is debuggable —
-                // previously we swallowed it and emitted only a generic
-                // "Failed to create session" bail, which made every root cause
-                // look identical.
-                let stage1_err = String::from_utf8_lossy(&output.stderr);
-                let stage2_err = String::from_utf8_lossy(&output2.stderr);
-                anyhow::bail!(
-                    "Failed to create session {name}: stage1 stderr: {}; stage2 stderr: {}",
-                    stage1_err.trim(),
-                    stage2_err.trim()
-                );
-            }
-
-            // Inject env vars into the live shell via send-keys.
-            let mut init_cmd = String::from("export TERM=xterm-256color;export LANG=C.UTF-8;");
-            for (key, value) in &process_env {
-                if skip_env(key, &caller_keys) {
-                    continue;
-                }
-                init_cmd.push_str(&format!("export {key}='{}';", value.replace('\'', "'\\''")));
-            }
-            for (key, value) in env {
-                init_cmd.push_str(&format!("export {key}='{}';", value.replace('\'', "'\\''")));
-            }
-            if !has_ps1 {
-                init_cmd.push_str(&format!(
-                    "export NESSON_PS1='{}';",
-                    DEFAULT_PS1.replace('\'', "'\\''")
-                ));
-                init_cmd.push_str(
-                    r#"export PROMPT_COMMAND='[ -n "$NESSON_PS1" ] && { PS1="$NESSON_PS1"; unset NESSON_PS1; }';"#,
-                );
-            }
-            for (key, value) in &claude_env {
-                init_cmd.push_str(&format!("export {key}='{}';", value.replace('\'', "'\\''")));
-            }
-            if !init_cmd.is_empty() {
-                // **Required.** Stage 2 is the path for a tmux without
-                // `new-session -e` (before 3.0), and on that path this line is
-                // the *only* thing that puts the caller's environment into the
-                // shell that exists — stage 3 below reaches windows that do not
-                // exist yet, so it cannot stand in for it. A line that was typed
-                // but never ran therefore leaves a session whose `TERM`, locale
-                // and caller variables are not the requested ones, and the
-                // create would answer success for it: `let _ =` here is the
-                // exact shape #980 was, one stage further along.
-                //
-                // The class is what step 5 left open and step 7 decided
-                // ("whether a failed stage-2 line is tolerable is #991's step
-                // 7"). It is not tolerable: the variable this operation exists
-                // to deliver has nowhere else to come from. The session itself
-                // is left in place — this reports the failure, it does not add
-                // a rollback policy no caller had.
-                TmuxOps::new(self.cmd.clone())
-                    .send_keys(name, &init_cmd)
-                    .await
-                    .with_context(|| {
-                        format!("failed to inject the environment line into session {name}")
-                    })?;
-
-                // **BestEffort.** Cosmetic: it hides the `export …` line the
-                // statement above typed from the pane's scrollback. The
-                // environment was delivered by that statement, so a scrollback
-                // that could not be cleared is still a session that has it —
-                // #991's "cosmetic cleanup fails after the primary succeeded is
-                // observable but does not rewrite the primary". Observability is
-                // the shared helper's `tracing::warn!`.
-                crate::tmux::env::clear_history(&self.tmux_dep(), name).await;
-            }
-        }
-
-        // Stage 3: set-environment for future windows/panes (both paths).
-        self.propagate_env_best_effort(name, "TERM", "xterm-256color")
-            .await;
-        self.propagate_env_best_effort(name, "LANG", "C.UTF-8")
-            .await;
-        for (key, value) in &process_env {
-            if skip_env(key, &caller_keys) {
-                continue;
-            }
-            self.propagate_env_best_effort(name, key, value).await;
-        }
-        for (key, value) in env {
-            self.propagate_env_best_effort(name, key, value).await;
-        }
-        if !has_ps1 {
-            self.propagate_env_best_effort(name, "NESSON_PS1", DEFAULT_PS1)
-                .await;
-            self.propagate_env_best_effort(
-                name,
-                "PROMPT_COMMAND",
-                "[ -n \"$NESSON_PS1\" ] && { PS1=\"$NESSON_PS1\"; unset NESSON_PS1; }",
-            )
-            .await;
+        if !outcome.used_e {
+            // BestEffort cosmetic cleanup: hides the `export …` line the
+            // fallback typed from the pane's scrollback. The environment was
+            // delivered by that statement, so a scrollback that could not be
+            // cleared is still a session that has it.
+            crate::tmux::env::clear_history(&self.tmux_dep(), name).await;
         }
 
         // Enable tmux mouse mode so mouse events reach tmux as SGR sequences
-        // (copy-mode scroll, pane selection, and forwarding to TUI apps).
-        // The web client lets xterm.js use its default behaviour — mouse
-        // clicks pass through to the PTY; hold Shift for local selection.
+        // (copy-mode scroll, pane selection, and forwarding to TUI apps). The
+        // web client lets xterm.js use its default behaviour.
         //
-        // **BestEffort** (#991 open question 4, decided here). What breaks if
-        // this fails: the session's *interaction* degrades — there is no
-        // mouse-driven copy-mode, no pane selection, and TUI apps stop
-        // receiving mouse reports. What does not break: the session itself. The
-        // option is not consulted on the input path (keyboard bytes reach the
-        // pane through `send-keys`/the attach client regardless of it), it
-        // holds no session state, and the web client carries its own scrollback
-        // (`DeviceProfile`'s 10k/50k lines), so scrolling history does not
-        // depend on tmux following the mouse either. Making it `Required` would
-        // let a presentation preference fail a create whose session exists and
-        // works.
-        //
-        // Observable rather than dropped: `let _ = … .stderr(Stdio::null())`
-        // discarded the status *and* tmux's reason, which is the invisibility
-        // #980 fixed elsewhere (#991's "no silent accidental policy").
-        match self
-            .cmd
-            .output(&["set-option", "-t", name, "mouse", "on"])
-            .await
-        {
-            Ok(out) if out.status.success() => {}
-            Ok(out) => tracing::warn!(
-                "best-effort `set-option mouse on` for session {name} failed ({}): {}",
-                out.status,
-                String::from_utf8_lossy(&out.stderr).trim()
-            ),
-            Err(e) => tracing::warn!(
-                "best-effort `set-option mouse on` for session {name} failed to spawn: {e}"
-            ),
+        // **BestEffort**: a failure degrades *interaction* (no mouse-driven
+        // copy-mode, no pane selection) but not the session. The option is not
+        // consulted on the input path, it holds no session state, and the web
+        // client carries its own scrollback. Observable rather than dropped:
+        // the failure is WARNed with tmux's reason.
+        if let Err(e) = self.sdk_ops().set_option(name, "mouse", "on").await {
+            tracing::warn!("best-effort `set-option mouse on` for session {name} failed: {e:#}");
         }
 
         Ok(())
     }
 
-    /// Propagate one environment variable to a session's **future** windows and
-    /// panes — `tmux set-environment -t <session> <name> <value>`.
-    ///
-    /// **BestEffort, by decision rather than by omission.** Every call site is
-    /// stage 3 of `create_session_impl`, which the code there labels
-    /// "set-environment for future windows/panes (both paths)". The environment
-    /// the *session's own shell* runs with was established by an earlier stage
-    /// whose failure is the create's failure — stage 1's `new-session -e …`, or
-    /// stage 2's `send-keys export …`. Stage 3 therefore carries an environment
-    /// the initial shell already has to windows that do not exist yet, so its
-    /// failure degrades a *later* operation rather than this one: #991's
-    /// definition of `Required` is "failure changes the operation result", and
-    /// this one does not.
-    ///
-    /// Three separate classes meet here — the forced pair (`TERM`/`LANG`), the
-    /// agent-process passthrough, and the caller's own variables — and they are
-    /// the same class for that same reason: in all three, stage 1 or stage 2
-    /// already delivered the value to the shell that exists.
-    ///
-    /// It is **not** `Required`, and making it so would be actively harmful for
-    /// the passthrough group: `std::env::vars()` is ambient, and tmux refuses a
-    /// variable name beginning with `-` (`unknown flag`, measured on 3.6b), so
-    /// one odd name in the agent's environment would fail every session
-    /// creation. (A *user-requested* mutation is the opposite case and is
-    /// `Required` — that is `EnvManager::set_environment`, whose callers must
-    /// report the failure; #980 is what fixed it and this must not undo it.)
-    ///
-    /// The failure is WARNed rather than dropped, which is the whole difference
-    /// from the `let _ = … .stderr(Stdio::null())` calls this replaced: those
-    /// discarded both the status and tmux's reason, so a failure here was
-    /// unobservable even in logs (#980's invisibility half).
-    ///
-    /// Bound to the manager's own addressing rather than to the process-wide
-    /// [`TmuxOps::global`](super::ops::TmuxOps::global): a manager that had been
-    /// given a different socket must not propagate its environment onto the
-    /// other one. (Steps 3–4 noted here that this is *not* step 6's work — at
-    /// the time only this manager held a `TmuxCmd` and nothing else had become
-    /// injectable. Step 6 is what changed that: the addressing is a
-    /// [`TmuxDep`] the `EnvManager` below is bound to as well, so the fake the
-    /// `legacy_stage_two_tests` module injects is what both halves run.)
-    async fn propagate_env_best_effort(&self, session: &str, name: &str, value: &str) {
-        let ops = TmuxOps::new(self.cmd.clone());
-        if let Err(e) = ops.set_environment(session, name, value).await {
-            tracing::warn!(
-                "best-effort env propagation to future panes of session {session} failed ({name}): {e:#}"
-            );
-        }
-    }
-
-    /// Kill a session.
-    ///
-    /// **Required** (#991): `SessionManager::kill_session`'s result is what the
-    /// caller reports — `agent.session.kill` answers `success: false` with this
-    /// error's text, and the server-side `session.kill` path turns it into the
-    /// message a user reads. So the failure carries tmux's own words and exit
-    /// status, not just the session name: before #991 step 7 this read
-    /// `.stderr(Stdio::null())` and bailed with "Failed to kill session: <name>",
-    /// which is the same sentence for "no such session", "the server is gone"
-    /// and "you are not allowed to" — the diagnostic was discarded before the
-    /// message that reaches the user could hold it.
     pub async fn kill_session(&self, name: &str) -> Result<()> {
-        let output =
-            tmux_output(&self.cmd, &["kill-session", "-t", name], self.kill_timeout).await?;
+        self.sdk_ops().kill_session(name).await?;
 
-        if !output.status.success() {
-            anyhow::bail!(
-                "Failed to kill session {name}: {} ({})",
-                output.status,
-                String::from_utf8_lossy(&output.stderr).trim()
-            );
-        }
-
-        // Clean up env source/unsource scripts for this session so they
-        // don't linger in the temp dir (sourced_env_files() scans it to
-        // report which env files are active — orphaned scripts cause stale
-        // "sourced" state after the session is gone).
+        // Clean up env source/unsource scripts for this session so they do not
+        // linger in the temp dir (sourced_env_files() scans it to report which
+        // env files are active — orphaned scripts cause stale "sourced" state
+        // after the session is gone).
         self.env.cleanup_session_scripts(name).await;
 
         Ok(())
@@ -698,51 +414,6 @@ impl SessionManager {
 impl Default for SessionManager {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-/// Whether a failed `list-sessions` just means "there are no sessions".
-///
-/// tmux words this two different ways depending on whether the socket file
-/// exists yet, and both are the normal state for an idle agent:
-///
-/// - `no server running on <path>` — the socket file is there, its server is not
-/// - `error connecting to <path> (No such file or directory)` — nothing has
-///   created the socket yet
-///
-/// The second case only started appearing once nession moved to its own socket
-/// (#575): on tmux's default socket some other server had usually already made
-/// the file. Treating it as a failure logged a warning on every poll — every 5s
-/// for a freshly started agent with no sessions, which reads as a fault.
-fn is_no_sessions_stderr(stderr: &str) -> bool {
-    stderr.contains("no server running")
-        || (stderr.contains("error connecting to") && stderr.contains("No such file or directory"))
-}
-
-/// Run a tmux command, failing with a timeout error if it exceeds `timeout`.
-///
-/// `output()` rather than `status()` since #991 step 7, for the reason #980
-/// measured: a `status()` call has no pipes, so everything tmux says about a
-/// failure is gone by the time the caller can report it. The two are not
-/// interchangeable at a `Required` call site, and this helper no longer has any
-/// other kind.
-///
-/// The execution is [`TmuxCmd::output`]'s, so the stale-socket heal and its
-/// one retry (#1225) run here too — the timeout wraps both attempts, which is
-/// the caller's one budget rather than a per-attempt one. (`.stderr(Stdio::
-/// piped())` beside a `.output()` was always declarative: `output()` sets both
-/// pipes itself — measured, `tokio`'s implementation calls
-/// `stdout(Stdio::piped())/stderr(Stdio::piped())` on the inner
-/// `std::process::Command` immediately before spawning, which *overrides*
-/// anything set earlier.)
-async fn tmux_output(
-    cmd: &TmuxCmd,
-    args: &[&str],
-    timeout: Duration,
-) -> Result<std::process::Output> {
-    match tokio::time::timeout(timeout, cmd.output(args)).await {
-        Err(_) => Err(anyhow::anyhow!("tmux command timed out after {timeout:?}")),
-        Ok(res) => Ok(res?),
     }
 }
 
@@ -815,35 +486,6 @@ mod window_size_lock_tests {
         // `session` kills the tmux session on drop, panic or not.
     }
 
-    #[tokio::test]
-    async fn tmux_output_times_out() {
-        // One timeout test, not two: `tmux_status_times_out` covered a helper
-        // that no longer exists. #991 step 7 removed it because its only caller
-        // was `kill_session`, and a status-only call there is precisely the
-        // shape that discarded tmux's reason for refusing to kill a session.
-        //
-        // A fake tmux whose one behaviour is to sleep: the timeout is the
-        // whole budget (#1225 folded the heal + retry into `TmuxCmd::output`,
-        // so this helper no longer owns a process builder), and a 100ms
-        // budget against a 30s sleep must fail long before either ends.
-        let dir = tempfile::tempdir().expect("tempdir");
-        let fake = crate::test_support::FakeTmux::new(dir.path(), "sleep 30");
-        let dep = fake.dep();
-        let start = std::time::Instant::now();
-        let res = tmux_output(&dep.cmd(), &["list-sessions"], Duration::from_millis(100)).await;
-        assert!(res.is_err(), "expected timeout error, got {res:?}");
-        assert!(start.elapsed() < Duration::from_secs(2));
-    }
-
-    #[test]
-    fn missing_socket_file_counts_as_no_sessions() {
-        // The exact wording tmux 3.6b emits for a socket path that does not
-        // exist yet — the normal state of an agent that has created no session.
-        assert!(is_no_sessions_stderr(
-            "error connecting to /tmp/nession-501/tmux.sock (No such file or directory)"
-        ));
-    }
-
     #[test]
     fn every_manager_addresses_the_process_socket() {
         // ~60 call sites build a SessionManager with ::new(), and nothing tells
@@ -870,26 +512,6 @@ mod window_size_lock_tests {
         let expected = mgr.socket_path().to_path_buf();
         mgr.with_tmux_bin("/nonexistent/fake-tmux");
         assert_eq!(mgr.socket_path(), expected);
-    }
-
-    #[test]
-    fn stopped_server_counts_as_no_sessions() {
-        assert!(is_no_sessions_stderr(
-            "no server running on /tmp/nession-501/tmux.sock"
-        ));
-    }
-
-    #[test]
-    fn real_failures_are_not_treated_as_no_sessions() {
-        // A permission problem or an over-long path must still warn — silencing
-        // those would hide the failures this socket work is meant to surface.
-        assert!(!is_no_sessions_stderr(
-            "error connecting to /tmp/nession-501/tmux.sock (Permission denied)"
-        ));
-        assert!(!is_no_sessions_stderr(
-            "error connecting to /tmp/x/tmux.sock (File name too long)"
-        ));
-        assert!(!is_no_sessions_stderr("lost server"));
     }
 }
 
@@ -1028,8 +650,8 @@ mod legacy_stage_two_tests {
             "a line that is typed but never submitted sets nothing: {typed:?}"
         );
         assert!(
-            typed[3].starts_with("export TERM=xterm-256color;")
-                && typed[3].contains("export LANG=C.UTF-8;"),
+            typed[3].starts_with("export TERM='xterm-256color';")
+                && typed[3].contains("export LANG='C.UTF-8';"),
             "the line is the export chain stage 2 builds, unchanged: {typed:?}"
         );
     }
@@ -1414,48 +1036,5 @@ mod injected_tmux_tests {
             vec![vec!["kill-session", "-t", "nession-fake-sess"]],
             "on the manager's own addressing, one call, tmux's own grammar"
         );
-    }
-}
-
-#[cfg(test)]
-mod session_line_tests {
-    use super::*;
-
-    #[test]
-    fn parses_the_session_row_including_foreground_command() {
-        let info =
-            parse_session_line("work|1700000000|2|1|120|40|/repo|claude").expect("row parses");
-        assert_eq!(info.name, "work");
-        assert_eq!(info.created_at, 1_700_000_000);
-        assert_eq!(info.window_count, 2);
-        assert_eq!(info.attached_clients, 1);
-        assert_eq!(info.width, 120);
-        assert_eq!(info.height, 40);
-        assert_eq!(info.foreground_command.as_deref(), Some("claude"));
-    }
-
-    #[test]
-    fn keeps_a_pipe_inside_the_foreground_command() {
-        // The command is the last field, so a delimiter inside it must survive
-        // instead of shifting every row into the "unparseable" branch.
-        let info =
-            parse_session_line("work|1700000000|1|0|80|24|/repo|we|ird").expect("row parses");
-        assert_eq!(info.foreground_command.as_deref(), Some("we|ird"));
-    }
-
-    #[test]
-    fn reports_an_absent_foreground_command_as_none() {
-        let info = parse_session_line("work|1700000000|1|0|80|24|/repo|").expect("row parses");
-        assert_eq!(info.foreground_command, None);
-    }
-
-    #[test]
-    fn rejects_rows_with_too_few_fields() {
-        assert!(parse_session_line("work|1700000000|1|0|80|24").is_none());
-    }
-
-    #[test]
-    fn rejects_rows_with_unparseable_numbers() {
-        assert!(parse_session_line("work|not-a-number|1|0|80|24|/repo|claude").is_none());
     }
 }

@@ -5615,7 +5615,8 @@ mod tests {
         tmux.create_session(&session_name, 80, 24, "/tmp", &[])
             .await
             .unwrap();
-        crate::tmux::ops::TmuxOps::global()
+        crate::tmux::ops::TmuxDep::global()
+            .ops()
             .send_keys(&session_name, "echo hello-from-preview")
             .await
             .unwrap();

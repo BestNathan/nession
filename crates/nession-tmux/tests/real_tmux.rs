@@ -120,3 +120,58 @@ fn a_relative_socket_is_refused_before_spawning() {
     let command = TmuxCommand::new("tmux", "relative/tmux.sock");
     assert!(command.validate().is_err());
 }
+
+/// The typed administration API against one real isolated server: create with
+/// an explicit environment, list it, prove the environment reached the shell,
+/// then kill it.
+#[tokio::test]
+async fn admin_creates_lists_and_kills_a_real_isolated_session() -> anyhow::Result<()> {
+    use nession_tmux::{NewSession, TmuxOps};
+
+    let dir = tempfile::tempdir()?;
+    let command = TmuxCommand::new("tmux", dir.path().join("tmux.sock"));
+    command.validate()?;
+    let ops = TmuxOps::new(command);
+    let name = unique_name("admin");
+
+    ops.new_session(&NewSession {
+        name: name.clone(),
+        working_dir: "/tmp".to_string(),
+        width: 80,
+        height: 24,
+        env: vec![("NESSON_SDK_ADMIN".to_string(), "delivered".to_string())],
+    })
+    .await?;
+
+    let sessions = ops.list_sessions().await?;
+    anyhow::ensure!(
+        sessions.iter().any(|session| session.name == name),
+        "the created session is not in list_sessions: {sessions:?}"
+    );
+
+    ops.send_keys(&name, "printf 'ADMIN_%s\\n' \"$NESSON_SDK_ADMIN\"")
+        .await?;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let captured = ops.capture_pane(&name, 100).await?.unwrap_or_default();
+        if String::from_utf8_lossy(&captured).contains("ADMIN_delivered") {
+            break;
+        }
+        anyhow::ensure!(
+            Instant::now() < deadline,
+            "the environment did not reach the shell: {:?}",
+            String::from_utf8_lossy(&captured)
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    ops.kill_session(&name).await?;
+    anyhow::ensure!(
+        !ops.list_sessions()
+            .await?
+            .iter()
+            .any(|session| session.name == name),
+        "the killed session is still listed"
+    );
+    Ok(())
+}
