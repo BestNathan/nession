@@ -457,10 +457,23 @@ fn concurrent_writers_do_not_splice_the_recorded_calls() {
             "a recorded block is not exactly one call: {calls:?}"
         );
     }
+    // Distinguish a writer that never claimed an index from a reader that
+    // skipped a claimed one: the shortfall has been observed under the
+    // coverage run's load and the two have different owners.
+    let claims = std::fs::read_dir(dir.path())
+        .unwrap()
+        .filter_map(std::result::Result::ok)
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(CALL_FILE_PREFIX)
+        })
+        .count();
     assert_eq!(
         calls.len(),
         80,
-        "all 80 calls are recorded, each as its own block: {calls:?}"
+        "all 80 calls are recorded, each as its own block (claims={claims}): {calls:?}"
     );
 }
 
