@@ -24,8 +24,20 @@ import { pathToFileURL } from 'node:url';
 export const DEFERRED_REPLAY_LOG_PREFIX = 'ACCEPTANCE_DEFERRED_REPLAY_V1 ';
 export const DEFERRED_REPLAY_WORKFLOW = '.github/workflows/acceptance-orchestrator.yml';
 export const DEFERRED_REPLAY_WORKFLOW_NAME = 'Acceptance / Orchestrator';
-export const DEFERRED_REPLAY_JOB = 'reconcile-completed-quality-e2e';
-export const DEFERRED_REPLAY_EVENT = 'workflow_run';
+// Two trusted main-owned jobs replay a deferred run: the workflow_run waker
+// and the E2E-projection reconcile (repository_dispatch). Whichever wins the
+// race writes the receipt, so both are admissible evidence producers.
+export const DEFERRED_REPLAY_JOBS = Object.freeze([
+  'reconcile-completed-quality-e2e',
+  'reconcile-issue-e2e',
+]);
+export const DEFERRED_REPLAY_EVENTS = Object.freeze([
+  'workflow_run',
+  'repository_dispatch',
+]);
+// The waker paths, kept as named constants for the workflow-shape self-test.
+export const DEFERRED_REPLAY_JOB = DEFERRED_REPLAY_JOBS[0];
+export const DEFERRED_REPLAY_EVENT = DEFERRED_REPLAY_EVENTS[0];
 export const DEFERRED_REPLAY_BRANCH = 'main';
 export const DEFERRED_REPLAY_SOURCE_EVENT = 'pull_request_target';
 export const DEFERRED_REPLAY_RESULT = 'replayed';
@@ -135,13 +147,14 @@ export function attestDeferredReplayReceipt({
       wakerRun?.run_attempt !== receipt.source_run_attempt ||
       wakerRun?.head_sha !== targetSha ||
       wakerRun?.head_branch !== DEFERRED_REPLAY_BRANCH ||
-      wakerRun?.event !== DEFERRED_REPLAY_EVENT ||
+      !DEFERRED_REPLAY_EVENTS.includes(wakerRun?.event) ||
       normalizeWorkflowPath(wakerRun?.path) !== DEFERRED_REPLAY_WORKFLOW ||
       wakerRun?.name !== DEFERRED_REPLAY_WORKFLOW_NAME ||
       wakerRun?.status !== 'completed' || wakerRun?.conclusion !== 'success') {
     throw Error('deferred replay waker identity mismatch');
   }
-  if (wakerJob?.name !== DEFERRED_REPLAY_JOB || wakerJob?.conclusion !== 'success' ||
+  if (!DEFERRED_REPLAY_JOBS.includes(wakerJob?.name) ||
+      wakerJob?.conclusion !== 'success' ||
       wakerJob?.run_id !== wakerRun.id ||
       wakerJob?.run_attempt !== wakerRun.run_attempt) {
     throw Error('deferred replay waker job mismatch');
@@ -300,6 +313,23 @@ function selfTest() {
   assert.equal(proof.replay_attempt, 2);
   assert.equal(proof.deferral.defer_pre_merge, 'cancelled');
   assert.equal(proof.replay.pre_merge_acceptance, 'success');
+
+  // The E2E-projection reconcile is the other trusted replay producer; a
+  // replay it performs is the same behavioral fact.
+  const projectionProof = attestDeferredReplayReceipt({
+    receipt, wakerRun: { ...wakerRun, event: 'repository_dispatch' },
+    wakerJob: { ...wakerJob, name: 'reconcile-issue-e2e' },
+    deferredRun, deferredJobs, replayJobs, targetSha: mainSha,
+  });
+  assert.equal(projectionProof.replay_attempt, 2);
+  assert.throws(() => attestDeferredReplayReceipt({
+    receipt, wakerRun: { ...wakerRun, event: 'push' }, wakerJob,
+    deferredRun, deferredJobs, replayJobs, targetSha: mainSha,
+  }), /waker identity mismatch/, 'an untrusted event cannot produce evidence');
+  assert.throws(() => attestDeferredReplayReceipt({
+    receipt, wakerRun, wakerJob: { ...wakerJob, name: 'untrusted-job' },
+    deferredRun, deferredJobs, replayJobs, targetSha: mainSha,
+  }), /waker job mismatch/, 'an untrusted job cannot produce evidence');
 
   const attests = (overrides) => () => attestDeferredReplayReceipt({
     receipt, wakerRun, wakerJob, deferredRun, deferredJobs, replayJobs,
