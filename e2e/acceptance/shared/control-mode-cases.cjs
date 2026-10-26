@@ -24,13 +24,13 @@ function targetSha() {
   return sha;
 }
 
-function checked(command, args, timeout) {
+function checked(command, args, timeout, extraEnv = {}) {
   const result = spawnSync(command, args, {
     cwd: root,
     encoding: 'utf8',
     timeout,
     maxBuffer: 8 * 1024 * 1024,
-    env: { ...process.env, GH_TOKEN: '', GITHUB_TOKEN: '', RUSTC_WRAPPER: '' },
+    env: { ...process.env, GH_TOKEN: '', GITHUB_TOKEN: '', RUSTC_WRAPPER: '', ...extraEnv },
   });
   if (result.error) throw result.error;
   if (result.status !== 0) {
@@ -40,9 +40,14 @@ function checked(command, args, timeout) {
   return String(result.stdout) + '\n' + String(result.stderr);
 }
 
-/** Run one or more filters in the nession-agent cargo test target. */
-function cargoTests(args, timeout) {
-  return checked('cargo', ['test', '-p', 'nession-agent', ...args, '--', '--nocapture'], timeout);
+/**
+ * Run one or more filters in the nession-agent cargo test target.
+ *
+ * `extraEnv` lets a Case own its isolation: a tmux-backed test must not inherit
+ * whatever socket the Case runtime happens to use.
+ */
+function cargoTests(args, timeout, extraEnv = {}) {
+  return checked('cargo', ['test', '-p', 'nession-agent', ...args, '--', '--nocapture'], timeout, extraEnv);
 }
 
 /** Assert every named test actually ran and passed. */

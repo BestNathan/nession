@@ -33,8 +33,11 @@ function webRetainedRendererTest() {
   );
   if (result.error) throw result.error;
   const output = String(result.stdout) + '\n' + String(result.stderr);
-  if (result.status !== 0 || !/Tests\s+1 passed/.test(output)) {
-    throw new Error('the retained-renderer test did not report a pass: ' + output.slice(-3000));
+  // vitest colours its summary; strip the escapes before matching, or a
+  // passing run reads as a failure.
+  const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+  if (result.status !== 0 || !/Tests\s+1 passed/.test(plain)) {
+    throw new Error('the retained-renderer test did not report a pass: ' + plain.slice(-3000));
   }
   return output;
 }

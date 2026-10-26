@@ -6,6 +6,8 @@
 // real-tmux attach/reattach ordering, the atomic-epoch cut identity, and the
 // renderer's bootstrap/fidelity/ACK tests. The P2P/Relay browser matrix stays
 // with the selected E2E regressions owned by SC-04.
+const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const {
@@ -31,14 +33,20 @@ function rendererContractTests() {
   );
   if (result.error) throw result.error;
   const output = String(result.stdout) + '\n' + String(result.stderr);
-  if (result.status !== 0 || !/Tests\s+\d+ passed/.test(output)) {
-    throw new Error('the renderer bootstrap/fidelity suite did not pass: ' + output.slice(-3000));
+  // vitest colours its summary; compare against the plain text.
+  const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+  if (result.status !== 0 || !/Tests\s+\d+ passed/.test(plain)) {
+    throw new Error('the renderer bootstrap/fidelity suite did not pass: ' + plain.slice(-3000));
   }
   return output;
 }
 
 run(({ evidence }) => {
   const sha = targetSha();
+  // The real-tmux fixtures own their server; inheriting the Case runtime's
+  // socket let it disappear between session creation and the first send-keys.
+  const socketDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nession-2464-sc03-'));
+  const tmuxEnv = { NESSION_TMUX_SOCKET: path.join(socketDir, 'tmux.sock') };
 
   for (const name of [
     'server::a_plain_second_attach_sends_bootstrap_before_ok_when_asked',
@@ -46,8 +54,9 @@ run(({ evidence }) => {
     'server::a_control_first_attach_names_an_atomic_epoch_start_cut',
     'server::a_plain_bootstrap_restores_a_caret_the_pane_left_on_an_empty_row',
   ]) {
-    assertRan(cargoTests(['--test', 'integration', name], 300000), [name]);
+    assertRan(cargoTests(['--test', 'integration', name], 300000, tmuxEnv), [name]);
   }
+  fs.rmSync(socketDir, { recursive: true, force: true });
 
   rendererContractTests();
 
