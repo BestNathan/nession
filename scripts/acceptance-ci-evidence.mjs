@@ -366,11 +366,13 @@ export async function collectDeferredAcceptanceReplays(repo, sha,
       '/attempts/' + wakerRun.run_attempt + '/jobs?per_page=100');
     if (!Array.isArray(jobs?.jobs) || jobs.jobs.length > 100)
       throw Error('unverified deferred replay waker jobs');
+    // Every replaying run carries BOTH trusted job names: the one for its
+    // event executes, the other is skipped by its own `if`. Select the single
+    // successful job; two successes would be an ambiguous producer.
     const matches = jobs.jobs.filter((job) =>
-      DEFERRED_REPLAY_JOBS.includes(job?.name));
+      DEFERRED_REPLAY_JOBS.includes(job?.name) && job.conclusion === 'success');
     if (matches.length !== 1) continue;
     const wakerJob = matches[0];
-    if (wakerJob.conclusion !== 'success') continue;
     let log;
     try {
       log = await getText('/repos/' + repo + '/actions/jobs/' + wakerJob.id +
@@ -1710,8 +1712,12 @@ async function selfTest() {
     head_branch: 'main', event: 'workflow_run', status: 'completed',
     conclusion: 'success', name: DEFERRED_REPLAY_WORKFLOW_NAME,
     path: DEFERRED_REPLAY_WORKFLOW + '@refs/heads/main' };
-  const wakerJobs = { jobs: [{ id: wakerJobId, name: DEFERRED_REPLAY_JOB,
-    conclusion: 'success', run_id: wakerRunId, run_attempt: 1 }] };
+  // Real runs carry both trusted job names; the non-matching one is skipped.
+  const wakerJobs = { jobs: [
+    { id: wakerJobId, name: DEFERRED_REPLAY_JOB,
+      conclusion: 'success', run_id: wakerRunId, run_attempt: 1 },
+    { id: wakerJobId + 1, name: 'reconcile-issue-e2e',
+      conclusion: 'skipped', run_id: wakerRunId, run_attempt: 1 }] };
   const replayedRun = { id: replayedId, event: 'pull_request_target',
     head_sha: replayHead, status: 'completed', conclusion: 'success',
     run_attempt: 2, path: DEFERRED_REPLAY_WORKFLOW };
@@ -1750,8 +1756,11 @@ async function selfTest() {
   // The projection reconcile (repository_dispatch) is the other trusted
   // producer; a receipt it wrote is the same behavioral evidence.
   const projectionRun = { ...wakerRun, id: 814, event: 'repository_dispatch' };
-  const projectionJobs = { jobs: [{ id: 816, name: 'reconcile-issue-e2e',
-    conclusion: 'success', run_id: 814, run_attempt: 1 }] };
+  const projectionJobs = { jobs: [
+    { id: 816, name: 'reconcile-issue-e2e',
+      conclusion: 'success', run_id: 814, run_attempt: 1 },
+    { id: 817, name: 'reconcile-completed-quality-e2e',
+      conclusion: 'skipped', run_id: 814, run_attempt: 1 }] };
   const projectionReceipt = makeDeferredReplayReceipt({
     env: { ...replayEnv, GITHUB_RUN_ID: '814' }, sourceRunId: 814,
     targetSha: replayHead, pr: 99, replayedRunId: replayedId, deferredAttempt: 1,
@@ -1768,6 +1777,12 @@ async function selfTest() {
     replayMain, async () => [projectionRun], projectionRequest,
     async () => projectionLog);
   assert.equal(projection.length, 1, 'projection reconciles are admissible');
+  assert.deepEqual(await collectDeferredAcceptanceReplays(denialRepo, replayMain,
+    wakerList, async (p) => p.endsWith('/actions/runs/' + wakerRunId +
+      '/attempts/1/jobs?per_page=100')
+      ? { jobs: wakerJobs.jobs.map((job) => ({ ...job, conclusion: 'success' })) }
+      : replayRequest(p), async () => replayLog), [],
+  'two successful trusted replay jobs are ambiguous and prove nothing');
   assert.deepEqual(normalizeCiEvidence({ targetSha: replayMain,
     deferredAcceptanceReplays: replays }).verified_deferred_acceptance_replays,
   replays);
