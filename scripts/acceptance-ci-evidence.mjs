@@ -28,6 +28,7 @@ import {GOVERNED_REFS,UNOBSERVABLE_CAPABILITIES} from './run-store-policy.mjs';
 import {parseAcceptanceBatchLog,attestAcceptanceBatchReceipt,makeAcceptanceBatchReceipt,
   ACCEPTANCE_BATCH_WORKFLOWS,ACCEPTANCE_BATCH_LOG_PREFIX} from '../e2e/runner/acceptance-batch-receipt.mjs';
 import { collectFullRegression } from './verification-full-regression-evidence.mjs';
+import { FULL_NOT_REQUIRED_LOG_PREFIX } from './e2e-full-applicability.mjs';
 import {parseE2eSelectedRunLog,attestE2eSelectedRunReceipt,makeE2eSelectedRunReceipt,
   parseE2eNotRequiredLog,attestE2eNotRequiredReceipt,makeE2eNotRequiredReceipt,
   parseE2eFullGateLog,attestE2eFullGateReceipt,
@@ -166,7 +167,7 @@ function compactRuns(runs, expectedSha) {
   return retainedRuns(runs, expectedSha).runs.map(compactRun);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], historicalRecovery = null, historicalRegressions = null, exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], acceptanceRoutingProof = null, replayDenials = [], storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [], fullRegressionReceipts = [], verifiedCiCostStudy = null, historicalBrowserDesignProof = null, exactHeadStepsBySha = new Map(), batchReceiptsBySha = new Map(), ancestryReceipts = [], reuseComparison = null, publicPagesObservations = [], publicPagesE2EObservations = [], publicWorkflowPublications = [], developmentReadback = [], stagingAcrReadback = null, verifiedAgentTelemetryRecords = [], deferredAcceptanceReplays = [] }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], historicalRecovery = null, historicalRegressions = null, exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], acceptanceRoutingProof = null, replayDenials = [], storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [], fullRegressionReceipts = [], fullNotRequiredReceipts = [], verifiedCiCostStudy = null, historicalBrowserDesignProof = null, exactHeadStepsBySha = new Map(), batchReceiptsBySha = new Map(), ancestryReceipts = [], reuseComparison = null, publicPagesObservations = [], publicPagesE2EObservations = [], publicWorkflowPublications = [], developmentReadback = [], stagingAcrReadback = null, verifiedAgentTelemetryRecords = [], deferredAcceptanceReplays = [] }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -218,6 +219,7 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     e2e_not_required_receipts: notRequiredRunReceipts,
     e2e_full_gate_provision_receipts: fullGateProvisionReceipts,
     verified_full_regression_receipts: fullRegressionReceipts,
+    e2e_full_not_required_receipts: fullNotRequiredReceipts,
     verified_ci_cost_study: verifiedCiCostStudy,
     historical_browser_design_regressions: historicalBrowserDesignProof,
     target_push_e2e_runs: targetPushE2eRuns,
@@ -635,6 +637,104 @@ export async function collectFullGateProvisionReceipts(repo,sha,runs,
       attested={...attested,full_per_id:attestFullReceipt(perId,run,matches[0])};
     }
     evidence.push(attested);
+  }
+  return evidence;
+}
+
+// #2478 SC-03: a tooling-only Main merge produces an explicit Not Required
+// Full decision. The artifact is not evidence the Acceptance harness can read,
+// so the scope job also emits a bounded run-bound log receipt. Re-attest it
+// against the exact push run/attempt, the scope job's own steps, and the fact
+// that the `full` browser job did not execute.
+const FULL_NOT_REQUIRED_WORKFLOW = '.github/workflows/e2e-full-regression.yml';
+const FULL_SCOPE_JOB = 'scope';
+const FULL_SCOPE_STEPS = Object.freeze([
+  'Classify the pushed change against the Full suite inputs',
+  'Upload the Not Required receipt',
+]);
+export async function collectFullNotRequiredReceipts(repo, sha, request = githubGet,
+  getText = githubJobLog, { pageSize = 20, maxPages = 3, maxReceipts = 3 } = {}) {
+  if (repo !== REPO || !/^[a-f0-9]{40}$/.test(String(sha)) ||
+      !Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 20 ||
+      !Number.isSafeInteger(maxPages) || maxPages < 1 || maxPages > 3 ||
+      !Number.isSafeInteger(maxReceipts) || maxReceipts < 1 || maxReceipts > 3) {
+    throw Error('invalid Full Not Required receipt scope');
+  }
+  const evidence = [];
+  for (let page = 1; page <= maxPages && evidence.length < maxReceipts; page += 1) {
+    const query = new URLSearchParams({
+      branch: 'main', per_page: String(pageSize), page: String(page),
+    });
+    const listed = await request('/repos/' + repo +
+      '/actions/workflows/e2e-full-regression.yml/runs?' + query);
+    if (!Array.isArray(listed?.workflow_runs) || listed.workflow_runs.length > pageSize) {
+      throw Error('unbounded Full Not Required source runs');
+    }
+    for (const run of listed.workflow_runs) {
+      if (run.status !== 'completed' || run.conclusion !== 'success' ||
+          run.head_branch !== 'main' || run.head_sha !== sha ||
+          !Number.isSafeInteger(run.id) || run.id < 1 ||
+          !Number.isSafeInteger(run.run_attempt) || run.run_attempt < 1) continue;
+      const jobs = await request('/repos/' + repo + '/actions/runs/' + run.id +
+        '/attempts/' + run.run_attempt + '/jobs?per_page=100');
+      if (!Array.isArray(jobs?.jobs) || jobs.jobs.length > 100) {
+        throw Error('unbounded Full Not Required jobs');
+      }
+      // A real Full execution (or one still running) is not this shape.
+      const fullJobs = jobs.jobs.filter((job) => job?.name === 'full');
+      if (fullJobs.some((job) => job?.status !== 'completed' ||
+        job?.conclusion === 'success')) continue;
+      const scopes = jobs.jobs.filter((job) => job?.name === FULL_SCOPE_JOB);
+      if (scopes.length !== 1) continue;
+      const scopeJob = scopes[0];
+      const stepsOk = FULL_SCOPE_STEPS.every((name) => {
+        const matches = (scopeJob.steps ?? []).filter((step) => step?.name === name);
+        return matches.length === 1 && matches[0].conclusion === 'success';
+      });
+      if (!stepsOk) continue;
+      let log;
+      try {
+        log = await getText('/repos/' + repo + '/actions/jobs/' + scopeJob.id + '/logs',
+          8 * 1024 * 1024);
+      } catch { continue; }
+      if (typeof log !== 'string' || log.length > 8 * 1024 * 1024) continue;
+      const lines = log.split(/\r?\n/)
+        .filter((line) => line.includes(FULL_NOT_REQUIRED_LOG_PREFIX));
+      if (lines.length !== 1) continue;
+      let receipt;
+      try {
+        const raw = lines[0].slice(lines[0].indexOf(FULL_NOT_REQUIRED_LOG_PREFIX) +
+          FULL_NOT_REQUIRED_LOG_PREFIX.length).trim();
+        receipt = JSON.parse(raw);
+      } catch { continue; }
+      const changedOk = Array.isArray(receipt?.changed_paths) &&
+        receipt.changed_paths.length <= 50 &&
+        receipt.changed_paths.every((file) =>
+          typeof file === 'string' && file && !/[\r\n]/.test(file));
+      if (receipt?.schema_version !== 1 || receipt.kind !== 'e2e_full_not_required' ||
+          receipt.repository !== REPO || receipt.workflow !== FULL_NOT_REQUIRED_WORKFLOW ||
+          receipt.run_id !== run.id || receipt.run_attempt !== run.run_attempt ||
+          receipt.target_sha !== sha || receipt.category !== 'tooling-only' ||
+          receipt.full_regression !== 'NOT_REQUIRED' || !changedOk) continue;
+      evidence.push(Object.freeze({
+        kind: 'verified_e2e_full_not_required',
+        run_id: run.id,
+        run_attempt: run.run_attempt,
+        sha,
+        target_sha: sha,
+        event: run.event,
+        branch: run.head_branch,
+        category: receipt.category,
+        reason: receipt.reason ?? null,
+        changed_paths: receipt.changed_paths,
+        full_regression: 'NOT_REQUIRED',
+        scope_job_id: scopeJob.id,
+        evidence: 'GitHub exact-attempt scope job steps + skipped Full browser job ' +
+          '+ bounded original job-log receipt',
+      }));
+      if (evidence.length >= maxReceipts) break;
+    }
+    if (listed.workflow_runs.length < pageSize) break;
   }
   return evidence;
 }
@@ -1613,6 +1713,8 @@ async function collectCommand(workspace, outFile) {
     replayIssue?.labels?.some(label=> (typeof label==='string'?label:label.name)==='verification:full')
       ?await collectFullRegression({repo,sha,get:githubGet,getText:githubJobLog})
       :[];
+  const fullNotRequiredReceipts = process.env.ACCEPTANCE_STAGE==='post-merge'
+    ? await collectFullNotRequiredReceipts(repo, sha) : [];
   const reuseComparison = computeReuseComparison({ targetSha: sha,
     acceptanceBatchReceipts,
     extraBatchReceipts: [...batchReceiptsBySha.values()].flat()
@@ -1621,7 +1723,7 @@ async function collectCommand(workspace, outFile) {
       .concat(ancestryReceipts.flatMap(entry => entry.e2e_selected_run_receipts)),
     fullGateProvisionReceipts, selectedRunReceipts, targetPushE2eRuns });
   const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls,
-    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, historicalRecovery, historicalRegressions, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts, acceptanceRoutingProof, replayDenials, storePolicyObservability, ancestryRuns, acceptanceBatchReceipts, selectedRunReceiptsBySha, selectedRunReceipts, notRequiredRunReceiptsBySha, notRequiredRunReceipts, fullGateProvisionReceipts, fullRegressionReceipts, verifiedCiCostStudy, historicalBrowserDesignProof, exactHeadStepsBySha, batchReceiptsBySha, ancestryReceipts, reuseComparison, publicPagesObservations, publicPagesE2EObservations, publicWorkflowPublications, developmentReadback, stagingAcrReadback, verifiedAgentTelemetryRecords, deferredAcceptanceReplays });
+    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, historicalRecovery, historicalRegressions, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts, acceptanceRoutingProof, replayDenials, storePolicyObservability, ancestryRuns, acceptanceBatchReceipts, selectedRunReceiptsBySha, selectedRunReceipts, notRequiredRunReceiptsBySha, notRequiredRunReceipts, fullGateProvisionReceipts, fullRegressionReceipts, fullNotRequiredReceipts, verifiedCiCostStudy, historicalBrowserDesignProof, exactHeadStepsBySha, batchReceiptsBySha, ancestryReceipts, reuseComparison, publicPagesObservations, publicPagesE2EObservations, publicWorkflowPublications, developmentReadback, stagingAcrReadback, verifiedAgentTelemetryRecords, deferredAcceptanceReplays });
   fs.writeFileSync(outFile, JSON.stringify(evidence, null, 2) + '\n');
   console.log(
     'collected acceptance CI evidence for ' + sha +
@@ -2765,6 +2867,47 @@ async function selfTest() {
   reject(provider,metrics,orchestration,{jobs:validJobs.jobs.map(x=>({...x,started_at:'2026-10-13T12:29:00Z'}))});
   reject(provider,metrics,orchestration,{jobs:validJobs.jobs.map(x=>({...x,conclusion:'failure'}))});
 
+  // #2478 SC-03: the Full Not Required log receipt must bind the exact
+  // run/attempt and scope-job steps, and a real Full execution is not this
+  // shape.
+  const fnrSha='6'.repeat(40);
+  const fnrRun={id:930,run_attempt:1,event:'push',head_branch:'main',head_sha:fnrSha,
+    status:'completed',conclusion:'success'};
+  const fnrReceipt={schema_version:1,kind:'e2e_full_not_required',repository:denialRepo,
+    workflow:'.github/workflows/e2e-full-regression.yml',run_id:930,run_attempt:1,
+    target_sha:fnrSha,category:'tooling-only',reason:'changed-paths-cannot-affect-runtime',
+    changed_paths:['scripts/a.mjs'],full_regression:'NOT_REQUIRED'};
+  const fnrScope={name:'scope',id:931,run_id:930,run_attempt:1,head_sha:fnrSha,
+    status:'completed',conclusion:'success',steps:[
+      {name:'Classify the pushed change against the Full suite inputs',conclusion:'success'},
+      {name:'Upload the Not Required receipt',conclusion:'success'}]};
+  const fnrFullSkipped={name:'full',id:932,run_id:930,run_attempt:1,head_sha:fnrSha,
+    status:'completed',conclusion:'skipped'};
+  const fnrLog=FULL_NOT_REQUIRED_LOG_PREFIX+JSON.stringify(fnrReceipt)+'\n';
+  const fnrRequest=async p=>{
+    if(p.includes('/actions/workflows/e2e-full-regression.yml/runs?'))
+      return {workflow_runs:[fnrRun]};
+    if(p.endsWith('/actions/runs/930/attempts/1/jobs?per_page=100'))
+      return {jobs:[fnrScope,fnrFullSkipped]};
+    throw Error('unexpected Full Not Required API: '+p);
+  };
+  const fnr=await collectFullNotRequiredReceipts(denialRepo,fnrSha,fnrRequest,async()=>fnrLog);
+  assert.equal(fnr.length,1);
+  assert.equal(fnr[0].full_regression,'NOT_REQUIRED');
+  assert.equal(fnr[0].scope_job_id,931);
+  const normFnr=normalizeCiEvidence({targetSha:fnrSha,fullNotRequiredReceipts:fnr});
+  assert.equal(normFnr.e2e_full_not_required_receipts.length,1);
+  assert.deepEqual(await collectFullNotRequiredReceipts(denialRepo,fnrSha,
+    async p=>p.includes('/actions/workflows/')?{workflow_runs:[fnrRun]}:
+      {jobs:[fnrScope,{...fnrFullSkipped,conclusion:'success'}]},
+    async()=>fnrLog),[],'a real Full execution is never Not Required evidence');
+  assert.deepEqual(await collectFullNotRequiredReceipts(denialRepo,fnrSha,fnrRequest,
+    async()=>FULL_NOT_REQUIRED_LOG_PREFIX+JSON.stringify({...fnrReceipt,run_attempt:2})+'\n'),
+  [],'the receipt must bind its own run/attempt');
+  assert.deepEqual(await collectFullNotRequiredReceipts(denialRepo,fnrSha,
+    async p=>p.includes('/actions/workflows/')?{workflow_runs:[fnrRun]}:
+      {jobs:[{...fnrScope,steps:[fnrScope.steps[0]]},fnrFullSkipped]},
+    async()=>fnrLog),[],'missing scope steps are not a trusted decision');
   selfTestCiCostStudy();
   selfTestHistoricalBrowserDesign();
   selfTestHistoricalCase();
