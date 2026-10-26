@@ -20,7 +20,11 @@ export default defineConfig({
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: 1,
+  // #2205 P1 experiment: file-level parallelism against the shared full-stack
+  // runtime. Baseline (workers: 1) is a ~7.1m Playwright phase, 61% of it in
+  // one spec file; this branch only answers whether two files can share the
+  // provisioned stack without interference. It is not a delivery change.
+  workers: 2,
   reporter: 'html',
   snapshotPathTemplate: '{testDir}/__snapshots__/{testFilePath}/{arg}-{platform}{ext}',
 
