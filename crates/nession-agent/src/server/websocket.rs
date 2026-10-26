@@ -34,13 +34,15 @@ use crate::server::execution::{
 };
 use crate::server::issued_credit::SubscriberIssuedFlow;
 use crate::server::output_ack::{OutputAckBinding, OutputAckVerdict, SubscriberOutputAck};
-use crate::session::registry::{NotAttached, SessionRegistry};
+use crate::session::registry::{
+    ControlAcquireRejected, InputRejected, NotAttached, SessionRegistry,
+};
 use crate::session::service::{AttachedBackend, SessionService};
 use crate::session::terminal::runtime::{
     AttachedSession, OutputChunk, SessionPeer, SubscriberEvent,
 };
 use crate::session::terminal::state as session_terminal;
-use crate::session::terminal::state::{InputSequence, InputVerdict};
+use crate::session::terminal::state::InputSequence;
 // The lanes' boxed work is the shared type, and the constructors take this
 // socket's own bounds — see `nession_runtime::lane`.
 use crate::server::outbound::{self, OutboundError, P2pOutbound};
@@ -260,44 +262,6 @@ fn client_attach_response(
         // position" and "my position is zero" stay different answers.
         input_epoch: Some(session.input.epoch),
         input_applied_through: Some(session.input.applied_through),
-    }
-}
-
-/// Tell a session's peers where its input cursor now stands (#1307).
-///
-/// Shaped like [`notify_control_changed`], and for the same reason: the fact is
-/// about the *session*, not about one connection, so it goes to every peer and
-/// each decides what it means for itself. Sending it only to the controller
-/// would be this socket adjudicating a client-side question — and would be
-/// wrong across a handoff, where the client that needs the cursor is exactly
-/// the one that did not send the frame.
-///
-/// A failure to deliver is dropped rather than propagated. The cursor is stated
-/// again by the next acknowledgement and by every attach, so a peer that missed
-/// one has not lost the position, only this chance to hear it early.
-async fn notify_input_ack(peers: &[SessionPeer], payload: TerminalInputAckPayload) {
-    let msg = new_message(msg_types::TERMINAL_INPUT_ACK, payload);
-    let Ok(json) = serde_json::to_string(&msg) else {
-        return;
-    };
-    for peer in peers {
-        let _ = peer
-            .outbound
-            .send_terminal(WsMessage::Text(json.clone()))
-            .await;
-    }
-}
-
-async fn notify_control_changed(peers: &[SessionPeer], payload: TerminalControlChangedPayload) {
-    let msg = new_message(msg_types::TERMINAL_CONTROL_CHANGED, payload);
-    let Ok(json) = serde_json::to_string(&msg) else {
-        return;
-    };
-    for peer in peers {
-        let _ = peer
-            .outbound
-            .send_terminal(WsMessage::Text(json.clone()))
-            .await;
     }
 }
 
@@ -2462,8 +2426,12 @@ p2p_routes! { ctx, msg_type, payload_value;
                 // holding the connection's index of sessions across it is the
                 // lock-across-await `#961-D` exists to remove.
                 let client_id = connection_client_id(ctx.client_id).await;
-                let detached = match ctx.sessions.detach_client(&payload.session_name, &client_id) {
-                    Ok(detached) => detached,
+                let removed = match ctx
+                    .sessions
+                    .detach_client(&payload.session_name, &client_id)
+                    .await
+                {
+                    Ok(removed) => removed,
                     Err(NotAttached) => {
                         return ctx.err(
                             "not_attached",
@@ -2472,11 +2440,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     }
                 };
 
-                if let Some((peers, changed)) = detached.control_change {
-                    notify_control_changed(&peers, changed).await;
-                }
-
-                if let Some(removed) = detached.removed {
+                if let Some(removed) = removed {
                     if let Err(e) = crate::session::terminal::runtime::close(&removed.backend).await {
                         warn!("Error closing session {}: {:#}", payload.session_name, e);
                     }
@@ -2495,43 +2459,22 @@ p2p_routes! { ctx, msg_type, payload_value;
                         Err(e) => return ctx.err("parse_error", &e.to_string()),
                     };
                 let client_id = connection_client_id(ctx.client_id).await;
-                let (resp, peers, changed) = {
-                    let mut guard = ctx.sessions.lock();
-                    let Some(session) = guard.get_mut(&payload.session_name) else {
-                        return ctx.err(
-                            "not_attached",
-                            &format!("not attached to session: {}", payload.session_name),
-                        );
-                    };
-                    if !session.peers.iter().any(|p| p.client_id == client_id) {
-                        return ctx.err(
-                            "not_attached",
-                            &format!("client not attached to session: {}", payload.session_name),
-                        );
-                    }
-                    let generation = session.control.acquire(&client_id);
-                    let role = session.control.role_of(&client_id);
-                    let resp = TerminalControlAcquireResponse {
-                        session_name: payload.session_name.clone(),
-                        generation,
-                        role: if role == session_terminal::TerminalRole::Controller {
-                            "controller"
-                        } else {
-                            "observer"
-                        }
-                        .to_string(),
-                        controller_client_id: session.control.controller_client_id.clone(),
-                    };
-                    let changed = TerminalControlChangedPayload {
-                        session_name: payload.session_name.clone(),
-                        generation,
-                        controller_client_id: session.control.controller_client_id.clone(),
-                    };
-                    (resp, session.peers.clone(), changed)
-                };
-                notify_control_changed(&peers, changed).await;
-                serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
-                    .unwrap_or_default()
+                match ctx
+                    .sessions
+                    .acquire_control(&payload.session_name, &client_id)
+                    .await
+                {
+                    Ok(resp) => serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
+                        .unwrap_or_default(),
+                    Err(ControlAcquireRejected::NotAttached) => ctx.err(
+                        "not_attached",
+                        &format!("not attached to session: {}", payload.session_name),
+                    ),
+                    Err(ControlAcquireRejected::ClientNotAttached) => ctx.err(
+                        "not_attached",
+                        &format!("client not attached to session: {}", payload.session_name),
+                    ),
+                }
             }
             "agent.terminal.stream.resume" => "agent.terminal.stream.resume" => 1 => terminal_scope(payload_value) => Key(session_named(payload_value)) => {
                 let payload: TerminalStreamResumePayload =
@@ -2580,121 +2523,33 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(reason) => return ctx.err("bad_input_sequence", reason),
                 };
                 let client_id = connection_client_id(ctx.client_id).await;
-                // One pass under the map's lock decides everything that is a
-                // property of the session rather than of the bytes: whether
-                // this client may write at all, whether the frame may go to the
-                // PTY, and where the cursor stands if it does. The cursor is
-                // read *before* the write and applied *after* it, which is what
-                // keeps a failed write from accounting for bytes that never
-                // arrived.
-                let decided = ctx.sessions.lock()
-                    .get(&payload.session_name)
-                    .map(|session| {
-                        (
-                            session
-                                .control
-                                .authorize_mutation(&client_id, payload.control_generation),
-                            session.input.classify(sequence),
-                            Arc::clone(&session.backend),
-                            session.input.epoch,
-                            session.input.applied_through,
-                            Some(session.control.generation),
-                        )
-                    });
-                let Some((authorized, verdict, backend, epoch, applied_through, generation)) = decided
-                else {
-                    return ctx.err(
+                match ctx
+                    .sessions
+                    .apply_input(
+                        &payload.session_name,
+                        &client_id,
+                        payload.control_generation,
+                        sequence,
+                        &payload.data,
+                    )
+                    .await
+                {
+                    Ok(()) => serde_json::to_string(&make_ok(ctx.id, "ok")).unwrap_or_default(),
+                    Err(InputRejected::NotAttached) => ctx.err(
                         "not_attached",
                         &format!("not attached to session: {}", payload.session_name),
-                    );
-                };
-                if !authorized {
-                    return ctx.err(
+                    ),
+                    Err(InputRejected::NotController) => ctx.err(
                         "not_controller",
                         "terminal input requires an active controller lease",
-                    );
+                    ),
+                    Err(InputRejected::InvalidBase64(error)) => ctx.err("decode_error", &error),
+                    Err(InputRejected::Write(error)) => ctx.err("write_error", &error.to_string()),
+                    Err(InputRejected::StateChanged) => ctx.err(
+                        "write_error",
+                        "session input state changed under the write",
+                    ),
                 }
-                use base64::Engine;
-                let data = match base64::engine::general_purpose::STANDARD.decode(&payload.data) {
-                    Ok(d) => d,
-                    Err(e) => return ctx.err("decode_error", &e.to_string()),
-                };
-                // What the cursor will be once this frame is dealt with, and
-                // what the sender is told either way. Stating it even when
-                // nothing was written is the point rather than a nicety: a
-                // refusal that named no position would leave the sender knowing
-                // its bytes did not land but not from where to resume, and the
-                // only place it could ask would be a wire of its own.
-                let ack = |applied_through: u64| TerminalInputAckPayload {
-                    session_name: payload.session_name.clone(),
-                    input_epoch: epoch,
-                    applied_through,
-                    control_generation: generation,
-                };
-                // Peers are cloned before the write for the same reason the
-                // backend is: the map's lock covers the lookup and nothing
-                // else (`AttachedSession::backend`, #961-D), and the fan-out
-                // below is I/O.
-                let peers = ctx.sessions.lock()
-                    .get(&payload.session_name)
-                    .map(|session| session.peers.clone());
-                let Some(peers) = peers else {
-                    return ctx.err(
-                        "not_attached",
-                        &format!("not attached to session: {}", payload.session_name),
-                    );
-                };
-
-                // The three verdicts that decide whether this frame reaches the
-                // PTY, and there are three rather than two because the ones
-                // that refuse are not the same refusal: a duplicate is the
-                // system working, and a gap or a stale epoch is the sender
-                // needing to hear a position.
-                let outcome = match verdict {
-                    InputVerdict::Apply { through } => {
-                        match crate::session::terminal::runtime::write_input(&backend, &data).await {
-                            Ok(()) => {
-                                // Only now does the cursor move, and only if
-                                // the state that classified this frame is
-                                // still the state holding it — the key lane
-                                // serialises this session's mutations, so a
-                                // mismatch would mean that guarantee broke and
-                                // is worth not acting on.
-                                let advanced = match ctx.sessions.record_input_applied(
-                                    &payload.session_name,
-                                    epoch,
-                                    through,
-                                ) {
-                                    Ok(()) => None,
-                                    Err(()) => Some(ctx.err(
-                                        "write_error",
-                                        "session input state changed under the write",
-                                    )),
-                                };
-                                match advanced {
-                                    Some(err) => return err,
-                                    None => serde_json::to_string(&make_ok(ctx.id, "ok"))
-                                        .unwrap_or_default(),
-                                }
-                            }
-                            Err(e) => return ctx.err("write_error", &e.to_string()),
-                        }
-                    }
-                    InputVerdict::Duplicate | InputVerdict::Gap | InputVerdict::StaleEpoch => {
-                        serde_json::to_string(&make_ok(ctx.id, "ok")).unwrap_or_default()
-                    }
-                };
-                // Sent for every verdict, and after the write rather than
-                // beside it: an acknowledgement that could precede the PTY
-                // write would be a claim about bytes that were still on their
-                // way, which is exactly the "browser called send()" fact the
-                // requirement exists to stop reporting as delivery.
-                notify_input_ack(&peers, ack(match verdict {
-                    InputVerdict::Apply { through } => through,
-                    _ => applied_through,
-                }))
-                .await;
-                outcome
             }
             "agent.terminal.resize" => "agent.terminal.resize" => 1 => terminal_scope(payload_value) => Key(session_named(payload_value)) => {
                 let payload: TerminalResizePayload = match serde_json::from_value(payload_value) {
@@ -3634,13 +3489,10 @@ impl AgentServer {
         // Retire only this physical connection's peers, not other browser
         // clients of the same Session. Pointer identity avoids an old socket
         // deleting its successor when both use the same stable client_id.
-        let retired = connection
+        let drained = connection
             .sessions
-            .retire_connection(&connection.peer_token);
-        let (drained, changes) = (retired.drained, retired.changes);
-        for (peers, changed) in changes {
-            notify_control_changed(&peers, changed).await;
-        }
+            .retire_connection(&connection.peer_token)
+            .await;
         for (name, session) in drained {
             if let Err(e) = crate::session::terminal::runtime::close(&session.backend).await {
                 warn!("Error closing session {}: {:#}", name, e);
