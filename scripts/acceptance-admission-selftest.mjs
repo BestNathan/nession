@@ -9,8 +9,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {classifyPrDependencies, isDeferredRun} from './acceptance-dependency-state.mjs';
 import {sourceApplicability} from './acceptance-source-applicability.mjs';
-import {DEFERRED_REPLAY_LOG_PREFIX, DEFERRED_REPLAY_JOB}
-  from './acceptance-deferred-replay-receipt.mjs';
+import {DEFERRED_REPLAY_JOB} from './acceptance-deferred-replay-receipt.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const source = fs.readFileSync(
@@ -66,14 +65,22 @@ assert.match(waker, /actions\/runs\/\$id\/rerun"/,
 assert.match(waker, /current_state/,
   'the waker must re-read the run immediately before the replay write');
 // #2461 SC-02: the replayed run lives on the PR head, so the merged-main
-// evaluator can only learn about it from a receipt in the waker's own log.
-// The producer must use the canonical prefix its collector parses, and the
-// receipt must not precede the full-rerun dispatch it attests.
-assert.ok(waker.includes(DEFERRED_REPLAY_LOG_PREFIX.trim()),
-  'the waker must emit the machine-readable deferred replay receipt');
-assert.ok(waker.indexOf(DEFERRED_REPLAY_LOG_PREFIX.trim()) >
+// evaluator can only learn about it from a receipt in the replaying job's log.
+// BOTH replay paths must emit through the canonical producer: the
+// workflow_run waker and the E2E-projection reconcile each replay a deferred
+// run, and the latter is the path that wins when the E2E Report is projected
+// after the waker already ran.
+for (const name of ['reconcile-completed-quality-e2e', 'reconcile-issue-e2e']) {
+  assert.match(job(name), /acceptance-deferred-replay-receipt\.mjs emit/,
+    `${name} must emit the machine-readable deferred replay receipt`);
+}
+assert.ok(waker.indexOf('acceptance-deferred-replay-receipt.mjs emit') >
   waker.indexOf('actions/runs/$id/rerun"'),
-'the replay receipt is emitted only after the full rerun is dispatched');
+'the waker receipt is emitted only after the full rerun is dispatched');
+const projection = job('reconcile-issue-e2e');
+assert.ok(projection.indexOf('acceptance-dependency-state.mjs deferred') <
+  projection.indexOf('acceptance-deferred-replay-receipt.mjs emit'),
+'the projection receipt is emitted only after the attempt proves a deferral');
 assert.ok(waker.includes(DEFERRED_REPLAY_JOB),
   'the receipt travels in the reconcile job log the collector reads');
 

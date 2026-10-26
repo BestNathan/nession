@@ -602,9 +602,9 @@ jobs:
             [.workflow_runs[] | select(.head_sha == $sha and .event == "pull_request_target" and
              ([.pull_requests[].number] | index($pr) != null))] |
             sort_by(.created_at) | last // empty |
-            [.id, .status, .conclusion] | @tsv' \
+            [.id, .status, .conclusion, .run_attempt] | @tsv' \
             "$RUNNER_TEMP/acceptance-runs.json" > "$RUNNER_TEMP/acceptance-target.tsv"
-          IFS=$'\t' read -r accept_id accept_status accept_conclusion < "$RUNNER_TEMP/acceptance-target.tsv"
+          IFS=$'\t' read -r accept_id accept_status accept_conclusion accept_attempt < "$RUNNER_TEMP/acceptance-target.tsv"
           [[ "$accept_id" =~ ^[1-9][0-9]*$ ]] || exit 1
           if [[ "$accept_status" != completed || "$accept_conclusion" == success ]]; then
             echo "Acceptance already running or successful; no rerun"
@@ -619,8 +619,24 @@ jobs:
           # acceptance (#2461). A genuinely failed run keeps the narrower
           # failed-job replay.
           if [[ "$accept_conclusion" == cancelled ]]; then
+            # Prove the deferral from the exact attempt BEFORE the replay write,
+            # then emit the same receipt the workflow_run waker writes. The
+            # projection path is the other way a deferred run is replayed, so
+            # a merged-main evaluator must be able to see it too (#2461).
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$accept_id" \
+              > "$RUNNER_TEMP/accept-run.json"
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$accept_id/attempts/$accept_attempt/jobs?per_page=100" \
+              > "$RUNNER_TEMP/accept-jobs.json"
+            deferred="$(node scripts/acceptance-dependency-state.mjs deferred \
+              "$RUNNER_TEMP/accept-jobs.json" "$RUNNER_TEMP/accept-run.json" \
+              "$TARGET_SHA" 2> /dev/null || true)"
             gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$accept_id/rerun"
             echo "Reconciled E2E proof by replaying the whole deferred Acceptance run for PR #$PR_NUMBER" >> "$GITHUB_STEP_SUMMARY"
+            if [[ "$deferred" == true ]]; then
+              TARGET_SHA="$TARGET_SHA" PR_NUMBER="$PR_NUMBER" REPLAYED_RUN_ID="$accept_id" \
+                DEFERRED_ATTEMPT="$accept_attempt" REPLAY_RESULT=replayed \
+                node scripts/acceptance-deferred-replay-receipt.mjs emit
+            fi
           else
             gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$accept_id/rerun-failed-jobs"
             echo "Reconciled E2E proof by rerunning failed Acceptance jobs for PR #$PR_NUMBER" >> "$GITHUB_STEP_SUMMARY"
@@ -782,28 +798,14 @@ jobs:
               if [[ "$current_state" == "completed/cancelled/$attempt" ]]; then
                 gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/rerun"
                 echo "Replayed deferred Acceptance after both applicable source completions" >> "$GITHUB_STEP_SUMMARY"
-                replay_receipt="$(jq -nc \
-                  --arg repository "$GITHUB_REPOSITORY" \
-                  --argjson source_run_id "$GITHUB_RUN_ID" \
-                  --argjson source_run_attempt "$GITHUB_RUN_ATTEMPT" \
-                  --arg target_sha "$TARGET_SHA" \
-                  --argjson pr "$pr" \
-                  --argjson replayed_run_id "$id" \
-                  --argjson deferred_attempt "$attempt" \
-                  '{schema_version:1,kind:"deferred_acceptance_replay",repository:$repository,source_run_id:$source_run_id,source_run_attempt:$source_run_attempt,target_sha:$target_sha,pr:$pr,replayed_run_id:$replayed_run_id,deferred_attempt:$deferred_attempt,result:"replayed"}')"
-                printf '%s\n' "ACCEPTANCE_DEFERRED_REPLAY_V1 ${replay_receipt}"
+                TARGET_SHA="$TARGET_SHA" PR_NUMBER="$pr" REPLAYED_RUN_ID="$id" \
+                  DEFERRED_ATTEMPT="$attempt" REPLAY_RESULT=replayed \
+                  node scripts/acceptance-deferred-replay-receipt.mjs emit
               else
                 echo "Deferred Acceptance changed before replay; no duplicate dispatch" >> "$GITHUB_STEP_SUMMARY"
-                replay_receipt="$(jq -nc \
-                  --arg repository "$GITHUB_REPOSITORY" \
-                  --argjson source_run_id "$GITHUB_RUN_ID" \
-                  --argjson source_run_attempt "$GITHUB_RUN_ATTEMPT" \
-                  --arg target_sha "$TARGET_SHA" \
-                  --argjson pr "$pr" \
-                  --argjson replayed_run_id "$id" \
-                  --argjson deferred_attempt "$attempt" \
-                  '{schema_version:1,kind:"deferred_acceptance_replay",repository:$repository,source_run_id:$source_run_id,source_run_attempt:$source_run_attempt,target_sha:$target_sha,pr:$pr,replayed_run_id:$replayed_run_id,deferred_attempt:$deferred_attempt,result:"changed_before_replay"}')"
-                printf '%s\n' "ACCEPTANCE_DEFERRED_REPLAY_V1 ${replay_receipt}"
+                TARGET_SHA="$TARGET_SHA" PR_NUMBER="$pr" REPLAYED_RUN_ID="$id" \
+                  DEFERRED_ATTEMPT="$attempt" REPLAY_RESULT=changed_before_replay \
+                  node scripts/acceptance-deferred-replay-receipt.mjs emit
               fi
             fi
           fi

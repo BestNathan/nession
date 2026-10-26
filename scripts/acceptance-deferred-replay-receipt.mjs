@@ -94,9 +94,11 @@ export function validateDeferredReplayReceipt(receipt) {
   return receipt;
 }
 
-// Malformed framing is ignored-marker territory only when the line is not a
-// receipt at all; a framed record that does not validate is a producer defect
-// and throws, as the batch receipt does.
+// A job log contains two kinds of line mentioning the prefix: the workflow's
+// own **source text** (`printf '%s\n' "ACCEPTANCE_DEFERRED_REPLAY_V1 …"`), and
+// the record the step actually writes. Only a line whose tail is a JSON object
+// is a record; source text is skipped. A framed record that does not validate
+// is a producer defect and throws, as the batch receipt does.
 export function parseDeferredReplayLog(log) {
   if (typeof log !== 'string' || log.length > MAX_LOG_BYTES) {
     throw Error('invalid deferred Acceptance replay log size');
@@ -105,7 +107,9 @@ export function parseDeferredReplayLog(log) {
   for (const line of log.split(/\r?\n/)) {
     if (!line.includes(DEFERRED_REPLAY_LOG_PREFIX)) continue;
     const match = line.match(/ACCEPTANCE_DEFERRED_REPLAY_V1 (\{.*\})\s*$/);
-    if (!match || match[1].length > MAX_RECORD_BYTES) {
+    // Not a record: the workflow source text names the prefix too.
+    if (!match) continue;
+    if (match[1].length > MAX_RECORD_BYTES) {
       throw Error('invalid deferred Acceptance replay record framing');
     }
     let record;
@@ -227,7 +231,12 @@ function selfTest() {
 
   const log = '2026-10-26T03:27:39Z ' + DEFERRED_REPLAY_LOG_PREFIX +
     JSON.stringify(receipt) + '\n';
-  const parsed = parseDeferredReplayLog(log);
+  // The workflow source text names the prefix; it is not a receipt and must
+  // not make the whole log unparseable (it did, until this fix).
+  const scriptText = '    printf \'%s\\n\' "ACCEPTANCE_DEFERRED_REPLAY_V1 ' +
+    '${replay_receipt}"\n';
+  assert.deepEqual(parseDeferredReplayLog(scriptText), []);
+  const parsed = parseDeferredReplayLog(scriptText + log);
   assert.equal(parsed.length, 1);
   assert.equal(parsed[0].replayed_run_id, 40263312546);
   assert.throws(() => parseDeferredReplayLog(
@@ -235,6 +244,21 @@ function selfTest() {
   assert.throws(() => parseDeferredReplayLog(
     DEFERRED_REPLAY_LOG_PREFIX + JSON.stringify({ ...receipt, result: 'other' }) + '\n'),
     /invalid deferred Acceptance replay receipt/);
+
+  // The CLI producer and the parser are one contract: what emit prints must
+  // parse back, and invalid inputs must fail the step instead of printing.
+  const emitted = emitDeferredReplayReceipt({
+    GITHUB_REPOSITORY: REPO, GITHUB_RUN_ID: '40264172173',
+    GITHUB_RUN_ATTEMPT: '1', TARGET_SHA: prHead, PR_NUMBER: '2465',
+    REPLAYED_RUN_ID: '40263312546', DEFERRED_ATTEMPT: '1',
+    REPLAY_RESULT: 'replayed',
+  });
+  assert.equal(parseDeferredReplayLog(emitted)[0].replayed_run_id, 40263312546);
+  assert.throws(() => emitDeferredReplayReceipt({
+    GITHUB_REPOSITORY: REPO, GITHUB_RUN_ID: '40264172173',
+    GITHUB_RUN_ATTEMPT: '1', TARGET_SHA: 'not-a-sha', PR_NUMBER: '2465',
+    REPLAYED_RUN_ID: '40263312546', DEFERRED_ATTEMPT: '1',
+  }), /invalid deferred Acceptance replay receipt inputs/);
 
   const wakerRun = {
     id: 40264172173, run_attempt: 1, head_sha: mainSha, head_branch: 'main',
@@ -304,8 +328,34 @@ function selfTest() {
   console.log('Deferred Acceptance replay receipt: producer/parser/attestation and fail-closed negatives passed');
 }
 
+// The workflow's replay paths call this instead of hand-building the JSON, so
+// the producer and the parser share one owner. Inputs come from the step
+// environment; an invalid input fails the step rather than printing nothing.
+export function emitDeferredReplayReceipt(env = process.env) {
+  const receipt = makeDeferredReplayReceipt({
+    env,
+    sourceRunId: env.GITHUB_RUN_ID,
+    targetSha: env.TARGET_SHA,
+    pr: env.PR_NUMBER,
+    replayedRunId: env.REPLAYED_RUN_ID,
+    deferredAttempt: env.DEFERRED_ATTEMPT,
+    result: env.REPLAY_RESULT || DEFERRED_REPLAY_RESULT,
+  });
+  if (!receipt) throw Error('invalid deferred Acceptance replay receipt inputs');
+  return DEFERRED_REPLAY_LOG_PREFIX + JSON.stringify(receipt);
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
-  selfTest();
+  if (process.argv[2] === 'emit') {
+    try {
+      console.log(emitDeferredReplayReceipt(process.env));
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : error);
+      process.exitCode = 2;
+    }
+  } else {
+    selfTest();
+  }
 }
 
 export { selfTest as selfTestDeferredReplayReceipt };
