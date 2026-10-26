@@ -264,10 +264,18 @@ pub struct TerminalControlAcquirePayload {
 pub struct TerminalControlAcquireResponse {
     pub session_name: String,
     pub generation: u64,
-    /// `controller` or `observer` for this client after the operation.
+    /// `controller` or `observer` for this subscription after the operation.
     pub role: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub controller_client_id: Option<String>,
+    /// The subscription holding the lease, when one is stated.
+    ///
+    /// Same-origin tabs share the browser's `client_id`, so `role` is the
+    /// answer for *this* requester while this field is what every peer
+    /// compares against its own `subscription_id`. Absent means the provider
+    /// predates subscription identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub controller_subscription_id: Option<String>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -278,6 +286,12 @@ pub struct TerminalControlChangedPayload {
     pub generation: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub controller_client_id: Option<String>,
+    /// The subscription holding the lease, when one is stated.
+    ///
+    /// Each tab decides whether the change names it by comparing this against
+    /// the id it attached under; the shared browser id cannot answer that.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub controller_subscription_id: Option<String>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
