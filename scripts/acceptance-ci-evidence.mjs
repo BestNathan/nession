@@ -1720,8 +1720,12 @@ async function selfTest() {
     { name: 'defer-pre-merge', conclusion: 'skipped' },
     { name: 'pre-merge-acceptance (99) / Execute acceptance',
       conclusion: 'success' }] };
-  const replayLog = '2026-10-26T03:27:39Z ' + DEFERRED_REPLAY_LOG_PREFIX +
-    JSON.stringify(replayReceipt) + '\n';
+  // Real waker logs also contain the workflow's own source text naming the
+  // prefix; the parsed record must still be found (and only it).
+  const replayScriptText = '    printf \'%s\\n\' "ACCEPTANCE_DEFERRED_REPLAY_V1 ' +
+    '${replay_receipt}"\n';
+  const replayLog = replayScriptText + '2026-10-26T03:27:39Z ' +
+    DEFERRED_REPLAY_LOG_PREFIX + JSON.stringify(replayReceipt) + '\n';
   const replayRequest = async (p) => {
     if (p.endsWith('/actions/runs/' + wakerRunId)) return wakerRun;
     if (p.endsWith('/actions/runs/' + wakerRunId + '/attempts/1/jobs?per_page=100'))

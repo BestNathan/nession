@@ -94,9 +94,11 @@ export function validateDeferredReplayReceipt(receipt) {
   return receipt;
 }
 
-// Malformed framing is ignored-marker territory only when the line is not a
-// receipt at all; a framed record that does not validate is a producer defect
-// and throws, as the batch receipt does.
+// A job log contains two kinds of line mentioning the prefix: the workflow's
+// own **source text** (`printf '%s\n' "ACCEPTANCE_DEFERRED_REPLAY_V1 …"`), and
+// the record the step actually writes. Only a line whose tail is a JSON object
+// is a record; source text is skipped. A framed record that does not validate
+// is a producer defect and throws, as the batch receipt does.
 export function parseDeferredReplayLog(log) {
   if (typeof log !== 'string' || log.length > MAX_LOG_BYTES) {
     throw Error('invalid deferred Acceptance replay log size');
@@ -105,7 +107,9 @@ export function parseDeferredReplayLog(log) {
   for (const line of log.split(/\r?\n/)) {
     if (!line.includes(DEFERRED_REPLAY_LOG_PREFIX)) continue;
     const match = line.match(/ACCEPTANCE_DEFERRED_REPLAY_V1 (\{.*\})\s*$/);
-    if (!match || match[1].length > MAX_RECORD_BYTES) {
+    // Not a record: the workflow source text names the prefix too.
+    if (!match) continue;
+    if (match[1].length > MAX_RECORD_BYTES) {
       throw Error('invalid deferred Acceptance replay record framing');
     }
     let record;
@@ -227,7 +231,12 @@ function selfTest() {
 
   const log = '2026-10-26T03:27:39Z ' + DEFERRED_REPLAY_LOG_PREFIX +
     JSON.stringify(receipt) + '\n';
-  const parsed = parseDeferredReplayLog(log);
+  // The workflow source text names the prefix; it is not a receipt and must
+  // not make the whole log unparseable (it did, until this fix).
+  const scriptText = '    printf \'%s\\n\' "ACCEPTANCE_DEFERRED_REPLAY_V1 ' +
+    '${replay_receipt}"\n';
+  assert.deepEqual(parseDeferredReplayLog(scriptText), []);
+  const parsed = parseDeferredReplayLog(scriptText + log);
   assert.equal(parsed.length, 1);
   assert.equal(parsed[0].replayed_run_id, 40263312546);
   assert.throws(() => parseDeferredReplayLog(
