@@ -20,7 +20,11 @@ export default defineConfig({
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: 1,
+  // File-level parallelism: independent spec files run concurrently. Measured
+  // on ubuntu-24.04 (#2470): the full suite drops from 11m21s to 8m17s of job
+  // time with zero failed/skipped/flaky tests. Tests inside a file stay
+  // serial (fullyParallel: false), preserving their shared-session semantics.
+  workers: 2,
   reporter: 'html',
   snapshotPathTemplate: '{testDir}/__snapshots__/{testFilePath}/{arg}-{platform}{ext}',
 
