@@ -56,7 +56,7 @@ export async function publishPrototypes(sourceDir, outDir, sha) {
       // enters the public Pages artifact. JS is copied as inert bytes at build time.
       if (!item.isFile() || item.isSymbolicLink()) throw new Error('Unexpected nested/symlink prototype asset: ' + slug + '/' + item.name);
       if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(item.name)) throw new Error('Invalid prototype asset filename: ' + item.name);
-      if (!ALLOWED.has(extname(item.name).toLowerCase()) || /(?:^|\.)test\.(?:m?js)$/.test(item.name)) continue;
+      if (!ALLOWED.has(extname(item.name).toLowerCase()) || /(?:^|[.-])test\.(?:m?js)$/.test(item.name)) continue;
       const path = slug + '/' + item.name;
       bytes += await normalFile(join(folder, item.name));
       if (bytes > MAX_TOTAL) throw new Error('Prototype artifact exceeds size budget');
