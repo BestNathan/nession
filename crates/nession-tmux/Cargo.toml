@@ -1,0 +1,25 @@
+[package]
+name = "nession-tmux"
+# Independent of the Nession product version on purpose: this crate is a
+# tmux-native library, not a Nession application crate (#2469).
+version = "0.1.0"
+edition.workspace = true
+description = "Typed tmux administration and Control Mode client"
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+portable-pty.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+futures-util.workspace = true
+tempfile = "3"
+
+[lints]
+workspace = true

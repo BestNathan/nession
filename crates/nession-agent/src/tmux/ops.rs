@@ -926,6 +926,15 @@ impl TmuxDep {
     pub fn ops(&self) -> TmuxOps {
         TmuxOps::new(self.cmd())
     }
+
+    /// The SDK process owner this addressing resolves to.
+    ///
+    /// The Control Mode client lives in `nession-tmux` and takes an explicit
+    /// command; this keeps the Agent's per-use resolution (global vs injected)
+    /// authoritative for both one-shot and attached operations.
+    pub fn sdk(&self) -> nession_tmux::TmuxCommand {
+        self.cmd().as_sdk().clone()
+    }
 }
 
 #[cfg(test)]
