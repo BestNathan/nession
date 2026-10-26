@@ -38,16 +38,50 @@ function positiveInt(x) {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
-export function makeE2eSelectedRunReceipt({ env, runId, runAttempt, sha, selectedIds, provisions }) {
+// #2478 SC-05: a Main push may satisfy the selected obligations from the
+// exact-SHA Full per-ID report instead of launching a second browser suite.
+// That mode has ZERO provisions and must name the verified Full run/attempt;
+// the two modes can never be mixed.
+export const E2E_SELECTED_REUSE_FIELDS = Object.freeze([
+  'reused_full_run_id', 'reused_full_run_attempt', 'reused_full_sha',
+]);
+
+function hasReuseBinding(receipt) {
+  return E2E_SELECTED_REUSE_FIELDS.some((key) => Object.hasOwn(receipt ?? {}, key));
+}
+
+export function makeE2eSelectedRunReceipt({ env, runId, runAttempt, sha, selectedIds,
+  provisions, reusedFull = null }) {
   const run = positiveInt(runId ?? env?.GITHUB_RUN_ID);
   const attempt = positiveInt(runAttempt ?? env?.GITHUB_RUN_ATTEMPT);
   const ids = Array.isArray(selectedIds) ? [...new Set(selectedIds)] : [];
   if (env?.GITHUB_REPOSITORY !== REPO || run === null || attempt === null ||
       !SHA.test(String(sha ?? '')) || ids.length === 0 || ids.length > MAX_IDS ||
-      ids.some((id) => !ID.test(String(id))) || ids.length !== selectedIds.length ||
-      !POS(provisions) || provisions > MAX_IDS) {
+      ids.some((id) => !ID.test(String(id))) || ids.length !== selectedIds.length) {
     return null;
   }
+  if (reusedFull) {
+    if (provisions !== 0 || !positiveInt(reusedFull.run_id) ||
+        !positiveInt(reusedFull.run_attempt) || reusedFull.sha !== sha) {
+      return null;
+    }
+    return Object.freeze({
+      schema_version: 1,
+      kind: 'e2e_selected_run',
+      repository: REPO,
+      workflow: E2E_SELECTED_WORKFLOW,
+      run_id: run,
+      run_attempt: attempt,
+      sha,
+      selected_ids: Object.freeze(ids.sort()),
+      selected_count: ids.length,
+      provisioned_runtimes: 0,
+      reused_full_run_id: reusedFull.run_id,
+      reused_full_run_attempt: reusedFull.run_attempt,
+      reused_full_sha: sha,
+    });
+  }
+  if (!POS(provisions) || provisions > MAX_IDS) return null;
   return Object.freeze({
     schema_version: 1,
     kind: 'e2e_selected_run',
@@ -65,6 +99,7 @@ export function makeE2eSelectedRunReceipt({ env, runId, runAttempt, sha, selecte
 }
 
 export function validateE2eSelectedRunReceipt(receipt) {
+  const reused = hasReuseBinding(receipt);
   if (receipt?.schema_version !== 1 || receipt.kind !== 'e2e_selected_run' ||
       receipt.repository !== REPO || receipt.workflow !== E2E_SELECTED_WORKFLOW ||
       !POS(receipt.run_id) || !POS(receipt.run_attempt) ||
@@ -75,13 +110,24 @@ export function validateE2eSelectedRunReceipt(receipt) {
       new Set(receipt.selected_ids).size !== receipt.selected_ids.length ||
       !POS(receipt.selected_count) ||
       receipt.selected_count !== receipt.selected_ids.length ||
-      !POS(receipt.provisioned_runtimes) ||
+      !Number.isSafeInteger(receipt.provisioned_runtimes) ||
+      receipt.provisioned_runtimes < 0 ||
       receipt.provisioned_runtimes > MAX_IDS) {
+    throw Error('invalid selected E2E run receipt');
+  }
+  if (reused) {
+    if (receipt.provisioned_runtimes !== 0 ||
+        !POS(receipt.reused_full_run_id) || !POS(receipt.reused_full_run_attempt) ||
+        receipt.reused_full_sha !== receipt.sha) {
+      throw Error('invalid selected E2E reused-Full binding');
+    }
+  } else if (receipt.provisioned_runtimes < 1) {
     throw Error('invalid selected E2E run receipt');
   }
   const allowed = new Set(['schema_version', 'kind', 'repository', 'workflow',
     'run_id', 'run_attempt', 'sha',
-    'selected_ids', 'selected_count', 'provisioned_runtimes']);
+    'selected_ids', 'selected_count', 'provisioned_runtimes',
+    ...E2E_SELECTED_REUSE_FIELDS]);
   if (Object.keys(receipt).some((key) => !allowed.has(key))) {
     throw Error('unexpected selected E2E run receipt fields');
   }
@@ -125,12 +171,24 @@ export function attestE2eSelectedRunReceipt(receipt, run, job) {
     selected_ids: receipt.selected_ids,
     selected_count: receipt.selected_count,
     provisioned_runtimes: receipt.provisioned_runtimes,
+    // #2478 SC-05: the selected obligations were proven from the exact-SHA
+    // Full per-ID report; the Full run/attempt identity is attested here and
+    // the Full receipt remains the per-ID authority.
+    reused_full: receipt.reused_full_run_id == null ? null : Object.freeze({
+      run_id: receipt.reused_full_run_id,
+      run_attempt: receipt.reused_full_run_attempt,
+      sha: receipt.reused_full_sha,
+    }),
     // One measured provision for the whole selected invocation is the
     // one-runtime fact; the per-ID results remain owned by the trusted
     // Run Record, not by this receipt.
     one_runtime_for_selected_run: receipt.provisioned_runtimes === 1,
-    evidence: 'GitHub API Run/Attempt/job/step outcomes + exact original ' +
-      'selected E2E job log receipt emitted by the measured run',
+    evidence: receipt.reused_full_run_id == null
+      ? 'GitHub API Run/Attempt/job/step outcomes + exact original ' +
+        'selected E2E job log receipt emitted by the measured run'
+      : 'GitHub API Run/Attempt/job/step outcomes + exact original ' +
+        'selected E2E job log receipt + attested exact-SHA Full per-ID report ' +
+        '(run ' + receipt.reused_full_run_id + '/' + receipt.reused_full_run_attempt + ')',
   });
 }
 
@@ -403,11 +461,20 @@ function arg(name, required = false) {
 }
 
 function emit() {
+  const sha = arg('sha', true);
+  const reusedRun = arg('reused-full-run');
+  const reusedAttempt = arg('reused-full-attempt');
+  if ((reusedRun && !reusedAttempt) || (!reusedRun && reusedAttempt)) {
+    throw new Error('--reused-full-run and --reused-full-attempt are required together');
+  }
   const receipt = makeE2eSelectedRunReceipt({
     env: process.env,
-    sha: arg('sha', true),
+    sha,
     selectedIds: String(arg('ids', true)).split(',').map((id) => id.trim()).filter(Boolean),
     provisions: Number(arg('provisions', true)),
+    reusedFull: reusedRun
+      ? { run_id: Number(reusedRun), run_attempt: Number(reusedAttempt), sha }
+      : null,
   });
   if (!receipt) throw new Error('selected E2E run receipt inputs are invalid');
   process.stdout.write(E2E_SELECTED_RUN_LOG_PREFIX + JSON.stringify(receipt) + '\n');
@@ -454,6 +521,31 @@ function selfTest() {
     sha, selectedIds: ['login'], provisions: 1 }), null);
 
   const reject = (fn, pattern) => assert.throws(fn, pattern);
+
+  // #2478 SC-05: reuse of the exact-SHA Full per-ID report has zero local
+  // provisions and must carry the attested Full run/attempt binding.
+  const reused = makeE2eSelectedRunReceipt({ env, sha, selectedIds: ['login'],
+    provisions: 0, reusedFull: { run_id: 77, run_attempt: 2, sha } });
+  assert.equal(reused.provisioned_runtimes, 0);
+  assert.equal(reused.reused_full_run_id, 77);
+  assert.equal(validateE2eSelectedRunReceipt(reused).reused_full_sha, sha);
+  const reusedAttested = attestE2eSelectedRunReceipt(reused, run, job);
+  assert.deepEqual(reusedAttested.reused_full, { run_id: 77, run_attempt: 2, sha });
+  assert.equal(reusedAttested.one_runtime_for_selected_run, false);
+  assert.equal(makeE2eSelectedRunReceipt({ env, sha, selectedIds: ['login'],
+    provisions: 1, reusedFull: { run_id: 77, run_attempt: 2, sha } }), null,
+  'a reused Full cannot also claim a local provision');
+  assert.equal(makeE2eSelectedRunReceipt({ env, sha, selectedIds: ['login'],
+    provisions: 0, reusedFull: { run_id: 77, run_attempt: 2, sha: 'b'.repeat(40) } }), null,
+  'reuse must bind the selected target SHA');
+  assert.equal(makeE2eSelectedRunReceipt({ env, sha, selectedIds: ['login'],
+    provisions: 0 }), null, 'zero provisions requires a Full reuse binding');
+  reject(() => validateE2eSelectedRunReceipt({ ...reused, provisioned_runtimes: 1 }),
+    /reused-Full binding/);
+  reject(() => validateE2eSelectedRunReceipt({ ...reused, reused_full_sha: 'b'.repeat(40) }),
+    /reused-Full binding/);
+  reject(() => validateE2eSelectedRunReceipt({ ...reused, reused_full_run_id: 0 }),
+    /reused-Full binding/);
   const bound = receipt;
   reject(() => attestE2eSelectedRunReceipt(bound, { ...run, head_sha: 'b'.repeat(40) }, job), /mismatch/);
   assert.equal(attestE2eSelectedRunReceipt(bound, { ...run, event:'push',head_branch:'main' }, job).event,'push');
