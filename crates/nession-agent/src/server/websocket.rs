@@ -34,7 +34,7 @@ use crate::server::execution::{
 };
 use crate::server::issued_credit::SubscriberIssuedFlow;
 use crate::server::output_ack::{OutputAckBinding, OutputAckVerdict, SubscriberOutputAck};
-use crate::session::registry::SessionRegistry;
+use crate::session::registry::{NotAttached, SessionRegistry};
 use crate::session::terminal::runtime::{
     AttachedSession, OutputChunk, SessionPeer, SubscriberEvent,
 };
@@ -2515,67 +2515,21 @@ p2p_routes! { ctx, msg_type, payload_value;
                 // holding the connection's index of sessions across it is the
                 // lock-across-await `#961-D` exists to remove.
                 let client_id = connection_client_id(ctx.client_id).await;
-                let (removed, control_notify) = {
-                    let mut sessions_guard = ctx.sessions.lock();
-                    match sessions_guard.get_mut(&payload.session_name) {
-                        Some(session) => {
-                            if !session
-                                .peers
-                                .iter()
-                                .any(|p| p.client_id == client_id)
-                            {
-                                return ctx.err(
-                                    "not_attached",
-                                    &format!(
-                                        "not attached to session: {}",
-                                        payload.session_name
-                                    ),
-                                );
-                            }
-                            let before_controller =
-                                session.control.controller_client_id.clone();
-                            session
-                                .peers
-                                .retain(|p| p.client_id != client_id);
-                            session.control.release_if_holder(&client_id);
-                            let notify = if before_controller
-                                != session.control.controller_client_id
-                            {
-                                Some((
-                                    session.peers.clone(),
-                                    TerminalControlChangedPayload {
-                                        session_name: payload.session_name.clone(),
-                                        generation: session.control.generation,
-                                        controller_client_id: session
-                                            .control
-                                            .controller_client_id
-                                            .clone(),
-                                    },
-                                ))
-                            } else {
-                                None
-                            };
-                            let removed = if session.peers.is_empty() {
-                                sessions_guard.remove(&payload.session_name)
-                            } else {
-                                None
-                            };
-                            (removed, notify)
-                        }
-                        None => {
-                            return ctx.err(
-                                "not_attached",
-                                &format!("not attached to session: {}", payload.session_name),
-                            );
-                        }
+                let detached = match ctx.sessions.detach_client(&payload.session_name, &client_id) {
+                    Ok(detached) => detached,
+                    Err(NotAttached) => {
+                        return ctx.err(
+                            "not_attached",
+                            &format!("not attached to session: {}", payload.session_name),
+                        );
                     }
                 };
 
-                if let Some((peers, changed)) = control_notify {
+                if let Some((peers, changed)) = detached.control_change {
                     notify_control_changed(&peers, changed).await;
                 }
 
-                if let Some(removed) = removed {
+                if let Some(removed) = detached.removed {
                     if let Err(e) = removed.backend.lock().await.close().await {
                         warn!("Error closing session {}: {:#}", payload.session_name, e);
                     }

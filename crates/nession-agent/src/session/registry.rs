@@ -81,6 +81,47 @@ impl SessionRegistry {
         RetiredConnection { drained, changes }
     }
 
+    /// Remove one client's subscription from one Session.
+    ///
+    /// Returns the removed attachment when this was the last subscriber, and
+    /// the control change to broadcast when the departing client held the
+    /// lease. The handler sends/closes outside this lock, as before.
+    pub(crate) fn detach_client(
+        &self,
+        session_name: &str,
+        client_id: &str,
+    ) -> Result<DetachedClient, NotAttached> {
+        let mut guard = self.lock();
+        let Some(session) = guard.get_mut(session_name) else {
+            return Err(NotAttached);
+        };
+        if !session.peers.iter().any(|peer| peer.client_id == client_id) {
+            return Err(NotAttached);
+        }
+        let before = session.control.controller_client_id.clone();
+        session.peers.retain(|peer| peer.client_id != client_id);
+        session.control.release_if_holder(client_id);
+        let control_change = (before != session.control.controller_client_id).then(|| {
+            (
+                session.peers.clone(),
+                TerminalControlChangedPayload {
+                    session_name: session_name.to_string(),
+                    generation: session.control.generation,
+                    controller_client_id: session.control.controller_client_id.clone(),
+                },
+            )
+        });
+        let removed = if session.peers.is_empty() {
+            guard.remove(session_name)
+        } else {
+            None
+        };
+        Ok(DetachedClient {
+            removed,
+            control_change,
+        })
+    }
+
     /// The transition seam for the handler arms that have not yet moved onto a
     /// registry method.
     pub(crate) fn lock(&self) -> MutexGuard<'_, SessionMap> {
@@ -103,4 +144,16 @@ pub(crate) struct RetiredConnection {
     pub drained: Vec<(String, AttachedSession)>,
     /// Control-role changes to broadcast to the remaining peers.
     pub changes: Vec<(Vec<SessionPeer>, TerminalControlChangedPayload)>,
+}
+
+/// The client was not a subscriber of the named Session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct NotAttached;
+
+/// What a detach removed.
+pub(crate) struct DetachedClient {
+    /// The attachment to close because this was the last subscriber.
+    pub removed: Option<AttachedSession>,
+    /// The control-role change to broadcast, when the lease holder left.
+    pub control_change: Option<(Vec<SessionPeer>, TerminalControlChangedPayload)>,
 }
