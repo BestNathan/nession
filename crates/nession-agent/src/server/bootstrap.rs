@@ -93,7 +93,8 @@ pub fn bound(mut capture: Vec<u8>) -> Bounded {
     }
 }
 
-/// Drop the blank screen under the last row the session wrote to.
+/// Drop the blank screen under the last row the session wrote to, but never
+/// below the row the pane's cursor is on.
 ///
 /// `capture-pane -p -S - -E -` ends at the bottom of the **visible pane**, not
 /// at the last row anything was written to, and on a shell that has not filled
@@ -116,7 +117,14 @@ pub fn bound(mut capture: Vec<u8>) -> Bounded {
 /// application left it — after `root:~# `, not on the row below — and a stream
 /// ending in a bare LF puts it on the next one, a row lower than the pane this
 /// is mirroring.
-pub fn strip_trailing_blank_rows(capture: &mut Vec<u8>) {
+///
+/// `keep_through_row` is the pane's cursor row, zero-based from the top of the
+/// capture (which is the top of the visible pane). An application can move to
+/// an empty row and pause there; trimming that row away would move the caret
+/// up with the text and the next live byte would land at a row the pane never
+/// chose (#2464). So the floor keeps every row through the cursor's own,
+/// terminator included — the caller then places the caret explicitly.
+pub fn strip_trailing_blank_rows(capture: &mut Vec<u8>, keep_through_row: Option<usize>) {
     // The index just past the last line that had something on it, its own
     // terminator excluded — so the stream ends on that line rather than below
     // it. A final line with no terminator at all is handled by the same pass.
@@ -139,6 +147,25 @@ pub fn strip_trailing_blank_rows(capture: &mut Vec<u8>) {
         if !line_is_blank(line) {
             keep = capture.len();
         }
+    }
+    if let Some(row) = keep_through_row {
+        // Keep the whole row the cursor is on, including its terminator: the
+        // row's content is what makes the coordinates mean anything. A row
+        // beyond the captured lines keeps the whole capture rather than
+        // pointing past it.
+        let mut line = 0usize;
+        let mut end = capture.len();
+        for (i, byte) in capture.iter().enumerate() {
+            if *byte != b'\n' {
+                continue;
+            }
+            if line == row {
+                end = i + 1;
+                break;
+            }
+            line += 1;
+        }
+        keep = keep.max(end);
     }
     capture.truncate(keep);
 }
@@ -217,7 +244,7 @@ pub fn as_terminal_stream(capture: &[u8]) -> Vec<u8> {
 /// carries SGR attributes and never a private mode (measured — see
 /// [`TmuxOps::pane_mode_flags`]).
 ///
-/// # Ordering, and why `?1049` is not symmetric
+/// # Ordering, and why `?1049` is a level too
 ///
 /// The result goes **before** the capture bytes, so the escape for the
 /// application's screen runs first and the capture lands on the screen it came
@@ -225,12 +252,13 @@ pub fn as_terminal_stream(capture: &[u8]) -> Vec<u8> {
 /// buffer and then hidden behind an empty alternate screen until the
 /// application happened to redraw.
 ///
-/// `?1049` is emitted only when it is **set**, and that asymmetry is
-/// deliberate: entering the alternate screen is what the application's screen
-/// requires, while leaving it is not a state a snapshot can assert — the client
-/// this is written to has just been built and has no screen to leave. Every
-/// other flag here is a level, so it is emitted in both directions, which also
-/// means a mode that is *off* is stated rather than assumed.
+/// `?1049` is emitted in **both** directions. The earlier omission assumed the
+/// client "has just been built and has no screen to leave", which is false for
+/// a reconnect that keeps its renderer: the application can leave the alternate
+/// screen while the transport is down, and a capture that never says `?1049l`
+/// leaves that retained xterm on the alternate buffer while tmux is on the
+/// normal one (#2464). On a genuinely fresh renderer `?1049l` is a no-op, so
+/// stating the level costs nothing and removes the assumption.
 ///
 /// # What is not here
 ///
@@ -258,14 +286,36 @@ pub fn mode_escapes(flags: &PaneModeFlags) -> Vec<u8> {
         out.extend_from_slice(format!("\x1b[?{mode}{}", if on { 'h' } else { 'l' }).as_bytes());
     }
     if flags.alternate {
-        // Set only — see the note on asymmetry above.
         out.extend_from_slice(b"\x1b[?1049h");
+    } else {
+        out.extend_from_slice(b"\x1b[?1049l");
     }
     // IRM is not a private mode: `CSI 4 h`, with no `?`.
     out.extend_from_slice(if flags.insert { b"\x1b[4h" } else { b"\x1b[4l" });
     // DECKPAM / DECKPNM — a two-byte sequence, not a CSI at all.
     out.extend_from_slice(if flags.keypad { b"\x1b=" } else { b"\x1b>" });
     out
+}
+
+/// Erase the destination screen and home the cursor, written **after** the mode
+/// escapes so it applies to the buffer the pane is actually on.
+///
+/// The client's own reconnect reset runs before the bootstrap bytes and
+/// therefore on whichever buffer the retained renderer was showing; if the pane
+/// is on the normal screen, that reset clears the wrong one. Repeating it here,
+/// after [`mode_escapes`] has selected the pane's screen, makes the
+/// reconstruction start from a clean correct buffer on both a fresh and a
+/// retained renderer (#2464).
+pub const SCREEN_RESET: &[u8] = b"\x1b[2J\x1b[H";
+
+/// Absolute cursor placement for the end of a screen reconstruction.
+///
+/// tmux reports `cursor_x`/`cursor_y` zero-based from the top-left of the
+/// visible pane; a terminal addresses rows and columns from 1. The caret is
+/// placed after the text so a pane that paused on an empty row comes back on
+/// that row rather than at the end of the last line written (#2464).
+pub fn cursor_escape(x: u16, y: u16) -> Vec<u8> {
+    format!("\x1b[{};{}H", u32::from(y) + 1, u32::from(x) + 1).into_bytes()
 }
 
 #[cfg(test)]
@@ -358,20 +408,24 @@ mod tests {
     }
 
     #[test]
-    fn the_alternate_screen_is_entered_but_never_left() {
+    fn the_alternate_screen_selection_is_stated_in_both_directions() {
         let entered = String::from_utf8(mode_escapes(&PaneModeFlags {
             alternate: true,
             ..quiet_pane()
         }))
         .unwrap();
         assert!(entered.contains("\x1b[?1049h"), "{entered:?}");
+        assert!(!entered.contains("\x1b[?1049l"), "{entered:?}");
 
         let not_entered = String::from_utf8(mode_escapes(&quiet_pane())).unwrap();
         assert!(
-            !not_entered.contains("1049"),
-            "a fresh client has no alternate screen to leave, and `?1049l` \
-             would clear one it might already be on: {not_entered:?}"
+            not_entered.contains("\x1b[?1049l"),
+            "a reconnect keeps its xterm, so the application can leave the \
+             alternate screen while the transport is down; a capture that never \
+             says `?1049l` leaves that renderer on the wrong buffer (#2464): \
+             {not_entered:?}"
         );
+        assert!(!not_entered.contains("\x1b[?1049h"), "{not_entered:?}");
     }
 
     #[test]
@@ -506,7 +560,7 @@ mod tests {
         // content at the top of a mostly-empty screen.
         let mut capture = b"root:~# echo hi\nhi\nroot:~# \n".to_vec();
         capture.extend(std::iter::repeat_n(b'\n', 13));
-        strip_trailing_blank_rows(&mut capture);
+        strip_trailing_blank_rows(&mut capture, None);
         assert_eq!(
             capture,
             b"root:~# echo hi\nhi\nroot:~# ".to_vec(),
@@ -520,7 +574,7 @@ mod tests {
         // Only the trailing run is geometry. A gap the session printed is a gap
         // the user asked for, and dropping it would rewrite their output.
         let mut capture = b"one\n\ntwo\n\n\n".to_vec();
-        strip_trailing_blank_rows(&mut capture);
+        strip_trailing_blank_rows(&mut capture, None);
         assert_eq!(capture, b"one\n\ntwo".to_vec());
     }
 
@@ -531,7 +585,7 @@ mod tests {
         // first time a version pads instead of trimming, so the row is judged
         // by what it would draw.
         let mut capture = b"text\n   \n\x1b[0m\n\x1b[m\t\n".to_vec();
-        strip_trailing_blank_rows(&mut capture);
+        strip_trailing_blank_rows(&mut capture, None);
         assert_eq!(
             capture,
             b"text".to_vec(),
@@ -545,7 +599,7 @@ mod tests {
         // that over-consumed an escape could call a real row blank and truncate
         // the history without saying so. The prompt wears five escapes.
         let mut capture = b"\x1b[32mroot\x1b[39m:\x1b[34m~\x1b[39m# \n\n\n".to_vec();
-        strip_trailing_blank_rows(&mut capture);
+        strip_trailing_blank_rows(&mut capture, None);
         assert_eq!(
             capture,
             b"\x1b[32mroot\x1b[39m:\x1b[34m~\x1b[39m# ".to_vec()
@@ -555,7 +609,7 @@ mod tests {
     #[test]
     fn a_capture_with_nothing_on_it_becomes_nothing() {
         let mut capture = vec![b'\n'; 41];
-        strip_trailing_blank_rows(&mut capture);
+        strip_trailing_blank_rows(&mut capture, None);
         assert!(
             capture.is_empty(),
             "a screen nobody wrote to is not a history: {:?}",
@@ -568,7 +622,41 @@ mod tests {
         // The function runs on every bootstrap, including one whose capture
         // already ends where it should. It has to be a no-op there.
         let mut capture = b"a\nb".to_vec();
-        strip_trailing_blank_rows(&mut capture);
+        strip_trailing_blank_rows(&mut capture, None);
         assert_eq!(capture, b"a\nb".to_vec());
+    }
+
+    #[test]
+    fn a_cursor_on_an_empty_row_keeps_that_row_and_its_terminator() {
+        // #2464 R1: the application moved to an empty row and paused without
+        // writing anything there. Trimming the trailing blank rows would move
+        // the caret up with the text; the floor keeps the cursor's own row so
+        // the caller's absolute cursor escape lands where the pane chose.
+        let mut capture = b"one\ntwo\n\n\n\n".to_vec();
+        strip_trailing_blank_rows(&mut capture, Some(2));
+        assert_eq!(capture, b"one\ntwo\n\n".to_vec());
+
+        // The same capture without a cursor row is the pre-#2464 stream.
+        let mut no_floor = b"one\ntwo\n\n\n\n".to_vec();
+        strip_trailing_blank_rows(&mut no_floor, None);
+        assert_eq!(no_floor, b"one\ntwo".to_vec());
+    }
+
+    #[test]
+    fn a_cursor_past_the_captured_rows_keeps_the_whole_capture() {
+        // The answer cannot point past the screen it was read beside; keeping
+        // everything is the safe reading rather than truncating at a row that
+        // does not exist.
+        let mut capture = b"one\ntwo\n".to_vec();
+        strip_trailing_blank_rows(&mut capture, Some(40));
+        assert_eq!(capture, b"one\ntwo\n".to_vec());
+    }
+
+    #[test]
+    fn the_cursor_escape_is_one_based_and_absolute() {
+        // tmux is zero-based, a terminal addresses from 1; the conversion is
+        // the whole content of this function.
+        assert_eq!(cursor_escape(0, 0), b"\x1b[1;1H".to_vec());
+        assert_eq!(cursor_escape(11, 14), b"\x1b[15;12H".to_vec());
     }
 }

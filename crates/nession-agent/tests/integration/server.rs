@@ -830,6 +830,158 @@ async fn a_plain_first_attach_sends_the_history_it_was_asked_for() {
     handle.shutdown().await.ok();
 }
 
+/// #2464 SC-01: a screen-only bootstrap restores the pane's caret.
+///
+/// The pane writes a header, moves its cursor to an empty row and blocks
+/// there. Text alone cannot express that position, so the bootstrap must carry
+/// the absolute placement the Agent read from tmux; before #2464 it ended at
+/// the last written row and the next live byte landed a row too high.
+#[tokio::test]
+async fn a_plain_bootstrap_restores_a_caret_the_pane_left_on_an_empty_row() {
+    let (addr, handle, credentials) = start_server(0).await.unwrap();
+    let tmux = SessionManager::new();
+    let session = TestSession::new("plain-caret");
+    let session_name = session.name().to_string();
+    tmux.create_session(&session_name, 80, 24, "/tmp", &[])
+        .await
+        .unwrap();
+
+    let marker = "PLAIN-CARET-MARKER";
+    // A blocking `cat` after the escape keeps a shell from redrawing its prompt
+    // at the caret: the pane is left with its cursor on an otherwise empty row
+    // while the last row anything was written to is the marker's.
+    let mut setup = String::from("sh -c 'echo ");
+    setup.push_str(marker);
+    setup.push_str("; printf \"\\033[11;6H\"; cat > /dev/null'\n");
+    TmuxDep::global()
+        .ops()
+        .send_keys(&session_name, &setup)
+        .await
+        .unwrap();
+
+    // Waited on the cursor query itself: it is the same query the bootstrap
+    // makes, so a wrong reading fails here rather than as a mysterious wire
+    // assertion.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let position = TmuxDep::global()
+            .ops()
+            .pane_cursor(&session_name)
+            .await
+            .expect("the pane cursor query works against a real tmux");
+        if position.1 >= 10 {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the fixture never parked the caret on an empty row: {position:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    let (mut sink, mut stream) = connect_for(&credentials, addr, &session_name)
+        .await
+        .unwrap();
+    let attach = new_message(
+        msg_types::CLIENT_ATTACH,
+        ClientAttachPayload {
+            session_name: session_name.clone(),
+            width: 80,
+            height: 24,
+            size_known: None,
+            env_snapshots: Vec::new(),
+            needs_bootstrap: Some(true),
+        },
+    );
+    sink.send(WsMessage::Text(serde_json::to_string(&attach).unwrap()))
+        .await
+        .unwrap();
+
+    let mut bootstrap: Option<serde_json::Value> = None;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let frame = tokio::time::timeout(Duration::from_secs(2), stream.next())
+            .await
+            .expect("timeout waiting for the attach response")
+            .expect("stream ended")
+            .expect("error reading the attach response");
+        let WsMessage::Text(text) = frame else {
+            continue;
+        };
+        let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
+        match parsed["msg_type"].as_str().unwrap_or("") {
+            msg_types::OK => break,
+            msg_types::TERMINAL_OUTPUT => {
+                if let Some(bootstrap_field) = parsed["payload"].get("bootstrap") {
+                    bootstrap = Some(serde_json::json!({
+                        "data": parsed["payload"]["data"].clone(),
+                        "bootstrap": bootstrap_field.clone(),
+                    }));
+                }
+            }
+            _ => {}
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out waiting for ok, last frames: {bootstrap:?}"
+        );
+    }
+
+    let bootstrap = bootstrap.expect("a first attach sent no bootstrap");
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(
+            bootstrap["data"]
+                .as_str()
+                .expect("bootstrap data is base64"),
+        )
+        .expect("bootstrap payload is valid base64");
+    assert!(
+        String::from_utf8_lossy(&bytes).contains(marker),
+        "the bootstrap does not carry the marker: {:?}",
+        String::from_utf8_lossy(&bytes[bytes.len().saturating_sub(120)..])
+    );
+    // The caret is read after the attach: an attach that changes the window
+    // size makes tmux clamp/reset the caret column, so the position the
+    // bootstrap must restore is the pane's **post-resize** one.
+    let (cursor_x, cursor_y) = TmuxDep::global()
+        .ops()
+        .pane_cursor(&session_name)
+        .await
+        .expect("the pane cursor still answers after the bootstrap");
+    assert!(
+        cursor_y >= 10,
+        "the attach moved the pane off the empty caret row: ({cursor_x},{cursor_y})"
+    );
+    let expected = nession_agent::server::bootstrap::cursor_escape(cursor_x, cursor_y);
+    assert!(
+        bytes
+            .windows(expected.len())
+            .any(|window| window == expected.as_slice()),
+        "the bootstrap does not place the caret at the pane's empty row \
+         ({cursor_x},{cursor_y}): {:?}",
+        String::from_utf8_lossy(&bytes[bytes.len().saturating_sub(160)..])
+    );
+    // The caret can only land there if the blank rows above it were kept —
+    // that is the trimming floor, and it is what makes the row index mean the
+    // pane's row rather than "the row after the last text".
+    let text = String::from_utf8_lossy(&bytes);
+    let breaks = text.matches("\r\n").count();
+    assert!(
+        breaks >= usize::from(cursor_y),
+        "the stream kept {breaks} line breaks but the caret row is {cursor_y}: \n{text:?}"
+    );
+    assert_eq!(
+        bootstrap["bootstrap"]["fidelity"].as_str(),
+        Some("screen-only"),
+        "a complete capture with modes and caret is a screen reconstruction, \
+         neither a full VT checkpoint nor a degraded one"
+    );
+
+    tmux.kill_session(&session_name).await.ok();
+    handle.shutdown().await.ok();
+}
+
 /// #2124 SC-01/SC-03: a Control-mode first attach's bootstrap names an atomic
 /// cut at the session stream's position 0, and the live stream starts at 1.
 ///
