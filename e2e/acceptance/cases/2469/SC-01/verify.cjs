@@ -89,7 +89,14 @@ run(({ evidence }) => {
     'cargo',
     ['check', '--manifest-path', manifest],
     300000,
-    { CARGO_TARGET_DIR: path.join(consumer, 'target') },
+    {
+      CARGO_TARGET_DIR: path.join(consumer, 'target'),
+      // The workspace's lint policy is not the consumer's: this is a
+      // third-party build. Its dependencies resolve independently, and a
+      // deprecation in the newest compatible crate (not a compile error) must
+      // not be reported as "does not build outside the workspace".
+      RUSTFLAGS: '',
+    },
   );
 
   // The public API documentation must build with warnings denied; broken

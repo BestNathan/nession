@@ -11,9 +11,17 @@
 //   - the Relay only mints a subscription proof from an Agent-attested pair and
 //     carries the Agent's control lease;
 //   - the bootstrap capture and live stream join exactly.
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const {
   run, targetSha, checked, cargoTests, assertRan, tmuxVersion,
 } = require('../../../shared/control-mode-cases.cjs');
+
+// Own the Agent's process-wide tmux socket: lazy resolution does not create
+// the directory, and the Acceptance runner's home need not have one.
+const tmuxDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nession-2469-sc08-'));
+const tmuxEnv = { NESSION_TMUX_SOCKET: path.join(tmuxDir, 'tmux.sock') };
 
 run(({ evidence }) => {
   const sha = targetSha();
@@ -23,6 +31,7 @@ run(({ evidence }) => {
     'cargo',
     ['test', '-p', 'nession-server', '--lib', 'server::websocket::tests', '--', '--nocapture'],
     300000,
+    tmuxEnv,
   );
   assertRan(server, [
     'a_merged_burst_states_the_range_it_covers',
@@ -37,6 +46,7 @@ run(({ evidence }) => {
   const bounded = cargoTests(
     ['--lib', 'server::websocket::tests::a_stalled_fan_out_does_not_hold_the_session_backend'],
     300000,
+    tmuxEnv,
   );
   assertRan(bounded, [
     'server::websocket::tests::a_stalled_fan_out_does_not_hold_the_session_backend',
@@ -50,6 +60,7 @@ run(({ evidence }) => {
       '--', '--nocapture',
     ],
     300000,
+    tmuxEnv,
   );
   assertRan(slow, [
     'websocket::a_client_that_stops_reading_parks_dispatch_and_loses_nothing',
@@ -58,24 +69,28 @@ run(({ evidence }) => {
   const order = cargoTests(
     ['--test', 'integration', 'server::a_sessions_frames_are_applied_in_order'],
     300000,
+    tmuxEnv,
   );
   assertRan(order, ['server::a_sessions_frames_are_applied_in_order']);
 
   const resumable = cargoTests(
     ['--test', 'integration', 'server::a_resume_states_its_window_and_whether_it_is_complete'],
     300000,
+    tmuxEnv,
   );
   assertRan(resumable, ['server::a_resume_states_its_window_and_whether_it_is_complete']);
 
   const reconciled = cargoTests(
     ['--test', 'integration', 'server::integration_input_ack_reconciles_on_reattach'],
     300000,
+    tmuxEnv,
   );
   assertRan(reconciled, ['server::integration_input_ack_reconciles_on_reattach']);
 
   const cut = cargoTests(
     ['--test', 'integration', 'control_mode::the_bootstrap_capture_and_the_live_stream_join_exactly'],
     300000,
+    tmuxEnv,
   );
   assertRan(cut, ['control_mode::the_bootstrap_capture_and_the_live_stream_join_exactly']);
 
