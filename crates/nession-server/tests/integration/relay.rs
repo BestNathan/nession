@@ -139,7 +139,7 @@ async fn start_agent(
             resize,
             credentials: Arc::clone(&credentials),
             mutations: Arc::clone(&mutations),
-            memory_threshold_percent: None,
+            tmux: Arc::new(SessionManager::new()),
         },
     )?;
 
@@ -522,7 +522,7 @@ async fn relay_attach_and_terminal_io() {
     // 3b. Start heartbeat loop so the server keeps the agent Online.
     let heartbeat = HeartbeatLoop::new(
         client_handle.clone(),
-        SessionManager::new(),
+        Arc::new(SessionManager::new()),
         1, // 1s interval for fast test
     );
     let heartbeat_shutdown = heartbeat.shutdown_handle();
@@ -533,7 +533,7 @@ async fn relay_attach_and_terminal_io() {
     // 3c. Start session watcher so the tmux session syncs to the server.
     let watcher = SessionWatcher::new(
         client_handle.clone(),
-        SessionManager::new(),
+        Arc::new(SessionManager::new()),
         1, // 1s poll for fast test
     );
     let watcher_shutdown = watcher.shutdown_handle();
@@ -716,13 +716,13 @@ async fn relay_carries_the_input_ack_to_the_browser() {
     .await
     .unwrap();
 
-    let heartbeat = HeartbeatLoop::new(client_handle.clone(), SessionManager::new(), 1);
+    let heartbeat = HeartbeatLoop::new(client_handle.clone(), Arc::new(SessionManager::new()), 1);
     let heartbeat_shutdown = heartbeat.shutdown_handle();
     tokio::spawn(async move {
         let _ = heartbeat.run().await;
     });
 
-    let watcher = SessionWatcher::new(client_handle.clone(), SessionManager::new(), 1);
+    let watcher = SessionWatcher::new(client_handle.clone(), Arc::new(SessionManager::new()), 1);
     let watcher_shutdown = watcher.shutdown_handle();
     tokio::spawn(async move {
         let _ = watcher.run().await;
@@ -922,13 +922,13 @@ async fn relay_binds_the_browser_identity_to_the_agent_connection() {
     .await
     .unwrap();
 
-    let heartbeat = HeartbeatLoop::new(client_handle.clone(), SessionManager::new(), 1);
+    let heartbeat = HeartbeatLoop::new(client_handle.clone(), Arc::new(SessionManager::new()), 1);
     let heartbeat_shutdown = heartbeat.shutdown_handle();
     tokio::spawn(async move {
         let _ = heartbeat.run().await;
     });
 
-    let watcher = SessionWatcher::new(client_handle.clone(), SessionManager::new(), 1);
+    let watcher = SessionWatcher::new(client_handle.clone(), Arc::new(SessionManager::new()), 1);
     let watcher_shutdown = watcher.shutdown_handle();
     tokio::spawn(async move {
         let _ = watcher.run().await;
@@ -1117,13 +1117,13 @@ async fn relay_output_applied_ack_is_admitted_only_for_the_agent_minted_subscrip
     .await
     .unwrap();
 
-    let heartbeat = HeartbeatLoop::new(client_handle.clone(), SessionManager::new(), 1);
+    let heartbeat = HeartbeatLoop::new(client_handle.clone(), Arc::new(SessionManager::new()), 1);
     let heartbeat_shutdown = heartbeat.shutdown_handle();
     tokio::spawn(async move {
         let _ = heartbeat.run().await;
     });
 
-    let watcher = SessionWatcher::new(client_handle.clone(), SessionManager::new(), 1);
+    let watcher = SessionWatcher::new(client_handle.clone(), Arc::new(SessionManager::new()), 1);
     let watcher_shutdown = watcher.shutdown_handle();
     tokio::spawn(async move {
         let _ = watcher.run().await;
@@ -1539,12 +1539,12 @@ async fn p2p_and_relay_observe_one_agent_stream_timeline() -> anyhow::Result<()>
     )
     .await?;
 
-    let heartbeat = HeartbeatLoop::new(client_handle.clone(), SessionManager::new(), 1);
+    let heartbeat = HeartbeatLoop::new(client_handle.clone(), Arc::new(SessionManager::new()), 1);
     let heartbeat_shutdown = heartbeat.shutdown_handle();
     tokio::spawn(async move {
         let _ = heartbeat.run().await;
     });
-    let watcher = SessionWatcher::new(client_handle.clone(), SessionManager::new(), 1);
+    let watcher = SessionWatcher::new(client_handle.clone(), Arc::new(SessionManager::new()), 1);
     let watcher_shutdown = watcher.shutdown_handle();
     tokio::spawn(async move {
         let _ = watcher.run().await;

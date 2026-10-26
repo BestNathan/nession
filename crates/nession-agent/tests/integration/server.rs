@@ -73,7 +73,7 @@ async fn start_server_in_mode(
             resize,
             credentials: Arc::clone(&credentials),
             mutations: nession_agent::execution::mutation_scheduler(),
-            memory_threshold_percent: None,
+            tmux: Arc::new(SessionManager::new()),
         },
     )?;
     let (handle, addr) = server.start().await?;
@@ -1016,11 +1016,12 @@ async fn a_bootstrap_trim_keeps_history_above_the_visible_pane() {
         .await
         .expect("the window can be made short");
 
-    let mut setup = String::from("sh -c '");
-    for i in 1..=20 {
-        setup.push_str(&format!("echo TRIM-{i:02}; "));
-    }
-    setup.push_str("cat > /dev/null'\n");
+    // A short command whose *output* is the twenty lines. Spelling twenty
+    // `echo` calls on one line makes the shell's command echo longer than the
+    // pane, and the wrap can split a marker across grid lines; it also puts
+    // `TRIM-20` in that echo, so waiting for it would no longer wait for the
+    // output at all.
+    let setup = "sh -c 'seq -f TRIM-%02g 1 20; cat > /dev/null'\n".to_string();
     TmuxDep::global()
         .ops()
         .send_keys(&session_name, &setup)
@@ -2056,7 +2057,7 @@ async fn start_server_with_file_root() -> anyhow::Result<(
             resize,
             credentials: Arc::clone(&credentials),
             mutations: nession_agent::execution::mutation_scheduler(),
-            memory_threshold_percent: None,
+            tmux: Arc::new(SessionManager::new()),
         },
     )?;
     let (handle, addr) = server.start().await?;
