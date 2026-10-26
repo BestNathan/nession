@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "e0a9b2f48fd0077e3681288a48f5a80b2aaae549b7bd22ae42535f2d478dfb6b",
+  "run_id": 40379623077,
+  "run_attempt": 1,
+  "issue": 2469,
+  "criterion": "SC-06",
+  "criterion_text": "Last subscriber removal, reconnect, backend replacement, Agent shutdown and Session kill each have distinct generation-safe cleanup; no unintended tmux Session termination, hidden leak, false stream continuity or old forwarder writing into a new attachment.",
+  "stage": "staging",
+  "target_sha": "8461ea4c3a90a33ce7ad1048fd91fccee31dde11",
+  "contract_sha256": "668ab9684492c450c331beafbac53caddad4ed082eebd29df11dc7dfa9d00430",
+  "case_revision": "8461ea4c3a90a33ce7ad1048fd91fccee31dde11",
+  "case_tree_sha": "aa00b14a4539d453609c72fe789ac9d5c7b94c4b",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-26T18:41:59.674Z",
+  "finished_at": "2026-10-26T18:42:15.820Z",
+  "duration_ms": 16146,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Session kill, source loss and shutdown each retire their generation; no stale producer can enter a successor attachment",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 8461ea4c3a90a33ce7ad1048fd91fccee31dde11 on tmux 3.6: a retired generation's producer was refused, a killed Session and a plain-PTY EOF each retired the attachment and handed the reconnect a fresh stream generation"
+        },
+        {
+          "type": "runtime",
+          "value": "process shutdown closed every attached backend; the retirements closed their tmux clients rather than leaking them"
+        }
+      ],
+      "duration_ms": 10300,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40379623077,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "8461ea4c3a90a33ce7ad1048fd91fccee31dde11",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40379623077",
+    "record_path": "runs/2026-10-26/40379623077-1/2469/SC-06.json",
+    "source_result_sha256": "b91e09dc8b2085c9703c76672c8fce46217d7a06697099060228e02380ab6313"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40379623077-1",
+    "sha256": "b91e09dc8b2085c9703c76672c8fce46217d7a06697099060228e02380ab6313",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40379623077",
+    "durability": "time-limited; object archival not configured"
+  }
+}

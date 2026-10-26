@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "37b5ceaa8dc61cdd218d4de872193dac2429c6f2d8e2c5a715d3b3e0ddd84122",
+  "run_id": 40379623077,
+  "run_attempt": 1,
+  "issue": 2469,
+  "criterion": "SC-08",
+  "criterion_text": "Under output bursts, slow observers, bootstrap and P2P↔Relay route changes, subscribers share one Agent stream timeline and truthful applied-ACK/replay/checkpoint semantics; memory/queues remain bounded and a healthy observer is not stalled by another peer.",
+  "stage": "staging",
+  "target_sha": "8461ea4c3a90a33ce7ad1048fd91fccee31dde11",
+  "contract_sha256": "668ab9684492c450c331beafbac53caddad4ed082eebd29df11dc7dfa9d00430",
+  "case_revision": "8461ea4c3a90a33ce7ad1048fd91fccee31dde11",
+  "case_tree_sha": "fa8e544f1525773852546087ac15ead6dd92a2bc",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-26T18:42:23.827Z",
+  "finished_at": "2026-10-26T18:42:59.759Z",
+  "duration_ms": 35932,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Subscribers share one bounded Agent stream timeline under bursts, slow peers and Relay route changes, with truthful replay/ACK and checkpoint semantics",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 8461ea4c3a90a33ce7ad1048fd91fccee31dde11 on tmux 3.6: bursts merged into one sequenced stream or were forwarded whole on a hole/unmergeable/unsequenced frame"
+        },
+        {
+          "type": "runtime",
+          "value": "a stopped reader was detached without parking the session backend or a healthy peer; frames stayed ordered"
+        },
+        {
+          "type": "runtime",
+          "value": "resume stated its window/completeness, input ACK reconciled on reattach, the bootstrap joined the live stream exactly, and Relay proofs came only from Agent-attested pairs carrying the lease"
+        }
+      ],
+      "duration_ms": 30085,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40379623077,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "8461ea4c3a90a33ce7ad1048fd91fccee31dde11",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40379623077",
+    "record_path": "runs/2026-10-26/40379623077-1/2469/SC-08.json",
+    "source_result_sha256": "9bc2e67d99db3a5b5178a5bbfea835f0cc66210a4aa082bbecf15061d8cf83f9"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40379623077-1",
+    "sha256": "9bc2e67d99db3a5b5178a5bbfea835f0cc66210a4aa082bbecf15061d8cf83f9",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40379623077",
+    "durability": "time-limited; object archival not configured"
+  }
+}

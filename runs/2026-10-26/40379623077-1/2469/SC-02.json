@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "d41632e85f64d5b5da1609902acde0b054c31b8e5d059898b05af3cd552a873d",
+  "run_id": 40379623077,
+  "run_attempt": 1,
+  "issue": 2469,
+  "criterion": "SC-02",
+  "criterion_text": "A real isolated tmux server can be created/listed/managed before attach and interacted with afterward through typed SDK APIs; every tmux process/command in Nession production paths goes through the SDK and continues explicit private-socket isolation without a raw-spawn bypass.",
+  "stage": "staging",
+  "target_sha": "8461ea4c3a90a33ce7ad1048fd91fccee31dde11",
+  "contract_sha256": "668ab9684492c450c331beafbac53caddad4ed082eebd29df11dc7dfa9d00430",
+  "case_revision": "8461ea4c3a90a33ce7ad1048fd91fccee31dde11",
+  "case_tree_sha": "0206431b81e92d23d326156c083053c9f914d319",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-26T18:41:23.111Z",
+  "finished_at": "2026-10-26T18:41:44.414Z",
+  "duration_ms": 21303,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Every production tmux command is owned by nession-tmux and the typed admin API manages a real isolated server end to end",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 8461ea4c3a90a33ce7ad1048fd91fccee31dde11 on tmux 3.6: the typed SDK created a session on one real isolated socket, listed it, proved its environment reached the shell, and killed it"
+        },
+        {
+          "type": "static",
+          "value": "the tmux socket-isolation gate found no process construction or tmux invocation outside the SDK owner; the Agent manager drove the same typed operations"
+        }
+      ],
+      "duration_ms": 15456,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40379623077,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "8461ea4c3a90a33ce7ad1048fd91fccee31dde11",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40379623077",
+    "record_path": "runs/2026-10-26/40379623077-1/2469/SC-02.json",
+    "source_result_sha256": "380a0c4822bdde4db54a0340b91cd9ae2be0644451069ae8f7fb696f20d2a952"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40379623077-1",
+    "sha256": "380a0c4822bdde4db54a0340b91cd9ae2be0644451069ae8f7fb696f20d2a952",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40379623077",
+    "durability": "time-limited; object archival not configured"
+  }
+}

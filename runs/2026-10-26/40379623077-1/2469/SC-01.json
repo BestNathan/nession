@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "65f9d3bcfc8f68f3a769e977f7e4d81f3c8efd22ea72e520a2b7a9d0ca4e3daa",
+  "run_id": 40379623077,
+  "run_attempt": 1,
+  "issue": 2469,
+  "criterion": "SC-01",
+  "criterion_text": "nession-tmux builds, tests and documents as a standalone reusable Rust library (including packaged/external-consumer fixture); its dependency graph, code, and test support contain no Nession business crate/DTO or Agent-only initialization.",
+  "stage": "staging",
+  "target_sha": "8461ea4c3a90a33ce7ad1048fd91fccee31dde11",
+  "contract_sha256": "668ab9684492c450c331beafbac53caddad4ed082eebd29df11dc7dfa9d00430",
+  "case_revision": "8461ea4c3a90a33ce7ad1048fd91fccee31dde11",
+  "case_tree_sha": "cd640998029898e0997a0aa80e471806dbc767de",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-26T18:40:58.457Z",
+  "finished_at": "2026-10-26T18:41:23.110Z",
+  "duration_ms": 24653,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "nession-tmux packages and builds for an external consumer, with no Nession crate, DTO or Agent initialization in its graph or source",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 8461ea4c3a90a33ce7ad1048fd91fccee31dde11: `cargo test -p nession-tmux` passed its in-memory wire, fake-process and real isolated-tmux tests with no Agent initialization"
+        },
+        {
+          "type": "dependency",
+          "value": "the packaged dependency graph for nession-tmux names no nession-* crate; the manifest/source independence checks ran in the same test binary"
+        },
+        {
+          "type": "test",
+          "value": "README.md and examples/attach_watch.rs are present and the example compiles as part of `cargo test -p nession-tmux`"
+        },
+        {
+          "type": "build",
+          "value": "cargo package produced nession-tmux-0.1.0.crate and a consumer crate outside the workspace, depending on the extracted package, built TmuxCommand + TmuxOps with its own binary and absolute socket"
+        },
+        {
+          "type": "static",
+          "value": "the public API documentation built with RUSTDOCFLAGS=-D warnings, so no intra-doc link points at an Agent-only or private owner"
+        }
+      ],
+      "duration_ms": 18763,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40379623077,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "8461ea4c3a90a33ce7ad1048fd91fccee31dde11",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40379623077",
+    "record_path": "runs/2026-10-26/40379623077-1/2469/SC-01.json",
+    "source_result_sha256": "db9ddde3c277cb304a875e70885d8fae4a0418acdaf9edbc45758b5107586330"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40379623077-1",
+    "sha256": "db9ddde3c277cb304a875e70885d8fae4a0418acdaf9edbc45758b5107586330",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40379623077",
+    "durability": "time-limited; object archival not configured"
+  }
+}

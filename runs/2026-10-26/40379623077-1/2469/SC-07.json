@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "cd0ed131a87c2b1b9d342d25f0ff1c0a9a1731c8b31456912caf379a327b482d",
+  "run_id": 40379623077,
+  "run_attempt": 1,
+  "issue": 2469,
+  "criterion": "SC-07",
+  "criterion_text": "Same-origin browser tabs and separate devices independently subscribe and receive broadcast; only the most recently meaningfully active authorized peer controls input/resize, A→B→A takeover fences stale frames/cleanup and passive reconnect does not take over.",
+  "stage": "staging",
+  "target_sha": "8461ea4c3a90a33ce7ad1048fd91fccee31dde11",
+  "contract_sha256": "668ab9684492c450c331beafbac53caddad4ed082eebd29df11dc7dfa9d00430",
+  "case_revision": "8461ea4c3a90a33ce7ad1048fd91fccee31dde11",
+  "case_tree_sha": "e8333bfbd4fc9254d73d3c6f1c3cf3319e706a02",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-26T18:42:15.821Z",
+  "finished_at": "2026-10-26T18:42:23.826Z",
+  "duration_ms": 8005,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Same-origin tabs subscribe and receive broadcast independently, and only the most recently active subscription controls input/resize",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 8461ea4c3a90a33ce7ad1048fd91fccee31dde11 on tmux 3.6: two subscriptions sharing one browser client id both received output; the second was an observer until it explicitly acquired, and the replaced controller's frame was refused as not_controller"
+        },
+        {
+          "type": "runtime",
+          "value": "a passive reconnect kept the observer role; A -> B -> A advanced the generation and fenced B's stale input"
+        }
+      ],
+      "duration_ms": 2158,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40379623077,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "8461ea4c3a90a33ce7ad1048fd91fccee31dde11",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40379623077",
+    "record_path": "runs/2026-10-26/40379623077-1/2469/SC-07.json",
+    "source_result_sha256": "a15c3ed48c1e93eeb1f3a03d848d16ee60f56553def7eadb89b6208f1c61d826"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40379623077-1",
+    "sha256": "a15c3ed48c1e93eeb1f3a03d848d16ee60f56553def7eadb89b6208f1c61d826",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40379623077",
+    "durability": "time-limited; object archival not configured"
+  }
+}

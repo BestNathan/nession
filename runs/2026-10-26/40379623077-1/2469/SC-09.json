@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "cae866052fcd602bffac61bb69ca4d0968d9ad964981d7c353b364bb17caf132",
+  "run_id": 40379623077,
+  "run_attempt": 1,
+  "issue": 2469,
+  "criterion": "SC-09",
+  "criterion_text": "Import/ownership/socket/protocol guards and documented owner paths detect new illicit SDK→Nession dependencies, raw tmux spawns, unauthorized state mutation or incompatible wire changes, without weakening established quality gates.",
+  "stage": "staging",
+  "target_sha": "8461ea4c3a90a33ce7ad1048fd91fccee31dde11",
+  "contract_sha256": "668ab9684492c450c331beafbac53caddad4ed082eebd29df11dc7dfa9d00430",
+  "case_revision": "8461ea4c3a90a33ce7ad1048fd91fccee31dde11",
+  "case_tree_sha": "2e3416a13cd87f5e27df26223b26b7fae99ef994",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-26T18:42:59.759Z",
+  "finished_at": "2026-10-26T18:43:51.162Z",
+  "duration_ms": 51403,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Import, ownership, socket and protocol guards detect planted violations, keep their negative fixtures, and the documented owner paths resolve",
+      "evidence": [
+        {
+          "type": "static",
+          "value": "exact SHA 8461ea4c3a90a33ce7ad1048fd91fccee31dde11: tmux socket/ownership, protocol-integrity, handler-locality and detector-coverage selftests each ran their negative fixture"
+        },
+        {
+          "type": "static",
+          "value": "the live tmux-socket, protocol and handler-locality guards passed; the gate router definitions validated"
+        },
+        {
+          "type": "test",
+          "value": "the SDK independence guard caught a planted Nession dependency and source reference, and the documented owner paths exist"
+        }
+      ],
+      "duration_ms": 45555,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40379623077,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "8461ea4c3a90a33ce7ad1048fd91fccee31dde11",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40379623077",
+    "record_path": "runs/2026-10-26/40379623077-1/2469/SC-09.json",
+    "source_result_sha256": "f07bb3b69eca43350e6074c837e1f053ec2812bf2aa4bc3e5b357e185e03dec3"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40379623077-1",
+    "sha256": "f07bb3b69eca43350e6074c837e1f053ec2812bf2aa4bc3e5b357e185e03dec3",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40379623077",
+    "durability": "time-limited; object archival not configured"
+  }
+}
