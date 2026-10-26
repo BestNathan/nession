@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_projection_receipt",
+  "outcome": "applied",
+  "issue": 2470,
+  "run_id": 40276077477,
+  "run_attempt": 2,
+  "target_sha": "a5b55235a69775a503866cdf804aba6e6505dc20",
+  "plan_digest": "f795a4b2d7100c45d131ef7eccd2f5995f4bee84c04ebd9a878774d3cb050651",
+  "artifact_digest": "sha256:65bd6b4ecc9280b8d0329f0e4bd185423c36a662046fc1d76ffc45ebbecbcb6d",
+  "ingest_run_id": 40276897462,
+  "ingest_attempt": 1,
+  "declaration_digest": "fa36d27f269bfe5e7b904780d7b149e693ee42c182355b398cf5590f524c8dcd",
+  "before_body_sha256": "31300f0b990c7166d242ccf0cdc3d4f8afb3473fd1bf886e1e95e455848e0e71",
+  "body_sha256": "f9ed4365a1975b0143203cc66cb32f4cb1d3f4bf11d0ba7fea77a37a092ed8d6",
+  "readback_body": "## Requirements: run the browser E2E suite with file-level parallelism\n\nThe full browser suite currently runs with `workers: 1` and `fullyParallel: false`, so independent spec files execute one after another. Measured on the pinned ubuntu-24.04 image (2026-10-26), the full-suite `workflow_dispatch` takes 11m21s of job time (9m46s in `Run E2E tests`) for 34 file IDs / 267 tests, with 61% of the Playwright time in `terminal-consistency-faults.spec.ts` alone.\n\nA source-identical two-worker run (same event, same image, same catalog, config change only) completes in 8m17s (6m16s in `Run E2E tests`) with **zero failed, skipped or flaky** tests — see #2205 for the evidence and the earlier ubuntu-26.04 arm. File-level parallelism therefore reduces PR feedback time without touching test semantics or the intentional 120s stalled-observer case.\n\nThis delivers only the worker-count change. It does not change required checks, does not add/remove E2E IDs, and does not split the dominant spec file (the next lever, tracked in #2205).\n\n### Success Criteria\n\n- [ ] SC-01 The exact PR head's selected E2E run executes the declared regression spec together with the coalesced browser-design IDs under `workers: 2` on the pinned ubuntu-24.04 image, with zero failed, skipped or flaky tests, and a measured `Run E2E tests` step shorter than the workers=1 baseline measured on the same image.\n\n## Acceptance Plan\n\n```yaml\nacceptance:\n  SC-01:\n    when: pr\n    method: agent\n```\n\n## Acceptance Report\n\n| Criterion | Result | Evidence |\n|---|---|---|\n| SC-01 | Pending | awaiting the exact PR head's selected E2E run under workers=2 |\n\n## E2E Verification\n\n### New\n- none: no new browser test; this changes scheduling of the existing catalog.\n\n### Regression\n- terminal-consistency-faults\n\n## E2E Report\n\n| ID | Type | Result | Evidence |\n|---|---|---|---|\n| terminal-consistency-faults | Regression | Pass | run 40276077477/2, SHA a5b55235a69775a503866cdf804aba6e6505dc20, contract fa36d27f269bfe5e7b904780d7b149e693ee42c182355b398cf5590f524c8dcd, plan f795a4b2d7100c45d131ef7eccd2f5995f4bee84c04ebd9a878774d3cb050651, tests 14/14 (https://github.com/BestNathan/nession/actions/runs/40276077477) |\n\n## Product alignment\n\n- [x] Moves toward VISION.md by shortening the PR feedback loop without weakening verification.\n- [x] Obeys PRINCIPLE.md: one owner (Playwright config) and no duplicated selection policy.\n- [x] No design-source change.\n\n",
+  "patch_updated_at": "2026-10-26T05:56:04Z",
+  "readback_updated_at": "2026-10-26T05:56:04Z",
+  "rows": [
+    {
+      "id": "terminal-consistency-faults",
+      "result": "Pass",
+      "evidence": "run 40276077477/2, SHA a5b55235a69775a503866cdf804aba6e6505dc20, contract fa36d27f269bfe5e7b904780d7b149e693ee42c182355b398cf5590f524c8dcd, plan f795a4b2d7100c45d131ef7eccd2f5995f4bee84c04ebd9a878774d3cb050651, tests 14/14 (https://github.com/BestNathan/nession/actions/runs/40276077477)"
+    }
+  ]
+}
