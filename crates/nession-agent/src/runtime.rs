@@ -182,6 +182,12 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
     }
 
     let (resize, mut resize_updates) = crate::server::ResizeReporter::new();
+    let tmux_for_client = {
+        let mut mgr = SessionManager::new();
+        mgr.with_memory_threshold(Some(config.memory_threshold_percent));
+        Arc::new(mgr)
+    };
+
     let agent_server = AgentServer::new(
         &config.listen_address,
         &agent_id,
@@ -196,7 +202,7 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
             // name are built — one tmux server, one file sandbox — and handed
             // to *both* mutating paths below (#1021).
             mutations: Arc::clone(&mutation_lane),
-            memory_threshold_percent: Some(config.memory_threshold_percent),
+            tmux: Arc::clone(&tmux_for_client),
         },
     )
     .context("failed to create agent server")?;
@@ -239,12 +245,6 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
         image_tag: option_env!("IMAGE_TAG").unwrap_or("dev").to_string(),
     };
 
-    let tmux_for_client = {
-        let mut mgr = SessionManager::new();
-        mgr.with_memory_threshold(Some(config.memory_threshold_percent));
-        Arc::new(mgr)
-    };
-
     // Before any session can exist, and before the server connection, so a
     // standalone agent installs it too.
     install_claude_integration().await;
@@ -278,7 +278,7 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
             addresses,
             config.display_name.clone(),
             metadata,
-            tmux_for_client,
+            Arc::clone(&tmux_for_client),
             config.default_working_dir.clone(),
             Some(ext_registry),
             Arc::clone(&p2p_credentials),
@@ -339,7 +339,7 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
     let heartbeat_shutdown = if let Some(ref handle) = client_handle {
         let heartbeat = HeartbeatLoop::new(
             handle.clone(),
-            SessionManager::new(),
+            Arc::clone(&tmux_for_client),
             heartbeat_interval_secs,
         );
         let shutdown_handle = heartbeat.shutdown_handle();
@@ -361,7 +361,7 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
     let watcher_shutdown = if let Some(ref handle) = client_handle {
         let watcher = SessionWatcher::new(
             handle.clone(),
-            SessionManager::new(),
+            Arc::clone(&tmux_for_client),
             config.session_poll_interval_secs,
         );
         let shutdown_handle = watcher.shutdown_handle();
@@ -381,11 +381,10 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
 
     // 8. Git repository invalidation watcher (#1008).
     let git_invalidation_shutdown = if let Some(ref handle) = client_handle {
-        let tmux_for_git = Arc::new(SessionManager::new());
-        let resolve = Arc::new(TmuxWorkdirResolver::new(Arc::clone(&tmux_for_git)));
+        let resolve = Arc::new(TmuxWorkdirResolver::new(Arc::clone(&tmux_for_client)));
         let watcher = GitInvalidationWatcher::new(
             handle.clone(),
-            SessionManager::new(),
+            Arc::clone(&tmux_for_client),
             resolve,
             config.session_poll_interval_secs,
         );

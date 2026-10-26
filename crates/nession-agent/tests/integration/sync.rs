@@ -109,7 +109,7 @@ async fn test_heartbeat_loop_sends_heartbeat() {
     // Create heartbeat loop with 1-second interval.
     let tmux = SessionManager::new();
     let loop_handle = {
-        let hl = HeartbeatLoop::new(handle.clone(), tmux, 1);
+        let hl = HeartbeatLoop::new(handle.clone(), Arc::new(tmux), 1);
         let shutdown = hl.shutdown_handle();
         tokio::spawn(hl.run());
         shutdown
@@ -147,7 +147,7 @@ async fn test_heartbeat_loop_respects_interval() {
     // Create heartbeat loop with 2-second interval.
     let tmux = SessionManager::new();
     let shutdown = {
-        let hl = HeartbeatLoop::new(handle.clone(), tmux, 2);
+        let hl = HeartbeatLoop::new(handle.clone(), Arc::new(tmux), 2);
         let sd = hl.shutdown_handle();
         tokio::spawn(hl.run());
         sd
@@ -193,7 +193,7 @@ async fn test_heartbeat_loop_shutdown() {
     // Use a long interval so we can verify shutdown stops the loop promptly.
     let tmux = SessionManager::new();
     let (shutdown, task) = {
-        let hl = HeartbeatLoop::new(handle.clone(), tmux, 60);
+        let hl = HeartbeatLoop::new(handle.clone(), Arc::new(tmux), 60);
         let sd = hl.shutdown_handle();
         let t = tokio::spawn(hl.run());
         (sd, t)
@@ -234,7 +234,7 @@ async fn test_session_watcher_detects_new_session() {
         .expect("failed to create tmux session");
 
     let shutdown = {
-        let sw = SessionWatcher::new(handle.clone(), SessionManager::new(), 1);
+        let sw = SessionWatcher::new(handle.clone(), Arc::new(SessionManager::new()), 1);
         let sd = sw.shutdown_handle();
         tokio::spawn(sw.run());
         sd
@@ -287,7 +287,7 @@ async fn test_session_watcher_detects_removed_session() {
         .expect("failed to create tmux session");
 
     let shutdown = {
-        let sw = SessionWatcher::new(handle.clone(), SessionManager::new(), 1);
+        let sw = SessionWatcher::new(handle.clone(), Arc::new(SessionManager::new()), 1);
         let sd = sw.shutdown_handle();
         tokio::spawn(sw.run());
         sd

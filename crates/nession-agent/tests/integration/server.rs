@@ -73,7 +73,7 @@ async fn start_server_in_mode(
             resize,
             credentials: Arc::clone(&credentials),
             mutations: nession_agent::execution::mutation_scheduler(),
-            memory_threshold_percent: None,
+            tmux: Arc::new(SessionManager::new()),
         },
     )?;
     let (handle, addr) = server.start().await?;
@@ -2056,7 +2056,7 @@ async fn start_server_with_file_root() -> anyhow::Result<(
             resize,
             credentials: Arc::clone(&credentials),
             mutations: nession_agent::execution::mutation_scheduler(),
-            memory_threshold_percent: None,
+            tmux: Arc::new(SessionManager::new()),
         },
     )?;
     let (handle, addr) = server.start().await?;

@@ -1355,14 +1355,18 @@ pub struct AgentServerContext {
     /// context rather than being built here is the fix: this object used to mint
     /// its own, which is precisely why the two paths could interleave.
     pub mutations: Arc<KeyedLane<ResourceKey>>,
-    /// Memory threshold percentage (0-100) for rejecting new sessions.
-    /// Passed to the `SessionManager` so `create_session` can check memory
-    /// pressure before starting a new tmux session.
-    pub memory_threshold_percent: Option<u8>,
+    /// The Agent's one SessionManager (#2469 slice 3).
+    ///
+    /// Built by `runtime.rs` with the memory threshold applied and shared by
+    /// every entrypoint — this listener, the central connection, the
+    /// heartbeat, the session watcher and the git invalidation watcher. A
+    /// second construction site would be a second, independently configured
+    /// owner of the same tmux server.
+    pub tmux: Arc<SessionManager>,
 }
 
 pub struct AgentServer {
-    tmux_manager: SessionManager,
+    tmux_manager: Arc<SessionManager>,
     /// Agent-wide P2P lease, retained terminal history and peer fan-out.
     sessions: Arc<SessionMapLock>,
     file_ops: Arc<FileOps>,
@@ -3425,8 +3429,7 @@ impl AgentServer {
             .context("failed to create file sandbox")?;
         let file_ops = Arc::new(crate::fs::ops::FileOps::new(sandbox));
 
-        let mut tmux_manager = SessionManager::new();
-        tmux_manager.with_memory_threshold(context.memory_threshold_percent);
+        let tmux_manager = Arc::clone(&context.tmux);
 
         Ok(Self {
             tmux_manager,
@@ -3467,7 +3470,7 @@ impl AgentServer {
             shutdown_tx: self.shutdown_tx.clone(),
         };
 
-        let tmux_manager = Arc::new(self.tmux_manager);
+        let tmux_manager = Arc::clone(&self.tmux_manager);
         let sessions = Arc::clone(&self.sessions);
         let file_ops = Arc::clone(&self.file_ops);
         let mutations = Arc::clone(&self.mutations);
@@ -4795,7 +4798,7 @@ mod tests {
                 resize,
                 credentials: Arc::clone(&credentials),
                 mutations: crate::execution::mutation_scheduler(),
-                memory_threshold_percent: None,
+                tmux: Arc::new(SessionManager::new()),
             },
         )
         .expect("server creation should succeed");
@@ -4910,7 +4913,7 @@ mod tests {
                 resize,
                 credentials: Arc::new(P2pCredentials::new()),
                 mutations: crate::execution::mutation_scheduler(),
-                memory_threshold_percent: None,
+                tmux: Arc::new(SessionManager::new()),
             },
         )
         .unwrap();
