@@ -22,6 +22,29 @@ use crate::server::output_ack::SubscriberOutputAck;
 use crate::session::terminal::state as session_terminal;
 use crate::tmux::session::TmuxSession;
 
+/// One Session's attached terminal backend.
+pub(crate) type SharedBackend = Arc<Mutex<Box<dyn TmuxSession>>>;
+
+/// Write input into the Session's attached backend.
+///
+/// The backend lock covers this I/O and nothing else: callers never hold the
+/// registry lock across it, so a slow PTY/control write cannot park another
+/// Session. Execution lives here rather than in a transport handler so there is
+/// one place that drives a tmux client.
+pub(crate) async fn write_input(backend: &SharedBackend, data: &[u8]) -> anyhow::Result<()> {
+    backend.lock().await.write_input(data).await
+}
+
+/// Resize the Session's authoritative window through its attached backend.
+pub(crate) async fn resize(backend: &SharedBackend, cols: u16, rows: u16) -> anyhow::Result<()> {
+    backend.lock().await.resize(cols, rows).await
+}
+
+/// Close the Session's attached backend (detaches and reaps the tmux client).
+pub(crate) async fn close(backend: &SharedBackend) -> anyhow::Result<()> {
+    backend.lock().await.close().await
+}
+
 pub(crate) type OutputChunk = (Vec<u8>, u64, u64);
 
 #[derive(Clone, Debug, PartialEq, Eq)]

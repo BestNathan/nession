@@ -2425,7 +2425,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                             }
                                         }
                                     }
-                                    if let Err(error) = session.backend.lock().await.close().await {
+                                    if let Err(error) = crate::session::terminal::runtime::close(&session.backend).await {
                                         warn!(
                                             "terminal session {session_name_clone}:                                              failed to retire broken tmux client: {error:#}"
                                         );
@@ -2551,7 +2551,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                 }
 
                 if let Some(removed) = detached.removed {
-                    if let Err(e) = removed.backend.lock().await.close().await {
+                    if let Err(e) = crate::session::terminal::runtime::close(&removed.backend).await {
                         warn!("Error closing session {}: {:#}", payload.session_name, e);
                     }
                 }
@@ -2738,7 +2738,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                 // needing to hear a position.
                 let outcome = match verdict {
                     InputVerdict::Apply { through } => {
-                        match backend.lock().await.write_input(&data).await {
+                        match crate::session::terminal::runtime::write_input(&backend, &data).await {
                             Ok(()) => {
                                 // Only now does the cursor move, and only if
                                 // the state that classified this frame is
@@ -2833,10 +2833,12 @@ p2p_routes! { ctx, msg_type, payload_value;
                         // operation that takes this backend (#1352). What the
                         // lock is for is the backend's own I/O and nothing else:
                         // see `AttachedSession::backend`.
-                        let resized = {
-                            let mut backend = backend.lock().await;
-                            backend.resize(payload.cols, payload.rows).await
-                        };
+                        let resized = crate::session::terminal::runtime::resize(
+                            &backend,
+                            payload.cols,
+                            payload.rows,
+                        )
+                        .await;
                         match resized {
                             Ok(_) => {
                                 // `record_resize` consumes a sequence number,
@@ -3728,7 +3730,7 @@ impl AgentServer {
             notify_control_changed(&peers, changed).await;
         }
         for (name, session) in drained {
-            if let Err(e) = session.backend.lock().await.close().await {
+            if let Err(e) = crate::session::terminal::runtime::close(&session.backend).await {
                 warn!("Error closing session {}: {:#}", name, e);
             }
         }
