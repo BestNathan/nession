@@ -29,6 +29,8 @@ Find one canonical **column count** for the same Nession Session that remains un
 ## Verification
 - Standalone: `python3 -m http.server 8025` from `prototype` branch root then browse `http://localhost:8025/terminal-fixed-cols-2487/`.
 - Static: inspect for well-formed HTML; parse JS and check controls; after publishing fetch immutable commit source.
+- Executed static verification: inline JavaScript parses in V8; all DOM control IDs are unique and all programmatic ID references exist; gallery and README catalog contain the target links.
+- Executed deterministic mocked-DOM logic smoke: **5/5 passed** (88-column baseline; 100-column slider/shared wrap; soft keyboard affects only phone rows; Web cap changes only Web font; reset restores defaults). This is not a rendered browser.
 - Browser: inspect Web/iPhone at 88 and 100 cols, toggle keyboard and sidebar, verify `metric-cols` unchanged while `metric-rows` responds; inspect computed CSS font-size and ensure no transforms on terminal nodes.
 - Prototype/design evidence only. None of this marks #2487 production SC or E2E Acceptance Pass.
 
