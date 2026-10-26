@@ -7,7 +7,10 @@
 - **Each prototype:** `index.html` (standalone browser UI), `README.md` (scope, data/behavior fidelity, related Requirement).
 - **No runtime coupling:** mock-only assets, never production Web/API, secrets, or live user data.
 - **Links from Requirements:** use a pin to the exact **prototype commit SHA**, and move the link when the design changes.
-- **Hosting:** the main GitHub Pages pipeline only deploys trusted `main`; previews use a separate HTML rendering service. Treat these as design discussions, **not Acceptance evidence**.
+- **Hosting:** the main-owned `Deploy / Public Pages` pipeline publishes an inert, sanitized static copy from the pinned `prototype` SHA at [Nession Pages / Prototypes](https://bestnathan.github.io/nession/prototypes/) when the deployment workflow runs. A direct preview is `https://bestnathan.github.io/nession/prototypes/<topic>-<issue-number>/index.html`. These links are only confirmed live after exact HTTPS readback; do not confuse a source browser with a rendered preview.
+- **Source:** keep the separate GitHub URL `https://github.com/BestNathan/nession/blob/<published-sha>/<topic>-<issue-number>/index.html` for exact provenance. Preview pages expose this with **View source**.
+- **Timing:** updates to this orphan branch do not immediately redeploy Pages; trigger the trusted main workflow manually or rely on its scheduled run. Always check the published `prototypes/manifest.json` SHA before claiming a refreshed preview.
+- **Evidence:** mock HTML is design discussion material, **not Acceptance evidence**.
 
 ## Catalog
 
