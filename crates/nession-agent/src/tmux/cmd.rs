@@ -1,20 +1,20 @@
-//! The single place in this workspace that may spawn a `tmux` process.
+//! Nession's tmux process addressing.
 //!
-//! Every tmux invocation nession makes — create, list, kill, attach, send-keys,
-//! capture-pane, `-V` — is built here, so every one of them carries an explicit
-//! `-S <socket path>` and lands on nession's own tmux server. That is the whole
-//! point: a call that forgot `-S` would silently use tmux's default socket,
-//! where the user's own sessions live, and killing nession's last session there
-//! takes the user's entire tmux server with it (tmux's `exit-empty` is `on` by
-//! default — this destroyed a real session on 2026-09-02, see #574/#575).
+//! Process construction and environment scrubbing live in the independent
+//! `nession-tmux` crate ([`nession_tmux::process`]), the one place that may
+//! name a tmux binary. This module keeps the Nession-specific half: which
+//! socket and server configuration the Agent uses, the process-wide resolution
+//! installed by [`configure`], stale-socket healing at startup, and the history
+//! limit that produces the server configuration.
 //!
-//! Because "somewhere forgot `-S`" is invisible at runtime,
-//! `scripts/check-tmux-socket.sh` fails the commit if any tmux process is
-//! spawned outside this module.
+//! Every tmux invocation the Agent builds still carries an explicit
+//! `-S <socket path>` (through [`TmuxCommand`]) and lands on Nession's own tmux
+//! server. `scripts/check-tmux-socket.sh` follows the chokepoint into the SDK;
+//! this module must not spawn tmux on its own.
 //!
 //! ## Environment is never trusted
 //!
-//! Each command explicitly removes `TMUX` and `TMUX_TMPDIR` from the child
+//! `TmuxCommand` removes `TMUX` and `TMUX_TMPDIR` from every child
 //! environment. Neither is used for addressing — `-S` decides that — but an
 //! inherited `TMUX` describes some *other* server, and leaving it in place lets
 //! a tmux client or a shell inside a session act on that one instead.
@@ -25,24 +25,22 @@
 //! leaves the socket file behind, and every later call against it fails with
 //! `server exited unexpectedly` — a message that names neither the socket nor
 //! the fact that nothing listens on it, so the whole session surface stays
-//! broken until someone deletes the file by hand. [`heal_stale_socket`] is the
-//! precise check (`ECONNREFUSED` on a file that is a socket), [`configure`]
-//! runs it at startup, and [`TmuxCmd::output`] / [`TmuxCmd::output_with`] /
-//! [`TmuxCmd::output_blocking`] run it between a failure and one retry.
+//! broken until someone deletes the file by hand. The SDK's
+//! [`heal_stale_socket`] is the precise check (`ECONNREFUSED` on a file that is
+//! a socket), [`configure`] runs it at startup, and the command constructors
+//! run it between a failure and one retry.
 
-#[cfg(unix)]
-use std::os::unix::fs::FileTypeExt;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
 use nession_common::tmux_socket;
+use nession_tmux::TmuxCommand;
 
 use super::HISTORY_LIMIT_LINES;
 
-/// Environment variables that describe a tmux server we are not addressing.
-/// Stripped from every child so behaviour never depends on inheritance.
-const INHERITED_TMUX_VARS: [&str; 2] = ["TMUX", "TMUX_TMPDIR"];
+pub use nession_tmux::heal_stale_socket;
+pub use nession_tmux::process::INHERITED_TMUX_VARS;
 
 /// The name of nession's own tmux configuration, inside the socket directory.
 const SERVER_CONFIG_FILE: &str = "nession.conf";
@@ -95,215 +93,80 @@ fn write_server_config(socket: &Path) -> Result<()> {
 /// [`configure`] and read by [`global`].
 static GLOBAL: OnceLock<TmuxCmd> = OnceLock::new();
 
-/// A tmux binary plus the socket every command it builds will address.
+/// Nession's addressing layered on the SDK's explicit tmux command.
+///
+/// The wrapper exists for one reason: Nession always passes its server
+/// configuration as `-f`, while the SDK library treats the config file as the
+/// caller's choice. Everything else — `-S`, environment scrubbing, the PTY
+/// `TERM` pin — is the SDK's.
 #[derive(Debug, Clone)]
-pub struct TmuxCmd {
-    bin: String,
-    socket: PathBuf,
-}
+pub struct TmuxCmd(TmuxCommand);
 
 impl TmuxCmd {
-    /// Bind a tmux binary to a socket path. Does not touch the filesystem —
+    /// Bind a tmux binary to a socket path, with nession's server config
+    /// derived from the socket's directory. Does not touch the filesystem —
     /// [`configure`] does that once at startup.
     pub fn new(bin: impl Into<String>, socket: impl Into<PathBuf>) -> Self {
-        Self {
-            bin: bin.into(),
-            socket: socket.into(),
-        }
+        let command = TmuxCommand::new(bin, socket);
+        let config = server_config_path(command.socket_path());
+        Self(command.with_config_file(config))
     }
 
     /// The socket this instance addresses.
     pub fn socket_path(&self) -> &Path {
-        &self.socket
+        self.0.socket_path()
     }
 
     /// The tmux binary name or path.
     pub fn bin(&self) -> &str {
-        &self.bin
+        self.0.bin()
     }
 
     /// Same socket, different binary — the test seam for injecting a fake tmux.
     pub fn with_bin(&self, bin: impl Into<String>) -> Self {
-        Self {
-            bin: bin.into(),
-            socket: self.socket.clone(),
-        }
+        Self(self.0.with_bin(bin))
+    }
+
+    /// The SDK command this addressing wraps.
+    ///
+    /// The Control Mode client takes this type directly, so the attachment and
+    /// every one-shot call share one process grammar.
+    pub fn as_sdk(&self) -> &TmuxCommand {
+        &self.0
     }
 
     /// A `tokio::process::Command` for `tmux -S <socket> -f <config>`.
     pub fn tokio(&self) -> tokio::process::Command {
-        let mut cmd = tokio::process::Command::new(&self.bin);
-        self.apply_addressing(|arg| {
-            cmd.arg(arg);
-        });
-        for var in INHERITED_TMUX_VARS {
-            cmd.env_remove(var);
-        }
-        cmd
+        self.0.tokio()
     }
 
-    /// A `std::process::Command` for `tmux -S <socket> -f <config>`, for the
-    /// synchronous call sites (`Drop`, which cannot await).
+    /// A `std::process::Command` for the synchronous call sites (`Drop`).
     pub fn std(&self) -> std::process::Command {
-        let mut cmd = std::process::Command::new(&self.bin);
-        self.apply_addressing(|arg| {
-            cmd.arg(arg);
-        });
-        for var in INHERITED_TMUX_VARS {
-            cmd.env_remove(var);
-        }
-        cmd
+        self.0.std()
     }
 
-    /// The two global flags every invocation carries, in order.
-    ///
-    /// `-f` is here rather than at a `set-option` call site because a server
-    /// configuration is read only when tmux *starts* a server — see
-    /// [`server_config_contents`]. Passing it unconditionally is what makes
-    /// whichever invocation happens to start the server the one that installs
-    /// nession's defaults, and it costs nothing on the ones that do not: tmux
-    /// ignores `-f` when a server is already running, and a `-f` naming a file
-    /// that does not exist is harmless (measured: exit 0, session created).
-    /// That last property is what keeps this safe for a `TmuxCmd` built in a
-    /// test against a socket directory nothing has written a config into.
-    fn apply_addressing(&self, mut arg: impl FnMut(&std::ffi::OsStr)) {
-        arg(std::ffi::OsStr::new("-S"));
-        arg(self.socket.as_os_str());
-        arg(std::ffi::OsStr::new("-f"));
-        arg(server_config_path(&self.socket).as_os_str());
-    }
-
-    /// Run `tmux <args>` to completion, capturing stdout and stderr, with one
-    /// self-heal: when the command fails because a dead server left its socket
-    /// behind, remove the stale socket and run the command once more (#1225).
-    ///
-    /// `Command::output()` semantics — both pipes captured, stdin closed — so
-    /// the `.stderr(Stdio::piped())` call sites used to write beside
-    /// `.output()` is implied (tokio's `output()` re-pipes right before
-    /// spawning regardless). The heal runs *between* the failure and the
-    /// retry: a command that fails against a **live** server is returned
-    /// as-is, unretried — the retry exists only for the state the heal
-    /// removed, not for second-guessing tmux's own answers.
+    /// Run `tmux <args>` to completion, with the SDK's one stale-socket retry.
     pub async fn output(&self, args: &[&str]) -> std::io::Result<std::process::Output> {
-        self.output_with(|cmd| {
-            cmd.args(args);
-        })
-        .await
+        self.0.output(args).await
     }
 
     /// [`output`](Self::output) for a command built incrementally.
-    ///
-    /// The closure runs against a fresh command per attempt, so a retried
-    /// call gets exactly the argv the first attempt had — relevant to
-    /// `create_session`, whose argument list is assembled in loops over the
-    /// environment and cannot be re-spelled as one `&[&str]`.
     pub async fn output_with(
         &self,
         build: impl Fn(&mut tokio::process::Command),
     ) -> std::io::Result<std::process::Output> {
-        let mut first = self.tokio();
-        build(&mut first);
-        let out = first.output().await?;
-        if out.status.success() || !heal_stale_socket(&self.socket) {
-            return Ok(out);
-        }
-        let mut retry = self.tokio();
-        build(&mut retry);
-        retry.output().await
+        self.0.output_with(build).await
     }
 
-    /// The blocking form of [`output`](Self::output), for callers that cannot
-    /// await (`Drop`, sync setup). [`std`](Self::std)-based, same heal.
+    /// The blocking form of [`output`](Self::output).
     pub fn output_blocking(&self, args: &[&str]) -> std::io::Result<std::process::Output> {
-        let out = self.std().args(args).output()?;
-        if out.status.success() || !heal_stale_socket(&self.socket) {
-            return Ok(out);
-        }
-        self.std().args(args).output()
+        self.0.output_blocking(args)
     }
 
-    /// A `portable_pty::CommandBuilder` for `tmux -S <socket> -f <config>`.
-    ///
-    /// portable-pty has its own command type, so this cannot reuse
-    /// [`TmuxCmd::std`] — the PTY attach path needs its own constructor rather
-    /// than a mechanical substitution.
+    /// A `portable_pty::CommandBuilder` for the plain-PTY attach path.
     pub fn pty(&self) -> portable_pty::CommandBuilder {
-        let mut cmd = portable_pty::CommandBuilder::new(&self.bin);
-        self.apply_addressing(|arg| {
-            cmd.arg(arg);
-        });
-        for var in INHERITED_TMUX_VARS {
-            cmd.env_remove(var);
-        }
-        // A PTY attach child inherits the agent's environment, which carries
-        // no usable $TERM on CI runners and in docker/systemd — tmux then
-        // fails with "terminal does not support clear" and the client sees a
-        // dead session (#633). Pin the same terminal manager.rs forces on
-        // session creation, so attach renders regardless of what the agent
-        // process inherited.
-        cmd.env("TERM", "xterm-256color");
-        cmd
+        self.0.pty()
     }
-}
-
-/// One self-heal for a socket a dead server left behind (#1225): remove it,
-/// but only when it provably has no listener.
-///
-/// The criterion is `ECONNREFUSED`, not "connect failed". Permission errors
-/// and timeouts also fail a connect, and in those cases the server may be
-/// serving — deleting its socket would take a live server off addressing,
-/// which is the #574/#575 class of mistake (a wrong server-level cleanup that
-/// destroyed a real session). Refused is the kernel's own "nothing is
-/// listening", identical on Linux and macOS, and the only condition under
-/// which the file is removed. A path that is not a socket is never touched
-/// either: it is not ours to delete.
-///
-/// The accepted race: a server in the microseconds between `bind` and
-/// `listen` also answers `ECONNREFUSED`. It is accepted because the
-/// alternative is the permanent unavailability #1225 measures, and because
-/// nession runs one agent per socket — the only process that could be
-/// starting that server is this one.
-///
-/// Returns `true` when a stale socket was found and removed. The removal is
-/// logged with its path: a delete without a trace is how the #574-class
-/// mistakes stayed invisible for as long as they did.
-#[cfg(unix)]
-pub fn heal_stale_socket(socket: &Path) -> bool {
-    let Ok(meta) = std::fs::symlink_metadata(socket) else {
-        return false; // nothing there — nothing to heal
-    };
-    if !meta.file_type().is_socket() {
-        return false;
-    }
-    let Err(err) = std::os::unix::net::UnixStream::connect(socket) else {
-        return false; // someone is listening — the socket is alive
-    };
-    if err.kind() != std::io::ErrorKind::ConnectionRefused {
-        return false; // only "no listener" is ours to repair
-    }
-    match std::fs::remove_file(socket) {
-        Ok(()) => {
-            tracing::warn!(
-                "removed stale tmux socket {} — nothing was listening on it \
-                 (ECONNREFUSED); the previous server died without unlinking (#1225)",
-                socket.display()
-            );
-            true
-        }
-        Err(err) => {
-            tracing::warn!(
-                "tmux socket {} has no listener but could not be removed: {err}",
-                socket.display()
-            );
-            false
-        }
-    }
-}
-
-/// tmux is unix-only; elsewhere there is no unix socket to heal.
-#[cfg(not(unix))]
-pub fn heal_stale_socket(_socket: &Path) -> bool {
-    false
 }
 
 /// Resolve the socket path, create its directory, and install the result as the
