@@ -517,11 +517,11 @@ test('a reconnect returns a retained renderer to the pane\'s normal screen and c
 
   await submitTerminalCommand(
     page,
-    `sh -c 'printf "\\033[?1049h"; printf "ALT-2464-TUI\\n"; sleep 3; ` +
-      `printf "\\033[?1049l"; printf "ALT-2464-BACK\\n"; printf "\\033[6;9H"; cat > /dev/null'`,
+    `sh -c 'printf "\\033[?1049h"; printf "ALT-2464-TUI-%s\\n" 2464; sleep 3; ` +
+      `printf "\\033[?1049l"; printf "ALT-2464-BACK-%s\\n" 2464; printf "\\033[6;9H"; cat > /dev/null'`,
   );
   await expect.poll(async () => readBufferType(page)).toBe('alternate');
-  await expect.poll(async () => countInBuffer(page, 'ALT-2464-TUI')).toBe(1);
+  await expect.poll(async () => countInBuffer(page, 'ALT-2464-TUI-2464')).toBe(1);
 
   await page.evaluate(() => {
     const originalSend = WebSocket.prototype.send;
@@ -564,7 +564,7 @@ test('a reconnect returns a retained renderer to the pane\'s normal screen and c
   await expect(page.locator('.xterm')).toHaveAttribute('data-e2e-reconnect-instance', 'original');
 
   await expect.poll(async () => readBufferType(page), { timeout: 20_000 }).toBe('normal');
-  await expect.poll(async () => countInBuffer(page, 'ALT-2464-BACK'), { timeout: 20_000 }).toBe(1);
+  await expect.poll(async () => countInBuffer(page, 'ALT-2464-BACK-2464'), { timeout: 20_000 }).toBe(1);
 
   // The pane parked at 0-based (x 8, y 5) of its screen. `cursorY` is absolute
   // in xterm's buffer, so compare the screen row against `baseY`.
