@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 40339215431,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/2469-slice2-sdk-admin",
+    "target_sha": "e2d822b7477be704ca7d08f699f28d490e832d73",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/40339215431",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "c7b41f19c5ce2dd1e046e4c49e12111c8cd701af62f1ae5ffc9f96312d41258d"
+  },
+  "record": "runs/2026-10-26/40339215431-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "58e6211b419cb29df4944ac044e95fbc5bfa2a48f03d3bbf9f3b0818a098e5fb"
+}
