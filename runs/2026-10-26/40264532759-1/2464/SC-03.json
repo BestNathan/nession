@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "14c60479ea05fc63c8115f78a6f3de5a97d6be3fa390ba9450348225ed434d7f",
+  "run_id": 40264532759,
+  "run_attempt": 1,
+  "issue": 2464,
+  "criterion": "SC-03",
+  "criterion_text": "For two or more realistic states (normal shell and an alternate-screen TUI), P2P and Relay reconnect, source-aligned real tmux, initial attach, and retained-renderer attach do not falsely promote cut/fidelity/ACK; legitimate scrollback stays intact, no duplicated marker lines or spurious same-size tmux redraw.",
+  "stage": "staging",
+  "target_sha": "993125da96e4d18c87a2cd37ce0110acf4fcf92e",
+  "contract_sha256": "0c1917620048e887b75a8b9529010d9a36132cce7433853a4f0e4c1245bffd97",
+  "case_revision": "993125da96e4d18c87a2cd37ce0110acf4fcf92e",
+  "case_tree_sha": "4696b81f3eef52fb98e7dee2df3b219dd566ba6c",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-26T03:34:23.518Z",
+  "finished_at": "2026-10-26T03:34:39.692Z",
+  "duration_ms": 16174,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Bootstrap and reattach neither promote cut/fidelity/ACK falsely nor lose history, and the renderer contracts hold for both a normal shell and a caret parked away from the text",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 993125da96e4d18c87a2cd37ce0110acf4fcf92e: real-tmux first and second attach keep bootstrap-before-ok ordering, CRLF history, mode/caret restoration and the atomic-epoch cut identity"
+        },
+        {
+          "type": "renderer",
+          "value": "the controller suite keeps stream-baseline/fidelity/ACK semantics across bootstrap, replacement and dispose paths without claiming a full-VT repair"
+        }
+      ],
+      "duration_ms": 10324,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40264532759,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "993125da96e4d18c87a2cd37ce0110acf4fcf92e",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40264532759",
+    "record_path": "runs/2026-10-26/40264532759-1/2464/SC-03.json",
+    "source_result_sha256": "da5d64d4b95b165c0dd06ffae05cbd99757a2eb3bec46334204e0efc99fee466"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40264532759-1",
+    "sha256": "da5d64d4b95b165c0dd06ffae05cbd99757a2eb3bec46334204e0efc99fee466",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40264532759",
+    "durability": "time-limited; object archival not configured"
+  }
+}
