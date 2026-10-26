@@ -16,6 +16,7 @@ import { WIRE as TERMINAL_RESIZE_WIRE } from '@/generated/protocol/core/agent-te
 import { WIRE as TERMINAL_CONTROL_ACQUIRE_WIRE } from '@/generated/protocol/core/agent-terminal-control-acquire/v1';
 import { WIRE as TERMINAL_STREAM_RESUME_WIRE } from '@/generated/protocol/core/agent-terminal-stream-resume/v1';
 import { getOrCreateClientId } from '@/platform/socket/clientId';
+import { getOrCreateSubscriptionId } from '@/platform/socket/subscriptionId';
 import type { PluginSurface } from '@/platform/socket/types';
 import type { AttachResult, TerminalSize } from './types';
 import type { TerminalControlState } from './state/terminalControl';
@@ -274,17 +275,22 @@ async function attachToSession(
       ...(attachOpts?.needsBootstrap !== undefined
         ? { needs_bootstrap: attachOpts.needsBootstrap }
         : {}),
+      // This page's subscription, not the browser: two same-origin tabs must
+      // be two subscriptions, and one page's reconnect must replace only its
+      // own (#2469 slice 4).
+      subscription_id: getOrCreateSubscriptionId(),
     }, { timeoutMs: attachOpts?.timeoutMs ?? ATTACH_TIMEOUT_MS });
     const fields = readAttachControlFields(reply);
     const role =
       fields.controlRole ??
       (fields.controllerClientId === undefined
         ? 'controller'
-        : lease.roleForClient(fields.controllerClientId));
+        : lease.roleForClient(fields.controllerClientId, fields.controllerSubscriptionId));
     lease.setControl(sessionName, {
       role,
       generation: fields.controlGeneration,
       controllerClientId: fields.controllerClientId,
+      controllerSubscriptionId: fields.controllerSubscriptionId,
     });
     return {
       ok: true,
@@ -325,6 +331,10 @@ async function acquireSessionControl(
       role: fields.role ?? 'controller',
       generation,
       controllerClientId: fields.controllerClientId ?? getOrCreateClientId(),
+      // The acquire reply is this page's own answer; when the Agent names the
+      // holder it is the acting subscription.
+      controllerSubscriptionId:
+        fields.controllerSubscriptionId ?? getOrCreateSubscriptionId(),
     });
     return { ok: true, generation };
   } catch (err) {

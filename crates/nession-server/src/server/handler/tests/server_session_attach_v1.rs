@@ -298,6 +298,7 @@ async fn attach_relay_mode() {
             rows: _,
             size_known,
             needs_bootstrap,
+            subscription_id: _,
         } => {
             assert!(!agent_ws_urls.is_empty(), "expected at least one relay URL");
             assert!(agent_ws_urls[0].contains("1.2.3.4"));

@@ -1487,6 +1487,14 @@ p2p_routes! { ctx, msg_type, payload_value;
                 };
                 match ctx.tmux.kill_session(&payload.name).await {
                     Ok(()) => {
+                        // The tmux Session is gone; an attachment left behind
+                        // would answer the next attach with a dead backend.
+                        ctx.sessions
+                            .retire_session(
+                                &payload.name,
+                                "the session was killed; create or attach a new one",
+                            )
+                            .await;
                         let resp = SessionKillResponse { name: payload.name };
                         serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                             .unwrap_or_default()
@@ -1586,6 +1594,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     let mut subscribed = match ctx.sessions.subscribe(
                         &session_name,
                         &client_id,
+                        payload.subscription_id.as_deref(),
                         ctx.peer_token,
                         ctx.outbound.clone(),
                         wants_bootstrap,
@@ -1710,6 +1719,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 &session_name,
                                 backend,
                                 &client_id,
+                                payload.subscription_id.as_deref(),
                                 ctx.peer_token,
                                 ctx.outbound.clone(),
                             ) {
@@ -1765,6 +1775,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 );
                             }
 
+                            let stream_epoch = inserted.stream_epoch;
                             // Spawn forwarding task for the first subscriber.
                             spawn_output_forwarder(
                                 inserted.events,
@@ -1787,10 +1798,12 @@ p2p_routes! { ctx, msg_type, payload_value;
                             let session_name_clone = session_name.clone();
                             tokio::spawn(async move {
                                 while let Some(bytes) = output_rx.recv().await {
-                                    let Some(recorded) =
-                                        registry.record_output(&session_name_clone, &bytes)
-                                    else {
-                                        break; // session removed
+                                    let Some(recorded) = registry.record_output(
+                                        &session_name_clone,
+                                        stream_epoch,
+                                        &bytes,
+                                    ) else {
+                                        break; // session removed or replaced
                                     };
                                     if recorded.detached > 0 {
                                         warn!(
@@ -1802,6 +1815,20 @@ p2p_routes! { ctx, msg_type, payload_value;
                                     if !recorded.has_subscriber_queue {
                                         break;
                                     }
+                                }
+                                // The PTY reader ended: the tmux client this
+                                // attachment owns is gone. Retire only the
+                                // generation that read the bytes — a newer
+                                // attach may already own the name — and tell
+                                // its subscribers the output source ended.
+                                if registry
+                                    .retire_stream(&session_name_clone, stream_epoch)
+                                    .await
+                                {
+                                    warn!(
+                                        "terminal session {session_name_clone}: tmux PTY reader \
+                                         ended; retiring epoch {stream_epoch}"
+                                    );
                                 }
                             });
 
@@ -1874,6 +1901,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 &session_name,
                                 backend,
                                 &client_id,
+                                payload.subscription_id.as_deref(),
                                 ctx.peer_token,
                                 ctx.outbound.clone(),
                             ) {
@@ -1927,7 +1955,11 @@ p2p_routes! { ctx, msg_type, payload_value;
                             tokio::spawn(async move {
                                 while let Some(bytes) = output_rx.recv().await {
                                     if registry
-                                        .record_output(&session_name_clone, &bytes)
+                                        .record_output(
+                                            &session_name_clone,
+                                            stream_epoch,
+                                            &bytes,
+                                        )
                                         .is_none()
                                     {
                                         break;
@@ -2017,7 +2049,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                         format!("{agent_id_resize}:{session_name_resize}");
                                     resize_reporter.publish(&full_id, cols, rows);
                                     let peers = sessions_for_resize
-                                        .subscriber_sinks(&session_name_resize);
+                                        .subscriber_sinks(&session_name_resize, stream_epoch);
                                     if peers.is_empty() {
                                         break;
                                     }
@@ -2057,7 +2089,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                 let client_id = connection_client_id(ctx.client_id).await;
                 let removed = match ctx
                     .sessions
-                    .detach_client(&payload.session_name, &client_id)
+                    .detach_client(&payload.session_name, &client_id, ctx.peer_token)
                     .await
                 {
                     Ok(removed) => removed,
@@ -2090,7 +2122,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                 let client_id = connection_client_id(ctx.client_id).await;
                 match ctx
                     .sessions
-                    .acquire_control(&payload.session_name, &client_id)
+                    .acquire_control(&payload.session_name, &client_id, ctx.peer_token)
                     .await
                 {
                     Ok(resp) => serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
@@ -2157,6 +2189,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     .apply_input(
                         &payload.session_name,
                         &client_id,
+                        ctx.peer_token,
                         payload.control_generation,
                         sequence,
                         &payload.data,
@@ -2191,6 +2224,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     .resize(
                         &payload.session_name,
                         &client_id,
+                        ctx.peer_token,
                         payload.control_generation,
                         payload.cols,
                         payload.rows,
@@ -2415,6 +2449,12 @@ p2p_routes! { ctx, msg_type, payload_value;
                 let session_name = extract_session_name(&payload.session_id);
                 match ctx.tmux.kill_session(&session_name).await {
                     Ok(()) => {
+                        ctx.sessions
+                            .retire_session(
+                                &session_name,
+                                "the session was killed; create or attach a new one",
+                            )
+                            .await;
                         let resp = WebSessionKillResponse {
                             success: true,
                             error: None,
@@ -2711,6 +2751,10 @@ impl AgentServer {
                     }
                     _ = shutdown_future => {
                         info!("Agent WebSocket server shutting down");
+                        // Close every attached backend: the tmux Sessions
+                        // persist, but their terminal clients belong to this
+                        // process and must not outlive it.
+                        sessions.shutdown().await;
                         break;
                     }
                 }
@@ -3135,6 +3179,7 @@ mod tests {
         let (tx, _) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
         let mut peers = vec![SessionPeer {
             client_id: "observer".to_string(),
+            subscription_id: None,
             peer_token: Arc::clone(&new_socket),
             output_ack: SubscriberOutputAck::new(OutputAckBinding {
                 subscriber_generation: 88,
@@ -3520,6 +3565,7 @@ mod tests {
         let (outbound, _) = P2pOutbound::new();
         let mut peers = vec![SessionPeer {
             client_id: "observer".to_owned(),
+            subscription_id: None,
             peer_token: Arc::new(()),
             output_ack: test_output_ack(),
             outbound,
@@ -3555,6 +3601,7 @@ mod tests {
         let (observer_outbound, _) = P2pOutbound::new();
         let peer = |client_id: &str, outbound: P2pOutbound, tx| SessionPeer {
             client_id: client_id.to_owned(),
+            subscription_id: None,
             peer_token: Arc::new(()),
             output_ack: test_output_ack(),
             outbound,
@@ -3624,6 +3671,7 @@ mod tests {
         let mut peers = vec![
             SessionPeer {
                 client_id: "slow".into(),
+                subscription_id: None,
                 peer_token: Arc::new(()),
                 output_ack: test_output_ack(),
                 outbound: slow_outbound,
@@ -3634,6 +3682,7 @@ mod tests {
             },
             SessionPeer {
                 client_id: "fast".into(),
+                subscription_id: None,
                 peer_token: Arc::new(()),
                 output_ack: test_output_ack(),
                 outbound: fast_outbound,
@@ -3693,6 +3742,7 @@ mod tests {
         let queued = Arc::new(AtomicUsize::new(0));
         let mut peers = vec![SessionPeer {
             client_id: "relay".into(),
+            subscription_id: None,
             peer_token: Arc::new(()),
             output_ack: test_output_ack(),
             outbound,
@@ -3743,6 +3793,7 @@ mod tests {
         let flag = Arc::new(AtomicBool::new(false));
         let mut peers = vec![SessionPeer {
             client_id: "stalled".into(),
+            subscription_id: None,
             peer_token: Arc::new(()),
             output_ack: test_output_ack(),
             outbound,
@@ -3795,6 +3846,7 @@ mod tests {
         let attach_state = Arc::clone(&shared);
         let peer = SessionPeer {
             client_id: "late-observer".to_owned(),
+            subscription_id: None,
             peer_token: Arc::new(()),
             output_ack: test_output_ack(),
             outbound,
@@ -4191,6 +4243,7 @@ mod tests {
         let mut peers = vec![
             SessionPeer {
                 client_id: "slow".to_owned(),
+                subscription_id: None,
                 peer_token: Arc::new(()),
                 output_ack: test_output_ack(),
                 outbound: slow_outbound,
@@ -4201,6 +4254,7 @@ mod tests {
             },
             SessionPeer {
                 client_id: "fast".to_owned(),
+                subscription_id: None,
                 peer_token: Arc::new(()),
                 output_ack: test_output_ack(),
                 outbound: fast_outbound,
@@ -4253,6 +4307,7 @@ mod tests {
         let (outbound, _) = P2pOutbound::new();
         let mut peers = vec![SessionPeer {
             client_id: "big".to_owned(),
+            subscription_id: None,
             peer_token: Arc::new(()),
             output_ack: test_output_ack(),
             outbound,
@@ -4278,6 +4333,7 @@ mod tests {
         let (outbound, _) = P2pOutbound::new();
         let mut peers = vec![SessionPeer {
             client_id: "closed".to_owned(),
+            subscription_id: None,
             peer_token: Arc::new(()),
             output_ack: test_output_ack(),
             outbound,
@@ -4308,6 +4364,7 @@ mod tests {
         let (peer_outbound, _) = P2pOutbound::new();
         let mut peers = vec![SessionPeer {
             client_id: "test-client".to_string(),
+            subscription_id: None,
             peer_token: Arc::new(()),
             output_ack: test_output_ack(),
             outbound: peer_outbound,
@@ -4571,6 +4628,7 @@ mod tests {
             size_known: None,
             env_snapshots: Vec::new(),
             needs_bootstrap: None,
+            subscription_id: None,
         };
         let attach_req = new_message(msg_types::CLIENT_ATTACH, attach_payload);
         let attach_resp: Message<ClientAttachResponse> =
@@ -4622,6 +4680,7 @@ mod tests {
             size_known: None,
             env_snapshots: Vec::new(),
             needs_bootstrap: None,
+            subscription_id: None,
         };
         let attach_req = new_message(msg_types::CLIENT_ATTACH, attach_payload);
         let attach_resp: Message<ClientAttachResponse> =
@@ -5276,6 +5335,7 @@ mod tests {
             size_known: None,
             env_snapshots: Vec::new(),
             needs_bootstrap: None,
+            subscription_id: None,
         };
         let attach_req = new_message(msg_types::CLIENT_ATTACH, attach_payload);
         let _ = send_and_receive::<_, serde_json::Value>(&mut sink, &mut stream, &attach_req).await;
@@ -5750,16 +5810,33 @@ mod tests {
 
         const SESSION: &str = "resize-lock";
         let client_id = "test-client".to_string();
+        // The caller's physical connection, which the registry identifies by
+        // pointer: the resize arm refuses a sender that is not a subscriber.
+        let peer_token = Arc::new(());
 
         let backend: Arc<Mutex<Box<dyn TmuxSession>>> = Arc::new(Mutex::new(Box::new(Resizing)));
         let mut control = session_terminal::SessionControlState::new();
-        control.ensure_controller(&client_id);
+        control.ensure_controller(&client_id, None);
+        let (peer_outbound, _peer_outbound_rx) = P2pOutbound::new();
+        let peer = SessionPeer {
+            client_id: client_id.clone(),
+            subscription_id: None,
+            peer_token: Arc::clone(&peer_token),
+            output_ack: test_output_ack(),
+            outbound: peer_outbound,
+            // The compatibility path this test pins is the one with no
+            // sequenced queue: the frame goes over the connection's outbound.
+            output_tx: None,
+            issued_flow: Arc::new(StdMutex::new(SubscriberIssuedFlow::new())),
+            queued_bytes: Arc::new(AtomicUsize::new(0)),
+            detached_for_not_draining: Arc::new(AtomicBool::new(false)),
+        };
         let sessions: Arc<SessionRegistry> = Arc::new(SessionRegistry::from_map(
             [(
                 SESSION.to_string(),
                 AttachedSession {
                     backend: Arc::clone(&backend),
-                    peers: Vec::new(),
+                    peers: vec![peer],
                     control,
                     stream: session_terminal::SessionStreamState::new(),
                     input: session_terminal::SessionInputState::new(),
@@ -5796,7 +5873,6 @@ mod tests {
         // directly would leave the arm's own wiring — which is where the guard
         // is taken — unpinned.
         let dispatch = tokio::spawn(async move {
-            let peer_token = Arc::new(());
             let ctx = P2pRequest {
                 id: "resize-1",
                 tmux: &tmux,

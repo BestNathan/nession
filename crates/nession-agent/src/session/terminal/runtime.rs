@@ -79,7 +79,12 @@ impl SubscriberEvent {
 
 #[derive(Clone)]
 pub(crate) struct SessionPeer {
+    /// The stable browser identity.
     pub(crate) client_id: String,
+    /// The page-instance subscription, when the client states one. Two
+    /// same-origin tabs share `client_id` and differ here; a reconnect of one
+    /// page keeps it. Absent is the v1 rule: `client_id` is the identity.
+    pub(crate) subscription_id: Option<String>,
     pub(crate) peer_token: Arc<()>,
     /// Fresh for each attach, independent of ControlLease/queue dequeue.
     pub(crate) output_ack: SubscriberOutputAck,
@@ -100,6 +105,17 @@ pub(crate) struct SessionPeer {
     /// re-derived from the session map at the receiver's end, where "the peer
     /// is gone" and "the peer was replaced" used to be indistinguishable.
     pub(crate) detached_for_not_draining: Arc<AtomicBool>,
+}
+
+impl SessionPeer {
+    /// The identity the ControlLease and subscription replacement use.
+    ///
+    /// The subscription when the client stated one; the stable client id
+    /// otherwise, which is the rule a client written before #2469 slice 4
+    /// already gets.
+    pub(crate) fn identity(&self) -> &str {
+        self.subscription_id.as_deref().unwrap_or(&self.client_id)
+    }
 }
 
 /// A tmux attach session, shared by all clients attached through this
@@ -352,9 +368,12 @@ pub(crate) fn subscribe_at_stream_cut(
     live_tx: &mpsc::Sender<SubscriberEvent>,
     needs_bootstrap: bool,
 ) -> Option<AtomicOutputPrefix> {
-    // A replaced peer's queue must not receive subsequent output; its
+    // A replaced subscription's queue must not receive subsequent output; its
     // detached_for_not_draining flag remains false (not a slow-peer eviction).
-    peers.retain(|current| current.client_id != peer.client_id);
+    // Identity, not client id: two same-origin tabs share the browser id and
+    // are separate subscriptions.
+    let incoming = peer.identity().to_string();
+    peers.retain(|current| current.identity() != incoming);
     let prefix = if needs_bootstrap {
         atomic_output_prefix(stream)
     } else {
@@ -369,9 +388,9 @@ pub(crate) fn subscribe_at_stream_cut(
 pub(crate) fn client_attach_response(
     session_name: String,
     session: &AttachedSession,
-    client_id: &str,
+    peer: &SessionPeer,
 ) -> ClientAttachResponse {
-    let role = session.control.role_of(client_id);
+    let role = session.control.role_of(peer.identity());
     ClientAttachResponse {
         session_name,
         control_generation: Some(session.control.generation),
@@ -384,13 +403,10 @@ pub(crate) fn client_attach_response(
             .to_string(),
         ),
         controller_client_id: session.control.controller_client_id.clone(),
+        controller_subscription_id: session.control.controller_subscription_id.clone(),
         stream_epoch: Some(session.stream.epoch),
         stream_cursor: Some(session.stream.cursor()),
-        subscriber_generation: session
-            .peers
-            .iter()
-            .find(|peer| peer.client_id == client_id)
-            .map(|peer| peer.output_ack.binding().subscriber_generation),
+        subscriber_generation: Some(peer.output_ack.binding().subscriber_generation),
         // Stated on every attach, including a re-attach to a session this
         // agent already holds — which is the case they are for. A client whose
         // transport was rebuilt does not know what became of the input it had

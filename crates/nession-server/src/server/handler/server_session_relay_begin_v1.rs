@@ -48,6 +48,7 @@ impl ConnectionHandler {
                 // An unparseable payload has no opinion to forward; the agent's
                 // own rule is what a caller that says nothing already gets.
                 needs_bootstrap: None,
+                subscription_id: None,
             });
 
         let session_id = payload.session_id.as_str();
@@ -217,6 +218,7 @@ impl ConnectionHandler {
             rows,
             size_known: payload.size_known,
             needs_bootstrap: payload.needs_bootstrap,
+            subscription_id: payload.subscription_id,
         })
     }
 }

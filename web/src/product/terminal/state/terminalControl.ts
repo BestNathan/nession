@@ -8,6 +8,8 @@ export interface TerminalControlState {
   role: TerminalControlRole;
   generation?: number;
   controllerClientId?: string;
+  /** The page instance holding the lease, when the Agent states one. */
+  controllerSubscriptionId?: string;
   /** Family key — not sent on the wire. */
   sessionName?: string;
 }

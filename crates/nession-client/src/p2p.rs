@@ -108,6 +108,11 @@ pub fn attach_frame(session_name: &str, cols: u16, rows: u16) -> Message<ClientA
             // buffer to have an opinion about: what it serves is the CLI, whose
             // terminal is the caller's.
             needs_bootstrap: None,
+            // The CLI is one process and one terminal: the stable client id
+            // already names its subscription, which is the v1 rule. The
+            // per-page identity exists for same-origin browser tabs (#2469
+            // slice 4).
+            subscription_id: None,
         },
     )
 }

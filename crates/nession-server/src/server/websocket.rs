@@ -556,6 +556,7 @@ where
                 rows,
                 size_known,
                 needs_bootstrap,
+                subscription_id,
             } => {
                 let mut dispatch = RelayDispatch {
                     handler: &handler,
@@ -584,6 +585,7 @@ where
                         rows,
                         size_known,
                         needs_bootstrap,
+                        subscription_id: subscription_id.as_deref(),
                     },
                 )
                 .await;
@@ -806,6 +808,9 @@ struct RelayRequest<'a> {
     /// client needs the session's history is a fact about *that client's*
     /// terminal, which only the client has — so the Server does not read it.
     needs_bootstrap: Option<bool>,
+    /// The browser page's subscription identity, forwarded verbatim. The
+    /// Agent uses it to keep two same-origin tabs as separate subscriptions.
+    subscription_id: Option<&'a str>,
 }
 
 /// Read from the agent until the reply carrying `request_id` arrives, sending
@@ -1060,6 +1065,7 @@ where
         rows,
         size_known,
         needs_bootstrap,
+        subscription_id,
     } = request;
 
     info!(
@@ -1205,6 +1211,14 @@ where
             object.insert(
                 "needs_bootstrap".to_string(),
                 serde_json::Value::Bool(needs_bootstrap),
+            );
+        }
+    }
+    if let Some(subscription_id) = subscription_id {
+        if let Some(object) = attach_payload.as_object_mut() {
+            object.insert(
+                "subscription_id".to_string(),
+                serde_json::Value::String(subscription_id.to_string()),
             );
         }
     }
