@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "b4c8e55560d59bec11dcd788d4cdf3442f7d4af25aa89769d9fd796741157ec8",
+  "run_id": 40376099250,
+  "run_attempt": 1,
+  "issue": 2469,
+  "criterion": "SC-03",
+  "criterion_text": "On supported real macOS/Linux tmux, -C Pipe and -CC PTY preserve typed byte-exact non-UTF8 output, command FIFO/error/tombstones, capture/live cut, lifecycle/source-loss, resource bounds and graceful cleanup; unsupported variants fail explicitly rather than silently falling back.",
+  "stage": "staging",
+  "target_sha": "c5ef8b79ac4ed32f6a56d13e57aec1a976f70993",
+  "contract_sha256": "668ab9684492c450c331beafbac53caddad4ed082eebd29df11dc7dfa9d00430",
+  "case_revision": "c5ef8b79ac4ed32f6a56d13e57aec1a976f70993",
+  "case_tree_sha": "518ae77dcb88334aca9810f57f46c29efd95bc66",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-26T18:18:10.706Z",
+  "finished_at": "2026-10-26T18:18:25.929Z",
+  "duration_ms": 15223,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Both Control Mode carriers preserve the same byte-exact typed contract on real tmux, with bounded resources and explicit unsupported-variant failure",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA c5ef8b79ac4ed32f6a56d13e57aec1a976f70993 on Linux x86_64 with tmux 3.6: both -C pipe and -CC PTY attached to one private isolated socket and answered typed commands"
+        },
+        {
+          "type": "runtime",
+          "value": "non-UTF8 bytes survived framing and the protocol layer; command/reply matching, tombstones, source loss, capture ordering, bounded ingress and bounded close were proven by the typed client tests"
+        },
+        {
+          "type": "runtime",
+          "value": "a missing tmux failed explicitly on both transports rather than falling back to the other carrier"
+        }
+      ],
+      "duration_ms": 9383,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40376099250,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "c5ef8b79ac4ed32f6a56d13e57aec1a976f70993",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40376099250",
+    "record_path": "runs/2026-10-26/40376099250-1/2469/SC-03.json",
+    "source_result_sha256": "cd1d53185a1bc6feeb44ff812a34c47152ddedbcbd91f5a8b68a0aade42d7ec4"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40376099250-1",
+    "sha256": "cd1d53185a1bc6feeb44ff812a34c47152ddedbcbd91f5a8b68a0aade42d7ec4",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40376099250",
+    "durability": "time-limited; object archival not configured"
+  }
+}

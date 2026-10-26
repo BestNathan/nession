@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "710a22356ed2e7366c8abab9b3b04946c7532bc91c13933385988fe28638999b",
+  "run_id": 40376099250,
+  "run_attempt": 1,
+  "issue": 2469,
+  "criterion": "SC-01",
+  "criterion_text": "nession-tmux builds, tests and documents as a standalone reusable Rust library (including packaged/external-consumer fixture); its dependency graph, code, and test support contain no Nession business crate/DTO or Agent-only initialization.",
+  "stage": "staging",
+  "target_sha": "c5ef8b79ac4ed32f6a56d13e57aec1a976f70993",
+  "contract_sha256": "668ab9684492c450c331beafbac53caddad4ed082eebd29df11dc7dfa9d00430",
+  "case_revision": "c5ef8b79ac4ed32f6a56d13e57aec1a976f70993",
+  "case_tree_sha": "2ea3c6bd9307b2e5689bcc36724b24b1589fe4d2",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Fail",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-26T18:17:17.271Z",
+  "finished_at": "2026-10-26T18:17:41.103Z",
+  "duration_ms": 23831,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Fail",
+      "summary": "cargo check --manifest-path /tmp/nession-tmux-consumer.1eQc8k/consumer/Cargo.toml failed (exit 101): \u001b[1m\u001b[92m    Updating\u001b[0m crates.io index\n\u001b[1m\u001b[92m     Locking\u001b[0m 55 packages to latest compatible versions\n\u001b[1m\u001b[92m Downloading\u001b[0m crates ...\n\u001b[1m\u001b[92m  Downloaded\u001b[0m cfg-if v1.0.5\n\u001b[1m\u001b[92m  Downloaded\u001b[0m pin-utils v0.1.1\n\u001b[1m\u001b[92m  Downloaded\u001b[0m smallvec v1.16.4\n\u001b[1m\u001b[92m  Downloaded\u001b[0m unicode-ident v1.0.27\n\u001b[1m\u001b[92m  Downloaded\u001b[0m mio v1.2.4\n\u001b[1m\u001b[92m  Downloaded\u001b[0m syn v3.0.9\n\u001b[1m\u001b[92m  Downloaded\u001b[0m libc v0.2.191\n\u001b[1m\u001b[92m  Downloaded\u001b[0m tokio v1.54.1\n\u001b[1m\u001b[92m   Compiling\u001b[0m libc v0.2.191\n\u001b[1m\u001b[92m   Compiling\u001b[0m proc-macro2 v1.0.107\n\u001b[1m\u001b[92m   Compiling\u001b[0m unicode-ident v1.0.27\n\u001b[1m\u001b[92m   Compiling\u001b[0m quote v1.0.47\n\u001b[1m\u001b[92m    Checking\u001b[0m cfg-if v1.0.5\n\u001b[1m\u001b[92m   Compiling\u001b[0m autocfg v1.5.1\n\u001b[1m\u001b[92m   Compiling\u001b[0m parking_lot_core v0.9.12\n\u001b[1m\u001b[92m   Compiling\u001b[0m thiserror v1.0.69\n\u001b[1m\u001b[92m   Compiling\u001b[0m memoffset v0.6.5\n\u001b[1m\u001b[92m    Checking\u001b[0m smallvec v1.16.4\n\u001b[1m\u001b[92m   Compiling\u001b[0m anyhow v1.0.104\n\u001b[1m\u001b[92m    Checking\u001b[0m scopeguard v1.2.0\n\u001b[1m\u001b[92m    Checking\u001b[0m lock_api v0.4.14\n\u001b[1m\u001b[92m   Compiling\u001b[0m syn v2.0.119\n\u001b[1m\u001b[92m   Compiling\u001b[0m syn v3.0.9\n\u001b[1m\u001b[92m    Checking\u001b[0m bitflags v1.3.2\n\u001b[1m\u001b[92m    Checking\u001b[0m once_cell v1.21.4\n\u001b[1m\u001b[92m    Checking\u001b[0m pin-utils v0.1.1\n\u001b[1m\u001b[92m    Checking\u001b[0m pin-project-lite v0.2.17\n\u001b[1m\u001b[92m    Checking\u001b[0m tracing-core v0.1.36\n\u001b[1m\u001b[92m    Checking\u001b[0m shell-words v1.1.1\n\u001b[1m\u001b[92m    Checking\u001b[0m downcast-rs v1.2.1\n\u001b[1m\u001b[92m    Checking\u001b[0m log v0.4.34\n\u001b[1m\u001b[92m    Checking\u001b[0m termios v0.2.2\n\u001b[1m\u001b[92m    Checking\u001b[0m ioctl-rs v0.1.6\n\u001b[1m\u001b[92m    Checking\u001b[0m serial-core v0.4.0\n\u001b[1m\u001b[92m    Checking\u001b[0m errno v0.3.14\n\u001b[1m\u001b[92m    Checking\u001b[0m serial-unix v0.4.0\n\u001b[1m\u001b[92m    Checking\u001b[0m serial v0.4.0\n\u001b[1m\u001b[92m    Checking\u001b[0m signal-hook-registry v1.4.8\n\u001b[1m\u001b[92m    Checking\u001b[0m parking_lot v0.12.5\n\u001b[1m\u001b[92m    Checking\u001b[0m nix v0.25.1\n\u001b[1m\u001b[92m    Checking\u001b[0m socket2 v0.6.5\n\u001b[1m\u001b[92m    Checking\u001b[0m mio v1.2.4\n\u001b[1m\u001b[92m    Checking\u001b[0m bytes v1.12.1\n\u001b[1m\u001b[92m   Compiling\u001b[0m tokio-macros v2.7.2\n\u001b[1m\u001b[92m    Checking\u001b[0m tokio v1.54.1\n\u001b[1m\u001b[92m   Compiling\u001b[0m thiserror-impl v1.0.69\n\u001b[1m\u001b[92m   Compiling\u001b[0m tracing-attributes v0.1.31\n\u001b[1m\u001b[92m    Checking\u001b[0m filedescriptor v0.8.3\n\u001b[1m\u001b[92m    Checking\u001b[0m tracing v0.1.44\n\u001b[1m\u001b[92m    Checking\u001b[0m portable-pty v0.8.1\n\u001b[1m\u001b[92m    Checking\u001b[0m nession-tmux v0.1.0 (/tmp/nession-tmux-consumer.1eQc8k/unpacked/nession-tmux-0.1.0)\n\u001b[1m\u001b[91merror\u001b[0m\u001b[1m: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)\u001b[0m\n   \u001b[1m\u001b[94m--> \u001b[0m/tmp/nession-tmux-consumer.1eQc8k/unpacked/nession-tmux-0.1.0/src/client/transport.rs:454:30\n    \u001b[1m\u001b[94m|\u001b[0m\n\u001b[1m\u001b[94m454\u001b[0m \u001b[1m\u001b[94m|\u001b[0m                 fd: AsyncFd::new(fd)?,\n    \u001b[1m\u001b[94m|\u001b[0m                              \u001b[1m\u001b[91m^^^\u001b[0m\n    \u001b[1m\u001b[94m|\u001b[0m\n    \u001b[1m\u001b[94m= \u001b[0m\u001b[1mnote\u001b[0m: `-D deprecated` implied by `-D warnings`\n    \u001b[1m\u001b[94m= \u001b[0m\u001b[1mhelp\u001b[0m: to override `-D warnings` add `#[allow(deprecated)]`\n\n\u001b[1m\u001b[91merror\u001b[0m: could not compile `nession-tmux` (lib) due to 1 previous error",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "the named exact-SHA source tests did not establish the criterion"
+        }
+      ],
+      "duration_ms": 17950,
+      "exit_code": 1
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40376099250,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "c5ef8b79ac4ed32f6a56d13e57aec1a976f70993",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40376099250",
+    "record_path": "runs/2026-10-26/40376099250-1/2469/SC-01.json",
+    "source_result_sha256": "e36679fd20c2feab36faeff7bbaffa1f13fa20efacb5b5e51f2dee3e0b6d9a6e"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40376099250-1",
+    "sha256": "e36679fd20c2feab36faeff7bbaffa1f13fa20efacb5b5e51f2dee3e0b6d9a6e",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40376099250",
+    "durability": "time-limited; object archival not configured"
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "4b8fb4b48a6fea18f8c0f6546074a66de67e689fe660542537aa6f77530747a5",
+  "run_id": 40376099250,
+  "run_attempt": 1,
+  "issue": 2469,
+  "criterion": "SC-02",
+  "criterion_text": "A real isolated tmux server can be created/listed/managed before attach and interacted with afterward through typed SDK APIs; every tmux process/command in Nession production paths goes through the SDK and continues explicit private-socket isolation without a raw-spawn bypass.",
+  "stage": "staging",
+  "target_sha": "c5ef8b79ac4ed32f6a56d13e57aec1a976f70993",
+  "contract_sha256": "668ab9684492c450c331beafbac53caddad4ed082eebd29df11dc7dfa9d00430",
+  "case_revision": "c5ef8b79ac4ed32f6a56d13e57aec1a976f70993",
+  "case_tree_sha": "9a632c6ea680be485c40a2861da38edc7f574de8",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Fail",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-26T18:17:41.104Z",
+  "finished_at": "2026-10-26T18:18:10.705Z",
+  "duration_ms": 29601,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Fail",
+      "summary": "cargo test -p nession-agent --test integration tmux:: failed (exit 101): \u001b[1m\u001b[92m   Compiling\u001b[0m tokio v1.53.1\n\u001b[1m\u001b[92m   Compiling\u001b[0m tokio-stream v0.1.19\n\u001b[1m\u001b[92m   Compiling\u001b[0m tokio-rustls v0.25.0\n\u001b[1m\u001b[92m   Compiling\u001b[0m nession-tmux v0.1.0 (/home/runner/work/nession/nession/workspace/crates/nession-tmux)\n\u001b[1m\u001b[92m   Compiling\u001b[0m tokio-tungstenite v0.21.0\n\u001b[1m\u001b[92m   Compiling\u001b[0m sqlx-core v0.9.0\n\u001b[1m\u001b[92m   Compiling\u001b[0m nession-runtime v0.35.0 (/home/runner/work/nession/nession/workspace/crates/nession-runtime)\n\u001b[1m\u001b[92m   Compiling\u001b[0m nession-git v0.35.0 (/home/runner/work/nession/nession/workspace/crates/nession-git)\n\u001b[1m\u001b[92m   Compiling\u001b[0m nession-claude-code v0.35.0 (/home/runner/work/nession/nession/workspace/crates/nession-claude-code)\n\u001b[1m\u001b[92m   Compiling\u001b[0m sqlx-sqlite v0.9.0\n\u001b[1m\u001b[92m   Compiling\u001b[0m nession-agent v0.35.0 (/home/runner/work/nession/nession/workspace/crates/nession-agent)\n\u001b[1m\u001b[92m   Compiling\u001b[0m sqlx v0.9.0\n\u001b[1m\u001b[92m   Compiling\u001b[0m sea-query-sqlx v0.9.1\n\u001b[1m\u001b[92m   Compiling\u001b[0m sea-schema v0.18.1\n\u001b[1m\u001b[92m   Compiling\u001b[0m sea-orm v2.0.2\n\u001b[1m\u001b[92m   Compiling\u001b[0m sea-orm-migration v2.0.2\n\u001b[1m\u001b[92m   Compiling\u001b[0m nession-server v0.35.0 (/home/runner/work/nession/nession/workspace/crates/nession-server)\n\u001b[1m\u001b[92m    Finished\u001b[0m `test` profile [unoptimized] target(s) in 19.21s\n\u001b[1m\u001b[92m     Running\u001b[0m tests/integration/main.rs (target/debug/deps/integration-9a87659a812d32bc)\n\u001b[1m\u001b[91merror\u001b[0m: test failed, to rerun pass `-p nession-agent --test integration`",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "the named exact-SHA source tests did not establish the criterion"
+        }
+      ],
+      "duration_ms": 23757,
+      "exit_code": 1
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40376099250,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "c5ef8b79ac4ed32f6a56d13e57aec1a976f70993",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40376099250",
+    "record_path": "runs/2026-10-26/40376099250-1/2469/SC-02.json",
+    "source_result_sha256": "35234cc01d5d79558f866cbc3e81463acd4bb6cb91dbf23381b47e9306d8903e"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40376099250-1",
+    "sha256": "35234cc01d5d79558f866cbc3e81463acd4bb6cb91dbf23381b47e9306d8903e",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40376099250",
+    "durability": "time-limited; object archival not configured"
+  }
+}
