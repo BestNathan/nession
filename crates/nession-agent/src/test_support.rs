@@ -238,8 +238,7 @@ impl FakeTmux {
                  fi\n\
                  n=$((n + 1))\n\
                  done\n\
-                 printf '%s\\n' \"$@\" > \"{dir}/{prefix}$n/{record}\"\n\
-                 echo \"{sep}\" >> \"{dir}/{prefix}$n/{record}\"\n\
+                 printf '%s\\n' \"$@\" \"{sep}\" > \"{dir}/{prefix}$n/{record}\" || exit 1\n\
                  {script}\n",
                 dir = dir.display(),
                 prefix = CALL_FILE_PREFIX,
@@ -289,13 +288,11 @@ impl FakeTmux {
             // recorded has no terminator: report it only once it is whole.
             //
             // The terminator is an **end** marker, so a repeated one is still
-            // the same end. The recorder writes it with a second command
-            // (`printf` then `echo`), and under the coverage run's load that
-            // pair was observed appending the marker twice to one record; that
-            // is one call, not two, and reading it as an argv entry would fail
-            // a test about splicing for a reason that is not splicing. A
-            // separator *inside* the block is left alone — that is what a
-            // genuine splice would look like.
+            // the same end. The recorder writes it as the last argument of its
+            // single `printf`; a repeated marker (observed once under the
+            // coverage run's load) is one call, not a call whose last argument
+            // is the marker. A separator *inside* the block is left alone —
+            // that is what a genuine splice would look like.
             let text = text.trim_end_matches('\n');
             let mut body = text;
             let mut whole = false;
