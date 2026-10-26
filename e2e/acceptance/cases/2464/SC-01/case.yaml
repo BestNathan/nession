@@ -1,7 +1,7 @@
 schema_version: 1
 issue: 2464
 criterion: SC-01
-stage: pre-merge
+stage: staging
 runtime: full-stack-local
 verifiers:
   - type: runtime
