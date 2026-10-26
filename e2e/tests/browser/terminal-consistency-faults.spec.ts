@@ -491,6 +491,101 @@ test('a Relay reconnect keeps the xterm and loses no session output', async ({ p
   expect(missingTail, 'a tail line never reached the parser').toEqual([]);
 });
 
+// #2464 SC-02/SC-04: a reconnect keeps the renderer but must follow the pane's
+// **buffer selection and caret**. The application enters the alternate screen,
+// leaves it while the transport is down, paints a marker and parks the caret at
+// screen row 6 / column 9. The Agent's screen-only bootstrap has to carry the
+// `?1049l`, the text and an absolute placement; text alone would leave the
+// retained xterm on the alternate buffer, and the caret at the end of the last
+// written line.
+test('a reconnect returns a retained renderer to the pane\'s normal screen and caret (#2464)', async ({ page }, testInfo) => {
+  test.skip(!process.env.CI, 'real stack available in CI only');
+  test.setTimeout(240_000);
+
+  const sessionName = `e2e-2464-retained-${testInfo.retry}-${Date.now()}`;
+  await page.goto(
+    '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
+  );
+  await waitForShell(page);
+  await createSession(page, sessionName);
+  await attachToSession(page, sessionName, 'Relay');
+  await waitForInteractiveShell(page);
+
+  await page.locator('.xterm').evaluate((node) => {
+    node.setAttribute('data-e2e-reconnect-instance', 'original');
+  });
+
+  await submitTerminalCommand(
+    page,
+    `sh -c 'printf "\\033[?1049h"; printf "ALT-2464-TUI\\n"; sleep 3; ` +
+      `printf "\\033[?1049l"; printf "ALT-2464-BACK\\n"; printf "\\033[6;9H"; cat > /dev/null'`,
+  );
+  await expect.poll(async () => readBufferType(page)).toBe('alternate');
+  await expect.poll(async () => countInBuffer(page, 'ALT-2464-TUI')).toBe(1);
+
+  await page.evaluate(() => {
+    const originalSend = WebSocket.prototype.send;
+    WebSocket.prototype.send = function (data) {
+      if (typeof data === 'string') {
+        try {
+          if ((JSON.parse(data) as { msg_type?: string }).msg_type === 'server.info') {
+            return;
+          }
+        } catch {
+          // Non-JSON frames still pass through unchanged.
+        }
+      }
+      return originalSend.call(this, data);
+    };
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => 'hidden',
+    });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+
+  // The application leaves the alternate screen while the browser is offline.
+  await page.waitForTimeout(6_000);
+
+  const newSocket = page.waitForEvent('websocket', {
+    predicate: (ws) => ws.url().includes('/ws'),
+    timeout: 20_000,
+  });
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => 'visible',
+    });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+
+  await newSocket;
+  await expect(page.getByTestId('terminal-connecting')).toBeHidden({ timeout: 30_000 });
+  await expect(page.locator('.xterm')).toHaveAttribute('data-e2e-reconnect-instance', 'original');
+
+  await expect.poll(async () => readBufferType(page), { timeout: 20_000 }).toBe('normal');
+  await expect.poll(async () => countInBuffer(page, 'ALT-2464-BACK'), { timeout: 20_000 }).toBe(1);
+
+  // The pane parked at 0-based (x 8, y 5) of its screen. `cursorY` is absolute
+  // in xterm's buffer, so compare the screen row against `baseY`.
+  const cursor = await page.evaluate(() => {
+    const xtermEl = document.querySelector('.xterm');
+    const container = xtermEl?.parentElement as
+      | ({ xtermInstance?: { buffer: { active: { cursorX: number; cursorY: number; baseY: number } } } } & Record<string, unknown>)
+      | null;
+    const term = container?.xtermInstance;
+    if (!term) {
+      throw new Error('xtermInstance not mounted');
+    }
+    return {
+      x: term.buffer.active.cursorX,
+      screenY: term.buffer.active.cursorY - term.buffer.active.baseY,
+    };
+  });
+  expect(cursor.x, 'the bootstrap did not place the caret at the pane column').toBe(8);
+  expect(cursor.screenY, 'the bootstrap did not place the caret at the pane row').toBe(5);
+});
+
 // #2144 / #1926 SC-06: two real clients on one Session. The browser client id
 // is persisted in localStorage, so two pages in one context are one client to
 // the Agent; the observer must be a separate browser context with its own
