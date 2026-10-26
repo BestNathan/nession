@@ -1,41 +1,122 @@
 #!/usr/bin/env node
-// Owner: #2323 SC-06. Decide whether a Main push can affect the Full E2E
-// suite and emit an explicit Not Required receipt instead of silently
-// skipping via a path filter. Unknown or unverifiable input fails closed to
-// applicable, so a real runtime change can never be mistaken for a no-op.
+// Owner: #2323 SC-06 / #2478 SC-01. Decide whether a change can affect the
+// Full E2E suite (and whether any browser runtime is warranted at all), and
+// emit an explicit Not Required receipt instead of silently skipping via a
+// path filter. Unknown or unverifiable input fails closed to applicable.
+//
+// The policy is an ordered, auditable matrix:
+//   tooling       known CI/Acceptance scheduler, ingestion and Gate tooling;
+//   e2e-contract  E2E executor / selection / report contract, browser tests,
+//                 fixtures, catalog and suite membership;
+//   app-runtime   product runtime and build inputs;
+//   unknown       anything not positively recognized (fail closed).
+// Only a change whose every path is positively tooling may be `tooling-only`
+// (Not Required). Mixed and unknown changes never silently downgrade.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const NON_RUNTIME = [
-  (file) => file.endsWith('.md'),
-  (file) => file.startsWith('docs/'),
-  (file) => file.startsWith('.github/workflows/'),
-];
+// Workflows that EXECUTE browser tests. Their routers/ingesters/schedulers are
+// tooling; these are the runner/report contract and stay risk-bearing even
+// though they live under .github/workflows/.
+const E2E_EXECUTOR_WORKFLOWS = new Set([
+  'e2e-tests.yml',
+  'e2e-full-regression.yml',
+  'e2e-scenario-smoke.yml',
+  'acceptance-cases.yml',
+  'acceptance-case-smoke.yml',
+]);
+
+function basename(file) {
+  return file.slice(file.lastIndexOf('/') + 1);
+}
+
+function isE2ERisk(file) {
+  if (file.startsWith('e2e/')) return true; // tests, fixtures, catalog, runner, Cases
+  if (/^scripts\/(e2e-|issue-e2e-|ci\/)/.test(file)) return true;
+  if (file.startsWith('.github/workflows/') &&
+      E2E_EXECUTOR_WORKFLOWS.has(basename(file))) return true;
+  // Browser gates define what browser evidence means; a change there can
+  // invalidate prior design/E2E proof even though it cannot alter runtime.
+  if (/^gates\/checks\/(e2e|.*playwright|.*browser)/i.test(file)) return true;
+  // Suite membership decides which Gates run; it is part of the contract.
+  if (file.startsWith('gates/suites/')) return true;
+  return false;
+}
+
+function isRuntime(file) {
+  return file.startsWith('crates/') ||
+    file.startsWith('web/') ||
+    file.startsWith('design/') ||
+    file.startsWith('.cargo/') ||
+    file === 'Cargo.toml' || file === 'Cargo.lock' ||
+    file === 'rust-toolchain.toml';
+}
+
+function isTooling(file) {
+  if (file.endsWith('.md') || file.startsWith('docs/')) return true;
+  if (file.startsWith('gates/')) return true; // executor/suite paths handled first
+  if (file.startsWith('.github/workflows/')) return true; // executor paths handled first
+  if (file.startsWith('scripts/')) return true; // e2e/ci paths handled first
+  return false;
+}
+
+export function categorizeChangedPath(file) {
+  if (typeof file !== 'string' || !file || /[\r\n]/.test(file)) return 'unknown';
+  // Documentation is tooling wherever it lives (web/AGENTS.md, e2e/README.md).
+  if (file.endsWith('.md')) return 'tooling';
+  if (isE2ERisk(file)) return 'e2e-contract';
+  if (isRuntime(file)) return 'app-runtime';
+  if (isTooling(file)) return 'tooling';
+  return 'unknown';
+}
+
+const REASON = Object.freeze({
+  'tooling-only': 'changed-paths-cannot-affect-runtime',
+  'e2e-contract': 'e2e-runner-or-contract-change',
+  'app-runtime': 'runtime-affecting-change',
+  mixed: 'mixed-risk-change',
+  unknown: 'unrecognized-changed-path',
+});
 
 export function classifyChangedPaths(paths) {
   if (!Array.isArray(paths) || paths.length === 0) {
-    return { applicable: true, reason: 'no-verifiable-change-scope', changed_paths: [] };
+    return { applicable: true, category: 'unknown', reason: 'no-verifiable-change-scope', changed_paths: [] };
   }
   for (const file of paths) {
     if (typeof file !== 'string' || !file || /[\r\n]/.test(file)) {
-      return { applicable: true, reason: 'unrecognized-changed-path', changed_paths: paths.slice(0, 50) };
+      return { applicable: true, category: 'unknown', reason: 'unrecognized-changed-path', changed_paths: paths.slice(0, 50) };
     }
   }
-  const runtime = paths.filter((file) => !NON_RUNTIME.some((rule) => rule(file)));
-  if (runtime.length === 0) {
-    return { applicable: false, reason: 'changed-paths-cannot-affect-runtime', changed_paths: paths.slice(0, 50) };
+  const entries = paths.map((file) => ({ file, category: categorizeChangedPath(file) }));
+  const risk = entries.filter((entry) => entry.category !== 'tooling');
+  if (risk.length === 0) {
+    return {
+      applicable: false, category: 'tooling-only',
+      reason: REASON['tooling-only'], changed_paths: paths.slice(0, 50),
+    };
   }
-  return { applicable: true, reason: 'runtime-affecting-change', changed_paths: runtime.slice(0, 50) };
+  const categories = new Set(entries.map((entry) => entry.category));
+  const category = categories.has('unknown') ? 'unknown'
+    : categories.size === 1 ? [...categories][0] : 'mixed';
+  return {
+    applicable: true,
+    category,
+    reason: REASON[category],
+    changed_paths: risk.map((entry) => entry.file).slice(0, 50),
+  };
 }
 
 export function notRequiredReceipt(sha, classification) {
   if (!/^[a-f0-9]{40}$/.test(String(sha ?? ''))) throw new Error('invalid target SHA');
-  if (classification?.applicable !== false) throw new Error('receipt requires a not-required classification');
+  if (classification?.applicable !== false || classification?.category !== 'tooling-only') {
+    throw new Error('receipt requires a not-required classification');
+  }
   return {
     schema_version: 1,
     kind: 'e2e_full_not_required',
     target_sha: sha,
+    category: classification.category,
     reason: classification.reason,
     changed_paths: classification.changed_paths,
     full_regression: 'NOT_REQUIRED',
@@ -43,23 +124,87 @@ export function notRequiredReceipt(sha, classification) {
 }
 
 function selfTest() {
-  assert.deepEqual(classifyChangedPaths(['docs/design/notes.md']),
-    { applicable: false, reason: 'changed-paths-cannot-affect-runtime', changed_paths: ['docs/design/notes.md'] });
-  assert.equal(classifyChangedPaths(['README.md']).applicable, false);
-  assert.equal(classifyChangedPaths(['.github/workflows/e2e-full-regression.yml']).applicable, false);
-  assert.equal(classifyChangedPaths(['web/AGENTS.md', 'docs/architecture/x.md']).applicable, false);
-  assert.equal(classifyChangedPaths(['crates/nession-server/src/lib.rs']).applicable, true);
-  assert.equal(classifyChangedPaths(['docs/a.md', 'scripts/e2e-full-applicability.mjs']).applicable, true);
-  assert.equal(classifyChangedPaths(['e2e/tests/browser/login.spec.ts']).applicable, true);
-  assert.equal(classifyChangedPaths(['justfile']).applicable, true);
-  assert.equal(classifyChangedPaths([]).applicable, true, 'unverifiable scope must fail closed to applicable');
-  assert.equal(classifyChangedPaths(['']).applicable, true, 'unrecognized path must fail closed to applicable');
-  const receipt = notRequiredReceipt('a'.repeat(40), classifyChangedPaths(['docs/x.md']));
+  const tooling = [
+    'docs/design/notes.md',
+    'README.md',
+    '.github/workflows/acceptance-orchestrator.yml',
+    '.github/workflows/e2e-staging-lanes.yml', // scheduler, not executor
+    '.github/workflows/e2e-full-failure-ingest.yml', // ingestion
+    '.github/workflows/ci-quality.yml',
+    'gates/checks/deployment-identity-selftest.sh',
+    'scripts/staging-lane-admission-state.mjs',
+    'scripts/staging-lane-scheduler.mjs',
+    'scripts/acceptance-case-ingest.mjs',
+    'scripts/deployment-binding-lookup.mjs',
+  ];
+  for (const file of tooling) {
+    assert.equal(categorizeChangedPath(file), 'tooling', file + ' must be tooling');
+  }
+  const contract = [
+    'e2e/tests/browser/login.spec.ts',
+    'e2e/fixtures/server.js',
+    'e2e/runner/test-catalog.cjs',
+    'e2e/playwright.config.ts',
+    'scripts/e2e-regression-policy.mjs',
+    'scripts/issue-e2e-plan.mjs',
+    'scripts/ci/try-web-build-reuse.sh',
+    '.github/workflows/e2e-tests.yml',
+    '.github/workflows/e2e-full-regression.yml',
+    '.github/workflows/acceptance-cases.yml',
+    'gates/checks/e2e-playwright.sh',
+    'gates/checks/design-system-browser.sh',
+    'gates/suites/quality-tooling.gates',
+  ];
+  for (const file of contract) {
+    assert.equal(categorizeChangedPath(file), 'e2e-contract', file + ' must be E2E contract');
+  }
+  for (const file of ['crates/nession-agent/src/server/websocket.rs', 'web/src/App.tsx',
+    'design/tokens.json', 'Cargo.lock']) {
+    assert.equal(categorizeChangedPath(file), 'app-runtime', file + ' must be runtime');
+  }
+  for (const file of ['justfile', '.github/CODEOWNERS', 'terraform/main.tf']) {
+    assert.equal(categorizeChangedPath(file), 'unknown', file + ' must fail closed as unknown');
+  }
+
+  // The real #2476 surface must be tooling-only (Not Required).
+  const reproduction = classifyChangedPaths([
+    '.github/workflows/e2e-staging-lanes.yml',
+    'gates/checks/deployment-identity-selftest.sh',
+    'scripts/staging-lane-admission-state.mjs',
+  ]);
+  assert.equal(reproduction.applicable, false);
+  assert.equal(reproduction.category, 'tooling-only');
+
+  // Matrix: tooling-only, contract, runtime, mixed, unknown.
+  assert.deepEqual(classifyChangedPaths(['web/AGENTS.md', 'docs/a.md']).category, 'tooling-only');
+  assert.equal(classifyChangedPaths(['e2e/tests/browser/login.spec.ts']).category, 'e2e-contract');
+  assert.equal(classifyChangedPaths(['web/src/App.tsx']).category, 'app-runtime');
+  assert.equal(classifyChangedPaths(['docs/a.md', 'web/src/App.tsx']).category, 'mixed');
+  assert.equal(classifyChangedPaths(['scripts/acceptance-x.mjs', 'e2e/tests/y.ts']).category, 'mixed');
+  assert.equal(classifyChangedPaths(['justfile']).category, 'unknown');
+  assert.equal(classifyChangedPaths(['docs/a.md', 'justfile']).category, 'unknown',
+    'an unknown path in a mixed change must fail closed');
+
+  // Untrusted text cannot downgrade a risk-bearing path: a path carrying a
+  // claim/newline is unrecognized, and Issue/PR prose is never an input.
+  assert.equal(classifyChangedPaths(['crates/nession-agent/src/lib.rs\nnot-required']).category, 'unknown');
+  assert.equal(classifyChangedPaths(['crates/nession-agent/src/server/websocket.rs']).applicable, true,
+    'security-sensitive runtime stays applicable');
+
+  // Empty/unverifiable scope fails closed.
+  assert.equal(classifyChangedPaths([]).applicable, true);
+  assert.equal(classifyChangedPaths([]).category, 'unknown');
+  assert.equal(classifyChangedPaths(['']).applicable, true);
+
+  const receipt = notRequiredReceipt('a'.repeat(40), reproduction);
   assert.equal(receipt.full_regression, 'NOT_REQUIRED');
   assert.equal(receipt.kind, 'e2e_full_not_required');
-  assert.throws(() => notRequiredReceipt('main', classifyChangedPaths(['docs/x.md'])), /invalid target SHA/);
+  assert.equal(receipt.category, 'tooling-only');
+  assert.throws(() => notRequiredReceipt('main', reproduction), /invalid target SHA/);
   assert.throws(() => notRequiredReceipt('a'.repeat(40), { applicable: true }), /not-required classification/);
-  console.log('e2e full applicability: path classification and Not Required receipt fixtures passed');
+  assert.throws(() => notRequiredReceipt('a'.repeat(40),
+    { applicable: false, category: 'e2e-contract' }), /not-required classification/);
+  console.log('e2e full applicability: impact matrix, fail-closed negatives and Not Required receipt fixtures passed');
 }
 
 function main() {

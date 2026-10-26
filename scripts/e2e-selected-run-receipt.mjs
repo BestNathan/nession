@@ -163,14 +163,28 @@ export const E2E_NOT_REQUIRED_STEPS = Object.freeze([
   Object.freeze(['tmux', 'Install tmux', 'skipped']),
   Object.freeze(['design_gate', 'Run canonical browser design gate', 'success']),
 ]);
+// #2478 SC-02/SC-03: the design gate is only skippable when the trusted
+// impact policy positively classified the change as tooling-only (it cannot
+// affect browser behavior). Every other not-required plan still runs the
+// design gate, and a receipt that skips it without this explicit scope is
+// rejected — an accidental `if:` regression can never read as a Pass.
+export const E2E_NOT_REQUIRED_BROWSER_SCOPES = Object.freeze(['required', 'tooling-only']);
 
-export function makeE2eNotRequiredReceipt({ env, runId, runAttempt, sha, steps }) {
+function designGateExpectation(browserScope) {
+  return browserScope === 'tooling-only' ? 'skipped' : 'success';
+}
+
+export function makeE2eNotRequiredReceipt({ env, runId, runAttempt, sha, steps,
+  browserScope = 'required' }) {
   const run = positiveInt(runId ?? env?.GITHUB_RUN_ID);
   const attempt = positiveInt(runAttempt ?? env?.GITHUB_RUN_ATTEMPT);
+  const designExpected = designGateExpectation(browserScope);
   if (env?.GITHUB_REPOSITORY !== REPO || run === null || attempt === null ||
       !SHA.test(String(sha ?? '')) || !steps ||
+      !E2E_NOT_REQUIRED_BROWSER_SCOPES.includes(browserScope) ||
       !E2E_NOT_REQUIRED_STEPS.every(([key]) => OUTCOME(steps[key])) ||
-      !E2E_NOT_REQUIRED_STEPS.every(([key, , expected]) => steps[key] === expected)) {
+      !E2E_NOT_REQUIRED_STEPS.every(([key, , expected]) =>
+        steps[key] === (key === 'design_gate' ? designExpected : expected))) {
     return null;
   }
   return Object.freeze({
@@ -182,6 +196,7 @@ export function makeE2eNotRequiredReceipt({ env, runId, runAttempt, sha, steps }
     run_attempt: attempt,
     sha,
     plan_mode: 'not-required',
+    browser_scope: browserScope,
     steps: Object.freeze(Object.fromEntries(
       E2E_NOT_REQUIRED_STEPS.map(([key]) => [key, steps[key]]),
     )),
@@ -189,16 +204,20 @@ export function makeE2eNotRequiredReceipt({ env, runId, runAttempt, sha, steps }
 }
 
 export function validateE2eNotRequiredReceipt(receipt) {
-  if (receipt?.schema_version !== 1 || receipt.kind !== E2E_NOT_REQUIRED_KIND ||
+  const browserScope = receipt?.browser_scope ?? 'required';
+  const designExpected = designGateExpectation(browserScope);
+  if (!E2E_NOT_REQUIRED_BROWSER_SCOPES.includes(browserScope) ||
+      receipt?.schema_version !== 1 || receipt.kind !== E2E_NOT_REQUIRED_KIND ||
       receipt.repository !== REPO || receipt.workflow !== E2E_SELECTED_WORKFLOW ||
       !POS(receipt.run_id) || !POS(receipt.run_attempt) ||
       !SHA.test(receipt.sha ?? '') || receipt.plan_mode !== 'not-required' ||
       !receipt.steps || typeof receipt.steps !== 'object' ||
-      !E2E_NOT_REQUIRED_STEPS.every(([key, , expected]) => receipt.steps[key] === expected)) {
+      !E2E_NOT_REQUIRED_STEPS.every(([key, , expected]) =>
+        receipt.steps[key] === (key === 'design_gate' ? designExpected : expected))) {
     throw Error('invalid not-required E2E receipt');
   }
   const allowed = new Set(['schema_version', 'kind', 'repository', 'workflow',
-    'run_id', 'run_attempt', 'sha', 'plan_mode', 'steps']);
+    'run_id', 'run_attempt', 'sha', 'plan_mode', 'browser_scope', 'steps']);
   if (Object.keys(receipt).some((key) => !allowed.has(key))) {
     throw Error('unexpected not-required E2E receipt fields');
   }
@@ -211,19 +230,23 @@ export function validateE2eNotRequiredReceipt(receipt) {
 
 export function attestE2eNotRequiredReceipt(receipt, run, job) {
   validateE2eNotRequiredReceipt(receipt);
+  const browserScope = receipt.browser_scope ?? 'required';
   const steps = Array.isArray(job?.steps) ? job.steps : [];
   for (const [key, name, expected] of E2E_NOT_REQUIRED_STEPS) {
     // Canonical E2E renamed this step to "(standalone)" when selected
     // plans were introduced. Verify exactly one recognized step, not an
-    // arbitrary or missing step, and still require GitHub's success verdict.
+    // arbitrary or missing step, and still require GitHub's own verdict.
     const expectedNames = key === 'design_gate'
       ? [name, 'Run canonical browser design gate (standalone)']
       : [name];
+    const wanted = key === 'design_gate'
+      ? designGateExpectation(browserScope) : expected;
     const matches = steps.filter((step) => expectedNames.includes(step?.name));
-    // The job API must agree with the receipt's claimed outcome, and the
-    // required design gate must actually have run and passed.
-    if (matches.length !== 1 || matches[0].conclusion !== expected ||
-        receipt.steps[key] !== expected) {
+    // The job API must agree with the receipt's claimed outcome. A required
+    // design gate must actually have run and passed; a tooling-only scope
+    // must have really skipped it.
+    if (matches.length !== 1 || matches[0].conclusion !== wanted ||
+        receipt.steps[key] !== wanted) {
       throw Error('not-required E2E receipt step provenance mismatch: ' + name);
     }
   }
@@ -254,7 +277,8 @@ export function attestE2eNotRequiredReceipt(receipt, run, job) {
     plan_mode: 'not-required',
     skipped_e2e_only_steps: E2E_NOT_REQUIRED_STEPS
       .filter(([, , expected]) => expected === 'skipped').map(([key]) => key),
-    design_gate: 'success',
+    browser_scope: browserScope,
+    design_gate: designGateExpectation(browserScope),
     evidence: 'GitHub API Run/Attempt/job step outcomes + exact original ' +
       'not-required E2E job log receipt emitted by the measured run',
   });
@@ -357,6 +381,7 @@ function emitNotRequired() {
   const receipt = makeE2eNotRequiredReceipt({
     env: process.env,
     sha: arg('sha', true),
+    browserScope: arg('browser-scope', true),
     steps: {
       rust_toolchain: arg('rust', true),
       cargo_build: arg('cargo', true),
@@ -457,6 +482,12 @@ function selfTest() {
   };
   const nr = makeE2eNotRequiredReceipt({ env, sha, steps: nrSteps });
   assert.equal(validateE2eNotRequiredReceipt(nr).plan_mode, 'not-required');
+  assert.equal(nr.browser_scope, 'required');
+  // Historical receipts predate `browser_scope`; their success design gate
+  // remains the only accepted shape.
+  const legacyNr = { ...nr };
+  delete legacyNr.browser_scope;
+  assert.equal(validateE2eNotRequiredReceipt(legacyNr).plan_mode, 'not-required');
   const nrJob = {
     name: E2E_SELECTED_JOB, run_id: 12, run_attempt: 1, head_sha: sha,
     status: 'completed', conclusion: 'success',
@@ -482,9 +513,38 @@ function selfTest() {
     steps:standaloneJob.steps.map(s=>
       s.name==='Run canonical browser design gate (standalone)'
         ? {...s,conclusion:'skipped'} : s)}),/provenance mismatch/);
-  // The design gate must have RUN: a skipped design gate is not a Pass.
+  // The design gate must have RUN unless the trusted impact policy positively
+  // scoped the change as tooling-only: a skipped design gate is not a Pass.
   assert.equal(makeE2eNotRequiredReceipt({ env, sha,
     steps: { ...nrSteps, design_gate: 'skipped' } }), null);
+  assert.equal(makeE2eNotRequiredReceipt({ env, sha, browserScope: 'required',
+    steps: { ...nrSteps, design_gate: 'skipped' } }), null);
+  // A tooling-only scope may skip the design gate, but it must then really
+  // have been skipped, and the receipt records why.
+  const toolingSteps = { ...nrSteps, design_gate: 'skipped' };
+  const toolingNr = makeE2eNotRequiredReceipt({ env, sha,
+    browserScope: 'tooling-only', steps: toolingSteps });
+  assert.equal(toolingNr.browser_scope, 'tooling-only');
+  const toolingJob = { ...nrJob, steps: nrJob.steps.map((step) =>
+    step.name === 'Run canonical browser design gate'
+      ? { ...step, name: 'Run canonical browser design gate (standalone)', conclusion: 'skipped' }
+      : step) };
+  const toolingAttested = attestE2eNotRequiredReceipt(toolingNr, run, toolingJob);
+  assert.equal(toolingAttested.browser_scope, 'tooling-only');
+  assert.equal(toolingAttested.design_gate, 'skipped');
+  assert.deepEqual(toolingAttested.skipped_e2e_only_steps,
+    ['rust_toolchain', 'cargo_build', 'tmux']);
+  // The scope claim and the measured outcome can never disagree.
+  assert.equal(makeE2eNotRequiredReceipt({ env, sha,
+    browserScope: 'tooling-only', steps: nrSteps }), null);
+  assert.equal(makeE2eNotRequiredReceipt({ env, sha,
+    browserScope: 'sometimes', steps: toolingSteps }), null);
+  reject(() => attestE2eNotRequiredReceipt(toolingNr, run, nrJob),
+    /provenance mismatch/);
+  reject(() => validateE2eNotRequiredReceipt({ ...toolingNr, browser_scope: 'sometimes' }),
+    /invalid/);
+  reject(() => attestE2eNotRequiredReceipt(nr, run, toolingJob),
+    /provenance mismatch/);
   // A Rust build that ran is not a skip.
   assert.equal(makeE2eNotRequiredReceipt({ env, sha,
     steps: { ...nrSteps, cargo_build: 'success' } }), null);
