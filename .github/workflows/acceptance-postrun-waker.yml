@@ -8,7 +8,14 @@ on:
   workflow_run:
     # Include the independently HTTPS-verified main Pages publication as a waker;
     # never infer SC Pass from merely receiving this notification.
-    workflows: ["Acceptance / Orchestrator", "CI / Run Store Fixture Evidence", "E2E / Tests", "Deploy / Public Pages"]
+    #
+    # E2E / Full Regression is a waker too (#2323): the exact-Main-SHA Full
+    # completes after the initial merged-stage Agent ran, and that Agent
+    # otherwise observes the Full as still in progress and leaves the
+    # release-qualification SCs Pending with no later re-evaluation. A second
+    # trigger cannot authorize Pass by itself; the evaluator re-reads the
+    # completed Full evidence under the same trusted rules.
+    workflows: ["Acceptance / Orchestrator", "CI / Run Store Fixture Evidence", "E2E / Tests", "E2E / Full Regression", "Deploy / Public Pages"]
     # Only successful main-push sources can authorize post-merge verification.
     # Filtering the event here prevents thousands of PR completion no-op runs,
     # rather than creating a downstream run solely to skip its select job.
@@ -78,6 +85,8 @@ jobs:
                .path == ".github/workflows/ci-run-store-fixture-evidence.yml") or
               (.name == "E2E / Tests" and
                .path == ".github/workflows/e2e-tests.yml") or
+              (.name == "E2E / Full Regression" and
+               .path == ".github/workflows/e2e-full-regression.yml") or
               (.name == "Deploy / Public Pages" and
                .path == ".github/workflows/deploy-pages.yml")
             ) and
