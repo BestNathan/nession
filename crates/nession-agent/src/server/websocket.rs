@@ -1211,7 +1211,7 @@ async fn send_bootstrap(
     // row, and trimming it would move the caret up with the text (#2464).
     crate::server::bootstrap::strip_trailing_blank_rows(
         &mut capture,
-        cursor.map(|(_, y)| usize::from(y)),
+        cursor.map(|(_, y, pane_height)| (y, pane_height)),
     );
     // The ceiling is applied to the *capture*, before the two translations
     // below. Both of them grow the frame — the escapes by under 100 bytes, the
@@ -1239,7 +1239,7 @@ async fn send_bootstrap(
     // whatever the retained renderer had restored.
     bytes.extend_from_slice(crate::server::bootstrap::SCREEN_RESET);
     bytes.extend_from_slice(&text);
-    if let Some((x, y)) = place_cursor {
+    if let Some((x, y, _pane_height)) = place_cursor {
         bytes.extend(crate::server::bootstrap::cursor_escape(x, y));
     }
     let bounded = crate::server::bootstrap::Bounded {
