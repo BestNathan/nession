@@ -35,11 +35,12 @@ use crate::server::execution::{
 use crate::server::issued_credit::SubscriberIssuedFlow;
 use crate::server::output_ack::{OutputAckBinding, OutputAckVerdict, SubscriberOutputAck};
 use crate::session::registry::{
-    ControlAcquireRejected, InputRejected, NotAttached, SessionRegistry,
+    ControlAcquireRejected, InputRejected, NotAttached, ResizeRejected, SessionRegistry,
 };
 use crate::session::service::{AttachedBackend, SessionService};
 use crate::session::terminal::runtime::{
-    AttachedSession, OutputChunk, SessionPeer, SubscriberEvent,
+    fan_out_peers, release_subscriber_bytes, AttachedSession, SessionPeer, SubscriberEvent,
+    SUBSCRIBER_QUEUE_SLOTS,
 };
 use crate::session::terminal::state as session_terminal;
 use crate::session::terminal::state::InputSequence;
@@ -72,142 +73,6 @@ use tracing::{debug, error, info, warn};
 // lane (`#961-E`). It used to be a bare `Arc<Mutex<SplitSink>>` — see that
 // module for what an unbounded socket write turns into, and why the writer task
 // is a task rather than a lock.
-
-/// How much terminal output one attached client may have waiting (#961).
-///
-/// This is the terminal lane's slow-consumer policy, and the depth is the
-/// policy. What it buys is that the *slowest* client cannot become the pace of
-/// the session for everybody else: the broadcast task fans one session's output
-/// out to every attached client, so a `send().await` here would park the
-/// fan-out on whichever client is behind — the other clients and the PTY reader
-/// behind it. A client with a full queue is therefore detached. That is the same
-/// verdict the Server reaches for a relayed client
-/// (`server::outbound::send_terminal`), applied where the terminal is served.
-///
-/// **The byte cap is the memory bound; the slot count is only a metadata
-/// backstop.** This used to be 64 slots, sized from the backend hop's *64
-/// chunks of up to 4 KiB* — but that hop's unit is not this queue's unit.
-/// Terminal events here are per-PTY-chunk, and tmux/`sed` emit small chunks
-/// (measured: a 5 000-line `sed` burst arrived as ~500-byte reads, and one
-/// relayed burst stalled after 913 delivered lines with only ~64 events
-/// queued). A 64-slot bound therefore evicted a *healthy* relayed subscriber
-/// after ~35 ms of scheduling lag with barely 1 KiB queued (#2179), while the
-/// 2 MiB byte budget below had not been approached.
-///
-/// The number is large enough that the byte budget binds first for realistic
-/// chunks (16 384 × 128 B = 2 MiB), and a genuinely stalled subscriber is still
-/// detached: the per-connection outbound path ends it after
-/// `DEFAULT_TERMINAL_STALL_GRACE`, and the queue's own byte reservation stops
-/// it before memory does. A subscriber evicted here must also actually *end* —
-/// see `P2pOutbound::close` on why the read loop races `wait_closed`.
-const SUBSCRIBER_QUEUE_SLOTS: usize = 16_384;
-/// Independent byte cap for the per-subscriber mpsc queue (#1983).
-///
-/// This is the bound a slow consumer actually reaches, and it is deliberately
-/// small enough to be a real verdict: 2 MiB is tens of thousands of terminal
-/// lines. A client that accumulates that much has stopped reading in any
-/// useful sense.
-const SUBSCRIBER_QUEUE_BYTES: usize = 2 * 1024 * 1024;
-
-/// Fan one chunk of terminal output out to every subscriber of a session.
-///
-/// Returns the number of subscribers **detached** by this call, i.e. dropped
-/// for having no room. A subscriber whose queue is closed is pruned too but not
-/// counted: that one's connection has already ended, and `spawn_output_forwarder`
-/// is on its way out.
-///
-/// Never waits, and that is the policy rather than an optimisation — see
-/// [`SUBSCRIBER_QUEUE_SLOTS`]. A free function so the policy can be tested
-/// without a socket, a PTY, or a session: the three cases (room, full, closed)
-/// are the whole of it.
-#[cfg(test)]
-fn fan_out(subscribers: &mut Vec<mpsc::Sender<OutputChunk>>, chunk: OutputChunk) -> usize {
-    let mut detached = 0usize;
-    subscribers.retain(|tx| match tx.try_send(chunk.clone()) {
-        Ok(()) => true,
-        Err(mpsc::error::TrySendError::Full(_)) => {
-            detached += 1;
-            false
-        }
-        Err(mpsc::error::TrySendError::Closed(_)) => false,
-    });
-    detached
-}
-
-fn release_subscriber_bytes(queued: &AtomicUsize, bytes: usize) {
-    // A disconnected raw-test sender may have skipped reservations; never
-    // underflow. Production's only fan-out writer reserves before try_send.
-    let _ = queued.fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
-        Some(n.saturating_sub(bytes))
-    });
-}
-
-fn fan_out_peers(peers: &mut Vec<SessionPeer>, chunk: OutputChunk) -> usize {
-    fan_out_session_event(peers, SubscriberEvent::Output(chunk))
-}
-
-fn fan_out_recorded_resize(
-    peers: &mut Vec<SessionPeer>,
-    cols: u16,
-    rows: u16,
-    stream_epoch: u64,
-    stream_seq: u64,
-    control_generation: Option<u64>,
-) -> usize {
-    fan_out_session_event(
-        peers,
-        SubscriberEvent::Resize {
-            cols,
-            rows,
-            stream_epoch,
-            stream_seq,
-            control_generation,
-        },
-    )
-}
-
-/// Called in the same producer lock after recording *either* event type.
-/// Every subscriber gets the identical sequence in the same FIFO order.
-fn fan_out_session_event(peers: &mut Vec<SessionPeer>, event: SubscriberEvent) -> usize {
-    let mut detached = 0usize;
-    peers.retain(|peer| {
-        let Some(tx) = &peer.output_tx else {
-            return true;
-        };
-        // Reserve before delivery; the receiver can immediately dequeue and
-        // release its charge on another task. One oversized frame is enough
-        // to evict this peer but cannot stall or evict a healthy observer.
-        let bytes = event.queued_bytes();
-        let reserved =
-            peer.queued_bytes
-                .fetch_update(Ordering::AcqRel, Ordering::Acquire, |queued| {
-                    queued
-                        .checked_add(bytes)
-                        .filter(|n| *n <= SUBSCRIBER_QUEUE_BYTES)
-                });
-        if reserved.is_err() {
-            peer.detached_for_not_draining
-                .store(true, Ordering::Release);
-            detached += 1;
-            return false;
-        }
-        match tx.try_send(event.clone()) {
-            Ok(()) => true,
-            Err(mpsc::error::TrySendError::Full(_)) => {
-                peer.queued_bytes.fetch_sub(bytes, Ordering::AcqRel);
-                peer.detached_for_not_draining
-                    .store(true, Ordering::Release);
-                detached += 1;
-                false
-            }
-            Err(mpsc::error::TrySendError::Closed(_)) => {
-                peer.queued_bytes.fetch_sub(bytes, Ordering::AcqRel);
-                false
-            }
-        }
-    });
-    detached
-}
 
 fn new_output_ack(stream_epoch: u64) -> Result<SubscriberOutputAck, OutputAckVerdict> {
     SubscriberOutputAck::new(OutputAckBinding {
@@ -2557,139 +2422,66 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
                 };
                 let client_id = connection_client_id(ctx.client_id).await;
-                let role_and_backend = ctx.sessions.lock()
-                    .get(&payload.session_name)
-                    .map(|session| {
-                        (
-                            session.control.role_of(&client_id),
-                            session
-                                .control
-                                .authorize_mutation(&client_id, payload.control_generation),
-                            // The generation this resize was admitted under. It
-                            // is recorded with the event so a client that has
-                            // since taken over can recognise a size chosen
-                            // under a lease the session has left (#2286 SC-03).
-                            // Captured at admission, not at record time: the
-                            // lease may move across the backend await, and the
-                            // event must say who asked, not who owns now.
-                            session.control.generation,
-                            Arc::clone(&session.backend),
-                        )
-                    });
-                match role_and_backend {
-                    Some((session_terminal::TerminalRole::Observer, _, _, _)) => {
-                        return ctx.err(
-                            "observer_resize",
-                            "observers must not resize the live session",
-                        );
-                    }
-                    Some((_, false, _, _)) => {
-                        return ctx.err(
-                            "not_controller",
-                            "terminal resize requires an active controller lease",
-                        );
-                    }
-                    Some((_, true, authorized_generation, backend)) => {
-                        // The guard is scoped here rather than written as the
-                        // `match` scrutinee, because a scrutinee's temporaries
-                        // live until the end of the **whole match** — so
-                        // `match backend.lock().await.resize(..).await` would
-                        // hold this session's backend across the fan-out below,
-                        // and `send_terminal` waits out the stall grace. A peer
-                        // that stopped draining would then park every other
-                        // operation that takes this backend (#1352). What the
-                        // lock is for is the backend's own I/O and nothing else:
-                        // see `AttachedSession::backend`.
-                        let resized = crate::session::terminal::runtime::resize(
-                            &backend,
-                            payload.cols,
-                            payload.rows,
-                        )
-                        .await;
-                        match resized {
-                            Ok(_) => {
-                                // `record_resize` consumes a sequence number,
-                                // and a number the client never receives is a
-                                // hole it can only close with a round trip, so
-                                // the frame below carries that position (#1303).
-                                // The session may have ended across the
-                                // resize's own `await`, in which case nothing
-                                // was recorded and there is no position to
-                                // report.
-                                let recorded = ctx.sessions.lock()
-                                    .get_mut(&payload.session_name)
-                                    .map(|session| {
-                                        let position = session.stream.record_resize(
-                                            &payload.session_name,
-                                            payload.cols,
-                                            payload.rows,
-                                            Some(authorized_generation),
-                                        );
-                                        // Record and enqueue within the SAME lock
-                                        // as record_output + fan-out. A resize
-                                        // cannot overtake output in any attached
-                                        // subscriber's FIFO (#2028).
-                                        let has_subscriber_queue = session
-                                            .peers
-                                            .iter()
-                                            .any(|peer| peer.output_tx.is_some());
-                                        let detached = fan_out_recorded_resize(
-                                            &mut session.peers,
-                                            payload.cols,
-                                            payload.rows,
-                                            position.0,
-                                            position.1,
-                                            Some(authorized_generation),
-                                        );
-                                        if detached > 0 {
-                                            warn!(
-                                                "session {}: detached {detached} subscriber(s) on sequenced resize",
-                                                payload.session_name,
-                                            );
-                                        }
-                                        (position, has_subscriber_queue)
-                                    });
-                                // Relay observers do not consume the P2P peer
-                                // stream. Broadcast the successfully admitted,
-                                // current-controller size through the Agent's
-                                // central resize reporter as well, so they do
-                                // not depend solely on an eventual tmux
-                                // %layout-change (which may be interleaved
-                                // with a command response or coalesced away).
-                                // The reporter is a per-session latest-size
-                                // level; this is not a second Agent stream seq.
-                                if recorded.is_some() {
-                                    let full_id =
-                                        format!("{}:{}", ctx.agent_id, payload.session_name);
-                                    ctx.resize.publish(&full_id, payload.cols, payload.rows);
-                                }
-
-                                // Compatibility only: an old attachment with
-                                // no sequenced forwarder retains the original
-                                // single-connection delivery. Never duplicate
-                                // a resize already dispatched to subscriber
-                                // FIFOs, including the requesting controller.
-                                if let Some((position, false)) = recorded {
-                                    send_recorded_resize_msg(
-                                        ctx.outbound,
-                                        &payload.session_name,
-                                        payload.cols,
-                                        payload.rows,
-                                        position,
-                                        Some(authorized_generation),
-                                    )
-                                    .await;
-                                }
-                                serde_json::to_string(&make_ok(ctx.id, "ok"))
-                                    .unwrap_or_default()
-                            }
-                            Err(e) => ctx.err("resize_error", &e.to_string()),
+                match ctx
+                    .sessions
+                    .resize(
+                        &payload.session_name,
+                        &client_id,
+                        payload.control_generation,
+                        payload.cols,
+                        payload.rows,
+                    )
+                    .await
+                {
+                    Ok(recorded) => {
+                        // Relay observers do not consume the P2P peer stream.
+                        // Broadcast the successfully admitted, current-controller
+                        // size through the Agent's central resize reporter as
+                        // well, so they do not depend solely on an eventual tmux
+                        // %layout-change (which may be interleaved with a
+                        // command response or coalesced away). The reporter is
+                        // a per-session latest-size level; this is not a second
+                        // Agent stream seq.
+                        if recorded.position.is_some() {
+                            let full_id = format!("{}:{}", ctx.agent_id, payload.session_name);
+                            ctx.resize.publish(&full_id, payload.cols, payload.rows);
                         }
+
+                        // Compatibility only: an old attachment with no
+                        // sequenced forwarder retains the original
+                        // single-connection delivery. Never duplicate a resize
+                        // already dispatched to subscriber FIFOs, including the
+                        // requesting controller.
+                        if let (Some(position), false) =
+                            (recorded.position, recorded.has_subscriber_queue)
+                        {
+                            send_recorded_resize_msg(
+                                ctx.outbound,
+                                &payload.session_name,
+                                payload.cols,
+                                payload.rows,
+                                position,
+                                Some(recorded.authorized_generation),
+                            )
+                            .await;
+                        }
+                        serde_json::to_string(&make_ok(ctx.id, "ok")).unwrap_or_default()
                     }
-                    None => ctx.err(
+                    Err(ResizeRejected::NotAttached) => ctx.err(
                         "not_attached",
                         &format!("not attached to session: {}", payload.session_name),
                     ),
+                    Err(ResizeRejected::Observer) => ctx.err(
+                        "observer_resize",
+                        "observers must not resize the live session",
+                    ),
+                    Err(ResizeRejected::NotController) => ctx.err(
+                        "not_controller",
+                        "terminal resize requires an active controller lease",
+                    ),
+                    Err(ResizeRejected::Backend(error)) => {
+                        ctx.err("resize_error", &error.to_string())
+                    }
                 }
             }
 
@@ -3563,7 +3355,10 @@ impl AgentServer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session::terminal::runtime::{accept_output_ack, build_terminal_resume_response};
+    use crate::session::terminal::runtime::{
+        accept_output_ack, build_terminal_resume_response, fan_out, fan_out_recorded_resize,
+        SUBSCRIBER_QUEUE_BYTES,
+    };
 
     #[test]
     fn output_ack_requires_exact_attached_socket_and_current_subscription() {

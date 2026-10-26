@@ -23,8 +23,8 @@ use crate::server::websocket::{msg_types, new_message};
 use crate::session::terminal::state::{InputSequence, InputVerdict, TerminalRole};
 
 use super::terminal::runtime::{
-    accept_output_ack, build_terminal_resume_response, write_input, AttachedSession, SessionMap,
-    SessionMapLock, SessionPeer,
+    accept_output_ack, build_terminal_resume_response, fan_out_recorded_resize, write_input,
+    AttachedSession, SessionMap, SessionMapLock, SessionPeer,
 };
 
 /// The Agent's one Session map.
@@ -297,6 +297,87 @@ impl SessionRegistry {
         Ok(())
     }
 
+    /// Admit, execute and record one authoritative resize.
+    ///
+    /// The lease generation is captured at admission, not at record time: the
+    /// lease may move across the backend await, and the recorded event must
+    /// say who asked, not who owns the pane now (#2286 SC-03). The record and
+    /// the subscriber fan-out happen under the same lock, so a resize cannot
+    /// overtake output in any subscriber's FIFO (#2028).
+    pub(crate) async fn resize(
+        &self,
+        session_name: &str,
+        client_id: &str,
+        control_generation: Option<u64>,
+        cols: u16,
+        rows: u16,
+    ) -> Result<ResizeRecorded, ResizeRejected> {
+        let (role, authorized, authorized_generation, backend) = {
+            let guard = self.lock();
+            let Some(session) = guard.get(session_name) else {
+                return Err(ResizeRejected::NotAttached);
+            };
+            (
+                session.control.role_of(client_id),
+                session
+                    .control
+                    .authorize_mutation(client_id, control_generation),
+                session.control.generation,
+                Arc::clone(&session.backend),
+            )
+        };
+        if role == TerminalRole::Observer {
+            return Err(ResizeRejected::Observer);
+        }
+        if !authorized {
+            return Err(ResizeRejected::NotController);
+        }
+        super::terminal::runtime::resize(&backend, cols, rows)
+            .await
+            .map_err(ResizeRejected::Backend)?;
+
+        let recorded = {
+            let mut guard = self.lock();
+            guard.get_mut(session_name).map(|session| {
+                let position = session.stream.record_resize(
+                    session_name,
+                    cols,
+                    rows,
+                    Some(authorized_generation),
+                );
+                let has_subscriber_queue =
+                    session.peers.iter().any(|peer| peer.output_tx.is_some());
+                let detached = fan_out_recorded_resize(
+                    &mut session.peers,
+                    cols,
+                    rows,
+                    position.0,
+                    position.1,
+                    Some(authorized_generation),
+                );
+                ResizeRecorded {
+                    position: Some(position),
+                    has_subscriber_queue,
+                    detached,
+                    authorized_generation,
+                }
+            })
+        };
+        let recorded = recorded.unwrap_or(ResizeRecorded {
+            position: None,
+            has_subscriber_queue: false,
+            detached: 0,
+            authorized_generation,
+        });
+        if recorded.detached > 0 {
+            tracing::warn!(
+                "session {session_name}: detached {} subscriber(s) on sequenced resize",
+                recorded.detached
+            );
+        }
+        Ok(recorded)
+    }
+
     /// The transition seam for the handler arms that have not yet moved onto a
     /// registry method.
     pub(crate) fn lock(&self) -> MutexGuard<'_, SessionMap> {
@@ -340,6 +421,34 @@ pub(crate) enum InputRejected {
     /// The backend took the bytes, but this Session's input state changed
     /// underneath the write, so they must not be claimed as applied.
     StateChanged,
+}
+
+/// What one resize recorded.
+pub(crate) struct ResizeRecorded {
+    /// The stream position it was recorded at, or `None` when the Session
+    /// ended across the backend resize.
+    pub position: Option<(u64, u64)>,
+    /// Whether any subscriber consumed the sequenced resize from its FIFO.
+    /// When false, the caller may still deliver it over its own connection
+    /// for a legacy attachment.
+    pub has_subscriber_queue: bool,
+    /// Subscribers evicted by a full queue during the fan-out.
+    pub detached: usize,
+    /// The lease generation this resize was admitted under.
+    pub authorized_generation: u64,
+}
+
+/// Why a resize was refused.
+#[derive(Debug)]
+pub(crate) enum ResizeRejected {
+    /// The Session has no attachment in this Agent.
+    NotAttached,
+    /// The sender is a known subscriber but not the controller.
+    Observer,
+    /// The sender does not hold the ControlLease generation it claimed.
+    NotController,
+    /// The attached backend refused the resize.
+    Backend(anyhow::Error),
 }
 
 /// Why a ControlLease acquisition was refused.

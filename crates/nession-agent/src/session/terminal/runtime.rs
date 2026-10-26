@@ -11,7 +11,7 @@
 //! these values; moving the operations themselves is the next step of the
 //! boundary work.
 
-use std::sync::atomic::{AtomicBool, AtomicUsize};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 
 use tokio::sync::{mpsc, Mutex};
@@ -139,6 +139,145 @@ pub(crate) struct AttachedSession {
     /// a new [`SessionInputState::epoch`], and a client holding the old one
     /// reads the mismatch as delivery-unknown rather than replaying.
     pub(crate) input: session_terminal::SessionInputState,
+}
+
+/// How much terminal output one attached client may have waiting (#961).
+///
+/// This is the terminal lane's slow-consumer policy, and the depth is the
+/// policy. What it buys is that the *slowest* client cannot become the pace of
+/// the session for everybody else: the broadcast task fans one session's output
+/// out to every attached client, so a `send().await` here would park the
+/// fan-out on whichever client is behind — the other clients and the PTY reader
+/// behind it. A client with a full queue is therefore detached. That is the same
+/// verdict the Server reaches for a relayed client
+/// (`server::outbound::send_terminal`), applied where the terminal is served.
+///
+/// **The byte cap is the memory bound; the slot count is only a metadata
+/// backstop.** This used to be 64 slots, sized from the backend hop's *64
+/// chunks of up to 4 KiB* — but that hop's unit is not this queue's unit.
+/// Terminal events here are per-PTY-chunk, and tmux/`sed` emit small chunks
+/// (measured: a 5 000-line `sed` burst arrived as ~500-byte reads, and one
+/// relayed burst stalled after 913 delivered lines with only ~64 events
+/// queued). A 64-slot bound therefore evicted a *healthy* relayed subscriber
+/// after ~35 ms of scheduling lag with barely 1 KiB queued (#2179), while the
+/// 2 MiB byte budget below had not been approached.
+///
+/// The number is large enough that the byte budget binds first for realistic
+/// chunks (16 384 × 128 B = 2 MiB), and a genuinely stalled subscriber is still
+/// detached: the per-connection outbound path ends it after
+/// `DEFAULT_TERMINAL_STALL_GRACE`, and the queue's own byte reservation stops
+/// it before memory does. A subscriber evicted here must also actually *end* —
+/// see `P2pOutbound::close` on why the read loop races `wait_closed`.
+pub(crate) const SUBSCRIBER_QUEUE_SLOTS: usize = 16_384;
+/// Independent byte cap for the per-subscriber mpsc queue (#1983).
+///
+/// This is the bound a slow consumer actually reaches, and it is deliberately
+/// small enough to be a real verdict: 2 MiB is tens of thousands of terminal
+/// lines. A client that accumulates that much has stopped reading in any
+/// useful sense.
+pub(crate) const SUBSCRIBER_QUEUE_BYTES: usize = 2 * 1024 * 1024;
+
+/// Fan one chunk of terminal output out to every subscriber of a session.
+///
+/// Returns the number of subscribers **detached** by this call, i.e. dropped
+/// for having no room. A subscriber whose queue is closed is pruned too but not
+/// counted: that one's connection has already ended, and `spawn_output_forwarder`
+/// is on its way out.
+///
+/// Never waits, and that is the policy rather than an optimisation — see
+/// [`SUBSCRIBER_QUEUE_SLOTS`]. A free function so the policy can be tested
+/// without a socket, a PTY, or a session: the three cases (room, full, closed)
+/// are the whole of it.
+#[cfg(test)]
+pub(crate) fn fan_out(
+    subscribers: &mut Vec<mpsc::Sender<OutputChunk>>,
+    chunk: OutputChunk,
+) -> usize {
+    let mut detached = 0usize;
+    subscribers.retain(|tx| match tx.try_send(chunk.clone()) {
+        Ok(()) => true,
+        Err(mpsc::error::TrySendError::Full(_)) => {
+            detached += 1;
+            false
+        }
+        Err(mpsc::error::TrySendError::Closed(_)) => false,
+    });
+    detached
+}
+
+pub(crate) fn release_subscriber_bytes(queued: &AtomicUsize, bytes: usize) {
+    // A disconnected raw-test sender may have skipped reservations; never
+    // underflow. Production's only fan-out writer reserves before try_send.
+    let _ = queued.fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+        Some(n.saturating_sub(bytes))
+    });
+}
+
+pub(crate) fn fan_out_peers(peers: &mut Vec<SessionPeer>, chunk: OutputChunk) -> usize {
+    fan_out_session_event(peers, SubscriberEvent::Output(chunk))
+}
+
+pub(crate) fn fan_out_recorded_resize(
+    peers: &mut Vec<SessionPeer>,
+    cols: u16,
+    rows: u16,
+    stream_epoch: u64,
+    stream_seq: u64,
+    control_generation: Option<u64>,
+) -> usize {
+    fan_out_session_event(
+        peers,
+        SubscriberEvent::Resize {
+            cols,
+            rows,
+            stream_epoch,
+            stream_seq,
+            control_generation,
+        },
+    )
+}
+
+/// Called in the same producer lock after recording *either* event type.
+/// Every subscriber gets the identical sequence in the same FIFO order.
+pub(crate) fn fan_out_session_event(peers: &mut Vec<SessionPeer>, event: SubscriberEvent) -> usize {
+    let mut detached = 0usize;
+    peers.retain(|peer| {
+        let Some(tx) = &peer.output_tx else {
+            return true;
+        };
+        // Reserve before delivery; the receiver can immediately dequeue and
+        // release its charge on another task. One oversized frame is enough
+        // to evict this peer but cannot stall or evict a healthy observer.
+        let bytes = event.queued_bytes();
+        let reserved =
+            peer.queued_bytes
+                .fetch_update(Ordering::AcqRel, Ordering::Acquire, |queued| {
+                    queued
+                        .checked_add(bytes)
+                        .filter(|n| *n <= SUBSCRIBER_QUEUE_BYTES)
+                });
+        if reserved.is_err() {
+            peer.detached_for_not_draining
+                .store(true, Ordering::Release);
+            detached += 1;
+            return false;
+        }
+        match tx.try_send(event.clone()) {
+            Ok(()) => true,
+            Err(mpsc::error::TrySendError::Full(_)) => {
+                peer.queued_bytes.fetch_sub(bytes, Ordering::AcqRel);
+                peer.detached_for_not_draining
+                    .store(true, Ordering::Release);
+                detached += 1;
+                false
+            }
+            Err(mpsc::error::TrySendError::Closed(_)) => {
+                peer.queued_bytes.fetch_sub(bytes, Ordering::AcqRel);
+                false
+            }
+        }
+    });
+    detached
 }
 
 pub(crate) type SessionMap = std::collections::HashMap<String, AttachedSession>;
