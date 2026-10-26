@@ -3,11 +3,15 @@
 Owner: [`crates/nession-tmux/src/client/`](../../crates/nession-tmux/src/client/)
 — the typed, session-owned Control Mode client and its transports, in the
 independent `nession-tmux` crate (#2469 slice 1).
-`ControlModeSession` is the session-level adapter above it (bootstrap capture
-barrier, window-size guard). [`TmuxOps`](../../crates/nession-agent/src/tmux/ops.rs)
-stays the operation-semantics owner, and [`TmuxCmd`](../../crates/nession-agent/src/tmux/cmd.rs)
-owns process addressing (`-S <private socket>`, inherited-env scrubbing). Plain
-`PtySession` remains a separate backend for plain (non-Control-Mode) attach.
+[`ControlModeSession`](../../crates/nession-agent/src/tmux/control.rs) is the
+session-level adapter above it (bootstrap capture barrier, window-size guard).
+[`TmuxOps`](../../crates/nession-tmux/src/ops.rs) is the operation-semantics
+owner, and [`TmuxCommand`](../../crates/nession-tmux/src/process.rs) owns
+process construction (`-S <private socket>`, inherited-env scrubbing). The
+Agent's [`tmux/cmd.rs`](../../crates/nession-agent/src/tmux/cmd.rs) supplies
+Nession's socket and server configuration and never spawns a process itself.
+Plain [`PtySession`](../../crates/nession-agent/src/tmux/pty.rs) remains a
+separate backend for plain (non-Control-Mode) attach.
 
 ## Two carriers, one protocol
 
