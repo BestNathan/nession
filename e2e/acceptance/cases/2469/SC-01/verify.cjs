@@ -1,12 +1,12 @@
 'use strict';
 // #2469 SC-01: nession-tmux is a standalone, Nession-independent Rust library.
 //
-// This Case proves the slice-1 part of the criterion at the exact target SHA:
-// the crate's own dependency graph, source and manifest name no Nession crate,
-// and its tests run without Agent initialization — the in-memory wire tests, a
-// self-contained fake process, and a real isolated tmux server on a private
-// socket. The packaged/external-consumer fixture is the final slice's
-// hardening step and is not claimed here.
+// This Case proves the slice-1 part of the criterion at the exact merged
+// staging SHA: the crate's own dependency graph, source and manifest name no
+// Nession crate, and its tests run without Agent initialization — the
+// in-memory wire tests, a self-contained fake process, and a real isolated tmux
+// server on a private socket. The packaged/external-consumer fixture is the
+// final slice's hardening step and is not claimed here.
 const fs = require('node:fs');
 const path = require('node:path');
 const {
