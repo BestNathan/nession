@@ -33,16 +33,14 @@ use crate::server::execution::{
     ExecutionLanes, ResourceKey, DEFAULT_MUTATIONS_IN_FLIGHT, SHUTDOWN_GRACE,
 };
 use crate::server::issued_credit::SubscriberIssuedFlow;
-use crate::server::output_ack::{OutputAckBinding, OutputAckVerdict, SubscriberOutputAck};
 use crate::session::registry::{
-    ControlAcquireRejected, InputRejected, NotAttached, ResizeRejected, SessionRegistry,
+    ControlAcquireRejected, InputRejected, InvalidStreamIdentity, NotAttached, ResizeRejected,
+    SessionRegistry, SubscribeRejected,
 };
 use crate::session::service::{AttachedBackend, SessionService};
 use crate::session::terminal::runtime::{
-    fan_out_peers, release_subscriber_bytes, AttachedSession, SessionPeer, SubscriberEvent,
-    SUBSCRIBER_QUEUE_SLOTS,
+    release_subscriber_bytes, AtomicOutputPrefix, SubscriberEvent,
 };
-use crate::session::terminal::state as session_terminal;
 use crate::session::terminal::state::InputSequence;
 // The lanes' boxed work is the shared type, and the constructors take this
 // socket's own bounds — see `nession_runtime::lane`.
@@ -74,60 +72,12 @@ use tracing::{debug, error, info, warn};
 // module for what an unbounded socket write turns into, and why the writer task
 // is a task rather than a lock.
 
-fn new_output_ack(stream_epoch: u64) -> Result<SubscriberOutputAck, OutputAckVerdict> {
-    SubscriberOutputAck::new(OutputAckBinding {
-        subscriber_generation: session_terminal::next_subscriber_generation(),
-        stream_epoch,
-    })
-}
-
 async fn connection_client_id(client_id: &Arc<Mutex<Option<String>>>) -> String {
     client_id
         .lock()
         .await
         .clone()
         .unwrap_or_else(|| "unknown-client".to_string())
-}
-
-fn client_attach_response(
-    session_name: String,
-    session: &AttachedSession,
-    client_id: &str,
-) -> ClientAttachResponse {
-    let role = session.control.role_of(client_id);
-    ClientAttachResponse {
-        session_name,
-        control_generation: Some(session.control.generation),
-        control_role: Some(
-            if role == session_terminal::TerminalRole::Controller {
-                "controller"
-            } else {
-                "observer"
-            }
-            .to_string(),
-        ),
-        controller_client_id: session.control.controller_client_id.clone(),
-        stream_epoch: Some(session.stream.epoch),
-        stream_cursor: Some(session.stream.cursor()),
-        subscriber_generation: session
-            .peers
-            .iter()
-            .find(|peer| peer.client_id == client_id)
-            .map(|peer| peer.output_ack.binding().subscriber_generation),
-        // Stated on every attach, including a re-attach to a session this
-        // agent already holds — which is the case they are for. A client whose
-        // transport was rebuilt does not know what became of the input it had
-        // in flight, and this reply is the one message it is certain to
-        // receive; asking separately would need its own request, its own
-        // timeout, and its own ordering against the client's first keystroke.
-        //
-        // `Some`, not `None`: this agent has the state and is the authority on
-        // it. The absence of these fields is reserved for an agent that does
-        // not — a build from before the contract existed — so that "I have no
-        // position" and "my position is zero" stay different answers.
-        input_epoch: Some(session.input.epoch),
-        input_applied_through: Some(session.input.applied_through),
-    }
 }
 
 /// Forward one subscriber's terminal output to this connection's sink, and —
@@ -618,84 +568,6 @@ fn tmux_capture_fidelity(
     }
 }
 
-/// Build a contiguous prefix exclusively from the Agent's *ordered* stream
-/// ring. No tmux capture occurs here, so a current-head cut and the new
-/// subscriber's live queue can be activated under the same SessionMap lock.
-///
-/// This proves stream continuity only. It cannot restore terminal history
-/// preceding the Agent reader, nor replay resize/emulator state as full VT.
-/// Missing, expired or oversized prefixes must take the unverified fallback.
-struct AtomicOutputPrefix {
-    bytes: Vec<u8>,
-    stream_epoch: u64,
-    through_seq: u64,
-}
-
-fn atomic_output_prefix(
-    stream: &session_terminal::SessionStreamState,
-) -> Option<AtomicOutputPrefix> {
-    use base64::Engine;
-    let replay = stream.replay_since(stream.epoch, 0)?;
-    if !replay.complete || replay.events.is_empty() {
-        return None;
-    }
-    let mut raw = Vec::new();
-    for event in replay.events {
-        match event {
-            TerminalStreamEventPayload::Output { data, .. } => {
-                let decoded = base64::engine::general_purpose::STANDARD
-                    .decode(data)
-                    .ok()?;
-                let size = raw.len().checked_add(decoded.len())?;
-                if size > crate::server::bootstrap::BOOTSTRAP_MAX_BYTES {
-                    return None;
-                }
-                raw.extend_from_slice(&decoded);
-            }
-            // A resize is a real sequenced event, but not a byte sequence.
-            // The baseline is marked Partial even when output replay is whole.
-            TerminalStreamEventPayload::Resize { .. } => {}
-        }
-    }
-    (!raw.is_empty()).then_some(AtomicOutputPrefix {
-        bytes: raw,
-        stream_epoch: stream.epoch,
-        through_seq: stream.cursor(),
-    })
-}
-
-/// Register a new subscriber and its bounded queue at one Agent stream cut.
-///
-/// The caller MUST hold the SessionMap producer lock, which also protects
-/// stream.record_output + fan_out_peers. A complete ring prefix therefore
-/// joins the live queue exactly at `through_seq`. For an incomplete ring, the
-/// external tmux capture is still **unverified**: output may overlap that
-/// snapshot, but it is no longer silently discarded while capture awaits.
-///
-/// Queue activation is mandatory even on the unverified fallback. In
-/// particular, do not defer `output_tx = Some(..)` until after capture: that
-/// leaves an unbounded loss window for concurrently recorded Agent output.
-fn subscribe_at_stream_cut(
-    peers: &mut Vec<SessionPeer>,
-    stream: &session_terminal::SessionStreamState,
-    mut peer: SessionPeer,
-    live_tx: &mpsc::Sender<SubscriberEvent>,
-    needs_bootstrap: bool,
-) -> Option<AtomicOutputPrefix> {
-    // A replaced peer's queue must not receive subsequent output; its
-    // detached_for_not_draining flag remains false (not a slow-peer eviction).
-    peers.retain(|current| current.client_id != peer.client_id);
-    let prefix = if needs_bootstrap {
-        atomic_output_prefix(stream)
-    } else {
-        None
-    };
-    // This is under the same lock as the producer, *before* any await.
-    peer.output_tx = Some(live_tx.clone());
-    peers.push(peer);
-    prefix
-}
-
 /// A stream-log cut is atomic with its live queue *only* when both are
 /// selected under the same SessionMap lock. No unproven tmux cut is promoted.
 fn atomic_prefix_payload(session_name: &str, prefix: &AtomicOutputPrefix) -> TerminalOutputPayload {
@@ -935,7 +807,7 @@ fn format_error_chain(error: &anyhow::Error) -> String {
     parts.join(": ")
 }
 
-fn make_error(request_id: &str, code: &str, message: &str) -> Message<ErrorPayload> {
+pub(crate) fn make_error(request_id: &str, code: &str, message: &str) -> Message<ErrorPayload> {
     Message {
         msg_type: msg_types::ERROR.to_string(),
         id: request_id.to_string(),
@@ -1697,56 +1569,39 @@ p2p_routes! { ctx, msg_type, payload_value;
                 // All P2P sockets of this Agent share a Session-scoped lease,
                 // event ring and bounded output fan-out (both tmux backends).
                 let session_name = payload.session_name.clone();
-                    let already_attached = ctx.sessions.lock().contains_key(&session_name);
+                let already_attached = ctx.sessions.is_attached(&session_name);
 
-                    if already_attached {
-                        if let Err(e) = apply_env_snapshots(
-                            ctx.tmux, &session_name, &payload.env_snapshots,
-                        ).await {
-                            return ctx.err("env_apply_failed", &format!("{e:#}"));
+                if already_attached {
+                    if let Err(e) = apply_env_snapshots(
+                        ctx.tmux, &session_name, &payload.env_snapshots,
+                    ).await {
+                        return ctx.err("env_apply_failed", &format!("{e:#}"));
+                    }
+                    // Session already exists: add a new subscriber. The
+                    // subscription and its stream cut are installed atomically
+                    // with producer record/fan-out, including the unverified
+                    // tmux fallback (#2024).
+                    let client_id = connection_client_id(ctx.client_id).await;
+                    let wants_bootstrap = payload.needs_bootstrap.unwrap_or(false);
+                    let mut subscribed = match ctx.sessions.subscribe(
+                        &session_name,
+                        &client_id,
+                        ctx.peer_token,
+                        ctx.outbound.clone(),
+                        wants_bootstrap,
+                    ) {
+                        Ok(subscribed) => subscribed,
+                        Err(SubscribeRejected::NotAttached) => {
+                            return ctx.err("not_attached", "session ended during attach");
                         }
-                        // Session already exists: add a new subscriber.
-                        let client_id = connection_client_id(ctx.client_id).await;
-                        let (tx, rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
-                        let detached_for_not_draining = Arc::new(AtomicBool::new(false));
-                            let queued_bytes = Arc::new(AtomicUsize::new(0));
-                            let issued_flow = Arc::new(StdMutex::new(SubscriberIssuedFlow::new()));
-                        let wants_bootstrap = payload.needs_bootstrap.unwrap_or(false);
-                        let (resp, atomic_prefix) = {
-                            let mut guard = ctx.sessions.lock();
-                            let Some(shared) = guard.get_mut(&session_name) else {
-                                return ctx.err("not_attached", "session ended during attach");
-                            };
-                            // The subscription and its stream cut are
-                            // installed atomically with producer record/fan-out,
-                            // including the unverified tmux fallback (#2024).
-                            let output_ack = match new_output_ack(shared.stream.epoch) {
-                                Ok(ack) => ack,
-                                Err(_) => return ctx.err("invalid_stream_identity", "output ACK identity unavailable"),
-                            };
-                            let atomic_prefix = subscribe_at_stream_cut(
-                                &mut shared.peers,
-                                &shared.stream,
-                                SessionPeer {
-                                    client_id: client_id.clone(),
-                                    peer_token: Arc::clone(ctx.peer_token),
-                                    outbound: ctx.outbound.clone(),
-                                    output_ack,
-                                    output_tx: None, // enabled by subscribe_at_stream_cut
-                                    detached_for_not_draining: Arc::clone(
-                                        &detached_for_not_draining,
-                                    ),
-                                    issued_flow: Arc::clone(&issued_flow),
-                                    queued_bytes: Arc::clone(&queued_bytes),
-                                },
-                                &tx,
-                                wants_bootstrap,
+                        Err(SubscribeRejected::InvalidStreamIdentity) => {
+                            return ctx.err(
+                                "invalid_stream_identity",
+                                "output ACK identity unavailable",
                             );
-                            (
-                                client_attach_response(payload.session_name.clone(), shared, &client_id),
-                                atomic_prefix,
-                            )
-                        };
+                        }
+                    };
+                    let atomic_prefix = subscribed.prefix.take();
 
                         // The session's history, before the live forwarder
                         // exists — `send_bootstrap` carries why that ordering is
@@ -1800,16 +1655,20 @@ p2p_routes! { ctx, msg_type, payload_value;
                         }
 
                         spawn_output_forwarder(
-                            rx,
+                            subscribed.events,
                             ctx.outbound.clone(),
                             session_name.clone(),
-                            detached_for_not_draining,
-                            queued_bytes,
-                            issued_flow,
+                            subscribed.detached_for_not_draining,
+                            subscribed.queued_bytes,
+                            subscribed.issued_flow,
                         );
 
-                        return serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
-                            .unwrap_or_default();
+                        return serde_json::to_string(&make_response(
+                            ctx.id,
+                            msg_types::OK,
+                            subscribed.response,
+                        ))
+                        .unwrap_or_default();
                     }
 
                 if matches!(ctx.attach_mode, AttachMode::Plain) {
@@ -1847,42 +1706,21 @@ p2p_routes! { ctx, msg_type, payload_value;
                         }) => {
                             let backend: Box<dyn TmuxSession> = pty_session;
                             let client_id = connection_client_id(ctx.client_id).await;
-                            let (tx, rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
-                            let detached_for_not_draining = Arc::new(AtomicBool::new(false));
-                            let queued_bytes = Arc::new(AtomicUsize::new(0));
-                            let issued_flow = Arc::new(StdMutex::new(SubscriberIssuedFlow::new()));
-                            let mut control = session_terminal::SessionControlState::new();
-                            control.ensure_controller(&client_id);
-                            let stream = session_terminal::SessionStreamState::new();
-                            let input = session_terminal::SessionInputState::new();
-                            let output_ack = match new_output_ack(stream.epoch) {
-                                Ok(ack) => ack,
-                                Err(_) => return ctx.err("invalid_stream_identity", "output ACK identity unavailable"),
-                            };
-                            let attached = AttachedSession {
-                                backend: Arc::new(Mutex::new(backend)),
-                                peers: vec![SessionPeer {
-                                    client_id: client_id.clone(),
-                                    peer_token: Arc::clone(ctx.peer_token),
-                                    output_ack,
-                                    outbound: ctx.outbound.clone(),
-                                    output_tx: Some(tx),
-                                    detached_for_not_draining: Arc::clone(
-                                        &detached_for_not_draining,
-                                    ),
-                                    issued_flow: Arc::clone(&issued_flow),
-                                    queued_bytes: Arc::clone(&queued_bytes),
-                                }],
-                                control,
-                                stream,
-                                input,
-                            };
-                            let resp = client_attach_response(
-                                payload.session_name.clone(),
-                                &attached,
+                            let inserted = match ctx.sessions.insert_new(
+                                &session_name,
+                                backend,
                                 &client_id,
-                            );
-                            ctx.sessions.lock().insert(session_name.clone(), attached);
+                                ctx.peer_token,
+                                ctx.outbound.clone(),
+                            ) {
+                                Ok(inserted) => inserted,
+                                Err(InvalidStreamIdentity) => {
+                                    return ctx.err(
+                                        "invalid_stream_identity",
+                                        "output ACK identity unavailable",
+                                    );
+                                }
+                            };
 
                             // The session's history, before the live forwarder
                             // exists — the same barrier the Control arm below
@@ -1929,59 +1767,50 @@ p2p_routes! { ctx, msg_type, payload_value;
 
                             // Spawn forwarding task for the first subscriber.
                             spawn_output_forwarder(
-                                rx,
+                                inserted.events,
                                 ctx.outbound.clone(),
                                 session_name.clone(),
-                                detached_for_not_draining,
-                                queued_bytes,
-                                issued_flow,
+                                inserted.detached_for_not_draining,
+                                inserted.queued_bytes,
+                                inserted.issued_flow,
                             );
 
                             // Spawn ONE broadcast task for this session.
-                            // It reads from output_rx and fans out to ALL subscribers.
-                            let sessions_clone = Arc::clone(ctx.sessions);
+                            // It reads from output_rx and fans out to ALL
+                            // subscribers through the registry, which prunes the
+                            // ones that are gone — closed because their
+                            // connection ended, or full because they stopped
+                            // draining. Either way they are not attached in any
+                            // useful sense, and the fan-out must not wait for
+                            // them; see `SUBSCRIBER_QUEUE_SLOTS`.
+                            let registry = Arc::clone(ctx.sessions);
                             let session_name_clone = session_name.clone();
                             tokio::spawn(async move {
                                 while let Some(bytes) = output_rx.recv().await {
-                                    let mut guard = sessions_clone.lock();
-                                    if let Some(s) = guard.get_mut(&session_name_clone) {
-                                        use base64::Engine;
-                                        let encoded = base64::engine::general_purpose::STANDARD
-                                            .encode(&bytes);
-                                        let (epoch, seq) = s.stream.record_output(
-                                            &session_name_clone,
-                                            encoded,
-                                        );
-                                        // Fan out to every subscriber, pruning the
-                                        // ones that are gone — closed because
-                                        // their connection ended, or full because
-                                        // they stopped draining. Either way they
-                                        // are not attached in any useful sense,
-                                        // and the fan-out must not wait for them;
-                                        // see `SUBSCRIBER_QUEUE_SLOTS`.
-                                        let detached =
-                                            fan_out_peers(&mut s.peers, (bytes, epoch, seq));
-                                        if detached > 0 {
-                                            warn!(
-                                                "session {session_name_clone}: detached {detached} \
-                                                 subscriber(s) that stopped draining their terminal"
-                                            );
-                                        }
-                                        if !s
-                                            .peers
-                                            .iter()
-                                            .any(|p| p.output_tx.is_some())
-                                        {
-                                            break;
-                                        }
-                                    } else {
+                                    let Some(recorded) =
+                                        registry.record_output(&session_name_clone, &bytes)
+                                    else {
                                         break; // session removed
+                                    };
+                                    if recorded.detached > 0 {
+                                        warn!(
+                                            "session {session_name_clone}: detached {} \
+                                             subscriber(s) that stopped draining their terminal",
+                                            recorded.detached
+                                        );
+                                    }
+                                    if !recorded.has_subscriber_queue {
+                                        break;
                                     }
                                 }
                             });
 
-                            serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
-                                .unwrap_or_default()
+                            serde_json::to_string(&make_response(
+                                ctx.id,
+                                msg_types::OK,
+                                inserted.response,
+                            ))
+                            .unwrap_or_default()
                         }
                         Ok(AttachedBackend::Control { .. }) => ctx.err(
                             "attach_failed",
@@ -2041,49 +1870,24 @@ p2p_routes! { ctx, msg_type, payload_value;
                             let backend: Box<dyn TmuxSession> = session;
                             let session_name = payload.session_name.clone();
                             let client_id = connection_client_id(ctx.client_id).await;
-                            let mut control = session_terminal::SessionControlState::new();
-                            control.ensure_controller(&client_id);
-                            let stream = session_terminal::SessionStreamState::new();
+                            let inserted = match ctx.sessions.insert_new(
+                                &session_name,
+                                backend,
+                                &client_id,
+                                ctx.peer_token,
+                                ctx.outbound.clone(),
+                            ) {
+                                Ok(inserted) => inserted,
+                                Err(InvalidStreamIdentity) => {
+                                    return ctx.err(
+                                        "invalid_stream_identity",
+                                        "output ACK identity unavailable",
+                                    );
+                                }
+                            };
                             // The barrier below makes the attach capture an exact
                             // cut at this epoch's position 0 (#2124).
-                            let stream_epoch = stream.epoch;
-                            let input = session_terminal::SessionInputState::new();
-                            let (tx, rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
-                            let detached_for_not_draining = Arc::new(AtomicBool::new(false));
-                            let queued_bytes = Arc::new(AtomicUsize::new(0));
-                            let issued_flow = Arc::new(StdMutex::new(SubscriberIssuedFlow::new()));
-                            let output_ack = match new_output_ack(stream.epoch) {
-                                Ok(ack) => ack,
-                                Err(_) => return ctx.err("invalid_stream_identity", "output ACK identity unavailable"),
-                            };
-                            let attached = AttachedSession {
-                                backend: Arc::new(Mutex::new(backend)),
-                                peers: vec![SessionPeer {
-                                    client_id: client_id.clone(),
-                                    peer_token: Arc::clone(ctx.peer_token),
-                                    output_ack,
-                                    outbound: ctx.outbound.clone(),
-                                    output_tx: Some(tx),
-                                    detached_for_not_draining: Arc::clone(
-                                        &detached_for_not_draining,
-                                    ),
-                                    issued_flow: Arc::clone(&issued_flow),
-                                    queued_bytes: Arc::clone(&queued_bytes),
-                                }],
-                                control,
-                                stream,
-                                input,
-                            };
-                            let resp = client_attach_response(
-                                payload.session_name.clone(),
-                                &attached,
-                                &client_id,
-                            );
-                            // The insert is its own statement, so the map's
-                            // guard is released before the scrollback capture
-                            // below rather than living until the end of the
-                            // block that holds this arm's locals.
-                            ctx.sessions.lock().insert(session_name.clone(), attached);
+                            let stream_epoch = inserted.stream_epoch;
 
                             // The session's history, before the live output
                             // stream is spawned — `send_bootstrap` carries why
@@ -2111,27 +1915,21 @@ p2p_routes! { ctx, msg_type, payload_value;
                             // Control-mode output is a Session stream, never
                             // the possession of the socket that first attached.
                             spawn_output_forwarder(
-                                rx,
+                                inserted.events,
                                 ctx.outbound.clone(),
                                 session_name.clone(),
-                                detached_for_not_draining,
-                                queued_bytes,
-                                issued_flow,
+                                inserted.detached_for_not_draining,
+                                inserted.queued_bytes,
+                                inserted.issued_flow,
                             );
                             let session_name_clone = session_name.clone();
-                            let sessions_for_output = Arc::clone(ctx.sessions);
+                            let registry = Arc::clone(ctx.sessions);
                             tokio::spawn(async move {
                                 while let Some(bytes) = output_rx.recv().await {
-                                    use base64::Engine;
-                                    let encoded =
-                                        base64::engine::general_purpose::STANDARD.encode(&bytes);
-                                    let mut guard = sessions_for_output.lock();
-                                    if let Some(session) = guard.get_mut(&session_name_clone) {
-                                        let (epoch, seq) = session
-                                            .stream
-                                            .record_output(&session_name_clone, encoded);
-                                        fan_out_peers(&mut session.peers, (bytes, epoch, seq));
-                                    } else {
+                                    if registry
+                                        .record_output(&session_name_clone, &bytes)
+                                        .is_none()
+                                    {
                                         break;
                                     }
                                 }
@@ -2143,48 +1941,14 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 //
                                 // Retire only the generation we read: a newer
                                 // re-attach may already own this same name.
-                                // Never hold the SessionMap lock across I/O.
-                                let retired = {
-                                    let mut guard = sessions_for_output.lock();
-                                    let still_ours = guard.get(&session_name_clone)
-                                        .is_some_and(|session| session.stream.epoch == stream_epoch);
-                                    if still_ours {
-                                        guard.remove(&session_name_clone)
-                                    } else {
-                                        None
-                                    }
-                                };
-                                if let Some(session) = retired {
+                                if registry
+                                    .retire_stream(&session_name_clone, stream_epoch)
+                                    .await
+                                {
                                     warn!(
                                         "terminal session {session_name_clone}: tmux control reader ended; \
                                          retiring epoch {stream_epoch} so the next attach requires a new cut"
                                     );
-                                    let notice = serde_json::to_string(&make_error(
-                                        "terminal-stream-lost",
-                                        "terminal_stream_unavailable",
-                                        "tmux Control Mode output source ended; reattach the terminal to restore output",
-                                    )).ok();
-                                    if let Some(json) = notice {
-                                        for peer in &session.peers {
-                                            // Terminal lane, not a lossy size
-                                            // level. The timeout bounds a
-                                            // stalled client's recovery notice.
-                                            let sent = tokio::time::timeout(
-                                                std::time::Duration::from_millis(500),
-                                                peer.outbound.send_terminal(WsMessage::Text(json.clone())),
-                                            ).await;
-                                            if !matches!(sent, Ok(Ok(()))) {
-                                                warn!(
-                                                    "terminal session {session_name_clone}:                                                      could not deliver source-loss notice to subscriber"
-                                                );
-                                            }
-                                        }
-                                    }
-                                    if let Err(error) = crate::session::terminal::runtime::close(&session.backend).await {
-                                        warn!(
-                                            "terminal session {session_name_clone}:                                              failed to retire broken tmux client: {error:#}"
-                                        );
-                                    }
                                 }
                             });
 
@@ -2252,12 +2016,8 @@ p2p_routes! { ctx, msg_type, payload_value;
                                     let full_id =
                                         format!("{agent_id_resize}:{session_name_resize}");
                                     resize_reporter.publish(&full_id, cols, rows);
-                                    let peers = sessions_for_resize.lock()
-                                        .get(&session_name_resize)
-                                        .map(|s| {
-                                            s.peers.iter().map(|p| p.outbound.clone()).collect::<Vec<_>>()
-                                        })
-                                        .unwrap_or_default();
+                                    let peers = sessions_for_resize
+                                        .subscriber_sinks(&session_name_resize);
                                     if peers.is_empty() {
                                         break;
                                     }
@@ -2269,8 +2029,12 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 }
                             });
 
-                            serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
-                                .unwrap_or_default()
+                            serde_json::to_string(&make_response(
+                                ctx.id,
+                                msg_types::OK,
+                                inserted.response,
+                            ))
+                            .unwrap_or_default()
                         }
                         Ok(AttachedBackend::Plain { .. }) => ctx.err(
                             "attach_failed",
@@ -3355,10 +3119,13 @@ impl AgentServer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::server::output_ack::{OutputAckBinding, OutputAckVerdict, SubscriberOutputAck};
     use crate::session::terminal::runtime::{
-        accept_output_ack, build_terminal_resume_response, fan_out, fan_out_recorded_resize,
-        SUBSCRIBER_QUEUE_BYTES,
+        accept_output_ack, atomic_output_prefix, build_terminal_resume_response, fan_out,
+        fan_out_peers, fan_out_recorded_resize, new_output_ack, subscribe_at_stream_cut,
+        AttachedSession, SessionPeer, SUBSCRIBER_QUEUE_BYTES, SUBSCRIBER_QUEUE_SLOTS,
     };
+    use crate::session::terminal::state as session_terminal;
 
     #[test]
     fn output_ack_requires_exact_attached_socket_and_current_subscription() {

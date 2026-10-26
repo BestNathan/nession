@@ -16,9 +16,10 @@ use std::sync::{Arc, Mutex as StdMutex};
 
 use tokio::sync::{mpsc, Mutex};
 
+use nession_protocol::contracts::session::v1::ClientAttachResponse;
 use nession_protocol::contracts::terminal::v1::{
-    TerminalOutputAppliedPayload, TerminalResumeRecovery, TerminalStreamResumePayload,
-    TerminalStreamResumeResponse,
+    TerminalOutputAppliedPayload, TerminalResumeRecovery, TerminalStreamEventPayload,
+    TerminalStreamResumePayload, TerminalStreamResumeResponse,
 };
 
 use crate::server::issued_credit::SubscriberIssuedFlow;
@@ -278,6 +279,132 @@ pub(crate) fn fan_out_session_event(peers: &mut Vec<SessionPeer>, event: Subscri
         }
     });
     detached
+}
+
+pub(crate) fn new_output_ack(stream_epoch: u64) -> Result<SubscriberOutputAck, OutputAckVerdict> {
+    SubscriberOutputAck::new(OutputAckBinding {
+        subscriber_generation: session_terminal::next_subscriber_generation(),
+        stream_epoch,
+    })
+}
+
+/// Build a contiguous prefix exclusively from the Agent's *ordered* stream
+/// ring. No tmux capture occurs here, so a current-head cut and the new
+/// subscriber's live queue can be activated under the same SessionMap lock.
+///
+/// This proves stream continuity only. It cannot restore terminal history
+/// preceding the Agent reader, nor replay resize/emulator state as full VT.
+/// Missing, expired or oversized prefixes must take the unverified fallback.
+pub(crate) struct AtomicOutputPrefix {
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) stream_epoch: u64,
+    pub(crate) through_seq: u64,
+}
+
+pub(crate) fn atomic_output_prefix(
+    stream: &session_terminal::SessionStreamState,
+) -> Option<AtomicOutputPrefix> {
+    use base64::Engine;
+    let replay = stream.replay_since(stream.epoch, 0)?;
+    if !replay.complete || replay.events.is_empty() {
+        return None;
+    }
+    let mut raw = Vec::new();
+    for event in replay.events {
+        match event {
+            TerminalStreamEventPayload::Output { data, .. } => {
+                let decoded = base64::engine::general_purpose::STANDARD
+                    .decode(data)
+                    .ok()?;
+                let size = raw.len().checked_add(decoded.len())?;
+                if size > crate::server::bootstrap::BOOTSTRAP_MAX_BYTES {
+                    return None;
+                }
+                raw.extend_from_slice(&decoded);
+            }
+            // A resize is a real sequenced event, but not a byte sequence.
+            // The baseline is marked Partial even when output replay is whole.
+            TerminalStreamEventPayload::Resize { .. } => {}
+        }
+    }
+    (!raw.is_empty()).then_some(AtomicOutputPrefix {
+        bytes: raw,
+        stream_epoch: stream.epoch,
+        through_seq: stream.cursor(),
+    })
+}
+
+/// Register a new subscriber and its bounded queue at one Agent stream cut.
+///
+/// The caller MUST hold the SessionMap producer lock, which also protects
+/// stream.record_output + fan_out_peers. A complete ring prefix therefore
+/// joins the live queue exactly at `through_seq`. For an incomplete ring, the
+/// external tmux capture is still **unverified**: output may overlap that
+/// snapshot, but it is no longer silently discarded while capture awaits.
+///
+/// Queue activation is mandatory even on the unverified fallback. In
+/// particular, do not defer `output_tx = Some(..)` until after capture: that
+/// leaves an unbounded loss window for concurrently recorded Agent output.
+pub(crate) fn subscribe_at_stream_cut(
+    peers: &mut Vec<SessionPeer>,
+    stream: &session_terminal::SessionStreamState,
+    mut peer: SessionPeer,
+    live_tx: &mpsc::Sender<SubscriberEvent>,
+    needs_bootstrap: bool,
+) -> Option<AtomicOutputPrefix> {
+    // A replaced peer's queue must not receive subsequent output; its
+    // detached_for_not_draining flag remains false (not a slow-peer eviction).
+    peers.retain(|current| current.client_id != peer.client_id);
+    let prefix = if needs_bootstrap {
+        atomic_output_prefix(stream)
+    } else {
+        None
+    };
+    // This is under the same lock as the producer, *before* any await.
+    peer.output_tx = Some(live_tx.clone());
+    peers.push(peer);
+    prefix
+}
+
+pub(crate) fn client_attach_response(
+    session_name: String,
+    session: &AttachedSession,
+    client_id: &str,
+) -> ClientAttachResponse {
+    let role = session.control.role_of(client_id);
+    ClientAttachResponse {
+        session_name,
+        control_generation: Some(session.control.generation),
+        control_role: Some(
+            if role == session_terminal::TerminalRole::Controller {
+                "controller"
+            } else {
+                "observer"
+            }
+            .to_string(),
+        ),
+        controller_client_id: session.control.controller_client_id.clone(),
+        stream_epoch: Some(session.stream.epoch),
+        stream_cursor: Some(session.stream.cursor()),
+        subscriber_generation: session
+            .peers
+            .iter()
+            .find(|peer| peer.client_id == client_id)
+            .map(|peer| peer.output_ack.binding().subscriber_generation),
+        // Stated on every attach, including a re-attach to a session this
+        // agent already holds — which is the case they are for. A client whose
+        // transport was rebuilt does not know what became of the input it had
+        // in flight, and this reply is the one message it is certain to
+        // receive; asking separately would need its own request, its own
+        // timeout, and its own ordering against the client's first keystroke.
+        //
+        // `Some`, not `None`: this agent has the state and is the authority on
+        // it. The absence of these fields is reserved for an agent that does
+        // not — a build from before the contract existed — so that "I have no
+        // position" and "my position is zero" stay different answers.
+        input_epoch: Some(session.input.epoch),
+        input_applied_through: Some(session.input.applied_through),
+    }
 }
 
 pub(crate) type SessionMap = std::collections::HashMap<String, AttachedSession>;
