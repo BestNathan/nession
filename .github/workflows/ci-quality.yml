@@ -9,6 +9,10 @@ env:
 
 
 on:
+  # #2467 diagnostic only: this throwaway branch measures the fake-tmux
+  # recorder's residual failure rate on ubuntu-26.04 under llvm-cov and
+  # captures the claims diagnostic when it fails. It is never merged.
+  workflow_dispatch:
   pull_request:
     branches: [staging, main]
     # Scope PR execution to changes that can affect this validator.
@@ -45,6 +49,7 @@ jobs:
   scope:
     # PR and merged main source both select only the relevant checks.
     # A skipped job is Not Applicable, not a fabricated Quality Pass.
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     outputs:
       rust: ${{ steps.changed.outputs.rust }}
@@ -152,6 +157,49 @@ jobs:
       - run: rustup component add llvm-tools-preview
       - name: Verify Rust and Acceptance Gates
         run: ./gates/run --suite quality-rust
+
+  # #2467 diagnostic only. Repeats the agent lib suite under llvm-cov on the
+  # current runner image and prints the fixture's own failure diagnostics
+  # (including the claims counter) so the residual 26.04 race names its owner.
+  recorder-stress:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with: { cache-workspaces: ".", cache-all-crates: "true" }
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-llvm-cov
+          key: cargo-llvm-cov-v1
+      - run: which cargo-llvm-cov || cargo install cargo-llvm-cov
+      - run: rustup component add llvm-tools-preview
+      - name: Repeat the agent lib suite under llvm-cov
+        env:
+          ITERATIONS: '8'
+        run: |
+          set -uo pipefail
+          fails=0
+          for i in $(seq 1 "$ITERATIONS"); do
+            echo "::group::iteration $i"
+            # Keep the instrumented build warm; clear only profile data so
+            # repeated runs do not merge coverage results.
+            cargo llvm-cov clean --profraw-only > /dev/null 2>&1 || true
+            log="$RUNNER_TEMP/iter-$i.log"
+            if cargo llvm-cov --no-report -p nession-agent --lib -- --skip terminal_io > "$log" 2>&1; then
+              echo "ITERATION $i PASS"
+            else
+              echo "ITERATION $i FAIL"
+              fails=$((fails + 1))
+              grep -E "panicked|left:|right:|not exactly one call|claims=|test result" "$log" | tail -20
+            fi
+            echo "::endgroup::"
+          done
+          echo "RECORDER_STRESS_RECEIPT iterations=$ITERATIONS failures=$fails image=$(grep -oE 'PRETTY_NAME=.*' /etc/os-release)"
+          [[ "$fails" -eq 0 ]]
 
   web-check:
     needs: scope
