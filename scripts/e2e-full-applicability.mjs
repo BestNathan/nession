@@ -123,6 +123,43 @@ export function notRequiredReceipt(sha, classification) {
   };
 }
 
+// #2478 SC-03: the Acceptance harness never reads artifacts. Emit the same Not
+// Required decision as a bounded job-log receipt that a trusted collector can
+// re-attest against the exact run/attempt and the scope job's own steps.
+export const FULL_NOT_REQUIRED_LOG_PREFIX = 'E2E_FULL_NOT_REQUIRED_V1 ';
+export function notRequiredLogReceipt({ runId, runAttempt, classification }) {
+  const run = Number(runId);
+  const attempt = Number(runAttempt);
+  const sha = String(classification?.target_sha ?? '');
+  if (!Number.isSafeInteger(run) || run <= 0 ||
+      !Number.isSafeInteger(attempt) || attempt <= 0) {
+    throw new Error('invalid Full Not Required run identity');
+  }
+  if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error('invalid target SHA');
+  if (classification?.applicable !== false ||
+      classification?.category !== 'tooling-only' ||
+      classification?.reason !== REASON['tooling-only'] ||
+      !Array.isArray(classification.changed_paths) ||
+      classification.changed_paths.length > 50 ||
+      classification.changed_paths.some((file) =>
+        typeof file !== 'string' || !file || /[\r\n]/.test(file))) {
+    throw new Error('log receipt requires a tooling-only classification');
+  }
+  return {
+    schema_version: 1,
+    kind: 'e2e_full_not_required',
+    repository: 'BestNathan/nession',
+    workflow: '.github/workflows/e2e-full-regression.yml',
+    run_id: run,
+    run_attempt: attempt,
+    target_sha: sha,
+    category: classification.category,
+    reason: classification.reason,
+    changed_paths: classification.changed_paths,
+    full_regression: 'NOT_REQUIRED',
+  };
+}
+
 function selfTest() {
   const tooling = [
     'docs/design/notes.md',
@@ -204,12 +241,40 @@ function selfTest() {
   assert.throws(() => notRequiredReceipt('a'.repeat(40), { applicable: true }), /not-required classification/);
   assert.throws(() => notRequiredReceipt('a'.repeat(40),
     { applicable: false, category: 'e2e-contract' }), /not-required classification/);
+  // #2478 SC-03: the job-log receipt binds the exact run identity and only a
+  // positively tooling-only decision may be emitted.
+  const target = 'a'.repeat(40);
+  const logReceipt = notRequiredLogReceipt({ runId: 12, runAttempt: 2,
+    classification: { ...reproduction, target_sha: target } });
+  assert.equal(logReceipt.run_id, 12);
+  assert.equal(logReceipt.run_attempt, 2);
+  assert.equal(logReceipt.target_sha, target);
+  assert.equal(logReceipt.full_regression, 'NOT_REQUIRED');
+  assert.throws(() => notRequiredLogReceipt({ runId: 0, runAttempt: 1,
+    classification: { ...reproduction, target_sha: target } }), /run identity/);
+  assert.throws(() => notRequiredLogReceipt({ runId: 12, runAttempt: 2,
+    classification: { ...reproduction, target_sha: 'main' } }), /invalid target SHA/);
+  assert.throws(() => notRequiredLogReceipt({ runId: 12, runAttempt: 2,
+    classification: { ...classifyChangedPaths(['web/src/App.tsx']), target_sha: target } }),
+  /tooling-only classification/);
+  assert.throws(() => notRequiredLogReceipt({ runId: 12, runAttempt: 2,
+    classification: { ...reproduction, target_sha: target,
+      changed_paths: ['scripts/a.mjs\nnot-required'] } }), /tooling-only classification/);
   console.log('e2e full applicability: impact matrix, fail-closed negatives and Not Required receipt fixtures passed');
 }
 
 function main() {
   const [command, ...args] = process.argv.slice(2);
   if (command === 'self-test') return selfTest();
+  if (command === 'log-receipt') {
+    const [classFile] = args;
+    if (!classFile) throw new Error('usage: log-receipt CLASSIFICATION_JSON');
+    const classification = JSON.parse(fs.readFileSync(classFile, 'utf8'));
+    process.stdout.write(FULL_NOT_REQUIRED_LOG_PREFIX + JSON.stringify(
+      notRequiredLogReceipt({ runId: process.env.GITHUB_RUN_ID,
+        runAttempt: process.env.GITHUB_RUN_ATTEMPT, classification })) + '\n');
+    return;
+  }
   if (command === 'classify') {
     const [pathsFile, outFile] = args;
     if (!pathsFile || !outFile) throw new Error('usage: classify PATHS_JSON OUT_JSON [SHA]');
@@ -224,7 +289,7 @@ function main() {
     process.stdout.write(classification.applicable + '\n');
     return;
   }
-  throw new Error('usage: self-test | classify PATHS_JSON OUT_JSON [SHA]');
+  throw new Error('usage: self-test | classify PATHS_JSON OUT_JSON [SHA] | log-receipt CLASSIFICATION_JSON');
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === new URL(import.meta.url).pathname) {
