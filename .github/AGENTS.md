@@ -49,6 +49,12 @@ Only a positively tooling-only diff, together with a trusted `not-required`
 Issue plan, may skip browser provisioning. Unknown, mixed and unverifiable
 diffs fail closed to applicable (#2478).
 
+A tooling-only Main merge records the skipped Full as an authenticated
+`E2E_FULL_NOT_REQUIRED_V1` receipt in the Full scope job log, because the
+Acceptance harness never reads artifacts. A successful Full workflow run whose
+`full` job was skipped proves the suite did **not** execute; the receipt, the
+scope job's steps and the exact push run/attempt must agree.
+
 ## Change discipline
 
 Workflow changes happen in a worktree and receive the same Gate/review treatment as code. Preserve concurrency/cancellation semantics deliberately; do not add broad retries that hide deterministic failures.
