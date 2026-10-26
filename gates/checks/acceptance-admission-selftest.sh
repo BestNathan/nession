@@ -15,6 +15,9 @@ gate_check() {
   gate_require_path './scripts/acceptance-source-applicability.mjs' "Restore the canonical source applicability reader." || return $?
   gate_require_path './.github/workflows/acceptance-orchestrator.yml' "Restore the trusted Acceptance Orchestrator." || return $?
   gate_run_invariant node scripts/acceptance-admission-selftest.mjs || return $?
+  # The deferred-replay receipt owner accepts both trusted deferral shapes
+  # (success after an accepted cancel request, or cancelled termination).
+  gate_run_invariant node scripts/acceptance-deferred-replay-receipt.mjs self-test || return $?
   gate_run_invariant node scripts/acceptance-source-applicability.mjs self-test || return $?
   gate_run_invariant node scripts/acceptance-dependency-state.mjs self-test || return $?
 }

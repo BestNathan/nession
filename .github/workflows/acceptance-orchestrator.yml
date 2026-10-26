@@ -223,19 +223,15 @@ jobs:
             echo "::error::Failed to cancel the deferred Acceptance run"
             exit 1
           fi
-          # Cancellation is asynchronous and does not abort the current job
-          # immediately. Block until the run is terminal, then verify it is
-          # genuinely cancelled instead of leaving a green run that never
-          # evaluated anything.
-          timeout 90 gh run watch "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
-            > /dev/null 2>&1 || true
-          conclusion="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
-            --jq '.conclusion // "none"')"
-          [[ "$conclusion" == cancelled ]] || {
-            echo "::error::Deferred Acceptance run was not cancelled (conclusion=${conclusion})"
-            exit 1
-          }
-          echo "Deferred Acceptance run is cancelled; evaluation remains deferred"
+          # Cancellation is asynchronous, and this job is part of the run being
+          # cancelled: the run cannot report a terminal `cancelled` conclusion
+          # until this job ends. Requiring that state from inside the run made
+          # every deferral fail its own job (#2323). The cancel request was
+          # accepted above; GitHub applies it when this job ends, and the
+          # trusted waker requires a completed `cancelled` run plus exact
+          # attempt deferral evidence before replaying, so exiting here cannot
+          # leave a green run that never evaluated anything.
+          echo "Deferred Acceptance run cancellation requested; evaluation remains deferred"
 
   # New tasks use the repository default Acceptor instance, resolved on trusted main.
   # Legacy ACCEPTANCE_PROVIDER stays as an explicit compatibility override until
