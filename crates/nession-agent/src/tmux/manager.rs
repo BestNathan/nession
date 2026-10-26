@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use super::cmd::{self, TmuxCmd};
 use super::env::EnvManager;
-use super::ops::{TmuxDep, TmuxOps};
+use super::ops::TmuxDep;
 
 /// The environment that tells a Claude Code integration which Nession session it
 /// is in, and where to report what it is doing (`#1005`).
@@ -531,7 +531,8 @@ impl SessionManager {
                 // to deliver has nowhere else to come from. The session itself
                 // is left in place — this reports the failure, it does not add
                 // a rollback policy no caller had.
-                TmuxOps::new(self.cmd.clone())
+                self.tmux_dep()
+                    .ops()
                     .send_keys(name, &init_cmd)
                     .await
                     .with_context(|| {
@@ -654,7 +655,7 @@ impl SessionManager {
     /// [`TmuxDep`] the `EnvManager` below is bound to as well, so the fake the
     /// `legacy_stage_two_tests` module injects is what both halves run.)
     async fn propagate_env_best_effort(&self, session: &str, name: &str, value: &str) {
-        let ops = TmuxOps::new(self.cmd.clone());
+        let ops = self.tmux_dep().ops();
         if let Err(e) = ops.set_environment(session, name, value).await {
             tracing::warn!(
                 "best-effort env propagation to future panes of session {session} failed ({name}): {e:#}"

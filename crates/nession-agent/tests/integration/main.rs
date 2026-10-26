@@ -389,7 +389,8 @@ pub(crate) const CALL_SEPARATOR: &str = "==call==";
 /// what this helper has always reported; `Result` is the operation's contract,
 /// and a test that needs the distinction asserts it directly on the operation.
 pub(crate) async fn tmux_show_environment(session: &str, name: &str) -> Option<String> {
-    nession_agent::tmux::ops::TmuxOps::global()
+    nession_agent::tmux::ops::TmuxDep::global()
+        .ops()
         .show_environment(session, name)
         .await
         .ok()

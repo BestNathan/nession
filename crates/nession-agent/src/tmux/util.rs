@@ -150,7 +150,8 @@ mod tests {
         mgr.create_session(ts.name(), 80, 24, "/tmp", &[])
             .await
             .expect("create session");
-        crate::tmux::ops::TmuxOps::global()
+        crate::tmux::ops::TmuxDep::global()
+            .ops()
             .send_keys(ts.name(), "echo hello")
             .await
             .expect("send keys");

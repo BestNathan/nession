@@ -21,6 +21,7 @@
 //! `docs/architecture/session-tmux-sdk-ownership.md` for that boundary.
 
 pub mod client;
+pub mod ops;
 pub mod parser;
 pub mod process;
 
@@ -31,5 +32,6 @@ pub use client::{
     ClientChild, ClientIo, ControlCommand, ControlTransport, EventIngressLimits, TmuxClient,
     TmuxClientError, TmuxEvent,
 };
+pub use ops::{PaneModeFlags, TmuxOps};
 pub use parser::{parse_control_line, parse_control_line_bytes, ControlMessage};
 pub use process::{heal_stale_socket, TmuxCommand};
