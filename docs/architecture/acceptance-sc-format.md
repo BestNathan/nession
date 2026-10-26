@@ -59,7 +59,9 @@ The canonical lifecycle ordering is executable in `scripts/acceptance-lifecycle.
 3. **Regression Qualified** — Full Regression passed for the exact promoted Main merge SHA. A green run for any other SHA never qualifies a newer Main.
 4. **Released** — the release admitted the same SHA with the required approvals.
 
-A failure after Development Complete opens a Main/integration incident and blocks release; it does not retroactively invalidate the Issue's Staging proof or reopen completed feature Issues. Test and docs-only promotions that cannot affect runtime use an explicit authenticated `Not Required`, never a fabricated Full Pass.
+A failure after Development Complete opens a Main/integration incident and blocks release; it does not retroactively invalidate the Issue's Staging proof or reopen completed feature Issues.
+
+Executable consequence: `scripts/requirement-acceptance.mjs` requires `Pass`/`N/A` at closure only for `pr` and `merged/staging` criteria. A `merged/main` or `deployed` criterion is release qualification — its truthful `Pending`/`Fail` row blocks release, but it does not reopen or block the Issue at Development Complete. `scripts/acceptance-lifecycle.mjs` (Gate `acceptance-lifecycle-selftest`) owns the state ordering. Test and docs-only promotions that cannot affect runtime use an explicit authenticated `Not Required`, never a fabricated Full Pass.
 
 ## Minimize proof latency without weakening trust
 
