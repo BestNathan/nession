@@ -177,7 +177,12 @@ export function attestDeferredReplayReceipt({
   const defer = deferredJobs.find((job) => job?.name === 'defer-pre-merge');
   const admission = (prepare?.steps ?? [])
     .find((step) => step?.name === DEFERRED_ADMISSION_STEP);
-  if (prepare?.conclusion !== 'success' || defer?.conclusion !== 'cancelled' ||
+  // A deferral job may conclude `success` when it exits after GitHub accepted
+  // the cancel request (the run then becomes cancelled), or `cancelled` when
+  // the cancellation terminated it first. Both are the same trusted decision;
+  // skipped/failure/absent defer jobs are not.
+  if (prepare?.conclusion !== 'success' ||
+      !['cancelled', 'success'].includes(defer?.conclusion) ||
       admission?.conclusion !== 'success') {
     throw Error('deferred attempt is not a trusted deferral');
   }
@@ -207,7 +212,7 @@ export function attestDeferredReplayReceipt({
     deferral: Object.freeze({
       prepare_pre_merge: 'success',
       admission_evaluated: 'success',
-      defer_pre_merge: 'cancelled',
+      defer_pre_merge: defer.conclusion,
     }),
     replay: Object.freeze({
       defer_pre_merge: replayDefer ? 'skipped' : 'absent',
@@ -292,7 +297,10 @@ function selfTest() {
   const deferredJobs = [
     { name: 'prepare-pre-merge', conclusion: 'success', steps: [
       { name: DEFERRED_ADMISSION_STEP, conclusion: 'success' }] },
-    { name: 'defer-pre-merge', conclusion: 'cancelled' },
+    // The deferral job exits successfully after the accepted cancel request;
+    // the run itself becomes cancelled. Older deferrals were terminated with
+    // conclusion `cancelled` and stay valid.
+    { name: 'defer-pre-merge', conclusion: 'success' },
   ];
   const replayJobs = [
     { name: 'prepare-pre-merge', conclusion: 'success' },
@@ -311,8 +319,18 @@ function selfTest() {
   assert.equal(proof.pr, 2465);
   assert.equal(proof.deferred_attempt, 1);
   assert.equal(proof.replay_attempt, 2);
-  assert.equal(proof.deferral.defer_pre_merge, 'cancelled');
+  assert.equal(proof.deferral.defer_pre_merge, 'success');
   assert.equal(proof.replay.pre_merge_acceptance, 'success');
+  // Backward-compatible: a deferral job terminated by the run cancellation
+  // (the pre-#2323 shape) remains a trusted deferral.
+  const cancelledDeferProof = attestDeferredReplayReceipt({
+    receipt, wakerRun, wakerJob,
+    deferredRun,
+    deferredJobs: deferredJobs.map((job) => job.name === 'defer-pre-merge'
+      ? { ...job, conclusion: 'cancelled' } : job),
+    replayJobs, targetSha: mainSha,
+  });
+  assert.equal(cancelledDeferProof.deferral.defer_pre_merge, 'cancelled');
 
   // The E2E-projection reconcile is the other trusted replay producer; a
   // replay it performs is the same behavioral fact.
@@ -346,7 +364,7 @@ function selfTest() {
   assert.throws(attests({ deferredJobs: [
     { name: 'prepare-pre-merge', conclusion: 'success', steps: [
       { name: DEFERRED_ADMISSION_STEP, conclusion: 'success' }] },
-    { name: 'defer-pre-merge', conclusion: 'success' },
+    { name: 'defer-pre-merge', conclusion: 'skipped' },
   ] }), /not a trusted deferral/, 'a run that evaluated was not deferred');
   assert.throws(attests({ replayJobs: replayJobs.map((job) =>
     job.name === 'defer-pre-merge' ? { ...job, conclusion: 'cancelled' } : job) }),
