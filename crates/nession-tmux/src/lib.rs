@@ -12,7 +12,9 @@
 //!     |      - byte framing, ordered command/reply matching, tombstones
 //!     |      - one ordered source-event stream, bounded ingress
 //!     |
-//!     +-- (one-shot operations arrive in the next migration slice)
+//!     +-- ops::TmuxOps        -> typed one-shot operations
+//!            - create/list/kill Session, display-message, set-option,
+//!              capture, clear-history, version
 //! ```
 //!
 //! What lives above this crate — Nession Session identity, environment

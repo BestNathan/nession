@@ -14,7 +14,7 @@
 //!   caller. The client emits [`TmuxEvent`]s in source order and assigns
 //!   nothing.
 //! - The byte framing and the `Control Mode` message grammar are **not
-//!   re-implemented here**: the reader reuses [`framing`] and
+//!   re-implemented here**: the reader reuses `framing` and
 //!   [`crate::parser`], including the bounded-byte contract and its
 //!   fatal/forward-compatible record split.
 //!

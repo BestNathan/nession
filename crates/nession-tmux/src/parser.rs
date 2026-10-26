@@ -3,19 +3,19 @@
 /// tmux control mode 消息类型
 #[derive(Debug, Clone, PartialEq)]
 pub enum ControlMessage {
-    /// 终端输出: %output %<pane_id> <data>
+    /// 终端输出: `%output %<pane_id> <data>`
     Output { pane_id: String, data: Vec<u8> },
-    /// 命令开始: %begin <timestamp> <id> <flags>
+    /// 命令开始: `%begin <timestamp> <id> <flags>`
     Begin { timestamp: u64, id: u64, flags: u64 },
-    /// 命令结束: %end <timestamp> <id> <flags>
+    /// 命令结束: `%end <timestamp> <id> <flags>`
     End { timestamp: u64, id: u64, flags: u64 },
-    /// 命令错误: %error <timestamp> <id> <flags>
+    /// 命令错误: `%error <timestamp> <id> <flags>`
     Error { timestamp: u64, id: u64, flags: u64 },
-    /// Session 切换: %session-changed $<id> <name>
+    /// Session 切换: `%session-changed $<id> <name>`
     SessionChanged { session_id: String, name: String },
-    /// 布局变化: %layout-change <window_id> <layout> <flags> <active_pane>
+    /// 布局变化: `%layout-change <window_id> <layout> <flags> <active_pane>`
     LayoutChange { window_id: String, layout: String },
-    /// 窗口尺寸变化: %window-resize @<window_id> <cols> <rows>
+    /// 窗口尺寸变化: `%window-resize @<window_id> <cols> <rows>`
     ///
     /// **Parsed for a tmux that emits it; the pinned 3.6b does not.**
     /// `grep -c '%window-resize'` on the 3.6b binary is 0 and a live control

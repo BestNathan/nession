@@ -31,10 +31,9 @@
 //!
 //! Result *policy* belongs to the caller, because it is a property of the call
 //! and not of the operation. The same `set-environment` is `Required` when a
-//! user asked for those variables ([`EnvManager::set_environment`]) and
-//! `BestEffort` when it propagates an environment an earlier stage already
-//! established to windows that do not exist yet
-//! ([`SessionManager::create_session`](super::manager::SessionManager)). So
+//! user asked for those variables and `BestEffort` when it propagates an
+//! environment an earlier stage already established to windows that do not
+//! exist yet. So
 //! every operation here returns its failure and none of them swallows one; a
 //! caller choosing `BestEffort` has to say so, and it says it in its own code
 //! where a reader can see it.
@@ -56,7 +55,6 @@
 //! gets designed once both shapes are known, not from the first of them.
 //!
 //! [`TmuxCommand`]: crate::process::TmuxCommand
-//! [`EnvManager::set_environment`]: super::env::EnvManager::set_environment
 
 use std::time::Duration;
 
@@ -184,7 +182,7 @@ fn size_from_line(line: &str) -> Result<(u16, u16)> {
 /// is lossy — a resumed control connection, a chunk boundary inside a sequence,
 /// output produced before the agent attached.
 ///
-/// Field order is the [`PANE_MODE_FORMAT`] order and is not alphabetical: it
+/// Field order is the `PANE_MODE_FORMAT` order and is not alphabetical: it
 /// follows the DEC private modes the escapes below are spelled in, so a reader
 /// can hold both in their head at once.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -783,12 +781,11 @@ impl TmuxOps {
     /// Resize `session`'s window to `cols` × `rows` — the write counterpart of
     /// [`window_size`](Self::window_size).
     ///
-    /// Called by `ControlModeSession::attach`, which has to set the size
-    /// **before** the control-mode client exists: at that moment there is no
-    /// stdin to write to, so the resize cannot travel the transport
-    /// [`ControlModeSession::resize`](super::control::ControlModeSession::resize)
-    /// uses. Same subcommand, same target, two routes — the split is the
-    /// transport, not the grammar.
+    /// Called by the Agent's Control Mode adapter when it attaches, which has
+    /// to set the size **before** the control-mode client exists: at that
+    /// moment there is no stdin to write to, so the resize cannot travel the
+    /// transport that adapter uses afterwards. Same subcommand, same target,
+    /// two routes — the split is the transport, not the grammar.
     pub async fn resize_window(&self, session: &str, cols: u16, rows: u16) -> Result<()> {
         let cols = cols.to_string();
         let rows = rows.to_string();
@@ -820,7 +817,7 @@ impl TmuxOps {
     /// this; see the module docs for why it is not unified with it.
     ///
     /// Both halves of what changed when this moved: the argument vector is now
-    /// built once, in [`send_keys_args`], instead of at the two call sites that
+    /// built once, in `send_keys_args`, instead of at the two call sites that
     /// each wrote it; and a failure now carries tmux's own stderr, where the
     /// `util::send_keys` it replaces discarded it (`Stdio::null()`) and
     /// reported only the session name (#991: a required failure retains useful
@@ -917,8 +914,8 @@ impl TmuxOps {
     /// cannot await. `Drop` is why this exists.
     ///
     /// The same operation on the blocking [`TmuxCommand::std`] builder, not a
-    /// second grammar: both reach [`detach_client_args`] and
-    /// [`client_name_for_pid_in`]. Only the spawn differs, which is the
+    /// second grammar: both reach `detach_client_args` and
+    /// `client_name_for_pid_in`. Only the spawn differs, which is the
     /// `std`/`tokio` duality [`TmuxCommand`] already carries.
     pub fn detach_client_by_pid_blocking(&self, pid: u32) -> Result<bool> {
         let Some(client) = self.client_name_for_pid_blocking(pid)? else {
