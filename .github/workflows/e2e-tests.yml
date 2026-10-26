@@ -71,7 +71,7 @@ concurrency:
 
 jobs:
   e2e:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # PLAYWRIGHT_BROWSERS_PATH applies to BOTH install and test — keeps them
     # pointed at the same directory (and the same one the cache restores to).
     # NESSION_TARGET_SHA binds the shared Runtime Harness to the exact checkout
