@@ -35,6 +35,7 @@ use crate::server::execution::{
 use crate::server::issued_credit::SubscriberIssuedFlow;
 use crate::server::output_ack::{OutputAckBinding, OutputAckVerdict, SubscriberOutputAck};
 use crate::session::registry::{NotAttached, SessionRegistry};
+use crate::session::service::{AttachedBackend, SessionService};
 use crate::session::terminal::runtime::{
     AttachedSession, OutputChunk, SessionPeer, SubscriberEvent,
 };
@@ -45,6 +46,7 @@ use crate::session::terminal::state::{InputSequence, InputVerdict};
 use crate::server::outbound::{self, OutboundError, P2pOutbound};
 use crate::server::resize::ResizeReporter;
 use crate::tmux::manager::SessionManager;
+use crate::tmux::session::TmuxSession;
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
 use nession_protocol::contracts::env::v1::EnvSnapshot;
@@ -1243,6 +1245,8 @@ pub struct AgentServerContext {
 
 pub struct AgentServer {
     tmux_manager: Arc<SessionManager>,
+    /// The one Session service every connection asks for a backend.
+    service: Arc<SessionService>,
     /// Agent-wide P2P lease, retained terminal history and peer fan-out.
     sessions: Arc<SessionRegistry>,
     file_ops: Arc<FileOps>,
@@ -1400,6 +1404,7 @@ pub(crate) struct P2pRequest<'a> {
     /// The request id, echoed on the reply.
     id: &'a str,
     tmux: &'a Arc<SessionManager>,
+    service: &'a Arc<SessionService>,
     sessions: &'a Arc<SessionRegistry>,
     client_id: &'a Arc<Mutex<Option<String>>>,
     peer_token: &'a Arc<()>,
@@ -1445,6 +1450,7 @@ impl P2pRequest<'_> {
 /// connection's and nothing else's.
 struct Connection {
     tmux: Arc<SessionManager>,
+    service: Arc<SessionService>,
     sessions: Arc<SessionRegistry>,
     client_id: Arc<Mutex<Option<String>>>,
     peer_token: Arc<()>,
@@ -1636,6 +1642,7 @@ impl Frame {
         let ctx = P2pRequest {
             id: &id,
             tmux: &connection.tmux,
+            service: &connection.service,
             sessions: &connection.sessions,
             client_id: &connection.client_id,
             peer_token: &connection.peer_token,
@@ -2078,13 +2085,12 @@ p2p_routes! { ctx, msg_type, payload_value;
                     // binary reaches the attach too (#991 step 6).
                     let (width, height) =
                         resolve_attach_size(ctx.tmux, &session_name, &payload).await;
-                    match crate::tmux::pty::PtySession::attach(
-                        &ctx.tmux.tmux_dep(),
-                        &session_name,
-                        width,
-                        height,
-                    ) {
-                        Ok((pty_session, mut output_rx)) => {
+                    match ctx.service.attach(&session_name, width, height, None).await {
+                        Ok(AttachedBackend::Plain {
+                            session: pty_session,
+                            output: mut output_rx,
+                        }) => {
+                            let backend: Box<dyn TmuxSession> = pty_session;
                             let client_id = connection_client_id(ctx.client_id).await;
                             let (tx, rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
                             let detached_for_not_draining = Arc::new(AtomicBool::new(false));
@@ -2099,7 +2105,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 Err(_) => return ctx.err("invalid_stream_identity", "output ACK identity unavailable"),
                             };
                             let attached = AttachedSession {
-                                backend: Arc::new(Mutex::new(Box::new(pty_session))),
+                                backend: Arc::new(Mutex::new(backend)),
                                 peers: vec![SessionPeer {
                                     client_id: client_id.clone(),
                                     peer_token: Arc::clone(ctx.peer_token),
@@ -2222,6 +2228,10 @@ p2p_routes! { ctx, msg_type, payload_value;
                             serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                                 .unwrap_or_default()
                         }
+                        Ok(AttachedBackend::Control { .. }) => ctx.err(
+                            "attach_failed",
+                            "the session service returned a Control backend to the Plain path",
+                        ),
                         Err(e) => ctx.err("attach_failed", &e.to_string()),
                     }
                 } else {
@@ -2253,20 +2263,27 @@ p2p_routes! { ctx, msg_type, payload_value;
                     let wants_bootstrap = payload.needs_bootstrap.unwrap_or(true);
                     let (width, height) =
                         resolve_attach_size(ctx.tmux, &payload.session_name, &payload).await;
-                    match crate::tmux::control::ControlModeSession::attach(
-                        &ctx.tmux.tmux_dep(),
-                        &payload.session_name,
-                        width,
-                        height,
-                        if wants_bootstrap {
-                            Some(crate::tmux::HISTORY_LIMIT_LINES)
-                        } else {
-                            None
-                        },
-                    )
-                    .await
+                    match ctx
+                        .service
+                        .attach(
+                            &payload.session_name,
+                            width,
+                            height,
+                            if wants_bootstrap {
+                                Some(crate::tmux::HISTORY_LIMIT_LINES)
+                            } else {
+                                None
+                            },
+                        )
+                        .await
                     {
-                        Ok((session, mut output_rx, mut resize_rx, capture)) => {
+                        Ok(AttachedBackend::Control {
+                            session,
+                            output: mut output_rx,
+                            resize: mut resize_rx,
+                            capture,
+                        }) => {
+                            let backend: Box<dyn TmuxSession> = session;
                             let session_name = payload.session_name.clone();
                             let client_id = connection_client_id(ctx.client_id).await;
                             let mut control = session_terminal::SessionControlState::new();
@@ -2285,7 +2302,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 Err(_) => return ctx.err("invalid_stream_identity", "output ACK identity unavailable"),
                             };
                             let attached = AttachedSession {
-                                backend: Arc::new(Mutex::new(Box::new(session))),
+                                backend: Arc::new(Mutex::new(backend)),
                                 peers: vec![SessionPeer {
                                     client_id: client_id.clone(),
                                     peer_token: Arc::clone(ctx.peer_token),
@@ -2500,6 +2517,10 @@ p2p_routes! { ctx, msg_type, payload_value;
                             serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                                 .unwrap_or_default()
                         }
+                        Ok(AttachedBackend::Plain { .. }) => ctx.err(
+                            "attach_failed",
+                            "the session service returned a Plain backend to the Control path",
+                        ),
                         Err(e) => ctx.err("attach_failed", &e.to_string()),
                     }
                 }
@@ -3260,9 +3281,14 @@ impl AgentServer {
         let file_ops = Arc::new(crate::fs::ops::FileOps::new(sandbox));
 
         let tmux_manager = Arc::clone(&context.tmux);
+        let service = Arc::new(SessionService::new(
+            Arc::clone(&tmux_manager),
+            attach_mode.clone(),
+        ));
 
         Ok(Self {
             tmux_manager,
+            service,
             sessions: Arc::new(SessionRegistry::new()),
             file_ops,
             mutations: context.mutations,
@@ -3301,6 +3327,7 @@ impl AgentServer {
         };
 
         let tmux_manager = Arc::clone(&self.tmux_manager);
+        let service = Arc::clone(&self.service);
         let sessions = Arc::clone(&self.sessions);
         let file_ops = Arc::clone(&self.file_ops);
         let mutations = Arc::clone(&self.mutations);
@@ -3326,6 +3353,7 @@ impl AgentServer {
                         match accept_result {
                             Ok((stream, addr)) => {
                                 let tmux = Arc::clone(&tmux_manager);
+                                let svc = Arc::clone(&service);
                                 let shared_sessions = Arc::clone(&sessions);
                                 let fops = Arc::clone(&file_ops);
                                 let lanes = Arc::clone(&mutations);
@@ -3339,8 +3367,8 @@ impl AgentServer {
                                 tokio::spawn(async move {
                                     if let Err(e) =
                                         Self::handle_connection(
-                                            stream, addr, tmux, tls, wd, fops, lanes, &la, &aid,
-                                            am, rtx, creds, shared_sessions,
+                                            stream, addr, tmux, svc, tls, wd, fops, lanes, &la,
+                                            &aid, am, rtx, creds, shared_sessions,
                                         )
                                         .await
                                     {
@@ -3375,6 +3403,7 @@ impl AgentServer {
         stream: tokio::net::TcpStream,
         addr: SocketAddr,
         tmux_manager: Arc<SessionManager>,
+        service: Arc<SessionService>,
         tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
         default_working_dir: String,
         file_ops: Arc<FileOps>,
@@ -3482,6 +3511,7 @@ impl AgentServer {
         // things a handler reads.
         let connection = Arc::new(Connection {
             tmux: tmux_manager,
+            service,
             sessions,
             client_id,
             peer_token: Arc::new(()),
@@ -6425,6 +6455,7 @@ mod tests {
         let (resize, _resize_updates) = ResizeReporter::new();
         let client: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(Some(client_id.clone())));
         let attach_mode = AttachMode::Plain;
+        let service = Arc::new(SessionService::new(Arc::clone(&tmux), attach_mode.clone()));
         let probe = outbound.clone();
         let payload = serde_json::json!({
             "session_name": SESSION,
@@ -6440,6 +6471,7 @@ mod tests {
             let ctx = P2pRequest {
                 id: "resize-1",
                 tmux: &tmux,
+                service: &service,
                 sessions: &sessions,
                 client_id: &client,
                 peer_token: &peer_token,
