@@ -287,9 +287,25 @@ impl FakeTmux {
             };
             // The argv is written after the claim, so a call still being
             // recorded has no terminator: report it only once it is whole.
-            let Some(body) = text.trim_end_matches('\n').strip_suffix(CALL_SEPARATOR) else {
+            //
+            // The terminator is an **end** marker, so a repeated one is still
+            // the same end. The recorder writes it with a second command
+            // (`printf` then `echo`), and under the coverage run's load that
+            // pair was observed appending the marker twice to one record; that
+            // is one call, not two, and reading it as an argv entry would fail
+            // a test about splicing for a reason that is not splicing. A
+            // separator *inside* the block is left alone — that is what a
+            // genuine splice would look like.
+            let text = text.trim_end_matches('\n');
+            let mut body = text;
+            let mut whole = false;
+            while let Some(stripped) = body.strip_suffix(CALL_SEPARATOR) {
+                whole = true;
+                body = stripped.trim_end_matches('\n');
+            }
+            if !whole {
                 continue;
-            };
+            }
             let entries: Vec<String> = body
                 .trim_matches('\n')
                 .lines()
@@ -474,5 +490,51 @@ fn a_call_is_reported_only_after_its_terminator() {
         fake.calls(),
         expected,
         "each call reads back as the argv tmux received, in index order"
+    );
+}
+
+/// A repeated end marker is still one end.
+///
+/// The recorder writes the marker with a second command, and under the
+/// coverage run's load that pair was observed appending it twice to one
+/// record. That is a whole call, not a call whose last argument is the marker;
+/// reading it otherwise fails a test about splicing for a reason that is not
+/// splicing. A separator *inside* the block is left alone — that is what a
+/// splice would leave behind and the concurrency test must still see it.
+#[cfg(unix)]
+#[test]
+fn a_repeated_terminator_still_describes_one_call() {
+    let dir = tempfile::tempdir().unwrap();
+    let fake = FakeTmux::new(dir.path(), "exit 0");
+    let claim = dir.path().join(format!("{CALL_FILE_PREFIX}0"));
+    let record = claim.join(CALL_RECORD_NAME);
+    std::fs::create_dir(&claim).unwrap();
+
+    std::fs::write(
+        &record,
+        "set-option\n-t\nsess\nstatus\noff\n==call==\n==call==\n",
+    )
+    .unwrap();
+    let one: Vec<String> = ["set-option", "-t", "sess", "status", "off"]
+        .into_iter()
+        .map(ToString::to_string)
+        .collect();
+    assert_eq!(
+        fake.calls(),
+        vec![one],
+        "a repeated terminator is the same end, not an argv entry"
+    );
+
+    std::fs::write(
+        &record,
+        "attach\n-t\nsess\n==call==\nset-option\n-t\nsess\nstatus\noff\n==call==\n",
+    )
+    .unwrap();
+    let spliced = fake.calls();
+    assert_eq!(spliced.len(), 1);
+    assert_eq!(
+        spliced[0].len(),
+        9,
+        "the internal separator stays a token so a splice is still visible: {spliced:?}"
     );
 }

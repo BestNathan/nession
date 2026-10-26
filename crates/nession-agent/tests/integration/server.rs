@@ -879,6 +879,15 @@ async fn a_plain_bootstrap_restores_a_caret_the_pane_left_on_an_empty_row() {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 
+    // Attach at the window's own size: a size change makes tmux reset the
+    // caret column, which would move the pane away from the position this
+    // fixture is about. The bootstrap still has to place the caret.
+    let (cols, rows) = TmuxDep::global()
+        .ops()
+        .window_size(&session_name)
+        .await
+        .expect("the window size query works against a real tmux");
+
     let (mut sink, mut stream) = connect_for(&credentials, addr, &session_name)
         .await
         .unwrap();
@@ -886,8 +895,8 @@ async fn a_plain_bootstrap_restores_a_caret_the_pane_left_on_an_empty_row() {
         msg_types::CLIENT_ATTACH,
         ClientAttachPayload {
             session_name: session_name.clone(),
-            width: 80,
-            height: 24,
+            width: cols,
+            height: rows,
             size_known: None,
             env_snapshots: Vec::new(),
             needs_bootstrap: Some(true),
