@@ -33,7 +33,7 @@ concurrency:
 jobs:
   prepare-pre-merge:
     if: github.event_name == 'pull_request_target' && github.event.pull_request.draft == false
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
       actions: read
@@ -203,7 +203,7 @@ jobs:
     if: >-
       needs.prepare-pre-merge.result == 'success' &&
       needs.prepare-pre-merge.outputs.admission != 'ready'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       actions: write
@@ -265,7 +265,7 @@ jobs:
       needs.prepare-pre-merge.result == 'success' &&
       needs.prepare-pre-merge.outputs.admission == 'ready' &&
       (needs.pre-merge-acceptance.result == 'success' || needs.pre-merge-acceptance.result == 'skipped')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       issues: read
@@ -307,7 +307,7 @@ jobs:
   acceptance-pr-gate:
     needs: pre-merge-gate
     if: github.event_name == 'pull_request_target' && github.event.pull_request.base.ref == 'main' && needs.pre-merge-gate.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       issues: read
@@ -326,7 +326,7 @@ jobs:
 
   acceptance-close-guard:
     if: github.event_name == 'issues'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       issues: write
@@ -347,7 +347,7 @@ jobs:
   # evidence producer and uses the same trusted SC plan in acceptance-executor.
   prepare-merged-agent:
     if: github.event_name == 'push' && (github.ref_name == 'staging' || github.ref_name == 'main')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       issues: read
@@ -421,7 +421,7 @@ jobs:
   # This wakes the existing Agent SC evaluator; it never projects a verdict.
   prepare-post-merge-provider-evidence:
     if: github.event_name == 'repository_dispatch' && github.event.action == 'nession-agent-telemetry-ingested'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       actions: read
@@ -518,7 +518,7 @@ jobs:
       group: acceptance-pr-reconcile
       cancel-in-progress: false
     if: github.event_name == 'repository_dispatch' && github.event.action == 'nession-issue-e2e-projected'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       actions: write
@@ -637,7 +637,7 @@ jobs:
       ${{ github.event_name == 'workflow_run' &&
           github.event.workflow_run.event == 'pull_request' &&
           github.event.workflow_run.conclusion == 'success' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # The bounded re-read may wait up to three minutes for a queued deferral.
     timeout-minutes: 10
     permissions:

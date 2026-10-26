@@ -44,7 +44,7 @@ jobs:
   # Phase 1 — Check (parallel)
   # ═══════════════════════════════════════════════════════════════════
   rust-check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -64,7 +64,7 @@ jobs:
         run: ./gates/run --suite quality-rust
 
   web-check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -85,7 +85,7 @@ jobs:
   # ═══════════════════════════════════════════════════════════════════
   versions:
     needs: [rust-check, web-check]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       rust_version: ${{ steps.versions.outputs.rust_version }}
       web_version: ${{ steps.versions.outputs.web_version }}
@@ -113,7 +113,7 @@ jobs:
   # ═══════════════════════════════════════════════════════════════════
   build-web:
     needs: versions
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -130,7 +130,7 @@ jobs:
 
   build-amd64:
     needs: versions
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       packages: write
@@ -243,7 +243,7 @@ jobs:
   # ── amd64 ──────────────────────────────────────────────────────────
   docker-server-amd64:
     needs: [versions, build-web, build-amd64]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       packages: write
@@ -277,7 +277,7 @@ jobs:
 
   docker-agent-amd64:
     needs: [versions, build-web, build-amd64]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       packages: write
@@ -311,7 +311,7 @@ jobs:
 
   docker-ui-amd64:
     needs: [versions, build-web]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       packages: write
@@ -448,7 +448,7 @@ jobs:
       [versions,
        docker-server-amd64, docker-agent-amd64, docker-ui-amd64,
        docker-server-arm64, docker-agent-arm64, docker-ui-arm64]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       packages: write
     steps:
@@ -474,7 +474,7 @@ jobs:
     # Staging pulls exclusively from ACR, so wait for all three independent
     # mirrors (both platforms) before advancing ArgoCD desired state.
     needs: [versions, mirror-acr]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
@@ -494,7 +494,7 @@ jobs:
       max-parallel: 2
       matrix:
         image: [server, agent, ui]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
       contents: read
@@ -544,7 +544,7 @@ jobs:
   # recorded and the deployment identity collector selects the observed one.
   provenance:
     needs: [versions, mirror-acr]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       packages: read

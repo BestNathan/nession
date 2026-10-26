@@ -19,7 +19,7 @@ concurrency:
 jobs:
   build:
     name: Build independent Pages
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       issues: read
@@ -136,7 +136,7 @@ jobs:
     name: Publish independent Pages
     if: needs.build.outputs.active == 'true'
     needs: [build]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       pages: write

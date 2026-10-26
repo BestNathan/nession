@@ -29,7 +29,7 @@ jobs:
   readback:
     name: Five-mode authenticated Git-byte receipt readback
     if: github.repository == 'BestNathan/nession' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'repository_dispatch')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Checkout exact trusted main SHA (no persisted credentials)

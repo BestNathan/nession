@@ -45,7 +45,7 @@ jobs:
          github.event.workflow_run.repository.full_name == 'BestNathan/nession' &&
          github.event.workflow_run.head_repository.full_name == 'BestNathan/nession')
       )
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout trusted main
@@ -75,7 +75,7 @@ jobs:
 
   ingest:
     needs: prepare
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 12
     steps:
       - name: Checkout trusted main
