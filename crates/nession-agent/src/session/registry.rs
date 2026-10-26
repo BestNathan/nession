@@ -70,6 +70,7 @@ impl SessionRegistry {
         session_name: &str,
         backend: Box<dyn TmuxSession>,
         client_id: &str,
+        subscription_id: Option<&str>,
         peer_token: &Arc<()>,
         outbound: P2pOutbound,
     ) -> Result<NewAttachment, InvalidStreamIdentity> {
@@ -79,27 +80,30 @@ impl SessionRegistry {
         let issued_flow = Arc::new(StdMutex::new(SubscriberIssuedFlow::new()));
 
         let mut control = SessionControlState::new();
-        control.ensure_controller(client_id);
+        control.ensure_controller(client_id, subscription_id);
         let stream = SessionStreamState::new();
         let stream_epoch = stream.epoch;
         let output_ack = new_output_ack(stream.epoch).map_err(|_| InvalidStreamIdentity)?;
+        let first_peer = SessionPeer {
+            client_id: client_id.to_string(),
+            subscription_id: subscription_id.map(str::to_string),
+            peer_token: Arc::clone(peer_token),
+            output_ack,
+            outbound,
+            output_tx: Some(tx),
+            detached_for_not_draining: Arc::clone(&detached_for_not_draining),
+            issued_flow: Arc::clone(&issued_flow),
+            queued_bytes: Arc::clone(&queued_bytes),
+        };
+        let response_peer = first_peer.clone();
         let attached = AttachedSession {
             backend: Arc::new(tokio::sync::Mutex::new(backend)),
-            peers: vec![SessionPeer {
-                client_id: client_id.to_string(),
-                peer_token: Arc::clone(peer_token),
-                output_ack,
-                outbound,
-                output_tx: Some(tx),
-                detached_for_not_draining: Arc::clone(&detached_for_not_draining),
-                issued_flow: Arc::clone(&issued_flow),
-                queued_bytes: Arc::clone(&queued_bytes),
-            }],
+            peers: vec![first_peer],
             control,
             stream,
             input: SessionInputState::new(),
         };
-        let response = client_attach_response(session_name.to_string(), &attached, client_id);
+        let response = client_attach_response(session_name.to_string(), &attached, &response_peer);
         self.lock().insert(session_name.to_string(), attached);
         Ok(NewAttachment {
             response,
@@ -121,6 +125,7 @@ impl SessionRegistry {
         &self,
         session_name: &str,
         client_id: &str,
+        subscription_id: Option<&str>,
         peer_token: &Arc<()>,
         outbound: P2pOutbound,
         wants_bootstrap: bool,
@@ -138,6 +143,7 @@ impl SessionRegistry {
             .map_err(|_| SubscribeRejected::InvalidStreamIdentity)?;
         let peer = SessionPeer {
             client_id: client_id.to_string(),
+            subscription_id: subscription_id.map(str::to_string),
             peer_token: Arc::clone(peer_token),
             output_ack,
             outbound,
@@ -146,6 +152,7 @@ impl SessionRegistry {
             issued_flow: Arc::clone(&issued_flow),
             queued_bytes: Arc::clone(&queued_bytes),
         };
+        let response_peer = peer.clone();
         let prefix = subscribe_at_stream_cut(
             &mut session.peers,
             &session.stream,
@@ -153,7 +160,7 @@ impl SessionRegistry {
             &tx,
             wants_bootstrap,
         );
-        let response = client_attach_response(session_name.to_string(), session, client_id);
+        let response = client_attach_response(session_name.to_string(), session, &response_peer);
         Ok(SubscribedClient {
             response,
             prefix,
@@ -166,12 +173,24 @@ impl SessionRegistry {
 
     /// Record one output chunk and fan it out to every subscriber.
     ///
-    /// `None` means the Session was removed; the producer task must stop.
-    pub(crate) fn record_output(&self, session_name: &str, bytes: &[u8]) -> Option<RecordedOutput> {
+    /// Only the generation that produced the bytes may record them: after a
+    /// stream retires and a new attach owns the name, the previous producer
+    /// task must not write its backend's output into the new attachment.
+    /// `None` means the Session was removed or the stream generation changed;
+    /// the producer task must stop either way.
+    pub(crate) fn record_output(
+        &self,
+        session_name: &str,
+        stream_epoch: u64,
+        bytes: &[u8],
+    ) -> Option<RecordedOutput> {
         use base64::Engine;
         let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
         let mut guard = self.lock();
         let session = guard.get_mut(session_name)?;
+        if session.stream.epoch != stream_epoch {
+            return None;
+        }
         let (epoch, seq) = session.stream.record_output(session_name, encoded);
         let detached = fan_out_peers(&mut session.peers, (bytes.to_vec(), epoch, seq));
         Some(RecordedOutput {
@@ -182,9 +201,17 @@ impl SessionRegistry {
 
     /// Sinks of the Session's current subscribers, for an authoritative size
     /// change observed on the tmux side.
-    pub(crate) fn subscriber_sinks(&self, session_name: &str) -> Vec<P2pOutbound> {
+    ///
+    /// Epoch-scoped like [`record_output`](Self::record_output): a size
+    /// observer of a retired generation must not publish into its successor.
+    pub(crate) fn subscriber_sinks(
+        &self,
+        session_name: &str,
+        stream_epoch: u64,
+    ) -> Vec<P2pOutbound> {
         self.lock()
             .get(session_name)
+            .filter(|session| session.stream.epoch == stream_epoch)
             .map(|session| {
                 session
                     .peers
@@ -216,12 +243,63 @@ impl SessionRegistry {
         let Some(session) = retired else {
             return false;
         };
-        let notice = serde_json::to_string(&make_error(
+        self.finish_retirement(
+            session_name,
+            session,
             "terminal-stream-lost",
             "terminal_stream_unavailable",
-            "tmux Control Mode output source ended; reattach the terminal to restore output",
-        ))
-        .ok();
+            "tmux output source ended; reattach the terminal to restore output",
+        )
+        .await;
+        true
+    }
+
+    /// Retire the Session's attachment whatever generation owns the name.
+    ///
+    /// Used when the tmux Session itself is gone (kill): there is no backend
+    /// left whose EOF could retire it, and leaving the entry would make the
+    /// next attach subscribe to a dead attachment.
+    pub(crate) async fn retire_session(&self, session_name: &str, reason: &str) -> bool {
+        let retired = self.lock().remove(session_name);
+        let Some(session) = retired else {
+            return false;
+        };
+        self.finish_retirement(
+            session_name,
+            session,
+            "terminal-session-ended",
+            "terminal_session_ended",
+            reason,
+        )
+        .await;
+        true
+    }
+
+    /// Close every attached backend. Process shutdown must not leave tmux
+    /// clients behind; the tmux Sessions themselves persist by design.
+    pub(crate) async fn shutdown(&self) {
+        let sessions: Vec<(String, AttachedSession)> = {
+            let mut guard = self.lock();
+            guard.drain().collect()
+        };
+        for (name, session) in sessions {
+            if let Err(error) = close(&session.backend).await {
+                tracing::warn!(
+                    "terminal session {name}: failed to close attachment during shutdown: {error:#}"
+                );
+            }
+        }
+    }
+
+    async fn finish_retirement(
+        &self,
+        session_name: &str,
+        session: AttachedSession,
+        code: &str,
+        wire_code: &str,
+        message: &str,
+    ) {
+        let notice = serde_json::to_string(&make_error(code, wire_code, message)).ok();
         if let Some(json) = notice {
             for peer in &session.peers {
                 // Terminal lane, not a lossy size level. The timeout bounds a
@@ -243,7 +321,6 @@ impl SessionRegistry {
                 "terminal session {session_name}: failed to retire broken tmux client: {error:#}"
             );
         }
-        true
     }
 
     /// Retire every subscriber a physical connection held.
@@ -264,23 +341,21 @@ impl SessionRegistry {
             let mut changes = Vec::new();
             let mut empty = Vec::new();
             for (name, session) in guard.iter_mut() {
-                let before = session.control.controller_client_id.clone();
+                let before = session.control.holder_identity().map(str::to_string);
                 session
                     .peers
                     .retain(|peer| !Arc::ptr_eq(&peer.peer_token, peer_token));
                 if let Some(holder) = before.as_ref() {
-                    if !session.peers.iter().any(|peer| &peer.client_id == holder) {
+                    if !session.peers.iter().any(|peer| peer.identity() == holder) {
                         session.control.release_if_holder(holder);
                     }
                 }
-                if before != session.control.controller_client_id && !session.peers.is_empty() {
+                if before.as_deref() != session.control.holder_identity()
+                    && !session.peers.is_empty()
+                {
                     changes.push((
                         session.peers.clone(),
-                        TerminalControlChangedPayload {
-                            session_name: name.clone(),
-                            generation: session.control.generation,
-                            controller_client_id: session.control.controller_client_id.clone(),
-                        },
+                        control_changed(name, &session.control),
                     ));
                 }
                 if session.peers.is_empty() {
@@ -308,28 +383,35 @@ impl SessionRegistry {
         &self,
         session_name: &str,
         client_id: &str,
+        peer_token: &Arc<()>,
     ) -> Result<Option<AttachedSession>, NotAttached> {
         let (removed, control_change) = {
             let mut guard = self.lock();
             let Some(session) = guard.get_mut(session_name) else {
                 return Err(NotAttached);
             };
-            if !session.peers.iter().any(|peer| peer.client_id == client_id) {
+            let Some(index) = session.peers.iter().position(|peer| {
+                peer.client_id == client_id && Arc::ptr_eq(&peer.peer_token, peer_token)
+            }) else {
                 return Err(NotAttached);
-            }
-            let before = session.control.controller_client_id.clone();
-            session.peers.retain(|peer| peer.client_id != client_id);
-            session.control.release_if_holder(client_id);
-            let control_change = (before != session.control.controller_client_id).then(|| {
-                (
-                    session.peers.clone(),
-                    TerminalControlChangedPayload {
-                        session_name: session_name.to_string(),
-                        generation: session.control.generation,
-                        controller_client_id: session.control.controller_client_id.clone(),
-                    },
-                )
-            });
+            };
+            let Some(identity) = session
+                .peers
+                .get(index)
+                .map(|peer| peer.identity().to_string())
+            else {
+                return Err(NotAttached);
+            };
+            let before = session.control.holder_identity().map(str::to_string);
+            session.peers.remove(index);
+            session.control.release_if_holder(&identity);
+            let control_change =
+                (before.as_deref() != session.control.holder_identity()).then(|| {
+                    (
+                        session.peers.clone(),
+                        control_changed(session_name, &session.control),
+                    )
+                });
             let removed = if session.peers.is_empty() {
                 guard.remove(session_name)
             } else {
@@ -384,17 +466,25 @@ impl SessionRegistry {
         &self,
         session_name: &str,
         client_id: &str,
+        peer_token: &Arc<()>,
     ) -> Result<TerminalControlAcquireResponse, ControlAcquireRejected> {
         let (response, peers, changed) = {
             let mut guard = self.lock();
             let Some(session) = guard.get_mut(session_name) else {
                 return Err(ControlAcquireRejected::NotAttached);
             };
-            if !session.peers.iter().any(|peer| peer.client_id == client_id) {
+            let Some(peer) = session.peers.iter().find(|peer| {
+                peer.client_id == client_id && Arc::ptr_eq(&peer.peer_token, peer_token)
+            }) else {
                 return Err(ControlAcquireRejected::ClientNotAttached);
-            }
-            let generation = session.control.acquire(client_id);
-            let role = session.control.role_of(client_id);
+            };
+            let subscription_id = peer.subscription_id.clone();
+            let generation = session
+                .control
+                .acquire(client_id, subscription_id.as_deref());
+            let role = session
+                .control
+                .role_of(subscription_id.as_deref().unwrap_or(client_id));
             let response = TerminalControlAcquireResponse {
                 session_name: session_name.to_string(),
                 generation,
@@ -405,12 +495,9 @@ impl SessionRegistry {
                 }
                 .to_string(),
                 controller_client_id: session.control.controller_client_id.clone(),
+                controller_subscription_id: session.control.controller_subscription_id.clone(),
             };
-            let changed = TerminalControlChangedPayload {
-                session_name: session_name.to_string(),
-                generation,
-                controller_client_id: session.control.controller_client_id.clone(),
-            };
+            let changed = control_changed(session_name, &session.control);
             (response, session.peers.clone(), changed)
         };
         notify_control_changed(&peers, changed).await;
@@ -428,6 +515,7 @@ impl SessionRegistry {
         &self,
         session_name: &str,
         client_id: &str,
+        peer_token: &Arc<()>,
         control_generation: Option<u64>,
         sequence: InputSequence,
         data_b64: &str,
@@ -437,9 +525,22 @@ impl SessionRegistry {
             let Some(session) = guard.get(session_name) else {
                 return Err(InputRejected::NotAttached);
             };
+            // The actor is the subscription this connection attached under,
+            // never a subscription id a frame could claim: same-origin tabs
+            // share the browser id.
+            let Some(identity) = session
+                .peers
+                .iter()
+                .find(|peer| {
+                    peer.client_id == client_id && Arc::ptr_eq(&peer.peer_token, peer_token)
+                })
+                .map(|peer| peer.identity().to_string())
+            else {
+                return Err(InputRejected::NotController);
+            };
             if !session
                 .control
-                .authorize_mutation(client_id, control_generation)
+                .authorize_mutation(&identity, control_generation)
             {
                 return Err(InputRejected::NotController);
             }
@@ -506,6 +607,7 @@ impl SessionRegistry {
         &self,
         session_name: &str,
         client_id: &str,
+        peer_token: &Arc<()>,
         control_generation: Option<u64>,
         cols: u16,
         rows: u16,
@@ -515,11 +617,21 @@ impl SessionRegistry {
             let Some(session) = guard.get(session_name) else {
                 return Err(ResizeRejected::NotAttached);
             };
+            let Some(identity) = session
+                .peers
+                .iter()
+                .find(|peer| {
+                    peer.client_id == client_id && Arc::ptr_eq(&peer.peer_token, peer_token)
+                })
+                .map(|peer| peer.identity().to_string())
+            else {
+                return Err(ResizeRejected::NotController);
+            };
             (
-                session.control.role_of(client_id),
+                session.control.role_of(&identity),
                 session
                     .control
-                    .authorize_mutation(client_id, control_generation),
+                    .authorize_mutation(&identity, control_generation),
                 session.control.generation,
                 Arc::clone(&session.backend),
             )
@@ -701,6 +813,19 @@ pub(crate) enum ControlAcquireRejected {
     ClientNotAttached,
 }
 
+/// The control level every peer receives after the lease moved.
+fn control_changed(
+    session_name: &str,
+    control: &SessionControlState,
+) -> TerminalControlChangedPayload {
+    TerminalControlChangedPayload {
+        session_name: session_name.to_string(),
+        generation: control.generation,
+        controller_client_id: control.controller_client_id.clone(),
+        controller_subscription_id: control.controller_subscription_id.clone(),
+    }
+}
+
 /// Tell a Session's peers where its input cursor now stands (#1307).
 ///
 /// The fact is about the *session*, not about one connection, so it goes to
@@ -730,5 +855,122 @@ async fn notify_control_changed(peers: &[SessionPeer], payload: TerminalControlC
             .outbound
             .send_terminal(WsMessage::Text(json.clone()))
             .await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+
+    struct Idle {
+        closed: Arc<AtomicBool>,
+    }
+
+    #[async_trait]
+    impl TmuxSession for Idle {
+        async fn write_input(&mut self, _data: &[u8]) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn resize(&mut self, _cols: u16, _rows: u16) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn viewport(&self) -> (u16, u16) {
+            (80, 24)
+        }
+        fn session_name(&self) -> &str {
+            "idle"
+        }
+        async fn close(&mut self) -> anyhow::Result<()> {
+            self.closed
+                .store(true, std::sync::atomic::Ordering::Release);
+            Ok(())
+        }
+    }
+
+    fn insert(
+        registry: &SessionRegistry,
+        session_name: &str,
+        subscription_id: &str,
+        closed: &Arc<AtomicBool>,
+    ) -> NewAttachment {
+        let token = Arc::new(());
+        let (outbound, _) = P2pOutbound::new();
+        registry
+            .insert_new(
+                session_name,
+                Box::new(Idle {
+                    closed: Arc::clone(closed),
+                }),
+                "browser",
+                Some(subscription_id),
+                &token,
+                outbound,
+            )
+            .expect("a fresh subscription generation is available")
+    }
+
+    /// #2469 SC-06: a producer from a retired generation must not write into
+    /// its successor. The witness is the stream cursor: the stale frame moves
+    /// nothing, the live one is recorded.
+    #[tokio::test]
+    async fn a_retired_producers_output_cannot_enter_its_successor() {
+        let registry = SessionRegistry::new();
+        let closed = Arc::new(AtomicBool::new(false));
+        let first = insert(&registry, "s", "tab-a", &closed);
+        assert!(registry
+            .record_output("s", first.stream_epoch, b"first")
+            .is_some());
+
+        assert!(registry.retire_stream("s", first.stream_epoch).await);
+        assert!(!registry.is_attached("s"));
+        assert!(
+            closed.load(std::sync::atomic::Ordering::Acquire),
+            "retiring the stream must close its tmux client"
+        );
+
+        let second = insert(&registry, "s", "tab-a", &closed);
+        assert_ne!(first.stream_epoch, second.stream_epoch);
+        assert!(
+            registry
+                .record_output("s", first.stream_epoch, b"stale")
+                .is_none(),
+            "a retired producer's bytes entered the new attachment"
+        );
+        assert!(registry
+            .record_output("s", second.stream_epoch, b"live")
+            .is_some());
+    }
+
+    /// #2469 SC-06: killing the tmux Session retires its attachment, so the
+    /// next attach creates a new runtime instead of subscribing to a dead one.
+    #[tokio::test]
+    async fn killing_a_session_retires_its_attachment() {
+        let registry = SessionRegistry::new();
+        let closed = Arc::new(AtomicBool::new(false));
+        insert(&registry, "s", "tab-a", &closed);
+        assert!(registry.retire_session("s", "killed").await);
+        assert!(!registry.is_attached("s"));
+        assert!(
+            closed.load(std::sync::atomic::Ordering::Acquire),
+            "retiring the Session must close its tmux client"
+        );
+        assert!(!registry.retire_session("s", "killed").await);
+    }
+
+    /// #2469 SC-06: process shutdown closes every attached backend rather
+    /// than leaving tmux clients behind.
+    #[tokio::test]
+    async fn shutdown_closes_every_attachment() {
+        let registry = SessionRegistry::new();
+        let a = Arc::new(AtomicBool::new(false));
+        let b = Arc::new(AtomicBool::new(false));
+        insert(&registry, "a", "tab-a", &a);
+        insert(&registry, "b", "tab-b", &b);
+        registry.shutdown().await;
+        assert!(a.load(std::sync::atomic::Ordering::Acquire));
+        assert!(b.load(std::sync::atomic::Ordering::Acquire));
+        assert!(!registry.is_attached("a"));
+        assert!(!registry.is_attached("b"));
     }
 }

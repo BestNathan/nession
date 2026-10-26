@@ -13,6 +13,12 @@ vi.mock('@/platform/socket/clientId', () => ({
   getOrCreateClientId: () => 'this-client',
 }));
 
+// This page's subscription, fixed for the same reason as the client id above:
+// attach payload assertions are exact, and the real id is a fresh uuid.
+vi.mock('@/platform/socket/subscriptionId', () => ({
+  getOrCreateSubscriptionId: () => 'this-subscription',
+}));
+
 describe('createTerminalAgentApi', () => {
   let surface: MockPluginSurface;
   let api: TerminalAgentApi;
@@ -37,7 +43,9 @@ describe('createTerminalAgentApi', () => {
 
     it('honors a custom timeout', async () => {
       const pending = api.attach('work', { cols: 80, rows: 24 }, { timeoutMs: 500 });
-      expect(surface.requests[0]?.payload).toEqual({ session_name: 'work', width: 80, height: 24 });
+      expect(surface.requests[0]?.payload).toEqual({
+        session_name: 'work', width: 80, height: 24, subscription_id: 'this-subscription',
+      });
       expect(surface.requests[0]?.options).toEqual({ timeoutMs: 500 });
 
       surface.resolveNext('agent.attach', {});
@@ -50,7 +58,9 @@ describe('createTerminalAgentApi', () => {
       // put that on the wire and the agent would resize the **shared** window
       // to it and back, repainting an inline-drawing application into the
       // scrollback twice for a size nothing measured (#1265).
-      expect(surface.requests[0]?.payload).toEqual({ session_name: 'work', size_known: false });
+      expect(surface.requests[0]?.payload).toEqual({
+        session_name: 'work', size_known: false, subscription_id: 'this-subscription',
+      });
       expect(surface.requests[0]?.options).toEqual({ timeoutMs: ATTACH_TIMEOUT_MS });
 
       surface.resolveNext('agent.attach', {});

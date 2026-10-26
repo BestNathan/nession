@@ -1,4 +1,5 @@
 import { getOrCreateClientId } from '@/platform/socket/clientId';
+import { getOrCreateSubscriptionId } from '@/platform/socket/subscriptionId';
 import type { PluginSurface } from '@/platform/socket/types';
 import { readControlChanged } from './controlPayload';
 import type { TerminalControlRole, TerminalControlState } from './state/terminalControl';
@@ -12,19 +13,46 @@ export interface AgentControlLease {
   onControlChanged(
     cb: (sessionName: string, state: TerminalControlState) => void,
   ): () => void;
-  roleForClient(controllerClientId?: string): TerminalControlRole;
+  roleForClient(
+    controllerClientId?: string,
+    controllerSubscriptionId?: string,
+  ): TerminalControlRole;
+}
+
+/** Who a lease names, or who is asking. */
+export interface ControlIdentity {
+  clientId?: string;
+  subscriptionId?: string;
 }
 
 /**
- * The one place the lease's role rule lives: a client is the controller only
- * when it is the holder. Every route (P2P Agent surface, Relay Server
+ * The one place the lease's role rule lives: a subscription is the controller
+ * only when it holds the lease. Every route (P2P Agent surface, Relay Server
  * surface) derives the role from the same level, so the two cannot disagree.
+ *
+ * The subscription is the precise identity when **both** sides state one:
+ * same-origin tabs share the browser's client id, so comparing that alone
+ * makes every tab believe it controls the session. An Agent that predates
+ * subscription identity states none, and the client-id rule it already had is
+ * what applies.
  */
 export function controlRoleFor(
-  controllerClientId: string | undefined,
-  self: string,
+  controller: ControlIdentity,
+  self: ControlIdentity,
 ): TerminalControlRole {
-  return controllerClientId === self ? 'controller' : 'observer';
+  if (controller.subscriptionId !== undefined && self.subscriptionId !== undefined) {
+    return controller.subscriptionId === self.subscriptionId ? 'controller' : 'observer';
+  }
+  return controller.clientId !== undefined && controller.clientId === self.clientId
+    ? 'controller'
+    : 'observer';
+}
+
+function selfIdentity(): ControlIdentity {
+  return {
+    clientId: getOrCreateClientId(),
+    subscriptionId: getOrCreateSubscriptionId(),
+  };
 }
 
 export function createAgentControlLease(surface: PluginSurface): AgentControlLease {
@@ -38,8 +66,14 @@ export function createAgentControlLease(surface: PluginSurface): AgentControlLea
     }
   };
 
-  const roleForClient = (controllerClientId?: string): TerminalControlRole =>
-    controlRoleFor(controllerClientId, getOrCreateClientId());
+  const roleForClient = (
+    controllerClientId?: string,
+    controllerSubscriptionId?: string,
+  ): TerminalControlRole =>
+    controlRoleFor(
+      { clientId: controllerClientId, subscriptionId: controllerSubscriptionId },
+      selfIdentity(),
+    );
 
   surface.subscribe(TERMINAL_CONTROL_CHANGED_WIRE, (payload) => {
     const changed = readControlChanged(payload);
@@ -47,9 +81,10 @@ export function createAgentControlLease(surface: PluginSurface): AgentControlLea
       return;
     }
     setControl(changed.sessionName, {
-      role: roleForClient(changed.controllerClientId),
+      role: roleForClient(changed.controllerClientId, changed.controllerSubscriptionId),
       generation: changed.generation,
       controllerClientId: changed.controllerClientId,
+      controllerSubscriptionId: changed.controllerSubscriptionId,
     });
   });
 

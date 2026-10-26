@@ -133,10 +133,29 @@ freeze the single ordered forwarder or hold unaccounted memory:
   send is not acceptable here: it could suspend output and source-loss handling
   behind a resize consumer that is alive but not reading.
 
+## Session runtime ownership and retirement (#2469 slices 3–4)
+
+- `SessionService` constructs both terminal backends; `SessionRegistry` is the
+  one writable owner of the Agent's Session map, and its lock is private. P2P
+  and Relay reach the same registry.
+- A subscription is one page/connection's attach (`subscription_id`); the
+  stable browser `client_id` is shared by same-origin tabs and is not a lease
+  identity. See
+  [terminal/multi-client-ownership.md](../design/terminal/multi-client-ownership.md).
+- Each attachment has a stream generation. A producer task may record output
+  only for the generation it read; after retirement its bytes are refused, so
+  an old forwarder cannot enter a successor attachment.
+- Retirement has distinct producers and one effect: a tmux Session kill, a
+  backend EOF (Control Mode reader or plain PTY), and process shutdown each
+  remove the attachment, close its tmux client, and — where a subscriber is
+  still attached — state that the source ended. A later attach creates a fresh
+  runtime and generation.
+
 ## Invariants to preserve
 
 - One session-owned attachment; a P2P/Relay subscriber coming or going never
-  creates or destroys it.
+  creates or destroys it. A subscriber is identified by its subscription, not
+  by the browser id.
 - Input is loss-intolerant: one ordered writer, byte-exact `send-keys -H`,
   bounded pending commands, tombstones for timed-out replies.
 - The bootstrap capture and the live stream join exactly: output the snapshot

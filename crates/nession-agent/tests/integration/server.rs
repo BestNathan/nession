@@ -325,6 +325,7 @@ async fn integration_client_attach_creates_pty() {
         size_known: None,
         env_snapshots: Vec::new(),
         needs_bootstrap: None,
+        subscription_id: None,
     };
     let req = new_message(msg_types::CLIENT_ATTACH, attach);
     let resp: nession_agent::server::websocket::Message<ClientAttachResponse> =
@@ -378,6 +379,7 @@ async fn integration_attach_supplies_the_effective_session_size() {
         size_known: None,
         env_snapshots: Vec::new(),
         needs_bootstrap: None,
+        subscription_id: None,
     };
     let req = new_message(msg_types::CLIENT_ATTACH, attach);
     let resp: nession_agent::server::websocket::Message<ClientAttachResponse> =
@@ -461,6 +463,7 @@ async fn a_second_attach_on_the_same_connection_is_answered() {
                 // The history is not what is under test, and asking for it
                 // would only give the misjudged close a longer window.
                 needs_bootstrap: Some(false),
+                subscription_id: None,
             },
         )
     };
@@ -532,6 +535,7 @@ async fn a_plain_second_attach_sends_bootstrap_before_ok_when_asked() {
             size_known: None,
             env_snapshots: Vec::new(),
             needs_bootstrap: Some(false),
+            subscription_id: None,
         },
     );
     let resp: nession_agent::server::websocket::Message<ClientAttachResponse> =
@@ -583,6 +587,7 @@ async fn a_plain_second_attach_sends_bootstrap_before_ok_when_asked() {
             size_known: None,
             env_snapshots: Vec::new(),
             needs_bootstrap: Some(true),
+            subscription_id: None,
         },
     );
     sink.send(WsMessage::Text(serde_json::to_string(&second).unwrap()))
@@ -719,6 +724,7 @@ async fn a_plain_first_attach_sends_the_history_it_was_asked_for() {
         size_known: None,
         env_snapshots: Vec::new(),
         needs_bootstrap: None,
+        subscription_id: None,
     };
     let req = new_message(msg_types::CLIENT_ATTACH, attach);
     sink.send(WsMessage::Text(serde_json::to_string(&req).unwrap()))
@@ -900,6 +906,7 @@ async fn a_plain_bootstrap_restores_a_caret_the_pane_left_on_an_empty_row() {
             size_known: None,
             env_snapshots: Vec::new(),
             needs_bootstrap: Some(true),
+            subscription_id: None,
         },
     );
     sink.send(WsMessage::Text(serde_json::to_string(&attach).unwrap()))
@@ -1130,6 +1137,7 @@ async fn a_control_first_attach_names_an_atomic_epoch_start_cut() {
             size_known: None,
             env_snapshots: Vec::new(),
             needs_bootstrap: Some(true),
+            subscription_id: None,
         },
     );
     sink.send(WsMessage::Text(serde_json::to_string(&attach).unwrap()))
@@ -1289,6 +1297,7 @@ async fn integration_terminal_io_flow() {
         size_known: None,
         env_snapshots: Vec::new(),
         needs_bootstrap: None,
+        subscription_id: None,
     };
     let req = new_message(msg_types::CLIENT_ATTACH, attach);
     let _: nession_agent::server::websocket::Message<ClientAttachResponse> =
@@ -1391,6 +1400,7 @@ async fn a_recorded_resize_reaches_the_client_at_its_stream_position() {
         // outside the timeline by construction — the agent gives it no
         // position precisely so it cannot be taken for an event in the stream.
         needs_bootstrap: Some(false),
+        subscription_id: None,
     };
     let req = new_message(msg_types::CLIENT_ATTACH, attach);
     let attached: nession_agent::server::websocket::Message<ClientAttachResponse> =
@@ -1451,7 +1461,7 @@ async fn a_recorded_resize_reaches_the_client_at_its_stream_position() {
             .await
             .unwrap()
         else {
-            break;
+            continue;
         };
         if frame.get("id").and_then(serde_json::Value::as_str) == Some(resize_id.as_str()) {
             acked = true;
@@ -1657,6 +1667,7 @@ async fn a_resume_states_its_window_and_whether_it_is_complete() {
         // No history: a bootstrap is outside the timeline by construction, and
         // this test counts the positions that are in it.
         needs_bootstrap: Some(false),
+        subscription_id: None,
     };
     let req = new_message(msg_types::CLIENT_ATTACH, attach);
     let attached: nession_agent::server::websocket::Message<ClientAttachResponse> =
@@ -1696,7 +1707,7 @@ async fn a_resume_states_its_window_and_whether_it_is_complete() {
             .await
             .unwrap()
         else {
-            break;
+            continue;
         };
         if frame.get("msg_type").and_then(serde_json::Value::as_str)
             == Some(msg_types::TERMINAL_OUTPUT)
@@ -3421,6 +3432,14 @@ async fn authenticate(
 
 /// The attach frame every test in this section opens with.
 fn attach_to(session_name: &str) -> nession_agent::server::websocket::Message<ClientAttachPayload> {
+    attach_with_subscription(session_name, None)
+}
+
+/// The attach frame for a stated page subscription (#2469 slice 4).
+fn attach_with_subscription(
+    session_name: &str,
+    subscription_id: Option<&str>,
+) -> nession_agent::server::websocket::Message<ClientAttachPayload> {
     new_message(
         msg_types::CLIENT_ATTACH,
         ClientAttachPayload {
@@ -3431,6 +3450,7 @@ fn attach_to(session_name: &str) -> nession_agent::server::websocket::Message<Cl
             size_known: None,
             env_snapshots: Vec::new(),
             needs_bootstrap: None,
+            subscription_id: subscription_id.map(str::to_string),
         },
     )
 }
@@ -4060,4 +4080,382 @@ async fn integration_resize_from_a_stale_lease_is_refused_and_tagged() {
     );
 
     session.handle.shutdown().await.ok();
+}
+
+/// #2469 SC-07: two same-origin tabs are two subscriptions of one browser.
+///
+/// Both connections present the **same** `client_id` — exactly what two tabs
+/// get from localStorage — and differ only in `subscription_id`. The witnesses
+/// are the wire: the second tab is handed the observer role rather than
+/// replacing the first, both receive the same output, a takeover advances the
+/// generation, and the replaced controller's in-flight frame is refused by
+/// name. A passive reconnect (attach without an acquire) stays an observer.
+#[tokio::test]
+async fn integration_two_tabs_of_one_browser_broadcast_and_take_over() {
+    let (addr, handle, credentials) = start_server(0).await.unwrap();
+    let tmux = SessionManager::new();
+    let session = TestSession::new("two-tabs");
+    let session_name = session.name().to_string();
+    tmux.create_session(&session_name, 80, 24, "/tmp", &[])
+        .await
+        .unwrap();
+
+    let browser = "one-browser-two-tabs";
+    let (mut a_sink, mut a_stream) = connect_for(&credentials, addr, &session_name)
+        .await
+        .unwrap();
+    authenticate(&mut a_sink, &mut a_stream, browser)
+        .await
+        .unwrap();
+    let (mut b_sink, mut b_stream) = connect_for(&credentials, addr, &session_name)
+        .await
+        .unwrap();
+    authenticate(&mut b_sink, &mut b_stream, browser)
+        .await
+        .unwrap();
+
+    // Tab A attaches first and becomes the controller.
+    let a: nession_agent::server::websocket::Message<ClientAttachResponse> = round_trip(
+        &mut a_sink,
+        &mut a_stream,
+        &attach_with_subscription(&session_name, Some("tab-a")),
+    )
+    .await
+    .unwrap();
+    assert_eq!(a.payload.control_role.as_deref(), Some("controller"));
+    let a_generation = a.payload.control_generation.unwrap();
+    let input_epoch = a.payload.input_epoch.unwrap();
+
+    // Tab B is a second subscription, not a replacement for A.
+    let b: nession_agent::server::websocket::Message<ClientAttachResponse> = round_trip(
+        &mut b_sink,
+        &mut b_stream,
+        &attach_with_subscription(&session_name, Some("tab-b")),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        b.payload.control_role.as_deref(),
+        Some("observer"),
+        "the second tab of one browser was handed the lease"
+    );
+    assert_eq!(
+        b.payload.controller_subscription_id.as_deref(),
+        Some("tab-a"),
+        "the attach does not name the subscription holding the lease"
+    );
+
+    // B takes the lease; the generation fences A's in-flight frame.
+    let acquired: nession_agent::server::websocket::Message<
+        nession_agent::server::websocket::TerminalControlAcquireResponse,
+    > = round_trip(
+        &mut b_sink,
+        &mut b_stream,
+        &new_message(
+            msg_types::TERMINAL_CONTROL_ACQUIRE,
+            nession_agent::server::websocket::TerminalControlAcquirePayload {
+                session_name: session_name.clone(),
+            },
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(acquired.payload.role, "controller");
+    assert!(acquired.payload.generation > a_generation);
+    assert_eq!(
+        acquired.payload.controller_subscription_id.as_deref(),
+        Some("tab-b")
+    );
+
+    use base64::Engine;
+    let stale = new_message(
+        msg_types::TERMINAL_INPUT,
+        nession_agent::server::websocket::TerminalInputPayload {
+            session_name: session_name.clone(),
+            data: base64::engine::general_purpose::STANDARD.encode(b"echo STALE-TAB\n"),
+            control_generation: Some(a_generation),
+            input_epoch: Some(input_epoch),
+            seq_start: Some(1),
+            seq_end: Some(1),
+        },
+    );
+    let refused: nession_agent::server::websocket::Message<serde_json::Value> =
+        round_trip(&mut a_sink, &mut a_stream, &stale)
+            .await
+            .unwrap();
+    assert_eq!(refused.msg_type, msg_types::ERROR);
+    assert_eq!(
+        refused.payload["code"], "not_controller",
+        "the replaced tab's frame was not fenced by the lease"
+    );
+
+    // The holder writes; both subscriptions receive the same output.
+    let marker = "TWO-TABS-BROADCAST";
+    let accepted: nession_agent::server::websocket::Message<serde_json::Value> = round_trip(
+        &mut b_sink,
+        &mut b_stream,
+        &new_message(
+            msg_types::TERMINAL_INPUT,
+            nession_agent::server::websocket::TerminalInputPayload {
+                session_name: session_name.clone(),
+                data: base64::engine::general_purpose::STANDARD.encode(format!("echo {marker}\n")),
+                control_generation: Some(acquired.payload.generation),
+                input_epoch: Some(b.payload.input_epoch.unwrap()),
+                seq_start: Some(1),
+                seq_end: Some(1),
+            },
+        ),
+    )
+    .await
+    .unwrap();
+    assert_ne!(
+        accepted.msg_type,
+        msg_types::ERROR,
+        "the holder's input was refused"
+    );
+
+    for (label, stream) in [("tab-a", &mut a_stream), ("tab-b", &mut b_stream)] {
+        let mut seen = false;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        while tokio::time::Instant::now() < deadline {
+            let Some(frame) = next_frame_within(stream, Duration::from_secs(2))
+                .await
+                .unwrap()
+            else {
+                break;
+            };
+            if frame.get("msg_type").and_then(serde_json::Value::as_str)
+                != Some(msg_types::TERMINAL_OUTPUT)
+            {
+                continue;
+            }
+            let Some(encoded) = frame
+                .get("payload")
+                .and_then(|payload| payload.get("data"))
+                .and_then(serde_json::Value::as_str)
+            else {
+                continue;
+            };
+            let decoded = base64::engine::general_purpose::STANDARD
+                .decode(encoded)
+                .unwrap_or_default();
+            if String::from_utf8_lossy(&decoded).contains(marker) {
+                seen = true;
+                break;
+            }
+        }
+        assert!(seen, "{label} never received the session's output");
+    }
+
+    // A passive reconnect of tab A keeps its subscription identity and does
+    // not take the lease: only an explicit acquire may.
+    let (mut a2_sink, mut a2_stream) = connect_for(&credentials, addr, &session_name)
+        .await
+        .unwrap();
+    authenticate(&mut a2_sink, &mut a2_stream, browser)
+        .await
+        .unwrap();
+    let a2: nession_agent::server::websocket::Message<ClientAttachResponse> = round_trip(
+        &mut a2_sink,
+        &mut a2_stream,
+        &attach_with_subscription(&session_name, Some("tab-a")),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        a2.payload.control_role.as_deref(),
+        Some("observer"),
+        "a passive reconnect took the lease"
+    );
+    assert_eq!(
+        a2.payload.controller_subscription_id.as_deref(),
+        Some("tab-b")
+    );
+
+    // A -> B -> A: taking it back advances the generation and B's old frame
+    // is refused.
+    let back: nession_agent::server::websocket::Message<
+        nession_agent::server::websocket::TerminalControlAcquireResponse,
+    > = round_trip(
+        &mut a2_sink,
+        &mut a2_stream,
+        &new_message(
+            msg_types::TERMINAL_CONTROL_ACQUIRE,
+            nession_agent::server::websocket::TerminalControlAcquirePayload {
+                session_name: session_name.clone(),
+            },
+        ),
+    )
+    .await
+    .unwrap();
+    assert!(back.payload.generation > acquired.payload.generation);
+    let b_stale = new_message(
+        msg_types::TERMINAL_INPUT,
+        nession_agent::server::websocket::TerminalInputPayload {
+            session_name: session_name.clone(),
+            data: base64::engine::general_purpose::STANDARD.encode(b"echo B-STALE\n"),
+            control_generation: Some(acquired.payload.generation),
+            input_epoch: Some(b.payload.input_epoch.unwrap()),
+            seq_start: Some(1),
+            seq_end: Some(1),
+        },
+    );
+    let b_refused: nession_agent::server::websocket::Message<serde_json::Value> =
+        round_trip(&mut b_sink, &mut b_stream, &b_stale)
+            .await
+            .unwrap();
+    assert_eq!(b_refused.msg_type, msg_types::ERROR);
+    assert_eq!(b_refused.payload["code"], "not_controller");
+
+    handle.shutdown().await.ok();
+}
+
+/// #2469 SC-06: a killed tmux Session retires its attachment, so the next
+/// attach creates a new runtime rather than subscribing to a dead backend.
+///
+/// The witness is the second attach: before the fix the registry still held
+/// the attachment and answered `ok` with the old stream epoch, which is a
+/// terminal that never produces another byte.
+#[tokio::test]
+async fn integration_a_killed_session_retires_its_attachment() {
+    let (addr, handle, credentials) = start_server(0).await.unwrap();
+    let tmux = SessionManager::new();
+    let session = TestSession::new("kill-retires");
+    let session_name = session.name().to_string();
+    tmux.create_session(&session_name, 80, 24, "/tmp", &[])
+        .await
+        .unwrap();
+
+    let (mut sink, mut stream) = connect_for(&credentials, addr, &session_name)
+        .await
+        .unwrap();
+    authenticate(&mut sink, &mut stream, "kill-retires-browser")
+        .await
+        .unwrap();
+    let attached: nession_agent::server::websocket::Message<ClientAttachResponse> =
+        round_trip(&mut sink, &mut stream, &attach_to(&session_name))
+            .await
+            .unwrap();
+    assert_eq!(attached.msg_type, msg_types::OK);
+    let old_epoch = attached.payload.stream_epoch.unwrap();
+
+    let killed: nession_agent::server::websocket::Message<serde_json::Value> = round_trip(
+        &mut sink,
+        &mut stream,
+        &new_message(
+            msg_types::SESSION_KILL,
+            nession_agent::server::websocket::SessionKillPayload {
+                name: session_name.clone(),
+            },
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(killed.msg_type, msg_types::OK);
+
+    // A new attach gets a fresh runtime and stream generation. Before the fix
+    // it was answered from the retained attachment with the old epoch.
+    let (mut second_sink, mut second_stream) = connect_for(&credentials, addr, &session_name)
+        .await
+        .unwrap();
+    authenticate(&mut second_sink, &mut second_stream, "kill-retires-second")
+        .await
+        .unwrap();
+    let fresh: nession_agent::server::websocket::Message<ClientAttachResponse> = round_trip(
+        &mut second_sink,
+        &mut second_stream,
+        &attach_to(&session_name),
+    )
+    .await
+    .unwrap();
+    assert_eq!(fresh.msg_type, msg_types::OK);
+    assert_ne!(
+        fresh.payload.stream_epoch,
+        Some(old_epoch),
+        "the retired attachment answered a new attach with the stream that can never move"
+    );
+
+    handle.shutdown().await.ok();
+}
+
+/// #2469 SC-06: when the tmux Session dies outside the Agent (the plain PTY's
+/// EOF), the attachment is retired and its subscribers hear why.
+#[tokio::test]
+async fn integration_a_plain_backend_eof_retires_the_stream() {
+    let (addr, handle, credentials) = start_server(0).await.unwrap();
+    let tmux = SessionManager::new();
+    let session = TestSession::new("plain-eof-retires");
+    let session_name = session.name().to_string();
+    tmux.create_session(&session_name, 80, 24, "/tmp", &[])
+        .await
+        .unwrap();
+
+    let (mut sink, mut stream) = connect_for(&credentials, addr, &session_name)
+        .await
+        .unwrap();
+    authenticate(&mut sink, &mut stream, "plain-eof-browser")
+        .await
+        .unwrap();
+    let attached: nession_agent::server::websocket::Message<ClientAttachResponse> =
+        round_trip(&mut sink, &mut stream, &attach_to(&session_name))
+            .await
+            .unwrap();
+    assert_eq!(attached.msg_type, msg_types::OK);
+    let old_epoch = attached.payload.stream_epoch.unwrap();
+
+    // Kill tmux directly: the Agent sees its PTY client end, not a kill
+    // request, which is the source-loss path rather than the kill handler.
+    tmux.tmux_dep()
+        .ops()
+        .kill_session(&session_name)
+        .await
+        .expect("the test session is killed");
+
+    // The subscriber hears the output source ended: the error's payload code
+    // is the machine-readable one (`terminal_stream_unavailable`), not the
+    // envelope id.
+    let mut lost = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while tokio::time::Instant::now() < deadline {
+        let Some(frame) = next_frame_within(&mut stream, Duration::from_secs(2))
+            .await
+            .unwrap()
+        else {
+            continue;
+        };
+        if frame.get("msg_type").and_then(serde_json::Value::as_str) == Some(msg_types::ERROR)
+            && frame
+                .get("payload")
+                .and_then(|payload| payload.get("code"))
+                .and_then(serde_json::Value::as_str)
+                == Some("terminal_stream_unavailable")
+        {
+            lost = true;
+            break;
+        }
+    }
+    assert!(lost, "a subscriber was never told its output source ended");
+
+    // The reconnect gets a fresh generation rather than the dead one.
+    let (mut second_sink, mut second_stream) = connect_for(&credentials, addr, &session_name)
+        .await
+        .unwrap();
+    authenticate(&mut second_sink, &mut second_stream, "plain-eof-second")
+        .await
+        .unwrap();
+    let fresh: nession_agent::server::websocket::Message<ClientAttachResponse> = round_trip(
+        &mut second_sink,
+        &mut second_stream,
+        &attach_to(&session_name),
+    )
+    .await
+    .unwrap();
+    assert_eq!(fresh.msg_type, msg_types::OK);
+    assert_ne!(
+        fresh.payload.stream_epoch,
+        Some(old_epoch),
+        "the retired generation was handed to a reconnect"
+    );
+
+    handle.shutdown().await.ok();
 }

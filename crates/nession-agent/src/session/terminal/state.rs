@@ -93,7 +93,13 @@ pub enum TerminalRole {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionControlState {
+    /// The browser holding the lease, for reporting to every peer.
     pub controller_client_id: Option<String>,
+    /// The subscription holding the lease, when the holder states one.
+    ///
+    /// Two same-origin tabs share `controller_client_id`; authorization and
+    /// the per-tab role decision use this identity, not the browser id.
+    pub controller_subscription_id: Option<String>,
     pub generation: u64,
 }
 
@@ -101,24 +107,38 @@ impl SessionControlState {
     pub fn new() -> Self {
         Self {
             controller_client_id: None,
+            controller_subscription_id: None,
             generation: 0,
         }
     }
 
-    pub fn role_of(&self, client_id: &str) -> TerminalRole {
-        if self.controller_client_id.as_deref() == Some(client_id) {
+    /// The identity authorization is decided on: the subscription when the
+    /// holder stated one, the stable client id otherwise (v1 legacy).
+    pub(crate) fn holder_identity(&self) -> Option<&str> {
+        self.controller_subscription_id
+            .as_deref()
+            .or(self.controller_client_id.as_deref())
+    }
+
+    pub fn role_of(&self, identity: &str) -> TerminalRole {
+        if self.holder_identity() == Some(identity) {
             TerminalRole::Controller
         } else {
             TerminalRole::Observer
         }
     }
 
-    pub fn ensure_controller(&mut self, client_id: &str) -> u64 {
-        if self.controller_client_id.is_none() {
+    pub fn ensure_controller(&mut self, client_id: &str, subscription_id: Option<&str>) -> u64 {
+        if self.holder_identity().is_none() {
             self.generation = self.generation.saturating_add(1);
-            self.controller_client_id = Some(client_id.to_string());
+            self.set_holder(client_id, subscription_id);
         }
         self.generation
+    }
+
+    fn set_holder(&mut self, client_id: &str, subscription_id: Option<&str>) {
+        self.controller_client_id = Some(client_id.to_string());
+        self.controller_subscription_id = subscription_id.map(str::to_string);
     }
 
     /// Take the lease, or restate it when this client already holds it.
@@ -134,23 +154,25 @@ impl SessionControlState {
     ///
     /// A **different** client still advances the generation, which is what
     /// fences the previous controller's late frames.
-    pub fn acquire(&mut self, client_id: &str) -> u64 {
-        if self.controller_client_id.as_deref() == Some(client_id) {
+    pub fn acquire(&mut self, client_id: &str, subscription_id: Option<&str>) -> u64 {
+        let identity = subscription_id.unwrap_or(client_id);
+        if self.holder_identity() == Some(identity) {
             return self.generation;
         }
         self.generation = self.generation.saturating_add(1);
-        self.controller_client_id = Some(client_id.to_string());
+        self.set_holder(client_id, subscription_id);
         self.generation
     }
 
-    pub fn release_if_holder(&mut self, client_id: &str) {
-        if self.controller_client_id.as_deref() == Some(client_id) {
+    pub fn release_if_holder(&mut self, identity: &str) {
+        if self.holder_identity() == Some(identity) {
             self.controller_client_id = None;
+            self.controller_subscription_id = None;
         }
     }
 
-    pub fn authorize_mutation(&self, client_id: &str, generation: Option<u64>) -> bool {
-        if self.controller_client_id.as_deref() != Some(client_id) {
+    pub fn authorize_mutation(&self, identity: &str, generation: Option<u64>) -> bool {
+        if self.holder_identity() != Some(identity) {
             return false;
         }
         match generation {
@@ -587,7 +609,7 @@ mod tests {
     #[test]
     fn first_client_becomes_controller_on_ensure() {
         let mut control = SessionControlState::new();
-        let gen = control.ensure_controller("a");
+        let gen = control.ensure_controller("a", None);
         assert_eq!(gen, 1);
         assert_eq!(control.role_of("a"), TerminalRole::Controller);
         assert_eq!(control.role_of("b"), TerminalRole::Observer);
@@ -596,8 +618,8 @@ mod tests {
     #[test]
     fn acquire_bumps_generation_and_rejects_stale() {
         let mut control = SessionControlState::new();
-        control.ensure_controller("a");
-        let g2 = control.acquire("b");
+        control.ensure_controller("a", None);
+        let g2 = control.acquire("b", None);
         assert_eq!(g2, 2);
         assert!(!control.authorize_mutation("a", Some(1)));
         assert!(control.authorize_mutation("b", Some(2)));
@@ -609,12 +631,12 @@ mod tests {
     #[test]
     fn reacquiring_as_the_holder_keeps_the_generation() {
         let mut control = SessionControlState::new();
-        let g1 = control.ensure_controller("a");
-        let again = control.acquire("a");
+        let g1 = control.ensure_controller("a", None);
+        let again = control.acquire("a", None);
         assert_eq!(again, g1);
         assert!(control.authorize_mutation("a", Some(g1)));
 
-        let g2 = control.acquire("b");
+        let g2 = control.acquire("b", None);
         assert_eq!(g2, g1 + 1);
         assert!(control.authorize_mutation("b", Some(g2)));
         assert!(!control.authorize_mutation("a", Some(g1)));
@@ -626,12 +648,56 @@ mod tests {
     #[test]
     fn the_restated_generation_survives_repeated_activation() {
         let mut control = SessionControlState::new();
-        control.ensure_controller("pc");
-        let phone = control.acquire("phone");
-        let back_to_pc = control.acquire("pc");
+        control.ensure_controller("pc", None);
+        let phone = control.acquire("phone", None);
+        let back_to_pc = control.acquire("pc", None);
         assert_eq!(back_to_pc, phone + 1);
-        assert_eq!(control.acquire("pc"), back_to_pc);
-        assert_eq!(control.acquire("pc"), back_to_pc);
+        assert_eq!(control.acquire("pc", None), back_to_pc);
+        assert_eq!(control.acquire("pc", None), back_to_pc);
+    }
+
+    /// #2469 SC-07: two same-origin tabs share the browser id and are still
+    /// two lease identities. The mutation this pins is deciding the role and
+    /// authorization from `controller_client_id`, which makes both tabs
+    /// controllers.
+    #[test]
+    fn same_browser_tabs_are_separate_lease_identities() {
+        let mut control = SessionControlState::new();
+        control.ensure_controller("browser", Some("tab-a"));
+        assert_eq!(control.role_of("tab-a"), TerminalRole::Controller);
+        assert_eq!(control.role_of("tab-b"), TerminalRole::Observer);
+
+        // A different subscription of the same browser is a real takeover.
+        let g2 = control.acquire("browser", Some("tab-b"));
+        assert!(g2 > 1);
+        assert_eq!(control.role_of("tab-a"), TerminalRole::Observer);
+        assert!(control.authorize_mutation("tab-b", Some(g2)));
+        assert!(!control.authorize_mutation("tab-a", Some(1)));
+        assert_eq!(control.controller_client_id.as_deref(), Some("browser"));
+        assert_eq!(control.controller_subscription_id.as_deref(), Some("tab-b"));
+
+        // Restating the same subscription is the idempotent activation #2286
+        // added; only a different subscription moves the generation.
+        assert_eq!(control.acquire("browser", Some("tab-b")), g2);
+    }
+
+    /// A client that states no subscription is identified by its stable id,
+    /// which is the v1 rule an older client already gets.
+    #[test]
+    fn a_legacy_client_is_identified_by_its_client_id() {
+        let mut control = SessionControlState::new();
+        control.ensure_controller("legacy", None);
+        assert_eq!(control.role_of("legacy"), TerminalRole::Controller);
+        assert_eq!(control.role_of("another"), TerminalRole::Observer);
+        assert_eq!(
+            control.acquire("legacy", None),
+            1,
+            "the holder restating its own identity must not advance the lease"
+        );
+        control.release_if_holder("another");
+        assert_eq!(control.role_of("legacy"), TerminalRole::Controller);
+        control.release_if_holder("legacy");
+        assert_eq!(control.controller_client_id, None);
     }
 
     #[test]

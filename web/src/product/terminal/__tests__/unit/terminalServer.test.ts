@@ -3,6 +3,12 @@ import { TerminalServerPlugin, decodeTerminalData, terminalServerApi } from '@/p
 import { createMockPluginSurface, type MockPluginSurface } from '@/test/mockPluginSurface';
 import { getOrCreateClientId } from '@/platform/socket/clientId';
 
+// The page subscription attach/relay-begin payloads now carry. Fixed so the
+// exact payload assertions below stay legible; the real id is a fresh uuid.
+vi.mock('@/platform/socket/subscriptionId', () => ({
+  getOrCreateSubscriptionId: () => 'this-subscription',
+}));
+
 function b64Bytes(bytes: number[]): string {
   let binary = '';
   for (const byte of bytes) {
@@ -95,7 +101,12 @@ describe('TerminalServerPlugin', () => {
       // inline-drawing application into the scrollback, for a size no client
       // ever measured (#1265).
       expect(surface.sent).toEqual([
-        { type: 'server.session.relay.begin', payload: { session_id: 'sess-1', size_known: false } },
+        {
+          type: 'server.session.relay.begin',
+          payload: {
+            session_id: 'sess-1', size_known: false, subscription_id: 'this-subscription',
+          },
+        },
       ]);
     });
 
@@ -105,7 +116,10 @@ describe('TerminalServerPlugin', () => {
       expect(surface.sent).toEqual([
         {
           type: 'server.session.relay.begin',
-          payload: { session_id: 'sess-1', relay_url: 'ws://agent:19090/ws', cols: 120, rows: 40 },
+          payload: {
+            session_id: 'sess-1', relay_url: 'ws://agent:19090/ws', cols: 120, rows: 40,
+            subscription_id: 'this-subscription',
+          },
         },
       ]);
     });
@@ -119,7 +133,10 @@ describe('TerminalServerPlugin', () => {
       expect(surface.sent).toEqual([
         {
           type: 'server.session.relay.begin',
-          payload: { session_id: 'sess-1', cols: 100, size_known: false },
+          payload: {
+            session_id: 'sess-1', cols: 100, size_known: false,
+            subscription_id: 'this-subscription',
+          },
         },
       ]);
     });
@@ -133,9 +150,17 @@ describe('TerminalServerPlugin', () => {
       expect(surface.sent).toEqual([
         {
           type: 'server.session.relay.begin',
-          payload: { session_id: 'sess-1', size_known: false, needs_bootstrap: true },
+          payload: {
+            session_id: 'sess-1', size_known: false, needs_bootstrap: true,
+            subscription_id: 'this-subscription',
+          },
         },
-        { type: 'server.session.relay.begin', payload: { session_id: 'sess-2', size_known: false } },
+        {
+          type: 'server.session.relay.begin',
+          payload: {
+            session_id: 'sess-2', size_known: false, subscription_id: 'this-subscription',
+          },
+        },
       ]);
     });
 

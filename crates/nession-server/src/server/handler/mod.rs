@@ -86,6 +86,10 @@ pub enum HandlerAction {
         /// bootstrap (#321), forwarded verbatim into the `agent.attach` the
         /// Server builds. `None` leaves the agent to decide.
         needs_bootstrap: Option<bool>,
+        /// The browser page's subscription identity, forwarded verbatim into
+        /// the `agent.attach` the Server builds. Absent is the v1 rule: the
+        /// stable client id is the subscription.
+        subscription_id: Option<String>,
     },
     /// Close the connection.
     Close,
