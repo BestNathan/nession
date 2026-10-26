@@ -136,15 +136,3 @@ pub(crate) type SessionMap = std::collections::HashMap<String, AttachedSession>;
 /// another thread's insert — while the thing being prevented has no bound at
 /// all.
 pub(crate) type SessionMapLock = std::sync::Mutex<SessionMap>;
-
-/// Take the agent's shared session map.
-///
-/// Poisoning is ignored, as in `server::resize`: every section under this lock
-/// is a map operation that cannot leave the map half-written, so a panic
-/// somewhere else must not turn into a connection that can never touch its own
-/// sessions again.
-pub(crate) fn sessions_lock(sessions: &SessionMapLock) -> std::sync::MutexGuard<'_, SessionMap> {
-    sessions
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-}

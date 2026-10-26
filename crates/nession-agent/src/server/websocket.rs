@@ -34,9 +34,9 @@ use crate::server::execution::{
 };
 use crate::server::issued_credit::SubscriberIssuedFlow;
 use crate::server::output_ack::{OutputAckBinding, OutputAckVerdict, SubscriberOutputAck};
+use crate::session::registry::SessionRegistry;
 use crate::session::terminal::runtime::{
-    sessions_lock, AttachedSession, OutputChunk, SessionMap, SessionMapLock, SessionPeer,
-    SubscriberEvent,
+    AttachedSession, OutputChunk, SessionPeer, SubscriberEvent,
 };
 use crate::session::terminal::state as session_terminal;
 use crate::session::terminal::state::{InputSequence, InputVerdict};
@@ -1244,7 +1244,7 @@ pub struct AgentServerContext {
 pub struct AgentServer {
     tmux_manager: Arc<SessionManager>,
     /// Agent-wide P2P lease, retained terminal history and peer fan-out.
-    sessions: Arc<SessionMapLock>,
+    sessions: Arc<SessionRegistry>,
     file_ops: Arc<FileOps>,
     /// The one mutation lane every peer-to-peer connection of this agent
     /// dispatches into. Built here because the resources its keys name — one
@@ -1400,7 +1400,7 @@ pub(crate) struct P2pRequest<'a> {
     /// The request id, echoed on the reply.
     id: &'a str,
     tmux: &'a Arc<SessionManager>,
-    sessions: &'a Arc<SessionMapLock>,
+    sessions: &'a Arc<SessionRegistry>,
     client_id: &'a Arc<Mutex<Option<String>>>,
     peer_token: &'a Arc<()>,
     outbound: &'a P2pOutbound,
@@ -1445,7 +1445,7 @@ impl P2pRequest<'_> {
 /// connection's and nothing else's.
 struct Connection {
     tmux: Arc<SessionManager>,
-    sessions: Arc<SessionMapLock>,
+    sessions: Arc<SessionRegistry>,
     client_id: Arc<Mutex<Option<String>>>,
     peer_token: Arc<()>,
     outbound: P2pOutbound,
@@ -1935,7 +1935,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                 // All P2P sockets of this Agent share a Session-scoped lease,
                 // event ring and bounded output fan-out (both tmux backends).
                 let session_name = payload.session_name.clone();
-                    let already_attached = sessions_lock(ctx.sessions).contains_key(&session_name);
+                    let already_attached = ctx.sessions.lock().contains_key(&session_name);
 
                     if already_attached {
                         if let Err(e) = apply_env_snapshots(
@@ -1951,7 +1951,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                             let issued_flow = Arc::new(StdMutex::new(SubscriberIssuedFlow::new()));
                         let wants_bootstrap = payload.needs_bootstrap.unwrap_or(false);
                         let (resp, atomic_prefix) = {
-                            let mut guard = sessions_lock(ctx.sessions);
+                            let mut guard = ctx.sessions.lock();
                             let Some(shared) = guard.get_mut(&session_name) else {
                                 return ctx.err("not_attached", "session ended during attach");
                             };
@@ -2121,7 +2121,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 &attached,
                                 &client_id,
                             );
-                            sessions_lock(ctx.sessions).insert(session_name.clone(), attached);
+                            ctx.sessions.lock().insert(session_name.clone(), attached);
 
                             // The session's history, before the live forwarder
                             // exists — the same barrier the Control arm below
@@ -2182,7 +2182,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                             let session_name_clone = session_name.clone();
                             tokio::spawn(async move {
                                 while let Some(bytes) = output_rx.recv().await {
-                                    let mut guard = sessions_lock(&sessions_clone);
+                                    let mut guard = sessions_clone.lock();
                                     if let Some(s) = guard.get_mut(&session_name_clone) {
                                         use base64::Engine;
                                         let encoded = base64::engine::general_purpose::STANDARD
@@ -2311,7 +2311,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                             // guard is released before the scrollback capture
                             // below rather than living until the end of the
                             // block that holds this arm's locals.
-                            sessions_lock(ctx.sessions).insert(session_name.clone(), attached);
+                            ctx.sessions.lock().insert(session_name.clone(), attached);
 
                             // The session's history, before the live output
                             // stream is spawned — `send_bootstrap` carries why
@@ -2353,7 +2353,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                     use base64::Engine;
                                     let encoded =
                                         base64::engine::general_purpose::STANDARD.encode(&bytes);
-                                    let mut guard = sessions_lock(&sessions_for_output);
+                                    let mut guard = sessions_for_output.lock();
                                     if let Some(session) = guard.get_mut(&session_name_clone) {
                                         let (epoch, seq) = session
                                             .stream
@@ -2373,7 +2373,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 // re-attach may already own this same name.
                                 // Never hold the SessionMap lock across I/O.
                                 let retired = {
-                                    let mut guard = sessions_lock(&sessions_for_output);
+                                    let mut guard = sessions_for_output.lock();
                                     let still_ours = guard.get(&session_name_clone)
                                         .is_some_and(|session| session.stream.epoch == stream_epoch);
                                     if still_ours {
@@ -2480,7 +2480,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                     let full_id =
                                         format!("{agent_id_resize}:{session_name_resize}");
                                     resize_reporter.publish(&full_id, cols, rows);
-                                    let peers = sessions_lock(&sessions_for_resize)
+                                    let peers = sessions_for_resize.lock()
                                         .get(&session_name_resize)
                                         .map(|s| {
                                             s.peers.iter().map(|p| p.outbound.clone()).collect::<Vec<_>>()
@@ -2516,7 +2516,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                 // lock-across-await `#961-D` exists to remove.
                 let client_id = connection_client_id(ctx.client_id).await;
                 let (removed, control_notify) = {
-                    let mut sessions_guard = sessions_lock(ctx.sessions);
+                    let mut sessions_guard = ctx.sessions.lock();
                     match sessions_guard.get_mut(&payload.session_name) {
                         Some(session) => {
                             if !session
@@ -2595,7 +2595,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     };
                 let client_id = connection_client_id(ctx.client_id).await;
                 let (resp, peers, changed) = {
-                    let mut guard = sessions_lock(ctx.sessions);
+                    let mut guard = ctx.sessions.lock();
                     let Some(session) = guard.get_mut(&payload.session_name) else {
                         return ctx.err(
                             "not_attached",
@@ -2639,7 +2639,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                         Err(e) => return ctx.err("parse_error", &e.to_string()),
                     };
                 let resp = {
-                    let guard = sessions_lock(ctx.sessions);
+                    let guard = ctx.sessions.lock();
                     let Some(session) = guard.get(&payload.session_name) else {
                         return ctx.err(
                             "not_attached",
@@ -2658,7 +2658,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                 };
                 let client_id = connection_client_id(ctx.client_id).await;
                 let verdict = {
-                    let mut guard = sessions_lock(ctx.sessions);
+                    let mut guard = ctx.sessions.lock();
                     let Some(session) = guard.get_mut(&payload.session_name) else {
                         return ctx.err("not_attached", "session not attached");
                     };
@@ -2698,7 +2698,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                 // read *before* the write and applied *after* it, which is what
                 // keeps a failed write from accounting for bytes that never
                 // arrived.
-                let decided = sessions_lock(ctx.sessions)
+                let decided = ctx.sessions.lock()
                     .get(&payload.session_name)
                     .map(|session| {
                         (
@@ -2746,7 +2746,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                 // backend is: the map's lock covers the lookup and nothing
                 // else (`AttachedSession::backend`, #961-D), and the fan-out
                 // below is I/O.
-                let peers = sessions_lock(ctx.sessions)
+                let peers = ctx.sessions.lock()
                     .get(&payload.session_name)
                     .map(|session| session.peers.clone());
                 let Some(peers) = peers else {
@@ -2772,7 +2772,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 // mismatch would mean that guarantee broke and
                                 // is worth not acting on.
                                 let advanced = {
-                                    let mut guard = sessions_lock(ctx.sessions);
+                                    let mut guard = ctx.sessions.lock();
                                     match guard.get_mut(&payload.session_name) {
                                         Some(session) if session.input.epoch == epoch => {
                                             session.input.applied(through);
@@ -2815,7 +2815,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
                 };
                 let client_id = connection_client_id(ctx.client_id).await;
-                let role_and_backend = sessions_lock(ctx.sessions)
+                let role_and_backend = ctx.sessions.lock()
                     .get(&payload.session_name)
                     .map(|session| {
                         (
@@ -2872,7 +2872,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 // resize's own `await`, in which case nothing
                                 // was recorded and there is no position to
                                 // report.
-                                let recorded = sessions_lock(ctx.sessions)
+                                let recorded = ctx.sessions.lock()
                                     .get_mut(&payload.session_name)
                                     .map(|session| {
                                         let position = session.stream.record_resize(
@@ -3309,7 +3309,7 @@ impl AgentServer {
 
         Ok(Self {
             tmux_manager,
-            sessions: Arc::new(SessionMapLock::new(SessionMap::new())),
+            sessions: Arc::new(SessionRegistry::new()),
             file_ops,
             mutations: context.mutations,
             shutdown_tx,
@@ -3430,7 +3430,7 @@ impl AgentServer {
         attach_mode: AttachMode,
         resize: ResizeReporter,
         credentials: Arc<P2pCredentials>,
-        sessions: Arc<SessionMapLock>,
+        sessions: Arc<SessionRegistry>,
     ) -> Result<()> {
         // Box the underlying stream so that TLS and plain connections
         // share a single WebSocket stream type.
@@ -3737,7 +3737,7 @@ impl AgentServer {
         // clients of the same Session. Pointer identity avoids an old socket
         // deleting its successor when both use the same stable client_id.
         let (drained, changes) = {
-            let mut guard = sessions_lock(&connection.sessions);
+            let mut guard = connection.sessions.lock();
             let mut changes = Vec::new();
             let mut empty = Vec::new();
             for (name, session) in guard.iter_mut() {
@@ -6471,7 +6471,7 @@ mod tests {
         let backend: Arc<Mutex<Box<dyn TmuxSession>>> = Arc::new(Mutex::new(Box::new(Resizing)));
         let mut control = session_terminal::SessionControlState::new();
         control.ensure_controller(&client_id);
-        let sessions: Arc<SessionMapLock> = Arc::new(SessionMapLock::new(
+        let sessions: Arc<SessionRegistry> = Arc::new(SessionRegistry::from_map(
             [(
                 SESSION.to_string(),
                 AttachedSession {
