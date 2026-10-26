@@ -58,6 +58,8 @@
 //! [`TmuxCommand`]: crate::process::TmuxCommand
 //! [`EnvManager::set_environment`]: super::env::EnvManager::set_environment
 
+use std::time::Duration;
+
 use anyhow::{Context, Result};
 
 use crate::process::TmuxCommand;
@@ -469,12 +471,127 @@ fn client_name_for_pid_in(listing: &[u8], pid: u32) -> Option<String> {
 #[derive(Debug, Clone)]
 pub struct TmuxOps {
     command: TmuxCommand,
+    list_timeout: Duration,
+    kill_timeout: Duration,
+    create_timeout: Duration,
+}
+
+/// Default budget for a quick tmux query (`list-sessions`, `display-message`).
+pub const DEFAULT_LIST_TIMEOUT: Duration = Duration::from_secs(2);
+/// Default budget for `kill-session`.
+pub const DEFAULT_KILL_TIMEOUT: Duration = Duration::from_secs(5);
+/// Default budget for the multi-stage session create.
+pub const DEFAULT_CREATE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// A typed request to create one detached tmux session.
+///
+/// The environment is explicit: the caller decides which variables a session
+/// inherits. This crate does not copy the parent process environment, because
+/// doing so is a product policy, not a tmux operation.
+#[derive(Debug, Clone)]
+pub struct NewSession {
+    pub name: String,
+    pub working_dir: String,
+    pub width: u16,
+    pub height: u16,
+    /// Entries in the caller's order. They are offered with `new-session -e`,
+    /// typed into the initial shell when `-e` is unsupported, and installed on
+    /// the session for future windows.
+    pub env: Vec<(String, String)>,
+}
+
+/// How a session was created, for a follow-up step only the fallback needs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NewSessionOutcome {
+    /// `true` when `new-session -e` was accepted. `false` means the environment
+    /// was typed into the initial shell instead.
+    pub used_e: bool,
+}
+
+/// One `list-sessions` row, in tmux's own terms.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionSummary {
+    pub name: String,
+    pub created_at: u64,
+    pub window_count: u32,
+    pub attached_clients: u32,
+    pub width: u16,
+    pub height: u16,
+    pub working_dir: Option<String>,
+    pub foreground_command: Option<String>,
+}
+
+/// The `list-sessions -F` format `list_sessions` parses.
+///
+/// `|` is the delimiter because tmux converts tab characters in format strings
+/// to underscores. `pane_current_command` is last and the split is capped, so a
+/// `|` inside it stays part of the command instead of shifting the row.
+const SESSION_LIST_FORMAT: &str = "#{session_name}|#{session_created}|#{session_windows}|#{session_attached}|#{window_width}|#{window_height}|#{pane_current_path}|#{pane_current_command}";
+
+/// Whether a failed `list-sessions` just means "there are no sessions".
+///
+/// tmux words this two ways depending on whether the socket file exists yet,
+/// and both are the normal state for an idle server:
+/// `no server running on <path>`, or `error connecting to <path> (No such file
+/// or directory)`.
+fn is_no_sessions_stderr(stderr: &str) -> bool {
+    stderr.contains("no server running")
+        || (stderr.contains("error connecting to") && stderr.contains("No such file or directory"))
+}
+
+/// Parse one [`SESSION_LIST_FORMAT`] row.
+fn session_summary_from_line(line: &str) -> Option<SessionSummary> {
+    let parts: Vec<&str> = line.splitn(8, '|').collect();
+    if parts.len() != 8 {
+        return None;
+    }
+    let working_dir = parts.get(6).copied().unwrap_or_default();
+    let foreground = parts.get(7).copied().unwrap_or_default();
+    Some(SessionSummary {
+        name: parts.first().copied().unwrap_or_default().to_string(),
+        created_at: parts.get(1).and_then(|s| s.parse().ok())?,
+        window_count: parts.get(2).and_then(|s| s.parse().ok())?,
+        attached_clients: parts.get(3).and_then(|s| s.parse().ok())?,
+        width: parts.get(4).and_then(|s| s.parse().ok())?,
+        height: parts.get(5).and_then(|s| s.parse().ok())?,
+        working_dir: (!working_dir.is_empty()).then(|| working_dir.to_string()),
+        foreground_command: (!foreground.is_empty()).then(|| foreground.to_string()),
+    })
+}
+
+/// The `new-session` argv without environment injection.
+fn new_session_args(request: &NewSession) -> Vec<String> {
+    vec![
+        "new-session".to_string(),
+        "-d".to_string(),
+        "-s".to_string(),
+        request.name.clone(),
+        "-x".to_string(),
+        request.width.to_string(),
+        "-y".to_string(),
+        request.height.to_string(),
+        "-c".to_string(),
+        request.working_dir.clone(),
+    ]
 }
 
 impl TmuxOps {
     /// Bind the operations to a specific process addressing.
     pub fn new(command: TmuxCommand) -> Self {
-        Self { command }
+        Self {
+            command,
+            list_timeout: DEFAULT_LIST_TIMEOUT,
+            kill_timeout: DEFAULT_KILL_TIMEOUT,
+            create_timeout: DEFAULT_CREATE_TIMEOUT,
+        }
+    }
+
+    /// Override the per-operation budgets.
+    pub fn with_timeouts(mut self, list: Duration, kill: Duration, create: Duration) -> Self {
+        self.list_timeout = list;
+        self.kill_timeout = kill;
+        self.create_timeout = create;
+        self
     }
 
     /// The process addressing these operations run on.
@@ -854,6 +971,218 @@ impl TmuxOps {
             );
         }
         Ok(client_name_for_pid_in(&output.stdout, pid))
+    }
+    /// Create one detached session.
+    ///
+    /// Three stages, in the order a tmux that lacks `-e` requires:
+    ///
+    /// 1. `new-session -e KEY=VALUE …` (tmux ≥ 3.0). The environment reaches the
+    ///    shell before its rc files run, which is the only reliable way to set a
+    ///    prompt on a shell that overwrites it.
+    /// 2. Without `-e`: create the session, then type the equivalent `export`
+    ///    line into the initial shell. On that path this line is the only thing
+    ///    that delivers the environment to the process that exists; a failure is
+    ///    returned rather than swallowed.
+    /// 3. `set-environment` on the session for windows that do not exist yet
+    ///    (best effort: the session already has the environment).
+    pub async fn new_session(&self, request: &NewSession) -> Result<NewSessionOutcome> {
+        let args = new_session_args(request);
+        let output = tokio::time::timeout(
+            self.create_timeout,
+            self.command.output_with(|cmd| {
+                cmd.args(&args).stderr(std::process::Stdio::piped());
+                for (key, value) in &request.env {
+                    cmd.arg("-e").arg(format!("{key}={value}"));
+                }
+            }),
+        )
+        .await
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "tmux create-session timed out after {:?}",
+                self.create_timeout
+            )
+        })??;
+
+        if output.status.success() {
+            self.propagate_env_best_effort(request).await;
+            return Ok(NewSessionOutcome { used_e: true });
+        }
+
+        let output2 = tokio::time::timeout(
+            self.create_timeout,
+            self.command
+                .output(&args.iter().map(String::as_str).collect::<Vec<_>>()),
+        )
+        .await
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "tmux create-session timed out after {:?}",
+                self.create_timeout
+            )
+        })??;
+        if !output2.status.success() {
+            let stage1_err = String::from_utf8_lossy(&output.stderr);
+            let stage2_err = String::from_utf8_lossy(&output2.stderr);
+            anyhow::bail!(
+                "Failed to create session {}: stage1 stderr: {}; stage2 stderr: {}",
+                request.name,
+                stage1_err.trim(),
+                stage2_err.trim()
+            );
+        }
+
+        let mut init_cmd = String::new();
+        for (key, value) in &request.env {
+            init_cmd.push_str(&format!("export {key}='{}';", value.replace('\'', "'\\''")));
+        }
+        if !init_cmd.is_empty() {
+            self.send_keys(&request.name, &init_cmd)
+                .await
+                .with_context(|| {
+                    format!(
+                        "failed to inject the environment line into session {}",
+                        request.name
+                    )
+                })?;
+        }
+        self.propagate_env_best_effort(request).await;
+        Ok(NewSessionOutcome { used_e: false })
+    }
+
+    /// Install the requested environment on the session for future windows.
+    ///
+    /// Best effort: the session already has the environment through `-e` or the
+    /// typed line, so a refused variable is observable but not the operation's
+    /// failure.
+    async fn propagate_env_best_effort(&self, request: &NewSession) {
+        for (key, value) in &request.env {
+            if let Err(e) = self.set_environment(&request.name, key, value).await {
+                tracing::warn!(
+                    "best-effort env propagation to future panes of session {} failed ({key}): {e:#}",
+                    request.name
+                );
+            }
+        }
+    }
+
+    /// List the server's sessions, newest tmux answer first (tmux's order).
+    ///
+    /// A server that is not running is an empty list, not an error — that is
+    /// the normal state of an idle socket. Every other failure is logged and
+    /// answered the same way, preserving the pre-existing policy that a poll
+    /// does not turn into a session-surface failure.
+    pub async fn list_sessions(&self) -> Result<Vec<SessionSummary>> {
+        let output = tokio::time::timeout(
+            self.list_timeout,
+            self.command
+                .output(&["list-sessions", "-F", SESSION_LIST_FORMAT]),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("tmux command timed out after {:?}", self.list_timeout))??;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stderr = stderr.trim();
+            if is_no_sessions_stderr(stderr) {
+                tracing::debug!("tmux list-sessions: {stderr} (no tmux server running)");
+            } else {
+                tracing::warn!("tmux list-sessions exited with {}: {stderr}", output.status);
+            }
+            return Ok(Vec::new());
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        Ok(stdout
+            .lines()
+            .filter_map(session_summary_from_line)
+            .collect())
+    }
+
+    /// `tmux display-message -p -t <session> -F <format>`, trimmed.
+    pub async fn display_message(&self, session: &str, format: &str) -> Result<String> {
+        let output = tokio::time::timeout(
+            self.list_timeout,
+            self.command
+                .output(&["display-message", "-p", "-t", session, "-F", format]),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("tmux command timed out after {:?}", self.list_timeout))??;
+        if !output.status.success() {
+            anyhow::bail!(
+                "tmux display-message failed for session {}: {}",
+                session,
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    }
+
+    /// Kill one session. The error carries tmux's own words and exit status.
+    pub async fn kill_session(&self, name: &str) -> Result<()> {
+        let output = tokio::time::timeout(
+            self.kill_timeout,
+            self.command.output(&["kill-session", "-t", name]),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("tmux command timed out after {:?}", self.kill_timeout))??;
+        if !output.status.success() {
+            anyhow::bail!(
+                "Failed to kill session {name}: {} ({})",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        Ok(())
+    }
+
+    /// Set one session-scoped option: `tmux set-option -t <session> <name> <value>`.
+    ///
+    /// The caller decides whether a failure is required or merely observable;
+    /// this returns it either way, carrying tmux's own stderr.
+    pub async fn set_option(&self, session: &str, name: &str, value: &str) -> Result<()> {
+        let output = self
+            .command
+            .output(&["set-option", "-t", session, name, value])
+            .await?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "tmux set-option -t {session} {name} {value} failed: {} ({})",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        Ok(())
+    }
+
+    /// The tmux binary's version line (`tmux -V`), or `None` when it exits
+    /// non-zero. `-V` opens no socket, but it still runs through the same
+    /// explicit addressing as every other operation so an unavailable binary
+    /// is the only failure mode.
+    pub async fn version(&self) -> std::io::Result<Option<String>> {
+        let output = self.command.output(&["-V"]).await?;
+        Ok(output
+            .status
+            .success()
+            .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string()))
+    }
+
+    /// Clear one session's scrollback, best effort.
+    ///
+    /// Used after the fallback environment line was typed into the shell: the
+    /// line is visible in the pane's history, and hiding it is cosmetic — the
+    /// environment was delivered by the statement, so a failed cleanup is
+    /// logged rather than reported as the create's result.
+    pub async fn clear_history(&self, session: &str) {
+        match self.command.output(&["clear-history", "-t", session]).await {
+            Ok(out) if out.status.success() => {}
+            Ok(out) => tracing::warn!(
+                "clear-history for session {session} failed ({}): {}",
+                out.status,
+                String::from_utf8_lossy(&out.stderr).trim()
+            ),
+            Err(e) => tracing::warn!("clear-history for session {session} failed: {e}"),
+        }
     }
 }
 #[cfg(test)]
@@ -1414,5 +1743,91 @@ mod tests {
             ]],
             "the target and both dimensions come from the owner's one vector"
         );
+    }
+
+    #[tokio::test]
+    async fn an_operation_times_out_on_its_budget() {
+        // A fake tmux whose one behaviour is to sleep: the timeout is the whole
+        // budget, and a 100ms budget against a 30s sleep must fail long before
+        // either ends.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let fake = crate::testing::FakeTmux::new(dir.path(), "sleep 30");
+        let ops = TmuxOps::new(fake.command()).with_timeouts(
+            Duration::from_millis(100),
+            Duration::from_millis(100),
+            Duration::from_millis(100),
+        );
+        let start = std::time::Instant::now();
+        let res = ops.list_sessions().await;
+        assert!(res.is_err(), "expected timeout error, got {res:?}");
+        assert!(start.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn missing_socket_file_counts_as_no_sessions() {
+        // The exact wording tmux 3.6b emits for a socket path that does not
+        // exist yet — the normal state of a server that has created no session.
+        assert!(is_no_sessions_stderr(
+            "error connecting to /tmp/nession-501/tmux.sock (No such file or directory)"
+        ));
+    }
+
+    #[test]
+    fn stopped_server_counts_as_no_sessions() {
+        assert!(is_no_sessions_stderr(
+            "no server running on /tmp/nession-501/tmux.sock"
+        ));
+    }
+
+    #[test]
+    fn real_failures_are_not_treated_as_no_sessions() {
+        // A permission problem or an over-long path must still warn — silencing
+        // those would hide the failures the socket work is meant to surface.
+        assert!(!is_no_sessions_stderr(
+            "error connecting to /tmp/nession-501/tmux.sock (Permission denied)"
+        ));
+        assert!(!is_no_sessions_stderr(
+            "error connecting to /tmp/x/tmux.sock (File name too long)"
+        ));
+        assert!(!is_no_sessions_stderr("lost server"));
+    }
+
+    #[test]
+    fn parses_a_session_row_including_the_foreground_command() {
+        let info = session_summary_from_line("work|1700000000|2|1|120|40|/repo|claude")
+            .expect("row parses");
+        assert_eq!(info.name, "work");
+        assert_eq!(info.created_at, 1_700_000_000);
+        assert_eq!(info.window_count, 2);
+        assert_eq!(info.attached_clients, 1);
+        assert_eq!(info.width, 120);
+        assert_eq!(info.height, 40);
+        assert_eq!(info.foreground_command.as_deref(), Some("claude"));
+    }
+
+    #[test]
+    fn keeps_a_pipe_inside_the_foreground_command() {
+        // The command is the last field, so a delimiter inside it must survive
+        // instead of shifting every row into the "unparseable" branch.
+        let info = session_summary_from_line("work|1700000000|1|0|80|24|/repo|we|ird")
+            .expect("row parses");
+        assert_eq!(info.foreground_command.as_deref(), Some("we|ird"));
+    }
+
+    #[test]
+    fn reports_an_absent_foreground_command_as_none() {
+        let info =
+            session_summary_from_line("work|1700000000|1|0|80|24|/repo|").expect("row parses");
+        assert_eq!(info.foreground_command, None);
+    }
+
+    #[test]
+    fn rejects_rows_with_too_few_fields() {
+        assert!(session_summary_from_line("work|1700000000|1|0|80|24").is_none());
+    }
+
+    #[test]
+    fn rejects_rows_with_unparseable_numbers() {
+        assert!(session_summary_from_line("work|not-a-number|1|0|80|24|/repo|claude").is_none());
     }
 }

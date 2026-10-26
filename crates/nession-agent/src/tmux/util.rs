@@ -13,7 +13,6 @@
 
 use anyhow::Result;
 
-use super::cmd;
 use super::ops::TmuxDep;
 
 /// Default window size for a session whose size could not be read.
@@ -45,13 +44,7 @@ async fn window_size_or_fallback(tmux: &TmuxDep, session: &str) -> (u16, u16) {
 
 /// Check whether the `tmux` binary is available on `PATH`.
 pub async fn check_tmux_available() -> Result<bool> {
-    let status = cmd::global()
-        .tokio()
-        .arg("-V")
-        .stderr(std::process::Stdio::null())
-        .status()
-        .await?;
-    Ok(status.success())
+    Ok(TmuxDep::global().ops().version().await?.is_some())
 }
 
 /// Version string reported by `tmux -V`, or `"unknown"` if it cannot be read.
@@ -60,19 +53,12 @@ pub async fn check_tmux_available() -> Result<bool> {
 /// keep their own copy, and a copy is a place for an un-socketed tmux spawn to
 /// reappear.
 pub async fn tmux_version() -> String {
-    cmd::global()
-        .tokio()
-        .arg("-V")
-        .output()
+    TmuxDep::global()
+        .ops()
+        .version()
         .await
         .ok()
-        .and_then(|output| {
-            if output.status.success() {
-                Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
-            } else {
-                None
-            }
-        })
+        .flatten()
         .unwrap_or_else(|| "unknown".to_string())
 }
 

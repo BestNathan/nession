@@ -16,8 +16,8 @@ an optional server configuration.
 | Persistent Control Mode client over `-C` pipe and `-CC` PTY | present |
 | Bounded framing/parser for non-UTF-8 pane bytes | present |
 | Ordered command/reply matching with FIFO and tombstones | present |
-| Typed one-shot administration API | arriving in the next migration slice |
-| Administration examples | arriving with that slice |
+| Typed one-shot administration API (`new_session`, `list_sessions`, `kill_session`, env/capture/resize/options) | present |
+| Administration example (`manage_sessions`) | present |
 
 ## Quick start
 
