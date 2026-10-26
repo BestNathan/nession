@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_test_run",
+  "mode": "test",
+  "target_sha": "e8dfd30221f773bce00226f792c564bee37ce67a",
+  "source_tree_sha": "da3e66d93f38e47c18a150f450cc71129a301839",
+  "run_id": 40282592710,
+  "run_attempt": 1,
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 382193593,
+    "run_id": 40282592710,
+    "run_attempt": 1,
+    "head_sha": "e8dfd30221f773bce00226f792c564bee37ce67a",
+    "head_branch": "main",
+    "event": "push"
+  },
+  "started_at": "2026-10-26T06:54:42Z",
+  "status": "Completed",
+  "evaluation": null,
+  "test_scope": "not-required",
+  "test_scope_receipt": {
+    "kind": "verified_e2e_not_required",
+    "run_id": 40282592710,
+    "run_attempt": 1,
+    "sha": "e8dfd30221f773bce00226f792c564bee37ce67a",
+    "event": "push",
+    "branch": "main",
+    "plan_mode": "not-required",
+    "skipped_e2e_only_steps": [
+      "rust_toolchain",
+      "cargo_build",
+      "tmux"
+    ],
+    "design_gate": "success",
+    "evidence": "GitHub API Run/Attempt/job step outcomes + exact original not-required E2E job log receipt emitted by the measured run"
+  },
+  "test_scope_assertion": {
+    "scope": "not-required",
+    "target_sha": "e8dfd30221f773bce00226f792c564bee37ce67a",
+    "run_id": 40282592710,
+    "run_attempt": 1,
+    "verified_ids": [],
+    "plan_digest": "50870c6f88870006f9c06885f415b18491da4baae6045539765ecda197332622",
+    "evidence": "authenticated SHA256 artifact + independent per-ID assertions"
+  },
+  "selected_e2e_artifact": null,
+  "test_job": {
+    "job_id": 121438972823,
+    "name": "e2e",
+    "conclusion": "success",
+    "run_attempt": 1
+  },
+  "evidence": {
+    "artifact_id": 12632839086,
+    "name": "issue-e2e-verification",
+    "size_bytes": 11867,
+    "sha256": "7d45f6bb76cda277d79818864f266ddde3990c16dbe0dcb9ede7ccb92fd282e9",
+    "expires_at": "2026-11-09T07:07:05Z",
+    "durability": "GitHub Actions artifact; time-limited, not indefinitely archived"
+  },
+  "execution_id": "8690334bdf516f2d1b62cda10af30225f6667a3b784d29ab29b05b20e09f129f"
+}
