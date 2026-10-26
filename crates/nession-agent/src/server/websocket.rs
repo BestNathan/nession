@@ -214,80 +214,6 @@ fn new_output_ack(stream_epoch: u64) -> Result<SubscriberOutputAck, OutputAckVer
     })
 }
 
-/// Never hand a caller the retained *tail* of an incomplete ring: it is
-/// not a contiguous suffix of the requested cursor. A failed replay requires
-/// a future verified checkpoint (or an explicit degraded/unavailable state).
-fn build_terminal_resume_response(
-    request: &TerminalStreamResumePayload,
-    stream: &session_terminal::SessionStreamState,
-) -> TerminalStreamResumeResponse {
-    let replay = stream.replay_since(request.stream_epoch, request.after_seq);
-    let recovery = match replay.as_ref() {
-        None => TerminalResumeRecovery::Unavailable,
-        Some(r) if r.complete => TerminalResumeRecovery::Complete,
-        Some(_) => TerminalResumeRecovery::CheckpointRequired,
-    };
-    TerminalStreamResumeResponse {
-        session_name: request.session_name.clone(),
-        stream_epoch: stream.epoch,
-        epoch_match: replay.is_some(),
-        first_available_seq: replay.as_ref().map(|r| r.first_available_seq),
-        complete: replay.as_ref().map(|r| r.complete),
-        recovery: Some(recovery),
-        events: if recovery == TerminalResumeRecovery::Complete {
-            replay.map_or_else(Vec::new, |r| r.events)
-        } else {
-            Vec::new()
-        },
-    }
-}
-
-/// Socket identity and per-attach subscription generation are both required.
-/// Nothing here grants credit for queued/dequeued bytes.
-fn accept_output_ack(
-    peers: &mut [SessionPeer],
-    client_id: &str,
-    peer_token: &Arc<()>,
-    payload: &TerminalOutputAppliedPayload,
-    issued_head: u64,
-) -> Result<OutputAckVerdict, &'static str> {
-    let Some(peer) = peers
-        .iter_mut()
-        .find(|peer| peer.client_id == client_id && Arc::ptr_eq(&peer.peer_token, peer_token))
-    else {
-        return Err("not_current_subscriber");
-    };
-    if !(1..=(1_u64 << 53) - 1).contains(&payload.renderer_generation) {
-        return Err("invalid_renderer_generation");
-    }
-    // Stage the cursor: reject a beyond-issued credit claim before commit.
-    let mut cursor = peer.output_ack.clone();
-    let verdict = cursor.observe_with_renderer(
-        OutputAckBinding {
-            subscriber_generation: payload.subscriber_generation,
-            stream_epoch: payload.stream_epoch,
-        },
-        payload.renderer_generation,
-        payload.applied_through,
-        issued_head,
-    );
-    match verdict {
-        OutputAckVerdict::Advanced { .. } => {
-            let mut issued = peer
-                .issued_flow
-                .lock()
-                .map_err(|_| "credit_state_unavailable")?;
-            issued
-                .parser_ack(payload.stream_epoch, payload.applied_through)
-                .map_err(|_| "invalid_issued_credit_ack")?;
-            peer.output_ack = cursor;
-            Ok(verdict)
-        }
-        OutputAckVerdict::Duplicate => Ok(verdict),
-        _ => Err("invalid_output_ack"),
-    }
-}
-
 async fn connection_client_id(client_id: &Arc<Mutex<Option<String>>>) -> String {
     client_id
         .lock()
@@ -2613,15 +2539,11 @@ p2p_routes! { ctx, msg_type, payload_value;
                         Ok(p) => p,
                         Err(e) => return ctx.err("parse_error", &e.to_string()),
                     };
-                let resp = {
-                    let guard = ctx.sessions.lock();
-                    let Some(session) = guard.get(&payload.session_name) else {
-                        return ctx.err(
-                            "not_attached",
-                            &format!("not attached to session: {}", payload.session_name),
-                        );
-                    };
-                    build_terminal_resume_response(&payload, &session.stream)
+                let Some(resp) = ctx.sessions.resume_response(&payload) else {
+                    return ctx.err(
+                        "not_attached",
+                        &format!("not attached to session: {}", payload.session_name),
+                    );
                 };
                 serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                     .unwrap_or_default()
@@ -2632,23 +2554,15 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
                 };
                 let client_id = connection_client_id(ctx.client_id).await;
-                let verdict = {
-                    let mut guard = ctx.sessions.lock();
-                    let Some(session) = guard.get_mut(&payload.session_name) else {
-                        return ctx.err("not_attached", "session not attached");
-                    };
-                    let head = session.stream.cursor();
-                    accept_output_ack(
-                        &mut session.peers,
-                        &client_id,
-                        ctx.peer_token,
-                        &payload,
-                        head,
-                    )
-                };
-                match verdict {
+                match ctx.sessions.record_output_ack(
+                    &payload.session_name,
+                    &client_id,
+                    ctx.peer_token,
+                    &payload,
+                ) {
                     Ok(_) => serde_json::to_string(&make_ok(ctx.id, "output applied"))
                         .unwrap_or_default(),
+                    Err("not_attached") => ctx.err("not_attached", "session not attached"),
                     Err(reason) => ctx.err("output_ack_rejected", reason),
                 }
             }
@@ -2746,18 +2660,16 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 // serialises this session's mutations, so a
                                 // mismatch would mean that guarantee broke and
                                 // is worth not acting on.
-                                let advanced = {
-                                    let mut guard = ctx.sessions.lock();
-                                    match guard.get_mut(&payload.session_name) {
-                                        Some(session) if session.input.epoch == epoch => {
-                                            session.input.applied(through);
-                                            None
-                                        }
-                                        _ => Some(ctx.err(
-                                            "write_error",
-                                            "session input state changed under the write",
-                                        )),
-                                    }
+                                let advanced = match ctx.sessions.record_input_applied(
+                                    &payload.session_name,
+                                    epoch,
+                                    through,
+                                ) {
+                                    Ok(()) => None,
+                                    Err(()) => Some(ctx.err(
+                                        "write_error",
+                                        "session input state changed under the write",
+                                    )),
                                 };
                                 match advanced {
                                     Some(err) => return err,
@@ -3799,6 +3711,7 @@ impl AgentServer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::session::terminal::runtime::{accept_output_ack, build_terminal_resume_response};
 
     #[test]
     fn output_ack_requires_exact_attached_socket_and_current_subscription() {

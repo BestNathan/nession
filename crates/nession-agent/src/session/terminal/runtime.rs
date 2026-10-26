@@ -16,9 +16,15 @@ use std::sync::{Arc, Mutex as StdMutex};
 
 use tokio::sync::{mpsc, Mutex};
 
+use nession_protocol::contracts::terminal::v1::{
+    TerminalOutputAppliedPayload, TerminalResumeRecovery, TerminalStreamResumePayload,
+    TerminalStreamResumeResponse,
+};
+
 use crate::server::issued_credit::SubscriberIssuedFlow;
 use crate::server::outbound::P2pOutbound;
 use crate::server::output_ack::SubscriberOutputAck;
+use crate::server::output_ack::{OutputAckBinding, OutputAckVerdict};
 use crate::session::terminal::state as session_terminal;
 use crate::tmux::session::TmuxSession;
 
@@ -159,3 +165,77 @@ pub(crate) type SessionMap = std::collections::HashMap<String, AttachedSession>;
 /// another thread's insert — while the thing being prevented has no bound at
 /// all.
 pub(crate) type SessionMapLock = std::sync::Mutex<SessionMap>;
+
+/// Never hand a caller the retained *tail* of an incomplete ring: it is
+/// not a contiguous suffix of the requested cursor. A failed replay requires
+/// a future verified checkpoint (or an explicit degraded/unavailable state).
+pub(crate) fn build_terminal_resume_response(
+    request: &TerminalStreamResumePayload,
+    stream: &session_terminal::SessionStreamState,
+) -> TerminalStreamResumeResponse {
+    let replay = stream.replay_since(request.stream_epoch, request.after_seq);
+    let recovery = match replay.as_ref() {
+        None => TerminalResumeRecovery::Unavailable,
+        Some(r) if r.complete => TerminalResumeRecovery::Complete,
+        Some(_) => TerminalResumeRecovery::CheckpointRequired,
+    };
+    TerminalStreamResumeResponse {
+        session_name: request.session_name.clone(),
+        stream_epoch: stream.epoch,
+        epoch_match: replay.is_some(),
+        first_available_seq: replay.as_ref().map(|r| r.first_available_seq),
+        complete: replay.as_ref().map(|r| r.complete),
+        recovery: Some(recovery),
+        events: if recovery == TerminalResumeRecovery::Complete {
+            replay.map_or_else(Vec::new, |r| r.events)
+        } else {
+            Vec::new()
+        },
+    }
+}
+
+/// Socket identity and per-attach subscription generation are both required.
+/// Nothing here grants credit for queued/dequeued bytes.
+pub(crate) fn accept_output_ack(
+    peers: &mut [SessionPeer],
+    client_id: &str,
+    peer_token: &Arc<()>,
+    payload: &TerminalOutputAppliedPayload,
+    issued_head: u64,
+) -> Result<OutputAckVerdict, &'static str> {
+    let Some(peer) = peers
+        .iter_mut()
+        .find(|peer| peer.client_id == client_id && Arc::ptr_eq(&peer.peer_token, peer_token))
+    else {
+        return Err("not_current_subscriber");
+    };
+    if !(1..=(1_u64 << 53) - 1).contains(&payload.renderer_generation) {
+        return Err("invalid_renderer_generation");
+    }
+    // Stage the cursor: reject a beyond-issued credit claim before commit.
+    let mut cursor = peer.output_ack.clone();
+    let verdict = cursor.observe_with_renderer(
+        OutputAckBinding {
+            subscriber_generation: payload.subscriber_generation,
+            stream_epoch: payload.stream_epoch,
+        },
+        payload.renderer_generation,
+        payload.applied_through,
+        issued_head,
+    );
+    match verdict {
+        OutputAckVerdict::Advanced { .. } => {
+            let mut issued = peer
+                .issued_flow
+                .lock()
+                .map_err(|_| "credit_state_unavailable")?;
+            issued
+                .parser_ack(payload.stream_epoch, payload.applied_through)
+                .map_err(|_| "invalid_issued_credit_ack")?;
+            peer.output_ack = cursor;
+            Ok(verdict)
+        }
+        OutputAckVerdict::Duplicate => Ok(verdict),
+        _ => Err("invalid_output_ack"),
+    }
+}

@@ -12,9 +12,17 @@
 
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use nession_protocol::contracts::terminal::v1::TerminalControlChangedPayload;
+use nession_protocol::contracts::terminal::v1::{
+    TerminalControlChangedPayload, TerminalOutputAppliedPayload, TerminalStreamResumePayload,
+    TerminalStreamResumeResponse,
+};
 
-use super::terminal::runtime::{AttachedSession, SessionMap, SessionMapLock, SessionPeer};
+use crate::server::output_ack::OutputAckVerdict;
+
+use super::terminal::runtime::{
+    accept_output_ack, build_terminal_resume_response, AttachedSession, SessionMap, SessionMapLock,
+    SessionPeer,
+};
 
 /// The Agent's one Session map.
 pub struct SessionRegistry {
@@ -120,6 +128,59 @@ impl SessionRegistry {
             removed,
             control_change,
         })
+    }
+
+    /// Advance the Session's applied input cursor, but only if the epoch
+    /// that classified the write still holds.
+    ///
+    /// `Err` means the input state changed under the backend write; the caller
+    /// must not claim the bytes were applied.
+    pub(crate) fn record_input_applied(
+        &self,
+        session_name: &str,
+        epoch: u64,
+        through: u64,
+    ) -> Result<(), ()> {
+        let mut guard = self.lock();
+        match guard.get_mut(session_name) {
+            Some(session) if session.input.epoch == epoch => {
+                session.input.applied(through);
+                Ok(())
+            }
+            _ => Err(()),
+        }
+    }
+
+    /// The ordered-stream replay a resume request asks for, or `None` when the
+    /// Session is not attached.
+    pub(crate) fn resume_response(
+        &self,
+        request: &TerminalStreamResumePayload,
+    ) -> Option<TerminalStreamResumeResponse> {
+        let guard = self.lock();
+        guard
+            .get(&request.session_name)
+            .map(|session| build_terminal_resume_response(request, &session.stream))
+    }
+
+    /// Apply one subscriber's output-applied acknowledgement.
+    ///
+    /// The peer must be the *current* subscriber (client id + socket token);
+    /// `not_attached` is the one failure the handler answers differently from a
+    /// rejected acknowledgement.
+    pub(crate) fn record_output_ack(
+        &self,
+        session_name: &str,
+        client_id: &str,
+        peer_token: &Arc<()>,
+        payload: &TerminalOutputAppliedPayload,
+    ) -> Result<OutputAckVerdict, &'static str> {
+        let mut guard = self.lock();
+        let Some(session) = guard.get_mut(session_name) else {
+            return Err("not_attached");
+        };
+        let head = session.stream.cursor();
+        accept_output_ack(&mut session.peers, client_id, peer_token, payload, head)
     }
 
     /// The transition seam for the handler arms that have not yet moved onto a
