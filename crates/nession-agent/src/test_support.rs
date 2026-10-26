@@ -238,7 +238,8 @@ impl FakeTmux {
                  fi\n\
                  n=$((n + 1))\n\
                  done\n\
-                 printf '%s\\n' \"$@\" \"{sep}\" > \"{dir}/{prefix}$n/{record}\" || exit 1\n\
+                 printf '%s\\n' \"$@\" \"{sep}\" > \"{dir}/{prefix}$n/{record}.tmp\" &&\n\
+                 mv \"{dir}/{prefix}$n/{record}.tmp\" \"{dir}/{prefix}$n/{record}\" || exit 1\n\
                  {script}\n",
                 dir = dir.display(),
                 prefix = CALL_FILE_PREFIX,
