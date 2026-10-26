@@ -2062,6 +2062,22 @@ async function selfTest() {
   assert.deepEqual(notRequired[0].skipped_e2e_only_steps,
     ['rust_toolchain','cargo_build','tmux']);
   assert.equal(notRequired[0].design_gate,'success');
+  // #2478: a positively tooling-only merge really skips the design browser.
+  // The trusted collector accepts that shape only with the explicit scope and
+  // only when GitHub's own step outcome agrees it was skipped.
+  const nrToolingReceipt=makeE2eNotRequiredReceipt({env:nrEnv,sha:nrSha,
+    browserScope:'tooling-only',steps:{...nrSteps,design_gate:'skipped'}});
+  const nrToolingJobs={jobs:[{...nrJobs.jobs[0],steps:nrJobs.jobs[0].steps.map(s=>
+    s.name==='Run canonical browser design gate'?{...s,conclusion:'skipped'}:s)}]};
+  const nrToolingLog=E2E_NOT_REQUIRED_LOG_PREFIX+
+    JSON.stringify(nrToolingReceipt)+'\n';
+  const nrTooling=await collectNotRequiredE2eReceipts(denialRepo,nrSha,[nrRun],
+    async p=>p.includes('/jobs?')?nrToolingJobs:nrRequest(p),async()=>nrToolingLog);
+  assert.equal(nrTooling.length,1);
+  assert.equal(nrTooling[0].browser_scope,'tooling-only');
+  assert.equal(nrTooling[0].design_gate,'skipped');
+  await assert.rejects(()=>collectNotRequiredE2eReceipts(denialRepo,nrSha,[nrRun],
+    nrRequest,async()=>nrToolingLog),/provenance mismatch/);
   // A run where the Rust build actually ran is not a skip.
   await assert.rejects(()=>collectNotRequiredE2eReceipts(denialRepo,nrSha,[nrRun],
     async p=>p.includes('/jobs?')?{jobs:[{...nrJobs.jobs[0],

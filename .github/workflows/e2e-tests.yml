@@ -157,6 +157,73 @@ jobs:
             "$GITHUB_EVENT_PATH" "$GITHUB_WORKSPACE" "$RUNNER_TEMP/issue-e2e/plan.json"
           echo "mode=$(jq -r '.mode' "$RUNNER_TEMP/issue-e2e/plan.json")" >> "$GITHUB_OUTPUT"
 
+      # ── Impact policy (#2478 SC-02/SC-03) ─────────────────────────────
+      # The single deterministic owner of "can this change affect any browser
+      # runtime?" is trusted Main's scripts/e2e-full-applicability.mjs. The
+      # pull-request/pushed tree is untrusted, so only the trusted checkout is
+      # executed; an absent/unverifiable diff fails closed to applicable.
+      # Browsers stay provisioned unless BOTH the trusted Issue plan is
+      # `not-required` AND the diff is positively tooling-only.
+      - name: Classify change impact for browser provisioning
+        id: impact
+        if: github.event_name != 'workflow_dispatch'
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/e2e-scope"
+          applicable=true
+          category=unknown
+          base=''
+          if [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ && "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] &&
+             git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            if [[ "$EVENT_NAME" == 'pull_request' ]]; then
+              # The branch point, not the current base tip: base-side commits
+              # are not this PR's change and must not be classified.
+              base="$(git merge-base "$BASE_SHA" "$HEAD_SHA" 2>/dev/null || true)"
+            else
+              base="$BASE_SHA"
+            fi
+          fi
+          if [[ -n "$base" ]]; then
+            git diff --no-renames --name-only "$base" "$HEAD_SHA" | jq -R . | jq -s . \
+              > "$RUNNER_TEMP/e2e-scope/changed-paths.json"
+            applicable="$(node trusted/scripts/e2e-full-applicability.mjs classify \
+              "$RUNNER_TEMP/e2e-scope/changed-paths.json" \
+              "$RUNNER_TEMP/e2e-scope/classification.json" "$HEAD_SHA")"
+            category="$(jq -r .category "$RUNNER_TEMP/e2e-scope/classification.json")"
+          else
+            echo "[]" > "$RUNNER_TEMP/e2e-scope/changed-paths.json"
+            echo '{"applicable":true,"category":"unknown","reason":"unverifiable-base","target_sha":"'"$HEAD_SHA"'"}' \
+              > "$RUNNER_TEMP/e2e-scope/classification.json"
+          fi
+          plan_mode="${{ steps.selection.outputs.mode }}${{ steps.push-selection.outputs.mode }}"
+          browsers=true
+          if [[ "$applicable" == 'false' && "$plan_mode" == 'not-required' ]]; then
+            browsers=false
+          fi
+          # Keep the decision in the job log and the exact-head artifact: the
+          # Acceptance harness never reads step summaries.
+          echo "impact: applicable=${applicable} category=${category} plan=${plan_mode} browsers=${browsers}"
+          mkdir -p "$RUNNER_TEMP/issue-e2e"
+          cp "$RUNNER_TEMP/e2e-scope/classification.json" \
+            "$RUNNER_TEMP/issue-e2e/e2e-impact.json"
+          {
+            echo "applicable=${applicable}"
+            echo "category=${category}"
+            echo "browsers=${browsers}"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "## E2E impact"
+            echo
+            echo "- Target SHA: \`${HEAD_SHA}\`"
+            echo "- Applicable: \`${applicable}\` (category \`${category}\`)"
+            echo "- Browser provisioning: \`${browsers}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       # ── E2E-only preparation ──────────────────────────────────────────
       # An explicit `not-required` plan skips the Rust build and the full-stack
       # prerequisites below. Every other mode (and every non-PR event) keeps
@@ -181,12 +248,16 @@ jobs:
       # Restore browser cache BEFORE install — a cache hit means the install
       # below skips the download entirely.
       - uses: actions/cache@v4
+        if: steps.impact.outputs.browsers != 'false'
         with:
           path: ~/.cache/ms-playwright
           key: playwright-chromium-${{ runner.os }}-${{ hashFiles('e2e/package-lock.json') }}
 
-      # Install Playwright + Chromium only (skip Firefox/WebKit).
-      - run: |
+      # Install Playwright + Chromium only (skip Firefox/WebKit). A tooling-only
+      # not-required change provisions no browser runtime at all (#2478).
+      - name: Install Playwright and Chromium
+        if: steps.impact.outputs.browsers != 'false'
+        run: |
           cd e2e
           npm ci
           npx playwright install chromium --with-deps
@@ -195,6 +266,7 @@ jobs:
       # npm ci is still required: vite preview and its /api + /ws proxy run
       # from local node_modules. Reusing dist does not replace those packages.
       - name: Install Web preview dependencies
+        if: steps.impact.outputs.browsers != 'false'
         run: cd web && npm ci
 
       # Never expose a GH_TOKEN to PR-head scripts. Only trusted main-push
@@ -204,16 +276,17 @@ jobs:
         id: web-dist
         # A manual full E2E run on the exact current main SHA is a distinct
         # consumer after Quality completion; a branch dispatch never qualifies.
-        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && steps.impact.outputs.browsers != 'false'
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash scripts/ci/try-web-build-reuse.sh "$GITHUB_WORKSPACE" "$GITHUB_SHA"
 
       - name: Build Web on cold/mismatched artifact
-        if: steps.web-dist.outputs.hit != 'true'
+        if: steps.web-dist.outputs.hit != 'true' && steps.impact.outputs.browsers != 'false'
         run: cd web && npm run build
 
       - name: Verify runnable Web preview and proxy parity
+        if: steps.impact.outputs.browsers != 'false'
         run: node scripts/ci/web-preview-parity.mjs .
 
       # Pre-build Rust binaries so the webServer startup is fast and the
@@ -236,9 +309,15 @@ jobs:
       # #1866 SC-01: the browser profile renders client-side fixtures, so it
       # runs on a web-only runtime. That is what lets a `not-required` plan
       # skip the Rust build while the required design gate still executes.
+      #
+      # #2478 SC-02: a change the trusted impact policy positively classifies
+      # as tooling-only cannot affect browser behavior, so it provisions no
+      # browser at all. The not-required receipt records that skip explicitly
+      # (`browser_scope: tooling-only`); every other not-required plan still
+      # runs this gate and must attest its success.
       - name: Run canonical browser design gate (standalone)
         id: design
-        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots == true) || (steps.selection.outputs.mode == 'not-required' || steps.push-selection.outputs.mode == 'not-required') }}
+        if: ${{ steps.impact.outputs.browsers != 'false' && ((github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots == true) || (steps.selection.outputs.mode == 'not-required' || steps.push-selection.outputs.mode == 'not-required')) }}
         env:
           CI: true
           E2E_RUNTIME_WEB_ONLY: '1'
@@ -371,9 +450,12 @@ jobs:
                   --provisions "$provisions" ;;
               not-required)
                 # GitHub's own step outcomes prove the skip; the receipt is
-                # the only channel the Acceptance harness can read.
+                # the only channel the Acceptance harness can read. A
+                # tooling-only impact is the ONLY scope allowed to record a
+                # skipped design gate (#2478); every other plan must show it ran.
                 node scripts/e2e-selected-run-receipt.mjs emit-not-required \
                   --sha "$(git rev-parse HEAD)" \
+                  --browser-scope "${{ steps.impact.outputs.browsers == 'false' && 'tooling-only' || 'required' }}" \
                   --rust "${{ steps.rust.outcome }}" \
                   --cargo "${{ steps.rust-build.outcome }}" \
                   --tmux "${{ steps.tmux.outcome }}" \
@@ -486,7 +568,7 @@ jobs:
 
       # ── Report ────────────────────────────────────────────────────────
       - uses: actions/upload-artifact@v4
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.impact.outputs.browsers != 'false' }}
         with:
           name: playwright-report
           path: e2e/playwright-report/

@@ -40,6 +40,15 @@ run (#2467). The pin is a deliberate, temporary compatibility boundary until
 that work is done; removing it is a migration that must prove the full
 Rust/CI suite on the new image, not a cleanup.
 
+## Browser impact policy
+
+`scripts/e2e-full-applicability.mjs` is the single owner of "can this change
+affect a browser runtime?". `e2e-full-regression.yml` and `e2e-tests.yml`
+consume its classification; do not add a second path catalog to workflow YAML.
+Only a positively tooling-only diff, together with a trusted `not-required`
+Issue plan, may skip browser provisioning. Unknown, mixed and unverifiable
+diffs fail closed to applicable (#2478).
+
 ## Change discipline
 
 Workflow changes happen in a worktree and receive the same Gate/review treatment as code. Preserve concurrency/cancellation semantics deliberately; do not add broad retries that hide deterministic failures.
