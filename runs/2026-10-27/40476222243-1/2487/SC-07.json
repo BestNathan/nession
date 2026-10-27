@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "077f680dabbaaf1fa98e0857eb01e23e7b9f1bba24a6ac687a20b38233483348",
+  "run_id": 40476222243,
+  "run_attempt": 1,
+  "issue": 2487,
+  "criterion": "SC-07",
+  "criterion_text": "Two optional build-time settings independently select the fixed terminal columns and Web preferred/max CSS font size without source changes; omitted values use approved defaults, invalid inputs fail the build, and Web/mobile use the same embedded cols while existing Sessions never silently change width.",
+  "stage": "staging",
+  "target_sha": "a1f37afcb3987019a59e08be00621a420fbc9bde",
+  "contract_sha256": "b991b4952792cad8f6877fe3f0aceabf46a5eedb8366a2e40e2d73a718b6f523",
+  "case_revision": "a1f37afcb3987019a59e08be00621a420fbc9bde",
+  "case_tree_sha": "c4e5ca3c54987240c8a05e214b47e0998bc933c8",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-27T08:52:59.404Z",
+  "finished_at": "2026-10-27T08:54:28.819Z",
+  "duration_ms": 89415,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Two optional build inputs independently select columns and the Web maximum font; defaults and fail-fast cases are proven by real builds",
+      "evidence": [
+        {
+          "type": "build",
+          "value": "exact SHA a1f37afcb3987019a59e08be00621a420fbc9bde: isolated Web builds emitted 80/13, 96/14 and default 80/14 via WEB_TERMINAL_CONFIG_V1; both inputs report source=\"env\" only when supplied"
+        },
+        {
+          "type": "build",
+          "value": "VITE_NESSION_TERMINAL_COLS=0 and VITE_NESSION_TERMINAL_WEB_FONT_SIZE=14px each failed the build visibly and produced no index.html"
+        },
+        {
+          "type": "test",
+          "value": "a font-only change (12px vs 18px at cols=96) changed only web_max_font_size; the shared terminalConfig unit tests passed and no mobile columns value exists"
+        }
+      ],
+      "duration_ms": 83562,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40476222243,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "a1f37afcb3987019a59e08be00621a420fbc9bde",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40476222243",
+    "record_path": "runs/2026-10-27/40476222243-1/2487/SC-07.json",
+    "source_result_sha256": "d41bc39735c2b61b90ba323cbac93ce576605e1ca6a4abec6df350f81817386c"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40476222243-1",
+    "sha256": "d41bc39735c2b61b90ba323cbac93ce576605e1ca6a4abec6df350f81817386c",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40476222243",
+    "durability": "time-limited; object archival not configured"
+  }
+}
