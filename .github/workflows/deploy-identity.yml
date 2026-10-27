@@ -69,39 +69,45 @@ jobs:
 
       - name: Validate CI secret availability (values never printed)
         env:
-          WG_CI_CONF: ${{ secrets.WG_CI_CONF }}
+          GOST_RELAY_URL: ${{ secrets.GOST_RELAY_URL }}
           KUBE_CONFIG_CI: ${{ secrets.KUBE_CONFIG_CI }}
         shell: bash
         run: |
           set -euo pipefail
-          [[ -n "${WG_CI_CONF:-}" ]] || { echo "::error::WG_CI_CONF unavailable as repository-level secret"; exit 1; }
+          [[ -n "${GOST_RELAY_URL:-}" ]] || { echo "::error::GOST_RELAY_URL unavailable as repository-level secret"; exit 1; }
           [[ -n "${KUBE_CONFIG_CI:-}" ]] || { echo "::error::KUBE_CONFIG_CI unavailable as repository-level secret"; exit 1; }
           echo "Both CI secrets are non-empty and available to this job. No secret values logged."
 
-      - name: Install WireGuard and kubectl client
+      - name: Install gost and check kubectl client
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq wireguard-tools
+          # Pinned to the server-side gost major.minor (relay+wss protocol).
+          curl -sSL --retry 3 -o /tmp/gost.tgz https://github.com/go-gost/gost/releases/download/v3.0.0/gost_3.0.0_linux_amd64.tar.gz
+          tar -xzf /tmp/gost.tgz -C /tmp gost
+          chmod +x /tmp/gost
           command -v kubectl >/dev/null || { echo "::error::kubectl not installed on runner"; exit 1; }
 
-      - name: Establish WireGuard tunnel (do not expose configuration)
+      - name: Establish gost tunnel via HK relay (do not expose configuration)
         env:
-          WG_CI_CONF: ${{ secrets.WG_CI_CONF }}
+          GOST_RELAY_URL: ${{ secrets.GOST_RELAY_URL }}
         shell: bash
         run: |
           set -euo pipefail
-          umask 077
-          sudo install -m 600 /dev/null /etc/wireguard/ci.conf
-          if [[ "$WG_CI_CONF" == *'[Interface]'* ]]; then
-            printf '%s\n' "$WG_CI_CONF" | sudo tee /etc/wireguard/ci.conf >/dev/null
-          else
-            printf '%s' "$WG_CI_CONF" | base64 -d | sudo tee /etc/wireguard/ci.conf >/dev/null
-          fi
-          sudo chmod 600 /etc/wireguard/ci.conf
-          sudo wg-quick up ci
-          echo "WireGuard interface activated (key and peer configuration redacted)."
+          # The CI kubeconfig targets https://192.168.2.162:6443. Alias that
+          # address onto lo so the API-server TLS SAN check passes unchanged,
+          # then forward it through the authenticated relay+wss entry on HK.
+          sudo ip addr add 192.168.2.162/32 dev lo
+          sudo nohup /tmp/gost -L tcp://192.168.2.162:6443/192.168.2.162:6443 -F "$GOST_RELAY_URL" >/tmp/gost-ci.log 2>&1 &
+          for i in $(seq 1 15); do
+            if curl -sk -m 2 https://192.168.2.162:6443/healthz >/dev/null 2>&1; then
+              echo "gost tunnel to the k8s API is up (relay endpoint redacted)."
+              exit 0
+            fi
+            sleep 2
+          done
+          sed -E 's#//[^/@]*@#//<redacted>@#g' /tmp/gost-ci.log || true
+          echo "::error::gost tunnel to the k8s API is not ready"; exit 1
 
       - name: Verify read-only Kubernetes identity
         env:
@@ -187,11 +193,11 @@ jobs:
           path: ${{ runner.temp }}/deployment-attestation.json
           retention-days: 90
 
-      - name: Remove temporary VPN and kubeconfig
+      - name: Remove temporary tunnel and kubeconfig
         if: always()
         shell: bash
         run: |
-          sudo wg-quick down ci >/dev/null 2>&1 || true
-          sudo rm -f /etc/wireguard/ci.conf
+          sudo pkill -f 'gost -L tcp://192.168.2.162:6443' >/dev/null 2>&1 || true
+          sudo ip addr del 192.168.2.162/32 dev lo >/dev/null 2>&1 || true
           rm -f "$RUNNER_TEMP/nession-ci-kubeconfig"
-          echo "Temporary VPN and kubeconfig files cleared."
+          echo "Temporary tunnel and kubeconfig files cleared."
