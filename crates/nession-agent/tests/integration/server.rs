@@ -636,9 +636,18 @@ async fn integration_standalone_agent_uses_its_configured_columns() {
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+    // TEMP DIAGNOSTIC (not for merge): the runner's tmux and the pane it made.
+    let tmux_version = tmux
+        .tmux_dep()
+        .ops()
+        .version()
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "<unknown>".to_string());
     assert_eq!(
         pane.0, configured,
-        "the standalone Agent's width must apply"
+        "the standalone Agent's width must apply (tmux: {tmux_version}, pane: {pane:?})"
     );
 
     let attach = ClientAttachPayload {
