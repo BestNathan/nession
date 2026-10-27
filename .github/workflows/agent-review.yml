@@ -43,7 +43,7 @@ jobs:
         github.actor == 'BestNathan' ||
         (github.event_name == 'workflow_dispatch' && github.actor == 'github-actions[bot]')
       )
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
       environment: ${{ steps.identity.outputs.environment }}
@@ -126,7 +126,7 @@ jobs:
 
   review:
     needs: prepare
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: ${{ needs.prepare.outputs.environment }}
     steps:

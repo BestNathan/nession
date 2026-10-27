@@ -249,6 +249,22 @@ pub struct TerminalBootstrapPayload {
     /// is not a replayable event and consumes no stream sequence number.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub through_seq: Option<u64>,
+    /// The pane's screen width the capture was taken from.
+    ///
+    /// A capture is a **screen reconstruction**, and its trailing absolute
+    /// caret addresses a row on the pane's screen (`pane_rows` rows high, the
+    /// row `cursor_y`). A renderer that has not measured the Session yet — a
+    /// reloaded page before its first layout pass — must adopt this geometry
+    /// **before** parsing the bytes. Written at a taller placeholder size, the
+    /// caret lands above the end of the buffer it just wrote, and xterm's
+    /// row-shrink reflow drops every line below the cursor: the snapshot's
+    /// newest history disappears (#2483). Absent means the provider did not
+    /// state it; a legacy client keeps its own size.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_cols: Option<u16>,
+    /// The pane's screen height the capture was taken from; see `pane_cols`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_rows: Option<u16>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]

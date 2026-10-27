@@ -586,6 +586,10 @@ fn atomic_prefix_payload(session_name: &str, prefix: &AtomicOutputPrefix) -> Ter
             fidelity: Some(TerminalCheckpointFidelity::Partial),
             stream_epoch: Some(prefix.stream_epoch),
             through_seq: Some(prefix.through_seq),
+            // A byte replay, not a screen: it names no capture geometry, and
+            // the client must not adopt one for it (#2483).
+            pane_cols: None,
+            pane_rows: None,
         }),
     }
 }
@@ -638,12 +642,18 @@ enum BootstrapCut {
 /// Fidelity and truncation describe the **screen** and remain independent of
 /// the cut: a truncated epoch-start capture still proves that no stream event
 /// precedes it, and never becomes a full-VT claim.
+///
+/// `screen` is the pane's `(cols, rows)`; the capture is a reconstruction of
+/// that screen, and the payload states it so a renderer that has not measured
+/// the session can adopt it before parsing (#2483). `None` when the size could
+/// not be read, and the marker then names no geometry rather than a guess.
 fn bootstrap_payload(
     session_name: &str,
     bytes: Vec<u8>,
     truncated: bool,
     fidelity: TerminalCheckpointFidelity,
     cut: BootstrapCut,
+    screen: Option<(u16, u16)>,
 ) -> TerminalOutputPayload {
     use base64::Engine;
     let (cut_consistency, stream_epoch, through_seq) = match cut {
@@ -667,6 +677,8 @@ fn bootstrap_payload(
             fidelity: Some(fidelity),
             stream_epoch,
             through_seq,
+            pane_cols: screen.map(|(cols, _)| cols),
+            pane_rows: screen.map(|(_, rows)| rows),
         }),
     }
 }
@@ -705,6 +717,20 @@ async fn send_bootstrap(
         Ok(position) => Some(position),
         Err(e) => {
             warn!("bootstrap: pane cursor for {session_name} failed: {e:#}");
+            None
+        }
+    };
+    // The screen the capture reconstructs. The snapshot's trailing absolute
+    // caret addresses a row on **this** screen, so a client that has not
+    // measured the session yet must adopt it before parsing: written at a
+    // taller placeholder size, the caret lands above the end of the buffer and
+    // a later row-shrink reflow drops every line below it — the snapshot's
+    // newest history (#2483). A failed read costs the geometry, not the text;
+    // the marker then states none rather than a guess.
+    let screen = match tmux.ops().window_size(session_name).await {
+        Ok(size) => Some(size),
+        Err(e) => {
+            warn!("bootstrap: pane size for {session_name} failed: {e:#}");
             None
         }
     };
@@ -757,6 +783,7 @@ async fn send_bootstrap(
         bounded.truncated,
         tmux_capture_fidelity(bounded.truncated, modes_complete, place_cursor.is_some()),
         cut,
+        screen,
     );
     let msg = new_message(msg_types::TERMINAL_OUTPUT, payload);
     let Ok(json) = serde_json::to_string(&msg) else {
@@ -3518,6 +3545,7 @@ mod tests {
             false,
             TerminalCheckpointFidelity::ScreenOnly,
             BootstrapCut::AtomicEpochStart { stream_epoch: 42 },
+            Some((80, 24)),
         );
         // The bootstrap is not itself a stream event: its position lives only
         // in the marker, while the first live event after it is seq 1.
@@ -3535,6 +3563,11 @@ mod tests {
         );
         assert_eq!(bootstrap.stream_epoch, Some(42));
         assert_eq!(bootstrap.through_seq, Some(0));
+        assert_eq!(
+            (bootstrap.pane_cols, bootstrap.pane_rows),
+            (Some(80), Some(24)),
+            "the capture states the screen its absolute caret addresses (#2483)"
+        );
     }
 
     #[test]
@@ -3545,6 +3578,7 @@ mod tests {
             true,
             TerminalCheckpointFidelity::Partial,
             BootstrapCut::AtomicEpochStart { stream_epoch: 7 },
+            Some((120, 16)),
         );
         let bootstrap = payload.bootstrap.expect("bootstrap marker");
         // Truncation describes the screen snapshot. No stream event precedes
@@ -3570,8 +3604,14 @@ mod tests {
             false,
             TerminalCheckpointFidelity::ScreenOnly,
             BootstrapCut::Unverified,
+            None,
         );
         let bootstrap = payload.bootstrap.expect("bootstrap marker");
+        assert_eq!(
+            (bootstrap.pane_cols, bootstrap.pane_rows),
+            (None, None),
+            "a size that could not be read is named as unknown, never guessed"
+        );
         assert_eq!(
             bootstrap.cut_consistency,
             Some(TerminalCheckpointCutConsistency::Unverified)

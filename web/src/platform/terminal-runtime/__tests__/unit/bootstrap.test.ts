@@ -44,6 +44,25 @@ describe('decodeBootstrapMarker', () => {
       truncated: true,
     });
   });
+
+  it('reads the screen a capture came from, and only both dimensions together (#2483)', () => {
+    // The snapshot's trailing absolute caret addresses a row on the pane's
+    // screen; a renderer adopts this geometry before parsing it. Half a
+    // geometry is not a size a renderer may adopt, and an implausible one is a
+    // malformed frame rather than a screen.
+    expect(decodeBootstrapMarker({
+      requested_lines: 5000, truncated: false, pane_cols: 80, pane_rows: 16,
+    })).toEqual({ requestedLines: 5000, truncated: false, paneCols: 80, paneRows: 16 });
+    expect(decodeBootstrapMarker({
+      requested_lines: 5000, truncated: false, pane_cols: 80,
+    })).toEqual({ requestedLines: 5000, truncated: false });
+    expect(decodeBootstrapMarker({
+      requested_lines: 5000, truncated: false, pane_cols: 80, pane_rows: 0,
+    })).toEqual({ requestedLines: 5000, truncated: false });
+    expect(decodeBootstrapMarker({
+      requested_lines: 5000, truncated: false, pane_cols: 80, pane_rows: 100_000,
+    })).toEqual({ requestedLines: 5000, truncated: false });
+  });
 });
 
 describe('P2 checkpoint cut and fidelity cannot be conflated (#2008)', () => {

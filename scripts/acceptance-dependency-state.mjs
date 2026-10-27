@@ -141,6 +141,8 @@ function selfTest() {
   const defer={name:'defer-pre-merge',conclusion:'cancelled'};
   const jobs=(list)=>({total_count:list.length,jobs:list});
   assert.equal(isDeferredRun(jobs([prepare,defer]),deferredRun,sha),true);
+  assert.equal(isDeferredRun(jobs([prepare,{...defer,conclusion:'success'}]),deferredRun,sha),true,
+    'an accepted cancellation ends the defer job successfully (#2323)');
   assert.equal(isDeferredRun(jobs([prepare,{...defer,conclusion:'skipped'}]),deferredRun,sha),false,
     'a skipped defer job did not defer');
   assert.equal(isDeferredRun(jobs([{...prepare,conclusion:'failure'},defer]),deferredRun,sha),false,

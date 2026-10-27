@@ -17,6 +17,9 @@ gate_check() {
   gate_run_invariant node e2e/runner/selected-report.mjs self-test
   gate_run_invariant node e2e/runner/e2e-full-per-id-receipt.mjs self-test
   gate_run_invariant node scripts/e2e-regression-policy.mjs self-test && node scripts/e2e-full-applicability.mjs self-test
+  # #2478 SC-05: Main-push selected evidence may reuse the exact-SHA Full
+  # per-ID report; prove exact-run selection and per-ID coverage fail closed.
+  gate_run_invariant node scripts/ci/reuse-full-selected-evidence.mjs self-test
   gate_run_invariant node scripts/verification-full-regression-evidence.mjs self-test
   #2327 duplicate analysis policy fixture
   gate_run_invariant node scripts/e2e-failure-admission.mjs self-test

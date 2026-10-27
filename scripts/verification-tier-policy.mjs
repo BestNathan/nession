@@ -47,7 +47,12 @@ export function assessChangedPaths(paths) {
   const components = new Set();
   let unknown = false;
   for (const p of paths) {
-    if (/^(docs\/|\.claude\/|README\.md$|CHANGELOG\.md$)/.test(p)) continue;
+    // Repository documentation is not a runtime/build input wherever it lives.
+    // The canonical instruction files include `.github/AGENTS.md` (with its
+    // CLAUDE.md compatibility link); leaving them unclassified made every
+    // merged PR that touched scope guidance fail the merge-selection audit
+    // even though it could not affect E2E (#2478).
+    if (/^(docs\/|\.claude\/|README\.md$|CHANGELOG\.md$|\.github\/[^/]+\.md$)/.test(p)) continue;
     if (/^crates\/nession-(agent|server|protocol|common)\//.test(p)) {
       components.add('agent-server-protocol');
     } else if (/^web\//.test(p)) {
@@ -136,6 +141,14 @@ function selfTest() {
   assert.equal(assessChangedPaths(['pages/scripts/build.mjs','e2e/helpers/pagesStandalone.ts']).floor,
     VERIFICATION_TIERS[1]);
   assert.equal(assessChangedPaths(['unmapped/file']).needsAudit, true);
+  // Scope documentation under .github/ is documentation, not an audited path.
+  assert.equal(assessChangedPaths(['.github/AGENTS.md']).needsAudit, false);
+  assert.deepEqual(assessChangedPaths(['.github/AGENTS.md']).components, []);
+  assert.equal(assessChangedPaths(['.github/AGENTS.md', '.github/CLAUDE.md']).floor,
+    VERIFICATION_TIERS[0]);
+  // Non-documentation governance files still fail closed.
+  assert.equal(assessChangedPaths(['.github/CODEOWNERS']).needsAudit, true);
+  assert.equal(assessChangedPaths(['.github/ISSUE_TEMPLATE/bug.md']).needsAudit, true);
   assert.throws(() => assessChangedPaths([]), /unverified/);
   const parent = issue(1645, VERIFICATION_TIERS[2]);
   const child = issue(1953, VERIFICATION_TIERS[0]);

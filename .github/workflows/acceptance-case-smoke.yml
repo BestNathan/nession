@@ -30,7 +30,7 @@ concurrency:
 
 jobs:
   case-smoke:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 70
     env:
       RUSTC_WRAPPER: ""

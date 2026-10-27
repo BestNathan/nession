@@ -29,7 +29,7 @@ concurrency:
 
 jobs:
   execute:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
       SOURCE_SHA: ${{ github.event_name == 'push' && github.sha || inputs.source_sha }}

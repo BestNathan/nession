@@ -34,7 +34,7 @@ concurrency:
 
 jobs:
   contract:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       issues: read
@@ -232,7 +232,7 @@ jobs:
     if: >-
       (needs.contract.outputs.needs_agent == 'true' && needs.contract.outputs.allow_agent == 'true') ||
       (github.event_name == 'workflow_dispatch' && inputs.simulate_missing_provider_config == true)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: ${{ needs.contract.outputs.mode == 'tree' && 60 || 20 }}
     environment: ${{ needs.contract.outputs.environment }}
     permissions:
