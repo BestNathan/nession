@@ -1,5 +1,5 @@
 'use strict';
-// Browser/snapshot parity must be checked against pinned pre-migration blob IDs;
+// Browser/snapshot parity must be checked against the approved baseline blob IDs;
 // this verifier additionally talks to the running exact-SHA production Web.
 const assert=require('node:assert/strict');
 const fs=require('node:fs');

@@ -1093,7 +1093,10 @@ async fn a_plain_bootstrap_restores_a_caret_the_pane_left_on_an_empty_row() {
     let tmux = SessionManager::new();
     let session = TestSession::new("plain-caret");
     let session_name = session.name().to_string();
-    tmux.create_session(&session_name, 80, 24, "/tmp", &[])
+    // A wide starting pane keeps the fixture's command on one line: the test
+    // is about the caret row the bootstrap restores, not about wrapping. The
+    // width is explicit because `create_session` now honours it (#2487).
+    tmux.create_session(&session_name, 200, 24, "/tmp", &[])
         .await
         .unwrap();
 
