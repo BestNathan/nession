@@ -31,6 +31,13 @@ jobs:
       rust_version: ${{ steps.check.outputs.rust_version }}
       web_version: ${{ steps.check.outputs.web_version }}
       short_sha: ${{ steps.check.outputs.short_sha }}
+      terminal_cols: ${{ steps.check.outputs.terminal_cols }}
+      terminal_web_font_size: ${{ steps.check.outputs.terminal_web_font_size }}
+    env:
+      # One release-level source (#2487). Production has its own scope, then
+      # the shared variable, then the approved default.
+      RELEASE_TERMINAL_COLS: ${{ vars.PRODUCTION_TERMINAL_COLS || vars.NESSION_TERMINAL_COLS || '88' }}
+      RELEASE_TERMINAL_WEB_FONT_SIZE: ${{ vars.PRODUCTION_TERMINAL_WEB_FONT_SIZE || vars.NESSION_TERMINAL_WEB_FONT_SIZE || '14' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -57,6 +64,8 @@ jobs:
           echo "rust_version=${RUST_VER}" >> $GITHUB_OUTPUT
           echo "web_version=${WEB_VER}" >> $GITHUB_OUTPUT
           echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "terminal_cols=${RELEASE_TERMINAL_COLS}" >> $GITHUB_OUTPUT
+          echo "terminal_web_font_size=${RELEASE_TERMINAL_WEB_FONT_SIZE}" >> $GITHUB_OUTPUT
 
           # Strictly greater, by version order. `sort -V` handles the component
           # widths that string comparison gets wrong (`0.9.0` vs `0.10.0`).
@@ -209,6 +218,9 @@ jobs:
           cache: 'npm'
           cache-dependency-path: web/package-lock.json
       - run: cd web && npm ci && npm run build
+        env:
+          VITE_NESSION_TERMINAL_COLS: ${{ needs.version-check.outputs.terminal_cols }}
+          VITE_NESSION_TERMINAL_WEB_FONT_SIZE: ${{ needs.version-check.outputs.terminal_web_font_size }}
       - uses: actions/upload-artifact@v4
         with:
           name: web-dist
@@ -410,6 +422,9 @@ jobs:
           tags: ${{ env.IMG }}:server-${{ env.RUST_VER }}-amd64
           cache-from: type=gha,scope=nession-build-amd64
           cache-to: type=gha,scope=nession-build-amd64,mode=min
+          build-args: |
+            NESSION_TERMINAL_COLS=${{ needs.version-check.outputs.terminal_cols }}
+            NESSION_TERMINAL_WEB_FONT_SIZE=${{ needs.version-check.outputs.terminal_web_font_size }}
           build-contexts: |
             server-bin=/tmp/server-bin
             web-dist=/tmp/web-dist
@@ -445,6 +460,8 @@ jobs:
           tags: ${{ env.IMG }}:agent-${{ env.RUST_VER }}-amd64
           cache-from: type=gha,scope=nession-build-amd64
           cache-to: type=gha,scope=nession-build-amd64,mode=min
+          build-args: |
+            NESSION_TERMINAL_COLS=${{ needs.version-check.outputs.terminal_cols }}
           build-contexts: |
             agent-bin=/tmp/agent-bin
             web-dist=/tmp/web-dist
@@ -513,6 +530,9 @@ jobs:
           tags: ${{ env.IMG }}:server-${{ env.RUST_VER }}-arm64
           cache-from: type=gha,scope=nession-build-arm64
           cache-to: type=gha,scope=nession-build-arm64,mode=min
+          build-args: |
+            NESSION_TERMINAL_COLS=${{ needs.version-check.outputs.terminal_cols }}
+            NESSION_TERMINAL_WEB_FONT_SIZE=${{ needs.version-check.outputs.terminal_web_font_size }}
           build-contexts: |
             server-bin=/tmp/server-bin
             web-dist=/tmp/web-dist
@@ -548,6 +568,8 @@ jobs:
           tags: ${{ env.IMG }}:agent-${{ env.RUST_VER }}-arm64
           cache-from: type=gha,scope=nession-build-arm64
           cache-to: type=gha,scope=nession-build-arm64,mode=min
+          build-args: |
+            NESSION_TERMINAL_COLS=${{ needs.version-check.outputs.terminal_cols }}
           build-contexts: |
             agent-bin=/tmp/agent-bin
             web-dist=/tmp/web-dist
