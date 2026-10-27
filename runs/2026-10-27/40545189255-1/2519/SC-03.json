@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "03089b5166728ede0cbd94aaf7f8296376434faa9f4ba24fb1ec74f256615efa",
+  "run_id": 40545189255,
+  "run_attempt": 1,
+  "issue": 2519,
+  "criterion": "SC-03",
+  "criterion_text": "A new prototype added to the orphan branch is discoverable in the public Pages manifest and standalone HTML after the event-driven publication, with HTTPS readback matching the published source SHA.",
+  "stage": "post-merge",
+  "target_sha": "5eaaf7cc9e20a9fc0086f5c0fffda1ef8aa06a47",
+  "contract_sha256": "8b37a13beb056ec2b6f32b91eaa70076be14e52003b769beef52e88bf271f74a",
+  "case_revision": "5eaaf7cc9e20a9fc0086f5c0fffda1ef8aa06a47",
+  "case_tree_sha": "8edf612e1dbbdaf0789d29577e33331fc216e5be",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Fail",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-27T16:54:31.527Z",
+  "finished_at": "2026-10-27T16:54:37.700Z",
+  "duration_ms": 6173,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Fail",
+      "summary": "Command failed: git merge-base --is-ancestor 2c90a55508c1e2a886fb88ce1e4a117bcfc1d4bb 5eaaf7cc9e20a9fc0086f5c0fffda1ef8aa06a47\nfatal: Not a valid commit name 2c90a55508c1e2a886fb88ce1e4a117bcfc1d4bb",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "#2519 post-merge source signal, trusted Pages Run, or anonymous HTTPS readback was not verified"
+        }
+      ],
+      "duration_ms": 336,
+      "exit_code": 1,
+      "stderr": "fatal: Not a valid commit name 2c90a55508c1e2a886fb88ce1e4a117bcfc1d4bb"
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40545189255,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "5eaaf7cc9e20a9fc0086f5c0fffda1ef8aa06a47",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40545189255",
+    "record_path": "runs/2026-10-27/40545189255-1/2519/SC-03.json",
+    "source_result_sha256": "14409058f2b37259d75d7754231ecde1ad439763d110ceaaf31c92676bb92c14"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40545189255-1",
+    "sha256": "14409058f2b37259d75d7754231ecde1ad439763d110ceaaf31c92676bb92c14",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40545189255",
+    "durability": "time-limited; object archival not configured"
+  }
+}
