@@ -660,6 +660,25 @@ async fn integration_standalone_agent_uses_its_configured_columns() {
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+    if pane.0 != configured {
+        // The pane is the application-visible truth, so a failure here has to
+        // say what tmux actually holds: the session the query resolved and
+        // every other session on the socket are the two answers that separate
+        // "the configured width did not apply" from "the read found another
+        // session" (observed once on a loaded runner).
+        let sessions = match tmux.tmux_dep().ops().list_sessions().await {
+            Ok(list) => list
+                .into_iter()
+                .map(|s| format!("{}={}x{}", s.name, s.width, s.height))
+                .collect::<Vec<_>>()
+                .join(", "),
+            Err(error) => format!("<list-sessions failed: {error:#}>"),
+        };
+        panic!(
+            "the standalone Agent's width must apply: pane={pane:?} \
+             configured={configured} session={session_name} sessions=[{sessions}]"
+        );
+    }
     assert_eq!(
         pane.0, configured,
         "the standalone Agent's width must apply"
