@@ -259,17 +259,19 @@ impl SessionManager {
         self.sdk_ops().display_message(session_name, format).await
     }
 
-    /// Create a new detached tmux session at [`SESSION_WIDTH`] × [`SESSION_HEIGHT`].
+    /// Create a new detached tmux session at `width` × `height`.
     ///
-    /// The `_width` and `_height` parameters are ignored — every session starts
-    /// at the same size, and the first client to attach resizes it from there.
+    /// `width` is the release-selected fixed column count (#2487): the caller
+    /// arrives with the Server's value (relayed create) or this Agent's
+    /// configuration (a direct/standalone caller). It is validated rather than
+    /// clamped, so a bad caller is told instead of silently given a different
+    /// grid. `height` is the initial pane height; the first client to attach
+    /// replaces it with its measured rows.
     ///
     /// There is deliberately **no per-client viewport**: the session has one
-    /// window and one pane, and a resize by any attached client moves it for
-    /// all of them. A second client attaching to a session already at 120×40
-    /// does not get its own 80×24 — it watches that client's resizes and
-    /// resizes it in turn. Last write wins; there is no arbitration
-    /// (`2026-08-15-viewport-fit-terminal-migration-design.md` §2).
+    /// window and one pane, and a row resize by the controller moves it for
+    /// all of them. Width, once chosen here or by the pane that already
+    /// exists, is the Session's authority and is enforced on resize.
     ///
     /// `window-size` is left at tmux's default (`latest`) so that clients can
     /// resize the window at all; locking it would freeze the pane at the
@@ -328,11 +330,12 @@ impl SessionManager {
     async fn create_session_impl(
         &self,
         name: &str,
-        _width: u16,
-        _height: u16,
+        width: u16,
+        height: u16,
         working_dir: &str,
         env: &[(String, String)],
     ) -> Result<()> {
+        nession_common::config::validate_terminal_cols(width).map_err(anyhow::Error::msg)?;
         // History depth needs nothing here: it travels as `-f` on every tmux
         // invocation this manager makes (`cmd.rs`), so whichever one starts the
         // server installs it before the window below exists.
@@ -368,8 +371,8 @@ impl SessionManager {
             .new_session(&nession_tmux::ops::NewSession {
                 name: name.to_string(),
                 working_dir: working_dir.to_string(),
-                width: SESSION_WIDTH,
-                height: SESSION_HEIGHT,
+                width,
+                height,
                 env: session_env,
             })
             .await?;

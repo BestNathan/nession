@@ -108,6 +108,11 @@ impl ConnectionHandler {
                     // that says 80×24 — see the note on the CLI's `--width`.
                     "width": 80,
                     "height": 24,
+                    // The fixed column count this release selects (#2487).
+                    // The Agent validates and creates at this width; the
+                    // `width` above remains for an Agent built before the
+                    // field existed and is ignored by a current one.
+                    "terminal_cols": self.config.terminal_cols,
                     "working_dir": working_dir,
                     "env_snapshots": env_snapshots,
                 }),

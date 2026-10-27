@@ -54,7 +54,8 @@ const expectedSpecs = migration.specs.filter(name => name !== 'conversation-acce
 assert.deepEqual(foundSpecs, expectedSpecs, 'regression spec dropped or drifted during semantic split');
 assert.equal(catalog.browserTests, expectedSpecs.length, 'catalog may not silently omit specs');
 const snapshotRoot = path.join(browserRoot, '__snapshots__');
-// Original #1512 blob SHAs must remain byte-for-byte despite a file-ID split.
+// The manifest pins the current approved baseline bytes. They move only with a canonical
+// `--update-snapshots=all` run and the matching manifest update; a file-ID split must not.
 const visualDir = name => /^web-compact-/.test(name) ? 'fixture-visual-web-compact.spec.ts'
   : /^app-.*-375-linux\.png$/.test(name) ? 'fixture-visual-app-compact.spec.ts'
   : /^app-.*-844x390-linux\.png$/.test(name) ? 'fixture-visual-app-landscape.spec.ts'

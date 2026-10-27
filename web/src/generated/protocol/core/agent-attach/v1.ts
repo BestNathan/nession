@@ -120,7 +120,18 @@ subscriber_generation?: number | null,
  * the pending bytes landed is gone, and its answer died with it. A client
  * must not replay that input automatically.
  */
-input_epoch?: number | null, input_applied_through?: number | null, };
+input_epoch?: number | null, input_applied_through?: number | null, 
+/**
+ * The Session's authoritative fixed column count (#2487).
+ *
+ * The Agent owns the tmux pane and therefore the Session's width. A
+ * client whose build embedded a different value renders this grid rather
+ * than resizing the shared pane: only rows follow the active client's
+ * viewport. Absent from an Agent built before this field, in which case
+ * the client keeps its own build configuration and the Agent still
+ * ignores any column change on resize.
+ */
+terminal_cols?: number | null, };
 export type EnvSnapshot = { name: string, source: EnvSource, agent_id?: string | null, 
 /**
  * Ordered KEY/VALUE pairs (already deduplicated, last-wins).
@@ -236,5 +247,16 @@ subscriber_generation?: number | null,
  * the pending bytes landed is gone, and its answer died with it. A client
  * must not replay that input automatically.
  */
-input_epoch?: number | null, input_applied_through?: number | null, };
+input_epoch?: number | null, input_applied_through?: number | null, 
+/**
+ * The Session's authoritative fixed column count (#2487).
+ *
+ * The Agent owns the tmux pane and therefore the Session's width. A
+ * client whose build embedded a different value renders this grid rather
+ * than resizing the shared pane: only rows follow the active client's
+ * viewport. Absent from an Agent built before this field, in which case
+ * the client keeps its own build configuration and the Agent still
+ * ignores any column change on resize.
+ */
+terminal_cols?: number | null, };
 

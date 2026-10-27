@@ -2,6 +2,92 @@ use serde::{Deserialize, Serialize};
 
 use crate::logging::LoggingConfig;
 
+/// Canonical fixed terminal width (#2487).
+///
+/// One value is the *product* default for a new Session across Web and App.
+/// It is not a per-client viewport: an existing Session keeps the width its
+/// tmux pane already has, and the Agent refuses to change it through an
+/// ordinary resize. A release embeds the same selected value into the Web
+/// bundle and the Server/Agent runtime configuration (see
+/// `docs/design/terminal/terminal-sizing.md`).
+pub const DEFAULT_TERMINAL_COLS: u16 = 80;
+
+/// The smallest accepted fixed column count. Below this a terminal is no
+/// longer a usable text surface (20 columns fits a command name and a path).
+pub const MIN_TERMINAL_COLS: u16 = 20;
+
+/// The largest accepted fixed column count. Growth beyond this belongs in a
+/// different sizing policy, not a wider release default.
+pub const MAX_TERMINAL_COLS: u16 = 400;
+
+/// The Web terminal's default preferred/maximum CSS font size (#2487).
+pub const DEFAULT_TERMINAL_WEB_FONT_SIZE: f64 = 14.0;
+/// The smallest accepted Web terminal font size, in CSS px.
+pub const MIN_TERMINAL_WEB_FONT_SIZE: f64 = 6.0;
+/// The largest accepted Web terminal font size, in CSS px.
+pub const MAX_TERMINAL_WEB_FONT_SIZE: f64 = 32.0;
+
+/// The Server/Agent runtime process environment variable carrying the fixed
+/// column count. The deployment pipeline sets it from the same release-level
+/// parameter that builds the Web bundle (#2487 SC-08).
+pub const TERMINAL_COLS_ENV: &str = "NESSION_TERMINAL_COLS";
+/// The process environment variable mirroring the Web maximum CSS font size.
+/// The Server does not use it for PTY sizing; it is configuration
+/// introspection, so an operator can compare a running Server with the Web
+/// build it serves (#2487).
+pub const TERMINAL_WEB_FONT_SIZE_ENV: &str = "NESSION_TERMINAL_WEB_FONT_SIZE";
+
+/// Parse and range-check a fixed column count.
+pub fn parse_terminal_cols(raw: &str) -> Result<u16, String> {
+    if !raw.bytes().all(|byte| byte.is_ascii_digit()) || raw.is_empty() {
+        return Err(format!(
+            "{TERMINAL_COLS_ENV} must be a positive integer; got {raw:?}"
+        ));
+    }
+    let cols: u16 = raw.parse().map_err(|_| {
+        format!("{TERMINAL_COLS_ENV} is out of range for a terminal width: {raw:?}")
+    })?;
+    validate_terminal_cols(cols)?;
+    Ok(cols)
+}
+
+/// Range-check a fixed column count.
+pub fn validate_terminal_cols(cols: u16) -> Result<(), String> {
+    if (MIN_TERMINAL_COLS..=MAX_TERMINAL_COLS).contains(&cols) {
+        Ok(())
+    } else {
+        Err(format!(
+            "{TERMINAL_COLS_ENV} must be in [{MIN_TERMINAL_COLS}, {MAX_TERMINAL_COLS}]; got {cols}"
+        ))
+    }
+}
+
+/// Parse and range-check the Web maximum CSS font size.
+pub fn parse_terminal_web_font_size(raw: &str) -> Result<f64, String> {
+    let value: f64 = raw.parse().map_err(|_| {
+        format!(
+            "{TERMINAL_WEB_FONT_SIZE_ENV} must be a number in \
+             [{MIN_TERMINAL_WEB_FONT_SIZE}, {MAX_TERMINAL_WEB_FONT_SIZE}] CSS px; got {raw:?}"
+        )
+    })?;
+    validate_terminal_web_font_size(value)?;
+    Ok(value)
+}
+
+/// Range-check the Web maximum CSS font size.
+pub fn validate_terminal_web_font_size(value: f64) -> Result<(), String> {
+    if value.is_finite()
+        && (MIN_TERMINAL_WEB_FONT_SIZE..=MAX_TERMINAL_WEB_FONT_SIZE).contains(&value)
+    {
+        Ok(())
+    } else {
+        Err(format!(
+            "{TERMINAL_WEB_FONT_SIZE_ENV} must be a number in \
+             [{MIN_TERMINAL_WEB_FONT_SIZE}, {MAX_TERMINAL_WEB_FONT_SIZE}] CSS px; got {value}"
+        ))
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
     pub listen_address: String,
@@ -54,10 +140,63 @@ pub struct ServerConfig {
     /// that a leaked token is stale by the time anyone notices it leaked.
     #[serde(default = "default_p2p_token_expiry")]
     pub p2p_token_expiry_secs: u64,
+    /// The fixed column count a new Session is created at (#2487).
+    ///
+    /// The Server's runtime value comes from `NESSION_TERMINAL_COLS`, written by
+    /// the deployment pipeline from the same release parameter that builds the
+    /// Web bundle. It is **not** a live-Session resize policy: an existing
+    /// Session's width belongs to its tmux pane and is enforced by the Agent.
+    #[serde(default = "default_terminal_cols")]
+    pub terminal_cols: u16,
+    /// The Web terminal's preferred/maximum CSS font size, mirrored for
+    /// configuration introspection (#2487).
+    ///
+    /// The Server does not apply it to a PTY — the Web bundle owns font
+    /// sizing. Exposing the value here is what lets an operator compare a
+    /// running Server with the Web build it serves.
+    #[serde(default = "default_terminal_web_font_size")]
+    pub terminal_web_font_size: f64,
     /// Logging configuration (optional). When omitted, defaults to
     /// `level = "info"`, `rotation = "daily"`, `retention_days = 7`.
     #[serde(default)]
     pub logging: LoggingConfig,
+}
+
+impl ServerConfig {
+    /// Apply the runtime environment overrides owned by the deployment
+    /// pipeline (#2487 SC-08).
+    ///
+    /// The entrypoint writes these values into `config.toml`; reading the same
+    /// environment here makes a directly started Server (and a Compose/k8s
+    /// environment that already supplies them) agree with that file instead of
+    /// silently ignoring it. An explicitly set environment value wins over the
+    /// file, because it is the release-level parameter and the file is its
+    /// projection.
+    pub fn apply_env_overrides(&mut self) -> anyhow::Result<()> {
+        self.apply_env_overrides_from(|name| std::env::var(name).ok())
+    }
+
+    /// The testable half of [`Self::apply_env_overrides`].
+    pub fn apply_env_overrides_from(
+        &mut self,
+        get: impl Fn(&str) -> Option<String>,
+    ) -> anyhow::Result<()> {
+        if let Some(raw) = get(TERMINAL_COLS_ENV) {
+            self.terminal_cols = parse_terminal_cols(&raw).map_err(anyhow::Error::msg)?;
+        }
+        if let Some(raw) = get(TERMINAL_WEB_FONT_SIZE_ENV) {
+            self.terminal_web_font_size =
+                parse_terminal_web_font_size(&raw).map_err(anyhow::Error::msg)?;
+        }
+        Ok(())
+    }
+
+    /// Validate the effective configuration before the runtime starts.
+    pub fn validate(&self) -> anyhow::Result<()> {
+        validate_terminal_cols(self.terminal_cols).map_err(anyhow::Error::msg)?;
+        validate_terminal_web_font_size(self.terminal_web_font_size).map_err(anyhow::Error::msg)?;
+        Ok(())
+    }
 }
 
 /// The default for [`ServerConfig::terminal_stall_grace_secs`], published so the
@@ -96,9 +235,19 @@ impl Default for ServerConfig {
             terminal_stall_grace_secs: default_terminal_stall_grace(),
             query_concurrency_per_connection: default_query_concurrency(),
             p2p_token_expiry_secs: default_p2p_token_expiry(),
+            terminal_cols: default_terminal_cols(),
+            terminal_web_font_size: default_terminal_web_font_size(),
             logging: LoggingConfig::default(),
         }
     }
+}
+
+fn default_terminal_cols() -> u16 {
+    DEFAULT_TERMINAL_COLS
+}
+
+fn default_terminal_web_font_size() -> f64 {
+    DEFAULT_TERMINAL_WEB_FONT_SIZE
 }
 
 fn default_terminal_stall_grace() -> u64 {
@@ -218,5 +367,123 @@ mod tests {
             config.query_concurrency_per_connection,
             DEFAULT_QUERY_CONCURRENCY_PER_CONNECTION
         );
+    }
+
+    #[test]
+    fn terminal_sizing_defaults_and_toml_round_trip() {
+        let default = ServerConfig::default();
+        assert_eq!(default.terminal_cols, DEFAULT_TERMINAL_COLS);
+        assert_eq!(
+            default.terminal_web_font_size,
+            DEFAULT_TERMINAL_WEB_FONT_SIZE
+        );
+
+        // A config written before #2487 has neither field; both must default.
+        let config: ServerConfig = toml::from_str(
+            r#"
+            listen_address = "0.0.0.0:8443"
+            tls_cert_path = "/path/to/cert.pem"
+            tls_key_path = "/path/to/key.pem"
+            auth_token = "secret"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(config.terminal_cols, DEFAULT_TERMINAL_COLS);
+        assert_eq!(
+            config.terminal_web_font_size,
+            DEFAULT_TERMINAL_WEB_FONT_SIZE
+        );
+
+        let explicit: ServerConfig = toml::from_str(
+            r#"
+            listen_address = "0.0.0.0:8443"
+            tls_cert_path = ""
+            tls_key_path = ""
+            auth_token = ""
+            terminal_cols = 96
+            terminal_web_font_size = 13.5
+            "#,
+        )
+        .unwrap();
+        assert_eq!(explicit.terminal_cols, 96);
+        assert_eq!(explicit.terminal_web_font_size, 13.5);
+    }
+
+    #[test]
+    fn terminal_cols_parser_rejects_out_of_range_and_non_numeric() {
+        assert_eq!(parse_terminal_cols("88").unwrap(), 88);
+        assert_eq!(parse_terminal_cols("20").unwrap(), 20);
+        assert_eq!(parse_terminal_cols("400").unwrap(), 400);
+        for raw in ["", "0", "19", "401", "88.5", "-1", "eighty", " 88"] {
+            assert!(parse_terminal_cols(raw).is_err(), "{raw:?} must be refused");
+        }
+    }
+
+    #[test]
+    fn terminal_font_parser_rejects_units_and_out_of_range() {
+        assert_eq!(parse_terminal_web_font_size("14").unwrap(), 14.0);
+        assert_eq!(parse_terminal_web_font_size("6.5").unwrap(), 6.5);
+        assert_eq!(parse_terminal_web_font_size("32").unwrap(), 32.0);
+        for raw in ["", "0", "5.9", "32.1", "14px", "NaN", "inf"] {
+            assert!(
+                parse_terminal_web_font_size(raw).is_err(),
+                "{raw:?} must be refused"
+            );
+        }
+    }
+
+    #[test]
+    fn env_overrides_win_over_the_file_and_fail_fast() {
+        let mut config = ServerConfig {
+            terminal_cols: 80,
+            terminal_web_font_size: 13.0,
+            ..Default::default()
+        };
+        config
+            .apply_env_overrides_from(|name| match name {
+                TERMINAL_COLS_ENV => Some("96".to_string()),
+                TERMINAL_WEB_FONT_SIZE_ENV => Some("14.5".to_string()),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(config.terminal_cols, 96);
+        assert_eq!(config.terminal_web_font_size, 14.5);
+
+        let mut invalid = ServerConfig::default();
+        assert!(invalid
+            .apply_env_overrides_from(|name| (name == TERMINAL_COLS_ENV).then(|| "80x".to_string()))
+            .is_err());
+        assert!(invalid
+            .apply_env_overrides_from(|name| {
+                (name == TERMINAL_WEB_FONT_SIZE_ENV).then(|| "huge".to_string())
+            })
+            .is_err());
+    }
+
+    #[test]
+    fn validate_rejects_values_that_bypass_the_parsers() {
+        let below = ServerConfig {
+            terminal_cols: MIN_TERMINAL_COLS - 1,
+            ..Default::default()
+        };
+        assert!(below.validate().is_err());
+
+        let above = ServerConfig {
+            terminal_cols: MAX_TERMINAL_COLS + 1,
+            ..Default::default()
+        };
+        assert!(above.validate().is_err());
+
+        let not_a_number = ServerConfig {
+            terminal_web_font_size: f64::NAN,
+            ..Default::default()
+        };
+        assert!(not_a_number.validate().is_err());
+
+        let too_large = ServerConfig {
+            terminal_web_font_size: MAX_TERMINAL_WEB_FONT_SIZE + 1.0,
+            ..Default::default()
+        };
+        assert!(too_large.validate().is_err());
     }
 }

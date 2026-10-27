@@ -57,6 +57,13 @@ use crate::tmux::manager::SessionManager;
 /// value cannot serve that purpose: `run` does not return until shutdown, so a
 /// parent would learn "started" only when it stopped (#1016).
 pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
+    // The environment wins over the file for the release-selected terminal
+    // width (#2487), and an invalid value fails before any subsystem starts.
+    // Both entrypoints reach this function, so the rule has one owner.
+    let mut config = config;
+    config.apply_env_overrides()?;
+    config.validate()?;
+
     // 1. Initialize logging (stdout + file)
     let _log_guard = nession_common::logging::init_logging(
         &config.logging,
@@ -203,6 +210,7 @@ pub async fn run(config: AgentConfig, ready: Readiness) -> Result<()> {
             // to *both* mutating paths below (#1021).
             mutations: Arc::clone(&mutation_lane),
             tmux: Arc::clone(&tmux_for_client),
+            terminal_cols: config.terminal_cols,
         },
     )
     .context("failed to create agent server")?;

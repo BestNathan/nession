@@ -1,5 +1,4 @@
 import type { Terminal } from '@xterm/xterm';
-
 const MIN_FONT = 8;
 const MAX_FONT = 40;
 const STEP = 1;

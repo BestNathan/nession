@@ -32,6 +32,14 @@ impl ConnectionHandler {
                     "online_agent_count": online,
                     "session_count": sessions,
                     "build_time": option_env!("BUILD_TIME").unwrap_or("unknown"),
+                    // The release-selected fixed terminal configuration
+                    // (#2487). A Web build compares its embedded column count
+                    // with this; the value is what the Server states on attach
+                    // and what a new Session is created at. It is runtime
+                    // configuration, not a property of an existing Session —
+                    // that width belongs to the Agent's pane.
+                    "terminal_cols": self.config.terminal_cols,
+                    "terminal_web_font_size": self.config.terminal_web_font_size,
                     // What this server serves (`#678`). Derived from the same
                     // declaration that dispatches, so it cannot claim a unit
                     // this server does not answer.

@@ -9,6 +9,7 @@ export function readAttachControlFields(payload: unknown): {
   subscriberGeneration?: number;
   inputEpoch?: number;
   inputAppliedThrough?: number;
+  terminalCols?: number;
 } {
   if (!payload || typeof payload !== 'object') {
     return {};
@@ -42,6 +43,11 @@ export function readAttachControlFields(payload: unknown): {
     inputEpoch: typeof p.input_epoch === 'number' ? p.input_epoch : undefined,
     inputAppliedThrough:
       typeof p.input_applied_through === 'number' ? p.input_applied_through : undefined,
+    // The live Session's authoritative fixed width (#2487). Absent from an
+    // older Agent; a positive integer is the only shape that can be a grid.
+    terminalCols:
+      Number.isSafeInteger(p.terminal_cols) && (p.terminal_cols as number) > 0
+        ? p.terminal_cols as number : undefined,
   };
 }
 

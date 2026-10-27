@@ -45,7 +45,15 @@ export type SessionCreatePayload = { name: string, width: number, height: number
  * Empty (default) preserves the previous behaviour exactly for a caller
  * that does not send it.
  */
-env_snapshots: Array<EnvSnapshot>, };
+env_snapshots: Array<EnvSnapshot>, 
+/**
+ * The fixed column count this Session should be created at (#2487).
+ *
+ * The Server's relayed create states its value; a direct caller omits it
+ * and the Agent uses its own configuration. Creation only: an existing
+ * Session keeps its pane's width.
+ */
+terminal_cols?: number | null, };
 export type SessionCreateResponse = { name: string, };
 
 // ── Operations ──
@@ -65,7 +73,15 @@ export type SessionCreateCall = { name: string, width: number, height: number, w
  * Empty (default) preserves the previous behaviour exactly for a caller
  * that does not send it.
  */
-env_snapshots: Array<EnvSnapshot>, };
+env_snapshots: Array<EnvSnapshot>, 
+/**
+ * The fixed column count this Session should be created at (#2487).
+ *
+ * The Server's relayed create states its value; a direct caller omits it
+ * and the Agent uses its own configuration. Creation only: an existing
+ * Session keeps its pane's width.
+ */
+terminal_cols?: number | null, };
 
 /** The payload the provider answers with. */
 export type SessionCreateReply = { name: string, };

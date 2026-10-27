@@ -90,6 +90,14 @@ jobs:
       rust_version: ${{ steps.versions.outputs.rust_version }}
       web_version: ${{ steps.versions.outputs.web_version }}
       short_sha: ${{ steps.versions.outputs.short_sha }}
+      terminal_cols: ${{ steps.terminal.outputs.cols }}
+      terminal_web_font_size: ${{ steps.terminal.outputs.web_font_size }}
+    env:
+      # One release-level source (#2487). Staging has its own scope, then the
+      # shared variable, then the approved default; the Web build and both
+      # image paths consume this same value.
+      RELEASE_TERMINAL_COLS: ${{ vars.STAGING_TERMINAL_COLS || vars.NESSION_TERMINAL_COLS || '80' }}
+      RELEASE_TERMINAL_WEB_FONT_SIZE: ${{ vars.STAGING_TERMINAL_WEB_FONT_SIZE || vars.NESSION_TERMINAL_WEB_FONT_SIZE || '14' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -108,6 +116,12 @@ jobs:
           echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
           echo "Rust: ${RUST_VER}, Web: ${WEB_VER}, SHA: ${SHORT_SHA}"
 
+      - id: terminal
+        run: |
+          echo "cols=${RELEASE_TERMINAL_COLS}" >> $GITHUB_OUTPUT
+          echo "web_font_size=${RELEASE_TERMINAL_WEB_FONT_SIZE}" >> $GITHUB_OUTPUT
+          echo "Terminal: cols=${RELEASE_TERMINAL_COLS}, web_max_font=${RELEASE_TERMINAL_WEB_FONT_SIZE}px"
+
   # ═══════════════════════════════════════════════════════════════════
   # Phase 3 — Build (3 parallel: web + amd64 zigbuild + arm64 zigbuild)
   # ═══════════════════════════════════════════════════════════════════
@@ -122,6 +136,9 @@ jobs:
           cache: 'npm'
           cache-dependency-path: web/package-lock.json
       - run: cd web && npm ci && npm run build
+        env:
+          VITE_NESSION_TERMINAL_COLS: ${{ needs.versions.outputs.terminal_cols }}
+          VITE_NESSION_TERMINAL_WEB_FONT_SIZE: ${{ needs.versions.outputs.terminal_web_font_size }}
       - uses: actions/upload-artifact@v4
         with:
           name: web-dist
@@ -271,6 +288,9 @@ jobs:
           tags: ${{ env.IMG }}:server-${{ env.SHORT_SHA }}-amd64
           cache-from: type=gha,scope=nession-build-amd64
           cache-to: type=gha,scope=nession-build-amd64,mode=min
+          build-args: |
+            NESSION_TERMINAL_COLS=${{ needs.versions.outputs.terminal_cols }}
+            NESSION_TERMINAL_WEB_FONT_SIZE=${{ needs.versions.outputs.terminal_web_font_size }}
           build-contexts: |
             server-bin=/tmp/server-bin
             web-dist=/tmp/web-dist
@@ -305,6 +325,8 @@ jobs:
           tags: ${{ env.IMG }}:agent-${{ env.SHORT_SHA }}-amd64
           cache-from: type=gha,scope=nession-build-amd64
           cache-to: type=gha,scope=nession-build-amd64,mode=min
+          build-args: |
+            NESSION_TERMINAL_COLS=${{ needs.versions.outputs.terminal_cols }}
           build-contexts: |
             agent-bin=/tmp/agent-bin
             web-dist=/tmp/web-dist
@@ -371,6 +393,9 @@ jobs:
           tags: ${{ env.IMG }}:server-${{ env.SHORT_SHA }}-arm64
           cache-from: type=gha,scope=nession-build-arm64
           cache-to: type=gha,scope=nession-build-arm64,mode=min
+          build-args: |
+            NESSION_TERMINAL_COLS=${{ needs.versions.outputs.terminal_cols }}
+            NESSION_TERMINAL_WEB_FONT_SIZE=${{ needs.versions.outputs.terminal_web_font_size }}
           build-contexts: |
             server-bin=/tmp/server-bin
             web-dist=/tmp/web-dist
@@ -405,6 +430,8 @@ jobs:
           tags: ${{ env.IMG }}:agent-${{ env.SHORT_SHA }}-arm64
           cache-from: type=gha,scope=nession-build-arm64
           cache-to: type=gha,scope=nession-build-arm64,mode=min
+          build-args: |
+            NESSION_TERMINAL_COLS=${{ needs.versions.outputs.terminal_cols }}
           build-contexts: |
             agent-bin=/tmp/agent-bin
             web-dist=/tmp/web-dist
@@ -584,7 +611,11 @@ jobs:
           done
           out="${RUNNER_TEMP}/nession-build-provenance.json"
           jq -n --arg sha "${GITHUB_SHA}" --argjson images "$images" \
-            '{schema_version:1,kind:"nession_build_provenance",source_sha:$sha,images:$images}' > "$out"
+            --argjson terminal_cols "${{ needs.versions.outputs.terminal_cols }}" \
+            --argjson terminal_web_font_size "${{ needs.versions.outputs.terminal_web_font_size }}" \
+            '{schema_version:1,kind:"nession_build_provenance",source_sha:$sha,
+              terminal_config:{cols:$terminal_cols,web_max_font_size:$terminal_web_font_size},
+              images:$images}' > "$out"
           cat "$out" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:

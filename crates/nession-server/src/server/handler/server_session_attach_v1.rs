@@ -259,6 +259,13 @@ impl ConnectionHandler {
                             // Server TCP probe results — the browser shows these
                             // so the user can pick a specific relay endpoint.
                             "addresses": addresses_json,
+                            // The release-selected width this Server states
+                            // for a new Session (#2487). The browser renders
+                            // this rather than its own build value when they
+                            // differ; an existing Session's Agent reply is
+                            // authoritative on top of it.
+                            "terminal_cols": self.config.terminal_cols,
+                            "terminal_web_font_size": self.config.terminal_web_font_size,
                         }
                     })
                     .to_string(),
@@ -323,7 +330,9 @@ impl ConnectionHandler {
                         "agent_address": agent_address,
                         "addresses": addresses_json,
                         "connection_token": connection_token,
-                        "session_name": session_name
+                        "session_name": session_name,
+                        "terminal_cols": self.config.terminal_cols,
+                        "terminal_web_font_size": self.config.terminal_web_font_size
                     }
                 })
                 .to_string(),

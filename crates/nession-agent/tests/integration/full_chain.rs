@@ -168,6 +168,7 @@ async fn start_test_agent_server() -> anyhow::Result<(
             credentials: Arc::clone(&credentials),
             mutations: Arc::clone(&mutations),
             tmux: Arc::new(SessionManager::new()),
+            terminal_cols: nession_common::config::DEFAULT_TERMINAL_COLS,
         },
     )?;
     let (handle, addr) = server.start().await?;
@@ -455,6 +456,7 @@ async fn test_session_lifecycle() {
         height: 24,
         working_dir: None,
         env_snapshots: Vec::new(),
+        terminal_cols: None,
     };
     let req = new_message(agent_msg_types::SESSION_CREATE, create);
     let json = serde_json::to_string(&req).unwrap();

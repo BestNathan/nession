@@ -56,9 +56,11 @@ mutable ID registry or source-code-to-E2E graph is maintained.
 ./e2e/run test --all
 ```
 
-The original 21-spec baseline from #1512 remains pinned in migration-parity.json.
-The conversation regression was split by behavior into focused Web, narrow Web,
-scroll ownership and App specs without moving the 43 canonical visual PNGs.
+The 21-spec inventory from #1512 remains pinned in migration-parity.json. The
+conversation regression was split by behavior into focused Web, narrow Web,
+scroll ownership and App specs without moving the 43 canonical visual PNGs. The
+PNG hashes pin the current approved baselines; an intentional visual change
+updates them through the canonical snapshot run and the manifest together.
 
 The established full regression Gate stays `e2e-playwright`. Issue-owned selection
 and trusted per-ID result publication are separate follow-up requirements (#1701/#1702).

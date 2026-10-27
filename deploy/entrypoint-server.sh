@@ -12,6 +12,19 @@ SERVER_HEARTBEAT_TIMEOUT="${SERVER_HEARTBEAT_TIMEOUT:-30}"
 NESSION_HOME="${NESSION_HOME:-}"
 
 export LISTEN_PORT SERVER_BACKEND NESSION_HOME
+export NESSION_TERMINAL_COLS NESSION_TERMINAL_WEB_FONT_SIZE
+
+# The release-selected fixed terminal configuration (#2487). The image's ENV
+# is set from the same build parameters that produced the Web bundle; Compose
+# or a GitOps env patch may override them, and the Server validates the
+# effective values at startup. They are written into config.toml below, which
+# is the Server's canonical configuration reader.
+NESSION_TERMINAL_COLS="${NESSION_TERMINAL_COLS:-80}"
+NESSION_TERMINAL_WEB_FONT_SIZE="${NESSION_TERMINAL_WEB_FONT_SIZE:-14}"
+# Configuration directory. Overridable so the entrypoint can be exercised
+# without writing /etc (the acceptance Case does exactly that).
+NESSON_CONFIG_DIR="${NESSON_CONFIG_DIR:-/etc/nession}"
+mkdir -p "${NESSON_CONFIG_DIR}"
 
 # Generate nginx config
 envsubst '${LISTEN_PORT} ${SERVER_BACKEND}' \
@@ -48,20 +61,17 @@ fi
 nginx -t
 nginx -g 'daemon off;' &
 
-# Generate server config — db_path intentionally omitted: the binary resolves
-# it from NESSION_HOME (or $HOME/.nession as fallback).
-cat > /etc/nession/config.toml <<TOML
-listen_address = "${SERVER_LISTEN}"
-auth_token = "${SERVER_AUTH_TOKEN}"
-tls_cert_path = "${TLS_CERT_PATH:-}"
-tls_key_path = "${TLS_KEY_PATH:-}"
-heartbeat_interval_secs = ${SERVER_HEARTBEAT_INTERVAL}
-heartbeat_timeout_secs = ${SERVER_HEARTBEAT_TIMEOUT}
-TOML
+# Generate server config. The projection itself lives in the one renderer
+# script so a Case can exercise it without nginx or a listener (#2487 SC-08).
+export SERVER_LISTEN SERVER_AUTH_TOKEN TLS_CERT_PATH TLS_KEY_PATH
+export SERVER_HEARTBEAT_INTERVAL SERVER_HEARTBEAT_TIMEOUT
+"$(dirname "$0")/render-server-config.sh" "${NESSON_CONFIG_DIR}/config.toml"
 
 echo "=== nession-server ==="
 echo "  Listen:       $SERVER_LISTEN"
 echo "  Nession Home: ${NESSIN_HOME:-$HOME/.nession}"
+echo "  Terminal:     cols=$NESSION_TERMINAL_COLS web_max_font=${NESSION_TERMINAL_WEB_FONT_SIZE}px"
+echo "  Config dir:   $NESSON_CONFIG_DIR"
 echo "  Nginx:        :${LISTEN_PORT} -> $SERVER_BACKEND"
 
 exec /usr/local/bin/nession-server

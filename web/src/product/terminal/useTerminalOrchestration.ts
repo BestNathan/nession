@@ -21,6 +21,7 @@ import {
 import { terminalServerApi } from '@/product/terminal';
 import { useTerminal } from '@/product/terminal/hooks/useTerminal';
 import type { TerminalController } from '@/platform/terminal-runtime/controller/TerminalController';
+import type { SessionRuntime } from '@/platform/session-runtime/SessionRuntime';
 import { detectProfile, PROFILES } from '@/platform/terminal-runtime/DeviceProfile';
 import type { TerminalStatus } from '@/product/terminal/state/session';
 import {
@@ -62,6 +63,26 @@ function useSessionEnvSourcing(opts: {
       apply();
     }
   }, [envRefs, sessionId, effectiveMode, agentTerminalApi, connectionState]);
+}
+
+/**
+ * Adopt the live Session's authoritative width when the Agent states it on an
+ * attach reply (#2487). A hook of its own so the composition's line budget is
+ * about composition; the subscription's lifetime is the runtime/controller
+ * pair, exactly as it would be inline.
+ */
+function useSessionTerminalCols(
+  runtime: SessionRuntime | null,
+  controller: TerminalController | null,
+): void {
+  useEffect(() => {
+    if (!runtime || !controller) { return; }
+    return runtime.subscribeRuntimeEvents((event) => {
+      if (event.type === 'session-terminal-cols') {
+        controller.adoptSessionCols(event.cols);
+      }
+    });
+  }, [runtime, controller]);
 }
 
 function useReconnectBanner(opts: {
@@ -201,6 +222,7 @@ export function useTerminalOrchestration({
     scrollback: PROFILES[deviceProfile].scrollback,
     deviceProfile,
     scrollbackMode,
+    terminalCols: attachInfo?.terminal_cols,
     runtime,
   });
   // Filled here rather than in an effect: `useTerminal` memoizes the
@@ -209,6 +231,10 @@ export function useTerminalOrchestration({
   // the viewport's layout-effect attach, which is what starts the first
   // `client.attach` this flag is read by.
   controllerRef.current = controller;
+
+  // The Agent's attach reply states the live Session's authoritative width
+  // (#2487); the Server's value above is the new-Session policy.
+  useSessionTerminalCols(runtime, controller);
 
   // Automatic takeover on meaningful foreground activation (#2286). The hook
   // owns the triggers that are not a DOM gesture (open/attach, surface return,

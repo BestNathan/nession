@@ -670,10 +670,11 @@ test('two clients: a stalled observer never blocks the controller (#2144)', asyn
     await expectPtySize(controller, controllerGrid.cols, controllerGrid.rows);
     await expect(observer.getByTestId('terminal-observer-bar')).toBeVisible();
 
-    // #2286 SC-02 PC → phone → PC: a real gesture on the observer's terminal
-    // takes the lease automatically, and the shared PTY follows *its measured*
-    // viewport — not the size the previous controller left behind. A gesture
-    // on the first client returns ownership and the PTY follows it back.
+    // #2286 SC-02 / #2487 PC → phone → PC: a real gesture on the observer's
+    // terminal takes the lease automatically, and the shared PTY follows the
+    // active device's **rows**. The columns are the Session's fixed value, so
+    // the takeover must not widen the grid. A gesture on the first client
+    // returns ownership and the rows follow it back.
     await observer.locator('.xterm').click();
     await expect(observer.getByTestId('terminal-observer-bar')).toHaveCount(0, { timeout: 15_000 });
     await expect(controller.getByTestId('terminal-observer-bar')).toBeVisible({ timeout: 15_000 });
@@ -681,7 +682,8 @@ test('two clients: a stalled observer never blocks the controller (#2144)', asyn
     // client: settle before reading the grid its PTY size is asserted against.
     await waitForStableGrid(observer);
     const observerGrid = await readGrid(observer);
-    expect(observerGrid.cols).toBeGreaterThan(controllerGrid.cols);
+    expect(observerGrid.cols).toBe(controllerGrid.cols);
+    expect(observerGrid.rows).not.toBe(controllerGrid.rows);
     await expectPtySize(observer, observerGrid.cols, observerGrid.rows);
     // The displaced client is an observer, not a copy of the pane: its own
     // container still measures its local grid (and the observer bar has just

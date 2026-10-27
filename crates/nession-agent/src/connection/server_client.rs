@@ -3682,11 +3682,20 @@ core_routes!(agent, msg, responses;
                         payload.env_snapshots.len()
                     );
 
+                    // The Server states the release-selected width (#2487);
+                    // an older Server that omits it gets the product default
+                    // rather than the legacy 80-column placeholder. This
+                    // path cannot see the Agent's own config, and the Server
+                    // is authoritative for new Sessions in a central
+                    // deployment.
+                    let terminal_cols = payload
+                        .terminal_cols
+                        .unwrap_or(nession_common::config::DEFAULT_TERMINAL_COLS);
                     let (success, error, session_name) = match agent
                         .tmux
                         .create_session(
                             &name,
-                            payload.width,
+                            terminal_cols,
                             payload.height,
                             &agent.default_working_dir,
                             &env,

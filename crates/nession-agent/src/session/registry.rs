@@ -69,11 +69,15 @@ impl SessionRegistry {
         &self,
         session_name: &str,
         backend: Box<dyn TmuxSession>,
-        client_id: &str,
-        subscription_id: Option<&str>,
-        peer_token: &Arc<()>,
-        outbound: P2pOutbound,
+        terminal_cols: u16,
+        first: FirstSubscriber<'_>,
     ) -> Result<NewAttachment, InvalidStreamIdentity> {
+        let FirstSubscriber {
+            client_id,
+            subscription_id,
+            peer_token,
+            outbound,
+        } = first;
         let (tx, rx) = mpsc::channel(SUBSCRIBER_QUEUE_SLOTS);
         let detached_for_not_draining = Arc::new(AtomicBool::new(false));
         let queued_bytes = Arc::new(AtomicUsize::new(0));
@@ -98,6 +102,7 @@ impl SessionRegistry {
         let response_peer = first_peer.clone();
         let attached = AttachedSession {
             backend: Arc::new(tokio::sync::Mutex::new(backend)),
+            terminal_cols,
             peers: vec![first_peer],
             control,
             stream,
@@ -598,6 +603,14 @@ impl SessionRegistry {
 
     /// Admit, execute and record one authoritative resize.
     ///
+    /// **Columns are the Session's, rows are the controller's (#2487).** The
+    /// width captured when the Session was first attached is applied whatever
+    /// the payload states, so a stale client build — or one that derived a
+    /// width from its viewport — cannot reflow a live Session. The applied
+    /// size (the Session's columns and the requested rows) is what the stream
+    /// records and fans out, so every subscriber learns the real geometry
+    /// rather than the one the requester asked for.
+    ///
     /// The lease generation is captured at admission, not at record time: the
     /// lease may move across the backend await, and the recorded event must
     /// say who asked, not who owns the pane now (#2286 SC-03). The record and
@@ -609,10 +622,10 @@ impl SessionRegistry {
         client_id: &str,
         peer_token: &Arc<()>,
         control_generation: Option<u64>,
-        cols: u16,
+        _stated_cols: u16,
         rows: u16,
     ) -> Result<ResizeRecorded, ResizeRejected> {
-        let (role, authorized, authorized_generation, backend) = {
+        let (role, authorized, authorized_generation, backend, terminal_cols) = {
             let guard = self.lock();
             let Some(session) = guard.get(session_name) else {
                 return Err(ResizeRejected::NotAttached);
@@ -634,6 +647,7 @@ impl SessionRegistry {
                     .authorize_mutation(&identity, control_generation),
                 session.control.generation,
                 Arc::clone(&session.backend),
+                session.terminal_cols,
             )
         };
         if role == TerminalRole::Observer {
@@ -642,6 +656,11 @@ impl SessionRegistry {
         if !authorized {
             return Err(ResizeRejected::NotController);
         }
+        // The Session's width, not the requester's. `cols` is deliberately
+        // unused beyond admission: rejecting outright would leave an old
+        // client's rows stale, and the fan-out below tells it the width that
+        // was actually applied.
+        let cols = terminal_cols;
         super::terminal::runtime::resize(&backend, cols, rows)
             .await
             .map_err(ResizeRejected::Backend)?;
@@ -670,6 +689,8 @@ impl SessionRegistry {
                     has_subscriber_queue,
                     detached,
                     authorized_generation,
+                    cols,
+                    rows,
                 }
             })
         };
@@ -678,6 +699,8 @@ impl SessionRegistry {
             has_subscriber_queue: false,
             detached: 0,
             authorized_generation,
+            cols,
+            rows,
         });
         if recorded.detached > 0 {
             tracing::warn!(
@@ -708,6 +731,18 @@ impl Default for SessionRegistry {
 pub(crate) struct NotAttached;
 
 /// A Session created and its first subscriber installed.
+/// The identity and sink of the first subscriber an attachment installs.
+///
+/// Grouped so `insert_new` keeps one parameter per resource rather than one
+/// per property of that subscriber; the four values are written and read as a
+/// unit at every call site.
+pub(crate) struct FirstSubscriber<'a> {
+    pub client_id: &'a str,
+    pub subscription_id: Option<&'a str>,
+    pub peer_token: &'a Arc<()>,
+    pub outbound: P2pOutbound,
+}
+
 pub(crate) struct NewAttachment {
     pub response: ClientAttachResponse,
     /// The epoch the attach capture is an exact cut at (#2124).
@@ -789,6 +824,11 @@ pub(crate) struct ResizeRecorded {
     pub detached: usize,
     /// The lease generation this resize was admitted under.
     pub authorized_generation: u64,
+    /// The **applied** width — the Session's fixed columns, which may differ
+    /// from the requester's stated width (#2487).
+    pub cols: u16,
+    /// The requested rows, which are the controller's to choose.
+    pub rows: u16,
 }
 
 /// Why a resize was refused.
@@ -902,10 +942,13 @@ mod tests {
                 Box::new(Idle {
                     closed: Arc::clone(closed),
                 }),
-                "browser",
-                Some(subscription_id),
-                &token,
-                outbound,
+                80,
+                FirstSubscriber {
+                    client_id: "browser",
+                    subscription_id: Some(subscription_id),
+                    peer_token: &token,
+                    outbound,
+                },
             )
             .expect("a fresh subscription generation is available")
     }
@@ -972,5 +1015,73 @@ mod tests {
         assert!(b.load(std::sync::atomic::Ordering::Acquire));
         assert!(!registry.is_attached("a"));
         assert!(!registry.is_attached("b"));
+    }
+
+    struct Recording {
+        resizes: Arc<StdMutex<Vec<(u16, u16)>>>,
+    }
+
+    #[async_trait]
+    impl TmuxSession for Recording {
+        async fn write_input(&mut self, _data: &[u8]) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn resize(&mut self, cols: u16, rows: u16) -> anyhow::Result<()> {
+            self.resizes
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push((cols, rows));
+            Ok(())
+        }
+        fn viewport(&self) -> (u16, u16) {
+            (88, 24)
+        }
+        fn session_name(&self) -> &str {
+            "recording"
+        }
+        async fn close(&mut self) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// #2487 SC-09: the Session keeps its fixed columns; only the controller's
+    /// rows are applied. A client build that derived a different width (or an
+    /// old client that still tries) cannot reflow the live pane, and the
+    /// recorded/fanned-out size is the one actually applied so every
+    /// subscriber learns the real geometry.
+    #[tokio::test]
+    async fn resize_applies_the_sessions_columns_not_the_requesters() {
+        let registry = SessionRegistry::new();
+        let token = Arc::new(());
+        let (outbound, _) = P2pOutbound::new();
+        let resizes = Arc::new(StdMutex::new(Vec::new()));
+        registry
+            .insert_new(
+                "s",
+                Box::new(Recording {
+                    resizes: Arc::clone(&resizes),
+                }),
+                88,
+                FirstSubscriber {
+                    client_id: "browser",
+                    subscription_id: Some("tab-a"),
+                    peer_token: &token,
+                    outbound,
+                },
+            )
+            .expect("a fresh subscription generation is available");
+
+        let recorded = registry
+            .resize("s", "browser", &token, None, 120, 40)
+            .await
+            .expect("the controller may resize rows");
+        assert_eq!(recorded.cols, 88, "the Session's width must win");
+        assert_eq!(recorded.rows, 40, "rows follow the controller");
+        assert_eq!(
+            *resizes
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+            vec![(88, 40)]
+        );
     }
 }
