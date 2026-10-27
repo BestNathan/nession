@@ -244,8 +244,16 @@ ok(() => {
     'acceptance-cases.yml'), 'utf8');
   assert.match(workflow,
     /- name: Install browser verifier runtime\s+if: steps\.select\.outputs\.needs_browser == 'true'/);
+  // #2525: Browser runtime binaries are cached, and the runner's pinned
+  // Ubuntu image is checked by a real launch. Requiring --with-deps here would
+  // reintroduce an unbounded apt mirror fetch on every CI execution.
+  assert.match(workflow, /PLAYWRIGHT_BROWSERS_PATH: \$\{\{ github\.workspace \}\}\/\.cache\/ms-playwright/);
   assert.match(workflow,
-    /- name: Install browser verifier runtime[\s\S]*?cd workspace\/e2e\s+npm ci\s+npx playwright install chromium --with-deps/);
+    /- uses: actions\/cache@v4\s+if: steps\.select\.outputs\.needs_browser == 'true'/);
+  assert.match(workflow,
+    /- name: Install browser verifier runtime[\s\S]*?cd workspace\/e2e\s+npm ci\s+npx playwright install chromium\s/);
+  assert.doesNotMatch(workflow, /npx playwright install chromium --with-deps/);
+  assert.match(workflow, /chromium\.launch\(\{ timeout: 30000 \}\)/);
   assert.match(workflow, /node trusted\/scripts\/select-acceptance-cases\.mjs select/);
   const selector = fs.readFileSync(path.join(repoRoot, 'scripts', 'select-acceptance-cases.mjs'), 'utf8');
   assert.match(selector, /needs_browser: verifiers\.some\(\(item\) => item\.type === 'browser'\)/);

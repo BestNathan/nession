@@ -35,18 +35,18 @@ gate_check() {
   rm -f "$full_report" "$assertions"
   : > "$provision_log"
   # Playwright list-only discovery has no full-stack startup; verify it matches file-ID catalog.
-  gate_run_invariant bash -c 'cd e2e && npx playwright test --list > "$1"' _ "$list_file"
-  gate_run_invariant node e2e/runner/verify-playwright-list.cjs "$list_file"
+  gate_run_invariant bash -c 'cd e2e && npx playwright test --list > "$1"' _ "$list_file" || return $?
+  gate_run_invariant node e2e/runner/verify-playwright-list.cjs "$list_file" || return $?
   # #1866 SC-03: this Gate used to provision the real full stack TWICE — a
   # two-ID canary run, then `--all`. Selection is a pure ID -> spec-file
   # mapping, so its positive and negative contract is verified without a
   # runtime, and each canary ID's REAL outcome is verified per ID from the one
   # full run below. The subset runtime path keeps live coverage on every
   # selected PR run, which invokes `./e2e/run test --id …` for real.
-  gate_run_invariant node e2e/runner/verify-e2e-selector.cjs login session-lifecycle
+  gate_run_invariant node e2e/runner/verify-e2e-selector.cjs login session-lifecycle || return $?
   # Exactly one full-stack provision for this Gate invocation. Measured, not
   # assumed: the shared runtime appends one line per real provision.
-  gate_run_invariant bash -c 'cd e2e && CI=true E2E_RUNTIME_PROVISION_LOG="$3" PLAYWRIGHT_JSON_OUTPUT_FILE="$1" NESSION_E2E_ASSERTIONS_OUTPUT_FILE="$2" ./run test --all' _ "$full_report" "$assertions" "$provision_log"
+  gate_run_invariant bash -c 'cd e2e && CI=true E2E_RUNTIME_PROVISION_LOG="$3" PLAYWRIGHT_JSON_OUTPUT_FILE="$1" NESSION_E2E_ASSERTIONS_OUTPUT_FILE="$2" ./run test --all' _ "$full_report" "$assertions" "$provision_log" || return $?
   if [ ! -s "$full_report" ] || [ ! -s "$assertions" ]; then
     gate_invariant_failure "Full E2E did not produce the report and assertion receipt required for an independent design verdict" \
       "restore the canonical Playwright reporters; a run without executed assertion evidence is not a Pass" || return $?
@@ -56,10 +56,10 @@ gate_check() {
     if [ "$count" -ne 1 ]; then
       echo "one Gate invocation must provision the full stack exactly once; observed ${count}" >&2
       exit 1
-    fi' _ "$provision_log"
+    fi' _ "$provision_log" || return $?
   # Legacy selector/canary assurance retained against that single run: a canary
   # ID that did not run, was skipped, or did not fully pass still fails here.
-  gate_run_invariant node e2e/runner/verify-playwright-selected.cjs "$full_report" login session-lifecycle
+  gate_run_invariant node e2e/runner/verify-playwright-selected.cjs "$full_report" login session-lifecycle || return $?
   # #1866 Measurements: bounded, non-sensitive gate evidence. The Gate's own
   # command output is intentionally discarded on success, so the measured
   # provision count would otherwise be unobservable after the fact.
@@ -103,7 +103,7 @@ gate_check() {
       const receiptFile = String(process.argv[3] || "");
       if (receiptFile) require("node:fs").writeFileSync(receiptFile, line);
     ' "$(wc -l < "$provision_log" | tr -d ' ')" "${GITHUB_SHA:-}" \
-      "${E2E_PROVISION_RECEIPT_FILE:-}"
+      "${E2E_PROVISION_RECEIPT_FILE:-}" || return $?
   fi
 }
 
