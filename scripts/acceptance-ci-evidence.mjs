@@ -13,6 +13,13 @@ import { verifyWake } from './agent-evidence-waker.mjs';
 import {collectHistoricalRecovery,selfTestHistoricalRecovery} from './acceptance-telemetry-recovery-proof.mjs';
 import {collectWorkflowRegressions,selfTestRegressions} from './acceptance-telemetry-regression-proof.mjs';
 import {parseReplayDenialLog,attestReplayDenial,makeDenialReceipt,DENIAL_LOG_PREFIX} from './metrics-replay-denial-receipt.mjs';
+import {parseDeferredReplayLog,attestDeferredReplayReceipt,makeDeferredReplayReceipt,
+  DEFERRED_REPLAY_WORKFLOW,DEFERRED_REPLAY_WORKFLOW_NAME,DEFERRED_REPLAY_JOB,
+  DEFERRED_REPLAY_JOBS,DEFERRED_REPLAY_EVENTS,
+  DEFERRED_REPLAY_EVENT,DEFERRED_REPLAY_BRANCH,DEFERRED_REPLAY_RESULT,
+  DEFERRED_REPLAY_LOG_PREFIX,DEFERRED_ADMISSION_STEP,REPO,
+  selfTestDeferredReplayReceipt,
+} from './acceptance-deferred-replay-receipt.mjs';
 import { buildAgentWorkflowTelemetry, validateAgentWorkflowTelemetry, telemetryStoragePath } from './agent-workflow-telemetry.mjs';
 import {parsePolicyObservabilityLog,attestPolicyObservability,makePolicyObservabilityReceipt,
   POLICY_WORKFLOW,POLICY_WORKFLOW_NAME,POLICY_OBSERVE_JOB,POLICY_TRIGGER_EVENTS,
@@ -21,6 +28,7 @@ import {GOVERNED_REFS,UNOBSERVABLE_CAPABILITIES} from './run-store-policy.mjs';
 import {parseAcceptanceBatchLog,attestAcceptanceBatchReceipt,makeAcceptanceBatchReceipt,
   ACCEPTANCE_BATCH_WORKFLOWS,ACCEPTANCE_BATCH_LOG_PREFIX} from '../e2e/runner/acceptance-batch-receipt.mjs';
 import { collectFullRegression } from './verification-full-regression-evidence.mjs';
+import { FULL_NOT_REQUIRED_LOG_PREFIX } from './e2e-full-applicability.mjs';
 import {parseE2eSelectedRunLog,attestE2eSelectedRunReceipt,makeE2eSelectedRunReceipt,
   parseE2eNotRequiredLog,attestE2eNotRequiredReceipt,makeE2eNotRequiredReceipt,
   parseE2eFullGateLog,attestE2eFullGateReceipt,
@@ -41,6 +49,7 @@ import {selfTestDevelopmentReadback} from './acceptance-development-readback-sel
 import os from 'node:os';
 import path from 'node:path';
 
+const SHA = /^[a-f0-9]{40}$/;
 const MAX_RUNS_PER_SHA = 20;
 const MAX_ASSOCIATED_PULLS = 5;
 const MAX_IMPLEMENTATION_PULLS = 2;
@@ -158,7 +167,7 @@ function compactRuns(runs, expectedSha) {
   return retainedRuns(runs, expectedSha).runs.map(compactRun);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], historicalRecovery = null, historicalRegressions = null, exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], acceptanceRoutingProof = null, replayDenials = [], storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [], fullRegressionReceipts = [], verifiedCiCostStudy = null, historicalBrowserDesignProof = null, exactHeadStepsBySha = new Map(), batchReceiptsBySha = new Map(), ancestryReceipts = [], reuseComparison = null, publicPagesObservations = [], publicPagesE2EObservations = [], publicWorkflowPublications = [], developmentReadback = [], stagingAcrReadback = null, verifiedAgentTelemetryRecords = [] }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], historicalRecovery = null, historicalRegressions = null, exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], acceptanceRoutingProof = null, replayDenials = [], storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [], fullRegressionReceipts = [], fullNotRequiredReceipts = [], verifiedCiCostStudy = null, historicalBrowserDesignProof = null, exactHeadStepsBySha = new Map(), batchReceiptsBySha = new Map(), ancestryReceipts = [], reuseComparison = null, publicPagesObservations = [], publicPagesE2EObservations = [], publicWorkflowPublications = [], developmentReadback = [], stagingAcrReadback = null, verifiedAgentTelemetryRecords = [], deferredAcceptanceReplays = [] }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -200,6 +209,7 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     verified_public_pages_e2e_observations: publicPagesE2EObservations,
     verified_public_pages_workflow_publications: publicWorkflowPublications,
     verified_metrics_replay_denials: replayDenials,
+    verified_deferred_acceptance_replays: deferredAcceptanceReplays,
     store_policy_observability: storePolicyObservability,
     ancestry_runs: ancestryRuns,
     ancestry_receipts: ancestryReceipts,
@@ -209,6 +219,7 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     e2e_not_required_receipts: notRequiredRunReceipts,
     e2e_full_gate_provision_receipts: fullGateProvisionReceipts,
     verified_full_regression_receipts: fullRegressionReceipts,
+    e2e_full_not_required_receipts: fullNotRequiredReceipts,
     verified_ci_cost_study: verifiedCiCostStudy,
     historical_browser_design_regressions: historicalBrowserDesignProof,
     target_push_e2e_runs: targetPushE2eRuns,
@@ -320,6 +331,85 @@ export async function collectAuthenticatedReplayDenials(repo,sha,runs,
     const source=await request('/repos/'+repo+'/actions/runs/'+receipt.source_claim.run_id);
     const workflow=await request('/repos/'+repo+'/actions/workflows/'+source.workflow_id);
     evidence.push(attestReplayDenial(receipt,source,recipient,jobs,workflow));
+  }
+  return evidence;
+}
+
+// #2461 SC-02: a deferred pre-merge Acceptance run lives on its PR HEAD, so a
+// merged target's run window cannot reach it — and `retainedRuns` keeps one Run
+// per workflow path, which can drop the replaying Run behind a newer
+// orchestrator Run at the same SHA. Two trusted jobs can replay a deferred
+// run (the workflow_run waker and the E2E-projection reconcile), so this
+// collector reads either receipt and re-binds the replaying Run/Attempt/Job
+// and both attempts of the replayed Run through GitHub.
+// Deliberately not issue-gated: any merged criterion about the deferred path
+// needs to tell "no deferral was replayed" from "the channel cannot show it".
+const MAX_DEFERRED_REPLAY_WAKES = 6, DEFERRED_REPLAY_LOG_BYTES = 2097152;
+export async function collectDeferredAcceptanceReplays(repo, sha,
+  runsForSha = workflowRunsForSha, request = githubGet, getText = githubJobLog) {
+  if (repo !== REPO || !SHA.test(String(sha ?? '')))
+    throw Error('invalid deferred Acceptance replay scope');
+  const runs = await runsForSha(repo, sha);
+  if (!Array.isArray(runs)) throw Error('invalid deferred replay run response');
+  const candidates = runs.filter((run) =>
+    run?.name === DEFERRED_REPLAY_WORKFLOW_NAME &&
+    String(run?.path ?? '').replace(/@refs\/[^\s]+$/, '') === DEFERRED_REPLAY_WORKFLOW &&
+    DEFERRED_REPLAY_EVENTS.includes(run.event) && run.head_sha === sha &&
+    run.head_branch === DEFERRED_REPLAY_BRANCH && run.status === 'completed' &&
+    run.conclusion === 'success')
+    .sort((a, b) => b.id - a.id).slice(0, MAX_DEFERRED_REPLAY_WAKES);
+  const evidence = [];
+  for (const candidate of candidates) {
+    const wakerRun = await request('/repos/' + repo + '/actions/runs/' + candidate.id);
+    if (wakerRun?.id !== candidate.id || wakerRun.head_sha !== sha ||
+        !Number.isSafeInteger(wakerRun.run_attempt) || wakerRun.run_attempt < 1)
+      throw Error('unverified deferred replay waker selection');
+    const jobs = await request('/repos/' + repo + '/actions/runs/' + candidate.id +
+      '/attempts/' + wakerRun.run_attempt + '/jobs?per_page=100');
+    if (!Array.isArray(jobs?.jobs) || jobs.jobs.length > 100)
+      throw Error('unverified deferred replay waker jobs');
+    // Every replaying run carries BOTH trusted job names: the one for its
+    // event executes, the other is skipped by its own `if`. Select the single
+    // successful job; two successes would be an ambiguous producer.
+    const matches = jobs.jobs.filter((job) =>
+      DEFERRED_REPLAY_JOBS.includes(job?.name) && job.conclusion === 'success');
+    if (matches.length !== 1) continue;
+    const wakerJob = matches[0];
+    let log;
+    try {
+      log = await getText('/repos/' + repo + '/actions/jobs/' + wakerJob.id +
+        '/logs', DEFERRED_REPLAY_LOG_BYTES);
+    } catch {
+      continue; // Missing/expired/oversized log cannot be counted as evidence.
+    }
+    let receipts;
+    try {
+      receipts = parseDeferredReplayLog(log);
+    } catch {
+      continue; // The producer is main code; malformed framing proves nothing.
+    }
+    const replayed = receipts.filter((receipt) =>
+      receipt.result === DEFERRED_REPLAY_RESULT);
+    if (replayed.length === 0) continue;
+    if (replayed.length > 1) throw Error('ambiguous deferred replay receipts');
+    const receipt = replayed[0];
+    const deferredRun = await request('/repos/' + repo + '/actions/runs/' +
+      receipt.replayed_run_id);
+    const [deferredAttemptJobs, replayAttemptJobs] = await Promise.all([
+      request('/repos/' + repo + '/actions/runs/' + receipt.replayed_run_id +
+        '/attempts/' + receipt.deferred_attempt + '/jobs?per_page=100'),
+      request('/repos/' + repo + '/actions/runs/' + receipt.replayed_run_id +
+        '/attempts/' + (receipt.deferred_attempt + 1) + '/jobs?per_page=100'),
+    ]);
+    for (const page of [deferredAttemptJobs, replayAttemptJobs]) {
+      if (!Array.isArray(page?.jobs) || page.jobs.length > 100)
+        throw Error('unverified deferred replay attempt jobs');
+    }
+    evidence.push(attestDeferredReplayReceipt({
+      receipt, wakerRun, wakerJob, deferredRun,
+      deferredJobs: deferredAttemptJobs.jobs, replayJobs: replayAttemptJobs.jobs,
+      targetSha: sha,
+    }));
   }
   return evidence;
 }
@@ -547,6 +637,106 @@ export async function collectFullGateProvisionReceipts(repo,sha,runs,
       attested={...attested,full_per_id:attestFullReceipt(perId,run,matches[0])};
     }
     evidence.push(attested);
+  }
+  return evidence;
+}
+
+// #2478 SC-03: a tooling-only Main merge produces an explicit Not Required
+// Full decision. The artifact is not evidence the Acceptance harness can read,
+// so the scope job also emits a bounded run-bound log receipt. Re-attest it
+// against the exact push run/attempt, the scope job's own steps, and the fact
+// that the `full` browser job did not execute. A successful Full workflow run
+// with a skipped `full` job is never evidence that the Full executed; the
+// receipt, the scope steps and the run identity must all agree.
+const FULL_NOT_REQUIRED_WORKFLOW = '.github/workflows/e2e-full-regression.yml';
+const FULL_SCOPE_JOB = 'scope';
+const FULL_SCOPE_STEPS = Object.freeze([
+  'Classify the pushed change against the Full suite inputs',
+  'Upload the Not Required receipt',
+]);
+export async function collectFullNotRequiredReceipts(repo, sha, request = githubGet,
+  getText = githubJobLog, { pageSize = 20, maxPages = 3, maxReceipts = 3 } = {}) {
+  if (repo !== REPO || !/^[a-f0-9]{40}$/.test(String(sha)) ||
+      !Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 20 ||
+      !Number.isSafeInteger(maxPages) || maxPages < 1 || maxPages > 3 ||
+      !Number.isSafeInteger(maxReceipts) || maxReceipts < 1 || maxReceipts > 3) {
+    throw Error('invalid Full Not Required receipt scope');
+  }
+  const evidence = [];
+  for (let page = 1; page <= maxPages && evidence.length < maxReceipts; page += 1) {
+    const query = new URLSearchParams({
+      branch: 'main', per_page: String(pageSize), page: String(page),
+    });
+    const listed = await request('/repos/' + repo +
+      '/actions/workflows/e2e-full-regression.yml/runs?' + query);
+    if (!Array.isArray(listed?.workflow_runs) || listed.workflow_runs.length > pageSize) {
+      throw Error('unbounded Full Not Required source runs');
+    }
+    for (const run of listed.workflow_runs) {
+      if (run.status !== 'completed' || run.conclusion !== 'success' ||
+          run.head_branch !== 'main' || run.head_sha !== sha ||
+          !Number.isSafeInteger(run.id) || run.id < 1 ||
+          !Number.isSafeInteger(run.run_attempt) || run.run_attempt < 1) continue;
+      const jobs = await request('/repos/' + repo + '/actions/runs/' + run.id +
+        '/attempts/' + run.run_attempt + '/jobs?per_page=100');
+      if (!Array.isArray(jobs?.jobs) || jobs.jobs.length > 100) {
+        throw Error('unbounded Full Not Required jobs');
+      }
+      // A real Full execution (or one still running) is not this shape.
+      const fullJobs = jobs.jobs.filter((job) => job?.name === 'full');
+      if (fullJobs.some((job) => job?.status !== 'completed' ||
+        job?.conclusion === 'success')) continue;
+      const scopes = jobs.jobs.filter((job) => job?.name === FULL_SCOPE_JOB);
+      if (scopes.length !== 1) continue;
+      const scopeJob = scopes[0];
+      const stepsOk = FULL_SCOPE_STEPS.every((name) => {
+        const matches = (scopeJob.steps ?? []).filter((step) => step?.name === name);
+        return matches.length === 1 && matches[0].conclusion === 'success';
+      });
+      if (!stepsOk) continue;
+      let log;
+      try {
+        log = await getText('/repos/' + repo + '/actions/jobs/' + scopeJob.id + '/logs',
+          8 * 1024 * 1024);
+      } catch { continue; }
+      if (typeof log !== 'string' || log.length > 8 * 1024 * 1024) continue;
+      const lines = log.split(/\r?\n/)
+        .filter((line) => line.includes(FULL_NOT_REQUIRED_LOG_PREFIX));
+      if (lines.length !== 1) continue;
+      let receipt;
+      try {
+        const raw = lines[0].slice(lines[0].indexOf(FULL_NOT_REQUIRED_LOG_PREFIX) +
+          FULL_NOT_REQUIRED_LOG_PREFIX.length).trim();
+        receipt = JSON.parse(raw);
+      } catch { continue; }
+      const changedOk = Array.isArray(receipt?.changed_paths) &&
+        receipt.changed_paths.length <= 50 &&
+        receipt.changed_paths.every((file) =>
+          typeof file === 'string' && file && !/[\r\n]/.test(file));
+      if (receipt?.schema_version !== 1 || receipt.kind !== 'e2e_full_not_required' ||
+          receipt.repository !== REPO || receipt.workflow !== FULL_NOT_REQUIRED_WORKFLOW ||
+          receipt.run_id !== run.id || receipt.run_attempt !== run.run_attempt ||
+          receipt.target_sha !== sha || receipt.category !== 'tooling-only' ||
+          receipt.full_regression !== 'NOT_REQUIRED' || !changedOk) continue;
+      evidence.push(Object.freeze({
+        kind: 'verified_e2e_full_not_required',
+        run_id: run.id,
+        run_attempt: run.run_attempt,
+        sha,
+        target_sha: sha,
+        event: run.event,
+        branch: run.head_branch,
+        category: receipt.category,
+        reason: receipt.reason ?? null,
+        changed_paths: receipt.changed_paths,
+        full_regression: 'NOT_REQUIRED',
+        scope_job_id: scopeJob.id,
+        evidence: 'GitHub exact-attempt scope job steps + skipped Full browser job ' +
+          '+ bounded original job-log receipt',
+      }));
+      if (evidence.length >= maxReceipts) break;
+    }
+    if (listed.workflow_runs.length < pageSize) break;
   }
   return evidence;
 }
@@ -1297,6 +1487,11 @@ async function collectCommand(workspace, outFile) {
   // needs to be able to tell "unobservable here" from "absent".
   const storePolicyObservability=process.env.ACCEPTANCE_STAGE==='post-merge'
     ?await collectStorePolicyObservability(repo,sha,directRuns):[];
+  // #2461 SC-02: the replayed deferred run lives on a PR head, unreachable from
+  // the merged target's compacted run window; re-read the main-owned waker's
+  // own replay receipt and re-bind both attempts through GitHub.
+  const deferredAcceptanceReplays=process.env.ACCEPTANCE_STAGE==='post-merge'
+    ?await collectDeferredAcceptanceReplays(repo,sha):[];
   const targetPushE2eRuns=process.env.ACCEPTANCE_STAGE==='post-merge'
     ? await collectTargetPushE2eRuns(repo,sha) : [];
   // #1866 SC-04: job-log batch receipts are readable at every stage; the
@@ -1520,6 +1715,8 @@ async function collectCommand(workspace, outFile) {
     replayIssue?.labels?.some(label=> (typeof label==='string'?label:label.name)==='verification:full')
       ?await collectFullRegression({repo,sha,get:githubGet,getText:githubJobLog})
       :[];
+  const fullNotRequiredReceipts = process.env.ACCEPTANCE_STAGE==='post-merge'
+    ? await collectFullNotRequiredReceipts(repo, sha) : [];
   const reuseComparison = computeReuseComparison({ targetSha: sha,
     acceptanceBatchReceipts,
     extraBatchReceipts: [...batchReceiptsBySha.values()].flat()
@@ -1528,7 +1725,7 @@ async function collectCommand(workspace, outFile) {
       .concat(ancestryReceipts.flatMap(entry => entry.e2e_selected_run_receipts)),
     fullGateProvisionReceipts, selectedRunReceipts, targetPushE2eRuns });
   const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls,
-    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, historicalRecovery, historicalRegressions, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts, acceptanceRoutingProof, replayDenials, storePolicyObservability, ancestryRuns, acceptanceBatchReceipts, selectedRunReceiptsBySha, selectedRunReceipts, notRequiredRunReceiptsBySha, notRequiredRunReceipts, fullGateProvisionReceipts, fullRegressionReceipts, verifiedCiCostStudy, historicalBrowserDesignProof, exactHeadStepsBySha, batchReceiptsBySha, ancestryReceipts, reuseComparison, publicPagesObservations, publicPagesE2EObservations, publicWorkflowPublications, developmentReadback, stagingAcrReadback, verifiedAgentTelemetryRecords });
+    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, historicalRecovery, historicalRegressions, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts, acceptanceRoutingProof, replayDenials, storePolicyObservability, ancestryRuns, acceptanceBatchReceipts, selectedRunReceiptsBySha, selectedRunReceipts, notRequiredRunReceiptsBySha, notRequiredRunReceipts, fullGateProvisionReceipts, fullRegressionReceipts, fullNotRequiredReceipts, verifiedCiCostStudy, historicalBrowserDesignProof, exactHeadStepsBySha, batchReceiptsBySha, ancestryReceipts, reuseComparison, publicPagesObservations, publicPagesE2EObservations, publicWorkflowPublications, developmentReadback, stagingAcrReadback, verifiedAgentTelemetryRecords, deferredAcceptanceReplays });
   fs.writeFileSync(outFile, JSON.stringify(evidence, null, 2) + '\n');
   console.log(
     'collected acceptance CI evidence for ' + sha +
@@ -1598,6 +1795,125 @@ async function selfTest() {
   await assert.rejects(()=>collectAuthenticatedReplayDenials(denialRepo,denialSha,
     [candidate],async p=>p.endsWith('/actions/runs/701')?
       {...deniedSource,run_attempt:2}:request(p),async()=>denialLog),/provenance mismatch/);
+
+  // #2461 SC-02: the replayed deferred run lives on a PR head, so the merged
+  // target's run window cannot reach it, and retainedRuns keeps one Run per
+  // workflow path. The waker's own receipt carries it; every identity is
+  // re-bound and a declined replay is not evidence.
+  selfTestDeferredReplayReceipt();
+  const replayMain = 'c'.repeat(40), replayHead = 'd'.repeat(40);
+  const wakerRunId = 811, wakerJobId = 812, replayedId = 813;
+  const replayEnv = { GITHUB_REPOSITORY: denialRepo,
+    GITHUB_RUN_ID: String(wakerRunId), GITHUB_RUN_ATTEMPT: '1' };
+  const replayReceipt = makeDeferredReplayReceipt({ env: replayEnv,
+    sourceRunId: wakerRunId, targetSha: replayHead, pr: 99,
+    replayedRunId: replayedId, deferredAttempt: 1 });
+  const declinedReceipt = makeDeferredReplayReceipt({ env: replayEnv,
+    sourceRunId: wakerRunId, targetSha: replayHead, pr: 99,
+    replayedRunId: replayedId, deferredAttempt: 1,
+    result: 'changed_before_replay' });
+  const wakerRun = { id: wakerRunId, run_attempt: 1, head_sha: replayMain,
+    head_branch: 'main', event: 'workflow_run', status: 'completed',
+    conclusion: 'success', name: DEFERRED_REPLAY_WORKFLOW_NAME,
+    path: DEFERRED_REPLAY_WORKFLOW + '@refs/heads/main' };
+  // Real runs carry both trusted job names; the non-matching one is skipped.
+  const wakerJobs = { jobs: [
+    { id: wakerJobId, name: DEFERRED_REPLAY_JOB,
+      conclusion: 'success', run_id: wakerRunId, run_attempt: 1 },
+    { id: wakerJobId + 1, name: 'reconcile-issue-e2e',
+      conclusion: 'skipped', run_id: wakerRunId, run_attempt: 1 }] };
+  const replayedRun = { id: replayedId, event: 'pull_request_target',
+    head_sha: replayHead, status: 'completed', conclusion: 'success',
+    run_attempt: 2, path: DEFERRED_REPLAY_WORKFLOW };
+  const deferredAttemptJobs = { jobs: [
+    { name: 'prepare-pre-merge', conclusion: 'success', steps: [
+      { name: DEFERRED_ADMISSION_STEP, conclusion: 'success' }] },
+    { name: 'defer-pre-merge', conclusion: 'cancelled' }] };
+  const replayAttemptJobs = { jobs: [
+    { name: 'defer-pre-merge', conclusion: 'skipped' },
+    { name: 'pre-merge-acceptance (99) / Execute acceptance',
+      conclusion: 'success' }] };
+  // Real waker logs also contain the workflow's own source text naming the
+  // prefix; the parsed record must still be found (and only it).
+  const replayScriptText = '    printf \'%s\\n\' "ACCEPTANCE_DEFERRED_REPLAY_V1 ' +
+    '${replay_receipt}"\n';
+  const replayLog = replayScriptText + '2026-10-26T03:27:39Z ' +
+    DEFERRED_REPLAY_LOG_PREFIX + JSON.stringify(replayReceipt) + '\n';
+  const replayRequest = async (p) => {
+    if (p.endsWith('/actions/runs/' + wakerRunId)) return wakerRun;
+    if (p.endsWith('/actions/runs/' + wakerRunId + '/attempts/1/jobs?per_page=100'))
+      return wakerJobs;
+    if (p.endsWith('/actions/runs/' + replayedId)) return replayedRun;
+    if (p.endsWith('/actions/runs/' + replayedId + '/attempts/1/jobs?per_page=100'))
+      return deferredAttemptJobs;
+    if (p.endsWith('/actions/runs/' + replayedId + '/attempts/2/jobs?per_page=100'))
+      return replayAttemptJobs;
+    throw Error('unexpected deferred replay API: ' + p);
+  };
+  const wakerList = async () => [wakerRun];
+  const replays = await collectDeferredAcceptanceReplays(denialRepo, replayMain,
+    wakerList, replayRequest, async () => replayLog);
+  assert.equal(replays.length, 1);
+  assert.equal(replays[0].replay_attempt, 2);
+  assert.equal(replays[0].deferral.defer_pre_merge, 'cancelled');
+  assert.equal(replays[0].replay.pre_merge_acceptance, 'success');
+  // The projection reconcile (repository_dispatch) is the other trusted
+  // producer; a receipt it wrote is the same behavioral evidence.
+  const projectionRun = { ...wakerRun, id: 814, event: 'repository_dispatch' };
+  const projectionJobs = { jobs: [
+    { id: 816, name: 'reconcile-issue-e2e',
+      conclusion: 'success', run_id: 814, run_attempt: 1 },
+    { id: 817, name: 'reconcile-completed-quality-e2e',
+      conclusion: 'skipped', run_id: 814, run_attempt: 1 }] };
+  const projectionReceipt = makeDeferredReplayReceipt({
+    env: { ...replayEnv, GITHUB_RUN_ID: '814' }, sourceRunId: 814,
+    targetSha: replayHead, pr: 99, replayedRunId: replayedId, deferredAttempt: 1,
+  });
+  const projectionLog = '2026-10-26T05:56:10Z ' + DEFERRED_REPLAY_LOG_PREFIX +
+    JSON.stringify(projectionReceipt) + '\n';
+  const projectionRequest = async (p) => {
+    if (p.endsWith('/actions/runs/814')) return projectionRun;
+    if (p.endsWith('/actions/runs/814/attempts/1/jobs?per_page=100'))
+      return projectionJobs;
+    return replayRequest(p);
+  };
+  const projection = await collectDeferredAcceptanceReplays(denialRepo,
+    replayMain, async () => [projectionRun], projectionRequest,
+    async () => projectionLog);
+  assert.equal(projection.length, 1, 'projection reconciles are admissible');
+  assert.deepEqual(await collectDeferredAcceptanceReplays(denialRepo, replayMain,
+    wakerList, async (p) => p.endsWith('/actions/runs/' + wakerRunId +
+      '/attempts/1/jobs?per_page=100')
+      ? { jobs: wakerJobs.jobs.map((job) => ({ ...job, conclusion: 'success' })) }
+      : replayRequest(p), async () => replayLog), [],
+  'two successful trusted replay jobs are ambiguous and prove nothing');
+  assert.deepEqual(normalizeCiEvidence({ targetSha: replayMain,
+    deferredAcceptanceReplays: replays }).verified_deferred_acceptance_replays,
+  replays);
+  assert.deepEqual(await collectDeferredAcceptanceReplays(denialRepo, replayMain,
+    async () => [], replayRequest, async () => replayLog), [],
+  'no main waker run at the target SHA means no evidence');
+  assert.deepEqual(await collectDeferredAcceptanceReplays(denialRepo, replayMain,
+    wakerList, replayRequest, async () => 'plain log line\n'), [],
+  'a waker log without a receipt proves nothing');
+  assert.deepEqual(await collectDeferredAcceptanceReplays(denialRepo, replayMain,
+    wakerList, replayRequest,
+    async () => '2026-10-26T03:27:39Z ' + DEFERRED_REPLAY_LOG_PREFIX +
+      JSON.stringify(declinedReceipt) + '\n'), [],
+  'a declined replay is not evidence of a replay');
+  await assert.rejects(() => collectDeferredAcceptanceReplays(denialRepo,
+    replayMain, wakerList, async (p) => p.endsWith('/actions/runs/' + wakerRunId)
+      ? { ...wakerRun, head_sha: replayHead } : replayRequest(p),
+    async () => replayLog), /unverified deferred replay waker selection/);
+  await assert.rejects(() => collectDeferredAcceptanceReplays(denialRepo,
+    replayMain, wakerList, async (p) => p.endsWith('/actions/runs/' + replayedId)
+      ? { ...replayedRun, run_attempt: 3 } : replayRequest(p),
+    async () => replayLog), /target identity mismatch/);
+  assert.deepEqual(await collectDeferredAcceptanceReplays(denialRepo, replayMain,
+    wakerList, replayRequest,
+    async () => '2026-10-26T03:27:39Z ' + DEFERRED_REPLAY_LOG_PREFIX +
+      JSON.stringify({ ...replayReceipt, replayed_run_id: replayMain }) + '\n'), [],
+  'a receipt that cannot validate is never turned into evidence');
 
   // Store policy observability: the failed governance run's only evaluator-
   // visible fact was its conclusion, which made an unobservable capability read
@@ -1850,6 +2166,22 @@ async function selfTest() {
   assert.deepEqual(notRequired[0].skipped_e2e_only_steps,
     ['rust_toolchain','cargo_build','tmux']);
   assert.equal(notRequired[0].design_gate,'success');
+  // #2478: a positively tooling-only merge really skips the design browser.
+  // The trusted collector accepts that shape only with the explicit scope and
+  // only when GitHub's own step outcome agrees it was skipped.
+  const nrToolingReceipt=makeE2eNotRequiredReceipt({env:nrEnv,sha:nrSha,
+    browserScope:'tooling-only',steps:{...nrSteps,design_gate:'skipped'}});
+  const nrToolingJobs={jobs:[{...nrJobs.jobs[0],steps:nrJobs.jobs[0].steps.map(s=>
+    s.name==='Run canonical browser design gate'?{...s,conclusion:'skipped'}:s)}]};
+  const nrToolingLog=E2E_NOT_REQUIRED_LOG_PREFIX+
+    JSON.stringify(nrToolingReceipt)+'\n';
+  const nrTooling=await collectNotRequiredE2eReceipts(denialRepo,nrSha,[nrRun],
+    async p=>p.includes('/jobs?')?nrToolingJobs:nrRequest(p),async()=>nrToolingLog);
+  assert.equal(nrTooling.length,1);
+  assert.equal(nrTooling[0].browser_scope,'tooling-only');
+  assert.equal(nrTooling[0].design_gate,'skipped');
+  await assert.rejects(()=>collectNotRequiredE2eReceipts(denialRepo,nrSha,[nrRun],
+    nrRequest,async()=>nrToolingLog),/provenance mismatch/);
   // A run where the Rust build actually ran is not a skip.
   await assert.rejects(()=>collectNotRequiredE2eReceipts(denialRepo,nrSha,[nrRun],
     async p=>p.includes('/jobs?')?{jobs:[{...nrJobs.jobs[0],
@@ -2537,6 +2869,47 @@ async function selfTest() {
   reject(provider,metrics,orchestration,{jobs:validJobs.jobs.map(x=>({...x,started_at:'2026-10-13T12:29:00Z'}))});
   reject(provider,metrics,orchestration,{jobs:validJobs.jobs.map(x=>({...x,conclusion:'failure'}))});
 
+  // #2478 SC-03: the Full Not Required log receipt must bind the exact
+  // run/attempt and scope-job steps, and a real Full execution is not this
+  // shape.
+  const fnrSha='6'.repeat(40);
+  const fnrRun={id:930,run_attempt:1,event:'push',head_branch:'main',head_sha:fnrSha,
+    status:'completed',conclusion:'success'};
+  const fnrReceipt={schema_version:1,kind:'e2e_full_not_required',repository:denialRepo,
+    workflow:'.github/workflows/e2e-full-regression.yml',run_id:930,run_attempt:1,
+    target_sha:fnrSha,category:'tooling-only',reason:'changed-paths-cannot-affect-runtime',
+    changed_paths:['scripts/a.mjs'],full_regression:'NOT_REQUIRED'};
+  const fnrScope={name:'scope',id:931,run_id:930,run_attempt:1,head_sha:fnrSha,
+    status:'completed',conclusion:'success',steps:[
+      {name:'Classify the pushed change against the Full suite inputs',conclusion:'success'},
+      {name:'Upload the Not Required receipt',conclusion:'success'}]};
+  const fnrFullSkipped={name:'full',id:932,run_id:930,run_attempt:1,head_sha:fnrSha,
+    status:'completed',conclusion:'skipped'};
+  const fnrLog=FULL_NOT_REQUIRED_LOG_PREFIX+JSON.stringify(fnrReceipt)+'\n';
+  const fnrRequest=async p=>{
+    if(p.includes('/actions/workflows/e2e-full-regression.yml/runs?'))
+      return {workflow_runs:[fnrRun]};
+    if(p.endsWith('/actions/runs/930/attempts/1/jobs?per_page=100'))
+      return {jobs:[fnrScope,fnrFullSkipped]};
+    throw Error('unexpected Full Not Required API: '+p);
+  };
+  const fnr=await collectFullNotRequiredReceipts(denialRepo,fnrSha,fnrRequest,async()=>fnrLog);
+  assert.equal(fnr.length,1);
+  assert.equal(fnr[0].full_regression,'NOT_REQUIRED');
+  assert.equal(fnr[0].scope_job_id,931);
+  const normFnr=normalizeCiEvidence({targetSha:fnrSha,fullNotRequiredReceipts:fnr});
+  assert.equal(normFnr.e2e_full_not_required_receipts.length,1);
+  assert.deepEqual(await collectFullNotRequiredReceipts(denialRepo,fnrSha,
+    async p=>p.includes('/actions/workflows/')?{workflow_runs:[fnrRun]}:
+      {jobs:[fnrScope,{...fnrFullSkipped,conclusion:'success'}]},
+    async()=>fnrLog),[],'a real Full execution is never Not Required evidence');
+  assert.deepEqual(await collectFullNotRequiredReceipts(denialRepo,fnrSha,fnrRequest,
+    async()=>FULL_NOT_REQUIRED_LOG_PREFIX+JSON.stringify({...fnrReceipt,run_attempt:2})+'\n'),
+  [],'the receipt must bind its own run/attempt');
+  assert.deepEqual(await collectFullNotRequiredReceipts(denialRepo,fnrSha,
+    async p=>p.includes('/actions/workflows/')?{workflow_runs:[fnrRun]}:
+      {jobs:[{...fnrScope,steps:[fnrScope.steps[0]]},fnrFullSkipped]},
+    async()=>fnrLog),[],'missing scope steps are not a trusted decision');
   selfTestCiCostStudy();
   selfTestHistoricalBrowserDesign();
   selfTestHistoricalCase();

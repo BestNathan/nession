@@ -8,15 +8,17 @@ The agent owns node-local execution and tmux-backed Sessions. Non-trivial lifecy
 
 Nession never relies on the user's default tmux server.
 
-- Every tmux process spawn goes through the `nession-tmux` crate
-  (`crates/nession-tmux/src/process.rs`). The Agent's `src/tmux/cmd.rs` supplies
-  Nession's socket and server configuration and must not spawn a process itself.
+- Every tmux process is constructed by the canonical owner,
+  `crates/nession-tmux/src/process.rs` (#2469). The Agent's `src/tmux/cmd.rs`
+  supplies Nession's socket and server configuration and must not spawn.
 - Every invocation carries an explicit private `-S <absolute-socket>`.
 - Do not use `TMUX_TMPDIR` as isolation.
 - Do not introduce direct tmux process spawns outside the canonical owner.
 - Cleanup targets Nession-owned resources and proves socket ownership before broad server cleanup.
 - Control Mode transport, selection and tradeoffs:
   [docs/architecture/agent-tmux-control-transport.md](../../docs/architecture/agent-tmux-control-transport.md).
+- Session/tmux SDK ownership boundary, delivered on staging by #2469:
+  [docs/architecture/session-tmux-sdk-ownership.md](../../docs/architecture/session-tmux-sdk-ownership.md).
 
 The deterministic enforcement owner is `scripts/check-tmux-socket.sh`:
 
