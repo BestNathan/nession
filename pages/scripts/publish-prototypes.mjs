@@ -20,11 +20,38 @@ function decoratedHtml(html, sha, path) {
   if (!/<\/head\s*>/i.test(html) || !/<\/body\s*>/i.test(html)) throw new Error('Invalid HTML entry: ' + path);
   const source = sourceUrl(sha, path);
   const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">`;
-  // The source link deliberately lives in the preview, not in a GitHub blob viewer.
-  const link = `<a class="nession-preview-source" href="${source}" target="_blank" rel="noopener noreferrer" aria-label="View prototype source on GitHub">View source ↗</a>
-<style>.nession-preview-source{position:fixed!important;z-index:2147483600!important;right:12px!important;bottom:12px!important;display:inline-flex!important;padding:8px 12px!important;background:#182d30!important;color:#fff!important;border:1px solid #95b8b5!important;border-radius:999px!important;font:600 12px/1.4 system-ui,sans-serif!important;text-decoration:none!important;box-shadow:0 2px 12px #0003!important}.nession-preview-source:focus-visible{outline:3px solid #43c8b0;outline-offset:2px}</style>`;
-  return html.replace(/<\/head\s*>/i, csp + '\n</head>').replace(/<\/body\s*>/i, link + '\n</body>');
+  // Stable Pages navigation is injected into the mock, without rewriting the
+  // mock design. The source viewer is intentionally secondary to the HTML.
+  const bar = `<nav class="nession-preview-nav" aria-label="Nession prototype navigation">
+  <a href="../../#/prototypes" class="nession-preview-home" aria-label="Back to Nession prototype gallery">← Nession / Prototypes</a>
+  <span>INTERACTIVE MOCK</span>
+  <a href="${source}" class="nession-preview-source" target="_blank" rel="noopener noreferrer" aria-label="View prototype source on GitHub">View source ↗</a>
+</nav>
+<style>
+.nession-preview-nav{position:fixed!important;z-index:2147483600!important;right:14px!important;bottom:14px!important;display:flex!important;align-items:center!important;gap:12px!important;max-width:calc(100vw - 28px)!important;flex-wrap:wrap!important;padding:9px 12px!important;background:#fffefa!important;color:#183c36!important;border:1px solid #b6ccbf!important;border-radius:14px!important;font:600 12px/1.4 system-ui,sans-serif!important;box-shadow:0 8px 25px #132b2840!important}
+.nession-preview-nav a{color:#183c36!important;text-decoration:none!important;font:inherit!important;white-space:nowrap!important}
+.nession-preview-nav a:hover{text-decoration:underline!important;text-underline-offset:3px!important}
+.nession-preview-nav>span{color:#74857c!important;font:500 9px/1.4 ui-monospace,monospace!important;letter-spacing:.5px!important}
+.nession-preview-nav .nession-preview-source{border-left:1px solid #c6d6cb!important;padding-left:11px!important}
+.nession-preview-nav a:focus-visible{outline:3px solid #43c8b0!important;outline-offset:2px!important}
+@media(max-width:580px){.nession-preview-nav{left:10px!important;right:10px!important;bottom:10px!important;justify-content:space-between!important;gap:6px!important;padding:9px!important}.nession-preview-nav>span{display:none!important}.nession-preview-nav a{font-size:11px!important}}
+</style>`;
+  return html.replace(/<\/head\s*>/i, csp + '\n</head>').replace(/<\/body\s*>/i, bar + '\n</body>');
 }
+
+function integratedGalleryRedirect() {
+  // The canonical index is a Pages route. Older /prototypes/ bookmarks should
+  // land on the same native application shell, never on a second visual system.
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="0;url=../#/prototypes">
+<title>Prototypes — Nession</title><link rel="icon" href="../favicon.svg"><link rel="stylesheet" href="../styles.css">
+</head><body><main class="site"><section class="page-head"><div class="eyebrow">NESSION / DESIGN LAB</div>
+<h1>Explore prototypes.</h1><p class="lede">The interactive library now lives inside Nession Pages.</p>
+<p><a class="action" href="../#/prototypes">Open the prototype library ↗</a></p>
+</section></main></body></html>`;
+}
+
 async function normalFile(file) {
   const st = await lstat(file);
   if (!st.isFile() || st.isSymbolicLink()) throw new Error('Not a regular prototype asset: ' + file);
@@ -42,7 +69,10 @@ export async function publishPrototypes(sourceDir, outDir, sha) {
   const gallery = join(input, 'index.html');
   let bytes = await normalFile(gallery);
   await mkdir(output, { recursive: true });
-  await writeFile(join(output, 'index.html'), decoratedHtml(await readFile(gallery, 'utf8'), sha, 'index.html'));
+  const originalGallery = await readFile(gallery, 'utf8');
+  if(!/<\/head\s*>/i.test(originalGallery) || !/<\/body\s*>/i.test(originalGallery))
+    throw new Error('Invalid HTML entry: index.html');
+  await writeFile(join(output, 'index.html'), integratedGalleryRedirect());
   const manifest = { schema_version: 1, source: { branch: 'prototype', sha }, entries: [] };
   for (const slug of dirs) {
     const folder = join(input, slug);

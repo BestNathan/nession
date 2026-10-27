@@ -30,7 +30,13 @@ test('publishes independently navigable HTML with pinned source link and inert a
     assert.match(html, /Content-Security-Policy/);
     assert.match(html, /View source/);
     assert.match(html, new RegExp('github.com/BestNathan/nession/blob/' + SHA + '/terminal-fixed-cols-2487/index.html'));
-    assert.match(await readFile(join(output, 'index.html'), 'utf8'), new RegExp('blob/' + SHA + '/index.html'));
+    const legacyGallery=await readFile(join(output, 'index.html'), 'utf8');
+    assert.match(legacyGallery, /http-equiv="refresh" content="0;url=\.\.\/#\/prototypes"/);
+    assert.match(legacyGallery, /\.\.\/#\/prototypes/);
+    assert.match(legacyGallery, /\.\.\/styles\.css/);
+    assert.doesNotMatch(legacyGallery, /Prototype Branch/);
+    assert.match(html, /Back to Nession prototype gallery/);
+    assert.match(html, /href="\.\.\/\.\.\/#\/prototypes"/);
     assert.equal(await readFile(join(output, 'terminal-fixed-cols-2487', 'app.js'), 'utf8'), 'window.isMock = true;');
     assert.deepEqual((await readdir(join(output, 'terminal-fixed-cols-2487'))).sort(), ['app.js', 'index.html']);
   });

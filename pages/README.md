@@ -117,7 +117,7 @@ The regression E2E IDs for this public surface are `pages-overview` and `pages-e
 
 ## Interactive prototypes
 
-The **Prototypes** link in the public Pages header opens `https://bestnathan.github.io/nession/prototypes/`. Each gallery card navigates to a **working standalone HTML page**, e.g. `https://bestnathan.github.io/nession/prototypes/terminal-fixed-cols-2487/index.html`, rather than a GitHub source viewer.
+The **Prototypes** link is a native hash route in the independent public Pages app: `https://bestnathan.github.io/nession/#/prototypes`. It reuses the existing Pages navigation, footer, typography, responsive grid and palette; the Overview page also includes a design-lab entry. **The old `/prototypes/` gallery URL now redirects to that native route**, rather than serving the orphan branch's separate gallery UI. Each card still opens a **standalone interactive HTML** page, e.g. `https://bestnathan.github.io/nession/prototypes/terminal-fixed-cols-2487/index.html`, rather than a GitHub source viewer. Standalone pages display a small Pages-themed bar linking back to the integrated library and to immutable GitHub source.
 
 The prototype sources remain in the isolated `prototype` branch. Trusted `Deploy / Public Pages` checks out its exact SHA read-only and publishes a bounded, static-asset-only copy into `pages/dist/prototypes/`; the published HTML shows a separate **View source** link pinned to that SHA. The generated `prototypes/manifest.json` declares the exact published prototype source SHA and available paths. No prototype code executes in CI and no runtime Nession credentials are embedded.
 
