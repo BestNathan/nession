@@ -151,6 +151,8 @@ fn a_bootstrap_carries_what_was_asked_for_and_whether_it_was_cut() {
             fidelity: Some(TerminalCheckpointFidelity::Partial),
             stream_epoch: None,
             through_seq: None,
+            pane_cols: None,
+            pane_rows: None,
         }),
     };
     let back: TerminalOutputPayload =
@@ -169,6 +171,8 @@ fn atomic_bootstrap_is_bound_to_a_specific_stream_epoch_and_cut() {
         fidelity: Some(TerminalCheckpointFidelity::Partial),
         stream_epoch: Some(17),
         through_seq: Some(42),
+        pane_cols: Some(80),
+        pane_rows: Some(24),
     };
     let value = serde_json::to_value(&marker).unwrap();
     assert_eq!(value["stream_epoch"], 17);
@@ -176,6 +180,29 @@ fn atomic_bootstrap_is_bound_to_a_specific_stream_epoch_and_cut() {
     let decoded: TerminalBootstrapPayload = serde_json::from_value(value).unwrap();
     assert_eq!(decoded.stream_epoch, Some(17));
     assert_eq!(decoded.through_seq, Some(42));
+}
+
+/// A capture is a screen reconstruction, so the payload states the pane's
+/// geometry it was taken from. A renderer that has not measured the Session
+/// adopts it before parsing; a provider that does not state it keeps the old
+/// meaning (the reader's own size), and the reader never invents one.
+#[test]
+fn a_bootstrap_states_the_screen_geometry_it_was_captured_at() {
+    let marker = TerminalBootstrapPayload {
+        requested_lines: 5000,
+        truncated: false,
+        cut_consistency: Some(TerminalCheckpointCutConsistency::Atomic),
+        fidelity: Some(TerminalCheckpointFidelity::ScreenOnly),
+        stream_epoch: Some(3),
+        through_seq: Some(0),
+        pane_cols: Some(80),
+        pane_rows: Some(16),
+    };
+    let wire = serde_json::to_value(&marker).unwrap();
+    assert_eq!(wire["pane_cols"], 80);
+    assert_eq!(wire["pane_rows"], 16);
+    let back: TerminalBootstrapPayload = serde_json::from_value(wire).unwrap();
+    assert_eq!((back.pane_cols, back.pane_rows), (Some(80), Some(16)));
 }
 
 #[test]
@@ -187,6 +214,8 @@ fn bootstrap_cut_consistency_is_independent_of_screen_fidelity() {
         fidelity: Some(TerminalCheckpointFidelity::ScreenOnly),
         stream_epoch: None,
         through_seq: None,
+        pane_cols: None,
+        pane_rows: None,
     };
     let wire = serde_json::to_value(&marker).unwrap();
     assert_eq!(wire["cut_consistency"], "unverified");

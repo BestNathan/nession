@@ -494,6 +494,52 @@ describe('TerminalController', () => {
     controller.dispose();
   });
 
+  it('adopts the capture screen before parsing it, so the shrink that follows keeps the tail (#2483)', async () => {
+    const transport = makeTransport();
+    const controller = new TerminalController(makeSession(), () => transport);
+    controller.attach(host());
+    await flush();
+
+    // A reloaded page's renderer before its first measurement: a **taller**
+    // placeholder than the pane the capture came from. The snapshot's trailing
+    // absolute caret addresses a row on the pane's screen, so written here it
+    // would land above the end of the buffer and the shrink below would reflow
+    // away every line after it.
+    controller.terminal!.resize(80, 24);
+    await flush();
+
+    const lines = [
+      "runner:~$ printf '%s' 'x' | base64 -d > inline-repaint.sh",
+      'runner:~$ bash inline-repaint.sh',
+      ...Array.from(
+        { length: 20 },
+        (_, i) => `REPAINT-initial-${String(i + 1).padStart(4, '0')}`,
+      ),
+    ];
+    transport.onOutput!(
+      new TextEncoder().encode(`\x1b[2J\x1b[H${lines.join('\r\n')}\x1b[16;1H`),
+      {
+        requestedLines: 5000, truncated: false,
+        cutConsistency: 'atomic', fidelity: 'screen-only', streamEpoch: 3, throughSeq: 0,
+        paneCols: 80, paneRows: 16,
+      },
+    );
+    // The browser's own layout settles to the pane's size afterwards.
+    transport.onResize!(80, 16);
+    await flush();
+
+    expect(controller.terminal!.rows).toBe(16);
+    const buffer = controller.terminal!.buffer.active;
+    const text: string[] = [];
+    for (let i = 0; i < buffer.length; i += 1) {
+      const line = buffer.getLine(i);
+      if (line) { text.push(line.translateToString(true)); }
+    }
+    expect(text.join('\n').match(/REPAINT-initial-0020/g) ?? []).toHaveLength(1);
+    expect(text.join('\n')).toContain('REPAINT-initial-0001');
+    controller.dispose();
+  });
+
   it('replaces scrollback only for an atomic full-VT complete checkpoint (#2008)', () => {
     const transport = makeTransport();
     const controller = new TerminalController(makeSession(), () => transport);
