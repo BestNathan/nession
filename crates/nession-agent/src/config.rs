@@ -235,7 +235,7 @@ pub struct AgentConfig {
     /// yet; an existing Session keeps the width its pane already has, and a
     /// later client resize may change only rows. In a central deployment the
     /// Server sends the same release-selected value on create/attach; this
-    /// field is the standalone fallback, read from `NESSON_TERMINAL_COLS` when
+    /// field is the standalone fallback, read from `NESSION_TERMINAL_COLS` when
     /// the environment sets it.
     #[serde(default = "default_terminal_cols")]
     pub terminal_cols: u16,
@@ -279,7 +279,7 @@ fn default_terminal_cols() -> u16 {
 impl AgentConfig {
     /// Apply runtime environment overrides (#2487).
     ///
-    /// `NESSON_TERMINAL_COLS` has the same name and meaning as the Server's
+    /// `NESSION_TERMINAL_COLS` has the same name and meaning as the Server's
     /// variable, so one release-level parameter configures both a central
     /// deployment and a standalone Agent. A standalone operator sets it (or
     /// `terminal_cols` in the TOML); the Agent never depends on a

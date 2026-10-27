@@ -11,10 +11,34 @@ const {
   verifiedRuntime, createAndAttach, command, countInBuffer,
 } = require('../../../shared/foreground-resume-browser.cjs');
 
+/**
+ * Wait until the shell answers, without assuming a prompt string. The CI
+ * runner uses bash (`runner:~$`); the local full-stack runner inherits the
+ * host shell, so a typed marker is the portable readiness signal.
+ */
+async function waitForShell(page, marker) {
+  await page.locator('.xterm').click();
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    await command(page, `printf '${marker}\\n'`);
+    try {
+      await expect.poll(async () => countInBuffer(page, marker).catch(() => 0),
+        { timeout: 1000 }).toBeGreaterThan(0);
+      return;
+    } catch {
+      await page.waitForTimeout(250);
+    }
+  }
+  throw new Error('the shell did not answer a readiness marker');
+}
+
 function grid(page) {
   return page.evaluate(() => {
-    const host = document.querySelector('[data-terminal-viewport]');
-    const xterm = document.querySelector('.xterm');
+    const xterm = Array.from(document.querySelectorAll('.xterm')).find((el) => {
+      const rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    });
+    // The terminal this surface is showing, not any other mounted viewport.
+    const host = xterm?.closest('[data-terminal-viewport]');
     const term = xterm?.parentElement?.xtermInstance;
     const cell = term?._core?._renderService?.dimensions?.css?.cell;
     const screen = document.querySelector('.xterm-screen');
@@ -53,7 +77,8 @@ test('SC-03: phone font, fixed columns, rotation and keyboard-height rows', asyn
   // Attach on a desktop-sized viewport (the session's creation flows are the
   // desktop shell's), then hand the same live Session to the phone size.
   await page.setViewportSize({ width: 1280, height: 800 });
-  await createAndAttach(page, expect, runtime, 'case-2487-sc03', 'Relay');
+  await createAndAttach(page, expect, runtime, 'case-2487-sc03', 'Relay', null);
+  await waitForShell(page, 'SC03-READY');
   expect((await grid(page)).cols).toBe(88);
 
   await page.setViewportSize({ width: 390, height: 844 });

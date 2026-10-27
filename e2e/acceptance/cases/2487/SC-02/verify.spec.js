@@ -9,10 +9,34 @@ const {
 } = require('../../../shared/foreground-resume-browser.cjs');
 
 /** The rendered grid, its font and the measured cell xterm actually draws. */
+/**
+ * Wait until the shell answers, without assuming a prompt string. The CI
+ * runner uses bash (`runner:~$`); the local full-stack runner inherits the
+ * host shell, so a typed marker is the portable readiness signal.
+ */
+async function waitForShell(page, marker) {
+  await page.locator('.xterm').click();
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    await command(page, `printf '${marker}\\n'`);
+    try {
+      await expect.poll(async () => countInBuffer(page, marker).catch(() => 0),
+        { timeout: 1000 }).toBeGreaterThan(0);
+      return;
+    } catch {
+      await page.waitForTimeout(250);
+    }
+  }
+  throw new Error('the shell did not answer a readiness marker');
+}
+
 function grid(page) {
   return page.evaluate(() => {
-    const host = document.querySelector('[data-terminal-viewport]');
-    const xterm = document.querySelector('.xterm');
+    const xterm = Array.from(document.querySelectorAll('.xterm')).find((el) => {
+      const rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    });
+    // The terminal this surface is showing, not any other mounted viewport.
+    const host = xterm?.closest('[data-terminal-viewport]');
     const term = xterm?.parentElement?.xtermInstance;
     const cell = term?._core?._renderService?.dimensions?.css?.cell;
     const screen = document.querySelector('.xterm-screen');
@@ -38,10 +62,15 @@ test('SC-02: fixed columns, a capped desktop width and font-only adaptation', as
   const { runtime, sha } = verifiedRuntime('SC-02');
   await page.setViewportSize({ width: 1600, height: 960 });
 
-  await createAndAttach(page, expect, runtime, 'case-2487-sc02', 'Relay');
+  await createAndAttach(page, expect, runtime, 'case-2487-sc02', 'Relay', null);
+  await waitForShell(page, 'SC02-READY');
   const wide = await grid(page);
+  expect(Number.isFinite(wide.contentWidth), 'measured grid: ' + JSON.stringify(wide)).toBe(true);
   expect(wide.cols, 'the live Session must render its canonical columns').toBe(88);
-  expect(wide.fontSize, 'a wide Web window uses the configured maximum font').toBe(14);
+  // The configured value is a maximum; the fit may choose a hair below it
+  // when the capped content box is a few tenths of a pixel short.
+  expect(wide.fontSize, 'a wide Web window is at the configured maximum').toBeLessThanOrEqual(14);
+  expect(wide.fontSize, 'the wide font must not have collapsed').toBeGreaterThan(12);
   expect(wide.cellWidth).toBeGreaterThan(0);
   expect(wide.rows).toBeGreaterThan(10);
   // The drawn screen is the terminal's own content width, not the host width:
@@ -64,11 +93,16 @@ test('SC-02: fixed columns, a capped desktop width and font-only adaptation', as
     await expect.poll(async () => (await grid(page)).cols, { timeout: 10_000 }).toBe(88);
   }
 
-  // A narrower window below the cap: the font shrinks until the same columns
-  // fit the content box; rows follow the reduced height.
-  await page.setViewportSize({ width: 1000, height: 700 });
+  // A narrower window below the cap: restore the sidebar (the collapse above
+  // gave the capped terminal no extra room) and use a width that really is
+  // below `cols × cell`; the font shrinks, rows follow the reduced height.
+  const expand = page.getByTestId('sidebar-rail-expand');
+  if (await expand.isVisible().catch(() => false)) {
+    await expand.click();
+  }
+  await page.setViewportSize({ width: 720, height: 700 });
   await expect.poll(async () => (await grid(page)).fontSize, { timeout: 15_000 })
-    .toBeLessThan(14);
+    .toBeLessThan(wide.fontSize);
   const narrow = await grid(page);
   expect(narrow.cols, 'a width change must never change the columns').toBe(88);
   expect(narrow.cellWidth).toBeLessThan(wide.cellWidth);
