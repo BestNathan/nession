@@ -1,11 +1,12 @@
 # Per-environment NFS PV/PVC pairs — no subPath anywhere.
-# Directories must exist on the NFS server before first sync (bootstrap checklist).
-# preprod starts empty: fresh /mnt/share/k8s/preprod{,/claude-home}.
+# The paths are the lane's existing dirs, so moving into namespace nession
+# keeps the data. kustomize nameSuffix appends -preprod to every PV/PVC name
+# and to the claimName / volumeName references.
 ---
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: preprod-data
+  name: nession-data
 spec:
   accessModes:
     - ReadWriteMany
@@ -20,11 +21,11 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: preprod-data
+  name: nession-server-data
 spec:
   accessModes:
     - ReadWriteMany
-  volumeName: preprod-data
+  volumeName: nession-data
   resources:
     requests:
       storage: 5Gi
@@ -32,7 +33,7 @@ spec:
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: preprod-claude-home
+  name: nession-claude-home
 spec:
   accessModes:
     - ReadWriteMany
@@ -47,11 +48,11 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: preprod-claude-home
+  name: nession-claude-home
 spec:
   accessModes:
     - ReadWriteMany
-  volumeName: preprod-claude-home
+  volumeName: nession-claude-home
   resources:
     requests:
       storage: 10Gi

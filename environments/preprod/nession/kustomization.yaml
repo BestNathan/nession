@@ -1,9 +1,14 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-# preprod — dormant (owner scope 2026-09-05): reserved, own namespace + NFS
-# dirs; not part of the release flow. Dispatch-ready via deploy.yml.
-namespace: nession-preprod
+# preprod — dormant (owner scope 2026-09-05): reserved, dispatch-ready via
+# deploy.yml, not part of the release flow.
+# Owner model: one shared nession namespace; environments are distinguished by
+# nameSuffix (staging -staging, staging-01 -staging-01, preprod -preprod).
+# This lane keeps its existing NFS dirs so the namespace move keeps data.
+namespace: nession
+
+nameSuffix: -preprod
 
 commonLabels:
   env: preprod

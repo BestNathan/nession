@@ -1,4 +1,5 @@
-# preprod — deploys environments/preprod/nession into its own namespace.
+# preprod — deploys environments/preprod/nession as the suffixed lane in the
+# shared nession namespace (owner model: nameSuffix, not a per-env namespace).
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -15,7 +16,7 @@ spec:
     path: environments/preprod/nession
   destination:
     server: https://kubernetes.default.svc
-    namespace: nession-preprod
+    namespace: nession
   syncPolicy:
     automated:
       prune: true
