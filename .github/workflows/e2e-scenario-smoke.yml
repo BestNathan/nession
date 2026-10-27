@@ -82,8 +82,17 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/.cache/ms-playwright
-          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('e2e/package-lock.json') }}
-      - run: cd e2e && npm ci && npx playwright install chromium --with-deps
+          key: playwright-chromium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('e2e/package-lock.json') }}
+      - name: Install and verify cached Chromium runtime
+        run: |
+          cd e2e
+          npm ci
+          npx playwright install chromium
+          # The pinned Ubuntu runner already provides launch-time libraries.
+          # Verify them by actually launching Chromium; missing dependencies
+          # fail closed instead of silently passing a cache hit. Do not run
+          # Playwright's --with-deps apt installer on every warm job (#2525).
+          node -e 'const { chromium } = require("@playwright/test"); chromium.launch({ timeout: 30000 }).then(browser => browser.close()).catch(error => { console.error(error); process.exitCode = 1; })'
       - run: cd web && npm ci && npm run build
       - run: cargo build -p nession-server -p nession-agent
       - name: Run scenario contract self-test
