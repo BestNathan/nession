@@ -60,3 +60,15 @@ test('published mocks remain discoverable and source is secondary',()=>{
   assert.match(publisher,/View source ↗/);
   assert.doesNotMatch(app.slice(app.indexOf('function renderPrototypes('),app.indexOf('function renderAgents(')),/innerHTML/);
 });
+
+test('prototype push bridge triggers only trusted main-owned publication',async()=>{
+  const workflow=await readFile(new URL('../../.github/workflows/deploy-pages.yml',import.meta.url),'utf8');
+  assert.ok(workflow.includes("workflows: ['Prototype / Change Signal']"));
+  assert.ok(workflow.includes('types: [completed]'));
+  assert.ok(workflow.includes('branches: [prototype]'));
+  assert.ok(workflow.includes("workflow_run.conclusion == 'success'"));
+  assert.ok(workflow.includes("workflow_run.event == 'push'"));
+  assert.ok(workflow.includes("workflow_run.head_branch == 'prototype'"));
+  assert.ok(workflow.includes('workflow_run.head_repository.full_name == github.repository'));
+  assert.ok(!workflow.includes("cron: '*/15 * * * *'"));
+});
