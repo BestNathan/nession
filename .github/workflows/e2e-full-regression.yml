@@ -266,6 +266,24 @@ jobs:
             echo "Debian archives retained: $count"
             echo "Browser + OS dependency setup: $elapsed seconds"
           } >> "$GITHUB_STEP_SUMMARY"
+      # apt owns lock/partial files as root. actions/cache uses the runner
+      # user, so leaving these files in the archive makes its save action warn
+      # "Cache save failed" while misleadingly reporting step success (#2525).
+      # Only remove transient apt runtime state AFTER successful --with-deps
+      # and the Chromium launch probe; preserve all signed .deb archives.
+      - name: Verify apt archive is readable before cache upload
+        if: steps.browser-setup.outcome == 'success' && steps.apt-cache.outputs.cache-hit != 'true' && steps.browser-setup.outputs.deb_count != '0'
+        run: |
+          set -euo pipefail
+          archives="$GITHUB_WORKSPACE/.cache/playwright-apt/archives"
+          sudo rm -f "$archives/lock"
+          sudo rm -rf "$archives/partial"
+          count="$(find "$archives" -maxdepth 1 -type f -name '*.deb' | wc -l | tr -d ' ')"
+          [[ "$count" -gt 0 ]] || { echo "::error::No apt archives to cache"; exit 1; }
+          # A real tar read is the same privilege boundary as actions/cache:
+          # a permission regression fails the Full job, never a false hit.
+          tar -cf /dev/null -C "$GITHUB_WORKSPACE" .cache/playwright-apt
+          echo "PLAYWRIGHT_APT_CACHE_ARCHIVE_V1 debs=$count readable=true"
       - name: Save verified apt archives before Full test execution
         if: steps.browser-setup.outcome == 'success' && steps.apt-cache.outputs.cache-hit != 'true' && steps.browser-setup.outputs.deb_count != '0'
         uses: actions/cache/save@v4
