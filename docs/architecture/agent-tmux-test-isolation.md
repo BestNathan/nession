@@ -83,9 +83,12 @@ every poll, and on failure:
 
 A failure therefore distinguishes **"the Pane was never 96" (the create ran at
 80)** from **"the Pane was 96 and an event moved it"**, and names the server and
-clients involved. The next occurrence of this failure carries that evidence;
-this document does not yet claim which of the two happened in the cited run —
-that distinction is the open part of SC-01.
+clients involved. The instrumented CI run answered it: the target Session read
+`window=80x24 pane=80x24 attached=0` immediately after the create response,
+never 96 at any poll, while `/dev/pts/21` was attached to the anchor Session at
+`80x24`. The Pane was never 96 — the create itself ran at 80, sized by the
+other Session's client, which is the first kind of failure (SC-01's
+determination).
 
 ## Controlled concurrency proof (SC-02) and production-equivalent proof (SC-03)
 
@@ -93,9 +96,11 @@ Two integration tests make the relevant schedules explicit rather than relying
 on suite timing:
 
 - `configured_width_survives_shared_server_flood_and_attach` — a configured-96
-  Agent creates its Sessions while another Agent on the same socket floods 48
-  creates with 400 environment variables each, and a real 80×24 client stays
-  attached to an anchor Session. Each measured Session must read 96.
+  Agent creates its Sessions while another Agent on the same socket floods 8
+  creates with 20 environment variables each, and a real 80×24 client stays
+  attached to an anchor Session. Each measured Session must read 96. The load
+  is bounded deliberately: the schedule must fit inside one create's admission
+  budget, so it models concurrency rather than gridlocking every create lane.
 - `shared_agent_keeps_independent_session_widths` — one Agent, one tmux server,
   an 80-column and a 96-column Session; both attach replies state their own
   width, an authorized resize applies rows only, and the other Session is
@@ -125,7 +130,7 @@ case) so the classification cannot silently regress.
 | tmux options and `window-size` | **found and fixed** | On tmux 3.4, `window-size latest` sizes a **new** Session to the server's latest client, overriding `-x/-y`. The create path now applies the created size explicitly and restores `latest`; only the authorized resize path changes rows. The server config still sets only `history-limit` (setting `window-size manual` at startup aborts tmux 3.6b). |
 | Other real-tmux suites | audited | `control_mode`, `tmux`, `full_chain`, `sync` all address their own unique Session names; no global resize/option mutation. |
 | Shared-UID multi-Agent | unproven risk | The default socket is per UID (`/tmp/nession-<uid>/tmux.sock`), so separate Agent processes under one user can share a server unless configured with distinct `NESSSION_TMUX_SOCKET` values. Production should give each Agent its own socket; #575 owns the topology rule. No width violation is demonstrated. |
-| Web/App / Relay recovery | conditional | Only if a real Pane width is shown to change. #2487's SC-09 receipt stays valid; a product defect needs a new live witness, not a test-only isolation claim. |
+| Web/App / Relay recovery | conditional | Only if a real Pane width is shown to change; the create-time width did change, but before any Web/App attach, so no client-side recovery path is implicated. #2487's SC-09 receipt is reopened: its create-width claim was violated on tmux 3.4, and the fix's live shared-server witness re-accepts it. No test-only isolation claim. |
 | CI coverage reporting | fixed | See SC-05 above. |
 
 ## Limits

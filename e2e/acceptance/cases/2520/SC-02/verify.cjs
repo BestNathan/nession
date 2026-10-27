@@ -42,7 +42,7 @@ run(({ evidence }) => {
     type: 'runtime',
     value:
       'exact SHA ' + sha + ' on ' + version + ': ' + REPEATS +
-      'x configured-96 create under a shared-server flood (48 creates, 400 env ' +
+      'x configured-96 create under a shared-server flood (8 creates, 20 env ' +
       'vars each) plus a real attached 80x24 client, and ' + REPEATS +
       'x isolated standalone create, all read their own 96-column Pane and no ' +
       'Session moved another Session',

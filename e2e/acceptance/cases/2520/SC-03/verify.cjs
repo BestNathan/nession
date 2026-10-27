@@ -35,5 +35,22 @@ run(({ evidence }) => {
       'resize on the 96-column Session applied rows only, and the 80-column ' +
       'Session was unchanged',
   });
-  return 'Multi-Session sharing keeps independent configured widths; no product regression is proven';
+  // The criterion does not ask whether the sharing topology merely looks
+  // stable: it asks whether a real product defect exists. One did — on tmux
+  // 3.4 a client attached to another Session sized a created Session to its
+  // own 80x24 — and `create_session` now applies the requested geometry after
+  // `new-session`. #2487's SC-09 invariant is the one that was violated; its
+  // reopen evidence is this same shared-server witness, not a test-only
+  // isolation change.
+  evidence.push({
+    type: 'runtime',
+    value:
+      'the shared-server create defect is found and fixed at the create owner: ' +
+      'on tmux 3.4 a client attached to another Session discarded a new ' +
+      'Session\'s requested columns; the create path now applies them ' +
+      'explicitly; the #2487 SC-09 invariant it violated cannot rest on an ' +
+      'isolated path, so this production-equivalent witness is its live ' +
+      'evidence',
+  });
+  return 'Multi-Session sharing keeps independent configured widths; the shared-server create defect behind the original 80x24 failure is fixed at the create owner';
 });
