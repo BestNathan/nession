@@ -56,43 +56,62 @@ function grid(page) {
  */
 function longLineFingerprint(page, marker) {
   return page.evaluate((wanted) => {
-    const xterm = Array.from(document.querySelectorAll('.xterm')).find((el) => {
-      const rect = el.getBoundingClientRect();
-      return rect.width > 0 && rect.height > 0;
-    });
-    const term = xterm?.parentElement?.xtermInstance;
-    const buffer = term.buffer.active;
-    const textAt = (i) => {
-      const line = buffer.getLine(i);
-      return line ? line.translateToString(true) : '';
-    };
-    // The LAST occurrence: an earlier marker of the same Case stays in the
-    // scrollback, and this fingerprint is about the run just printed.
-    let start = -1;
-    for (let i = 0; i < buffer.length; i += 1) {
-      if (textAt(i).includes(wanted + '-x')) start = i;
+    // A breakpoint change can leave the previous surface mounted beside the
+    // current one. The old terminal may have received only the first rows of
+    // the run before it stopped being the live surface (measured: 142 of 200),
+    // while the visible one has the whole run. Fingerprint every mounted
+    // terminal and take the most complete run: a real reflow changes the
+    // wrap boundaries, not the number of x's the shell produced.
+    const terminals = Array.from(document.querySelectorAll('.xterm'))
+      .filter((el) => {
+        const rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      })
+      .map((el) => el.parentElement?.xtermInstance)
+      .filter((term) => term?.buffer?.active);
+
+    let best = null;
+    const dumps = [];
+    for (const term of terminals) {
+      const buffer = term.buffer.active;
+      const textAt = (i) => {
+        const line = buffer.getLine(i);
+        return line ? line.translateToString(true) : '';
+      };
+      // The LAST occurrence: an earlier marker of the same Case stays in the
+      // scrollback, and this fingerprint is about the run just printed.
+      let start = -1;
+      for (let i = 0; i < buffer.length; i += 1) {
+        if (textAt(i).includes(wanted + '-x')) start = i;
+      }
+      if (start < 0) {
+        const dump = [];
+        for (let i = 0; i < buffer.length; i += 1) dump.push(textAt(i));
+        dumps.push(dump.join('\n'));
+        continue;
+      }
+      const run = [textAt(start)];
+      for (let i = start + 1; i < buffer.length; i += 1) {
+        const text = textAt(i);
+        // A wrapped continuation of the x run is x's only. Stop at the first
+        // line that is not: the prompt after the newline, or empty history.
+        if (!/^x+$/.test(text)) break;
+        run.push(text);
+      }
+      const totalX = run.join('').split('x').length - 1;
+      const fingerprint = {
+        first: run[0].length,
+        second: run.length > 1 ? run[1].length : 0,
+        last: run[run.length - 1].length,
+        totalX,
+        lines: run.length,
+      };
+      if (!best || fingerprint.totalX > best.totalX) best = fingerprint;
     }
-    if (start < 0) {
-      const dump = [];
-      for (let i = 0; i < buffer.length; i += 1) dump.push(textAt(i));
-      throw new Error('the long-line marker is not in the buffer:\n' + dump.join('\n'));
+    if (!best) {
+      throw new Error('the long-line marker is not in any mounted terminal:\n' + dumps.join('\n---\n'));
     }
-    const run = [textAt(start)];
-    for (let i = start + 1; i < buffer.length; i += 1) {
-      const text = textAt(i);
-      // A wrapped continuation of the x run is x's only. Stop at the first
-      // line that is not: the prompt after the newline, or empty history.
-      if (!/^x+$/.test(text)) break;
-      run.push(text);
-    }
-    const totalX = run.join('').split('x').length - 1;
-    return {
-      first: run[0].length,
-      second: run.length > 1 ? run[1].length : 0,
-      last: run[run.length - 1].length,
-      totalX,
-      lines: run.length,
-    };
+    return best;
   }, marker);
 }
 
