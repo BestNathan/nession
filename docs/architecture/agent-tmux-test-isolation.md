@@ -37,11 +37,14 @@ Measured on tmux 3.6b (macOS) while building #2520's evidence:
 | 64 concurrent `set-environment` writers while creating | 96 |
 | 16 concurrent `new-session` clients starting the server | 96 |
 
-So the shared server and client attachment do not, by themselves, move an
-unrelated Session. The CI observation remains a **specific event** to identify,
-not a licence to change the product's sizing contract.
+On **tmux 3.4** (Ubuntu 24.04, the CI runner) the client-attachment rows do
+not hold: a client attached to one Session at 80×24 sized a **newly created**
+Session to 80×24 and discarded `-x 96 -y 24`. The #2522 create-time probe
+shows the target Session with `attached=0`, never at 96, while an 80×24 client
+is attached to an anchor Session; `default-size=80x24`, `window-size` is unset
+(global `latest`). That is the #2520 event.
 
-## The #2520 observation
+## The #2520 event and the fix
 
 PR #2518's Quality/coverage run `40485541897` at `4101234b`:
 
@@ -55,6 +58,17 @@ sessions=[16 × nession-test-flood-*=80x24, 3 × nession-test-showenv-*=80x24,
 The standalone Case (`e2e/acceptance/cases/2487/SC-09`) runs the same test in
 isolation on its own socket and passes; that proves the isolated path, not
 parallel-suite stability.
+
+The fix is in the **product create path**, not test isolation: after
+`new-session`, `create_session_impl` applies the requested geometry with
+`resize-window` and restores tmux's dynamic `window-size latest` (the resize
+command itself pins `manual`). A newly created Session therefore ends at the
+agent-stated size even when another Session's client is the server's "latest",
+while the active controller's authorized resize path still drives rows. The
+regression witness is
+`a_client_attached_elsewhere_cannot_size_a_new_session`: a real 80×24 client
+held on an anchor Session while a 96-column Session is created. The
+corresponding integration test runs the same schedule under the suite's flood.
 
 ### What is instrumented now
 
@@ -108,7 +122,7 @@ case) so the classification cannot silently regress.
 |---|---|---|
 | Run socket and teardown | verified | One socket per run (`scripts/tmux-run-socket.sh`), owner lock, canonical reclamation in `scripts/sweep-test-sessions.sh`. Orphans on a developer machine explain local PTY pressure, not CI width changes. |
 | Linked Sessions / window association | verified | No `link-window`/`link-session` in the product or suite; `new-session` always creates a fresh Window. |
-| tmux options and `default-size` | verified (3.6b) | The server config sets only `history-limit`. `window-size` stays `latest`; a client sizes its own Session. `default-size` 80×24 is the observed fallback value, not an applied create size. |
+| tmux options and `window-size` | **found and fixed** | On tmux 3.4, `window-size latest` sizes a **new** Session to the server's latest client, overriding `-x/-y`. The create path now applies the created size explicitly and restores `latest`; only the authorized resize path changes rows. The server config still sets only `history-limit` (setting `window-size manual` at startup aborts tmux 3.6b). |
 | Other real-tmux suites | audited | `control_mode`, `tmux`, `full_chain`, `sync` all address their own unique Session names; no global resize/option mutation. |
 | Shared-UID multi-Agent | unproven risk | The default socket is per UID (`/tmp/nession-<uid>/tmux.sock`), so separate Agent processes under one user can share a server unless configured with distinct `NESSSION_TMUX_SOCKET` values. Production should give each Agent its own socket; #575 owns the topology rule. No width violation is demonstrated. |
 | Web/App / Relay recovery | conditional | Only if a real Pane width is shown to change. #2487's SC-09 receipt stays valid; a product defect needs a new live witness, not a test-only isolation claim. |
@@ -116,12 +130,12 @@ case) so the classification cannot silently regress.
 
 ## Limits
 
-- The tmux matrix and the concurrency tests were exercised on macOS tmux 3.6b;
-  CI runs Ubuntu 24.04 with the distribution tmux. The controlled tests and the
-  four-point diagnostics run on both.
-- A passing concurrency test is not proof about the cited run's exact
-  scheduling. SC-01 remains open until the instrumentation (or a deterministic
-  fault-injection reproduction) names the event.
-- Do not "fix" the observation by serializing all tests, forcing
-  `window-size=manual`, deleting the standalone assertion, or adding retries:
-  those remove the topology that makes the property meaningful.
+- The client-attachment behavior differs by tmux version: macOS tmux 3.6b did
+  not reproduce it, Ubuntu 24.04's tmux 3.4 did. The regression witness runs on
+  both; CI is the authority for the 3.4 behavior.
+- The event is identified and fixed at the create owner. A failure that is
+  **not** at create (for example an existing Session moved later) would be a
+  new variant and needs a fresh witness; do not confuse it with this one.
+- Do not "fix" a future variant by serializing all tests, forcing
+  `window-size=manual` for every Session, deleting the standalone assertion, or
+  adding retries: those remove the topology that makes the property meaningful.
