@@ -63,13 +63,12 @@ test('published mocks remain discoverable and source is secondary',()=>{
 
 test('prototype push bridge triggers only trusted main-owned publication',async()=>{
   const workflow=await readFile(new URL('../../.github/workflows/deploy-pages.yml',import.meta.url),'utf8');
-  assert.match(workflow,/workflow_run:/);
-  assert.match(workflow,/workflows: \\['Prototype \/ Change Signal'\\]/);
-  assert.match(workflow,/types: \\[completed\\]/);
-  assert.match(workflow,/branches: \\[prototype\\]/);
-  assert.match(workflow,/workflow_run\.conclusion == 'success'/);
-  assert.match(workflow,/workflow_run\.event == 'push'/);
-  assert.match(workflow,/workflow_run\.head_branch == 'prototype'/);
-  assert.match(workflow,/workflow_run\.head_repository\.full_name == github\.repository/);
-  assert.doesNotMatch(workflow,/\\*\\/15 \\* \\* \\* \\*/);
+  assert.ok(workflow.includes("workflows: ['Prototype / Change Signal']"));
+  assert.ok(workflow.includes('types: [completed]'));
+  assert.ok(workflow.includes('branches: [prototype]'));
+  assert.ok(workflow.includes("workflow_run.conclusion == 'success'"));
+  assert.ok(workflow.includes("workflow_run.event == 'push'"));
+  assert.ok(workflow.includes("workflow_run.head_branch == 'prototype'"));
+  assert.ok(workflow.includes('workflow_run.head_repository.full_name == github.repository'));
+  assert.ok(!workflow.includes("cron: '*/15 * * * *'"));
 });
