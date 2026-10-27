@@ -25,7 +25,7 @@ jobs:
   # Version check — gate for entire workflow
   # ═══════════════════════════════════════════════════════════════════
   version-check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       version_changed: ${{ steps.check.outputs.version_changed }}
       rust_version: ${{ steps.check.outputs.rust_version }}
@@ -117,7 +117,7 @@ jobs:
   regression-ready:
     needs: version-check
     if: needs.version-check.outputs.version_changed == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 95
     permissions:
       contents: read
@@ -164,7 +164,7 @@ jobs:
   rust-check:
     needs: version-check
     if: needs.version-check.outputs.version_changed == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -187,7 +187,7 @@ jobs:
   web-check:
     needs: version-check
     if: needs.version-check.outputs.version_changed == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -209,7 +209,7 @@ jobs:
   build-web:
     needs: [version-check, rust-check, web-check]
     if: needs.version-check.outputs.version_changed == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -233,7 +233,7 @@ jobs:
   build-linux-amd64:
     needs: [version-check, rust-check, web-check]
     if: needs.version-check.outputs.version_changed == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -394,7 +394,7 @@ jobs:
   docker-server-amd64:
     needs: [version-check, regression-ready, build-web, build-linux-amd64]
     if: needs.version-check.outputs.version_changed == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       packages: write
@@ -432,7 +432,7 @@ jobs:
   docker-agent-amd64:
     needs: [version-check, regression-ready, build-web, build-linux-amd64]
     if: needs.version-check.outputs.version_changed == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       packages: write
@@ -469,7 +469,7 @@ jobs:
   docker-ui-amd64:
     needs: [version-check, regression-ready, build-web]
     if: needs.version-check.outputs.version_changed == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       packages: write
@@ -615,7 +615,7 @@ jobs:
        docker-server-amd64, docker-agent-amd64, docker-ui-amd64,
        docker-server-arm64, docker-agent-arm64, docker-ui-arm64]
     if: needs.version-check.outputs.version_changed == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       packages: write
     steps:
@@ -651,7 +651,7 @@ jobs:
     concurrency:
       group: gitops-writer
       cancel-in-progress: false
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
@@ -727,7 +727,7 @@ jobs:
       [version-check, regression-ready, merge,
        build-linux-amd64, build-linux-arm64, build-macos]
     if: needs.version-check.outputs.version_changed == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
@@ -794,7 +794,7 @@ jobs:
       max-parallel: 2
       matrix:
         image: [server, agent, ui]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
       contents: read

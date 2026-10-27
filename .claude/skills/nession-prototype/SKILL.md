@@ -106,13 +106,13 @@ Verify **what the prototype claims**, not unrelated production invariants:
 
 After the final prototype and gallery commit:
 
-1. Fetch/verify the **exact remote `prototype` HEAD SHA** and the files under the target directory. Pin links to that immutable commit, not just `prototype`.
+1. Fetch/verify the **exact remote `prototype` HEAD SHA** and the files under the target directory. Preserve a pinned source link to that commit. For the Pages preview, separately verify `prototypes/manifest.json` reports the same published SHA; if the artifact is older, describe the preview as stale and never claim it shows the latest source.
 2. Add a conspicuous **Interactive prototype** subsection in the Requirement description with:
-   - clickable preview (where available) and the immutable source/GitHub directory;
+   - **browser HTML preview first** (canonical Pages deep link, only after live verification), followed by the immutable source/GitHub directory;
    - `PROTOCOL.md` / design notes and smoke commands where applicable;
    - what is mocked vs actually live;
    - tested interactions, test result, browser-validation status and limitations.
-3. The existing gallery uses external `raw.githack.com` / `rawcdn.githack.com` for static HTML previews; these are **third-party** renderers, not GitHub Pages for the orphan branch. Only link verified actual URLs; distinguish a constructed URL from one whose delivery was opened in a browser, and note external renderer/cache risks. Always include a GitHub source link as fallback.
+3. **Preview-first linking is mandatory.** The **native Pages library** is `https://bestnathan.github.io/nession/#/prototypes` (the older `/prototypes/` entry redirects here, and must not become a separately styled gallery) and a prototype is linked directly as `https://bestnathan.github.io/nession/prototypes/<topic>-<issue-number>/index.html`. These are browser-rendered HTML views, **not** GitHub `/blob/` or `/tree/` pages. Prefer that direct preview in Issue comments, handoffs and responses; put an immutable GitHub source link alongside it, not in place of it. Every published preview includes a visible **View source** link to the exact published commit. Only claim the Pages URL is *live* after verifying its actual HTTPS response; the `prototype` branch itself does not trigger instant Pages publication (main push, schedule or manual dispatch does). If Pages is not yet deployed/verified, label the URL unverified, provide the GitHub source, and use a third-party renderer only as a clearly identified fallback.
 4. When revising, publish a new commit and update the Issue's **pinned SHA** and fidelity/evidence notes while keeping decision history. Do not silently move the source under an old pinned link.
 5. A prototype can inform or satisfy an explicitly defined **prototype-specific deliverable**, but does **not** prove production Success Criteria, E2E cases, backend/AI integration or security. Preserve trusted Acceptance Report status until the appropriate owner records real evidence.
 

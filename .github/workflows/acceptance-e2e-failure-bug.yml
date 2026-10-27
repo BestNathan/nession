@@ -36,7 +36,7 @@ jobs:
          github.event.workflow_run.repository.full_name == github.repository &&
          github.event.workflow_run.status == 'completed' &&
          github.event.workflow_run.conclusion == 'success'))
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Checkout trusted main

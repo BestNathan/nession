@@ -14,7 +14,7 @@ permissions:
 jobs:
   request:
     if: github.repository == 'BestNathan/nession' && github.ref == 'refs/heads/main' && github.actor == 'BestNathan'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
       - name: Record read-only main/owner replay request

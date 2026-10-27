@@ -142,6 +142,17 @@ function selfTest() {
   assert.deepEqual(validateAcceptancePlan('## Success Criteria\nNo plan', criteria, stages), {plan:null,errors:[]});
   const valid = validateAcceptancePlan(plan, criteria, stages);
   assert.deepEqual(valid.errors, []);
+  // A Staging lane is an *environment*, not a Git branch: any authorized lane
+  // name is valid via `when: deployed`, while `when: merged` stays limited to
+  // the two canonical branches. This is the SC-04 contract distinction.
+  assert.deepEqual(validateAcceptancePlan(
+    plan.replace('environment: production', 'environment: staging-01'),
+    criteria, stages).errors, []);
+  assert.match(validateAcceptancePlan(
+    plan.replace('when: deployed\n    environment: production',
+      'when: merged\n    branch: staging-01'),
+    criteria, stages).errors.join('\n'),
+  /merged plan requires explicit staging\/main branch/);
   // The v2 authoring format omits Stage from the projection table. Its
   // compatibility stage must be derived from when/branch/environment.
   const implicitRows = new Map(criteria.map(id => [id, {

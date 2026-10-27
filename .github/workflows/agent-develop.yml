@@ -46,7 +46,7 @@ jobs:
       github.event_name == 'workflow_dispatch' &&
       github.run_attempt == 1 &&
       github.actor == 'github-actions[bot]'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
@@ -80,7 +80,7 @@ jobs:
       github.run_attempt == 1 &&
       github.actor == 'github-actions[bot]' &&
       inputs.resume_from != ''
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 12
     environment: cursor
     steps:
@@ -130,7 +130,7 @@ jobs:
       github.actor == 'github-actions[bot]' &&
       needs.claim.result == 'success' &&
       (inputs.resume_from == '' || needs.restore.result == 'success')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: cursor
     steps:

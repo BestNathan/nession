@@ -41,7 +41,7 @@ env:
 
 jobs:
   admit:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -86,21 +86,36 @@ jobs:
           node scripts/deployment-binding-lookup.mjs collect \
             "$RUNNER_TEMP/store" "$RUNNER_TEMP/deployment-records.json"
 
-      - name: Read previous admission state
+      - name: Read trusted previous admission state
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          artifact_id=$(gh api \
+          # The artifact NAME is not provenance: any run (including a PR) can
+          # upload `staging-lane-admission`. Only the canonical lane workflow
+          # on main, from a trusted event, by a completed successful run, may
+          # seed the next admission interval. Losing prior state is safer than
+          # trusting a forged interval.
+          gh api \
             "repos/${GITHUB_REPOSITORY}/actions/artifacts?name=staging-lane-admission&per_page=100" \
-            --jq '.artifacts | sort_by(.created_at) | reverse | .[0].id // empty')
+            > "$RUNNER_TEMP/admission-artifacts.json"
+          node scripts/staging-lane-admission-state.mjs select \
+            "$RUNNER_TEMP/admission-artifacts.json" \
+            "$RUNNER_TEMP/trusted-admission.json"
+          artifact_id="$(jq -r '.artifact_id // empty' "$RUNNER_TEMP/trusted-admission.json")"
           if [[ -n "${artifact_id}" ]]; then
             gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" \
               > "$RUNNER_TEMP/previous.zip"
             mkdir -p "$RUNNER_TEMP/previous"
             unzip -o -q "$RUNNER_TEMP/previous.zip" -d "$RUNNER_TEMP/previous"
             cp "$RUNNER_TEMP/previous/admission.json" "$RUNNER_TEMP/previous-admission.json"
-            echo "Loaded previous admission receipt artifact ${artifact_id}"
+            echo "Loaded trusted previous admission receipt artifact ${artifact_id} from run $(jq -r '.run_id' "$RUNNER_TEMP/trusted-admission.json")/attempt $(jq -r '.run_attempt' "$RUNNER_TEMP/trusted-admission.json")"
+          else
+            {
+              echo "## Previous admission state"
+              echo
+              echo "No trusted previous admission artifact (canonical lane workflow on main, successful, trusted event). Starting without an interval baseline."
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Decide per-lane admission
