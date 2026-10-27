@@ -36,3 +36,7 @@
 - Whether the Process drill-down should also be surfaced in the Session capability (without duplicating Agent ownership).
 - Long-running reparented worker visibility when a Pane has already exited: requires retained scope mappings, not just a fresh `list-panes` call.
 - Which diagnostic details to expose on mobile without leaking private local paths or sensitive command arguments.
+
+## Publication delivery
+
+This static mock is authored on the isolated `prototype` branch and published by the trusted main-owned [Deploy / Public Pages](https://github.com/BestNathan/nession/actions/workflows/deploy-pages.yml) workflow. The read-only `Prototype / Change Signal` runs on ordinary source pushes and triggers a constrained `workflow_run` consumer after [#2518](https://github.com/BestNathan/nession/pull/2518). The live preview must be verified by the deployed `prototypes/manifest.json` source SHA and the standalone HTML response; a source commit is not itself proof of HTTPS publication. This section was added as the end-to-end event-bridge verification source change for [#2519](https://github.com/BestNathan/nession/issues/2519).
