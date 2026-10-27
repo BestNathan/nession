@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 40465003834,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/2487-acceptance-read-races",
+    "target_sha": "9d49cd98910ba8508cbfb847a3701ced64aa789f",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/40465003834",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "b2f53693d3dab069fc473c8e1d3447cc93e4b6b2e248c35ee05d14d52e10b244"
+  },
+  "record": "runs/2026-10-27/40465003834-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "4fd3e617d5d978374418d4c8f64016d832ddcf5dde46714c4bcbb15bb985ad00"
+}
