@@ -10,7 +10,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const {
-  root, targetSha, webBuild, buildConfig, expectFailure, requireText,
+  root, targetSha, webBuild, buildConfig, expectFailure, requireText, stripAnsi,
 } = require('../../../shared/terminal-sizing-cases.cjs');
 const { run, checked } = require('../../../shared/control-mode-cases.cjs');
 
@@ -78,12 +78,12 @@ run(({ evidence }) => {
   // The runtime reader is the same parser (unit tests) and the deployment
   // knobs exist in the two image paths. The Web/App shared value is the one
   // `terminalConfig` module: no separate mobile columns knob exists.
-  const unit = checked(
+  const unit = stripAnsi(checked(
     'npm',
     ['--prefix', 'web', 'test', '--', '--project', 'unit',
       'src/platform/terminal-runtime/__tests__/unit/terminalConfig.test.ts'],
     300000,
-  );
+  ));
   if (!unit.includes('terminalConfig.test.ts') || !/Tests\s+7 passed/.test(unit)) {
     throw new Error('the build-configuration unit tests did not run/pass: ' + unit.slice(-2500));
   }
