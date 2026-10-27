@@ -89,10 +89,17 @@ function imageIdFor(overlay, roleName, deploymentName, image, pods) {
   const tagSuffix = ':' + image.slice(image.lastIndexOf(':') + 1);
   const matchesTag = (entry) =>
     typeof entry?.image === 'string' && entry.image.endsWith(tagSuffix);
+  // A deployment's ReplicaSet is `<deployment-name>-<pod-template-hash>`, and
+  // the hash never contains a dash. Matching by plain prefix adopted a sibling
+  // lane whose name extends this one (nession-agent-staging vs
+  // nession-agent-staging-01), and the sibling's env label then rejected this
+  // lane's attestation (#2523).
+  const escapedName = deploymentName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const replicaSetName = new RegExp('^' + escapedName + '-[^-]+$');
   const matching = pods.filter((pod) => {
     const owner = pod?.metadata?.ownerReferences?.[0];
     return owner?.kind === 'ReplicaSet' &&
-      typeof owner.name === 'string' && owner.name.startsWith(deploymentName + '-');
+      typeof owner.name === 'string' && replicaSetName.test(owner.name);
   });
   if (matching.length === 0) fail('missing running pod for ' + roleName + ' deployment');
   const imageIds = new Set();
@@ -335,6 +342,40 @@ function selfTest() {
     deployments: wrongTagFixtures.deployments,
     pods: wrongTagFixtures.pods,
   }), /no ready pod reports the agent deployment image/);
+
+  // #2523: lanes share one namespace, so a sibling whose name extends this
+  // deployment (nession-agent-staging vs nession-agent-staging-01) has pods in
+  // the same list. They must never be adopted by the shorter lane; the old
+  // startsWith match did exactly that and then failed on the env label.
+  const siblingFixtures = kubernetesFixtures();
+  for (const roleName of ROLES) {
+    const sibling = structuredClone(
+      siblingFixtures.pods.items.find((pod) => pod.metadata.name.includes('-' + roleName + '-')));
+    sibling.metadata.name = 'nession-' + roleName + '-staging-01-zz999';
+    sibling.metadata.labels.env = 'staging-01';
+    sibling.metadata.ownerReferences[0].name = 'nession-' + roleName + '-staging-01-zz999';
+    siblingFixtures.pods.items.push(sibling);
+  }
+  const siblingObservation = observationFromKubernetes({
+    overlay: parseEnvironmentOverlay(OVERLAY_PATH, OVERLAY_TEXT),
+    environmentId: 'staging',
+    clusterContext: 'home-k8s',
+    observedAt: '2026-10-24T16:00:00Z',
+    deployments: siblingFixtures.deployments,
+    pods: siblingFixtures.pods,
+  });
+  assert.equal(siblingObservation.workloads.length, 3);
+  const onlySibling = kubernetesFixtures();
+  onlySibling.pods.items = siblingFixtures.pods.items.filter(
+    (pod) => pod.metadata.labels.env === 'staging-01');
+  assert.throws(() => observationFromKubernetes({
+    overlay: parseEnvironmentOverlay(OVERLAY_PATH, OVERLAY_TEXT),
+    environmentId: 'staging',
+    clusterContext: 'home-k8s',
+    observedAt: '2026-10-24T16:00:00Z',
+    deployments: onlySibling.deployments,
+    pods: onlySibling.pods,
+  }), /missing running pod for agent/);
 
   const reject = (mutations, pattern) => {
     const fixtures = kubernetesFixtures(mutations);
