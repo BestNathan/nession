@@ -96,6 +96,26 @@ function longLineFingerprint(page, marker) {
   }, marker);
 }
 
+/**
+ * Wait until the whole 200-x run is in the buffer before fingerprinting it.
+ *
+ * The marker line appears as soon as the first wrapped row arrives; on the
+ * phone the remounted App terminal can still be receiving the rest of the
+ * run. Reading then counts only the rows that had arrived (measured: 142 of
+ * 200) and reads as a reflow. Poll the fingerprint's own completeness rather
+ * than sleeping.
+ */
+async function waitForLongLine(page, marker) {
+  await expect.poll(async () => {
+    try {
+      return (await longLineFingerprint(page, marker)).totalX;
+    } catch {
+      return 0;
+    }
+  }, { timeout: 20_000 }).toBe(200);
+  return longLineFingerprint(page, marker);
+}
+
 async function printLongLine(page, marker) {
   await command(page, `printf '${marker}-%s\\n' "$(printf 'x%.0s' $(seq 1 200))"`);
   // Wait for the **output** line, not the echoed command: the echo contains
@@ -152,7 +172,7 @@ test('SC-04: wrap, cursor, alternate screen, scrollback and device handoff', asy
 
   // 1. Terminal-produced long line at the fixed width.
   await printLongLine(page, 'SC04-LONG-PC-1');
-  const pcWrap = await longLineFingerprint(page, 'SC04-LONG-PC-1');
+  const pcWrap = await waitForLongLine(page, 'SC04-LONG-PC-1');
   expect(pcWrap.first, 'the first wrapped line is the canonical width').toBe(80);
   expect(pcWrap.second).toBe(80);
   expect(pcWrap.totalX).toBe(200);
@@ -201,7 +221,7 @@ test('SC-04: wrap, cursor, alternate screen, scrollback and device handoff', asy
   // 4. Phone: the same long-line boundaries; a fresh phone-produced line has
   //    the identical split.
   await printLongLine(page, 'SC04-LONG-PHONE-1');
-  const phoneWrap = await longLineFingerprint(page, 'SC04-LONG-PHONE-1');
+  const phoneWrap = await waitForLongLine(page, 'SC04-LONG-PHONE-1');
   expect(phoneWrap.first, 'a phone must not reflow the grid').toBe(pcWrap.first);
   expect(phoneWrap.second).toBe(pcWrap.second);
   expect(phoneWrap.totalX).toBe(200);
@@ -216,7 +236,7 @@ test('SC-04: wrap, cursor, alternate screen, scrollback and device handoff', asy
   await expect.poll(async () => (await grid(page)).cols, { timeout: 20_000 }).toBe(80);
   await waitForShell(page, 'SC04-PC-AGAIN-READY');
   await printLongLine(page, 'SC04-LONG-PC-2');
-  const pcAgain = await longLineFingerprint(page, 'SC04-LONG-PC-2');
+  const pcAgain = await waitForLongLine(page, 'SC04-LONG-PC-2');
   expect(pcAgain.first).toBe(pcWrap.first);
   expect(pcAgain.second).toBe(pcWrap.second);
 

@@ -19,7 +19,7 @@ const { spawnSync } = require('node:child_process');
 const {
   run, targetSha, cargoTests, assertRan, tmuxVersion,
 } = require('../../../shared/control-mode-cases.cjs');
-const { root, requireText } = require('../../../shared/terminal-sizing-cases.cjs');
+const { root, stripAnsi, requireText } = require('../../../shared/terminal-sizing-cases.cjs');
 
 const tmuxDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nession-2487-sc01-'));
 const tmuxEnv = { NESSION_TMUX_SOCKET: path.join(tmuxDir, 'tmux.sock') };
@@ -35,7 +35,7 @@ function webTests(args) {
       env: { ...process.env, RUSTC_WRAPPER: '' },
     },
   );
-  const output = String(result.stdout || '') + '\n' + String(result.stderr || '');
+  const output = stripAnsi(String(result.stdout || '') + '\n' + String(result.stderr || ''));
   if (result.status !== 0) {
     throw new Error('Web tests failed (exit ' + result.status + '): ' + output.slice(-4000));
   }

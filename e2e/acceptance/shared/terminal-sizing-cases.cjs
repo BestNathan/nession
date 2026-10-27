@@ -20,6 +20,18 @@ const TERMINAL_WEB_FONT_SIZE_ENV = PROJECT + '_TERMINAL_WEB_FONT_SIZE';
 const VITE_TERMINAL_COLS_ENV = 'VITE_' + TERMINAL_COLS_ENV;
 const VITE_TERMINAL_WEB_FONT_SIZE_ENV = 'VITE_' + TERMINAL_WEB_FONT_SIZE_ENV;
 
+/**
+ * The plain text of a tool's output.
+ *
+ * Vitest colorizes its summary when the environment advertises color support
+ * (the CI runner does), so `Tests\s+13 passed` does not match the raw text:
+ * SGR escape sequences sit between the words. Strip them before asserting on
+ * a suite's counts — the tests themselves did run.
+ */
+function stripAnsi(output) {
+  return String(output).replace(/\u001b\[[0-9;]*m/g, '');
+}
+
 function checkedIn(cwd, command, args, timeout, extraEnv = {}) {
   const result = spawnSync(command, args, {
     cwd,
@@ -111,6 +123,7 @@ module.exports = {
   TERMINAL_WEB_FONT_SIZE_ENV,
   VITE_TERMINAL_COLS_ENV,
   VITE_TERMINAL_WEB_FONT_SIZE_ENV,
+  stripAnsi,
   checkedIn,
   webBuild,
   buildConfig,
