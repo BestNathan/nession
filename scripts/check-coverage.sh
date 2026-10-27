@@ -126,9 +126,11 @@ if [ -z "$JSON" ]; then
         echo -e "${YELLOW}  ── failing tests ──${NC}"
         # libtest prints `test <name> ... FAILED`; strip ANSI first because the
         # CI environment sets CARGO_TERM_COLOR=always.
+        # -A2 carries the panic message (the assertion and its diagnostics),
+        # which is the evidence a reader needs; the location alone is not.
         sed -E 's/\x1B\[[0-9;]*[A-Za-z]//g' "$COV_STDERR" \
-            | grep -E '^test .* \.\.\. FAILED$|panicked at' \
-            | head -20 \
+            | grep -A2 -E '^test .* \.\.\. FAILED$|panicked at' \
+            | head -60 \
             | while IFS= read -r line; do echo -e "  ${YELLOW}| ${line}${NC}"; done
         echo -e "${YELLOW}  Fix: repair the failing Rust test; a coverage threshold cannot be evaluated from a failed run${NC}"
     else

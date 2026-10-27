@@ -627,7 +627,7 @@ async fn integration_new_session_uses_configured_columns_and_clamps_resize() {
 /// (pid + socket) the answer came from.
 async fn tmux_state(tmux: &SessionManager, session: &str) -> String {
     let cmd = tmux.tmux_dep().cmd();
-    let probes: [(&str, Vec<&str>); 5] = [
+    let probes: [(&str, Vec<&str>); 6] = [
         (
             "ids",
             vec![
@@ -647,6 +647,10 @@ async fn tmux_state(tmux: &SessionManager, session: &str) -> String {
         (
             "default-size",
             vec!["show-options", "-g", "-v", "default-size"],
+        ),
+        (
+            "global-window-size",
+            vec!["show-options", "-g", "-v", "window-size"],
         ),
         (
             "clients",
