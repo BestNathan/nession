@@ -79,7 +79,10 @@ jobs:
     env:
       PLAYWRIGHT_BROWSERS_PATH: ~/.cache/ms-playwright
       NESSION_TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-    timeout-minutes: 20
+    # 30m covers the bounded Full-reuse wait plus the strictly necessary
+    # selected-suite fallback; the ordinary selected/not-required paths are
+    # unchanged (#2478 SC-05).
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -157,6 +160,73 @@ jobs:
             "$GITHUB_EVENT_PATH" "$GITHUB_WORKSPACE" "$RUNNER_TEMP/issue-e2e/plan.json"
           echo "mode=$(jq -r '.mode' "$RUNNER_TEMP/issue-e2e/plan.json")" >> "$GITHUB_OUTPUT"
 
+      # ── Impact policy (#2478 SC-02/SC-03) ─────────────────────────────
+      # The single deterministic owner of "can this change affect any browser
+      # runtime?" is trusted Main's scripts/e2e-full-applicability.mjs. The
+      # pull-request/pushed tree is untrusted, so only the trusted checkout is
+      # executed; an absent/unverifiable diff fails closed to applicable.
+      # Browsers stay provisioned unless BOTH the trusted Issue plan is
+      # `not-required` AND the diff is positively tooling-only.
+      - name: Classify change impact for browser provisioning
+        id: impact
+        if: github.event_name != 'workflow_dispatch'
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/e2e-scope"
+          applicable=true
+          category=unknown
+          base=''
+          if [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ && "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] &&
+             git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            if [[ "$EVENT_NAME" == 'pull_request' ]]; then
+              # The branch point, not the current base tip: base-side commits
+              # are not this PR's change and must not be classified.
+              base="$(git merge-base "$BASE_SHA" "$HEAD_SHA" 2>/dev/null || true)"
+            else
+              base="$BASE_SHA"
+            fi
+          fi
+          if [[ -n "$base" ]]; then
+            git diff --no-renames --name-only "$base" "$HEAD_SHA" | jq -R . | jq -s . \
+              > "$RUNNER_TEMP/e2e-scope/changed-paths.json"
+            applicable="$(node trusted/scripts/e2e-full-applicability.mjs classify \
+              "$RUNNER_TEMP/e2e-scope/changed-paths.json" \
+              "$RUNNER_TEMP/e2e-scope/classification.json" "$HEAD_SHA")"
+            category="$(jq -r .category "$RUNNER_TEMP/e2e-scope/classification.json")"
+          else
+            echo "[]" > "$RUNNER_TEMP/e2e-scope/changed-paths.json"
+            echo '{"applicable":true,"category":"unknown","reason":"unverifiable-base","target_sha":"'"$HEAD_SHA"'"}' \
+              > "$RUNNER_TEMP/e2e-scope/classification.json"
+          fi
+          plan_mode="${{ steps.selection.outputs.mode }}${{ steps.push-selection.outputs.mode }}"
+          browsers=true
+          if [[ "$applicable" == 'false' && "$plan_mode" == 'not-required' ]]; then
+            browsers=false
+          fi
+          # Keep the decision in the job log and the exact-head artifact: the
+          # Acceptance harness never reads step summaries.
+          echo "impact: applicable=${applicable} category=${category} plan=${plan_mode} browsers=${browsers}"
+          mkdir -p "$RUNNER_TEMP/issue-e2e"
+          cp "$RUNNER_TEMP/e2e-scope/classification.json" \
+            "$RUNNER_TEMP/issue-e2e/e2e-impact.json"
+          {
+            echo "applicable=${applicable}"
+            echo "category=${category}"
+            echo "browsers=${browsers}"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "## E2E impact"
+            echo
+            echo "- Target SHA: \`${HEAD_SHA}\`"
+            echo "- Applicable: \`${applicable}\` (category \`${category}\`)"
+            echo "- Browser provisioning: \`${browsers}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       # ── E2E-only preparation ──────────────────────────────────────────
       # An explicit `not-required` plan skips the Rust build and the full-stack
       # prerequisites below. Every other mode (and every non-PR event) keeps
@@ -181,12 +251,16 @@ jobs:
       # Restore browser cache BEFORE install — a cache hit means the install
       # below skips the download entirely.
       - uses: actions/cache@v4
+        if: steps.impact.outputs.browsers != 'false'
         with:
           path: ~/.cache/ms-playwright
           key: playwright-chromium-${{ runner.os }}-${{ hashFiles('e2e/package-lock.json') }}
 
-      # Install Playwright + Chromium only (skip Firefox/WebKit).
-      - run: |
+      # Install Playwright + Chromium only (skip Firefox/WebKit). A tooling-only
+      # not-required change provisions no browser runtime at all (#2478).
+      - name: Install Playwright and Chromium
+        if: steps.impact.outputs.browsers != 'false'
+        run: |
           cd e2e
           npm ci
           npx playwright install chromium --with-deps
@@ -195,6 +269,7 @@ jobs:
       # npm ci is still required: vite preview and its /api + /ws proxy run
       # from local node_modules. Reusing dist does not replace those packages.
       - name: Install Web preview dependencies
+        if: steps.impact.outputs.browsers != 'false'
         run: cd web && npm ci
 
       # Never expose a GH_TOKEN to PR-head scripts. Only trusted main-push
@@ -204,16 +279,17 @@ jobs:
         id: web-dist
         # A manual full E2E run on the exact current main SHA is a distinct
         # consumer after Quality completion; a branch dispatch never qualifies.
-        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && steps.impact.outputs.browsers != 'false'
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash scripts/ci/try-web-build-reuse.sh "$GITHUB_WORKSPACE" "$GITHUB_SHA"
 
       - name: Build Web on cold/mismatched artifact
-        if: steps.web-dist.outputs.hit != 'true'
+        if: steps.web-dist.outputs.hit != 'true' && steps.impact.outputs.browsers != 'false'
         run: cd web && npm run build
 
       - name: Verify runnable Web preview and proxy parity
+        if: steps.impact.outputs.browsers != 'false'
         run: node scripts/ci/web-preview-parity.mjs .
 
       # Pre-build Rust binaries so the webServer startup is fast and the
@@ -236,9 +312,15 @@ jobs:
       # #1866 SC-01: the browser profile renders client-side fixtures, so it
       # runs on a web-only runtime. That is what lets a `not-required` plan
       # skip the Rust build while the required design gate still executes.
+      #
+      # #2478 SC-02: a change the trusted impact policy positively classifies
+      # as tooling-only cannot affect browser behavior, so it provisions no
+      # browser at all. The not-required receipt records that skip explicitly
+      # (`browser_scope: tooling-only`); every other not-required plan still
+      # runs this gate and must attest its success.
       - name: Run canonical browser design gate (standalone)
         id: design
-        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots == true) || (steps.selection.outputs.mode == 'not-required' || steps.push-selection.outputs.mode == 'not-required') }}
+        if: ${{ steps.impact.outputs.browsers != 'false' && ((github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots == true) || (steps.selection.outputs.mode == 'not-required' || steps.push-selection.outputs.mode == 'not-required')) }}
         env:
           CI: true
           E2E_RUNTIME_WEB_ONLY: '1'
@@ -278,6 +360,29 @@ jobs:
             --assertions "$DESIGN_BROWSER_ASSERTIONS_OUT" \
             --sha "$DESIGN_BROWSER_SHA"
 
+      # ── Exact-SHA Full reuse (#2478 SC-05) ────────────────────────────
+      # A Main push already runs the complete Full suite for release
+      # qualification. When that exact-SHA run is complete, verified and
+      # covers every selected ID, the selected obligations read its report
+      # instead of launching a second overlapping browser suite. This step
+      # needs actions:read, so it runs only for a trusted main push; PR-head
+      # code never receives that token.
+      - name: Reuse exact-SHA Full evidence for a selected Main plan
+        id: full-reuse
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.push-selection.outputs.mode == 'selected' && steps.impact.outputs.applicable == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          selected_json="$(jq -c '[.selected[].id]' "$RUNNER_TEMP/issue-e2e/plan.json")"
+          if node scripts/ci/reuse-full-selected-evidence.mjs reuse \
+               "$(git rev-parse HEAD)" "$RUNNER_TEMP/issue-e2e" "$selected_json"; then
+            echo "reused=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Full per-ID reuse unavailable; running the bounded selected suite"
+          fi
+
       # ── Run E2E ───────────────────────────────────────────────────────
       - name: Run E2E tests
         env:
@@ -310,70 +415,95 @@ jobs:
               selected)
                 mapfile -t plan_ids < <(jq -r '.selected[].id' "$plan")
                 (( ${#plan_ids[@]} > 0 )) || exit 1
-                # #1876 Phase A: the mandatory Browser Design subset joins the
-                # Issue-selected IDs in the SAME Playwright process. Dedupe
-                # preserves every obligation exactly once: a design ID that is
-                # also Issue-selected is not executed twice, and design IDs are
-                # never counted as Issue-selected coverage.
-                mapfile -t design_ids < <(node --input-type=module -e '
-                  import { BROWSER_DESIGN_IDS } from "./design/scripts/browser-design-catalog.mjs";
-                  process.stdout.write(BROWSER_DESIGN_IDS.join("\n") + "\n");')
-                # Fail closed rather than silently running only the Issue
-                # selection: the design verdict below requires these IDs.
-                if (( ${#design_ids[@]} == 0 )); then
-                  echo "::error::canonical Browser Design catalog resolved no IDs"
-                  exit 1
-                fi
-                ids=("${plan_ids[@]}")
-                for design_id in "${design_ids[@]}"; do
-                  found=false
-                  for existing in "${ids[@]}"; do
-                    [[ "$existing" == "$design_id" ]] && found=true
-                  done
-                  [[ "$found" == true ]] || ids+=("$design_id")
-                done
-                args=()
-                for id in "${ids[@]}"; do args+=(--id "$id"); done
-                # #1866 SC-02: measure, do not claim, how many full-stack
-                # runtimes the whole selected invocation resolved. One line per
-                # real provision is appended by the runtime itself.
-                provision_log="$RUNNER_TEMP/issue-e2e/provision.log"
-                : > "$provision_log"
-                rm -f "$E2E_PLAYWRIGHT_REPORT_FILE" "$E2E_PLAYWRIGHT_ASSERTIONS_FILE"
-                if [[ -f trusted/scripts/issue-e2e-assertion-reporter.cjs ]]; then
-                  E2E_RUNTIME_PROVISION_LOG="$provision_log" \
-                    NESSION_E2E_ASSERTIONS_OUTPUT_FILE="$E2E_PLAYWRIGHT_ASSERTIONS_FILE" \
-                    PLAYWRIGHT_JSON_OUTPUT_FILE="$E2E_PLAYWRIGHT_REPORT_FILE" \
-                    CI=true ./e2e/run test "${args[@]}"
-                else
-                  # Compatibility until the trusted assertion reporter source lands.
-                  # Old results remain unproven rather than being promoted to Pass.
-                  E2E_RUNTIME_PROVISION_LOG="$provision_log" \
-                    PLAYWRIGHT_JSON_OUTPUT_FILE="$E2E_PLAYWRIGHT_REPORT_FILE" \
-                    CI=true ./e2e/run test "${args[@]}"
-                fi
-                # The coalesced run's assertion receipt also covers the design
-                # subset. The trusted Issue projection accepts only obligated
-                # IDs, so project those rows into their own receipt instead of
-                # weakening that #1866 contract.
-                if [[ -f "$E2E_PLAYWRIGHT_ASSERTIONS_FILE" ]]; then
+                # #2478 SC-05: on a Main push the token-bearing step above may
+                # have reused the exact-SHA Full per-ID report. Absent or
+                # unverified Full evidence falls back to the bounded selected
+                # suite (the strictly necessary targeted fallback).
+                if [[ "${{ steps.full-reuse.outputs.reused }}" == 'true' ]]; then
+                  # The verified Full report now sits at the same
+                  # playwright-run.json / assertions paths, so the coalesced
+                  # Browser Design verdict below reads the same single run.
                   jq --argjson ids "$(printf '%s\n' "${plan_ids[@]}" | jq -R . | jq -s .)" \
                     '{schema_version, kind, tests: [.tests[] | select(.id as $x | $ids | any(. == $x))]}' \
                     "$E2E_PLAYWRIGHT_ASSERTIONS_FILE" \
                     > "$RUNNER_TEMP/issue-e2e/assertions.json"
-                fi
-                # Bounded receipt into the job log: the Acceptance harness never
-                # reads artifacts, so the one-runtime measurement must live here.
-                provisions="$(wc -l < "$provision_log" | tr -d ' ')"
-                node scripts/e2e-selected-run-receipt.mjs emit \
-                  --sha "$(git rev-parse HEAD)" \
-                  --ids "$(IFS=,; echo "${plan_ids[*]}")" \
-                  --provisions "$provisions" ;;
+                  reused_run="$(jq -r .run_id "$RUNNER_TEMP/issue-e2e/reused-full.json")"
+                  reused_attempt="$(jq -r .run_attempt "$RUNNER_TEMP/issue-e2e/reused-full.json")"
+                  node scripts/e2e-selected-run-receipt.mjs emit \
+                    --sha "$(git rev-parse HEAD)" \
+                    --ids "$(IFS=,; echo "${plan_ids[*]}")" \
+                    --provisions 0 \
+                    --reused-full-run "$reused_run" \
+                    --reused-full-attempt "$reused_attempt"
+                else
+                  # #1876 Phase A: the mandatory Browser Design subset joins the
+                  # Issue-selected IDs in the SAME Playwright process. Dedupe
+                  # preserves every obligation exactly once: a design ID that is
+                  # also Issue-selected is not executed twice, and design IDs are
+                  # never counted as Issue-selected coverage.
+                  mapfile -t design_ids < <(node --input-type=module -e '
+                    import { BROWSER_DESIGN_IDS } from "./design/scripts/browser-design-catalog.mjs";
+                    process.stdout.write(BROWSER_DESIGN_IDS.join("\n") + "\n");')
+                  # Fail closed rather than silently running only the Issue
+                  # selection: the design verdict below requires these IDs.
+                  if (( ${#design_ids[@]} == 0 )); then
+                    echo "::error::canonical Browser Design catalog resolved no IDs"
+                    exit 1
+                  fi
+                  ids=("${plan_ids[@]}")
+                  for design_id in "${design_ids[@]}"; do
+                    found=false
+                    for existing in "${ids[@]}"; do
+                      [[ "$existing" == "$design_id" ]] && found=true
+                    done
+                    [[ "$found" == true ]] || ids+=("$design_id")
+                  done
+                  args=()
+                  for id in "${ids[@]}"; do args+=(--id "$id"); done
+                  # #1866 SC-02: measure, do not claim, how many full-stack
+                  # runtimes the whole selected invocation resolved. One line per
+                  # real provision is appended by the runtime itself.
+                  provision_log="$RUNNER_TEMP/issue-e2e/provision.log"
+                  : > "$provision_log"
+                  rm -f "$E2E_PLAYWRIGHT_REPORT_FILE" "$E2E_PLAYWRIGHT_ASSERTIONS_FILE"
+                  if [[ -f trusted/scripts/issue-e2e-assertion-reporter.cjs ]]; then
+                    E2E_RUNTIME_PROVISION_LOG="$provision_log" \
+                      NESSION_E2E_ASSERTIONS_OUTPUT_FILE="$E2E_PLAYWRIGHT_ASSERTIONS_FILE" \
+                      PLAYWRIGHT_JSON_OUTPUT_FILE="$E2E_PLAYWRIGHT_REPORT_FILE" \
+                      CI=true ./e2e/run test "${args[@]}"
+                  else
+                    # Compatibility until the trusted assertion reporter source lands.
+                    # Old results remain unproven rather than being promoted to Pass.
+                    E2E_RUNTIME_PROVISION_LOG="$provision_log" \
+                      PLAYWRIGHT_JSON_OUTPUT_FILE="$E2E_PLAYWRIGHT_REPORT_FILE" \
+                      CI=true ./e2e/run test "${args[@]}"
+                  fi
+                  # The coalesced run's assertion receipt also covers the design
+                  # subset. The trusted Issue projection accepts only obligated
+                  # IDs, so project those rows into their own receipt instead of
+                  # weakening that #1866 contract.
+                  if [[ -f "$E2E_PLAYWRIGHT_ASSERTIONS_FILE" ]]; then
+                    jq --argjson ids "$(printf '%s\n' "${plan_ids[@]}" | jq -R . | jq -s .)" \
+                      '{schema_version, kind, tests: [.tests[] | select(.id as $x | $ids | any(. == $x))]}' \
+                      "$E2E_PLAYWRIGHT_ASSERTIONS_FILE" \
+                      > "$RUNNER_TEMP/issue-e2e/assertions.json"
+                  fi
+                  # Bounded receipt into the job log: the Acceptance harness never
+                  # reads artifacts, so the one-runtime measurement must live here.
+                  provisions="$(wc -l < "$provision_log" | tr -d ' ')"
+                  node scripts/e2e-selected-run-receipt.mjs emit \
+                    --sha "$(git rev-parse HEAD)" \
+                    --ids "$(IFS=,; echo "${plan_ids[*]}")" \
+                    --provisions "$provisions"
+                fi ;;
               not-required)
                 # GitHub's own step outcomes prove the skip; the receipt is
-                # the only channel the Acceptance harness can read.
+                # the only channel the Acceptance harness can read. A
+                # tooling-only impact is the ONLY scope allowed to record a
+                # skipped design gate (#2478); every other plan must show it ran.
                 node scripts/e2e-selected-run-receipt.mjs emit-not-required \
                   --sha "$(git rev-parse HEAD)" \
+                  --browser-scope "${{ steps.impact.outputs.browsers == 'false' && 'tooling-only' || 'required' }}" \
                   --rust "${{ steps.rust.outcome }}" \
                   --cargo "${{ steps.rust-build.outcome }}" \
                   --tmux "${{ steps.tmux.outcome }}" \
@@ -486,7 +616,7 @@ jobs:
 
       # ── Report ────────────────────────────────────────────────────────
       - uses: actions/upload-artifact@v4
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.impact.outputs.browsers != 'false' }}
         with:
           name: playwright-report
           path: e2e/playwright-report/

@@ -117,6 +117,8 @@ const prepareJob = {
 const deferJob = {name: 'defer-pre-merge', conclusion: 'cancelled'};
 const jobs = (list) => ({total_count: list.length, jobs: list});
 assert.equal(isDeferredRun(jobs([prepareJob, deferJob]), deferredRun, sha), true);
+assert.equal(isDeferredRun(jobs([prepareJob, { ...deferJob, conclusion: 'success' }]),
+  deferredRun, sha), true, 'an accepted cancellation ends the defer job successfully (#2323)');
 assert.equal(isDeferredRun(jobs([prepareJob]), deferredRun, sha), false);
 assert.equal(isDeferredRun(jobs([prepareJob, deferJob]),
   {...deferredRun, conclusion: 'failure'}, sha), false);
