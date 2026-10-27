@@ -1,0 +1,21 @@
+name: Prototype / Change Signal
+
+# Unprivileged event bridge only. Main owns sanitized Pages publication.
+# This orphan branch MUST NOT acquire Pages, Actions write or secrets.
+on:
+  push:
+    branches: [prototype]
+
+permissions:
+  contents: read
+
+jobs:
+  signal:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Record prototype branch revision
+        shell: bash
+        run: |
+          echo "Prototype source revision: $GITHUB_SHA"
+          echo "The trusted main Pages workflow receives only this run-completed event."
