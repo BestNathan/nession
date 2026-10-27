@@ -945,11 +945,14 @@ async fn shared_agent_keeps_independent_session_widths() {
 /// reaches it without a sleep-tuned race.
 #[tokio::test]
 async fn configured_width_survives_shared_server_flood_and_attach() {
-    // One tmux server's admission bound is 16 mutations; more creates than
-    // that only re-tests the bound (the flood test owns it) while holding
-    // extra panes/PTYs this width test does not need.
-    const FLOOD: usize = 16;
-    const PARK_VARS: usize = 100;
+    // Enough concurrent creates and env commands to keep the server busy;
+    // deliberately below the mutation bound so this width test does not
+    // re-test admission (the flood test owns that) or hold more panes than
+    // the schedule needs. Under LLVM instrumentation a production-sized flood
+    // can also push the measured `new-session` past its 10 s budget, which
+    // would turn a width test into a timeout test.
+    const FLOOD: usize = 8;
+    const PARK_VARS: usize = 20;
     const CREATES: usize = 3;
 
     let (addr_a, handle_a, credentials_a) = start_server_with_terminal_cols(AttachMode::Plain, 96)
