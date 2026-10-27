@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "kind": "nession_deployment_attestation",
+  "status": "Attested",
+  "environment_id": "staging-01",
+  "namespace": "nession",
+  "cluster_context": "ci",
+  "gitops_revision": "52f44ea7abc239bb61cbf19b185a801a822b5762",
+  "observed_at": "2026-10-27T12:59:28.000Z",
+  "source_sha": "ea22b0385a4cc41786dc5d884959eee48e9b5b00",
+  "images": [
+    {
+      "role": "agent",
+      "repository": "crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession",
+      "declared_repository": "ghcr.io/bestnathan/nession",
+      "tag": "agent-ea22b03",
+      "digest": "sha256:97b81fdd3e4aac50a02980a7546da2a4254792b9e1c9e5697af214e04d46dfd8"
+    },
+    {
+      "role": "server",
+      "repository": "crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession",
+      "declared_repository": "ghcr.io/bestnathan/nession",
+      "tag": "server-ea22b03",
+      "digest": "sha256:9401203c31074485168128aee075efe518a0e2c5d35f5bae7edfecd6ab8292e7"
+    },
+    {
+      "role": "ui",
+      "repository": "crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession",
+      "declared_repository": "ghcr.io/bestnathan/nession",
+      "tag": "ui-ea22b03",
+      "digest": "sha256:ab08da64c64331e2f1b1b99be851bfde51462de77af00beab0c4e92885d0636c"
+    }
+  ],
+  "workloads": [
+    {
+      "role": "agent",
+      "name": "nession-agent-staging-01",
+      "namespace": "nession",
+      "uid": "f80a31ad-c575-45a1-98b2-2fc372f4ed1c",
+      "generation": 1,
+      "observed_generation": 1,
+      "ready": true,
+      "image": "ghcr.io/bestnathan/nession:agent-ea22b03",
+      "image_id": "crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession@sha256:97b81fdd3e4aac50a02980a7546da2a4254792b9e1c9e5697af214e04d46dfd8",
+      "declared_repository": "ghcr.io/bestnathan/nession",
+      "repository": "crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession",
+      "digest": "sha256:97b81fdd3e4aac50a02980a7546da2a4254792b9e1c9e5697af214e04d46dfd8"
+    },
+    {
+      "role": "server",
+      "name": "nession-server-staging-01",
+      "namespace": "nession",
+      "uid": "b82ce804-9f9d-4240-ae68-4d0b51573806",
+      "generation": 1,
+      "observed_generation": 1,
+      "ready": true,
+      "image": "ghcr.io/bestnathan/nession:server-ea22b03",
+      "image_id": "crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession@sha256:9401203c31074485168128aee075efe518a0e2c5d35f5bae7edfecd6ab8292e7",
+      "declared_repository": "ghcr.io/bestnathan/nession",
+      "repository": "crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession",
+      "digest": "sha256:9401203c31074485168128aee075efe518a0e2c5d35f5bae7edfecd6ab8292e7"
+    },
+    {
+      "role": "ui",
+      "name": "nession-ui-staging-01",
+      "namespace": "nession",
+      "uid": "7ec0d8d0-4dad-4f07-b8b8-75f76c1e6bd8",
+      "generation": 1,
+      "observed_generation": 1,
+      "ready": true,
+      "image": "ghcr.io/bestnathan/nession:ui-ea22b03",
+      "image_id": "crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession@sha256:ab08da64c64331e2f1b1b99be851bfde51462de77af00beab0c4e92885d0636c",
+      "declared_repository": "ghcr.io/bestnathan/nession",
+      "repository": "crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession",
+      "digest": "sha256:ab08da64c64331e2f1b1b99be851bfde51462de77af00beab0c4e92885d0636c"
+    }
+  ],
+  "execution_id": "c1d2b8e8335f1ce463c31736aa982572f09d7a6c2a487d902e5c97f45a6c989b",
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40508097467,
+      "run_attempt": 1,
+      "workflow_id": 395306893,
+      "event": "workflow_dispatch",
+      "head_sha": "0381d956f5598065be4ab782a1af11477ad438b3",
+      "head_branch": "main"
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40508097467",
+    "record_path": "runs/2026-10-27/40508097467-1/deployment/staging-01.json",
+    "source_record_sha256": "d572df390571628bea4023f59a06536ae12a610c1eba58eb145b4e676e32a3d1"
+  }
+}
