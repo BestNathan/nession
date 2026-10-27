@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "9b4cc9883866be257ab3ea7ebf2c48205a75690652226dd7fefc5d5e7bb7eaef",
+  "run_id": 40456806952,
+  "run_attempt": 1,
+  "issue": 2487,
+  "criterion": "SC-08",
+  "criterion_text": "The chosen release/build parameters are traceably injected into the **running Server process environment** (including canonical terminal cols) through Compose and staged/production image/GitOps paths; Server validates/reads effective values at startup and the values match the associated Web bundle without manual config drift.",
+  "stage": "staging",
+  "target_sha": "cba7c18eceb06ba30807ec06ef33b1b29537b25b",
+  "contract_sha256": "b991b4952792cad8f6877fe3f0aceabf46a5eedb8366a2e40e2d73a718b6f523",
+  "case_revision": "cba7c18eceb06ba30807ec06ef33b1b29537b25b",
+  "case_tree_sha": "6ede5a4e42f0ec8fb583d44c52106ec7d71a2673",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-27T05:46:57.194Z",
+  "finished_at": "2026-10-27T05:47:18.027Z",
+  "duration_ms": 20833,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "One release parameter reaches the Web bundle and the Server process configuration, agrees on cols, defaults deterministically and fails fast on invalid values",
+      "evidence": [
+        {
+          "type": "config",
+          "value": "exact SHA cba7c18eceb06ba30807ec06ef33b1b29537b25b: render-server-config.sh projected cols=96/font=13.5 into config.toml and `nession-server --print-config` read back 96/13.5 through its canonical parser and validation"
+        },
+        {
+          "type": "build",
+          "value": "the Web bundle built from the same 96/13.5 parameters emitted 96/13.5; omitted inputs read back as 80/14 in both the renderer and the Server parser"
+        },
+        {
+          "type": "config",
+          "value": "cols=0, cols=eighty and font=32.1 each failed the Server reader visibly; the entrypoint writes the values and the runtime environment overrides and validates them"
+        },
+        {
+          "type": "static",
+          "value": "both Server/Agent image paths carry ARG+ENV, Compose states both variables, and both release workflows pass the Web build inputs and the image build args from one parameter source"
+        }
+      ],
+      "duration_ms": 14988,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40456806952,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "cba7c18eceb06ba30807ec06ef33b1b29537b25b",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40456806952",
+    "record_path": "runs/2026-10-27/40456806952-1/2487/SC-08.json",
+    "source_result_sha256": "48c2f58cc9917cacbba9f82ecee952a4c841e6dfd04dc42527f07159e56593b3"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40456806952-1",
+    "sha256": "48c2f58cc9917cacbba9f82ecee952a4c841e6dfd04dc42527f07159e56593b3",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40456806952",
+    "durability": "time-limited; object archival not configured"
+  }
+}
