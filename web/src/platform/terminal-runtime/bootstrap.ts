@@ -39,6 +39,18 @@ export interface TerminalBootstrap {
   /** Optional, explicit identity of an actual Agent stream cut. */
   streamEpoch?: number;
   throughSeq?: number;
+  /**
+   * The pane's screen size the capture was taken from, when the Agent stated
+   * it. A capture is a **screen reconstruction**: its trailing absolute caret
+   * addresses a row on that screen. A renderer that has not measured the
+   * Session yet (a reloaded page before its first layout pass) must adopt this
+   * geometry **before** parsing the bytes — written into a taller placeholder
+   * size, the caret lands above the end of the buffer it wrote, and the row
+   * shrink that follows reflows lines the reflow cannot place back (#2483).
+   * Absent on a legacy provider, and on a byte replay (which names no screen).
+   */
+  paneCols?: number;
+  paneRows?: number;
 }
 
 /**
@@ -126,5 +138,17 @@ export function decodeBootstrapMarker(raw: unknown): TerminalBootstrap | undefin
       ? { streamEpoch: payload.stream_epoch as number } : {}),
     ...(Number.isSafeInteger(payload.through_seq) && (payload.through_seq as number) >= 0
       ? { throughSeq: payload.through_seq as number } : {}),
+    // Both bounds or neither: a screen needs a width and a height, and half a
+    // geometry is not a size a renderer may adopt. `2` is xterm's own floor
+    // (`MIN_TERMINAL_COLS`/`MIN_TERMINAL_ROWS` in sizing.ts); the upper bound
+    // keeps a malformed frame from asking for an absurd buffer.
+    ...(isPlausiblePaneSize(payload.pane_cols) && isPlausiblePaneSize(payload.pane_rows)
+      ? { paneCols: payload.pane_cols as number, paneRows: payload.pane_rows as number }
+      : {}),
   };
+}
+
+/** A stated pane dimension a renderer may adopt: an integer xterm can hold. */
+function isPlausiblePaneSize(value: unknown): boolean {
+  return Number.isSafeInteger(value) && (value as number) >= 2 && (value as number) <= 1_000;
 }

@@ -459,6 +459,21 @@ export class TerminalController {
       const replayReplacesBuffer = provesVerifiedBootstrapRepair(bootstrap)
         || (streamBaseline !== undefined && streamBaseline.appliedThrough > 0)
         || completeHistoryCut;
+      // A capture is a screen reconstruction, and its trailing absolute caret
+      // addresses a row on the **pane's** screen. Adopt the geometry the Agent
+      // stated before the bytes: a renderer that has not measured the Session
+      // yet is still at a placeholder size, and the caret would land above the
+      // end of the buffer it just wrote — the row shrink that follows then
+      // reflows away every line below it, which is the snapshot's newest
+      // history (#2483). Queued through the writer, so the resize is parsed
+      // before the reset and the snapshot, never after them.
+      if (bootstrap?.paneCols !== undefined && bootstrap.paneRows !== undefined) {
+        // Same owner as the attach-time remote size: the Session states its
+        // width, and the client's next fit follows it rather than fighting it
+        // (#2487).
+        this.adoptSessionCols(bootstrap.paneCols);
+        this.writer.resize(bootstrap.paneCols, bootstrap.paneRows);
+      }
       if (bootstrap) {
         this.writer.write(replayReplacesBuffer
           ? BOOTSTRAP_BUFFER_RESET : BOOTSTRAP_SCREEN_RESET);
