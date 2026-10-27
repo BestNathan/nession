@@ -34,7 +34,7 @@ jobs:
     timeout-minutes: 70
     env:
       RUSTC_WRAPPER: ""
-      PLAYWRIGHT_BROWSERS_PATH: ~/.cache/ms-playwright
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.cache/ms-playwright
     steps:
       - uses: actions/checkout@v4
         with:
@@ -60,6 +60,14 @@ jobs:
             web/package-lock.json
             e2e/package-lock.json
 
+      # Share the content-addressed Chromium binary cache with E2E / Tests
+      # and E2E / Scenario Smoke. OS libraries are checked by a real launch
+      # below and are deliberately NOT misrepresented as cached (#2525).
+      - uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('e2e/package-lock.json') }}
+
       - run: sudo apt-get update && sudo apt-get install -y tmux
 
       - name: Validate canonical Case contracts and generic selection
@@ -80,7 +88,12 @@ jobs:
         run: |
           cd e2e
           npm ci
-          npx playwright install chromium --with-deps
+          npx playwright install chromium
+          # The pinned Ubuntu runner already provides launch-time libraries.
+          # Verify them by actually launching Chromium; missing dependencies
+          # fail closed instead of silently passing a cache hit. Do not run
+          # Playwright's --with-deps apt installer on every warm job (#2525).
+          node -e 'const { chromium } = require("@playwright/test"); chromium.launch({ timeout: 30000 }).then(browser => browser.close()).catch(error => { console.error(error); process.exitCode = 1; })'
 
       - name: Select representative Case verifier classes (untrusted source, no token)
         run: |
