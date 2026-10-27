@@ -10,6 +10,7 @@ protocol-integrity
 server-handler-locality
 protocol-codegen-drift
 rust-coverage
+coverage-classification-selftest
 instruction-contract
 acceptance-runtime-contract
 acceptance-cases-contract

@@ -112,19 +112,36 @@ set +e
     # instrumentation.  They pass fine with plain `cargo test`.
     SKIP_FLAGS="--skip terminal_io"
     JSON=$(cargo llvm-cov $PACKAGE_FLAGS --json -- $SKIP_FLAGS 2>"$COV_STDERR")
+COV_STATUS=$?
 set -e
 
 if [ -z "$JSON" ]; then
     echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${RED}  ✗ cargo llvm-cov not installed or failed to run${NC}"
-    if [ -s "$COV_STDERR" ]; then
-        echo -e "${YELLOW}  ── last 20 lines of stderr ──${NC}"
-        tail -60 "$COV_STDERR" | while IFS= read -r line; do
-            echo -e "  ${YELLOW}| ${line}${NC}"
-        done
+    # A failed test run produces no coverage JSON, but "no JSON" is not the
+    # same fact as "the tool is missing": the previous message sent readers to
+    # `cargo install` while the real failure was a Rust test panicking under
+    # the coverage build. Name the boundary the evidence actually crossed.
+    if grep -qE 'test result: FAILED|^failures:$|panicked at|error: test failed' "$COV_STDERR"; then
+        echo -e "${RED}  ✗ cargo llvm-cov ran, but the Rust tests failed (exit ${COV_STATUS})${NC}"
+        echo -e "${YELLOW}  ── failing tests ──${NC}"
+        # libtest prints `test <name> ... FAILED`; strip ANSI first because the
+        # CI environment sets CARGO_TERM_COLOR=always.
+        sed -E 's/\x1B\[[0-9;]*[A-Za-z]//g' "$COV_STDERR" \
+            | grep -E '^test .* \.\.\. FAILED$|panicked at' \
+            | head -20 \
+            | while IFS= read -r line; do echo -e "  ${YELLOW}| ${line}${NC}"; done
+        echo -e "${YELLOW}  Fix: repair the failing Rust test; a coverage threshold cannot be evaluated from a failed run${NC}"
+    else
+        echo -e "${RED}  ✗ cargo llvm-cov not installed or failed to run (exit ${COV_STATUS})${NC}"
+        if [ -s "$COV_STDERR" ]; then
+            echo -e "${YELLOW}  ── last 20 lines of stderr ──${NC}"
+            tail -60 "$COV_STDERR" | while IFS= read -r line; do
+                echo -e "  ${YELLOW}| ${line}${NC}"
+            done
+        fi
+        echo -e "${YELLOW}  Fix: cargo install cargo-llvm-cov${NC}"
+        echo -e "${YELLOW}       rustup component add llvm-tools-preview${NC}"
     fi
-    echo -e "${YELLOW}  Fix: cargo install cargo-llvm-cov${NC}"
-    echo -e "${YELLOW}       rustup component add llvm-tools-preview${NC}"
     echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     rm -f "$COV_STDERR"
     exit 1
