@@ -1,10 +1,33 @@
 # Multi-client terminal ownership (#1095, #2286)
 
-> Requirements: [GitHub #1095](https://github.com/BestNathan/nession/issues/1095) (lease), [#2286](https://github.com/BestNathan/nession/issues/2286) (active-device handoff), [#2283](https://github.com/BestNathan/nession/issues/2283) (content fidelity).
+> Requirements: [GitHub #1095](https://github.com/BestNathan/nession/issues/1095) (lease), [#2286](https://github.com/BestNathan/nession/issues/2286) (active-device handoff), [#2283](https://github.com/BestNathan/nession/issues/2283) (content fidelity), [#2487](https://github.com/BestNathan/nession/issues/2487) (fixed columns).
 
 Session-scoped **ControlLease** (holder subscription + monotonic generation). At most one Controller may send input and authoritative resize; Observers receive output and local/replay history only. The Agent enforces the lease and generation before mutating the tmux backend; Web/App surface the Observer / Take Control affordances.
 
 Depends on #1096 for single-controller PTY encoding. Does not implement replay storage (#1094).
+
+## Fixed columns (#2487)
+
+The active-device handoff below is unchanged, but **what a takeover may change
+is narrower than it was in #2286**. #2286 let the active device resize the
+shared window in both dimensions. Since #2487 the Session's **columns are
+fixed** by the release/Session policy and only **rows** follow the active
+device's usable height:
+
+- A resize request still requires the current ControlLease generation and is
+  still recorded in the ordered resize timeline. The Agent applies the
+  Session's authoritative columns (the pane's width at first attach, or the
+  creation width) and the requested rows, and fans out the size it actually
+  applied.
+- A takeover states the active device's rows. It does not state a new width;
+  a client that sends one is clamped, not honoured.
+- An observer that adopts the lease measures its own height and takes rows. Its
+  font fit makes the same fixed columns legible in its own content box; it
+  never gains columns by having a wider screen.
+- The existing protections — generation fencing, refusal by name
+  (`not_controller`, `observer_resize`), a delayed resize from a previous
+  controller not reverting the current grid — remain the contract. The sizing
+  decision itself is owned by [terminal-sizing.md](terminal-sizing.md).
 
 ## Subscription identity (#2469 slice 4)
 
@@ -22,7 +45,7 @@ Nession is one interactive Session used **sequentially** across devices (PC → 
 - A meaningful foreground activation — opening/attaching the Session's terminal, returning to its surface, focusing the window on it, or touching the grid — acquires the lease automatically, even while another device remains attached.
 - Passive events do **not** take the lease: a background container/`ResizeObserver` reflow, history scroll, capsule inset, unrelated overlay, or a transport reconnect alone.
 - Acquisition is **idempotent for the holder** (`acquire` returns the current generation). Restating the lease never invalidates the client's own in-flight input or resize; only a *different subscription* advances the generation.
-- On takeover the client forgets its last stated size, measures its viewport **now**, and states that size to the PTY after the lease/generation is acknowledged. Local xterm and the shared tmux window converge on the active device's viewport.
+- On takeover the client forgets its last stated size, measures its viewport **now**, and states that size to the PTY after the lease/generation is acknowledged. Local xterm and the shared tmux window converge on the active device's **rows**; the columns stay the Session's fixed value (#2487).
 - The retained manual **Take control** is the fallback for a deliberately displaced observer, not the ordinary flow.
 
 ## Generation fencing

@@ -302,6 +302,7 @@ async function attachToSession(
       subscriberGeneration: fields.subscriberGeneration,
       inputEpoch: fields.inputEpoch,
       inputAppliedThrough: fields.inputAppliedThrough,
+      terminalCols: fields.terminalCols,
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

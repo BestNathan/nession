@@ -258,6 +258,8 @@ impl WebSocketServer {
                 p2p_broker: Arc::clone(&self.p2p_broker),
                 auth_token: self.config.auth_token.clone(),
                 heartbeat_interval_secs,
+                terminal_cols: self.config.terminal_cols,
+                terminal_web_font_size: self.config.terminal_web_font_size,
                 terminal_stall_grace: std::time::Duration::from_secs(
                     self.config.terminal_stall_grace_secs,
                 ),
@@ -324,6 +326,10 @@ struct ServerContext {
     p2p_broker: Arc<crate::broker::ConnectionBroker>,
     auth_token: String,
     heartbeat_interval_secs: u64,
+    /// The release-selected fixed column count (#2487).
+    terminal_cols: u16,
+    /// The Web maximum CSS font size, mirrored for introspection (#2487).
+    terminal_web_font_size: f64,
     terminal_stall_grace: std::time::Duration,
     /// How many queries one connection may have in flight (`#961-C`). Bound
     /// here rather than read per frame so a connection's lane is fixed for its
@@ -362,6 +368,8 @@ where
         mutations,
         auth_token,
         heartbeat_interval_secs,
+        terminal_cols,
+        terminal_web_font_size,
         terminal_stall_grace,
         query_concurrency,
         p2p_broker,
@@ -390,6 +398,8 @@ where
         crate::server::handler::ConnectionHandlerConfig {
             server_auth_token: auth_token,
             heartbeat_interval_secs,
+            terminal_cols,
+            terminal_web_font_size,
         },
     );
     handler.set_client_sender(sender.clone());

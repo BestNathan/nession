@@ -21,10 +21,21 @@ AGENT_CONNECT_URL="${AGENT_CONNECT_URL:-}"
 # point it at the PVC mount: /data is NFS in this deployment and binding a unix
 # socket there is not reliable.
 AGENT_TMUX_SOCKET="${AGENT_TMUX_SOCKET:-}"
+# The fixed column count this Agent creates Sessions at (#2487). The release
+# pipeline sets NESSION_TERMINAL_COLS from the same parameter that built the
+# Web bundle; AGENT_TERMINAL_COLS lets a standalone operator override it
+# without changing the shared name. The Server's relayed create/attach states
+# its own value in a central deployment, and an existing Session keeps its
+# pane width regardless.
+AGENT_TERMINAL_COLS="${AGENT_TERMINAL_COLS:-${NESSION_TERMINAL_COLS:-88}}"
+# Config directory, overridable for an entrypoint test that must not write /etc.
+NESSON_CONFIG_DIR="${NESSON_CONFIG_DIR:-/etc/nession}"
 
 export LISTEN_PORT SERVER_BACKEND
+export AGENT_TERMINAL_COLS
 export LANG="${LANG:-C.UTF-8}"
 export TERM="${TERM:-xterm-256color}"
+mkdir -p "${NESSON_CONFIG_DIR}"
 
 # Generate nginx config
 envsubst '${LISTEN_PORT} ${SERVER_BACKEND}' \
@@ -35,7 +46,7 @@ nginx -t
 nginx -g 'daemon off;' &
 
 # Generate agent config
-cat > /etc/nession/agent-config.toml <<TOML
+cat > "${NESSON_CONFIG_DIR}/agent-config.toml" <<TOML
 agent_id = "${AGENT_ID}"
 listen_address = "${AGENT_LISTEN}"
 server_url = "${AGENT_SERVER_URL}"
@@ -43,6 +54,7 @@ auth_token = "${AGENT_AUTH_TOKEN}"
 agent_token = "${AGENT_TOKEN}"
 heartbeat_interval_secs = 10
 session_poll_interval_secs = 5
+terminal_cols = ${AGENT_TERMINAL_COLS}
 TOML
 
 # Only add connect_url if explicitly set
@@ -95,8 +107,10 @@ echo "  Server URL:  ${AGENT_SERVER_URL:-<standalone>}"
 if [ -z "${AGENT_SERVER_URL}" ]; then
   echo "  P2P token:   ${AGENT_TOKEN:+set}"
 fi
+echo "  Terminal:    cols=$AGENT_TERMINAL_COLS"
+echo "  Config dir:  $NESSON_CONFIG_DIR"
 echo "  Nginx:       :${LISTEN_PORT} -> $SERVER_BACKEND"
 echo "  Connect URL: ${AGENT_CONNECT_URL:-<auto>}"
 echo "  tmux:        $(tmux -V 2>/dev/null || echo 'not found')"
 
-exec /usr/local/bin/nession-agent /etc/nession/agent-config.toml
+exec /usr/local/bin/nession-agent "${NESSON_CONFIG_DIR}/agent-config.toml"

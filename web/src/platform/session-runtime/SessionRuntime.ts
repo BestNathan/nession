@@ -179,7 +179,9 @@ export type SessionRuntimeEvent =
   | { type: 'next-candidate'; activeUrl: string | null }
   | { type: 'force-relay' }
   | { type: 'transport-exhausted'; manualRoute: boolean }
-  | { type: 'route-intent-changed'; phase: AttachPhase };
+  | { type: 'route-intent-changed'; phase: AttachPhase }
+  /** The Agent stated the live Session's authoritative fixed columns (#2487). */
+  | { type: 'session-terminal-cols'; cols: number };
 
 /**
  * Value equality for the published snapshot.
@@ -1028,6 +1030,9 @@ export class SessionRuntime {
         // If it differs from the last one adopted, the buffer kept across the
         // loss belongs to a timeline this Agent cannot replay (#2194).
         this.adoptStreamEpoch(result.streamEpoch);
+        if (result.terminalCols !== undefined) {
+          this.emitRuntimeEvent({ type: 'session-terminal-cols', cols: result.terminalCols });
+        }
         this.attachedSize = attachSize;
         this.p2pAttachSeed = {
           streamEpoch: result.streamEpoch,

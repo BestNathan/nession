@@ -11,6 +11,8 @@ GitHub requirements (Approved):
 | [#1095](https://github.com/BestNathan/nession/issues/1095) | Multi-client Controller / Observer | [multi-client-ownership.md](multi-client-ownership.md) |
 | [#1094](https://github.com/BestNathan/nession/issues/1094) | Terminal stream, checkpoints & replay | [stream-replay.md](stream-replay.md) |
 | [#1309](https://github.com/BestNathan/nession/issues/1309) | Session runtime = single lifecycle authority | [session-runtime-ownership.md](session-runtime-ownership.md) |
+| [#2286](https://github.com/BestNathan/nession/issues/2286) | Active-device handoff and terminal ownership | [multi-client-ownership.md](multi-client-ownership.md) |
+| [#2487](https://github.com/BestNathan/nession/issues/2487) | Fixed terminal columns, adaptive font and release configuration | [terminal-sizing.md](terminal-sizing.md) |
 | [#1645](https://github.com/BestNathan/nession/issues/1645) / [#1927](https://github.com/BestNathan/nession/issues/1927) | Terminal buffer continuity, parser ACK, atomic checkpoint & recovery RFC v2 | [ahp-inspired-terminal-consistency.md](ahp-inspired-terminal-consistency.md) |
 
 Related: [#1081](https://github.com/BestNathan/nession/issues/1081) (App shell gestures).

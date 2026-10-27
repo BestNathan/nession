@@ -50,6 +50,19 @@ async fn start_server_in_mode(
     nession_agent::server::ServerHandle,
     Arc<P2pCredentials>,
 )> {
+    start_server_with_terminal_cols(mode, nession_common::config::DEFAULT_TERMINAL_COLS).await
+}
+
+/// Same server, with the Agent's configured fixed column count chosen by the
+/// test (#2487). This is the standalone policy: no Server is in the path.
+async fn start_server_with_terminal_cols(
+    mode: AttachMode,
+    terminal_cols: u16,
+) -> anyhow::Result<(
+    SocketAddr,
+    nession_agent::server::ServerHandle,
+    Arc<P2pCredentials>,
+)> {
     let tmp = Box::leak(Box::new(tempfile::tempdir()?));
     let (resize, _resize_updates) = nession_agent::server::ResizeReporter::new();
     // Built, granted into, and only then handed to the listener — the store the
@@ -74,6 +87,7 @@ async fn start_server_in_mode(
             credentials: Arc::clone(&credentials),
             mutations: nession_agent::execution::mutation_scheduler(),
             tmux: Arc::new(SessionManager::new()),
+            terminal_cols,
         },
     )?;
     let (handle, addr) = server.start().await?;
@@ -142,6 +156,7 @@ async fn integration_session_create_and_kill() {
         height: 24,
         working_dir: None,
         env_snapshots: Vec::new(),
+        terminal_cols: None,
     };
     let req = new_message(msg_types::SESSION_CREATE, create);
     let resp: nession_agent::server::websocket::Message<SessionCreateResponse> =
@@ -347,17 +362,15 @@ async fn integration_client_attach_creates_pty() {
     handle.shutdown().await.ok();
 }
 
-/// #2268 SC-03: the size a created session has is the attaching client's.
+/// #2487 SC-01: an existing Session keeps its columns; an attach states rows.
 ///
-/// Creation states no dimensions (the manager ignores any it is handed), so the
-/// window starts at the Agent's default. The first attach resizes it to the
-/// size that client states — which is why the CLI no longer offers a create-time
-/// `--width`/`--height`: they were a second, losing owner of this decision.
-///
-/// The create size here (80×24) is deliberately different from the attach size
-/// (111×41), so the assertion can only pass if the attach moved the pane.
+/// This replaces the #2268 SC-03 expectation that the first attaching client
+/// sets both dimensions. Since #2487 the Session's width is authoritative: the
+/// pane created at 80 stays 80 even when a client states 111, while the
+/// client's measured height still becomes the pane's rows. The reply carries
+/// the width the client must render.
 #[tokio::test]
-async fn integration_attach_supplies_the_effective_session_size() {
+async fn integration_attach_keeps_session_columns_and_applies_rows() {
     let (addr, handle, credentials) = start_server(0).await.unwrap();
 
     let tmux = SessionManager::new();
@@ -385,6 +398,11 @@ async fn integration_attach_supplies_the_effective_session_size() {
     let resp: nession_agent::server::websocket::Message<ClientAttachResponse> =
         round_trip(&mut sink, &mut stream, &req).await.unwrap();
     assert_eq!(resp.msg_type, msg_types::OK);
+    assert_eq!(
+        resp.payload.terminal_cols,
+        Some(80),
+        "the reply must state the Session's width, not the client's"
+    );
 
     // tmux is the application-visible truth; the resize is applied by the
     // attach path, so allow it the same bounded settle the other resize tests
@@ -397,15 +415,15 @@ async fn integration_attach_supplies_the_effective_session_size() {
             .window_size(&session_name)
             .await
             .expect("the session has a tmux window");
-        if pane == (111, 41) {
+        if pane == (80, 41) {
             break;
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     assert_eq!(
         pane,
-        (111, 41),
-        "the attaching client's size did not become the shared pane size"
+        (80, 41),
+        "the Session's columns must survive an attach; rows follow the client"
     );
 
     let detach = ClientDetachPayload {
@@ -414,6 +432,233 @@ async fn integration_attach_supplies_the_effective_session_size() {
     let req = new_message(msg_types::CLIENT_DETACH, detach);
     let _: nession_agent::server::websocket::Message<ClientDetachResponse> =
         round_trip(&mut sink, &mut stream, &req).await.unwrap();
+
+    tmux.kill_session(&session_name).await.ok();
+    handle.shutdown().await.ok();
+}
+
+/// #2487 SC-01/SC-09: a Session with no pane is created at the configured
+/// width, a later client cannot change it, and an authorized resize applies
+/// the Session's columns with the controller's rows.
+#[tokio::test]
+async fn integration_new_session_uses_configured_columns_and_clamps_resize() {
+    let (addr, handle, credentials) = start_server(0).await.unwrap();
+    let tmux = SessionManager::new();
+    let session = TestSession::new("fixed-cols");
+    let session_name = session.name().to_string();
+    let expected_cols = nession_common::config::DEFAULT_TERMINAL_COLS;
+
+    // An explicit create carries no terminal_cols, so the Agent's configured
+    // value decides the width. The caller's `width` placeholder is not used.
+    let (mut sink, mut stream) = connect_for(&credentials, addr, &session_name)
+        .await
+        .unwrap();
+    let create = SessionCreatePayload {
+        name: session_name.clone(),
+        width: 80,
+        height: 24,
+        working_dir: None,
+        env_snapshots: Vec::new(),
+        terminal_cols: None,
+    };
+    let req = new_message(msg_types::SESSION_CREATE, create);
+    let created: nession_agent::server::websocket::Message<SessionCreateResponse> =
+        round_trip(&mut sink, &mut stream, &req).await.unwrap();
+    assert_eq!(created.msg_type, msg_types::OK);
+
+    let mut pane = (0, 0);
+    for _ in 0..50 {
+        pane = tmux
+            .tmux_dep()
+            .ops()
+            .window_size(&session_name)
+            .await
+            .expect("the create produced a tmux window");
+        if pane.0 == expected_cols {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(
+        pane.0, expected_cols,
+        "a new Session must be created at the configured width"
+    );
+
+    // The first client states a different width and a measured height. The
+    // Session's columns win; its rows are the client's.
+    let first = ClientAttachPayload {
+        session_name: session_name.clone(),
+        width: 80,
+        height: 30,
+        size_known: None,
+        env_snapshots: Vec::new(),
+        needs_bootstrap: None,
+        subscription_id: None,
+    };
+    let req = new_message(msg_types::CLIENT_ATTACH, first);
+    let resp: nession_agent::server::websocket::Message<ClientAttachResponse> =
+        round_trip(&mut sink, &mut stream, &req).await.unwrap();
+    assert_eq!(resp.msg_type, msg_types::OK);
+    assert_eq!(resp.payload.terminal_cols, Some(expected_cols));
+
+    // A second, measured client asks for a different width. Attaching as a
+    // subscriber does not move a live Session at all; the reply states the
+    // width it must render.
+    let (mut sink2, mut stream2) = connect_for(&credentials, addr, &session_name)
+        .await
+        .unwrap();
+    let second = ClientAttachPayload {
+        session_name: session_name.clone(),
+        width: 140,
+        height: 50,
+        size_known: None,
+        env_snapshots: Vec::new(),
+        needs_bootstrap: None,
+        subscription_id: None,
+    };
+    let req = new_message(msg_types::CLIENT_ATTACH, second);
+    let resp2: nession_agent::server::websocket::Message<ClientAttachResponse> =
+        round_trip(&mut sink2, &mut stream2, &req).await.unwrap();
+    assert_eq!(resp2.msg_type, msg_types::OK);
+    assert_eq!(resp2.payload.terminal_cols, Some(expected_cols));
+    assert_eq!(
+        tmux.tmux_dep()
+            .ops()
+            .window_size(&session_name)
+            .await
+            .expect("the session still has a tmux window"),
+        (expected_cols, 30),
+        "a second attach must not reflow the live Session"
+    );
+
+    // Taking the lease lets the second client state rows. Its width is still
+    // clamped by the Session.
+    let _: nession_agent::server::websocket::Message<
+        nession_agent::server::websocket::TerminalControlAcquireResponse,
+    > = round_trip(
+        &mut sink2,
+        &mut stream2,
+        &new_message(
+            msg_types::TERMINAL_CONTROL_ACQUIRE,
+            nession_agent::server::websocket::TerminalControlAcquirePayload {
+                session_name: session_name.clone(),
+            },
+        ),
+    )
+    .await
+    .unwrap();
+    let resize = nession_agent::server::websocket::TerminalResizePayload {
+        session_name: session_name.clone(),
+        cols: 200,
+        rows: 40,
+        control_generation: None,
+        stream_epoch: None,
+        stream_seq: None,
+    };
+    let req = new_message(msg_types::TERMINAL_RESIZE, resize);
+    let _: nession_agent::server::websocket::Message<serde_json::Value> =
+        round_trip(&mut sink2, &mut stream2, &req).await.unwrap();
+    let mut pane3 = (0, 0);
+    for _ in 0..50 {
+        pane3 = tmux
+            .tmux_dep()
+            .ops()
+            .window_size(&session_name)
+            .await
+            .expect("the session still has a tmux window");
+        if pane3 == (expected_cols, 40) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(
+        pane3,
+        (expected_cols, 40),
+        "a resize may change rows, never the Session's columns"
+    );
+
+    // Detaching is cleanup, not the assertion: a subscriber the fan-out may
+    // already have dropped for not draining can answer `not_attached`, and
+    // that is not this test's subject.
+    for sink in [&mut sink, &mut sink2] {
+        let detach = ClientDetachPayload {
+            session_name: session_name.clone(),
+        };
+        let req = new_message(msg_types::CLIENT_DETACH, detach);
+        sink.send(WsMessage::Text(serde_json::to_string(&req).unwrap()))
+            .await
+            .ok();
+    }
+    tmux.kill_session(&session_name).await.ok();
+    handle.shutdown().await.ok();
+}
+
+/// #2487 SC-09: a standalone Agent (no Server) creates Sessions at its own
+/// configured width, and the attach reply states that width.
+#[tokio::test]
+async fn integration_standalone_agent_uses_its_configured_columns() {
+    let configured = 96;
+    let (addr, handle, credentials) =
+        start_server_with_terminal_cols(AttachMode::Plain, configured)
+            .await
+            .unwrap();
+    let tmux = SessionManager::new();
+    let session = TestSession::new("standalone-cols");
+    let session_name = session.name().to_string();
+    let (mut sink, mut stream) = connect_for(&credentials, addr, &session_name)
+        .await
+        .unwrap();
+
+    let create = SessionCreatePayload {
+        name: session_name.clone(),
+        width: 80,
+        height: 24,
+        working_dir: None,
+        env_snapshots: Vec::new(),
+        // No Server stated a value, so the Agent's own configuration decides.
+        terminal_cols: None,
+    };
+    let req = new_message(msg_types::SESSION_CREATE, create);
+    let created: nession_agent::server::websocket::Message<SessionCreateResponse> =
+        round_trip(&mut sink, &mut stream, &req).await.unwrap();
+    assert_eq!(created.msg_type, msg_types::OK);
+
+    let mut pane = (0, 0);
+    for _ in 0..50 {
+        pane = tmux
+            .tmux_dep()
+            .ops()
+            .window_size(&session_name)
+            .await
+            .expect("the create produced a tmux window");
+        if pane.0 == configured {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(
+        pane.0, configured,
+        "the standalone Agent's width must apply"
+    );
+
+    let attach = ClientAttachPayload {
+        session_name: session_name.clone(),
+        width: 140,
+        height: 30,
+        size_known: None,
+        env_snapshots: Vec::new(),
+        needs_bootstrap: None,
+        subscription_id: None,
+    };
+    let req = new_message(msg_types::CLIENT_ATTACH, attach);
+    let resp: nession_agent::server::websocket::Message<ClientAttachResponse> =
+        round_trip(&mut sink, &mut stream, &req).await.unwrap();
+    assert_eq!(resp.msg_type, msg_types::OK);
+    assert_eq!(
+        resp.payload.terminal_cols,
+        Some(configured),
+        "a standalone attach must state the Agent's configured width"
+    );
 
     tmux.kill_session(&session_name).await.ok();
     handle.shutdown().await.ok();
@@ -1533,8 +1778,8 @@ async fn a_recorded_resize_reaches_the_client_at_its_stream_position() {
     );
     assert_eq!(
         payload.get("cols").and_then(serde_json::Value::as_u64),
-        Some(100),
-        "the broadcast carries the size that was asked for"
+        Some(80),
+        "the broadcast carries the size actually applied: the Session's columns"
     );
 
     // And it is the log's position, not merely *a* position: the events after
@@ -1592,7 +1837,7 @@ async fn a_recorded_resize_reaches_the_client_at_its_stream_position() {
                 .get("cols")
                 .and_then(serde_json::Value::as_u64),
         ),
-        (Some("resize"), Some(100)),
+        (Some("resize"), Some(80)),
         "the position the resize was broadcast at holds something else in the log: a client \
          would take the live frame for a duplicate and drop it"
     );
@@ -1915,6 +2160,7 @@ async fn integration_web_ui_session_create() {
         width: 80,
         height: 24,
         working_dir: None,
+        terminal_cols: None,
     };
     let req = new_message(msg_types::CLIENT_SESSION_CREATE, payload);
     let resp: nession_agent::server::websocket::Message<WebSessionCreateResponse> =
@@ -2069,6 +2315,7 @@ async fn start_server_with_file_root() -> anyhow::Result<(
             credentials: Arc::clone(&credentials),
             mutations: nession_agent::execution::mutation_scheduler(),
             tmux: Arc::new(SessionManager::new()),
+            terminal_cols: nession_common::config::DEFAULT_TERMINAL_COLS,
         },
     )?;
     let (handle, addr) = server.start().await?;
@@ -4042,7 +4289,8 @@ async fn integration_resize_from_a_stale_lease_is_refused_and_tagged() {
     let payload = frame.get("payload").expect("a resize frame has a payload");
     assert_eq!(
         payload.get("cols").and_then(serde_json::Value::as_u64),
-        Some(100)
+        Some(80),
+        "the observer learns the Session's columns, not the requester's"
     );
     assert_eq!(
         payload
@@ -4068,16 +4316,12 @@ async fn integration_resize_from_a_stale_lease_is_refused_and_tagged() {
             .window_size(&session.session_name)
             .await
             .unwrap();
-        if pane == (100, 30) {
+        if pane == (80, 30) {
             break;
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    assert_eq!(
-        pane,
-        (100, 30),
-        "the accepted resize never reached the pane"
-    );
+    assert_eq!(pane, (80, 30), "the accepted resize never reached the pane");
 
     session.handle.shutdown().await.ok();
 }

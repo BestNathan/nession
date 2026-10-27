@@ -272,6 +272,9 @@ function makeRuntimeHarness(opts: {
       return live;
     },
     subscribeTransportSwap: () => () => {},
+    // The production runtime publishes the Agent-stated Session width here
+    // (#2487); this harness has no attach reply to state.
+    subscribeRuntimeEvents: () => () => {},
     setTransportReady: () => {},
     updateViewportSize: () => {},
   } as unknown as SessionRuntime;

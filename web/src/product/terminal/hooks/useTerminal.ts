@@ -19,6 +19,8 @@ export interface UseTerminalOptions {
   deviceProfile?: DeviceProfile;
   /** Whether history is owned by xterm's browser buffer or the legacy path. */
   scrollbackMode?: TerminalScrollbackMode;
+  /** The Session's stated fixed columns (#2487), when the Server stated one. */
+  terminalCols?: number;
   /**
    * The session's lifecycle owner — required. The controller is not created
    * without it: the runtime builds every transport the controller binds
@@ -61,6 +63,7 @@ export function useTerminal(options: UseTerminalOptions): TerminalController | n
     scrollback,
     deviceProfile,
     scrollbackMode = 'legacy',
+    terminalCols,
     runtime,
   } = options;
 
@@ -71,6 +74,11 @@ export function useTerminal(options: UseTerminalOptions): TerminalController | n
   // the user is reading.
   const modeRef = useRef(mode);
   modeRef.current = mode;
+  // Init-only for the controller memo, like `mode`: a later attach statement
+  // is adopted through the controller instead of recreating the xterm and
+  // destroying the buffer the user is reading.
+  const terminalColsRef = useRef(terminalCols);
+  terminalColsRef.current = terminalCols;
 
   const controller = useMemo(() => {
     if (!sessionId || !runtime) { return null; }
@@ -102,6 +110,7 @@ export function useTerminal(options: UseTerminalOptions): TerminalController | n
         scrollback,
         deviceProfile,
         scrollbackMode,
+        terminalCols: terminalColsRef.current,
         events,
         transportBinding: {
           subscribe: (listener) => runtime.subscribeTransportSwap(listener),
@@ -109,6 +118,15 @@ export function useTerminal(options: UseTerminalOptions): TerminalController | n
       },
     );
   }, [sessionId, sessionName, rendererType, fontSize, lineHeight, scrollback, deviceProfile, scrollbackMode, runtime]);
+
+  // A later attach statement (or a Server value that arrived after mount) is
+  // applied to the live controller; the controller's own memo deliberately
+  // does not depend on it (#2487).
+  useEffect(() => {
+    if (controller && terminalCols !== undefined) {
+      controller.adoptSessionCols(terminalCols);
+    }
+  }, [controller, terminalCols]);
 
   // Dispose replaced controllers (session switch). Never dispose synchronously
   // in cleanup: StrictMode replays effects as unmount→remount and would

@@ -32,6 +32,8 @@ async fn test_handler(auth_token: &str) -> ConnectionHandler {
         ConnectionHandlerConfig {
             server_auth_token: auth_token.to_string(),
             heartbeat_interval_secs: 30,
+            terminal_cols: nession_common::config::DEFAULT_TERMINAL_COLS,
+            terminal_web_font_size: nession_common::config::DEFAULT_TERMINAL_WEB_FONT_SIZE,
         },
     )
 }
@@ -351,6 +353,17 @@ async fn the_server_advertises_what_it_serves() {
     // exists to refuse, so claiming an offer that does not exist would be
     // the one failure it cannot make.
     assert!(manifest["protocols"]["git.status"].is_null());
+
+    // The release-selected terminal configuration is part of what this server
+    // is (#2487): a Web build compares its embedded value with these.
+    assert_eq!(
+        reply["payload"]["terminal_cols"],
+        nession_common::config::DEFAULT_TERMINAL_COLS
+    );
+    assert_eq!(
+        reply["payload"]["terminal_web_font_size"],
+        nession_common::config::DEFAULT_TERMINAL_WEB_FONT_SIZE
+    );
 }
 
 #[test]
@@ -1132,6 +1145,8 @@ async fn connections_on_one_server() -> (ConnectionHandler, ConnectionHandler) {
             ConnectionHandlerConfig {
                 server_auth_token: String::new(),
                 heartbeat_interval_secs: 30,
+                terminal_cols: nession_common::config::DEFAULT_TERMINAL_COLS,
+                terminal_web_font_size: nession_common::config::DEFAULT_TERMINAL_WEB_FONT_SIZE,
             },
         )
     };

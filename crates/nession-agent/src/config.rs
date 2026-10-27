@@ -1,5 +1,6 @@
 //! Agent configuration.
 
+use nession_common::config::{validate_terminal_cols, DEFAULT_TERMINAL_COLS, TERMINAL_COLS_ENV};
 use nession_common::logging::LoggingConfig;
 use nession_protocol::contracts::agent::v1::{AgentAddress, NetworkType};
 use serde::{Deserialize, Serialize};
@@ -226,6 +227,18 @@ pub struct AgentConfig {
     /// Only effective when running in a cgroup v2 container with readable metrics.
     #[serde(default = "default_memory_threshold_percent")]
     pub memory_threshold_percent: u8,
+
+    /// The fixed column count for a Session this Agent creates (#2487).
+    ///
+    /// The Agent owns the tmux pane, so it owns the Session's authoritative
+    /// width. This value is the **creation** width for a Session with no pane
+    /// yet; an existing Session keeps the width its pane already has, and a
+    /// later client resize may change only rows. In a central deployment the
+    /// Server sends the same release-selected value on create/attach; this
+    /// field is the standalone fallback, read from `NESSON_TERMINAL_COLS` when
+    /// the environment sets it.
+    #[serde(default = "default_terminal_cols")]
+    pub terminal_cols: u16,
 }
 
 impl Default for AgentConfig {
@@ -254,7 +267,43 @@ impl Default for AgentConfig {
             tmux_socket_path: None,
             logging: LoggingConfig::default(),
             memory_threshold_percent: default_memory_threshold_percent(),
+            terminal_cols: default_terminal_cols(),
         }
+    }
+}
+
+fn default_terminal_cols() -> u16 {
+    DEFAULT_TERMINAL_COLS
+}
+
+impl AgentConfig {
+    /// Apply runtime environment overrides (#2487).
+    ///
+    /// `NESSON_TERMINAL_COLS` has the same name and meaning as the Server's
+    /// variable, so one release-level parameter configures both a central
+    /// deployment and a standalone Agent. A standalone operator sets it (or
+    /// `terminal_cols` in the TOML); the Agent never depends on a
+    /// Server-only process environment.
+    pub fn apply_env_overrides(&mut self) -> anyhow::Result<()> {
+        self.apply_env_overrides_from(|name| std::env::var(name).ok())
+    }
+
+    /// The testable half of [`Self::apply_env_overrides`].
+    pub fn apply_env_overrides_from(
+        &mut self,
+        get: impl Fn(&str) -> Option<String>,
+    ) -> anyhow::Result<()> {
+        if let Some(raw) = get(TERMINAL_COLS_ENV) {
+            self.terminal_cols =
+                nession_common::config::parse_terminal_cols(&raw).map_err(anyhow::Error::msg)?;
+        }
+        Ok(())
+    }
+
+    /// Validate the effective configuration before the runtime starts.
+    pub fn validate(&self) -> anyhow::Result<()> {
+        validate_terminal_cols(self.terminal_cols).map_err(anyhow::Error::msg)?;
+        Ok(())
     }
 }
 
@@ -545,5 +594,47 @@ auth_token = ""
         assert!(config.tls_key_path.is_none());
         assert!(config.advertise_address.is_none());
         assert!(config.connect_url.is_none());
+    }
+
+    #[test]
+    fn terminal_cols_defaults_for_a_config_written_before_2487() {
+        let config: AgentConfig = toml::from_str(
+            r#"
+agent_id = "agent-1"
+server_url = "ws://localhost:8443"
+auth_token = ""
+"#,
+        )
+        .unwrap();
+        assert_eq!(config.terminal_cols, DEFAULT_TERMINAL_COLS);
+        config.validate().unwrap();
+    }
+
+    #[test]
+    fn terminal_cols_reads_from_toml_and_the_environment_wins() {
+        let mut config: AgentConfig = toml::from_str(
+            r#"
+agent_id = "agent-1"
+server_url = "ws://localhost:8443"
+auth_token = ""
+terminal_cols = 80
+"#,
+        )
+        .unwrap();
+        assert_eq!(config.terminal_cols, 80);
+
+        config
+            .apply_env_overrides_from(|name| (name == TERMINAL_COLS_ENV).then(|| "96".to_string()))
+            .unwrap();
+        assert_eq!(config.terminal_cols, 96);
+
+        let mut invalid = AgentConfig::default();
+        assert!(invalid
+            .apply_env_overrides_from(|name| {
+                (name == TERMINAL_COLS_ENV).then(|| "not-a-width".to_string())
+            })
+            .is_err());
+        invalid.terminal_cols = 0;
+        assert!(invalid.validate().is_err());
     }
 }

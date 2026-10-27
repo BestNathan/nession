@@ -139,6 +139,13 @@ pub(crate) struct AttachedSession {
     /// and `terminal.resize` all carry the same resource key, so the key lane
     /// runs at most one of them at a time for a given session name.
     pub(crate) backend: Arc<Mutex<Box<dyn TmuxSession>>>,
+    /// The Session's authoritative column count (#2487).
+    ///
+    /// Captured when the backend is inserted: an existing pane's current width
+    /// (the Session keeps the width it has), or the width this attach created
+    /// it at. Every resize applies this value regardless of what a client
+    /// states; only rows are the controller's to choose.
+    pub(crate) terminal_cols: u16,
     /// Live connections for this session (output fan-out + control notifications).
     pub(crate) peers: Vec<SessionPeer>,
     pub(crate) control: session_terminal::SessionControlState,
@@ -420,6 +427,11 @@ pub(crate) fn client_attach_response(
         // position" and "my position is zero" stay different answers.
         input_epoch: Some(session.input.epoch),
         input_applied_through: Some(session.input.applied_through),
+        // The Session's authoritative width (#2487). A browser from a build
+        // whose embedded column count differs renders this one instead of
+        // resizing the shared pane; an Agent from before the field omits it,
+        // which leaves the client's own build configuration in charge.
+        terminal_cols: Some(session.terminal_cols),
     }
 }
 

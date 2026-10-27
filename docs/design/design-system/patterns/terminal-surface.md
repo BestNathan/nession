@@ -133,7 +133,14 @@ For example, choosing Git opens a Peek that surfaces branch/worktree/change coun
 
 Terminal implementation still needs reliable fit/resize behavior:
 
-- container resize updates local grid and remote PTY dimensions through the existing debounced policy;
+- The Session has a **fixed canonical column count** (#2487); a container,
+  device or window resize changes the **font size**, the **content-width cap**
+  and the **rows**, never the columns. Canonical rules, compatibility and the
+  release configuration pipeline live in
+  [terminal-sizing.md](../../terminal/terminal-sizing.md).
+- container resize updates the local font fit and the remote PTY **rows**
+  through the existing debounced policy; only the active Controller may state
+  them, and the Agent keeps the Session's columns;
 - returning from Workspace/deeper surfaces refits the terminal when required;
 - capsule geometry changes should prefer occlusion/clearance updates over unnecessary terminal remounts;
 - font/scrollback/control metrics come from Experience tokens, not ad-hoc breakpoint values;

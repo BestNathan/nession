@@ -46,4 +46,16 @@ pub struct ServerInfoResponse {
     /// gets "this server did not say" rather than a decode error.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub protocol_manifest: Option<crate::ProtocolManifest>,
+    /// The fixed column count this Server selects for a new Session (#2487).
+    ///
+    /// A Web build compares its embedded value with this one. It is the
+    /// Server's release configuration, not a claim about an existing Session —
+    /// that width belongs to the Session's tmux pane and is stated by the
+    /// Agent on attach.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_cols: Option<u16>,
+    /// The Web maximum CSS font size mirrored for configuration introspection
+    /// (#2487). The Server does not apply it to a PTY.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_web_font_size: Option<f64>,
 }

@@ -21,13 +21,23 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
-export type WebSessionCreatePayload = { agent_id: string, name: string, width: number, height: number, working_dir?: string | null, };
+export type WebSessionCreatePayload = { agent_id: string, name: string, width: number, height: number, working_dir?: string | null, 
+/**
+ * The fixed column count this Session should be created at (#2487).
+ * `None` means the Agent's own configuration.
+ */
+terminal_cols?: number | null, };
 export type WebSessionCreateResponse = { success: boolean, session_id: string | null, error: string | null, };
 
 // ── Operations ──
 
 /** The payload a caller sends. */
-export type ClientSessionCreateCall = { agent_id: string, name: string, width: number, height: number, working_dir?: string | null, };
+export type ClientSessionCreateCall = { agent_id: string, name: string, width: number, height: number, working_dir?: string | null, 
+/**
+ * The fixed column count this Session should be created at (#2487).
+ * `None` means the Agent's own configuration.
+ */
+terminal_cols?: number | null, };
 
 /** The payload the provider answers with. */
 export type ClientSessionCreateReply = { success: boolean, session_id: string | null, error: string | null, };

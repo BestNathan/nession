@@ -1079,14 +1079,16 @@ describe('TerminalController', () => {
       expect(controller.terminal!.cols).toBe(177);
       expect(controller.terminal!.rows).toBe(49);
       expect(transport.sendResize).not.toHaveBeenCalled();
-      expect(viewport).toHaveBeenLastCalledWith('agent1:sess', 88, 68);
+      // The Session's width is authoritative (#2487): the observer adopts the
+      // remote columns, and the passive box change may only alter rows.
+      expect(viewport).toHaveBeenLastCalledWith('agent1:sess', 177, 68);
 
       // A real takeover, unlike a passive ResizeObserver, must immediately
-      // remeasure the stored box, fit this xterm and send the new PTY size.
+      // remeasure the stored box, refit this xterm and send the new rows.
       controller.adoptControl();
-      expect(controller.terminal!.cols).toBe(88);
+      expect(controller.terminal!.cols).toBe(177);
       expect(controller.terminal!.rows).toBe(68);
-      expect(transport.sendResize).toHaveBeenCalledWith(88, 68);
+      expect(transport.sendResize).toHaveBeenCalledWith(177, 68);
     } finally {
       restore();
     }
@@ -1186,6 +1188,33 @@ describe('TerminalController', () => {
 
       // Fixed cols 88; 600/16=37 rows (8×16 fallback cell in jsdom).
       expect(transport.sendResize).toHaveBeenCalledWith(88, 37);
+    } finally {
+      restore();
+    }
+  });
+
+  it('renders the Session\'s stated columns instead of the build value (#2487)', async () => {
+    const restore = installCapturingResizeObserver();
+    try {
+      const transport = makeTransport();
+      const el = host();
+      const controller = new TerminalController(makeSession(), () => transport, {
+        rendererType: 'canvas',
+        terminalCols: 96,
+      });
+      controller.attach(el);
+      await flush();
+
+      const entry = { contentRect: { width: 1024, height: 600 } } as unknown as ResizeObserverEntry;
+      capturedCallback!([entry], capturedObserver!);
+
+      expect(controller.terminal!.cols).toBe(96);
+      expect(controller.terminal!.rows).toBe(37);
+      expect(transport.sendResize).toHaveBeenCalledWith(96, 37);
+      expect(
+        el.style.getPropertyValue('--nession-local-terminal-content-width'),
+      ).toBe('768px');
+      controller.dispose();
     } finally {
       restore();
     }

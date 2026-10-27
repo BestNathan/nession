@@ -93,6 +93,17 @@ export interface AttachInfo {
   connection_token?: string;
   /** Full candidate list with probe status (issue #43). Empty for relay. */
   addresses?: ProbedAddress[];
+  /**
+   * The fixed column count the Server was released with (#2487).
+   *
+   * The terminal renders this width rather than its own embedded build value
+   * when they differ, so a mixed release cannot draw a grid the Server does
+   * not agree with. An existing Session's Agent reply is authoritative on top
+   * of it.
+   */
+  terminal_cols?: number;
+  /** The Web maximum CSS font size the Server was released with (#2487). */
+  terminal_web_font_size?: number;
 }
 
 /**

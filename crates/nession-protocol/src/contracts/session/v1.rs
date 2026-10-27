@@ -22,6 +22,14 @@ pub struct ServerSessionCreatePayload {
     /// Empty (default) preserves the pre-env-feature behaviour exactly.
     #[serde(default)]
     pub env_snapshots: Vec<EnvSnapshot>,
+    /// The fixed column count this Session should be created at (#2487).
+    ///
+    /// In a central deployment the Server states its release-selected value;
+    /// a standalone caller omits it and the Agent uses its own configuration.
+    /// An existing Session is never resized by this field — it is a creation
+    /// parameter only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_cols: Option<u16>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -234,6 +242,18 @@ pub struct ClientSessionAttachResponsePayload {
     /// browser.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connection_token: Option<String>,
+    /// The Server's release-selected fixed column count (#2487).
+    ///
+    /// The browser renders this width when its embedded build value differs,
+    /// so a mixed release cannot draw a grid the Server does not agree with.
+    /// An existing Session's authoritative width is stated by the Agent on
+    /// attach and takes precedence over this value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_cols: Option<u16>,
+    /// The Web maximum CSS font size this Server was released with, mirrored
+    /// for introspection (#2487). Not a PTY parameter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_web_font_size: Option<f64>,
 }
 
 // --- Env application to sessions ---
@@ -624,6 +644,13 @@ pub struct SessionCreatePayload {
     /// that does not send it.
     #[serde(default)]
     pub env_snapshots: Vec<EnvSnapshot>,
+    /// The fixed column count this Session should be created at (#2487).
+    ///
+    /// The Server's relayed create states its value; a direct caller omits it
+    /// and the Agent uses its own configuration. Creation only: an existing
+    /// Session keeps its pane's width.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_cols: Option<u16>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -833,6 +860,10 @@ pub struct WebSessionCreatePayload {
     pub height: u16,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub working_dir: Option<String>,
+    /// The fixed column count this Session should be created at (#2487).
+    /// `None` means the Agent's own configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_cols: Option<u16>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -1009,6 +1040,16 @@ pub struct ClientAttachResponse {
     pub input_epoch: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_applied_through: Option<u64>,
+    /// The Session's authoritative fixed column count (#2487).
+    ///
+    /// The Agent owns the tmux pane and therefore the Session's width. A
+    /// client whose build embedded a different value renders this grid rather
+    /// than resizing the shared pane: only rows follow the active client's
+    /// viewport. Absent from an Agent built before this field, in which case
+    /// the client keeps its own build configuration and the Agent still
+    /// ignores any column change on resize.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_cols: Option<u16>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]

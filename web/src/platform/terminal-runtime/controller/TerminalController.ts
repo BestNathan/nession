@@ -124,6 +124,14 @@ export interface TerminalControllerOptions {
    */
   deviceProfile?: DeviceProfile;
   scrollbackMode?: TerminalScrollbackMode;
+  /**
+   * The Session's stated fixed column count (#2487), if the caller already
+   * knows it — the Server states its release value on attach, and the Agent
+   * states the live Session's width on its attach reply. Absent means "use
+   * this build's embedded value"; the Agent's first authoritative resize
+   * adopts the live value either way.
+   */
+  terminalCols?: number;
   events?: TerminalControllerEvents;
   /** Lifecycle-owner swap channel — the controller rewires when it fires. */
   transportBinding?: TerminalTransportBinding;
@@ -172,6 +180,8 @@ export class TerminalController {
   private transportFactory: () => TerminalTransport;
   private transport: TerminalTransport | null = null;
   private resizeController: ResizeController | null = null;
+  /** The Session's stated fixed columns, when a caller or the Agent stated one. */
+  private sessionCols: number | null;
   private inputRouter: InputRouter | null = null;
   private inputSourceManager: InputSourceManager;
   private mobileIme: MobileImeInput | null = null;
@@ -248,6 +258,7 @@ export class TerminalController {
     this.useMobileIme = shouldUseMobileIme(options.deviceProfile);
     this.scrollbackMode = options.scrollbackMode ?? 'legacy';
     this.events = options.events;
+    this.sessionCols = typeof options.terminalCols === 'number' ? options.terminalCols : null;
     this.initInputRouter();
     // Subscribed at construction, not in an effect: the swap notification is
     // synchronous with the owner's identity change, so the rewire lands in
@@ -503,6 +514,11 @@ export class TerminalController {
       if (bootstrapSeq === null) { this.markSessionOutput(); }
     };
     transport.onResize = (cols: number, rows: number, position?: TerminalStreamPosition) => {
+      // The Agent states the geometry it actually applied. If that width is
+      // not the one this client was rendering (an existing Session from a
+      // different release, or a clamped request), adopt it before drawing the
+      // remote size, so the next fit does not fight the Session (#2487).
+      this.adoptSessionCols(cols);
       this.writer.resize(cols, rows, () => {
         if (position && this._terminal === terminal && this.transport === transport) {
           this.events?.onStreamEventParsed?.(position);
@@ -936,6 +952,26 @@ export class TerminalController {
     this.events?.onResize?.(this.sessionId, cols, rows);
   }
 
+  /**
+   * Adopt the Session's authoritative fixed columns (#2487).
+   *
+   * The caller is either the Server/Agent attach statement (before the first
+   * grid is drawn) or the Agent's own resize fan-out, which states the width
+   * it actually applied after clamping a client's request. The local grid —
+   * font fit, content-width cap and rows — is recomputed for the new width;
+   * the Agent remains the owner of that width, never this client.
+   */
+  adoptSessionCols(cols: number): void {
+    if (!Number.isFinite(cols) || cols <= 0) { return; }
+    this.sessionCols = cols;
+    this.resizeController?.adoptSessionCols(cols);
+  }
+
+  /** The Session's stated fixed columns, or null while nobody stated them. */
+  get statedTerminalCols(): number | null {
+    return this.sessionCols;
+  }
+
 }
 
 /**
@@ -977,8 +1013,12 @@ export class ResizeController {
    * it (#2132).
    */
   private fontMetricsSettled = false;
-  /** The immutable build-time column count for this client. */
-  private readonly cols: number;
+  /**
+   * The fixed column count to render. Starts at the stated Session value or
+   * this build's embedded value, and changes only when the Agent states the
+   * Session's authoritative width (#2487).
+   */
+  private cols: number;
   /** The Web terminal's preferred/maximum CSS font size. */
   private readonly webMaxFontSize: number;
   private lastReported: { cols: number; rows: number } | null = null;
@@ -986,8 +1026,23 @@ export class ResizeController {
   constructor(controller: TerminalController) {
     this.controller = controller;
     const config = readTerminalClientConfig();
-    this.cols = config.cols;
+    this.cols = controller.statedTerminalCols ?? config.cols;
     this.webMaxFontSize = config.webMaxFontSize;
+  }
+
+  /**
+   * Render the Session's authoritative width instead of this client's build
+   * value (#2487). Used when the attach reply or the Agent's resize fan-out
+   * states a different width; the local fit is recomputed so exactly that many
+   * columns are visible.
+   */
+  adoptSessionCols(cols: number): void {
+    if (!Number.isFinite(cols) || cols <= 0 || cols === this.cols) { return; }
+    this.cols = cols;
+    this.lastReported = null;
+    if (this.lastContainer.width > 0 && this.lastContainer.height > 0) {
+      this.remeasure({ ordered: true, fitFont: true });
+    }
   }
 
   observe(container: HTMLElement, cellWidth: number, cellHeight: number): void {

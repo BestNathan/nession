@@ -140,6 +140,7 @@ async fn start_agent(
             credentials: Arc::clone(&credentials),
             mutations: Arc::clone(&mutations),
             tmux: Arc::new(SessionManager::new()),
+            terminal_cols: nession_common::config::DEFAULT_TERMINAL_COLS,
         },
     )?;
 

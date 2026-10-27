@@ -24,6 +24,12 @@ export type AttachResult =
       /** The agent's input run and applied cursor (#1307). Absent when unstated. */
       inputEpoch?: number;
       inputAppliedThrough?: number;
+      /**
+       * The live Session's authoritative fixed columns (#2487). Absent from an
+       * agent built before the field; the client then keeps its build value
+       * and the agent still ignores column changes on resize.
+       */
+      terminalCols?: number;
     }
   | { ok: false; error: string };
 

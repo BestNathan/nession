@@ -30,6 +30,13 @@ COPY web/ .
 # `COPY design/ design/` would land at `/build/design/` and the build would
 # still fail, which is why the destination is absolute.
 COPY design/ /design/
+# #2487 release-selected terminal configuration, embedded into the bundle.
+# The release workflow passes the same values to the Server image and the
+# prebuilt Web artifact; an invalid value fails this build in the Vite config.
+ARG VITE_NESSION_TERMINAL_COLS=88
+ARG VITE_NESSION_TERMINAL_WEB_FONT_SIZE=14
+ENV VITE_NESSION_TERMINAL_COLS=${VITE_NESSION_TERMINAL_COLS}
+ENV VITE_NESSION_TERMINAL_WEB_FONT_SIZE=${VITE_NESSION_TERMINAL_WEB_FONT_SIZE}
 RUN npm run build
 
 # Stage 4: Build server binary
@@ -54,6 +61,12 @@ RUN cargo build --release --bin nession-server
 # on `rust:1.96-bullseye` on purpose: they install nothing, and a binary linked
 # against glibc 2.31 runs fine on bookworm's 2.36.
 FROM debian:bookworm-slim AS runtime
+# The release-selected fixed terminal configuration (#2487). See
+# `Dockerfile.server.prebuilt`; both image paths carry the same env.
+ARG NESSION_TERMINAL_COLS=88
+ARG NESSION_TERMINAL_WEB_FONT_SIZE=14
+ENV NESSION_TERMINAL_COLS=${NESSION_TERMINAL_COLS}
+ENV NESSION_TERMINAL_WEB_FONT_SIZE=${NESSION_TERMINAL_WEB_FONT_SIZE}
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         nginx ca-certificates curl gettext-base && \
@@ -63,7 +76,8 @@ COPY --from=rust-builder /build/target/release/nession-server /usr/local/bin/nes
 COPY --from=web-builder /build/dist /usr/share/nginx/html
 COPY deploy/nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY deploy/entrypoint-server.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+COPY deploy/render-server-config.sh /render-server-config.sh
+RUN chmod +x /entrypoint.sh /render-server-config.sh
 
 RUN mkdir -p /data /etc/nession && chown www-data:www-data /data
 RUN rm -f /etc/nginx/sites-enabled/default

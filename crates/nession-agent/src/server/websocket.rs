@@ -868,6 +868,14 @@ pub struct AgentServerContext {
     /// second construction site would be a second, independently configured
     /// owner of the same tmux server.
     pub tmux: Arc<SessionManager>,
+    /// The fixed column count this Agent creates Sessions at (#2487).
+    ///
+    /// The Agent owns the tmux pane, so this is the creation-time width for a
+    /// Session that does not have one yet. It is the standalone policy; in a
+    /// central deployment the Server states the same release-selected value
+    /// on create/attach. An existing Session keeps its pane's width regardless
+    /// of this value.
+    pub terminal_cols: u16,
 }
 
 pub struct AgentServer {
@@ -889,6 +897,8 @@ pub struct AgentServer {
     agent_id: String,
     /// Default working directory for new tmux sessions created via P2P.
     default_working_dir: String,
+    /// The fixed column count this Agent creates Sessions at (#2487).
+    terminal_cols: u16,
     /// How the agent attaches to tmux sessions (plain PTY or control mode).
     attach_mode: AttachMode,
     /// The lane tmux resize events are published to for the central server
@@ -937,11 +947,18 @@ async fn apply_env_snapshots(
 
 /// The size an attach should give the session.
 ///
-/// A client that has measured its viewport says so, and its `width`/`height`
-/// are used as they always were. A client that has **not** — a page that has
-/// not laid its terminal out yet — can only send the payload's placeholder,
-/// and acting on it resizes the **shared** window to 80×24 and back: two real
-/// size changes, each of which makes an inline-drawing application repaint its
+/// **Width is not the attaching client's.** Since #2487 the column count is a
+/// Session invariant: an existing tmux pane keeps the width it has, and a
+/// session that does not exist yet is created at the Agent/Server-configured
+/// width (or, for a client that measured and is creating the session, the
+/// stated width — the relay path replaces it with the Server's value). Only
+/// rows follow the active client's usable height.
+///
+/// A client that has measured its viewport states the height it wants. A
+/// client that has **not** — a page that has not laid its terminal out yet —
+/// can only send the payload's placeholder, and acting on it resizes the
+/// **shared** window to the placeholder height and back: two real size
+/// changes, each of which makes an inline-drawing application repaint its
 /// screen into the scrollback the user then reads it from (#1265).
 ///
 /// Inheriting the pane's current size makes the attach a no-op for the
@@ -949,45 +966,60 @@ async fn apply_env_snapshots(
 /// it is the size the client is about to be looking at, rather than one it
 /// never measured.
 ///
-/// A read that fails keeps the placeholder. The session is very often about to
-/// be reported missing by the attach itself, and *that* is the error worth
-/// surfacing; substituting a size here would only hide which of the two
-/// happened.
+/// A read that fails keeps the stated placeholder for height. The session is
+/// very often about to be reported missing by the attach itself, and *that* is
+/// the error worth surfacing; substituting a size here would only hide which
+/// of the two happened.
 async fn resolve_attach_size(
     tmux: &SessionManager,
     session_name: &str,
     payload: &ClientAttachPayload,
+    configured_cols: u16,
 ) -> (u16, u16) {
     let authoritative = payload.size_is_authoritative();
-    // The read is skipped entirely for a client that measured: its size is the
-    // instruction, and asking tmux for the current one would only be a fact
-    // nobody uses.
-    let pane = if authoritative {
-        None
-    } else {
-        tmux.tmux_dep().ops().window_size(session_name).await.ok()
-    };
-    choose_attach_size(authoritative, (payload.width, payload.height), pane)
+    // The pane read is no longer skippable for a measured client: its width is
+    // the Session's authority even when the client measured its own viewport.
+    let pane = tmux.tmux_dep().ops().window_size(session_name).await.ok();
+    choose_attach_size(
+        authoritative,
+        (payload.width, payload.height),
+        pane,
+        configured_cols,
+    )
 }
 
 /// The decision [`resolve_attach_size`] makes, separated from the tmux read so
-/// it can be tested without a server — and so the rule is one expression rather
-/// than something a reader has to reassemble from two branches.
+/// it can be tested without a server — and so the rule is one expression
+/// rather than something a reader has to reassemble from two branches.
 ///
 /// `pane` is the session's current size, or `None` when it could not be read.
-/// A read that fails keeps the stated size: the session is very often about to
-/// be reported missing by the attach itself, and *that* is the error worth
+/// A read that fails keeps the stated height: the session is very often about
+/// to be reported missing by the attach itself, and *that* is the error worth
 /// surfacing.
+///
+/// The width rule:
+/// - an existing pane's width is authoritative, whatever the client sent;
+/// - a missing pane means this attach creates the Session. A measured client's
+///   stated width is used (the relay path states the Server's configured
+///   width); a client that has not measured cannot have chosen a width, so the
+///   configured one is used rather than the payload placeholder.
 fn choose_attach_size(
     authoritative: bool,
     stated: (u16, u16),
     pane: Option<(u16, u16)>,
+    configured_cols: u16,
 ) -> (u16, u16) {
-    if authoritative {
-        stated
+    let cols = match pane {
+        Some((cols, _)) => cols,
+        None if authoritative => stated.0,
+        None => configured_cols,
+    };
+    let rows = if authoritative {
+        stated.1
     } else {
-        pane.unwrap_or(stated)
-    }
+        pane.map_or(stated.1, |(_, rows)| rows)
+    };
+    (cols, rows)
 }
 
 /// Handle to a running [`AgentServer`]. Clone and keep around to request
@@ -1037,6 +1069,9 @@ pub(crate) struct P2pRequest<'a> {
     peer_token: &'a Arc<()>,
     outbound: &'a P2pOutbound,
     default_working_dir: &'a str,
+    /// The fixed column count this Agent creates Sessions at (#2487). Copied
+    /// because it is a plain number, unlike the borrows around it.
+    terminal_cols: u16,
     file_ops: &'a Arc<FileOps>,
     listen_address: &'a str,
     agent_id: &'a str,
@@ -1083,6 +1118,8 @@ struct Connection {
     peer_token: Arc<()>,
     outbound: P2pOutbound,
     default_working_dir: String,
+    /// The fixed column count this Agent creates Sessions at (#2487).
+    terminal_cols: u16,
     file_ops: Arc<FileOps>,
     listen_address: String,
     agent_id: String,
@@ -1275,6 +1312,7 @@ impl Frame {
             peer_token: &connection.peer_token,
             outbound: &connection.outbound,
             default_working_dir: &connection.default_working_dir,
+            terminal_cols: connection.terminal_cols,
             file_ops: &connection.file_ops,
             listen_address: &connection.listen_address,
             agent_id: &connection.agent_id,
@@ -1439,11 +1477,16 @@ p2p_routes! { ctx, msg_type, payload_value;
                     },
                     None => ctx.default_working_dir.to_string(),
                 };
+                // The creation width is the release-selected column count
+                // (#2487), not the caller's payload placeholder: the Server
+                // states its configured value on the relayed create, and a
+                // direct/standalone caller falls back to this Agent's config.
+                let terminal_cols = payload.terminal_cols.unwrap_or(ctx.terminal_cols);
                 match ctx
                     .tmux
                     .create_session(
                         &payload.name,
-                        payload.width,
+                        terminal_cols,
                         payload.height,
                         &working_dir,
                         &[],
@@ -1707,7 +1750,8 @@ p2p_routes! { ctx, msg_type, payload_value;
                     // than resolving the process-wide one, so a substituted
                     // binary reaches the attach too (#991 step 6).
                     let (width, height) =
-                        resolve_attach_size(ctx.tmux, &session_name, &payload).await;
+                        resolve_attach_size(ctx.tmux, &session_name, &payload, ctx.terminal_cols)
+                            .await;
                     match ctx.service.attach(&session_name, width, height, None).await {
                         Ok(AttachedBackend::Plain {
                             session: pty_session,
@@ -1718,10 +1762,13 @@ p2p_routes! { ctx, msg_type, payload_value;
                             let inserted = match ctx.sessions.insert_new(
                                 &session_name,
                                 backend,
-                                &client_id,
-                                payload.subscription_id.as_deref(),
-                                ctx.peer_token,
-                                ctx.outbound.clone(),
+                                width,
+                                crate::session::registry::FirstSubscriber {
+                                    client_id: &client_id,
+                                    subscription_id: payload.subscription_id.as_deref(),
+                                    peer_token: ctx.peer_token,
+                                    outbound: ctx.outbound.clone(),
+                                },
                             ) {
                                 Ok(inserted) => inserted,
                                 Err(InvalidStreamIdentity) => {
@@ -1873,7 +1920,13 @@ p2p_routes! { ctx, msg_type, payload_value;
                     // belongs to a client that has none.
                     let wants_bootstrap = payload.needs_bootstrap.unwrap_or(true);
                     let (width, height) =
-                        resolve_attach_size(ctx.tmux, &payload.session_name, &payload).await;
+                        resolve_attach_size(
+                            ctx.tmux,
+                            &payload.session_name,
+                            &payload,
+                            ctx.terminal_cols,
+                        )
+                        .await;
                     match ctx
                         .service
                         .attach(
@@ -1900,10 +1953,13 @@ p2p_routes! { ctx, msg_type, payload_value;
                             let inserted = match ctx.sessions.insert_new(
                                 &session_name,
                                 backend,
-                                &client_id,
-                                payload.subscription_id.as_deref(),
-                                ctx.peer_token,
-                                ctx.outbound.clone(),
+                                width,
+                                crate::session::registry::FirstSubscriber {
+                                    client_id: &client_id,
+                                    subscription_id: payload.subscription_id.as_deref(),
+                                    peer_token: ctx.peer_token,
+                                    outbound: ctx.outbound.clone(),
+                                },
                             ) {
                                 Ok(inserted) => inserted,
                                 Err(InvalidStreamIdentity) => {
@@ -2242,7 +2298,12 @@ p2p_routes! { ctx, msg_type, payload_value;
                         // Agent stream seq.
                         if recorded.position.is_some() {
                             let full_id = format!("{}:{}", ctx.agent_id, payload.session_name);
-                            ctx.resize.publish(&full_id, payload.cols, payload.rows);
+                            // The applied size, not the requested one: the
+                            // Session keeps its fixed columns (#2487), and a
+                            // relay observer must learn what the pane
+                            // actually became.
+                            ctx.resize
+                                .publish(&full_id, recorded.cols, recorded.rows);
                         }
 
                         // Compatibility only: an old attachment with no
@@ -2256,8 +2317,8 @@ p2p_routes! { ctx, msg_type, payload_value;
                             send_recorded_resize_msg(
                                 ctx.outbound,
                                 &payload.session_name,
-                                payload.cols,
-                                payload.rows,
+                                recorded.cols,
+                                recorded.rows,
                                 position,
                                 Some(recorded.authorized_generation),
                             )
@@ -2402,11 +2463,16 @@ p2p_routes! { ctx, msg_type, payload_value;
                     },
                     None => ctx.default_working_dir.to_string(),
                 };
+                // The creation width is the release-selected column count
+                // (#2487), not the caller's payload placeholder: the Server
+                // states its configured value on the relayed create, and a
+                // direct/standalone caller falls back to this Agent's config.
+                let terminal_cols = payload.terminal_cols.unwrap_or(ctx.terminal_cols);
                 match ctx
                     .tmux
                     .create_session(
                         &payload.name,
-                        payload.width,
+                        terminal_cols,
                         payload.height,
                         &working_dir,
                         &[],
@@ -2663,6 +2729,7 @@ impl AgentServer {
             listen_address: listen_address.into(),
             agent_id: agent_id.into(),
             default_working_dir,
+            terminal_cols: context.terminal_cols,
             attach_mode,
             resize: context.resize,
             credentials: context.credentials,
@@ -2698,6 +2765,7 @@ impl AgentServer {
         let mutations = Arc::clone(&self.mutations);
         let tls_acceptor = self.tls_acceptor;
         let default_working_dir = self.default_working_dir.clone();
+        let terminal_cols = self.terminal_cols;
         let listen_address = self.listen_address.clone();
         let agent_id = self.agent_id.clone();
         let attach_mode = self.attach_mode.clone();
@@ -2732,8 +2800,9 @@ impl AgentServer {
                                 tokio::spawn(async move {
                                     if let Err(e) =
                                         Self::handle_connection(
-                                            stream, addr, tmux, svc, tls, wd, fops, lanes, &la,
-                                            &aid, am, rtx, creds, shared_sessions,
+                                            stream, addr, tmux, svc, tls, wd, terminal_cols,
+                                            fops, lanes, &la, &aid, am, rtx, creds,
+                                            shared_sessions,
                                         )
                                         .await
                                     {
@@ -2775,6 +2844,7 @@ impl AgentServer {
         service: Arc<SessionService>,
         tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
         default_working_dir: String,
+        terminal_cols: u16,
         file_ops: Arc<FileOps>,
         mutations: Arc<KeyedLane<ResourceKey>>,
         listen_address: &str,
@@ -2886,6 +2956,7 @@ impl AgentServer {
             peer_token: Arc::new(()),
             outbound,
             default_working_dir,
+            terminal_cols,
             file_ops,
             listen_address: listen_address.to_string(),
             agent_id: agent_id.to_string(),
@@ -4010,6 +4081,7 @@ mod tests {
                 credentials: Arc::clone(&credentials),
                 mutations: crate::execution::mutation_scheduler(),
                 tmux: Arc::new(SessionManager::new()),
+                terminal_cols: nession_common::config::DEFAULT_TERMINAL_COLS,
             },
         )
         .expect("server creation should succeed");
@@ -4125,6 +4197,7 @@ mod tests {
                 credentials: Arc::new(P2pCredentials::new()),
                 mutations: crate::execution::mutation_scheduler(),
                 tmux: Arc::new(SessionManager::new()),
+                terminal_cols: nession_common::config::DEFAULT_TERMINAL_COLS,
             },
         )
         .unwrap();
@@ -4575,6 +4648,7 @@ mod tests {
             height: 24,
             working_dir: None,
             env_snapshots: Vec::new(),
+            terminal_cols: None,
         };
         let create_req = new_message(msg_types::SESSION_CREATE, create_payload);
         let create_resp: Message<SessionCreateResponse> =
@@ -5474,30 +5548,42 @@ mod tests {
         assert!(!read(Some(false)));
     }
 
-    /// The decision the two attach arms make, in the three cases that matter.
+    /// The decision the two attach arms make (#1265, #2487).
     ///
-    /// `Some(false)` is what a page that has not laid its Terminal out says, and
-    /// the pane's size is what it must get: the alternative is resizing the
-    /// **shared** window to the payload's placeholder and back, which repaints
-    /// an inline-drawing application into the scrollback the user reads (#1265).
+    /// Width is the Session's: an existing pane's columns win even over a
+    /// measured client, and only rows follow the client. `Some(false)` is what
+    /// a page that has not laid its Terminal out says, and the pane's height is
+    /// what it must get: the alternative is resizing the **shared** window to
+    /// the payload's placeholder and back, which repaints an inline-drawing
+    /// application into the scrollback the user reads.
+    ///
+    /// A missing pane means this attach creates the Session. A measured client
+    /// states the creation size (the relay path states the Server's configured
+    /// width); an unmeasured client cannot have chosen one, so the configured
+    /// width is used instead of the payload placeholder.
     #[test]
-    fn an_unmeasured_attach_inherits_the_panes_size() {
+    fn attach_width_is_the_sessions_and_only_rows_follow_the_client() {
         let stated = (80, 24);
+        let configured = 88;
         assert_eq!(
-            choose_attach_size(true, stated, Some((101, 31))),
-            stated,
-            "a measured client's own columns are the instruction, not the pane's"
+            choose_attach_size(true, stated, Some((101, 31)), configured),
+            (101, 24),
+            "an existing pane keeps its columns; the measured client owns rows"
         );
         assert_eq!(
-            choose_attach_size(false, stated, Some((101, 31))),
+            choose_attach_size(false, stated, Some((101, 31)), configured),
             (101, 31),
             "an unmeasured attach kept the placeholder instead of inheriting"
         );
         assert_eq!(
-            choose_attach_size(false, stated, None),
+            choose_attach_size(true, stated, None, configured),
             stated,
-            "a pane that could not be read must leave the attach its stated \
-             size — the attach's own error is the one worth surfacing"
+            "a measured client creating the Session states its width"
+        );
+        assert_eq!(
+            choose_attach_size(false, stated, None, configured),
+            (configured, 24),
+            "an unmeasured client did not choose a width; the configured one is"
         );
     }
 
@@ -5630,6 +5716,7 @@ mod tests {
             width: 100,
             height: 30,
             working_dir: None,
+            terminal_cols: None,
         };
         let create_req = new_message(msg_types::CLIENT_SESSION_CREATE, create_payload);
         let create_resp: Message<WebSessionCreateResponse> =
@@ -5836,6 +5923,7 @@ mod tests {
                 SESSION.to_string(),
                 AttachedSession {
                     backend: Arc::clone(&backend),
+                    terminal_cols: 80,
                     peers: vec![peer],
                     control,
                     stream: session_terminal::SessionStreamState::new(),
@@ -5882,6 +5970,7 @@ mod tests {
                 peer_token: &peer_token,
                 outbound: &outbound,
                 default_working_dir: "/tmp",
+                terminal_cols: nession_common::config::DEFAULT_TERMINAL_COLS,
                 file_ops: &file_ops,
                 listen_address: "127.0.0.1:0",
                 agent_id: "test-agent",

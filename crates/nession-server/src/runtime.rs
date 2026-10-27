@@ -29,6 +29,14 @@ use crate::server::WebSocketServer;
 /// parent would learn "started" only when it stopped (#1016). The announcement
 /// happens inside [`WebSocketServer::run`], after the last step that can fail.
 pub async fn run(config: ServerConfig, ready: Readiness) -> anyhow::Result<()> {
+    // The release-selected terminal configuration (#2487): environment wins
+    // over the generated config file, and an invalid value fails before
+    // logging, the database, or the listener. Both entrypoints reach this
+    // function, so validation has one owner.
+    let mut config = config;
+    config.apply_env_overrides()?;
+    config.validate()?;
+
     let _log_guard = nession_common::logging::init_logging(
         &config.logging,
         &nession_common::paths::server_logs_dir()?,
