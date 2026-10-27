@@ -45,7 +45,7 @@ jobs:
   scope:
     # PR and merged main source both select only the relevant checks.
     # A skipped job is Not Applicable, not a fabricated Quality Pass.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       rust: ${{ steps.changed.outputs.rust }}
       web: ${{ steps.changed.outputs.web }}
@@ -112,7 +112,7 @@ jobs:
   workflow-check:
     needs: scope
     if: needs.scope.outputs.workflow == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
@@ -131,7 +131,7 @@ jobs:
   rust-check:
     needs: scope
     if: needs.scope.outputs.rust == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
@@ -156,7 +156,7 @@ jobs:
   web-check:
     needs: scope
     if: needs.scope.outputs.web == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:

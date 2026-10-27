@@ -31,6 +31,15 @@ A workflow must not become a second implementation of protocol, design, acceptan
 - Secrets and production credentials stay in their owning deployment/release boundary.
 - Pin decisions/evidence to the exact commit when stale-head results would be unsafe.
 
+## Runner image
+
+Every job pins `runs-on: ubuntu-24.04`; do not reintroduce `ubuntu-latest`.
+GitHub moved `ubuntu-latest` to ubuntu-26.04 on 2026-10-26, and the Rust
+fake-tmux recorder then failed under `llvm-cov` on essentially every main-based
+run (#2467). The pin is a deliberate, temporary compatibility boundary until
+that work is done; removing it is a migration that must prove the full
+Rust/CI suite on the new image, not a cleanup.
+
 ## Change discipline
 
 Workflow changes happen in a worktree and receive the same Gate/review treatment as code. Preserve concurrency/cancellation semantics deliberately; do not add broad retries that hide deterministic failures.

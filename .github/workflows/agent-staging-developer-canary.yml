@@ -27,7 +27,7 @@ jobs:
       github.event.workflow_run.repository.full_name == 'BestNathan/nession' &&
       github.event.workflow_run.head_repository.full_name == 'BestNathan/nession' &&
       github.event.workflow_run.run_attempt == 1
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       staging_sha: ${{ steps.source.outputs.staging_sha }}
@@ -75,7 +75,7 @@ jobs:
   synthetic-qwen:
     needs: verify-source
     if: needs.verify-source.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: dev-claude-qwen-staging
     timeout-minutes: 15
     env:
