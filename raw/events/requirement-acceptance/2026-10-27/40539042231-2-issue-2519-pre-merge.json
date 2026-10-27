@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "kind": "agent_execution_trace",
+  "identity": {
+    "workflow_id": "requirement-acceptance",
+    "github_run_id": 40539042231,
+    "github_run_attempt": 2,
+    "unique_run_name": "40539042231-2-issue-2519-pre-merge",
+    "repository": "BestNathan/nession"
+  },
+  "task": {
+    "id": "issue-2519-pre-merge",
+    "type": "acceptance",
+    "issue": 2519,
+    "target_sha": "2afe1aaea24a0ad259fcf5e113b45de525a7f2ff"
+  },
+  "agent": {
+    "id": "legacy-acceptance-claude-code",
+    "role": "acceptor",
+    "provider": "claude-code",
+    "harness_sha256": null
+  },
+  "timing": {
+    "started_at": "2026-10-27T16:22:21.415Z",
+    "finished_at": "2026-10-27T16:25:06.752Z"
+  },
+  "coverage": {
+    "model": "unobserved",
+    "tools": "unobserved",
+    "skills": "unobserved",
+    "mcp": "unobserved"
+  },
+  "events": []
+}
