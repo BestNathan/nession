@@ -148,7 +148,7 @@ jobs:
     timeout-minutes: 65
     env:
       RUSTC_WRAPPER: ""
-      PLAYWRIGHT_BROWSERS_PATH: ~/.cache/ms-playwright
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.cache/ms-playwright
     steps:
       - uses: actions/checkout@v4
         with:
@@ -203,10 +203,23 @@ jobs:
       - uses: extractions/setup-just@v2
       - name: Prepare tmux
         run: sudo apt-get update && sudo apt-get install -y tmux
+      # Full regression runs at a pinned exact SHA: cache the matching browser
+      # revision only after resolving and checking out that SHA (#2525).
+      - uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('e2e/package-lock.json') }}
       - name: Install web, browser and binaries
         run: |
           (cd web && npm ci && npm run build)
-          (cd e2e && npm ci && npx playwright install chromium --with-deps)
+          (
+            cd e2e
+            npm ci
+            npx playwright install chromium
+          # The pinned ubuntu-24.04 image must actually launch Chromium.
+          # Cache hits alone do not prove Linux runtime compatibility (#2525).
+          node -e 'const { chromium } = require("@playwright/test"); chromium.launch({ timeout: 30000 }).then(browser => browser.close()).catch(error => { console.error(error); process.exitCode = 1; })'
+          )
           cargo build -p nession-server -p nession-agent
       - name: Run full canonical Playwright suite at pinned SHA
         env:
