@@ -941,9 +941,12 @@ async fn shared_agent_keeps_independent_session_widths() {
 /// reaches it without a sleep-tuned race.
 #[tokio::test]
 async fn configured_width_survives_shared_server_flood_and_attach() {
-    const FLOOD: usize = 48;
-    const PARK_VARS: usize = 400;
-    const CREATES: usize = 4;
+    // One tmux server's admission bound is 16 mutations; more creates than
+    // that only re-tests the bound (the flood test owns it) while holding
+    // extra panes/PTYs this width test does not need.
+    const FLOOD: usize = 16;
+    const PARK_VARS: usize = 100;
+    const CREATES: usize = 3;
 
     let (addr_a, handle_a, credentials_a) = start_server_with_terminal_cols(AttachMode::Plain, 96)
         .await
@@ -990,7 +993,6 @@ async fn configured_width_survives_shared_server_flood_and_attach() {
             .expect("send the flood create");
     }
 
-    let mut created_names = Vec::new();
     let mut history = Vec::new();
     for i in 0..CREATES {
         let name = unique_session_name("standalone-under-load");
@@ -1036,12 +1038,11 @@ async fn configured_width_survives_shared_server_flood_and_attach() {
             "shared-server activity moved a configured-width Session: {}",
             history.join(" | ")
         );
-        created_names.push(name);
+        // Free the measured Session's pane before the next create: the
+        // schedule needs concurrent tmux activity, not accumulating panes.
+        tmux.kill_session(&name).await.ok();
     }
 
-    for name in &created_names {
-        tmux.kill_session(name).await.ok();
-    }
     tmux.kill_session(&attach_target).await.ok();
     for n in 0..FLOOD {
         tmux.kill_session(&format!("{flood_prefix}-{n}")).await.ok();
