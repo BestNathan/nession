@@ -234,9 +234,11 @@ pub struct AgentConfig {
     /// width. This value is the **creation** width for a Session with no pane
     /// yet; an existing Session keeps the width its pane already has, and a
     /// later client resize may change only rows. In a central deployment the
-    /// Server sends the same release-selected value on create/attach; this
-    /// field is the standalone fallback, read from `NESSION_TERMINAL_COLS` when
-    /// the environment sets it.
+    /// Server states the same release-selected value on create and relay
+    /// attach; a direct P2P attach that has not measured falls back to this
+    /// Agent value, so the release pipeline sets both from one parameter. In
+    /// standalone mode this is the policy, read from `NESSION_TERMINAL_COLS`
+    /// when the environment sets it.
     #[serde(default = "default_terminal_cols")]
     pub terminal_cols: u16,
 }
