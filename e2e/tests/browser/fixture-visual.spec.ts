@@ -355,6 +355,8 @@ test.describe('Web 1440×900', () => {
     const xterm = page.locator('.xterm').first();
     const expandedColumn = (await column.boundingBox())?.width ?? 0;
     const expandedXterm = (await xterm.boundingBox())?.width ?? 0;
+    const viewport = page.locator('[data-terminal-viewport]').first();
+    const expandedViewport = (await viewport.boundingBox())?.width ?? 0;
     expect(expandedColumn).toBeGreaterThan(railWidth * 2);
 
     // An icon-only shell button centers its glyph in the box — the shared
@@ -374,15 +376,19 @@ test.describe('Web 1440×900', () => {
     // Pointer path: the one Collapse control, in the Agents section head.
     await page.getByTestId('sidebar-collapse').click();
 
-    // Geometry: the column is exactly the rail width and the Terminal's own
-    // box — not just the flex gap beside it — absorbs the freed width, so the
-    // reclaim reached the work surface through the resize pipeline (#1195).
+    // Geometry: the column is exactly the rail width and the work surface
+    // absorbs the freed width through the resize pipeline (#1195). Since #2487
+    // the Terminal's own box is capped at `cols × cell`, so the reclaim is
+    // measured on the surface rather than on the capped grid; the grid stays
+    // mounted and keeps its fixed columns.
     const collapsedColumn = (await column.boundingBox())?.width ?? 0;
     expect(collapsedColumn).toBe(railWidth);
     await expect
-      .poll(async () => (await xterm.boundingBox())?.width ?? 0)
-      .toBeGreaterThan(expandedXterm + (expandedColumn - railWidth) * 0.9);
+      .poll(async () => (await viewport.boundingBox())?.width ?? 0)
+      .toBeGreaterThan(expandedViewport + (expandedColumn - railWidth) * 0.9);
     await expect(xterm).toBeVisible();
+    const collapsedXterm = (await xterm.boundingBox())?.width ?? 0;
+    expect(collapsedXterm).toBeLessThanOrEqual(expandedXterm + 120);
 
     // The return trip is asserted separately — see "expanding the sidebar
     // gives the work surface its width back" in `ui-contract-assertions.spec.ts`
