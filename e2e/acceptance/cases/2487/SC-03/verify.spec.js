@@ -70,9 +70,28 @@ async function steadyColumns(page, expected) {
   }
 }
 
+/** Every PTY resize this page sends, so no transient wrong width can hide. */
+function recordResizeCols(page) {
+  const cols = [];
+  page.on('websocket', (ws) => {
+    ws.on('framesent', (event) => {
+      try {
+        const frame = JSON.parse(String(event.payload));
+        if (frame?.msg_type === 'agent.terminal.resize') {
+          cols.push(frame.payload?.cols);
+        }
+      } catch {
+        // A non-JSON frame (control ping, binary) is not a resize.
+      }
+    });
+  });
+  return cols;
+}
+
 test('SC-03: phone font, fixed columns, rotation and keyboard-height rows', async ({ page }) => {
   test.setTimeout(180_000);
   const { runtime, sha } = verifiedRuntime('SC-03');
+  const resizeCols = recordResizeCols(page);
 
   // Attach on a desktop-sized viewport (the session's creation flows are the
   // desktop shell's), then hand the same live Session to the phone size.
@@ -123,6 +142,11 @@ test('SC-03: phone font, fixed columns, rotation and keyboard-height rows', asyn
   const keyboard = await grid(page);
   expect(keyboard.cols).toBe(80);
   expect(keyboard.fit).toBe('true');
+
+  // No intermediate frame ever stated a different width: the resize lane is
+  // where a transient erroneous remote geometry would be observable.
+  expect(resizeCols.length).toBeGreaterThan(0);
+  expect([...new Set(resizeCols)]).toEqual([80]);
 
   test.info().annotations.push({
     type: 'evidence',

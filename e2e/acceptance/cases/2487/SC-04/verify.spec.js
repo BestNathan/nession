@@ -121,11 +121,30 @@ async function printLongLine(page, marker) {
   }
 }
 
+/** Every PTY resize this page sends, so no transient wrong width can hide. */
+function recordResizeCols(page) {
+  const cols = [];
+  page.on('websocket', (ws) => {
+    ws.on('framesent', (event) => {
+      try {
+        const frame = JSON.parse(String(event.payload));
+        if (frame?.msg_type === 'agent.terminal.resize') {
+          cols.push(frame.payload?.cols);
+        }
+      } catch {
+        // A non-JSON frame (control ping, binary) is not a resize.
+      }
+    });
+  });
+  return cols;
+}
+
 test('SC-04: wrap, cursor, alternate screen, scrollback and device handoff', async ({
   page,
 }) => {
   test.setTimeout(240_000);
   const { runtime, sha } = verifiedRuntime('SC-04');
+  const resizeCols = recordResizeCols(page);
   await page.setViewportSize({ width: 1280, height: 800 });
   const { name } = await createAndAttach(page, expect, runtime, 'case-2487-sc04', 'Relay', null);
   await waitForShell(page, 'SC04-READY');
@@ -218,6 +237,11 @@ test('SC-04: wrap, cursor, alternate screen, scrollback and device handoff', asy
   expect(afterReload.first).toBe(pcWrap.first);
   expect(afterReload.second).toBe(pcWrap.second);
   expect((await grid(page)).cols).toBe(80);
+
+  // Every resize this page sent named the Session's width, through the
+  // viewport changes and the deep-link reconnect.
+  expect(resizeCols.length).toBeGreaterThan(0);
+  expect([...new Set(resizeCols)]).toEqual([80]);
 
   test.info().annotations.push({
     type: 'evidence',
