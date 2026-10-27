@@ -69,7 +69,7 @@ run(({ evidence }) => {
   // The Web and App are one bundle and one configuration module. The emitted
   // value is the canonical column count; no separate mobile columns knob.
   requireText('web/src/platform/terminal-runtime/terminalConfig.ts', [
-    'DEFAULT_TERMINAL_COLS = 88',
+    'DEFAULT_TERMINAL_COLS = 80',
     'readTerminalClientConfig',
   ]);
   const configTests = webTests([

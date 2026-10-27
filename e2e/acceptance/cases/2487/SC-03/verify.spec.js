@@ -79,39 +79,39 @@ test('SC-03: phone font, fixed columns, rotation and keyboard-height rows', asyn
   await page.setViewportSize({ width: 1280, height: 800 });
   await createAndAttach(page, expect, runtime, 'case-2487-sc03', 'Relay', null);
   await waitForShell(page, 'SC03-READY');
-  expect((await grid(page)).cols).toBe(88);
+  expect((await grid(page)).cols).toBe(80);
 
   await page.setViewportSize({ width: 390, height: 844 });
   await expect.poll(async () => {
     const g = await grid(page);
-    return g.fit === 'true' && g.cols === 88 && g.fontSize < 10;
+    return g.fit === 'true' && g.cols === 80 && g.fontSize < 10;
   }, { timeout: 20_000 }).toBe(true);
   const phone = await grid(page);
-  expect(phone.cols, 'the phone must keep the canonical columns').toBe(88);
+  expect(phone.cols, 'the phone must keep the canonical columns').toBe(80);
   expect(phone.fontSize, 'the phone uses a smaller real CSS font').toBeLessThan(10);
   expect(phone.fontSize, 'the phone font is a real readable size').toBeGreaterThanOrEqual(6);
   expect(phone.cellWidth).toBeLessThan(14 * 0.7);
-  expect(phone.contentWidth).toBeCloseTo(88 * phone.cellWidth, 1);
+  expect(phone.contentWidth).toBeCloseTo(80 * phone.cellWidth, 1);
   expect(phone.screenWidth).toBeLessThanOrEqual(phone.viewportWidth + 1.5);
   expect(phone.fit).toBe('true');
-  await steadyColumns(page, 88);
+  await steadyColumns(page, 80);
 
   await command(page, "printf 'SC03-PHONE-%s\\n' \"$(stty size)\"");
-  await expect.poll(async () => countInBuffer(page, `SC03-PHONE-${phone.rows} 88`)
+  await expect.poll(async () => countInBuffer(page, `SC03-PHONE-${phone.rows} 80`)
     .catch(() => 0), { timeout: 20_000 }).toBeGreaterThan(0);
 
   // Rotation: same columns, a different measured cell and row count.
   await page.setViewportSize({ width: 844, height: 390 });
-  await expect.poll(async () => (await grid(page)).cols, { timeout: 15_000 }).toBe(88);
-  await steadyColumns(page, 88);
+  await expect.poll(async () => (await grid(page)).cols, { timeout: 15_000 }).toBe(80);
+  await steadyColumns(page, 80);
   const landscape = await grid(page);
-  expect(landscape.cols, 'rotation must never change the columns').toBe(88);
+  expect(landscape.cols, 'rotation must never change the columns').toBe(80);
   expect(landscape.rows).not.toBe(phone.rows);
-  expect(landscape.contentWidth).toBeCloseTo(88 * landscape.cellWidth, 1);
+  expect(landscape.contentWidth).toBeCloseTo(80 * landscape.cellWidth, 1);
   expect(landscape.screenWidth).toBeLessThanOrEqual(landscape.viewportWidth + 1.5);
 
   await command(page, "printf 'SC03-LAND-%s\\n' \"$(stty size)\"");
-  await expect.poll(async () => countInBuffer(page, `SC03-LAND-${landscape.rows} 88`)
+  await expect.poll(async () => countInBuffer(page, `SC03-LAND-${landscape.rows} 80`)
     .catch(() => 0), { timeout: 20_000 }).toBeGreaterThan(0);
 
   // Keyboard-height change: the terminal's usable height shrinks, rows
@@ -119,9 +119,9 @@ test('SC-03: phone font, fixed columns, rotation and keyboard-height rows', asyn
   await page.setViewportSize({ width: 390, height: 520 });
   await expect.poll(async () => (await grid(page)).rows, { timeout: 15_000 })
     .toBeLessThan(phone.rows);
-  await steadyColumns(page, 88);
+  await steadyColumns(page, 80);
   const keyboard = await grid(page);
-  expect(keyboard.cols).toBe(88);
+  expect(keyboard.cols).toBe(80);
   expect(keyboard.fit).toBe('true');
 
   test.info().annotations.push({
@@ -130,6 +130,6 @@ test('SC-03: phone font, fixed columns, rotation and keyboard-height rows', asyn
       ' font ' + phone.fontSize + ' cell ' + phone.cellWidth + '/' + phone.cellHeight +
       '; landscape ' + landscape.cols + 'x' + landscape.rows +
       '; keyboard-height ' + keyboard.cols + 'x' + keyboard.rows +
-      '; sampled columns stayed 88 through every change',
+      '; sampled columns stayed 80 through every change',
   });
 });

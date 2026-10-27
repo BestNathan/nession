@@ -27,7 +27,7 @@ AGENT_TMUX_SOCKET="${AGENT_TMUX_SOCKET:-}"
 # without changing the shared name. The Server's relayed create/attach states
 # its own value in a central deployment, and an existing Session keeps its
 # pane width regardless.
-AGENT_TERMINAL_COLS="${AGENT_TERMINAL_COLS:-${NESSION_TERMINAL_COLS:-88}}"
+AGENT_TERMINAL_COLS="${AGENT_TERMINAL_COLS:-${NESSION_TERMINAL_COLS:-80}}"
 # Config directory, overridable for an entrypoint test that must not write /etc.
 NESSON_CONFIG_DIR="${NESSON_CONFIG_DIR:-/etc/nession}"
 

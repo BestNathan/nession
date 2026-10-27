@@ -129,13 +129,13 @@ test('SC-04: wrap, cursor, alternate screen, scrollback and device handoff', asy
   await page.setViewportSize({ width: 1280, height: 800 });
   const { name } = await createAndAttach(page, expect, runtime, 'case-2487-sc04', 'Relay', null);
   await waitForShell(page, 'SC04-READY');
-  expect((await grid(page)).cols).toBe(88);
+  expect((await grid(page)).cols).toBe(80);
 
   // 1. Terminal-produced long line at the fixed width.
   await printLongLine(page, 'SC04-LONG-PC-1');
   const pcWrap = await longLineFingerprint(page, 'SC04-LONG-PC-1');
-  expect(pcWrap.first, 'the first wrapped line is the canonical width').toBe(88);
-  expect(pcWrap.second).toBe(88);
+  expect(pcWrap.first, 'the first wrapped line is the canonical width').toBe(80);
+  expect(pcWrap.second).toBe(80);
   expect(pcWrap.totalX).toBe(200);
 
   // 2. A real ANSI cursor move (clear, home, row 5 column 10). The shell is
@@ -152,11 +152,11 @@ test('SC-04: wrap, cursor, alternate screen, scrollback and device handoff', asy
   await expect.poll(async () => countInBuffer(page, 'SC04-HIST-MARK'), { timeout: 20_000 })
     .toBe(1);
   await page.setViewportSize({ width: 1100, height: 800 });
-  await expect.poll(async () => (await grid(page)).cols, { timeout: 15_000 }).toBe(88);
+  await expect.poll(async () => (await grid(page)).cols, { timeout: 15_000 }).toBe(80);
   expect(await countInBuffer(page, 'SC04-HIST-MARK'),
     'desktop history must survive a width change').toBe(1);
   await page.setViewportSize({ width: 1280, height: 800 });
-  await expect.poll(async () => (await grid(page)).cols, { timeout: 15_000 }).toBe(88);
+  await expect.poll(async () => (await grid(page)).cols, { timeout: 15_000 }).toBe(80);
 
   // 3. Alternate screen through a real full-screen TUI; resize around it.
   //    The PC terminal owns the alternate screen. Crossing the mobile
@@ -170,7 +170,7 @@ test('SC-04: wrap, cursor, alternate screen, scrollback and device handoff', asy
   await expect.poll(async () => countInBuffer(page, 'SC04-TUI-MARK'), { timeout: 20_000 })
     .toBeGreaterThan(0);
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect.poll(async () => (await grid(page)).cols, { timeout: 20_000 }).toBe(88);
+  await expect.poll(async () => (await grid(page)).cols, { timeout: 20_000 }).toBe(80);
   await expect.poll(async () => countInBuffer(page, 'SC04-TUI-MARK'), { timeout: 20_000 })
     .toBeGreaterThan(0);
   await command(page, ':q!');
@@ -194,7 +194,7 @@ test('SC-04: wrap, cursor, alternate screen, scrollback and device handoff', asy
   //    capture, not a VT restore), so the earlier buffer is not the evidence;
   //    the boundary of a line printed now is.
   await page.setViewportSize({ width: 1280, height: 800 });
-  await expect.poll(async () => (await grid(page)).cols, { timeout: 20_000 }).toBe(88);
+  await expect.poll(async () => (await grid(page)).cols, { timeout: 20_000 }).toBe(80);
   await waitForShell(page, 'SC04-PC-AGAIN-READY');
   await printLongLine(page, 'SC04-LONG-PC-2');
   const pcAgain = await longLineFingerprint(page, 'SC04-LONG-PC-2');
@@ -217,12 +217,12 @@ test('SC-04: wrap, cursor, alternate screen, scrollback and device handoff', asy
   const afterReload = await longLineFingerprint(page, 'SC04-LONG-RELOAD-1');
   expect(afterReload.first).toBe(pcWrap.first);
   expect(afterReload.second).toBe(pcWrap.second);
-  expect((await grid(page)).cols).toBe(88);
+  expect((await grid(page)).cols).toBe(80);
 
   test.info().annotations.push({
     type: 'evidence',
-    description: 'exact SHA ' + sha + ': 200-char line wrapped at 88/88/24 on PC, phone and ' +
+    description: 'exact SHA ' + sha + ': 200-char line wrapped at 80/80/24 on PC, phone and ' +
       'after reload; cursor at ' + cursor.cursorX + '; vim alternate screen survived a ' +
-      '390px resize; ' + name + ' kept 88 columns across both devices and the reconnect',
+      '390px resize; ' + name + ' kept 80 columns across both devices and the reconnect',
   });
 });

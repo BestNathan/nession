@@ -92,9 +92,9 @@ GitHub Variables (or approved defaults)
 
 | Knob | Scope | Default | Meaning |
 |---|---|---|---|
-| `NESSION_TERMINAL_COLS` | Release / Server / Agent | `88` | Fixed columns for new Sessions |
+| `NESSION_TERMINAL_COLS` | Release / Server / Agent | `80` | Fixed columns for new Sessions |
 | `NESSION_TERMINAL_WEB_FONT_SIZE` | Release / Web / Server diagnostics | `14` | Web preferred maximum CSS font size; never a PTY parameter |
-| `VITE_NESSION_TERMINAL_COLS` | Web/App bundle | `88` | Inlined canonical columns |
+| `VITE_NESSION_TERMINAL_COLS` | Web/App bundle | `80` | Inlined canonical columns |
 | `VITE_NESSION_TERMINAL_WEB_FONT_SIZE` | Web bundle | `14` | Inlined Web maximum font |
 
 Rules:
@@ -123,6 +123,23 @@ Rules:
   running container's environment — not only a temporary CI job — holds the
   selected value. GitOps advances the image tag; the image identity is the
   configuration carrier.
+
+### Why 80 is the shipped default
+
+The candidate range is 70–120. Device evidence selected **80**:
+
+- At the 375×812 class the terminal content box is 347 px wide (375 minus the
+  owned insets). The measured JetBrains Mono cell at the 6 px fit floor
+  quantizes to 4 px, so 80 columns need 320 px and fit inside the inset.
+- 88 columns need 352 px in that same box. Rendering them would either break
+  the surface inset (#1092's contract) or require a font below the fit floor;
+  the prototype exposes that trade-off rather than hiding it.
+- Desktop keeps the Web maximum font (14 px by default) because
+  `80 × 8.4 = 672 px` fits the capped content width; wider windows add padding,
+  not columns.
+
+Changing the default is the build/release parameter described below; it is
+not a per-client setting and does not rewrite an existing Session.
 
 ## Rendering and accessibility
 

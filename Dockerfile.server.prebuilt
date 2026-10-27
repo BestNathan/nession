@@ -10,7 +10,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # workflow passes these values from the same parameters that built the Web
 # bundle, so the image's ENV is the traceable carrier to the running Server.
 # The entrypoint writes them into config.toml and the Server validates them.
-ARG NESSION_TERMINAL_COLS=88
+ARG NESSION_TERMINAL_COLS=80
 ARG NESSION_TERMINAL_WEB_FONT_SIZE=14
 ENV NESSION_TERMINAL_COLS=${NESSION_TERMINAL_COLS}
 ENV NESSION_TERMINAL_WEB_FONT_SIZE=${NESSION_TERMINAL_WEB_FONT_SIZE}

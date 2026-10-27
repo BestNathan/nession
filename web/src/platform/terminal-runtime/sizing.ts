@@ -19,10 +19,11 @@ import type { PixelSize } from './grid';
  * The smallest font the fixed-column fit may choose (#2487).
  *
  * This is below the manual zoom floor (8 px): a phone must be able to show the
- * canonical 88 columns in its content box, which lands near 6.9 px at 393 px.
- * The prototype exposes this readability trade-off rather than hiding it; the
- * canonical column count can be lowered at build time when the selected count
- * cannot meet the accessibility policy.
+ * canonical columns in its content box. At the 375 px class the measured cell
+ * quantizes to 4 px, which is why the release default is 80 columns — 88 would
+ * need 352 px inside a 347 px content box even at this floor. The prototype
+ * exposes the readability trade-off rather than hiding it; the canonical count
+ * can be changed at build time when a device class cannot meet the policy.
  */
 export const MIN_TERMINAL_FIT_FONT_SIZE = 6;
 

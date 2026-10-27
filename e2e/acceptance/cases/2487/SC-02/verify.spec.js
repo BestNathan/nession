@@ -66,7 +66,7 @@ test('SC-02: fixed columns, a capped desktop width and font-only adaptation', as
   await waitForShell(page, 'SC02-READY');
   const wide = await grid(page);
   expect(Number.isFinite(wide.contentWidth), 'measured grid: ' + JSON.stringify(wide)).toBe(true);
-  expect(wide.cols, 'the live Session must render its canonical columns').toBe(88);
+  expect(wide.cols, 'the live Session must render its canonical columns').toBe(80);
   // The configured value is a maximum; the fit may choose a hair below it
   // when the capped content box is a few tenths of a pixel short.
   expect(wide.fontSize, 'a wide Web window is at the configured maximum').toBeLessThanOrEqual(14);
@@ -75,7 +75,7 @@ test('SC-02: fixed columns, a capped desktop width and font-only adaptation', as
   expect(wide.rows).toBeGreaterThan(10);
   // The drawn screen is the terminal's own content width, not the host width:
   // unused space is insets, and the glyph aspect ratio is untouched.
-  expect(wide.contentWidth).toBeCloseTo(88 * wide.cellWidth, 1);
+  expect(wide.contentWidth).toBeCloseTo(80 * wide.cellWidth, 1);
   expect(wide.screenWidth).toBeLessThanOrEqual(wide.contentWidth + 1.5);
   expect(wide.contentWidth).toBeLessThan(wide.viewportWidth - 100);
   expect(wide.fit).toBe('true');
@@ -83,14 +83,14 @@ test('SC-02: fixed columns, a capped desktop width and font-only adaptation', as
   // The PTY agrees with the browser; the command's own output is what makes
   // the echo unable to satisfy the assertion.
   await command(page, "printf 'SC02-SIZE-%s\\n' \"$(stty size)\"");
-  await expect.poll(async () => countInBuffer(page, `SC02-SIZE-${wide.rows} 88`)
+  await expect.poll(async () => countInBuffer(page, `SC02-SIZE-${wide.rows} 80`)
     .catch(() => 0), { timeout: 20_000 }).toBeGreaterThan(0);
 
   // Sidebar collapse: the grid does not gain columns.
   const collapse = page.getByTestId('sidebar-collapse');
   if (await collapse.isVisible().catch(() => false)) {
     await collapse.click();
-    await expect.poll(async () => (await grid(page)).cols, { timeout: 10_000 }).toBe(88);
+    await expect.poll(async () => (await grid(page)).cols, { timeout: 10_000 }).toBe(80);
   }
 
   // A narrower window below the cap: restore the sidebar (the collapse above
@@ -104,16 +104,16 @@ test('SC-02: fixed columns, a capped desktop width and font-only adaptation', as
   await expect.poll(async () => (await grid(page)).fontSize, { timeout: 15_000 })
     .toBeLessThan(wide.fontSize);
   const narrow = await grid(page);
-  expect(narrow.cols, 'a width change must never change the columns').toBe(88);
+  expect(narrow.cols, 'a width change must never change the columns').toBe(80);
   expect(narrow.cellWidth).toBeLessThan(wide.cellWidth);
-  expect(narrow.contentWidth).toBeCloseTo(88 * narrow.cellWidth, 1);
+  expect(narrow.contentWidth).toBeCloseTo(80 * narrow.cellWidth, 1);
   expect(narrow.screenWidth).toBeLessThanOrEqual(narrow.viewportWidth + 1.5);
   expect(narrow.fit).toBe('true');
   expect(narrow.rows, 'rows follow usable height').toBeLessThan(wide.rows);
 
   // The remote pane sees the same columns on a size-changing refit.
   await command(page, "printf 'SC02-NARROW-%s\\n' \"$(stty size)\"");
-  await expect.poll(async () => countInBuffer(page, `SC02-NARROW-${narrow.rows} 88`)
+  await expect.poll(async () => countInBuffer(page, `SC02-NARROW-${narrow.rows} 80`)
     .catch(() => 0), { timeout: 20_000 }).toBeGreaterThan(0);
 
   test.info().annotations.push({

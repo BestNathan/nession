@@ -416,7 +416,7 @@ describe('TerminalController', () => {
 
     // Legacy frames and local display bytes are not Agent timeline events.
     transport.onOutput!(new Uint8Array([67]));
-    transport.onResize!(88, 25);
+    transport.onResize!(80, 25);
     controller.write('local');
     h.finish();
     h.finish();
@@ -972,7 +972,7 @@ describe('TerminalController', () => {
       expect(resize).not.toHaveBeenCalled();
 
       parser.finish();
-      expect(resize).toHaveBeenCalledWith(88, 37);
+      expect(resize).toHaveBeenCalledWith(80, 37);
       resize.mockRestore();
       parser.spy.mockRestore();
       controller.dispose();
@@ -999,14 +999,14 @@ describe('TerminalController', () => {
         contentRect: { width: 1024, height: 600 },
       } as unknown as ResizeObserverEntry;
       capturedCallback!([entry], capturedObserver!);
-      expect(transport.sendResize).toHaveBeenLastCalledWith(88, 37);
+      expect(transport.sendResize).toHaveBeenLastCalledWith(80, 37);
       transport.sendResize.mockClear();
 
       controller.adoptControl();
 
       expect(restateResize).toHaveBeenCalledTimes(1);
-      expect(transport.sendResize).toHaveBeenCalledWith(88, 37);
-      expect(controller.terminal!.cols).toBe(88);
+      expect(transport.sendResize).toHaveBeenCalledWith(80, 37);
+      expect(controller.terminal!.cols).toBe(80);
       expect(controller.terminal!.rows).toBe(37);
     } finally {
       restore();
@@ -1040,7 +1040,7 @@ describe('TerminalController', () => {
       expect(resize).not.toHaveBeenCalled();
 
       parser.finish();
-      expect(resize).toHaveBeenCalledWith(88, 37);
+      expect(resize).toHaveBeenCalledWith(80, 37);
     } finally {
       restore();
     }
@@ -1186,8 +1186,8 @@ describe('TerminalController', () => {
       const entry = { contentRect: { width: 1024, height: 600 } } as unknown as ResizeObserverEntry;
       capturedCallback!([entry], capturedObserver!);
 
-      // Fixed cols 88; 600/16=37 rows (8×16 fallback cell in jsdom).
-      expect(transport.sendResize).toHaveBeenCalledWith(88, 37);
+      // Fixed cols 80; 600/16=37 rows (8×16 fallback cell in jsdom).
+      expect(transport.sendResize).toHaveBeenCalledWith(80, 37);
     } finally {
       restore();
     }
@@ -1250,8 +1250,8 @@ describe('TerminalController', () => {
       capturedCallback!([entry], capturedObserver!);
 
       // The local grid follows at once, from the cell box xterm has now
-      // (8×16 fallback cells in jsdom): fixed cols 88, 600/16=37 rows.
-      expect(controller.terminal!.cols).toBe(88);
+      // (8×16 fallback cells in jsdom): fixed cols 80, 600/16=37 rows.
+      expect(controller.terminal!.cols).toBe(80);
       expect(controller.terminal!.rows).toBe(37);
       // Nothing left the client — this grid is a size the pane never had.
       expect(transport.sendResize).not.toHaveBeenCalled();
@@ -1268,7 +1268,7 @@ describe('TerminalController', () => {
       // the `grid` this fire captured is what the browser measurement shows
       // (one SIGWINCH per reload instead of two — #1490).
       expect(transport.sendResize).toHaveBeenCalledTimes(1);
-      expect(transport.sendResize).toHaveBeenCalledWith(88, 37);
+      expect(transport.sendResize).toHaveBeenCalledWith(80, 37);
       controller.dispose();
     } finally {
       if (!hadFonts) { delete (document as { fonts?: unknown }).fonts; }
@@ -1312,7 +1312,7 @@ describe('TerminalController', () => {
       resolveReady();
       await flush();
       expect(transport.sendResize).toHaveBeenCalledTimes(1);
-      expect(transport.sendResize).toHaveBeenLastCalledWith(88, 37);
+      expect(transport.sendResize).toHaveBeenLastCalledWith(80, 37);
 
       // A later real container resize, while an unrelated face is loading.
       // Height is what changes rows under fixed columns; width only re-fits
@@ -1321,13 +1321,13 @@ describe('TerminalController', () => {
       vi.useFakeTimers();
       const grown = { contentRect: { width: 1200, height: 640 } } as unknown as ResizeObserverEntry;
       capturedCallback!([grown], capturedObserver!);
-      expect(controller.terminal!.cols).toBe(88);
+      expect(controller.terminal!.cols).toBe(80);
       expect(controller.terminal!.rows).toBe(40);
       vi.advanceTimersByTime(200);
 
       // The PTY hears it: the cell box this grid was computed from is final.
       expect(transport.sendResize).toHaveBeenCalledTimes(2);
-      expect(transport.sendResize).toHaveBeenLastCalledWith(88, 40);
+      expect(transport.sendResize).toHaveBeenLastCalledWith(80, 40);
       vi.useRealTimers();
       controller.dispose();
     } finally {
@@ -1363,7 +1363,7 @@ describe('TerminalController', () => {
       // The grid — and the session — take the well *minus* the band: 600/16
       // rows. Sizing to the well instead would draw rows the padding clips.
       expect(controller.terminal!.rows).toBe(33);
-      expect(transport.sendResize).toHaveBeenLastCalledWith(88, 33);
+      expect(transport.sendResize).toHaveBeenLastCalledWith(80, 33);
 
       vi.useFakeTimers();
       // History: the band is released, the content box grows by the same 60 px.
@@ -1380,7 +1380,7 @@ describe('TerminalController', () => {
       // the session was never told about it.
       const sent = (transport.sendResize.mock.calls as Array<[number, number]>)
         .map(([cols, rows]) => `${cols}x${rows}`);
-      expect([...new Set(sent)]).toEqual(['88x33']);
+      expect([...new Set(sent)]).toEqual(['80x33']);
       // What this mock cannot show is how many of those reach the wire: the
       // transport is the layer that knows what the session already has, and it
       // drops the repeats — see 'does not send a resize that repeats the size
@@ -1488,7 +1488,7 @@ describe('TerminalController', () => {
 
       vi.advanceTimersByTime(200);
       expect(transport.sendResize).toHaveBeenCalledTimes(2);
-      expect(transport.sendResize).toHaveBeenLastCalledWith(88, 25);
+      expect(transport.sendResize).toHaveBeenLastCalledWith(80, 25);
 
       vi.useRealTimers();
     } finally {
@@ -1513,7 +1513,7 @@ describe('TerminalController', () => {
       // First fire is immediate on both halves (8×16 fallback cells in jsdom).
       const entryA = { contentRect: { width: 1024, height: 600 } } as unknown as ResizeObserverEntry;
       capturedCallback!([entryA], capturedObserver!);
-      expect(controller.terminal!.cols).toBe(88);
+      expect(controller.terminal!.cols).toBe(80);
       expect(controller.terminal!.rows).toBe(37);
 
       vi.useFakeTimers();
@@ -1521,13 +1521,13 @@ describe('TerminalController', () => {
       // tick — no timer advance — or the two disagree on screen.
       const entryB = { contentRect: { width: 800, height: 400 } } as unknown as ResizeObserverEntry;
       capturedCallback!([entryB], capturedObserver!);
-      expect(controller.terminal!.cols).toBe(88);
+      expect(controller.terminal!.cols).toBe(80);
       expect(controller.terminal!.rows).toBe(25);
       // ...while tmux is still waiting on the debounce.
       expect(transport.sendResize).toHaveBeenCalledTimes(1);
 
       vi.advanceTimersByTime(200);
-      expect(transport.sendResize).toHaveBeenLastCalledWith(88, 25);
+      expect(transport.sendResize).toHaveBeenLastCalledWith(80, 25);
       vi.useRealTimers();
     } finally {
       vi.useRealTimers();
@@ -1544,10 +1544,10 @@ describe('TerminalController', () => {
 
       await flush(); // RAF fires → observe() captures the callback with 8×16 cells
 
-      // Pre-change: container 1024×600 with 8×16 cells → fixed 88 cols, 37 rows.
+      // Pre-change: container 1024×600 with 8×16 cells → fixed 80 cols, 37 rows.
       const entry = { contentRect: { width: 1024, height: 600 } } as unknown as ResizeObserverEntry;
       capturedCallback!([entry], capturedObserver!);
-      expect(transport.sendResize).toHaveBeenLastCalledWith(88, 37);
+      expect(transport.sendResize).toHaveBeenLastCalledWith(80, 37);
 
       // Simulate a font-size zoom: the render service now reports larger cells.
       const cell = (controller.terminal! as unknown as {
@@ -1560,16 +1560,16 @@ describe('TerminalController', () => {
       const rc = (controller as unknown as { resizeController: { remeasure(): void } }).resizeController;
       rc.remeasure();
 
-      // fixed cols 88, 600/20=30 rows — smaller than the pre-zoom 37 rows,
+      // fixed cols 80, 600/20=30 rows — smaller than the pre-zoom 37 rows,
       // proving remeasure read the live cell size, not the stale 8×16 stash.
       //
       // Asserted as two facts rather than one spied call: the local grid
       // follows the cell box and the *reported* size follows it minus the
       // container's own inset (`reportedGrid`). They coincide here only
       // because jsdom computes no padding.
-      expect(controller.terminal!.cols).toBe(88);
+      expect(controller.terminal!.cols).toBe(80);
       expect(controller.terminal!.rows).toBe(30);
-      expect(transport.sendResize).toHaveBeenLastCalledWith(88, 30);
+      expect(transport.sendResize).toHaveBeenLastCalledWith(80, 30);
     } finally {
       restore();
     }
@@ -1588,7 +1588,7 @@ describe('TerminalController', () => {
       // Fire the observer once so ResizeController.lastContainer is live.
       const entry = { contentRect: { width: 1024, height: 600 } } as unknown as ResizeObserverEntry;
       capturedCallback!([entry], capturedObserver!);
-      expect(transport.sendResize).toHaveBeenLastCalledWith(88, 37);
+      expect(transport.sendResize).toHaveBeenLastCalledWith(80, 37);
 
       // Clear so the assertions below only see the zoom-triggered resize.
       transport.sendResize.mockClear();

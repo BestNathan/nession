@@ -31,7 +31,7 @@ COPY web/ .
 # still fail, which is why the destination is absolute.
 COPY design/ /design/
 # #2487 release-selected terminal configuration, embedded into the bundle.
-ARG VITE_NESSION_TERMINAL_COLS=88
+ARG VITE_NESSION_TERMINAL_COLS=80
 ARG VITE_NESSION_TERMINAL_WEB_FONT_SIZE=14
 ENV VITE_NESSION_TERMINAL_COLS=${VITE_NESSION_TERMINAL_COLS}
 ENV VITE_NESSION_TERMINAL_WEB_FONT_SIZE=${VITE_NESSION_TERMINAL_WEB_FONT_SIZE}
@@ -62,7 +62,7 @@ RUN cargo build --release --bin nession-agent
 FROM debian:bookworm-slim AS runtime
 # The release-selected fixed terminal width (#2487), carried to the Agent's
 # process environment and written into agent-config.toml by the entrypoint.
-ARG NESSION_TERMINAL_COLS=88
+ARG NESSION_TERMINAL_COLS=80
 ENV NESSION_TERMINAL_COLS=${NESSION_TERMINAL_COLS}
 # `git` is here because the agent composes `GitAgentExtension` (`main.rs`) and
 # this image carried no git binary — the capability was live and its tool was
