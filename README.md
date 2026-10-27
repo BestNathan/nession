@@ -16,9 +16,16 @@ deploy(production): 0.36.0     ← release promotion (Environment approval)
 | env | namespace | storage | driven by | role |
 |-----|-----------|---------|-----------|------|
 | `staging` | `nession` (`-staging` names) | legacy shared NFS via subPath, incl. the historical shared claude-home | `staging.yml` auto-deploy on every staging-branch push | **the retained staging env** — byte-identical replica of the pre-cutover overlay |
-| `staging-01` | `nession-staging-01` | own PVs → `/mnt/share/k8s/staging-01{,/claude-home}` | `deploy.yml` manual dispatch at an exact SHA | on-demand validation of specific commits |
-| `preprod` | `nession-preprod` | own PVs → `/mnt/share/k8s/preprod{,/claude-home}` | nothing (dispatch-ready via `deploy.yml`) | **dormant** — reserved; not part of the release flow |
-| `production` | `nession` | zero-copy PVs → the pre-existing `/mnt/share/k8s/production` + `/mnt/share/k8s/nession/claude-home` | `release.yml` `promote-production` behind GitHub Environment `production` approval | live |
+| `staging-01` | `nession` (`-staging-01` names) | own PVs → `/mnt/share/k8s/staging-01{,/claude-home}` | `deploy.yml` manual dispatch at an exact SHA | on-demand validation of specific commits |
+| `preprod` | `nession` (`-preprod` names) | own PVs → `/mnt/share/k8s/preprod{,/claude-home}` | nothing (dispatch-ready via `deploy.yml`) | **dormant** — reserved; not part of the release flow |
+| `production` | `nession` (unsuffixed names) | zero-copy PVs → the pre-existing `/mnt/share/k8s/production` + `/mnt/share/k8s/nession/claude-home` | `release.yml` `promote-production` behind GitHub Environment `production` approval | live |
+
+All environments live in the shared **`nession`** namespace. Each overlay
+sets `nameSuffix` (`-staging`, `-staging-01`, `-preprod`; production is the
+unsuffixed base), so their deployments, services, ingress and storage are
+distinguished by name, not by namespace. The trusted deployment-identity
+policy derives the expected workloads from `namespace` + `nameSuffix` and
+requires the pod `env` label to match.
 
 ## Who writes here
 
@@ -60,8 +67,8 @@ second line.
 ```
 argocd/                    root app + child apps (source of truth for ArgoCD)
 base/nession/              env-agnostic deployments/services/ingress/secret
-environments/<env>/nession one overlay per environment: namespace, PV/PVC,
-                           claims, ingress hosts, image tags
+environments/<env>/nession one overlay per environment: namespace,
+                           nameSuffix, PV/PVC, claims, ingress hosts, image tags
 ```
 
 **Adding an environment** = add `environments/<env>/nession/` + a child app
@@ -75,15 +82,17 @@ foreseen, switch the static child apps to an ApplicationSet first.
    correct ownership/perms (production's dirs already exist).
 2. DNS (manual): `<env>.nession.*`, `<env>.agent.nession.*`,
    `<env>.ui.nession.*` on both `nhome.local` and `bestnathan.top`.
-3. Namespace resources ArgoCD cannot create from manifests:
-   - `ghcr-secret` docker-registry secret (mirror from namespace `nession`):
-     `kubectl -n <ns> create secret docker-registry ghcr-secret --from-file=.dockerconfigjson=<(kubectl -n nession get secret ghcr-secret -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d)`
+3. Shared-namespace resources ArgoCD cannot create from manifests: the
+   `ghcr-secret` docker-registry secret already exists in namespace `nession`
+   and is used by every environment; only a different target namespace would
+   need its own mirror.
 4. ArgoCD child app (`argocd/apps/`).
 5. Wait for sync, verify pods Running and data dirs visible.
 
 ## Cutover record (executed 2026-09-05)
 
-All done and verified:
+All done and verified (historical record; the per-environment namespaces in
+step 4 were later converged — see the 2026-10-27 correction below):
 
 1. ✅ Pre-cutover state recorded (apps / PV / PVC / pods).
 2. ✅ Production switched to zero-copy PVs (`prod-data`, `prod-claude-home`
@@ -115,3 +124,12 @@ Storage leftovers (deliberate, known):
 Rollback if broken: revert the deploy commit on this branch
 (`git revert` + push — ArgoCD syncs back). NFS data is never touched by
 desired-state changes.
+
+## Namespace convergence (2026-10-27)
+
+Owner model: one shared `nession` namespace, environments distinguished by
+`nameSuffix`. `staging-01` (`663025754`) and `preprod` (`16d02512f`) moved off
+their own namespaces into `nession` as `nameSuffix: -staging-01` / `-preprod`,
+keeping their existing NFS dirs. Their ArgoCD apps keep the lane names but now
+target `nession`. The old `nession-staging-01` / `nession-preprod` namespaces
+are empty; the `kube-root-ca.crt` configmap is namespace-controller managed.
