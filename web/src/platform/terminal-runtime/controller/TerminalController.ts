@@ -25,7 +25,10 @@ import {
   TerminalInteractionController,
   type TerminalSemanticKey,
 } from '../interaction/TerminalInteractionController';
-import { gridFor } from '../grid';
+import type { Grid } from '../grid';
+import { detectProfile, PROFILES } from '../DeviceProfile';
+import { MIN_TERMINAL_FIT_FONT_SIZE, fitFontToColumns, rowsForHeight } from '../sizing';
+import { readTerminalClientConfig } from '../terminalConfig';
 import type { FontSizeManager } from '../FontSizeManager';
 
 /**
@@ -552,8 +555,10 @@ export class TerminalController {
   }
 
   private wireTerminalUi(element: HTMLElement, terminal: Terminal): void {
-    this.instance.onCellSizeChange = () => {
-      this.resizeController?.remeasure();
+    this.instance.onCellSizeChange = (reason) => {
+      // A webfont landing changes the cell the fit was based on, so re-fit.
+      // A user zoom is an explicit font choice: keep it and recompute rows.
+      this.resizeController?.remeasure({ fitFont: reason === 'font-load' });
     };
 
     const capsuleHost = element.closest('[data-terminal-capsule-host]');
@@ -905,6 +910,16 @@ export class TerminalController {
     return this.instance?.cellDimensions ?? { width: 8, height: 16 };
   }
 
+  /**
+   * Render at `fontSize` and return the cell xterm measured for it.
+   *
+   * The fixed-column fit probes real cell widths; asking xterm rather than
+   * scaling `fontSize × 0.6` is what makes the result the grid it draws.
+   */
+  measureFont(fontSize: number): { width: number; height: number } {
+    return this.instance.setFontSize(fontSize);
+  }
+
   // ── Input mode ───────────────────────────────────────────────────────────
 
   setInputMode(mode: InputMode): void {
@@ -924,15 +939,22 @@ export class TerminalController {
 }
 
 /**
- * ResizeObserver wrapper: container size → cols/rows → controller.resize().
+ * Fixed-column terminal sizing (#2487).
  *
- * Every measurement is published as soon as it is observed; the xterm grid
- * mutation is serialized with unfinished parser writes (#2283). Rendering may
- * briefly lag a rapid drag while xterm finishes parsing older output, but an
- * older ANSI write must never run across an untracked local grid mutation.
+ * The column count is canonical — read once from the build configuration — and
+ * is **never** derived from the container width. What adapts:
  *
- * Only the PTY notification is debounced (200ms), so dragging a window doesn't
- * flood tmux with intermediate sizes. The first fire skips that debounce.
+ * - **font**: the largest size, up to the Web maximum or the App token, whose
+ *   measured cell lets exactly `cols` fit the content box. A wide Web window
+ *   keeps the maximum and caps/centres the terminal; a narrower one shrinks the
+ *   glyphs rather than the grid; a phone uses the same columns at a smaller
+ *   measured font.
+ * - **rows**: `floor(usable height / measured cell height)`.
+ *
+ * Geometry is applied through the parser writer so it cannot cross an
+ * unfinished ANSI parse (#2283). Only the PTY notification is debounced
+ * (200 ms); the first fire, a font-load correction and an explicit takeover
+ * report immediately. Repeated identical sizes are not resent.
  *
  * Exported so consumers can type/instantiate the resize controller when
  * composing the terminal at the boundary.
@@ -943,9 +965,8 @@ export class ResizeController {
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private isFirstFire = true;
   private lastContainer = { width: 0, height: 0 };
-  /** The element being observed — held for {@link reportedGrid}. */
+  /** The element being observed — held for the content/capsule geometry. */
   private container: HTMLElement | null = null;
-  private lastCell = { width: 8, height: 16 };
   /**
    * Whether the cell box has already been through the font-load correction
    * (#1490). Until it has, a provisional status means the grid is still the
@@ -956,132 +977,203 @@ export class ResizeController {
    * it (#2132).
    */
   private fontMetricsSettled = false;
+  /** The immutable build-time column count for this client. */
+  private readonly cols: number;
+  /** The Web terminal's preferred/maximum CSS font size. */
+  private readonly webMaxFontSize: number;
+  private lastReported: { cols: number; rows: number } | null = null;
 
   constructor(controller: TerminalController) {
     this.controller = controller;
+    const config = readTerminalClientConfig();
+    this.cols = config.cols;
+    this.webMaxFontSize = config.webMaxFontSize;
   }
 
   observe(container: HTMLElement, cellWidth: number, cellHeight: number): void {
     if (cellWidth <= 0 || cellHeight <= 0) { return; }
     this.dispose();
-    // Held for {@link reportedGrid}: the inset is applied to this element's
-    // padding, so reading it back is what tells the reported size what the
-    // content box left out.
+    // Held for the geometry read: the inset is applied to this element's
+    // padding, so reading it back is what tells the grid what the content box
+    // left out.
     this.container = container;
     this.isFirstFire = true;
-    this.lastCell = { width: cellWidth, height: cellHeight };
     this.lastContainer = { width: 0, height: 0 };
+    this.lastReported = null;
 
     this.observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const size = entry.contentRect;
         this.lastContainer = { width: size.width, height: size.height };
-        // The content box, not the border box: `contentRect` excludes the
-        // container's padding, which is the whole of `--terminal-pad-x`. Fitted
-        // against the padded box the grid draws wider than the well that holds
-        // it — #1092, in the fixture. Use the live cell size (refreshed by
-        // remeasure() on font-size zoom), not the stale observe()-time params.
-        // One geometry for both halves — see {@link reportedGrid}: the capsule
-        // band is excluded from the grid *and* from what the session is told,
-        // so neither the drawing nor the tty follows the scroll mode.
-        const grid = this.reportedGrid();
+        // Fit the font first, then apply the fixed-column grid. The content
+        // box, not the border box: `contentRect` excludes the container's
+        // padding, which is the whole of `--terminal-pad-x` (#1092).
+        const grid = this.applyGeometry({ fitFont: true, ordered: false });
         if (grid === null) { continue; }
 
         // Only the Controller owns the pane's geometry. An observer's
-        // container can resize independently; fitting its xterm now would
-        // overwrite a newer authoritative tmux resize (PC → phone handoff).
-        // We still publish the measurement for a future explicit takeover.
-        if (!this.controller.isObserverReadOnly) {
-          // Enqueue the latest local grid in the terminal writer FIFO. The
-          // measured viewport becomes known now, but xterm may finish an older
-          // in-flight ANSI parser callback before mutating the buffer (#2283).
-          this.controller.resizeLocal(grid.cols, grid.rows);
-        }
-
+        // container can resize independently; fitting its own font is local,
+        // but its grid follows the authoritative session size. We still
+        // publish the measurement for a future explicit takeover.
         if (this.isFirstFire) {
           this.isFirstFire = false;
-          // The half that leaves this client — the atom the attach reads and
-          // the size the PTY is moved to — is deferred while the cell box is
-          // still provisional, because then it is a size the pane never had:
-          // see {@link metricsAreProvisional}, which is also where the report
-          // that *does* land comes from.
-          if (!this.metricsAreProvisional()) { this.reportSize(); }
+          if (!this.metricsAreProvisional()) { this.report(grid, { force: true }); }
           continue;
         }
-
         if (this.metricsAreProvisional()) { continue; }
-
-        // Publish to the atom the state machine reads on (re)attach so
-        // client.attach / beginRelay carry the current viewport size. Covers
-        // both the immediate first fire and the debounced subsequent fires.
-        const reported = this.reportedGrid();
-        if (reported !== null) {
-          this.controller.publishViewportResize(reported.cols, reported.rows);
-          // The Observer's measured box is only a future takeover proposal:
-          // neither its local renderer nor the Agent window follows it.
-          if (this.debounceTimer) { clearTimeout(this.debounceTimer); }
-          this.debounceTimer = null;
-          if (!this.controller.isObserverReadOnly) {
-            // PTY notification debounced, so a drag sends one final size.
-            this.debounceTimer = setTimeout(() => {
-              if (!this.controller.isObserverReadOnly) {
-                this.controller.sendResize(reported.cols, reported.rows);
-              }
-            }, 200);
-          }
+        if (this.controller.isObserverReadOnly) {
+          this.controller.publishViewportResize(grid.cols, grid.rows);
+          continue;
         }
+        this.report(grid, { force: false });
       }
     });
     this.observer.observe(container);
   }
 
   /**
-   * The size this client reports to the PTY and to the attach atom — the
-   * container's geometry **without the capsule's dock inset**.
+   * Recompute the geometry from the last observed container size.
    *
-   * The terminal well applies the capsule's clearance as `padding-bottom` on
-   * the very element this controller observes, and `contentRect` excludes
-   * padding — so the scroll mode becomes the grid size: following reserved the
-   * capsule's band, history released it, and the 60 px between them is 3 rows
-   * at our 20 px cell. Both are honest measurements of the content box, which
-   * is why nothing downstream could tell them apart (#1503).
+   * `fitFont` is false for a user zoom: the chosen font is kept and only rows
+   * are recomputed. It is true after a webfont settles (the first fit used the
+   * fallback's cell) and on takeover.
    *
-   * That inset is a *display* clearance for chrome that is drawn over the
-   * well, and `terminal-surface.md` §Resize gives the rule: a **container**
-   * resize updates the local grid and the remote PTY. This container never
-   * resized — the capsule docked and undocked — so the PTY keeps the size the
-   * user types at, and browsing history changes only what is drawn.
-   *
-   * The geometry is the well **minus the capsule's band**, in both modes, and
-   * both halves use it. Sizing to the well instead — the obvious first reading
-   * of "exclude the inset" — was measured on this change and is wrong: 35 rows
-   * of 20 px drawn into a 646 px box, with the cursor in the rows the padding
-   * clips. The grid has to fit what is visible, and reserving the band is what
-   * makes it visible; so the band comes off the height whichever mode is on,
-   * and the three rows history mode frees are blank space where the capsule
-   * was rather than content behind a clip.
+   * `ordered` applies the grid through the parser writer — the adoption path,
+   * where correctness is worth a deferred frame (#2286 SC-04).
    */
-  private reportedGrid(): { cols: number; rows: number } | null {
+  remeasure({ ordered = false, fitFont = true }: { ordered?: boolean; fitFont?: boolean } = {}): void {
+    this.fontMetricsSettled = true;
+    if (this.lastContainer.width <= 0 || this.lastContainer.height <= 0) { return; }
+    const grid = this.applyGeometry({ fitFont, ordered });
+    if (grid === null) { return; }
+    if (this.controller.isObserverReadOnly) {
+      this.controller.publishViewportResize(grid.cols, grid.rows);
+      return;
+    }
+    this.report(grid, { force: true });
+  }
+
+  /**
+   * Fit (or keep) the font, cap the content width, and return the fixed-cols
+   * grid. The local xterm mutation happens here, before any report.
+   */
+  private applyGeometry(options: { fitFont: boolean; ordered: boolean }): Grid | null {
+    const layout = this.measureLayout(options.fitFont);
+    if (layout === null) { return null; }
+    if (this.container !== null) {
+      // The terminal's own content width, used by the stylesheet to cap and
+      // centre the xterm. At the minimum font a very narrow box may be smaller
+      // than this; the viewport scrolls horizontally rather than dropping a
+      // column.
+      this.container.style.setProperty(
+        '--nession-local-terminal-content-width',
+        `${layout.contentWidth}px`,
+      );
+      this.container.dataset.terminalColsFit = layout.fits ? 'true' : 'false';
+    }
+    const grid = { cols: this.cols, rows: layout.rows };
+    if (this.controller.isObserverReadOnly) { return grid; }
+    if (options.ordered) {
+      this.controller.resizeLocalOrdered(grid.cols, grid.rows);
+    } else {
+      this.controller.resizeLocal(grid.cols, grid.rows);
+    }
+    return grid;
+  }
+
+  private measureLayout(fitFont: boolean): {
+    cell: { width: number; height: number };
+    contentWidth: number;
+    fits: boolean;
+    rows: number;
+  } | null {
+    const width = this.lastContainer.width;
+    const height = this.usableHeight();
+    if (width <= 0 || height === null) { return null; }
+
+    const profile = detectProfile(width);
+    const maxFont = profile === 'mobile'
+      ? PROFILES.mobile.fontSize
+      : this.webMaxFontSize;
+
+    let cell: { width: number; height: number };
+    let contentWidth: number;
+    let fits: boolean;
+    if (fitFont) {
+      const fit = fitFontToColumns({
+        cols: this.cols,
+        availableWidth: width,
+        minFontSize: MIN_TERMINAL_FIT_FONT_SIZE,
+        maxFontSize: Math.max(MIN_TERMINAL_FIT_FONT_SIZE, maxFont),
+        measureCell: (fontSize) => this.controller.measureFont(fontSize),
+      });
+      if (fit === null) { return null; }
+      cell = fit.cell;
+      contentWidth = fit.contentWidth;
+      fits = fit.fits;
+    } else {
+      cell = this.controller.cellDimensions;
+      if (cell.width <= 0 || cell.height <= 0) { return null; }
+      contentWidth = this.cols * cell.width;
+      fits = contentWidth <= width;
+    }
+
+    const rows = rowsForHeight(height, cell.height);
+    if (rows === null) { return null; }
+    return { cell, contentWidth, fits, rows };
+  }
+
+  /**
+   * The usable height: the content box plus the capsule band this mode
+   * reserves, minus the band itself (#1503). The grid must never draw rows the
+   * well is not showing, and the band is chrome drawn over it in both modes.
+   */
+  private usableHeight(): number | null {
     const container = this.container;
     if (container === null) { return null; }
-    // Both numbers come from the stylesheet rather than from asking the capsule
-    // which mode it is in: the band the capsule needs, and how much of it this
-    // mode currently reserves as padding. Following reserves it (so the content
-    // box is already short by exactly that much); history releases it (so the
-    // content box is the whole well). Subtracting the band from both gives one
-    // geometry, and it is the one that fits what is *visible* — which is the
-    // point: the grid must never draw rows the well is not showing.
     const style = getComputedStyle(container);
     const number = (value: string): number => {
       const parsed = Number.parseFloat(value);
       return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
     };
     const reserved = number(style.paddingBottom);
-    const band = number(style.getPropertyValue('--nession-local-terminal-capsule-occlusion'));
-    return gridFor(
-      { width: this.lastContainer.width, height: this.lastContainer.height + reserved - band },
-      this.lastCell,
+    const band = number(
+      style.getPropertyValue('--nession-local-terminal-capsule-occlusion'),
     );
+    return this.lastContainer.height + reserved - band;
+  }
+
+  /**
+   * Publish and send one geometry, unless it is the duplicate of the last one.
+   *
+   * `force` is for the paths that must state the size even when nothing moved:
+   * a takeover (the transport forgot its last send) and the font-load
+   * correction. The drag path leaves it false, so a resize that does not
+   * change the grid sends nothing to tmux.
+   */
+  private report(
+    grid: Grid,
+    { force }: { force: boolean },
+  ): void {
+    if (!force
+      && this.lastReported?.cols === grid.cols
+      && this.lastReported.rows === grid.rows) {
+      return;
+    }
+    this.lastReported = { cols: grid.cols, rows: grid.rows };
+    this.controller.publishViewportResize(grid.cols, grid.rows);
+    if (this.controller.isObserverReadOnly) { return; }
+    if (this.debounceTimer) { clearTimeout(this.debounceTimer); }
+    this.debounceTimer = null;
+    if (force) {
+      this.controller.sendResize(grid.cols, grid.rows);
+      return;
+    }
+    this.debounceTimer = setTimeout(() => {
+      if (!this.controller.isObserverReadOnly) {
+        this.controller.sendResize(grid.cols, grid.rows);
+      }
+    }, 200);
   }
 
   /**
@@ -1089,21 +1181,15 @@ export class ResizeController {
    * one — false while a webfont is still loading.
    *
    * xterm measures one cell at `open()` and caches it; a face that lands after
-   * that leaves the cached cell as the *fallback's*. `TerminalInstance`
-   * already treats this as a real state — `remeasureOnFontLoad` waits for
+   * that leaves the cached cell as the *fallback's*. `TerminalInstance` already
+   * treats this as a real state — `remeasureOnFontLoad` waits for
    * `document.fonts.ready` and corrects the grid — but the size that leaves
    * this client had no such guard, and the consequence is not a mis-drawn
    * glyph (#1490): on a reload, `142x37` was published and sent from the
    * fallback's cell, then the font-load correction sent `142x32` 52 ms later.
    * Both are real resizes of the **shared** window (`window-size latest`), so
    * the pane moved twice, the kernel delivered two SIGWINCHes to it, and an
-   * inline-drawing application repainted into the scrollback on each — which
-   * is the reported "history grows with every refresh".
-   *
-   * Neither size can be recognised as the redundant one downstream: the first
-   * is a faithful measurement of a cell box that never existed on screen. So
-   * the report is held here instead of deduped later, and the container has
-   * not moved in the meantime — the size that arrives is the same one, once.
+   * inline-drawing application repainted into the scrollback on each.
    *
    * The report that lands in the provisional case is the font-load correction
    * itself: `TerminalInstance.remeasureOnFontLoad` waits on the same `ready`
@@ -1118,55 +1204,6 @@ export class ResizeController {
     if (this.fontMetricsSettled) { return false; }
     const fonts = typeof document === 'undefined' ? undefined : document.fonts;
     return fonts?.status === 'loading';
-  }
-
-  /** Recompute cols/rows from the last observed container size and the LIVE
-   *  cell size (used after font-size changes, when the container hasn't
-   *  resized). Refreshes the stashed cell size so later observer fires also
-   *  use it.
-   *
-   *  `ordered` applies the grid through the parser writer instead of directly
-   *  — the adoption path, where correctness is worth a deferred frame (#2286
-   *  SC-04). */
-  remeasure({ ordered = false }: { ordered?: boolean } = {}): void {
-    this.fontMetricsSettled = true;
-    const { width, height } = this.lastContainer;
-    if (width <= 0 || height <= 0) { return; }
-    const cell = this.controller.cellDimensions;
-    if (cell.width <= 0 || cell.height <= 0) { return; }
-    this.lastCell = cell;
-    // The cell box changed (they all do after a zoom), so lastContainer's own
-    // geometry is unchanged — the same read `reportedGrid` makes.
-    const grid = this.reportedGrid();
-    if (grid === null) { return; }
-    // One geometry for the grid and for what the session is told — the capsule
-    // band is excluded from both (#1503).
-    if (this.controller.isObserverReadOnly) {
-      this.controller.publishViewportResize(grid.cols, grid.rows);
-      return;
-    }
-    if (ordered) {
-      this.controller.resizeLocalOrdered(grid.cols, grid.rows);
-    } else {
-      this.controller.resizeLocal(grid.cols, grid.rows);
-    }
-    this.reportSize();
-  }
-
-  /**
-   * Publish and send the reported size now — the immediate half of a report,
-   * used where waiting is wrong (the first size, a font-size zoom) rather than
-   * the debounced drag path.
-   */
-  private reportSize(): void {
-    const reported = this.reportedGrid();
-    if (reported === null) { return; }
-    // Keep the atom fresh after a font-size zoom so a (re)attach uses the
-    // recomputed cell count, not the stale pre-zoom size.
-    this.controller.publishViewportResize(reported.cols, reported.rows);
-    if (!this.controller.isObserverReadOnly) {
-      this.controller.sendResize(reported.cols, reported.rows);
-    }
   }
 
   /** Cancel a resize captured under a lease that this client has lost. */

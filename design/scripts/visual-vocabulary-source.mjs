@@ -223,6 +223,11 @@ export function scanVisualUtilitySource(
 export const LOCAL_CSS_VARIABLE_OWNERS = Object.freeze({
   '--nession-local-terminal-capsule-occlusion': ['web/src/product/terminal/capsule/hooks/useCapsuleDockClearance.ts'],
   '--nession-local-terminal-content-bottom-inset': ['web/src/index.css', 'web/src/platform/terminal-runtime/capsule/occlusionScroll.ts'],
+  '--nession-local-terminal-content-width': [
+    'web/src/index.css',
+    'web/src/platform/terminal-runtime/controller/TerminalController.ts',
+    'web/src/app/fixture/FixtureTerminal.tsx',
+  ],
   '--nession-local-workspace-content-bottom-inset': ['web/src/app/workspace/hooks/useWorkspaceCapsuleClearance.ts'],
 });
 
@@ -236,6 +241,9 @@ export const LOCAL_CSS_VARIABLE_SURFACES = Object.freeze({
     'web/src/index.css', 'web/src/product/terminal/', 'web/src/platform/terminal-runtime/',
   ],
   '--nession-local-terminal-content-bottom-inset': [
+    'web/src/index.css', 'web/src/product/terminal/', 'web/src/platform/terminal-runtime/',
+  ],
+  '--nession-local-terminal-content-width': [
     'web/src/index.css', 'web/src/product/terminal/', 'web/src/platform/terminal-runtime/',
   ],
   '--nession-local-workspace-content-bottom-inset': [
