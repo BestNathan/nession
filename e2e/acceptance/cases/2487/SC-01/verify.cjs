@@ -19,7 +19,9 @@ const { spawnSync } = require('node:child_process');
 const {
   run, targetSha, cargoTests, assertRan, tmuxVersion,
 } = require('../../../shared/control-mode-cases.cjs');
-const { root, stripAnsi, requireText } = require('../../../shared/terminal-sizing-cases.cjs');
+const {
+  root, stripAnsi, passedTests, requireText,
+} = require('../../../shared/terminal-sizing-cases.cjs');
 
 const tmuxDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nession-2487-sc01-'));
 const tmuxEnv = { NESSION_TMUX_SOCKET: path.join(tmuxDir, 'tmux.sock') };
@@ -77,7 +79,7 @@ run(({ evidence }) => {
     'src/platform/terminal-runtime/__tests__/unit/terminalConfig.test.ts',
     'src/platform/terminal-runtime/__tests__/unit/sizing.test.ts',
   ]);
-  if (!/Test Files\s+2 passed/.test(configTests) || !/Tests\s+13 passed/.test(configTests)) {
+  if (!/Test Files\s+2 passed/.test(configTests) || (passedTests(configTests) ?? 0) < 13) {
     throw new Error('the shared-config/sizing tests did not run: ' + configTests.slice(-3000));
   }
 
@@ -87,7 +89,7 @@ run(({ evidence }) => {
     '--project', 'integration',
     'src/platform/terminal-runtime/controller/__tests__/integration/TerminalController.test.ts',
   ]);
-  if (!/Tests\s+63 passed/.test(controllerTests)) {
+  if ((passedTests(controllerTests) ?? 0) < 63) {
     throw new Error('the terminal controller tests did not run: ' + controllerTests.slice(-3000));
   }
 

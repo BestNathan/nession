@@ -93,10 +93,17 @@ function longLineFingerprint(page, marker) {
       const run = [textAt(start)];
       for (let i = start + 1; i < buffer.length; i += 1) {
         const text = textAt(i);
-        // A wrapped continuation of the x run is x's only. Stop at the first
-        // line that is not: the prompt after the newline, or empty history.
-        if (!/^x+$/.test(text)) break;
-        run.push(text);
+        if (/^x+$/.test(text)) {
+          run.push(text);
+          continue;
+        }
+        // The row that ends the run can share its buffer line with the next
+        // prompt (observed on the CI phone surface). Count its leading x's
+        // before stopping: the run is measured by the x's the shell produced,
+        // and a real reflow still changes the wrap boundaries.
+        const leading = /^(x+)/.exec(text);
+        if (leading) run.push(leading[1]);
+        break;
       }
       const totalX = run.join('').split('x').length - 1;
       const fingerprint = {
@@ -105,6 +112,8 @@ function longLineFingerprint(page, marker) {
         last: run[run.length - 1].length,
         totalX,
         lines: run.length,
+        lengths: run.map((line) => line.length),
+        next: textAt(start + run.length).slice(0, 120),
       };
       if (!best || fingerprint.totalX > best.totalX) best = fingerprint;
     }
@@ -125,13 +134,22 @@ function longLineFingerprint(page, marker) {
  * than sleeping.
  */
 async function waitForLongLine(page, marker) {
-  await expect.poll(async () => {
-    try {
-      return (await longLineFingerprint(page, marker)).totalX;
-    } catch {
-      return 0;
-    }
-  }, { timeout: 20_000 }).toBe(200);
+  let last = null;
+  try {
+    await expect.poll(async () => {
+      try {
+        last = await longLineFingerprint(page, marker);
+        return last.totalX;
+      } catch (error) {
+        last = { error: String(error) };
+        return 0;
+      }
+    }, { timeout: 20_000 }).toBe(200);
+  } catch (error) {
+    // The poll only carries the last count; the lines that produced it are
+    // what distinguishes a partial buffer from a genuine wrap difference.
+    throw new Error('the long-line run is incomplete: ' + JSON.stringify(last));
+  }
   return longLineFingerprint(page, marker);
 }
 

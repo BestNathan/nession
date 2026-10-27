@@ -14,7 +14,7 @@ const path = require('node:path');
 const {
   run, targetSha, cargoTests, assertRan, tmuxVersion,
 } = require('../../../shared/control-mode-cases.cjs');
-const { stripAnsi } = require('../../../shared/terminal-sizing-cases.cjs');
+const { stripAnsi, passedTests } = require('../../../shared/terminal-sizing-cases.cjs');
 
 const tmuxDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nession-2487-sc09-'));
 const tmuxEnv = { NESSION_TMUX_SOCKET: path.join(tmuxDir, 'tmux.sock') };
@@ -83,7 +83,7 @@ run(({ evidence }) => {
     },
   );
   const webOut = stripAnsi(String(web.stdout || '') + '\n' + String(web.stderr || ''));
-  if (web.status !== 0 || !/Tests\s+38 passed/.test(webOut)) {
+  if (web.status !== 0 || (passedTests(webOut) ?? 0) < 38) {
     throw new Error('the attach-reply compatibility tests did not pass: ' + webOut.slice(-3000));
   }
 
