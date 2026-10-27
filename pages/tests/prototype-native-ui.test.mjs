@@ -52,6 +52,9 @@ test('catalog source and routes are exact, bounded and trusted',()=>{
 test('published mocks remain discoverable and source is secondary',()=>{
   assert.match(app,/Open interactive HTML/);
   assert.match(app,/new URL\(entry\.preview,document\.baseURI\)/);
+  assert.match(app,/preview\.target='_blank'/);
+  assert.match(app,/preview\.rel='noopener noreferrer'/);
+  assert.match(app,/Open '\+info\.title\+' interactive HTML in a new tab/);
   assert.match(app,/View source/);
   assert.match(publisher,/Back to Nession prototype gallery/);
   assert.match(publisher,/View source ↗/);
