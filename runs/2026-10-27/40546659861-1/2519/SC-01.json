@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "8758b31a5dcdd7b89ed4bac34aa2364a4af55bc5bccb843a6add413bd7a79ab6",
+  "run_id": 40546659861,
+  "run_attempt": 1,
+  "issue": 2519,
+  "criterion": "SC-01",
+  "criterion_text": "A real user/GitHub App push to `prototype` emits the unprivileged `Prototype / Change Signal` workflow, without write/Pages permissions or executing prototype code.",
+  "stage": "post-merge",
+  "target_sha": "28bcd8b9ed971f739938975aea5a9952dfff676c",
+  "contract_sha256": "8b37a13beb056ec2b6f32b91eaa70076be14e52003b769beef52e88bf271f74a",
+  "case_revision": "28bcd8b9ed971f739938975aea5a9952dfff676c",
+  "case_tree_sha": "de9617fb7b26c26ee388d3176e1f63a57ce3556c",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-27T17:03:48.214Z",
+  "finished_at": "2026-10-27T17:03:54.648Z",
+  "duration_ms": 6434,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Actual orphan workflow is contents-read/push-only/echo-only and successfully emitted a real signal",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "Current prototype ref b929fe89321b4bcc74d76e889f5c56c359a274cf has audited source bytes sha256=c6c7422e3469404c9a068a00c93c975fbc7d8b192888039f8c5695c274afd7f4: push:prototype only, contents:read only, single echo-only signal job; no checkout, secrets, write/Pages permission or prototype execution"
+        },
+        {
+          "type": "runtime",
+          "value": "GitHub Actions Run 40534958867 is completed/success, same-repository source push at b929fe89321b4bcc74d76e889f5c56c359a274cf"
+        },
+        {
+          "type": "runtime",
+          "value": "Exact Acceptance target HEAD 28bcd8b9ed971f739938975aea5a9952dfff676c checked independently from current orphan source"
+        }
+      ],
+      "duration_ms": 518,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40546659861,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "28bcd8b9ed971f739938975aea5a9952dfff676c",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40546659861",
+    "record_path": "runs/2026-10-27/40546659861-1/2519/SC-01.json",
+    "source_result_sha256": "9f3986ca4f0d9b80f08805872216a2ce7d919e3580dce9953ca65ccfb54b46d0"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40546659861-1",
+    "sha256": "9f3986ca4f0d9b80f08805872216a2ce7d919e3580dce9953ca65ccfb54b46d0",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40546659861",
+    "durability": "time-limited; object archival not configured"
+  }
+}
