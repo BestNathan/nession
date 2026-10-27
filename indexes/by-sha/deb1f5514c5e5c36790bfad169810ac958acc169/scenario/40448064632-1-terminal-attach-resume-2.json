@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 40448064632,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/2487-fixed-terminal-cols",
+    "target_sha": "deb1f5514c5e5c36790bfad169810ac958acc169",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/40448064632",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "ac4ef13c64fb59d9d8414b242943a1e52ecd12cfe6f11afc567c4d91ba99c5bb"
+  },
+  "record": "runs/2026-10-27/40448064632-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "77cf8343f66a9717e77de38a2a3f94d47a26e2f6816dce978798828c49753a0e"
+}
