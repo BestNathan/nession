@@ -64,8 +64,34 @@ env_snapshots: Array<EnvSnapshot>,
  * stay silent for one that is. That is also exactly what a client written
  * before this field would get.
  */
-needs_bootstrap?: boolean | null, };
-export type ClientAttachResponse = { session_name: string, control_generation?: number | null, control_role?: string | null, controller_client_id?: string | null, stream_epoch?: number | null, stream_cursor?: number | null, 
+needs_bootstrap?: boolean | null, 
+/**
+ * The subscription this attach represents, distinct from the browser.
+ *
+ * The stable `client_id` is per **browser**, kept in localStorage, so
+ * every same-origin tab presents the same one. A subscription is one
+ * page's attach: two tabs must subscribe independently and receive the
+ * same broadcast, while a reconnect of one page must replace its own
+ * subscription rather than either tab's sibling.
+ *
+ * The client mints this per page instance and keeps it for that page's
+ * reconnects. **Absence preserves the v1 meaning**: the stable client id
+ * is the subscription identity, and a newer attach of that client
+ * replaces the older one — the behaviour a client written before this
+ * field already gets.
+ */
+subscription_id?: string | null, };
+export type ClientAttachResponse = { session_name: string, control_generation?: number | null, control_role?: string | null, controller_client_id?: string | null, 
+/**
+ * The subscription holding the lease, when it states one.
+ *
+ * `controller_client_id` names the browser; same-origin tabs share it, so
+ * a tab can tell whether it is *the* controller only by comparing this
+ * value with the `subscription_id` it attached under. Absent means the
+ * provider predates subscription identity, and the client must fall back
+ * to the client-id comparison.
+ */
+controller_subscription_id?: string | null, stream_epoch?: number | null, stream_cursor?: number | null, 
 /**
  * Issued by the Agent on every attach/replacement, unrelated to the
  * controller's ControlLease generation. Absent for legacy providers.
@@ -94,7 +120,18 @@ subscriber_generation?: number | null,
  * the pending bytes landed is gone, and its answer died with it. A client
  * must not replay that input automatically.
  */
-input_epoch?: number | null, input_applied_through?: number | null, };
+input_epoch?: number | null, input_applied_through?: number | null, 
+/**
+ * The Session's authoritative fixed column count (#2487).
+ *
+ * The Agent owns the tmux pane and therefore the Session's width. A
+ * client whose build embedded a different value renders this grid rather
+ * than resizing the shared pane: only rows follow the active client's
+ * viewport. Absent from an Agent built before this field, in which case
+ * the client keeps its own build configuration and the Agent still
+ * ignores any column change on resize.
+ */
+terminal_cols?: number | null, };
 export type EnvSnapshot = { name: string, source: EnvSource, agent_id?: string | null, 
 /**
  * Ordered KEY/VALUE pairs (already deduplicated, last-wins).
@@ -152,10 +189,36 @@ env_snapshots: Array<EnvSnapshot>,
  * stay silent for one that is. That is also exactly what a client written
  * before this field would get.
  */
-needs_bootstrap?: boolean | null, };
+needs_bootstrap?: boolean | null, 
+/**
+ * The subscription this attach represents, distinct from the browser.
+ *
+ * The stable `client_id` is per **browser**, kept in localStorage, so
+ * every same-origin tab presents the same one. A subscription is one
+ * page's attach: two tabs must subscribe independently and receive the
+ * same broadcast, while a reconnect of one page must replace its own
+ * subscription rather than either tab's sibling.
+ *
+ * The client mints this per page instance and keeps it for that page's
+ * reconnects. **Absence preserves the v1 meaning**: the stable client id
+ * is the subscription identity, and a newer attach of that client
+ * replaces the older one — the behaviour a client written before this
+ * field already gets.
+ */
+subscription_id?: string | null, };
 
 /** The payload the provider answers with. */
-export type ClientAttachReply = { session_name: string, control_generation?: number | null, control_role?: string | null, controller_client_id?: string | null, stream_epoch?: number | null, stream_cursor?: number | null, 
+export type ClientAttachReply = { session_name: string, control_generation?: number | null, control_role?: string | null, controller_client_id?: string | null, 
+/**
+ * The subscription holding the lease, when it states one.
+ *
+ * `controller_client_id` names the browser; same-origin tabs share it, so
+ * a tab can tell whether it is *the* controller only by comparing this
+ * value with the `subscription_id` it attached under. Absent means the
+ * provider predates subscription identity, and the client must fall back
+ * to the client-id comparison.
+ */
+controller_subscription_id?: string | null, stream_epoch?: number | null, stream_cursor?: number | null, 
 /**
  * Issued by the Agent on every attach/replacement, unrelated to the
  * controller's ControlLease generation. Absent for legacy providers.
@@ -184,5 +247,16 @@ subscriber_generation?: number | null,
  * the pending bytes landed is gone, and its answer died with it. A client
  * must not replay that input automatically.
  */
-input_epoch?: number | null, input_applied_through?: number | null, };
+input_epoch?: number | null, input_applied_through?: number | null, 
+/**
+ * The Session's authoritative fixed column count (#2487).
+ *
+ * The Agent owns the tmux pane and therefore the Session's width. A
+ * client whose build embedded a different value renders this grid rather
+ * than resizing the shared pane: only rows follow the active client's
+ * viewport. Absent from an Agent built before this field, in which case
+ * the client keeps its own build configuration and the Agent still
+ * ignores any column change on resize.
+ */
+terminal_cols?: number | null, };
 

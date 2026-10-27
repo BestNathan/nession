@@ -18,6 +18,7 @@ import { WIRE as TERMINAL_STREAM_RESUME_WIRE } from '@/generated/protocol/core/a
 import { WIRE as TERMINAL_OUTPUT_APPLIED_WIRE } from '@/generated/protocol/core/agent-terminal-output-applied/v1';
 import type { TransportPlugin, PluginSurface, SentSocketMessage } from '@/platform/socket/types';
 import { getOrCreateClientId } from '@/platform/socket/clientId';
+import { getOrCreateSubscriptionId } from '@/platform/socket/subscriptionId';
 import { controlRoleFor } from './agentControlLease';
 import type { TerminalControlRole, TerminalControlState } from './state/terminalControl';
 // The shared options shape, owned next to the runtime that drives relay. A
@@ -55,6 +56,7 @@ export interface RelayControlLease {
   role: TerminalControlRole;
   generation?: number;
   controllerClientId?: string;
+  controllerSubscriptionId?: string;
 }
 
 /** Informational proof only: this does NOT authorize parser ACK or Agent credit. */
@@ -75,12 +77,15 @@ function readRelayControl(payload: Record<string, unknown>): RelayControlLease |
   }
   const generation = payload.control_generation;
   const controllerClientId = payload.controller_client_id;
+  const controllerSubscriptionId = payload.controller_subscription_id;
   return {
     role,
     ...(typeof generation === 'number' && Number.isSafeInteger(generation)
       && generation >= 0 ? { generation } : {}),
     ...(typeof controllerClientId === 'string' && controllerClientId
       ? { controllerClientId } : {}),
+    ...(typeof controllerSubscriptionId === 'string' && controllerSubscriptionId
+      ? { controllerSubscriptionId } : {}),
   };
 }
 
@@ -275,9 +280,19 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
         if (!changed) { return; }
         const state: TerminalControlState = {
           sessionName: changed.sessionName,
-          role: controlRoleFor(changed.controllerClientId, getOrCreateClientId()),
+          role: controlRoleFor(
+            {
+              clientId: changed.controllerClientId,
+              subscriptionId: changed.controllerSubscriptionId,
+            },
+            {
+              clientId: getOrCreateClientId(),
+              subscriptionId: getOrCreateSubscriptionId(),
+            },
+          ),
           generation: changed.generation,
           controllerClientId: changed.controllerClientId,
+          controllerSubscriptionId: changed.controllerSubscriptionId,
         };
         this.controlBySession.set(changed.sessionName, state);
         for (const cb of this.controlCallbacks) {
@@ -332,7 +347,14 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
   }
 
   private relayBeginPayload(sessionId: string, opts?: RelayBeginOptions): Record<string, unknown> {
-    const payload: Record<string, unknown> = { session_id: sessionId };
+    const payload: Record<string, unknown> = {
+      session_id: sessionId,
+      // The page's subscription, forwarded by the Server into the Agent
+      // attach. Two same-origin tabs are two relays with one browser id; this
+      // is what keeps them separate subscriptions (and lets each recognise
+      // itself in `agent.terminal.control.changed`).
+      subscription_id: getOrCreateSubscriptionId(),
+    };
     if (opts?.relayUrl) {
       payload.relay_url = opts.relayUrl;
     }
@@ -485,6 +507,8 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
       role,
       generation: fields.generation,
       controllerClientId: fields.controllerClientId ?? getOrCreateClientId(),
+      controllerSubscriptionId:
+        fields.controllerSubscriptionId ?? getOrCreateSubscriptionId(),
       sessionName,
     });
     return { ok: true, generation: fields.generation, role };
@@ -505,6 +529,7 @@ export class TerminalServerPlugin implements TransportPlugin, TerminalServerApi 
         role: proof.control.role,
         generation: proof.control.generation,
         controllerClientId: proof.control.controllerClientId,
+        controllerSubscriptionId: proof.control.controllerSubscriptionId,
       };
       this.controlBySession.set(proof.sessionName, state);
       for (const cb of this.controlCallbacks) {

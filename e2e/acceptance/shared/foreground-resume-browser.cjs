@@ -21,7 +21,13 @@ function verifiedRuntime(criterion) {
 
 async function readBuffer(page) {
   return page.evaluate(() => {
-    const terminal = document.querySelector('.xterm')?.parentElement?.xtermInstance;
+    // A breakpoint change can mount a new surface while the previous one is
+    // still in the DOM; read the terminal the user is actually seeing.
+    const xterm = Array.from(document.querySelectorAll('.xterm')).find((el) => {
+      const rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    });
+    const terminal = xterm?.parentElement?.xtermInstance;
     if (!terminal) return '';
     const buffer = terminal.buffer.active;
     const lines = [];
@@ -39,13 +45,23 @@ async function countInBuffer(page, needle) {
 
 async function command(page, text) {
   await page.evaluate(value => {
-    const terminal = document.querySelector('.xterm')?.parentElement?.xtermInstance;
+    const xterm = Array.from(document.querySelectorAll('.xterm')).find((el) => {
+      const rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    });
+    const terminal = xterm?.parentElement?.xtermInstance;
     if (!terminal) throw new Error('xterm not attached');
     terminal.input(value + '\n', true);
   }, text);
 }
 
-async function createAndAttach(page, expect, runtime, prefix, mode = 'Relay') {
+// The CI runner's bash prompt. A Case may pass its own when the provisioned
+// shell is not that one (the local full-stack runner uses the host's zsh).
+const DEFAULT_READY_PATTERN = /runner:\S*\$/m;
+
+async function createAndAttach(
+  page, expect, runtime, prefix, mode = 'Relay', readyPattern = DEFAULT_READY_PATTERN,
+) {
   const wsUrl = 'ws://127.0.0.1:' + runtime.server_port + '/ws';
   await page.goto('/?token=e2e-test-token&server_url=' + encodeURIComponent(wsUrl));
   await expect(page.getByTestId('shell')).toBeVisible({ timeout: 25000 });
@@ -67,13 +83,19 @@ async function createAndAttach(page, expect, runtime, prefix, mode = 'Relay') {
   await expect(dialog).toBeVisible();
   await dialog.getByRole('button', { name: new RegExp('^' + mode + '\\b') }).click();
   const attach = dialog.getByRole('button', { name: 'Attach' });
-  await expect(attach).toBeEnabled({ timeout: 15000 });
-  await attach.click();
+  // A configure dialog that already carries a saved choice may start the
+  // attach on the mode selection and close itself; only click when it stays.
+  if (await attach.isVisible().catch(() => false)) {
+    await expect(attach).toBeEnabled({ timeout: 15000 });
+    await attach.click();
+  }
   await expect(dialog).not.toBeVisible({ timeout: 15000 });
   await expect(page.locator('.xterm')).toBeVisible({ timeout: 30000 });
   await expect(page.getByTestId('terminal-connecting')).toBeHidden({ timeout: 30000 });
   await expect(page.getByTestId('terminal-loading')).toBeHidden({ timeout: 30000 });
-  await expect.poll(async () => /runner:\S*\$/m.test(await readBuffer(page)), { timeout: 30000 }).toBe(true);
+  if (readyPattern) {
+    await expect.poll(async () => readyPattern.test(await readBuffer(page)), { timeout: 30000 }).toBe(true);
+  }
   await expect(page.locator('.xterm')).toHaveCount(1);
   await page.locator('.xterm').evaluate(el => el.setAttribute('data-1213-case-instance', 'original'));
   return { name, wsUrl };
@@ -91,23 +113,43 @@ async function assertTerminalContinuous(page, expect, before, after) {
 }
 
 
-async function attachExisting(page, expect, runtime, name, mode = 'P2P') {
+async function attachExisting(
+  page, expect, runtime, name, mode = 'P2P', readyPattern = DEFAULT_READY_PATTERN,
+) {
   const wsUrl = 'ws://127.0.0.1:' + runtime.server_port + '/ws';
   await page.goto('/?token=e2e-test-token&server_url=' + encodeURIComponent(wsUrl));
   await expect(page.getByTestId('shell')).toBeVisible({ timeout: 25000 });
   const row = page.locator('[data-testid="session-item-row"]', { hasText: name });
   await expect(row).toBeVisible({ timeout: 30000 });
-  await row.getByRole('button').first().click();
+  // The row's dedicated configure control opens the attach dialog; the row
+  // itself may navigate/attach directly depending on the shell state.
+  const configure = page.getByRole('button', { name: /Configure attach settings/ }).first();
+  if (await configure.isVisible().catch(() => false)) {
+    // The row container overlays its actions; the dedicated control is the
+    // intended target and stays enabled/stable.
+    await configure.click({ force: true });
+  } else {
+    await row.getByRole('button').first().click();
+  }
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();
   await dialog.getByRole('button', { name: new RegExp('^' + mode + '\\b') }).click();
   const attach = dialog.getByRole('button', { name: 'Attach' });
-  await expect(attach).toBeEnabled({ timeout: 15000 });
-  await attach.click();
+  // A configure dialog that already carries a saved choice may start the
+  // attach on the mode selection and close itself; only click when it stays.
+  if (await attach.isVisible().catch(() => false)) {
+    await expect(attach).toBeEnabled({ timeout: 15000 });
+    await attach.click();
+  }
   await expect(dialog).not.toBeVisible({ timeout: 15000 });
   await expect(page.locator('.xterm')).toBeVisible({ timeout: 30000 });
   await expect(page.getByTestId('terminal-connecting')).toBeHidden({ timeout: 30000 });
-  await expect.poll(async () => /runner:\S*\$/m.test(await readBuffer(page)), { timeout: 30000 }).toBe(true);
+  if (readyPattern) {
+    await expect.poll(async () => readyPattern.test(await readBuffer(page)), { timeout: 30000 }).toBe(true);
+  }
 }
 
-module.exports = { verifiedRuntime, createAndAttach, attachExisting, command, countInBuffer, assertTerminalContinuous };
+module.exports = {
+  verifiedRuntime, createAndAttach, attachExisting, command, countInBuffer, readBuffer,
+  assertTerminalContinuous,
+};

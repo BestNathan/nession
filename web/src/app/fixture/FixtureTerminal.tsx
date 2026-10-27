@@ -2,10 +2,11 @@ import { useEffect, useRef } from 'react';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import {
-  gridFor,
   measuredCellDimensionsOf,
   type PixelSize,
 } from '@/platform/terminal-runtime/grid';
+import { fitFontToColumns, rowsForHeight, MIN_TERMINAL_FIT_FONT_SIZE } from '@/platform/terminal-runtime/sizing';
+import { readTerminalClientConfig } from '@/platform/terminal-runtime/terminalConfig';
 import {
   NESSION_TERMINAL_THEME,
   TERMINAL_MINIMUM_CONTRAST_RATIO,
@@ -120,7 +121,10 @@ export function FixtureTerminal({
     let disposed = false;
     let teardown: (() => void) | undefined;
 
-    const metrics = PROFILES[detectProfile(window.innerWidth)];
+    const config = readTerminalClientConfig();
+    const profile = detectProfile(host.clientWidth || window.innerWidth);
+    const metrics = PROFILES[profile];
+    const maxFont = profile === 'mobile' ? metrics.fontSize : config.webMaxFontSize;
 
     // Opened only once the face this terminal renders with is loaded. xterm
     // measures one cell when it opens and every glyph afterwards is laid out
@@ -149,14 +153,17 @@ export function FixtureTerminal({
     // environment, not for coverage.
     const fonts = document.fonts;
     const fontsReady: Promise<unknown> = fonts
-      ? Promise.all([fonts.load(`${metrics.fontSize}px ${DEFAULT_FONT}`), fonts.ready])
+      ? Promise.all([fonts.load(`${maxFont}px ${DEFAULT_FONT}`), fonts.ready])
       : Promise.resolve();
 
     void fontsReady.then(() => {
       if (disposed) {
         return;
       }
-      teardown = startFixtureTerminal(host, metrics);
+      teardown = startFixtureTerminal(host, metrics, {
+        cols: config.cols,
+        maxFont,
+      });
     });
 
     return () => {
@@ -196,6 +203,7 @@ export function FixtureTerminal({
 function startFixtureTerminal(
   host: HTMLDivElement,
   metrics: (typeof PROFILES)[keyof typeof PROFILES],
+  fixed: { cols: number; maxFont: number },
 ): () => void {
   const term = new Terminal({
     theme: NESSION_TERMINAL_THEME,
@@ -214,12 +222,10 @@ function startFixtureTerminal(
   // well instead of the surface the product actually shows, and the visual gate
   // was protecting a screen no user sees.
   //
-  // Sized the way the product sizes it — `gridFor`, from the container's
-  // **content box**. `FitAddon` stood here and measured the parent's border
-  // box, so the `--terminal-pad-x` inset was never subtracted: the grid came
-  // out 11px wider than the well, 14px of inset on the left and 3px on the
-  // right, in every App baseline (#1092). The arithmetic is shared with
-  // `ResizeController` rather than reimplemented, so the fixture and the
+  // Sized the way the product sizes it (#2487): the column count is the
+  // build-config canonical value and never derived from the well's width; the
+  // font is the largest measured size that fits it. The arithmetic is shared
+  // with `ResizeController` rather than reimplemented, so the fixture and the
   // product cannot drift again; only the *observation* differs, because a
   // static fixture has no transport to publish cols/rows to and nothing to
   // debounce.
@@ -229,18 +235,42 @@ function startFixtureTerminal(
   let written = false;
   let frame = 0;
   let remaining = 0;
+  let fittedWidth = -1;
+  // Fit the font for this width once; the cell is re-read each frame so a
+  // renderer that settles later still yields the final grid.
+  const fitFont = () => {
+    if (size === null) { return false; }
+    if (fittedWidth === size.width) { return true; }
+    const fit = fitFontToColumns({
+      cols: fixed.cols,
+      availableWidth: size.width,
+      minFontSize: MIN_TERMINAL_FIT_FONT_SIZE,
+      maxFontSize: Math.max(MIN_TERMINAL_FIT_FONT_SIZE, fixed.maxFont),
+      measureCell: (fontSize) => {
+        term.options.fontSize = fontSize;
+        term.refresh(0, Math.max(0, term.rows - 1));
+        return measuredCellDimensionsOf(term);
+      },
+    });
+    if (fit === null) { return false; }
+    fittedWidth = size.width;
+    const contentWidth = fixed.cols * fit.cell.width;
+    host.style.setProperty('--nession-local-terminal-content-width', `${contentWidth}px`);
+    host.dataset.terminalColsFit = fit.fits ? 'true' : 'false';
+    return true;
+  };
   // Fit to the cell xterm reports, and skip the grid it already has. Both
   // halves matter while the cell is still settling: a resize to the same
   // dimensions is churn, and the write below must not be repeated.
   const applyGrid = () => {
-    if (size !== null) {
+    if (size !== null && fitFont()) {
       const cell = measuredCellDimensionsOf(term);
       // A cell of `null` is "the renderer has not measured one yet", not a
-      // measurement — and a grid fitted to the *fallback* is wrong
-      // permanently, because nothing corrects it: the observer fires again
-      // only when the host resizes. `FitAddon` declined to fit in this state
-      // too, which is the guard this replaced.
-      const grid = cell === null ? null : gridFor(size, cell);
+      // measurement — a grid fitted to the *fallback* is wrong permanently,
+      // because nothing corrects it: the observer fires again only when the
+      // host resizes. `FitAddon` declined to fit in this state too.
+      const rows = cell === null ? null : rowsForHeight(size.height, cell.height);
+      const grid = rows === null ? null : { cols: fixed.cols, rows };
       if (grid !== null && (term.cols !== grid.cols || term.rows !== grid.rows)) {
         term.resize(grid.cols, grid.rows);
       }

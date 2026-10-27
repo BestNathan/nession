@@ -26,6 +26,9 @@ services:
       # credential, so the agent refuses to start without one rather than
       # binding a socket that refuses every connection (#1013).
       AGENT_TOKEN: "change-me-standalone"
+      # Fixed terminal columns (#2487). The same value the Web image was
+      # built with; the Agent validates it and uses it for new Sessions.
+      NESSION_TERMINAL_COLS: "${NESSION_TERMINAL_COLS:-80}"
       LISTEN_PORT: "10080"
       SERVER_BACKEND: "127.0.0.1:19090"
     healthcheck:
@@ -51,6 +54,11 @@ services:
       SERVER_BACKEND: "127.0.0.1:18080"
       SERVER_AUTH_TOKEN: "${SERVER_AUTH_TOKEN:-}"
       SERVER_DB_PATH: "/data/server.db"
+      # Fixed terminal columns and the Web max font (#2487). Derived from the
+      # same release parameters as the Web build; the entrypoint writes them
+      # into config.toml and the Server validates them at startup.
+      NESSION_TERMINAL_COLS: "${NESSION_TERMINAL_COLS:-80}"
+      NESSION_TERMINAL_WEB_FONT_SIZE: "${NESSION_TERMINAL_WEB_FONT_SIZE:-14}"
     volumes:
       - server-data:/data
     healthcheck:
@@ -72,6 +80,7 @@ services:
       AGENT_ID: agent-remote
       AGENT_LISTEN: "0.0.0.0:19090"
       AGENT_SERVER_URL: "ws://server:18080"
+      NESSION_TERMINAL_COLS: "${NESSION_TERMINAL_COLS:-80}"
     depends_on:
       server:
         condition: service_healthy

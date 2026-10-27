@@ -167,7 +167,8 @@ async fn start_test_agent_server() -> anyhow::Result<(
             resize,
             credentials: Arc::clone(&credentials),
             mutations: Arc::clone(&mutations),
-            memory_threshold_percent: None,
+            tmux: Arc::new(SessionManager::new()),
+            terminal_cols: nession_common::config::DEFAULT_TERMINAL_COLS,
         },
     )?;
     let (handle, addr) = server.start().await?;
@@ -248,7 +249,7 @@ async fn test_full_agent_server_integration() {
     // Start heartbeat loop.
     let heartbeat = HeartbeatLoop::new(
         client_handle.clone(),
-        SessionManager::new(),
+        Arc::new(SessionManager::new()),
         1, // 1 second for testing
     );
     let heartbeat_shutdown = heartbeat.shutdown_handle();
@@ -339,6 +340,7 @@ async fn test_terminal_io_through_full_chain() {
         size_known: None,
         env_snapshots: Vec::new(),
         needs_bootstrap: None,
+        subscription_id: None,
     };
     let req = new_message(agent_msg_types::CLIENT_ATTACH, attach);
     let json = serde_json::to_string(&req).unwrap();
@@ -454,6 +456,7 @@ async fn test_session_lifecycle() {
         height: 24,
         working_dir: None,
         env_snapshots: Vec::new(),
+        terminal_cols: None,
     };
     let req = new_message(agent_msg_types::SESSION_CREATE, create);
     let json = serde_json::to_string(&req).unwrap();
@@ -630,14 +633,14 @@ async fn test_graceful_shutdown() {
     .unwrap();
 
     // Start heartbeat.
-    let heartbeat = HeartbeatLoop::new(client_handle.clone(), SessionManager::new(), 10);
+    let heartbeat = HeartbeatLoop::new(client_handle.clone(), Arc::new(SessionManager::new()), 10);
     let heartbeat_shutdown = heartbeat.shutdown_handle();
     tokio::spawn(async move {
         let _ = heartbeat.run().await;
     });
 
     // Start session watcher.
-    let watcher = SessionWatcher::new(client_handle.clone(), SessionManager::new(), 5);
+    let watcher = SessionWatcher::new(client_handle.clone(), Arc::new(SessionManager::new()), 5);
     let watcher_shutdown = watcher.shutdown_handle();
     tokio::spawn(async move {
         let _ = watcher.run().await;

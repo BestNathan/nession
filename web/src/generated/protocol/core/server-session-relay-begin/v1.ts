@@ -83,7 +83,18 @@ needs_bootstrap?: boolean | null,
  * and the Server forwards that to the agent, which inherits the pane's
  * current size instead of forcing one nobody chose.
  */
-size_known?: boolean | null, };
+size_known?: boolean | null, 
+/**
+ * The browser page's subscription identity, forwarded to the Agent
+ * attach this relay performs.
+ *
+ * The relay is one subscription: the Server opens its own Agent
+ * connection per relay, so two same-origin tabs are two relays with the
+ * same browser `client_id`. The id lets each tab recognise itself in
+ * `agent.terminal.control.changed`. Absence of this field is the same
+ * legacy identity rule as [`ClientAttachPayload::subscription_id`].
+ */
+subscription_id?: string | null, };
 export type SessionRefusal = { 
 /**
  * Always `"error"` today. A string rather than an enum because nothing
@@ -157,7 +168,18 @@ needs_bootstrap?: boolean | null,
  * and the Server forwards that to the agent, which inherits the pane's
  * current size instead of forcing one nobody chose.
  */
-size_known?: boolean | null, };
+size_known?: boolean | null, 
+/**
+ * The browser page's subscription identity, forwarded to the Agent
+ * attach this relay performs.
+ *
+ * The relay is one subscription: the Server opens its own Agent
+ * connection per relay, so two same-origin tabs are two relays with the
+ * same browser `client_id`. The id lets each tab recognise itself in
+ * `agent.terminal.control.changed`. Absence of this field is the same
+ * legacy identity rule as [`ClientAttachPayload::subscription_id`].
+ */
+subscription_id?: string | null, };
 
 /** The payload the provider answers with. */
 export type ClientRelayBeginReply = { 

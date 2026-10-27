@@ -34,7 +34,7 @@ struct SessionWatch {
 
 pub struct GitInvalidationWatcher {
     handle: ServerClientHandle,
-    tmux: SessionManager,
+    tmux: Arc<SessionManager>,
     resolve_workdir: Arc<dyn WorkdirResolver>,
     poll_interval: Duration,
     sessions: HashMap<String, SessionWatch>,
@@ -45,7 +45,7 @@ pub struct GitInvalidationWatcher {
 impl GitInvalidationWatcher {
     pub fn new(
         handle: ServerClientHandle,
-        tmux: SessionManager,
+        tmux: Arc<SessionManager>,
         resolve_workdir: Arc<dyn WorkdirResolver>,
         poll_interval_secs: u64,
     ) -> Self {

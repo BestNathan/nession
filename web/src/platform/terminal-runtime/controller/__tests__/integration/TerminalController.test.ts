@@ -416,7 +416,7 @@ describe('TerminalController', () => {
 
     // Legacy frames and local display bytes are not Agent timeline events.
     transport.onOutput!(new Uint8Array([67]));
-    transport.onResize!(100, 25);
+    transport.onResize!(80, 25);
     controller.write('local');
     h.finish();
     h.finish();
@@ -455,6 +455,89 @@ describe('TerminalController', () => {
     h.finish(); // disposed instance ignores even a previously queued callback
     expect(onStreamEventParsed).toHaveBeenCalledOnce();
     h.spy.mockRestore();
+  });
+
+  it('returns a retained renderer to the pane buffer and caret named by the bootstrap (#2464)', async () => {
+    const first = makeTransport();
+    const second = makeTransport();
+    const transports = [first, second];
+    const controller = new TerminalController(makeSession(), () => transports.shift()!);
+    controller.attach(host());
+    await flush();
+
+    // A TUI puts the retained xterm on the alternate screen.
+    first.onOutput!(new TextEncoder().encode('\x1b[?1049h'), undefined);
+    await flush();
+    expect(controller.terminal!.buffer.active.type).toBe('alternate');
+
+    // The transport is replaced while the pane has gone back to its normal
+    // screen. The second attach keeps the renderer, and the bootstrap states
+    // the buffer, clears it and places the caret — the Agent started emitting
+    // both in #2464. Neither the client's reset (which ran on the alternate
+    // buffer) nor the text alone can do this.
+    controller.attach(host());
+    await flush();
+    second.onOutput!(
+      new TextEncoder().encode('\x1b[?1049l\x1b[2J\x1b[Hshell\r\n\x1b[2;3H'),
+      {
+        requestedLines: 5000, truncated: false,
+        cutConsistency: 'unverified', fidelity: 'screen-only',
+      },
+    );
+    await flush();
+
+    expect(controller.terminal!.buffer.active.type).toBe('normal');
+    expect(controller.terminal!.buffer.active.getLine(0)?.translateToString(true))
+      .toContain('shell');
+    expect(controller.terminal!.buffer.active.cursorX).toBe(2);
+    expect(controller.terminal!.buffer.active.cursorY).toBe(1);
+    controller.dispose();
+  });
+
+  it('adopts the capture screen before parsing it, so the shrink that follows keeps the tail (#2483)', async () => {
+    const transport = makeTransport();
+    const controller = new TerminalController(makeSession(), () => transport);
+    controller.attach(host());
+    await flush();
+
+    // A reloaded page's renderer before its first measurement: a **taller**
+    // placeholder than the pane the capture came from. The snapshot's trailing
+    // absolute caret addresses a row on the pane's screen, so written here it
+    // would land above the end of the buffer and the shrink below would reflow
+    // away every line after it.
+    controller.terminal!.resize(80, 24);
+    await flush();
+
+    const lines = [
+      "runner:~$ printf '%s' 'x' | base64 -d > inline-repaint.sh",
+      'runner:~$ bash inline-repaint.sh',
+      ...Array.from(
+        { length: 20 },
+        (_, i) => `REPAINT-initial-${String(i + 1).padStart(4, '0')}`,
+      ),
+    ];
+    transport.onOutput!(
+      new TextEncoder().encode(`\x1b[2J\x1b[H${lines.join('\r\n')}\x1b[16;1H`),
+      {
+        requestedLines: 5000, truncated: false,
+        cutConsistency: 'atomic', fidelity: 'screen-only', streamEpoch: 3, throughSeq: 0,
+        paneCols: 80, paneRows: 16,
+      },
+    );
+    // The browser's own layout settles to the pane's size afterwards.
+    transport.onResize!(80, 16);
+    await flush();
+
+    expect(controller.terminal!.rows).toBe(16);
+    const buffer = controller.terminal!.buffer.active;
+    const text: string[] = [];
+    for (let i = 0; i < buffer.length; i += 1) {
+      const line = buffer.getLine(i);
+      if (line) { text.push(line.translateToString(true)); }
+    }
+    expect(text.join('\n').match(/REPAINT-initial-0020/g) ?? []).toHaveLength(1);
+    expect(text.join('\n')).toContain('REPAINT-initial-0001');
+    controller.dispose();
   });
 
   it('replaces scrollback only for an atomic full-VT complete checkpoint (#2008)', () => {
@@ -935,7 +1018,7 @@ describe('TerminalController', () => {
       expect(resize).not.toHaveBeenCalled();
 
       parser.finish();
-      expect(resize).toHaveBeenCalledWith(128, 37);
+      expect(resize).toHaveBeenCalledWith(80, 37);
       resize.mockRestore();
       parser.spy.mockRestore();
       controller.dispose();
@@ -962,14 +1045,14 @@ describe('TerminalController', () => {
         contentRect: { width: 1024, height: 600 },
       } as unknown as ResizeObserverEntry;
       capturedCallback!([entry], capturedObserver!);
-      expect(transport.sendResize).toHaveBeenLastCalledWith(128, 37);
+      expect(transport.sendResize).toHaveBeenLastCalledWith(80, 37);
       transport.sendResize.mockClear();
 
       controller.adoptControl();
 
       expect(restateResize).toHaveBeenCalledTimes(1);
-      expect(transport.sendResize).toHaveBeenCalledWith(128, 37);
-      expect(controller.terminal!.cols).toBe(128);
+      expect(transport.sendResize).toHaveBeenCalledWith(80, 37);
+      expect(controller.terminal!.cols).toBe(80);
       expect(controller.terminal!.rows).toBe(37);
     } finally {
       restore();
@@ -1003,7 +1086,7 @@ describe('TerminalController', () => {
       expect(resize).not.toHaveBeenCalled();
 
       parser.finish();
-      expect(resize).toHaveBeenCalledWith(128, 37);
+      expect(resize).toHaveBeenCalledWith(80, 37);
     } finally {
       restore();
     }
@@ -1042,14 +1125,16 @@ describe('TerminalController', () => {
       expect(controller.terminal!.cols).toBe(177);
       expect(controller.terminal!.rows).toBe(49);
       expect(transport.sendResize).not.toHaveBeenCalled();
-      expect(viewport).toHaveBeenLastCalledWith('agent1:sess', 212, 68);
+      // The Session's width is authoritative (#2487): the observer adopts the
+      // remote columns, and the passive box change may only alter rows.
+      expect(viewport).toHaveBeenLastCalledWith('agent1:sess', 177, 68);
 
       // A real takeover, unlike a passive ResizeObserver, must immediately
-      // remeasure the stored box, fit this xterm and send the new PTY size.
+      // remeasure the stored box, refit this xterm and send the new rows.
       controller.adoptControl();
-      expect(controller.terminal!.cols).toBe(212);
+      expect(controller.terminal!.cols).toBe(177);
       expect(controller.terminal!.rows).toBe(68);
-      expect(transport.sendResize).toHaveBeenCalledWith(212, 68);
+      expect(transport.sendResize).toHaveBeenCalledWith(177, 68);
     } finally {
       restore();
     }
@@ -1147,8 +1232,35 @@ describe('TerminalController', () => {
       const entry = { contentRect: { width: 1024, height: 600 } } as unknown as ResizeObserverEntry;
       capturedCallback!([entry], capturedObserver!);
 
-      // 1024/8=128, 600/16=37 (8×16 fallback cell size in jsdom).
-      expect(transport.sendResize).toHaveBeenCalledWith(128, 37);
+      // Fixed cols 80; 600/16=37 rows (8×16 fallback cell in jsdom).
+      expect(transport.sendResize).toHaveBeenCalledWith(80, 37);
+    } finally {
+      restore();
+    }
+  });
+
+  it('renders the Session\'s stated columns instead of the build value (#2487)', async () => {
+    const restore = installCapturingResizeObserver();
+    try {
+      const transport = makeTransport();
+      const el = host();
+      const controller = new TerminalController(makeSession(), () => transport, {
+        rendererType: 'canvas',
+        terminalCols: 96,
+      });
+      controller.attach(el);
+      await flush();
+
+      const entry = { contentRect: { width: 1024, height: 600 } } as unknown as ResizeObserverEntry;
+      capturedCallback!([entry], capturedObserver!);
+
+      expect(controller.terminal!.cols).toBe(96);
+      expect(controller.terminal!.rows).toBe(37);
+      expect(transport.sendResize).toHaveBeenCalledWith(96, 37);
+      expect(
+        el.style.getPropertyValue('--nession-local-terminal-content-width'),
+      ).toBe('768px');
+      controller.dispose();
     } finally {
       restore();
     }
@@ -1184,8 +1296,8 @@ describe('TerminalController', () => {
       capturedCallback!([entry], capturedObserver!);
 
       // The local grid follows at once, from the cell box xterm has now
-      // (8×16 fallback cells in jsdom): 1024/8=128, 600/16=37.
-      expect(controller.terminal!.cols).toBe(128);
+      // (8×16 fallback cells in jsdom): fixed cols 80, 600/16=37 rows.
+      expect(controller.terminal!.cols).toBe(80);
       expect(controller.terminal!.rows).toBe(37);
       // Nothing left the client — this grid is a size the pane never had.
       expect(transport.sendResize).not.toHaveBeenCalled();
@@ -1202,7 +1314,7 @@ describe('TerminalController', () => {
       // the `grid` this fire captured is what the browser measurement shows
       // (one SIGWINCH per reload instead of two — #1490).
       expect(transport.sendResize).toHaveBeenCalledTimes(1);
-      expect(transport.sendResize).toHaveBeenCalledWith(128, 37);
+      expect(transport.sendResize).toHaveBeenCalledWith(80, 37);
       controller.dispose();
     } finally {
       if (!hadFonts) { delete (document as { fonts?: unknown }).fonts; }
@@ -1246,19 +1358,22 @@ describe('TerminalController', () => {
       resolveReady();
       await flush();
       expect(transport.sendResize).toHaveBeenCalledTimes(1);
-      expect(transport.sendResize).toHaveBeenLastCalledWith(128, 37);
+      expect(transport.sendResize).toHaveBeenLastCalledWith(80, 37);
 
       // A later real container resize, while an unrelated face is loading.
+      // Height is what changes rows under fixed columns; width only re-fits
+      // the font, so a width-only change is deliberately not a PTY resize.
       fontsStub.status = 'loading';
       vi.useFakeTimers();
-      const grown = { contentRect: { width: 1200, height: 600 } } as unknown as ResizeObserverEntry;
+      const grown = { contentRect: { width: 1200, height: 640 } } as unknown as ResizeObserverEntry;
       capturedCallback!([grown], capturedObserver!);
-      expect(controller.terminal!.cols).toBe(150);
+      expect(controller.terminal!.cols).toBe(80);
+      expect(controller.terminal!.rows).toBe(40);
       vi.advanceTimersByTime(200);
 
       // The PTY hears it: the cell box this grid was computed from is final.
       expect(transport.sendResize).toHaveBeenCalledTimes(2);
-      expect(transport.sendResize).toHaveBeenLastCalledWith(150, 37);
+      expect(transport.sendResize).toHaveBeenLastCalledWith(80, 40);
       vi.useRealTimers();
       controller.dispose();
     } finally {
@@ -1294,7 +1409,7 @@ describe('TerminalController', () => {
       // The grid — and the session — take the well *minus* the band: 600/16
       // rows. Sizing to the well instead would draw rows the padding clips.
       expect(controller.terminal!.rows).toBe(33);
-      expect(transport.sendResize).toHaveBeenLastCalledWith(128, 33);
+      expect(transport.sendResize).toHaveBeenLastCalledWith(80, 33);
 
       vi.useFakeTimers();
       // History: the band is released, the content box grows by the same 60 px.
@@ -1311,7 +1426,7 @@ describe('TerminalController', () => {
       // the session was never told about it.
       const sent = (transport.sendResize.mock.calls as Array<[number, number]>)
         .map(([cols, rows]) => `${cols}x${rows}`);
-      expect([...new Set(sent)]).toEqual(['128x33']);
+      expect([...new Set(sent)]).toEqual(['80x33']);
       // What this mock cannot show is how many of those reach the wire: the
       // transport is the layer that knows what the session already has, and it
       // drops the repeats — see 'does not send a resize that repeats the size
@@ -1419,7 +1534,7 @@ describe('TerminalController', () => {
 
       vi.advanceTimersByTime(200);
       expect(transport.sendResize).toHaveBeenCalledTimes(2);
-      expect(transport.sendResize).toHaveBeenLastCalledWith(100, 25);
+      expect(transport.sendResize).toHaveBeenLastCalledWith(80, 25);
 
       vi.useRealTimers();
     } finally {
@@ -1444,7 +1559,7 @@ describe('TerminalController', () => {
       // First fire is immediate on both halves (8×16 fallback cells in jsdom).
       const entryA = { contentRect: { width: 1024, height: 600 } } as unknown as ResizeObserverEntry;
       capturedCallback!([entryA], capturedObserver!);
-      expect(controller.terminal!.cols).toBe(128);
+      expect(controller.terminal!.cols).toBe(80);
       expect(controller.terminal!.rows).toBe(37);
 
       vi.useFakeTimers();
@@ -1452,13 +1567,13 @@ describe('TerminalController', () => {
       // tick — no timer advance — or the two disagree on screen.
       const entryB = { contentRect: { width: 800, height: 400 } } as unknown as ResizeObserverEntry;
       capturedCallback!([entryB], capturedObserver!);
-      expect(controller.terminal!.cols).toBe(100);
+      expect(controller.terminal!.cols).toBe(80);
       expect(controller.terminal!.rows).toBe(25);
       // ...while tmux is still waiting on the debounce.
       expect(transport.sendResize).toHaveBeenCalledTimes(1);
 
       vi.advanceTimersByTime(200);
-      expect(transport.sendResize).toHaveBeenLastCalledWith(100, 25);
+      expect(transport.sendResize).toHaveBeenLastCalledWith(80, 25);
       vi.useRealTimers();
     } finally {
       vi.useRealTimers();
@@ -1475,10 +1590,10 @@ describe('TerminalController', () => {
 
       await flush(); // RAF fires → observe() captures the callback with 8×16 cells
 
-      // Pre-change: container 1024×600 with 8×16 cells → 128×37.
+      // Pre-change: container 1024×600 with 8×16 cells → fixed 80 cols, 37 rows.
       const entry = { contentRect: { width: 1024, height: 600 } } as unknown as ResizeObserverEntry;
       capturedCallback!([entry], capturedObserver!);
-      expect(transport.sendResize).toHaveBeenLastCalledWith(128, 37);
+      expect(transport.sendResize).toHaveBeenLastCalledWith(80, 37);
 
       // Simulate a font-size zoom: the render service now reports larger cells.
       const cell = (controller.terminal! as unknown as {
@@ -1491,16 +1606,16 @@ describe('TerminalController', () => {
       const rc = (controller as unknown as { resizeController: { remeasure(): void } }).resizeController;
       rc.remeasure();
 
-      // 1024/10=102, 600/20=30 — strictly smaller than the pre-zoom 128×37,
+      // fixed cols 80, 600/20=30 rows — smaller than the pre-zoom 37 rows,
       // proving remeasure read the live cell size, not the stale 8×16 stash.
       //
       // Asserted as two facts rather than one spied call: the local grid
       // follows the cell box and the *reported* size follows it minus the
       // container's own inset (`reportedGrid`). They coincide here only
       // because jsdom computes no padding.
-      expect(controller.terminal!.cols).toBe(102);
+      expect(controller.terminal!.cols).toBe(80);
       expect(controller.terminal!.rows).toBe(30);
-      expect(transport.sendResize).toHaveBeenLastCalledWith(102, 30);
+      expect(transport.sendResize).toHaveBeenLastCalledWith(80, 30);
     } finally {
       restore();
     }
@@ -1519,7 +1634,7 @@ describe('TerminalController', () => {
       // Fire the observer once so ResizeController.lastContainer is live.
       const entry = { contentRect: { width: 1024, height: 600 } } as unknown as ResizeObserverEntry;
       capturedCallback!([entry], capturedObserver!);
-      expect(transport.sendResize).toHaveBeenLastCalledWith(128, 37);
+      expect(transport.sendResize).toHaveBeenLastCalledWith(80, 37);
 
       // Clear so the assertions below only see the zoom-triggered resize.
       transport.sendResize.mockClear();

@@ -43,7 +43,21 @@ build_time: string,
  * field serves `null` rather than failing to parse, and a client reading it
  * gets "this server did not say" rather than a decode error.
  */
-protocol_manifest?: ProtocolManifest | null, };
+protocol_manifest?: ProtocolManifest | null, 
+/**
+ * The fixed column count this Server selects for a new Session (#2487).
+ *
+ * A Web build compares its embedded value with this one. It is the
+ * Server's release configuration, not a claim about an existing Session —
+ * that width belongs to the Session's tmux pane and is stated by the
+ * Agent on attach.
+ */
+terminal_cols?: number | null, 
+/**
+ * The Web maximum CSS font size mirrored for configuration introspection
+ * (#2487). The Server does not apply it to a PTY.
+ */
+terminal_web_font_size?: number | null, };
 export type ProtocolManifest = { 
 /**
  * Who offers this set — an agent id, a server, a runtime name.
@@ -104,5 +118,19 @@ build_time: string,
  * field serves `null` rather than failing to parse, and a client reading it
  * gets "this server did not say" rather than a decode error.
  */
-protocol_manifest?: ProtocolManifest | null, };
+protocol_manifest?: ProtocolManifest | null, 
+/**
+ * The fixed column count this Server selects for a new Session (#2487).
+ *
+ * A Web build compares its embedded value with this one. It is the
+ * Server's release configuration, not a claim about an existing Session —
+ * that width belongs to the Session's tmux pane and is stated by the
+ * Agent on attach.
+ */
+terminal_cols?: number | null, 
+/**
+ * The Web maximum CSS font size mirrored for configuration introspection
+ * (#2487). The Server does not apply it to a PTY.
+ */
+terminal_web_font_size?: number | null, };
 

@@ -86,6 +86,10 @@ pub enum HandlerAction {
         /// bootstrap (#321), forwarded verbatim into the `agent.attach` the
         /// Server builds. `None` leaves the agent to decide.
         needs_bootstrap: Option<bool>,
+        /// The browser page's subscription identity, forwarded verbatim into
+        /// the `agent.attach` the Server builds. Absent is the v1 rule: the
+        /// stable client id is the subscription.
+        subscription_id: Option<String>,
     },
     /// Close the connection.
     Close,
@@ -161,6 +165,8 @@ impl Clone for ConnectionHandler {
             config: ConnectionHandlerConfig {
                 server_auth_token: self.config.server_auth_token.clone(),
                 heartbeat_interval_secs: self.config.heartbeat_interval_secs,
+                terminal_cols: self.config.terminal_cols,
+                terminal_web_font_size: self.config.terminal_web_font_size,
             },
             authenticated_client: self.authenticated_client,
             registered_agent_id: self.registered_agent_id.clone(),
@@ -177,6 +183,10 @@ impl Clone for ConnectionHandler {
 pub struct ConnectionHandlerConfig {
     pub server_auth_token: String,
     pub heartbeat_interval_secs: u64,
+    /// The release-selected fixed column count (#2487).
+    pub terminal_cols: u16,
+    /// The Web maximum CSS font size, mirrored for introspection (#2487).
+    pub terminal_web_font_size: f64,
 }
 
 /// Shared dependencies for a connection handler.

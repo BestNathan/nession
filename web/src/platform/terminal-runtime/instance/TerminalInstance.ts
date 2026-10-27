@@ -32,6 +32,9 @@ export const DEFAULT_FONT =
  */
 const BASELINE_METRICS = TERMINAL_METRICS.web;
 
+/** Why the cell box changed: a user zoom, or the webfont settling. */
+export type CellSizeChangeReason = 'zoom' | 'font-load';
+
 /**
  * Start fetching the terminal face at module load rather than at first paint.
  * xterm measures one cell once, when it opens; see {@link TerminalInstance.remeasureOnFontLoad}
@@ -50,7 +53,7 @@ export class TerminalInstance {
   readonly terminal: Terminal;
   readonly fontSizeManager: FontSizeManager;
   private disposed = false;
-  private fontSizeCallback: () => void = () => {};
+  private fontSizeCallback: (reason: CellSizeChangeReason) => void = () => {};
 
   constructor(options: TerminalInstanceOptions) {
     const initialFontSize = options.fontSize ?? BASELINE_METRICS.fontSize;
@@ -82,13 +85,24 @@ export class TerminalInstance {
 
     this.fontSizeManager = new FontSizeManager(
       this.terminal,
-      () => this.fontSizeCallback(),
+      () => this.fontSizeCallback('zoom'),
       initialFontSize,
     );
   }
 
-  set onCellSizeChange(cb: () => void) {
+  set onCellSizeChange(cb: (reason: CellSizeChangeReason) => void) {
     this.fontSizeCallback = cb;
+  }
+
+  /**
+   * Apply a font size for fixed-column fitting and return the cell xterm
+   * measured at it. `refresh` forces the re-measure immediately; without it
+   * the caller would read the previous font's cell.
+   */
+  setFontSize(size: number): { width: number; height: number } {
+    this.terminal.options.fontSize = size;
+    this.terminal.refresh(0, Math.max(0, this.terminal.rows - 1));
+    return this.cellDimensions;
   }
 
   /** Attach xterm to container. Uses open() which preserves JS state. */
@@ -132,7 +146,7 @@ export class TerminalInstance {
       const family = this.terminal.options.fontFamily ?? DEFAULT_FONT;
       this.terminal.options.fontFamily = `${family} `;
       this.terminal.options.fontFamily = family;
-      this.fontSizeCallback();
+      this.fontSizeCallback('font-load');
     });
   }
 

@@ -3,6 +3,11 @@ import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
+import {
+  TERMINAL_COLS_ENV,
+  TERMINAL_WEB_FONT_SIZE_ENV,
+  parseTerminalBuildConfig,
+} from './src/platform/terminal-runtime/terminalConfig'
 
 /** Override in web/.env.development.local, e.g. http://staging.nession.nhome.local */
 function devWsProxyTarget(mode: string): string {
@@ -12,6 +17,29 @@ function devWsProxyTarget(mode: string): string {
 
 export default defineConfig(({ mode }) => {
   const devWsProxy = devWsProxyTarget(mode)
+
+  // #2487 SC-07: validate the optional fixed-cols / Web-max-font build inputs
+  // before producing a bundle. The same parser runs in the app, so the build
+  // and the artifact cannot disagree about what an input means. Values come
+  // from .env files and the process environment, with the explicit process
+  // value winning (CI passes them there).
+  const env = { ...loadEnv(mode, __dirname, 'VITE_'), ...process.env }
+  const terminal = parseTerminalBuildConfig({
+    [TERMINAL_COLS_ENV]: env[TERMINAL_COLS_ENV],
+    [TERMINAL_WEB_FONT_SIZE_ENV]: env[TERMINAL_WEB_FONT_SIZE_ENV],
+  })
+  if (terminal.errors.length > 0) {
+    throw new Error(
+      'Invalid terminal build configuration:\n  ' + terminal.errors.join('\n  '),
+    )
+  }
+  console.log('WEB_TERMINAL_CONFIG_V1 ' + JSON.stringify({
+    schema_version: 1,
+    cols: terminal.config.cols,
+    web_max_font_size: terminal.config.webMaxFontSize,
+    cols_source: terminal.sources.cols,
+    web_font_source: terminal.sources.webMaxFontSize,
+  }))
 
   return {
   plugins: [tailwindcss(), react()],

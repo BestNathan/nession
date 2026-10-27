@@ -50,6 +50,19 @@ async fn start_server_in_mode(
     nession_agent::server::ServerHandle,
     Arc<P2pCredentials>,
 )> {
+    start_server_with_terminal_cols(mode, nession_common::config::DEFAULT_TERMINAL_COLS).await
+}
+
+/// Same server, with the Agent's configured fixed column count chosen by the
+/// test (#2487). This is the standalone policy: no Server is in the path.
+async fn start_server_with_terminal_cols(
+    mode: AttachMode,
+    terminal_cols: u16,
+) -> anyhow::Result<(
+    SocketAddr,
+    nession_agent::server::ServerHandle,
+    Arc<P2pCredentials>,
+)> {
     let tmp = Box::leak(Box::new(tempfile::tempdir()?));
     let (resize, _resize_updates) = nession_agent::server::ResizeReporter::new();
     // Built, granted into, and only then handed to the listener — the store the
@@ -73,7 +86,8 @@ async fn start_server_in_mode(
             resize,
             credentials: Arc::clone(&credentials),
             mutations: nession_agent::execution::mutation_scheduler(),
-            memory_threshold_percent: None,
+            tmux: Arc::new(SessionManager::new()),
+            terminal_cols,
         },
     )?;
     let (handle, addr) = server.start().await?;
@@ -142,6 +156,7 @@ async fn integration_session_create_and_kill() {
         height: 24,
         working_dir: None,
         env_snapshots: Vec::new(),
+        terminal_cols: None,
     };
     let req = new_message(msg_types::SESSION_CREATE, create);
     let resp: nession_agent::server::websocket::Message<SessionCreateResponse> =
@@ -325,6 +340,7 @@ async fn integration_client_attach_creates_pty() {
         size_known: None,
         env_snapshots: Vec::new(),
         needs_bootstrap: None,
+        subscription_id: None,
     };
     let req = new_message(msg_types::CLIENT_ATTACH, attach);
     let resp: nession_agent::server::websocket::Message<ClientAttachResponse> =
@@ -346,17 +362,15 @@ async fn integration_client_attach_creates_pty() {
     handle.shutdown().await.ok();
 }
 
-/// #2268 SC-03: the size a created session has is the attaching client's.
+/// #2487 SC-01: an existing Session keeps its columns; an attach states rows.
 ///
-/// Creation states no dimensions (the manager ignores any it is handed), so the
-/// window starts at the Agent's default. The first attach resizes it to the
-/// size that client states — which is why the CLI no longer offers a create-time
-/// `--width`/`--height`: they were a second, losing owner of this decision.
-///
-/// The create size here (80×24) is deliberately different from the attach size
-/// (111×41), so the assertion can only pass if the attach moved the pane.
+/// This replaces the #2268 SC-03 expectation that the first attaching client
+/// sets both dimensions. Since #2487 the Session's width is authoritative: the
+/// pane created at 80 stays 80 even when a client states 111, while the
+/// client's measured height still becomes the pane's rows. The reply carries
+/// the width the client must render.
 #[tokio::test]
-async fn integration_attach_supplies_the_effective_session_size() {
+async fn integration_attach_keeps_session_columns_and_applies_rows() {
     let (addr, handle, credentials) = start_server(0).await.unwrap();
 
     let tmux = SessionManager::new();
@@ -378,11 +392,17 @@ async fn integration_attach_supplies_the_effective_session_size() {
         size_known: None,
         env_snapshots: Vec::new(),
         needs_bootstrap: None,
+        subscription_id: None,
     };
     let req = new_message(msg_types::CLIENT_ATTACH, attach);
     let resp: nession_agent::server::websocket::Message<ClientAttachResponse> =
         round_trip(&mut sink, &mut stream, &req).await.unwrap();
     assert_eq!(resp.msg_type, msg_types::OK);
+    assert_eq!(
+        resp.payload.terminal_cols,
+        Some(80),
+        "the reply must state the Session's width, not the client's"
+    );
 
     // tmux is the application-visible truth; the resize is applied by the
     // attach path, so allow it the same bounded settle the other resize tests
@@ -395,15 +415,15 @@ async fn integration_attach_supplies_the_effective_session_size() {
             .window_size(&session_name)
             .await
             .expect("the session has a tmux window");
-        if pane == (111, 41) {
+        if pane == (80, 41) {
             break;
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     assert_eq!(
         pane,
-        (111, 41),
-        "the attaching client's size did not become the shared pane size"
+        (80, 41),
+        "the Session's columns must survive an attach; rows follow the client"
     );
 
     let detach = ClientDetachPayload {
@@ -412,6 +432,276 @@ async fn integration_attach_supplies_the_effective_session_size() {
     let req = new_message(msg_types::CLIENT_DETACH, detach);
     let _: nession_agent::server::websocket::Message<ClientDetachResponse> =
         round_trip(&mut sink, &mut stream, &req).await.unwrap();
+
+    tmux.kill_session(&session_name).await.ok();
+    handle.shutdown().await.ok();
+}
+
+/// #2487 SC-01/SC-09: a Session with no pane is created at the configured
+/// width, a later client cannot change it, and an authorized resize applies
+/// the Session's columns with the controller's rows.
+#[tokio::test]
+async fn integration_new_session_uses_configured_columns_and_clamps_resize() {
+    let (addr, handle, credentials) = start_server(0).await.unwrap();
+    let tmux = SessionManager::new();
+    let session = TestSession::new("fixed-cols");
+    let session_name = session.name().to_string();
+    let expected_cols = nession_common::config::DEFAULT_TERMINAL_COLS;
+
+    // An explicit create carries no terminal_cols, so the Agent's configured
+    // value decides the width. The caller's `width` placeholder is not used.
+    let (mut sink, mut stream) = connect_for(&credentials, addr, &session_name)
+        .await
+        .unwrap();
+    let create = SessionCreatePayload {
+        name: session_name.clone(),
+        width: 80,
+        height: 24,
+        working_dir: None,
+        env_snapshots: Vec::new(),
+        terminal_cols: None,
+    };
+    let req = new_message(msg_types::SESSION_CREATE, create);
+    let created: nession_agent::server::websocket::Message<SessionCreateResponse> =
+        round_trip(&mut sink, &mut stream, &req).await.unwrap();
+    assert_eq!(created.msg_type, msg_types::OK);
+
+    let mut pane = (0, 0);
+    for _ in 0..50 {
+        pane = tmux
+            .tmux_dep()
+            .ops()
+            .window_size(&session_name)
+            .await
+            .expect("the create produced a tmux window");
+        if pane.0 == expected_cols {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(
+        pane.0, expected_cols,
+        "a new Session must be created at the configured width"
+    );
+
+    // The first client states a different width and a measured height. The
+    // Session's columns win; its rows are the client's.
+    let first = ClientAttachPayload {
+        session_name: session_name.clone(),
+        width: 80,
+        height: 30,
+        size_known: None,
+        env_snapshots: Vec::new(),
+        needs_bootstrap: None,
+        subscription_id: None,
+    };
+    let req = new_message(msg_types::CLIENT_ATTACH, first);
+    let resp: nession_agent::server::websocket::Message<ClientAttachResponse> =
+        round_trip(&mut sink, &mut stream, &req).await.unwrap();
+    assert_eq!(resp.msg_type, msg_types::OK);
+    assert_eq!(resp.payload.terminal_cols, Some(expected_cols));
+
+    // The first attach applies its measured height. Let that resize land
+    // before a second client reads the pane: on a loaded runner the read
+    // raced it, the second attach adopted the create-size rows, and the
+    // Session moved — which is the attach rule under test, not a property of
+    // the fixture's speed.
+    let mut attached_pane = (0, 0);
+    for _ in 0..50 {
+        attached_pane = tmux
+            .tmux_dep()
+            .ops()
+            .window_size(&session_name)
+            .await
+            .expect("the session still has a tmux window");
+        if attached_pane == (expected_cols, 30) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(
+        attached_pane,
+        (expected_cols, 30),
+        "the first attach's rows must be applied before a second client reads the Session"
+    );
+
+    // A second, measured client asks for a different width. Attaching as a
+    // subscriber does not move a live Session at all; the reply states the
+    // width it must render.
+    let (mut sink2, mut stream2) = connect_for(&credentials, addr, &session_name)
+        .await
+        .unwrap();
+    let second = ClientAttachPayload {
+        session_name: session_name.clone(),
+        width: 140,
+        height: 50,
+        size_known: None,
+        env_snapshots: Vec::new(),
+        needs_bootstrap: None,
+        subscription_id: None,
+    };
+    let req = new_message(msg_types::CLIENT_ATTACH, second);
+    let resp2: nession_agent::server::websocket::Message<ClientAttachResponse> =
+        round_trip(&mut sink2, &mut stream2, &req).await.unwrap();
+    assert_eq!(resp2.msg_type, msg_types::OK);
+    assert_eq!(resp2.payload.terminal_cols, Some(expected_cols));
+    assert_eq!(
+        tmux.tmux_dep()
+            .ops()
+            .window_size(&session_name)
+            .await
+            .expect("the session still has a tmux window"),
+        (expected_cols, 30),
+        "a second attach must not reflow the live Session"
+    );
+
+    // Taking the lease lets the second client state rows. Its width is still
+    // clamped by the Session.
+    let _: nession_agent::server::websocket::Message<
+        nession_agent::server::websocket::TerminalControlAcquireResponse,
+    > = round_trip(
+        &mut sink2,
+        &mut stream2,
+        &new_message(
+            msg_types::TERMINAL_CONTROL_ACQUIRE,
+            nession_agent::server::websocket::TerminalControlAcquirePayload {
+                session_name: session_name.clone(),
+            },
+        ),
+    )
+    .await
+    .unwrap();
+    let resize = nession_agent::server::websocket::TerminalResizePayload {
+        session_name: session_name.clone(),
+        cols: 200,
+        rows: 40,
+        control_generation: None,
+        stream_epoch: None,
+        stream_seq: None,
+    };
+    let req = new_message(msg_types::TERMINAL_RESIZE, resize);
+    let _: nession_agent::server::websocket::Message<serde_json::Value> =
+        round_trip(&mut sink2, &mut stream2, &req).await.unwrap();
+    let mut pane3 = (0, 0);
+    for _ in 0..50 {
+        pane3 = tmux
+            .tmux_dep()
+            .ops()
+            .window_size(&session_name)
+            .await
+            .expect("the session still has a tmux window");
+        if pane3 == (expected_cols, 40) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(
+        pane3,
+        (expected_cols, 40),
+        "a resize may change rows, never the Session's columns"
+    );
+
+    // Detaching is cleanup, not the assertion: a subscriber the fan-out may
+    // already have dropped for not draining can answer `not_attached`, and
+    // that is not this test's subject.
+    for sink in [&mut sink, &mut sink2] {
+        let detach = ClientDetachPayload {
+            session_name: session_name.clone(),
+        };
+        let req = new_message(msg_types::CLIENT_DETACH, detach);
+        sink.send(WsMessage::Text(serde_json::to_string(&req).unwrap()))
+            .await
+            .ok();
+    }
+    tmux.kill_session(&session_name).await.ok();
+    handle.shutdown().await.ok();
+}
+
+/// #2487 SC-09: a standalone Agent (no Server) creates Sessions at its own
+/// configured width, and the attach reply states that width.
+#[tokio::test]
+async fn integration_standalone_agent_uses_its_configured_columns() {
+    let configured = 96;
+    let (addr, handle, credentials) =
+        start_server_with_terminal_cols(AttachMode::Plain, configured)
+            .await
+            .unwrap();
+    let tmux = SessionManager::new();
+    let session = TestSession::new("standalone-cols");
+    let session_name = session.name().to_string();
+    let (mut sink, mut stream) = connect_for(&credentials, addr, &session_name)
+        .await
+        .unwrap();
+
+    let create = SessionCreatePayload {
+        name: session_name.clone(),
+        width: 80,
+        height: 24,
+        working_dir: None,
+        env_snapshots: Vec::new(),
+        // No Server stated a value, so the Agent's own configuration decides.
+        terminal_cols: None,
+    };
+    let req = new_message(msg_types::SESSION_CREATE, create);
+    let created: nession_agent::server::websocket::Message<SessionCreateResponse> =
+        round_trip(&mut sink, &mut stream, &req).await.unwrap();
+    assert_eq!(created.msg_type, msg_types::OK);
+
+    let mut pane = (0, 0);
+    for _ in 0..50 {
+        pane = tmux
+            .tmux_dep()
+            .ops()
+            .window_size(&session_name)
+            .await
+            .expect("the create produced a tmux window");
+        if pane.0 == configured {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    if pane.0 != configured {
+        // The pane is the application-visible truth, so a failure here has to
+        // say what tmux actually holds: the session the query resolved and
+        // every other session on the socket are the two answers that separate
+        // "the configured width did not apply" from "the read found another
+        // session" (observed once on a loaded runner).
+        let sessions = match tmux.tmux_dep().ops().list_sessions().await {
+            Ok(list) => list
+                .into_iter()
+                .map(|s| format!("{}={}x{}", s.name, s.width, s.height))
+                .collect::<Vec<_>>()
+                .join(", "),
+            Err(error) => format!("<list-sessions failed: {error:#}>"),
+        };
+        panic!(
+            "the standalone Agent's width must apply: pane={pane:?} \
+             configured={configured} session={session_name} sessions=[{sessions}]"
+        );
+    }
+    assert_eq!(
+        pane.0, configured,
+        "the standalone Agent's width must apply"
+    );
+
+    let attach = ClientAttachPayload {
+        session_name: session_name.clone(),
+        width: 140,
+        height: 30,
+        size_known: None,
+        env_snapshots: Vec::new(),
+        needs_bootstrap: None,
+        subscription_id: None,
+    };
+    let req = new_message(msg_types::CLIENT_ATTACH, attach);
+    let resp: nession_agent::server::websocket::Message<ClientAttachResponse> =
+        round_trip(&mut sink, &mut stream, &req).await.unwrap();
+    assert_eq!(resp.msg_type, msg_types::OK);
+    assert_eq!(
+        resp.payload.terminal_cols,
+        Some(configured),
+        "a standalone attach must state the Agent's configured width"
+    );
 
     tmux.kill_session(&session_name).await.ok();
     handle.shutdown().await.ok();
@@ -461,6 +751,7 @@ async fn a_second_attach_on_the_same_connection_is_answered() {
                 // The history is not what is under test, and asking for it
                 // would only give the misjudged close a longer window.
                 needs_bootstrap: Some(false),
+                subscription_id: None,
             },
         )
     };
@@ -532,6 +823,7 @@ async fn a_plain_second_attach_sends_bootstrap_before_ok_when_asked() {
             size_known: None,
             env_snapshots: Vec::new(),
             needs_bootstrap: Some(false),
+            subscription_id: None,
         },
     );
     let resp: nession_agent::server::websocket::Message<ClientAttachResponse> =
@@ -544,7 +836,29 @@ async fn a_plain_second_attach_sends_bootstrap_before_ok_when_asked() {
         .send_keys(&session_name, &format!("echo {marker}\n"))
         .await
         .unwrap();
-    tokio::time::sleep(Duration::from_millis(400)).await;
+    // The session shell is started by tmux, so its readiness depends on load;
+    // a fixed sleep raced the instrumented coverage suite on a busy host. Wait
+    // for the marker to actually reach the pane instead of assuming it has.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let pane = TmuxDep::global()
+            .ops()
+            .capture_pane(&session_name, 200)
+            .await
+            .unwrap();
+        let produced = pane
+            .as_deref()
+            .map(|bytes| String::from_utf8_lossy(bytes).contains(marker))
+            .unwrap_or(false);
+        if produced {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the session shell never produced {marker}: {pane:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
 
     // Drop anything the first attach's forwarder still had on the socket, so
     // only the second attach's ordering is under test.
@@ -561,6 +875,7 @@ async fn a_plain_second_attach_sends_bootstrap_before_ok_when_asked() {
             size_known: None,
             env_snapshots: Vec::new(),
             needs_bootstrap: Some(true),
+            subscription_id: None,
         },
     );
     sink.send(WsMessage::Text(serde_json::to_string(&second).unwrap()))
@@ -697,6 +1012,7 @@ async fn a_plain_first_attach_sends_the_history_it_was_asked_for() {
         size_known: None,
         env_snapshots: Vec::new(),
         needs_bootstrap: None,
+        subscription_id: None,
     };
     let req = new_message(msg_types::CLIENT_ATTACH, attach);
     sink.send(WsMessage::Text(serde_json::to_string(&req).unwrap()))
@@ -808,6 +1124,253 @@ async fn a_plain_first_attach_sends_the_history_it_was_asked_for() {
     handle.shutdown().await.ok();
 }
 
+/// #2464 SC-01: a screen-only bootstrap restores the pane's caret.
+///
+/// The pane writes a header, moves its cursor to an empty row and blocks
+/// there. Text alone cannot express that position, so the bootstrap must carry
+/// the absolute placement the Agent read from tmux; before #2464 it ended at
+/// the last written row and the next live byte landed a row too high.
+#[tokio::test]
+async fn a_plain_bootstrap_restores_a_caret_the_pane_left_on_an_empty_row() {
+    let (addr, handle, credentials) = start_server(0).await.unwrap();
+    let tmux = SessionManager::new();
+    let session = TestSession::new("plain-caret");
+    let session_name = session.name().to_string();
+    // A wide starting pane keeps the fixture's command on one line: the test
+    // is about the caret row the bootstrap restores, not about wrapping. The
+    // width is explicit because `create_session` now honours it (#2487).
+    tmux.create_session(&session_name, 200, 24, "/tmp", &[])
+        .await
+        .unwrap();
+
+    let marker = "PLAIN-CARET-MARKER";
+    // A blocking `cat` after the escape keeps a shell from redrawing its prompt
+    // at the caret: the pane is left with its cursor on an otherwise empty row
+    // while the last row anything was written to is the marker's.
+    let mut setup = String::from("sh -c 'echo ");
+    setup.push_str(marker);
+    setup.push_str("; printf \"\\033[11;6H\"; cat > /dev/null'\n");
+    TmuxDep::global()
+        .ops()
+        .send_keys(&session_name, &setup)
+        .await
+        .unwrap();
+
+    // Waited on the cursor query itself: it is the same query the bootstrap
+    // makes, so a wrong reading fails here rather than as a mysterious wire
+    // assertion.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let position = TmuxDep::global()
+            .ops()
+            .pane_cursor(&session_name)
+            .await
+            .expect("the pane cursor query works against a real tmux");
+        if position.1 >= 10 {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the fixture never parked the caret on an empty row: {position:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    // Attach at the window's own size: a size change makes tmux reset the
+    // caret column, which would move the pane away from the position this
+    // fixture is about. The bootstrap still has to place the caret.
+    let (cols, rows) = TmuxDep::global()
+        .ops()
+        .window_size(&session_name)
+        .await
+        .expect("the window size query works against a real tmux");
+
+    let (mut sink, mut stream) = connect_for(&credentials, addr, &session_name)
+        .await
+        .unwrap();
+    let attach = new_message(
+        msg_types::CLIENT_ATTACH,
+        ClientAttachPayload {
+            session_name: session_name.clone(),
+            width: cols,
+            height: rows,
+            size_known: None,
+            env_snapshots: Vec::new(),
+            needs_bootstrap: Some(true),
+            subscription_id: None,
+        },
+    );
+    sink.send(WsMessage::Text(serde_json::to_string(&attach).unwrap()))
+        .await
+        .unwrap();
+
+    let mut bootstrap: Option<serde_json::Value> = None;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let frame = tokio::time::timeout(Duration::from_secs(2), stream.next())
+            .await
+            .expect("timeout waiting for the attach response")
+            .expect("stream ended")
+            .expect("error reading the attach response");
+        let WsMessage::Text(text) = frame else {
+            continue;
+        };
+        let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
+        match parsed["msg_type"].as_str().unwrap_or("") {
+            msg_types::OK => break,
+            msg_types::TERMINAL_OUTPUT => {
+                if let Some(bootstrap_field) = parsed["payload"].get("bootstrap") {
+                    bootstrap = Some(serde_json::json!({
+                        "data": parsed["payload"]["data"].clone(),
+                        "bootstrap": bootstrap_field.clone(),
+                    }));
+                }
+            }
+            _ => {}
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out waiting for ok, last frames: {bootstrap:?}"
+        );
+    }
+
+    let bootstrap = bootstrap.expect("a first attach sent no bootstrap");
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(
+            bootstrap["data"]
+                .as_str()
+                .expect("bootstrap data is base64"),
+        )
+        .expect("bootstrap payload is valid base64");
+    assert!(
+        String::from_utf8_lossy(&bytes).contains(marker),
+        "the bootstrap does not carry the marker: {:?}",
+        String::from_utf8_lossy(&bytes[bytes.len().saturating_sub(120)..])
+    );
+    // The caret is read after the attach: an attach that changes the window
+    // size makes tmux clamp/reset the caret column, so the position the
+    // bootstrap must restore is the pane's **post-resize** one.
+    let (cursor_x, cursor_y, _pane_height) = TmuxDep::global()
+        .ops()
+        .pane_cursor(&session_name)
+        .await
+        .expect("the pane cursor still answers after the bootstrap");
+    assert!(
+        cursor_y >= 10,
+        "the attach moved the pane off the empty caret row: ({cursor_x},{cursor_y})"
+    );
+    let expected = nession_agent::server::bootstrap::cursor_escape(cursor_x, cursor_y);
+    assert!(
+        bytes
+            .windows(expected.len())
+            .any(|window| window == expected.as_slice()),
+        "the bootstrap does not place the caret at the pane's empty row \
+         ({cursor_x},{cursor_y}): {:?}",
+        String::from_utf8_lossy(&bytes[bytes.len().saturating_sub(160)..])
+    );
+    // The caret can only land there if the blank rows above it were kept —
+    // that is the trimming floor, and it is what makes the row index mean the
+    // pane's row rather than "the row after the last text".
+    let text = String::from_utf8_lossy(&bytes);
+    let breaks = text.matches("\r\n").count();
+    assert!(
+        breaks >= usize::from(cursor_y),
+        "the stream kept {breaks} line breaks but the caret row is {cursor_y}: \n{text:?}"
+    );
+    assert_eq!(
+        bootstrap["bootstrap"]["fidelity"].as_str(),
+        Some("screen-only"),
+        "a complete capture with modes and caret is a screen reconstruction, \
+         neither a full VT checkpoint nor a degraded one"
+    );
+
+    tmux.kill_session(&session_name).await.ok();
+    handle.shutdown().await.ok();
+}
+
+/// #1490/#2464 regression: the caret floor must not truncate scrollback.
+///
+/// `capture-pane -S -<history>` starts above the visible pane and `-J` joins a
+/// wrapped line, so the pane's cursor row is not a line index into the
+/// capture. Treating it as one kept the capture's first `cursor_y + 1` lines
+/// and dropped everything below — the Relay reload test came back with the
+/// first sixteen of twenty written lines. The trim must remove only blank
+/// geometry; it may never remove a written line.
+#[tokio::test]
+async fn a_bootstrap_trim_keeps_history_above_the_visible_pane() {
+    let tmux = SessionManager::new();
+    let session = TestSession::new("bootstrap-history-trim");
+    let session_name = session.name().to_string();
+    tmux.create_session(&session_name, 80, 16, "/tmp", &[])
+        .await
+        .unwrap();
+    // Sixteen rows so twenty printed lines leave four in tmux history, which
+    // is exactly the shape a `-S -5000` capture carries above the visible
+    // pane.
+    TmuxDep::global()
+        .ops()
+        .resize_window(&session_name, 80, 16)
+        .await
+        .expect("the window can be made short");
+
+    // A short command whose *output* is the twenty lines. Spelling twenty
+    // `echo` calls on one line makes the shell's command echo longer than the
+    // pane, and the wrap can split a marker across grid lines; it also puts
+    // `TRIM-20` in that echo, so waiting for it would no longer wait for the
+    // output at all.
+    let setup = "sh -c 'seq -f TRIM-%02g 1 20; cat > /dev/null'\n".to_string();
+    TmuxDep::global()
+        .ops()
+        .send_keys(&session_name, &setup)
+        .await
+        .expect("the fixture is typed into the pane");
+
+    let ops = TmuxDep::global().ops();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let captured = loop {
+        let captured = ops
+            .capture_pane(&session_name, nession_agent::tmux::HISTORY_LIMIT_LINES)
+            .await
+            .expect("the capture works against a real tmux")
+            .unwrap_or_default();
+        if String::from_utf8_lossy(&captured).contains("TRIM-20") {
+            break captured;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the fixture never printed its last line: {:?}",
+            String::from_utf8_lossy(&captured)
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+
+    let (_, cursor_y, pane_height) = ops
+        .pane_cursor(&session_name)
+        .await
+        .expect("the cursor query works against a real tmux");
+    let mut trimmed = captured.clone();
+    nession_agent::server::bootstrap::strip_trailing_blank_rows(
+        &mut trimmed,
+        Some((cursor_y, pane_height)),
+    );
+
+    let text = String::from_utf8_lossy(&trimmed);
+    for i in 1..=20 {
+        assert!(
+            text.contains(&format!("TRIM-{i:02}")),
+            "the trim dropped TRIM-{i:02} from a {pane_height}-row pane with \
+             cursor row {cursor_y}: {text:?}"
+        );
+    }
+    assert!(
+        trimmed.len() <= captured.len(),
+        "the floor may only remove blank geometry"
+    );
+
+    tmux.kill_session(&session_name).await.ok();
+}
+
 /// #2124 SC-01/SC-03: a Control-mode first attach's bootstrap names an atomic
 /// cut at the session stream's position 0, and the live stream starts at 1.
 ///
@@ -865,6 +1428,7 @@ async fn a_control_first_attach_names_an_atomic_epoch_start_cut() {
             size_known: None,
             env_snapshots: Vec::new(),
             needs_bootstrap: Some(true),
+            subscription_id: None,
         },
     );
     sink.send(WsMessage::Text(serde_json::to_string(&attach).unwrap()))
@@ -1024,6 +1588,7 @@ async fn integration_terminal_io_flow() {
         size_known: None,
         env_snapshots: Vec::new(),
         needs_bootstrap: None,
+        subscription_id: None,
     };
     let req = new_message(msg_types::CLIENT_ATTACH, attach);
     let _: nession_agent::server::websocket::Message<ClientAttachResponse> =
@@ -1126,6 +1691,7 @@ async fn a_recorded_resize_reaches_the_client_at_its_stream_position() {
         // outside the timeline by construction — the agent gives it no
         // position precisely so it cannot be taken for an event in the stream.
         needs_bootstrap: Some(false),
+        subscription_id: None,
     };
     let req = new_message(msg_types::CLIENT_ATTACH, attach);
     let attached: nession_agent::server::websocket::Message<ClientAttachResponse> =
@@ -1186,7 +1752,7 @@ async fn a_recorded_resize_reaches_the_client_at_its_stream_position() {
             .await
             .unwrap()
         else {
-            break;
+            continue;
         };
         if frame.get("id").and_then(serde_json::Value::as_str) == Some(resize_id.as_str()) {
             acked = true;
@@ -1258,8 +1824,8 @@ async fn a_recorded_resize_reaches_the_client_at_its_stream_position() {
     );
     assert_eq!(
         payload.get("cols").and_then(serde_json::Value::as_u64),
-        Some(100),
-        "the broadcast carries the size that was asked for"
+        Some(80),
+        "the broadcast carries the size actually applied: the Session's columns"
     );
 
     // And it is the log's position, not merely *a* position: the events after
@@ -1317,7 +1883,7 @@ async fn a_recorded_resize_reaches_the_client_at_its_stream_position() {
                 .get("cols")
                 .and_then(serde_json::Value::as_u64),
         ),
-        (Some("resize"), Some(100)),
+        (Some("resize"), Some(80)),
         "the position the resize was broadcast at holds something else in the log: a client \
          would take the live frame for a duplicate and drop it"
     );
@@ -1392,6 +1958,7 @@ async fn a_resume_states_its_window_and_whether_it_is_complete() {
         // No history: a bootstrap is outside the timeline by construction, and
         // this test counts the positions that are in it.
         needs_bootstrap: Some(false),
+        subscription_id: None,
     };
     let req = new_message(msg_types::CLIENT_ATTACH, attach);
     let attached: nession_agent::server::websocket::Message<ClientAttachResponse> =
@@ -1431,7 +1998,7 @@ async fn a_resume_states_its_window_and_whether_it_is_complete() {
             .await
             .unwrap()
         else {
-            break;
+            continue;
         };
         if frame.get("msg_type").and_then(serde_json::Value::as_str)
             == Some(msg_types::TERMINAL_OUTPUT)
@@ -1639,6 +2206,7 @@ async fn integration_web_ui_session_create() {
         width: 80,
         height: 24,
         working_dir: None,
+        terminal_cols: None,
     };
     let req = new_message(msg_types::CLIENT_SESSION_CREATE, payload);
     let resp: nession_agent::server::websocket::Message<WebSessionCreateResponse> =
@@ -1792,7 +2360,8 @@ async fn start_server_with_file_root() -> anyhow::Result<(
             resize,
             credentials: Arc::clone(&credentials),
             mutations: nession_agent::execution::mutation_scheduler(),
-            memory_threshold_percent: None,
+            tmux: Arc::new(SessionManager::new()),
+            terminal_cols: nession_common::config::DEFAULT_TERMINAL_COLS,
         },
     )?;
     let (handle, addr) = server.start().await?;
@@ -3156,6 +3725,14 @@ async fn authenticate(
 
 /// The attach frame every test in this section opens with.
 fn attach_to(session_name: &str) -> nession_agent::server::websocket::Message<ClientAttachPayload> {
+    attach_with_subscription(session_name, None)
+}
+
+/// The attach frame for a stated page subscription (#2469 slice 4).
+fn attach_with_subscription(
+    session_name: &str,
+    subscription_id: Option<&str>,
+) -> nession_agent::server::websocket::Message<ClientAttachPayload> {
     new_message(
         msg_types::CLIENT_ATTACH,
         ClientAttachPayload {
@@ -3166,6 +3743,7 @@ fn attach_to(session_name: &str) -> nession_agent::server::websocket::Message<Cl
             size_known: None,
             env_snapshots: Vec::new(),
             needs_bootstrap: None,
+            subscription_id: subscription_id.map(str::to_string),
         },
     )
 }
@@ -3757,7 +4335,8 @@ async fn integration_resize_from_a_stale_lease_is_refused_and_tagged() {
     let payload = frame.get("payload").expect("a resize frame has a payload");
     assert_eq!(
         payload.get("cols").and_then(serde_json::Value::as_u64),
-        Some(100)
+        Some(80),
+        "the observer learns the Session's columns, not the requester's"
     );
     assert_eq!(
         payload
@@ -3783,16 +4362,390 @@ async fn integration_resize_from_a_stale_lease_is_refused_and_tagged() {
             .window_size(&session.session_name)
             .await
             .unwrap();
-        if pane == (100, 30) {
+        if pane == (80, 30) {
             break;
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    assert_eq!(
-        pane,
-        (100, 30),
-        "the accepted resize never reached the pane"
-    );
+    assert_eq!(pane, (80, 30), "the accepted resize never reached the pane");
 
     session.handle.shutdown().await.ok();
+}
+
+/// #2469 SC-07: two same-origin tabs are two subscriptions of one browser.
+///
+/// Both connections present the **same** `client_id` — exactly what two tabs
+/// get from localStorage — and differ only in `subscription_id`. The witnesses
+/// are the wire: the second tab is handed the observer role rather than
+/// replacing the first, both receive the same output, a takeover advances the
+/// generation, and the replaced controller's in-flight frame is refused by
+/// name. A passive reconnect (attach without an acquire) stays an observer.
+#[tokio::test]
+async fn integration_two_tabs_of_one_browser_broadcast_and_take_over() {
+    let (addr, handle, credentials) = start_server(0).await.unwrap();
+    let tmux = SessionManager::new();
+    let session = TestSession::new("two-tabs");
+    let session_name = session.name().to_string();
+    tmux.create_session(&session_name, 80, 24, "/tmp", &[])
+        .await
+        .unwrap();
+
+    let browser = "one-browser-two-tabs";
+    let (mut a_sink, mut a_stream) = connect_for(&credentials, addr, &session_name)
+        .await
+        .unwrap();
+    authenticate(&mut a_sink, &mut a_stream, browser)
+        .await
+        .unwrap();
+    let (mut b_sink, mut b_stream) = connect_for(&credentials, addr, &session_name)
+        .await
+        .unwrap();
+    authenticate(&mut b_sink, &mut b_stream, browser)
+        .await
+        .unwrap();
+
+    // Tab A attaches first and becomes the controller.
+    let a: nession_agent::server::websocket::Message<ClientAttachResponse> = round_trip(
+        &mut a_sink,
+        &mut a_stream,
+        &attach_with_subscription(&session_name, Some("tab-a")),
+    )
+    .await
+    .unwrap();
+    assert_eq!(a.payload.control_role.as_deref(), Some("controller"));
+    let a_generation = a.payload.control_generation.unwrap();
+    let input_epoch = a.payload.input_epoch.unwrap();
+
+    // Tab B is a second subscription, not a replacement for A.
+    let b: nession_agent::server::websocket::Message<ClientAttachResponse> = round_trip(
+        &mut b_sink,
+        &mut b_stream,
+        &attach_with_subscription(&session_name, Some("tab-b")),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        b.payload.control_role.as_deref(),
+        Some("observer"),
+        "the second tab of one browser was handed the lease"
+    );
+    assert_eq!(
+        b.payload.controller_subscription_id.as_deref(),
+        Some("tab-a"),
+        "the attach does not name the subscription holding the lease"
+    );
+
+    // B takes the lease; the generation fences A's in-flight frame.
+    let acquired: nession_agent::server::websocket::Message<
+        nession_agent::server::websocket::TerminalControlAcquireResponse,
+    > = round_trip(
+        &mut b_sink,
+        &mut b_stream,
+        &new_message(
+            msg_types::TERMINAL_CONTROL_ACQUIRE,
+            nession_agent::server::websocket::TerminalControlAcquirePayload {
+                session_name: session_name.clone(),
+            },
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(acquired.payload.role, "controller");
+    assert!(acquired.payload.generation > a_generation);
+    assert_eq!(
+        acquired.payload.controller_subscription_id.as_deref(),
+        Some("tab-b")
+    );
+
+    use base64::Engine;
+    let stale = new_message(
+        msg_types::TERMINAL_INPUT,
+        nession_agent::server::websocket::TerminalInputPayload {
+            session_name: session_name.clone(),
+            data: base64::engine::general_purpose::STANDARD.encode(b"echo STALE-TAB\n"),
+            control_generation: Some(a_generation),
+            input_epoch: Some(input_epoch),
+            seq_start: Some(1),
+            seq_end: Some(1),
+        },
+    );
+    let refused: nession_agent::server::websocket::Message<serde_json::Value> =
+        round_trip(&mut a_sink, &mut a_stream, &stale)
+            .await
+            .unwrap();
+    assert_eq!(refused.msg_type, msg_types::ERROR);
+    assert_eq!(
+        refused.payload["code"], "not_controller",
+        "the replaced tab's frame was not fenced by the lease"
+    );
+
+    // The holder writes; both subscriptions receive the same output.
+    let marker = "TWO-TABS-BROADCAST";
+    let accepted: nession_agent::server::websocket::Message<serde_json::Value> = round_trip(
+        &mut b_sink,
+        &mut b_stream,
+        &new_message(
+            msg_types::TERMINAL_INPUT,
+            nession_agent::server::websocket::TerminalInputPayload {
+                session_name: session_name.clone(),
+                data: base64::engine::general_purpose::STANDARD.encode(format!("echo {marker}\n")),
+                control_generation: Some(acquired.payload.generation),
+                input_epoch: Some(b.payload.input_epoch.unwrap()),
+                seq_start: Some(1),
+                seq_end: Some(1),
+            },
+        ),
+    )
+    .await
+    .unwrap();
+    assert_ne!(
+        accepted.msg_type,
+        msg_types::ERROR,
+        "the holder's input was refused"
+    );
+
+    for (label, stream) in [("tab-a", &mut a_stream), ("tab-b", &mut b_stream)] {
+        let mut seen = false;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        while tokio::time::Instant::now() < deadline {
+            let Some(frame) = next_frame_within(stream, Duration::from_secs(2))
+                .await
+                .unwrap()
+            else {
+                break;
+            };
+            if frame.get("msg_type").and_then(serde_json::Value::as_str)
+                != Some(msg_types::TERMINAL_OUTPUT)
+            {
+                continue;
+            }
+            let Some(encoded) = frame
+                .get("payload")
+                .and_then(|payload| payload.get("data"))
+                .and_then(serde_json::Value::as_str)
+            else {
+                continue;
+            };
+            let decoded = base64::engine::general_purpose::STANDARD
+                .decode(encoded)
+                .unwrap_or_default();
+            if String::from_utf8_lossy(&decoded).contains(marker) {
+                seen = true;
+                break;
+            }
+        }
+        assert!(seen, "{label} never received the session's output");
+    }
+
+    // A passive reconnect of tab A keeps its subscription identity and does
+    // not take the lease: only an explicit acquire may.
+    let (mut a2_sink, mut a2_stream) = connect_for(&credentials, addr, &session_name)
+        .await
+        .unwrap();
+    authenticate(&mut a2_sink, &mut a2_stream, browser)
+        .await
+        .unwrap();
+    let a2: nession_agent::server::websocket::Message<ClientAttachResponse> = round_trip(
+        &mut a2_sink,
+        &mut a2_stream,
+        &attach_with_subscription(&session_name, Some("tab-a")),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        a2.payload.control_role.as_deref(),
+        Some("observer"),
+        "a passive reconnect took the lease"
+    );
+    assert_eq!(
+        a2.payload.controller_subscription_id.as_deref(),
+        Some("tab-b")
+    );
+
+    // A -> B -> A: taking it back advances the generation and B's old frame
+    // is refused.
+    let back: nession_agent::server::websocket::Message<
+        nession_agent::server::websocket::TerminalControlAcquireResponse,
+    > = round_trip(
+        &mut a2_sink,
+        &mut a2_stream,
+        &new_message(
+            msg_types::TERMINAL_CONTROL_ACQUIRE,
+            nession_agent::server::websocket::TerminalControlAcquirePayload {
+                session_name: session_name.clone(),
+            },
+        ),
+    )
+    .await
+    .unwrap();
+    assert!(back.payload.generation > acquired.payload.generation);
+    let b_stale = new_message(
+        msg_types::TERMINAL_INPUT,
+        nession_agent::server::websocket::TerminalInputPayload {
+            session_name: session_name.clone(),
+            data: base64::engine::general_purpose::STANDARD.encode(b"echo B-STALE\n"),
+            control_generation: Some(acquired.payload.generation),
+            input_epoch: Some(b.payload.input_epoch.unwrap()),
+            seq_start: Some(1),
+            seq_end: Some(1),
+        },
+    );
+    let b_refused: nession_agent::server::websocket::Message<serde_json::Value> =
+        round_trip(&mut b_sink, &mut b_stream, &b_stale)
+            .await
+            .unwrap();
+    assert_eq!(b_refused.msg_type, msg_types::ERROR);
+    assert_eq!(b_refused.payload["code"], "not_controller");
+
+    handle.shutdown().await.ok();
+}
+
+/// #2469 SC-06: a killed tmux Session retires its attachment, so the next
+/// attach creates a new runtime rather than subscribing to a dead backend.
+///
+/// The witness is the second attach: before the fix the registry still held
+/// the attachment and answered `ok` with the old stream epoch, which is a
+/// terminal that never produces another byte.
+#[tokio::test]
+async fn integration_a_killed_session_retires_its_attachment() {
+    let (addr, handle, credentials) = start_server(0).await.unwrap();
+    let tmux = SessionManager::new();
+    let session = TestSession::new("kill-retires");
+    let session_name = session.name().to_string();
+    tmux.create_session(&session_name, 80, 24, "/tmp", &[])
+        .await
+        .unwrap();
+
+    let (mut sink, mut stream) = connect_for(&credentials, addr, &session_name)
+        .await
+        .unwrap();
+    authenticate(&mut sink, &mut stream, "kill-retires-browser")
+        .await
+        .unwrap();
+    let attached: nession_agent::server::websocket::Message<ClientAttachResponse> =
+        round_trip(&mut sink, &mut stream, &attach_to(&session_name))
+            .await
+            .unwrap();
+    assert_eq!(attached.msg_type, msg_types::OK);
+    let old_epoch = attached.payload.stream_epoch.unwrap();
+
+    let killed: nession_agent::server::websocket::Message<serde_json::Value> = round_trip(
+        &mut sink,
+        &mut stream,
+        &new_message(
+            msg_types::SESSION_KILL,
+            nession_agent::server::websocket::SessionKillPayload {
+                name: session_name.clone(),
+            },
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(killed.msg_type, msg_types::OK);
+
+    // A new attach gets a fresh runtime and stream generation. Before the fix
+    // it was answered from the retained attachment with the old epoch.
+    let (mut second_sink, mut second_stream) = connect_for(&credentials, addr, &session_name)
+        .await
+        .unwrap();
+    authenticate(&mut second_sink, &mut second_stream, "kill-retires-second")
+        .await
+        .unwrap();
+    let fresh: nession_agent::server::websocket::Message<ClientAttachResponse> = round_trip(
+        &mut second_sink,
+        &mut second_stream,
+        &attach_to(&session_name),
+    )
+    .await
+    .unwrap();
+    assert_eq!(fresh.msg_type, msg_types::OK);
+    assert_ne!(
+        fresh.payload.stream_epoch,
+        Some(old_epoch),
+        "the retired attachment answered a new attach with the stream that can never move"
+    );
+
+    handle.shutdown().await.ok();
+}
+
+/// #2469 SC-06: when the tmux Session dies outside the Agent (the plain PTY's
+/// EOF), the attachment is retired and its subscribers hear why.
+#[tokio::test]
+async fn integration_a_plain_backend_eof_retires_the_stream() {
+    let (addr, handle, credentials) = start_server(0).await.unwrap();
+    let tmux = SessionManager::new();
+    let session = TestSession::new("plain-eof-retires");
+    let session_name = session.name().to_string();
+    tmux.create_session(&session_name, 80, 24, "/tmp", &[])
+        .await
+        .unwrap();
+
+    let (mut sink, mut stream) = connect_for(&credentials, addr, &session_name)
+        .await
+        .unwrap();
+    authenticate(&mut sink, &mut stream, "plain-eof-browser")
+        .await
+        .unwrap();
+    let attached: nession_agent::server::websocket::Message<ClientAttachResponse> =
+        round_trip(&mut sink, &mut stream, &attach_to(&session_name))
+            .await
+            .unwrap();
+    assert_eq!(attached.msg_type, msg_types::OK);
+    let old_epoch = attached.payload.stream_epoch.unwrap();
+
+    // Kill tmux directly: the Agent sees its PTY client end, not a kill
+    // request, which is the source-loss path rather than the kill handler.
+    tmux.tmux_dep()
+        .ops()
+        .kill_session(&session_name)
+        .await
+        .expect("the test session is killed");
+
+    // The subscriber hears the output source ended: the error's payload code
+    // is the machine-readable one (`terminal_stream_unavailable`), not the
+    // envelope id.
+    let mut lost = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while tokio::time::Instant::now() < deadline {
+        let Some(frame) = next_frame_within(&mut stream, Duration::from_secs(2))
+            .await
+            .unwrap()
+        else {
+            continue;
+        };
+        if frame.get("msg_type").and_then(serde_json::Value::as_str) == Some(msg_types::ERROR)
+            && frame
+                .get("payload")
+                .and_then(|payload| payload.get("code"))
+                .and_then(serde_json::Value::as_str)
+                == Some("terminal_stream_unavailable")
+        {
+            lost = true;
+            break;
+        }
+    }
+    assert!(lost, "a subscriber was never told its output source ended");
+
+    // The reconnect gets a fresh generation rather than the dead one.
+    let (mut second_sink, mut second_stream) = connect_for(&credentials, addr, &session_name)
+        .await
+        .unwrap();
+    authenticate(&mut second_sink, &mut second_stream, "plain-eof-second")
+        .await
+        .unwrap();
+    let fresh: nession_agent::server::websocket::Message<ClientAttachResponse> = round_trip(
+        &mut second_sink,
+        &mut second_stream,
+        &attach_to(&session_name),
+    )
+    .await
+    .unwrap();
+    assert_eq!(fresh.msg_type, msg_types::OK);
+    assert_ne!(
+        fresh.payload.stream_epoch,
+        Some(old_epoch),
+        "the retired generation was handed to a reconnect"
+    );
+
+    handle.shutdown().await.ok();
 }

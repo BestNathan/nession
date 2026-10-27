@@ -4,20 +4,18 @@ Session/tmux SDK ownership is governed by
 [`session-tmux-sdk-ownership.md`](session-tmux-sdk-ownership.md). This document
 remains the Control Mode protocol and transport contract.
 
-Owner: the typed, session-owned Control Mode client and its transports in
-`nession-tmux` (`crates/nession-tmux/src/client/`), extracted from
-`crates/nession-agent/src/tmux/client/` by #2469 slice 1. `main` receives the
-SDK with the next release promotion; until then it carries the Agent copy at
-that original path. [`ControlModeSession`](../../crates/nession-agent/src/tmux/control.rs)
-is the session-level adapter above it (bootstrap capture barrier, window-size
-guard). `nession-tmux::TmuxOps` is the operation-semantics owner, with the
-Agent's [`tmux/ops.rs`](../../crates/nession-agent/src/tmux/ops.rs) as its
-`TmuxDep` adapter. `TmuxCommand` owns process construction
-(`-S <private socket>`, inherited-env scrubbing); the Agent's
-[`tmux/cmd.rs`](../../crates/nession-agent/src/tmux/cmd.rs) supplies the Nession
-socket and server configuration and never spawns a process. Plain
-[`PtySession`](../../crates/nession-agent/src/tmux/pty.rs) remains a separate
-backend for plain (non-Control-Mode) attach.
+Owner: [`crates/nession-tmux/src/client/`](../../crates/nession-tmux/src/client/)
+— the typed, session-owned Control Mode client and its transports, in the
+independent `nession-tmux` crate (#2469 slice 1).
+[`ControlModeSession`](../../crates/nession-agent/src/tmux/control.rs) is the
+session-level adapter above it (bootstrap capture barrier, window-size guard).
+[`TmuxOps`](../../crates/nession-tmux/src/ops.rs) is the operation-semantics
+owner, and [`TmuxCommand`](../../crates/nession-tmux/src/process.rs) owns
+process construction (`-S <private socket>`, inherited-env scrubbing). The
+Agent's [`tmux/cmd.rs`](../../crates/nession-agent/src/tmux/cmd.rs) supplies
+Nession's socket and server configuration and never spawns a process itself.
+Plain [`PtySession`](../../crates/nession-agent/src/tmux/pty.rs) remains a
+separate backend for plain (non-Control-Mode) attach.
 
 ## Two carriers, one protocol
 
@@ -143,10 +141,29 @@ freeze the single ordered forwarder or hold unaccounted memory:
   send is not acceptable here: it could suspend output and source-loss handling
   behind a resize consumer that is alive but not reading.
 
+## Session runtime ownership and retirement (#2469 slices 3–4)
+
+- `SessionService` constructs both terminal backends; `SessionRegistry` is the
+  one writable owner of the Agent's Session map, and its lock is private. P2P
+  and Relay reach the same registry.
+- A subscription is one page/connection's attach (`subscription_id`); the
+  stable browser `client_id` is shared by same-origin tabs and is not a lease
+  identity. See
+  [terminal/multi-client-ownership.md](../design/terminal/multi-client-ownership.md).
+- Each attachment has a stream generation. A producer task may record output
+  only for the generation it read; after retirement its bytes are refused, so
+  an old forwarder cannot enter a successor attachment.
+- Retirement has distinct producers and one effect: a tmux Session kill, a
+  backend EOF (Control Mode reader or plain PTY), and process shutdown each
+  remove the attachment, close its tmux client, and — where a subscriber is
+  still attached — state that the source ended. A later attach creates a fresh
+  runtime and generation.
+
 ## Invariants to preserve
 
 - One session-owned attachment; a P2P/Relay subscriber coming or going never
-  creates or destroys it.
+  creates or destroys it. A subscriber is identified by its subscription, not
+  by the browser id.
 - Input is loss-intolerant: one ordered writer, byte-exact `send-keys -H`,
   bounded pending commands, tombstones for timed-out replies.
 - The bootstrap capture and the live stream join exactly: output the snapshot

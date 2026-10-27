@@ -22,6 +22,14 @@ pub struct ServerSessionCreatePayload {
     /// Empty (default) preserves the pre-env-feature behaviour exactly.
     #[serde(default)]
     pub env_snapshots: Vec<EnvSnapshot>,
+    /// The fixed column count this Session should be created at (#2487).
+    ///
+    /// In a central deployment the Server states its release-selected value;
+    /// a standalone caller omits it and the Agent uses its own configuration.
+    /// An existing Session is never resized by this field — it is a creation
+    /// parameter only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_cols: Option<u16>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -234,6 +242,18 @@ pub struct ClientSessionAttachResponsePayload {
     /// browser.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connection_token: Option<String>,
+    /// The Server's release-selected fixed column count (#2487).
+    ///
+    /// The browser renders this width when its embedded build value differs,
+    /// so a mixed release cannot draw a grid the Server does not agree with.
+    /// An existing Session's authoritative width is stated by the Agent on
+    /// attach and takes precedence over this value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_cols: Option<u16>,
+    /// The Web maximum CSS font size this Server was released with, mirrored
+    /// for introspection (#2487). Not a PTY parameter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_web_font_size: Option<f64>,
 }
 
 // --- Env application to sessions ---
@@ -538,6 +558,16 @@ pub struct ClientRelayBeginPayload {
     /// current size instead of forcing one nobody chose.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size_known: Option<bool>,
+    /// The browser page's subscription identity, forwarded to the Agent
+    /// attach this relay performs.
+    ///
+    /// The relay is one subscription: the Server opens its own Agent
+    /// connection per relay, so two same-origin tabs are two relays with the
+    /// same browser `client_id`. The id lets each tab recognise itself in
+    /// `agent.terminal.control.changed`. Absence of this field is the same
+    /// legacy identity rule as [`ClientAttachPayload::subscription_id`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subscription_id: Option<String>,
 }
 
 fn default_cols() -> u16 {
@@ -614,6 +644,13 @@ pub struct SessionCreatePayload {
     /// that does not send it.
     #[serde(default)]
     pub env_snapshots: Vec<EnvSnapshot>,
+    /// The fixed column count this Session should be created at (#2487).
+    ///
+    /// The Server's relayed create states its value; a direct caller omits it
+    /// and the Agent uses its own configuration. Creation only: an existing
+    /// Session keeps its pane's width.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_cols: Option<u16>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -672,6 +709,21 @@ pub struct ClientAttachPayload {
     /// before this field would get.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub needs_bootstrap: Option<bool>,
+    /// The subscription this attach represents, distinct from the browser.
+    ///
+    /// The stable `client_id` is per **browser**, kept in localStorage, so
+    /// every same-origin tab presents the same one. A subscription is one
+    /// page's attach: two tabs must subscribe independently and receive the
+    /// same broadcast, while a reconnect of one page must replace its own
+    /// subscription rather than either tab's sibling.
+    ///
+    /// The client mints this per page instance and keeps it for that page's
+    /// reconnects. **Absence preserves the v1 meaning**: the stable client id
+    /// is the subscription identity, and a newer attach of that client
+    /// replaces the older one — the behaviour a client written before this
+    /// field already gets.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subscription_id: Option<String>,
 }
 
 impl ClientAttachPayload {
@@ -808,6 +860,10 @@ pub struct WebSessionCreatePayload {
     pub height: u16,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub working_dir: Option<String>,
+    /// The fixed column count this Session should be created at (#2487).
+    /// `None` means the Agent's own configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_cols: Option<u16>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -942,6 +998,15 @@ pub struct ClientAttachResponse {
     pub control_role: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub controller_client_id: Option<String>,
+    /// The subscription holding the lease, when it states one.
+    ///
+    /// `controller_client_id` names the browser; same-origin tabs share it, so
+    /// a tab can tell whether it is *the* controller only by comparing this
+    /// value with the `subscription_id` it attached under. Absent means the
+    /// provider predates subscription identity, and the client must fall back
+    /// to the client-id comparison.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub controller_subscription_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stream_epoch: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -975,6 +1040,16 @@ pub struct ClientAttachResponse {
     pub input_epoch: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_applied_through: Option<u64>,
+    /// The Session's authoritative fixed column count (#2487).
+    ///
+    /// The Agent owns the tmux pane and therefore the Session's width. A
+    /// client whose build embedded a different value renders this grid rather
+    /// than resizing the shared pane: only rows follow the active client's
+    /// viewport. Absent from an Agent built before this field, in which case
+    /// the client keeps its own build configuration and the Agent still
+    /// ignores any column change on resize.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_cols: Option<u16>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]

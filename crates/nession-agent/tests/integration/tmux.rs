@@ -1,5 +1,5 @@
 use nession_agent::tmux::manager::SessionManager;
-use nession_agent::tmux::ops::TmuxOps;
+use nession_agent::tmux::ops::TmuxDep;
 use nession_agent::tmux::util::check_tmux_available;
 
 use super::{tmux_show_environment, unique_session_name, TestSession};
@@ -148,7 +148,7 @@ async fn show_environment_tells_an_unset_variable_apart_from_an_unanswerable_que
         .await
         .unwrap();
 
-    let ops = TmuxOps::global();
+    let ops = TmuxDep::global().ops();
 
     assert_eq!(
         ops.show_environment(&name, "NESSON_NEVER_SET")
@@ -196,7 +196,7 @@ async fn show_environment_reads_the_session_it_was_given() {
             .unwrap();
     }
 
-    let ops = TmuxOps::global();
+    let ops = TmuxDep::global().ops();
     ops.set_environment(first.name(), "NESSON_TARGETED", "only-in-first")
         .await
         .expect("set_environment on the first session");
@@ -337,7 +337,8 @@ async fn test_send_keys() {
 
     // Send keys - should not error. Required class: a line the caller asked to
     // be typed reaching nothing is a failure, not a degraded success.
-    TmuxOps::global()
+    TmuxDep::global()
+        .ops()
         .send_keys(&session_name, "echo test")
         .await
         .unwrap();
@@ -350,7 +351,7 @@ async fn test_send_keys() {
 async fn test_send_keys_nonexistent_session() {
     // Sending keys to a non-existent session should fail
     let ghost = unique_session_name("ghost");
-    let result = TmuxOps::global().send_keys(&ghost, "test").await;
+    let result = TmuxDep::global().ops().send_keys(&ghost, "test").await;
     assert!(result.is_err());
 }
 

@@ -4,7 +4,6 @@ pub mod issued_credit;
 pub mod outbound;
 pub mod output_ack;
 pub mod resize;
-pub mod session_terminal;
 pub mod websocket;
 
 pub use outbound::P2pOutbound;

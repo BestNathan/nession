@@ -1957,6 +1957,7 @@ dependencies = [
  "nession-protocol",
  "nession-runtime",
  "nession-server",
+ "nession-tmux",
  "portable-pty",
  "rand 0.8.7",
  "rustls 0.22.4",
@@ -2151,6 +2152,20 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "nession-tmux"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "futures-util",
+ "libc",
+ "portable-pty",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

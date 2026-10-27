@@ -2,18 +2,20 @@
 //!
 //! This module owns **one attached control client**: the byte-framed reader, the
 //! ordered command/response matcher and the single ordered source-event stream.
-//! It is session-owned, not WebSocket-owned: a P2P/Relay subscriber coming and
-//! going must not create or destroy the tmux attachment.
+//! The lifetime of the attachment belongs to the caller: a subscriber coming
+//! and going must not create or destroy the tmux attachment.
 //!
 //! Deliberate boundaries:
 //!
-//! - [`TmuxOps`](crate::tmux::ops::TmuxOps) stays the operation-semantics owner;
-//!   [`ControlCommand`] is the control-channel encoding of the same operations.
-//! - `SessionStreamState`/epoch/seq/replay/ACK stay with the Agent stream owner.
-//!   The client emits [`TmuxEvent`]s in source order and assigns nothing.
+//! - [`ControlCommand`] is the control-channel encoding of tmux operations. It
+//!   introduces no semantics of its own; the one-shot operation owner lives
+//!   beside it in this crate.
+//! - Session stream epochs, sequence numbers, replay and ACK stay with the
+//!   caller. The client emits [`TmuxEvent`]s in source order and assigns
+//!   nothing.
 //! - The byte framing and the `Control Mode` message grammar are **not
-//!   re-implemented here**: the reader reuses [`framing`] and the parser in
-//!   `tmux::parser`, including the #2300 bounded-byte contract and its
+//!   re-implemented here**: the reader reuses `framing` and
+//!   [`crate::parser`], including the bounded-byte contract and its
 //!   fatal/forward-compatible record split.
 //!
 //! ## Transports
@@ -23,8 +25,8 @@
 //! PTY. `-CC` brackets the stream with terminal framing (DCS/ST) and writes
 //! `CRLF` line endings; the transport removes that framing before this module
 //! sees a byte, so the grammar, matcher and events are the same on both. Both
-//! spawn through `TmuxCmd`, and a failed launch is an error — never a silent
-//! fallback to the other transport.
+//! spawn through [`TmuxCommand`], and a failed launch is an error — never a
+//! silent fallback to the other transport.
 //!
 //! ## Command matching
 //!
@@ -55,8 +57,8 @@ use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, oneshot, Notify};
 use tokio::task::JoinHandle;
 
-use super::ops::TmuxDep;
-use super::parser::{decode_tmux_output, layout_size, parse_control_line_bytes, ControlMessage};
+use crate::parser::{decode_tmux_output, layout_size, parse_control_line_bytes, ControlMessage};
+use crate::process::TmuxCommand;
 
 pub mod commands;
 pub mod events;
@@ -531,7 +533,7 @@ impl TmuxClient {
     /// process is the scope that outlives both. Tests construct through
     /// [`TmuxClient::from_io`] with an explicit generation when they need a
     /// fixed one.
-    pub fn connect(tmux: &TmuxDep, session_name: &str) -> anyhow::Result<Self> {
+    pub fn connect(tmux: &TmuxCommand, session_name: &str) -> anyhow::Result<Self> {
         Self::connect_with(tmux, session_name, ControlTransport::Pipe)
     }
 
@@ -541,7 +543,7 @@ impl TmuxClient {
     /// other transport (#2307 slice D). A failed launch returns the transport's
     /// error and never falls back to the other transport.
     pub fn connect_with(
-        tmux: &TmuxDep,
+        tmux: &TmuxCommand,
         session_name: &str,
         transport: ControlTransport,
     ) -> anyhow::Result<Self> {
@@ -562,7 +564,7 @@ impl TmuxClient {
 
     /// As [`Self::connect_with`], with explicit ingress limits (#2380).
     pub fn connect_with_limits(
-        tmux: &TmuxDep,
+        tmux: &TmuxCommand,
         session_name: &str,
         transport: ControlTransport,
         limits: EventIngressLimits,

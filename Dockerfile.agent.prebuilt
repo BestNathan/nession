@@ -4,6 +4,12 @@
 # security pool is gone, so the `apt-get install` below 404s on every package.
 FROM debian:bookworm-slim
 ENV DEBIAN_FRONTEND=noninteractive
+
+# The release-selected fixed terminal width (#2487), carried to the Agent's
+# process environment. The entrypoint writes it into agent-config.toml; it is
+# the creation width for a Session with no pane yet and the standalone policy.
+ARG NESSION_TERMINAL_COLS=80
+ENV NESSION_TERMINAL_COLS=${NESSION_TERMINAL_COLS}
 # `git` is here because the agent composes `GitAgentExtension` (`main.rs`) and
 # this image carried no git binary — the capability was live and its tool was
 # missing, so every `git.*` unit failed at the point of running git. Kept in step

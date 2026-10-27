@@ -249,6 +249,22 @@ pub struct TerminalBootstrapPayload {
     /// is not a replayable event and consumes no stream sequence number.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub through_seq: Option<u64>,
+    /// The pane's screen width the capture was taken from.
+    ///
+    /// A capture is a **screen reconstruction**, and its trailing absolute
+    /// caret addresses a row on the pane's screen (`pane_rows` rows high, the
+    /// row `cursor_y`). A renderer that has not measured the Session yet — a
+    /// reloaded page before its first layout pass — must adopt this geometry
+    /// **before** parsing the bytes. Written at a taller placeholder size, the
+    /// caret lands above the end of the buffer it just wrote, and xterm's
+    /// row-shrink reflow drops every line below the cursor: the snapshot's
+    /// newest history disappears (#2483). Absent means the provider did not
+    /// state it; a legacy client keeps its own size.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_cols: Option<u16>,
+    /// The pane's screen height the capture was taken from; see `pane_cols`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_rows: Option<u16>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -264,10 +280,18 @@ pub struct TerminalControlAcquirePayload {
 pub struct TerminalControlAcquireResponse {
     pub session_name: String,
     pub generation: u64,
-    /// `controller` or `observer` for this client after the operation.
+    /// `controller` or `observer` for this subscription after the operation.
     pub role: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub controller_client_id: Option<String>,
+    /// The subscription holding the lease, when one is stated.
+    ///
+    /// Same-origin tabs share the browser's `client_id`, so `role` is the
+    /// answer for *this* requester while this field is what every peer
+    /// compares against its own `subscription_id`. Absent means the provider
+    /// predates subscription identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub controller_subscription_id: Option<String>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -278,6 +302,12 @@ pub struct TerminalControlChangedPayload {
     pub generation: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub controller_client_id: Option<String>,
+    /// The subscription holding the lease, when one is stated.
+    ///
+    /// Each tab decides whether the change names it by comparing this against
+    /// the id it attached under; the shared browser id cannot answer that.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub controller_subscription_id: Option<String>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]

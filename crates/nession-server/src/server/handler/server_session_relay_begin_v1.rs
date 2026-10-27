@@ -48,6 +48,7 @@ impl ConnectionHandler {
                 // An unparseable payload has no opinion to forward; the agent's
                 // own rule is what a caller that says nothing already gets.
                 needs_bootstrap: None,
+                subscription_id: None,
             });
 
         let session_id = payload.session_id.as_str();
@@ -202,7 +203,14 @@ impl ConnectionHandler {
         // sends them cannot disagree about the default — and `size_known` is
         // what keeps that fallback from being *acted on* as if the browser had
         // chosen it (#1265).
-        let cols = payload.cols;
+        //
+        // **Columns are the Server's, not the browser's (#2487).** A Session
+        // created by this relay is created at the release-selected width, and
+        // an existing Session's pane width still wins inside the Agent. Stating
+        // the Server's value here is what makes the Server's runtime
+        // configuration — not a browser build — the policy for a new Session
+        // in a central deployment.
+        let cols = self.config.terminal_cols;
         let rows = payload.rows;
 
         Ok(HandlerAction::Relay {
@@ -217,6 +225,7 @@ impl ConnectionHandler {
             rows,
             size_known: payload.size_known,
             needs_bootstrap: payload.needs_bootstrap,
+            subscription_id: payload.subscription_id,
         })
     }
 }

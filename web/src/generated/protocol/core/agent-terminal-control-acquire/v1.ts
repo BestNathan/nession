@@ -24,9 +24,18 @@ export const VERSION = 1;
 export type TerminalControlAcquirePayload = { session_name: string, };
 export type TerminalControlAcquireResponse = { session_name: string, generation: number, 
 /**
- * `controller` or `observer` for this client after the operation.
+ * `controller` or `observer` for this subscription after the operation.
  */
-role: string, controller_client_id?: string | null, };
+role: string, controller_client_id?: string | null, 
+/**
+ * The subscription holding the lease, when one is stated.
+ *
+ * Same-origin tabs share the browser's `client_id`, so `role` is the
+ * answer for *this* requester while this field is what every peer
+ * compares against its own `subscription_id`. Absent means the provider
+ * predates subscription identity.
+ */
+controller_subscription_id?: string | null, };
 
 // ── Operations ──
 
@@ -36,7 +45,16 @@ export type TerminalControlAcquireCall = { session_name: string, };
 /** The payload the provider answers with. */
 export type TerminalControlAcquireReply = { session_name: string, generation: number, 
 /**
- * `controller` or `observer` for this client after the operation.
+ * `controller` or `observer` for this subscription after the operation.
  */
-role: string, controller_client_id?: string | null, };
+role: string, controller_client_id?: string | null, 
+/**
+ * The subscription holding the lease, when one is stated.
+ *
+ * Same-origin tabs share the browser's `client_id`, so `role` is the
+ * answer for *this* requester while this field is what every peer
+ * compares against its own `subscription_id`. Absent means the provider
+ * predates subscription identity.
+ */
+controller_subscription_id?: string | null, };
 

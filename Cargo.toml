@@ -8,6 +8,7 @@ members = [
     "crates/nession-runtime",
     "crates/nession-server",
     "crates/nession-agent",
+    "crates/nession-tmux",
     "crates/nession-cli",
     "crates/nession-client",
 ]

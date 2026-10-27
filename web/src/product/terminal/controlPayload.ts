@@ -3,11 +3,13 @@ export function readAttachControlFields(payload: unknown): {
   controlGeneration?: number;
   controlRole?: 'controller' | 'observer';
   controllerClientId?: string;
+  controllerSubscriptionId?: string;
   streamEpoch?: number;
   streamCursor?: number;
   subscriberGeneration?: number;
   inputEpoch?: number;
   inputAppliedThrough?: number;
+  terminalCols?: number;
 } {
   if (!payload || typeof payload !== 'object') {
     return {};
@@ -25,6 +27,10 @@ export function readAttachControlFields(payload: unknown): {
     controlRole: role,
     controllerClientId:
       typeof p.controller_client_id === 'string' ? p.controller_client_id : undefined,
+    controllerSubscriptionId:
+      typeof p.controller_subscription_id === 'string'
+        ? p.controller_subscription_id
+        : undefined,
     streamEpoch: typeof p.stream_epoch === 'number' ? p.stream_epoch : undefined,
     streamCursor: typeof p.stream_cursor === 'number' ? p.stream_cursor : undefined,
     subscriberGeneration:
@@ -37,6 +43,11 @@ export function readAttachControlFields(payload: unknown): {
     inputEpoch: typeof p.input_epoch === 'number' ? p.input_epoch : undefined,
     inputAppliedThrough:
       typeof p.input_applied_through === 'number' ? p.input_applied_through : undefined,
+    // The live Session's authoritative fixed width (#2487). Absent from an
+    // older Agent; a positive integer is the only shape that can be a grid.
+    terminalCols:
+      Number.isSafeInteger(p.terminal_cols) && (p.terminal_cols as number) > 0
+        ? p.terminal_cols as number : undefined,
   };
 }
 
@@ -86,6 +97,7 @@ export function readControlAcquireReply(payload: unknown): {
   generation?: number;
   role?: 'controller' | 'observer';
   controllerClientId?: string;
+  controllerSubscriptionId?: string;
 } {
   if (!payload || typeof payload !== 'object') {
     return {};
@@ -102,6 +114,10 @@ export function readControlAcquireReply(payload: unknown): {
     role,
     controllerClientId:
       typeof p.controller_client_id === 'string' ? p.controller_client_id : undefined,
+    controllerSubscriptionId:
+      typeof p.controller_subscription_id === 'string'
+        ? p.controller_subscription_id
+        : undefined,
   };
 }
 
@@ -109,6 +125,7 @@ export function readControlChanged(payload: unknown): {
   sessionName: string;
   generation: number;
   controllerClientId?: string;
+  controllerSubscriptionId?: string;
 } | null {
   if (!payload || typeof payload !== 'object') {
     return null;
@@ -122,5 +139,9 @@ export function readControlChanged(payload: unknown): {
     generation: p.generation,
     controllerClientId:
       typeof p.controller_client_id === 'string' ? p.controller_client_id : undefined,
+    controllerSubscriptionId:
+      typeof p.controller_subscription_id === 'string'
+        ? p.controller_subscription_id
+        : undefined,
   };
 }

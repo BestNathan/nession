@@ -53,19 +53,7 @@ fn unsource_script_path(base_dir: PathBuf, client_id: &str, session: &str, name:
 /// `set-environment` encodings. Both callers state the class at their own
 /// call site; this function is where it is enacted.
 pub(crate) async fn clear_history(tmux: &TmuxDep, session_name: &str) {
-    match tmux
-        .cmd()
-        .output(&["clear-history", "-t", session_name])
-        .await
-    {
-        Ok(out) if out.status.success() => {}
-        Ok(out) => tracing::warn!(
-            "clear-history for session {session_name} failed ({}): {}",
-            out.status,
-            String::from_utf8_lossy(&out.stderr).trim()
-        ),
-        Err(e) => tracing::warn!("clear-history for session {session_name} failed: {e}"),
-    }
+    tmux.ops().clear_history(session_name).await;
 }
 
 /// Manages environment variables for tmux sessions.

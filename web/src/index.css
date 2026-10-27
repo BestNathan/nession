@@ -189,8 +189,27 @@ html {
   pointer-events: none;
 }
 
+/* Fixed-column terminal (#2487): the grid is always the configured columns;
+   the font fits them. On a wide window the terminal is capped at its measured
+   content width and centred. A window too narrow for the minimum font scrolls
+   horizontally rather than dropping a column or stretching glyphs. */
+[data-terminal-capsule-host] [data-terminal-viewport] {
+  overflow-x: auto;
+}
+
 [data-terminal-capsule-host] [data-terminal-viewport] .xterm {
   pointer-events: auto;
+  max-width: var(--nession-local-terminal-content-width, 100%);
+  /* Left-aligned on phone widths: the shell-edge swipe band is measured from
+     the surface's own left edge, and centring a capped grid would move that
+     edge inward past the band (#1081). A wide Web window centres it below. */
+  margin-inline: 0;
+}
+
+@media (min-width: 1024px) {
+  [data-terminal-capsule-host] [data-terminal-viewport] .xterm {
+    margin-inline: auto;
+  }
 }
 
 [data-terminal-capsule-host] [data-testid='terminal-capsule'] {

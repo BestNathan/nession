@@ -7,6 +7,12 @@ import type { SocketMessage } from '@/platform/socket/types';
 
 const OriginalWebSocket = globalThis.WebSocket;
 
+// The page subscription every relay begin now carries. Fixed so the exact
+// payload assertion below stays legible; the real id is a fresh uuid.
+vi.mock('@/platform/socket/subscriptionId', () => ({
+  getOrCreateSubscriptionId: () => 'this-subscription',
+}));
+
 /** Parse every JSON frame a mock socket sent over the wire. */
 function frames(socket: MockWebSocket): SocketMessage[] {
   return socket.send.mock.calls.map((call) => JSON.parse(String(call[0])) as SocketMessage);
@@ -187,7 +193,9 @@ describe('relayServerHandle', () => {
       'agent.terminal.resize',
       'server.session.relay.end',
     ]);
-    expect(sent[0]?.payload).toEqual({ session_id: 'a:work', cols: 120, rows: 40 });
+    expect(sent[0]?.payload).toEqual({
+      session_id: 'a:work', cols: 120, rows: 40, subscription_id: 'this-subscription',
+    });
     expect(sent[1]?.payload).toMatchObject({ session_name: 'work' });
 
     const unsubOutput = handle.onRelayOutput('work', () => {});

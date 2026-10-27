@@ -115,7 +115,21 @@ addresses: Array<ProbedAddress>,
  * parameter name are independent, and only the latter is shared with the
  * browser.
  */
-connection_token?: string | null, };
+connection_token?: string | null, 
+/**
+ * The Server's release-selected fixed column count (#2487).
+ *
+ * The browser renders this width when its embedded build value differs,
+ * so a mixed release cannot draw a grid the Server does not agree with.
+ * An existing Session's authoritative width is stated by the Agent on
+ * attach and takes precedence over this value.
+ */
+terminal_cols?: number | null, 
+/**
+ * The Web maximum CSS font size this Server was released with, mirrored
+ * for introspection (#2487). Not a PTY parameter.
+ */
+terminal_web_font_size?: number | null, };
 export type SessionRefusal = { 
 /**
  * Always `"error"` today. A string rather than an enum because nothing
