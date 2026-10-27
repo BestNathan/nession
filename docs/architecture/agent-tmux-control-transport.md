@@ -1,16 +1,23 @@
 # Agent tmux Control Mode transport
 
-Session/tmux SDK ownership and the #2469 migration are governed by
+Session/tmux SDK ownership is governed by
 [`session-tmux-sdk-ownership.md`](session-tmux-sdk-ownership.md). This document
 remains the Control Mode protocol and transport contract.
 
-Owner: [`crates/nession-agent/src/tmux/client/`](../../crates/nession-agent/src/tmux/client/)
-— the typed, session-owned Control Mode client and its transports.
-`ControlModeSession` is the session-level adapter above it (bootstrap capture
-barrier, window-size guard). [`TmuxOps`](../../crates/nession-agent/src/tmux/ops.rs)
-stays the operation-semantics owner, and [`TmuxCmd`](../../crates/nession-agent/src/tmux/cmd.rs)
-owns process addressing (`-S <private socket>`, inherited-env scrubbing). Plain
-`PtySession` remains a separate backend for plain (non-Control-Mode) attach.
+Owner: the typed, session-owned Control Mode client and its transports in
+`nession-tmux` (`crates/nession-tmux/src/client/`), extracted from
+`crates/nession-agent/src/tmux/client/` by #2469 slice 1. `main` receives the
+SDK with the next release promotion; until then it carries the Agent copy at
+that original path. [`ControlModeSession`](../../crates/nession-agent/src/tmux/control.rs)
+is the session-level adapter above it (bootstrap capture barrier, window-size
+guard). `nession-tmux::TmuxOps` is the operation-semantics owner, with the
+Agent's [`tmux/ops.rs`](../../crates/nession-agent/src/tmux/ops.rs) as its
+`TmuxDep` adapter. `TmuxCommand` owns process construction
+(`-S <private socket>`, inherited-env scrubbing); the Agent's
+[`tmux/cmd.rs`](../../crates/nession-agent/src/tmux/cmd.rs) supplies the Nession
+socket and server configuration and never spawns a process. Plain
+[`PtySession`](../../crates/nession-agent/src/tmux/pty.rs) remains a separate
+backend for plain (non-Control-Mode) attach.
 
 ## Two carriers, one protocol
 
