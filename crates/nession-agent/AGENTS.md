@@ -17,6 +17,8 @@ Nession never relies on the user's default tmux server.
 - Cleanup targets Nession-owned resources and proves socket ownership before broad server cleanup.
 - Control Mode transport, selection and tradeoffs:
   [docs/architecture/agent-tmux-control-transport.md](../../docs/architecture/agent-tmux-control-transport.md).
+- Test-run isolation and shared-server Session-width semantics:
+  [docs/architecture/agent-tmux-test-isolation.md](../../docs/architecture/agent-tmux-test-isolation.md).
 - Session/tmux SDK ownership boundary, delivered on staging by #2469:
   [docs/architecture/session-tmux-sdk-ownership.md](../../docs/architecture/session-tmux-sdk-ownership.md).
   `main` receives it with the release promotion; until then the `cmd.rs`
