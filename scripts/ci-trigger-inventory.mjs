@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CATALOG, workflowName, upstreamWorkflowNames } from './workflow-conventions.mjs';
+import { CATALOG, workflowName, upstreamWorkflowNames, approvedExternalWorkflowRunSource } from './workflow-conventions.mjs';
 
 const ROOT=path.resolve(fileURLToPath(new URL('../',import.meta.url)));
 const DIR=path.join(ROOT,'.github/workflows');
@@ -59,7 +59,11 @@ export function inspectWorkflows(){
   assert.deepEqual([...files].sort(),all,'unclassified Actions workflow found');
   for(const item of inventory)for(const source of item.upstream){
     const upstream=inventory.find(x=>x.name===source);
-    if(!upstream)throw Error('dangling workflow_run consumer: '+item.name+' -> '+source);
+    if(!upstream){
+      const content=fs.readFileSync(path.join(DIR,item.file),'utf8');
+      if(approvedExternalWorkflowRunSource(item.file,content,source))continue;
+      throw Error('dangling workflow_run consumer: '+item.name+' -> '+source);
+    }
     upstream.downstream.push(item.name);
   }
   return inventory;

@@ -119,6 +119,31 @@ export function reusableReferences(content) {
 // This is a deliberately restricted reader for GitHub's top-level
 // on.workflow_run.workflows YAML list (inline or block). It is not a YAML
 // parser or a new policy engine for arbitrary workflow syntax.
+// One expressly bounded cross-branch source: the producer lives on the
+// history-isolated prototype branch, never in main's workflow catalog.
+// Keep its consumer, workflow name and trusted event restrictions together.
+export const EXTERNAL_WORKFLOW_RUN_SOURCE = Object.freeze({
+  consumerFile: 'deploy-pages.yml',
+  displayName: 'Prototype / Change Signal',
+  branch: 'prototype',
+  producerFile: '.github/workflows/prototype-changed.yml',
+});
+
+export function approvedExternalWorkflowRunSource(consumerFile, content, displayName) {
+  const source = EXTERNAL_WORKFLOW_RUN_SOURCE;
+  if (consumerFile !== source.consumerFile || displayName !== source.displayName) return false;
+  // Require the signal to be branch-scoped, originate from a successful push
+  // in the same repository, and be used only in the trusted Pages workflow.
+  return /^  workflow_run:\s*$/m.test(content) &&
+    /^    workflows: \['Prototype \/ Change Signal'\]\s*$/m.test(content) &&
+    /^    types: \[completed\]\s*$/m.test(content) &&
+    /^    branches: \[prototype\]\s*$/m.test(content) &&
+    content.includes("github.event.workflow_run.event == 'push'") &&
+    content.includes("github.event.workflow_run.conclusion == 'success'") &&
+    content.includes("github.event.workflow_run.head_branch == 'prototype'") &&
+    content.includes('github.event.workflow_run.head_repository.full_name == github.repository');
+}
+
 export function upstreamWorkflowNames(content) {
   const lines = content.split(/\r?\n/);
   let insideOn = false, insideRun = false, insideList = false, sawRun = false, sawList = false;
@@ -244,7 +269,7 @@ export function auditWorkflows(files, catalog = CATALOG, { complete = true, trus
     const consumer = upstreamWorkflowNames(content);
     if (!consumer.valid) errors.push(file + ': malformed/empty on.workflow_run.workflows');
     for (const name of consumer.names) {
-      if (!names.has(name)) errors.push(file + ': dangling workflow_run upstream display name: ' + name);
+      if (!names.has(name) && !approvedExternalWorkflowRunSource(file, content, name)) errors.push(file + ': dangling workflow_run upstream display name: ' + name);
     }
     for (const reference of reusableReferences(content)) {
       if (!files.has(reference)) errors.push(file + ': missing reusable workflow path: ' + reference);
@@ -330,6 +355,22 @@ function selfTest() {
   assert.match(auditWorkflows(old, catalog, { trustedSources: 'const TRUSTED_TELEMETRY_SOURCES = new Map([\n  [\'.github/workflows/missing.yml\', {}],\n]);' }).errors.join('\n'), /telemetry allowlist references absent/);
   assert.deepEqual(upstreamWorkflowNames('on:\n  workflow_run:\n    workflows:\n      - Model\n      - Task\n').names, ['Model', 'Task']);
   assert.match(auditWorkflows(old, catalog, { ownerDocs: '## 3. Current workflow owners\n- \x60.github/workflows/missing.yml\x60\n## 4. Other' }).errors.join('\n'), /CI\/CD Skill references absent workflow/);
+  // The one non-main producer cannot become a generic dangling-name bypass.
+  const signalConsumer = [
+    'name: Deploy / Public Pages',
+    'on:',
+    '  workflow_run:',
+    "    workflows: ['Prototype / Change Signal']",
+    '    types: [completed]',
+    '    branches: [prototype]',
+    'jobs:',
+    '  build:',
+    "    if: github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'prototype' && github.event.workflow_run.head_repository.full_name == github.repository",
+  ].join('\\n');
+  assert.equal(approvedExternalWorkflowRunSource('deploy-pages.yml', signalConsumer, 'Prototype / Change Signal'), true);
+  assert.equal(approvedExternalWorkflowRunSource('ci-quality.yml', signalConsumer, 'Prototype / Change Signal'), false);
+  assert.equal(approvedExternalWorkflowRunSource('deploy-pages.yml', signalConsumer.replace('branches: [prototype]', 'branches: [main]'), 'Prototype / Change Signal'), false);
+  assert.equal(approvedExternalWorkflowRunSource('deploy-pages.yml', signalConsumer.replace('head_repository.full_name == github.repository', 'head_repository.full_name == unknown'), 'Prototype / Change Signal'), false);
   assert.equal(workflowName('name: One\nname: Two'), null);
   const docs = new Map([
     ['.claude/skills/nession-acceptance/SKILL.md',
