@@ -80,7 +80,7 @@ run(({ evidence }) => {
       ' at ' + TRUSTED_MERGE_SHA + ' succeeded after it' },
     { type: 'runtime', value: 'anonymous HTTPS manifest confirmed prototype source ' +
       EXPECTED_PROTOTYPE_SHA + ' and Agent process slug ' + SLUG },
-    { type: 'browser', value: 'anonymous HTTPS GET of standalone ' + SLUG +
+    { type: 'runtime', value: 'anonymous HTTPS GET of standalone ' + SLUG +
       '/index.html returned 2xx, with scenario selector, workspace stage and pinned source link' },
   );
   return 'The orphan prototype push triggered the trusted merged-main Pages workflow; ' +
