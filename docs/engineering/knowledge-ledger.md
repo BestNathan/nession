@@ -38,6 +38,10 @@ Example:
 
 All old log entries remain readable, even when the current article is deleted or moved; Git SHA allows reconstructing exact earlier content. The log is **not** a copy of the article or a mutable `last_updated` record. A commit changing article content must append matching events atomically, and must regenerate the index.
 
+## GitHub server-side writer protection
+
+Knowledge publication and audit do not enforce GitHub-side write permissions. The exact rollout, dual-ruleset design (writer identity and non-bypass append-only), canary denial proof, isolated publisher secrets and recovery procedure are owned by [Knowledge trusted-writer protection](knowledge-writer-protection.md) under [#2358](https://github.com/BestNathan/nession/issues/2358). Keep this boundary Pending until the active live rules and controlled write probes are authenticated.
+
 ## Trust and atomicity
 
 Normal editor workflow is `edit current Markdown -> append one log record -> regenerate index -> validate -> commit -> publish`. The canonical validator checks frontmatter/path constraints, title-to-filename matching, content/source requirements, topic index, category index, timestamped log entries, and per-commit historical mutations. No article revisions or separate receipt pushes are required. Every successful publication is identified by the resulting Git commit SHA.

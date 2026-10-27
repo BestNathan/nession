@@ -23,7 +23,7 @@ jobs:
   inspect:
     name: Read-only anchored store audit
     if: github.repository == 'BestNathan/nession' && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'repository_dispatch') && vars.RUN_STORE_AUDIT_ENABLED == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
       GITHUB_TOKEN: ${{ github.token }}

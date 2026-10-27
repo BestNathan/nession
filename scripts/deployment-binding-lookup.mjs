@@ -100,6 +100,22 @@ export function selectDeploymentBinding({ environmentId, sourceSha, records }) {
   return bindingOf(top[0]);
 }
 
+// A newly dispatched deployed Case is a NEW observation of the lane, not a
+// replay of history: the requested SHA must still be the lane's newest
+// authenticated deployment. A historical receipt stays valid evidence for an
+// already-executed Case, but must not authorize a fresh observation after the
+// lane redeployed (#2323 SC-04 review).
+export function selectFreshDeploymentBinding({ environmentId, sourceSha, records }) {
+  const binding = selectDeploymentBinding({ environmentId, sourceSha, records });
+  const latest = latestDeploymentBinding({ environmentId, records });
+  if (latest.source_sha !== binding.source_sha) {
+    fail('deployment attestation for environment ' + environmentId +
+      ' is stale: lane latest is ' + latest.source_sha +
+      ', requested ' + sourceSha);
+  }
+  return binding;
+}
+
 const RECEIPT = {
   schema_version: 1,
   kind: 'nession_deployment_attestation',
@@ -181,6 +197,25 @@ function selfTest() {
     ],
   });
   assert.equal(newer.attestation_path, path101);
+
+  // A fresh observation requires the lane's newest SHA; a historical SHA stays
+  // selectable only for already-executed Case evidence.
+  const path102 = 'runs/2026-10-25/102-1/deployment/staging-01.json';
+  const redeployed = [
+    { path: path100, record: storedRecord() },
+    { path: path102, record: storedRecord({ runId: 102, observedAt: '2026-10-25T03:00:00Z', sourceSha: 'b'.repeat(40) }) },
+  ];
+  assert.equal(selectFreshDeploymentBinding({
+    environmentId: 'staging-01', sourceSha: 'b'.repeat(40), records: redeployed,
+  }).source_sha, 'b'.repeat(40));
+  assert.throws(() => selectFreshDeploymentBinding({
+    environmentId: 'staging-01', sourceSha: 'a'.repeat(40), records: redeployed,
+  }), /is stale: lane latest is/,
+  'a historical SHA cannot authorize a new observation after a redeploy');
+  assert.equal(selectDeploymentBinding({
+    environmentId: 'staging-01', sourceSha: 'a'.repeat(40), records: redeployed,
+  }).source_sha, 'a'.repeat(40),
+  'historical selection remains available for already-executed evidence');
 
   // Ignore other environments and reject a stale source SHA.
   assert.throws(() => selectDeploymentBinding({
@@ -294,7 +329,9 @@ function main() {
       throw new Error('usage: select ENVIRONMENT SOURCE_SHA RECORDS_JSON [OUTPUT]');
     }
     const records = JSON.parse(fs.readFileSync(recordsFile, 'utf8'));
-    const binding = selectDeploymentBinding({ environmentId, sourceSha, records });
+    // The workflow uses this subcommand to authorize a NEW deployed Case
+    // observation, so a redeployed lane fails closed here.
+    const binding = selectFreshDeploymentBinding({ environmentId, sourceSha, records });
     const json = JSON.stringify(binding, null, 2) + '\n';
     if (output) fs.writeFileSync(output, json);
     else process.stdout.write(json);

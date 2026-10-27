@@ -38,16 +38,50 @@ function positiveInt(x) {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
-export function makeE2eSelectedRunReceipt({ env, runId, runAttempt, sha, selectedIds, provisions }) {
+// #2478 SC-05: a Main push may satisfy the selected obligations from the
+// exact-SHA Full per-ID report instead of launching a second browser suite.
+// That mode has ZERO provisions and must name the verified Full run/attempt;
+// the two modes can never be mixed.
+export const E2E_SELECTED_REUSE_FIELDS = Object.freeze([
+  'reused_full_run_id', 'reused_full_run_attempt', 'reused_full_sha',
+]);
+
+function hasReuseBinding(receipt) {
+  return E2E_SELECTED_REUSE_FIELDS.some((key) => Object.hasOwn(receipt ?? {}, key));
+}
+
+export function makeE2eSelectedRunReceipt({ env, runId, runAttempt, sha, selectedIds,
+  provisions, reusedFull = null }) {
   const run = positiveInt(runId ?? env?.GITHUB_RUN_ID);
   const attempt = positiveInt(runAttempt ?? env?.GITHUB_RUN_ATTEMPT);
   const ids = Array.isArray(selectedIds) ? [...new Set(selectedIds)] : [];
   if (env?.GITHUB_REPOSITORY !== REPO || run === null || attempt === null ||
       !SHA.test(String(sha ?? '')) || ids.length === 0 || ids.length > MAX_IDS ||
-      ids.some((id) => !ID.test(String(id))) || ids.length !== selectedIds.length ||
-      !POS(provisions) || provisions > MAX_IDS) {
+      ids.some((id) => !ID.test(String(id))) || ids.length !== selectedIds.length) {
     return null;
   }
+  if (reusedFull) {
+    if (provisions !== 0 || !positiveInt(reusedFull.run_id) ||
+        !positiveInt(reusedFull.run_attempt) || reusedFull.sha !== sha) {
+      return null;
+    }
+    return Object.freeze({
+      schema_version: 1,
+      kind: 'e2e_selected_run',
+      repository: REPO,
+      workflow: E2E_SELECTED_WORKFLOW,
+      run_id: run,
+      run_attempt: attempt,
+      sha,
+      selected_ids: Object.freeze(ids.sort()),
+      selected_count: ids.length,
+      provisioned_runtimes: 0,
+      reused_full_run_id: reusedFull.run_id,
+      reused_full_run_attempt: reusedFull.run_attempt,
+      reused_full_sha: sha,
+    });
+  }
+  if (!POS(provisions) || provisions > MAX_IDS) return null;
   return Object.freeze({
     schema_version: 1,
     kind: 'e2e_selected_run',
@@ -65,6 +99,7 @@ export function makeE2eSelectedRunReceipt({ env, runId, runAttempt, sha, selecte
 }
 
 export function validateE2eSelectedRunReceipt(receipt) {
+  const reused = hasReuseBinding(receipt);
   if (receipt?.schema_version !== 1 || receipt.kind !== 'e2e_selected_run' ||
       receipt.repository !== REPO || receipt.workflow !== E2E_SELECTED_WORKFLOW ||
       !POS(receipt.run_id) || !POS(receipt.run_attempt) ||
@@ -75,13 +110,24 @@ export function validateE2eSelectedRunReceipt(receipt) {
       new Set(receipt.selected_ids).size !== receipt.selected_ids.length ||
       !POS(receipt.selected_count) ||
       receipt.selected_count !== receipt.selected_ids.length ||
-      !POS(receipt.provisioned_runtimes) ||
+      !Number.isSafeInteger(receipt.provisioned_runtimes) ||
+      receipt.provisioned_runtimes < 0 ||
       receipt.provisioned_runtimes > MAX_IDS) {
+    throw Error('invalid selected E2E run receipt');
+  }
+  if (reused) {
+    if (receipt.provisioned_runtimes !== 0 ||
+        !POS(receipt.reused_full_run_id) || !POS(receipt.reused_full_run_attempt) ||
+        receipt.reused_full_sha !== receipt.sha) {
+      throw Error('invalid selected E2E reused-Full binding');
+    }
+  } else if (receipt.provisioned_runtimes < 1) {
     throw Error('invalid selected E2E run receipt');
   }
   const allowed = new Set(['schema_version', 'kind', 'repository', 'workflow',
     'run_id', 'run_attempt', 'sha',
-    'selected_ids', 'selected_count', 'provisioned_runtimes']);
+    'selected_ids', 'selected_count', 'provisioned_runtimes',
+    ...E2E_SELECTED_REUSE_FIELDS]);
   if (Object.keys(receipt).some((key) => !allowed.has(key))) {
     throw Error('unexpected selected E2E run receipt fields');
   }
@@ -125,12 +171,24 @@ export function attestE2eSelectedRunReceipt(receipt, run, job) {
     selected_ids: receipt.selected_ids,
     selected_count: receipt.selected_count,
     provisioned_runtimes: receipt.provisioned_runtimes,
+    // #2478 SC-05: the selected obligations were proven from the exact-SHA
+    // Full per-ID report; the Full run/attempt identity is attested here and
+    // the Full receipt remains the per-ID authority.
+    reused_full: receipt.reused_full_run_id == null ? null : Object.freeze({
+      run_id: receipt.reused_full_run_id,
+      run_attempt: receipt.reused_full_run_attempt,
+      sha: receipt.reused_full_sha,
+    }),
     // One measured provision for the whole selected invocation is the
     // one-runtime fact; the per-ID results remain owned by the trusted
     // Run Record, not by this receipt.
     one_runtime_for_selected_run: receipt.provisioned_runtimes === 1,
-    evidence: 'GitHub API Run/Attempt/job/step outcomes + exact original ' +
-      'selected E2E job log receipt emitted by the measured run',
+    evidence: receipt.reused_full_run_id == null
+      ? 'GitHub API Run/Attempt/job/step outcomes + exact original ' +
+        'selected E2E job log receipt emitted by the measured run'
+      : 'GitHub API Run/Attempt/job/step outcomes + exact original ' +
+        'selected E2E job log receipt + attested exact-SHA Full per-ID report ' +
+        '(run ' + receipt.reused_full_run_id + '/' + receipt.reused_full_run_attempt + ')',
   });
 }
 
@@ -163,14 +221,28 @@ export const E2E_NOT_REQUIRED_STEPS = Object.freeze([
   Object.freeze(['tmux', 'Install tmux', 'skipped']),
   Object.freeze(['design_gate', 'Run canonical browser design gate', 'success']),
 ]);
+// #2478 SC-02/SC-03: the design gate is only skippable when the trusted
+// impact policy positively classified the change as tooling-only (it cannot
+// affect browser behavior). Every other not-required plan still runs the
+// design gate, and a receipt that skips it without this explicit scope is
+// rejected — an accidental `if:` regression can never read as a Pass.
+export const E2E_NOT_REQUIRED_BROWSER_SCOPES = Object.freeze(['required', 'tooling-only']);
 
-export function makeE2eNotRequiredReceipt({ env, runId, runAttempt, sha, steps }) {
+function designGateExpectation(browserScope) {
+  return browserScope === 'tooling-only' ? 'skipped' : 'success';
+}
+
+export function makeE2eNotRequiredReceipt({ env, runId, runAttempt, sha, steps,
+  browserScope = 'required' }) {
   const run = positiveInt(runId ?? env?.GITHUB_RUN_ID);
   const attempt = positiveInt(runAttempt ?? env?.GITHUB_RUN_ATTEMPT);
+  const designExpected = designGateExpectation(browserScope);
   if (env?.GITHUB_REPOSITORY !== REPO || run === null || attempt === null ||
       !SHA.test(String(sha ?? '')) || !steps ||
+      !E2E_NOT_REQUIRED_BROWSER_SCOPES.includes(browserScope) ||
       !E2E_NOT_REQUIRED_STEPS.every(([key]) => OUTCOME(steps[key])) ||
-      !E2E_NOT_REQUIRED_STEPS.every(([key, , expected]) => steps[key] === expected)) {
+      !E2E_NOT_REQUIRED_STEPS.every(([key, , expected]) =>
+        steps[key] === (key === 'design_gate' ? designExpected : expected))) {
     return null;
   }
   return Object.freeze({
@@ -182,6 +254,7 @@ export function makeE2eNotRequiredReceipt({ env, runId, runAttempt, sha, steps }
     run_attempt: attempt,
     sha,
     plan_mode: 'not-required',
+    browser_scope: browserScope,
     steps: Object.freeze(Object.fromEntries(
       E2E_NOT_REQUIRED_STEPS.map(([key]) => [key, steps[key]]),
     )),
@@ -189,16 +262,20 @@ export function makeE2eNotRequiredReceipt({ env, runId, runAttempt, sha, steps }
 }
 
 export function validateE2eNotRequiredReceipt(receipt) {
-  if (receipt?.schema_version !== 1 || receipt.kind !== E2E_NOT_REQUIRED_KIND ||
+  const browserScope = receipt?.browser_scope ?? 'required';
+  const designExpected = designGateExpectation(browserScope);
+  if (!E2E_NOT_REQUIRED_BROWSER_SCOPES.includes(browserScope) ||
+      receipt?.schema_version !== 1 || receipt.kind !== E2E_NOT_REQUIRED_KIND ||
       receipt.repository !== REPO || receipt.workflow !== E2E_SELECTED_WORKFLOW ||
       !POS(receipt.run_id) || !POS(receipt.run_attempt) ||
       !SHA.test(receipt.sha ?? '') || receipt.plan_mode !== 'not-required' ||
       !receipt.steps || typeof receipt.steps !== 'object' ||
-      !E2E_NOT_REQUIRED_STEPS.every(([key, , expected]) => receipt.steps[key] === expected)) {
+      !E2E_NOT_REQUIRED_STEPS.every(([key, , expected]) =>
+        receipt.steps[key] === (key === 'design_gate' ? designExpected : expected))) {
     throw Error('invalid not-required E2E receipt');
   }
   const allowed = new Set(['schema_version', 'kind', 'repository', 'workflow',
-    'run_id', 'run_attempt', 'sha', 'plan_mode', 'steps']);
+    'run_id', 'run_attempt', 'sha', 'plan_mode', 'browser_scope', 'steps']);
   if (Object.keys(receipt).some((key) => !allowed.has(key))) {
     throw Error('unexpected not-required E2E receipt fields');
   }
@@ -211,19 +288,23 @@ export function validateE2eNotRequiredReceipt(receipt) {
 
 export function attestE2eNotRequiredReceipt(receipt, run, job) {
   validateE2eNotRequiredReceipt(receipt);
+  const browserScope = receipt.browser_scope ?? 'required';
   const steps = Array.isArray(job?.steps) ? job.steps : [];
   for (const [key, name, expected] of E2E_NOT_REQUIRED_STEPS) {
     // Canonical E2E renamed this step to "(standalone)" when selected
     // plans were introduced. Verify exactly one recognized step, not an
-    // arbitrary or missing step, and still require GitHub's success verdict.
+    // arbitrary or missing step, and still require GitHub's own verdict.
     const expectedNames = key === 'design_gate'
       ? [name, 'Run canonical browser design gate (standalone)']
       : [name];
+    const wanted = key === 'design_gate'
+      ? designGateExpectation(browserScope) : expected;
     const matches = steps.filter((step) => expectedNames.includes(step?.name));
-    // The job API must agree with the receipt's claimed outcome, and the
-    // required design gate must actually have run and passed.
-    if (matches.length !== 1 || matches[0].conclusion !== expected ||
-        receipt.steps[key] !== expected) {
+    // The job API must agree with the receipt's claimed outcome. A required
+    // design gate must actually have run and passed; a tooling-only scope
+    // must have really skipped it.
+    if (matches.length !== 1 || matches[0].conclusion !== wanted ||
+        receipt.steps[key] !== wanted) {
       throw Error('not-required E2E receipt step provenance mismatch: ' + name);
     }
   }
@@ -254,7 +335,8 @@ export function attestE2eNotRequiredReceipt(receipt, run, job) {
     plan_mode: 'not-required',
     skipped_e2e_only_steps: E2E_NOT_REQUIRED_STEPS
       .filter(([, , expected]) => expected === 'skipped').map(([key]) => key),
-    design_gate: 'success',
+    browser_scope: browserScope,
+    design_gate: designGateExpectation(browserScope),
     evidence: 'GitHub API Run/Attempt/job step outcomes + exact original ' +
       'not-required E2E job log receipt emitted by the measured run',
   });
@@ -357,6 +439,7 @@ function emitNotRequired() {
   const receipt = makeE2eNotRequiredReceipt({
     env: process.env,
     sha: arg('sha', true),
+    browserScope: arg('browser-scope', true),
     steps: {
       rust_toolchain: arg('rust', true),
       cargo_build: arg('cargo', true),
@@ -378,11 +461,20 @@ function arg(name, required = false) {
 }
 
 function emit() {
+  const sha = arg('sha', true);
+  const reusedRun = arg('reused-full-run');
+  const reusedAttempt = arg('reused-full-attempt');
+  if ((reusedRun && !reusedAttempt) || (!reusedRun && reusedAttempt)) {
+    throw new Error('--reused-full-run and --reused-full-attempt are required together');
+  }
   const receipt = makeE2eSelectedRunReceipt({
     env: process.env,
-    sha: arg('sha', true),
+    sha,
     selectedIds: String(arg('ids', true)).split(',').map((id) => id.trim()).filter(Boolean),
     provisions: Number(arg('provisions', true)),
+    reusedFull: reusedRun
+      ? { run_id: Number(reusedRun), run_attempt: Number(reusedAttempt), sha }
+      : null,
   });
   if (!receipt) throw new Error('selected E2E run receipt inputs are invalid');
   process.stdout.write(E2E_SELECTED_RUN_LOG_PREFIX + JSON.stringify(receipt) + '\n');
@@ -429,6 +521,31 @@ function selfTest() {
     sha, selectedIds: ['login'], provisions: 1 }), null);
 
   const reject = (fn, pattern) => assert.throws(fn, pattern);
+
+  // #2478 SC-05: reuse of the exact-SHA Full per-ID report has zero local
+  // provisions and must carry the attested Full run/attempt binding.
+  const reused = makeE2eSelectedRunReceipt({ env, sha, selectedIds: ['login'],
+    provisions: 0, reusedFull: { run_id: 77, run_attempt: 2, sha } });
+  assert.equal(reused.provisioned_runtimes, 0);
+  assert.equal(reused.reused_full_run_id, 77);
+  assert.equal(validateE2eSelectedRunReceipt(reused).reused_full_sha, sha);
+  const reusedAttested = attestE2eSelectedRunReceipt(reused, run, job);
+  assert.deepEqual(reusedAttested.reused_full, { run_id: 77, run_attempt: 2, sha });
+  assert.equal(reusedAttested.one_runtime_for_selected_run, false);
+  assert.equal(makeE2eSelectedRunReceipt({ env, sha, selectedIds: ['login'],
+    provisions: 1, reusedFull: { run_id: 77, run_attempt: 2, sha } }), null,
+  'a reused Full cannot also claim a local provision');
+  assert.equal(makeE2eSelectedRunReceipt({ env, sha, selectedIds: ['login'],
+    provisions: 0, reusedFull: { run_id: 77, run_attempt: 2, sha: 'b'.repeat(40) } }), null,
+  'reuse must bind the selected target SHA');
+  assert.equal(makeE2eSelectedRunReceipt({ env, sha, selectedIds: ['login'],
+    provisions: 0 }), null, 'zero provisions requires a Full reuse binding');
+  reject(() => validateE2eSelectedRunReceipt({ ...reused, provisioned_runtimes: 1 }),
+    /reused-Full binding/);
+  reject(() => validateE2eSelectedRunReceipt({ ...reused, reused_full_sha: 'b'.repeat(40) }),
+    /reused-Full binding/);
+  reject(() => validateE2eSelectedRunReceipt({ ...reused, reused_full_run_id: 0 }),
+    /reused-Full binding/);
   const bound = receipt;
   reject(() => attestE2eSelectedRunReceipt(bound, { ...run, head_sha: 'b'.repeat(40) }, job), /mismatch/);
   assert.equal(attestE2eSelectedRunReceipt(bound, { ...run, event:'push',head_branch:'main' }, job).event,'push');
@@ -457,6 +574,12 @@ function selfTest() {
   };
   const nr = makeE2eNotRequiredReceipt({ env, sha, steps: nrSteps });
   assert.equal(validateE2eNotRequiredReceipt(nr).plan_mode, 'not-required');
+  assert.equal(nr.browser_scope, 'required');
+  // Historical receipts predate `browser_scope`; their success design gate
+  // remains the only accepted shape.
+  const legacyNr = { ...nr };
+  delete legacyNr.browser_scope;
+  assert.equal(validateE2eNotRequiredReceipt(legacyNr).plan_mode, 'not-required');
   const nrJob = {
     name: E2E_SELECTED_JOB, run_id: 12, run_attempt: 1, head_sha: sha,
     status: 'completed', conclusion: 'success',
@@ -482,9 +605,38 @@ function selfTest() {
     steps:standaloneJob.steps.map(s=>
       s.name==='Run canonical browser design gate (standalone)'
         ? {...s,conclusion:'skipped'} : s)}),/provenance mismatch/);
-  // The design gate must have RUN: a skipped design gate is not a Pass.
+  // The design gate must have RUN unless the trusted impact policy positively
+  // scoped the change as tooling-only: a skipped design gate is not a Pass.
   assert.equal(makeE2eNotRequiredReceipt({ env, sha,
     steps: { ...nrSteps, design_gate: 'skipped' } }), null);
+  assert.equal(makeE2eNotRequiredReceipt({ env, sha, browserScope: 'required',
+    steps: { ...nrSteps, design_gate: 'skipped' } }), null);
+  // A tooling-only scope may skip the design gate, but it must then really
+  // have been skipped, and the receipt records why.
+  const toolingSteps = { ...nrSteps, design_gate: 'skipped' };
+  const toolingNr = makeE2eNotRequiredReceipt({ env, sha,
+    browserScope: 'tooling-only', steps: toolingSteps });
+  assert.equal(toolingNr.browser_scope, 'tooling-only');
+  const toolingJob = { ...nrJob, steps: nrJob.steps.map((step) =>
+    step.name === 'Run canonical browser design gate'
+      ? { ...step, name: 'Run canonical browser design gate (standalone)', conclusion: 'skipped' }
+      : step) };
+  const toolingAttested = attestE2eNotRequiredReceipt(toolingNr, run, toolingJob);
+  assert.equal(toolingAttested.browser_scope, 'tooling-only');
+  assert.equal(toolingAttested.design_gate, 'skipped');
+  assert.deepEqual(toolingAttested.skipped_e2e_only_steps,
+    ['rust_toolchain', 'cargo_build', 'tmux']);
+  // The scope claim and the measured outcome can never disagree.
+  assert.equal(makeE2eNotRequiredReceipt({ env, sha,
+    browserScope: 'tooling-only', steps: nrSteps }), null);
+  assert.equal(makeE2eNotRequiredReceipt({ env, sha,
+    browserScope: 'sometimes', steps: toolingSteps }), null);
+  reject(() => attestE2eNotRequiredReceipt(toolingNr, run, nrJob),
+    /provenance mismatch/);
+  reject(() => validateE2eNotRequiredReceipt({ ...toolingNr, browser_scope: 'sometimes' }),
+    /invalid/);
+  reject(() => attestE2eNotRequiredReceipt(nr, run, toolingJob),
+    /provenance mismatch/);
   // A Rust build that ran is not a skip.
   assert.equal(makeE2eNotRequiredReceipt({ env, sha,
     steps: { ...nrSteps, cargo_build: 'success' } }), null);

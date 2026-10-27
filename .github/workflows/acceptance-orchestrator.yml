@@ -33,7 +33,7 @@ concurrency:
 jobs:
   prepare-pre-merge:
     if: github.event_name == 'pull_request_target' && github.event.pull_request.draft == false
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
       actions: read
@@ -203,7 +203,7 @@ jobs:
     if: >-
       needs.prepare-pre-merge.result == 'success' &&
       needs.prepare-pre-merge.outputs.admission != 'ready'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       actions: write
@@ -223,19 +223,15 @@ jobs:
             echo "::error::Failed to cancel the deferred Acceptance run"
             exit 1
           fi
-          # Cancellation is asynchronous and does not abort the current job
-          # immediately. Block until the run is terminal, then verify it is
-          # genuinely cancelled instead of leaving a green run that never
-          # evaluated anything.
-          timeout 90 gh run watch "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
-            > /dev/null 2>&1 || true
-          conclusion="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
-            --jq '.conclusion // "none"')"
-          [[ "$conclusion" == cancelled ]] || {
-            echo "::error::Deferred Acceptance run was not cancelled (conclusion=${conclusion})"
-            exit 1
-          }
-          echo "Deferred Acceptance run is cancelled; evaluation remains deferred"
+          # Cancellation is asynchronous, and this job is part of the run being
+          # cancelled: the run cannot report a terminal `cancelled` conclusion
+          # until this job ends. Requiring that state from inside the run made
+          # every deferral fail its own job (#2323). The cancel request was
+          # accepted above; GitHub applies it when this job ends, and the
+          # trusted waker requires a completed `cancelled` run plus exact
+          # attempt deferral evidence before replaying, so exiting here cannot
+          # leave a green run that never evaluated anything.
+          echo "Deferred Acceptance run cancellation requested; evaluation remains deferred"
 
   # New tasks use the repository default Acceptor instance, resolved on trusted main.
   # Legacy ACCEPTANCE_PROVIDER stays as an explicit compatibility override until
@@ -265,7 +261,7 @@ jobs:
       needs.prepare-pre-merge.result == 'success' &&
       needs.prepare-pre-merge.outputs.admission == 'ready' &&
       (needs.pre-merge-acceptance.result == 'success' || needs.pre-merge-acceptance.result == 'skipped')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       issues: read
@@ -307,7 +303,7 @@ jobs:
   acceptance-pr-gate:
     needs: pre-merge-gate
     if: github.event_name == 'pull_request_target' && github.event.pull_request.base.ref == 'main' && needs.pre-merge-gate.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       issues: read
@@ -326,7 +322,7 @@ jobs:
 
   acceptance-close-guard:
     if: github.event_name == 'issues'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       issues: write
@@ -347,7 +343,7 @@ jobs:
   # evidence producer and uses the same trusted SC plan in acceptance-executor.
   prepare-merged-agent:
     if: github.event_name == 'push' && (github.ref_name == 'staging' || github.ref_name == 'main')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       issues: read
@@ -421,7 +417,7 @@ jobs:
   # This wakes the existing Agent SC evaluator; it never projects a verdict.
   prepare-post-merge-provider-evidence:
     if: github.event_name == 'repository_dispatch' && github.event.action == 'nession-agent-telemetry-ingested'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       actions: read
@@ -518,7 +514,7 @@ jobs:
       group: acceptance-pr-reconcile
       cancel-in-progress: false
     if: github.event_name == 'repository_dispatch' && github.event.action == 'nession-issue-e2e-projected'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       actions: write
@@ -602,16 +598,45 @@ jobs:
             [.workflow_runs[] | select(.head_sha == $sha and .event == "pull_request_target" and
              ([.pull_requests[].number] | index($pr) != null))] |
             sort_by(.created_at) | last // empty |
-            [.id, .status, .conclusion] | @tsv' \
+            [.id, .status, .conclusion, .run_attempt] | @tsv' \
             "$RUNNER_TEMP/acceptance-runs.json" > "$RUNNER_TEMP/acceptance-target.tsv"
-          IFS=$'\t' read -r accept_id accept_status accept_conclusion < "$RUNNER_TEMP/acceptance-target.tsv"
+          IFS=$'\t' read -r accept_id accept_status accept_conclusion accept_attempt < "$RUNNER_TEMP/acceptance-target.tsv"
           [[ "$accept_id" =~ ^[1-9][0-9]*$ ]] || exit 1
           if [[ "$accept_status" != completed || "$accept_conclusion" == success ]]; then
             echo "Acceptance already running or successful; no rerun"
             exit 0
           fi
-          gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$accept_id/rerun-failed-jobs"
-          echo "Reconciled E2E proof by rerunning failed Acceptance jobs for PR #$PR_NUMBER" >> "$GITHUB_STEP_SUMMARY"
+          # A cancelled run is a deferred one (or an external cancel): GitHub
+          # marks its unfinished jobs cancelled, and `defer-pre-merge`'s
+          # decision comes from `prepare-pre-merge`'s admission output. Rerun
+          # the WHOLE run so that job re-evaluates the now-complete sources;
+          # rerunning only the "failed" jobs would reuse the successful stale
+          # `waiting` output and cancel the replay again, stranding the
+          # acceptance (#2461). A genuinely failed run keeps the narrower
+          # failed-job replay.
+          if [[ "$accept_conclusion" == cancelled ]]; then
+            # Prove the deferral from the exact attempt BEFORE the replay write,
+            # then emit the same receipt the workflow_run waker writes. The
+            # projection path is the other way a deferred run is replayed, so
+            # a merged-main evaluator must be able to see it too (#2461).
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$accept_id" \
+              > "$RUNNER_TEMP/accept-run.json"
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$accept_id/attempts/$accept_attempt/jobs?per_page=100" \
+              > "$RUNNER_TEMP/accept-jobs.json"
+            deferred="$(node scripts/acceptance-dependency-state.mjs deferred \
+              "$RUNNER_TEMP/accept-jobs.json" "$RUNNER_TEMP/accept-run.json" \
+              "$TARGET_SHA" 2> /dev/null || true)"
+            gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$accept_id/rerun"
+            echo "Reconciled E2E proof by replaying the whole deferred Acceptance run for PR #$PR_NUMBER" >> "$GITHUB_STEP_SUMMARY"
+            if [[ "$deferred" == true ]]; then
+              TARGET_SHA="$TARGET_SHA" PR_NUMBER="$PR_NUMBER" REPLAYED_RUN_ID="$accept_id" \
+                DEFERRED_ATTEMPT="$accept_attempt" REPLAY_RESULT=replayed \
+                node scripts/acceptance-deferred-replay-receipt.mjs emit
+            fi
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$accept_id/rerun-failed-jobs"
+            echo "Reconciled E2E proof by rerunning failed Acceptance jobs for PR #$PR_NUMBER" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   # Source Quality/E2E workflow_run completion is the waker for a previously
   # failed or deliberately deferred Acceptance run. A single SHA check replaces
@@ -624,7 +649,7 @@ jobs:
       ${{ github.event_name == 'workflow_run' &&
           github.event.workflow_run.event == 'pull_request' &&
           github.event.workflow_run.conclusion == 'success' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # The bounded re-read may wait up to three minutes for a queued deferral.
     timeout-minutes: 10
     permissions:
@@ -760,11 +785,23 @@ jobs:
             if [[ "$deferred" == true ]]; then
               current="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id")"
               current_state="$(jq -r '(.status // "") + "/" + (.conclusion // "") + "/" + ((.run_attempt // 0) | tostring)' <<< "$current")"
+              # A replayed deferred Run lives on the PR HEAD, so a merged-main
+              # evaluator's target-SHA window cannot reach it (and retainedRuns
+              # keeps one Run per workflow path). Emit a bounded receipt into
+              # this job's log -- the one channel an evaluator reads -- so the
+              # post-merge collector can re-bind the waker Run/Attempt/Job and
+              # both attempts of the replayed Run (#2461 SC-02).
               if [[ "$current_state" == "completed/cancelled/$attempt" ]]; then
                 gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/rerun"
                 echo "Replayed deferred Acceptance after both applicable source completions" >> "$GITHUB_STEP_SUMMARY"
+                TARGET_SHA="$TARGET_SHA" PR_NUMBER="$pr" REPLAYED_RUN_ID="$id" \
+                  DEFERRED_ATTEMPT="$attempt" REPLAY_RESULT=replayed \
+                  node scripts/acceptance-deferred-replay-receipt.mjs emit
               else
                 echo "Deferred Acceptance changed before replay; no duplicate dispatch" >> "$GITHUB_STEP_SUMMARY"
+                TARGET_SHA="$TARGET_SHA" PR_NUMBER="$pr" REPLAYED_RUN_ID="$id" \
+                  DEFERRED_ATTEMPT="$attempt" REPLAY_RESULT=changed_before_replay \
+                  node scripts/acceptance-deferred-replay-receipt.mjs emit
               fi
             fi
           fi

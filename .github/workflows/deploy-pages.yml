@@ -19,7 +19,7 @@ concurrency:
 jobs:
   build:
     name: Build independent Pages
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       issues: read
@@ -32,6 +32,9 @@ jobs:
       workflow_nodes: ${{ steps.public_data.outputs.workflow_nodes }}
       public_agent_source: ${{ steps.public_data.outputs.source }}
       public_agent_runs: ${{ steps.public_data.outputs.observed_runs }}
+      prototype_sha: ${{ steps.public_data.outputs.prototype_sha }}
+      prototype_manifest_sha256: ${{ steps.public_data.outputs.prototype_manifest_sha256 }}
+      prototype_gallery_sha256: ${{ steps.public_data.outputs.prototype_gallery_sha256 }}
     steps:
       - name: Checkout trusted main
         uses: actions/checkout@v4
@@ -62,6 +65,13 @@ jobs:
           ref: acceptance-results
           path: acceptance-store
           persist-credentials: false
+      - name: Checkout shared public prototype snapshots (never executed in CI)
+        if: steps.detect.outputs.active == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: prototype
+          path: prototype-store
+          persist-credentials: false
       - name: Setup standalone Node toolchain
         if: steps.detect.outputs.active == 'true'
         uses: actions/setup-node@v4
@@ -83,6 +93,11 @@ jobs:
           export METRICS_SHA="$(git -C metrics-store rev-parse HEAD)"
           export ACCEPTANCE_RESULTS_SHA="$(git -C acceptance-store rev-parse HEAD)"
           node pages/scripts/build.mjs
+          prototype_sha="$(git -C prototype-store rev-parse HEAD)"
+          node pages/scripts/publish-prototypes.mjs "$GITHUB_WORKSPACE/prototype-store" "$GITHUB_WORKSPACE/pages/dist/prototypes" "$prototype_sha"
+          test -s pages/dist/prototypes/index.html
+          test -s pages/dist/prototypes/terminal-fixed-cols-2487/index.html
+          test -s pages/dist/prototypes/manifest.json
           test -s pages/dist/index.html
           test -s pages/dist/data/site.json
           test -s pages/dist/workflows.html
@@ -97,6 +112,16 @@ jobs:
           file=pages/dist/data/site.json
           workflow_json=pages/dist/data/workflows.json
           workflow_html=pages/dist/workflows.html
+          prototype_manifest=pages/dist/prototypes/manifest.json
+          prototype_gallery=pages/dist/prototypes/index.html
+          jq -e --arg sha "$(git -C prototype-store rev-parse HEAD)" '
+            .schema_version == 1 and .source.branch == "prototype" and
+            .source.sha == $sha and (.entries | length) >= 1 and
+            ([.entries[] | .source] | all(.[]; startswith("https://github.com/BestNathan/nession/blob/" + $sha + "/")))
+          ' "$prototype_manifest" >/dev/null
+          echo "prototype_sha=$(jq -r .source.sha "$prototype_manifest")" >> "$GITHUB_OUTPUT"
+          echo "prototype_manifest_sha256=$(sha256sum "$prototype_manifest" | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "prototype_gallery_sha256=$(sha256sum "$prototype_gallery" | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
           jq -e --arg sha "$GITHUB_SHA" '
             .schema_version == 1 and
             .source.repository == "BestNathan/nession" and
@@ -136,7 +161,7 @@ jobs:
     name: Publish independent Pages
     if: needs.build.outputs.active == 'true'
     needs: [build]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       pages: write
@@ -168,6 +193,9 @@ jobs:
           EXPECTED_WORKFLOW_NODES: ${{ needs.build.outputs.workflow_nodes }}
           EXPECTED_AGENT_SOURCE: ${{ needs.build.outputs.public_agent_source }}
           EXPECTED_AGENT_RUNS: ${{ needs.build.outputs.public_agent_runs }}
+          EXPECTED_PROTO_SHA: ${{ needs.build.outputs.prototype_sha }}
+          EXPECTED_PROTO_MANIFEST_SHA256: ${{ needs.build.outputs.prototype_manifest_sha256 }}
+          EXPECTED_PROTO_GALLERY_SHA256: ${{ needs.build.outputs.prototype_gallery_sha256 }}
         shell: bash
         run: |
           set -euo pipefail
@@ -239,6 +267,33 @@ jobs:
             echo "::error::Public Pages did not serve the exact HTML/JSON artifacts at the merged main SHA during bounded HTTPS polling"
             exit 1
           }
+          # Confirm the exact publicly served prototype snapshot, not a constructed
+          # URL, a GitHub blob viewer, or a potentially stale previous deployment.
+          [[ "$EXPECTED_PROTO_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+          [[ "$EXPECTED_PROTO_MANIFEST_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+          [[ "$EXPECTED_PROTO_GALLERY_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+          prototype_manifest="$(mktemp)"
+          prototype_gallery="$(mktemp)"
+          prototype_detail="$(mktemp)"
+          trap 'rm -f "$json" "$html" "$workflow_json" "$workflow_html" "$prototype_manifest" "$prototype_gallery" "$prototype_detail"' EXIT
+          proto_ready=false
+          for attempt in {1..18}; do
+            if curl --fail --silent --show-error --location --connect-timeout 10 --max-time 20 -H 'Cache-Control: no-cache' "$url/prototypes/manifest.json?revision=$EXPECTED_PROTO_SHA" -o "$prototype_manifest" \
+              && jq -e --arg sha "$EXPECTED_PROTO_SHA" '.schema_version == 1 and .source.sha == $sha' "$prototype_manifest" >/dev/null \
+              && curl --fail --silent --show-error --location --connect-timeout 10 --max-time 20 -H 'Cache-Control: no-cache' "$url/prototypes/index.html?revision=$EXPECTED_PROTO_SHA" -o "$prototype_gallery" \
+              && curl --fail --silent --show-error --location --connect-timeout 10 --max-time 20 -H 'Cache-Control: no-cache' "$url/prototypes/terminal-fixed-cols-2487/index.html?revision=$EXPECTED_PROTO_SHA" -o "$prototype_detail" \
+              && grep -Fq "View source" "$prototype_detail" \
+              && [[ "$(sha256sum "$prototype_manifest" | cut -d ' ' -f1)" == "$EXPECTED_PROTO_MANIFEST_SHA256" ]] \
+              && [[ "$(sha256sum "$prototype_gallery" | cut -d ' ' -f1)" == "$EXPECTED_PROTO_GALLERY_SHA256" ]]; then
+              proto_ready=true
+              break
+            fi
+            sleep 5
+          done
+          [[ "$proto_ready" == true ]] || {
+            echo "::error::Published Pages did not serve the exact prototype gallery and preview HTML"
+            exit 1
+          }
           # This is only source observation; never infer SC acceptance or PR
           # lineage from matching bytes. The existing trusted attester rechecks
           # the published SHA-256 against the exact GitHub Run/Attempt.
@@ -258,5 +313,8 @@ jobs:
             echo "- Workflow topology exact JSON SHA-256: \`$workflow_json_digest\`"
             echo "- Exact published JSON SHA-256: \`$digest\` (matches pinned build artifact)"
             echo "- Issue Agent Run observation: $status · source $source · visible runs $observed"
+            echo "- Public prototype gallery: $url/prototypes/ (source prototype SHA \`$EXPECTED_PROTO_SHA\`)"
+            echo "- Direct HTML example: $url/prototypes/terminal-fixed-cols-2487/index.html (source link visible)"
+            echo "- Prototype manifest SHA-256: \`$EXPECTED_PROTO_MANIFEST_SHA256\` (exact HTTPS bytes)"
             echo "- PR ownership / SC Acceptance / orphan integrity: not inferred"
           } >> "$GITHUB_STEP_SUMMARY"

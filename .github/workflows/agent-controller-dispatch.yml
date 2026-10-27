@@ -47,7 +47,7 @@ jobs:
           github.event.comment.body == '/nession resume issue=1997 checkpoint=2' ||
           github.event.comment.body == '/nession recover-native issue=1997 failed_run=39376331942'))
       )
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 12
     steps:
       - name: Checkout authenticated main code, never PR code

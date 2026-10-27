@@ -1,7 +1,30 @@
 // Pages deliberately has no dependency on nession/web, runtime APIs, or UI packages.
 const root = document.getElementById('main');
 const freshness = document.getElementById('freshness');
-const routes = new Set(['/', '/agents', '/work', '/repository', '/evidence']);
+const routes = new Set(['/', '/agents', '/work', '/repository', '/evidence', '/prototypes']);
+const PROTOTYPE_INFO = {
+  'terminal-fixed-cols-2487': {
+    title: 'Fixed-column Terminal Lab',
+    description: 'Compare true desktop and iPhone terminal font sizes while keeping the same logical columns. Change the viewport, column count and simulated keyboard.',
+    eyebrow: 'TERMINAL / RESPONSIVE TYPE',
+    kind: 'terminal',
+  },
+  'ai-workspace-2221': {
+    title: 'AI Workspace',
+    description: 'A scene-first workspace: let the current intent shape the surface, move between scenes and inspect how an action becomes a visible interaction.',
+    eyebrow: 'SYSTEM ONE / DYNAMIC SCENES',
+    kind: 'workspace',
+  },
+  'ai-conversation-2254': {
+    title: 'AI Conversation',
+    description: 'Follow a text-driven interaction from streamed AI content to structured business components, selection, and a contextual session flow.',
+    eyebrow: 'SYSTEM TWO / TEXT-TO-UI',
+    kind: 'conversation',
+  },
+};
+const PROTOTYPE_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*-[0-9]+$/;
+let prototypeCatalog = null;
+let prototypeCatalogStatus = 'loading';
 let snapshot = null;
 
 function node(tag, className, content) {
@@ -107,6 +130,90 @@ function renderHome() {
   const rows=(snapshot.work?.issues||[]).slice(0,4).map(x=>lineItem('#'+x.number+'  '+x.title,'Issue · '+x.state,'Updated',x.url,date(x.updated_at)));
   latest.append(rows.length?attach(node('div','list'),...rows):empty('No current Issue snapshot','GitHub activity could not be verified for this build.'));
   root.append(latest);
+  const designs=section('PRODUCT / DESIGN LAB','Try the experience.','Working interaction mockups, not production feature claims.');
+  const teaser=node('article','prototype-teaser');
+  const introduction=node('div','prototype-teaser-copy');
+  attach(introduction,
+    node('div','eyebrow','THE INTERACTIVE PROTOTYPE LIBRARY'),
+    node('h3','','From a product idea to something you can try.'),
+    node('p','','Explore scene-first AI interactions, text-native interfaces and the cross-device terminal experience without leaving the Nession Pages navigation.'),
+    local('Browse interactive prototypes  ↗','/prototypes','action'));
+  const visual=node('div','prototype-teaser-visual');
+  const window=node('div','prototype-teaser-window');
+  attach(window,node('span','', 'ness ion / interaction lab'),
+    node('div','prototype-teaser-line'),
+    node('div','prototype-teaser-line short'),
+    node('div','prototype-teaser-target','Preview the behavior'));
+  visual.append(window);
+  attach(teaser,introduction,visual);
+  designs.append(teaser);
+  root.append(designs);
+}
+function prototypeInfo(slug) {
+  const known=PROTOTYPE_INFO[slug];
+  if(known)return known;
+  const base=slug.replace(/-[0-9]+$/,'').replace(/-/g,' ');
+  return { title:base.replace(/\b\w/g, c=>c.toUpperCase()),
+    description:'Explore this interactive Nession product concept and its mocked transitions.',
+    eyebrow:'DESIGN EXPLORATION', kind:'generic' };
+}
+function renderPrototypes() {
+  root.append(pageHead('PRODUCT / INTERACTIVE LAB','Ideas in motion.','Design explorations that can be opened, clicked and reviewed. These are experimental browser mockups, not live Nession Sessions or production acceptance evidence.'));
+  const library=section('THE PROTOTYPE LIBRARY','Explore a direction.','Same Nession Pages experience; each concept keeps its own standalone interactive HTML.');
+  if(prototypeCatalogStatus==='loading'){
+    library.append(empty('Loading published prototypes','Reading the pinned public artifact list.'));
+  } else if(prototypeCatalogStatus!=='available' || !prototypeCatalog?.entries?.length){
+    library.append(empty('Prototype catalog unavailable','The published prototype manifest could not be verified. Existing engineering evidence and other Pages routes remain available.'));
+  } else {
+    const entries=[...prototypeCatalog.entries].sort((a,b)=>Number(b.slug.match(/[0-9]+$/)?.[0]||0)-Number(a.slug.match(/[0-9]+$/)?.[0]||0));
+    const cards=entries.map(entry=>{
+      const info=prototypeInfo(entry.slug);
+      const issue=entry.slug.match(/([0-9]+)$/)[1];
+      const card=node('article','prototype-card');
+      card.dataset.kind=info.kind;
+      const illustration=node('div','prototype-art');
+      illustration.setAttribute('aria-hidden','true');
+      const miniature=node('div','prototype-miniature');
+      attach(miniature,
+        node('div','prototype-miniature-top','NESSION / '+info.kind.toUpperCase()),
+        node('div','prototype-miniature-line'),
+        node('div','prototype-miniature-line second'),
+        node('div','prototype-miniature-line third'));
+      illustration.append(miniature);
+      const body=node('div','prototype-card-body');
+      const meta=node('div','prototype-card-meta');
+      attach(meta,node('span','eyebrow',info.eyebrow),node('span','tag neutral','Issue #'+issue));
+      const links=node('div','prototype-card-links');
+      const preview=node('a','action','Open interactive HTML  ↗');
+      preview.href=new URL(entry.preview,document.baseURI).href;
+      // Leave the Pages catalog in place while the standalone mock opens separately.
+      preview.target='_blank';
+      preview.rel='noopener noreferrer';
+      preview.setAttribute('aria-label','Open '+info.title+' interactive HTML in a new tab');
+      const source=ext('View source ↗',entry.source);
+      source.classList.add('prototype-source');
+      const issueLink=ext('Requirement #'+issue+' ↗','https://github.com/BestNathan/nession/issues/'+issue);
+      issueLink.classList.add('prototype-source');
+      attach(links,preview,source,issueLink);
+      attach(body,meta,node('h3','',info.title),node('p','',info.description),links);
+      attach(card,illustration,body);
+      return card;
+    });
+    library.append(grid(cards,'three'));
+    const pin=node('div','prototype-publication');
+    attach(pin,node('span','mono','SHARED PROTOTYPE SOURCE'),
+      node('span','',prototypeCatalog.source.sha.slice(0,12)+' · Snapshot published by Nession Pages'),
+      ext('Pinned branch source ↗','https://github.com/BestNathan/nession/tree/'+prototypeCatalog.source.sha));
+    library.append(pin);
+  }
+  root.append(library);
+  const note=section('HOW TO USE','Explore, then inspect.','A prototype is a design decision aid—not a claim that the production feature is complete.');
+  note.append(grid([
+    empty('1. Open the HTML','Try the interactive mock at the original viewport size. Every preview has a link back to the Pages gallery.'),
+    empty('2. Follow the source','Use the pinned GitHub source or owning Requirement to review the implementation and design questions.'),
+    empty('3. Validate in production separately','A mock interaction can inform product decisions, but real Agent, tmux, Session and E2E behavior must be verified independently.'),
+  ],'three'));
+  root.append(note);
 }
 function renderAgents(){
   root.append(pageHead('THE AI TEAM','The agents behind the work.','Registered workflow Agents are not the Nession runtime node Agents. A role can exist without a successful run; usage is shown only where actually observed.'));
@@ -455,14 +562,43 @@ function render(){
       root.append(empty('Invalid evidence reference',
         'This address does not identify a bounded public Issue or PR. No source has been verified.'));
     }else if(route==='/missing')root.append(empty('Route unavailable','The requested public page does not exist.'));
-    else ({'/':renderHome,'/agents':renderAgents,'/work':renderWork,'/repository':renderRepository,'/evidence':renderEvidence}[route])();
+    else ({'/':renderHome,'/agents':renderAgents,'/work':renderWork,'/repository':renderRepository,'/evidence':renderEvidence,'/prototypes':renderPrototypes}[route])();
     document.title=(detail?'Evidence':route==='/'?'Overview':route==='/missing'?'Unavailable':route.slice(1).replace(/^\w/, x=>x.toUpperCase()))+' — Nession';
   } catch(error){
     console.error('Pages render failure',error);
     root.append(node('p','failure','The public snapshot could not be rendered. See the source repository for authoritative information.'));
   }
 }
+function validPrototypeCatalog(data) {
+  if(data?.schema_version!==1 || data.source?.branch!=='prototype' ||
+    !/^[a-f0-9]{40}$/.test(data.source.sha||'') ||
+    !Array.isArray(data.entries) || data.entries.length>100)return false;
+  const seen=new Set();
+  return data.entries.every(entry=>{
+    if(typeof entry?.slug!=='string' || !PROTOTYPE_SLUG.test(entry.slug) ||
+       seen.has(entry.slug))return false;
+    seen.add(entry.slug);
+    return entry.preview==='prototypes/'+entry.slug+'/index.html' &&
+      entry.source==='https://github.com/BestNathan/nession/blob/'+data.source.sha+'/'+entry.slug+'/index.html';
+  });
+}
+async function loadPrototypeCatalog() {
+  try {
+    const response=await fetch(new URL('prototypes/manifest.json',document.baseURI),{cache:'no-cache'});
+    if(!response.ok)throw new Error('Prototype manifest unavailable');
+    const result=await response.json();
+    if(!validPrototypeCatalog(result))throw new Error('Prototype manifest validation failed');
+    prototypeCatalog=result;
+    prototypeCatalogStatus='available';
+  } catch(error) {
+    console.warn('Pages prototype catalog unavailable',error);
+    prototypeCatalogStatus='unavailable';
+  }
+  if(snapshot || location.hash==='#/prototypes')render();
+}
 async function init(){
+  window.addEventListener('hashchange',render);
+  void loadPrototypeCatalog();
   try{
     const response=await fetch(new URL('data/site.json',document.baseURI),{cache:'no-cache'});
     if(!response.ok)throw new Error('snapshot unavailable');
@@ -470,7 +606,6 @@ async function init(){
     if(parsed.schema_version!==1||!parsed.source)throw new Error('invalid schema');
     snapshot=parsed;
     freshness.textContent='Generated '+date(parsed.generated_at)+' · public snapshot, not live presence';
-    window.addEventListener('hashchange',render);
     render();
   } catch(error) {
     root.replaceChildren(node('p','failure','Engineering data is temporarily unavailable. View the authoritative GitHub repository for current activity.'));
