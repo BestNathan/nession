@@ -186,7 +186,10 @@ function renderPrototypes() {
       const links=node('div','prototype-card-links');
       const preview=node('a','action','Open interactive HTML  ↗');
       preview.href=new URL(entry.preview,document.baseURI).href;
-      preview.setAttribute('aria-label','Open '+info.title+' interactive HTML');
+      // Leave the Pages catalog in place while the standalone mock opens separately.
+      preview.target='_blank';
+      preview.rel='noopener noreferrer';
+      preview.setAttribute('aria-label','Open '+info.title+' interactive HTML in a new tab');
       const source=ext('View source ↗',entry.source);
       source.classList.add('prototype-source');
       const issueLink=ext('Requirement #'+issue+' ↗','https://github.com/BestNathan/nession/issues/'+issue);
