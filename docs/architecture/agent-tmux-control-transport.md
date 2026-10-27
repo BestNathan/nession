@@ -1,5 +1,9 @@
 # Agent tmux Control Mode transport
 
+Session/tmux SDK ownership is governed by
+[`session-tmux-sdk-ownership.md`](session-tmux-sdk-ownership.md). This document
+remains the Control Mode protocol and transport contract.
+
 Owner: [`crates/nession-tmux/src/client/`](../../crates/nession-tmux/src/client/)
 — the typed, session-owned Control Mode client and its transports, in the
 independent `nession-tmux` crate (#2469 slice 1).

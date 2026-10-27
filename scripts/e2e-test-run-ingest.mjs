@@ -300,6 +300,25 @@ function selfTest() {
   assert.equal(nrRecord.test_scope,'not-required');
   assert.equal(nrRecord.evidence.name,'issue-e2e-verification');
   assert.equal(nrRecord.selected_e2e_artifact,null);
+  // #2478: a positively tooling-only merge skips the design browser entirely;
+  // the trusted ingest must accept that shape only when it was really skipped.
+  const nrTooling=makeE2eNotRequiredReceipt({env,sha,browserScope:'tooling-only',steps:{
+    rust_toolchain:'skipped',cargo_build:'skipped',tmux:'skipped',design_gate:'skipped',
+  }});
+  const nrToolingJob={...nrJob,steps:nrJob.steps.map(s=>
+    s.name==='Run canonical browser design gate (standalone)'
+      ? {...s,conclusion:'skipped'} : s)};
+  const toolingProof=attestPushScope(run,nrToolingJob,
+    E2E_NOT_REQUIRED_LOG_PREFIX+JSON.stringify(nrTooling)+'\n');
+  assert.equal(toolingProof.scope,'not-required');
+  assert.equal(toolingProof.receipt.browser_scope,'tooling-only');
+  assert.equal(toolingProof.receipt.design_gate,'skipped');
+  const toolingRecord=JSON.parse(recordFor(event,run,workflow,tree,[nrToolingJob],
+    [selectedArtifact],toolingProof).recordBytes);
+  assert.equal(toolingRecord.test_scope,'not-required');
+  assert.throws(()=>attestPushScope(run,nrJob,
+    E2E_NOT_REQUIRED_LOG_PREFIX+JSON.stringify(nrTooling)+'\n'),
+    /provenance mismatch/,'tooling-only claim must match the measured skip');
   assert.throws(()=>recordFor(event,run,workflow,tree,[scopedJob],
     [selectedArtifact,{...selectedArtifact,id:36}],selectedProof),
     /missing or ambiguous/, 'ambiguous scoped artifacts must fail closed');

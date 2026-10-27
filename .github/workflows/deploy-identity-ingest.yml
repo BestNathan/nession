@@ -29,7 +29,7 @@ concurrency:
 jobs:
   ingest:
     if: github.event_name == 'schedule' || github.event_name == 'push' || github.event.workflow_run.conclusion == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Checkout trusted ingestion tooling

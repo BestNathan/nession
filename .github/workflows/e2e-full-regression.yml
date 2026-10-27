@@ -38,7 +38,7 @@ concurrency:
 jobs:
   scope:
     if: github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: read
@@ -70,6 +70,14 @@ jobs:
             applicable=true
           fi
           echo "applicable=${applicable}" >> "$GITHUB_OUTPUT"
+          # The Acceptance harness reads job logs, not step summaries or
+          # artifacts. Emit the Not Required decision as a bounded, run-bound
+          # receipt a trusted collector can re-attest (#2478 SC-03).
+          echo "impact: applicable=${applicable} category=$(jq -r '.category // "unknown"' "$RUNNER_TEMP/e2e-scope/classification.json") reason=$(jq -r .reason "$RUNNER_TEMP/e2e-scope/classification.json") target=${AFTER}"
+          if [[ "$applicable" != "true" ]]; then
+            node scripts/e2e-full-applicability.mjs log-receipt \
+              "$RUNNER_TEMP/e2e-scope/classification.json"
+          fi
           {
             echo "## Full E2E applicability"
             echo
@@ -97,7 +105,7 @@ jobs:
     permissions:
       contents: read
       actions: read
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 3
     outputs:
       run: ${{ steps.decide.outputs.run }}
@@ -136,7 +144,7 @@ jobs:
             needs.scope.result == 'success' &&
             needs.scope.outputs.applicable == 'true') ||
            (needs.admit.result == 'success' && needs.admit.outputs.run == 'true')) }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 65
     env:
       RUSTC_WRAPPER: ""
