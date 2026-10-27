@@ -79,7 +79,12 @@ async function run() {
   assert.equal(publisher.conclusion, 'success');
   assert.ok(new Date(publisher.created_at) > new Date(signal.created_at), 'Publisher must follow actual source push');
   assert.match(publisher.head_sha, SHA);
-  execFileSync('git', ['merge-base', '--is-ancestor', publisher.head_sha, target], {cwd: root});
+  // Acceptance checks out an exact SHA with shallow history. The publisher's
+  // older main commit may be absent locally: verify ancestry through GitHub's
+  // read-only commit comparison rather than `git merge-base` on a shallow clone.
+  const ancestry = await get(API + '/compare/' + publisher.head_sha + '...' + target, true, true);
+  assert.ok(['ahead', 'identical'].includes(ancestry.status),
+    'Published Pages main SHA must be an ancestor of this exact main Acceptance target');
 
   assert.match(gitRef.object.sha, SHA);
   const currentSourceSha = gitRef.object.sha;
