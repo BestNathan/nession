@@ -200,7 +200,16 @@ html {
 [data-terminal-capsule-host] [data-terminal-viewport] .xterm {
   pointer-events: auto;
   max-width: var(--nession-local-terminal-content-width, 100%);
-  margin-inline: auto;
+  /* Left-aligned on phone widths: the shell-edge swipe band is measured from
+     the surface's own left edge, and centring a capped grid would move that
+     edge inward past the band (#1081). A wide Web window centres it below. */
+  margin-inline: 0;
+}
+
+@media (min-width: 1024px) {
+  [data-terminal-capsule-host] [data-terminal-viewport] .xterm {
+    margin-inline: auto;
+  }
 }
 
 [data-terminal-capsule-host] [data-testid='terminal-capsule'] {

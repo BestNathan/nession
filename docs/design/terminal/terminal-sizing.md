@@ -29,9 +29,12 @@ For one live Session:
   it does not drop columns or stretch glyphs. There is no CSS
   `transform: scale()`: cell coordinates, selection and touch mapping must stay
   those of the rendered grid.
-- **Content width** is `cols × measured cell width`. On a wide Web window the
-  terminal is capped and centred at that width; unused space is padding, not a
-  wider grid. Owned horizontal insets remain part of the terminal host.
+- **Content width** is `cols × measured cell width`. On a wide Web window
+  (≥1024px) the terminal is capped and centred at that width; unused space is
+  padding, not a wider grid. Below that breakpoint the capped grid is left
+  aligned at the owned inset, so the shell's edge-swipe band still reaches the
+  surface (#1081) instead of being pushed inward by centring. Owned horizontal
+  insets remain part of the terminal host.
 
 The measured cell comes from xterm's own renderer (including DPR and the
 finally-loaded JetBrains Mono face), never from `fontSize × 0.6`. A late font
