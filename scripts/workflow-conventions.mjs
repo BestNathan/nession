@@ -366,7 +366,7 @@ function selfTest() {
     'jobs:',
     '  build:',
     "    if: github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'prototype' && github.event.workflow_run.head_repository.full_name == github.repository",
-  ].join('\\n');
+  ].join('\n');
   assert.equal(approvedExternalWorkflowRunSource('deploy-pages.yml', signalConsumer, 'Prototype / Change Signal'), true);
   assert.equal(approvedExternalWorkflowRunSource('ci-quality.yml', signalConsumer, 'Prototype / Change Signal'), false);
   assert.equal(approvedExternalWorkflowRunSource('deploy-pages.yml', signalConsumer.replace('branches: [prototype]', 'branches: [main]'), 'Prototype / Change Signal'), false);
