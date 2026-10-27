@@ -10,9 +10,10 @@ on:
       - '.github/workflows/deploy-pages.yml'
   schedule:
     - cron: '43 */4 * * *'
-    # Lightweight source-SHA watcher; full Pages deploy runs only when the
-    # published prototype manifest differs from the current orphan branch.
-    - cron: '*/15 * * * *'
+  workflow_run:
+    workflows: ['Prototype / Change Signal']
+    types: [completed]
+    branches: [prototype]
   workflow_dispatch:
 
 concurrency:
@@ -20,35 +21,18 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  prototype_refresh_probe:
-    name: Detect unpublished prototype source
-    if: github.event_name == 'schedule' && github.event.schedule == '*/15 * * * *'
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-    outputs:
-      changed: ${{ steps.probe.outputs.changed }}
-    steps:
-      - name: Checkout trusted main source
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-      - name: Compare prototype HEAD to anonymous published manifest
-        id: probe
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: node pages/scripts/prototype-refresh-needed.mjs
-
   build:
-    needs: [prototype_refresh_probe]
-    # A failed or skipped probe must never suppress regular main/scheduled/manual
-    # publication; on the frequent watch, unchanged prototypes skip the costly
-    # Pages build and deploy. This executes only trusted main scripts.
-    if: ${{ always() && (needs.prototype_refresh_probe.result != 'success' || needs.prototype_refresh_probe.outputs.changed == 'true') }}
+    # workflow_run runs trusted main workflow code only. The upstream signal
+    # is unprivileged and never supplies executable code, artifacts, or input.
+    if: >-
+      ${{
+        github.event_name != 'workflow_run' || (
+          github.event.workflow_run.event == 'push' &&
+          github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.head_branch == 'prototype' &&
+          github.event.workflow_run.head_repository.full_name == github.repository
+        )
+      }}
     name: Build independent Pages
     runs-on: ubuntu-24.04
     permissions:
