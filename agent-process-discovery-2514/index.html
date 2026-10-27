@@ -214,7 +214,7 @@ function overview(d){
  var head=add(stage,'div','stage-head'),title=add(head,'div');add(title,'h3','', 'Agent 能力总览');add(title,'p','','能力是否可用，取决于此节点的实际环境；不根据操作系统名称猜测。');
  btn(head,'查看诊断 →','subtle-button',function(){setTab('diagnostics');});
  var grid=add(stage,'div','overview'),left=add(grid,'div','panel'),lhead=add(left,'div','panel-head');add(lhead,'strong','','运行能力');add(lhead,'small','','Context-aware');
- describeCard(left,'Terminal / tmux','私有 Socket · Session / Window / Pane','可用','▣');
+ describeCard(left,'Terminal / tmux',d.coverage==='unavailable'?'Agent 断连 · 当前状态未知':'私有 Socket · Session / Window / Pane',d.coverage==='unavailable'?'未知':'可用','▣',d.coverage==='unavailable'?'warn':'');
  describeCard(left,'Process discovery',d.coverage==='unavailable'?'Agent 断连，等待重连':d.coverage==='complete'?'独立 cgroup 资源域 · 含重新收养进程':'OS 进程表 · 可能遗漏孤儿进程',d.coverage==='complete'?'完整':d.coverage==='partial'?'部分':'未知','⌁',d.coverage==='complete'?'':d.coverage==='partial'?'warn':'bad');
  describeCard(left,'Runtime context','操作系统 · tmux · Agent 版本','元数据','◈');
  var cta=add(left,'div','row-cta'),ct=add(cta,'div');add(ct,'strong','','Session 进程归属');add(ct,'p','',d.coverage==='unavailable'?'无法刷新；保留离线状态':'从当前 Session 的 Pane 开始，逐层查看工作进程');
@@ -265,7 +265,7 @@ function diagnostics(d){
  var rows=[
  ['01 / 操作系统','Environment',d.kind,'不能假定 macOS 具有 /proc 或 Linux cgroup 接口。'],
  ['02 / tmux Pane','Root attribution',d.coverage==='unavailable'?'Unknown':'pane_pid + pane_tty','根 PID 只是查询起点；还需比对启动时间并处理 Pane 重建。'],
- ['03 / 资源域','Scope validation',d.version,d.key==='shared'?'共享容器域不能作为 Pane 身份。':'必须验证 scope 独立性、可读性和 Pane 根进程归属。'],
+ ['03 / 资源域','Scope validation',d.version,state.key==='shared'?'共享容器域不能作为 Pane 身份。':'必须验证 scope 独立性、可读性和 Pane 根进程归属。'],
  ['04 / 最终结果','Discovery',d.coverage.toUpperCase(),'返回只读时间点快照与原因码；失败不影响 Terminal。']
  ];
  rows.forEach(function(row){var box=add(grid,'div','diag-card');add(box,'h4','',row[0]+' · '+row[1]);add(box,'div','diag-value','',row[2]);add(box,'p','',row[3]);});
