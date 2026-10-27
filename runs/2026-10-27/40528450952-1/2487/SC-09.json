@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "d37a362938a5287b81511e80bf33d4a0dd688e0c2884c2a8d8174589c991faf7",
+  "run_id": 40528450952,
+  "run_attempt": 1,
+  "issue": 2487,
+  "criterion": "SC-09",
+  "criterion_text": "The Server/Agent session sizing owner applies or negotiates the configured fixed columns through the existing ControlLease/authorized resize path, including standalone mode, and prevents mismatched Web↔Server build settings or old attached clients from silently resizing live tmux Sessions.",
+  "stage": "staging",
+  "target_sha": "5c5165ec013170884bd52480c0b74c3945c13193",
+  "contract_sha256": "b991b4952792cad8f6877fe3f0aceabf46a5eedb8366a2e40e2d73a718b6f523",
+  "case_revision": "5c5165ec013170884bd52480c0b74c3945c13193",
+  "case_tree_sha": "fb88e322827201928ecd45a648b1f32fdb3805f3",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-27T15:12:48.149Z",
+  "finished_at": "2026-10-27T15:13:21.086Z",
+  "duration_ms": 32937,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "The Agent owns and enforces the Session width through the ControlLease path, including standalone mode; mismatched clients cannot reflow a live Session",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 5c5165ec013170884bd52480c0b74c3945c13193 on tmux 3.4: a real Agent created a new Session at the configured width, kept that width when a second client attached with a different width, and applied only the lease holder's rows on resize"
+        },
+        {
+          "type": "runtime",
+          "value": "an existing pane kept its width at attach and the reply stated it; the registry test proved the applied resize is the Session's columns with the requested rows"
+        },
+        {
+          "type": "runtime",
+          "value": "a standalone Agent (no Server in the path) used its own configured width for creation and stated it on attach"
+        },
+        {
+          "type": "runtime",
+          "value": "reopened by #2520: with a real 80x24 PTY client attached to another Session on the same server, a 96-column create through the Agent read 96x24 — the create path applies the requested geometry instead of letting tmux 3.4 size the new Session to its latest client"
+        },
+        {
+          "type": "test",
+          "value": "the Web attach-reply parser accepts the Agent-stated width and ignores malformed values, so a client from a different build adopts the Session rather than resizing it"
+        }
+      ],
+      "duration_ms": 27027,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40528450952,
+      "run_attempt": 1,
+      "event": "workflow_dispatch",
+      "head_sha": "5c5165ec013170884bd52480c0b74c3945c13193",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40528450952",
+    "record_path": "runs/2026-10-27/40528450952-1/2487/SC-09.json",
+    "source_result_sha256": "d9e0d8c0f839d91d13cc0a1b6c0b5f9a93f17fcfa45d2ad9f37a717db222457f"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40528450952-1",
+    "sha256": "d9e0d8c0f839d91d13cc0a1b6c0b5f9a93f17fcfa45d2ad9f37a717db222457f",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40528450952",
+    "durability": "time-limited; object archival not configured"
+  }
+}
