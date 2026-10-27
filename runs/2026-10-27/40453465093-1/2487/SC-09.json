@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "b4089747a3cd9adcd32b38bd946e486f583948660a66aa606c5b0029ef5ca8bf",
+  "run_id": 40453465093,
+  "run_attempt": 1,
+  "issue": 2487,
+  "criterion": "SC-09",
+  "criterion_text": "The Server/Agent session sizing owner applies or negotiates the configured fixed columns through the existing ControlLease/authorized resize path, including standalone mode, and prevents mismatched Web↔Server build settings or old attached clients from silently resizing live tmux Sessions.",
+  "stage": "staging",
+  "target_sha": "a7cf6a05f7be2e89fad0d853e992fa8c0f73e048",
+  "contract_sha256": "b991b4952792cad8f6877fe3f0aceabf46a5eedb8366a2e40e2d73a718b6f523",
+  "case_revision": "a7cf6a05f7be2e89fad0d853e992fa8c0f73e048",
+  "case_tree_sha": "a17aaf89dcafa52f5382b53bc7037d56d06d08fa",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Fail",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-27T05:16:36.176Z",
+  "finished_at": "2026-10-27T05:16:53.358Z",
+  "duration_ms": 17182,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Fail",
+      "summary": "the attach-reply compatibility tests did not pass: \n> nession-web@0.35.0 test\n> vitest run --project unit src/product/terminal/__tests__/unit/terminalAgent.test.ts\n\nWEB_TERMINAL_CONFIG_V1 {\"schema_version\":1,\"cols\":80,\"web_max_font_size\":14,\"cols_source\":\"default\",\"web_font_source\":\"default\"}\nWEB_TERMINAL_CONFIG_V1 {\"schema_version\":1,\"cols\":80,\"web_max_font_size\":14,\"cols_source\":\"default\",\"web_font_source\":\"default\"}\nWEB_TERMINAL_CONFIG_V1 {\"schema_version\":1,\"cols\":80,\"web_max_font_size\":14,\"cols_source\":\"default\",\"web_font_source\":\"default\"}\n\n\u001b[1m\u001b[30m\u001b[46m RUN \u001b[49m\u001b[39m\u001b[22m \u001b[36mv4.1.9 \u001b[39m\u001b[90m/home/runner/work/nession/nession/workspace/web\u001b[39m\n\n \u001b[32m✓\u001b[39m \u001b[30m\u001b[42m unit \u001b[49m\u001b[39m src/product/terminal/__tests__/unit/terminalAgent.test.ts \u001b[2m(\u001b[22m\u001b[2m38 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 17\u001b[2mms\u001b[22m\u001b[39m\n\n\u001b[2m Test Files \u001b[22m \u001b[1m\u001b[32m1 passed\u001b[39m\u001b[22m\u001b[90m (1)\u001b[39m\n\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m38 passed\u001b[39m\u001b[22m\u001b[90m (38)\u001b[39m\n\u001b[2m   Start at \u001b[22m 05:16:53\n\u001b[2m   Duration \u001b[22m 257ms\u001b[2m (transform 112ms, setup 0ms, import 140ms, tests 17ms, environment 0ms)\u001b[22m\n\n\n\u001b[2m5:16:52 AM\u001b[22m \u001b[33m\u001b[1m[vite]\u001b[22m\u001b[39m \u001b[33mwarning: `esbuild` option was specified by \"vite:react-babel\" plugin. This option is deprecated, please use `oxc` instead.\u001b[39m\n\u001b[2m5:16:52 AM\u001b[22m \u001b[33m\u001b[1m[vite]\u001b[22m\u001b[39m \u001b[33mwarning: `optimizeDeps.esbuildOptions` option was specified by \"vite:react-babel\" plugin. This option is deprecated, please use `optimizeDeps.rolldownOptions` instead.\u001b[39m\n\u001b[33mBoth esbuild and oxc options were set. oxc options will be used and esbuild options will be ignored.\u001b[39m The following esbuild options were set: `{ jsx: 'automatic', jsxImportSource: undefined }`\n\u001b[2m5:16:53 AM\u001b[22m \u001b[33m\u001b[1m[vite]\u001b[22m\u001b[39m \u001b[33mwarning: `esbuild` option was specified by \"vite:react-babel\" plugin. This option is deprecated, please use `oxc` instead.\u001b[39m\n\u001b[2m5:16:53 AM\u001b[22m \u001b[33m\u001b[1m[vite]\u001b[22m\u001b[39m \u001b[33mwarning: `optimizeDeps.esbuildOptions` option was specified by \"vite:react-babel\" plugin. This option is deprecated, please use `optimizeDeps.rolldownOptions` instead.\u001b[39m\n\u001b[33mBoth esbuild and oxc options were set. oxc options will be used and esbuild options will be ignored.\u001b[39m The following esbuild options were set: `{ jsx: 'automatic', jsxImportSource: undefined }`\n\u001b[2m5:16:53 AM\u001b[22m \u001b[33m\u001b[1m[vite]\u001b[22m\u001b[39m \u001b[33mwarning: `esbuild` option was specified by \"vite:react-babel\" plugin. This option is deprecated, please use `oxc` instead.\u001b[39m\n\u001b[2m5:16:53 AM\u001b[22m \u001b[33m\u001b[1m[vite]\u001b[22m\u001b[39m \u001b[33mwarning: `optimizeDeps.esbuildOptions` option was specified by \"vite:react-babel\" plugin. This option is deprecated, please use `optimizeDeps.rolldownOptions` instead.\u001b[39m",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "the named exact-SHA source tests did not establish the criterion"
+        }
+      ],
+      "duration_ms": 11341,
+      "exit_code": 1
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40453465093,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "a7cf6a05f7be2e89fad0d853e992fa8c0f73e048",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40453465093",
+    "record_path": "runs/2026-10-27/40453465093-1/2487/SC-09.json",
+    "source_result_sha256": "7a441eda9fe8d064741e17fd9a53ef8ef9a48c615660d8d629aecaf85da500ce"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40453465093-1",
+    "sha256": "7a441eda9fe8d064741e17fd9a53ef8ef9a48c615660d8d629aecaf85da500ce",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40453465093",
+    "durability": "time-limited; object archival not configured"
+  }
+}
