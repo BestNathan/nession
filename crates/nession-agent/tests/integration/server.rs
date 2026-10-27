@@ -617,6 +617,72 @@ async fn integration_new_session_uses_configured_columns_and_clamps_resize() {
     handle.shutdown().await.ok();
 }
 
+/// One read of the tmux facts that decide where a Session's width came from.
+///
+/// The four answers the #2520 investigation needs at each time point: which
+/// Session/Window/Pane the target resolved to, that Session's own
+/// `window-size` option, the server-wide `default-size` (80x24 is what an
+/// ignored `-x` falls back to), the attached clients (a client attach resizes
+/// its Session under `window-size latest`), and the server identity
+/// (pid + socket) the answer came from.
+async fn tmux_state(tmux: &SessionManager, session: &str) -> String {
+    let cmd = tmux.tmux_dep().cmd();
+    let probes: [(&str, Vec<&str>); 6] = [
+        (
+            "ids",
+            vec![
+                "display-message",
+                "-p",
+                "-t",
+                session,
+                "#{session_id} #{window_id} #{pane_id} \
+                 window=#{window_width}x#{window_height} pane=#{pane_width}x#{pane_height} \
+                 attached=#{session_attached}",
+            ],
+        ),
+        (
+            "window-size",
+            vec!["show-options", "-t", session, "-v", "window-size"],
+        ),
+        (
+            "default-size",
+            vec!["show-options", "-g", "-v", "default-size"],
+        ),
+        (
+            "global-window-size",
+            vec!["show-options", "-g", "-v", "window-size"],
+        ),
+        (
+            "clients",
+            vec![
+                "list-clients",
+                "-F",
+                "#{client_name} #{client_session} #{client_width}x#{client_height}",
+            ],
+        ),
+        (
+            "server",
+            vec!["display-message", "-p", "#{pid} #{socket_path}"],
+        ),
+    ];
+    let mut out = String::new();
+    for (label, args) in probes {
+        let answer = match cmd.output(&args).await {
+            Ok(output) if output.status.success() => {
+                String::from_utf8_lossy(&output.stdout).trim().to_string()
+            }
+            Ok(output) => format!(
+                "<status {}: {}>",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            ),
+            Err(error) => format!("<spawn failed: {error}>"),
+        };
+        out.push_str(&format!("{label}={answer} "));
+    }
+    out
+}
+
 /// #2487 SC-09: a standalone Agent (no Server) creates Sessions at its own
 /// configured width, and the attach reply states that width.
 #[tokio::test]
@@ -633,6 +699,13 @@ async fn integration_standalone_agent_uses_its_configured_columns() {
         .await
         .unwrap();
 
+    // #2520: whether the Pane was ever 96 is the question the failure has to
+    // answer. Sample the facts before create, immediately after the create
+    // response, and at every poll, so a pane that was never 96 (create ran at
+    // 80) is distinguishable from one that became 80 later (an event resized
+    // it) without reproducing the race first.
+    let before = tmux_state(&tmux, &session_name).await;
+
     let create = SessionCreatePayload {
         name: session_name.clone(),
         width: 80,
@@ -647,14 +720,17 @@ async fn integration_standalone_agent_uses_its_configured_columns() {
         round_trip(&mut sink, &mut stream, &req).await.unwrap();
     assert_eq!(created.msg_type, msg_types::OK);
 
+    let after_create = tmux_state(&tmux, &session_name).await;
+    let mut samples = Vec::new();
     let mut pane = (0, 0);
-    for _ in 0..50 {
+    for i in 0..50 {
         pane = tmux
             .tmux_dep()
             .ops()
             .window_size(&session_name)
             .await
             .expect("the create produced a tmux window");
+        samples.push(format!("#{i}={}x{}", pane.0, pane.1));
         if pane.0 == configured {
             break;
         }
@@ -676,7 +752,10 @@ async fn integration_standalone_agent_uses_its_configured_columns() {
         };
         panic!(
             "the standalone Agent's width must apply: pane={pane:?} \
-             configured={configured} session={session_name} sessions=[{sessions}]"
+             configured={configured} session={session_name} \
+             before=[{before}] after_create=[{after_create}] \
+             samples=[{}] sessions=[{sessions}]",
+            samples.join(", ")
         );
     }
     assert_eq!(
@@ -705,6 +784,278 @@ async fn integration_standalone_agent_uses_its_configured_columns() {
 
     tmux.kill_session(&session_name).await.ok();
     handle.shutdown().await.ok();
+}
+
+/// #2520 SC-03: one Agent hosting multiple Sessions on one tmux server keeps
+/// each Session's width independent through create, attach and an authorized
+/// resize.
+///
+/// This is the production topology the shared test socket models: a single
+/// Agent, one tmux server, Sessions created at different widths (one from the
+/// Server-stated value, one from the Agent's configuration). A resize on one
+/// Session must not move the other.
+#[tokio::test]
+async fn shared_agent_keeps_independent_session_widths() {
+    let configured = 96;
+    let (addr, handle, credentials) =
+        start_server_with_terminal_cols(AttachMode::Plain, configured)
+            .await
+            .unwrap();
+    let tmux = SessionManager::new();
+    let narrow = TestSession::new("shared-width-80");
+    let wide = TestSession::new("shared-width-96");
+    let narrow_name = narrow.name().to_string();
+    let wide_name = wide.name().to_string();
+
+    // One Session is created at the width a Server stated, the other at the
+    // Agent's own configured width.
+    for (name, terminal_cols) in [(&narrow_name, Some(80u16)), (&wide_name, None)] {
+        let (mut sink, mut stream) = connect_for(&credentials, addr, name).await.unwrap();
+        let create = SessionCreatePayload {
+            name: name.clone(),
+            width: 140,
+            height: 30,
+            working_dir: None,
+            env_snapshots: Vec::new(),
+            terminal_cols,
+        };
+        let req = new_message(msg_types::SESSION_CREATE, create);
+        let created: nession_agent::server::websocket::Message<SessionCreateResponse> =
+            round_trip(&mut sink, &mut stream, &req).await.unwrap();
+        assert_eq!(created.msg_type, msg_types::OK);
+    }
+
+    for (name, expected) in [
+        (&narrow_name, (80u16, 30u16)),
+        (&wide_name, (configured, 30)),
+    ] {
+        let mut pane = (0, 0);
+        for _ in 0..50 {
+            pane = tmux
+                .tmux_dep()
+                .ops()
+                .window_size(name)
+                .await
+                .expect("the create produced a tmux window");
+            if pane == expected {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        assert_eq!(pane, expected, "each Session keeps its own created width");
+    }
+
+    // The attach reply states the Session's own width, not the client's and
+    // not the other Session's.
+    let mut wide_sink_stream = None;
+    for (name, expected) in [(&narrow_name, 80u16), (&wide_name, configured)] {
+        let (mut sink, mut stream) = connect_for(&credentials, addr, name).await.unwrap();
+        let attach = ClientAttachPayload {
+            session_name: name.clone(),
+            width: 140,
+            height: 30,
+            size_known: None,
+            env_snapshots: Vec::new(),
+            needs_bootstrap: None,
+            subscription_id: None,
+        };
+        let req = new_message(msg_types::CLIENT_ATTACH, attach);
+        let resp: nession_agent::server::websocket::Message<ClientAttachResponse> =
+            round_trip(&mut sink, &mut stream, &req).await.unwrap();
+        assert_eq!(resp.msg_type, msg_types::OK);
+        assert_eq!(
+            resp.payload.terminal_cols,
+            Some(expected),
+            "{name} must state its own width"
+        );
+        if name == &wide_name {
+            wide_sink_stream = Some((sink, stream));
+        }
+    }
+
+    // An authorized resize on the wide Session changes its rows (columns are
+    // clamped) and leaves the narrow Session untouched.
+    let (mut sink, mut stream) = wide_sink_stream.expect("wide attach kept its connection");
+    let _: nession_agent::server::websocket::Message<
+        nession_agent::server::websocket::TerminalControlAcquireResponse,
+    > = round_trip(
+        &mut sink,
+        &mut stream,
+        &new_message(
+            msg_types::TERMINAL_CONTROL_ACQUIRE,
+            nession_agent::server::websocket::TerminalControlAcquirePayload {
+                session_name: wide_name.clone(),
+            },
+        ),
+    )
+    .await
+    .unwrap();
+    let resize = nession_agent::server::websocket::TerminalResizePayload {
+        session_name: wide_name.clone(),
+        cols: 200,
+        rows: 40,
+        control_generation: None,
+        stream_epoch: None,
+        stream_seq: None,
+    };
+    let req = new_message(msg_types::TERMINAL_RESIZE, resize);
+    let _: nession_agent::server::websocket::Message<serde_json::Value> =
+        round_trip(&mut sink, &mut stream, &req).await.unwrap();
+    let mut wide_pane = (0, 0);
+    for _ in 0..50 {
+        wide_pane = tmux
+            .tmux_dep()
+            .ops()
+            .window_size(&wide_name)
+            .await
+            .expect("the wide Session still has a tmux window");
+        if wide_pane == (configured, 40) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(
+        wide_pane,
+        (configured, 40),
+        "an authorized resize may change rows, never the Session's columns"
+    );
+    assert_eq!(
+        tmux.tmux_dep()
+            .ops()
+            .window_size(&narrow_name)
+            .await
+            .expect("the narrow Session still has a tmux window"),
+        (80, 30),
+        "a resize on one Session must not move another"
+    );
+
+    tmux.kill_session(&narrow_name).await.ok();
+    tmux.kill_session(&wide_name).await.ok();
+    handle.shutdown().await.ok();
+}
+
+/// #2520 SC-02: a standalone Agent configured for 96 columns keeps that width
+/// while another Agent on the same tmux server floods creates and environment
+/// updates and a real client attaches at 80x24.
+///
+/// The suite's real ordering is not reproducible on demand, but the *load* it
+/// applies is: many `new-session` + `set-environment` commands in flight on one
+/// socket while a distinct Session is created, plus a live attached client. If
+/// shared-server activity can move an unrelated Session's width, this schedule
+/// reaches it without a sleep-tuned race.
+#[tokio::test]
+async fn configured_width_survives_shared_server_flood_and_attach() {
+    // Enough concurrent creates and env commands to keep the server busy;
+    // deliberately below the mutation bound so this width test does not
+    // re-test admission (the flood test owns that) or hold more panes than
+    // the schedule needs. Under LLVM instrumentation a production-sized flood
+    // can also push the measured `new-session` past its 10 s budget, which
+    // would turn a width test into a timeout test.
+    const FLOOD: usize = 8;
+    const PARK_VARS: usize = 20;
+    const CREATES: usize = 3;
+
+    let (addr_a, handle_a, credentials_a) = start_server_with_terminal_cols(AttachMode::Plain, 96)
+        .await
+        .unwrap();
+    let (addr_b, handle_b, credentials_b) = start_server(0).await.unwrap();
+    let tmux = SessionManager::new();
+
+    // A deterministic 80x24 anchor Session carries the live client; the flood
+    // is load, not a precondition, so its admission bound cannot turn this
+    // test into an infrastructure failure.
+    let attach_target = unique_session_name("width-anchor");
+    tmux.create_session(&attach_target, 80, 24, "/tmp", &[])
+        .await
+        .expect("create the attached-client anchor");
+    let (_client, _client_output) =
+        nession_agent::tmux::pty::PtySession::attach(&tmux.tmux_dep(), &attach_target, 80, 24)
+            .expect("attach a real 80x24 client to the anchor Session");
+
+    let flood_prefix = unique_session_name("width-flood");
+    let vars: Vec<serde_json::Value> = (0..PARK_VARS)
+        .map(|i| serde_json::json!([format!("NESSSION_WIDTH_FLOOD_{i}"), "1"]))
+        .collect();
+    let (mut flood_sink, _flood_stream) = connect(&credentials_b, addr_b).await.unwrap();
+    for n in 0..FLOOD {
+        let create = new_message(
+            msg_types::SESSION_CREATE,
+            serde_json::json!({
+                "name": format!("{flood_prefix}-{n}"),
+                "width": 80,
+                "height": 24,
+                "env_snapshots": [{
+                    "name": "park",
+                    "source": "agent",
+                    "vars": vars,
+                    "warnings": [],
+                }],
+            }),
+        );
+        flood_sink
+            .send(WsMessage::Text(
+                serde_json::to_value(&create).unwrap().to_string(),
+            ))
+            .await
+            .expect("send the flood create");
+    }
+
+    let mut history = Vec::new();
+    for i in 0..CREATES {
+        let name = unique_session_name("standalone-under-load");
+        let (mut sink, mut stream) = connect_for(&credentials_a, addr_a, &name).await.unwrap();
+        let before = tmux_state(&tmux, &name).await;
+        let create = SessionCreatePayload {
+            name: name.clone(),
+            width: 80,
+            height: 24,
+            working_dir: None,
+            env_snapshots: Vec::new(),
+            terminal_cols: None,
+        };
+        let req = new_message(msg_types::SESSION_CREATE, create);
+        let created: nession_agent::server::websocket::Message<serde_json::Value> =
+            round_trip(&mut sink, &mut stream, &req).await.unwrap();
+        assert_eq!(
+            created.msg_type,
+            msg_types::OK,
+            "measured create failed: {}",
+            created.payload
+        );
+        let after = tmux_state(&tmux, &name).await;
+        let mut pane = (0, 0);
+        for _ in 0..50 {
+            pane = tmux
+                .tmux_dep()
+                .ops()
+                .window_size(&name)
+                .await
+                .expect("the create produced a tmux window");
+            if pane.0 == 96 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        history.push(format!(
+            "create#{i} {name}: before=[{before}] after_create=[{after}] pane={pane:?}"
+        ));
+        assert_eq!(
+            pane.0,
+            96,
+            "shared-server activity moved a configured-width Session: {}",
+            history.join(" | ")
+        );
+        // Free the measured Session's pane before the next create: the
+        // schedule needs concurrent tmux activity, not accumulating panes.
+        tmux.kill_session(&name).await.ok();
+    }
+
+    tmux.kill_session(&attach_target).await.ok();
+    for n in 0..FLOOD {
+        tmux.kill_session(&format!("{flood_prefix}-{n}")).await.ok();
+    }
+    handle_a.shutdown().await.ok();
+    handle_b.shutdown().await.ok();
 }
 
 /// #1226: a second `agent.attach` on the SAME connection must be answered,
