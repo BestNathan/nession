@@ -501,6 +501,30 @@ async fn integration_new_session_uses_configured_columns_and_clamps_resize() {
     assert_eq!(resp.msg_type, msg_types::OK);
     assert_eq!(resp.payload.terminal_cols, Some(expected_cols));
 
+    // The first attach applies its measured height. Let that resize land
+    // before a second client reads the pane: on a loaded runner the read
+    // raced it, the second attach adopted the create-size rows, and the
+    // Session moved — which is the attach rule under test, not a property of
+    // the fixture's speed.
+    let mut attached_pane = (0, 0);
+    for _ in 0..50 {
+        attached_pane = tmux
+            .tmux_dep()
+            .ops()
+            .window_size(&session_name)
+            .await
+            .expect("the session still has a tmux window");
+        if attached_pane == (expected_cols, 30) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(
+        attached_pane,
+        (expected_cols, 30),
+        "the first attach's rows must be applied before a second client reads the Session"
+    );
+
     // A second, measured client asks for a different width. Attaching as a
     // subscriber does not move a live Session at all; the reply states the
     // width it must render.
