@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "168a3264c0cdffcc1a4383c83bb9f630658379a81fbe684b245b6959f40f1a03",
+  "run_id": 40527714709,
+  "run_attempt": 1,
+  "issue": 2520,
+  "criterion": "SC-02",
+  "criterion_text": "Under the proven relevant suite concurrency, `integration_standalone_agent_uses_its_configured_columns` and adjacent 80/96 tests consistently read their own correct Pane widths without false attribution, fixture contamination, blanket serialization/retries/skips or assertion weakening.",
+  "stage": "staging",
+  "target_sha": "5c5165ec013170884bd52480c0b74c3945c13193",
+  "contract_sha256": "9aad0b7c0ec55972a94726e42075afdac7a2c3bddb2874381ee85c468a6cfb9c",
+  "case_revision": "5c5165ec013170884bd52480c0b74c3945c13193",
+  "case_tree_sha": "656d105cf2ba70a3f625cb5cf7c52e52b45d995e",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-27T15:08:53.657Z",
+  "finished_at": "2026-10-27T15:09:25.767Z",
+  "duration_ms": 32109,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Configured widths stay correct under the shared-server concurrency the suite creates",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 5c5165ec013170884bd52480c0b74c3945c13193 on tmux 3.4: 3x configured-96 create under a shared-server flood (8 creates, 20 env vars each) plus a real attached 80x24 client, and 3x isolated standalone create, all read their own 96-column Pane and no Session moved another Session"
+        }
+      ],
+      "duration_ms": 26193,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40527714709,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "5c5165ec013170884bd52480c0b74c3945c13193",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40527714709",
+    "record_path": "runs/2026-10-27/40527714709-1/2520/SC-02.json",
+    "source_result_sha256": "30821eeca157a903f813dba297a1a0164a474cec0eaa7a50f599c8f78da7fc79"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40527714709-1",
+    "sha256": "30821eeca157a903f813dba297a1a0164a474cec0eaa7a50f599c8f78da7fc79",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40527714709",
+    "durability": "time-limited; object archival not configured"
+  }
+}
