@@ -215,7 +215,16 @@ jobs:
           (
             cd e2e
             npm ci
-            npx playwright install chromium
+            # #2525: Full visual snapshots need the *system font packages*
+            # installed by Playwright, not only a launchable Chrome binary.
+            # At the same source SHA ea22b038, Full succeeded repeatedly with
+            # --with-deps, but failed the same 5,974-pixel Chat dialect golden
+            # when --with-deps was removed (runs 40534919947 / 40537329299).
+            # Keep this correctness-first exception until a pinned font-ready
+            # image or separately validated system-font cache reproduces the
+            # same golden without an apt network fetch. Browser binaries still
+            # use the absolute cache restored above.
+            npx playwright install chromium --with-deps
           # The pinned ubuntu-24.04 image must actually launch Chromium.
           # Cache hits alone do not prove Linux runtime compatibility (#2525).
           node -e 'const { chromium } = require("@playwright/test"); chromium.launch({ timeout: 30000 }).then(browser => browser.close()).catch(error => { console.error(error); process.exitCode = 1; })'
