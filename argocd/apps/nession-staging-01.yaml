@@ -1,4 +1,5 @@
-# staging-01 — deploys environments/staging-01/nession into its own namespace.
+# staging-01 — deploys environments/staging-01/nession as the suffixed lane in
+# the shared nession namespace (owner model: nameSuffix, not a per-env namespace).
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -15,7 +16,7 @@ spec:
     path: environments/staging-01/nession
   destination:
     server: https://kubernetes.default.svc
-    namespace: nession-staging-01
+    namespace: nession
   syncPolicy:
     automated:
       prune: true

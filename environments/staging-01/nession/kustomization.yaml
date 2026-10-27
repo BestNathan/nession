@@ -1,9 +1,14 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-# staging-01 — on-demand SHA-deploy target (deploy.yml): own namespace, own
-# NFS dirs, starts empty. Not driven by the staging-branch flow.
-namespace: nession-staging-01
+# staging-01 — on-demand SHA-deploy target (deploy.yml).
+# Owner model: one shared `nession` namespace; environments are distinguished
+# by nameSuffix (staging uses -staging, this lane uses -staging-01). Mirrors the
+# staging overlay's shape: the env-agnostic base plus this lane's own PV/PVC
+# pairs. Storage reuses the lane's existing NFS dirs so the move keeps data.
+namespace: nession
+
+nameSuffix: -staging-01
 
 commonLabels:
   env: staging-01

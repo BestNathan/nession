@@ -1,5 +1,5 @@
-# Ingress hosts for staging-01. Backend names carry no suffix — each
-# environment runs in its own namespace with base names.
+# Ingress hosts for staging-01. Backends are written with the base service
+# names; nameSuffix rewrites them to the suffixed services in namespace nession.
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress

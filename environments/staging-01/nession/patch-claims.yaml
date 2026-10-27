@@ -1,17 +1,6 @@
-# Point per-env storage claims at this environment's PV/PVC pairs.
-# Base mounts carry no subPath; each PV path is the environment's own dir.
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: nession-server
-spec:
-  template:
-    spec:
-      volumes:
-        - name: data
-          persistentVolumeClaim:
-            claimName: staging-01-data
+# Point the agent's claude-home volume at this lane's own claim. The server and
+# agent data volumes keep the base claim (kustomize nameReference rewrites both
+# the base claimName and this patched one to the suffixed PVC names).
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -23,7 +12,7 @@ spec:
       volumes:
         - name: claude-home
           persistentVolumeClaim:
-            claimName: staging-01-claude-home
+            claimName: nession-claude-home
         - name: data
           persistentVolumeClaim:
-            claimName: staging-01-data
+            claimName: nession-server-data
