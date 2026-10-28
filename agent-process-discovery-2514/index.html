@@ -137,6 +137,46 @@ a{color:inherit}
 [hidden]{display:none!important}
 @media(max-width:850px){.overview{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,1fr)}.process-layout{grid-template-columns:1fr}.session-panel{display:flex;align-items:center;gap:7px;overflow-x:auto}.session-panel h4{white-space:nowrap;margin:0 4px}.session-row{flex:none;width:155px}.diagnostics{grid-template-columns:1fr}}
 @media(max-width:600px){.mast{padding:11px 16px}.mast .links{gap:10px}.mast .links .hide-mobile{display:none}.canvas{padding:19px 12px 115px}.lead{display:block;margin-bottom:17px}.lead h1{font-size:26px}.lead p{font-size:12px}.fixture{margin-top:16px;max-width:100%}.fixture select{flex:1;min-width:0}.shell{border-radius:15px}.shellbar{height:53px;padding:0 15px}.breadcrumb{font-size:11px}.header-actions .small{display:none}.refresh{padding:7px 9px}.context{padding:22px 17px 0}.context h2{font-size:18px}.node-icon{width:38px;height:38px}.metrics{padding:18px 17px;gap:7px}.metric{padding:14px 11px}.metric b{font-size:18px}.view-nav{padding:0 17px;gap:20px}.view-tab{font-size:11px}.stage{padding:19px 14px 30px}.panel-head{padding:16px}.capability-row{padding:15px}.row-cta{padding:16px}.bottom{padding-bottom:16px}.capsule button{padding:8px 12px}.detail-grid{grid-template-columns:repeat(2,1fr)}.shell{min-height:700px}}
+
+/* Process detail / runtime observability — command and resource evidence first */
+.process-layout{grid-template-columns:minmax(185px,.5fr) minmax(0,2fr)}
+.process-area{padding-bottom:13px}
+.detail{padding:0;margin:7px 15px 17px;border:1px solid #d9e3ee;border-radius:13px;background:#fff;overflow:hidden;box-shadow:0 10px 22px #1c375109}
+.detail-top{padding:19px 20px 13px;display:flex;align-items:center;justify-content:space-between;gap:15px;flex-wrap:wrap;border-bottom:1px solid #ecf0f4;background:#fbfcfe}
+.detail-title{font-size:15px;font-weight:780;color:#243b54;letter-spacing:-.03em}
+.detail-meta{font-size:11px;color:#8695a5;margin-top:5px}
+.proc-live{font-size:10px;padding:5px 9px;background:#eef7f2;color:#4f8c70;border-radius:7px;font-weight:700}
+.proc-live.uncertain{background:#fff5e4;color:#966d3f}
+.detail-section{padding:17px 20px;border-bottom:1px solid #edf0f4}
+.detail-section:last-child{border-bottom:0}
+.detail-section-head{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.detail-section-head strong{font-size:12px;color:#30475f}
+.detail-help{font-size:10px;color:#98a4b2;line-height:1.5}
+.command-box{background:#182638;border-radius:11px;padding:16px 17px;display:flex;align-items:flex-start;gap:13px}
+.command-box pre{margin:0;flex:1;min-width:0;white-space:pre-wrap;overflow-wrap:anywhere;color:#eaf1fb;font-size:12px;line-height:1.7;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;user-select:text}
+.command-box button{border:1px solid #506477;background:#2b3f57;color:#eef5ff;padding:7px 10px;border-radius:7px;white-space:nowrap;font-size:10px}
+.command-foot{margin-top:9px;font-size:10px;color:#8e9baa;line-height:1.6}
+.redact{color:#ad7545;font-weight:750}
+.segment-mini{display:flex;gap:3px;background:#edf2f7;border-radius:9px;padding:3px}
+.segment-mini button{background:transparent;color:#7b8da0;font-size:10px;font-weight:750;padding:7px 11px;border:0;border-radius:7px}
+.segment-mini button.active{background:white;color:#2b4869;box-shadow:0 1px 4px #18355013}
+.resource-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}
+.resource-cell{border:1px solid #e9eef4;background:#fbfcfe;border-radius:11px;padding:14px 14px 12px;min-width:0}
+.resource-cell .caption{display:block;font-size:10px;color:#8f9fb0}
+.resource-number{font-size:clamp(19px,2.15vw,28px);line-height:1.2;letter-spacing:-.04em;color:#29445f;margin-top:12px;font-weight:750;white-space:nowrap;font-variant-numeric:tabular-nums}
+.resource-number small{font-size:11px;font-weight:600;color:#8b9bad;letter-spacing:normal}
+.mini-chart{height:34px;margin-top:6px;display:block;width:100%;color:#78a5ce}
+.resource-detail-note{font-size:10px;color:#8999a9;line-height:1.7;margin:12px 0 0}
+.resource-secondary{margin-top:10px;display:flex;gap:12px 22px;flex-wrap:wrap;font-size:11px;color:#7e8d9d}
+.resource-secondary b{color:#465e78;margin-left:5px;font-variant-numeric:tabular-nums}
+.meta-chips{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px 10px}
+.meta-chip .k{display:block;font-size:10px;color:#9aa7b5}
+.meta-chip .v{display:block;font-size:11px;color:#506881;font-weight:700;margin-top:5px;overflow-wrap:anywhere}
+.identity-toggle{border:0;background:none;color:#556e89;font-size:11px;font-weight:700;padding:0;text-align:left}
+.identity-toggle:hover{text-decoration:underline}
+.metric-unknown{font-size:11px!important;letter-spacing:0;color:#a17b4d!important}
+@media(max-width:850px){.process-layout{grid-template-columns:1fr}.resource-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){.detail{margin:9px 10px 15px}.detail-section{padding:15px}.detail-top{padding:15px}.resource-cell{padding:12px 11px}.resource-number{font-size:22px}.meta-chips{grid-template-columns:repeat(2,minmax(0,1fr))}.command-box{display:block;padding:12px}.command-box button{margin-top:11px}.resource-grid{gap:7px}.segment-mini button{padding:7px 8px}}
 </style>
 </head>
 <body>
@@ -145,7 +185,7 @@ a{color:inherit}
  <nav class="links" aria-label="Prototype navigation"><a href="https://bestnathan.github.io/nession/#/prototypes" target="_blank" rel="noopener noreferrer">← Prototype Center</a><a class="hide-mobile" href="https://github.com/BestNathan/nession/issues/2514" target="_blank" rel="noopener noreferrer">Requirement #2514</a></nav>
 </header>
 <main class="canvas">
- <div class="lead"><div><div class="eyebrow">Contextual Capabilities / Agent</div><h1>一个 Agent，完整的执行上下文。</h1><p>从节点能力感知到 Session 进程归属。优先复用 tmux 原生资源域；能力缺失时保留清晰的降级结果，而不是丢失视图。</p></div>
+ <div class="lead"><div><div class="eyebrow">Contextual Capabilities / Agent</div><h1>一个 Agent，完整的执行上下文。</h1><p>从 Agent 能力检测到 Session 进程树；选中进程后，优先查看运行命令、CPU 与内存，再按需展开归属与降级诊断。</p></div>
   <div class="fixture"><label for="scenario">MOCK SCENARIO</label><select id="scenario" aria-label="选择模拟 Agent 环境"><option value="linux">Linux · 独立 tmux scope</option><option value="shared">Linux · 共享容器 cgroup</option><option value="mac">macOS · 进程树降级</option><option value="offline">Agent · 离线 / 无法检测</option></select></div>
  </div>
  <section class="shell" aria-label="Agent capability workspace">
@@ -183,7 +223,7 @@ var scenarios={
  {id:'infra',name:'infra',panes:[{id:'%3',tty:'/dev/ttys005',pid:761,scope:null,processes:[{pid:761,ppid:401,name:'zsh',depth:0},{pid:799,ppid:761,name:'python3',depth:1}]}]}]},
  offline:{host:'edge-node-03',sub:'最后已知：Linux · Agent 连接中断',state:'不可用',method:'—',coverage:'unavailable',reason:'Agent 离线，无法取得新的 tmux / 进程快照。不能把未观察到进程显示为 0。',reasonCode:'agent_offline',kind:'Unknown (last observed Linux)',version:'unknown',probe:'Unavailable',sessions:[]}
 };
-var state={key:'linux',tab:'overview',session:'dev',process:null,count:0};
+var state={key:'linux',tab:'overview',session:'dev',process:null,count:0,resourceScope:'self'};
 var stage=document.getElementById('stage');
 function el(tag,cls,txt){var n=document.createElement(tag);if(cls)n.className=cls;if(txt!==undefined)n.textContent=txt;return n;}
 function add(parent,tag,cls,txt){var n=el(tag,cls,txt);parent.appendChild(n);return n;}
@@ -193,7 +233,7 @@ function allProcesses(d){return d.sessions.reduce(function(a,s){return a+s.panes
 function allPanes(d){return d.sessions.reduce(function(a,s){return a+s.panes.length;},0);}
 function showToast(msg){var t=document.getElementById('toast');t.textContent=msg;t.hidden=false;window.clearTimeout(showToast.timer);showToast.timer=window.setTimeout(function(){t.hidden=true;},2400);}
 function tabs(){document.querySelectorAll('[data-tab]').forEach(function(b){var on=b.dataset.tab===state.tab;b.classList.toggle('selected',on);b.setAttribute('aria-selected',String(on));});}
-function setTab(t){state.tab=t;state.process=null;render();}
+function setTab(t){state.tab=t;if(t==='processes')state.resourceScope='self';state.process=null;render();}
 function header(d){
  document.getElementById('host').textContent=d.host;
  document.getElementById('subhost').textContent=d.sub;
@@ -227,10 +267,116 @@ function notice(root,d){
  if(d.coverage==='complete')return;
  var n=add(root,'div','notice '+(d.coverage==='unavailable'?'':'info'));n.textContent=d.coverage==='unavailable'?'当前 Agent 无法连接；没有新的进程快照。不要将空白理解为无进程。':'当前使用 '+d.method+'：已发现的后代进程可信，但后台 daemon / 被重新收养的进程可能无法完整归属。';
 }
+
+// Synthetic public-safe process metadata. All command strings are already
+// sanitized at the mock data boundary: never offer an unredacted toggle.
+var processProfiles={
+ 'bash':{cmd:'bash --login',cpu:.3,rss:16.8,threads:1,elapsed:'2h 14m',state:'Sleeping',read:0,write:0},
+ 'zsh':{cmd:'zsh -l',cpu:.2,rss:12.4,threads:1,elapsed:'41m',state:'Sleeping',read:0,write:0},
+ 'claude':{cmd:'claude --model sonnet --permission-mode default',cpu:31.8,rss:842.5,threads:27,elapsed:'1h 29m',state:'Running',read:126,write:41},
+ 'node':{cmd:'node /workspace/nession/tools/task-runner.mjs --jobs 4',cpu:12.6,rss:226.4,threads:11,elapsed:'46m',state:'Running',read:82,write:30},
+ 'git':{cmd:'git status --short',cpu:null,rss:null,threads:null,elapsed:'< 1s',state:'Exited / snapshot expired',read:null,write:null},
+ 'worker.py':{cmd:'python3 jobs/worker.py --queue build --api-key [REDACTED]',cpu:6.8,rss:298.2,threads:6,elapsed:'56m',state:'Running',read:38,write:12,redacted:true},
+ 'cargo':{cmd:'cargo test -p nession-agent --test integration',cpu:72.3,rss:493.7,threads:14,elapsed:'12m',state:'Running',read:890,write:360},
+ 'rustc':{cmd:'rustc --crate-name nession_agent --emit=link',cpu:128.6,rss:1426.5,threads:15,elapsed:'2m',state:'Running',read:1500,write:720},
+ 'python':{cmd:'python3 scripts/collector.py --interval 5s',cpu:8.4,rss:168.4,threads:7,elapsed:'9h',state:'Sleeping',read:32,write:22},
+ 'python3':{cmd:'python3 scripts/collector.py --interval 5s',cpu:8.4,rss:168.4,threads:7,elapsed:'3h',state:'Sleeping',read:null,write:null}
+};
+function profile(proc,d){
+ var base=processProfiles[proc.name]||{cmd:proc.name,cpu:null,rss:null,threads:null,elapsed:'—',state:'Unknown',read:null,write:null};
+ // On macOS and restricted hosts I/O rates may not be available.
+ var ioSupported=d.kind!=='macOS';
+ var n=state.count, wobble=((proc.pid%7)-3)*n*.13;
+ var cpu=base.cpu===null?null:Math.max(0,base.cpu+wobble);
+ var rss=base.rss===null?null:Math.max(0,base.rss+n*(proc.pid%3)*.15);
+ return {cmd:base.cmd,cpu:cpu,rss:rss,threads:base.threads,elapsed:base.elapsed,state:base.state,
+         read:ioSupported?base.read:null,write:ioSupported?base.write:null,redacted:base.redacted===true};
+}
+function descendants(p,proc){
+ var ids=new Set([proc.pid]),changed=true;
+ while(changed){changed=false;p.processes.forEach(function(child){
+   if(!ids.has(child.pid)&&ids.has(child.ppid)){ids.add(child.pid);changed=true;}
+ });}
+ return p.processes.filter(function(child){return ids.has(child.pid);});
+}
+function sampleGroup(p,proc,d){
+ var nodes=state.resourceScope==='subtree'?descendants(p,proc):[proc];
+ var metrics=nodes.map(function(x){return profile(x,d);});
+ function sum(key){return metrics.some(function(x){return x[key]===null;})?null:metrics.reduce(function(a,x){return a+x[key];},0);}
+ return {count:nodes.length, cpu:sum('cpu'),rss:sum('rss'),threads:sum('threads'),
+         read:sum('read'),write:sum('write'),noMetrics:metrics.some(function(x){return x.cpu===null||x.rss===null;})};
+}
+function fmt(v,unit,decimals){
+ return v===null?'不可用':Number(v).toFixed(decimals||0)+(unit||'');
+}
+function trend(parent,metric,seed){
+ if(metric===null)return;
+ var svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
+ svg.setAttribute('viewBox','0 0 190 34');svg.setAttribute('preserveAspectRatio','none');
+ svg.setAttribute('class','mini-chart');svg.setAttribute('role','img');svg.setAttribute('aria-label','模拟最近一分钟趋势');
+ var values=Array.from({length:13},function(_,i){return Math.max(.01,metric*(.56+.23*Math.sin(i*.9+seed)+.19*i/12));});
+ var max=Math.max.apply(null,values)*1.14,pts=values.map(function(v,i){return (i*190/12).toFixed(1)+','+(31-27*v/max).toFixed(1);}).join(' ');
+ var path=document.createElementNS('http://www.w3.org/2000/svg','polyline');
+ path.setAttribute('points',pts);path.setAttribute('fill','none');path.setAttribute('stroke','currentColor');path.setAttribute('stroke-width','2');path.setAttribute('stroke-linejoin','round');
+ path.setAttribute('stroke-linecap','round');svg.appendChild(path);parent.appendChild(svg);
+}
+function resourceTile(parent,label,value,unit,precision,history,seed){
+ var tile=add(parent,'div','resource-cell');add(tile,'span','caption',label);
+ var num=add(tile,'div','resource-number'+(value===null?' metric-unknown':''));
+ if(value===null)num.textContent='不可用';else{num.appendChild(document.createTextNode(fmt(value,'',precision)));if(unit)add(num,'small','', ' '+unit);}
+ if(history)trend(tile,value,seed);
+}
 function detailView(root,p,proc,d){
- var card=add(root,'div','detail'),h=add(card,'div','detail-head');add(h,'strong','',proc.name+' · PID '+proc.pid);add(h,'span','cap-state '+(proc.orphan?'warn':''),proc.orphan?'同 cgroup · 无父子路径': '当前进程');
- var g=add(card,'div','detail-grid');
- [['PID',String(proc.pid)],['PPID',String(proc.ppid)],['Pane',p.id],['TTY',p.tty],['Evidence',proc.orphan?'cgroup membership':d.method],['Session scope',p.scope||'Not dedicated']].forEach(function(v){var col=add(g,'div'),a=add(col,'div','detail-label',v[0]);add(col,'div','detail-value',v[1]);});
+ var active=profile(proc,d),agg=sampleGroup(p,proc,d);
+ var card=add(root,'section','detail');
+ card.setAttribute('aria-label',proc.name+' 进程详情');
+ var top=add(card,'div','detail-top'),name=add(top,'div');
+ add(name,'div','detail-title',proc.name+' · PID '+proc.pid);
+ add(name,'div','detail-meta','Session · '+state.session+'　 /　 Pane '+p.id+'　 /　 '+p.tty);
+ add(top,'span','proc-live'+(active.cpu===null?' uncertain':''),active.cpu===null?'数据过期':active.state);
+ var command=add(card,'div','detail-section'),ch=add(command,'div','detail-section-head');
+ add(ch,'strong','','运行命令');add(ch,'span','detail-help','已脱敏 · 只读快照');
+ var box=add(command,'div','command-box'),pre=add(box,'pre','',active.cmd);
+ pre.setAttribute('aria-label','脱敏后的进程命令行');
+ var copy=btn(box,'复制命令','',async function(){
+   try{
+     if(!navigator.clipboard||!navigator.clipboard.writeText)throw new Error('Clipboard unavailable');
+     await navigator.clipboard.writeText(active.cmd);
+     showToast('已复制脱敏命令');
+   }catch(_){showToast('复制不可用，可手动选择脱敏命令');}
+ });
+ copy.setAttribute('aria-label','仅复制已脱敏的进程命令');
+ add(command,'div','command-foot',active.redacted?
+   '包含敏感参数：已替换为 [REDACTED]，不提供显示原文入口。':
+   '展示 Agent 许可范围内的已过滤 argv；不读取环境变量，也不提供未脱敏原文。');
+ var rs=add(card,'div','detail-section'),head=add(rs,'div','detail-section-head');
+ add(head,'strong','','资源消耗');
+ var seg=add(head,'div','segment-mini');seg.setAttribute('role','group');seg.setAttribute('aria-label','资源统计范围');
+ btn(seg,'仅本进程',''+(state.resourceScope==='self'?'active':''),function(){state.resourceScope='self';render();}).setAttribute('aria-pressed',String(state.resourceScope==='self'));
+ btn(seg,'含子进程',''+(state.resourceScope==='subtree'?'active':''),function(){state.resourceScope='subtree';render();}).setAttribute('aria-pressed',String(state.resourceScope==='subtree'));
+ var grid=add(rs,'div','resource-grid');
+ resourceTile(grid,'CPU · 5 秒窗口',agg.cpu,'%',1,true,proc.pid%7);
+ resourceTile(grid,'常驻内存 · RSS',agg.rss,'MiB',1,true,proc.pid%5+1);
+ resourceTile(grid,'线程数',agg.threads,'',0,false,0);
+ resourceTile(grid,'运行时长',state.resourceScope==='subtree'?null:0,'',0,false,0);
+ var last=grid.lastChild.querySelector('.resource-number');
+ last.textContent=state.resourceScope==='self'?active.elapsed:'仅本进程';
+ if(state.resourceScope==='subtree')last.classList.add('metric-unknown');
+ var io=add(rs,'div','resource-secondary');
+ [['磁盘读取',agg.read===null?'不可用':fmt(agg.read,' KiB/s',0)],['磁盘写入',agg.write===null?'不可用':fmt(agg.write,' KiB/s',0)],
+ ['范围',state.resourceScope==='subtree'?'已发现后代 '+agg.count+' 个进程':'当前 PID'],['快照','T+'+state.count+' · 模拟采样']].forEach(function(x){var it=add(io,'span','',x[0]+' ');add(it,'b','',x[1]);});
+ var explanation=state.resourceScope==='subtree'
+  ?'子树按 PPID 关系聚合，不把仅由 cgroup 归属但已重新收养的进程自动纳入此 PID 的后代。'
+  :'CPU 按单个逻辑 CPU 的 100% 计，可能高于 100%；RSS 为当前进程的常驻物理内存，不是虚拟内存。';
+ if(agg.noMetrics)explanation+=' 部分进程指标不可用，聚合值显示“不可用”，不按 0 处理。';
+ if(d.kind==='macOS')explanation+=' 此 macOS 模拟环境不提供 I/O 速率。';
+ add(rs,'p','resource-detail-note',explanation+' 曲线为最近 60 秒模拟值；刷新不代表实时流式监控。');
+ var other=add(card,'div','detail-section'),oh=add(other,'div','detail-section-head');
+ add(oh,'strong','','进程与归属信息');add(oh,'span','detail-help','辅助诊断');
+ var meta=add(other,'div','meta-chips');
+ [['PID',String(proc.pid)],['PPID',String(proc.ppid)],['Pane ID',p.id],['TTY',p.tty],['发现依据',proc.orphan?'cgroup membership':d.method],['资源域',p.scope||'非独立 cgroup']].forEach(function(row){
+   var cell=add(meta,'div','meta-chip');add(cell,'span','k',row[0]);add(cell,'span','v',row[1]);
+ });
 }
 function processes(d){
  var hd=add(stage,'div','stage-head'),heading=add(hd,'div');add(heading,'h3','','Session 进程');add(heading,'p','','聚合所有 Pane。进程归属不取决于是否通过 Web 创建。');
@@ -238,19 +384,24 @@ function processes(d){
  notice(stage,d);
  if(d.coverage==='unavailable'){var no=add(stage,'div','empty');add(no,'b','','当前无可用快照');add(no,'span','','Agent 离线。连接恢复后才能重新查询进程；不推断进程数量。');return;}
  var layout=add(stage,'div','process-layout'),aside=add(layout,'aside','session-panel');add(aside,'h4','','Sessions');
- d.sessions.forEach(function(s){var count=s.panes.reduce(function(a,p){return a+p.processes.length;},0),b=btn(aside,s.name,'session-row '+(s.id===state.session?'active':''),function(){state.session=s.id;state.process=null;render();});
+ d.sessions.forEach(function(s){var count=s.panes.reduce(function(a,p){return a+p.processes.length;},0),b=btn(aside,s.name,'session-row '+(s.id===state.session?'active':''),function(){state.session=s.id;state.process=null;state.resourceScope='self';render();});
  add(b,'span','',s.panes.length+' Pane · '+count+' Processes');if(s.id===state.session)b.setAttribute('aria-current','true');
  });
- var s=d.sessions.find(function(x){return x.id===state.session;})||d.sessions[0],pnl=add(layout,'div','process-panel'),bar=add(pnl,'div','process-toolbar'),group=add(bar,'div');
+ var s=d.sessions.find(function(x){return x.id===state.session;})||d.sessions[0];
+ if(!state.process){
+  var candidates=s.panes.flatMap(function(p){return p.processes.map(function(proc){return {pane:p,proc:proc};});});
+  var best=candidates.find(function(x){return x.proc.name==='claude';})||candidates.find(function(x){return x.proc.name==='cargo'||x.proc.name==='python'||x.proc.name==='python3';})||candidates[0];
+  if(best)state.process=best.pane.id+':'+best.proc.pid;
+ }
+ var pnl=add(layout,'div','process-panel'),bar=add(pnl,'div','process-toolbar'),group=add(bar,'div');
  add(group,'strong','',s.name);add(group,'span','',s.panes.length+' Pane(s) · Snapshot T+'+state.count);
  var content=add(pnl,'div','process-area');
  s.panes.forEach(function(p){
   var ph=add(content,'div','pane-heading');add(ph,'span','','▧ '+p.id);add(ph,'small','',p.tty+' · Root '+p.pid);
   p.processes.forEach(function(pr){
-   var id=p.id+':'+pr.pid,active=state.process===id,line=btn(content,'','process-line '+(active?'selected':''),function(){state.process=id;render();});
+   var id=p.id+':'+pr.pid,active=state.process===id,line=btn(content,'','process-line '+(active?'selected':''),function(){state.process=id;state.resourceScope='self';render();});
    if(pr.depth>0){var ind=add(line,'span','process-indent');ind.style.setProperty('--indent',(10+pr.depth*17)+'px');}else{var dot=add(line,'span');dot.style.cssText='width:8px;height:8px;border-radius:50%;background:'+(pr.orphan?'#d2a65c':'#a3b3c7')+';flex:none';}
-   add(line,'strong','',pr.name);if(pr.orphan)add(line,'span','role','reparented');add(line,'span','pid','',);
-   line.lastChild.textContent='PID '+pr.pid;
+   add(line,'strong','',pr.name);if(pr.orphan)add(line,'span','role','reparented');add(line,'span','pid','PID '+pr.pid);
   });
  });
  var selected=null;
@@ -275,8 +426,8 @@ function render(){
  var d=node();tabs();header(d);stage.replaceChildren();
  if(state.tab==='overview')overview(d);else if(state.tab==='processes')processes(d);else diagnostics(d);
 }
-document.getElementById('scenario').addEventListener('change',function(e){state.key=e.target.value;state.session='dev';state.process=null;state.count=0;render();});
-document.getElementById('refresh').addEventListener('click',function(){if(node().coverage==='unavailable'){showToast('Agent 离线：无法获取新快照');return;}state.count++;state.process=null;render();showToast('已重放模拟进程快照 · T+'+state.count);});
+document.getElementById('scenario').addEventListener('change',function(e){state.key=e.target.value;state.session='dev';state.process=null;state.resourceScope='self';state.count=0;render();});
+document.getElementById('refresh').addEventListener('click',function(){if(node().coverage==='unavailable'){showToast('Agent 离线：无法获取新快照');return;}state.count++;render();showToast('已重放模拟进程快照 · T+'+state.count);});
 document.querySelectorAll('[data-tab]').forEach(function(b){b.addEventListener('click',function(){setTab(b.dataset.tab);});});
 document.querySelector('[data-go]').addEventListener('click',function(){setTab('overview');});
 document.querySelectorAll('[data-other]').forEach(function(b){b.addEventListener('click',function(){showToast(b.dataset.other+' 能力不在本次原型范围；当前焦点仍是 Agent');});});
