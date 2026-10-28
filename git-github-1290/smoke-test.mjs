@@ -47,7 +47,7 @@ check('repo-wide scope',app.innerHTML.includes('Most recent run across all branc
 change('scenario','auth');
 check('auth failure',app.innerHTML.includes('Authentication required'));
 click('to-local');
-check('local Git unaffected',app.innerHTML.includes('Working tree'));
+check('local Git unaffected and preserved tab',app.innerHTML.includes('Local repository') && app.innerHTML.includes('Branches'));
 change('scenario','ambiguous');
 click('section','github');
 check('ambiguous remote',app.innerHTML.includes('Multiple GitHub remotes'));
