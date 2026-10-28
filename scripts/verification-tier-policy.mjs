@@ -62,6 +62,12 @@ export function assessChangedPaths(paths) {
       components.add('web');
     } else if (/^e2e\//.test(p)) {
       components.add('e2e');
+    } else if (/^design\//.test(p)) {
+      // Design sources, generated tokens and design validation scripts are a
+      // build input: the Web bundle imports design/generated, and design
+      // gates decide visual evidence. They are a known component, not an
+      // unknown path requiring an Audit decision.
+      components.add('design');
     } else if (/^pages\//.test(p)) {
       // The public Pages app is its own runtime/build component (#1782).
       components.add('pages');
@@ -162,6 +168,11 @@ function selfTest() {
   assert.equal(assessChangedPaths(['container/Dockerfile.server']).needsAudit, true);
   assert.equal(assessChangedPaths(['pages/scripts/build.mjs']).needsAudit, false);
   assert.deepEqual(assessChangedPaths(['pages/scripts/build.mjs']).components,['pages']);
+  // Design sources/generated tokens are a build input, not an unknown path.
+  assert.equal(assessChangedPaths(['design/scripts/visual-vocabulary-source.mjs']).needsAudit, false);
+  assert.deepEqual(assessChangedPaths(['design/scripts/visual-vocabulary-source.mjs']).components,['design']);
+  assert.equal(assessChangedPaths(['web/src/a.ts','design/scripts/x.mjs']).floor,
+    VERIFICATION_TIERS[1]);
   assert.equal(assessChangedPaths(['pages/scripts/build.mjs','e2e/helpers/pagesStandalone.ts']).floor,
     VERIFICATION_TIERS[1]);
   assert.equal(assessChangedPaths(['unmapped/file']).needsAudit, true);
