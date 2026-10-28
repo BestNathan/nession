@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_failure_admission_observation",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_path": ".github/workflows/e2e-full-regression.yml",
+    "event": "push",
+    "branch": "main",
+    "conclusion": "failure",
+    "run_id": 40636677229,
+    "run_attempt": 1,
+    "target_sha": "5627c3571509d5069eebf4db9c4f0b7932056965",
+    "completed_at": "2026-10-28T05:14:57Z",
+    "acceptance_record_path": "runs/5627c3571509d5069eebf4db9c4f0b7932056965/full-regression/40636677229-1.json"
+  },
+  "artifact": {
+    "id": 12793379404,
+    "digest": "sha256:05d839632dcce552ad48ee1f68305ae5811a9ebb19a8aaa29eff2e72faee9671"
+  },
+  "fingerprint": null,
+  "classification": "setup_or_ci_error",
+  "observed_at": "2026-10-28T05:14:57Z",
+  "result_ids": [
+    "full-regression-report"
+  ],
+  "acceptance_record_path": "runs/5627c3571509d5069eebf4db9c4f0b7932056965/full-regression/40636677229-1.json",
+  "failure_signatures": [
+    {
+      "test_id": "full-regression-report",
+      "kind": "environment_error",
+      "actionable": false,
+      "signature": null
+    }
+  ]
+}
