@@ -47,6 +47,8 @@ jobs:
           SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
           SOURCE_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
           STAGING_DISPATCH_KEY: ${{ secrets.AGENT_STAGING_DISPATCH_KEY }}
+          ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
+          CLAUDE_CODE_VERSION: ${{ vars.CLAUDE_CODE_VERSION }}
           ISSUER_RUN_ID: ${{ github.run_id }}
         shell: bash
         run: |
@@ -74,18 +76,26 @@ jobs:
           import fs from 'node:fs';
           import {buildStagingDeveloperDispatch, parseStagingDispatchKey}
             from './scripts/lib/agent/orchestration/staging-developer-dispatch.mjs';
+          import {qwenDeveloperModel}
+            from './scripts/lib/agent/orchestration/qwen-developer-policy.mjs';
           const dir=process.env.STAGING_DISPATCH_DIR;
           const admission=JSON.parse(fs.readFileSync(dir+'/verified-staging.json','utf8'));
           const registry=JSON.parse(fs.readFileSync('automation/agents/registry.json','utf8'));
+          const model=qwenDeveloperModel(process.env);
+          const cliVersion=process.env.CLAUDE_CODE_VERSION;
+          if(!/^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/.test(cliVersion??''))
+            throw new Error('staging signer requires a pinned CLAUDE_CODE_VERSION');
           const key=parseStagingDispatchKey(process.env.STAGING_DISPATCH_KEY);
           try{
             const record=buildStagingDeveloperDispatch({admission,registry,
               signer:{key,key_id:'staging-controller-v1',
-                issuer_run_id:Number(process.env.ISSUER_RUN_ID)}});
+                issuer_run_id:Number(process.env.ISSUER_RUN_ID),
+                model,cli_version:cliVersion}});
             fs.writeFileSync(dir+'/staging-developer-dispatch.json',
               JSON.stringify(record,null,2)+'\n',{flag:'wx',mode:0o600});
             console.log('Signed staging dispatch '+record.body.dispatch_id+
-              ' for exact staging target '+record.body.target_sha);
+              ' for exact staging target '+record.body.target_sha+
+              ' with pinned model '+record.body.model+' and CLI '+record.body.cli_version);
           }finally{key.fill(0);}
           NODE
           target="$(jq -er .body.target_sha "$work/staging-developer-dispatch.json")"

@@ -37,6 +37,8 @@ jobs:
       dispatch_id: ${{ steps.source.outputs.dispatch_id }}
       agent_id: ${{ steps.source.outputs.agent_id }}
       environment: ${{ steps.source.outputs.environment }}
+      model: ${{ steps.source.outputs.model }}
+      cli_version: ${{ steps.source.outputs.cli_version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -95,7 +97,7 @@ jobs:
             "$work/verified-staging-dispatch.json"
           target="$(jq -er .target_sha "$work/verified-staging-dispatch.json")"
           dispatch="$(jq -er .dispatch_id "$work/verified-staging-dispatch.json")"
-          for key in source_main_sha dispatch_id agent_id environment; do
+          for key in source_main_sha dispatch_id agent_id environment model cli_version; do
             value="$(jq -er ".$key" "$work/verified-staging-dispatch.json")"
             echo "${key}=${value}" >> "$GITHUB_OUTPUT"
           done
@@ -122,10 +124,12 @@ jobs:
       STAGING_DISPATCH_ENVIRONMENT: ${{ needs.verify-source.outputs.environment }}
       SOURCE_MAIN_SHA: ${{ needs.verify-source.outputs.source_main_sha }}
       ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL }}
-      ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
+      # Model and CLI come from the signed dispatch, not from the mutable
+      # Environment variable. A later default change cannot alter this task.
+      ANTHROPIC_MODEL: ${{ needs.verify-source.outputs.model }}
+      CLAUDE_CODE_VERSION: ${{ needs.verify-source.outputs.cli_version }}
       ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      CLAUDE_CODE_VERSION: ${{ vars.CLAUDE_CODE_VERSION }}
     steps:
       - name: Checkout trusted main-only Provider implementation
         uses: actions/checkout@v4
