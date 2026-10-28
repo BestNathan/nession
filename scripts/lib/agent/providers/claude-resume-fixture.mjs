@@ -163,7 +163,7 @@ async function stagingPublish(input,out){
       });
     const source={repository:'BestNathan/nession',run_id:id.run_id,attempt:id.attempt,
       issue:2319,workflow_sha:id.workflow_sha,target_sha:id.source_sha,
-      head_branch:'main',
+      head_branch:'main',role:'developer',
       path:'.github/workflows/agent-staging-developer-canary.yml',
       workflow_name:'Agent / Staging Developer Canary',event:'workflow_run',
       agent_id:'dev-qwen-01',task:'implement',environment:'dev-claude-qwen',
