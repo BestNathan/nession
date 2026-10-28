@@ -154,8 +154,39 @@ function ownedArtifact(artifacts,run,actionId) {
     created<started-30000||created>updated+300000)fail('untrusted/expired Artifact metadata');
   return art;
 }
+// The result artifact and its canonical Metrics record are independent
+// witnesses of the same Run. Neither may substitute for the other.
+export function assertMetricsAgreement({metrics,run,pending,result,pr_number,
+  registry,action_id,state}) {
+  const role=pending?.task?.role;
+  const workflow=role==='reviewer'?'agent-review':'agent-develop';
+  const name=role==='reviewer'?'Agent / Review':'Agent / Development';
+  const type=role==='reviewer'?'review':'development';
+  const instance=registry?.instances?.[pending?.task?.agent_id];
+  const status=typeof result?.outcome==='string'?'review-'+result.outcome:null;
+  if(!metrics||typeof metrics!=='object'||Array.isArray(metrics)||
+      metrics.schema_version!==1||metrics.kind!=='agent_workflow_run'||
+      metrics.identity?.workflow_id!==workflow||
+      metrics.identity?.github_workflow!==name||
+      metrics.identity?.github_run_id!==run?.id||
+      metrics.identity?.github_run_attempt!==run?.run_attempt||
+      metrics.identity?.repository!==REPO||
+      metrics.task?.type!==type||metrics.task?.issue!==state?.issue||
+      metrics.task?.action_id!==action_id||
+      metrics.task?.target_ref!==result?.target_sha||
+      metrics.agent?.role!==role||metrics.agent?.id!==pending?.task?.agent_id||
+      metrics.agent?.provider!==instance?.provider||
+      typeof metrics.agent?.model?.id!=='string'||!metrics.agent.model.id||
+      metrics.agent?.status!=='finished'||
+      typeof metrics.result?.status!=='string'||!metrics.result.status)
+    fail('Metrics record does not match the authenticated result');
+  if(role==='reviewer'&&(metrics.task?.pr!==pr_number||
+      metrics.result.status!==status))
+    fail('Review Metrics record does not match the reviewed PR/outcome');
+  return metrics;
+}
 export async function ingestAgentResult({state,action_id,reader,artifactReader,registry,
-  keyring,dispatch_ticket,pr_number,verified_main_sha,now=Date.now()}) {
+  keyring,dispatch_ticket,pr_number,verified_main_sha,metrics,now=Date.now()}) {
   validateDevelopmentState(state);
   const pending=state.outbox.find(x=>x.id===action_id && x.status==='dispatched');
   if(!pending||pending.receipt?.status!=='verified'||!positive(pending.receipt.source_run_id)) {
@@ -173,6 +204,8 @@ export async function ingestAgentResult({state,action_id,reader,artifactReader,r
     result.kind!==pending.task.role)fail('Artifact not bound to expected Run/Issue/Agent task');
   const source=await attestAgentOutcome({
     state,result,dispatch_ticket,pr_number,registry,reader,keyring,now,verified_main_sha});
+  assertMetricsAgreement({metrics,run,pending,result,pr_number,registry,
+    action_id,state});
   // The PR number comes from the trusted ingester's argument, and has already
   // been checked against GitHub REST by attestAgentOutcome. The untrusted
   // worker's JSON cannot supply implementing_pr (parseAgentResult rejects it).
