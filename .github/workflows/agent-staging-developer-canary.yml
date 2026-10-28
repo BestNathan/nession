@@ -1,13 +1,14 @@
 name: Agent / Staging Developer Canary
 
 # #2319: trusted-main synthetic Qwen Developer proof against an exact staging
-# SHA. Admission Run is independently authenticated before the protected
-# staging-only Environment is entered. NEVER check out/execute staging code.
-# This is not signed Store/Outbox production Developer work or an SC Pass.
+# SHA. The signed Dispatch Run/artifact and its upstream Admission are both
+# independently authenticated before the protected staging-only Environment is
+# entered. NEVER check out/execute staging code. This is not signed Store
+# Developer work or an SC Pass.
 on:
   workflow_run:
     workflows:
-      - Acceptance / Staging Developer Admission
+      - Acceptance / Staging Developer Dispatch
     types: [completed]
 
 env:
@@ -22,15 +23,20 @@ jobs:
     if: >-
       github.repository == 'BestNathan/nession' &&
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'workflow_dispatch' &&
+      github.event.workflow_run.event == 'workflow_run' &&
       github.event.workflow_run.head_branch == 'main' &&
       github.event.workflow_run.repository.full_name == 'BestNathan/nession' &&
       github.event.workflow_run.head_repository.full_name == 'BestNathan/nession' &&
       github.event.workflow_run.run_attempt == 1
     runs-on: ubuntu-24.04
+    environment: agent-staging-controller
     timeout-minutes: 5
     outputs:
       staging_sha: ${{ steps.source.outputs.staging_sha }}
+      source_main_sha: ${{ steps.source.outputs.source_main_sha }}
+      dispatch_id: ${{ steps.source.outputs.dispatch_id }}
+      agent_id: ${{ steps.source.outputs.agent_id }}
+      environment: ${{ steps.source.outputs.environment }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -39,38 +45,67 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Authenticate main admission Run and GitHub artifact digest
+      - name: Authenticate signed Dispatch, its Admission and artifact digests
         id: source
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
           SOURCE_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          STAGING_DISPATCH_KEY: ${{ secrets.AGENT_STAGING_DISPATCH_KEY }}
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]] || exit 1
-          [[ "$SOURCE_RUN_ATTEMPT" == 1 ]] || exit 1
+          [[ "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$SOURCE_RUN_ATTEMPT" == 1 ]]
+          work="$RUNNER_TEMP/staging-source"
+          mkdir -p "$work"
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID" \
-            > "$RUNNER_TEMP/staging-source-run.json"
+            > "$work/dispatch-run.json"
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID/artifacts?per_page=100" \
-            > "$RUNNER_TEMP/staging-source-artifacts.json"
-          artifact_name="staging-development-admission-$SOURCE_RUN_ID-$SOURCE_RUN_ATTEMPT"
+            > "$work/dispatch-artifacts.json"
+          artifact_name="staging-developer-dispatch-$SOURCE_RUN_ID-$SOURCE_RUN_ATTEMPT"
           artifact_id="$(jq -er --arg name "$artifact_name" '
             [.artifacts[] | select(.name == $name)] |
-            if length == 1 then .[0].id else error("untrusted admission artifact cardinality") end
-          ' "$RUNNER_TEMP/staging-source-artifacts.json")"
-          [[ "$artifact_id" =~ ^[1-9][0-9]*$ ]] || exit 1
+            if length == 1 then .[0].id else error("untrusted dispatch artifact cardinality") end
+          ' "$work/dispatch-artifacts.json")"
+          [[ "$artifact_id" =~ ^[1-9][0-9]*$ ]]
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" \
-            > "$RUNNER_TEMP/staging-admission.zip"
-          node scripts/lib/agent/orchestration/staging-developer-source.mjs verify \
-            "$RUNNER_TEMP/staging-source-run.json" \
-            "$RUNNER_TEMP/staging-source-artifacts.json" \
-            "$RUNNER_TEMP/staging-admission.zip" \
-            "$RUNNER_TEMP/verified-staging.json"
-          target="$(jq -er .target_sha "$RUNNER_TEMP/verified-staging.json")"
-          [[ "$target" =~ ^[a-f0-9]{40}$ ]] || exit 1
-          echo "staging_sha=$target" >> "$GITHUB_OUTPUT"
-          echo "Authenticated exact staging proof target $target; no Store claim or SC Pass" >> "$GITHUB_STEP_SUMMARY"
+            > "$work/staging-dispatch.zip"
+          locator="$(node scripts/lib/agent/orchestration/staging-developer-dispatch.mjs locate \
+            "$work/dispatch-run.json" "$work/dispatch-artifacts.json" \
+            "$work/staging-dispatch.zip")"
+          [[ "$locator" =~ ^[1-9][0-9]+[[:space:]]1$ ]]
+          read -r admission_run_id admission_run_attempt <<< "$locator"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$admission_run_id" \
+            > "$work/admission-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$admission_run_id/artifacts?per_page=100" \
+            > "$work/admission-artifacts.json"
+          admission_name="staging-development-admission-$admission_run_id-$admission_run_attempt"
+          admission_artifact="$(jq -er --arg name "$admission_name" '
+            [.artifacts[] | select(.name == $name)] |
+            if length == 1 then .[0].id else error("untrusted admission artifact cardinality") end
+          ' "$work/admission-artifacts.json")"
+          [[ "$admission_artifact" =~ ^[1-9][0-9]*$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$admission_artifact/zip" \
+            > "$work/staging-admission.zip"
+          node scripts/lib/agent/orchestration/staging-developer-dispatch.mjs verify \
+            "$work/dispatch-run.json" "$work/dispatch-artifacts.json" \
+            "$work/staging-dispatch.zip" "$work/admission-run.json" \
+            "$work/admission-artifacts.json" "$work/staging-admission.zip" \
+            "$work/verified-staging-dispatch.json"
+          for key in target_sha source_main_sha dispatch_id agent_id environment; do
+            value="$(jq -er ".$key" "$work/verified-staging-dispatch.json")"
+            echo "${key}=${value}" >> "$GITHUB_OUTPUT"
+          done
+          target="$(jq -er .target_sha "$work/verified-staging-dispatch.json")"
+          dispatch="$(jq -er .dispatch_id "$work/verified-staging-dispatch.json")"
+          {
+            echo "## Authenticated staging dispatch"
+            echo
+            echo "- Target SHA: \`$target\`"
+            echo "- Dispatch ID: \`$dispatch\`"
+            echo "- Signed dispatch and upstream Admission digests verified; no Store claim or SC Pass"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   synthetic-qwen:
     needs: verify-source
@@ -80,7 +115,10 @@ jobs:
     timeout-minutes: 15
     env:
       STAGING_TARGET_SHA: ${{ needs.verify-source.outputs.staging_sha }}
-      SOURCE_MAIN_SHA: ${{ github.event.workflow_run.head_sha }}
+      STAGING_DISPATCH_ID: ${{ needs.verify-source.outputs.dispatch_id }}
+      STAGING_DISPATCH_AGENT: ${{ needs.verify-source.outputs.agent_id }}
+      STAGING_DISPATCH_ENVIRONMENT: ${{ needs.verify-source.outputs.environment }}
+      SOURCE_MAIN_SHA: ${{ needs.verify-source.outputs.source_main_sha }}
       ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL }}
       ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
       ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
@@ -90,16 +128,22 @@ jobs:
       - name: Checkout trusted main-only Provider implementation
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ needs.verify-source.outputs.source_main_sha }}
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Fail closed on absent/misconfigured staging Gateway
+      - name: Fail closed on absent/misconfigured staging dispatch or Gateway
         run: |
           set -euo pipefail
           [[ "$(git rev-parse HEAD)" == "$SOURCE_MAIN_SHA" ]] ||
             { echo "::error::Staging model Worker did not load authenticated main source"; exit 1; }
+          [[ "$STAGING_DISPATCH_AGENT" == "dev-qwen-01" ]] ||
+            { echo "::error::Staging dispatch selected an unapproved Agent"; exit 1; }
+          [[ "$STAGING_DISPATCH_ENVIRONMENT" == "dev-claude-qwen-staging" ]] ||
+            { echo "::error::Staging dispatch selected an unapproved Environment"; exit 1; }
+          [[ "$STAGING_DISPATCH_ID" =~ ^[a-f0-9]{64}$ ]] ||
+            { echo "::error::Staging dispatch identity is missing"; exit 1; }
           node --input-type=module <<'NODE'
           import {qwenDeveloperModel,qwenGatewayEndpoint}
             from './scripts/lib/agent/orchestration/qwen-developer-policy.mjs';

@@ -1,0 +1,110 @@
+name: Acceptance / Staging Developer Dispatch
+
+# #2319: trusted main-owned signing of one exact authenticated staging tip for
+# the registered dev-qwen-01 Claude Code Developer. The signing key lives only
+# in the `agent-staging-controller` Environment; the staging model executor
+# never receives it. This is NOT an Acceptance verdict, a Store write, or
+# permission to execute staging source code.
+on:
+  workflow_run:
+    workflows:
+      - Acceptance / Staging Developer Admission
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  sign:
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'workflow_dispatch' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.repository.full_name == 'BestNathan/nession' &&
+      github.event.workflow_run.head_repository.full_name == 'BestNathan/nession' &&
+      github.event.workflow_run.run_attempt == 1 &&
+      github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    environment: agent-staging-controller
+    timeout-minutes: 5
+    steps:
+      - name: Checkout only trusted main-owned signing code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify deterministic staging dispatch contract
+        run: node scripts/lib/agent/orchestration/staging-developer-dispatch-selftest.mjs
+      - name: Authenticate admission Run/artifact and sign exact staging dispatch
+        id: sign
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+          SOURCE_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          STAGING_DISPATCH_KEY: ${{ secrets.AGENT_STAGING_DISPATCH_KEY }}
+          ISSUER_RUN_ID: ${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$SOURCE_RUN_ATTEMPT" == 1 ]]
+          work="$RUNNER_TEMP/staging-dispatch"
+          mkdir -p "$work"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID" \
+            > "$work/admission-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID/artifacts?per_page=100" \
+            > "$work/admission-artifacts.json"
+          artifact_name="staging-development-admission-$SOURCE_RUN_ID-$SOURCE_RUN_ATTEMPT"
+          artifact_id="$(jq -er --arg name "$artifact_name" '
+            [.artifacts[] | select(.name == $name)] |
+            if length == 1 then .[0].id else error("untrusted admission artifact cardinality") end
+          ' "$work/admission-artifacts.json")"
+          [[ "$artifact_id" =~ ^[1-9][0-9]*$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" \
+            > "$work/admission.zip"
+          node scripts/lib/agent/orchestration/staging-developer-source.mjs verify \
+            "$work/admission-run.json" "$work/admission-artifacts.json" \
+            "$work/admission.zip" "$work/verified-staging.json"
+          STAGING_DISPATCH_DIR="$work" node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import {buildStagingDeveloperDispatch, parseStagingDispatchKey}
+            from './scripts/lib/agent/orchestration/staging-developer-dispatch.mjs';
+          const dir=process.env.STAGING_DISPATCH_DIR;
+          const admission=JSON.parse(fs.readFileSync(dir+'/verified-staging.json','utf8'));
+          const registry=JSON.parse(fs.readFileSync('automation/agents/registry.json','utf8'));
+          const key=parseStagingDispatchKey(process.env.STAGING_DISPATCH_KEY);
+          try{
+            const record=buildStagingDeveloperDispatch({admission,registry,
+              signer:{key,key_id:'staging-controller-v1',
+                issuer_run_id:Number(process.env.ISSUER_RUN_ID)}});
+            fs.writeFileSync(dir+'/staging-developer-dispatch.json',
+              JSON.stringify(record,null,2)+'\n',{flag:'wx',mode:0o600});
+            console.log('Signed staging dispatch '+record.body.dispatch_id+
+              ' for exact staging target '+record.body.target_sha);
+          }finally{key.fill(0);}
+          NODE
+          target="$(jq -er .body.target_sha "$work/staging-developer-dispatch.json")"
+          dispatch="$(jq -er .body.dispatch_id "$work/staging-developer-dispatch.json")"
+          [[ "$target" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$dispatch" =~ ^[a-f0-9]{64}$ ]]
+          echo "target_sha=$target" >> "$GITHUB_OUTPUT"
+          echo "dispatch_id=$dispatch" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Signed staging dispatch"
+            echo
+            echo "- Target SHA: \`$target\`"
+            echo "- Dispatch ID: \`$dispatch\`"
+            echo "- Non-authoritative: no model call, Store write or SC Pass"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload signed staging dispatch
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-developer-dispatch-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/staging-dispatch/staging-developer-dispatch.json
+          if-no-files-found: error
+          retention-days: 3
