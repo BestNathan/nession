@@ -11,7 +11,7 @@ import {runClaudeCli,normalizeClaudeUsage} from './claude-code.mjs';
 import {qwenDeveloperModel,qwenGatewayEndpoint} from '../orchestration/qwen-developer-policy.mjs';
 import {sealClaudeNativeSession,openClaudeNativeSession,discoverClaudeNativeProject} from './claude-native-store.mjs';
 import {sealCheckpoint} from '../store/checkpoint.mjs';
-import {publishEncryptedAgentCheckpoint} from '../store/remote.mjs';
+import {publishEncryptedAgentCheckpoint,readCheckpointHeadVersion} from '../store/remote.mjs';
 import {buildAgentWorkflowTelemetry,writeAgentWorkflowTelemetry} from '../../../agent-workflow-telemetry.mjs';
 
 const SHA=/^[a-f0-9]{40}$/, HEX=/^[a-f0-9]{64}$/;
@@ -156,7 +156,13 @@ async function stagingPublish(input,out){
       seed_run_id:m.run_id,seed_attempt:m.attempt,harness_digest:m.harness_digest,
       files};
     const identity={role:'developer',agent_id:'dev-qwen-01',issue:2319};
-    const checkpoint=sealCheckpoint(identity,1,
+    // A later staging SHA seeds a new checkpoint; advance the exact committed
+    // head instead of re-claiming version 1 forever. The Store CAS still
+    // rejects a racing writer.
+    const previous=readCheckpointHeadVersion({
+      remote:process.env.AGENT_STORE_CONTROLLER_REMOTE,identity});
+    const version=previous.version+1;
+    const checkpoint=sealCheckpoint(identity,version,
       Buffer.from(JSON.stringify(bundle)),key,{
         provider:'claude-code',session_id:m.session_id,
         source_sha:m.source_sha,harness_digest:m.harness_digest,
@@ -171,7 +177,7 @@ async function stagingPublish(input,out){
     const registry=JSON.parse(fs.readFileSync('automation/agents/registry.json','utf8'));
     const result=publishEncryptedAgentCheckpoint({
       remote:process.env.AGENT_STORE_CONTROLLER_REMOTE,source,sealed:checkpoint,
-      registry,key,expectedVersion:0});
+      registry,key,expectedVersion:previous.version});
     write(out,{schema_version:1,kind:'staging_developer_checkpoint_receipt',
       issue:2319,dispatch_id:m.dispatch_id,target_sha:m.source_sha,
       seed_run_id:m.run_id,seed_attempt:m.attempt,model:m.model,
