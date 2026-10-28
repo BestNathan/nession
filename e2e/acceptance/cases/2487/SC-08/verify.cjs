@@ -132,8 +132,13 @@ run(({ evidence }) => {
       VITE_TERMINAL_WEB_FONT_SIZE_ENV,
       'vars.' + TERMINAL_COLS_ENV,
       TERMINAL_COLS_ENV + '=${{',
+      'RELEASE_TERMINAL_COLS: ${{ vars.' + TERMINAL_COLS_ENV + " || '96' }}",
+      'RELEASE_TERMINAL_WEB_FONT_SIZE: ${{ vars.' + TERMINAL_WEB_FONT_SIZE_ENV + " || '14' }}",
     ]);
     const text = fs.readFileSync(path.join(root, workflow), 'utf8');
+    if (/vars\.(?:STAGING|PRODUCTION)_TERMINAL_(?:COLS|WEB_FONT_SIZE)/.test(text)) {
+      throw new Error(workflow + ' retains obsolete environment-specific terminal variable precedence');
+    }
     const serverBuildArgs = (text.match(/build-args:/g) || []).length;
     if (serverBuildArgs < 2) {
       throw new Error(workflow + ' does not pass build args to both image paths');
@@ -160,7 +165,8 @@ run(({ evidence }) => {
     {
       type: 'static',
       value: 'both Server/Agent image paths carry ARG+ENV, Compose states both variables, and both ' +
-        'release workflows pass the Web build inputs and the image build args from one parameter source',
+        'both release workflows resolve shared GitHub vars with 96/14 fallbacks, reject legacy ' +
+        'stage-specific overrides, and pass one parameter source to Web/image builds',
     },
   );
   return 'One release parameter reaches the Web bundle and the Server process configuration, agrees on cols, defaults deterministically and fails fast on invalid values';
