@@ -22,29 +22,33 @@ const DECISIONS = new Set([
   'FULL_IN_FLIGHT', 'INDETERMINATE', 'NOT_READY',
 ]);
 
-export function admissionReceipt(plan) {
-  if (!plan || typeof plan !== 'object' || Array.isArray(plan)) {
-    throw new Error('admission plan must be an object');
+// Validate the bounded receipt itself, independently of the plan that built
+// it: the Acceptance collector parses this back from a job log.
+export function validateAdmissionReceipt(receipt) {
+  if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt)) {
+    throw new Error('staging lane admission receipt must be an object');
   }
-  const mainSha = String(plan.main_sha ?? '');
+  if (receipt.schema_version !== 1 || receipt.kind !== 'staging_lane_admission_receipt') {
+    throw new Error('invalid staging lane admission receipt kind');
+  }
+  const mainSha = String(receipt.main_sha ?? '');
   if (!SHA.test(mainSha)) throw new Error('admission receipt requires an exact Main SHA');
-  const now = String(plan.now ?? '');
+  const now = String(receipt.now ?? '');
   if (!Number.isFinite(Date.parse(now))) throw new Error('admission receipt requires a valid timestamp');
-  if (!Array.isArray(plan.lanes) || plan.lanes.length === 0) {
+  if (!Array.isArray(receipt.lanes) || receipt.lanes.length === 0) {
     throw new Error('admission receipt requires at least one lane');
   }
-  const bindings = new Map((plan.bindings ?? []).map((entry) => [entry.environment_id, entry]));
   const seen = new Set();
-  const lanes = plan.lanes.map((lane) => {
-    const environment = String(lane.environment_id ?? '');
+  const lanes = receipt.lanes.map((lane) => {
+    const environment = String(lane?.environment_id ?? '');
     if (!LANE.test(environment) || seen.has(environment)) {
       throw new Error('invalid or duplicate admission lane ' + environment);
     }
     seen.add(environment);
-    if (!DECISIONS.has(lane.decision)) {
+    if (!DECISIONS.has(lane?.decision)) {
       throw new Error('invalid admission decision for ' + environment);
     }
-    const deployed = String(bindings.get(environment)?.deployed_source_sha ?? '');
+    const deployed = String(lane?.deployed_source_sha ?? '');
     if (!SHA.test(deployed)) {
       throw new Error('admission receipt requires the deployed SHA for ' + environment);
     }
@@ -53,19 +57,30 @@ export function admissionReceipt(plan) {
       decision: lane.decision,
       deployed_source_sha: deployed,
     };
-    if (Number.isSafeInteger(lane.ahead)) entry.ahead = lane.ahead;
-    if (Number.isSafeInteger(lane.behind)) entry.behind = lane.behind;
+    if (lane.ahead != null) {
+      if (!Number.isSafeInteger(lane.ahead)) throw new Error('invalid ahead count for ' + environment);
+      entry.ahead = lane.ahead;
+    }
+    if (lane.behind != null) {
+      if (!Number.isSafeInteger(lane.behind)) throw new Error('invalid behind count for ' + environment);
+      entry.behind = lane.behind;
+    }
     if (lane.next_due_at != null) {
       if (!Number.isFinite(Date.parse(lane.next_due_at))) {
         throw new Error('invalid next-due timestamp for ' + environment);
       }
-      entry.next_due_at = lane.next_due_at;
+      entry.next_due_at = String(lane.next_due_at);
     }
-    if (lane.reason) entry.reason = String(lane.reason);
+    if (lane.reason != null) {
+      const reason = String(lane.reason);
+      if (!reason || /[\r\n]/.test(reason)) throw new Error('invalid reason for ' + environment);
+      entry.reason = reason;
+    }
     return entry;
   });
-  const admitted = Array.isArray(plan.admitted) ? plan.admitted.map(String) : [];
-  if (admitted.some((environment) => !seen.has(environment))) {
+  const admitted = Array.isArray(receipt.admitted) ? receipt.admitted.map(String) : [];
+  if (new Set(admitted).size !== admitted.length ||
+      admitted.some((environment) => !seen.has(environment))) {
     throw new Error('admitted lane is missing from the admission receipt');
   }
   return Object.freeze({
@@ -76,6 +91,47 @@ export function admissionReceipt(plan) {
     admitted: Object.freeze(admitted),
     lanes: Object.freeze(lanes),
   });
+}
+
+export function admissionReceipt(plan) {
+  if (!plan || typeof plan !== 'object' || Array.isArray(plan)) {
+    throw new Error('admission plan must be an object');
+  }
+  const bindings = new Map((plan.bindings ?? []).map((entry) => [entry.environment_id, entry]));
+  const lanes = (Array.isArray(plan.lanes) ? plan.lanes : []).map((lane) => ({
+    environment_id: lane?.environment_id,
+    decision: lane?.decision,
+    deployed_source_sha: bindings.get(lane?.environment_id)?.deployed_source_sha,
+    ...(Number.isSafeInteger(lane?.ahead) ? { ahead: lane.ahead } : {}),
+    ...(Number.isSafeInteger(lane?.behind) ? { behind: lane.behind } : {}),
+    ...(lane?.next_due_at != null ? { next_due_at: lane.next_due_at } : {}),
+    ...(lane?.reason ? { reason: lane.reason } : {}),
+  }));
+  return validateAdmissionReceipt({
+    schema_version: 1,
+    kind: 'staging_lane_admission_receipt',
+    main_sha: plan.main_sha,
+    now: plan.now,
+    admitted: Array.isArray(plan.admitted) ? plan.admitted : [],
+    lanes,
+  });
+}
+
+export function parseAdmissionReceipt(text) {
+  const lines = String(text ?? '').split(/\r?\n/)
+    .filter((line) => line.includes(STAGING_LANE_ADMISSION_LOG_PREFIX));
+  if (lines.length !== 1) throw new Error('missing or ambiguous staging lane admission receipt');
+  const line = lines[0];
+  const raw = line
+    .slice(line.indexOf(STAGING_LANE_ADMISSION_LOG_PREFIX) + STAGING_LANE_ADMISSION_LOG_PREFIX.length)
+    .replace(/\u001b\[[0-9;]*m/g, '');
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error('invalid staging lane admission receipt JSON');
+  }
+  return validateAdmissionReceipt(parsed);
 }
 
 export function formatAdmissionReceipt(plan) {
@@ -214,6 +270,15 @@ function selfTest() {
     /invalid admission decision/);
   assert.throws(() => admissionReceipt({ ...decision, admitted: ['staging-02'] }),
     /admitted lane is missing/);
+  const line = formatAdmissionReceipt(decision);
+  assert.deepEqual(parseAdmissionReceipt('step log\n' + line + '\nnext'), receipt);
+  assert.deepEqual(parseAdmissionReceipt('\u001b[36;1m' + line + '\u001b[0m'), receipt);
+  assert.throws(() => parseAdmissionReceipt('no receipt'), /missing or ambiguous/);
+  assert.throws(() => parseAdmissionReceipt(line + '\n' + line), /missing or ambiguous/);
+  assert.throws(() => parseAdmissionReceipt(STAGING_LANE_ADMISSION_LOG_PREFIX + '{'),
+    /invalid staging lane admission receipt JSON/);
+  assert.throws(() => parseAdmissionReceipt(STAGING_LANE_ADMISSION_LOG_PREFIX +
+    JSON.stringify({ ...receipt, main_sha: 'main' })), /exact Main SHA/);
 
   console.log('staging lane scheduler: receipt -> ancestry -> admission fixture passed');
 }

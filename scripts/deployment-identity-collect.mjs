@@ -31,9 +31,15 @@ function fail(message) {
   throw new Error(message);
 }
 
-export function deploymentAttestationReceipt(receipt) {
+// Validate the bounded receipt itself. The Acceptance collector parses the
+// line back from a job log, so this must reject a forged/short/extended shape
+// without access to the canonical attestation.
+export function validateDeploymentAttestationReceipt(receipt) {
   if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt)) {
-    fail('attestation receipt source must be an object');
+    fail('deployment attestation receipt must be an object');
+  }
+  if (receipt.schema_version !== 1 || receipt.kind !== 'nession_deployment_attestation_receipt') {
+    fail('invalid deployment attestation receipt kind');
   }
   const environment = String(receipt.environment_id ?? '');
   if (!LANE.test(environment)) fail('invalid attested environment');
@@ -68,8 +74,44 @@ export function deploymentAttestationReceipt(receipt) {
   });
 }
 
+export function deploymentAttestationReceipt(receipt) {
+  if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt)) {
+    fail('attestation receipt source must be an object');
+  }
+  return validateDeploymentAttestationReceipt({
+    schema_version: 1,
+    kind: 'nession_deployment_attestation_receipt',
+    environment_id: receipt.environment_id,
+    source_sha: receipt.source_sha,
+    status: receipt.status,
+    gitops_revision: receipt.gitops_revision,
+    observed_at: receipt.observed_at,
+    cluster_context: receipt.cluster_context,
+    images: Array.isArray(receipt.images)
+      ? receipt.images.map((image) => ({ role: image?.role, digest: image?.digest }))
+      : [],
+  });
+}
+
 export function formatDeploymentAttestationReceipt(receipt) {
   return DEPLOYMENT_ATTESTATION_LOG_PREFIX + JSON.stringify(deploymentAttestationReceipt(receipt));
+}
+
+export function parseDeploymentAttestationReceipt(text) {
+  const lines = String(text ?? '').split(/\r?\n/)
+    .filter((line) => line.includes(DEPLOYMENT_ATTESTATION_LOG_PREFIX));
+  if (lines.length !== 1) fail('missing or ambiguous deployment attestation receipt');
+  const line = lines[0];
+  const raw = line
+    .slice(line.indexOf(DEPLOYMENT_ATTESTATION_LOG_PREFIX) + DEPLOYMENT_ATTESTATION_LOG_PREFIX.length)
+    .replace(/\u001b\[[0-9;]*m/g, '');
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    fail('invalid deployment attestation receipt JSON');
+  }
+  return validateDeploymentAttestationReceipt(parsed);
 }
 
 function nonEmptyLine(value, label) {
@@ -495,6 +537,19 @@ function selfTest() {
     /every image role/);
   assert.throws(() => deploymentAttestationReceipt({ ...positive, cluster_context: 'ci\nforged' }),
     /single line/);
+  // The collector parses the line back from a job log; exactly one receipt is
+  // admissible and a forged shape is rejected.
+  const line = formatDeploymentAttestationReceipt(positive);
+  assert.deepEqual(parseDeploymentAttestationReceipt('step log\n' + line + '\nnext'), receipt);
+  assert.deepEqual(parseDeploymentAttestationReceipt('\u001b[36;1m' + line + '\u001b[0m'), receipt);
+  assert.throws(() => parseDeploymentAttestationReceipt('no receipt'), /missing or ambiguous/);
+  assert.throws(() => parseDeploymentAttestationReceipt(line + '\n' + line), /missing or ambiguous/);
+  assert.throws(() => parseDeploymentAttestationReceipt(DEPLOYMENT_ATTESTATION_LOG_PREFIX + '{'),
+    /invalid deployment attestation receipt JSON/);
+  assert.throws(() => parseDeploymentAttestationReceipt(DEPLOYMENT_ATTESTATION_LOG_PREFIX +
+    JSON.stringify({ ...receipt, kind: 'other' })), /invalid deployment attestation receipt kind/);
+  assert.throws(() => parseDeploymentAttestationReceipt(DEPLOYMENT_ATTESTATION_LOG_PREFIX +
+    JSON.stringify({ ...receipt, source_sha: 'main' })), /source SHA/);
 
   console.log('deployment-identity-collect: Kubernetes observation mapping scenarios passed');
 }
