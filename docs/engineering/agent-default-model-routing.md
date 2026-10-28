@@ -62,9 +62,16 @@ Provider. The binding contains registered Agent, exact source SHA, Qwen model,
 canonical HTTPS gateway, pinned numeric Claude CLI version and restricted
 native tools. Its SHA-256 Harness digest intentionally excludes credentials.
 The native Resume verifier rejects source/model/CLI/Harness mismatches instead
-of silently starting another model or session. The real Store-driven Qwen
-Worker and cross-Run Resume remain **unimplemented**; this policy alone does
-not activate `AGENT_DEFAULT_DEVELOPER=dev-qwen-01`.
+of silently starting another model or session.
+
+The isolated staging lane (#2319) now proves the Qwen dispatch, bounded
+synthetic edit, canonical telemetry, ciphertext-only Store checkpoint and a
+real cross-Run native Session restore with the pinned model, against an exact
+staging SHA. That is a proof vehicle only. The **production** Store-driven
+Qwen Worker, its Publisher→Reviewer handoff, and the owner's
+`AGENT_DEFAULT_DEVELOPER` switch remain **unimplemented**; the Controller
+continues to refuse a Qwen Developer for production requests, so this policy
+alone does not activate `AGENT_DEFAULT_DEVELOPER=dev-qwen-01`.
 
 **Durability:** the existing Issue-centric Developer flow currently executes
 the specifically scoped Cursor-native #1997 Worker. The Controller reads this variable for new requests but refuses a Qwen Developer until #2274 is proven. Do **not** switch the Developer default to Qwen before then. Implement and prove
