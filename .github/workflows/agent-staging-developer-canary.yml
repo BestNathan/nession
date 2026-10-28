@@ -302,7 +302,11 @@ jobs:
 
   publish-checkpoint:
     needs: [verify-source, synthetic-qwen]
-    if: needs.verify-source.result == 'success' && needs.synthetic-qwen.result == 'success' && needs.verify-source.outputs.phase == 'seed'
+    if: >-
+      always() &&
+      needs.verify-source.result == 'success' &&
+      needs.synthetic-qwen.result == 'success' &&
+      needs.verify-source.outputs.phase == 'seed'
     runs-on: ubuntu-24.04
     environment: agent-staging-controller
     timeout-minutes: 10
