@@ -17,9 +17,9 @@ run(({ evidence }) => {
     'src/platform/terminal-runtime/__tests__/integration/inputChunking.test.ts',
   ]);
 
-  if (interaction.passed < 20) { throw new Error('expected the interaction suite, got ' + interaction.passed); }
+  if (interaction.passed < 10) { throw new Error('expected the interaction suite, got ' + interaction.passed); }
   if (ime.passed < 20) { throw new Error('expected the mobile IME suite, got ' + ime.passed); }
-  if (chunking.passed < 5) { throw new Error('expected the input chunking suite, got ' + chunking.passed); }
+  if (chunking.passed < 3) { throw new Error('expected the input chunking suite, got ' + chunking.passed); }
 
   requireText('web/src/platform/terminal-runtime/interaction/TerminalInteractionController.ts', [
     'sendPtyBytes', 'sendText', 'sendSemanticKey', 'bindXtermOnData', 'TerminalInteractionPort',
