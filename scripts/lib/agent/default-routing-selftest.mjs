@@ -26,6 +26,18 @@ assert.equal(resolveAgentDefault(registry,'auditor',{
 assert.equal(resolveAgentDefault(registry,'auditor',{
   configured:'audit-deepseek-01',
 }).environment,'deepseek');
+assert.equal(resolveAgentDefault(registry,'developer',{legacy:'dev-cursor-01'}).agent_id,
+  'dev-cursor-01');
+assert.equal(resolveAgentDefault(registry,'developer',{
+  configured:'dev-qwen-01',legacy:'dev-cursor-01',
+}).environment,'dev-claude-qwen');
+assert.equal(resolveAgentDefault(registry,'developer',{
+  configured:'dev-cursor-01',override:'dev-qwen-01',
+}).agent_id,'dev-qwen-01');
+assert.throws(()=>resolveAgentDefault(registry,'developer',{
+  configured:'review-qwen-01',
+}),/wrong-role/);
+assert.throws(()=>resolveAgentDefault(registry,'developer',{}),/missing/);
 assert.throws(()=>resolveAgentDefault(registry,'acceptor',{
   configured:'audit-qwen-01',
 }),/wrong-role/);
@@ -43,4 +55,4 @@ assert.throws(()=>resolveAgentDefault(registry,'admin',{legacy:'review-qwen-01'}
 assert.throws(()=>resolveAgentDefault(registry,'reviewer',{
   configured:42,legacy:'review-cursor-01',
 }),/invalid configured/);
-console.log('GitHub variable Agent defaults: 16 contract cases passed');
+console.log('GitHub variable Agent defaults: registered, invalid, missing, override and cross-role contract cases passed');

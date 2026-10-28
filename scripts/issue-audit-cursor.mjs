@@ -12,6 +12,7 @@ import { candidateIssue, issueLabelNames as labelNames } from './lib/agent/tools
 import { renderIssueAuditPrompt, issueAuditTools } from './lib/agent/tasks/issue-audit.mjs';
 import { promptTelemetry } from './lib/agent/telemetry/prompt.mjs';
 import { loadCursorSdk, runCursorSession, normalizeCursorSdkModule, selectCursorModel as modelSelectionFromCatalog, normalizeCursorUsage, normalizeCursorCost } from './lib/agent/providers/cursor.mjs';
+import { cursorModel } from './lib/agent/providers/model-selection.mjs';
 import { buildAgentWorkflowTelemetry, writeAgentWorkflowTelemetry } from './agent-workflow-telemetry.mjs';
 
 function ensureCursorConfig() {
@@ -24,10 +25,7 @@ function ensureCursorConfig() {
 }
 
 function requestedModel() {
-  return {
-    id: process.env.CURSOR_MODEL || 'composer-2.5',
-    fast: (process.env.CURSOR_MODEL_FAST || 'true').toLowerCase() !== 'false',
-  };
+  return cursorModel(process.env);
 }
 
 function cursorSdkPlatformPackage(platform = process.platform, arch = process.arch) {

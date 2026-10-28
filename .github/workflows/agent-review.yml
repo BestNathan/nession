@@ -172,7 +172,7 @@ jobs:
         env:
           NESSION_REVIEW_ACTION_ID: ${{ inputs.action_id }}
           CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
-          CURSOR_MODEL: ${{ vars.CURSOR_MODEL || 'composer-2.5' }}
+          CURSOR_MODEL: ${{ vars.CURSOR_MODEL }}
           CURSOR_MODEL_FAST: ${{ vars.CURSOR_MODEL_FAST || 'true' }}
           CURSOR_SDK_VERSION: ${{ vars.CURSOR_SDK_VERSION || '1.0.37' }}
           ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}

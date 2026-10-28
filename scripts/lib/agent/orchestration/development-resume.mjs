@@ -9,6 +9,7 @@ import {fileURLToPath} from 'node:url';
 import {resolveIdentity,resolveProviderPlan} from '../harness/contract.mjs';
 import {fetchEncryptedAgentCheckpoint} from '../store/remote.mjs';
 import {sealCursorNativeStore,openCursorNativeStore} from '../providers/cursor-native-store.mjs';
+import {cursorModel} from '../providers/model-selection.mjs';
 import {deriveStoreAesKey} from './development-checkpoint-key.mjs';
 import {nativeResumeSuccessorId} from './outbox.mjs';
 
@@ -107,7 +108,7 @@ export function writeNativeBundle(bytes,directory){
 function parameters(){
   const version=process.env.CURSOR_SDK_VERSION||'1.0.37';
   if(!/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(version))fail('pinned SDK required');
-  const model={id:process.env.CURSOR_MODEL||'composer-2.5',fast:(process.env.CURSOR_MODEL_FAST||'true')!=='false'};
+  const model=cursorModel(process.env);
   return {version,model,digest:developmentHarnessDigest(SOURCE,version,model)};
 }
 function authority(){

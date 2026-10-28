@@ -22,11 +22,22 @@ an arbitrary executable or fall back to Cursor.
 Set each Agent's model, endpoint and credentials in its registered GitHub
 Environment (Settings > Environments > select environment):
 
-- `ANTHROPIC_MODEL` or role-specific `ACCEPTANCE_CLAUDE_MODEL` /
-  `ISSUE_AUDIT_CLAUDE_MODEL`: an explicit Qwen model for Qwen paths.
+- `CURSOR_MODEL` (and optional `CURSOR_MODEL_FAST`): the explicit Cursor
+  model for `cursor`-provider instances.
+- `ANTHROPIC_MODEL`: the explicit DeepSeek/Qwen model for generic
+  `claude-code` paths.
+- `ACCEPTANCE_CLAUDE_MODEL` / `ISSUE_AUDIT_CLAUDE_MODEL`: an optional
+  role-specific override for the same gateway path; it is never used as a
+  fallback default.
 - `ANTHROPIC_BASE_URL`: the approved Anthropic-compatible gateway endpoint.
 - `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY`: **Environment Secret**,
   never a repository variable or committed file.
+
+Model identity is resolved only from the selected GitHub Environment by
+[scripts/lib/agent/providers/model-selection.mjs](../../scripts/lib/agent/providers/model-selection.mjs).
+A missing or malformed model fails closed with no Provider or model fallback,
+and the role workflows contain no hardcoded model name. Switching a model is
+therefore an Environment-only change; no Git diff is involved.
 
 For the currently registered Qwen identities, the Environment is
 `dev-claude-qwen`. Several roles may share one credential Environment if
@@ -37,10 +48,13 @@ previously running job is not retroactively reconfigured.
 
 **Compatibility:** until a given Repository Variable is set, Review uses the
 prior `review-qwen-01` default and the other supported entrypoints continue
-their historical `cursor` Environment selection. The legacy
-`ACCEPTANCE_PROVIDER` repository variable remains supported by the
-acceptance orchestrator for migration. Explicit authorized workflow dispatch
-inputs may select a registered alternative; invalid choices fail closed.
+their historical `cursor` Environment selection. The `cursor` and `deepseek`
+Environments must supply `CURSOR_MODEL` and `ANTHROPIC_MODEL` (plus the
+role-specific model override where the historical path needs one) for those
+legacy selections. The legacy `ACCEPTANCE_PROVIDER` repository variable
+remains supported by the acceptance orchestrator for migration. Explicit
+authorized workflow dispatch inputs may select a registered alternative;
+invalid choices fail closed.
 
 **Developer runtime pinning (incremental #2274):** a trusted, Store-admitted
 Qwen Developer must pass `qwen-developer-policy.mjs` before invoking the
@@ -64,9 +78,9 @@ assignments are not changed by Repository Variables.
 2. Run `Agent / Provider Smoke` in GitHub Actions to verify the Qwen gateway. The normal main-push/default manual smoke targets Qwen only; use `include_legacy=true` manually to test Cursor and DeepSeek compatibility when their quotas are available. Check the selected Environment, provider selection and verified result/telemetry.
 3. To roll back **new** runs, restore the previous ID in the same GitHub
    Settings page; existing accepted Tasks retain their original assignments.
-4. If the Environment is missing an API key, endpoint or the explicit Qwen
-   model, the selected workflow must fail before model invocation. Never copy
-   secrets into Issues, logs or telemetry.
+4. If the Environment is missing an API key, endpoint or the explicit model
+   variable, the selected workflow must fail before model invocation. Never
+   copy secrets into Issues, logs or telemetry.
 
 This is runtime configuration, not a GitOps desired-state change; no
 commit/PR/deployment is required for a later default change.

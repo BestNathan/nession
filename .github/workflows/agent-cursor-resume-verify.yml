@@ -27,7 +27,7 @@ jobs:
     environment: cursor
     timeout-minutes: 15
     env:
-      CURSOR_MODEL: ${{ vars.CURSOR_MODEL || 'composer-2.5' }}
+      CURSOR_MODEL: ${{ vars.CURSOR_MODEL }}
       CURSOR_MODEL_FAST: ${{ vars.CURSOR_MODEL_FAST || 'true' }}
       CURSOR_SDK_VERSION: ${{ vars.CURSOR_SDK_VERSION || 'latest' }}
       SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
