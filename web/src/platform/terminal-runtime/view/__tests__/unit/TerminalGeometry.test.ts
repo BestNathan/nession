@@ -33,6 +33,7 @@ interface Harness {
   localResizes: Array<[number, number]>;
   sentResizes: Array<[number, number]>;
   published: Array<[number, number]>;
+  contentWidths: Array<{ contentWidth: number; fits: boolean }>;
   setCell: (cell: TerminalCellSize) => void;
 }
 
@@ -42,6 +43,7 @@ function makeHarness(): Harness {
   const localResizes: Array<[number, number]> = [];
   const sentResizes: Array<[number, number]> = [];
   const published: Array<[number, number]> = [];
+  const contentWidths: Array<{ contentWidth: number; fits: boolean }> = [];
   const host: TerminalGeometryHost = {
     isObserverReadOnly: false,
     statedTerminalCols: null,
@@ -55,6 +57,9 @@ function makeHarness(): Harness {
     resizeLocalOrdered: (cols, rows) => { localResizes.push([cols, rows]); },
     publishViewportResize: (cols, rows) => { published.push([cols, rows]); },
     sendResize: (cols, rows) => { sentResizes.push([cols, rows]); },
+    applyContentWidth: (_container, contentWidth, fits) => {
+      contentWidths.push({ contentWidth, fits });
+    },
   };
   return {
     host,
@@ -62,6 +67,7 @@ function makeHarness(): Harness {
     localResizes,
     sentResizes,
     published,
+    contentWidths,
     setCell: (next) => { cell = next; },
   };
 }

@@ -21,7 +21,7 @@ never imports xterm, the raw adapter module, or xterm's private `_core`.
 | The xterm instance, mount/reparent/unmount/dispose, renderer, theme, addons | `platform/terminal-runtime/xterm/XtermEmulator` (port: `platform/terminal-runtime/emulator.ts`) | `TerminalController`, `FixtureTerminal` |
 | Measured cell / buffer / mode / logical-line read models, private `_core` | `platform/terminal-runtime/xterm/XtermMetrics.ts` — the ONE compatibility adapter | the engine only |
 | Ordered buffer/grid mutation (write, resize, dedupe) | `controller/SerializedTerminalWriter.ts` | `TerminalController` |
-| Fixed-column geometry, font fit, rows, PTY resize report/debounce | `view/TerminalGeometry.ts` | `TerminalController` |
+| Fixed-column geometry, font fit, rows, content-width value, PTY resize report/debounce | `view/TerminalGeometry.ts` | `TerminalController` (writes the viewport CSS property) |
 | PTY-bound input semantics (keyboard, semantic keys, paste, IME text) | `interaction/TerminalInteractionController.ts` | input handlers, capsule, mobile IME |
 | Workspace file-link recognition and navigation action | `product/terminal/workspaceFileLinks.ts` | `TerminalViewport` → emulator matcher |
 | Link cell mapping, buffer-line wrap joining | `xterm/LineLinks.ts` + `XtermMetrics.ts` | the engine |
