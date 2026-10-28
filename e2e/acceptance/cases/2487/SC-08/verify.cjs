@@ -69,12 +69,12 @@ run(({ evidence }) => {
   // 3. Missing values fall back deterministically in both halves.
   const defaultConfig = temp('default.toml');
   const defaultToml = renderServerConfig(defaultConfig);
-  if (!defaultToml.includes('terminal_cols = 80') ||
+  if (!defaultToml.includes('terminal_cols = 96') ||
       !defaultToml.includes('terminal_web_font_size = 14')) {
     throw new Error('the renderer has no deterministic default:\n' + defaultToml);
   }
   const defaultEffective = printServerConfig(defaultConfig);
-  if (defaultEffective.terminal_cols !== 80 || defaultEffective.terminal_web_font_size !== 14) {
+  if (defaultEffective.terminal_cols !== 96 || defaultEffective.terminal_web_font_size !== 14) {
     throw new Error('the Server default read ' + JSON.stringify(defaultEffective));
   }
 
@@ -105,7 +105,7 @@ run(({ evidence }) => {
     'Dockerfile.agent', 'Dockerfile.agent.prebuilt',
   ]) {
     requireText(dockerfile, [
-      `ARG ${TERMINAL_COLS_ENV}=80`,
+      `ARG ${TERMINAL_COLS_ENV}=96`,
       `ENV ${TERMINAL_COLS_ENV}=\${${TERMINAL_COLS_ENV}}`,
     ]);
   }
@@ -114,11 +114,11 @@ run(({ evidence }) => {
     `ENV ${TERMINAL_WEB_FONT_SIZE_ENV}=\${${TERMINAL_WEB_FONT_SIZE_ENV}}`,
   ]);
   requireText('Dockerfile.server', [
-    `ARG ${VITE_TERMINAL_COLS_ENV}=80`,
+    `ARG ${VITE_TERMINAL_COLS_ENV}=96`,
     `ENV ${VITE_TERMINAL_COLS_ENV}=\${${VITE_TERMINAL_COLS_ENV}}`,
   ]);
   requireText('deploy/docker-compose.yml', [
-    `${TERMINAL_COLS_ENV}: "\${${TERMINAL_COLS_ENV}:-80}"`,
+    `${TERMINAL_COLS_ENV}: "\${${TERMINAL_COLS_ENV}:-96}"`,
     `${TERMINAL_WEB_FONT_SIZE_ENV}: "\${${TERMINAL_WEB_FONT_SIZE_ENV}:-14}"`,
   ]);
   requireText('deploy/entrypoint-server.sh', ['render-server-config.sh']);
@@ -150,7 +150,7 @@ run(({ evidence }) => {
     {
       type: 'build',
       value: 'the Web bundle built from the same 96/13.5 parameters emitted 96/13.5; omitted inputs ' +
-        'read back as 80/14 in both the renderer and the Server parser',
+        'read back as 96/14 in both the renderer and the Server parser',
     },
     {
       type: 'config',

@@ -39,7 +39,7 @@ run(({ evidence }) => {
   // Omitted inputs fall back to the documented defaults, not to an error and
   // not to a silently different value.
   const defaults = buildConfig(webBuild(tempDir()));
-  if (defaults.cols !== 80 || defaults.web_max_font_size !== 14 ||
+  if (defaults.cols !== 96 || defaults.web_max_font_size !== 14 ||
       defaults.cols_source !== 'default' || defaults.web_font_source !== 'default') {
     throw new Error('default build emitted ' + JSON.stringify(defaults));
   }
@@ -101,7 +101,7 @@ run(({ evidence }) => {
   evidence.push(
     {
       type: 'build',
-      value: 'exact SHA ' + sha + ': isolated Web builds emitted 80/13, 96/14 and default 80/14 ' +
+      value: 'exact SHA ' + sha + ': isolated Web builds emitted 80/13, 96/14 and default 96/14 ' +
         'via WEB_TERMINAL_CONFIG_V1; both inputs report source="env" only when supplied',
     },
     {
