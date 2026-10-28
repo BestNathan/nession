@@ -138,6 +138,24 @@ export function readCheckpointHeadVersion({remote,identity}){
     return {version:head.version};
   }finally{fs.rmSync(parent,{recursive:true,force:true});}
 }
+// A trusted pre-model restore job must bind the signed commitment to the
+// committed public metadata before the model executor receives anything.
+export function readCommittedCheckpoint({remote,identity,commit_sha,version,
+  ciphertext_sha256}){
+  const {checkout,parent}=cloneRoot(remote);
+  try{
+    inspectCommittedCheckpoint(checkout,{identity,commit_sha,version,
+      ciphertext_sha256});
+    const location='roles/'+identity.role+'/'+identity.agent_id+'/issues/'+
+      identity.issue+'/checkpoints/'+String(version).padStart(8,'0')+'.json';
+    let raw;
+    try{raw=git(checkout,['show',commit_sha+':'+location]);}
+    catch{fail('committed checkpoint object missing');}
+    let record;
+    try{record=JSON.parse(raw);}catch{fail('corrupt committed checkpoint object');}
+    return Object.freeze({record,metadata:record.metadata});
+  }finally{fs.rmSync(parent,{recursive:true,force:true});}
+}
 export function fetchEncryptedAgentCheckpoint({
   remote,identity,expected,key,commitment=null,
 }){

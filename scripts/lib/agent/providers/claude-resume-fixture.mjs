@@ -11,7 +11,8 @@ import {runClaudeCli,normalizeClaudeUsage} from './claude-code.mjs';
 import {qwenDeveloperModel,qwenGatewayEndpoint} from '../orchestration/qwen-developer-policy.mjs';
 import {sealClaudeNativeSession,openClaudeNativeSession,discoverClaudeNativeProject} from './claude-native-store.mjs';
 import {sealCheckpoint} from '../store/checkpoint.mjs';
-import {publishEncryptedAgentCheckpoint,readCheckpointHeadVersion} from '../store/remote.mjs';
+import {publishEncryptedAgentCheckpoint,readCheckpointHeadVersion,
+  readCommittedCheckpoint,fetchEncryptedAgentCheckpoint} from '../store/remote.mjs';
 import {buildAgentWorkflowTelemetry,writeAgentWorkflowTelemetry} from '../../../agent-workflow-telemetry.mjs';
 
 const SHA=/^[a-f0-9]{40}$/, HEX=/^[a-f0-9]{64}$/;
@@ -128,7 +129,8 @@ async function stagingPublish(input,out){
       sealed.ciphertext_sha256!==proof.encrypted_sha256||
       m?.source_sha!==id.source_sha||m?.run_id!==id.run_id||m?.attempt!==id.attempt||
       m?.dispatch_id!==id.dispatch_id||m?.model!==process.env.ANTHROPIC_MODEL||
-      m?.cli_version!==process.env.CLAUDE_CODE_VERSION)
+      m?.cli_version!==process.env.CLAUDE_CODE_VERSION||
+      !HEX.test(proof.marker_sha256??''))
     fail('seed proof does not match the staging dispatch/Run');
   const tmp=fs.mkdtempSync(path.join(process.env.RUNNER_TEMP||os.tmpdir(),'staging-checkpoint-'));
   const key=stagingAesKey();
@@ -150,11 +152,13 @@ async function stagingPublish(input,out){
     walk(projectDir,'');
     if(!files.some(file=>file.path===m.session_id+'.jsonl'))
       fail('native bundle lacks the Session transcript');
+    // Keep the original RSA envelope inside the AES bundle so the restore job
+    // reuses the canonical open/validate path instead of a second file writer.
     const bundle={schema_version:1,kind:'staging-claude-native-bundle',
       session_id:m.session_id,project_key:opened.project_key,model:m.model,
       cli_version:m.cli_version,dispatch_id:m.dispatch_id,
       seed_run_id:m.run_id,seed_attempt:m.attempt,harness_digest:m.harness_digest,
-      files};
+      source_sha:m.source_sha,cwd_sha256:m.cwd_sha256,rsa_envelope:sealed,files};
     const identity={role:'developer',agent_id:'dev-qwen-01',issue:2319};
     // A later staging SHA seeds a new checkpoint; advance the exact committed
     // head instead of re-claiming version 1 forever. The Store CAS still
@@ -166,6 +170,9 @@ async function stagingPublish(input,out){
       Buffer.from(JSON.stringify(bundle)),key,{
         provider:'claude-code',session_id:m.session_id,
         source_sha:m.source_sha,harness_digest:m.harness_digest,
+        model:m.model,cli_version:m.cli_version,
+        marker_sha256:proof.marker_sha256,
+        seed_run_id:m.run_id,seed_attempt:m.attempt,
       });
     const source={repository:'BestNathan/nession',run_id:id.run_id,attempt:id.attempt,
       issue:2319,workflow_sha:id.workflow_sha,target_sha:id.source_sha,
@@ -186,6 +193,63 @@ async function stagingPublish(input,out){
     console.log('Staging checkpoint published at '+result.commit_sha+
       ' version '+result.version);
   } finally {key.fill(0);fs.rmSync(tmp,{recursive:true,force:true});}
+}
+// Trusted pre-model restore. This runs only in the protected Controller
+// Environment: it authenticates the signed commitment and the committed
+// public metadata, decrypts the synthetic native Session, and writes a config
+// directory for the separate model executor. No Store key leaves this job.
+async function stagingRestore(out){
+  const id=stagingOrigin();
+  const version=Number(process.env.STAGING_CHECKPOINT_VERSION);
+  const commit=process.env.STAGING_CHECKPOINT_COMMIT_SHA;
+  const ciphertext=process.env.STAGING_CHECKPOINT_CIPHERTEXT_SHA;
+  if(!Number.isSafeInteger(version)||version<1||!HEX.test(commit??'')||
+      !HEX.test(ciphertext??''))fail('missing staging checkpoint commitment');
+  const identity={role:'developer',agent_id:'dev-qwen-01',issue:2319};
+  const remote=process.env.STAGING_STORE_REMOTE||
+    'https://github.com/BestNathan/nession.git';
+  const committed=readCommittedCheckpoint({remote,identity,commit_sha:commit,
+    version,ciphertext_sha256:ciphertext});
+  const m=committed.metadata;
+  if(m?.provider!=='claude-code'||m.source_sha!==id.source_sha||
+      m.model!==process.env.ANTHROPIC_MODEL||
+      m.cli_version!==process.env.CLAUDE_CODE_VERSION||
+      !UUID.test(m.session_id??'')||!HEX.test(m.marker_sha256??'')||
+      m.seed_run_id!==undefined&&(!Number.isSafeInteger(m.seed_run_id)||m.seed_run_id<1)||
+      m.seed_attempt!==undefined&&m.seed_attempt!==1)
+    fail('committed checkpoint is not the signed staging task');
+  const key=stagingAesKey();
+  let native=null;
+  try {
+    native=fetchEncryptedAgentCheckpoint({remote,identity,key,
+      commitment:{commit_sha:commit,version,ciphertext_sha256:ciphertext},
+      expected:{provider:m.provider,source_sha:m.source_sha,
+        harness_digest:m.harness_digest}}).native_bytes;
+    let bundle;
+    try{bundle=JSON.parse(native.toString('utf8'));}
+    catch{fail('corrupt staging native bundle');}
+    if(bundle?.schema_version!==1||bundle.kind!=='staging-claude-native-bundle'||
+        bundle.session_id!==m.session_id||bundle.model!==m.model||
+        bundle.cli_version!==m.cli_version||bundle.source_sha!==m.source_sha||
+        !bundle.rsa_envelope||bundle.rsa_envelope.metadata?.session_id!==m.session_id)
+      fail('staging bundle does not match the committed checkpoint');
+    fs.mkdirSync(out,{recursive:true,mode:0o700});
+    const configDir=path.join(out,'native');
+    openClaudeNativeSession({record:bundle.rsa_envelope,
+      privateKeyPem:secret('STAGING_CLAUDE_RESUME_PRIVATE_KEY_B64'),
+      expected:bundle.rsa_envelope.metadata,configDir});
+    write(path.join(out,'config.json'),{schema_version:1,
+      kind:'staging-resume-session',session_id:m.session_id,
+      marker_sha256:m.marker_sha256,source_sha:m.source_sha,model:m.model,
+      cli_version:m.cli_version,checkpoint_version:version,
+      checkpoint_commit_sha:commit,ciphertext_sha256:ciphertext,
+      seed_run_id:m.seed_run_id??null,seed_attempt:m.seed_attempt??null});
+    console.log('Staging resume: restored native Session '+m.session_id+
+      ' from checkpoint '+version);
+  } finally {
+    if(key)key.fill(0);
+    if(native)native.fill(0);
+  }
 }
 function ctxSha(){return sha(path.resolve(process.env.GITHUB_WORKSPACE??''));}
 function run(prompt,configDir,sessionId,resume=false){
@@ -298,6 +362,7 @@ const main=async()=>{
   if(cmd==='seed'&&args.length===1)return seed(args[0]);
   if(cmd==='staging-seed'&&args.length===1)return stagingSeed(args[0]);
   if(cmd==='staging-publish'&&args.length===2)return stagingPublish(...args);
+  if(cmd==='staging-restore'&&args.length===1)return stagingRestore(...args);
   if(cmd==='verify-source'&&args.length===5)
     return console.log(JSON.stringify(verifyClaudeSeedSource(read(args[0]),read(args[1]),
       Number(args[2]),Number(args[3]),args[4])));

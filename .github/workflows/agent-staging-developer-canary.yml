@@ -44,6 +44,7 @@ jobs:
       default_model: ${{ steps.source.outputs.default_model }}
       checkpoint_version: ${{ steps.source.outputs.checkpoint_version }}
       checkpoint_ciphertext_sha256: ${{ steps.source.outputs.checkpoint_ciphertext_sha256 }}
+      checkpoint_commit_sha: ${{ steps.source.outputs.checkpoint_commit_sha }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -127,14 +128,18 @@ jobs:
           phase="$(jq -er .phase "$work/verified-staging-dispatch.json")"
           checkpoint_version=""
           checkpoint_sha=""
+          checkpoint_commit=""
           if [[ "$phase" == "resume" ]]; then
             checkpoint_version="$(jq -er .checkpoint.version "$work/verified-staging-dispatch.json")"
             checkpoint_sha="$(jq -er .checkpoint.ciphertext_sha256 "$work/verified-staging-dispatch.json")"
+            checkpoint_commit="$(jq -er .checkpoint.commit_sha "$work/verified-staging-dispatch.json")"
             [[ "$checkpoint_version" =~ ^[1-9][0-9]*$ ]]
             [[ "$checkpoint_sha" =~ ^[a-f0-9]{64}$ ]]
+            [[ "$checkpoint_commit" =~ ^[a-f0-9]{40}$ ]]
           fi
           echo "checkpoint_version=$checkpoint_version" >> "$GITHUB_OUTPUT"
           echo "checkpoint_ciphertext_sha256=$checkpoint_sha" >> "$GITHUB_OUTPUT"
+          echo "checkpoint_commit_sha=$checkpoint_commit" >> "$GITHUB_OUTPUT"
           # The job output name is the pre-existing `staging_sha` contract.
           echo "staging_sha=$target" >> "$GITHUB_OUTPUT"
           {
@@ -145,9 +150,53 @@ jobs:
             echo "- Signed dispatch and upstream Admission digests verified; no Store claim or SC Pass"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  synthetic-qwen:
+  restore-checkpoint:
     needs: verify-source
-    if: needs.verify-source.result == 'success'
+    if: needs.verify-source.result == 'success' && needs.verify-source.outputs.phase == 'resume'
+    runs-on: ubuntu-24.04
+    environment: agent-staging-controller
+    timeout-minutes: 10
+    steps:
+      - name: Checkout trusted main-only restore implementation
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify-source.outputs.source_main_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Authenticate the commitment and restore the synthetic native Session
+        env:
+          STAGING_TARGET_SHA: ${{ needs.verify-source.outputs.staging_sha }}
+          STAGING_DISPATCH_ID: ${{ needs.verify-source.outputs.dispatch_id }}
+          STAGING_PHASE: ${{ needs.verify-source.outputs.phase }}
+          STAGING_CHECKPOINT_VERSION: ${{ needs.verify-source.outputs.checkpoint_version }}
+          STAGING_CHECKPOINT_CIPHERTEXT_SHA: ${{ needs.verify-source.outputs.checkpoint_ciphertext_sha256 }}
+          STAGING_CHECKPOINT_COMMIT_SHA: ${{ needs.verify-source.outputs.checkpoint_commit_sha }}
+          ANTHROPIC_MODEL: ${{ needs.verify-source.outputs.model }}
+          CLAUDE_CODE_VERSION: ${{ needs.verify-source.outputs.cli_version }}
+          STAGING_CLAUDE_RESUME_PRIVATE_KEY_B64: ${{ secrets.STAGING_CLAUDE_RESUME_PRIVATE_KEY_B64 }}
+          STAGING_STORE_AES_KEY_B64: ${{ secrets.STAGING_STORE_AES_KEY_B64 }}
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "${{ needs.verify-source.outputs.source_main_sha }}" ]] ||
+            { echo "::error::Restore job did not load authenticated main source"; exit 1; }
+          node scripts/lib/agent/providers/claude-resume-fixture.mjs staging-restore \
+            "$RUNNER_TEMP/staging-resume-session"
+      - name: Upload restored synthetic Session for the model executor
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-resume-session-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/staging-resume-session
+          if-no-files-found: error
+          retention-days: 3
+
+  synthetic-qwen:
+    needs: [verify-source, restore-checkpoint]
+    if: >-
+      needs.verify-source.result == 'success' &&
+      (needs.verify-source.outputs.phase != 'resume' ||
+        needs.restore-checkpoint.result == 'success')
     runs-on: ubuntu-24.04
     environment: dev-claude-qwen
     timeout-minutes: 15
@@ -203,11 +252,24 @@ jobs:
           npm install -g "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION"
           claude --help | grep -q -- '--restricted' ||
             { echo "::error::Claude CLI must support restricted mode"; exit 1; }
+      - name: Download restored synthetic Session
+        if: needs.verify-source.outputs.phase == 'resume'
+        uses: actions/download-artifact@v4
+        with:
+          name: staging-resume-session-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/staging-resume-session
       - name: Execute bounded synthetic Qwen Read/Edit only
+        if: needs.verify-source.outputs.phase == 'seed'
         run: |
           set -euo pipefail
           node scripts/lib/agent/developer-canary.mjs staging \
             "$RUNNER_TEMP/staging-qwen-telemetry"
+      - name: Resume the exact stored native Qwen Session
+        if: needs.verify-source.outputs.phase == 'resume'
+        run: |
+          set -euo pipefail
+          node scripts/lib/agent/developer-canary.mjs staging-resume \
+            "$RUNNER_TEMP/staging-resume-session" "$RUNNER_TEMP/staging-qwen-telemetry"
       - name: Seal a ciphertext-only native staging Session checkpoint
         if: needs.verify-source.outputs.phase == 'seed'
         env:

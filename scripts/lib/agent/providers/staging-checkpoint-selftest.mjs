@@ -7,7 +7,7 @@ import {execFileSync} from 'node:child_process';
 import {stagingSeedMetadata} from './claude-resume-fixture.mjs';
 import {sealCheckpoint} from '../store/checkpoint.mjs';
 import {validateCheckpointSource} from '../store/ingest.mjs';
-import {readCheckpointHeadVersion} from '../store/remote.mjs';
+import {readCheckpointHeadVersion,readCommittedCheckpoint} from '../store/remote.mjs';
 
 const base={sourceSha:'a'.repeat(40),runId:7001,attempt:1,
   sessionId:'11111111-1111-4111-8111-111111111111',
@@ -85,4 +85,39 @@ try {
     identity:{...identity,issue:0}}),/invalid checkpoint identity/);
 } finally {fs.rmSync(storeRoot,{recursive:true,force:true});}
 
-console.log('Staging checkpoint metadata: pinned model/CLI, harness binding, Store source, head advance and negative fixtures passed');
+// The trusted restore reads the exact committed public metadata under the
+// signed commitment; a wrong digest or version must fail closed.
+const commitRoot=fs.mkdtempSync(path.join(os.tmpdir(),'staging-commit-'));
+const commitStore=path.join(commitRoot,'store');
+const gitCommit=(args)=>execFileSync('git',args,{encoding:'utf8',stdio:['ignore','pipe','pipe']});
+try {
+  gitCommit(['init','-q','-b','agent-store',commitStore]);
+  const prefix='roles/developer/dev-qwen-01/issues/2319';
+  const file=path.join(commitStore,prefix,'checkpoints','00000001.json');
+  fs.mkdirSync(path.dirname(file),{recursive:true});
+  fs.writeFileSync(file,JSON.stringify({schema_version:1,
+    kind:'encrypted_agent_checkpoint',path:prefix+'/checkpoints/00000001.json',
+    identity,version:1,metadata:{provider:'claude-code',session_id:base.sessionId,
+      source_sha:base.sourceSha,harness_digest:value.harness_digest,
+      model:base.model,cli_version:base.cliVersion,marker_sha256:'f'.repeat(64),
+      seed_run_id:base.runId,seed_attempt:1},
+    encryption:{algorithm:'aes-256-gcm'},ciphertext:'',ciphertext_sha256:'a'.repeat(64)}));
+  fs.writeFileSync(path.join(commitStore,prefix,'head.json'),JSON.stringify({
+    version:1,checkpoint_path:prefix+'/checkpoints/00000001.json',
+    ciphertext_sha256:'a'.repeat(64)}));
+  gitCommit(['-C',commitStore,'add','-A']);
+  gitCommit(['-C',commitStore,'-c','user.name=t','-c','user.email=t@t',
+    'commit','-qm','checkpoint']);
+  const sha=gitCommit(['-C',commitStore,'rev-parse','HEAD']).trim();
+  assert.equal(readCommittedCheckpoint({remote:commitStore,identity,
+    commit_sha:sha,version:1,ciphertext_sha256:'a'.repeat(64)})
+    .metadata.marker_sha256,'f'.repeat(64));
+  assert.throws(()=>readCommittedCheckpoint({remote:commitStore,identity,
+    commit_sha:sha,version:1,ciphertext_sha256:'b'.repeat(64)}),
+  /checkpoint advanced or signed head mismatched/);
+  assert.throws(()=>readCommittedCheckpoint({remote:commitStore,identity,
+    commit_sha:sha,version:2,ciphertext_sha256:'a'.repeat(64)}),
+  /checkpoint advanced or signed head mismatched/);
+} finally {fs.rmSync(commitRoot,{recursive:true,force:true});}
+
+console.log('Staging checkpoint metadata: pinned model/CLI, harness binding, Store source, head advance, committed restore and negative fixtures passed');
