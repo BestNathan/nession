@@ -250,12 +250,12 @@ jobs:
       ISSUE_AUDIT_REEVALUATE_TIER: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'issue_comment' || github.event.action == 'edited' || github.event.action == 'labeled' || github.event.action == 'unlabeled' }}
 
       CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
-      CURSOR_MODEL: ${{ vars.CURSOR_MODEL || 'composer-2.5' }}
+      CURSOR_MODEL: ${{ vars.CURSOR_MODEL }}
       CURSOR_MODEL_FAST: ${{ vars.CURSOR_MODEL_FAST || 'true' }}
       CURSOR_SDK_VERSION: ${{ vars.CURSOR_SDK_VERSION || 'latest' }}
 
       ISSUE_AUDIT_MAX_TURNS: ${{ needs.contract.outputs.mode == 'tree' && '120' || (vars.ISSUE_AUDIT_MAX_TURNS || '20') }}
-      ISSUE_AUDIT_CLAUDE_MODEL: ${{ (needs.contract.outputs.provider == 'qwen' && vars.ANTHROPIC_MODEL) || vars.ISSUE_AUDIT_CLAUDE_MODEL || 'claude-sonnet-5' }}
+      ISSUE_AUDIT_CLAUDE_MODEL: ${{ (needs.contract.outputs.provider == 'qwen' && vars.ANTHROPIC_MODEL) || vars.ISSUE_AUDIT_CLAUDE_MODEL || vars.ANTHROPIC_MODEL }}
       ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
       ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

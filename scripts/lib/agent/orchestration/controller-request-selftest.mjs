@@ -83,6 +83,12 @@ try{
   const right=make(request);
   assert.deepEqual(inspectControllerRequestZip(right.bytes,right.digest,
     upstream,expected,registry),request);
+  // Defaults are resolved once at Task creation. A later consumer validates
+  // the durable ZIP against its stored identities, so changing the current
+  // Repository Variables cannot silently rewrite an already dispatched Task.
+  const durable=make(routed);
+  assert.deepEqual(inspectControllerRequestZip(durable.bytes,durable.digest,
+    upstream,expected,registry),routed);
   assert.throws(()=>inspectControllerRequestZip(right.bytes,
     'sha256:'+'d'.repeat(64),upstream,expected,registry),/digest mismatch/);
   assert.throws(()=>inspectControllerRequestZip(right.bytes,right.digest,

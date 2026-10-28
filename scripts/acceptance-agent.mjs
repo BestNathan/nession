@@ -12,6 +12,7 @@ import { providerScopedRunName } from './lib/agent/telemetry/run-name.mjs';
 import { normalizeAcceptanceResult } from './acceptance-result-contract.mjs';
 import { runClaudeCli, normalizeClaudeUsage } from './lib/agent/providers/claude-code.mjs';
 import { runCursorSession, selectCursorModel } from './lib/agent/providers/cursor.mjs';
+import { cursorModel, claudeGatewayModel } from './lib/agent/providers/model-selection.mjs';
 
 function promptFor(context) {
   return renderAcceptancePrompt(context).text;
@@ -22,10 +23,7 @@ function parseJsonText(raw) {
 }
 
 function requestedCursorModel() {
-  return {
-    id: process.env.CURSOR_MODEL || 'composer-2.5',
-    fast: String(process.env.CURSOR_MODEL_FAST || 'true').toLowerCase() !== 'false',
-  };
+  return cursorModel(process.env);
 }
 
 async function runCursor(context, workspace) {
@@ -56,13 +54,10 @@ async function runCursor(context, workspace) {
 }
 
 function requestedClaudeGatewayModel(backend, env = process.env) {
-  const model = backend === 'qwen'
-    ? (env.ACCEPTANCE_CLAUDE_MODEL || env.ANTHROPIC_MODEL)
-    : (env.ACCEPTANCE_CLAUDE_MODEL || 'claude-sonnet-5');
-  if (backend === 'qwen' && (typeof model !== 'string' || !/^qwen[a-z0-9._-]*$/i.test(model))) {
-    throw new Error('Qwen Environment must explicitly set a Qwen model via ACCEPTANCE_CLAUDE_MODEL or ANTHROPIC_MODEL');
-  }
-  return model;
+  return claudeGatewayModel(env.ACCEPTANCE_CLAUDE_MODEL || env.ANTHROPIC_MODEL, {
+    provider: backend,
+    variable: 'ACCEPTANCE_CLAUDE_MODEL or ANTHROPIC_MODEL',
+  });
 }
 
 function claudeUsage(envelope) {
@@ -351,10 +346,11 @@ async function selfTest() {
   assert.equal(claudeUsage({ modelUsage: { modelA: { inputTokens: 5 } } }).input, 5);
   assert.equal(requestedClaudeGatewayModel('qwen', { ANTHROPIC_MODEL:'qwen3-coder-plus' }), 'qwen3-coder-plus');
   assert.equal(requestedClaudeGatewayModel('qwen', { ACCEPTANCE_CLAUDE_MODEL:'qwen3.7-plus' }), 'qwen3.7-plus');
-  assert.throws(() => requestedClaudeGatewayModel('qwen', {}), /Qwen Environment/);
+  assert.throws(() => requestedClaudeGatewayModel('qwen', {}), /missing ACCEPTANCE_CLAUDE_MODEL/);
   assert.throws(() => requestedClaudeGatewayModel('qwen', {ANTHROPIC_MODEL:'claude-sonnet-5'}), /Qwen Environment/);
   assert.throws(() => requestedClaudeGatewayModel('qwen', {ANTHROPIC_MODEL:'glm-5'}), /Qwen Environment/);
-  assert.equal(requestedClaudeGatewayModel('deepseek', {}), 'claude-sonnet-5');
+  assert.equal(requestedClaudeGatewayModel('deepseek', {ANTHROPIC_MODEL:'deepseek-flash[1m]'}), 'deepseek-flash[1m]');
+  assert.throws(() => requestedClaudeGatewayModel('deepseek', {}), /missing ACCEPTANCE_CLAUDE_MODEL/);
   // Structural retry: an unusable result is an execution failure, not a
   // verdict. Retry once with the same context; never retry a valid verdict.
   const retryContext = { ...context, criteria: [{ criterion: 'SC-01', text: 'works' }] };
@@ -405,10 +401,10 @@ async function main() {
       const fallbackMeta = error?.agentMeta ?? {
         provider: provider === 'qwen' ? 'claude-code' : provider,
         model: provider === 'cursor'
-          ? requestedCursorModel()
+          ? { id: process.env.CURSOR_MODEL || null,
+              fast: String(process.env.CURSOR_MODEL_FAST || 'true').toLowerCase() !== 'false' }
           : { id: process.env.ANTHROPIC_MODEL || 'gateway-default',
-              request_model: provider === 'qwen' ? (process.env.ACCEPTANCE_CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || null)
-                : (process.env.ACCEPTANCE_CLAUDE_MODEL || 'claude-sonnet-5') },
+              request_model: process.env.ACCEPTANCE_CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || null },
         run_id: null,
         request_id: null,
         status: 'error',

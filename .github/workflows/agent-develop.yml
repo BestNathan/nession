@@ -106,7 +106,7 @@ jobs:
           STORE_WRITER_PRIVATE_KEY: ${{ secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY }}
           CURSOR_RESUME_PRIVATE_KEY_B64: ${{ secrets.CURSOR_RESUME_PRIVATE_KEY_B64 }}
           CURSOR_SDK_VERSION: ${{ vars.CURSOR_SDK_VERSION || '1.0.37' }}
-          CURSOR_MODEL: ${{ vars.CURSOR_MODEL || 'composer-2.5' }}
+          CURSOR_MODEL: ${{ vars.CURSOR_MODEL }}
           CURSOR_MODEL_FAST: ${{ vars.CURSOR_MODEL_FAST || 'true' }}
         run: node scripts/lib/agent/orchestration/development-resume.mjs prepare "$RUNNER_TEMP/resume-admission.json" "$RUNNER_TEMP/resume-transfer"
       - name: Upload encrypted native transfer for the same admitted Run
@@ -210,7 +210,7 @@ jobs:
       - name: Restore native bytes and synchronize live Issue before model
         env:
           CURSOR_RESUME_PRIVATE_KEY_B64: ${{ secrets.CURSOR_RESUME_PRIVATE_KEY_B64 }}
-          CURSOR_MODEL: ${{ vars.CURSOR_MODEL || 'composer-2.5' }}
+          CURSOR_MODEL: ${{ vars.CURSOR_MODEL }}
           CURSOR_MODEL_FAST: ${{ vars.CURSOR_MODEL_FAST || 'true' }}
           GH_TOKEN: ${{ github.token }}
           HAS_RESUME: ${{ inputs.resume_from != '' }}
@@ -229,7 +229,7 @@ jobs:
       - name: Execute real Developer in isolated Docker with no host credentials
         env:
           CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
-          CURSOR_MODEL: ${{ vars.CURSOR_MODEL || 'composer-2.5' }}
+          CURSOR_MODEL: ${{ vars.CURSOR_MODEL }}
           CURSOR_MODEL_FAST: ${{ vars.CURSOR_MODEL_FAST || 'true' }}
         shell: bash
         run: |
