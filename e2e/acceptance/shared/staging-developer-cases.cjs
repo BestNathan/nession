@@ -128,6 +128,27 @@ function stagedAncestor(source) {
     : null;
 }
 
+// SC-04 reads the append-only acceptance-results branch, which records the
+// trusted Case/ingester verdicts for SC-02 and SC-03.
+function withAcceptanceResults(fn) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ns-2319-results-'));
+  try {
+    const repo = path.join(dir, 'results.git');
+    must(dir, ['init', '-q', '--bare', repo]);
+    const fetched = git(repo, ['fetch', '-q', '--depth=1', REMOTE,
+      'acceptance-results:refs/ns/acceptance-results']);
+    if (!fetched.ok) {
+      return pending('The acceptance-results branch is not reachable yet.',
+        [{ type: 'store', value: fetched.error }]);
+    }
+    const ref = must(repo, ['rev-parse', 'refs/ns/acceptance-results']).trim();
+    expect(SHA.test(ref), 'fetched acceptance-results ref is not an exact commit');
+    return fn({ repo, ref });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 function loadCheckpoint({ repo, storeRef }, sha) {
   const headFile = IDENTITY_PATH + '/head.json';
   if (!list(repo, storeRef, IDENTITY_PATH).includes(headFile)) {
@@ -218,5 +239,6 @@ function loadTelemetry({ repo, metricsRef }) {
 module.exports = {
   ISSUE, IDENTITY_PATH, WORKFLOW, SHA, HEX64, UUID,
   targetSha, expect, positive, qwen, pending, emit,
-  withPublicBranches, stagedAncestor, loadCheckpoint, loadSeedRun, loadTelemetry,
+  withPublicBranches, withAcceptanceResults, stagedAncestor,
+  loadCheckpoint, loadSeedRun, loadTelemetry, list, readJson,
 };
