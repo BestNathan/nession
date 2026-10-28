@@ -15,6 +15,9 @@ const RANK = Object.freeze({
   'verification:full': 3,
 });
 const SHA = /^[0-9a-f]{40}$/;
+// Container build context and deployment runtime inputs are explicitly L2,
+// not unaudited unknown paths. Keep root Dockerfile variants narrow.
+const DEPLOYMENT_INPUT = /^(?:deploy\/|Dockerfile(?:\.[A-Za-z0-9_-]+)*$)/;
 
 function names(issue) {
   return (issue?.labels ?? []).map(label =>
@@ -62,6 +65,8 @@ export function assessChangedPaths(paths) {
     } else if (/^pages\//.test(p)) {
       // The public Pages app is its own runtime/build component (#1782).
       components.add('pages');
+    } else if (DEPLOYMENT_INPUT.test(p)) {
+      components.add('deployment');
     } else if (/^\.github\/workflows\//.test(p)) {
       components.add('workflow');
     } else if (/^(scripts\/|gates\/|automation\/|Cargo\.|justfile$)/.test(p)) {
@@ -71,7 +76,8 @@ export function assessChangedPaths(paths) {
     } else {
       unknown = true;
     }
-    if (/^(crates\/nession-(protocol|common)\/|scripts\/(issue-e2e|acceptance-|requirement-acceptance)|e2e\/runner\/|\.github\/workflows\/(e2e-|acceptance-|ci-quality))/.test(p)) {
+    if (DEPLOYMENT_INPUT.test(p) ||
+      /^(crates\/nession-(protocol|common)\/|scripts\/(issue-e2e|acceptance-|requirement-acceptance)|e2e\/runner\/|\.github\/workflows\/(e2e-|acceptance-|ci-quality))/.test(p)) {
       floor = VERIFICATION_TIERS[1];
       reasons.push('shared-contract-or-test-infrastructure:' + p);
     }
@@ -136,6 +142,24 @@ function selfTest() {
   assert.equal(assessChangedPaths(['crates/nession-agent/src/a.rs']).floor, VERIFICATION_TIERS[0]);
   assert.equal(assessChangedPaths(['crates/nession-agent/src/a.rs','web/src/App.tsx']).floor, VERIFICATION_TIERS[1]);
   assert.equal(assessChangedPaths(['.github/workflows/acceptance-cases.yml']).floor, VERIFICATION_TIERS[1]);
+  // #2566: all root Dockerfile variants and canonical deploy scripts are
+  // known high-risk build/deploy inputs, not no-op metadata or unknowns.
+  const deployment = [
+    'Dockerfile.agent', 'Dockerfile.agent.prebuilt',
+    'Dockerfile.server', 'Dockerfile.server.prebuilt',
+    'deploy/docker-compose.yml', 'deploy/entrypoint-agent.sh',
+    'deploy/entrypoint-server.sh', 'deploy/render-server-config.sh',
+  ];
+  for (const p of deployment) {
+    const outcome = assessChangedPaths([p]);
+    assert.equal(outcome.needsAudit, false, p);
+    assert.equal(outcome.floor, VERIFICATION_TIERS[1], p);
+    assert.deepEqual(outcome.components, ['deployment'], p);
+  }
+  assert.equal(assessChangedPaths([...deployment,'web/src/terminalConfig.ts']).needsAudit, false);
+  assert.equal(assessChangedPaths(['Dockerfile.unknown/child']).needsAudit, true);
+  assert.throws(() => assessChangedPaths(['deploy/../untrusted']), /unverified/);
+  assert.equal(assessChangedPaths(['container/Dockerfile.server']).needsAudit, true);
   assert.equal(assessChangedPaths(['pages/scripts/build.mjs']).needsAudit, false);
   assert.deepEqual(assessChangedPaths(['pages/scripts/build.mjs']).components,['pages']);
   assert.equal(assessChangedPaths(['pages/scripts/build.mjs','e2e/helpers/pagesStandalone.ts']).floor,
