@@ -46,6 +46,13 @@ describe('terminal build configuration (#2487 SC-07)', () => {
     expect(large.config).toEqual({ cols: 96, webMaxFontSize: 14.5 });
   });
 
+  it('retains the 96-column default when only the Web font cap is configured', () => {
+    const parsed = parseTerminalBuildConfig({ [TERMINAL_WEB_FONT_SIZE_ENV]: '18' });
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.config).toEqual({ cols: 96, webMaxFontSize: 18 });
+    expect(parsed.sources).toEqual({ cols: 'default', webMaxFontSize: 'env' });
+  });
+
   it('changing only the Web font input never changes the column count', () => {
     const base = parseTerminalBuildConfig({ [TERMINAL_COLS_ENV]: '96' });
     const fontOnly = parseTerminalBuildConfig({
