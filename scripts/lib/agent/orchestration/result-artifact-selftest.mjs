@@ -212,4 +212,11 @@ const tooLarge=createGitHubResultArtifactReader('ghReadOnlyToken1234',{
 await assert.rejects(()=>tooLarge.downloadZip(999),/bounded archive/);
 assert.ok(fetched.every(x=>x.opts.method==='GET'));
 assert.throws(()=>createGitHubResultArtifactReader(''),/read-only token/);
+// The producer workflow must publish exactly the artifact name the trusted
+// ingest consumes, bound to the Outbox action ID.
+const reviewWorkflow=fs.readFileSync('.github/workflows/agent-review.yml','utf8');
+assert.match(reviewWorkflow,
+  /name: agent-result-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}-\$\{\{ inputs\.action_id \}\}/);
+assert.match(reviewWorkflow,
+  /path: \$\{\{ runner\.temp \}\}\/review-output\/agent-result\.json/);
 console.log('Agent Artifact Ingest verified single-file ZIP, GitHub digest, run/Issue binding and replay fixtures passed');
