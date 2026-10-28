@@ -42,6 +42,8 @@ jobs:
       cli_version: ${{ steps.source.outputs.cli_version }}
       phase: ${{ steps.source.outputs.phase }}
       default_model: ${{ steps.source.outputs.default_model }}
+      checkpoint_version: ${{ steps.source.outputs.checkpoint_version }}
+      checkpoint_ciphertext_sha256: ${{ steps.source.outputs.checkpoint_ciphertext_sha256 }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -120,6 +122,19 @@ jobs:
             value="$(jq -er ".$key" "$work/verified-staging-dispatch.json")"
             echo "${key}=${value}" >> "$GITHUB_OUTPUT"
           done
+          # A resume forwards the already-verified checkpoint commitment so the
+          # canonical telemetry binds the resumed Run to the stored Session.
+          phase="$(jq -er .phase "$work/verified-staging-dispatch.json")"
+          checkpoint_version=""
+          checkpoint_sha=""
+          if [[ "$phase" == "resume" ]]; then
+            checkpoint_version="$(jq -er .checkpoint.version "$work/verified-staging-dispatch.json")"
+            checkpoint_sha="$(jq -er .checkpoint.ciphertext_sha256 "$work/verified-staging-dispatch.json")"
+            [[ "$checkpoint_version" =~ ^[1-9][0-9]*$ ]]
+            [[ "$checkpoint_sha" =~ ^[a-f0-9]{64}$ ]]
+          fi
+          echo "checkpoint_version=$checkpoint_version" >> "$GITHUB_OUTPUT"
+          echo "checkpoint_ciphertext_sha256=$checkpoint_sha" >> "$GITHUB_OUTPUT"
           # The job output name is the pre-existing `staging_sha` contract.
           echo "staging_sha=$target" >> "$GITHUB_OUTPUT"
           {
@@ -143,6 +158,8 @@ jobs:
       STAGING_DISPATCH_ENVIRONMENT: ${{ needs.verify-source.outputs.environment }}
       STAGING_PHASE: ${{ needs.verify-source.outputs.phase }}
       STAGING_DEFAULT_MODEL: ${{ needs.verify-source.outputs.default_model }}
+      STAGING_CHECKPOINT_VERSION: ${{ needs.verify-source.outputs.checkpoint_version }}
+      STAGING_CHECKPOINT_CIPHERTEXT_SHA: ${{ needs.verify-source.outputs.checkpoint_ciphertext_sha256 }}
       SOURCE_MAIN_SHA: ${{ needs.verify-source.outputs.source_main_sha }}
       ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL }}
       # Model and CLI come from the signed dispatch, not from the mutable
