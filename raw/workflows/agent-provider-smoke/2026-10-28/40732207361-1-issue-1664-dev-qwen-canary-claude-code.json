@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "kind": "agent_workflow_run",
+  "identity": {
+    "workflow_id": "agent-provider-smoke",
+    "github_workflow": "Agent / Provider Smoke",
+    "github_run_id": 40732207361,
+    "github_run_attempt": 1,
+    "job": "qwen-developer-canary",
+    "repository": "BestNathan/nession",
+    "event": "push",
+    "unique_run_name": "40732207361-1-issue-1664-dev-qwen-canary-claude-code"
+  },
+  "task": {
+    "id": "issue-1664-dev-qwen-canary",
+    "type": "develop",
+    "issue": 1664,
+    "target_ref": "e1ad74e903edb2a1cee3f05834e4eeedef5e83bb"
+  },
+  "agent": {
+    "provider": "claude-code",
+    "id": "dev-qwen-01",
+    "role": "developer",
+    "harness_sha256": null,
+    "checkpoint_id": null,
+    "model": {
+      "id": "qwen3.7-plus",
+      "request_model": "qwen3.7-plus"
+    },
+    "run_id": "946c844d-9eca-48e5-b9ad-7b5524b787b7",
+    "request_id": null,
+    "status": "finished",
+    "prompt": null
+  },
+  "execution": {
+    "turns": 3,
+    "model_requests": null,
+    "tools": {
+      "observed": true,
+      "total": 2,
+      "unique": 2,
+      "by_name": {
+        "Edit": 1,
+        "Read": 1
+      }
+    }
+  },
+  "tokens": {
+    "input": 18,
+    "output": 232,
+    "cache_read": 4702,
+    "cache_write": 2592,
+    "reasoning": null,
+    "total": 7544
+  },
+  "cost": {
+    "raw_usd": null,
+    "charged_usd": null,
+    "estimated_usd": null
+  },
+  "timing": {
+    "started_at": "2026-10-28T17:05:17.344Z",
+    "finished_at": "2026-10-28T17:05:26.079Z",
+    "agent_duration_ms": 8735,
+    "workflow_duration_ms": null
+  },
+  "result": {
+    "status": "canary-pass"
+  }
+}
