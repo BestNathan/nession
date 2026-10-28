@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "agent_workflow_run",
+  "identity": {
+    "workflow_id": "agent-staging-developer-canary",
+    "github_workflow": "Agent / Staging Developer Canary",
+    "github_run_id": 40695388631,
+    "github_run_attempt": 1,
+    "job": "qwen-developer-canary",
+    "repository": "BestNathan/nession",
+    "event": "workflow_run",
+    "unique_run_name": "40695388631-1-issue-2319-staging-qwen-canary"
+  },
+  "task": {
+    "id": "issue-2319-staging-qwen-canary",
+    "type": "develop",
+    "issue": 2319,
+    "target_ref": "05d3501985c0f40af78b2b34ae1f6201de43ff5b",
+    "dispatch_id": "c02c6c31094828e977a59fa82b81ec4182eee84d30e5b60af69e612d5265d758",
+    "phase": "resume",
+    "dispatched_default_model": "qwen3.7-max"
+  },
+  "agent": {
+    "provider": "claude-code",
+    "id": "dev-qwen-01",
+    "role": "developer",
+    "harness_sha256": null,
+    "checkpoint_id": null,
+    "model": {
+      "id": "qwen3.7-plus",
+      "request_model": "qwen3.7-plus"
+    },
+    "run_id": "d1f61be2-87fa-4483-b732-9136f154752a",
+    "request_id": null,
+    "status": "finished",
+    "prompt": null
+  },
+  "execution": {
+    "turns": 3,
+    "model_requests": null,
+    "tools": {
+      "observed": true,
+      "total": 2,
+      "unique": 2,
+      "by_name": {
+        "Edit": 1,
+        "Read": 1
+      }
+    }
+  },
+  "tokens": {
+    "input": 18,
+    "output": 375,
+    "cache_read": 4752,
+    "cache_write": 2687,
+    "reasoning": null,
+    "total": 7832
+  },
+  "cost": {
+    "raw_usd": null,
+    "charged_usd": null,
+    "estimated_usd": null
+  },
+  "timing": {
+    "started_at": "2026-10-28T13:20:01.416Z",
+    "finished_at": "2026-10-28T13:20:12.327Z",
+    "agent_duration_ms": 10911,
+    "workflow_duration_ms": null
+  },
+  "result": {
+    "status": "staging-canary-pass"
+  }
+}
