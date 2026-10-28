@@ -170,6 +170,13 @@ jobs:
           set -euo pipefail
           node scripts/lib/agent/developer-canary.mjs staging \
             "$RUNNER_TEMP/staging-qwen-telemetry"
+      - name: Seal a ciphertext-only native staging Session checkpoint
+        env:
+          STAGING_CLAUDE_RESUME_PUBLIC_KEY_B64: ${{ vars.STAGING_CLAUDE_RESUME_PUBLIC_KEY_B64 }}
+        run: |
+          set -euo pipefail
+          node scripts/lib/agent/providers/claude-resume-fixture.mjs staging-seed \
+            "$RUNNER_TEMP/staging-checkpoint"
       - name: Upload canonical staging Agent telemetry
         if: always()
         uses: actions/upload-artifact@v4
@@ -179,4 +186,63 @@ jobs:
             ${{ runner.temp }}/staging-qwen-telemetry/agent-telemetry.json
             ${{ runner.temp }}/staging-qwen-telemetry/agent-execution-trace.json
           if-no-files-found: warn
+          retention-days: 14
+      - name: Upload ciphertext-only staging checkpoint
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-checkpoint-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/staging-checkpoint/ciphertext.json
+            ${{ runner.temp }}/staging-checkpoint/proof.json
+          if-no-files-found: error
+          retention-days: 3
+
+  publish-checkpoint:
+    needs: synthetic-qwen
+    if: needs.synthetic-qwen.result == 'success'
+    runs-on: ubuntu-24.04
+    environment: agent-staging-controller
+    timeout-minutes: 10
+    env:
+      STAGING_TARGET_SHA: ${{ needs.verify-source.outputs.staging_sha }}
+      STAGING_DISPATCH_ID: ${{ needs.verify-source.outputs.dispatch_id }}
+      ANTHROPIC_MODEL: ${{ needs.verify-source.outputs.model }}
+      CLAUDE_CODE_VERSION: ${{ needs.verify-source.outputs.cli_version }}
+    steps:
+      - name: Checkout trusted main-only Store ingester
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify-source.outputs.source_main_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Download ciphertext-only staging checkpoint
+        uses: actions/download-artifact@v4
+        with:
+          name: staging-checkpoint-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/staging-checkpoint
+      - name: Mint scoped Store Writer token
+        id: writer
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.RUN_STORE_WRITER_APP_ID }}
+          private-key: ${{ secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY }}
+      - name: Publish encrypted checkpoint to the canonical Store
+        env:
+          STAGING_CLAUDE_RESUME_PRIVATE_KEY_B64: ${{ secrets.STAGING_CLAUDE_RESUME_PRIVATE_KEY_B64 }}
+          STAGING_STORE_AES_KEY_B64: ${{ secrets.STAGING_STORE_AES_KEY_B64 }}
+          STORE_APP_TOKEN: ${{ steps.writer.outputs.token }}
+        run: |
+          set -euo pipefail
+          export AGENT_STORE_CONTROLLER_REMOTE="https://x-access-token:${STORE_APP_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          node scripts/lib/agent/providers/claude-resume-fixture.mjs staging-publish \
+            "$RUNNER_TEMP/staging-checkpoint" "$RUNNER_TEMP/staging-checkpoint-receipt.json"
+          unset AGENT_STORE_CONTROLLER_REMOTE STORE_APP_TOKEN
+      - name: Upload staging checkpoint receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-checkpoint-receipt-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/staging-checkpoint-receipt.json
+          if-no-files-found: error
           retention-days: 14

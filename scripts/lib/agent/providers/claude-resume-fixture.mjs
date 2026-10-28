@@ -10,6 +10,8 @@ import {createHash,randomBytes,randomUUID} from 'node:crypto';
 import {runClaudeCli,normalizeClaudeUsage} from './claude-code.mjs';
 import {qwenDeveloperModel,qwenGatewayEndpoint} from '../orchestration/qwen-developer-policy.mjs';
 import {sealClaudeNativeSession,openClaudeNativeSession,discoverClaudeNativeProject} from './claude-native-store.mjs';
+import {sealCheckpoint} from '../store/checkpoint.mjs';
+import {publishEncryptedAgentCheckpoint} from '../store/remote.mjs';
 import {buildAgentWorkflowTelemetry,writeAgentWorkflowTelemetry} from '../../../agent-workflow-telemetry.mjs';
 
 const SHA=/^[a-f0-9]{40}$/, HEX=/^[a-f0-9]{64}$/;
@@ -53,6 +55,131 @@ function secret(name){
   const encoded=process.env[name];
   if(typeof encoded!=='string'||encoded.length<100)fail('missing native encryption key: '+name);
   return Buffer.from(encoded,'base64').toString('utf8');
+}
+
+// #2319: the staging seed runs inside the signed staging canary. It uses the
+// staging target SHA and the pinned model from the verified dispatch; the
+// model executor holds only the public sealing key.
+function stagingOrigin(){
+  const id=Number(process.env.GITHUB_RUN_ID),attempt=Number(process.env.GITHUB_RUN_ATTEMPT);
+  if(process.env.GITHUB_REPOSITORY!=='BestNathan/nession'||
+      process.env.GITHUB_REF!=='refs/heads/main'||
+      process.env.GITHUB_WORKFLOW!=='Agent / Staging Developer Canary'||
+      process.env.GITHUB_EVENT_NAME!=='workflow_run'||
+      !SHA.test(process.env.GITHUB_SHA??'')||
+      !SHA.test(process.env.STAGING_TARGET_SHA??'')||
+      !/^[a-f0-9]{64}$/.test(process.env.STAGING_DISPATCH_ID??'')||
+      !Number.isSafeInteger(id)||id<1||attempt!==1)
+    fail('untrusted staging seed Run provenance');
+  return {source_sha:process.env.STAGING_TARGET_SHA,workflow_sha:process.env.GITHUB_SHA,
+    run_id:id,attempt,dispatch_id:process.env.STAGING_DISPATCH_ID};
+}
+export function stagingSeedMetadata({sourceSha,runId,attempt,sessionId,projectKey,
+  cliVersion,model,dispatchId,cwdSha}) {
+  if(!SHA.test(sourceSha??'')||!Number.isSafeInteger(runId)||runId<1||attempt!==1||
+      !UUID.test(sessionId??'')||typeof projectKey!=='string'||
+      !/^[A-Za-z0-9._-]{1,240}$/.test(projectKey)||
+      typeof cliVersion!=='string'||!/^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/.test(cliVersion)||
+      !/^qwen[a-z0-9._-]*$/i.test(model??'')||
+      !/^[a-f0-9]{64}$/.test(dispatchId??'')||
+      !/^[a-f0-9]{64}$/.test(cwdSha??''))
+    fail('invalid staging seed metadata');
+  return {session_id:sessionId,source_sha:sourceSha,run_id:runId,attempt,
+    project_key:projectKey,cwd_sha256:cwdSha,
+    cli_version:cliVersion,harness_digest:harness(sourceSha,cliVersion,model),
+    model,dispatch_id:dispatchId,issue:2319,agent_id:'dev-qwen-01'};
+}
+async function stagingSeed(dir){
+  const id=stagingOrigin(),cliVersion=version(),requestedModel=model();
+  fs.mkdirSync(dir,{recursive:true,mode:0o700});
+  const configDir=fs.mkdtempSync(path.join(process.env.RUNNER_TEMP||os.tmpdir(),'claude-staging-seed-'));
+  const sessionId=randomUUID(),marker=randomBytes(16).toString('hex');
+  try {
+    run('Remember this private 32-character hexadecimal marker for a later turn: '+
+      marker+'. Reply ONLY with ACK and do not repeat the marker.',configDir,sessionId);
+    const projectKey=discoverClaudeNativeProject(configDir,sessionId);
+    const metadata=stagingSeedMetadata({sourceSha:id.source_sha,runId:id.run_id,
+      attempt:id.attempt,sessionId,projectKey,cliVersion,model:requestedModel,
+      dispatchId:id.dispatch_id,cwdSha:ctxSha()});
+    const sealed=sealClaudeNativeSession({configDir,metadata,
+      publicKeyPem:secret('STAGING_CLAUDE_RESUME_PUBLIC_KEY_B64')});
+    write(path.join(dir,'ciphertext.json'),sealed);
+    write(path.join(dir,'proof.json'),{schema_version:1,
+      kind:'staging_developer_checkpoint_seed',metadata,
+      marker_sha256:sha(marker),encrypted_sha256:sealed.ciphertext_sha256});
+    console.log('Staging checkpoint: sealed native Session for '+id.source_sha+
+      ' model '+requestedModel+' dispatch '+id.dispatch_id);
+  } finally {fs.rmSync(configDir,{recursive:true,force:true});}
+}
+function stagingAesKey(){
+  const raw=process.env.STAGING_STORE_AES_KEY_B64;
+  if(typeof raw!=='string')fail('missing staging Store AES key');
+  const key=Buffer.from(raw,'base64');
+  if(key.length!==32)fail('staging Store AES key must be 32 bytes');
+  return key;
+}
+async function stagingPublish(input,out){
+  const id=stagingOrigin();
+  const proof=read(path.join(input,'proof.json'));
+  const sealed=read(path.join(input,'ciphertext.json'));
+  const m=proof?.metadata;
+  if(proof?.schema_version!==1||proof.kind!=='staging_developer_checkpoint_seed'||
+      sealed?.schema_version!==1||sealed.kind!=='claude-native-encrypted-snapshot'||
+      sealed.ciphertext_sha256!==proof.encrypted_sha256||
+      m?.source_sha!==id.source_sha||m?.run_id!==id.run_id||m?.attempt!==id.attempt||
+      m?.dispatch_id!==id.dispatch_id||m?.model!==process.env.ANTHROPIC_MODEL||
+      m?.cli_version!==process.env.CLAUDE_CODE_VERSION)
+    fail('seed proof does not match the staging dispatch/Run');
+  const tmp=fs.mkdtempSync(path.join(process.env.RUNNER_TEMP||os.tmpdir(),'staging-checkpoint-'));
+  const key=stagingAesKey();
+  try {
+    const native=path.join(tmp,'native');
+    const opened=openClaudeNativeSession({record:sealed,
+      privateKeyPem:secret('STAGING_CLAUDE_RESUME_PRIVATE_KEY_B64'),
+      expected:m,configDir:native});
+    const projectDir=path.join(native,'projects',opened.project_key);
+    const files=[];
+    const walk=(dir,prefix)=>{
+      for(const name of fs.readdirSync(dir).sort()){
+        const absolute=path.join(dir,name),stat=fs.lstatSync(absolute);
+        if(stat.isDirectory())walk(absolute,prefix+name+'/');
+        else if(name.endsWith('.jsonl'))files.push({path:prefix+name,
+          base64:fs.readFileSync(absolute).toString('base64')});
+      }
+    };
+    walk(projectDir,'');
+    if(!files.some(file=>file.path===m.session_id+'.jsonl'))
+      fail('native bundle lacks the Session transcript');
+    const bundle={schema_version:1,kind:'staging-claude-native-bundle',
+      session_id:m.session_id,project_key:opened.project_key,model:m.model,
+      cli_version:m.cli_version,dispatch_id:m.dispatch_id,
+      seed_run_id:m.run_id,seed_attempt:m.attempt,harness_digest:m.harness_digest,
+      files};
+    const identity={role:'developer',agent_id:'dev-qwen-01',issue:2319};
+    const checkpoint=sealCheckpoint(identity,1,
+      Buffer.from(JSON.stringify(bundle)),key,{
+        provider:'claude-code',session_id:m.session_id,
+        source_sha:m.source_sha,harness_digest:m.harness_digest,
+      });
+    const source={repository:'BestNathan/nession',run_id:id.run_id,attempt:id.attempt,
+      issue:2319,workflow_sha:id.workflow_sha,target_sha:id.source_sha,
+      head_branch:'main',
+      path:'.github/workflows/agent-staging-developer-canary.yml',
+      workflow_name:'Agent / Staging Developer Canary',event:'workflow_run',
+      agent_id:'dev-qwen-01',task:'implement',environment:'dev-claude-qwen',
+      provider:'claude-code'};
+    const registry=JSON.parse(fs.readFileSync('automation/agents/registry.json','utf8'));
+    const result=publishEncryptedAgentCheckpoint({
+      remote:process.env.AGENT_STORE_CONTROLLER_REMOTE,source,sealed:checkpoint,
+      registry,key,expectedVersion:0});
+    write(out,{schema_version:1,kind:'staging_developer_checkpoint_receipt',
+      issue:2319,dispatch_id:m.dispatch_id,target_sha:m.source_sha,
+      seed_run_id:m.run_id,seed_attempt:m.attempt,model:m.model,
+      cli_version:m.cli_version,checkpoint_version:result.version,
+      commit_sha:result.commit_sha,ciphertext_sha256:checkpoint.ciphertext_sha256});
+    console.log('Staging checkpoint published at '+result.commit_sha+
+      ' version '+result.version);
+  } finally {key.fill(0);fs.rmSync(tmp,{recursive:true,force:true});}
 }
 function ctxSha(){return sha(path.resolve(process.env.GITHUB_WORKSPACE??''));}
 function run(prompt,configDir,sessionId,resume=false){
@@ -163,12 +290,14 @@ function resume(input,dir,out) {
 const main=async()=>{
   const [cmd,...args]=process.argv.slice(2);
   if(cmd==='seed'&&args.length===1)return seed(args[0]);
+  if(cmd==='staging-seed'&&args.length===1)return stagingSeed(args[0]);
+  if(cmd==='staging-publish'&&args.length===2)return stagingPublish(...args);
   if(cmd==='verify-source'&&args.length===5)
     return console.log(JSON.stringify(verifyClaudeSeedSource(read(args[0]),read(args[1]),
       Number(args[2]),Number(args[3]),args[4])));
   if(cmd==='unseal'&&args.length===2)return unseal(...args);
   if(cmd==='resume'&&args.length===3)return resume(...args);
-  fail('usage: seed OUT | verify-source RUN ARTIFACTS RUN ATTEMPT SHA | unseal INPUT CONFIG | resume INPUT CONFIG OUT');
+  fail('usage: seed OUT | staging-seed OUT | staging-publish INPUT RECEIPT | verify-source RUN ARTIFACTS RUN ATTEMPT SHA | unseal INPUT CONFIG | resume INPUT CONFIG OUT');
 };
 if(process.argv[1]&&fileURLToPath(import.meta.url)===path.resolve(process.argv[1]))
   main().catch(error=>{console.error(error.message);process.exitCode=1;});
