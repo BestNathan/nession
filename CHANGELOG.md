@@ -57,3 +57,17 @@
 - Categories: agents, knowledge, provenance, research, skills
 - Reason: Restore verified status after confirming the exact-SHA canonical Skill source; trusted audit will rerun after the historical-snapshot validator fix merges
 - Source: https://github.com/BestNathan/nession/issues/2343
+
+## 2026-10-28T17:46:56Z | create | Web terminal emulator engine and component ownership
+- Path: topics/terminal/web-terminal-emulator-engine-and-component-ownership.md
+- Topic: terminal
+- Categories: architecture, ownership, terminal, web
+- Reason: Record the bounded Xterm Engine decision from #2581: one raw xterm owner, a narrow Product/UI port, ordered writer mutation, geometry policy and link cell mapping
+- Source: https://github.com/BestNathan/nession/issues/2581
+
+## 2026-10-28T17:46:56Z | update | Nession instruction architecture and knowledge ownership
+- Path: topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md
+- Topic: engineering
+- Categories: agents, instructions, knowledge, skills
+- Reason: Add a related-knowledge link to the terminal engine ownership article, providing its incoming cross-link
+- Source: https://github.com/BestNathan/nession/issues/2581
