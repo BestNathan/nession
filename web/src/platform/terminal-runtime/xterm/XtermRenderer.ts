@@ -28,18 +28,28 @@ export interface RendererHooks {
  * terminal, so the buffer and callbacks survive. `dispose()` stops reacting to
  * a context loss that arrives after the emulator is gone.
  */
+export type TerminalRendererType = 'webgl' | 'canvas' | 'dom';
+
 export class XtermRenderer {
-  type: 'webgl' | 'canvas';
+  type: TerminalRendererType;
   private disposed = false;
 
   private readonly hooks: RendererHooks;
 
   constructor(
     private readonly addons: XtermAddonHost,
-    preferred?: 'webgl' | 'canvas',
+    preferred?: TerminalRendererType,
     hooks: RendererHooks = {},
   ) {
     this.hooks = hooks;
+    // `dom` is the static fixture's renderer: xterm's built-in DOM renderer
+    // puts the buffer text in `.xterm-rows`, which the canonical screens and
+    // their visual/text assertions read. Product terminals always pass
+    // webgl/canvas.
+    if (preferred === 'dom') {
+      this.type = 'dom';
+      return;
+    }
     const webglSupported = hooks.webglSupported ?? detectWebGLSupport;
     if (preferred === 'webgl' && webglSupported()) {
       try {

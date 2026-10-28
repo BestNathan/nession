@@ -4,7 +4,7 @@ import { TERMINAL_METRICS } from '../../../../../design/generated/terminal';
 import { measuredCellDimensionsOf, readBufferSnapshot, readLogicalLine, readModeSnapshot, cellSizeOf } from './XtermMetrics';
 import { mapLineLinks } from './LineLinks';
 import { XtermAddonHost } from './XtermAddonHost';
-import { XtermRenderer } from './XtermRenderer';
+import { XtermRenderer, type TerminalRendererType } from './XtermRenderer';
 import { ThemeManager, TERMINAL_MINIMUM_CONTRAST_RATIO } from './ThemeManager';
 import { FontSizeManager } from './FontSizeManager';
 import type { PixelSize } from '../grid';
@@ -56,7 +56,7 @@ function warmTerminalFont(): void {
 
 /** Options for one engine instance. */
 export interface XtermEmulatorOptions {
-  rendererType: 'webgl' | 'canvas';
+  rendererType: TerminalRendererType;
   fontSize?: number;
   /**
    * xterm's own `lineHeight`: a multiple of the terminal font's measured box,

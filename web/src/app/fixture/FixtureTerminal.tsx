@@ -203,7 +203,9 @@ function startFixtureTerminal(
   // SC-10): one construction path, one renderer/theme/font lifecycle. Only
   // the static options — no transport, no input — are fixture-specific.
   const emulator = createTerminalEmulator({
-    rendererType: 'canvas',
+    // The DOM renderer keeps the buffer text in `.xterm-rows`; the canonical
+    // screens and the fixture wait read it, and the fixture has no GPU need.
+    rendererType: 'dom',
     fontSize: metrics.fontSize,
     lineHeight: metrics.lineHeight,
     terminalOptions: { convertEol: true, cursorBlink: false, disableStdin: true },

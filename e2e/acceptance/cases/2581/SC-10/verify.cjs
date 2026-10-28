@@ -12,7 +12,7 @@ run(({ evidence }) => {
   const sha = targetSha();
 
   requireText('web/src/app/fixture/FixtureTerminal.tsx', [
-    'createTerminalEmulator', "from '@/platform/terminal-runtime/xterm'",
+    'createTerminalEmulator', "from '@/platform/terminal-runtime/xterm'", "rendererType: 'dom'",
   ], ['@xterm/']);
   requireText('web/src/product/terminal/components/TerminalViewport.tsx', [], ['@xterm/']);
   requireText('docs/architecture/terminal-engine.md', [

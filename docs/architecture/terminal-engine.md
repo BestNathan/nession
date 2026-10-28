@@ -56,7 +56,9 @@ platform/terminal-runtime
 `app/fixture/FixtureTerminal.tsx` imports the engine's **public barrel**
 (`@/platform/terminal-runtime/xterm`) and therefore constructs its terminal
 through the same renderer/theme/metrics rules as the product (#2581 SC-10).
-No other app/product file may import that barrel.
+It selects the engine's `dom` renderer so the buffer text stays in
+`.xterm-rows` for the canonical screens and their text assertions. No other
+app/product file may import that barrel.
 
 ## Machine-checked boundary
 

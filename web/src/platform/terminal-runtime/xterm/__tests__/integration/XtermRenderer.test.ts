@@ -77,6 +77,15 @@ describe('XtermRenderer', () => {
     term.dispose();
   });
 
+  it('selects the built-in DOM renderer for the static fixture without an addon', () => {
+    const term = new Terminal();
+    const addons = new XtermAddonHost(term);
+    const renderer = new XtermRenderer(addons, 'dom');
+    expect(renderer.type).toBe('dom');
+    expect(addons.get(CanvasAddon)).toBeUndefined();
+    term.dispose();
+  });
+
   it('stops reacting to renderer events after dispose', () => {
     const term = new Terminal();
     const host = new XtermAddonHost(term);
