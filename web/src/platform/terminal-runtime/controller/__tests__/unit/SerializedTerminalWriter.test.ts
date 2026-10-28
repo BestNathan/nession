@@ -113,6 +113,37 @@ describe('SerializedTerminalWriter (#1931)', () => {
     expect(h.called).toEqual(['blocking']);
   });
 
+  it('does not mutate xterm for a resize that repeats the applied grid (#2581 SC-06)', () => {
+    const h = harness();
+    const applied = vi.fn();
+    h.writer.resize(80, 37, applied);
+    h.writer.resize(80, 37, applied);
+    h.writer.resize(80, 40, applied);
+
+    expect(h.terminal.resize).toHaveBeenCalledTimes(2);
+    expect(h.terminal.resize).toHaveBeenNthCalledWith(1, 80, 37);
+    expect(h.terminal.resize).toHaveBeenNthCalledWith(2, 80, 40);
+    // The deduped operation is still a FIFO fact: its parser-completed
+    // callback runs, in order, exactly like the resize that mutated.
+    expect(applied).toHaveBeenCalledTimes(3);
+  });
+
+  it('keeps a deduped resize behind an in-flight parse, never ahead of it', () => {
+    const h = harness();
+    const applied = vi.fn();
+    h.writer.resize(80, 37);
+    h.writer.write('blocking');
+    h.writer.resize(80, 37, applied);
+
+    expect(h.terminal.resize).toHaveBeenCalledTimes(1);
+    expect(applied).not.toHaveBeenCalled();
+    h.callbacks.shift()!();
+    // The second operation is ordered after the write; it reports completion
+    // without a second xterm mutation.
+    expect(h.terminal.resize).toHaveBeenCalledTimes(1);
+    expect(applied).toHaveBeenCalledTimes(1);
+  });
+
   it('does not treat call-to-write as parser completion', () => {
     const h = harness();
     let applied = 0;

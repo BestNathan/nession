@@ -2,7 +2,7 @@ import type { Terminal, ITheme } from '@xterm/xterm';
 import {
   TERMINAL_MINIMUM_CONTRAST_RATIO,
   TERMINAL_THEME,
-} from '../../../../design/generated/terminal';
+} from '../../../../../design/generated/terminal';
 
 export { TERMINAL_MINIMUM_CONTRAST_RATIO };
 

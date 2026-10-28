@@ -29,6 +29,7 @@ export default tseslint.config(
       'nession/no-ui-product-imports': 'error', // components/ui stays generic (see the rule's header)
       'nession/no-deep-capability-imports': 'error', // a capability is reached through its index (#801)
       'nession/no-capability-portals': 'error', // a Peek body stays inside the host (#1347 SC-27)
+      'nession/no-direct-xterm': 'error', // raw xterm stays inside the Xterm Engine (#2581)
       'nession/visual-vocabulary': 'error', // canonical vars + color/type/radius/elevation vocabulary (#1451)
 
       // ── Code quality limits ──────────────────────────────────────────

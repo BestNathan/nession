@@ -1,7 +1,7 @@
 import { useRef, useLayoutEffect } from 'react';
 import { cn } from '@/shared/lib/utils';
 import type { TerminalController } from '@/platform/terminal-runtime/controller/TerminalController';
-import { registerWorkspaceFileLinkProvider } from '@/product/terminal/workspaceFileLinks';
+import { workspaceFileLinkMatcher } from '@/product/terminal/workspaceFileLinks';
 
 /**
  * The terminal well's box and inset, exported so a second xterm mount cannot
@@ -61,13 +61,14 @@ export function TerminalViewport({
     const container = containerRef.current;
     if (!container || !controller) { return; }
     controller.attach(container);
-    const term = controller.terminal;
-    const linkDisposable =
-      term && linkHandlerRef.current
-        ? registerWorkspaceFileLinkProvider(term, (path, line) => {
-            linkHandlerRef.current?.(path, line);
-          })
-        : undefined;
+    // The link matcher goes through the emulator port (#2581 SC-05): Product
+    // owns recognition and navigation, the engine owns buffer lines and cell
+    // coordinates, and the viewport never reaches into xterm.
+    const linkDisposable = linkHandlerRef.current
+      ? controller.registerLinkMatcher(workspaceFileLinkMatcher((path, line) => {
+          linkHandlerRef.current?.(path, line);
+        }))
+      : null;
     return () => {
       linkDisposable?.dispose();
       controller.detach();

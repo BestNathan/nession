@@ -76,7 +76,13 @@ function setup(): {
   // at rather than falling back to unsequenced bytes.
   cm.seedInputCursor({ inputEpoch: 7, appliedThrough: 0, controlGeneration: 2 });
 
-  const controller = new TerminalInteractionController(terminal, (data) => cm.send(data));
+  const port = {
+    input: (data: string, wasUserInput?: boolean) => terminal.input(data, wasUserInput),
+    paste: (text: string) => terminal.paste(text),
+    readModes: () => ({ applicationCursorKeysMode: terminal.modes.applicationCursorKeysMode }),
+    onData: (listener: (data: string) => void) => terminal.onData(listener),
+  };
+  const controller = new TerminalInteractionController(port, (data) => cm.send(data));
   controller.bindXtermOnData();
 
   const sent = () =>

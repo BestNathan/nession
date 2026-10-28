@@ -189,7 +189,9 @@ not a per-client setting and does not rewrite an existing Session.
   [terminal-surface.md](../design-system/patterns/terminal-surface.md).
 - Lease, generations, ordered resize: [multi-client-ownership.md](multi-client-ownership.md).
 - Web implementation: `web/src/platform/terminal-runtime/terminalConfig.ts`,
-  `sizing.ts`, `controller/TerminalController.ts`.
+  `sizing.ts`, `view/TerminalGeometry.ts` (the sizing policy owner) and
+  `controller/TerminalController.ts` (composition). The xterm instance and its
+  measured cell are owned by `xterm/` (#2581).
 - Server/Agent configuration: `crates/nession-common/src/config.rs`,
   `crates/nession-agent/src/config.rs`,
   `crates/nession-agent/src/session/registry.rs`.

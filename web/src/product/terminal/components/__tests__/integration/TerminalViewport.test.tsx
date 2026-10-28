@@ -7,7 +7,11 @@ import type { TerminalSession } from '@/product/terminal/state/session';
 import type { TerminalTransport } from '@/platform/terminal-runtime/transport/TerminalTransport';
 
 function makeController(): TerminalController {
-  return { attach: vi.fn(), detach: vi.fn() } as unknown as TerminalController;
+  return {
+    attach: vi.fn(),
+    detach: vi.fn(),
+    registerLinkMatcher: vi.fn(() => null),
+  } as unknown as TerminalController;
 }
 
 // xterm.open() requires window.matchMedia in jsdom; ResizeObserver likewise,

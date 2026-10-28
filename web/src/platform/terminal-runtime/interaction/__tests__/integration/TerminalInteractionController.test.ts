@@ -42,7 +42,16 @@ function setup(): {
   open.push(terminal);
 
   const sent: string[] = [];
-  const controller = new TerminalInteractionController(terminal, (data) => {
+  // The interaction owner consumes the emulator port, not xterm (#2581). A
+  // real Terminal is wired behind it here so the onData/input/paste/mode
+  // behaviour under test is still xterm's.
+  const port = {
+    input: (data: string, wasUserInput?: boolean) => terminal.input(data, wasUserInput),
+    paste: (text: string) => terminal.paste(text),
+    readModes: () => ({ applicationCursorKeysMode: terminal.modes.applicationCursorKeysMode }),
+    onData: (listener: (data: string) => void) => terminal.onData(listener),
+  };
+  const controller = new TerminalInteractionController(port, (data) => {
     sent.push(data);
   });
   const unbind = controller.bindXtermOnData();
