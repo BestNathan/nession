@@ -23,7 +23,8 @@ jobs:
     if: >-
       github.repository == 'BestNathan/nession' &&
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'workflow_run' &&
+      (github.event.workflow_run.event == 'workflow_run' ||
+        github.event.workflow_run.event == 'workflow_dispatch') &&
       github.event.workflow_run.head_branch == 'main' &&
       github.event.workflow_run.repository.full_name == 'BestNathan/nession' &&
       github.event.workflow_run.head_repository.full_name == 'BestNathan/nession' &&
@@ -39,6 +40,8 @@ jobs:
       environment: ${{ steps.source.outputs.environment }}
       model: ${{ steps.source.outputs.model }}
       cli_version: ${{ steps.source.outputs.cli_version }}
+      phase: ${{ steps.source.outputs.phase }}
+      default_model: ${{ steps.source.outputs.default_model }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -95,9 +98,25 @@ jobs:
             "$work/staging-dispatch.zip" "$work/admission-run.json" \
             "$work/admission-artifacts.json" "$work/staging-admission.zip" \
             "$work/verified-staging-dispatch.json"
+          if [[ "$(jq -r .phase "$work/verified-staging-dispatch.json")" == "resume" ]]; then
+            STAGING_VERIFIED_DISPATCH="$work/verified-staging-dispatch.json" \
+              node --input-type=module <<'NODE'
+            import fs from 'node:fs';
+            import {verifyCommittedCheckpoint}
+              from './scripts/lib/agent/store/remote.mjs';
+            const v=JSON.parse(fs.readFileSync(process.env.STAGING_VERIFIED_DISPATCH,'utf8'));
+            const c=v.checkpoint;
+            verifyCommittedCheckpoint({remote:'https://github.com/BestNathan/nession.git',
+              identity:{role:'developer',agent_id:'dev-qwen-01',issue:2319},
+              commit_sha:c.commit_sha,version:c.version,
+              ciphertext_sha256:c.ciphertext_sha256});
+            console.log('Verified committed staged checkpoint '+c.version+
+              ' at '+c.commit_sha);
+            NODE
+          fi
           target="$(jq -er .target_sha "$work/verified-staging-dispatch.json")"
           dispatch="$(jq -er .dispatch_id "$work/verified-staging-dispatch.json")"
-          for key in source_main_sha dispatch_id agent_id environment model cli_version; do
+          for key in source_main_sha dispatch_id agent_id environment model cli_version phase default_model; do
             value="$(jq -er ".$key" "$work/verified-staging-dispatch.json")"
             echo "${key}=${value}" >> "$GITHUB_OUTPUT"
           done
@@ -122,6 +141,8 @@ jobs:
       STAGING_DISPATCH_ID: ${{ needs.verify-source.outputs.dispatch_id }}
       STAGING_DISPATCH_AGENT: ${{ needs.verify-source.outputs.agent_id }}
       STAGING_DISPATCH_ENVIRONMENT: ${{ needs.verify-source.outputs.environment }}
+      STAGING_PHASE: ${{ needs.verify-source.outputs.phase }}
+      STAGING_DEFAULT_MODEL: ${{ needs.verify-source.outputs.default_model }}
       SOURCE_MAIN_SHA: ${{ needs.verify-source.outputs.source_main_sha }}
       ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL }}
       # Model and CLI come from the signed dispatch, not from the mutable
@@ -171,6 +192,7 @@ jobs:
           node scripts/lib/agent/developer-canary.mjs staging \
             "$RUNNER_TEMP/staging-qwen-telemetry"
       - name: Seal a ciphertext-only native staging Session checkpoint
+        if: needs.verify-source.outputs.phase == 'seed'
         env:
           STAGING_CLAUDE_RESUME_PUBLIC_KEY_B64: ${{ vars.STAGING_CLAUDE_RESUME_PUBLIC_KEY_B64 }}
         run: |
@@ -188,6 +210,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
       - name: Upload ciphertext-only staging checkpoint
+        if: needs.verify-source.outputs.phase == 'seed'
         uses: actions/upload-artifact@v4
         with:
           name: staging-checkpoint-${{ github.run_id }}-${{ github.run_attempt }}
@@ -199,7 +222,7 @@ jobs:
 
   publish-checkpoint:
     needs: [verify-source, synthetic-qwen]
-    if: needs.verify-source.result == 'success' && needs.synthetic-qwen.result == 'success'
+    if: needs.verify-source.result == 'success' && needs.synthetic-qwen.result == 'success' && needs.verify-source.outputs.phase == 'seed'
     runs-on: ubuntu-24.04
     environment: agent-staging-controller
     timeout-minutes: 10

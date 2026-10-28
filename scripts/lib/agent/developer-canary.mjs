@@ -65,7 +65,9 @@ function canaryIdentity(env,startedAt,finishedAt,envelope,events,result,{stage=f
     env.GITHUB_WORKFLOW!=='Agent / Staging Developer Canary'||
     env.GITHUB_EVENT_NAME!=='workflow_run'||env.GITHUB_REF!=='refs/heads/main'||
     env.GITHUB_RUN_ATTEMPT!=='1'||
-    !/^[a-f0-9]{64}$/.test(env.STAGING_DISPATCH_ID??'')))
+    !/^[a-f0-9]{64}$/.test(env.STAGING_DISPATCH_ID??'')||
+    !['seed','resume'].includes(env.STAGING_PHASE)||
+    !/^qwen[a-z0-9._-]*$/i.test(env.STAGING_DEFAULT_MODEL??'')))
     fail('staging Worker source identity missing');
   const nativeToolNames=events.filter(x=>x?.type==='assistant')
     .flatMap(x=>x.message?.content??[])
@@ -79,7 +81,8 @@ function canaryIdentity(env,startedAt,finishedAt,envelope,events,result,{stage=f
     unique_run_name:providerScopedRunName({workflowId,
       runId:GITHUB_RUN_ID,runAttempt:GITHUB_RUN_ATTEMPT,taskId,provider:'claude-code'}),
     task:{id:taskId,type:'develop',issue:stage?2319:ISSUE,target_ref:targetRef,
-      ...(stage?{dispatch_id:env.STAGING_DISPATCH_ID}:{})},
+      ...(stage?{dispatch_id:env.STAGING_DISPATCH_ID,phase:env.STAGING_PHASE,
+        dispatched_default_model:env.STAGING_DEFAULT_MODEL}:{})},
     agent:{provider:'claude-code',id:'dev-qwen-01',role:'developer',
       model:{id:providerModel(env),request_model:providerModel(env)},
       run_id:envelope?.session_id??null,status:result.edit_verified?'finished':'error'},
@@ -98,7 +101,10 @@ async function run(dir,{stage=false}={}){
       (stage ? (env.GITHUB_WORKFLOW!=='Agent / Staging Developer Canary'||
         env.GITHUB_EVENT_NAME!=='workflow_run'||env.GITHUB_RUN_ATTEMPT!=='1'||
         !SHA.test(env.STAGING_TARGET_SHA??'')||
-        !/^[a-f0-9]{64}$/.test(env.STAGING_DISPATCH_ID??'')) : env.GITHUB_EVENT_NAME!=='push')) {
+        !/^[a-f0-9]{64}$/.test(env.STAGING_DISPATCH_ID??'')||
+        !['seed','resume'].includes(env.STAGING_PHASE)||
+        !/^qwen[a-z0-9._-]*$/i.test(env.STAGING_DEFAULT_MODEL??''))
+        : env.GITHUB_EVENT_NAME!=='push')) {
     fail('only admitted trusted main Workflow may run credentialed Developer Canary');
   }
   qwenGatewayEndpoint(env);
@@ -150,6 +156,7 @@ function selfTest(){
     GITHUB_EVENT_NAME:'workflow_run',GITHUB_RUN_ID:'401',
     GITHUB_RUN_ATTEMPT:'1',GITHUB_SHA:'b'.repeat(40),
     STAGING_TARGET_SHA:'a'.repeat(40),STAGING_DISPATCH_ID:'c'.repeat(64),
+    STAGING_PHASE:'resume',STAGING_DEFAULT_MODEL:'qwen3.7-max',
     ANTHROPIC_MODEL:'qwen3.7-plus',
   };
   const stageRecord=canaryIdentity(stageEnv,'2026-01-01T00:00:00.000Z',
@@ -158,7 +165,16 @@ function selfTest(){
   assert.equal(stageRecord.identity.workflow_id,'agent-staging-developer-canary');
   assert.equal(stageRecord.task.target_ref,stageEnv.STAGING_TARGET_SHA);
   assert.equal(stageRecord.task.dispatch_id,stageEnv.STAGING_DISPATCH_ID);
+  assert.equal(stageRecord.task.phase,'resume');
+  assert.equal(stageRecord.task.dispatched_default_model,'qwen3.7-max');
+  assert.equal(stageRecord.agent.model.id,'qwen3.7-plus');
   assert.equal(stageRecord.result.status,'staging-canary-pass');
+  assert.throws(()=>canaryIdentity({...stageEnv,STAGING_PHASE:'unknown'},
+    '2026-01-01T00:00:00.000Z','2026-01-01T00:00:01.000Z',{},[],
+    {edit_verified:true},{stage:true}),/staging Worker source/);
+  assert.throws(()=>canaryIdentity({...stageEnv,STAGING_DEFAULT_MODEL:'claude-sonnet-5'},
+    '2026-01-01T00:00:00.000Z','2026-01-01T00:00:01.000Z',{},[],
+    {edit_verified:true},{stage:true}),/staging Worker source/);
   assert.throws(()=>canaryIdentity({...stageEnv,GITHUB_EVENT_NAME:'pull_request_target'},
     '2026-01-01T00:00:00.000Z','2026-01-01T00:00:01.000Z',{},[],
     {edit_verified:true},{stage:true}),/staging Worker source/);
