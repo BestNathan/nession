@@ -10,6 +10,8 @@ const SOURCES = {
   '.github/workflows/agent-develop.yml': { role:'developer', name:'Agent / Development' },
   '.github/workflows/agent-review.yml': { role:'reviewer', name:'Agent / Review' },
   '.github/workflows/agent-sc-acceptance.yml': { role:'acceptor', name:'Agent / SC Acceptance' },
+  '.github/workflows/agent-staging-developer-canary.yml':
+    { role:'developer', name:'Agent / Staging Developer Canary' },
 };
 function reject(text) { throw new Error('agent store: ' + text); }
 function digest(bytes) { return createHash('sha256').update(bytes).digest('hex'); }
@@ -56,7 +58,7 @@ export function validateCheckpointSource(source, sealed, registry) {
       source.head_branch !== 'main') reject('invalid trusted source identity');
   const owner = SOURCES[source.path];
   if (!owner || owner.name !== source.workflow_name || owner.role !== source.role ||
-      !['workflow_dispatch','repository_dispatch','workflow_call'].includes(source.event)) {
+      !['workflow_dispatch','repository_dispatch','workflow_call','workflow_run'].includes(source.event)) {
     reject('untrusted source workflow');
   }
   const instance = resolveIdentity(registry, source.agent_id, source.task, source.environment);
