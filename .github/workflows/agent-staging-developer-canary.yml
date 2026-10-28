@@ -112,7 +112,7 @@ jobs:
               ciphertext_sha256:c.ciphertext_sha256});
             console.log('Verified committed staged checkpoint '+c.version+
               ' at '+c.commit_sha);
-            NODE
+          NODE
           fi
           target="$(jq -er .target_sha "$work/verified-staging-dispatch.json")"
           dispatch="$(jq -er .dispatch_id "$work/verified-staging-dispatch.json")"
