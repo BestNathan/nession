@@ -9,6 +9,7 @@ import {
 
 describe('terminal build configuration (#2487 SC-07)', () => {
   it('uses the versioned defaults when neither input is set', () => {
+    expect(DEFAULT_TERMINAL_COLS).toBe(96);
     const parsed = parseTerminalBuildConfig({});
     expect(parsed.errors).toEqual([]);
     expect(parsed.config).toEqual({

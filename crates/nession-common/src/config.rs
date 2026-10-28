@@ -371,6 +371,7 @@ mod tests {
 
     #[test]
     fn terminal_sizing_defaults_and_toml_round_trip() {
+        assert_eq!(DEFAULT_TERMINAL_COLS, 96);
         let default = ServerConfig::default();
         assert_eq!(default.terminal_cols, DEFAULT_TERMINAL_COLS);
         assert_eq!(
