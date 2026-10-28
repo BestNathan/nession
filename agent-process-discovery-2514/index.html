@@ -358,10 +358,9 @@ function detailView(root,p,proc,d){
  resourceTile(grid,'CPU · 5 秒窗口',agg.cpu,'%',1,true,proc.pid%7);
  resourceTile(grid,'常驻内存 · RSS',agg.rss,'MiB',1,true,proc.pid%5+1);
  resourceTile(grid,'线程数',agg.threads,'',0,false,0);
- resourceTile(grid,'运行时长',state.resourceScope==='subtree'?null:0,'',0,false,0);
+ resourceTile(grid,'所选进程运行时长',0,'',0,false,0);
  var last=grid.lastChild.querySelector('.resource-number');
- last.textContent=state.resourceScope==='self'?active.elapsed:'仅本进程';
- if(state.resourceScope==='subtree')last.classList.add('metric-unknown');
+ last.textContent=active.elapsed;
  var io=add(rs,'div','resource-secondary');
  [['磁盘读取',agg.read===null?'不可用':fmt(agg.read,' KiB/s',0)],['磁盘写入',agg.write===null?'不可用':fmt(agg.write,' KiB/s',0)],
  ['范围',state.resourceScope==='subtree'?'已发现后代 '+agg.count+' 个进程':'当前 PID'],['快照','T+'+state.count+' · 模拟采样']].forEach(function(x){var it=add(io,'span','',x[0]+' ');add(it,'b','',x[1]);});
