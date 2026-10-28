@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "kind": "agent_checkpoint_run",
+  "role": "developer",
+  "agent_id": "dev-qwen-01",
+  "issue": 2319,
+  "run_id": 40682948521,
+  "attempt": 1,
+  "source_sha": "05d3501985c0f40af78b2b34ae1f6201de43ff5b",
+  "workflow_sha": "f034ede76e07448fbb90d9263aaf8eda300d5637",
+  "workflow": ".github/workflows/agent-staging-developer-canary.yml",
+  "checkpoint_path": "roles/developer/dev-qwen-01/issues/2319/checkpoints/00000001.json",
+  "version": 1,
+  "ciphertext_sha256": "c806089e667ce54b70641704df42347e102ab9addea50ba339426f06d07e55aa",
+  "harness_digest": "e65f79145d9bfdc11fbbf382e5d800a86fca8c78c9d5bce4dfcd95443574a7e2"
+}
