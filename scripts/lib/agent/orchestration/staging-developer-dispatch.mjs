@@ -6,9 +6,9 @@
 // trusted job.
 //
 // The staging lane reuses the registry's `dev-claude-qwen` Environment and
-// model token. The registry still owns the role/provider binding; the trusted
-// model job maps only the model credential, never the signing key or Store
-// checkpoint key.
+// model token. The signed body pins the model and CLI version resolved at
+// signing time, so a later Environment/default change cannot alter an already
+// dispatched task. The registry still owns the role/provider binding.
 import {createHash, createHmac, timingSafeEqual} from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -24,13 +24,15 @@ const AGENT='dev-qwen-01', ROLE='developer', TASK='implement', PROVIDER='claude-
 const SHA=/^[a-f0-9]{40}$/;
 const HEX64=/^[a-f0-9]{64}$/;
 const DIGEST=/^sha256:[a-f0-9]{64}$/;
+const QWEN=/^qwen[a-z0-9._-]*$/i;
+const VERSION=/^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/;
 const KEY_ID=/^[a-z][a-z0-9-]{1,63}$/;
 const MAX_TTL_MS=15*60*1000;
 const ENVELOPE=['body','kind','schema_version','signature'];
 const CORE=['schema_version','kind','repository','issue','target_sha','agent_id',
-  'role','task','provider','environment','source_run_id','source_run_attempt',
-  'source_artifact_id','source_artifact_digest','issuer_run_id','issued_at',
-  'expires_at','key_id'];
+  'role','task','provider','environment','model','cli_version','source_run_id',
+  'source_run_attempt','source_artifact_id','source_artifact_digest',
+  'issuer_run_id','issued_at','expires_at','key_id'];
 const BODY=['dispatch_id',...CORE];
 
 function fail(message){throw new Error('Staging Developer dispatch: '+message);}
@@ -75,6 +77,7 @@ function validCore(body,registry){
       body.issue!==ISSUE||!SHA.test(body.target_sha??'')||
       body.agent_id!==AGENT||body.role!==ROLE||body.task!==TASK||
       body.provider!==PROVIDER||body.environment!==ENVIRONMENT||
+      !QWEN.test(body.model??'')||!VERSION.test(body.cli_version??'')||
       !positive(body.source_run_id)||body.source_run_attempt!==1||
       !positive(body.source_artifact_id)||
       !DIGEST.test(body.source_artifact_digest??'')||
@@ -101,13 +104,15 @@ export function buildStagingDeveloperDispatch({
       admission.verified_proof!=='synthetic_worker_canary_only')
     fail('admission is not an exact authenticated staging source');
   stagedIdentity(registry);
-  if(!signer||!KEY_ID.test(signer.key_id??'')||!positive(signer.issuer_run_id))
+  if(!signer||!KEY_ID.test(signer.key_id??'')||!positive(signer.issuer_run_id)||
+      !QWEN.test(signer.model??'')||!VERSION.test(signer.cli_version??''))
     fail('invalid staging dispatch signer');
   if(!Number.isSafeInteger(now)||!Number.isSafeInteger(ttlMs)||
       ttlMs<1000||ttlMs>MAX_TTL_MS) fail('invalid staging dispatch TTL');
   const core={schema_version:1,kind:KIND,repository:REPO,issue:ISSUE,
     target_sha:admission.target_sha,agent_id:AGENT,role:ROLE,task:TASK,
     provider:PROVIDER,environment:ENVIRONMENT,
+    model:signer.model,cli_version:signer.cli_version,
     source_run_id:admission.source_run_id,
     source_run_attempt:admission.source_run_attempt,
     source_artifact_id:admission.artifact_id,
@@ -224,6 +229,7 @@ export function verifyStagingDeveloperDispatchArtifact({
   return Object.freeze({dispatch_id:body.dispatch_id,target_sha:body.target_sha,
     source_main_sha:admission.source_sha,
     agent_id:body.agent_id,role:body.role,provider:body.provider,
+    model:body.model,cli_version:body.cli_version,
     environment:body.environment,source_run_id:body.source_run_id,
     source_run_attempt:body.source_run_attempt,issuer_run_id:body.issuer_run_id,
     artifact_id,artifact_digest,

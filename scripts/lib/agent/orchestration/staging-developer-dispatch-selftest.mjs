@@ -14,7 +14,8 @@ const admission=Object.freeze({
   artifact_digest:'sha256:'+'d'.repeat(64),
   verified_proof:'synthetic_worker_canary_only',
 });
-const signer={key,key_id:'staging-controller-v1',issuer_run_id:5001};
+const signer={key,key_id:'staging-controller-v1',issuer_run_id:5001,
+  model:'qwen3.7-plus',cli_version:'2.1.312'};
 const now=1_700_000_000_000;
 const record=buildStagingDeveloperDispatch({admission,registry,signer,now});
 const keyring={'staging-controller-v1':key};
@@ -23,6 +24,8 @@ assert.equal(record.kind,'staging_developer_dispatch');
 assert.equal(record.body.issue,2319);
 assert.equal(record.body.target_sha,admission.target_sha);
 assert.equal(record.body.environment,'dev-claude-qwen');
+assert.equal(record.body.model,'qwen3.7-plus');
+assert.equal(record.body.cli_version,'2.1.312');
 assert.equal(record.body.agent_id,'dev-qwen-01');
 assert.equal(record.body.provider,'claude-code');
 assert.match(record.signature,/^[a-f0-9]{64}$/);
@@ -38,6 +41,15 @@ assert.notEqual(buildStagingDeveloperDispatch({admission,registry,
   signer:{...signer,issuer_run_id:5002},now}).body.dispatch_id,record.body.dispatch_id);
 assert.notEqual(buildStagingDeveloperDispatch({admission,registry,signer,now,
   ttlMs:60_000}).body.dispatch_id,record.body.dispatch_id);
+// The signed model identity is part of the dispatch id: a later default
+// switch cannot silently replace the model of an already dispatched task.
+assert.notEqual(buildStagingDeveloperDispatch({admission,registry,
+  signer:{...signer,model:'qwen3.7-max'},now}).body.dispatch_id,
+  record.body.dispatch_id);
+assert.throws(()=>buildStagingDeveloperDispatch({admission,registry,
+  signer:{...signer,model:'claude-sonnet-5'},now}),/invalid staging dispatch signer/);
+assert.throws(()=>buildStagingDeveloperDispatch({admission,registry,
+  signer:{...signer,cli_version:'latest'},now}),/invalid staging dispatch signer/);
 
 assert.equal(parseStagingDispatchKey('ab'.repeat(32)).length,32);
 assert.throws(()=>parseStagingDispatchKey('ab'.repeat(31)),/64 hex/);
@@ -187,6 +199,8 @@ assert.equal(proved.source_main_sha,admissionEntry.source_sha);
 assert.equal(proved.dispatch_id,dispatchForAdmission.body.dispatch_id);
 assert.equal(proved.agent_id,'dev-qwen-01');
 assert.equal(proved.environment,'dev-claude-qwen');
+assert.equal(proved.model,'qwen3.7-plus');
+assert.equal(proved.cli_version,'2.1.312');
 assert.equal(proved.admission_artifact_id,7001);
 
 for(const patch of [
