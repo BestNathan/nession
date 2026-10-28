@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { Terminal, type ITheme } from '@xterm/xterm';
-import { ThemeManager } from '@/platform/terminal-runtime/ThemeManager';
+import { ThemeManager } from '../../ThemeManager';
 
 const CUSTOM_THEME: ITheme = {
   background: '#000000',

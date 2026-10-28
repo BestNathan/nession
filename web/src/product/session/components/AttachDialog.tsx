@@ -30,7 +30,7 @@ import {
   loadSessionProfile,
   type SessionAttachProfile,
 } from '@/platform/attach/sessionAttachProfile';
-import { detectWebGLSupport } from '@/platform/terminal-runtime/Renderer';
+import { detectWebGLSupport } from '@/platform/terminal-runtime/webglSupport';
 import { useAgentProbe } from '@/product/agent/hooks/useAgentProbe';
 
 /** Result handed back to the flow once the user confirms an attach. */

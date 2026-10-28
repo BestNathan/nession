@@ -1,8 +1,25 @@
-import type { Terminal } from '@xterm/xterm';
-import { cellDimensionsOf } from '../grid';
+import type {
+  TerminalBufferSnapshot,
+  TerminalCellSize,
+  TerminalDisposable,
+} from '../emulator';
 
 /** Max finger movement (px) still counted as a tap rather than a scroll. */
 const TAP_MOVE_THRESHOLD = 10;
+
+/**
+ * The terminal surface the mobile IME anchor needs, as a structural subset of
+ * {@link import('../emulator').TerminalEmulator} (#2581). It reads the cursor
+ * cell and the measured cell size; it never writes to the buffer.
+ */
+export interface MobileImeTerminalPort {
+  readonly cols: number;
+  readonly element: HTMLElement | null;
+  cellDimensions(): TerminalCellSize;
+  readBuffer(): TerminalBufferSnapshot;
+  onCursorMove(listener: () => void): TerminalDisposable;
+  onRender(listener: () => void): TerminalDisposable;
+}
 
 export interface MobileImeInputCallbacks {
   onCommitText: (text: string) => void;
@@ -57,7 +74,7 @@ export class MobileImeInput {
   private cleanups: Array<() => void> = [];
 
   constructor(
-    private terminal: Terminal,
+    private terminal: MobileImeTerminalPort,
     parent: HTMLElement,
     private callbacks: MobileImeInputCallbacks,
   ) {
@@ -254,7 +271,7 @@ export class MobileImeInput {
   syncPosition(): void {
     if (this.disposed) { return; }
     try {
-      const buffer = this.terminal.buffer.active;
+      const buffer = this.terminal.readBuffer();
       const cursorX = Math.min(buffer.cursorX, Math.max(this.terminal.cols - 1, 0));
       const cursorY = buffer.cursorY;
       const cell = this.cellDimensions;
@@ -269,9 +286,9 @@ export class MobileImeInput {
     }
   }
 
-  /** Cell pixel size from xterm's render service, with a sane fallback. */
+  /** Cell pixel size from the emulator's measured read model. */
   private get cellDimensions(): { width: number; height: number } {
-    return cellDimensionsOf(this.terminal);
+    return this.terminal.cellDimensions();
   }
 
   focus(): void {

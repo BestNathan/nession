@@ -1083,11 +1083,18 @@ describe('TerminalController', () => {
       transport.onOutput!(new Uint8Array([0x41]));
       expect(parser.callbacks).toHaveLength(1);
 
+      // The well grows while the parse is unfinished, so adoption has a new
+      // grid to apply. (Adoption at the *same* grid is a no-op mutation by
+      // design — #2581 SC-06 — so it could not witness the ordering.)
+      capturedCallback!([
+        { contentRect: { width: 1024, height: 640 } } as unknown as ResizeObserverEntry,
+      ], capturedObserver!);
+
       controller.adoptControl();
       expect(resize).not.toHaveBeenCalled();
 
       parser.finish();
-      expect(resize).toHaveBeenCalledWith(DEFAULT_TERMINAL_COLS, 37);
+      expect(resize).toHaveBeenCalledWith(DEFAULT_TERMINAL_COLS, 40);
     } finally {
       restore();
     }
@@ -1280,7 +1287,7 @@ describe('TerminalController', () => {
     const fontsStub = {
       status: 'loading' as FontFaceSet['status'],
       ready: Promise.resolve(),
-      // TerminalInstance warms the terminal face at construction; the stub
+      // XtermEmulator warms the terminal face at construction; the stub
       // only has to not throw there.
       load: () => Promise.resolve([]),
     };
@@ -1303,7 +1310,7 @@ describe('TerminalController', () => {
       // Nothing left the client — this grid is a size the pane never had.
       expect(transport.sendResize).not.toHaveBeenCalled();
 
-      // The webfont lands: `TerminalInstance`'s font-load correction reports
+      // The webfont lands: `XtermEmulator`'s font-load correction reports
       // the grid through onCellSizeChange → remeasure.
       fontsStub.status = 'loaded';
       resolveReady();
@@ -1604,7 +1611,7 @@ describe('TerminalController', () => {
       cell.height = 20;
 
       // Trigger the post-zoom remeasure — the same path onCellSizeChange wires.
-      const rc = (controller as unknown as { resizeController: { remeasure(): void } }).resizeController;
+      const rc = (controller as unknown as { geometry: { remeasure(): void } }).geometry;
       rc.remeasure();
 
       // fixed cols 96, 600/20=30 rows — smaller than the pre-zoom 37 rows,

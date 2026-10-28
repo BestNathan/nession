@@ -80,7 +80,7 @@ function FileViewerToolbar({
     <div className="flex flex-shrink-0 items-center justify-between gap-[var(--nession-shell-space-2)] border-b border-border/60 px-[var(--nession-workspace-editor-head-pad-x)] py-[var(--nession-shell-space-1)]">
       <div className={cn('flex min-w-0 items-center gap-[var(--nession-shell-space-2)] text-muted-foreground', chromeMonoRole('code'))}>
         {/* The path, not the basename. The mockup's head reads
-            `web/src/platform/terminal-runtime/ThemeManager.ts` — with a tree beside
+            `web/src/platform/terminal-runtime/xterm/ThemeManager.ts` — with a tree beside
             it, a bare filename does not say which of several `index.css` is
             open. */}
         <span className="truncate">{path || filename}</span>

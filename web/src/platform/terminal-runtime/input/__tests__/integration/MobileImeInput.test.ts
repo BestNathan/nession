@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 // web/src/terminal/input/__tests__/MobileImeInput.test.ts
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type { Terminal } from '@xterm/xterm';
-import { MobileImeInput } from '@/platform/terminal-runtime/input/MobileImeInput';
+import {
+  MobileImeInput,
+  type MobileImeTerminalPort,
+} from '@/platform/terminal-runtime/input/MobileImeInput';
 
 interface FakeTerminal {
-  terminal: Terminal;
+  terminal: MobileImeTerminalPort;
   fireCursorMove: () => void;
   fireRender: () => void;
   cursorMoveDisposed: () => boolean;
@@ -14,11 +16,11 @@ interface FakeTerminal {
 }
 
 /**
- * Minimal xterm stand-in: the real Terminal needs a live renderer, so the class
- * is exercised against the exact surface it touches (buffer cursor, cols, the
- * two event emitters, element, and the private render-service cell size).
+ * Minimal emulator-port stand-in: the real Terminal needs a live renderer, so
+ * the class is exercised against the exact surface it touches (cursor read
+ * model, cols, the two event emitters, element, and the measured cell size).
  */
-function makeTerminal(host: HTMLElement, cell?: { width: number; height: number }): FakeTerminal {
+function makeTerminal(host: HTMLElement, cell: { width: number; height: number } | null = { width: 10, height: 20 }): FakeTerminal {
   const cursor = { x: 0, y: 0 };
   const cursorMoveCbs: Array<() => void> = [];
   const renderCbs: Array<() => void> = [];
@@ -29,12 +31,17 @@ function makeTerminal(host: HTMLElement, cell?: { width: number; height: number 
   helper.className = 'xterm-helper-textarea';
   host.appendChild(helper);
 
-  const terminal = {
+  const terminal: MobileImeTerminalPort = {
     cols: 80,
     element: host,
-    get buffer() {
-      return { active: { get cursorX() { return cursor.x; }, get cursorY() { return cursor.y; } } };
-    },
+    readBuffer: () => ({
+      type: 'normal',
+      length: 24,
+      viewportY: 0,
+      get cursorX() { return cursor.x; },
+      get cursorY() { return cursor.y; },
+    }),
+    cellDimensions: () => cell ?? { width: 8, height: 16 },
     onCursorMove(cb: () => void) {
       cursorMoveCbs.push(cb);
       return { dispose: () => { cursorMoveDisposed = true; } };
@@ -43,8 +50,7 @@ function makeTerminal(host: HTMLElement, cell?: { width: number; height: number 
       renderCbs.push(cb);
       return { dispose: () => { renderDisposed = true; } };
     },
-    _core: { _renderService: { dimensions: { css: { cell } } } },
-  } as unknown as Terminal;
+  };
 
   return {
     terminal,
@@ -326,7 +332,7 @@ describe('MobileImeInput', () => {
     });
 
     it('falls back to 8x16 when the render service has not measured', () => {
-      const fake = makeTerminal(host, undefined);
+      const fake = makeTerminal(host, null);
       const ime = new MobileImeInput(fake.terminal, host, { onCommitText, onPaste, onSemanticKey });
       fake.setCursor(1, 1);
       fake.fireRender();

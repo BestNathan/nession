@@ -75,19 +75,6 @@ export interface DeviceProfileConfig {
   scrollback: number;
 }
 
-/** Options passed to TerminalInstance constructor. */
-export interface TerminalInstanceOptions {
-  rendererType: 'webgl' | 'canvas';
-  fontSize?: number;
-  /**
-   * xterm's own `lineHeight`: a multiple of the terminal font's measured box,
-   * not of `fontSize` the way CSS `line-height` is. Owned by
-   * `experience.{web,app}.terminal.lineHeight`.
-   */
-  lineHeight?: number;
-  scrollback?: number;
-}
-
 /** Input source types for the two-layer input system. */
 export type InputSource =
   | 'keyboard'           // Physical keyboard (Desktop)

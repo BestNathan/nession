@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { TerminalInstance } from '@/platform/terminal-runtime/instance/TerminalInstance';
+import { XtermEmulator } from '../../XtermEmulator';
 
 // Mock matchMedia for xterm.js in jsdom environment
 Object.defineProperty(window, 'matchMedia', {
@@ -17,11 +17,11 @@ Object.defineProperty(window, 'matchMedia', {
   }),
 });
 
-describe('TerminalInstance', () => {
-  let instance: TerminalInstance;
+describe('XtermEmulator', () => {
+  let instance: XtermEmulator;
 
   beforeEach(() => {
-    instance = new TerminalInstance({
+    instance = new XtermEmulator({
       rendererType: 'canvas',
       fontSize: 14,
       scrollback: 1000,
@@ -50,7 +50,7 @@ describe('TerminalInstance', () => {
     document.body.appendChild(container2);
 
     // Attach to first container and write some content
-    instance.attach(container1);
+    instance.mount(container1);
 
     // Write content - use writeSync for synchronous buffer update
     instance.terminal.write('line 1\r\n');
@@ -62,10 +62,10 @@ describe('TerminalInstance', () => {
     expect(initialBufferLength).toBeGreaterThan(0);
 
     // Detach
-    instance.detach();
+    instance.unmount();
 
     // Attach to second container
-    instance.attach(container2);
+    instance.mount(container2);
 
     // Reattach must put the existing xterm DOM back into the new viewport.
     expect(instance.terminal.element?.parentElement).toBe(container2);

@@ -1,18 +1,12 @@
 import { useEffect, useRef } from 'react';
-import { Terminal } from '@xterm/xterm';
-import '@xterm/xterm/css/xterm.css';
-import {
-  measuredCellDimensionsOf,
-  type PixelSize,
-} from '@/platform/terminal-runtime/grid';
+import type { PixelSize } from '@/platform/terminal-runtime/grid';
 import { fitFontToColumns, rowsForHeight, MIN_TERMINAL_FIT_FONT_SIZE } from '@/platform/terminal-runtime/sizing';
 import { readTerminalClientConfig } from '@/platform/terminal-runtime/terminalConfig';
 import {
-  NESSION_TERMINAL_THEME,
-  TERMINAL_MINIMUM_CONTRAST_RATIO,
-} from '@/platform/terminal-runtime/ThemeManager';
+  DEFAULT_FONT,
+  createTerminalEmulator,
+} from '@/platform/terminal-runtime/xterm';
 import { cn } from '@/shared/lib/utils';
-import { DEFAULT_FONT } from '@/platform/terminal-runtime/instance/TerminalInstance';
 import { detectProfile, PROFILES } from '@/platform/terminal-runtime/DeviceProfile';
 import {
   terminalViewportBoxClass,
@@ -135,7 +129,7 @@ export function FixtureTerminal({
     // **The request has to be made here, not merely awaited.** `fonts.ready`
     // resolves when *pending* loads settle, and at this moment nothing has
     // asked for this face: the terminal has not opened, and
-    // `TerminalInstance.warmTerminalFont` — the product's own warm-up, which
+    // `XtermEmulator` — the product's own warm-up, which
     // runs at module load — asks at **Web's** size while this renders at the App
     // profile's. So `ready` could resolve with no request outstanding, the
     // terminal would open against a substitute, and whether the real face
@@ -147,7 +141,7 @@ export function FixtureTerminal({
     //
     // Guarded because the CSS Font Loading API is not implemented everywhere
     // (jsdom has no `document.fonts`) and there is nothing to wait for where it
-    // is missing. `TerminalInstance` guards its own `document.fonts` call the
+    // is missing. `XtermEmulator` guards its own `document.fonts` call the
     // same way. No test reaches this line today — both fixture mount tests
     // replace the whole component with a stub — so the guard is for the
     // environment, not for coverage.
@@ -205,15 +199,14 @@ function startFixtureTerminal(
   metrics: (typeof PROFILES)[keyof typeof PROFILES],
   fixed: { cols: number; maxFont: number },
 ): () => void {
-  const term = new Terminal({
-    theme: NESSION_TERMINAL_THEME,
-    fontFamily: DEFAULT_FONT,
+  // The canonical fixture consumes the same engine the product does (#2581
+  // SC-10): one construction path, one renderer/theme/font lifecycle. Only
+  // the static options — no transport, no input — are fixture-specific.
+  const emulator = createTerminalEmulator({
+    rendererType: 'canvas',
     fontSize: metrics.fontSize,
     lineHeight: metrics.lineHeight,
-    minimumContrastRatio: TERMINAL_MINIMUM_CONTRAST_RATIO,
-    convertEol: true,
-    cursorBlink: false,
-    disableStdin: true,
+    terminalOptions: { convertEol: true, cursorBlink: false, disableStdin: true },
   });
 
   // Fitted, and re-fitted whenever one of the grid's two inputs moves. Without
@@ -225,11 +218,11 @@ function startFixtureTerminal(
   // Sized the way the product sizes it (#2487): the column count is the
   // build-config canonical value and never derived from the well's width; the
   // font is the largest measured size that fits it. The arithmetic is shared
-  // with `ResizeController` rather than reimplemented, so the fixture and the
+  // with `TerminalGeometry` rather than reimplemented, so the fixture and the
   // product cannot drift again; only the *observation* differs, because a
   // static fixture has no transport to publish cols/rows to and nothing to
   // debounce.
-  term.open(host);
+  emulator.mount(host);
 
   let size: PixelSize | null = null;
   let written = false;
@@ -247,9 +240,8 @@ function startFixtureTerminal(
       minFontSize: MIN_TERMINAL_FIT_FONT_SIZE,
       maxFontSize: Math.max(MIN_TERMINAL_FIT_FONT_SIZE, fixed.maxFont),
       measureCell: (fontSize) => {
-        term.options.fontSize = fontSize;
-        term.refresh(0, Math.max(0, term.rows - 1));
-        return measuredCellDimensionsOf(term);
+        emulator.setFontSize(fontSize);
+        return emulator.measureCell();
       },
     });
     if (fit === null) { return false; }
@@ -264,15 +256,15 @@ function startFixtureTerminal(
   // dimensions is churn, and the write below must not be repeated.
   const applyGrid = () => {
     if (size !== null && fitFont()) {
-      const cell = measuredCellDimensionsOf(term);
+      const cell = emulator.measureCell();
       // A cell of `null` is "the renderer has not measured one yet", not a
       // measurement — a grid fitted to the *fallback* is wrong permanently,
       // because nothing corrects it: the observer fires again only when the
       // host resizes. `FitAddon` declined to fit in this state too.
       const rows = cell === null ? null : rowsForHeight(size.height, cell.height);
       const grid = rows === null ? null : { cols: fixed.cols, rows };
-      if (grid !== null && (term.cols !== grid.cols || term.rows !== grid.rows)) {
-        term.resize(grid.cols, grid.rows);
+      if (grid !== null && (emulator.cols !== grid.cols || emulator.rows !== grid.rows)) {
+        emulator.resize(grid.cols, grid.rows);
       }
       // Written once the grid is right, rather than before sizing it. A write
       // at xterm's 80x24 default followed by a resize leaves the buffer to
@@ -280,7 +272,7 @@ function startFixtureTerminal(
       // fixture's longest line lost three characters off its tail that way.
       if (grid !== null && !written) {
         written = true;
-        term.write(FIXTURE_BUFFER);
+        emulator.write(FIXTURE_BUFFER);
       }
     }
     // The cell, the grid's other input — sampled per frame for the settle
@@ -300,7 +292,7 @@ function startFixtureTerminal(
   //
   // Deferred by a frame rather than applied in the callback, because the
   // observer's first fire lands before xterm's render service has measured a
-  // cell — the same race `TerminalInstance` guards on its own accessor, where
+  // cell — the same race `XtermMetrics` guards on its own accessor, where
   // `dimensions` throws until the renderer's first layout pass.
   const observer = new ResizeObserver((entries) => {
     const rect = entries[entries.length - 1]?.contentRect;
@@ -337,6 +329,6 @@ function startFixtureTerminal(
     cancelAnimationFrame(frame);
     fonts?.removeEventListener('loadingdone', onFontsDone);
     observer.disconnect();
-    term.dispose();
+    emulator.dispose();
   };
 }

@@ -1,6 +1,27 @@
-import type { Terminal } from '@xterm/xterm';
+import type {
+  TerminalBufferSnapshot,
+  TerminalDisposable,
+  TerminalModeSnapshot,
+} from '../emulator';
 
 export const TERMINAL_CAPSULE_OCCLUSION_EVENT = 'terminal-capsule-occlusion';
+
+/**
+ * The read/scroll surface the capsule occlusion needs, as a structural subset
+ * of {@link import('../emulator').TerminalEmulator} (#2581).
+ */
+export interface CapsuleScrollTerminalPort {
+  readonly element: HTMLElement | null;
+  readonly rows: number;
+  readBuffer(): TerminalBufferSnapshot;
+  readModes(): TerminalModeSnapshot;
+  onScroll(listener: () => void): TerminalDisposable;
+  onResize(listener: () => void): TerminalDisposable;
+  attachCustomWheelHandler(handler: (event: WheelEvent) => boolean): void;
+  scrollLines(lines: number): void;
+  scrollPages(pages: number): void;
+  scrollToBottom(): void;
+}
 
 export type ScrollMode = 'following' | 'history';
 
@@ -42,7 +63,7 @@ export function isFollowingMarginBottom(
  * scrollback to pass under the floating dock when the user scrolls up.
  */
 export class CapsuleOcclusionScroll {
-  private readonly terminal: Terminal;
+  private readonly terminal: CapsuleScrollTerminalPort;
   private readonly host: HTMLElement;
   private readonly getCellHeight: () => number;
   private resizeObserver: ResizeObserver | null = null;
@@ -58,7 +79,7 @@ export class CapsuleOcclusionScroll {
   private observedDock: HTMLElement | null = null;
 
   constructor(
-    terminal: Terminal,
+    terminal: CapsuleScrollTerminalPort,
     host: HTMLElement,
     getCellHeight: () => number,
   ) {
@@ -103,7 +124,7 @@ export class CapsuleOcclusionScroll {
 
     const element = this.terminal.element;
     if (element) {
-      this.terminal.attachCustomWheelEventHandler((event) => this.handleWheel(event));
+      this.terminal.attachCustomWheelHandler((event) => this.handleWheel(event));
 
       this.touchStartListener = (event) => {
         this.touchLastY = event.touches[0]?.clientY ?? null;
@@ -132,7 +153,7 @@ export class CapsuleOcclusionScroll {
     this.resizeDisposable?.dispose();
     this.resizeDisposable = null;
     const element = this.terminal.element;
-    this.terminal.attachCustomWheelEventHandler(() => true);
+    this.terminal.attachCustomWheelHandler(() => true);
     if (element && this.touchStartListener) {
       element.removeEventListener('touchstart', this.touchStartListener, true);
     }
@@ -193,7 +214,7 @@ export class CapsuleOcclusionScroll {
   }
 
   isFollowingMarginBottom(): boolean {
-    const buffer = this.terminal.buffer.active;
+    const buffer = this.terminal.readBuffer();
     return isFollowingMarginBottom(
       buffer.viewportY,
       buffer.length,
@@ -313,10 +334,10 @@ export class CapsuleOcclusionScroll {
    * answer comes from the terminal's state, not from a proxy for it.
    */
   private shouldScrollLocally(): boolean {
-    if (this.terminal.modes.mouseTrackingMode !== 'none') {
+    if (this.terminal.readModes().mouseTrackingMode !== 'none') {
       return false;
     }
-    const buffer = this.terminal.buffer.active;
+    const buffer = this.terminal.readBuffer();
     return buffer.type === 'normal' && buffer.length > this.terminal.rows;
   }
 }

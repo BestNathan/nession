@@ -1,23 +1,22 @@
-import type { Terminal } from '@xterm/xterm';
-import { CanvasAddon } from '@xterm/addon-canvas';
-import { WebglAddon } from '@xterm/addon-webgl';
-
 /**
  * Check whether the runtime supports WebGL rendering backed by a real GPU.
  *
  * On headless servers the browser may offer a WebGL context backed by a
- * software rasteriser (SwiftShader, llvmpipe, etc.).  xterm.js's WebGL addon
+ * software rasteriser (SwiftShader, llvmpipe, etc.). xterm.js's WebGL addon
  * activate() fails silently with these — it never sets _renderService — and
  * xterm's own Viewport constructor (which runs a setTimeout after open())
- * crashes on `_renderService.dimensions`.  We use two layers:
+ * crashes on `_renderService.dimensions`. We use two layers:
  *
  * 1. `failIfMajorPerformanceCaveat: true` — the standard WebGL context
  *    creation attribute that makes `getContext` return `null` when the
- *    implementation is software-only.  Works everywhere, no extension needed.
+ *    implementation is software-only. Works everywhere, no extension needed.
  *
  * 2. `WEBGL_debug_renderer_info` — a secondary string-based check for
  *    environments where layer 1 is ignored (privacy-respecting user agents
  *    that don't honour the hint but still expose the extension).
+ *
+ * This probe is xterm-free, so callers that only choose a renderer (the attach
+ * dialog, deep-link planning) do not need the engine (#2581).
  */
 export function detectWebGLSupport(): boolean {
   if (cachedWebGLSupport !== null) {
@@ -67,53 +66,4 @@ function probeWebGLSupport(): boolean {
 function releaseProbeContext(gl: WebGLRenderingContext | WebGL2RenderingContext): void {
   const ext = gl.getExtension('WEBGL_lose_context');
   ext?.loseContext();
-}
-
-export class Renderer {
-  type: 'webgl' | 'canvas';
-
-  constructor(private term: Terminal, preferred?: 'webgl' | 'canvas') {
-    if (preferred === 'webgl' && detectWebGLSupport()) {
-      try {
-        const webgl = new WebglAddon();
-        // @xterm/addon-webgl's dispose() throws "Cannot read properties of
-        // undefined (reading '_isDisposed')" if the addon is disposed before
-        // its GL renderer finished initializing — which happens under React
-        // StrictMode's dev mount→unmount→mount. Wrap dispose so teardown never
-        // throws and crashes the React tree. loadAddon() captures this
-        // reference and calls it through its own wrapper, so the addon is still
-        // unregistered correctly on terminal.dispose().
-        const rawDispose = webgl.dispose.bind(webgl);
-        webgl.dispose = () => {
-          try {
-            rawDispose();
-          } catch {
-            /* GL renderer never initialized — safe to ignore */
-          }
-        };
-        webgl.onContextLoss(() => {
-          webgl.dispose();
-          this.fallbackToCanvas();
-        });
-        term.loadAddon(webgl);
-        this.type = 'webgl';
-        return;
-      } catch {
-        console.warn('[Renderer] WebGL unavailable, falling back to Canvas');
-      }
-    }
-    term.loadAddon(new CanvasAddon());
-    this.type = 'canvas';
-  }
-
-  /** Load the Canvas renderer after a WebGL context loss so the terminal
-   *  keeps rendering instead of relying on xterm's implicit DOM fallback. */
-  private fallbackToCanvas(): void {
-    try {
-      this.term.loadAddon(new CanvasAddon());
-      this.type = 'canvas';
-    } catch {
-      /* terminal disposed mid-loss — nothing to do */
-    }
-  }
 }

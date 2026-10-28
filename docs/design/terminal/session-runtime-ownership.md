@@ -135,11 +135,13 @@ cannot see a dispose-and-rebuild.
 
 ## Controller and I/O boundaries
 
-- **TerminalController** owns TerminalInstance/xterm, the input router,
-  resize measurement, local scrollback/render, bootstrap/output apply, and
-  viewport attach/detach. It reports viewport facts (readiness, size) to the
-  runtime and decides nothing about route, reconnect, fallback, attach, or
-  retry budgets.
+- **TerminalController** composes the Xterm Engine
+  (`platform/terminal-runtime/xterm/`, #2581) with the input router, geometry,
+  local scrollback/render, bootstrap/output apply, and viewport
+  attach/detach. The engine is the sole owner of the xterm instance; ordered
+  mutation stays in `SerializedTerminalWriter`. The controller reports viewport
+  facts (readiness, size) to the runtime and decides nothing about route,
+  reconnect, fallback, attach, or retry budgets.
 - **ConnectionManager / the transports** own I/O adaptation only: send,
   resize, ordered stream apply, input buffering against the attach gate.
   The transport-interface surface carries only members with a real producer

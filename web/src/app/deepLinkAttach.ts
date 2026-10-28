@@ -3,7 +3,7 @@ import type { AttachChoice } from '@/product/session/components/AttachDialog';
 import { sessionsApi } from '@/product/session';
 import type { AgentProbe } from '@/product/agent/state';
 import { loadAttachPrefs } from '@/platform/attach/attachPrefs';
-import { detectWebGLSupport } from '@/platform/terminal-runtime/Renderer';
+import { detectWebGLSupport } from '@/platform/terminal-runtime/webglSupport';
 import {
   validateProfile,
   type PersistedAttachChoice,

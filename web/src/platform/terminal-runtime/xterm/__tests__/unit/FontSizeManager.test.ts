@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Terminal } from '@xterm/xterm';
-import { FontSizeManager } from '@/platform/terminal-runtime/FontSizeManager';
+import { FontSizeManager } from '../../FontSizeManager';
 
 describe('FontSizeManager', () => {
   let term: Terminal;
