@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "agent_workflow_run",
+  "identity": {
+    "workflow_id": "agent-claude-resume-seed",
+    "github_workflow": "Agent / Claude Resume Seed",
+    "github_run_id": 40682816579,
+    "github_run_attempt": 1,
+    "job": "seed",
+    "repository": "BestNathan/nession",
+    "event": "push",
+    "unique_run_name": "40682816579-1-claude-resume-d1"
+  },
+  "task": {
+    "id": "claude-resume-d1",
+    "type": "provider-fixture",
+    "target_ref": "f034ede76e07448fbb90d9263aaf8eda300d5637"
+  },
+  "agent": {
+    "provider": "claude-code",
+    "id": "claude-resume-fixture",
+    "role": "auditor",
+    "harness_sha256": null,
+    "checkpoint_id": null,
+    "model": {
+      "id": "qwen3.7-plus"
+    },
+    "run_id": "e1be9721-5ff2-4ee6-b5fd-0e37d138d377",
+    "request_id": null,
+    "status": "finished",
+    "prompt": null
+  },
+  "execution": {
+    "turns": 1,
+    "model_requests": null,
+    "tools": {
+      "observed": false,
+      "total": null,
+      "unique": null,
+      "by_name": null
+    }
+  },
+  "tokens": {
+    "input": 6,
+    "output": 118,
+    "cache_read": 0,
+    "cache_write": 1207,
+    "reasoning": null,
+    "total": 1331
+  },
+  "cost": {
+    "raw_usd": null,
+    "charged_usd": null,
+    "estimated_usd": null
+  },
+  "timing": {
+    "started_at": "2026-10-28T11:48:55.596Z",
+    "finished_at": null,
+    "agent_duration_ms": 5086,
+    "workflow_duration_ms": null
+  },
+  "result": {
+    "status": "native-snapshot-sealed"
+  }
+}
