@@ -109,4 +109,54 @@ capture 0 "$TMP_DIR/describe.out" "$TMP_DIR/repo/gates/run" --describe alpha
 assert_contains "$TMP_DIR/describe.out" 'id: alpha'
 assert_not_contains "$TMP_DIR/describe.out" 'raw output from alpha'
 
+
+# #2530: Exercise the REAL e2e-playwright adapter, not just the generic Gate
+# status vocabulary. This regression originally passed despite an exit=1 from
+# the full Playwright subprocess, because gate_main intentionally runs
+# gate_check with errexit disabled and the adapter kept executing.
+E2E_FIXTURE="$TMP_DIR/e2e-playwright/repo"
+E2E_BIN="$TMP_DIR/e2e-playwright/bin"
+mkdir -p "$E2E_FIXTURE/gates/lib" "$E2E_FIXTURE/gates/checks" \
+  "$E2E_FIXTURE/e2e/node_modules" "$E2E_FIXTURE/e2e/runner" \
+  "$E2E_FIXTURE/web/dist" "$E2E_BIN"
+cp "$GATES_DIR/lib/common.sh" "$E2E_FIXTURE/gates/lib/common.sh"
+cp "$GATES_DIR/checks/e2e-playwright.sh" "$E2E_FIXTURE/gates/checks/e2e-playwright.sh"
+chmod +x "$E2E_FIXTURE/gates/checks/e2e-playwright.sh"
+for cmd in cargo tmux node; do
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$E2E_BIN/$cmd"
+  chmod +x "$E2E_BIN/$cmd"
+done
+cat > "$E2E_BIN/npx" <<'EOF_E2E_NPX'
+#!/usr/bin/env bash
+printf 'fixture Playwright catalog\n'
+EOF_E2E_NPX
+chmod +x "$E2E_BIN/npx"
+cat > "$E2E_FIXTURE/e2e/run" <<'EOF_E2E_RUN'
+#!/usr/bin/env bash
+set -euo pipefail
+# Deliberately leave convincing-looking evidence behind even on a failed
+# Playwright invocation: only the child status can prove the suite passed.
+printf '{"stats":{"expected":2,"unexpected":0},"suites":[]}\n' > "$PLAYWRIGHT_JSON_OUTPUT_FILE"
+printf '{"tests":[]}\n' > "$NESSION_E2E_ASSERTIONS_OUTPUT_FILE"
+printf '{"provisioned":true}\n' >> "$E2E_RUNTIME_PROVISION_LOG"
+exit "${E2E_PLAYWRIGHT_FIXTURE_EXIT:-0}"
+EOF_E2E_RUN
+chmod +x "$E2E_FIXTURE/e2e/run"
+# Do not accidentally activate real GitHub receipt generation with the fake
+# node helper, and never pass the CI job's own env into an untrusted fixture.
+e2e_adapter() {
+  env -u GITHUB_REPOSITORY -u GITHUB_STEP_SUMMARY \
+    -u E2E_PROVISION_RECEIPT_FILE -u GITHUB_RUN_ID \
+    PATH="$E2E_BIN:$PATH" E2E_PLAYWRIGHT_FIXTURE_EXIT="$1" \
+    "$E2E_FIXTURE/gates/checks/e2e-playwright.sh"
+}
+capture 1 "$TMP_DIR/e2e-playwright-fail.out" e2e_adapter 1
+assert_contains "$TMP_DIR/e2e-playwright-fail.out" '[FAIL] e2e-playwright'
+assert_not_contains "$TMP_DIR/e2e-playwright-fail.out" '✓ e2e-playwright'
+capture 2 "$TMP_DIR/e2e-playwright-error.out" e2e_adapter 2
+assert_contains "$TMP_DIR/e2e-playwright-error.out" '[ERROR] e2e-playwright'
+assert_not_contains "$TMP_DIR/e2e-playwright-error.out" '✓ e2e-playwright'
+capture 0 "$TMP_DIR/e2e-playwright-pass.out" e2e_adapter 0
+assert_contains "$TMP_DIR/e2e-playwright-pass.out" '✓ e2e-playwright'
+
 printf 'run-selftest: PASS\n'

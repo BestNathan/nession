@@ -237,6 +237,15 @@ jobs:
         if: steps.select.outputs.count != '0'
         run: cd workspace && cargo build -p nession-server -p nession-agent
 
+      # Browser-only setup remains governed by the trusted needs_browser flag;
+      # restore matching binaries without repeating Playwright's apt dependency
+      # installation in an ephemeral Ubuntu runner (#2525).
+      - uses: actions/cache@v4
+        if: steps.select.outputs.needs_browser == 'true'
+        with:
+          path: ${{ github.workspace }}/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('workspace/e2e/package-lock.json') }}
+
       # Runtime/Protocol verifiers may invoke a real Browser/Terminal Scenario
       # transitively. Each such Case must explicitly declare a Browser verifier;
       # only the trusted selector may request browser runtime installation.
@@ -246,7 +255,10 @@ jobs:
           set -euo pipefail
           cd workspace/e2e
           npm ci
-          npx playwright install chromium --with-deps
+          npx playwright install chromium
+          # The pinned ubuntu-24.04 image must actually launch Chromium.
+          # Cache hits alone do not prove Linux runtime compatibility (#2525).
+          node -e 'const { chromium } = require("@playwright/test"); chromium.launch({ timeout: 30000 }).then(browser => browser.close()).catch(error => { console.error(error); process.exitCode = 1; })'
 
       # #1866 Phase B: one job-scoped invocation instead of one `run acceptance`
       # per Case. Each Case still emits its own record and verdict; eligible
