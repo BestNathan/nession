@@ -29,6 +29,12 @@ import {parseAcceptanceBatchLog,attestAcceptanceBatchReceipt,makeAcceptanceBatch
   ACCEPTANCE_BATCH_WORKFLOWS,ACCEPTANCE_BATCH_LOG_PREFIX} from '../e2e/runner/acceptance-batch-receipt.mjs';
 import { collectFullRegression } from './verification-full-regression-evidence.mjs';
 import { FULL_NOT_REQUIRED_LOG_PREFIX } from './e2e-full-applicability.mjs';
+import {
+  DEPLOYMENT_ATTESTATION_LOG_PREFIX,
+  formatDeploymentAttestationReceipt,
+  parseDeploymentAttestationReceipt,
+} from './deployment-identity-collect.mjs';
+import { formatAdmissionReceipt, parseAdmissionReceipt } from './staging-lane-scheduler.mjs';
 import {parseE2eSelectedRunLog,attestE2eSelectedRunReceipt,makeE2eSelectedRunReceipt,
   parseE2eNotRequiredLog,attestE2eNotRequiredReceipt,makeE2eNotRequiredReceipt,
   parseE2eFullGateLog,attestE2eFullGateReceipt,
@@ -167,7 +173,7 @@ function compactRuns(runs, expectedSha) {
   return retainedRuns(runs, expectedSha).runs.map(compactRun);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], historicalRecovery = null, historicalRegressions = null, exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], acceptanceRoutingProof = null, replayDenials = [], storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [], fullRegressionReceipts = [], fullNotRequiredReceipts = [], verifiedCiCostStudy = null, historicalBrowserDesignProof = null, exactHeadStepsBySha = new Map(), batchReceiptsBySha = new Map(), ancestryReceipts = [], reuseComparison = null, publicPagesObservations = [], publicPagesE2EObservations = [], publicWorkflowPublications = [], developmentReadback = [], stagingAcrReadback = null, verifiedAgentTelemetryRecords = [], deferredAcceptanceReplays = [] }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], historicalRecovery = null, historicalRegressions = null, exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], acceptanceRoutingProof = null, replayDenials = [], storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [], fullRegressionReceipts = [], fullNotRequiredReceipts = [], verifiedCiCostStudy = null, historicalBrowserDesignProof = null, exactHeadStepsBySha = new Map(), batchReceiptsBySha = new Map(), ancestryReceipts = [], reuseComparison = null, publicPagesObservations = [], publicPagesE2EObservations = [], publicWorkflowPublications = [], developmentReadback = [], stagingAcrReadback = null, verifiedAgentTelemetryRecords = [], deferredAcceptanceReplays = [], deploymentAttestationReceipts = [], stagingLaneAdmissionReceipts = [] }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -243,6 +249,8 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     linked_issue_e2e_evidence: linkedIssueE2E,
     implementation_pull_requests: implementationPulls,
     provider_wake_evidence: providerWakeEvidence,
+    deployment_attestation_receipts: deploymentAttestationReceipts,
+    staging_lane_admission_receipts: stagingLaneAdmissionReceipts,
   };
 }
 
@@ -739,6 +747,67 @@ export async function collectFullNotRequiredReceipts(repo, sha, request = github
     if (listed.workflow_runs.length < pageSize) break;
   }
   return evidence;
+}
+
+// #2323 SC-02/SC-10/SC-11: deployment attestations and lane admission
+// decisions existed only as artifacts, and the Acceptance harness never reads
+// artifacts. The canonical owners now print one bounded receipt line into
+// their job logs; bind each to the exact run/attempt/SHA that printed it. A
+// completed successful run from before the receipt existed is skipped (no
+// line); a malformed/duplicated receipt fails collection closed.
+const LANE_EVIDENCE_RUNS = 5;
+export async function collectLaneEvidenceReceipts(repo, request = githubGet,
+  getText = githubJobLog, { limit = LANE_EVIDENCE_RUNS } = {}) {
+  if (repo !== 'BestNathan/nession') throw new Error('invalid lane evidence repository');
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 20) {
+    throw new Error('invalid lane evidence run limit');
+  }
+  const result = { deployment_attestation_receipts: [], staging_lane_admission_receipts: [] };
+  const candidates = async (workflow, accept) => {
+    const data = await request('/repos/' + repo + '/actions/workflows/' + workflow +
+      '/runs?per_page=20&status=completed');
+    return (Array.isArray(data?.workflow_runs) ? data.workflow_runs : [])
+      .filter((run) => String(run?.path ?? '').replace(/@refs\/[^\s]+$/, '') ===
+        '.github/workflows/' + workflow)
+      .filter((run) => accept(run) && run.status === 'completed' && run.conclusion === 'success')
+      .sort((a, b) => Number(b.id) - Number(a.id))
+      .slice(0, limit);
+  };
+  const receiptFrom = async (run, jobName, parse) => {
+    const jobs = await request('/repos/' + repo + '/actions/runs/' + run.id +
+      '/jobs?per_page=100');
+    const matches = (Array.isArray(jobs?.jobs) ? jobs.jobs : [])
+      .filter((job) => job?.name === jobName);
+    if (matches.length !== 1) {
+      throw new Error('lane evidence job is missing or ambiguous: ' + jobName);
+    }
+    const log = await getText('/repos/' + repo + '/actions/jobs/' + matches[0].id + '/logs');
+    try {
+      return parse(log);
+    } catch (error) {
+      if (/missing or ambiguous/.test(String(error?.message ?? ''))) return null;
+      throw error;
+    }
+  };
+  const bind = (run, receipt) => Object.freeze({
+    ...receipt,
+    run_id: Number(run.id),
+    run_attempt: Number(run.run_attempt ?? 1),
+    head_sha: String(run.head_sha ?? ''),
+    event: String(run.event ?? ''),
+    html_url: String(run.html_url ?? ''),
+  });
+  for (const run of await candidates('deploy-identity.yml',
+    (run) => run.event === 'workflow_dispatch' && run.head_branch === 'main')) {
+    const receipt = await receiptFrom(run, 'attest', parseDeploymentAttestationReceipt);
+    if (receipt) result.deployment_attestation_receipts.push(bind(run, receipt));
+  }
+  for (const run of await candidates('e2e-staging-lanes.yml',
+    (run) => ['schedule', 'workflow_dispatch'].includes(run.event) && run.head_branch === 'main')) {
+    const receipt = await receiptFrom(run, 'admit', parseAdmissionReceipt);
+    if (receipt) result.staging_lane_admission_receipts.push(bind(run, receipt));
+  }
+  return result;
 }
 
 // #1866 SC-01/SC-02: a merged target carries only ONE pull_request, so a
@@ -1717,6 +1786,11 @@ async function collectCommand(workspace, outFile) {
       :[];
   const fullNotRequiredReceipts = process.env.ACCEPTANCE_STAGE==='post-merge'
     ? await collectFullNotRequiredReceipts(repo, sha) : [];
+  // Lane identity is a merged/staging-stage concern; a pre-merge evaluation
+  // has no deployed environment to attest.
+  const laneEvidence = process.env.ACCEPTANCE_STAGE === 'pre-merge'
+    ? { deployment_attestation_receipts: [], staging_lane_admission_receipts: [] }
+    : await collectLaneEvidenceReceipts(repo, githubGet, githubJobLog);
   const reuseComparison = computeReuseComparison({ targetSha: sha,
     acceptanceBatchReceipts,
     extraBatchReceipts: [...batchReceiptsBySha.values()].flat()
@@ -1725,7 +1799,9 @@ async function collectCommand(workspace, outFile) {
       .concat(ancestryReceipts.flatMap(entry => entry.e2e_selected_run_receipts)),
     fullGateProvisionReceipts, selectedRunReceipts, targetPushE2eRuns });
   const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls,
-    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, historicalRecovery, historicalRegressions, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts, acceptanceRoutingProof, replayDenials, storePolicyObservability, ancestryRuns, acceptanceBatchReceipts, selectedRunReceiptsBySha, selectedRunReceipts, notRequiredRunReceiptsBySha, notRequiredRunReceipts, fullGateProvisionReceipts, fullRegressionReceipts, fullNotRequiredReceipts, verifiedCiCostStudy, historicalBrowserDesignProof, exactHeadStepsBySha, batchReceiptsBySha, ancestryReceipts, reuseComparison, publicPagesObservations, publicPagesE2EObservations, publicWorkflowPublications, developmentReadback, stagingAcrReadback, verifiedAgentTelemetryRecords, deferredAcceptanceReplays });
+    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, historicalRecovery, historicalRegressions, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts, acceptanceRoutingProof, replayDenials, storePolicyObservability, ancestryRuns, acceptanceBatchReceipts, selectedRunReceiptsBySha, selectedRunReceipts, notRequiredRunReceiptsBySha, notRequiredRunReceipts, fullGateProvisionReceipts, fullRegressionReceipts, fullNotRequiredReceipts, verifiedCiCostStudy, historicalBrowserDesignProof, exactHeadStepsBySha, batchReceiptsBySha, ancestryReceipts, reuseComparison, publicPagesObservations, publicPagesE2EObservations, publicWorkflowPublications, developmentReadback, stagingAcrReadback, verifiedAgentTelemetryRecords, deferredAcceptanceReplays,
+    deploymentAttestationReceipts: laneEvidence.deployment_attestation_receipts,
+    stagingLaneAdmissionReceipts: laneEvidence.staging_lane_admission_receipts });
   fs.writeFileSync(outFile, JSON.stringify(evidence, null, 2) + '\n');
   console.log(
     'collected acceptance CI evidence for ' + sha +
@@ -1734,8 +1810,82 @@ async function collectCommand(workspace, outFile) {
   );
 }
 
+async function selfTestLaneEvidenceReceipts() {
+  const repo = 'BestNathan/nession';
+  const mainSha = 'a'.repeat(40);
+  const deployed = 'b'.repeat(40);
+  const deployRun = { id: 11, run_attempt: 1, path: '.github/workflows/deploy-identity.yml',
+    event: 'workflow_dispatch', head_branch: 'main', head_sha: mainSha,
+    status: 'completed', conclusion: 'success', html_url: 'https://x/11' };
+  const laneRun = { id: 22, run_attempt: 2, path: '.github/workflows/e2e-staging-lanes.yml',
+    event: 'schedule', head_branch: 'main', head_sha: mainSha,
+    status: 'completed', conclusion: 'success', html_url: 'https://x/22' };
+  const deployLine = formatDeploymentAttestationReceipt({
+    environment_id: 'staging-01', source_sha: deployed, status: 'Attested',
+    gitops_revision: 'c'.repeat(40), observed_at: '2026-10-28T00:00:00Z',
+    cluster_context: 'ci',
+    images: ['agent', 'server', 'ui']
+      .map((role, index) => ({ role, digest: 'sha256:' + String(index + 1).repeat(64) })),
+  });
+  const laneLine = formatAdmissionReceipt({
+    main_sha: mainSha, now: '2026-10-28T00:00:00Z', admitted: ['staging-01'],
+    lanes: [
+      { environment_id: 'staging', decision: 'NOT_DUE', ahead: 0, behind: 0,
+        next_due_at: '2026-10-28T02:00:00Z' },
+      { environment_id: 'staging-01', decision: 'ADMIT', ahead: 2, behind: 0,
+        next_due_at: '2026-10-28T02:00:00Z' },
+    ],
+    bindings: [
+      { environment_id: 'staging', deployed_source_sha: 'd'.repeat(40) },
+      { environment_id: 'staging-01', deployed_source_sha: deployed },
+    ],
+  });
+  const request = async (path) => {
+    if (path.includes('/workflows/deploy-identity.yml/runs')) return { workflow_runs: [deployRun] };
+    if (path.includes('/workflows/e2e-staging-lanes.yml/runs')) return { workflow_runs: [laneRun] };
+    if (path.includes('/actions/runs/11/jobs')) return { jobs: [{ id: 101, name: 'attest' }] };
+    if (path.includes('/actions/runs/22/jobs')) return { jobs: [{ id: 202, name: 'admit' }] };
+    throw new Error('unexpected request ' + path);
+  };
+  const getText = async (path) => {
+    if (path.endsWith('/101/logs')) return 'noise\n' + deployLine + '\n';
+    if (path.endsWith('/202/logs')) return 'noise\n' + laneLine + '\n';
+    throw new Error('unexpected log ' + path);
+  };
+  const evidence = await collectLaneEvidenceReceipts(repo, request, getText);
+  assert.equal(evidence.deployment_attestation_receipts.length, 1);
+  assert.equal(evidence.deployment_attestation_receipts[0].run_id, 11);
+  assert.equal(evidence.deployment_attestation_receipts[0].environment_id, 'staging-01');
+  assert.equal(evidence.deployment_attestation_receipts[0].source_sha, deployed);
+  assert.equal(evidence.staging_lane_admission_receipts.length, 1);
+  assert.equal(evidence.staging_lane_admission_receipts[0].run_attempt, 2);
+  assert.equal(evidence.staging_lane_admission_receipts[0].main_sha, mainSha);
+  assert.deepEqual(evidence.staging_lane_admission_receipts[0].admitted, ['staging-01']);
+  // A malformed receipt fails collection closed; a pre-receipt run (no line)
+  // is skipped so the migration itself does not break the collector.
+  await assert.rejects(() => collectLaneEvidenceReceipts(repo, request,
+    async (path) => path.endsWith('/101/logs') ? DEPLOYMENT_ATTESTATION_LOG_PREFIX + '{' : laneLine),
+  /invalid deployment attestation receipt JSON/);
+  const oldOnly = await collectLaneEvidenceReceipts(repo, request, async () => 'noise');
+  assert.deepEqual(oldOnly.deployment_attestation_receipts, []);
+  assert.deepEqual(oldOnly.staging_lane_admission_receipts, []);
+  // Ambiguous job identity is a collection error, not an empty pass.
+  await assert.rejects(() => collectLaneEvidenceReceipts(repo,
+    async (path) => path.includes('/actions/runs/11/jobs')
+      ? { jobs: [{ id: 101, name: 'attest' }, { id: 102, name: 'attest' }] }
+      : request(path), getText), /missing or ambiguous/);
+  // The normalized evidence carries both receipt sets.
+  const normalized = normalizeCiEvidence({ targetSha: mainSha,
+    deploymentAttestationReceipts: evidence.deployment_attestation_receipts,
+    stagingLaneAdmissionReceipts: evidence.staging_lane_admission_receipts });
+  assert.equal(normalized.deployment_attestation_receipts.length, 1);
+  assert.equal(normalized.staging_lane_admission_receipts.length, 1);
+  console.log('acceptance CI evidence: lane receipt collection fixtures passed');
+}
+
 async function selfTest() {
   selfTestStagingAcrEvidence();
+  await selfTestLaneEvidenceReceipts();
   await selfTestDevelopmentReadback();
   selfTestPublicPagesObservation();
   selfTestPublicWorkflowPublication();
