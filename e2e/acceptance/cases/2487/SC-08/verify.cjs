@@ -132,8 +132,13 @@ run(({ evidence }) => {
       VITE_TERMINAL_WEB_FONT_SIZE_ENV,
       'vars.' + TERMINAL_COLS_ENV,
       TERMINAL_COLS_ENV + '=${{',
+      'RELEASE_TERMINAL_COLS: ${{ vars.' + TERMINAL_COLS_ENV + " || '96' }}",
+      'RELEASE_TERMINAL_WEB_FONT_SIZE: ${{ vars.' + TERMINAL_WEB_FONT_SIZE_ENV + " || '14' }}",
     ]);
     const text = fs.readFileSync(path.join(root, workflow), 'utf8');
+    if (/vars\\.(?:STAGING|PRODUCTION)_TERMINAL_(?:COLS|WEB_FONT_SIZE)/.test(text)) {
+      throw new Error(workflow + ' retains obsolete environment-specific terminal variable precedence');
+    }
     const serverBuildArgs = (text.match(/build-args:/g) || []).length;
     if (serverBuildArgs < 2) {
       throw new Error(workflow + ' does not pass build args to both image paths');
