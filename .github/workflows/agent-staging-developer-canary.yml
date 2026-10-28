@@ -194,6 +194,7 @@ jobs:
   synthetic-qwen:
     needs: [verify-source, restore-checkpoint]
     if: >-
+      always() &&
       needs.verify-source.result == 'success' &&
       (needs.verify-source.outputs.phase != 'resume' ||
         needs.restore-checkpoint.result == 'success')
