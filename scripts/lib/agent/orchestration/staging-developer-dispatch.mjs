@@ -29,11 +29,14 @@ const VERSION=/^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/;
 const KEY_ID=/^[a-z][a-z0-9-]{1,63}$/;
 const MAX_TTL_MS=15*60*1000;
 const ENVELOPE=['body','kind','schema_version','signature'];
-const CORE=['schema_version','kind','repository','issue','target_sha','agent_id',
-  'role','task','provider','environment','model','cli_version','source_run_id',
-  'source_run_attempt','source_artifact_id','source_artifact_digest',
-  'issuer_run_id','issued_at','expires_at','key_id'];
-const BODY=['dispatch_id',...CORE];
+const PHASES=['seed','resume'];
+const CHECKPOINT_FIELDS=['version','commit_sha','ciphertext_sha256',
+  'seed_run_id','seed_attempt'];
+const CORE_SEED=['schema_version','kind','repository','issue','target_sha','agent_id',
+  'role','task','provider','environment','model','cli_version','phase',
+  'default_model','source_run_id','source_run_attempt','source_artifact_id',
+  'source_artifact_digest','issuer_run_id','issued_at','expires_at','key_id'];
+const CORE_RESUME=[...CORE_SEED,'checkpoint'];
 
 function fail(message){throw new Error('Staging Developer dispatch: '+message);}
 function positive(value){return Number.isSafeInteger(value)&&value>0;}
@@ -70,14 +73,27 @@ function stagedIdentity(registry){
   if(!instance||instance.role!==ROLE||instance.provider!==PROVIDER)
     fail('dev-qwen-01 is not a registered Claude Code Developer');
 }
+function validCheckpoint(checkpoint){
+  return exact(checkpoint,CHECKPOINT_FIELDS)&&
+    positive(checkpoint.version)&&SHA.test(checkpoint.commit_sha??'')&&
+    HEX64.test(checkpoint.ciphertext_sha256??'')&&
+    positive(checkpoint.seed_run_id)&&checkpoint.seed_attempt===1;
+}
+function coreFields(phase){
+  if(!PHASES.includes(phase))fail('invalid staging dispatch phase');
+  return phase==='resume'?CORE_RESUME:CORE_SEED;
+}
 
 function validCore(body,registry){
-  if(!exact(body,BODY)||
+  const phase=body?.phase;
+  const fields=coreFields(phase);
+  if(!exact(body,['dispatch_id',...fields])||
       body.schema_version!==1||body.kind!==KIND||body.repository!==REPO||
       body.issue!==ISSUE||!SHA.test(body.target_sha??'')||
       body.agent_id!==AGENT||body.role!==ROLE||body.task!==TASK||
       body.provider!==PROVIDER||body.environment!==ENVIRONMENT||
-      !QWEN.test(body.model??'')||!VERSION.test(body.cli_version??'')||
+      !QWEN.test(body.model??'')||!QWEN.test(body.default_model??'')||
+      !VERSION.test(body.cli_version??'')||
       !positive(body.source_run_id)||body.source_run_attempt!==1||
       !positive(body.source_artifact_id)||
       !DIGEST.test(body.source_artifact_digest??'')||
@@ -85,7 +101,9 @@ function validCore(body,registry){
       !Number.isSafeInteger(body.expires_at)||
       body.expires_at<=body.issued_at||
       body.expires_at-body.issued_at>MAX_TTL_MS||
-      !KEY_ID.test(body.key_id??'')||!HEX64.test(body.dispatch_id??''))
+      !KEY_ID.test(body.key_id??'')||!HEX64.test(body.dispatch_id??'')||
+      (phase==='resume'?!validCheckpoint(body.checkpoint):
+        Object.hasOwn(body,'checkpoint')))
     fail('invalid staging dispatch body');
   stagedIdentity(registry);
   return body;
@@ -93,6 +111,7 @@ function validCore(body,registry){
 
 export function buildStagingDeveloperDispatch({
   admission,registry,signer,now=Date.now(),ttlMs=10*60*1000,
+  phase='seed',checkpoint=null,
 }){
   // Shape produced by the trusted staging-developer-source verifier.
   if(!exact(admission,['target_sha','source_sha','source_run_id',
@@ -105,20 +124,28 @@ export function buildStagingDeveloperDispatch({
     fail('admission is not an exact authenticated staging source');
   stagedIdentity(registry);
   if(!signer||!KEY_ID.test(signer.key_id??'')||!positive(signer.issuer_run_id)||
-      !QWEN.test(signer.model??'')||!VERSION.test(signer.cli_version??''))
+      !QWEN.test(signer.model??'')||!QWEN.test(signer.default_model??'')||
+      !VERSION.test(signer.cli_version??''))
     fail('invalid staging dispatch signer');
   if(!Number.isSafeInteger(now)||!Number.isSafeInteger(ttlMs)||
       ttlMs<1000||ttlMs>MAX_TTL_MS) fail('invalid staging dispatch TTL');
+  coreFields(phase);
+  if(phase==='seed'&&checkpoint!==null)
+    fail('seed dispatch must not carry a checkpoint');
+  if(phase==='resume'&&!validCheckpoint(checkpoint))
+    fail('resume dispatch requires an exact checkpoint commitment');
   const core={schema_version:1,kind:KIND,repository:REPO,issue:ISSUE,
     target_sha:admission.target_sha,agent_id:AGENT,role:ROLE,task:TASK,
-    provider:PROVIDER,environment:ENVIRONMENT,
-    model:signer.model,cli_version:signer.cli_version,
+    provider:PROVIDER,environment:ENVIRONMENT,phase,
+    model:signer.model,default_model:signer.default_model,
+    cli_version:signer.cli_version,
     source_run_id:admission.source_run_id,
     source_run_attempt:admission.source_run_attempt,
     source_artifact_id:admission.artifact_id,
     source_artifact_digest:admission.artifact_digest,
     issuer_run_id:signer.issuer_run_id,issued_at:now,expires_at:now+ttlMs,
-    key_id:signer.key_id};
+    key_id:signer.key_id,
+    ...(phase==='resume'?{checkpoint}:{})};
   const body={...core,dispatch_id:dispatchId(core)};
   validCore(body,registry);
   return Object.freeze({schema_version:1,kind:KIND,body,
@@ -132,7 +159,7 @@ export function verifyStagingDeveloperDispatch({
       typeof record.signature!=='string'||!/^[a-f0-9]{64}$/.test(record.signature))
     fail('invalid staging dispatch envelope');
   const body=validCore(record.body,registry);
-  const core=Object.fromEntries(CORE.map(key=>[key,body[key]]));
+  const core=Object.fromEntries(coreFields(body.phase).map(key=>[key,body[key]]));
   if(body.dispatch_id!==dispatchId(core))fail('staging dispatch identity mismatch');
   if(!keyring||typeof keyring!=='object'||Array.isArray(keyring)||
       Object.keys(keyring).length===0)fail('invalid staging keyring');
@@ -175,7 +202,9 @@ export function readStagingDeveloperDispatchArtifact({
       dispatchRun.run_attempt!==1||
       dispatchRun.path!==DISPATCH_WORKFLOW.path||
       dispatchRun.name!==DISPATCH_WORKFLOW.name||
-      dispatchRun.event!=='workflow_run'||
+      !['workflow_run','workflow_dispatch'].includes(dispatchRun.event)||
+      (dispatchRun.event==='workflow_dispatch'&&
+        dispatchRun.actor?.login!=='BestNathan')||
       dispatchRun.head_branch!=='main'||
       dispatchRun.repository?.full_name!==REPO_NAME||
       dispatchRun.head_repository?.full_name!==REPO_NAME||
@@ -227,9 +256,11 @@ export function verifyStagingDeveloperDispatchArtifact({
     run:admissionRun,artifacts:admissionArtifacts,zip:admissionZip});
   const body=verifyStagingDeveloperDispatch({record,keyring,admission,registry,now});
   return Object.freeze({dispatch_id:body.dispatch_id,target_sha:body.target_sha,
-    source_main_sha:admission.source_sha,
+    source_main_sha:admission.source_sha,phase:body.phase,
+    model:body.model,default_model:body.default_model,
+    checkpoint:body.checkpoint??null,
     agent_id:body.agent_id,role:body.role,provider:body.provider,
-    model:body.model,cli_version:body.cli_version,
+    cli_version:body.cli_version,
     environment:body.environment,source_run_id:body.source_run_id,
     source_run_attempt:body.source_run_attempt,issuer_run_id:body.issuer_run_id,
     artifact_id,artifact_digest,

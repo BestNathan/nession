@@ -10,6 +10,18 @@ on:
     workflows:
       - Acceptance / Staging Developer Admission
     types: [completed]
+  workflow_dispatch:
+    inputs:
+      admission_run_id:
+        description: 'Admission Run ID this dispatch binds to'
+        required: true
+        type: string
+      mode:
+        description: 'Dispatch phase'
+        required: true
+        type: choice
+        options: [resume, seed]
+        default: resume
 
 permissions:
   contents: read
@@ -19,13 +31,17 @@ jobs:
   sign:
     if: >-
       github.repository == 'BestNathan/nession' &&
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'workflow_dispatch' &&
-      github.event.workflow_run.head_branch == 'main' &&
-      github.event.workflow_run.repository.full_name == 'BestNathan/nession' &&
-      github.event.workflow_run.head_repository.full_name == 'BestNathan/nession' &&
-      github.event.workflow_run.run_attempt == 1 &&
-      github.run_attempt == 1
+      github.run_attempt == 1 &&
+      ((github.event_name == 'workflow_run' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'workflow_dispatch' &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.repository.full_name == 'BestNathan/nession' &&
+        github.event.workflow_run.head_repository.full_name == 'BestNathan/nession' &&
+        github.event.workflow_run.run_attempt == 1) ||
+       (github.event_name == 'workflow_dispatch' &&
+        github.ref == 'refs/heads/main' &&
+        github.actor == 'BestNathan'))
     runs-on: ubuntu-24.04
     environment: agent-staging-controller
     timeout-minutes: 5
@@ -33,7 +49,7 @@ jobs:
       - name: Checkout only trusted main-owned signing code
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
@@ -44,15 +60,18 @@ jobs:
         id: sign
         env:
           GH_TOKEN: ${{ github.token }}
-          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
-          SOURCE_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          SOURCE_RUN_ID: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.id || inputs.admission_run_id }}
+          SOURCE_RUN_ATTEMPT: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.run_attempt || 1 }}
+          DISPATCH_MODE: ${{ github.event_name == 'workflow_run' && 'seed' || inputs.mode }}
           STAGING_DISPATCH_KEY: ${{ secrets.AGENT_STAGING_DISPATCH_KEY }}
+          STAGING_STORE_AES_KEY_B64: ${{ secrets.STAGING_STORE_AES_KEY_B64 }}
           ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
           CLAUDE_CODE_VERSION: ${{ vars.CLAUDE_CODE_VERSION }}
           ISSUER_RUN_ID: ${{ github.run_id }}
         shell: bash
         run: |
           set -euo pipefail
+          [[ "$DISPATCH_MODE" == "seed" || "$DISPATCH_MODE" == "resume" ]]
           [[ "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           [[ "$SOURCE_RUN_ATTEMPT" == 1 ]]
           work="$RUNNER_TEMP/staging-dispatch"
@@ -72,43 +91,99 @@ jobs:
           node scripts/lib/agent/orchestration/staging-developer-source.mjs verify \
             "$work/admission-run.json" "$work/admission-artifacts.json" \
             "$work/admission.zip" "$work/verified-staging.json"
-          STAGING_DISPATCH_DIR="$work" node --input-type=module <<'NODE'
+          if [[ "$DISPATCH_MODE" == "resume" ]]; then
+            gh api "repos/$GITHUB_REPOSITORY/contents/roles/developer/dev-qwen-01/issues/2319/head.json?ref=agent-store" \
+              --jq .content | tr -d '\n' | base64 -d > "$work/store-head.json"
+            checkpoint_path="$(jq -er .checkpoint_path "$work/store-head.json")"
+            [[ "$checkpoint_path" == "roles/developer/dev-qwen-01/issues/2319/checkpoints/"* ]]
+            gh api "repos/$GITHUB_REPOSITORY/contents/$checkpoint_path?ref=agent-store" \
+              --jq .content | tr -d '\n' | base64 -d > "$work/store-checkpoint.json"
+            gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/agent-store" \
+              --jq .object.sha > "$work/store-commit.txt"
+          fi
+          STAGING_DISPATCH_DIR="$work" STAGING_DISPATCH_MODE="$DISPATCH_MODE" \
+            node --input-type=module <<'NODE'
           import fs from 'node:fs';
           import {buildStagingDeveloperDispatch, parseStagingDispatchKey}
             from './scripts/lib/agent/orchestration/staging-developer-dispatch.mjs';
           import {qwenDeveloperModel}
             from './scripts/lib/agent/orchestration/qwen-developer-policy.mjs';
+          import {unsealCheckpoint}
+            from './scripts/lib/agent/store/checkpoint.mjs';
           const dir=process.env.STAGING_DISPATCH_DIR;
           const admission=JSON.parse(fs.readFileSync(dir+'/verified-staging.json','utf8'));
           const registry=JSON.parse(fs.readFileSync('automation/agents/registry.json','utf8'));
           const model=qwenDeveloperModel(process.env);
+          const defaultModel=process.env.ANTHROPIC_MODEL;
           const cliVersion=process.env.CLAUDE_CODE_VERSION;
+          if(typeof defaultModel!=='string'||!/^qwen[a-z0-9._-]*$/i.test(defaultModel))
+            throw new Error('signer default model must be Qwen');
           if(!/^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/.test(cliVersion??''))
             throw new Error('staging signer requires a pinned CLAUDE_CODE_VERSION');
+          const phase=process.env.STAGING_DISPATCH_MODE;
           const key=parseStagingDispatchKey(process.env.STAGING_DISPATCH_KEY);
+          let aesKey=null;
           try{
+            let taskModel=model,checkpoint=null;
+            if(phase==='resume'){
+              const head=JSON.parse(fs.readFileSync(dir+'/store-head.json','utf8'));
+              const sealed=JSON.parse(fs.readFileSync(dir+'/store-checkpoint.json','utf8'));
+              const commit=fs.readFileSync(dir+'/store-commit.txt','utf8').trim();
+              if(!Number.isSafeInteger(head.version)||head.version<1||
+                  typeof head.checkpoint_path!=='string'||
+                  !/^[a-f0-9]{64}$/.test(head.ciphertext_sha256??'')||
+                  sealed.schema_version!==1||sealed.kind!=='encrypted_agent_checkpoint'||
+                  sealed.path!==head.checkpoint_path||sealed.version!==head.version||
+                  sealed.ciphertext_sha256!==head.ciphertext_sha256||
+                  sealed.identity?.role!=='developer'||
+                  sealed.identity?.agent_id!=='dev-qwen-01'||
+                  sealed.identity?.issue!==2319||
+                  !/^[a-f0-9]{40}$/.test(commit))
+                throw new Error('invalid staging Store checkpoint commitment');
+              aesKey=Buffer.from(process.env.STAGING_STORE_AES_KEY_B64??'','base64');
+              if(aesKey.length!==32)throw new Error('staging Store AES key must be 32 bytes');
+              const bundle=JSON.parse(unsealCheckpoint(
+                {role:'developer',agent_id:'dev-qwen-01',issue:2319},sealed,aesKey)
+                .toString('utf8'));
+              if(bundle?.schema_version!==1||bundle.kind!=='staging-claude-native-bundle'||
+                  !/^qwen[a-z0-9._-]*$/i.test(bundle.model??'')||
+                  !Number.isSafeInteger(bundle.seed_run_id)||bundle.seed_run_id<1||
+                  bundle.seed_attempt!==1||
+                  !/^[a-f0-9]{64}$/.test(bundle.harness_digest??'')||
+                  bundle.harness_digest!==sealed.metadata?.harness_digest)
+                throw new Error('stored staging bundle lacks model identity');
+              taskModel=bundle.model;
+              checkpoint={version:sealed.version,commit_sha:commit,
+                ciphertext_sha256:sealed.ciphertext_sha256,
+                seed_run_id:bundle.seed_run_id,seed_attempt:bundle.seed_attempt};
+            }
             const record=buildStagingDeveloperDispatch({admission,registry,
               signer:{key,key_id:'staging-controller-v1',
                 issuer_run_id:Number(process.env.ISSUER_RUN_ID),
-                model,cli_version:cliVersion}});
+                model:taskModel,default_model:defaultModel,cli_version:cliVersion},
+              phase,checkpoint});
             fs.writeFileSync(dir+'/staging-developer-dispatch.json',
               JSON.stringify(record,null,2)+'\n',{flag:'wx',mode:0o600});
             console.log('Signed staging dispatch '+record.body.dispatch_id+
-              ' for exact staging target '+record.body.target_sha+
-              ' with pinned model '+record.body.model+' and CLI '+record.body.cli_version);
-          }finally{key.fill(0);}
+              ' phase '+record.body.phase+' model '+record.body.model+
+              ' default '+record.body.default_model);
+          }finally{key.fill(0);if(aesKey)aesKey.fill(0);}
           NODE
           target="$(jq -er .body.target_sha "$work/staging-developer-dispatch.json")"
           dispatch="$(jq -er .body.dispatch_id "$work/staging-developer-dispatch.json")"
+          phase="$(jq -er .body.phase "$work/staging-developer-dispatch.json")"
           [[ "$target" =~ ^[a-f0-9]{40}$ ]]
           [[ "$dispatch" =~ ^[a-f0-9]{64}$ ]]
+          [[ "$phase" == "seed" || "$phase" == "resume" ]]
           echo "target_sha=$target" >> "$GITHUB_OUTPUT"
           echo "dispatch_id=$dispatch" >> "$GITHUB_OUTPUT"
+          echo "phase=$phase" >> "$GITHUB_OUTPUT"
           {
             echo "## Signed staging dispatch"
             echo
             echo "- Target SHA: \`$target\`"
             echo "- Dispatch ID: \`$dispatch\`"
+            echo "- Phase: \`$phase\`"
             echo "- Non-authoritative: no model call, Store write or SC Pass"
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload signed staging dispatch
