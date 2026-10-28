@@ -196,6 +196,8 @@ function zipOne(name,text){
   return Buffer.concat([local,key,bytes,central,key,end]);
 }
 const dispatchSha='f'.repeat(40);
+// The Dispatch run may execute newer main code than its Admission Run.
+const dispatchMain='9'.repeat(40);
 const dispatchRun={id:6001,run_attempt:1,head_sha:dispatchSha,
   path:'.github/workflows/acceptance-staging-developer-admission.yml',
   name:'Acceptance / Staging Developer Admission',
@@ -228,7 +230,7 @@ const dispatchForAdmission=buildStagingDeveloperDispatch({admission:{
   verified_proof:'synthetic_worker_canary_only'},registry,signer,now});
 const dispatchZip=zipOne('staging-developer-dispatch.json',
   JSON.stringify(dispatchForAdmission));
-const dispatchRun2={id:8001,run_attempt:1,head_sha:dispatchSha,
+const dispatchRun2={id:8001,run_attempt:1,head_sha:dispatchMain,
   path:'.github/workflows/acceptance-staging-developer-dispatch.yml',
   name:'Acceptance / Staging Developer Dispatch',
   event:'workflow_run',head_branch:'main',
@@ -237,7 +239,7 @@ const dispatchRun2={id:8001,run_attempt:1,head_sha:dispatchSha,
   status:'completed',conclusion:'success'};
 const dispatchArtifacts={total_count:1,artifacts:[{
   name:'staging-developer-dispatch-8001-1',id:9001,expired:false,
-  workflow_run:{id:8001,head_sha:dispatchSha},
+  workflow_run:{id:8001,head_sha:dispatchMain},
   digest:'sha256:'+createHash('sha256').update(dispatchZip).digest('hex')}]};
 const chain={dispatchRun:dispatchRun2,dispatchArtifacts,dispatchZip,
   admissionRun,admissionArtifacts,admissionZip,keyring,registry,now};
@@ -246,7 +248,7 @@ const read=readStagingDeveloperDispatchArtifact({dispatchRun:dispatchRun2,
 assert.equal(read.record.body.dispatch_id,dispatchForAdmission.body.dispatch_id);
 const proved=verifyStagingDeveloperDispatchArtifact(chain);
 assert.equal(proved.target_sha,admissionEntry.target_sha);
-assert.equal(proved.source_main_sha,admissionEntry.source_sha);
+assert.equal(proved.source_main_sha,dispatchMain);
 assert.equal(proved.dispatch_id,dispatchForAdmission.body.dispatch_id);
 assert.equal(proved.agent_id,'dev-qwen-01');
 assert.equal(proved.environment,'dev-claude-qwen');
@@ -269,7 +271,7 @@ const resumeForAdmission=buildStagingDeveloperDispatch({admission:{
   now,phase:'resume',checkpoint});
 const resumeZip=zipOne('staging-developer-dispatch.json',
   JSON.stringify(resumeForAdmission));
-const resumeRun={id:8002,run_attempt:1,head_sha:dispatchSha,
+const resumeRun={id:8002,run_attempt:1,head_sha:dispatchMain,
   path:'.github/workflows/acceptance-staging-developer-dispatch.yml',
   name:'Acceptance / Staging Developer Dispatch',
   event:'workflow_dispatch',head_branch:'main',
@@ -278,7 +280,7 @@ const resumeRun={id:8002,run_attempt:1,head_sha:dispatchSha,
   actor:{login:'BestNathan'},status:'completed',conclusion:'success'};
 const resumeArtifacts={total_count:1,artifacts:[{
   name:'staging-developer-dispatch-8002-1',id:9002,expired:false,
-  workflow_run:{id:8002,head_sha:dispatchSha},
+  workflow_run:{id:8002,head_sha:dispatchMain},
   digest:'sha256:'+createHash('sha256').update(resumeZip).digest('hex')}]};
 const resumeChain={...chain,dispatchRun:resumeRun,
   dispatchArtifacts:resumeArtifacts,dispatchZip:resumeZip};
@@ -287,6 +289,7 @@ assert.equal(resumeProved.phase,'resume');
 assert.equal(resumeProved.model,'qwen3.7-plus');
 assert.equal(resumeProved.default_model,'qwen3.7-max');
 assert.deepEqual(resumeProved.checkpoint,checkpoint);
+assert.equal(resumeProved.source_main_sha,dispatchMain);
 assert.throws(()=>readStagingDeveloperDispatchArtifact({dispatchRun:
   {...resumeRun,actor:{login:'other'}},dispatchArtifacts:resumeArtifacts,
   dispatchZip:resumeZip}),/untrusted or incomplete/);

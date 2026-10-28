@@ -206,6 +206,7 @@ export function readStagingDeveloperDispatchArtifact({
       (dispatchRun.event==='workflow_dispatch'&&
         dispatchRun.actor?.login!=='BestNathan')||
       dispatchRun.head_branch!=='main'||
+      !SHA.test(dispatchRun.head_sha??'')||
       dispatchRun.repository?.full_name!==REPO_NAME||
       dispatchRun.head_repository?.full_name!==REPO_NAME||
       dispatchRun.status!=='completed'||dispatchRun.conclusion!=='success')
@@ -256,7 +257,9 @@ export function verifyStagingDeveloperDispatchArtifact({
     run:admissionRun,artifacts:admissionArtifacts,zip:admissionZip});
   const body=verifyStagingDeveloperDispatch({record,keyring,admission,registry,now});
   return Object.freeze({dispatch_id:body.dispatch_id,target_sha:body.target_sha,
-    source_main_sha:admission.source_sha,phase:body.phase,
+    // The Worker executes the trusted main code of the Dispatch Run itself.
+    // A resume's Admission may be older; using its SHA would run stale code.
+    source_main_sha:dispatchRun.head_sha,phase:body.phase,
     model:body.model,default_model:body.default_model,
     checkpoint:body.checkpoint??null,
     agent_id:body.agent_id,role:body.role,provider:body.provider,
