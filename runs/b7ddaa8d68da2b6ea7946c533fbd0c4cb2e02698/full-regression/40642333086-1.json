@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_full_failure_observation",
+  "trust": "authenticated_github_run_and_artifact_digest",
+  "evaluation": "NOT_EVALUATED",
+  "agent_dispatch": "NOT_AUTHORIZED",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_path": ".github/workflows/e2e-full-regression.yml",
+    "workflow_id": 391374339,
+    "event": "push",
+    "branch": "main",
+    "run_id": 40642333086,
+    "run_attempt": 1,
+    "source_sha": "b7ddaa8d68da2b6ea7946c533fbd0c4cb2e02698",
+    "conclusion": "failure",
+    "completed_at": "2026-10-28T06:13:20Z",
+    "run_url": "https://github.com/BestNathan/nession/actions/runs/40642333086"
+  },
+  "artifact": {
+    "id": 12795978760,
+    "name": "full-regression-40642333086-1",
+    "digest": "sha256:92be3d3b53c4fd78285b3b2c4ff2554019c5349d17cbfcba457c8f01cf36ecc2",
+    "size_bytes": 226313,
+    "expires_at": "2026-11-11T06:13:16Z",
+    "retention": "GitHub Actions artifact; time-limited"
+  },
+  "candidate": {
+    "status": "REPORT_UNAVAILABLE",
+    "observed_tests": 0,
+    "unknown_files": 0,
+    "results": []
+  },
+  "evidence": {
+    "archive_sha256": "92be3d3b53c4fd78285b3b2c4ff2554019c5349d17cbfcba457c8f01cf36ecc2",
+    "candidate_sha256": "39c63d8790e1b7a04a6026861a4b29fe34a72522099eb76bc90b38834e5a03be"
+  }
+}
