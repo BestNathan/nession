@@ -34,10 +34,10 @@ jobs:
       terminal_cols: ${{ steps.check.outputs.terminal_cols }}
       terminal_web_font_size: ${{ steps.check.outputs.terminal_web_font_size }}
     env:
-      # One release-level source (#2487). Production has its own scope, then
-      # the shared variable, then the approved default.
-      RELEASE_TERMINAL_COLS: ${{ vars.PRODUCTION_TERMINAL_COLS || vars.NESSION_TERMINAL_COLS || '80' }}
-      RELEASE_TERMINAL_WEB_FONT_SIZE: ${{ vars.PRODUCTION_TERMINAL_WEB_FONT_SIZE || vars.NESSION_TERMINAL_WEB_FONT_SIZE || '14' }}
+      # Same GitHub repository Variables source as staging (#2557).
+      # Production artifacts still use their own immutable version identity.
+      RELEASE_TERMINAL_COLS: ${{ vars.NESSION_TERMINAL_COLS || '96' }}
+      RELEASE_TERMINAL_WEB_FONT_SIZE: ${{ vars.NESSION_TERMINAL_WEB_FONT_SIZE || '14' }}
     steps:
       - uses: actions/checkout@v4
         with:
