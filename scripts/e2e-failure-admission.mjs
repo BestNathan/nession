@@ -99,6 +99,17 @@ export function decideAdmission(existing, incoming, now, linkedIssue = null) {
     // "resolved" can only be published from a verified fix; a new real failure
     // is a recurrence. The trusted projector reopens same-invariant Bugs.
     if (existing.verified_fix !== true) return { action: 'ERROR', reason: 'unverified resolution' };
+    // The fix is not the flag alone: the record must bind the fixed SHA to the
+    // trusted replay that proved it. A missing, mismatched or unverified
+    // replay is not a recurrence policy and must fail closed.
+    const fixedSha = String(existing.fixed_sha ?? '');
+    const replay = existing.verified_fix_replay;
+    if (!/^[a-f0-9]{40}$/.test(fixedSha) || !replay ||
+        String(replay.sha ?? '') !== fixedSha || replay.verified !== true ||
+        !Number.isSafeInteger(replay.run_id) || replay.run_id < 1 ||
+        !Number.isSafeInteger(replay.run_attempt) || replay.run_attempt < 1) {
+      return { action: 'ERROR', reason: 'unverified fixed-SHA replay' };
+    }
     return { action: 'CLAIM_RECURRENCE', epoch: existing.epoch + 1,
       expected_version: expected, prior_bug_issue: existing.bug_issue ?? null };
   }
@@ -153,10 +164,29 @@ function selfTest() {
     'RECONCILE_EXPIRED_CLAIM');
   assert.equal(decideAdmission({ ...stored, status: 'retryable_failure' }, repeat, now).action,
     'RETRY_SAME_TASK');
-  assert.deepEqual(decideAdmission({ ...stored, status: 'resolved', verified_fix: true }, repeat, now),
+  const fixedSha = 'd'.repeat(40);
+  const resolved = { ...stored, status: 'resolved', verified_fix: true,
+    fixed_sha: fixedSha,
+    verified_fix_replay: { sha: fixedSha, verified: true, run_id: 501, run_attempt: 1 } };
+  assert.deepEqual(decideAdmission(resolved, repeat, now),
     { action: 'CLAIM_RECURRENCE', epoch: 2, expected_version: 2, prior_bug_issue: 1234 });
   assert.equal(decideAdmission({ ...stored, status: 'resolved', verified_fix: false },
     repeat, now).action, 'ERROR');
+  // A verified_fix flag without an exact fixed SHA bound to a trusted replay
+  // is not a recurrence policy.
+  assert.equal(decideAdmission({ ...resolved, fixed_sha: undefined }, repeat, now).reason,
+    'unverified fixed-SHA replay');
+  assert.equal(decideAdmission({ ...resolved, fixed_sha: 'main' }, repeat, now).reason,
+    'unverified fixed-SHA replay');
+  assert.equal(decideAdmission({ ...resolved,
+    verified_fix_replay: { ...resolved.verified_fix_replay, sha: 'e'.repeat(40) } }, repeat, now).reason,
+  'unverified fixed-SHA replay');
+  assert.equal(decideAdmission({ ...resolved,
+    verified_fix_replay: { ...resolved.verified_fix_replay, verified: false } }, repeat, now).reason,
+  'unverified fixed-SHA replay');
+  assert.equal(decideAdmission({ ...resolved,
+    verified_fix_replay: { ...resolved.verified_fix_replay, run_id: 0 } }, repeat, now).reason,
+  'unverified fixed-SHA replay');
   assert.equal(decideAdmission({ ...stored, fingerprint: 'e2e1:' + 'f'.repeat(64) },
     repeat, now).action, 'TRIAGE_REQUIRED');
   assert.equal(decideAdmission(stored, { status: 'INSUFFICIENT_SIGNATURE' }, now).action,
