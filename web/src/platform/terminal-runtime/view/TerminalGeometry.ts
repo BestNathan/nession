@@ -21,6 +21,12 @@ export interface TerminalGeometryHost {
   resizeLocal(cols: number, rows: number): void;
   resizeLocalOrdered(cols: number, rows: number): void;
   measureFont(fontSize: number): TerminalCellSize;
+  /**
+   * Apply the measured content width to the viewport's CSS contract. Geometry
+   * owns the value; the controller owns the DOM write so the registered
+   * producer stays the view owner.
+   */
+  applyContentWidth(container: HTMLElement, contentWidth: number, fits: boolean): void;
 }
 
 /**
@@ -178,11 +184,7 @@ export class TerminalGeometry {
       // centre the xterm. At the minimum font a very narrow box may be smaller
       // than this; the viewport scrolls horizontally rather than dropping a
       // column.
-      this.container.style.setProperty(
-        '--nession-local-terminal-content-width',
-        `${layout.contentWidth}px`,
-      );
-      this.container.dataset.terminalColsFit = layout.fits ? 'true' : 'false';
+      this.controller.applyContentWidth(this.container, layout.contentWidth, layout.fits);
     }
     const grid = { cols: this.cols, rows: layout.rows };
     if (this.controller.isObserverReadOnly) { return grid; }

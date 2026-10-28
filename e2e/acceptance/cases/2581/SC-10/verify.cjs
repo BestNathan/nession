@@ -20,8 +20,9 @@ run(({ evidence }) => {
     'Tests',
   ]);
 
-  // The visual-vocabulary contract moved to the geometry owner when the
-  // production setter moved; keep that registration executable.
+  // The visual-vocabulary contract keeps the controller as the registered
+  // producer: geometry computes the content width and the controller writes
+  // the viewport property.
   const vocabulary = spawnSync('node', ['design/scripts/visual-vocabulary-source.mjs'], {
     cwd: root, encoding: 'utf8', timeout: 120000,
     env: { ...process.env, GH_TOKEN: '', GITHUB_TOKEN: '' },
@@ -43,7 +44,7 @@ run(({ evidence }) => {
 
   evidence.push(
     { type: 'runtime', value: 'exact SHA ' + sha + ': the canonical fixture constructs through the public engine barrel and shares the renderer/theme/metrics rules; no app/product file imports @xterm' },
-    { type: 'docs', value: 'docs/architecture/terminal-engine.md records the writable owners, final graph, machine-checked boundary and test owners; the visual-vocabulary source contract registers TerminalGeometry as the content-width producer' },
+    { type: 'docs', value: 'docs/architecture/terminal-engine.md records the writable owners, final graph, machine-checked boundary and test owners; the visual-vocabulary source contract passes with the controller as the registered content-width producer' },
   );
   return 'Fixture and production terminal construction share the engine rules; architecture docs and the executable vocabulary contract are updated with evidence';
 });

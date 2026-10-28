@@ -1006,6 +1006,21 @@ export class TerminalController {
     return this.instance.setFontSize(fontSize);
   }
 
+  /**
+   * Publish the measured terminal content width to the viewport stylesheet.
+   *
+   * `TerminalGeometry` owns the value; this class owns the DOM write, which is
+   * why the registered producer of `--nession-local-terminal-content-width`
+   * remains the controller (#2581 SC-06).
+   */
+  applyContentWidth(container: HTMLElement, contentWidth: number, fits: boolean): void {
+    container.style.setProperty(
+      '--nession-local-terminal-content-width',
+      `${contentWidth}px`,
+    );
+    container.dataset.terminalColsFit = fits ? 'true' : 'false';
+  }
+
 
   // ── Input mode ───────────────────────────────────────────────────────────
 

@@ -225,7 +225,7 @@ export const LOCAL_CSS_VARIABLE_OWNERS = Object.freeze({
   '--nession-local-terminal-content-bottom-inset': ['web/src/index.css', 'web/src/platform/terminal-runtime/capsule/occlusionScroll.ts'],
   '--nession-local-terminal-content-width': [
     'web/src/index.css',
-    'web/src/platform/terminal-runtime/view/TerminalGeometry.ts',
+    'web/src/platform/terminal-runtime/controller/TerminalController.ts',
     'web/src/app/fixture/FixtureTerminal.tsx',
   ],
   '--nession-local-workspace-content-bottom-inset': ['web/src/app/workspace/hooks/useWorkspaceCapsuleClearance.ts'],
