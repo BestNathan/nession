@@ -22,7 +22,7 @@ const keyring={'staging-controller-v1':key};
 assert.equal(record.kind,'staging_developer_dispatch');
 assert.equal(record.body.issue,2319);
 assert.equal(record.body.target_sha,admission.target_sha);
-assert.equal(record.body.environment,'dev-claude-qwen-staging');
+assert.equal(record.body.environment,'dev-claude-qwen');
 assert.equal(record.body.agent_id,'dev-qwen-01');
 assert.equal(record.body.provider,'claude-code');
 assert.match(record.signature,/^[a-f0-9]{64}$/);
@@ -147,7 +147,7 @@ const admissionEntry={schema_version:1,kind:'staging_developer_readonly_admissio
   target_branch:'staging',target_sha:admission.target_sha,
   source_run_id:dispatchRun.id,source_run_attempt:1,
   provider_identity:'dev-qwen-01',
-  selected_environment:'dev-claude-qwen-staging',
+  selected_environment:'dev-claude-qwen',
   status:'provenance_validated_only',can_execute_staging_source:false,
   signed_store_dispatch_verified:false,acceptance_result:'Pending'};
 const admissionZip=zipOne('staging-developer-admission.json',
@@ -186,7 +186,7 @@ assert.equal(proved.target_sha,admissionEntry.target_sha);
 assert.equal(proved.source_main_sha,admissionEntry.source_sha);
 assert.equal(proved.dispatch_id,dispatchForAdmission.body.dispatch_id);
 assert.equal(proved.agent_id,'dev-qwen-01');
-assert.equal(proved.environment,'dev-claude-qwen-staging');
+assert.equal(proved.environment,'dev-claude-qwen');
 assert.equal(proved.admission_artifact_id,7001);
 
 for(const patch of [

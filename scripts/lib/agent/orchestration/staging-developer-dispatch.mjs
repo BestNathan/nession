@@ -5,9 +5,10 @@
 // consumes the already-verified artifact identity produced by a separate
 // trusted job.
 //
-// The staging Environment is deliberately separate from the registry's
-// `dev-claude-qwen` production Environment. The registry still owns the
-// role/provider binding; this module adds the explicit staging target.
+// The staging lane reuses the registry's `dev-claude-qwen` Environment and
+// model token. The registry still owns the role/provider binding; the trusted
+// model job maps only the model credential, never the signing key or Store
+// checkpoint key.
 import {createHash, createHmac, timingSafeEqual} from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -18,7 +19,7 @@ import {readWorkerZipMember} from './worker-zip.mjs';
 const REPO='BestNathan/nession';
 const ISSUE=2319;
 const KIND='staging_developer_dispatch';
-const ENVIRONMENT='dev-claude-qwen-staging';
+const ENVIRONMENT='dev-claude-qwen';
 const AGENT='dev-qwen-01', ROLE='developer', TASK='implement', PROVIDER='claude-code';
 const SHA=/^[a-f0-9]{40}$/;
 const HEX64=/^[a-f0-9]{64}$/;
