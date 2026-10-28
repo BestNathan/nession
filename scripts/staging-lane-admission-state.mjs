@@ -16,6 +16,7 @@ export const ADMISSION_EVENTS = Object.freeze(['schedule', 'workflow_dispatch'])
 export const ADMISSION_BRANCH = 'main';
 export const REPO = 'BestNathan/nession';
 const POS = (x) => Number.isSafeInteger(x) && x > 0;
+const SHA = /^[a-f0-9]{40}$/;
 const MAX_CANDIDATES = 10;
 
 function fail(message) {
@@ -63,6 +64,10 @@ export function isTrustedAdmissionRun(run, { repo = REPO, artifact = null } = {}
   if (artifact && artifact.run_id !== run.id) return false;
   if (artifact?.head_branch && artifact.head_branch !== run.head_branch) return false;
   if (artifact?.head_sha && run.head_sha !== artifact.head_sha) return false;
+  // Durable admission state pins an exact commit. A branch name, an empty
+  // value or any other ambiguous identity is not state: losing it is safer
+  // than seeding the next admission with an unverifiable pin.
+  if (!SHA.test(String(run.head_sha ?? ''))) return false;
   return true;
 }
 
@@ -150,6 +155,15 @@ function selfTest() {
       fetchRun: async () => run(99),
     });
     assert.equal(mismatch, null, 'artifact/run identity mismatch is not state');
+    // A lane pin that is not an exact commit SHA is not state, even when the
+    // artifact and run agree with each other.
+    for (const ambiguous of ['main', '']) {
+      const unpinned = await selectTrustedAdmissionArtifact({
+        artifacts: [{ ...artifact(1, 11), workflow_run: { id: 11, head_branch: 'main' } }],
+        fetchRun: async () => run(11, { head_sha: ambiguous }),
+      });
+      assert.equal(unpinned, null, 'ambiguous lane pin ' + JSON.stringify(ambiguous) + ' is not state');
+    }
     // Expired, empty and unnamed artifacts never become candidates.
     assert.deepEqual(admissionCandidates([
       artifact(1, 11, { expired: true }),

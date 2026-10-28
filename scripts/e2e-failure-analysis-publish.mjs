@@ -55,6 +55,41 @@ export function record({ store, fingerprint, analysisId, bugIssue }) {
     bug_issue: bugIssue, state_version: receipt.version };
 }
 
+// The publisher never closes a Bug; it only creates, comments or reopens. A
+// trusted closer must call this policy, which requires the record's verified
+// fixed SHA to be bound to a trusted replay AND an authorized acceptance
+// receipt for the same fingerprint and exact SHA. Anything else is rejected.
+// The self-test below pins both the publisher's action set and every refusal.
+export const PUBLISH_ACTIONS = Object.freeze(['CREATE', 'COMMENT', 'REOPEN']);
+
+export function authorizedBugClosure({ state, acceptance } = {}) {
+  if (!state || typeof state !== 'object' || Array.isArray(state)) {
+    return { allowed: false, reason: 'missing admission state' };
+  }
+  if (state.status !== 'resolved' || state.verified_fix !== true) {
+    return { allowed: false, reason: 'fix is not verified' };
+  }
+  const fixedSha = String(state.fixed_sha ?? '');
+  const replay = state.verified_fix_replay;
+  if (!/^[a-f0-9]{40}$/.test(fixedSha) || !replay ||
+      String(replay.sha ?? '') !== fixedSha || replay.verified !== true) {
+    return { allowed: false, reason: 'fixed SHA is not bound to a trusted replay' };
+  }
+  if (!acceptance || typeof acceptance !== 'object' || Array.isArray(acceptance)) {
+    return { allowed: false, reason: 'missing authorized acceptance receipt' };
+  }
+  if (acceptance.authorized !== true ||
+      acceptance.fingerprint !== state.fingerprint ||
+      String(acceptance.sha ?? '') !== fixedSha ||
+      acceptance.result !== 'Pass' ||
+      !Number.isSafeInteger(acceptance.run_id) || acceptance.run_id < 1 ||
+      !Number.isSafeInteger(acceptance.run_attempt) || acceptance.run_attempt < 1) {
+    return { allowed: false, reason: 'acceptance receipt is not authorized for this fixed SHA' };
+  }
+  return { allowed: true, fingerprint: state.fingerprint, fixed_sha: fixedSha,
+    acceptance_run_id: acceptance.run_id, acceptance_run_attempt: acceptance.run_attempt };
+}
+
 function selfTest() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'e2e-failure-publish-'));
   try {
@@ -123,6 +158,38 @@ function selfTest() {
     assert.equal(plan({ store: root, fingerprint, analysisRun, diagnosis, issues: [] }).action, 'SKIP');
     assert.throws(() => record({ store: root, fingerprint, analysisId: created.analysis_id, bugIssue: 10 }),
       /not awaiting a diagnosis/);
+    // The publisher never emits a close action; a trusted closer must satisfy
+    // the authorizedBugClosure policy (verified fixed-SHA replay + authorized
+    // acceptance bound to the same fingerprint and SHA).
+    const fixedSha = 'd'.repeat(40);
+    const resolved = { fingerprint, status: 'resolved', verified_fix: true,
+      fixed_sha: fixedSha,
+      verified_fix_replay: { sha: fixedSha, verified: true, run_id: 501, run_attempt: 1 } };
+    const acceptance = { authorized: true, fingerprint, sha: fixedSha, result: 'Pass',
+      run_id: 601, run_attempt: 1 };
+    assert.deepEqual(authorizedBugClosure({ state: resolved, acceptance }),
+      { allowed: true, fingerprint, fixed_sha: fixedSha,
+        acceptance_run_id: 601, acceptance_run_attempt: 1 });
+    assert.equal(authorizedBugClosure({ state: resolved, acceptance: null }).reason,
+      'missing authorized acceptance receipt');
+    assert.equal(authorizedBugClosure({ state: resolved,
+      acceptance: { ...acceptance, authorized: false } }).reason,
+    'acceptance receipt is not authorized for this fixed SHA');
+    assert.equal(authorizedBugClosure({ state: resolved,
+      acceptance: { ...acceptance, fingerprint: 'e2e1:' + 'f'.repeat(64) } }).reason,
+    'acceptance receipt is not authorized for this fixed SHA');
+    assert.equal(authorizedBugClosure({ state: resolved,
+      acceptance: { ...acceptance, sha: 'e'.repeat(40) } }).reason,
+    'acceptance receipt is not authorized for this fixed SHA');
+    assert.equal(authorizedBugClosure({ state: { ...resolved, fixed_sha: undefined },
+      acceptance }).reason, 'fixed SHA is not bound to a trusted replay');
+    assert.equal(authorizedBugClosure({ state: { ...resolved, verified_fix: false },
+      acceptance }).reason, 'fix is not verified');
+    assert.ok(!PUBLISH_ACTIONS.includes('CLOSE'), 'the publisher never closes a Bug');
+    for (const action of ['CREATE', 'COMMENT', 'REOPEN']) {
+      assert.ok(PUBLISH_ACTIONS.includes(action));
+    }
+    console.log('e2e failure analysis publish closure policy self-test: passed');
     console.log('e2e failure analysis publish CLI self-test: passed');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

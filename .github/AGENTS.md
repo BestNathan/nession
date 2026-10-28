@@ -49,6 +49,14 @@ Only a positively tooling-only diff, together with a trusted `not-required`
 Issue plan, may skip browser provisioning. Unknown, mixed and unverifiable
 diffs fail closed to applicable (#2478).
 
+The policy's six categories are `tooling` (CI/Acceptance scheduler, ingestion
+and Gate tooling), `e2e-runner` (E2E executor, selection/report contract,
+browser tests, test support and Gate suite membership), `app-runtime` (product
+runtime and build inputs), `e2e-fixture-catalog` (browser fixtures, scenario
+fixtures and the Case catalog/verifiers), `mixed` (several risk categories)
+and `unknown`. Only an all-`tooling` change is `tooling-only`; runner and
+fixture/catalog risks are distinct and both stay applicable (#2478 SC-01).
+
 A tooling-only Main merge records the skipped Full as an authenticated
 `E2E_FULL_NOT_REQUIRED_V1` receipt in the Full scope job log, because the
 Acceptance harness never reads artifacts. A successful Full workflow run whose

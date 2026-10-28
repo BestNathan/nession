@@ -305,4 +305,65 @@ ok(() => {
   assert.match(result.stdout, /6 positive\/negative fixtures passed/);
 });
 
+// #2525: prove browser checks fail CLOSED, not merely that a cache restores.
+// This exercises the actual launch expressions checked into each workflow
+// against an isolated @playwright/test mock: corrupt executables and missing
+// system libraries must never translate to a green browser setup.
+ok(() => {
+  const names = [
+    'e2e-tests.yml',
+    'acceptance-case-smoke.yml',
+    'e2e-scenario-smoke.yml',
+    'acceptance-cases.yml',
+    'e2e-full-regression.yml',
+  ];
+  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'nession-playwright-probe-'));
+  const moduleDir = path.join(fixture, 'node_modules', '@playwright', 'test');
+  fs.mkdirSync(moduleDir, { recursive: true });
+  fs.writeFileSync(path.join(moduleDir, 'index.js'), [
+    "'use strict';",
+    'exports.chromium = { launch: async () => {',
+    '  if (process.env.NESSION_BROWSER_MOCK_ERROR)',
+    '    throw Error(process.env.NESSION_BROWSER_MOCK_ERROR);',
+    '  return { close: async () => {} };',
+    '} };',
+  ].join('\n'));
+  try {
+    for (const name of names) {
+      const workflow = fs.readFileSync(path.join(repoRoot, '.github', 'workflows', name), 'utf8');
+      assert.match(workflow,
+        /PLAYWRIGHT_BROWSERS_PATH: \$\{\{ github\.workspace \}\}\/\.cache\/ms-playwright/,
+        name + ' must install and run the same absolute cached browser');
+      const probes = [...workflow.matchAll(/node -e '([^'\n]*chromium\.launch[^'\n]*)'/g)];
+      assert.equal(probes.length, 1, name + ' must have one real Chromium launch probe');
+      if (name === 'e2e-full-regression.yml') {
+        assert.match(workflow, /npx playwright install chromium --with-deps/,
+          'Full visual golden font parity must be preserved');
+      } else {
+        assert.match(workflow, /npx playwright install chromium\s/,
+          name + ' must provision matching binary even after a cache miss');
+        assert.doesNotMatch(workflow, /npx playwright install chromium --with-deps/,
+          name + ' must not repeat unbounded apt setup on every warm job');
+      }
+      for (const [failure, expected] of [
+        ['', 0],
+        ['ENOENT: browser executable missing/corrupt', 1],
+        ['error while loading shared libraries: libmissing.so', 1],
+      ]) {
+        const result = spawnSync(process.execPath, ['-e', probes[0][1]], {
+          cwd: fixture,
+          env: { ...process.env, NESSION_BROWSER_MOCK_ERROR: failure },
+          encoding: 'utf8',
+          timeout: 5000,
+        });
+        assert.equal(result.status, expected,
+          name + ' accepted a failed Chromium probe: ' + (result.stderr || result.error));
+        if (expected !== 0) assert.match(result.stderr, new RegExp(failure.split(':')[0]));
+      }
+    }
+  } finally {
+    fs.rmSync(fixture, { recursive: true, force: true });
+  }
+});
+
 console.log('acceptance Case self-test: ' + cases + ' cases passed');
