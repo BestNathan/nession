@@ -18,6 +18,7 @@ const pairs = [
   ['tmux-socket-isolation', ['tmux-socket-isolation-selftest'], 'tooling'],
   ['server-handler-locality', ['server-handler-locality-selftest', 'server-handler-concurrency-selftest'], 'tooling'],
   ['release-version-consistency', ['release-version-consistency-selftest'], 'rust'],
+  ['rust-coverage', ['coverage-classification-selftest'], 'rust'],
   ['design-system-fast', ['design-token-boundary-selftest'], 'web'],
   ['design-system-full', ['design-token-boundary-selftest'], 'web'],
   ['acceptance-runtime-contract', ['e2e-cli-selftest'], 'tooling'],

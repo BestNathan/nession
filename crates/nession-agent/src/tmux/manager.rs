@@ -1,6 +1,6 @@
 //! tmux session lifecycle management: create, list, and kill sessions.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -377,6 +377,36 @@ impl SessionManager {
             })
             .await?;
 
+        // The requested size is the Session's width, not whatever client tmux
+        // considers "latest" on a shared server. On tmux 3.4 with the default
+        // `window-size latest`, a client attached to another Session sized a
+        // newly created Session to its own 80x24 and discarded `-x 96 -y 24`
+        // (#2520). `new-session`'s flags alone are therefore not the create's
+        // size: apply the requested geometry explicitly and let a failure fail
+        // the create, because a Session at the wrong width is not the Session
+        // that was asked for.
+        self.apply_session_size(name, width, height)
+            .await
+            .with_context(|| format!("apply the requested size for session {name}"))?;
+        // tmux's `resize-window` pins `window-size` to `manual` as a side
+        // effect. Restore the dynamic policy: the controller's authorized
+        // resize path still drives rows through the attached client, and only
+        // an explicit `resize-window` (this correction) should be manual.
+        //
+        // BestEffort, like the other session options: a refused option leaves
+        // the Session at the size this create just applied (manual), which
+        // degrades later row resizes rather than the created width. Observable
+        // rather than dropped.
+        if let Err(e) = self
+            .sdk_ops()
+            .set_option(name, "window-size", "latest")
+            .await
+        {
+            tracing::warn!(
+                "best-effort dynamic `window-size` restore for session {name} failed: {e:#}"
+            );
+        }
+
         if !outcome.used_e {
             // BestEffort cosmetic cleanup: hides the `export …` line the
             // fallback typed from the pane's scrollback. The environment was
@@ -399,6 +429,11 @@ impl SessionManager {
         }
 
         Ok(())
+    }
+
+    /// Apply the Agent's resolved size to a Session's pane.
+    pub(crate) async fn apply_session_size(&self, name: &str, cols: u16, rows: u16) -> Result<()> {
+        self.sdk_ops().resize_window(name, cols, rows).await
     }
 
     pub async fn kill_session(&self, name: &str) -> Result<()> {
@@ -443,7 +478,7 @@ mod window_size_lock_tests {
         }
 
         let mgr = SessionManager::new();
-        let session = TestSession::new("no-lock");
+        let session = TestSession::new("pinned-size");
         let name = session.name();
         let cwd = std::env::temp_dir().to_string_lossy().into_owned();
 
@@ -451,14 +486,63 @@ mod window_size_lock_tests {
             .await
             .expect("create");
 
-        // window-size should NOT be explicitly set, leaving it at tmux default
-        // so that clients can resize the window.
+        // window-size stays at tmux's default so the active client can drive
+        // rows through the authorized resize path; the *created* size is what
+        // must survive an unrelated client, which #2520 applies explicitly.
         let val = read_window_size_option(name).await.expect("show-option");
         assert!(
-            val.is_empty(),
-            "expected window-size to be unset, got {val:?}"
+            val.is_empty() || val == "latest",
+            "expected the dynamic window-size policy, got {val:?}"
         );
+        let size = mgr
+            .tmux_dep()
+            .ops()
+            .window_size(name)
+            .await
+            .expect("created window");
+        assert_eq!(size, (200, 60), "the requested size must be applied");
         // `session` kills the tmux session on drop, panic or not.
+    }
+
+    /// #2520: a client attached to one Session must not size a new Session.
+    ///
+    /// Reproduced on tmux 3.4 (Ubuntu 24.04): with the default
+    /// `window-size latest`, the new Session was created at the attached
+    /// client's 80x24 and discarded `-x 96 -y 24`. Nession's server config and
+    /// the explicit post-create resize are the fix; this test is the witness.
+    #[tokio::test]
+    async fn a_client_attached_elsewhere_cannot_size_a_new_session() {
+        if cmd::global().tokio().arg("-V").status().await.is_err() {
+            eprintln!("tmux not available, skipping");
+            return;
+        }
+
+        let mgr = SessionManager::new();
+        let cwd = std::env::temp_dir().to_string_lossy().into_owned();
+        let anchor = TestSession::new("client-size-anchor");
+        mgr.create_session(anchor.name(), 80, 24, &cwd, &[])
+            .await
+            .expect("create the anchor");
+        // Hold a real 80x24 client on the anchor while the target is created.
+        let (_client, _output) =
+            crate::tmux::pty::PtySession::attach(&mgr.tmux_dep(), anchor.name(), 80, 24)
+                .expect("attach the anchor client");
+
+        let target = TestSession::new("client-size-target");
+        mgr.create_session(target.name(), 96, 24, &cwd, &[])
+            .await
+            .expect("create the target");
+        let size = mgr
+            .tmux_dep()
+            .ops()
+            .window_size(target.name())
+            .await
+            .expect("target window");
+        assert_eq!(
+            size,
+            (96, 24),
+            "a client attached to another Session sized the new Session"
+        );
     }
 
     #[tokio::test]
@@ -778,9 +862,10 @@ mod legacy_stage_two_tests {
     async fn a_refused_cosmetic_stage_two_call_still_creates_the_session() {
         // The other half of the same path, and the contrast the criterion needs:
         // `clear-history` (cosmetic — it hides the `export …` line the
-        // statement above typed) and `set-option mouse on` (presentation — see
-        // the class comment at that call site) are `BestEffort`, and the fake
-        // refuses both.
+        // statement above typed), the `window-size latest` restore after the
+        // create's explicit resize, and `set-option mouse on` (presentation —
+        // see the class comment at that call site) are `BestEffort`, and the
+        // fake refuses all three.
         //
         // Reddens on: making either one `Required` (the `expect` below then
         // fails), and on removing either call (the recorded-call assertions
@@ -808,8 +893,11 @@ mod legacy_stage_two_tests {
         );
         assert_eq!(
             calls_of(&fake, "set-option"),
-            vec![vec!["set-option", "-t", session.name(), "mouse", "on"]],
-            "mouse mode is still requested, targeted at the session: {:#?}",
+            vec![
+                vec!["set-option", "-t", session.name(), "window-size", "latest"],
+                vec!["set-option", "-t", session.name(), "mouse", "on"],
+            ],
+            "the dynamic window-size restore and mouse mode are still requested,              targeted at the session: {:#?}",
             fake.calls()
         );
     }
