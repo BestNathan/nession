@@ -52,7 +52,7 @@ export function verifyStagingDeveloperSource({run,artifacts,zip}){
       record.target_branch!=='staging'||!SHA.test(record.target_sha??'')||
       record.source_run_id!==run.id||record.source_run_attempt!==run.run_attempt||
       record.provider_identity!=='dev-qwen-01'||
-      record.selected_environment!=='dev-claude-qwen-staging'||
+      record.selected_environment!=='dev-claude-qwen'||
       record.status!=='provenance_validated_only'||
       record.can_execute_staging_source!==false||
       record.signed_store_dispatch_verified!==false||

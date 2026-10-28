@@ -2,7 +2,7 @@ name: Agent / Staging Developer Canary
 
 # #2319: trusted-main synthetic Qwen Developer proof against an exact staging
 # SHA. The signed Dispatch Run/artifact and its upstream Admission are both
-# independently authenticated before the protected staging-only Environment is
+# independently authenticated before the protected provider Environment is
 # entered. NEVER check out/execute staging code. This is not signed Store
 # Developer work or an SC Pass.
 on:
@@ -111,7 +111,7 @@ jobs:
     needs: verify-source
     if: needs.verify-source.result == 'success'
     runs-on: ubuntu-24.04
-    environment: dev-claude-qwen-staging
+    environment: dev-claude-qwen
     timeout-minutes: 15
     env:
       STAGING_TARGET_SHA: ${{ needs.verify-source.outputs.staging_sha }}
@@ -140,7 +140,7 @@ jobs:
             { echo "::error::Staging model Worker did not load authenticated main source"; exit 1; }
           [[ "$STAGING_DISPATCH_AGENT" == "dev-qwen-01" ]] ||
             { echo "::error::Staging dispatch selected an unapproved Agent"; exit 1; }
-          [[ "$STAGING_DISPATCH_ENVIRONMENT" == "dev-claude-qwen-staging" ]] ||
+          [[ "$STAGING_DISPATCH_ENVIRONMENT" == "dev-claude-qwen" ]] ||
             { echo "::error::Staging dispatch selected an unapproved Environment"; exit 1; }
           [[ "$STAGING_DISPATCH_ID" =~ ^[a-f0-9]{64}$ ]] ||
             { echo "::error::Staging dispatch identity is missing"; exit 1; }
