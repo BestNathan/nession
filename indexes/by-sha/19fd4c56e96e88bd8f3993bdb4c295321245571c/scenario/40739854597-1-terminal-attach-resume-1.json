@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 40739854597,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/2581-xterm-engine-staging",
+    "target_sha": "19fd4c56e96e88bd8f3993bdb4c295321245571c",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/40739854597",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "31219b7bbad0a7b498bf41ce701700797bd6bc1e41a2bb25ada2d57b652691a2"
+  },
+  "record": "runs/2026-10-28/40739854597-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "afccff5487c6acfbec4c4af368fba13f1c9029095e47c9af97f25baded7e150b"
+}
