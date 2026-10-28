@@ -217,13 +217,22 @@ jobs:
             ${{ runner.temp }}/review-output/agent-execution-trace.json
           if-no-files-found: warn
           retention-days: 14
-      - name: Upload the canonical result and verdict
+      - name: Upload the canonical Agent result artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          # The trusted ingest (result-artifact.mjs) consumes exactly this
+          # single-member name, bound to the Outbox action ID.
+          name: agent-result-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.action_id }}
+          path: ${{ runner.temp }}/review-output/agent-result.json
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Upload the reviewer slice and verdict
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: reviewer-slice-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            ${{ runner.temp }}/review-output/agent-result.json
             ${{ runner.temp }}/review-output/review-verdict.json
           if-no-files-found: warn
           retention-days: 14
