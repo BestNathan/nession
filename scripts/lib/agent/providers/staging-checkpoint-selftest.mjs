@@ -1,9 +1,13 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {execFileSync} from 'node:child_process';
 import {stagingSeedMetadata} from './claude-resume-fixture.mjs';
 import {sealCheckpoint} from '../store/checkpoint.mjs';
 import {validateCheckpointSource} from '../store/ingest.mjs';
+import {readCheckpointHeadVersion} from '../store/remote.mjs';
 
 const base={sourceSha:'a'.repeat(40),runId:7001,attempt:1,
   sessionId:'11111111-1111-4111-8111-111111111111',
@@ -53,4 +57,32 @@ assert.throws(()=>validateCheckpointSource({...source,role:undefined},sealed,reg
   /untrusted source workflow/);
 assert.throws(()=>validateCheckpointSource({...source,event:'pull_request'},sealed,registry),
   /untrusted source workflow/);
-console.log('Staging checkpoint metadata: pinned model/CLI, harness binding, Store source and negative fixtures passed');
+// A second staging seed must advance the committed head. The publisher reads
+// the exact head version and lets the Store CAS reject a racing writer.
+const storeRoot=fs.mkdtempSync(path.join(os.tmpdir(),'staging-head-'));
+const store=path.join(storeRoot,'store');
+const git=(args)=>execFileSync('git',args,{encoding:'utf8',stdio:['ignore','pipe','pipe']});
+const writeHead=(head)=>{
+  const file=path.join(store,'roles','developer','dev-qwen-01','issues','2319','head.json');
+  fs.mkdirSync(path.dirname(file),{recursive:true});
+  fs.writeFileSync(file,JSON.stringify(head));
+  git(['-C',store,'add','-A']);
+  git(['-C',store,'-c','user.name=t','-c','user.email=t@t','commit','-qm','head']);
+};
+try {
+  git(['init','-q','-b','agent-store',store]);
+  writeHead({version:3,checkpoint_path:'roles/developer/dev-qwen-01/issues/2319/checkpoints/00000003.json',
+    ciphertext_sha256:'a'.repeat(64)});
+  assert.deepEqual(readCheckpointHeadVersion({remote:store,identity}),{version:3});
+  fs.rmSync(path.join(store,'roles'),{recursive:true,force:true});
+  git(['-C',store,'add','-A']);
+  git(['-C',store,'-c','user.name=t','-c','user.email=t@t','commit','-qm','clear']);
+  assert.deepEqual(readCheckpointHeadVersion({remote:store,identity}),{version:0});
+  writeHead({version:0});
+  assert.throws(()=>readCheckpointHeadVersion({remote:store,identity}),
+    /invalid committed Store head version/);
+  assert.throws(()=>readCheckpointHeadVersion({remote:store,
+    identity:{...identity,issue:0}}),/invalid checkpoint identity/);
+} finally {fs.rmSync(storeRoot,{recursive:true,force:true});}
+
+console.log('Staging checkpoint metadata: pinned model/CLI, harness binding, Store source, head advance and negative fixtures passed');

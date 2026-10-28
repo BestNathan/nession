@@ -113,6 +113,31 @@ export function publishEncryptedAgentCheckpoint({
 }
 // Restore only within a trusted caller that keeps the AES key out of the
 // model executor. The returned Buffer must be explicitly zeroed by its caller.
+// A publisher must advance the exact committed head it observed. Reading the
+// public head in a disposable checkout is the caller's version source; the
+// Store CAS remains the authority that rejects a stale advance.
+export function readCheckpointHeadVersion({remote,identity}){
+  if(!identity||!['developer','reviewer','acceptor'].includes(identity.role)||
+      !/^[a-z][a-z0-9-]{1,80}$/.test(identity.agent_id??'')||
+      !Number.isSafeInteger(identity.issue)||identity.issue<1) {
+    fail('invalid checkpoint identity');
+  }
+  const {checkout,parent}=cloneRoot(remote);
+  try{
+    const file=path.join(checkout,'roles',identity.role,identity.agent_id,
+      'issues',String(identity.issue),'head.json');
+    if(!fs.existsSync(file))return {version:0};
+    const stat=fs.lstatSync(file);
+    if(!stat.isFile()||stat.isSymbolicLink()||stat.size>1024*1024)
+      fail('unsafe Store head');
+    let head;
+    try{head=JSON.parse(fs.readFileSync(file,'utf8'));}
+    catch{fail('corrupt committed Store head');}
+    if(!Number.isSafeInteger(head?.version)||head.version<1)
+      fail('invalid committed Store head version');
+    return {version:head.version};
+  }finally{fs.rmSync(parent,{recursive:true,force:true});}
+}
 export function fetchEncryptedAgentCheckpoint({
   remote,identity,expected,key,commitment=null,
 }){
