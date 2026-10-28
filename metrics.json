@@ -2,42 +2,42 @@
   "schema_version": 2,
   "repository_name": "BestNathan/nession",
   "branch": "main",
-  "commit_sha": "b48faa8f6b17e21cafbacd770a451e3f6a3f49aa",
-  "generated_at": "2026-10-27T20:49:02.573Z",
+  "commit_sha": "92e5fa319c89c91206e6f7e9a9cad0e429391703",
+  "generated_at": "2026-10-28T05:44:03.099Z",
   "repository": {
     "source": {
-      "loc": 324068,
-      "files": 1795
+      "loc": 325416,
+      "files": 1800
     },
     "tests": {
       "unit": {
-        "total": 2988,
-        "rust": 1516,
+        "total": 2989,
+        "rust": 1517,
         "web": 1472
       },
       "integration": {
-        "total": 1735,
-        "rust": 253,
+        "total": 1737,
+        "rust": 255,
         "web": 1482
       },
       "e2e": {
         "total": 268,
         "playwright": 268
       },
-      "total": 4991
+      "total": 4994
     },
     "execution": {
       "unit": {
-        "passed": 2988,
+        "passed": 2989,
         "failed": 0,
         "skipped": 0,
         "pass_rate": 1
       },
       "integration": {
-        "passed": 1734,
-        "failed": 1,
+        "passed": 1737,
+        "failed": 0,
         "skipped": 0,
-        "pass_rate": 0.9994236311239193
+        "pass_rate": 1
       },
       "e2e": {
         "passed": 268,
@@ -48,14 +48,85 @@
     },
     "coverage": {
       "rust": {
-        "status": "unavailable",
-        "reason": "coverage unavailable because the measured Rust test revision has failing tests",
         "lines": {
-          "covered": null,
-          "total": null,
-          "rate": null
+          "covered": 31620,
+          "total": 36195,
+          "rate": 0.8736013261500207
         },
-        "crates": {}
+        "crates": {
+          "nession-common": {
+            "lines": {
+              "covered": 1056,
+              "total": 1151,
+              "rate": 0.9174630755864466
+            },
+            "threshold": 0.8
+          },
+          "nession-agent": {
+            "lines": {
+              "covered": 13365,
+              "total": 14758,
+              "rate": 0.905610516330126
+            },
+            "threshold": 0.79
+          },
+          "nession-server": {
+            "lines": {
+              "covered": 6375,
+              "total": 7520,
+              "rate": 0.8477393617021277
+            },
+            "threshold": 0.8
+          },
+          "nession-cli": {
+            "lines": {
+              "covered": 1989,
+              "total": 3228,
+              "rate": 0.6161710037174721
+            },
+            "threshold": 0.4
+          },
+          "nession-claude-code": {
+            "lines": {
+              "covered": 5019,
+              "total": 5324,
+              "rate": 0.9427122464312547
+            },
+            "threshold": 0.8
+          },
+          "nession-git": {
+            "lines": {
+              "covered": 1385,
+              "total": 1665,
+              "rate": 0.8318318318318318
+            },
+            "threshold": 0.8
+          },
+          "nession-protocol": {
+            "lines": {
+              "covered": 862,
+              "total": 898,
+              "rate": 0.9599109131403119
+            },
+            "threshold": 0.8
+          },
+          "nession-runtime": {
+            "lines": {
+              "covered": 1324,
+              "total": 1385,
+              "rate": 0.955956678700361
+            },
+            "threshold": 0.8
+          },
+          "nession-client": {
+            "lines": {
+              "covered": 245,
+              "total": 266,
+              "rate": 0.9210526315789473
+            },
+            "threshold": 0.8
+          }
+        }
       },
       "web": {
         "lines": {
@@ -87,43 +158,43 @@
   },
   "efficiency": {
     "window": "7d",
-    "window_start": "2026-10-20T20:49:02.573Z",
-    "window_30d_start": "2026-09-27T20:49:02.573Z",
+    "window_start": "2026-10-21T05:44:03.099Z",
+    "window_30d_start": "2026-09-28T05:44:03.099Z",
     "source_churn": {
-      "additions": 44156,
-      "deletions": 7315,
-      "baseline": "b2e6fd2e09c75cdbdaa6d64675b34cbee6720769"
+      "additions": 44342,
+      "deletions": 8760,
+      "baseline": "6b7fe9e3ffe5c969762b306214e4fd6c7a58f0d0"
     },
     "source_churn_30d": {
-      "additions": 181040,
-      "deletions": 27171,
-      "baseline": "a60def7594b613008a673146f755900be19c064c"
+      "additions": 182403,
+      "deletions": 27142,
+      "baseline": "b9f1450daed7f13a29bb1e9c6bd29d3f67ab3587"
     },
     "commits": {
-      "total": 7326,
-      "last_7d": 1019,
-      "last_30d": 4437
+      "total": 7361,
+      "last_7d": 960,
+      "last_30d": 4464
     },
     "issues": {
-      "total": 576,
-      "open": 33,
-      "created_7d": 105,
-      "closed_7d": 110,
-      "created_30d": 351,
-      "closed_30d": 331
+      "total": 577,
+      "open": 30,
+      "created_7d": 92,
+      "closed_7d": 114,
+      "created_30d": 348,
+      "closed_30d": 335
     },
     "pull_requests": {
-      "total": 1961,
-      "open": 6,
-      "created_7d": 303,
-      "merged_7d": 287,
-      "created_30d": 1022,
-      "merged_30d": 954
+      "total": 1969,
+      "open": 5,
+      "created_7d": 293,
+      "merged_7d": 283,
+      "created_30d": 1028,
+      "merged_30d": 961
     },
     "workflow_runs": {
-      "total": 56770,
-      "last_7d": 24803,
-      "last_30d": 53642
+      "total": 57519,
+      "last_7d": 23895,
+      "last_30d": 54381
     }
   }
 }
