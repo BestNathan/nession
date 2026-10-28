@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "2fb2510279897a764ed3cc96c695d3e62ade39d7a1588be486a2e30f6391acd4",
+  "run_id": 40702138197,
+  "run_attempt": 1,
+  "issue": 2266,
+  "criterion": "SC-04",
+  "criterion_text": "Existing in-flight durable work retains its original selected identity/model across resume, and deterministic tests cover valid/invalid configuration, missing variables, override, and cross-role rejection.",
+  "stage": "staging",
+  "target_sha": "8519b30e9bf1ec75848943ca4dac64998f7d1d09",
+  "contract_sha256": "0c06f0a0e242ede88e5de208f5a4979063da52ba4434f36f7500be28ae8bb7c6",
+  "case_revision": "8519b30e9bf1ec75848943ca4dac64998f7d1d09",
+  "case_tree_sha": "f474ad9be99f28e8f60cd9db66bc73da1356dfcd",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-28T14:04:39.889Z",
+  "finished_at": "2026-10-28T14:04:51.988Z",
+  "duration_ms": 12098,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Staging Developer work dispatched with qwen3.7-plus kept that model when the Environment default became qwen3.7-max and resumed from committed checkpoint v2",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact staging target 8519b30e9bf1ec75848943ca4dac64998f7d1d09: checkpoint source 13b2f89accadb4943273a046621c69ce93877edd is an ancestor of the target; authenticated Store checkpoint and seed/resume canary telemetry read from the public append-only branches"
+        },
+        {
+          "type": "store",
+          "value": "agent-store df508c6865fd930e4a1befc9426d7b65d41cb955: checkpoint v2 roles/developer/dev-qwen-01/issues/2319/checkpoints/00000002.json ciphertext a1062d1f859c4bfa70aff17c2958ca5fef62360c2ee9b1ee2fee8d18d4786f21 provider claude-code source 13b2f89accadb4943273a046621c69ce93877edd harness b01ca629f29cc36f8b1a5072fb6082af55dc51f8dd969dacd9165acc8e4e0bd8"
+        },
+        {
+          "type": "telemetry",
+          "value": "seed Run 40701309397 (dispatch 4bb7ec8d2526eebdbc13776687b66c8400a202daff5df57f4d4cd89dd1b02458) model qwen3.7-plus result staging-canary-pass target 13b2f89accadb4943273a046621c69ce93877edd"
+        },
+        {
+          "type": "telemetry",
+          "value": "resume Run 40701801186 (dispatch 126aceff688365055b7353030a3cb5ca1fed5abc10ba432e903d2d4cdc7a2c12) kept model qwen3.7-plus while dispatched default was qwen3.7-max; checkpoint v2 a1062d1f859c4bfa70aff17c2958ca5fef62360c2ee9b1ee2fee8d18d4786f21; result staging-canary-pass"
+        }
+      ],
+      "duration_ms": 6179,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40702138197,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "8519b30e9bf1ec75848943ca4dac64998f7d1d09",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40702138197",
+    "record_path": "runs/2026-10-28/40702138197-1/2266/SC-04.json",
+    "source_result_sha256": "35f8e2eea4faf841e2a6461cd12110c4eacbb46e59d0801cfac8765e829a402a"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40702138197-1",
+    "sha256": "35f8e2eea4faf841e2a6461cd12110c4eacbb46e59d0801cfac8765e829a402a",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40702138197",
+    "durability": "time-limited; object archival not configured"
+  }
+}
