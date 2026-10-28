@@ -15,6 +15,10 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile.agent
+      args:
+        VITE_NESSION_TERMINAL_COLS: "${NESSION_TERMINAL_COLS:-96}"
+        VITE_NESSION_TERMINAL_WEB_FONT_SIZE: "${NESSION_TERMINAL_WEB_FONT_SIZE:-14}"
+        NESSION_TERMINAL_COLS: "${NESSION_TERMINAL_COLS:-96}"
     profiles: ["agent", "full"]
     ports:
       - "${AGENT_HTTP_PORT:-13000}:10080"
@@ -28,7 +32,7 @@ services:
       AGENT_TOKEN: "change-me-standalone"
       # Fixed terminal columns (#2487). The same value the Web image was
       # built with; the Agent validates it and uses it for new Sessions.
-      NESSION_TERMINAL_COLS: "${NESSION_TERMINAL_COLS:-80}"
+      NESSION_TERMINAL_COLS: "${NESSION_TERMINAL_COLS:-96}"
       LISTEN_PORT: "10080"
       SERVER_BACKEND: "127.0.0.1:19090"
     healthcheck:
@@ -45,6 +49,11 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile.server
+      args:
+        VITE_NESSION_TERMINAL_COLS: "${NESSION_TERMINAL_COLS:-96}"
+        VITE_NESSION_TERMINAL_WEB_FONT_SIZE: "${NESSION_TERMINAL_WEB_FONT_SIZE:-14}"
+        NESSION_TERMINAL_COLS: "${NESSION_TERMINAL_COLS:-96}"
+        NESSION_TERMINAL_WEB_FONT_SIZE: "${NESSION_TERMINAL_WEB_FONT_SIZE:-14}"
     profiles: ["server", "full"]
     ports:
       - "${SERVER_HTTP_PORT:-18080}:10080"
@@ -57,7 +66,7 @@ services:
       # Fixed terminal columns and the Web max font (#2487). Derived from the
       # same release parameters as the Web build; the entrypoint writes them
       # into config.toml and the Server validates them at startup.
-      NESSION_TERMINAL_COLS: "${NESSION_TERMINAL_COLS:-80}"
+      NESSION_TERMINAL_COLS: "${NESSION_TERMINAL_COLS:-96}"
       NESSION_TERMINAL_WEB_FONT_SIZE: "${NESSION_TERMINAL_WEB_FONT_SIZE:-14}"
     volumes:
       - server-data:/data
@@ -75,12 +84,16 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile.agent
+      args:
+        VITE_NESSION_TERMINAL_COLS: "${NESSION_TERMINAL_COLS:-96}"
+        VITE_NESSION_TERMINAL_WEB_FONT_SIZE: "${NESSION_TERMINAL_WEB_FONT_SIZE:-14}"
+        NESSION_TERMINAL_COLS: "${NESSION_TERMINAL_COLS:-96}"
     profiles: ["full"]
     environment:
       AGENT_ID: agent-remote
       AGENT_LISTEN: "0.0.0.0:19090"
       AGENT_SERVER_URL: "ws://server:18080"
-      NESSION_TERMINAL_COLS: "${NESSION_TERMINAL_COLS:-80}"
+      NESSION_TERMINAL_COLS: "${NESSION_TERMINAL_COLS:-96}"
     depends_on:
       server:
         condition: service_healthy
