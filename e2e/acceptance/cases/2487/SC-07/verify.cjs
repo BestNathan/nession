@@ -10,7 +10,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const {
-  root, targetSha, webBuild, buildConfig, expectFailure, requireText, stripAnsi,
+  root, targetSha, webBuild, buildConfig, expectFailure, requireText, stripAnsi, passedTests,
 } = require('../../../shared/terminal-sizing-cases.cjs');
 const { run, checked } = require('../../../shared/control-mode-cases.cjs');
 
@@ -84,7 +84,7 @@ run(({ evidence }) => {
       'src/platform/terminal-runtime/__tests__/unit/terminalConfig.test.ts'],
     300000,
   ));
-  if (!unit.includes('terminalConfig.test.ts') || !/Tests\s+7 passed/.test(unit)) {
+  if (!unit.includes('terminalConfig.test.ts') || (passedTests(unit) ?? 0) < 7) {
     throw new Error('the build-configuration unit tests did not run/pass: ' + unit.slice(-2500));
   }
   requireText('web/src/platform/terminal-runtime/terminalConfig.ts', [

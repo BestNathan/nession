@@ -8,13 +8,21 @@
 // The tests use a real isolated tmux server (private socket), the real
 // agent WebSocket listener and the real ControlLease. No mock asserts the
 // property for itself.
+//
+// #2520 reopened this criterion: on tmux 3.4 a client attached to **another**
+// Session made a newly created Session read 80x24 even though the Agent asked
+// for 96, so "created at the configured width" did not hold on a shared
+// server. The create path now applies the requested geometry explicitly. The
+// distinct live witness is asserted below — a real 80x24 PTY client held on an
+// anchor Session while a 96-column Session is created through the Agent; this
+// is a product fix, not a test-isolation change.
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const {
   run, targetSha, cargoTests, assertRan, tmuxVersion,
 } = require('../../../shared/control-mode-cases.cjs');
-const { stripAnsi } = require('../../../shared/terminal-sizing-cases.cjs');
+const { stripAnsi, passedTests } = require('../../../shared/terminal-sizing-cases.cjs');
 
 const tmuxDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nession-2487-sc09-'));
 const tmuxEnv = { NESSION_TMUX_SOCKET: path.join(tmuxDir, 'tmux.sock') };
@@ -68,6 +76,21 @@ run(({ evidence }) => {
     'server::integration_standalone_agent_uses_its_configured_columns',
   ]);
 
+  // The #2520 reopen witness: the defect was not "a test shares a server"; it
+  // was that `window-size latest` let another Session's attached client size
+  // this create. A real 80x24 PTY client stays attached to an anchor Session
+  // while the Agent creates a 96-column one; the target must read 96x24.
+  const attachedElsewhere = cargoTests(
+    ['--lib',
+      'tmux::manager::window_size_lock_tests::' +
+      'a_client_attached_elsewhere_cannot_size_a_new_session'],
+    300000,
+    tmuxEnv,
+  );
+  assertRan(attachedElsewhere, [
+    'tmux::manager::window_size_lock_tests::a_client_attached_elsewhere_cannot_size_a_new_session',
+  ]);
+
   // The mismatch/compatibility policy is not only prose: the Web client adopts
   // the Agent's stated width instead of resending its build value. The unit
   // tests assert the attach-reply parser and the ResizeController adoption.
@@ -83,7 +106,7 @@ run(({ evidence }) => {
     },
   );
   const webOut = stripAnsi(String(web.stdout || '') + '\n' + String(web.stderr || ''));
-  if (web.status !== 0 || !/Tests\s+38 passed/.test(webOut)) {
+  if (web.status !== 0 || (passedTests(webOut) ?? 0) < 38) {
     throw new Error('the attach-reply compatibility tests did not pass: ' + webOut.slice(-3000));
   }
 
@@ -106,6 +129,13 @@ run(({ evidence }) => {
       value:
         'a standalone Agent (no Server in the path) used its own configured width for creation and ' +
         'stated it on attach',
+    },
+    {
+      type: 'runtime',
+      value:
+        'reopened by #2520: with a real 80x24 PTY client attached to another Session on the same ' +
+        'server, a 96-column create through the Agent read 96x24 — the create path applies the ' +
+        'requested geometry instead of letting tmux 3.4 size the new Session to its latest client',
     },
     {
       type: 'test',

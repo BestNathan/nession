@@ -32,6 +32,20 @@ function stripAnsi(output) {
   return String(output).replace(/\u001b\[[0-9;]*m/g, '');
 }
 
+/**
+ * How many tests vitest reports as passed, or `null` when the summary is
+ * absent.
+ *
+ * Cases assert a *baseline*, not an exact count: adding a test to the suite is
+ * a legitimate change, and failing the Case for it makes the evidence about
+ * test bookkeeping instead of the property under test. A removed test still
+ * fails the baseline.
+ */
+function passedTests(output) {
+  const match = /Tests\s+(\d+) passed/.exec(stripAnsi(output));
+  return match ? Number(match[1]) : null;
+}
+
 function checkedIn(cwd, command, args, timeout, extraEnv = {}) {
   const result = spawnSync(command, args, {
     cwd,
@@ -124,6 +138,7 @@ module.exports = {
   VITE_TERMINAL_COLS_ENV,
   VITE_TERMINAL_WEB_FONT_SIZE_ENV,
   stripAnsi,
+  passedTests,
   checkedIn,
   webBuild,
   buildConfig,

@@ -53,7 +53,11 @@ load re-fits the grid and recomputes rows before the first authoritative report.
 - A **new** Session is created at the release-selected width. In a central
   deployment the Server states that value on its relayed create/attach and the
   Agent validates it; a direct or standalone caller falls back to the Agent's
-  own configuration.
+  own configuration. The Agent applies that geometry explicitly after
+  `new-session` and restores tmux's dynamic `window-size` policy: on tmux 3.4 a
+  client attached to another Session otherwise sizes a newly created Session to
+  its own terminal (#2520). Only the authorized resize path changes rows
+  afterwards.
 - An **existing** Session keeps the width its pane already has. Attaching never
   resizes the shared window to a client's build value. The Agent ignores the
   columns on `agent.terminal.resize` and applies only the requested rows, then
