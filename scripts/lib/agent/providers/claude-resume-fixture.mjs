@@ -75,6 +75,17 @@ function stagingOrigin(){
   return {source_sha:process.env.STAGING_TARGET_SHA,workflow_sha:process.env.GITHUB_SHA,
     run_id:id,attempt,dispatch_id:process.env.STAGING_DISPATCH_ID};
 }
+// The public checkpoint metadata is intentionally limited to provider,
+// session_id, source_sha and harness_digest. The harness digest already binds
+// the pinned model and CLI, so a restore can prove compatibility without
+// widening that public surface.
+export function stagingHarnessDigest(sourceSha,cliVersion,modelValue){
+  if(!SHA.test(sourceSha??'')||
+      !/^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/.test(cliVersion??'')||
+      !/^qwen[a-z0-9._-]*$/i.test(modelValue??''))
+    fail('invalid staging harness identity');
+  return harness(sourceSha,cliVersion,modelValue);
+}
 export function stagingSeedMetadata({sourceSha,runId,attempt,sessionId,projectKey,
   cliVersion,model,dispatchId,cwdSha}) {
   if(!SHA.test(sourceSha??'')||!Number.isSafeInteger(runId)||runId<1||attempt!==1||
@@ -158,7 +169,8 @@ async function stagingPublish(input,out){
       session_id:m.session_id,project_key:opened.project_key,model:m.model,
       cli_version:m.cli_version,dispatch_id:m.dispatch_id,
       seed_run_id:m.run_id,seed_attempt:m.attempt,harness_digest:m.harness_digest,
-      source_sha:m.source_sha,cwd_sha256:m.cwd_sha256,rsa_envelope:sealed,files};
+      source_sha:m.source_sha,cwd_sha256:m.cwd_sha256,
+      marker_sha256:proof.marker_sha256,rsa_envelope:sealed,files};
     const identity={role:'developer',agent_id:'dev-qwen-01',issue:2319};
     // A later staging SHA seeds a new checkpoint; advance the exact committed
     // head instead of re-claiming version 1 forever. The Store CAS still
@@ -170,9 +182,6 @@ async function stagingPublish(input,out){
       Buffer.from(JSON.stringify(bundle)),key,{
         provider:'claude-code',session_id:m.session_id,
         source_sha:m.source_sha,harness_digest:m.harness_digest,
-        model:m.model,cli_version:m.cli_version,
-        marker_sha256:proof.marker_sha256,
-        seed_run_id:m.run_id,seed_attempt:m.attempt,
       });
     const source={repository:'BestNathan/nession',run_id:id.run_id,attempt:id.attempt,
       issue:2319,workflow_sha:id.workflow_sha,target_sha:id.source_sha,
@@ -211,12 +220,12 @@ async function stagingRestore(out){
   const committed=readCommittedCheckpoint({remote,identity,commit_sha:commit,
     version,ciphertext_sha256:ciphertext});
   const m=committed.metadata;
+  // The harness digest already binds source/model/CLI; recompute it from the
+  // signed dispatch so a stale default cannot be restored into a new task.
   if(m?.provider!=='claude-code'||m.source_sha!==id.source_sha||
-      m.model!==process.env.ANTHROPIC_MODEL||
-      m.cli_version!==process.env.CLAUDE_CODE_VERSION||
-      !UUID.test(m.session_id??'')||!HEX.test(m.marker_sha256??'')||
-      m.seed_run_id!==undefined&&(!Number.isSafeInteger(m.seed_run_id)||m.seed_run_id<1)||
-      m.seed_attempt!==undefined&&m.seed_attempt!==1)
+      !UUID.test(m.session_id??'')||
+      m.harness_digest!==stagingHarnessDigest(id.source_sha,
+        process.env.CLAUDE_CODE_VERSION,process.env.ANTHROPIC_MODEL))
     fail('committed checkpoint is not the signed staging task');
   const key=stagingAesKey();
   let native=null;
@@ -229,8 +238,12 @@ async function stagingRestore(out){
     try{bundle=JSON.parse(native.toString('utf8'));}
     catch{fail('corrupt staging native bundle');}
     if(bundle?.schema_version!==1||bundle.kind!=='staging-claude-native-bundle'||
-        bundle.session_id!==m.session_id||bundle.model!==m.model||
-        bundle.cli_version!==m.cli_version||bundle.source_sha!==m.source_sha||
+        bundle.session_id!==m.session_id||
+        bundle.model!==process.env.ANTHROPIC_MODEL||
+        bundle.cli_version!==process.env.CLAUDE_CODE_VERSION||
+        bundle.source_sha!==m.source_sha||!HEX.test(bundle.marker_sha256??'')||
+        !Number.isSafeInteger(bundle.seed_run_id)||bundle.seed_run_id<1||
+        bundle.seed_attempt!==1||
         !bundle.rsa_envelope||bundle.rsa_envelope.metadata?.session_id!==m.session_id)
       fail('staging bundle does not match the committed checkpoint');
     fs.mkdirSync(out,{recursive:true,mode:0o700});
@@ -240,10 +253,11 @@ async function stagingRestore(out){
       expected:bundle.rsa_envelope.metadata,configDir});
     write(path.join(out,'config.json'),{schema_version:1,
       kind:'staging-resume-session',session_id:m.session_id,
-      marker_sha256:m.marker_sha256,source_sha:m.source_sha,model:m.model,
-      cli_version:m.cli_version,checkpoint_version:version,
-      checkpoint_commit_sha:commit,ciphertext_sha256:ciphertext,
-      seed_run_id:m.seed_run_id??null,seed_attempt:m.seed_attempt??null});
+      marker_sha256:bundle.marker_sha256,source_sha:m.source_sha,
+      model:bundle.model,cli_version:bundle.cli_version,
+      checkpoint_version:version,checkpoint_commit_sha:commit,
+      ciphertext_sha256:ciphertext,seed_run_id:bundle.seed_run_id,
+      seed_attempt:bundle.seed_attempt});
     console.log('Staging resume: restored native Session '+m.session_id+
       ' from checkpoint '+version);
   } finally {

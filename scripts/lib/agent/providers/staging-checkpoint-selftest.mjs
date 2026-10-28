@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
-import {stagingSeedMetadata} from './claude-resume-fixture.mjs';
+import {stagingSeedMetadata,stagingHarnessDigest} from './claude-resume-fixture.mjs';
 import {sealCheckpoint} from '../store/checkpoint.mjs';
 import {validateCheckpointSource} from '../store/ingest.mjs';
 import {readCheckpointHeadVersion,readCommittedCheckpoint} from '../store/remote.mjs';
@@ -25,6 +25,18 @@ assert.notEqual(stagingSeedMetadata({...base,model:'qwen3.7-max'}).harness_diges
   value.harness_digest);
 assert.notEqual(stagingSeedMetadata({...base,cliVersion:'2.1.313'}).harness_digest,
   value.harness_digest);
+// The restore recomputes this digest from the signed dispatch, so a stale
+// model/CLI cannot be restored as the current task.
+assert.equal(stagingHarnessDigest(base.sourceSha,base.cliVersion,base.model),
+  value.harness_digest);
+assert.notEqual(stagingHarnessDigest(base.sourceSha,base.cliVersion,'qwen3.7-max'),
+  value.harness_digest);
+assert.throws(()=>stagingHarnessDigest('short',base.cliVersion,base.model),
+  /invalid staging harness identity/);
+assert.throws(()=>stagingHarnessDigest(base.sourceSha,'latest',base.model),
+  /invalid staging harness identity/);
+assert.throws(()=>stagingHarnessDigest(base.sourceSha,base.cliVersion,'claude-sonnet-5'),
+  /invalid staging harness identity/);
 for(const [change,error] of [
   [{sourceSha:'short'},/invalid staging seed metadata/],
   [{runId:0},/invalid staging seed metadata/],
@@ -98,9 +110,7 @@ try {
   fs.writeFileSync(file,JSON.stringify({schema_version:1,
     kind:'encrypted_agent_checkpoint',path:prefix+'/checkpoints/00000001.json',
     identity,version:1,metadata:{provider:'claude-code',session_id:base.sessionId,
-      source_sha:base.sourceSha,harness_digest:value.harness_digest,
-      model:base.model,cli_version:base.cliVersion,marker_sha256:'f'.repeat(64),
-      seed_run_id:base.runId,seed_attempt:1},
+      source_sha:base.sourceSha,harness_digest:value.harness_digest},
     encryption:{algorithm:'aes-256-gcm'},ciphertext:'',ciphertext_sha256:'a'.repeat(64)}));
   fs.writeFileSync(path.join(commitStore,prefix,'head.json'),JSON.stringify({
     version:1,checkpoint_path:prefix+'/checkpoints/00000001.json',
@@ -111,7 +121,7 @@ try {
   const sha=gitCommit(['-C',commitStore,'rev-parse','HEAD']).trim();
   assert.equal(readCommittedCheckpoint({remote:commitStore,identity,
     commit_sha:sha,version:1,ciphertext_sha256:'a'.repeat(64)})
-    .metadata.marker_sha256,'f'.repeat(64));
+    .metadata.source_sha,base.sourceSha);
   assert.throws(()=>readCommittedCheckpoint({remote:commitStore,identity,
     commit_sha:sha,version:1,ciphertext_sha256:'b'.repeat(64)}),
   /checkpoint advanced or signed head mismatched/);
