@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { Terminal } from '@xterm/xterm';
+import { CanvasAddon } from '@xterm/addon-canvas';
 import { XtermAddonHost } from '../../XtermAddonHost';
 import { XtermRenderer } from '../../XtermRenderer';
 import { detectWebGLSupport } from '../../../webglSupport';
@@ -36,6 +37,43 @@ describe('XtermRenderer', () => {
     const term = new Terminal();
     expect(() => rendererFor(term)).not.toThrow();
     expect(() => rendererFor(term, 'webgl')).not.toThrow();
+    term.dispose();
+  });
+
+  it('falls back to Canvas on a lost WebGL context and ignores a stale loss after dispose', () => {
+    // Failure injection (#2581 SC-04): jsdom has no GPU context, so a fake
+    // WebGL addon captures the context-loss callback and fires it. The
+    // terminal's buffer is not rebuilt — only the renderer addon changes.
+    const term = new Terminal();
+    const addons = new XtermAddonHost(term);
+    let loseContext: () => void = () => {};
+    let webglDisposals = 0;
+    const webgl = {
+      activate: vi.fn(),
+      // The renderer wraps dispose; count the underlying call instead of
+      // asserting on a spy the wrapper would replace.
+      dispose: () => { webglDisposals += 1; },
+      onContextLoss: (listener: () => void) => { loseContext = listener; },
+    };
+    const renderer = new XtermRenderer(addons, 'webgl', {
+      webglSupported: () => true,
+      createWebgl: () => webgl,
+    });
+
+    expect(renderer.type).toBe('webgl');
+    expect(addons.get(CanvasAddon)).toBeUndefined();
+
+    loseContext();
+
+    expect(webglDisposals).toBe(1);
+    expect(renderer.type).toBe('canvas');
+    expect(addons.get(CanvasAddon)).toBeDefined();
+
+    renderer.dispose();
+    // A context loss delivered after teardown must not install another addon
+    // or touch a disposed host.
+    expect(() => loseContext()).not.toThrow();
+    expect(renderer.type).toBe('canvas');
     term.dispose();
   });
 

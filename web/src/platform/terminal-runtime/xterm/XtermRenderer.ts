@@ -1,7 +1,24 @@
+import type { ITerminalAddon } from '@xterm/xterm';
 import { CanvasAddon } from '@xterm/addon-canvas';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { XtermAddonHost } from './XtermAddonHost';
 import { detectWebGLSupport } from '../webglSupport';
+
+/** The WebGL addon surface used here, so failure injection can stand in. */
+export interface WebglAddonLike extends ITerminalAddon {
+  onContextLoss(listener: () => void): void;
+}
+
+/**
+ * Failure-injection seams for the renderer tests (#2581 SC-04). Production
+ * passes none of these; a test supplies a fake WebGL addon to fire a context
+ * loss deterministically in jsdom, where no real GPU context exists.
+ */
+export interface RendererHooks {
+  webglSupported?: () => boolean;
+  createWebgl?: () => WebglAddonLike;
+  createCanvas?: () => ITerminalAddon;
+}
 
 /**
  * Renderer lifecycle for one xterm instance (WebGL with Canvas fallback).
@@ -15,13 +32,18 @@ export class XtermRenderer {
   type: 'webgl' | 'canvas';
   private disposed = false;
 
+  private readonly hooks: RendererHooks;
+
   constructor(
     private readonly addons: XtermAddonHost,
     preferred?: 'webgl' | 'canvas',
+    hooks: RendererHooks = {},
   ) {
-    if (preferred === 'webgl' && detectWebGLSupport()) {
+    this.hooks = hooks;
+    const webglSupported = hooks.webglSupported ?? detectWebGLSupport;
+    if (preferred === 'webgl' && webglSupported()) {
       try {
-        const webgl = new WebglAddon();
+        const webgl = hooks.createWebgl?.() ?? new WebglAddon();
         // @xterm/addon-webgl's dispose() throws "Cannot read properties of
         // undefined (reading '_isDisposed')" if the addon is disposed before
         // its GL renderer finished initializing — which happens under React
@@ -35,9 +57,10 @@ export class XtermRenderer {
             /* GL renderer never initialized — safe to ignore */
           }
         };
+        const webglType = webgl.constructor as new (...args: never[]) => ITerminalAddon;
         webgl.onContextLoss(() => {
           if (this.disposed) { return; }
-          this.addons.dispose(WebglAddon);
+          this.addons.dispose(webglType);
           this.fallbackToCanvas();
         });
         this.addons.register(webgl);
@@ -55,7 +78,7 @@ export class XtermRenderer {
    *  keeps rendering instead of relying on xterm's implicit DOM fallback. */
   private fallbackToCanvas(): void {
     try {
-      this.addons.register(new CanvasAddon());
+      this.addons.register(this.hooks.createCanvas?.() ?? new CanvasAddon());
       this.type = 'canvas';
     } catch {
       /* terminal disposed mid-loss — nothing to do */
