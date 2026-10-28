@@ -1,67 +1,81 @@
-// Dependency-free deterministic mock checks; does not call a real browser or API.
+// Recorded GitHub snapshots + actual mock app running in an isolated VM.
+ // Deterministic behavior checks, NOT browser/production acceptance.
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import assert from 'node:assert/strict';
-const app = { innerHTML: '' };
-const listeners = new Map();
-const document = {
-  getElementById: id => { assert.equal(id, 'app'); return app; },
-  addEventListener: (name, fn) => listeners.set(name, fn),
-  querySelector: () => ({focus(){},setSelectionRange(){}})
+const app={innerHTML:''};
+const listeners=new Map();
+const document={
+  getElementById:id=>{assert.equal(id,'app');return app},
+  addEventListener:(name,fn)=>listeners.set(name,fn),
+  querySelector:()=>({focus(){},setSelectionRange(){}})
 };
-const js = readFileSync(new URL('./app.js', import.meta.url), 'utf8');
-assert.doesNotMatch(js, /\bfetch\s*\(/);
-assert.doesNotMatch(js, /localStorage|sessionStorage/);
-runInNewContext(js, { document });
-let count=0;
-function check(label, condition) {assert.ok(condition, label);count++}
-function click(action,value) {
+const fixtures=readFileSync(new URL('./fixtures.js',import.meta.url),'utf8');
+const source=readFileSync(new URL('./app.js',import.meta.url),'utf8');
+assert.doesNotMatch(source,/\bfetch\s*\(/);
+assert.doesNotMatch(source,/localStorage|sessionStorage/);
+assert.match(fixtures,/BestNathan\/nession/);
+runInNewContext(fixtures+'\n'+source,{document});
+let total=0;
+const check=(label,ok)=>{assert.ok(ok,label);total++};
+const click=(action,value)=>{
   const el={dataset:{action,value},closest:()=>el};
   listeners.get('click')({target:el});
-}
-function change(key,value) {listeners.get('change')({target:{dataset:{select:key},value}})}
-check('initial Terminal',app.innerHTML.includes('data-testid="terminal-surface"'));
+};
+const change=(select,value)=>listeners.get('change')({target:{dataset:{select},value}});
+const input=value=>listeners.get('input')({target:{dataset:{input:'search'},value,selectionStart:value.length}});
+check('initial current Session Terminal',app.innerHTML.includes('data-testid="terminal-surface"'));
 click('toggle-context');
-check('context disclosure',app.innerHTML.includes('data-testid="context-capsule"'));
+check('Context Capsule',app.innerHTML.includes('data-testid="context-capsule"'));
 click('choose-git');
-check('Git directly in Workspace',app.innerHTML.includes('data-testid="workspace-surface"'));
-check('no Git Peek',!app.innerHTML.includes('data-testid="git-peek-body"')&&!app.innerHTML.includes('aria-label="Git Peek"'));
-check('local Changes',app.innerHTML.includes('Working tree'));
-click('select-file','crates/nession-git/src/runtime/remote.rs');
-check('file selection',app.innerHTML.includes('remote.rs')&&app.innerHTML.includes('typed remote fixture'));
+check('direct Git Workspace',app.innerHTML.includes('data-testid="workspace-surface"'));
+check('no intermediate Git Peek',!app.innerHTML.includes('data-testid="git-peek-body"'));
+check('local Git Changes',app.innerHTML.includes('Working tree'));
 click('local-tab','history');
-check('History',app.innerHTML.includes('feat: GitHub repository context'));
-click('local-tab','branches');
-check('Branches',app.innerHTML.includes('release/next'));
+check('local History',app.innerHTML.includes('feat: GitHub repository context'));
 click('section','github');
-check('GitHub identity',app.innerHTML.includes('demo-org/nession'));
+check('actual upstream repository',app.innerHTML.includes('BestNathan/nession'));
+check('Issues split reader',app.innerHTML.includes('data-testid="github-list-pane"')&&app.innerHTML.includes('data-testid="github-detail"'));
+check('real Issue 1290',app.innerHTML.includes('Requirement: extend Git capability'));
+check('real Issue body Markdown',app.innerHTML.includes('Local Git remains')&&app.innerHTML.includes('gh-markdown'));
+check('recorded source link',app.innerHTML.includes('github.com/BestNathan/nession/issues/1290'));
+click('select-gh','issue-2514');
+check('select Issue #2514',app.innerHTML.includes('cross-platform tmux Session process discovery'));
+check('mobile detail pushed',app.innerHTML.includes('mobile-detail-open'));
+click('toggle-reading');
+check('desktop focus reading',app.innerHTML.includes('is-reading'));
+click('toggle-reading');
+check('desktop split restored',!app.innerHTML.includes('is-reading'));
+click('back-gh-list');
+check('back to mobile list',!app.innerHTML.includes('mobile-detail-open'));
+input('staging');
+check('description search finds #2323',app.innerHTML.includes('fast multi-staging'));
+input('');
 click('github-tab','prs');
-check('PR branch relation',app.innerHTML.includes('Matched PR #2534'));
+check('real open PR 2229',app.innerHTML.includes('SHA-256 verified just'));
+check('no fabricated current-branch PR',app.innerHTML.includes('No open PR in snapshot matches'));
+click('select-gh','pr-2222');
+check('PR detail body',app.innerHTML.includes('prototype conversation-driven AI mode')&&app.innerHTML.includes('authenticated Nession Shell'));
+change('filter','closed');
+check('merged PRs visible',app.innerHTML.includes('publish prototype updates'));
+change('filter','all');
+check('mixed states',app.innerHTML.includes('SHA-256 verified just')&&app.innerHTML.includes('publish prototype updates'));
 change('remote','fork');
-check('fork identity',app.innerHTML.includes('demo-fork/nession'));
-check('no false fork branch PR',app.innerHTML.includes('No matching PR for selected fork'));
-click('github-tab','actions');
-check('Actions scope',app.innerHTML.includes('Current branch'));
-click('scope','repo');
-check('repo-wide scope',app.innerHTML.includes('Most recent run across all branches'));
-change('scenario','auth');
-check('auth failure',app.innerHTML.includes('Authentication required'));
-click('to-local');
-check('local Git unaffected and preserved tab',app.innerHTML.includes('Local repository') && app.innerHTML.includes('Branches'));
-change('scenario','ambiguous');
-click('section','github');
-check('ambiguous remote',app.innerHTML.includes('Multiple GitHub remotes'));
+check('fork cannot reuse upstream snapshot',app.innerHTML.includes('Fork snapshot not captured')&&!app.innerHTML.includes('SHA-256 verified just'));
 click('resolve-ambiguity','upstream');
-check('safe discovered remote',app.innerHTML.includes('demo-org/nession'));
-change('scenario','noRemote');
-check('no remote',app.innerHTML.includes('No GitHub remote'));
-change('scenario','empty');
-check('empty valid',app.innerHTML.includes('No matching issues'));
-change('scenario','noRuns');
+check('return to source repo',app.innerHTML.includes('BestNathan/nession'));
 click('github-tab','actions');
-check('no runs valid',app.innerHTML.includes('No runs yet'));
+check('Actions explicitly synthetic',app.innerHTML.includes('Actions runs are simulated fixtures'));
+click('scope','repo');
+check('repo-wide Action scope',app.innerHTML.includes('Most recent run across all branches'));
+change('scenario','empty');
+check('empty valid result',app.innerHTML.includes('intentional empty successful result'));
+change('scenario','auth');
+check('authentication failure',app.innerHTML.includes('Authentication required'));
+click('to-local');
+check('local Git fallback',app.innerHTML.includes('Local repository'));
 click('refresh');
-check('refresh counter',app.innerHTML.includes('Snapshot #2'));
+check('mock snapshot counter',app.innerHTML.includes('Snapshot #2'));
 click('reset');
-check('reset Terminal',app.innerHTML.includes('data-testid="terminal-surface"'));
-console.log(count+' / '+count+' deterministic prototype assertions passed (VM mock, not browser verification)');
+check('reset original Terminal',app.innerHTML.includes('data-testid="terminal-surface"'));
+console.log(total+' / '+total+' deterministic prototype assertions passed (VM only, no browser/live API)');
