@@ -7,7 +7,8 @@ import path from 'node:path';
 import {startDevelopment,recordDispatch,acceptTaskResult,reconcileOutbox} from './outbox.mjs';
 import {issueDispatchTicket} from './github-dispatch.mjs';
 import {decodeResultZip,parseAgentResult,createGitHubResultArtifactReader,
-  ingestAgentResult,appendAuthenticatedResult,validateAuthenticatedAgentReceipt} from './result-artifact.mjs';
+  ingestAgentResult,appendAuthenticatedResult,validateAuthenticatedAgentReceipt,
+  assertMetricsAgreement} from './result-artifact.mjs';
 
 const sha=data=>createHash('sha256').update(data).digest('hex');
 function crc32(data){
@@ -108,8 +109,17 @@ const artifactReader={
     artifacts:[artifact,...extra]}),
   downloadZip:async()=>archive,
 };
+// The canonical Metrics record is an independent witness of the same Run.
+const metrics={schema_version:1,kind:'agent_workflow_run',
+  identity:{workflow_id:'agent-develop',github_workflow:'Agent / Development',
+    github_run_id:333,github_run_attempt:1,repository:repo},
+  task:{type:'development',issue,action_id:action.id,target_ref:outputSha},
+  agent:{provider:'cursor',id:'dev-cursor-01',role:'developer',
+    model:{id:'composer-2.5'},status:'finished'},
+  result:{status:'native-checkpoint-proposed'}};
 const options={state,action_id:action.id,reader,artifactReader,registry,keyring,
-  dispatch_ticket:ticket,pr_number:43,verified_main_sha:main,now:now+30000};
+  dispatch_ticket:ticket,pr_number:43,verified_main_sha:main,metrics,
+  now:now+30000};
 const evidence=await ingestAgentResult(options);
 assert.equal(evidence.kind,'authenticated_agent_task_result');
 assert.equal(evidence.schema_version,2);
@@ -123,6 +133,39 @@ assert.equal(validateAuthenticatedAgentReceipt(evidence),evidence);
 const legacy={...evidence,schema_version:1};
 delete legacy.implementing_pr;
 assert.equal(validateAuthenticatedAgentReceipt(legacy),legacy);
+// Reviewer agreement: the artifact outcome, reviewed PR and Metrics record
+// must describe one exact Run.
+const reviewAction='e'.repeat(64);
+const reviewArgs={metrics:{schema_version:1,kind:'agent_workflow_run',
+    identity:{workflow_id:'agent-review',github_workflow:'Agent / Review',
+      github_run_id:444,github_run_attempt:1,repository:repo},
+    task:{type:'review',issue,action_id:reviewAction,target_ref:outputSha,pr:43},
+    agent:{provider:'cursor',id:'review-cursor-01',role:'reviewer',
+      model:{id:'composer-2.5'},status:'finished'},
+    result:{status:'review-approved'}},
+  run:{id:444,run_attempt:1},
+  pending:{task:{role:'reviewer',agent_id:'review-cursor-01'}},
+  result:{kind:'reviewer',outcome:'approved',target_sha:outputSha},
+  pr_number:43,registry,action_id:reviewAction,state};
+assert.equal(assertMetricsAgreement(reviewArgs).result.status,'review-approved');
+for(const [change,regex] of [
+  [{metrics:null},/Metrics record/],
+  [{metrics:{...reviewArgs.metrics,identity:{...reviewArgs.metrics.identity,
+    github_run_id:445}}},/Metrics record/],
+  [{metrics:{...reviewArgs.metrics,task:{...reviewArgs.metrics.task,
+    action_id:'f'.repeat(64)}}},/Metrics record/],
+  [{metrics:{...reviewArgs.metrics,task:{...reviewArgs.metrics.task,
+    target_ref:'d'.repeat(40)}}},/Metrics record/],
+  [{metrics:{...reviewArgs.metrics,agent:{...reviewArgs.metrics.agent,
+    id:'review-qwen-01'}}},/Metrics record/],
+  [{metrics:{...reviewArgs.metrics,agent:{...reviewArgs.metrics.agent,
+    status:'error'}}},/Metrics record/],
+  [{metrics:{...reviewArgs.metrics,result:{status:'review-changes_requested'}}},
+    /reviewed PR\/outcome/],
+  [{metrics:{...reviewArgs.metrics,task:{...reviewArgs.metrics.task,pr:44}}},
+    /reviewed PR\/outcome/],
+]) assert.throws(()=>assertMetricsAgreement({...reviewArgs,...change}),regex);
+
 const negativeReceipts=[
   {...legacy,implementing_pr:evidence.implementing_pr},
   {...evidence,schema_version:1},
@@ -150,6 +193,39 @@ try{
   assert.equal(appendAuthenticatedResult(root,evidence).changed,true);
   // Historical v1 result records remain valid and lack any inferred PR edge.
   assert.equal(validateAuthenticatedAgentReceipt(legacy),legacy);
+// Reviewer agreement: the artifact outcome, reviewed PR and Metrics record
+// must describe one exact Run.
+const reviewAction='e'.repeat(64);
+const reviewArgs={metrics:{schema_version:1,kind:'agent_workflow_run',
+    identity:{workflow_id:'agent-review',github_workflow:'Agent / Review',
+      github_run_id:444,github_run_attempt:1,repository:repo},
+    task:{type:'review',issue,action_id:reviewAction,target_ref:outputSha,pr:43},
+    agent:{provider:'cursor',id:'review-cursor-01',role:'reviewer',
+      model:{id:'composer-2.5'},status:'finished'},
+    result:{status:'review-approved'}},
+  run:{id:444,run_attempt:1},
+  pending:{task:{role:'reviewer',agent_id:'review-cursor-01'}},
+  result:{kind:'reviewer',outcome:'approved',target_sha:outputSha},
+  pr_number:43,registry,action_id:reviewAction,state};
+assert.equal(assertMetricsAgreement(reviewArgs).result.status,'review-approved');
+for(const [change,regex] of [
+  [{metrics:null},/Metrics record/],
+  [{metrics:{...reviewArgs.metrics,identity:{...reviewArgs.metrics.identity,
+    github_run_id:445}}},/Metrics record/],
+  [{metrics:{...reviewArgs.metrics,task:{...reviewArgs.metrics.task,
+    action_id:'f'.repeat(64)}}},/Metrics record/],
+  [{metrics:{...reviewArgs.metrics,task:{...reviewArgs.metrics.task,
+    target_ref:'d'.repeat(40)}}},/Metrics record/],
+  [{metrics:{...reviewArgs.metrics,agent:{...reviewArgs.metrics.agent,
+    id:'review-qwen-01'}}},/Metrics record/],
+  [{metrics:{...reviewArgs.metrics,agent:{...reviewArgs.metrics.agent,
+    status:'error'}}},/Metrics record/],
+  [{metrics:{...reviewArgs.metrics,result:{status:'review-changes_requested'}}},
+    /reviewed PR\/outcome/],
+  [{metrics:{...reviewArgs.metrics,task:{...reviewArgs.metrics.task,pr:44}}},
+    /reviewed PR\/outcome/],
+]) assert.throws(()=>assertMetricsAgreement({...reviewArgs,...change}),regex);
+
   assert.equal(appendAuthenticatedResult(root,evidence).changed,false);
   assert.throws(()=>appendAuthenticatedResult(root,{...evidence,artifact:{
     ...evidence.artifact,digest:'sha256:'+'f'.repeat(64)}}),/collision/);
