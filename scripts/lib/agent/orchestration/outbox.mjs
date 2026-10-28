@@ -120,7 +120,11 @@ export function validateDevelopmentState(state) {
       if (!item.receipt || !plain(item.receipt) ||
           !['accepted','verified'].includes(item.receipt.status) ||
           item.receipt.dispatch_id !== item.id ||
-          (item.receipt.status === 'verified' && !positive(item.receipt.source_run_id))) {
+          (item.receipt.status === 'verified' && !positive(item.receipt.source_run_id)) ||
+          (item.receipt.rebound_from_run_id !== undefined &&
+            (item.receipt.status !== 'verified' ||
+             !positive(item.receipt.rebound_from_run_id) ||
+             item.receipt.rebound_from_run_id === item.receipt.source_run_id))) {
         reject('missing acknowledged dispatch receipt');
       }
     } else if (item.status === 'yielded') {
@@ -394,6 +398,41 @@ export function recordDispatch(state, expectedVersion, actionId, receipt) {
       ...item,status:'dispatched',attempts:item.attempts+(item.status==='pending'?1:0),receipt,
     } : item),
   });
+}
+
+// A verified dispatch receipt that points at a skipped owner-guard Run may be
+// re-bound exactly once to the authenticated replacement. The skipped Run is
+// retained in the receipt for audit; later re-bindings are rejected.
+const REBINDING_FIELDS=['schema_version','kind','action_id','issue','role',
+  'skipped_run_id','replacement_run_id','verified_main_sha'];
+export function recordReboundDispatch(state,expectedVersion,actionId,attestation){
+  validateDevelopmentState(state);
+  if(expectedVersion!==state.version)reject('stale state CAS');
+  onlyKeys(attestation,REBINDING_FIELDS,'skipped dispatch rebinding');
+  if(Object.keys(attestation).length!==REBINDING_FIELDS.length||
+      attestation.schema_version!==1||
+      attestation.kind!=='skipped_dispatch_rebinding'||
+      attestation.action_id!==actionId||attestation.issue!==state.issue||
+      !['developer','reviewer'].includes(attestation.role)||
+      !positive(attestation.skipped_run_id)||
+      !positive(attestation.replacement_run_id)||
+      attestation.skipped_run_id===attestation.replacement_run_id||
+      !SHA.test(attestation.verified_main_sha??''))
+    reject('invalid skipped dispatch rebinding');
+  const item=state.outbox.find(x=>x.id===actionId);
+  if(!item||item.status!=='dispatched'||item.task.role!==attestation.role||
+      item.receipt?.status!=='verified'||item.receipt.dispatch_id!==actionId)
+    reject('rebinding action is not a verified dispatch');
+  if(item.receipt.source_run_id===attestation.replacement_run_id&&
+      item.receipt.rebound_from_run_id===attestation.skipped_run_id)return state;
+  if(item.receipt.source_run_id!==attestation.skipped_run_id)
+    reject('receipt does not point at the skipped Run');
+  return validateDevelopmentState({...state,version:state.version+1,
+    outbox:state.outbox.map(x=>x.id===actionId?{...x,receipt:{
+      status:'verified',dispatch_id:actionId,
+      source_run_id:attestation.replacement_run_id,
+      rebound_from_run_id:attestation.skipped_run_id,
+    }}:x)});
 }
 
 // A terminal failed continuation may have one replacement, but NEVER a second
