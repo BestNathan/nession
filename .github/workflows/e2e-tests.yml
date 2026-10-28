@@ -77,7 +77,7 @@ jobs:
     # NESSION_TARGET_SHA binds the shared Runtime Harness to the exact checkout
     # that this workflow is verifying.
     env:
-      PLAYWRIGHT_BROWSERS_PATH: ~/.cache/ms-playwright
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.cache/ms-playwright
       NESSION_TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     # 30m covers the bounded Full-reuse wait plus the strictly necessary
     # selected-suite fallback; the ordinary selected/not-required paths are
@@ -253,8 +253,8 @@ jobs:
       - uses: actions/cache@v4
         if: steps.impact.outputs.browsers != 'false'
         with:
-          path: ~/.cache/ms-playwright
-          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('e2e/package-lock.json') }}
+          path: ${{ github.workspace }}/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('e2e/package-lock.json') }}
 
       # Install Playwright + Chromium only (skip Firefox/WebKit). A tooling-only
       # not-required change provisions no browser runtime at all (#2478).
@@ -263,7 +263,12 @@ jobs:
         run: |
           cd e2e
           npm ci
-          npx playwright install chromium --with-deps
+          npx playwright install chromium
+          # The pinned Ubuntu runner already provides launch-time libraries.
+          # Verify them by actually launching Chromium; missing dependencies
+          # fail closed instead of silently passing a cache hit. Do not run
+          # Playwright's --with-deps apt installer on every warm job (#2525).
+          node -e 'const { chromium } = require("@playwright/test"); chromium.launch({ timeout: 30000 }).then(browser => browser.close()).catch(error => { console.error(error); process.exitCode = 1; })'
 
       # ── Web build transport (#1876) ────────────────────────────────
       # npm ci is still required: vite preview and its /api + /ws proxy run

@@ -49,6 +49,12 @@ A prototype directory must contain:
 
 Update the branch-root `README.md` catalog and `index.html` gallery **without removing or rewriting unrelated prototypes**.
 
+### Single exception: unprivileged prototype change signal
+
+The branch contains one repository-audited `.github/workflows/prototype-changed.yml` **signal-only** workflow. This is not a production Pages publisher, reusable runner, or prototype script. It runs on `prototype` pushes with `permissions: contents: read` and **must not** checkout/execute prototype content, accept secrets, acquire Actions write/Pages permissions, dispatch other privileged jobs directly, or fetch untrusted artifacts. The trusted main-owned `Deploy / Public Pages` workflow alone listens to its `workflow_run` completion with source-identity checks and performs the existing sanitized publication. The source branch keeps no other CI/workflow definitions. The branch-local signal file is infrastructure, excluded from the Pages asset publisher.
+
+This one exception makes prototype publication event-driven; do not create arbitrary CI workflows on the orphan branch. Source pushes made by another GitHub Actions job using its default `GITHUB_TOKEN` do not fire follow-on runs; any automated writer must account for that limitation under an approved identity boundary.
+
 ### Isolation and concurrent editing
 
 The normal `main` development/PR workflow is **not** the prototype publishing workflow:
