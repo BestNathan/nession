@@ -1,6 +1,6 @@
 # Staging Acceptance Migration — Measurement and Rollback Report
 
-Status: evidence report for #2323 SC-09 (2026-10-25 UTC). It measures the implemented fast-gate, deployment-identity and Main-qualification flow and records the observed fail-closed negatives. It is not a claim that remote deployed-environment Full coverage exists; that boundary is #1616 / SC-11.
+Status: evidence report for #2323 SC-09 (2026-10-25 UTC; refreshed 2026-10-28 UTC). It measures the implemented fast-gate, deployment-identity and Main-qualification flow and records the observed fail-closed negatives. It is not a claim that remote deployed-environment Full coverage exists; that boundary is #1616 / SC-11.
 
 ## Sources
 
@@ -102,3 +102,21 @@ These are real runs or their fixtures; none produced a fabricated Pass:
 - The admitted lane run is the `full-stack-local` suite at the deployed revision, not a remote deployed-environment Full; partial remote coverage must be labeled Partial/Remote, never Full Pass (SC-11 / #1616).
 - The #2327 error-fingerprint dedup integration is not exercised here.
 - GitHub Actions schedule delivery is not real-time; the admission receipt, not the cron tick, owns due decisions.
+
+## 7. 2026-10-28 refresh
+
+The flow was exercised further by the #2478 / #2520–#2544 work. The figures below are the last 100 completed runs per workflow at 2026-10-28 UTC, **success only** (cancelled/skipped runs excluded so early cancellation does not flatter the fast path):
+
+| Workflow | n | p50 | p90 | max |
+| --- | --- | --- | --- | --- |
+| `CI / Quality Gate` | 71 | 5.8 min | 6.8 min | 52.4 min |
+| `E2E / Tests` | 71 | 3.1 min | 11.2 min | 19.5 min |
+| `Agent / SC Acceptance` | 91 | 1.9 min | 5.3 min | 64.4 min |
+| `Acceptance / Cases` | 86 | 0.4 min | 2.2 min | 5.5 min |
+| `E2E / Full Regression` | 81 | 9.0 min | 15.7 min | 29.3 min |
+| `E2E / Staging Lanes` admission | 80 | 0.3 min | 0.4 min | 0.6 min |
+
+- The fast gate (Quality Gate + selected E2E + Case Smoke / agent acceptance) stays in the minutes range; Full remains a Main-qualification workload (p50 9 min), not a per-PR prerequisite.
+- Deployment attestations and lane admission decisions now emit bounded log receipts (`DEPLOYMENT_ATTESTATION_V1`, `STAGING_LANE_ADMISSION_V1`) that the trusted Acceptance collector binds to the exact run/attempt/SHA (PR #2543 / #2544). Admission run `40634772994` at Main `da2bf7e2` recorded both lanes `SKIPPED_NOT_AHEAD` with their actual deployed SHAs (`staging` `cd3702f5e`, `staging-01` `ea22b038`), ahead/behind and next-due; no Full was dispatched.
+- Real negative observation: the Full `e2e-playwright` list step intermittently fails with “Playwright discovered no runnable tests” (Main `70f84366f`, `2f0ce8db6`). PR #2545 adds a bounded list-file diagnostic so the next occurrence distinguishes an empty/miswritten list from a Playwright/cwd/format change. A skipped or tooling-only Full is never a Pass; the release gate still requires an authenticated Full at the release SHA.
+- The rollback runbook in §5 is unchanged and remains the owner for a bad Main integration.
