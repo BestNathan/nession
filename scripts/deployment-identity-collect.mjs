@@ -17,8 +17,59 @@ import {
   parseEnvironmentOverlay,
 } from './deployment-identity-policy.mjs';
 
+// A bounded, single-line log receipt for the trusted Acceptance collector.
+// The Acceptance harness never reads artifacts or step summaries; the job log
+// is the channel it can attest. The receipt carries only identity that is
+// already part of the canonical attestation, never overlay/pod/provenance
+// bodies. #2323 SC-02/SC-10/SC-11 need this lane identity in ci_evidence.
+export const DEPLOYMENT_ATTESTATION_LOG_PREFIX = 'DEPLOYMENT_ATTESTATION_V1 ';
+const SHA = /^[a-f0-9]{40}$/;
+const DIGEST = /^sha256:[a-f0-9]{64}$/;
+const LANE = /^[a-z][a-z0-9-]{0,62}$/;
+
 function fail(message) {
   throw new Error(message);
+}
+
+export function deploymentAttestationReceipt(receipt) {
+  if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt)) {
+    fail('attestation receipt source must be an object');
+  }
+  const environment = String(receipt.environment_id ?? '');
+  if (!LANE.test(environment)) fail('invalid attested environment');
+  if (receipt.status !== 'Attested') fail('only an Attested deployment may emit a receipt');
+  const sourceSha = String(receipt.source_sha ?? '');
+  if (!SHA.test(sourceSha)) fail('invalid attested source SHA');
+  const gitopsRevision = String(receipt.gitops_revision ?? '');
+  if (!SHA.test(gitopsRevision)) fail('invalid attested GitOps revision');
+  const clusterContext = nonEmptyLine(receipt.cluster_context, 'attested cluster context');
+  const observedAt = String(receipt.observed_at ?? '');
+  if (!Number.isFinite(Date.parse(observedAt))) fail('invalid attestation timestamp');
+  const images = Array.isArray(receipt.images) ? receipt.images.map((image) => {
+    const role = String(image?.role ?? '');
+    if (!ROLES.includes(role)) fail('invalid attestation image role');
+    const digest = String(image?.digest ?? '');
+    if (!DIGEST.test(digest)) fail('invalid attestation image digest');
+    return { role, digest };
+  }) : [];
+  if (images.length !== ROLES.length || new Set(images.map((image) => image.role)).size !== images.length) {
+    fail('attestation receipt must name every image role exactly once');
+  }
+  return Object.freeze({
+    schema_version: 1,
+    kind: 'nession_deployment_attestation_receipt',
+    environment_id: environment,
+    source_sha: sourceSha,
+    status: receipt.status,
+    gitops_revision: gitopsRevision,
+    observed_at: observedAt,
+    cluster_context: clusterContext,
+    images: Object.freeze(images),
+  });
+}
+
+export function formatDeploymentAttestationReceipt(receipt) {
+  return DEPLOYMENT_ATTESTATION_LOG_PREFIX + JSON.stringify(deploymentAttestationReceipt(receipt));
 }
 
 function nonEmptyLine(value, label) {
@@ -216,6 +267,7 @@ function main(args) {
   const outIndex = args.indexOf('--out');
   if (outIndex >= 0) fs.writeFileSync(args[outIndex + 1], json);
   process.stdout.write(json);
+  process.stdout.write(formatDeploymentAttestationReceipt(receipt) + '\n');
 }
 
 const OVERLAY_TEXT = [
@@ -425,6 +477,24 @@ function selfTest() {
     p.items[3].metadata.ownerReferences[0].name = 'nession-server-staging-def34';
     p.items[3].status.containerStatuses[0].imageID = 'ghcr.io/bestnathan/nession@sha256:' + 'f'.repeat(64);
   } }, /pods disagree on the running imageID/);
+
+  // The bounded log receipt carries the canonical identity the Acceptance
+  // collector attests; it must reject anything the canonical attestation
+  // itself could not have produced.
+  const receipt = deploymentAttestationReceipt(positive);
+  assert.equal(receipt.schema_version, 1);
+  assert.equal(receipt.kind, 'nession_deployment_attestation_receipt');
+  assert.equal(receipt.environment_id, positive.environment_id);
+  assert.equal(receipt.source_sha, positive.source_sha);
+  assert.equal(receipt.images.length, ROLES.length);
+  assert.equal(
+    formatDeploymentAttestationReceipt(positive).startsWith(DEPLOYMENT_ATTESTATION_LOG_PREFIX), true);
+  assert.throws(() => deploymentAttestationReceipt({ ...positive, source_sha: 'main' }), /source SHA/);
+  assert.throws(() => deploymentAttestationReceipt({ ...positive, status: 'Stale' }), /Attested/);
+  assert.throws(() => deploymentAttestationReceipt({ ...positive, images: positive.images.slice(0, 2) }),
+    /every image role/);
+  assert.throws(() => deploymentAttestationReceipt({ ...positive, cluster_context: 'ci\nforged' }),
+    /single line/);
 
   console.log('deployment-identity-collect: Kubernetes observation mapping scenarios passed');
 }
