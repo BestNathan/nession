@@ -54,6 +54,13 @@ const staging=pack([{name:'staging-developer-admission.json',
 assert.match(readWorkerZipMember(staging,'staging-developer-admission.json').toString(),
   /staging_developer_readonly_admission/);
 assert.throws(()=>readWorkerZipMember(staging,'development-worker-claim.json'),/ZIP/);
+const dispatch=pack([{name:'staging-developer-dispatch.json',
+  body:'{"kind":"staging_developer_dispatch"}\n'}]);
+assert.match(readWorkerZipMember(dispatch,'staging-developer-dispatch.json').toString(),
+  /staging_developer_dispatch/);
+// Each bounded artifact form keeps its own single-member allowlist.
+assert.throws(()=>readWorkerZipMember(dispatch,'staging-developer-admission.json'),/ZIP/);
+assert.throws(()=>readWorkerZipMember(staging,'staging-developer-dispatch.json'),/ZIP/);
 assert.throws(()=>readWorkerZipMember(pack([
   {name:'staging-developer-admission.json',body:'{}'},
   {name:'extra.json',body:'{}'}]),'staging-developer-admission.json'),/ZIP/);
