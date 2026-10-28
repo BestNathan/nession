@@ -198,8 +198,8 @@ jobs:
           retention-days: 3
 
   publish-checkpoint:
-    needs: synthetic-qwen
-    if: needs.synthetic-qwen.result == 'success'
+    needs: [verify-source, synthetic-qwen]
+    if: needs.verify-source.result == 'success' && needs.synthetic-qwen.result == 'success'
     runs-on: ubuntu-24.04
     environment: agent-staging-controller
     timeout-minutes: 10
