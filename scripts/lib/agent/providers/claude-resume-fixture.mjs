@@ -212,7 +212,7 @@ async function stagingRestore(out){
   const version=Number(process.env.STAGING_CHECKPOINT_VERSION);
   const commit=process.env.STAGING_CHECKPOINT_COMMIT_SHA;
   const ciphertext=process.env.STAGING_CHECKPOINT_CIPHERTEXT_SHA;
-  if(!Number.isSafeInteger(version)||version<1||!HEX.test(commit??'')||
+  if(!Number.isSafeInteger(version)||version<1||!SHA.test(commit??'')||
       !HEX.test(ciphertext??''))fail('missing staging checkpoint commitment');
   const identity={role:'developer',agent_id:'dev-qwen-01',issue:2319};
   const remote=process.env.STAGING_STORE_REMOTE||
