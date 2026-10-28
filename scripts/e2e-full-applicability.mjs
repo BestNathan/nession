@@ -4,14 +4,18 @@
 // emit an explicit Not Required receipt instead of silently skipping via a
 // path filter. Unknown or unverifiable input fails closed to applicable.
 //
-// The policy is an ordered, auditable matrix:
-//   tooling       known CI/Acceptance scheduler, ingestion and Gate tooling;
-//   e2e-contract  E2E executor / selection / report contract, browser tests,
-//                 fixtures, catalog and suite membership;
-//   app-runtime   product runtime and build inputs;
-//   unknown       anything not positively recognized (fail closed).
-// Only a change whose every path is positively tooling may be `tooling-only`
-// (Not Required). Mixed and unknown changes never silently downgrade.
+// The policy is an ordered, auditable six-category matrix (#2478 SC-01):
+//   tooling              known CI/Acceptance scheduler, ingestion and Gate
+//                        tooling;
+//   e2e-runner           E2E executor / selection / report contract, browser
+//                        tests, test support and Gate suite membership;
+//   app-runtime          product runtime and build inputs;
+//   e2e-fixture-catalog  browser fixtures, scenario fixtures and the Case
+//                        catalog/verifiers that decide what is executed;
+//   unknown              anything not positively recognized (fail closed).
+// A change whose every path is positively tooling is `tooling-only`
+// (Not Required); a change spanning several risk categories is `mixed`. Mixed
+// and unknown changes never silently downgrade.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -31,8 +35,16 @@ function basename(file) {
   return file.slice(file.lastIndexOf('/') + 1);
 }
 
-function isE2ERisk(file) {
-  if (file.startsWith('e2e/')) return true; // tests, fixtures, catalog, runner, Cases
+function isE2ERunner(file) {
+  // The executor, selection/report contract, browser tests, test support and
+  // suite membership are implementation, not data.
+  if (file.startsWith('e2e/runner/')) return true;
+  if (file.startsWith('e2e/tests/')) return true;
+  if (file.startsWith('e2e/acceptance/evaluator/') ||
+      file.startsWith('e2e/acceptance/contract/') ||
+      file.startsWith('e2e/acceptance/shared/')) return true;
+  if (file.startsWith('e2e/helpers/')) return true;
+  if (file === 'e2e/playwright.config.ts') return true;
   if (/^scripts\/(e2e-|issue-e2e-|ci\/)/.test(file)) return true;
   if (file.startsWith('.github/workflows/') &&
       E2E_EXECUTOR_WORKFLOWS.has(basename(file))) return true;
@@ -41,6 +53,15 @@ function isE2ERisk(file) {
   if (/^gates\/checks\/(e2e|.*playwright|.*browser)/i.test(file)) return true;
   // Suite membership decides which Gates run; it is part of the contract.
   if (file.startsWith('gates/suites/')) return true;
+  return false;
+}
+
+function isE2EFixtureCatalog(file) {
+  // Data that decides what the runner executes: browser fixtures, scenario
+  // fixtures and the Case catalog with its verifiers.
+  if (file.startsWith('e2e/fixtures/')) return true;
+  if (file.startsWith('e2e/scenarios/')) return true;
+  if (file.startsWith('e2e/acceptance/cases/')) return true;
   return false;
 }
 
@@ -65,7 +86,8 @@ export function categorizeChangedPath(file) {
   if (typeof file !== 'string' || !file || /[\r\n]/.test(file)) return 'unknown';
   // Documentation is tooling wherever it lives (web/AGENTS.md, e2e/README.md).
   if (file.endsWith('.md')) return 'tooling';
-  if (isE2ERisk(file)) return 'e2e-contract';
+  if (isE2ERunner(file)) return 'e2e-runner';
+  if (isE2EFixtureCatalog(file)) return 'e2e-fixture-catalog';
   if (isRuntime(file)) return 'app-runtime';
   if (isTooling(file)) return 'tooling';
   return 'unknown';
@@ -73,7 +95,8 @@ export function categorizeChangedPath(file) {
 
 const REASON = Object.freeze({
   'tooling-only': 'changed-paths-cannot-affect-runtime',
-  'e2e-contract': 'e2e-runner-or-contract-change',
+  'e2e-runner': 'e2e-runner-or-contract-change',
+  'e2e-fixture-catalog': 'e2e-fixture-or-catalog-change',
   'app-runtime': 'runtime-affecting-change',
   mixed: 'mixed-risk-change',
   unknown: 'unrecognized-changed-path',
@@ -177,10 +200,14 @@ function selfTest() {
   for (const file of tooling) {
     assert.equal(categorizeChangedPath(file), 'tooling', file + ' must be tooling');
   }
-  const contract = [
+  const runner = [
     'e2e/tests/browser/login.spec.ts',
-    'e2e/fixtures/server.js',
     'e2e/runner/test-catalog.cjs',
+    'e2e/runner/runtime/full-stack.cjs',
+    'e2e/acceptance/evaluator/run-case.mjs',
+    'e2e/acceptance/contract/cases.mjs',
+    'e2e/acceptance/shared/terminal-sizing-cases.cjs',
+    'e2e/helpers/wait.ts',
     'e2e/playwright.config.ts',
     'scripts/e2e-regression-policy.mjs',
     'scripts/issue-e2e-plan.mjs',
@@ -192,8 +219,19 @@ function selfTest() {
     'gates/checks/design-system-browser.sh',
     'gates/suites/quality-tooling.gates',
   ];
-  for (const file of contract) {
-    assert.equal(categorizeChangedPath(file), 'e2e-contract', file + ' must be E2E contract');
+  for (const file of runner) {
+    assert.equal(categorizeChangedPath(file), 'e2e-runner', file + ' must be E2E runner');
+  }
+  const fixtureCatalog = [
+    'e2e/fixtures/server.js',
+    'e2e/fixtures/browser/state.json',
+    'e2e/scenarios/terminal-attach-resume/case.json',
+    'e2e/acceptance/cases/2487/SC-09/case.yaml',
+    'e2e/acceptance/cases/2520/SC-03/verify.cjs',
+  ];
+  for (const file of fixtureCatalog) {
+    assert.equal(categorizeChangedPath(file), 'e2e-fixture-catalog',
+      file + ' must be E2E fixture/catalog');
   }
   for (const file of ['crates/nession-agent/src/server/websocket.rs', 'web/src/App.tsx',
     'design/tokens.json', 'Cargo.lock']) {
@@ -212,15 +250,35 @@ function selfTest() {
   assert.equal(reproduction.applicable, false);
   assert.equal(reproduction.category, 'tooling-only');
 
-  // Matrix: tooling-only, contract, runtime, mixed, unknown.
+  // Six-category matrix: tooling-only, runner contract, app runtime,
+  // fixture/catalog, mixed and unknown. Every risk-bearing category stays
+  // applicable; only an all-tooling change is Not Required.
   assert.deepEqual(classifyChangedPaths(['web/AGENTS.md', 'docs/a.md']).category, 'tooling-only');
-  assert.equal(classifyChangedPaths(['e2e/tests/browser/login.spec.ts']).category, 'e2e-contract');
+  assert.equal(classifyChangedPaths(['e2e/tests/browser/login.spec.ts']).category, 'e2e-runner');
   assert.equal(classifyChangedPaths(['web/src/App.tsx']).category, 'app-runtime');
+  assert.equal(classifyChangedPaths(['e2e/fixtures/server.js']).category, 'e2e-fixture-catalog');
+  assert.equal(classifyChangedPaths(['e2e/acceptance/cases/2487/SC-09/case.yaml']).category,
+    'e2e-fixture-catalog');
   assert.equal(classifyChangedPaths(['docs/a.md', 'web/src/App.tsx']).category, 'mixed');
   assert.equal(classifyChangedPaths(['scripts/acceptance-x.mjs', 'e2e/tests/y.ts']).category, 'mixed');
+  assert.equal(classifyChangedPaths(['e2e/fixtures/server.js', 'e2e/tests/browser/y.ts']).category,
+    'mixed', 'runner and fixture/catalog changes are distinct risks');
+  assert.equal(classifyChangedPaths(['e2e/acceptance/cases/2487/SC-09/verify.cjs',
+    'crates/nession-agent/src/lib.rs']).category, 'mixed');
   assert.equal(classifyChangedPaths(['justfile']).category, 'unknown');
   assert.equal(classifyChangedPaths(['docs/a.md', 'justfile']).category, 'unknown',
     'an unknown path in a mixed change must fail closed');
+  for (const category of ['e2e-runner', 'e2e-fixture-catalog', 'app-runtime', 'mixed', 'unknown']) {
+    assert.equal(classifyChangedPaths(category === 'e2e-runner'
+      ? ['e2e/tests/browser/login.spec.ts']
+      : category === 'e2e-fixture-catalog'
+        ? ['e2e/fixtures/server.js']
+        : category === 'app-runtime'
+          ? ['web/src/App.tsx']
+          : category === 'mixed'
+            ? ['web/src/App.tsx', 'e2e/fixtures/server.js']
+            : ['justfile']).applicable, true, category + ' must stay applicable');
+  }
 
   // Untrusted text cannot downgrade a risk-bearing path: a path carrying a
   // claim/newline is unrecognized, and Issue/PR prose is never an input.
@@ -240,7 +298,9 @@ function selfTest() {
   assert.throws(() => notRequiredReceipt('main', reproduction), /invalid target SHA/);
   assert.throws(() => notRequiredReceipt('a'.repeat(40), { applicable: true }), /not-required classification/);
   assert.throws(() => notRequiredReceipt('a'.repeat(40),
-    { applicable: false, category: 'e2e-contract' }), /not-required classification/);
+    { applicable: false, category: 'e2e-runner' }), /not-required classification/);
+  assert.throws(() => notRequiredReceipt('a'.repeat(40),
+    { applicable: false, category: 'e2e-fixture-catalog' }), /not-required classification/);
   // #2478 SC-03: the job-log receipt binds the exact run identity and only a
   // positively tooling-only decision may be emitted.
   const target = 'a'.repeat(40);
