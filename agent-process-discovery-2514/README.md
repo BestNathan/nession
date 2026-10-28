@@ -38,7 +38,7 @@
 
 - Standalone HTML only; no external script/font/CDN/module dependencies.
 - Document contains the four environment fixtures (`linux`, `shared`, `mac`, `offline`), Overview/Processes/Diagnostics views, focus/refresh/selected process handlers, mocked reparented worker, and visible source links injected by the publisher.
-- Browser interaction verification / public HTTPS/manifest publication needs separate verification; source commit alone is not evidence the live Pages URL was updated.
+- Browser interaction verification / public HTTPS/manifest publication needs separate verification; source commit alone is not evidence the live Pages URL was updated. For this command/resource-detail revision, Source-only smoke has passed; do not claim updated Pages HTML until its deployed SHA matches.
 
 ## Open product decisions
 
@@ -49,4 +49,4 @@
 
 ## Publication delivery
 
-This static mock is authored on the isolated `prototype` branch and published by the trusted main-owned [Deploy / Public Pages](https://github.com/BestNathan/nession/actions/workflows/deploy-pages.yml) workflow. The read-only `Prototype / Change Signal` runs on ordinary source pushes and triggers a constrained `workflow_run` consumer after [#2518](https://github.com/BestNathan/nession/pull/2518). The live preview must be verified by the deployed `prototypes/manifest.json` source SHA and the standalone HTML response; a source commit is not itself proof of HTTPS publication. This section was added as the end-to-end event-bridge verification source change for [#2519](https://github.com/BestNathan/nession/issues/2519).
+This static mock is authored on the isolated `prototype` branch and published by the trusted main-owned [Deploy / Public Pages](https://github.com/BestNathan/nession/actions/workflows/deploy-pages.yml) workflow. The read-only `Prototype / Change Signal` runs on ordinary source pushes and emits a constrained `workflow_run` event to the main-owned Pages consumer introduced in merged [#2518](https://github.com/BestNathan/nession/pull/2518). The live preview must be verified by the deployed `prototypes/manifest.json` source SHA and the standalone HTML response; a source commit is not itself proof of HTTPS publication. This section was added as the end-to-end event-bridge verification source change for [#2519](https://github.com/BestNathan/nession/issues/2519).
