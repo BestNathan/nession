@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "723e21445062ab49ab71ba1aedcaa0151d213951a5ebdb08d2f5fb31ce3620e6",
+  "run_id": 40729117300,
+  "run_attempt": 1,
+  "issue": 2319,
+  "criterion": "SC-03",
+  "criterion_text": "On the same staging revision, two distinct authenticated GitHub Runs persist ciphertext-only native Qwen Session to the isolated Store, successfully restore the same Session and reject mismatched/tampered/source/model continuations.",
+  "stage": "staging",
+  "target_sha": "1d1aaed2e86e1699f0e54fabd8d8cc3aff6674bf",
+  "contract_sha256": "f9f35fb787bee64f602fc8b4743716518bb8763e5f795cc4fa1b9b4ee81ff20c",
+  "case_revision": "1d1aaed2e86e1699f0e54fabd8d8cc3aff6674bf",
+  "case_tree_sha": "5a93fb35c2ecf2a063f2fa632c6432541569d014",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-28T16:47:31.416Z",
+  "finished_at": "2026-10-28T16:47:40.016Z",
+  "duration_ms": 8600,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Staging checkpoint v3 persisted a ciphertext-only native Qwen Session in Run 40718370468 and 1 later Run(s) restored the same UUID with the pinned model qwen3.7-plus",
+      "evidence": [
+        {
+          "type": "store",
+          "value": "agent-store 8f597c3cb1327f3c1b432fc9898333dabef4fa60: checkpoint v3 ciphertext 365d707d3c6ce081cea01a26db0eec31b122e15b9805b5dfe6f217536ca667dd session 779c79fc-71bc-4a61-b1cc-da9a1e7befa4 source 39ab0762bf8204e3af61e86b11f518ae36ad70aa harness cec3c046aae56413bb177c987b8540c5553ff96f9b377679f5c13fb90d3eaca9"
+        },
+        {
+          "type": "telemetry",
+          "value": "seed Run 40718370468 model qwen3.7-plus dispatched default qwen3.7-plus result staging-canary-pass"
+        },
+        {
+          "type": "telemetry",
+          "value": "resume Run 40720975690 session 779c79fc-71bc-4a61-b1cc-da9a1e7befa4 model qwen3.7-plus result staging-resume-pass"
+        },
+        {
+          "type": "runtime",
+          "value": "exact staging target 1d1aaed2e86e1699f0e54fabd8d8cc3aff6674bf with checkpoint source 39ab0762bf8204e3af61e86b11f518ae36ad70aa proven an ancestor of the target; tampered/mismatched commitments remain rejected by the signed dispatch verifier and its PR-boundary negative fixtures"
+        }
+      ],
+      "duration_ms": 2753,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40729117300,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "1d1aaed2e86e1699f0e54fabd8d8cc3aff6674bf",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40729117300",
+    "record_path": "runs/2026-10-28/40729117300-1/2319/SC-03.json",
+    "source_result_sha256": "7fddd7f2b65df0a235d4818f5b3deccf96e24edb8fb49fcbc21da92a4b5fcbb6"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40729117300-1",
+    "sha256": "7fddd7f2b65df0a235d4818f5b3deccf96e24edb8fb49fcbc21da92a4b5fcbb6",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40729117300",
+    "durability": "time-limited; object archival not configured"
+  }
+}

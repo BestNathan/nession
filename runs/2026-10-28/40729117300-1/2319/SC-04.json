@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "4c2db9ed98ab0654ee40850dd30584e44321acf2e109a7e2918a8d3b2048fbe6",
+  "run_id": 40729117300,
+  "run_attempt": 1,
+  "issue": 2319,
+  "criterion": "SC-04",
+  "criterion_text": "The existing canonical trusted Case/ingester records SC-02 and SC-03 evidence against their exact source SHA + SC contract; no model verdict or missing Case can create a false Pass, and main promotion remains blocked until integration evidence is accepted.",
+  "stage": "staging",
+  "target_sha": "1d1aaed2e86e1699f0e54fabd8d8cc3aff6674bf",
+  "contract_sha256": "f9f35fb787bee64f602fc8b4743716518bb8763e5f795cc4fa1b9b4ee81ff20c",
+  "case_revision": "1d1aaed2e86e1699f0e54fabd8d8cc3aff6674bf",
+  "case_tree_sha": "e890a55a597b311f5f5e9e9313eb36f8b8689e4c",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-28T16:47:40.017Z",
+  "finished_at": "2026-10-28T16:47:46.907Z",
+  "duration_ms": 6890,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "The trusted Case/ingester recorded SC-02 (Run 40726002957) and SC-03 (Run 40726002957) as Pass against one SC contract at merged staging SHAs that are ancestors of 1d1aaed2e86e1699f0e54fabd8d8cc3aff6674bf",
+      "evidence": [
+        {
+          "type": "store",
+          "value": "acceptance-results 4a0311ba1935abdf11c2e21a23a9e42f416b8b0f: SC-02 run 40726002957 target 309745f82ffc9ec3d6ca8445a1a3586fee5df578 tree 85fc04a0dc5bc966ce2ee66b1867c51250d2de54 execution cbbc9e69d56585268443462fb83080f8d5ccaf77955955b85b2451383b66fdec; SC-03 run 40726002957 target 309745f82ffc9ec3d6ca8445a1a3586fee5df578 tree 5a93fb35c2ecf2a063f2fa632c6432541569d014 execution 5a37f821655b7b5e3bdcba00d0b67dbc8b493b37ce5a5d62269a4299183d77cc; contract f9f35fb787bee64f602fc8b4743716518bb8763e5f795cc4fa1b9b4ee81ff20c"
+        },
+        {
+          "type": "runtime",
+          "value": "exact staging target 1d1aaed2e86e1699f0e54fabd8d8cc3aff6674bf: both records are Pass with non-empty verifier evidence, source-aligned case revisions and provenance heads, and their target SHAs are ancestors of this target"
+        }
+      ],
+      "duration_ms": 1044,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40729117300,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "1d1aaed2e86e1699f0e54fabd8d8cc3aff6674bf",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40729117300",
+    "record_path": "runs/2026-10-28/40729117300-1/2319/SC-04.json",
+    "source_result_sha256": "688c9bf187643b9dda78fd7c38745d646eb630afe6c518cc124aba4f07162b4b"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40729117300-1",
+    "sha256": "688c9bf187643b9dda78fd7c38745d646eb630afe6c518cc124aba4f07162b4b",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40729117300",
+    "durability": "time-limited; object archival not configured"
+  }
+}

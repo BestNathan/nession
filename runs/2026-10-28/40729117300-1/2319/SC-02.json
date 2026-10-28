@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "dcb3614ea1a36358cc8a8d93395c2c51892a920b90d8590339288497d9351d18",
+  "run_id": 40729117300,
+  "run_attempt": 1,
+  "issue": 2319,
+  "criterion": "SC-02",
+  "criterion_text": "On a merged staging SHA, a signed `dev-qwen-01` task runs in an isolated staging Worker, produces the exact bounded edit, canonical Telemetry and an authenticated result receipt.",
+  "stage": "staging",
+  "target_sha": "1d1aaed2e86e1699f0e54fabd8d8cc3aff6674bf",
+  "contract_sha256": "f9f35fb787bee64f602fc8b4743716518bb8763e5f795cc4fa1b9b4ee81ff20c",
+  "case_revision": "1d1aaed2e86e1699f0e54fabd8d8cc3aff6674bf",
+  "case_tree_sha": "85fc04a0dc5bc966ce2ee66b1867c51250d2de54",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-28T16:47:03.263Z",
+  "finished_at": "2026-10-28T16:47:31.415Z",
+  "duration_ms": 28152,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Staging Worker seed Run 40718370468 executed the signed dev-qwen-01 dispatch, performed the bounded Read+Edit repair and emitted canonical telemetry bound to 39ab0762bf8204e3af61e86b11f518ae36ad70aa",
+      "evidence": [
+        {
+          "type": "store",
+          "value": "agent-store 8f597c3cb1327f3c1b432fc9898333dabef4fa60: checkpoint v3 roles/developer/dev-qwen-01/issues/2319/checkpoints/00000003.json ciphertext 365d707d3c6ce081cea01a26db0eec31b122e15b9805b5dfe6f217536ca667dd source 39ab0762bf8204e3af61e86b11f518ae36ad70aa harness cec3c046aae56413bb177c987b8540c5553ff96f9b377679f5c13fb90d3eaca9"
+        },
+        {
+          "type": "telemetry",
+          "value": "seed Run 40718370468 dispatch 1914b0d3dd927d75f9e822ade5abab10c8f79f34c48532d41740c3081fc59740 provider claude-code model qwen3.7-plus tools Read=1 Edit=1 result staging-canary-pass target 39ab0762bf8204e3af61e86b11f518ae36ad70aa"
+        },
+        {
+          "type": "runtime",
+          "value": "exact staging target 1d1aaed2e86e1699f0e54fabd8d8cc3aff6674bf with checkpoint source 39ab0762bf8204e3af61e86b11f518ae36ad70aa proven an ancestor of the target"
+        }
+      ],
+      "duration_ms": 22262,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40729117300,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "1d1aaed2e86e1699f0e54fabd8d8cc3aff6674bf",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40729117300",
+    "record_path": "runs/2026-10-28/40729117300-1/2319/SC-02.json",
+    "source_result_sha256": "dbf9f26744db1426aac25c2f793f4cefe8e181f0d9f08d8d828e40a002ee8aa1"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40729117300-1",
+    "sha256": "dbf9f26744db1426aac25c2f793f4cefe8e181f0d9f08d8d828e40a002ee8aa1",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40729117300",
+    "durability": "time-limited; object archival not configured"
+  }
+}
