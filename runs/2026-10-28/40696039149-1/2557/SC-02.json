@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "0b13c159df164d2d8cab8b60747db2845a43c293e154eb5aa99cb3f33d936be3",
+  "run_id": 40696039149,
+  "run_attempt": 1,
+  "issue": 2557,
+  "criterion": "SC-02",
+  "criterion_text": "Web client, Server, Agent and Docker/Compose default-build paths use 96 columns consistently; valid overrides still work and invalid values fail.",
+  "stage": "staging",
+  "target_sha": "13b2f89accadb4943273a046621c69ce93877edd",
+  "contract_sha256": "2c9cf3f907411bb09ab89ab99b49403208abba268e73bb7740c083f9379f6992",
+  "case_revision": "13b2f89accadb4943273a046621c69ce93877edd",
+  "case_tree_sha": "8392c62a8f8fad2101e59ca1de1a5fa10825d5f4",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-28T13:28:20.655Z",
+  "finished_at": "2026-10-28T13:29:51.698Z",
+  "duration_ms": 91043,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Two optional build inputs independently select columns and the Web maximum font; defaults and fail-fast cases are proven by real builds",
+      "evidence": [
+        {
+          "type": "build",
+          "value": "exact SHA 13b2f89accadb4943273a046621c69ce93877edd: isolated Web builds emitted 80/13, 96/14 and default 96/14 via WEB_TERMINAL_CONFIG_V1; both inputs report source=\"env\" only when supplied"
+        },
+        {
+          "type": "build",
+          "value": "VITE_NESSION_TERMINAL_COLS=0 and VITE_NESSION_TERMINAL_WEB_FONT_SIZE=14px each failed the build visibly and produced no index.html"
+        },
+        {
+          "type": "test",
+          "value": "a font-only change (12px vs 18px at cols=96) changed only web_max_font_size; the shared terminalConfig unit tests passed and no mobile columns value exists"
+        }
+      ],
+      "duration_ms": 85129,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40696039149,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "13b2f89accadb4943273a046621c69ce93877edd",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40696039149",
+    "record_path": "runs/2026-10-28/40696039149-1/2557/SC-02.json",
+    "source_result_sha256": "4c5e9d67570e98e379a7bb6de384b7b8ae85e79fd0b6ca688b27578ca8085ed4"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40696039149-1",
+    "sha256": "4c5e9d67570e98e379a7bb6de384b7b8ae85e79fd0b6ca688b27578ca8085ed4",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40696039149",
+    "durability": "time-limited; object archival not configured"
+  }
+}

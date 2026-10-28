@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "1fd75e65e77f5bc33a33c977c473c5d47b252eeaa865c7bbad54ef2c0f4bf904",
+  "run_id": 40696039149,
+  "run_attempt": 1,
+  "issue": 2557,
+  "criterion": "SC-03",
+  "criterion_text": "A preexisting Session retains its authoritative width on attach after changing the release defaults; 96-column narrow-mobile fallback remains deterministic.",
+  "stage": "staging",
+  "target_sha": "13b2f89accadb4943273a046621c69ce93877edd",
+  "contract_sha256": "2c9cf3f907411bb09ab89ab99b49403208abba268e73bb7740c083f9379f6992",
+  "case_revision": "13b2f89accadb4943273a046621c69ce93877edd",
+  "case_tree_sha": "eb4c7f44569b4e69a3b773b32731fd399d62570a",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-28T13:29:51.698Z",
+  "finished_at": "2026-10-28T13:30:16.837Z",
+  "duration_ms": 25139,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "One fixed column count holds across Web/App and the running Agent/tmux Session; only rows follow the active viewport",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 13b2f89accadb4943273a046621c69ce93877edd on tmux 3.4: a real Agent/tmux Session kept one column count across creation, a second attach with a different width and an authorized resize; only rows changed and the attach reply stated the column count"
+        },
+        {
+          "type": "test",
+          "value": "the Web/App shared terminalConfig emitted the canonical columns; the fit/sizing unit tests and the 63 controller integration tests passed, including stated-width render and observer adoption of the Agent-stated width"
+        }
+      ],
+      "duration_ms": 19288,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40696039149,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "13b2f89accadb4943273a046621c69ce93877edd",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40696039149",
+    "record_path": "runs/2026-10-28/40696039149-1/2557/SC-03.json",
+    "source_result_sha256": "f63993c7a5645a245702d3665c16d29834a2753cf913ede950a7702c86227b5a"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40696039149-1",
+    "sha256": "f63993c7a5645a245702d3665c16d29834a2753cf913ede950a7702c86227b5a",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40696039149",
+    "durability": "time-limited; object archival not configured"
+  }
+}

@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "9114aa51f62a586699e3c1c03a3a951e531eec45bdf9ffb96a198d8e533ad4d8",
+  "run_id": 40696039149,
+  "run_attempt": 1,
+  "issue": 2557,
+  "criterion": "SC-04",
+  "criterion_text": "A release build emits auditable config and artifact identity, and Compose cannot silently build a mismatched Web vs Server/Agent configuration.",
+  "stage": "staging",
+  "target_sha": "13b2f89accadb4943273a046621c69ce93877edd",
+  "contract_sha256": "2c9cf3f907411bb09ab89ab99b49403208abba268e73bb7740c083f9379f6992",
+  "case_revision": "13b2f89accadb4943273a046621c69ce93877edd",
+  "case_tree_sha": "0b5f1d226d9164fb216872b907febfd82da196c6",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-28T13:30:16.838Z",
+  "finished_at": "2026-10-28T13:30:39.317Z",
+  "duration_ms": 22479,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "One release parameter reaches the Web bundle and the Server process configuration, agrees on cols, defaults deterministically and fails fast on invalid values",
+      "evidence": [
+        {
+          "type": "config",
+          "value": "exact SHA 13b2f89accadb4943273a046621c69ce93877edd: render-server-config.sh projected cols=96/font=13.5 into config.toml and `nession-server --print-config` read back 96/13.5 through its canonical parser and validation"
+        },
+        {
+          "type": "build",
+          "value": "the Web bundle built from the same 96/13.5 parameters emitted 96/13.5; omitted inputs read back as 96/14 in both the renderer and the Server parser"
+        },
+        {
+          "type": "config",
+          "value": "cols=0, cols=eighty and font=32.1 each failed the Server reader visibly; the entrypoint writes the values and the runtime environment overrides and validates them"
+        },
+        {
+          "type": "static",
+          "value": "both Server/Agent image paths carry ARG+ENV, Compose states both variables, and both release workflows pass the Web build inputs and the image build args from one parameter source"
+        }
+      ],
+      "duration_ms": 16630,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40696039149,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "13b2f89accadb4943273a046621c69ce93877edd",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40696039149",
+    "record_path": "runs/2026-10-28/40696039149-1/2557/SC-04.json",
+    "source_result_sha256": "6194a0383f173b9fb41c952c49c3267d8d5703d0284ff800b16e634e1ac6daac"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40696039149-1",
+    "sha256": "6194a0383f173b9fb41c952c49c3267d8d5703d0284ff800b16e634e1ac6daac",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40696039149",
+    "durability": "time-limited; object archival not configured"
+  }
+}
