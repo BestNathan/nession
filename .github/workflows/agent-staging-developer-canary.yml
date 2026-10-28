@@ -93,12 +93,14 @@ jobs:
             "$work/staging-dispatch.zip" "$work/admission-run.json" \
             "$work/admission-artifacts.json" "$work/staging-admission.zip" \
             "$work/verified-staging-dispatch.json"
-          for key in target_sha source_main_sha dispatch_id agent_id environment; do
+          target="$(jq -er .target_sha "$work/verified-staging-dispatch.json")"
+          dispatch="$(jq -er .dispatch_id "$work/verified-staging-dispatch.json")"
+          for key in source_main_sha dispatch_id agent_id environment; do
             value="$(jq -er ".$key" "$work/verified-staging-dispatch.json")"
             echo "${key}=${value}" >> "$GITHUB_OUTPUT"
           done
-          target="$(jq -er .target_sha "$work/verified-staging-dispatch.json")"
-          dispatch="$(jq -er .dispatch_id "$work/verified-staging-dispatch.json")"
+          # The job output name is the pre-existing `staging_sha` contract.
+          echo "staging_sha=$target" >> "$GITHUB_OUTPUT"
           {
             echo "## Authenticated staging dispatch"
             echo
