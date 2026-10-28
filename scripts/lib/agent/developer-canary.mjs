@@ -27,6 +27,20 @@ const PROMPT='Read calc.js using the Read tool. The function incorrectly subtrac
   'Do not use Bash, network tools, plugins or external tools.';
 function fail(message){throw new Error('Qwen Developer Canary: '+message);}
 function providerModel(env){return qwenDeveloperModel(env);}
+// A resume telemetry record must carry the exact signed checkpoint commitment
+// it consumed, so acceptance can bind the resumed Run to the stored Session
+// instead of trusting a separately reported model.
+function checkpointCommitment(env){
+  return /^[1-9]\d*$/.test(env.STAGING_CHECKPOINT_VERSION??'')&&
+    /^[a-f0-9]{64}$/.test(env.STAGING_CHECKPOINT_CIPHERTEXT_SHA??'');
+}
+function stagingTask(env){
+  const base={dispatch_id:env.STAGING_DISPATCH_ID,phase:env.STAGING_PHASE,
+    dispatched_default_model:env.STAGING_DEFAULT_MODEL};
+  if(env.STAGING_PHASE!=='resume')return base;
+  return {...base,checkpoint_version:Number(env.STAGING_CHECKPOINT_VERSION),
+    checkpoint_ciphertext_sha256:env.STAGING_CHECKPOINT_CIPHERTEXT_SHA};
+}
 export function checkSyntheticEdit(root,events){
   if(!Array.isArray(events))fail('missing real Provider event sequence');
   const tools=events.filter(x=>x?.type==='assistant'&&Array.isArray(x?.message?.content))
@@ -67,7 +81,8 @@ function canaryIdentity(env,startedAt,finishedAt,envelope,events,result,{stage=f
     env.GITHUB_RUN_ATTEMPT!=='1'||
     !/^[a-f0-9]{64}$/.test(env.STAGING_DISPATCH_ID??'')||
     !['seed','resume'].includes(env.STAGING_PHASE)||
-    !/^qwen[a-z0-9._-]*$/i.test(env.STAGING_DEFAULT_MODEL??'')))
+    !/^qwen[a-z0-9._-]*$/i.test(env.STAGING_DEFAULT_MODEL??'')||
+    (env.STAGING_PHASE==='resume'&&!checkpointCommitment(env))))
     fail('staging Worker source identity missing');
   const nativeToolNames=events.filter(x=>x?.type==='assistant')
     .flatMap(x=>x.message?.content??[])
@@ -81,8 +96,7 @@ function canaryIdentity(env,startedAt,finishedAt,envelope,events,result,{stage=f
     unique_run_name:providerScopedRunName({workflowId,
       runId:GITHUB_RUN_ID,runAttempt:GITHUB_RUN_ATTEMPT,taskId,provider:'claude-code'}),
     task:{id:taskId,type:'develop',issue:stage?2319:ISSUE,target_ref:targetRef,
-      ...(stage?{dispatch_id:env.STAGING_DISPATCH_ID,phase:env.STAGING_PHASE,
-        dispatched_default_model:env.STAGING_DEFAULT_MODEL}:{})},
+      ...(stage?stagingTask(env):{})},
     agent:{provider:'claude-code',id:'dev-qwen-01',role:'developer',
       model:{id:providerModel(env),request_model:providerModel(env)},
       run_id:envelope?.session_id??null,status:result.edit_verified?'finished':'error'},
@@ -103,7 +117,8 @@ async function run(dir,{stage=false}={}){
         !SHA.test(env.STAGING_TARGET_SHA??'')||
         !/^[a-f0-9]{64}$/.test(env.STAGING_DISPATCH_ID??'')||
         !['seed','resume'].includes(env.STAGING_PHASE)||
-        !/^qwen[a-z0-9._-]*$/i.test(env.STAGING_DEFAULT_MODEL??''))
+        !/^qwen[a-z0-9._-]*$/i.test(env.STAGING_DEFAULT_MODEL??'')||
+        (env.STAGING_PHASE==='resume'&&!checkpointCommitment(env)))
         : env.GITHUB_EVENT_NAME!=='push')) {
     fail('only admitted trusted main Workflow may run credentialed Developer Canary');
   }
@@ -157,6 +172,7 @@ function selfTest(){
     GITHUB_RUN_ATTEMPT:'1',GITHUB_SHA:'b'.repeat(40),
     STAGING_TARGET_SHA:'a'.repeat(40),STAGING_DISPATCH_ID:'c'.repeat(64),
     STAGING_PHASE:'resume',STAGING_DEFAULT_MODEL:'qwen3.7-max',
+    STAGING_CHECKPOINT_VERSION:'1',STAGING_CHECKPOINT_CIPHERTEXT_SHA:'d'.repeat(64),
     ANTHROPIC_MODEL:'qwen3.7-plus',
   };
   const stageRecord=canaryIdentity(stageEnv,'2026-01-01T00:00:00.000Z',
@@ -167,8 +183,28 @@ function selfTest(){
   assert.equal(stageRecord.task.dispatch_id,stageEnv.STAGING_DISPATCH_ID);
   assert.equal(stageRecord.task.phase,'resume');
   assert.equal(stageRecord.task.dispatched_default_model,'qwen3.7-max');
+  assert.equal(stageRecord.task.checkpoint_version,1);
+  assert.equal(stageRecord.task.checkpoint_ciphertext_sha256,
+    stageEnv.STAGING_CHECKPOINT_CIPHERTEXT_SHA);
   assert.equal(stageRecord.agent.model.id,'qwen3.7-plus');
   assert.equal(stageRecord.result.status,'staging-canary-pass');
+  // A resume without the exact signed checkpoint commitment fails closed.
+  for(const missing of [{STAGING_CHECKPOINT_VERSION:''},
+    {STAGING_CHECKPOINT_CIPHERTEXT_SHA:''},
+    {STAGING_CHECKPOINT_VERSION:'0'},
+    {STAGING_CHECKPOINT_CIPHERTEXT_SHA:'0'.repeat(63)}]) {
+    assert.throws(()=>canaryIdentity({...stageEnv,...missing},
+      '2026-01-01T00:00:00.000Z','2026-01-01T00:00:01.000Z',{},[],
+      {edit_verified:true},{stage:true}),/staging Worker source/);
+  }
+  // A seed Run has no checkpoint to commit; it neither requires nor records one.
+  const seedRecord=canaryIdentity({...stageEnv,STAGING_PHASE:'seed',
+    STAGING_CHECKPOINT_VERSION:'',STAGING_CHECKPOINT_CIPHERTEXT_SHA:''},
+    '2026-01-01T00:00:00.000Z','2026-01-01T00:00:01.000Z',{},[],
+    {edit_verified:true},{stage:true});
+  assert.equal(seedRecord.task.phase,'seed');
+  assert.equal(Object.hasOwn(seedRecord.task,'checkpoint_version'),false);
+  assert.equal(Object.hasOwn(seedRecord.task,'checkpoint_ciphertext_sha256'),false);
   assert.throws(()=>canaryIdentity({...stageEnv,STAGING_PHASE:'unknown'},
     '2026-01-01T00:00:00.000Z','2026-01-01T00:00:01.000Z',{},[],
     {edit_verified:true},{stage:true}),/staging Worker source/);
