@@ -755,7 +755,7 @@ export async function collectFullNotRequiredReceipts(repo, sha, request = github
 // their job logs; bind each to the exact run/attempt/SHA that printed it. A
 // completed successful run from before the receipt existed is skipped (no
 // line); a malformed/duplicated receipt fails collection closed.
-const LANE_EVIDENCE_RUNS = 5;
+const LANE_EVIDENCE_RUNS = 3;
 export async function collectLaneEvidenceReceipts(repo, request = githubGet,
   getText = githubJobLog, { limit = LANE_EVIDENCE_RUNS } = {}) {
   if (repo !== 'BestNathan/nession') throw new Error('invalid lane evidence repository');
@@ -1786,11 +1786,9 @@ async function collectCommand(workspace, outFile) {
       :[];
   const fullNotRequiredReceipts = process.env.ACCEPTANCE_STAGE==='post-merge'
     ? await collectFullNotRequiredReceipts(repo, sha) : [];
-  // Lane identity is a merged/staging-stage concern; a pre-merge evaluation
-  // has no deployed environment to attest.
-  const laneEvidence = process.env.ACCEPTANCE_STAGE === 'pre-merge'
-    ? { deployment_attestation_receipts: [], staging_lane_admission_receipts: [] }
-    : await collectLaneEvidenceReceipts(repo, githubGet, githubJobLog);
+  // SC-02 is a pre-merge criterion about the two-lane topology, so lane
+  // receipts must be available at every stage, not only merged/staging.
+  const laneEvidence = await collectLaneEvidenceReceipts(repo, githubGet, githubJobLog);
   const reuseComparison = computeReuseComparison({ targetSha: sha,
     acceptanceBatchReceipts,
     extraBatchReceipts: [...batchReceiptsBySha.values()].flat()
