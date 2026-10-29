@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "9242a27ed42ef981c1e8d6ca55ac3243b646f76aa11daf5a4029a538211ace7f",
+  "run_id": 40852433372,
+  "run_attempt": 1,
+  "issue": 2598,
+  "criterion": "SC-02",
+  "criterion_text": "Browser native selection copy and normal/bracketed text paste work exactly once in desktop and App terminal, including IME, keyboard, remount, renderer replacement and reconnect, without disrupting shell/TUI input semantics.",
+  "stage": "staging",
+  "target_sha": "1de6185df91526b6561fed6dce048c59eeb6abe7",
+  "contract_sha256": "56f7b141959cd4f1706de498003c69b3a74d2e0bfcf12891300a7c951d9fb138",
+  "case_revision": "1de6185df91526b6561fed6dce048c59eeb6abe7",
+  "case_tree_sha": "bdc5cfa2049b7acf40bb7d9756a1c4828364ce94",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-29T09:49:45.025Z",
+  "finished_at": "2026-10-29T09:50:07.211Z",
+  "duration_ms": 22186,
+  "verifiers": [
+    {
+      "type": "browser",
+      "entry": "verify.spec.js",
+      "result": "Pass",
+      "summary": "Playwright JSON confirms executed passing tests and assertions with no skips (1 recovered assertion retries)",
+      "evidence": [
+        {
+          "type": "browser",
+          "value": "Playwright discovered=1 passed=1 skipped=0 assertions=21"
+        }
+      ],
+      "execution": {
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 21
+      },
+      "duration_ms": 5816,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "The PTY-bound text and IME owners keep exact-once input across the suite",
+      "evidence": [
+        {
+          "type": "test",
+          "value": "exact SHA 1de6185df91526b6561fed6dce048c59eeb6abe7: 111 interaction/IME/controller integration tests passed (paste once, committed text once, IME composition commit, remount/reconnect input ownership)"
+        }
+      ],
+      "duration_ms": 10497,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40852433372,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "1de6185df91526b6561fed6dce048c59eeb6abe7",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40852433372",
+    "record_path": "runs/2026-10-29/40852433372-1/2598/SC-02.json",
+    "source_result_sha256": "b4c24fd0173622009f0a83cede6c00e58dee51eedd1752094fac3361576d794d"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40852433372-1",
+    "sha256": "b4c24fd0173622009f0a83cede6c00e58dee51eedd1752094fac3361576d794d",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40852433372",
+    "durability": "time-limited; object archival not configured"
+  }
+}

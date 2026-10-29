@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "17b52aa334ecb5d6e3dbe25e93742189333ad490f715fed178dbeafe78848d68",
+  "run_id": 40852433372,
+  "run_attempt": 1,
+  "issue": 2598,
+  "criterion": "SC-06",
+  "criterion_text": "A Web/App user pastes an image-only PNG/JPEG/WebP clipboard into an OSC 5522-enabled test TUI: the TUI requests a negotiated MIME type and receives matching binary bytes through standard OSC 5522 PTY messages (SHA-256 equality); **no file upload, remote file creation or path insertion** occurs.",
+  "stage": "staging",
+  "target_sha": "1de6185df91526b6561fed6dce048c59eeb6abe7",
+  "contract_sha256": "56f7b141959cd4f1706de498003c69b3a74d2e0bfcf12891300a7c951d9fb138",
+  "case_revision": "1de6185df91526b6561fed6dce048c59eeb6abe7",
+  "case_tree_sha": "98524a2494de5097a7a5488eaf4f4d6a3415e2da",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-29T09:51:01.890Z",
+  "finished_at": "2026-10-29T09:51:10.418Z",
+  "duration_ms": 8528,
+  "verifiers": [
+    {
+      "type": "browser",
+      "entry": "verify.spec.js",
+      "result": "Pass",
+      "summary": "Playwright JSON confirms executed passing tests and assertions with no skips",
+      "evidence": [
+        {
+          "type": "browser",
+          "value": "Playwright discovered=1 passed=1 skipped=0 assertions=20"
+        }
+      ],
+      "execution": {
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 20
+      },
+      "duration_ms": 2630,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Image clipboard data has no upload or file-path path in source",
+      "evidence": [
+        {
+          "type": "source",
+          "value": "exact SHA 1de6185df91526b6561fed6dce048c59eeb6abe7: the clipboard protocol, browser adapter and controller contain no Files/upload/path adapter (searched: agent.file.write, FilesPlugin, file.write, upload, createObjectURL)"
+        }
+      ],
+      "duration_ms": 41,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40852433372,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "1de6185df91526b6561fed6dce048c59eeb6abe7",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40852433372",
+    "record_path": "runs/2026-10-29/40852433372-1/2598/SC-06.json",
+    "source_result_sha256": "077cc97022c159aba9439fa0427872880d9873e4b01ca1574b51024a0af2cdc5"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40852433372-1",
+    "sha256": "077cc97022c159aba9439fa0427872880d9873e4b01ca1574b51024a0af2cdc5",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40852433372",
+    "durability": "time-limited; object archival not configured"
+  }
+}
