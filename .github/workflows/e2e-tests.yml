@@ -270,6 +270,16 @@ jobs:
           # Playwright's --with-deps apt installer on every warm job (#2525).
           node -e 'const { chromium } = require("@playwright/test"); chromium.launch({ timeout: 30000 }).then(browser => browser.close()).catch(error => { console.error(error); process.exitCode = 1; })'
 
+      # Visual baselines are verified by E2E / Full Regression, which runs
+      # `playwright install chromium --with-deps` and therefore has Playwright's
+      # system font package set. Baseline capture must run in the same font
+      # environment or a font-metric-sensitive transcript can settle one pixel
+      # away (#2596). Keep the warm-job install above unchanged (#2525) and pay
+      # the apt installer only on the explicit baseline-capture dispatch.
+      - name: Prepare baseline font environment
+        if: github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots == true
+        run: cd e2e && npx playwright install-deps chromium
+
       # ── Web build transport (#1876) ────────────────────────────────
       # npm ci is still required: vite preview and its /api + /ws proxy run
       # from local node_modules. Reusing dist does not replace those packages.
