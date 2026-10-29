@@ -305,10 +305,15 @@ ok(() => {
   assert.match(result.stdout, /6 positive\/negative fixtures passed/);
 });
 
-// #2525: prove browser checks fail CLOSED, not merely that a cache restores.
-// This exercises the actual launch expressions checked into each workflow
-// against an isolated @playwright/test mock: corrupt executables and missing
-// system libraries must never translate to a green browser setup.
+// #2525 / #2596: prove browser checks fail CLOSED, not merely that a cache
+// restores. This exercises the actual launch expressions checked into each
+// workflow against an isolated @playwright/test mock: corrupt executables and
+// missing system libraries must never translate to a green browser setup.
+//
+// One browser environment for every visual comparison: the pinned runner image
+// supplies the launch libraries, the probe proves them, and no call site
+// installs Playwright's --with-deps package set (its fonts made Full
+// Regression render a baseline one pixel differently, #2596).
 ok(() => {
   const names = [
     'e2e-tests.yml',
@@ -336,15 +341,10 @@ ok(() => {
         name + ' must install and run the same absolute cached browser');
       const probes = [...workflow.matchAll(/node -e '([^'\n]*chromium\.launch[^'\n]*)'/g)];
       assert.equal(probes.length, 1, name + ' must have one real Chromium launch probe');
-      if (name === 'e2e-full-regression.yml') {
-        assert.match(workflow, /npx playwright install chromium --with-deps/,
-          'Full visual golden font parity must be preserved');
-      } else {
-        assert.match(workflow, /npx playwright install chromium\s/,
-          name + ' must provision matching binary even after a cache miss');
-        assert.doesNotMatch(workflow, /npx playwright install chromium --with-deps/,
-          name + ' must not repeat unbounded apt setup on every warm job');
-      }
+      assert.match(workflow, /npx playwright install chromium\s/,
+        name + ' must provision matching binary even after a cache miss');
+      assert.doesNotMatch(workflow, /npx playwright install chromium --with-deps/,
+        name + ' must not install the --with-deps package set');
       for (const [failure, expected] of [
         ['', 0],
         ['ENOENT: browser executable missing/corrupt', 1],
