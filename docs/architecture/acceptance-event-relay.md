@@ -82,6 +82,33 @@ verified live endpoint remain required before removing legacy Waker/Quota
 Recovery. A successful health check alone is not delivery proof.
 Reference: https://docs.github.com/en/webhooks/using-webhooks/handling-failed-webhook-deliveries
 
+## Trusted event-consumer workflow contract (not enabled by shadow)
+
+The repository includes a main-owned `Acceptance / Event Consumer` workflow
+(`.github/workflows/acceptance-event-consumer.yml`), invoked only by an
+explicit `workflow_dispatch`. Its six inputs are source_run_id,
+source_attempt, target_sha, issue_number, contract_digest and task_id.
+The consumer re-fetches the live completed source run, checks allowlisted
+workflow path/name, exact main SHA, original push, successful conclusion and
+source attempt; checks SHA ancestry in the trusted main checkout; re-reads
+the current Issue and canonical Acceptance Plan; and recalculates task_id
+before invoking the existing `agent-sc-acceptance.yml@main` Agent and
+deterministic Issue updater. Invalid or stale input never authorizes Agent
+execution.
+
+Future live publisher needs a separate GitHub App credential with
+**Actions:write** permission scoped to this repository. That credential must
+not be available to untrusted PR-head code. The shadow receiver's own
+read-only App need not have Actions:write. A successful HTTP 204 from
+workflow_dispatch does not return an Actions run ID: the sender must keep its
+task in an explicit uncertain/reconciling state until independently
+authenticated run/evaluation evidence exists. Concurrency guards simultaneous
+same-task execution but are not an exactly-once delivery guarantee.
+
+This new workflow has no automatic trigger from the shadow service. It does
+not replace the legacy Waker until live source→task→consumer→Updater
+receipts, crash tests, and missed-webhook recovery have been verified.
+
 ## Requirements before turning off legacy receivers
 
 1. Deploy shadow ingress and compare real source run/attempt/SHA lineage and
