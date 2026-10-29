@@ -231,10 +231,8 @@ export function assertDeploymentBinding(record, planEntry) {
   return item;
 }
 
-export function assertSourceBoundRecord(record, source) {  const item = validateCaseRecord(record);
-  if (item.run_id !== source.run_id || item.run_attempt !== source.run_attempt) {
-    throw new Error('Case record run identity disagrees with triggering workflow_run');
-  }
+export function assertSourceBoundRecord(record, source) {
+  const item = assertRunIdentity(record, source);
   // A manually dispatched run may check out a different SHA, but that SHA is
   // not authenticated by workflow_run.head_sha. Reject rather than project it.
   if (item.target_sha !== source.head_sha) {
@@ -244,6 +242,20 @@ export function assertSourceBoundRecord(record, source) {  const item = validate
   if (item.stage !== expectedStage) {
     throw new Error('Case stage disagrees with authenticated workflow source branch');
   }
+  return assertExecutionIdentity(item);
+}
+
+/** The triggering run identity a Case record must belong to. */
+function assertRunIdentity(record, source) {
+  const item = validateCaseRecord(record);
+  if (item.run_id !== source.run_id || item.run_attempt !== source.run_attempt) {
+    throw new Error('Case record run identity disagrees with triggering workflow_run');
+  }
+  return item;
+}
+
+/** The deterministic execution digest, checked for every source-bound record. */
+function assertExecutionIdentity(item) {
   const canonical = JSON.stringify({
     schema_version: 1,
     run_id: item.run_id,
@@ -261,9 +273,40 @@ export function assertSourceBoundRecord(record, source) {  const item = validate
   return item;
 }
 
-async function attestCaseRecord(record, { event, repository, token, request = githubRequest }) {
+/**
+ * Source binding for an explicit `when: deployed` run (#2614).
+ *
+ * A `workflow_dispatch` run reports the ref's tip as `workflow_run.head_sha`,
+ * never the deployed source SHA the operator asked it to verify — so the
+ * branch-head rule above cannot authenticate a deployed record. The deployment
+ * attestation replaces it: the record must carry a binding that
+ * `verifyDeployedProof` re-derives byte-for-byte from the trusted store for
+ * the same environment, source SHA, GitOps revision and all three image
+ * digests. Run identity and the execution digest are still required.
+ */
+export function assertDeployedSourceRecord(record, source, deploymentRecords) {
+  const item = assertRunIdentity(record, source);
+  if (item.stage !== 'post-merge') {
+    throw new Error('deployed Case record must use the post-merge compatibility stage');
+  }
+  if (!item.deployment) {
+    throw new Error('deployed Case record requires a deployment proof binding');
+  }
+  if (!Array.isArray(deploymentRecords)) {
+    throw new Error('deployed Case attestation requires trusted deployment records');
+  }
+  verifyDeployedProof(item, deploymentRecords);
+  return assertExecutionIdentity(item);
+}
+
+async function attestCaseRecord(record, {
+  event, repository, token, request = githubRequest, deploymentRecords = null,
+}) {
   const source = sourceRunIdentity(event, repository);
-  const item = assertSourceBoundRecord(record, source);
+  const candidate = validateCaseRecord(record);
+  const item = candidate.deployment
+    ? assertDeployedSourceRecord(candidate, source, deploymentRecords)
+    : assertSourceBoundRecord(candidate, source);
   const [owner, repo] = repository.split('/');
   const commit = await request('/repos/' + owner + '/' + repo + '/git/commits/' + item.target_sha, { token });
   const tree = await request('/repos/' + owner + '/' + repo + '/git/trees/' + commit.tree.sha + '?recursive=1', { token });
@@ -328,13 +371,17 @@ export function caseIndexPath(record) {
   return 'indexes/by-sha/' + item.target_sha + '/acceptance/' +
     item.run_id + '-' + item.run_attempt + '-' + item.issue + '-' + item.criterion + '.json';
 }
-export function caseIndexRecord(record) {
+export function caseIndexRecord(record, { deploymentRecords = null } = {}) {
   const item = validateCaseRecord(record);
   const source = item.provenance?.verified_source;
   if (!source || typeof source !== 'object') {
     throw new Error('Case index requires authenticated source workflow identity');
   }
-  assertSourceBoundRecord(item, source);
+  if (item.deployment) {
+    assertDeployedSourceRecord(item, source, deploymentRecords);
+  } else {
+    assertSourceBoundRecord(item, source);
+  }
   const durable = recordPath(item);
   if (item.provenance.record_path !== durable) {
     throw new Error('Case index record path differs from immutable persisted record');
@@ -351,6 +398,16 @@ export function caseIndexRecord(record) {
     stage: item.stage,
     case_tree_sha: item.case_tree_sha,
     contract_sha256: item.contract_sha256,
+    // A deployed record's source is bound by the attested deployment, not by
+    // the dispatch ref tip (#2614).
+    ...(item.deployment ? {
+      deployment: {
+        environment_id: item.deployment.environment_id,
+        source_sha: item.target_sha,
+        gitops_revision: item.deployment.gitops_revision,
+        attestation_execution_id: item.deployment.attestation_execution_id,
+      },
+    } : {}),
   });
 }
 
@@ -985,7 +1042,65 @@ async function selfTest() {
     ...deployedRecord, deployment: { ...deployBinding,
       image_digests: { ...deployBinding.image_digests, agent: 'sha256:' + '9'.repeat(64) } },
   }, [{ path: 'x', record: deployAttestation }]), /agent deployed Case digest disagrees/);
+
+  // #2614: a `workflow_dispatch` run reports the ref tip as
+  // workflow_run.head_sha, not the deployed SHA. The attested deployment
+  // record authorizes the source; the branch-head rule must not, and the run
+  // identity plus execution digest are still enforced.
+  const deployedSource = {
+    repository: 'BestNathan/nession', run_id: deployedRecord.run_id,
+    run_attempt: deployedRecord.run_attempt, event: 'workflow_dispatch',
+    head_sha: 'c'.repeat(40), head_branch: 'main', workflow_id: 9,
+  };
+  const deployedRecords = [{ path: 'runs/2026-10-25/700-1/deployment/staging-01.json', record: deployAttestation }];
+  // The Case runner mints execution_id from the record's own fields; the bare
+  // fixture default is not that digest, so derive it before the positive case.
+  const deployedExecution = crypto.createHash('sha256').update(JSON.stringify({
+    schema_version: 1, run_id: deployedRecord.run_id, run_attempt: deployedRecord.run_attempt,
+    target_sha: deployedRecord.target_sha, issue: deployedRecord.issue,
+    criterion: deployedRecord.criterion, contract_sha256: deployedRecord.contract_sha256,
+    case_tree_sha: deployedRecord.case_tree_sha,
+  })).digest('hex');
+  const boundDeployed = { ...deployedRecord, execution_id: deployedExecution };
+  assert.equal(assertDeployedSourceRecord(boundDeployed, deployedSource, deployedRecords).issue, 1799);
+  assert.throws(() => assertDeployedSourceRecord({ ...boundDeployed, run_id: 7 }, deployedSource, deployedRecords),
+    /run identity/);
+  assert.throws(() => assertDeployedSourceRecord(boundDeployed, deployedSource, null),
+    /requires trusted deployment records/);
+  assert.throws(() => assertDeployedSourceRecord({ ...boundDeployed, stage: 'staging' }, deployedSource, deployedRecords),
+    /post-merge compatibility stage/);
+  assert.throws(() => assertDeployedSourceRecord({
+    ...boundDeployed,
+    deployment: { ...boundDeployed.deployment, environment_id: 'staging' },
+  }, deployedSource, deployedRecords), /environment disagrees/);
+  assert.throws(() => assertDeployedSourceRecord({ ...boundDeployed, execution_id: 'a'.repeat(64) },
+    deployedSource, deployedRecords), /execution_id/);
+  assert.throws(() => assertSourceBoundRecord(boundDeployed, deployedSource),
+    /not the authenticated source workflow head/);
+
+  // The SHA index carries the deployment binding instead of the branch head.
+  const deployedEnriched = enrichCaseRecord(boundDeployed, {
+    workflowUrl: 'https://github.com/BestNathan/nession/actions/runs/100',
+    recordPath: recordPath(boundDeployed), source: deployedSource,
+  });
+  const deployedIndex = caseIndexRecord(deployedEnriched, { deploymentRecords: deployedRecords });
+  assert.equal(deployedIndex.target_sha, deployedRecord.target_sha);
+  assert.equal(deployedIndex.deployment.environment_id, 'staging-01');
+  assert.equal(deployedIndex.deployment.source_sha, deployedRecord.target_sha);
+  assert.notEqual(deployedIndex.source.head_sha, deployedIndex.target_sha);
+  assert.throws(() => caseIndexRecord(deployedEnriched), /requires trusted deployment records/);
+  assert.throws(() => caseIndexRecord(deployedEnriched, { deploymentRecords: [] }),
+    /missing or ambiguous/);
   console.log('acceptance Case ingest self-test: provenance, deployment binding and record validation passed');
+}
+
+/**
+ * The trusted deployment store records the ingest job collected (or null).
+ * Set by the workflow after it clones the append-only results branch.
+ */
+function deploymentRecordsFromEnv() {
+  const path = process.env.DEPLOYMENT_RECORDS_JSON ?? '';
+  return path ? JSON.parse(fs.readFileSync(path, 'utf8')) : null;
 }
 
 async function main() {
@@ -1004,7 +1119,7 @@ async function main() {
     const record = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
     const output = process.argv[4];
     if (!output) throw new Error('index RECORD OUTPUT required');
-    const entry = caseIndexRecord(record);
+    const entry = caseIndexRecord(record, { deploymentRecords: deploymentRecordsFromEnv() });
     fs.writeFileSync(output, JSON.stringify(entry, null, 2) + '\n');
     process.stdout.write(caseIndexPath(record) + '\n');
     return;
@@ -1015,6 +1130,7 @@ async function main() {
     await attestCaseRecord(record, {
       event, repository: process.env.GITHUB_REPOSITORY,
       token: process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN,
+      deploymentRecords: deploymentRecordsFromEnv(),
     });
     process.stdout.write(recordPath(record) + '\n');
     return;
@@ -1026,6 +1142,7 @@ async function main() {
     const { source } = await attestCaseRecord(input, {
       event, repository: process.env.GITHUB_REPOSITORY,
       token: process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN,
+      deploymentRecords: deploymentRecordsFromEnv(),
     });
     const enriched = enrichCaseRecord(input, {
       workflowUrl: process.argv[5],
@@ -1037,14 +1154,10 @@ async function main() {
   }
   if (command === 'apply') {
     const record = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
-    const deploymentRecordsPath = process.env.DEPLOYMENT_RECORDS_JSON ?? '';
-    const deploymentRecords = deploymentRecordsPath
-      ? JSON.parse(fs.readFileSync(deploymentRecordsPath, 'utf8'))
-      : null;
     const result = await applyCaseRecord(record, {
       repository: process.env.GITHUB_REPOSITORY,
       token: process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN,
-      deploymentRecords,
+      deploymentRecords: deploymentRecordsFromEnv(),
     });
     process.stdout.write(JSON.stringify(result) + '\n');
     return;
