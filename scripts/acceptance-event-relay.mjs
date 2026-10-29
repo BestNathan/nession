@@ -2,7 +2,7 @@
 // #2031: optional GitHub App receiver. Shadow mode only: no Actions dispatch.
 import {createServer} from 'node:http';
 import {sign} from 'node:crypto';
-import {resolve} from 'node:path';
+import {resolve,isAbsolute} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {DurableInbox,verifyWebhook,attestSource} from './acceptance-event-relay-core.mjs';
 import {parsePreMergeIssueNumbers,isOpenAcceptanceIssue} from './requirement-acceptance.mjs';
@@ -101,7 +101,7 @@ export async function ingestWorkflowEvent({headers,raw,secret,installationId,get
 export function createRelay(env=process.env,fetcher=fetch){
   if(env.ACCEPTANCE_RELAY_MODE!=='shadow')
     fail('live dispatch is not implemented; shadow-only safety boundary');
-  if(!env.ACCEPTANCE_RELAY_DB||env.ACCEPTANCE_RELAY_DB===':memory:'||
+  if(!env.ACCEPTANCE_RELAY_DB||!isAbsolute(env.ACCEPTANCE_RELAY_DB)||
     typeof env.ACCEPTANCE_WEBHOOK_SECRET!=='string'||env.ACCEPTANCE_WEBHOOK_SECRET.length<32||
     !env.GITHUB_APP_PRIVATE_KEY||!positive(Number(env.GITHUB_APP_ID))||
     !positive(Number(env.GITHUB_APP_INSTALLATION_ID)))
@@ -138,7 +138,8 @@ export function createRelay(env=process.env,fetcher=fetch){
       return reply(202,result);
     }catch(err){
       // No Issue bodies, tokens, HMACs or credential fields in the log.
-      console.error('acceptance-event-relay: delivery not committed',err?.message);
+      console.error('acceptance-event-relay: webhook delivery not committed',
+        err instanceof SyntaxError ? 'invalid-json' : 'processing-error');
       return reply(503,{error:'delivery not committed; redeliver'});
     }
   });
