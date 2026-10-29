@@ -600,6 +600,19 @@ test.describe('App 390×844', () => {
     await expect(overlay.locator('.katex').first()).toBeVisible();
     await expect(overlay.locator('.katex-error')).toHaveCount(0);
 
+    // The overlay opens at the transcript's tail, but the scroller re-anchors
+    // through content and resize observers, so the captured frame can be one
+    // pixel short of the end a different job reaches — the entirety of what
+    // #2530 measured here. Photograph a stated scroll state rather than the
+    // race's winner: settle the dialect's fonts, pin the viewport to its end,
+    // and prove the end gap is closed (#2596).
+    await page.evaluate(() => document.fonts.ready);
+    const transcript = overlay.locator('[data-slot="message-scroller-viewport"]');
+    await expect.poll(() => transcript.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+      return element.scrollHeight - element.clientHeight - element.scrollTop;
+    })).toBeLessThanOrEqual(0);
+
     await expect(page).toHaveScreenshot('app-claude-code-chat-dialect.png', {
       fullPage: true,
       ...FIXTURE_SCREENSHOT,
