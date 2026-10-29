@@ -60,6 +60,16 @@ export class DurableInbox{
       "attempts INTEGER NOT NULL DEFAULT 0,due_at INTEGER NOT NULL,"+
       "lease_until INTEGER,last_error TEXT,confirmed_at INTEGER);"+
       "CREATE INDEX IF NOT EXISTS task_due ON tasks(status,due_at);");
+    // Existing shadow ledgers have a digest-only deliveries table. Add
+    // receipt/processing fields without invalidating previously committed IDs.
+    const columns=new Set(this.db.prepare('PRAGMA table_info(deliveries)').all().map(x=>x.name));
+    for(const [field,definition] of [
+      ['raw','BLOB'],['event_name','TEXT'],['installation_id','INTEGER'],
+      ['state',"TEXT NOT NULL DEFAULT 'done'"],
+      ['attempts','INTEGER NOT NULL DEFAULT 0'],
+      ['next_at','INTEGER'],['lease_until','INTEGER'],['last_error','TEXT'],
+    ])if(!columns.has(field))this.db.exec('ALTER TABLE deliveries ADD COLUMN '+field+' '+definition);
+    this.db.exec("CREATE INDEX IF NOT EXISTS delivery_due ON deliveries(state,next_at)");
   }
   close(){this.db.close()}
   tx(fn){
@@ -97,6 +107,100 @@ export class DurableInbox{
       }
       return {duplicate:false,added};
     });
+  }
+  // The receiving HTTP request commits just this signed envelope. No GitHub
+  // read, Issue parsing or downstream dispatch may block acknowledgement.
+  receive(delivery,raw,eventName,installationId,now=Date.now()){
+    if(!/^[0-9a-f-]{36}$/i.test(delivery??'')||!Buffer.isBuffer(raw)||
+      !raw.length||raw.length>1048576||eventName!=='workflow_run'||
+      !positive(installationId)||!Number.isSafeInteger(now))
+      fail('invalid durable webhook envelope');
+    return this.tx(()=>{
+      const digest=sha256(raw);
+      const old=this.db.prepare('SELECT digest FROM deliveries WHERE id=?').get(delivery);
+      if(old){
+        if(old.digest!==digest)fail('conflicting webhook delivery ID');
+        return {duplicate:true};
+      }
+      this.db.prepare(
+        "INSERT INTO deliveries(id,digest,at,raw,event_name,installation_id,state,next_at) "+
+        "VALUES(?,?,?,?,?,?,'received',?)")
+        .run(delivery,digest,now,raw,eventName,installationId,now);
+      return {duplicate:false};
+    });
+  }
+  // Selection has no external side effects. A crashed read lease is safely
+  // retried, unlike an ambiguous Actions POST on a task-dispatch lease.
+  claimDelivery(now=Date.now(),lease=900000){
+    if(!Number.isSafeInteger(now)||!Number.isSafeInteger(lease)||
+      lease<10000||lease>900000)fail('invalid inbox lease');
+    return this.tx(()=>{
+      this.db.prepare(
+        "UPDATE deliveries SET state='received',lease_until=NULL "+
+        "WHERE state='processing' AND lease_until<=?").run(now);
+      const row=this.db.prepare(
+        "SELECT * FROM deliveries WHERE state='received' AND next_at<=? "+
+        "ORDER BY next_at,id LIMIT 1").get(now);
+      if(!row)return null;
+      this.db.prepare(
+        "UPDATE deliveries SET state='processing',attempts=attempts+1,lease_until=? "+
+        "WHERE id=? AND state='received'").run(now+lease,row.id);
+      return {...row,state:'processing',attempts:row.attempts+1};
+    });
+  }
+  completeDelivery(id,source,eligible,now=Date.now()){
+    if(!Array.isArray(eligible)||!Number.isSafeInteger(now))fail('invalid resolution');
+    return this.tx(()=>{
+      const row=this.db.prepare(
+        "SELECT state,digest,raw FROM deliveries WHERE id=?").get(id);
+      if(row?.state!=='processing'||!row.raw||
+        row.digest!==sha256(Buffer.from(row.raw)))fail('untrusted claim or payload digest');
+      if(!source&&eligible.length)fail('unattested eligible work');
+      let added=0;
+      for(const item of eligible){
+        if(!positive(item.issue)||!/^[a-f0-9]{64}$/.test(item.contract_digest??'')||
+          source.repo!==REPO||!SHA.test(source.target_sha??'')||
+          !positive(source.source_run_id)||!positive(source.source_attempt)||
+          source.stage!=='post-merge'||!SOURCE_WORKFLOWS.has(source.source_path))
+          fail('invalid attested task identity');
+        const taskId=sha256(JSON.stringify([source.repo,source.source_run_id,
+          source.source_attempt,source.target_sha,item.issue,source.stage,item.contract_digest]));
+        added+=Number(this.db.prepare(
+          "INSERT OR IGNORE INTO tasks(id,repo,issue,target_sha,source_run_id,source_attempt,"+
+          "source_path,stage,contract_digest,status,due_at) VALUES(?,?,?,?,?,?,?,?,?,'pending',?)")
+          .run(taskId,source.repo,item.issue,source.target_sha,
+            source.source_run_id,source.source_attempt,source.source_path,
+            source.stage,item.contract_digest,now).changes);
+      }
+      this.db.prepare(
+        "UPDATE deliveries SET state='done',raw=NULL,lease_until=NULL,next_at=NULL,last_error=NULL "+
+        "WHERE id=?").run(id);
+      return {added,eligible:eligible.length};
+    });
+  }
+  retryDelivery(id,now=Date.now(),delayMs=30000){
+    if(!Number.isSafeInteger(now)||!Number.isSafeInteger(delayMs)||
+      delayMs<1000||delayMs>86400000)fail('invalid retry delay');
+    return this.tx(()=>{
+      const row=this.db.prepare(
+        "SELECT attempts FROM deliveries WHERE id=? AND state='processing'").get(id);
+      if(!row)return false;
+      this.db.prepare(
+        "UPDATE deliveries SET state=?,next_at=?,lease_until=NULL,last_error=? WHERE id=?")
+        .run(row.attempts>=12?'dead':'received',
+          row.attempts>=12?null:now+delayMs,
+          row.attempts>=12?'retry budget exhausted':'transient-source-read',id);
+      return true;
+    });
+  }
+  getDelivery(id){return this.db.prepare(
+    'SELECT id,digest,state,attempts,next_at,lease_until FROM deliveries WHERE id=?').get(id)}
+  nextDeliveryAt(){
+    const row=this.db.prepare(
+      "SELECT MIN(due) AS due FROM ("+
+      "SELECT next_at AS due FROM deliveries WHERE state='received' "+
+      "UNION ALL SELECT lease_until AS due FROM deliveries WHERE state='processing')").get();
+    return row?.due??null;
   }
   // A lost dispatcher cannot blindly retry an API POST: a timeout may have
   // created a GitHub Actions run. An expired lease becomes UNCERTAIN instead.

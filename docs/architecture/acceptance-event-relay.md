@@ -2,7 +2,9 @@
 
 **Current state:** optional Node 24+ GitHub App webhook service with authenticated
 run attestation, existing Acceptance Plan-based eligible SC selection and a
-SQLite WAL inbox. The service has **not** been deployed. It **never dispatches
+SQLite WAL inbox. Incoming signed webhook envelopes are durably committed before
+the HTTP 202 ACK. A separate local due-time worker re-authenticates source Runs
+and writes shadow tasks atomically; it never dispatches Actions. The service has **not** been deployed. It **never dispatches
 GitHub Actions**, writes Issues or changes Acceptance verdicts. The existing
 Post-Run Waker and 15-minute Quota Recovery remain required.
 
@@ -67,16 +69,17 @@ is not evidence of actual webhook delivery.
 ## Failed GitHub webhook delivery is not automatically retried
 
 GitHub explicitly does **not** automatically redeliver failed webhook
-deliveries. The current shadow HTTP receiver validates the signature and
-queries GitHub before acknowledging, so a slow API, 503 or server outage
-requires manual/API redelivery (GitHub retains redeliverable deliveries for
-a limited window). A successful process health check is not receipt proof.
+deliveries. The shadow HTTP receiver now commits verified raw payloads and
+delivery identity in SQLite **before** returning HTTP 202; a separate worker
+processes GitHub API/Issue source readbacks. The worker reclaims expired
+read-only leases, retries 403/429 with durable due times, and atomically
+commits selected tasks and the processed receipt. No Actions run is created.
 
-**Live ingress must first persist the signed delivery and acknowledge quickly
-(within GitHub's webhook timeout), then process/attest in a durable worker.**
-It additionally needs failed-delivery discovery/redelivery or a durable
-webhook proxy with positive delivery acknowledgements. This is still an
-explicit rollout blocker, not an assumption hidden behind the old cron.
+An endpoint outage before the SQLite commit, a 503, or failed TLS delivery
+still requires operator/API redelivery (GitHub retains deliveries for a limited
+window). A separate delivered-webhook audit/backfill and independently
+verified live endpoint remain required before removing legacy Waker/Quota
+Recovery. A successful health check alone is not delivery proof.
 Reference: https://docs.github.com/en/webhooks/using-webhooks/handling-failed-webhook-deliveries
 
 ## Requirements before turning off legacy receivers
@@ -96,4 +99,5 @@ Reference: https://docs.github.com/en/webhooks/using-webhooks/handling-failed-we
 
 Verification: ./gates/run acceptance-event-relay-selftest. This is the
 canonical deterministic owner for webhook HMAC, live run attestation, SQLite
-deduplication, lease uncertainty, restart and malformed/fork source fixtures.
+receipt-before-ACK, due-time async selection, deduplication, crash/restart,
+429 recovery, lease uncertainty and malformed/fork source fixtures.

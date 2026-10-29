@@ -5,6 +5,7 @@ import {sign} from 'node:crypto';
 import {resolve,isAbsolute} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {DurableInbox,verifyWebhook,attestSource} from './acceptance-event-relay-core.mjs';
+import {startInboxWorker} from './acceptance-event-relay-worker.mjs';
 import {parsePreMergeIssueNumbers,isOpenAcceptanceIssue} from './requirement-acceptance.mjs';
 import {buildAcceptanceContext} from './acceptance-executor.mjs';
 
@@ -35,7 +36,19 @@ export async function githubGet(path,token,fetcher=fetch){
   const response=await fetcher('https://api.github.com'+path,{
     headers:{Authorization:'Bearer '+token,Accept:'application/vnd.github+json',
       'X-GitHub-Api-Version':'2022-11-28'},signal:AbortSignal.timeout(15000)});
-  if(!response.ok)fail('GitHub read HTTP '+response.status);
+  if(!response.ok){
+    const err=Error('GitHub read HTTP '+response.status);
+    if(response.status===403||response.status===429){
+      const retry=response.headers?.get?.('retry-after');
+      const reset=response.headers?.get?.('x-ratelimit-reset');
+      if(/^[0-9]+$/.test(retry??''))
+        err.retryAfterMs=Math.min(86400000,Number(retry)*1000);
+      else if(/^[0-9]+$/.test(reset??''))
+        err.retryAfterMs=Math.min(86400000,Math.max(1000,
+          Number(reset)*1000-Date.now()));
+    }
+    throw err;
+  }
   return response.json();
 }
 
@@ -98,6 +111,29 @@ export async function ingestWorkflowEvent({headers,raw,secret,installationId,get
   return {...stored,eligible:eligible.length,source_run_id:source.source_run_id,mode:'shadow'};
 }
 
+// Called only after the signed event has been committed and acknowledged.
+// All operations here are read-only; task creation is a single DB transaction.
+export async function resolveDurableWebhook(payload,receipt,get){
+  if(receipt.event_name!=='workflow_run'||payload?.action!=='completed'||
+    payload?.repository?.full_name!==REPO||
+    payload?.installation?.id!==receipt.installation_id||
+    !positive(payload?.workflow_run?.id))
+    return {source:null,eligible:[]};
+  const live=await get('/repos/BestNathan/nession/actions/runs/'+payload.workflow_run.id);
+  const source=attestSource(payload,live);
+  if(!source)return {source:null,eligible:[]};
+  if(source.source_path==='.github/workflows/e2e-full-regression.yml'){
+    const jobs=await get('/repos/BestNathan/nession/actions/runs/'+source.source_run_id+
+      '/attempts/'+source.source_attempt+'/jobs?per_page=100');
+    if(!Array.isArray(jobs?.jobs)||jobs.jobs.length>100||
+      jobs.jobs.filter(j=>j.name==='full'&&j.run_id===source.source_run_id&&
+        j.run_attempt===source.source_attempt&&j.status==='completed'&&
+        j.conclusion==='success').length!==1)
+      return {source:null,eligible:[]};
+  }
+  return {source,eligible:await selectEligibleMergedIssues(source,get)};
+}
+
 export function createRelay(env=process.env,fetcher=fetch){
   if(env.ACCEPTANCE_RELAY_MODE!=='shadow')
     fail('live dispatch is not implemented; shadow-only safety boundary');
@@ -109,6 +145,14 @@ export function createRelay(env=process.env,fetcher=fetch){
   const port=Number(env.PORT||8080);
   if(!positive(port)||port>65535)fail('invalid listen port');
   const inbox=new DurableInbox(env.ACCEPTANCE_RELAY_DB);
+  const worker=startInboxWorker(inbox,async(payload,receipt)=>{
+    const token=await installationToken({appId:env.GITHUB_APP_ID,
+      installationId:env.GITHUB_APP_INSTALLATION_ID,
+      privateKey:env.GITHUB_APP_PRIVATE_KEY.replace(/\\n/g,'\n'),fetcher});
+    return resolveDurableWebhook(payload,receipt,
+      path=>githubGet(path,token,fetcher));
+  },{onError:event=>console.error('acceptance-event-relay: durable webhook retry',
+    JSON.stringify(event))});
   const server=createServer(async(req,res)=>{
     const reply=(status,data)=>{
       res.writeHead(status,{'content-type':'application/json','cache-control':'no-store'});
@@ -128,23 +172,30 @@ export function createRelay(env=process.env,fetcher=fetch){
       const raw=Buffer.concat(parts);
       if(!verifyWebhook(raw,req.headers['x-hub-signature-256'],env.ACCEPTANCE_WEBHOOK_SECRET))
         return reply(401,{error:'invalid signature'});
-      const token=await installationToken({appId:env.GITHUB_APP_ID,
-        installationId:env.GITHUB_APP_INSTALLATION_ID,
-        privateKey:env.GITHUB_APP_PRIVATE_KEY.replace(/\\n/g,'\n'),fetcher});
-      const result=await ingestWorkflowEvent({headers:req.headers,raw,
-        secret:env.ACCEPTANCE_WEBHOOK_SECRET,installationId:env.GITHUB_APP_INSTALLATION_ID,
-        get:path=>githubGet(path,token,fetcher),inbox});
-      console.log(JSON.stringify({kind:'acceptance_event_shadow',result}));
-      return reply(202,result);
+      if(req.headers['x-github-event']!=='workflow_run')
+        return reply(202,{ignored:'unrelated-event'});
+      let payload;
+      try{payload=JSON.parse(raw.toString('utf8'))}
+      catch{return reply(400,{error:'invalid JSON'})}
+      if(payload?.repository?.full_name!==REPO||
+        payload?.installation?.id!==Number(env.GITHUB_APP_INSTALLATION_ID))
+        return reply(403,{error:'unexpected installation or repository'});
+      if(payload?.action!=='completed'||!positive(payload?.workflow_run?.id))
+        return reply(202,{ignored:'not-completed'});
+      // No network or model invocation before ACK; SQLite COMMIT is the ACK
+      // boundary. GitHub will not automatically redeliver a failed webhook.
+      const result=inbox.receive(req.headers['x-github-delivery'],raw,
+        'workflow_run',Number(env.GITHUB_APP_INSTALLATION_ID));
+      worker.kick();
+      return reply(202,{accepted:true,duplicate:result.duplicate});
     }catch(err){
-      // No Issue bodies, tokens, HMACs or credential fields in the log.
-      console.error('acceptance-event-relay: webhook delivery not committed',
-        err instanceof SyntaxError ? 'invalid-json' : 'processing-error');
-      return reply(503,{error:'delivery not committed; redeliver'});
+      // Never log a raw payload, token, Issue body or HMAC.
+      console.error('acceptance-event-relay: webhook NOT acknowledged');
+      return reply(503,{error:'not persisted; operator redelivery required'});
     }
   });
-  server.on('close',()=>inbox.close());
-  return {server,port,inbox};
+  server.on('close',()=>{void worker.stop().then(()=>inbox.close());});
+  return {server,port,inbox,worker};
 }
 
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
