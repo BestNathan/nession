@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Nession · Terminal Clipboard Protocols · #2598</title>
+<style>
+:root{color-scheme:light;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#242b34;background:#f6f7f9}
+*{box-sizing:border-box}
+body{margin:0}
+button{font:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible,#screen:focus-visible{outline:3px solid #95b5fe;outline-offset:2px}
+.wrap{max-width:1180px;margin:auto;padding:30px clamp(16px,3vw,44px) 70px}
+header{max-width:800px}
+.eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.15em;font-weight:750;color:#8893a2}
+h1{font-size:clamp(26px,3vw,40px);letter-spacing:-.045em;line-height:1.15;margin:10px 0 10px}
+header p{color:#687587;line-height:1.65;font-size:14px;margin:0}
+.workspace{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:18px;margin-top:26px;align-items:start}
+.terminal-card{background:#fff;border:1px solid #dfe4ea;border-radius:16px;overflow:hidden;box-shadow:0 8px 26px #1a29330d}
+.titlebar{display:flex;justify-content:space-between;gap:12px;align-items:center;background:#f7f8fa;border-bottom:1px solid #e8ebef;padding:10px 14px;font-size:12px;color:#6d7887}
+.chip{font-size:11px;font-weight:700;color:#3f5a7c;background:#e9eef6;border-radius:7px;padding:5px 9px;max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.screen{background:#10151c;color:#d7dee8;font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;line-height:1.55;padding:16px 18px;min-height:320px;max-height:420px;overflow:auto;cursor:text}
+#transcript{margin:0;white-space:pre-wrap;word-break:break-word}
+#transcript .dim{color:#8896a8}
+#transcript .ok{color:#9ad6ae}
+#transcript .warn{color:#e6c07b}
+#caret{display:inline-block;width:7px;height:15px;background:#d7dee8;vertical-align:-3px;animation:blink 1.1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+@media (prefers-reduced-motion:reduce){#caret{animation:none}}
+.strip{display:flex;align-items:center;justify-content:space-between;gap:12px;border-top:1px solid #e7e9ee;background:#f4f6f9;color:#55616f;font-size:13px;line-height:1.45;padding:11px 14px}
+.strip[data-state="copy-required"]{background:#eef4ff;color:#2f4d78}
+.strip[data-state="unsupported-image-paste"]{background:#f7f1e6;color:#6d5a35}
+.strip button{border:1px solid #c9d3e2;background:#fff;color:#2f4d78;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;white-space:nowrap}
+.observer{border-top:1px solid #e7e9ee;background:#f7f8fa;color:#66727f;font-size:12px;padding:10px 14px}
+.controls{background:#fff;border:1px solid #e4e8ed;border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:10px;box-shadow:0 4px 16px #1a29330a}
+.controls strong{font-size:13px}
+.controls small{font-size:11px;color:#8a95a3;margin-top:-7px}
+.controls label{display:flex;gap:9px;align-items:flex-start;font-size:12.5px;color:#5d6b7c;line-height:1.45;cursor:pointer}
+.controls input{margin-top:2px;accent-color:#3a5e8b}
+.buttons{display:flex;flex-direction:column;gap:7px;margin-top:4px}
+.buttons button{border:1px solid #dbe1e8;background:#f8fafc;color:#2c3a4b;border-radius:9px;padding:9px 11px;font-size:12.5px;text-align:left}
+.buttons button:hover{border-color:#b9c6d6;background:#fff}
+.note{font-size:11px;color:#8a95a3;line-height:1.55;margin:6px 0 0}
+footer{margin-top:26px;font-size:12px;color:#7b8694;line-height:1.6}
+footer a{color:#335b9d}
+@media (max-width:760px){.workspace{grid-template-columns:1fr}.screen{min-height:260px}}
+</style>
+</head>
+<body>
+<main class="wrap">
+  <header>
+    <div class="eyebrow">Nession · Requirement #2598 · Terminal Clipboard Protocols</div>
+    <h1>Transient clipboard states</h1>
+    <p>OSC 52 text copy and OSC 5522 MIME paste stay quiet when they work. These are the only states the surface adds: a user-gesture copy when the browser blocks an async write, a refused-write notice, and one honest sentence when a TUI has not negotiated the image protocol. No permanent paste/upload toolbar.</p>
+  </header>
+
+  <div class="workspace">
+    <section class="terminal-card" aria-label="Mock terminal session">
+      <div class="titlebar">
+        <span>claude — session · tmux 96×24 · mock</span>
+        <span class="chip" id="clip-chip">clipboard: empty</span>
+      </div>
+      <div class="screen" id="screen" tabindex="0" role="textbox" aria-multiline="false" aria-label="Mock terminal input">
+        <pre id="transcript"></pre><span id="caret"></span>
+      </div>
+      <div class="strip" id="strip" role="status" aria-live="polite" hidden>
+        <span id="strip-text"></span>
+        <button id="strip-copy" type="button" hidden>Copy</button>
+      </div>
+      <div class="observer" id="observer-bar" hidden>View only — another client is controlling this session.</div>
+    </section>
+
+    <aside class="controls" aria-label="Prototype controls">
+      <strong>Prototype controls</strong>
+      <small>Mock only — not product UI</small>
+      <label><input id="opt-5522" type="checkbox" checked> TUI enabled OSC 5522 paste events (<code>CSI ? 5522 h</code>)</label>
+      <label><input id="opt-block" type="checkbox"> Browser blocks async clipboard writes</label>
+      <label><input id="opt-observer" type="checkbox"> This client is a passive observer</label>
+      <div class="buttons">
+        <button type="button" data-action="tui-copy">TUI: copy text (OSC 52)</button>
+        <button type="button" data-action="tui-image">TUI: write an image (OSC 5522)</button>
+        <button type="button" data-action="paste-image">User: paste an image</button>
+        <button type="button" data-action="paste-text">User: paste text</button>
+        <button type="button" data-action="reset">Reset</button>
+      </div>
+      <p class="note">The real protocol runs in the terminal engine; this mock only presents the interaction states, focus and geometry. Nothing here touches a real clipboard, Session, PTY or network.</p>
+    </aside>
+  </div>
+
+  <footer>
+    Prototype for design discussion only — not Acceptance evidence. Source:
+    <a href="https://github.com/BestNathan/nession/blob/prototype/terminal-clipboard-2598/index.html">terminal-clipboard-2598/index.html</a>.
+    Requirement: <a href="https://github.com/BestNathan/nession/issues/2598">#2598</a>.
+  </footer>
+</main>
+
+<script>
+(() => {
+  const transcript = document.getElementById('transcript');
+  const clipChip = document.getElementById('clip-chip');
+  const strip = document.getElementById('strip');
+  const stripText = document.getElementById('strip-text');
+  const stripCopy = document.getElementById('strip-copy');
+  const observerBar = document.getElementById('observer-bar');
+  const screen = document.getElementById('screen');
+  const opt5522 = document.getElementById('opt-5522');
+  const optBlock = document.getElementById('opt-block');
+  const optObserver = document.getElementById('opt-observer');
+
+  const state = {
+    lines: [
+      ['$ claude', ''],
+      ['  The TUI is running inside tmux on your Session.', 'dim'],
+      ['', ''],
+    ],
+    clipboard: null,
+    strip: null,
+    copyText: '',
+    timer: null,
+  };
+
+  const SAMPLE_TEXT = 'Copied from the TUI';
+  const IMAGE_SUMMARY = 'image/png · 5,000 bytes · sha256 9f2a…';
+
+  function line(text, tone) { state.lines.push([text, tone || '']); if (state.lines.length > 40) state.lines.shift(); }
+  function render() {
+    transcript.innerHTML = '';
+    for (const [text, tone] of state.lines) {
+      const span = document.createElement('span');
+      if (tone) { span.className = tone; }
+      span.textContent = text + '\n';
+      transcript.appendChild(span);
+    }
+    clipChip.textContent = 'clipboard: ' + (state.clipboard || 'empty');
+    clipChip.title = state.clipboard || '';
+    observerBar.hidden = !optObserver.checked;
+    if (state.strip) {
+      strip.hidden = false;
+      strip.dataset.state = state.strip.kind;
+      stripText.textContent = state.strip.text;
+      stripCopy.hidden = state.strip.kind !== 'copy-required';
+    } else {
+      strip.hidden = true;
+      strip.removeAttribute('data-state');
+      stripText.textContent = '';
+      stripCopy.hidden = true;
+    }
+  }
+
+  function showStrip(kind, text, copyText) {
+    state.strip = { kind, text };
+    state.copyText = copyText || '';
+    if (state.timer) { clearTimeout(state.timer); }
+    state.timer = setTimeout(() => { dismissStrip(); }, kind === 'copy-required' ? 10000 : 6000);
+    render();
+  }
+
+  function dismissStrip() {
+    if (state.timer) { clearTimeout(state.timer); state.timer = null; }
+    state.strip = null;
+    state.copyText = '';
+    render();
+  }
+
+  function observerRefused(action) {
+    line('  · ' + action + ' ignored: this client is an observer', 'warn');
+    render();
+  }
+
+  function completeCopy(text) {
+    state.clipboard = text;
+    line('  · clipboard ← "' + text + '"', 'ok');
+    dismissStrip();
+  }
+
+  document.getElementById('strip-copy').addEventListener('click', () => {
+    if (state.copyText) { completeCopy(state.copyText); }
+  });
+
+  document.querySelectorAll('[data-action]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const action = button.dataset.action;
+      if (action === 'reset') {
+        state.lines = [['$ claude', ''], ['  The TUI is running inside tmux on your Session.', 'dim'], ['', '']];
+        state.clipboard = null;
+        dismissStrip();
+        render();
+        screen.focus();
+        return;
+      }
+      if (optObserver.checked) {
+        observerRefused(action === 'tui-copy' ? 'OSC 52 copy'
+          : action === 'tui-image' ? 'OSC 5522 write'
+            : 'paste');
+        return;
+      }
+      if (action === 'tui-copy') {
+        if (optBlock.checked) {
+          showStrip('copy-required', 'The terminal wants to copy to your clipboard.', SAMPLE_TEXT);
+          line('  · async clipboard write was blocked; a user gesture is required', 'warn');
+        } else {
+          completeCopy(SAMPLE_TEXT);
+          dismissStrip();
+        }
+      } else if (action === 'tui-image') {
+        if (optBlock.checked) {
+          showStrip('write-denied', 'Clipboard write was blocked by the browser.');
+          line('  · OSC 5522 write refused (EPERM)', 'warn');
+        } else {
+          state.clipboard = IMAGE_SUMMARY;
+          line('  · clipboard ← ' + IMAGE_SUMMARY, 'ok');
+          dismissStrip();
+        }
+      } else if (action === 'paste-image') {
+        if (opt5522.checked) {
+          line('  · TUI received image/png · 5,000 bytes · DONE', 'ok');
+          dismissStrip();
+        } else {
+          showStrip('unsupported-image-paste', 'Image clipboard protocol not supported by this TUI');
+          line('  · image-only paste not sent (TUI has not enabled OSC 5522)', 'dim');
+        }
+      } else if (action === 'paste-text') {
+        line('$ pasted text from the clipboard');
+        line('  text paste uses the ordinary bracketed-paste path (unchanged)');
+        dismissStrip();
+      }
+      render();
+    });
+  });
+
+  [opt5522, optBlock, optObserver].forEach((input) => input.addEventListener('change', render));
+  screen.addEventListener('click', () => screen.focus());
+  render();
+})();
+</script>
+</body>
+</html>
