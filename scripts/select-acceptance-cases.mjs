@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { discoverCases } from '../e2e/acceptance/contract/cases.mjs';
 import { buildAcceptanceContext } from './acceptance-executor.mjs';
-import { acceptancePlanSection } from './acceptance-plan.mjs';
+import { acceptancePlan, acceptancePlanSection } from './acceptance-plan.mjs';
 import { validateCaseSelection } from './acceptance-case-selection-contract.mjs';
 
 const SELF = fileURLToPath(import.meta.url);
@@ -28,7 +28,19 @@ export function selectTrustedCases({
       issue, criterion, runtime: runtimeName,
       needs_browser: verifiers.some((item) => item.type === 'browser'),
     }));
-  const selectedKeys = new Set(selected.map((item) => item.issue + '/' + item.criterion));
+  // A `when: deployed` criterion carries a `post-merge` compatibility Case,
+  // but the executor only makes it eligible with an authenticated deployment
+  // binding for its environment. Without one — every ordinary push — the Case
+  // is not selectable; selecting it anyway would fail each main push as
+  // "wrong-stage/unknown" once the Issue merges.
+  const selectable = deploymentBinding
+    ? selected
+    : selected.filter((item) => {
+      const issue = issues.find((candidate) => Number(candidate.number) === Number(item.issue));
+      const plan = issue ? acceptancePlan(issue.body) : null;
+      return plan?.get(item.criterion)?.when !== 'deployed';
+    });
+  const selectedKeys = new Set(selectable.map((item) => item.issue + '/' + item.criterion));
   const expected = [];
   for (const issueNumber of issueNumbers) {
     const issue = issues.find((item) => Number(item.number) === issueNumber);
@@ -45,11 +57,11 @@ export function selectTrustedCases({
       if (explicit || selectedKeys.has(key)) expected.push(key);
     }
   }
-  const coverage = validateCaseSelection({ stage, issueNumbers, expected, selected, requested });
+  const coverage = validateCaseSelection({ stage, issueNumbers, expected, selected: selectable, requested });
   if (coverage.missing.length) {
     throw new Error('mandatory Case-method coverage missing: ' + coverage.missing.join(', '));
   }
-  return { selected, coverage };
+  return { selected: selectable, coverage };
 }
 
 function issueBody(stage, withPlan = false) {
@@ -66,6 +78,20 @@ function issueBody(stage, withPlan = false) {
       '  SC-02:', '    when: merged', '    branch: staging', '    method: agent',
       codeFence, '',
     ] : []),
+    '## Product alignment', '- [x] aligned', '**Status:** Approved',
+  ].join('\n');
+}
+
+function deployedIssueBody() {
+  const codeFence = String.fromCharCode(96).repeat(3);
+  return [
+    '## Success Criteria', '- [ ] SC-01 deployed case', '',
+    '## Acceptance Report', '| Criterion | Result | Evidence |',
+    '|---|---|---|',
+    '| SC-01 | Pending | awaiting deployment |', '',
+    '## Acceptance Plan', codeFence + 'yaml', 'acceptance:',
+    '  SC-01:', '    when: deployed', '    environment: staging', '    method: case',
+    codeFence, '',
     '## Product alignment', '- [x] aligned', '**Status:** Approved',
   ].join('\n');
 }
@@ -93,7 +119,30 @@ function selfTest() {
     const legacy = { ...issue, body: issueBody('staging') };
     assert.equal(selectTrustedCases({ ...base, issues: [legacy] }).coverage.status, 'not-applicable');
     assert.throws(() => selectTrustedCases({ ...base, issues: [issue], targetSha: 'main' }), /exact/);
-    console.log('trusted Acceptance Case selection: method separation and missing coverage negatives passed');
+
+    // A `when: deployed` criterion's post-merge compatibility Case exists in
+    // the tree, but without an authenticated binding the executor makes the
+    // criterion ineligible — the selector must not count the Case as
+    // unexpected on an ordinary push, and must select it only for its own
+    // attested environment.
+    const deployedDir = path.join(root, '43', 'SC-01'); fs.mkdirSync(deployedDir, { recursive: true });
+    fs.writeFileSync(path.join(deployedDir, 'case.yaml'),
+      'schema_version: 1\nissue: 43\ncriterion: SC-01\nstage: post-merge\nruntime: full-stack-local\nverifiers:\n  - type: runtime\n    entry: verify.js\nresult_policy: all-pass\n');
+    fs.writeFileSync(path.join(deployedDir, 'verify.js'), '// deployed fixture verifier');
+    const deployedIssue = { number: 43, title: 'Deployed fixture', body: deployedIssueBody() };
+    const postBase = { ...base, issueNumbers: [43], stage: 'post-merge' };
+    const plain = selectTrustedCases({ ...postBase, issues: [deployedIssue] });
+    assert.equal(plain.selected.length, 0);
+    assert.equal(plain.coverage.status, 'not-applicable');
+    const bound = selectTrustedCases({ ...postBase, issues: [deployedIssue],
+      deploymentBinding: { environment_id: 'staging', attested: true } });
+    assert.deepEqual(bound.coverage.expected, ['43/SC-01']);
+    assert.equal(bound.selected.length, 1);
+    assert.throws(() => selectTrustedCases({ ...postBase, issues: [deployedIssue],
+      deploymentBinding: { environment_id: 'production', attested: true } }),
+    /wrong-stage\/unknown|no source-aligned Cases/);
+    console.log('trusted Acceptance Case selection: method separation, missing coverage, '
+      + 'and deployed-binding negatives passed');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
