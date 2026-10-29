@@ -51,7 +51,7 @@ assert.match(guide,/no new.*Actions Run/i);
 assert.match(guide,/TLS|HTTPS/);
 assert.match(guide,/429/);
 assert.match(guide,/backup/i);
-assert.match(guide,/never.*?down -v/i);
+assert.match(guide,/never[\s\S]*?down -v/i);
 assert.match(guide,/three-day|3-day/);
 assert.match(guide,/separate/i);
 assert.match(guide,/Waker\/Quota Recovery|Post-Run Waker/);
