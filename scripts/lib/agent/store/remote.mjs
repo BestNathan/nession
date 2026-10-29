@@ -113,6 +113,49 @@ export function publishEncryptedAgentCheckpoint({
 }
 // Restore only within a trusted caller that keeps the AES key out of the
 // model executor. The returned Buffer must be explicitly zeroed by its caller.
+// A publisher must advance the exact committed head it observed. Reading the
+// public head in a disposable checkout is the caller's version source; the
+// Store CAS remains the authority that rejects a stale advance.
+export function readCheckpointHeadVersion({remote,identity}){
+  if(!identity||!['developer','reviewer','acceptor'].includes(identity.role)||
+      !/^[a-z][a-z0-9-]{1,80}$/.test(identity.agent_id??'')||
+      !Number.isSafeInteger(identity.issue)||identity.issue<1) {
+    fail('invalid checkpoint identity');
+  }
+  const {checkout,parent}=cloneRoot(remote);
+  try{
+    const file=path.join(checkout,'roles',identity.role,identity.agent_id,
+      'issues',String(identity.issue),'head.json');
+    if(!fs.existsSync(file))return {version:0};
+    const stat=fs.lstatSync(file);
+    if(!stat.isFile()||stat.isSymbolicLink()||stat.size>1024*1024)
+      fail('unsafe Store head');
+    let head;
+    try{head=JSON.parse(fs.readFileSync(file,'utf8'));}
+    catch{fail('corrupt committed Store head');}
+    if(!Number.isSafeInteger(head?.version)||head.version<1)
+      fail('invalid committed Store head version');
+    return {version:head.version};
+  }finally{fs.rmSync(parent,{recursive:true,force:true});}
+}
+// A trusted pre-model restore job must bind the signed commitment to the
+// committed public metadata before the model executor receives anything.
+export function readCommittedCheckpoint({remote,identity,commit_sha,version,
+  ciphertext_sha256}){
+  const {checkout,parent}=cloneRoot(remote);
+  try{
+    inspectCommittedCheckpoint(checkout,{identity,commit_sha,version,
+      ciphertext_sha256});
+    const location='roles/'+identity.role+'/'+identity.agent_id+'/issues/'+
+      identity.issue+'/checkpoints/'+String(version).padStart(8,'0')+'.json';
+    let raw;
+    try{raw=git(checkout,['show',commit_sha+':'+location]);}
+    catch{fail('committed checkpoint object missing');}
+    let record;
+    try{record=JSON.parse(raw);}catch{fail('corrupt committed checkpoint object');}
+    return Object.freeze({record,metadata:record.metadata});
+  }finally{fs.rmSync(parent,{recursive:true,force:true});}
+}
 export function fetchEncryptedAgentCheckpoint({
   remote,identity,expected,key,commitment=null,
 }){

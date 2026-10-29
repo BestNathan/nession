@@ -1,13 +1,14 @@
 name: Agent / Staging Developer Canary
 
 # #2319: trusted-main synthetic Qwen Developer proof against an exact staging
-# SHA. Admission Run is independently authenticated before the protected
-# staging-only Environment is entered. NEVER check out/execute staging code.
-# This is not signed Store/Outbox production Developer work or an SC Pass.
+# SHA. The signed Dispatch Run/artifact and its upstream Admission are both
+# independently authenticated before the protected provider Environment is
+# entered. NEVER check out/execute staging code. This is not signed Store
+# Developer work or an SC Pass.
 on:
   workflow_run:
     workflows:
-      - Acceptance / Staging Developer Admission
+      - Acceptance / Staging Developer Dispatch
     types: [completed]
 
 env:
@@ -22,15 +23,28 @@ jobs:
     if: >-
       github.repository == 'BestNathan/nession' &&
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'workflow_dispatch' &&
+      (github.event.workflow_run.event == 'workflow_run' ||
+        github.event.workflow_run.event == 'workflow_dispatch') &&
       github.event.workflow_run.head_branch == 'main' &&
       github.event.workflow_run.repository.full_name == 'BestNathan/nession' &&
       github.event.workflow_run.head_repository.full_name == 'BestNathan/nession' &&
       github.event.workflow_run.run_attempt == 1
     runs-on: ubuntu-24.04
+    environment: agent-staging-controller
     timeout-minutes: 5
     outputs:
       staging_sha: ${{ steps.source.outputs.staging_sha }}
+      source_main_sha: ${{ steps.source.outputs.source_main_sha }}
+      dispatch_id: ${{ steps.source.outputs.dispatch_id }}
+      agent_id: ${{ steps.source.outputs.agent_id }}
+      environment: ${{ steps.source.outputs.environment }}
+      model: ${{ steps.source.outputs.model }}
+      cli_version: ${{ steps.source.outputs.cli_version }}
+      phase: ${{ steps.source.outputs.phase }}
+      default_model: ${{ steps.source.outputs.default_model }}
+      checkpoint_version: ${{ steps.source.outputs.checkpoint_version }}
+      checkpoint_ciphertext_sha256: ${{ steps.source.outputs.checkpoint_ciphertext_sha256 }}
+      checkpoint_commit_sha: ${{ steps.source.outputs.checkpoint_commit_sha }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -39,67 +53,191 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Authenticate main admission Run and GitHub artifact digest
+      - name: Authenticate signed Dispatch, its Admission and artifact digests
         id: source
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
           SOURCE_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          STAGING_DISPATCH_KEY: ${{ secrets.AGENT_STAGING_DISPATCH_KEY }}
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]] || exit 1
-          [[ "$SOURCE_RUN_ATTEMPT" == 1 ]] || exit 1
+          [[ "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$SOURCE_RUN_ATTEMPT" == 1 ]]
+          work="$RUNNER_TEMP/staging-source"
+          mkdir -p "$work"
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID" \
-            > "$RUNNER_TEMP/staging-source-run.json"
+            > "$work/dispatch-run.json"
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID/artifacts?per_page=100" \
-            > "$RUNNER_TEMP/staging-source-artifacts.json"
-          artifact_name="staging-development-admission-$SOURCE_RUN_ID-$SOURCE_RUN_ATTEMPT"
+            > "$work/dispatch-artifacts.json"
+          artifact_name="staging-developer-dispatch-$SOURCE_RUN_ID-$SOURCE_RUN_ATTEMPT"
           artifact_id="$(jq -er --arg name "$artifact_name" '
             [.artifacts[] | select(.name == $name)] |
-            if length == 1 then .[0].id else error("untrusted admission artifact cardinality") end
-          ' "$RUNNER_TEMP/staging-source-artifacts.json")"
-          [[ "$artifact_id" =~ ^[1-9][0-9]*$ ]] || exit 1
+            if length == 1 then .[0].id else error("untrusted dispatch artifact cardinality") end
+          ' "$work/dispatch-artifacts.json")"
+          [[ "$artifact_id" =~ ^[1-9][0-9]*$ ]]
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" \
-            > "$RUNNER_TEMP/staging-admission.zip"
-          node scripts/lib/agent/orchestration/staging-developer-source.mjs verify \
-            "$RUNNER_TEMP/staging-source-run.json" \
-            "$RUNNER_TEMP/staging-source-artifacts.json" \
-            "$RUNNER_TEMP/staging-admission.zip" \
-            "$RUNNER_TEMP/verified-staging.json"
-          target="$(jq -er .target_sha "$RUNNER_TEMP/verified-staging.json")"
-          [[ "$target" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            > "$work/staging-dispatch.zip"
+          locator="$(node scripts/lib/agent/orchestration/staging-developer-dispatch.mjs locate \
+            "$work/dispatch-run.json" "$work/dispatch-artifacts.json" \
+            "$work/staging-dispatch.zip")"
+          [[ "$locator" =~ ^[1-9][0-9]+[[:space:]]1$ ]]
+          read -r admission_run_id admission_run_attempt <<< "$locator"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$admission_run_id" \
+            > "$work/admission-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$admission_run_id/artifacts?per_page=100" \
+            > "$work/admission-artifacts.json"
+          admission_name="staging-development-admission-$admission_run_id-$admission_run_attempt"
+          admission_artifact="$(jq -er --arg name "$admission_name" '
+            [.artifacts[] | select(.name == $name)] |
+            if length == 1 then .[0].id else error("untrusted admission artifact cardinality") end
+          ' "$work/admission-artifacts.json")"
+          [[ "$admission_artifact" =~ ^[1-9][0-9]*$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$admission_artifact/zip" \
+            > "$work/staging-admission.zip"
+          node scripts/lib/agent/orchestration/staging-developer-dispatch.mjs verify \
+            "$work/dispatch-run.json" "$work/dispatch-artifacts.json" \
+            "$work/staging-dispatch.zip" "$work/admission-run.json" \
+            "$work/admission-artifacts.json" "$work/staging-admission.zip" \
+            "$work/verified-staging-dispatch.json"
+          if [[ "$(jq -r .phase "$work/verified-staging-dispatch.json")" == "resume" ]]; then
+            STAGING_VERIFIED_DISPATCH="$work/verified-staging-dispatch.json" \
+              node --input-type=module <<'NODE'
+            import fs from 'node:fs';
+            import {verifyCommittedCheckpoint}
+              from './scripts/lib/agent/store/remote.mjs';
+            const v=JSON.parse(fs.readFileSync(process.env.STAGING_VERIFIED_DISPATCH,'utf8'));
+            const c=v.checkpoint;
+            verifyCommittedCheckpoint({remote:'https://github.com/BestNathan/nession.git',
+              identity:{role:'developer',agent_id:'dev-qwen-01',issue:2319},
+              commit_sha:c.commit_sha,version:c.version,
+              ciphertext_sha256:c.ciphertext_sha256});
+            console.log('Verified committed staged checkpoint '+c.version+
+              ' at '+c.commit_sha);
+          NODE
+          fi
+          target="$(jq -er .target_sha "$work/verified-staging-dispatch.json")"
+          dispatch="$(jq -er .dispatch_id "$work/verified-staging-dispatch.json")"
+          for key in source_main_sha dispatch_id agent_id environment model cli_version phase default_model; do
+            value="$(jq -er ".$key" "$work/verified-staging-dispatch.json")"
+            echo "${key}=${value}" >> "$GITHUB_OUTPUT"
+          done
+          # A resume forwards the already-verified checkpoint commitment so the
+          # canonical telemetry binds the resumed Run to the stored Session.
+          phase="$(jq -er .phase "$work/verified-staging-dispatch.json")"
+          checkpoint_version=""
+          checkpoint_sha=""
+          checkpoint_commit=""
+          if [[ "$phase" == "resume" ]]; then
+            checkpoint_version="$(jq -er .checkpoint.version "$work/verified-staging-dispatch.json")"
+            checkpoint_sha="$(jq -er .checkpoint.ciphertext_sha256 "$work/verified-staging-dispatch.json")"
+            checkpoint_commit="$(jq -er .checkpoint.commit_sha "$work/verified-staging-dispatch.json")"
+            [[ "$checkpoint_version" =~ ^[1-9][0-9]*$ ]]
+            [[ "$checkpoint_sha" =~ ^[a-f0-9]{64}$ ]]
+            [[ "$checkpoint_commit" =~ ^[a-f0-9]{40}$ ]]
+          fi
+          echo "checkpoint_version=$checkpoint_version" >> "$GITHUB_OUTPUT"
+          echo "checkpoint_ciphertext_sha256=$checkpoint_sha" >> "$GITHUB_OUTPUT"
+          echo "checkpoint_commit_sha=$checkpoint_commit" >> "$GITHUB_OUTPUT"
+          # The job output name is the pre-existing `staging_sha` contract.
           echo "staging_sha=$target" >> "$GITHUB_OUTPUT"
-          echo "Authenticated exact staging proof target $target; no Store claim or SC Pass" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "## Authenticated staging dispatch"
+            echo
+            echo "- Target SHA: \`$target\`"
+            echo "- Dispatch ID: \`$dispatch\`"
+            echo "- Signed dispatch and upstream Admission digests verified; no Store claim or SC Pass"
+          } >> "$GITHUB_STEP_SUMMARY"
 
-  synthetic-qwen:
+  restore-checkpoint:
     needs: verify-source
-    if: needs.verify-source.result == 'success'
+    if: needs.verify-source.result == 'success' && needs.verify-source.outputs.phase == 'resume'
     runs-on: ubuntu-24.04
-    environment: dev-claude-qwen-staging
-    timeout-minutes: 15
-    env:
-      STAGING_TARGET_SHA: ${{ needs.verify-source.outputs.staging_sha }}
-      SOURCE_MAIN_SHA: ${{ github.event.workflow_run.head_sha }}
-      ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL }}
-      ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
-      ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      CLAUDE_CODE_VERSION: ${{ vars.CLAUDE_CODE_VERSION }}
+    environment: agent-staging-controller
+    timeout-minutes: 10
     steps:
-      - name: Checkout trusted main-only Provider implementation
+      - name: Checkout trusted main-only restore implementation
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ needs.verify-source.outputs.source_main_sha }}
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Fail closed on absent/misconfigured staging Gateway
+      - name: Authenticate the commitment and restore the synthetic native Session
+        env:
+          STAGING_TARGET_SHA: ${{ needs.verify-source.outputs.staging_sha }}
+          STAGING_DISPATCH_ID: ${{ needs.verify-source.outputs.dispatch_id }}
+          STAGING_PHASE: ${{ needs.verify-source.outputs.phase }}
+          STAGING_CHECKPOINT_VERSION: ${{ needs.verify-source.outputs.checkpoint_version }}
+          STAGING_CHECKPOINT_CIPHERTEXT_SHA: ${{ needs.verify-source.outputs.checkpoint_ciphertext_sha256 }}
+          STAGING_CHECKPOINT_COMMIT_SHA: ${{ needs.verify-source.outputs.checkpoint_commit_sha }}
+          ANTHROPIC_MODEL: ${{ needs.verify-source.outputs.model }}
+          CLAUDE_CODE_VERSION: ${{ needs.verify-source.outputs.cli_version }}
+          STAGING_CLAUDE_RESUME_PRIVATE_KEY_B64: ${{ secrets.STAGING_CLAUDE_RESUME_PRIVATE_KEY_B64 }}
+          STAGING_STORE_AES_KEY_B64: ${{ secrets.STAGING_STORE_AES_KEY_B64 }}
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "${{ needs.verify-source.outputs.source_main_sha }}" ]] ||
+            { echo "::error::Restore job did not load authenticated main source"; exit 1; }
+          node scripts/lib/agent/providers/claude-resume-fixture.mjs staging-restore \
+            "$RUNNER_TEMP/staging-resume-session"
+      - name: Upload restored synthetic Session for the model executor
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-resume-session-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/staging-resume-session
+          if-no-files-found: error
+          retention-days: 3
+
+  synthetic-qwen:
+    needs: [verify-source, restore-checkpoint]
+    if: >-
+      always() &&
+      needs.verify-source.result == 'success' &&
+      (needs.verify-source.outputs.phase != 'resume' ||
+        needs.restore-checkpoint.result == 'success')
+    runs-on: ubuntu-24.04
+    environment: dev-claude-qwen
+    timeout-minutes: 15
+    env:
+      STAGING_TARGET_SHA: ${{ needs.verify-source.outputs.staging_sha }}
+      STAGING_DISPATCH_ID: ${{ needs.verify-source.outputs.dispatch_id }}
+      STAGING_DISPATCH_AGENT: ${{ needs.verify-source.outputs.agent_id }}
+      STAGING_DISPATCH_ENVIRONMENT: ${{ needs.verify-source.outputs.environment }}
+      STAGING_PHASE: ${{ needs.verify-source.outputs.phase }}
+      STAGING_DEFAULT_MODEL: ${{ needs.verify-source.outputs.default_model }}
+      STAGING_CHECKPOINT_VERSION: ${{ needs.verify-source.outputs.checkpoint_version }}
+      STAGING_CHECKPOINT_CIPHERTEXT_SHA: ${{ needs.verify-source.outputs.checkpoint_ciphertext_sha256 }}
+      SOURCE_MAIN_SHA: ${{ needs.verify-source.outputs.source_main_sha }}
+      ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL }}
+      # Model and CLI come from the signed dispatch, not from the mutable
+      # Environment variable. A later default change cannot alter this task.
+      ANTHROPIC_MODEL: ${{ needs.verify-source.outputs.model }}
+      CLAUDE_CODE_VERSION: ${{ needs.verify-source.outputs.cli_version }}
+      ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - name: Checkout trusted main-only Provider implementation
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify-source.outputs.source_main_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Fail closed on absent/misconfigured staging dispatch or Gateway
         run: |
           set -euo pipefail
           [[ "$(git rev-parse HEAD)" == "$SOURCE_MAIN_SHA" ]] ||
             { echo "::error::Staging model Worker did not load authenticated main source"; exit 1; }
+          [[ "$STAGING_DISPATCH_AGENT" == "dev-qwen-01" ]] ||
+            { echo "::error::Staging dispatch selected an unapproved Agent"; exit 1; }
+          [[ "$STAGING_DISPATCH_ENVIRONMENT" == "dev-claude-qwen" ]] ||
+            { echo "::error::Staging dispatch selected an unapproved Environment"; exit 1; }
+          [[ "$STAGING_DISPATCH_ID" =~ ^[a-f0-9]{64}$ ]] ||
+            { echo "::error::Staging dispatch identity is missing"; exit 1; }
           node --input-type=module <<'NODE'
           import {qwenDeveloperModel,qwenGatewayEndpoint}
             from './scripts/lib/agent/orchestration/qwen-developer-policy.mjs';
@@ -115,11 +253,32 @@ jobs:
           npm install -g "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION"
           claude --help | grep -q -- '--restricted' ||
             { echo "::error::Claude CLI must support restricted mode"; exit 1; }
+      - name: Download restored synthetic Session
+        if: needs.verify-source.outputs.phase == 'resume'
+        uses: actions/download-artifact@v4
+        with:
+          name: staging-resume-session-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/staging-resume-session
       - name: Execute bounded synthetic Qwen Read/Edit only
+        if: needs.verify-source.outputs.phase == 'seed'
         run: |
           set -euo pipefail
           node scripts/lib/agent/developer-canary.mjs staging \
             "$RUNNER_TEMP/staging-qwen-telemetry"
+      - name: Resume the exact stored native Qwen Session
+        if: needs.verify-source.outputs.phase == 'resume'
+        run: |
+          set -euo pipefail
+          node scripts/lib/agent/developer-canary.mjs staging-resume \
+            "$RUNNER_TEMP/staging-resume-session" "$RUNNER_TEMP/staging-qwen-telemetry"
+      - name: Seal a ciphertext-only native staging Session checkpoint
+        if: needs.verify-source.outputs.phase == 'seed'
+        env:
+          STAGING_CLAUDE_RESUME_PUBLIC_KEY_B64: ${{ vars.STAGING_CLAUDE_RESUME_PUBLIC_KEY_B64 }}
+        run: |
+          set -euo pipefail
+          node scripts/lib/agent/providers/claude-resume-fixture.mjs staging-seed \
+            "$RUNNER_TEMP/staging-checkpoint"
       - name: Upload canonical staging Agent telemetry
         if: always()
         uses: actions/upload-artifact@v4
@@ -129,4 +288,68 @@ jobs:
             ${{ runner.temp }}/staging-qwen-telemetry/agent-telemetry.json
             ${{ runner.temp }}/staging-qwen-telemetry/agent-execution-trace.json
           if-no-files-found: warn
+          retention-days: 14
+      - name: Upload ciphertext-only staging checkpoint
+        if: needs.verify-source.outputs.phase == 'seed'
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-checkpoint-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/staging-checkpoint/ciphertext.json
+            ${{ runner.temp }}/staging-checkpoint/proof.json
+          if-no-files-found: error
+          retention-days: 3
+
+  publish-checkpoint:
+    needs: [verify-source, synthetic-qwen]
+    if: >-
+      always() &&
+      needs.verify-source.result == 'success' &&
+      needs.synthetic-qwen.result == 'success' &&
+      needs.verify-source.outputs.phase == 'seed'
+    runs-on: ubuntu-24.04
+    environment: agent-staging-controller
+    timeout-minutes: 10
+    env:
+      STAGING_TARGET_SHA: ${{ needs.verify-source.outputs.staging_sha }}
+      STAGING_DISPATCH_ID: ${{ needs.verify-source.outputs.dispatch_id }}
+      ANTHROPIC_MODEL: ${{ needs.verify-source.outputs.model }}
+      CLAUDE_CODE_VERSION: ${{ needs.verify-source.outputs.cli_version }}
+    steps:
+      - name: Checkout trusted main-only Store ingester
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify-source.outputs.source_main_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Download ciphertext-only staging checkpoint
+        uses: actions/download-artifact@v4
+        with:
+          name: staging-checkpoint-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/staging-checkpoint
+      - name: Mint scoped Store Writer token
+        id: writer
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.RUN_STORE_WRITER_APP_ID }}
+          private-key: ${{ secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY }}
+      - name: Publish encrypted checkpoint to the canonical Store
+        env:
+          STAGING_CLAUDE_RESUME_PRIVATE_KEY_B64: ${{ secrets.STAGING_CLAUDE_RESUME_PRIVATE_KEY_B64 }}
+          STAGING_STORE_AES_KEY_B64: ${{ secrets.STAGING_STORE_AES_KEY_B64 }}
+          STORE_APP_TOKEN: ${{ steps.writer.outputs.token }}
+        run: |
+          set -euo pipefail
+          export AGENT_STORE_CONTROLLER_REMOTE="https://x-access-token:${STORE_APP_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          node scripts/lib/agent/providers/claude-resume-fixture.mjs staging-publish \
+            "$RUNNER_TEMP/staging-checkpoint" "$RUNNER_TEMP/staging-checkpoint-receipt.json"
+          unset AGENT_STORE_CONTROLLER_REMOTE STORE_APP_TOKEN
+      - name: Upload staging checkpoint receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-checkpoint-receipt-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/staging-checkpoint-receipt.json
+          if-no-files-found: error
           retention-days: 14

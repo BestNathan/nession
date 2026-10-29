@@ -93,9 +93,8 @@ jobs:
       terminal_cols: ${{ steps.terminal.outputs.cols }}
       terminal_web_font_size: ${{ steps.terminal.outputs.web_font_size }}
     env:
-      # One release-level source (#2487). Staging has its own scope, then the
-      # shared variable, then the approved default; the Web build and both
-      # image paths consume this same value.
+      # One GitHub repository Variables source (#2557) for both release lanes.
+      # Resolve once; the Web bundle and Server/Agent images consume these outputs.
       RELEASE_TERMINAL_COLS: ${{ vars.NESSION_TERMINAL_COLS || '96' }}
       RELEASE_TERMINAL_WEB_FONT_SIZE: ${{ vars.NESSION_TERMINAL_WEB_FONT_SIZE || '14' }}
     steps:

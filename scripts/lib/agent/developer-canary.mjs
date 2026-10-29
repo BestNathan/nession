@@ -7,10 +7,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {claudeCliToolPolicy} from './harness/native.mjs';
 import {qwenDeveloperModel,qwenGatewayEndpoint} from './orchestration/qwen-developer-policy.mjs';
-import {normalizeClaudeUsage} from './providers/claude-code.mjs';
+import {runClaudeCli,normalizeClaudeUsage} from './providers/claude-code.mjs';
 import {parseNativeEvents} from './providers/claude-stream.mjs';
 import {providerScopedRunName} from './telemetry/run-name.mjs';
 import {normalizeNativeTrace,writeExecutionTrace} from './telemetry/execution-trace.mjs';
@@ -25,8 +26,25 @@ const PROMPT='Read calc.js using the Read tool. The function incorrectly subtrac
   'Use the Edit tool to change ONLY the minus operator to plus, preserving all other bytes. '+
   'Do not create or edit any other file. Finish with a short confirmation. '+
   'Do not use Bash, network tools, plugins or external tools.';
+const RESUME_PROMPT='From the PREVIOUS conversation, reply ONLY with the exact '+
+  '32-character hexadecimal marker you were asked to remember. Do not invent one.';
+const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 function fail(message){throw new Error('Qwen Developer Canary: '+message);}
 function providerModel(env){return qwenDeveloperModel(env);}
+// A resume telemetry record must carry the exact signed checkpoint commitment
+// it consumed, so acceptance can bind the resumed Run to the stored Session
+// instead of trusting a separately reported model.
+function checkpointCommitment(env){
+  return /^[1-9]\d*$/.test(env.STAGING_CHECKPOINT_VERSION??'')&&
+    /^[a-f0-9]{64}$/.test(env.STAGING_CHECKPOINT_CIPHERTEXT_SHA??'');
+}
+function stagingTask(env){
+  const base={dispatch_id:env.STAGING_DISPATCH_ID,phase:env.STAGING_PHASE,
+    dispatched_default_model:env.STAGING_DEFAULT_MODEL};
+  if(env.STAGING_PHASE!=='resume')return base;
+  return {...base,checkpoint_version:Number(env.STAGING_CHECKPOINT_VERSION),
+    checkpoint_ciphertext_sha256:env.STAGING_CHECKPOINT_CIPHERTEXT_SHA};
+}
 export function checkSyntheticEdit(root,events){
   if(!Array.isArray(events))fail('missing real Provider event sequence');
   const tools=events.filter(x=>x?.type==='assistant'&&Array.isArray(x?.message?.content))
@@ -64,7 +82,12 @@ function canaryIdentity(env,startedAt,finishedAt,envelope,events,result,{stage=f
   if(stage&&(!SHA.test(targetRef??'')||
     env.GITHUB_WORKFLOW!=='Agent / Staging Developer Canary'||
     env.GITHUB_EVENT_NAME!=='workflow_run'||env.GITHUB_REF!=='refs/heads/main'||
-    env.GITHUB_RUN_ATTEMPT!=='1'))fail('staging Worker source identity missing');
+    env.GITHUB_RUN_ATTEMPT!=='1'||
+    !/^[a-f0-9]{64}$/.test(env.STAGING_DISPATCH_ID??'')||
+    !['seed','resume'].includes(env.STAGING_PHASE)||
+    !/^qwen[a-z0-9._-]*$/i.test(env.STAGING_DEFAULT_MODEL??'')||
+    (env.STAGING_PHASE==='resume'&&!checkpointCommitment(env))))
+    fail('staging Worker source identity missing');
   const nativeToolNames=events.filter(x=>x?.type==='assistant')
     .flatMap(x=>x.message?.content??[])
     .filter(x=>x?.type==='tool_use')
@@ -76,7 +99,8 @@ function canaryIdentity(env,startedAt,finishedAt,envelope,events,result,{stage=f
     github_run_id:Number(GITHUB_RUN_ID),github_run_attempt:Number(GITHUB_RUN_ATTEMPT),
     unique_run_name:providerScopedRunName({workflowId,
       runId:GITHUB_RUN_ID,runAttempt:GITHUB_RUN_ATTEMPT,taskId,provider:'claude-code'}),
-    task:{id:taskId,type:'develop',issue:stage?2319:ISSUE,target_ref:targetRef},
+    task:{id:taskId,type:'develop',issue:stage?2319:ISSUE,target_ref:targetRef,
+      ...(stage?stagingTask(env):{})},
     agent:{provider:'claude-code',id:'dev-qwen-01',role:'developer',
       model:{id:providerModel(env),request_model:providerModel(env)},
       run_id:envelope?.session_id??null,status:result.edit_verified?'finished':'error'},
@@ -94,7 +118,12 @@ async function run(dir,{stage=false}={}){
       !SHA.test(env.GITHUB_SHA??'')||
       (stage ? (env.GITHUB_WORKFLOW!=='Agent / Staging Developer Canary'||
         env.GITHUB_EVENT_NAME!=='workflow_run'||env.GITHUB_RUN_ATTEMPT!=='1'||
-        !SHA.test(env.STAGING_TARGET_SHA??'')) : env.GITHUB_EVENT_NAME!=='push')) {
+        !SHA.test(env.STAGING_TARGET_SHA??'')||
+        !/^[a-f0-9]{64}$/.test(env.STAGING_DISPATCH_ID??'')||
+        !['seed','resume'].includes(env.STAGING_PHASE)||
+        !/^qwen[a-z0-9._-]*$/i.test(env.STAGING_DEFAULT_MODEL??'')||
+        (env.STAGING_PHASE==='resume'&&!checkpointCommitment(env)))
+        : env.GITHUB_EVENT_NAME!=='push')) {
     fail('only admitted trusted main Workflow may run credentialed Developer Canary');
   }
   qwenGatewayEndpoint(env);
@@ -132,6 +161,94 @@ async function run(dir,{stage=false}={}){
   }
   if(error)throw error;
 }
+function stagingResumeConfig(dir,env){
+  let cfg;
+  try{cfg=JSON.parse(fs.readFileSync(path.join(dir,'config.json'),'utf8'));}
+  catch{fail('missing restored staging Session config');}
+  if(cfg?.schema_version!==1||cfg.kind!=='staging-resume-session'||
+      !UUID.test(cfg.session_id??'')||
+      !/^[a-f0-9]{64}$/.test(cfg.marker_sha256??'')||
+      cfg.source_sha!==env.STAGING_TARGET_SHA||
+      cfg.model!==providerModel(env)||
+      cfg.cli_version!==env.CLAUDE_CODE_VERSION||
+      cfg.checkpoint_version!==Number(env.STAGING_CHECKPOINT_VERSION)||
+      cfg.ciphertext_sha256!==env.STAGING_CHECKPOINT_CIPHERTEXT_SHA)
+    fail('restored staging Session does not match the signed dispatch');
+  return cfg;
+}
+function resumeIdentity(env,cfg,startedAt,finishedAt,envelope,ok){
+  const {GITHUB_RUN_ID,GITHUB_RUN_ATTEMPT,GITHUB_SHA,GITHUB_REPOSITORY}=env;
+  if(!/^[1-9]\d*$/.test(GITHUB_RUN_ID??'')||
+      !/^[1-9]\d*$/.test(GITHUB_RUN_ATTEMPT??'')||
+      !SHA.test(GITHUB_SHA??'')||GITHUB_REPOSITORY!=='BestNathan/nession'||
+      env.GITHUB_WORKFLOW!=='Agent / Staging Developer Canary'||
+      env.GITHUB_EVENT_NAME!=='workflow_run'||env.GITHUB_REF!=='refs/heads/main'||
+      env.GITHUB_RUN_ATTEMPT!=='1'||env.STAGING_PHASE!=='resume'||
+      !/^[a-f0-9]{64}$/.test(env.STAGING_DISPATCH_ID??'')||
+      !checkpointCommitment(env)||
+      !/^qwen[a-z0-9._-]*$/i.test(env.STAGING_DEFAULT_MODEL??''))
+    fail('staging Worker source identity missing');
+  const started=new Date(startedAt).getTime(),ended=new Date(finishedAt).getTime();
+  return buildAgentWorkflowTelemetry({
+    workflow_id:'agent-staging-developer-canary',
+    github_workflow:'Agent / Staging Developer Canary',job:'qwen-developer-canary',
+    repository:GITHUB_REPOSITORY,event:'workflow_run',
+    github_run_id:Number(GITHUB_RUN_ID),github_run_attempt:Number(GITHUB_RUN_ATTEMPT),
+    unique_run_name:providerScopedRunName({workflowId:'agent-staging-developer-canary',
+      runId:GITHUB_RUN_ID,runAttempt:GITHUB_RUN_ATTEMPT,
+      taskId:'issue-2319-staging-qwen-canary',provider:'claude-code'}),
+    task:{id:'issue-2319-staging-qwen-canary',type:'develop',issue:2319,
+      target_ref:env.STAGING_TARGET_SHA,...stagingTask(env)},
+    agent:{provider:'claude-code',id:'dev-qwen-01',role:'developer',
+      model:{id:providerModel(env),request_model:providerModel(env)},
+      run_id:envelope?.session_id??cfg.session_id,status:ok?'finished':'error'},
+    execution:{turns:envelope?.num_turns??null,model_requests:null,tool_calls:[],
+      tools_observed:envelope!==null},
+    tokens:normalizeClaudeUsage(envelope),
+    cost:{raw_usd:null,charged_usd:null,estimated_usd:null},
+    timing:{started_at:startedAt,finished_at:finishedAt,agent_duration_ms:ended-started},
+    result:{status:ok?'staging-resume-pass':'staging-resume-error'},
+  });
+}
+// Resume the exact stored native Session in a distinct GitHub Run. The model
+// executor receives only the restored config directory and the marker hash;
+// Store keys and the commitment stay in the trusted pre-model job.
+async function runStagingResume(dir,metricsDir){
+  const env=process.env,model=providerModel(env);
+  if(!dir||!path.isAbsolute(dir))fail('restored Session directory must be absolute');
+  const cfg=stagingResumeConfig(dir,env);
+  qwenGatewayEndpoint(env);
+  const startedAt=new Date().toISOString();
+  let envelope=null,error=null,ok=false;
+  try {
+    const result=runClaudeCli({prompt:RESUME_PROMPT,model,maxTurns:3,
+      allowedTools:'',disallowedTools:'*',cwd:env.GITHUB_WORKSPACE,env:{},
+      configDir:path.join(dir,'native'),restricted:true,tools:'',
+      resumeSessionId:cfg.session_id});
+    if(result.proc.status!==0||result.parsed?.is_error===true)
+      fail('restricted Claude Code resume failed (no raw output logged)');
+    if(result.parsed?.session_id!==cfg.session_id)
+      fail('resumed provider did not keep the stored Session UUID');
+    envelope=result.parsed;
+    const answer=String(envelope.result??'').trim();
+    if(!/^[a-f0-9]{32}$/.test(answer)||
+        createHash('sha256').update(answer).digest('hex')!==cfg.marker_sha256)
+      fail('stored native Session context was not retained');
+    ok=true;
+    console.log('Staging resume: stored native Session retained its prior-turn marker');
+  }catch(e){error=e;console.error(e.message);}
+  finally{
+    fs.mkdirSync(metricsDir,{recursive:true});
+    const finishedAt=new Date().toISOString();
+    const summary=resumeIdentity(env,cfg,startedAt,finishedAt,envelope,ok);
+    writeAgentWorkflowTelemetry(path.join(metricsDir,'agent-telemetry.json'),summary);
+    const trace=normalizeNativeTrace('claude-code',[],summary,{
+      model:'unobserved',tools:'unobserved',skills:'unobserved',mcp:'unobserved',
+    });
+    writeExecutionTrace(path.join(metricsDir,'agent-execution-trace.json'),trace);
+  }
+  if(error)throw error;
+}
 function selfTest(){
   assert.equal(providerModel({ANTHROPIC_MODEL:'qwen3.7-plus'}),'qwen3.7-plus');
   assert.throws(()=>providerModel({ANTHROPIC_MODEL:'claude-sonnet-5'}),/Qwen/);
@@ -145,14 +262,69 @@ function selfTest(){
     GITHUB_WORKFLOW:'Agent / Staging Developer Canary',
     GITHUB_EVENT_NAME:'workflow_run',GITHUB_RUN_ID:'401',
     GITHUB_RUN_ATTEMPT:'1',GITHUB_SHA:'b'.repeat(40),
-    STAGING_TARGET_SHA:'a'.repeat(40),ANTHROPIC_MODEL:'qwen3.7-plus',
+    STAGING_TARGET_SHA:'a'.repeat(40),STAGING_DISPATCH_ID:'c'.repeat(64),
+    STAGING_PHASE:'resume',STAGING_DEFAULT_MODEL:'qwen3.7-max',
+    STAGING_CHECKPOINT_VERSION:'1',STAGING_CHECKPOINT_CIPHERTEXT_SHA:'d'.repeat(64),
+    CLAUDE_CODE_VERSION:'2.1.312',ANTHROPIC_MODEL:'qwen3.7-plus',
   };
   const stageRecord=canaryIdentity(stageEnv,'2026-01-01T00:00:00.000Z',
     '2026-01-01T00:00:01.000Z',{num_turns:2,session_id:'synthetic'},[],
     {edit_verified:true},{stage:true});
   assert.equal(stageRecord.identity.workflow_id,'agent-staging-developer-canary');
   assert.equal(stageRecord.task.target_ref,stageEnv.STAGING_TARGET_SHA);
+  assert.equal(stageRecord.task.dispatch_id,stageEnv.STAGING_DISPATCH_ID);
+  assert.equal(stageRecord.task.phase,'resume');
+  assert.equal(stageRecord.task.dispatched_default_model,'qwen3.7-max');
+  assert.equal(stageRecord.task.checkpoint_version,1);
+  assert.equal(stageRecord.task.checkpoint_ciphertext_sha256,
+    stageEnv.STAGING_CHECKPOINT_CIPHERTEXT_SHA);
+  assert.equal(stageRecord.agent.model.id,'qwen3.7-plus');
   assert.equal(stageRecord.result.status,'staging-canary-pass');
+  // A resume without the exact signed checkpoint commitment fails closed.
+  for(const missing of [{STAGING_CHECKPOINT_VERSION:''},
+    {STAGING_CHECKPOINT_CIPHERTEXT_SHA:''},
+    {STAGING_CHECKPOINT_VERSION:'0'},
+    {STAGING_CHECKPOINT_CIPHERTEXT_SHA:'0'.repeat(63)}]) {
+    assert.throws(()=>canaryIdentity({...stageEnv,...missing},
+      '2026-01-01T00:00:00.000Z','2026-01-01T00:00:01.000Z',{},[],
+      {edit_verified:true},{stage:true}),/staging Worker source/);
+  }
+  // A seed Run has no checkpoint to commit; it neither requires nor records one.
+  const seedRecord=canaryIdentity({...stageEnv,STAGING_PHASE:'seed',
+    STAGING_CHECKPOINT_VERSION:'',STAGING_CHECKPOINT_CIPHERTEXT_SHA:''},
+    '2026-01-01T00:00:00.000Z','2026-01-01T00:00:01.000Z',{},[],
+    {edit_verified:true},{stage:true});
+  assert.equal(seedRecord.task.phase,'seed');
+  assert.equal(Object.hasOwn(seedRecord.task,'checkpoint_version'),false);
+  assert.equal(Object.hasOwn(seedRecord.task,'checkpoint_ciphertext_sha256'),false);
+  // The restored Session config must match the signed dispatch exactly.
+  const resumeRoot=fs.mkdtempSync(path.join(os.tmpdir(),'qwen-resume-config-'));
+  try {
+    const cfg={schema_version:1,kind:'staging-resume-session',
+      session_id:'11111111-1111-4111-8111-111111111111',
+      marker_sha256:'e'.repeat(64),source_sha:stageEnv.STAGING_TARGET_SHA,
+      model:'qwen3.7-plus',cli_version:'2.1.312',checkpoint_version:1,
+      ciphertext_sha256:stageEnv.STAGING_CHECKPOINT_CIPHERTEXT_SHA,
+      checkpoint_commit_sha:'f'.repeat(40),seed_run_id:401,seed_attempt:1};
+    fs.writeFileSync(path.join(resumeRoot,'config.json'),JSON.stringify(cfg));
+    assert.equal(stagingResumeConfig(resumeRoot,stageEnv).session_id,cfg.session_id);
+    for(const change of [
+      {source_sha:'0'.repeat(40)},{model:'qwen3.7-max'},{cli_version:'2.1.313'},
+      {checkpoint_version:2},{ciphertext_sha256:'0'.repeat(64)},
+      {session_id:'not-a-uuid'},{marker_sha256:'short'},
+    ]) {
+      fs.writeFileSync(path.join(resumeRoot,'config.json'),
+        JSON.stringify({...cfg,...change}));
+      assert.throws(()=>stagingResumeConfig(resumeRoot,stageEnv),
+        /restored staging Session/);
+    }
+  } finally {fs.rmSync(resumeRoot,{recursive:true,force:true});}
+  assert.throws(()=>canaryIdentity({...stageEnv,STAGING_PHASE:'unknown'},
+    '2026-01-01T00:00:00.000Z','2026-01-01T00:00:01.000Z',{},[],
+    {edit_verified:true},{stage:true}),/staging Worker source/);
+  assert.throws(()=>canaryIdentity({...stageEnv,STAGING_DEFAULT_MODEL:'claude-sonnet-5'},
+    '2026-01-01T00:00:00.000Z','2026-01-01T00:00:01.000Z',{},[],
+    {edit_verified:true},{stage:true}),/staging Worker source/);
   assert.throws(()=>canaryIdentity({...stageEnv,GITHUB_EVENT_NAME:'pull_request_target'},
     '2026-01-01T00:00:00.000Z','2026-01-01T00:00:01.000Z',{},[],
     {edit_verified:true},{stage:true}),/staging Worker source/);
@@ -185,6 +357,8 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
   (process.argv[2]==='self-test'?Promise.resolve(selfTest()):
     process.argv[2]==='run'?run(process.argv[3]):
     process.argv[2]==='staging'?run(process.argv[3],{stage:true}):
-    Promise.reject(Error('usage: self-test | run METRICS_DIR | staging METRICS_DIR')))
+    process.argv[2]==='staging-resume'?runStagingResume(process.argv[3],process.argv[4]):
+    Promise.reject(Error('usage: self-test | run METRICS_DIR | staging METRICS_DIR | '+
+      'staging-resume SESSION_DIR METRICS_DIR')))
     .catch(e=>{console.error(e.message);process.exitCode=1;});
 }
