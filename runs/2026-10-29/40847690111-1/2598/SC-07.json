@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "5cd167706061af9a6d589d0720788256bef59b4a4c3b41e3e9d1934fc2899fb1",
+  "run_id": 40847690111,
+  "run_attempt": 1,
+  "issue": 2598,
+  "criterion": "SC-07",
+  "criterion_text": "The OSC 5522 deterministic TUI fixture proves capability query, enable/disable, MIME notification, `type=read`, `type=write/wdata`, chunked OK/DATA/DONE, valid Base64/padding, multiplexer id, allowed 64 MiB clipboard writes and documented permission/concurrency/size errors with bounded resources.",
+  "stage": "staging",
+  "target_sha": "2934197ce4eac6b4948e2423abbb0b269391ca26",
+  "contract_sha256": "56f7b141959cd4f1706de498003c69b3a74d2e0bfcf12891300a7c951d9fb138",
+  "case_revision": "2934197ce4eac6b4948e2423abbb0b269391ca26",
+  "case_tree_sha": "244bca4c8b825af6d913831d9cf373ab4ae6430b",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-29T09:14:53.143Z",
+  "finished_at": "2026-10-29T09:15:12.049Z",
+  "duration_ms": 18906,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "The OSC 5522 deterministic protocol fixture conformance suite passes",
+      "evidence": [
+        {
+          "type": "test",
+          "value": "exact SHA 2934197ce4eac6b4948e2423abbb0b269391ca26: 31 protocol unit tests and 5 real-parser integration tests passed; the suite includes the 64 MiB streamed write, aliases, one-time reads, DECRQM truth and EBUSY contention"
+        }
+      ],
+      "duration_ms": 13045,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40847690111,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "2934197ce4eac6b4948e2423abbb0b269391ca26",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40847690111",
+    "record_path": "runs/2026-10-29/40847690111-1/2598/SC-07.json",
+    "source_result_sha256": "d9c545c9f322a575d54d432c56f5ff8380cf4675272f032cb556cf66f74d4994"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40847690111-1",
+    "sha256": "d9c545c9f322a575d54d432c56f5ff8380cf4675272f032cb556cf66f74d4994",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40847690111",
+    "durability": "time-limited; object archival not configured"
+  }
+}
