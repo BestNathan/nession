@@ -20,6 +20,7 @@ import { fixtureEnvSurface } from './fixtureEnv';
 import { fixtureFileOps } from './fixtureFileOps';
 import { fixtureGitSurface } from './fixtureGit';
 import { fixtureInputDrop } from './fixtureInputDrop';
+import { fixtureStatusInputs } from './fixtureStatusNotices';
 import { fixturePaneCommand } from './fixturePaneCommand';
 import { fixtureSelectedId } from './fixtureSelection';
 import { fixtureSessions } from './fixtureSessions';
@@ -96,6 +97,9 @@ export function FixtureApp() {
   // in no golden image at all — producing a live one needs an Agent to restart
   // mid-session, which no fixture route can do.
   const inputDrop = fixtureInputDrop(search);
+  // The other three status inputs (#2621), on the same rule: the route names
+  // what the runtime answered and the surface decides what to draw.
+  const { historyDegraded, terminalControl, clipboardNotice } = fixtureStatusInputs(search);
   const sessions = useMemo(() => fixtureSessions(search), [search]);
   const agents = useMemo(() => fixtureAgents(search), [search]);
   const connectionStatus = fixtureConnection(search);
@@ -203,7 +207,14 @@ export function FixtureApp() {
         mainShared={mainShared}
         workspaceAvailable={workspaceAvailable}
         terminal={(chrome: TerminalChrome) => (
-          <FixtureTerminal chrome={chrome} experience="app" inputDrop={inputDrop} />
+          <FixtureTerminal
+            chrome={chrome}
+            experience="app"
+            inputDrop={inputDrop}
+            historyDegraded={historyDegraded}
+            terminalControl={terminalControl}
+            clipboardNotice={clipboardNotice}
+          />
         )}
       />
     </div>

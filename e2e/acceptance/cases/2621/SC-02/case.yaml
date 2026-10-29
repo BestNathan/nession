@@ -1,0 +1,11 @@
+schema_version: 1
+issue: 2621
+criterion: SC-02
+stage: staging
+runtime: full-stack-local
+verifiers:
+  - type: browser
+    entry: verify.spec.js
+  - type: runtime
+    entry: verify.cjs
+result_policy: all-pass

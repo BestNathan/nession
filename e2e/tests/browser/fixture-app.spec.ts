@@ -126,64 +126,73 @@ test('an emerged capability does not reflow the terminal (#826)', async ({ page 
 });
 
 /**
- * The delivery-unknown notice is *painted*, not merely present (#1307 stage 6).
+ * #1307: a notice must not be obscured by the opaque bottom Capsule.
+ * #2621: that notice may not reserve any terminal flex height either.
  *
- * The defect this pins was invisible to everything that read the DOM. The
- * notice rendered, occupied 390×61, and was covered by the capsule's opaque
- * `backdrop-filter` shell — measured at 366×49 (75%, sentence included), with
- * `elementFromPoint` at the notice's own centre landing on the capsule's
- * textarea, and the frame **byte-identical** to the route with no notice at
- * all (md5 `fa3c7ea907eaf6b212152736620aff1c`, 35 061 bytes, both). A DOM
- * assertion cannot see that, which is why this one is taken the same way the
- * #1051 navigation-owner assertion above is: at the element's own centre.
- *
- * The geometry is asserted beside it rather than instead of it, because the two
- * say different things: `paintedCount` is what the user gets, and the box
- * comparison is the *mechanism* — the strip is laid out after the capsule host,
- * so the capsule ends above it rather than floating over it.
+ * Use the actual 390×844 App fixture and measured boxes, because jsdom has
+ * neither geometry nor elementFromPoint hit testing. The baseline and notice
+ * views must allocate identical terminal dimensions and xterm DOM rows.
  */
-test('the delivery-unknown notice is not drawn under the capsule (#1307)', async ({ page }) => {
-  await page.goto('/#/fixture/app?drop=epoch');
-  await expect(page.getByTestId('app-layer-terminal')).toBeInViewport();
-  await expect(page.getByTestId('terminal-input-drop')).toBeVisible();
+test('a compact notice remains painted without reserving Terminal rows (#1307, #2621)', async ({ page }) => {
+  const readGeometry = async () => {
+    await expect(page.getByTestId('fixture-terminal').locator('.xterm')).toBeVisible();
+    await expect.poll(() => page.locator('.xterm-rows > div').count()).toBeGreaterThan(0);
+    return page.evaluate(() => {
+      const surface = document.querySelector('[data-testid="terminal-surface"]');
+      const host = document.querySelector('[data-terminal-capsule-host]');
+      const viewport = document.querySelector('[data-testid="fixture-terminal"]');
+      const rect = (el: Element | null) => {
+        const b = el?.getBoundingClientRect();
+        return b ? { top: Math.round(b.top), height: Math.round(b.height) } : null;
+      };
+      return {
+        surface: rect(surface),
+        host: rect(host),
+        viewport: rect(viewport),
+        rows: document.querySelector('.xterm-rows')?.children.length ?? 0,
+      };
+    });
+  };
 
+  await page.goto('/#/fixture/app');
+  const withoutNotice = await readGeometry();
+  expect(withoutNotice.rows).toBeGreaterThan(0);
+  await expect(page.getByTestId('terminal-status-overlay')).toHaveCount(0);
+
+  await page.goto('/#/fixture/app?drop=epoch');
+  const withNotice = await readGeometry();
+  await expect(page.getByTestId('terminal-input-drop')).toBeVisible();
   expect(await paintedCount(page, '[data-testid="terminal-input-drop"]')).toBe(1);
 
+  // Status chrome is absolutely positioned beside, not inside or below, the
+  // flex-filling capsule host. All measured terminal dimensions stay the same.
+  expect(withNotice).toEqual(withoutNotice);
   const boxes = await page.evaluate(() => {
     const host = document.querySelector('[data-terminal-capsule-host]');
     const notice = document.querySelector('[data-testid="terminal-input-drop"]');
+    const overlay = document.querySelector('[data-testid="terminal-status-overlay"]');
     const dock = document.querySelector('[data-testid="terminal-capsule"]');
-    const box = (el: Element | null) => {
-      const b = el?.getBoundingClientRect();
-      return b ? { top: Math.round(b.top), bottom: Math.round(b.bottom) } : null;
-    };
+    const rect = (el: Element | null) => el?.getBoundingClientRect() ?? null;
+    const noticeRect = rect(notice);
+    const dockRect = rect(dock);
     return {
-      host: box(host),
-      notice: box(notice),
-      dock: box(dock),
-      // The invariant, read off the live tree: the capsule host is the well and
-      // the capsule, and the strip is its sibling.
-      hostContainsNotice: host !== null && notice !== null && host.contains(notice),
-      hostContainsDock: host !== null && dock !== null && host.contains(dock),
+      hostContainsNotice: !!host?.contains(notice),
+      hostContainsDock: !!host?.contains(dock),
+      overlayInsideSurface: overlay?.parentElement === document.querySelector('[data-testid="terminal-surface"]'),
+      overlayIsAbsolute: !!overlay && getComputedStyle(overlay).position === 'absolute',
+      noticeAboveDock: !!noticeRect && !!dockRect && noticeRect.bottom <= dockRect.top,
     };
   });
-
-  expect(boxes.hostContainsNotice).toBe(false);
-  expect(boxes.hostContainsDock).toBe(true);
-
-  // The capsule floats above the strip instead of over it. Both sides are read
-  // first, so a failure names the box that moved rather than just the relation.
-  expect(boxes.dock).not.toBeNull();
-  expect(boxes.notice).not.toBeNull();
-  const { capsuleBottom, noticeTop } = {
-    capsuleBottom: boxes.dock!.bottom,
-    noticeTop: boxes.notice!.top,
-  };
-  expect({ capsuleBottom, noticeTop, floatingAbove: capsuleBottom <= noticeTop }).toEqual({
-    capsuleBottom,
-    noticeTop,
-    floatingAbove: true,
+  expect(boxes).toEqual({
+    hostContainsNotice: false,
+    hostContainsDock: true,
+    overlayInsideSurface: true,
+    overlayIsAbsolute: true,
+    noticeAboveDock: true,
   });
+
+  await page.goto('/#/fixture/app');
+  expect(await readGeometry()).toEqual(withoutNotice);
 });
 
 /**

@@ -118,13 +118,11 @@ export interface TerminalSurfaceProps {
  *   35 061 bytes) whether the route named a drop or not, while the DOM differed
  *   by this whole band. Adding the notice changed no pixel.
  *
- * The observer bar has the same geometry and had the same problem, and it
- * **predates this notice** — the whole band, not this change, sat under the
- * composer. Both are fixed the same way: `data-terminal-capsule-host` is the
- * well *and* the capsule, so a strip the surface owns is laid out as its
- * sibling rather than inside it. Nothing about the strip itself moved, which is
- * why the two look identical to the byte at rest: with no strip rendered the
- * host fills the surface exactly as the root used to.
+ * The first repair kept notices outside the capsule host, which prevented
+ * occlusion but made each full-width flex sibling reserve terminal height.
+ * #2621 preserves that host boundary and instead places all notices in a
+ * compact root-owned absolute overlay near the top, leaving the full grid
+ * height unchanged when an observer takes control or a notice is dismissed.
  */
 function inputDropNotice(drop: InputDrop): string {
   switch (drop.reason) {
@@ -153,13 +151,20 @@ function clipboardNoticeText(notice: ClipboardNotice): string {
   }
 }
 
+/** The only status chrome: compact, accessible and never a flex row (#2621). */
+const terminalNoticeClass = cn(
+  'pointer-events-auto flex w-fit max-w-full items-center gap-2 rounded-[var(--nession-radius-control)]',
+  'border border-border/70 bg-background/95 px-2.5 py-1 text-muted-foreground shadow-[var(--nession-elevation-floating)] backdrop-blur-sm',
+  chromeSansRole('secondary'),
+);
+
 /**
- * The transient clipboard strip (#2598).
+ * The compact clipboard notice (#2598, #2621).
  *
- * A blocked OSC 52 write keeps its text only until this user gesture completes
- * it or the notice expires; the Copy button is the gesture the Clipboard API
- * requires. It is a status line beside the terminal, never a toolbar, and it
- * does not take focus. A second identical notice re-arms it through `state.id`.
+ * A blocked OSC 52 write keeps its text only until the user acts or the
+ * notice expires. The parent status overlay is positioned outside the capsule
+ * host, so this notice neither reserves a Terminal row nor hides behind the
+ * bottom composer. A repeated notice re-arms through `state.id`.
  */
 function TerminalClipboardNoticeStrip({
   state,
@@ -192,7 +197,7 @@ function TerminalClipboardNoticeStrip({
   };
   return (
     <div
-      className={cn('flex shrink-0 items-center justify-between gap-3 border-t border-border bg-muted/40 px-3 py-2 text-muted-foreground', chromeSansRole('body'))}
+      className={terminalNoticeClass}
       data-testid="terminal-clipboard-notice"
       data-clipboard-notice={notice.kind}
       role="status"
@@ -204,9 +209,102 @@ function TerminalClipboardNoticeStrip({
           : clipboardNoticeText(notice)}
       </span>
       {notice.kind === 'copy-required' && !copyFailed ? (
-        <Button type="button" variant="secondary" size="sm" onClick={() => copy()}>
+        <Button type="button" variant="secondary" size="sm" className="h-7 px-2" onClick={() => copy()}>
           Copy
         </Button>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The one root-owned, absolute status layer (#2621).
+ *
+ * It is deliberately a sibling of — never a child of — the capsule host, and
+ * it is absolutely positioned, so no notice participates in flex layout. The
+ * host stays the sole flex-filling region and xterm's rows never change when a
+ * notice appears, is replaced or expires. `pointer-events-none` on the
+ * container with `pointer-events-auto` only on the notices keeps the terminal's
+ * pointer/IME surface intact everywhere else.
+ */
+function TerminalStatusOverlay({
+  historyDegraded,
+  inputDrop,
+  clipboardNotice,
+  controller,
+  terminalControl,
+  onDismissInputDrop,
+  onDismissClipboardNotice,
+  onTakeControl,
+}: {
+  historyDegraded: boolean;
+  inputDrop: InputDrop | null;
+  clipboardNotice: ClipboardNoticeState | null;
+  controller: TerminalController | null;
+  terminalControl?: TerminalControlState;
+  onDismissInputDrop?: () => void;
+  onDismissClipboardNotice?: () => void;
+  onTakeControl?: () => void;
+}) {
+  if (!(historyDegraded || inputDrop || clipboardNotice || terminalControl?.role === 'observer')) {
+    return null;
+  }
+  return (
+    <div
+      data-testid="terminal-status-overlay"
+      className="pointer-events-none absolute inset-x-2 top-2 z-40 flex max-h-[40%] flex-col items-end gap-1.5 overflow-y-auto"
+    >
+      {historyDegraded ? (
+        <div
+          className={terminalNoticeClass}
+          data-testid="terminal-history-degraded"
+          role="status"
+        >
+          <span>History may be incomplete — some output was lost while disconnected.</span>
+        </div>
+      ) : null}
+      {inputDrop ? (
+        <div
+          className={terminalNoticeClass}
+          data-testid="terminal-input-drop"
+          role="status"
+        >
+          <span>{inputDropNotice(inputDrop)}</span>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="h-7 shrink-0 px-2"
+            onClick={() => onDismissInputDrop?.()}
+          >
+            Dismiss
+          </Button>
+        </div>
+      ) : null}
+      {clipboardNotice ? (
+        <TerminalClipboardNoticeStrip
+          state={clipboardNotice}
+          controller={controller}
+          onDismiss={onDismissClipboardNotice}
+        />
+      ) : null}
+      {terminalControl?.role === 'observer' ? (
+        <div
+          className={terminalNoticeClass}
+          data-testid="terminal-observer-bar"
+          role="status"
+        >
+          <span>View only — another client is controlling this session.</span>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="h-7 shrink-0 px-2"
+            onClick={() => onTakeControl?.()}
+          >
+            Take control
+          </Button>
+        </div>
       ) : null}
     </div>
   );
@@ -261,14 +359,10 @@ export function TerminalSurface({
       className="relative flex min-h-0 flex-1 flex-col"
     >
       {/*
-        The host is the **well plus the floating capsule**, and deliberately not
-        the whole surface: everything laid out inside it at its bottom is drawn
-        under the composer, because the dock is `absolute z-30` against this box
-        and `index.css` draws the occlusion band along its bottom edge. The
-        status strips below are its siblings for that reason — moving this
-        attribute back up to the surface root puts them back under the capsule,
-        which is the defect `#1307` stage 6 measured (the notice was 75% covered
-        and the frame was byte-identical to the route with no notice at all).
+        The capsule host stays limited to the well and bottom composer (#1307).
+        All status actions live in a separate absolute top-end layer below:
+        outside the opaque capsule/occlusion band, but no longer consuming
+        height or causing xterm row/resize churn (#2621).
       */}
       <div
         data-terminal-capsule-host
@@ -294,55 +388,16 @@ export function TerminalSurface({
           workContext={workContext}
         />
       </div>
-      {historyDegraded ? (
-        <div
-          className={cn('flex shrink-0 items-center justify-between gap-3 border-t border-border bg-muted/40 px-3 py-2 text-muted-foreground', chromeSansRole('body'))}
-          data-testid="terminal-history-degraded"
-          role="status"
-        >
-          <span>History may be incomplete — some output was lost while disconnected.</span>
-        </div>
-      ) : null}
-      {inputDrop ? (
-        <div
-          className={cn('flex shrink-0 items-center justify-between gap-3 border-t border-border bg-muted/40 px-3 py-2 text-muted-foreground', chromeSansRole('body'))}
-          data-testid="terminal-input-drop"
-          role="status"
-        >
-          <span>{inputDropNotice(inputDrop)}</span>
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={() => onDismissInputDrop?.()}
-          >
-            Dismiss
-          </Button>
-        </div>
-      ) : null}
-      {clipboardNotice ? (
-        <TerminalClipboardNoticeStrip
-          state={clipboardNotice}
-          controller={controller}
-          onDismiss={onDismissClipboardNotice}
-        />
-      ) : null}
-      {terminalControl?.role === 'observer' ? (
-        <div
-          className={cn('flex shrink-0 items-center justify-between gap-3 border-t border-border bg-muted/40 px-3 py-2 text-muted-foreground', chromeSansRole('body'))}
-          data-testid="terminal-observer-bar"
-        >
-          <span>View only — another client is controlling this session.</span>
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={() => onTakeControl?.()}
-          >
-            Take control
-          </Button>
-        </div>
-      ) : null}
+      <TerminalStatusOverlay
+        historyDegraded={historyDegraded}
+        inputDrop={inputDrop}
+        clipboardNotice={clipboardNotice}
+        controller={controller}
+        terminalControl={terminalControl}
+        onDismissInputDrop={onDismissInputDrop}
+        onDismissClipboardNotice={onDismissClipboardNotice}
+        onTakeControl={onTakeControl}
+      />
     </div>
   );
 }

@@ -54,8 +54,8 @@ describe('TerminalSurface', () => {
 
     // The host is the *inner* box, not the surface root: it carries the
     // scrollback mode and the capsule the occlusion band is drawn for, and the
-    // strips the surface owns are laid out after it (#1307 stage 6 — see the
-    // last describe block, which is what fails if this moves back up).
+    // notices stay outside that host (#1307) while floating against the root
+    // rather than shrinking the well (#2621).
     const surface = screen.getByTestId('terminal-surface');
     const host = surface.querySelector('[data-terminal-capsule-host]');
     expect(host).toHaveAttribute('data-terminal-scrollback-mode', 'local-buffer');
@@ -88,10 +88,8 @@ describe('TerminalSurface', () => {
 /**
  * #1307 SC-09 — the one user-visible surface this requirement adds.
  *
- * The requirement's constraint on it is "quiet by default, present only when a
- * decision is owed", so the absent case is asserted first and deliberately:
- * a notice that renders empty is a notice that occupies the surface forever,
- * and the shipping rule in this tree is "absent, not empty".
+ * The requirement's constraint is "quiet by default, present only when a
+ * decision is owed". The root overlay is absent, not an empty height reserve.
  */
 describe('input that will never arrive (#1307 SC-09)', () => {
   it('says nothing when nothing has been lost', () => {
@@ -164,12 +162,12 @@ describe('input that will never arrive (#1307 SC-09)', () => {
  * returned the capsule's textarea, and the frame was byte-identical to the
  * route with no notice at all.
  *
- * jsdom performs no layout, so this file cannot assert the geometry. It asserts
- * the structural invariant the geometry follows from — the part a later
- * refactor would break silently, because every DOM-reading assertion in this
- * file passes either way:
+ * jsdom performs no layout, so this file cannot assert the actual pixels. It
+ * asserts both the #1307 visibility boundary and #2621's absolute root layer,
+ * with browser layout proof still required separately:
  *
- *   host  ⊇  { the well } ∪ { the capsule }      and      host  ⊅  { strips }
+ *   root ⊇ { host, absolute notice overlay }, host ⊇ { well, capsule };
+ *   host ⊅ { notices }; notices contribute no normal-flow rows.
  *
  * The capsule is asserted *inside* the host for the same reason the strips are
  * asserted outside it: it is `z-30` and measured against the host, so a fix
@@ -214,7 +212,7 @@ describe('the capsule host wraps the well, not the surface (#1307 stage 6)', () 
     const degraded = renderSurface('web', { historyDegraded: true });
     const notice = degraded.getByTestId('terminal-history-degraded');
     expect(notice).toHaveTextContent(/history may be incomplete/i);
-    // Same strip geometry as the other status lines: outside the capsule host.
+    // Compact absolute overlay still stays outside the capsule host.
     expect(hostOf(degraded).contains(notice)).toBe(false);
   });
 
@@ -244,6 +242,64 @@ describe('explicit stream state (#1926 SC-08)', () => {
   });
 });
 
+/**
+ * #2621: status chrome may be visible for the entire observer lifetime, but it
+ * must NEVER create a bottom flex row and change xterm geometry. jsdom cannot
+ * measure the box, so pin the DOM/layout contract here and require a browser
+ * viewport/row measurement separately before Acceptance.
+ */
+describe('Terminal status overlays do not reserve grid height (#2621)', () => {
+  it('has no status placeholder in the healthy/controller state', () => {
+    renderSurface('web');
+    expect(screen.queryByTestId('terminal-status-overlay')).toBeNull();
+  });
+
+  it('owns a compact root-absolute notice layer outside the capsule host', () => {
+    const view = renderSurface('web', {
+      historyDegraded: true,
+      inputDrop: { reason: 'epoch', chunks: 1, at: 0 },
+      clipboardNotice: { id: 1, notice: { kind: 'write-denied' } },
+      terminalControl: { role: 'observer' },
+    });
+    const root = view.getByTestId('terminal-surface');
+    const overlay = view.getByTestId('terminal-status-overlay');
+    const host = root.querySelector('[data-terminal-capsule-host]');
+
+    expect(overlay.parentElement).toBe(root);
+    expect(root.children).toHaveLength(2);
+    expect(overlay).toHaveClass('absolute', 'pointer-events-none');
+    expect(overlay).not.toHaveClass('shrink-0');
+    expect(host).toHaveClass('flex-1');
+    expect(host?.contains(overlay)).toBe(false);
+
+    for (const testId of [
+      'terminal-history-degraded',
+      'terminal-input-drop',
+      'terminal-clipboard-notice',
+      'terminal-observer-bar',
+    ]) {
+      const notice = view.getByTestId(testId);
+      expect(overlay).toContainElement(notice);
+      expect(notice).toHaveClass('pointer-events-auto', 'w-fit', 'max-w-full');
+      expect(notice).not.toHaveClass('shrink-0');
+    }
+  });
+
+  it('keeps the observer takeover action while the status is floating', async () => {
+    const onTakeControl = vi.fn();
+    const view = renderSurface('app', {
+      terminalControl: { role: 'observer' },
+      onTakeControl,
+    });
+
+    const badge = view.getByTestId('terminal-observer-bar');
+    expect(badge).toHaveTextContent('View only — another client is controlling this session.');
+    expect(badge.closest('[data-testid="terminal-status-overlay"]')).not.toBeNull();
+    await userEvent.click(view.getByRole('button', { name: 'Take control' }));
+    expect(onTakeControl).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('transient clipboard state (#2598)', () => {
   it('states an unsupported image paste without inventing a capability', () => {
     const view = renderSurface('web', {
@@ -251,7 +307,7 @@ describe('transient clipboard state (#2598)', () => {
     });
     const notice = view.getByTestId('terminal-clipboard-notice');
     expect(notice).toHaveTextContent('Image clipboard protocol not supported by this TUI');
-    // A status strip outside the capsule host, like every other quiet notice.
+    // A root-owned overlay outside the capsule host, not a reserved flex row.
     const host = view.getByTestId('terminal-surface')
       .querySelector('[data-terminal-capsule-host]');
     expect(host?.contains(notice)).toBe(false);
