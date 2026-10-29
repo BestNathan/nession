@@ -64,6 +64,21 @@ The receiver records aggregate delivery decisions; it does not expose Issue
 body text, GitHub tokens or signatures. A successful health check or unit test
 is not evidence of actual webhook delivery.
 
+## Failed GitHub webhook delivery is not automatically retried
+
+GitHub explicitly does **not** automatically redeliver failed webhook
+deliveries. The current shadow HTTP receiver validates the signature and
+queries GitHub before acknowledging, so a slow API, 503 or server outage
+requires manual/API redelivery (GitHub retains redeliverable deliveries for
+a limited window). A successful process health check is not receipt proof.
+
+**Live ingress must first persist the signed delivery and acknowledge quickly
+(within GitHub's webhook timeout), then process/attest in a durable worker.**
+It additionally needs failed-delivery discovery/redelivery or a durable
+webhook proxy with positive delivery acknowledgements. This is still an
+explicit rollout blocker, not an assumption hidden behind the old cron.
+Reference: https://docs.github.com/en/webhooks/using-webhooks/handling-failed-webhook-deliveries
+
 ## Requirements before turning off legacy receivers
 
 1. Deploy shadow ingress and compare real source run/attempt/SHA lineage and
