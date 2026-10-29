@@ -1,0 +1,97 @@
+name: Acceptance / Event Consumer
+
+# A trusted, explicit workflow_dispatch is issued only for a previously
+# selected source/Issue transition. This is not enabled by the shadow relay.
+# Input fields are claims, not Acceptance authority: the select job reads the
+# exact live GitHub source and current canonical Issue/SC contract.
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: "Attested main source Run ID"
+        required: true
+        type: string
+      source_attempt:
+        description: "Attested source Run attempt"
+        required: true
+        type: string
+      target_sha:
+        description: "Exact main source SHA"
+        required: true
+        type: string
+      issue_number:
+        description: "Open Requirement/Bug Issue"
+        required: true
+        type: string
+      contract_digest:
+        description: "Canonical SC contract SHA-256"
+        required: true
+        type: string
+      task_id:
+        description: "Deterministic source/Issue task identity"
+        required: true
+        type: string
+
+run-name: Acceptance task ${{ inputs.task_id }}
+
+permissions:
+  actions: read
+  contents: read
+  issues: read
+  pull-requests: read
+
+concurrency:
+  # Do not run two evaluations of the same deterministic source/Issue task
+  # at once. A later attempt must still re-check the live contract.
+  group: acceptance-event-task-${{ inputs.task_id }}
+  cancel-in-progress: false
+
+jobs:
+  authorize:
+    if: github.repository == 'BestNathan/nession' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      authorized: ${{ steps.verify.outputs.authorized }}
+      issue_number: ${{ steps.verify.outputs.issue_number }}
+      target_sha: ${{ steps.verify.outputs.target_sha }}
+    steps:
+      - name: Checkout trusted main Acceptance consumer
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify source Run, current Issue and exact task identity
+        id: verify
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          SOURCE_ATTEMPT: ${{ inputs.source_attempt }}
+          TARGET_SHA: ${{ inputs.target_sha }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          CONTRACT_DIGEST: ${{ inputs.contract_digest }}
+          TASK_ID: ${{ inputs.task_id }}
+        run: |
+          set -euo pipefail
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git cat-file -e "$TARGET_SHA^{commit}"
+          git merge-base --is-ancestor "$TARGET_SHA" HEAD
+          node scripts/acceptance-event-consumer.mjs
+
+  evaluate:
+    needs: authorize
+    if: needs.authorize.outputs.authorized == 'true'
+    # Canonical read-only Acceptor and deterministic Issue Updater. No new
+    # direct projection path, evidence parser or merge gate is introduced.
+    uses: BestNathan/nession/.github/workflows/agent-sc-acceptance.yml@main
+    with:
+      issue_number: ${{ fromJSON(needs.authorize.outputs.issue_number) }}
+      stage: post-merge
+      provider: ${{ vars.AGENT_DEFAULT_ACCEPTOR || vars.ACCEPTANCE_PROVIDER || 'cursor' }}
+      target_ref: ${{ needs.authorize.outputs.target_sha }}
+      deployment: ''
+    secrets: inherit
