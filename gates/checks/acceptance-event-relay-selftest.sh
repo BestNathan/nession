@@ -12,6 +12,7 @@ GATE_OWNER='scripts/acceptance-event-relay-core.mjs + scripts/acceptance-event-r
 gate_check() {
   gate_require_command node "Install Node.js 24 or newer." || return $?
   gate_require_path './scripts/acceptance-event-relay-selftest.mjs' "Restore shadow event relay fixtures." || return $?
-  gate_run_invariant node scripts/acceptance-event-relay-selftest.mjs
+  gate_run_invariant node scripts/acceptance-event-relay-selftest.mjs || return $?
+  gate_run_invariant node scripts/acceptance-event-relay-durable-selftest.mjs
 }
 gate_main "$@"
