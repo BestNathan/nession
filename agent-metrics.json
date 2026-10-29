@@ -1,23 +1,23 @@
 {
   "schema_version": 1,
   "kind": "agent_metrics_aggregate",
-  "generated_at": "2026-10-29T14:45:58.265Z",
+  "generated_at": "2026-10-29T15:22:19.311Z",
   "windows": {
     "7d": {
       "runs": {
-        "total": 922,
+        "total": 919,
         "by_workflow": {
           "agent-claude-resume-seed": 8,
           "agent-claude-resume-verify": 8,
           "agent-provider-smoke": 184,
           "agent-review": 1,
           "agent-staging-developer-canary": 14,
-          "issue-audit": 340,
+          "issue-audit": 337,
           "requirement-acceptance": 367
         },
         "by_provider": {
           "claude-code": 489,
-          "cursor": 361,
+          "cursor": 358,
           "deepseek": 72
         },
         "by_role": {
@@ -49,8 +49,8 @@
           "2102": 3,
           "2205": 17,
           "2218": 2,
-          "2221": 19,
-          "2223": 18,
+          "2221": 17,
+          "2223": 17,
           "2225": 10,
           "2239": 2,
           "2241": 4,
@@ -154,7 +154,7 @@
         },
         "by_harness": {},
         "by_result": {
-          "agent-error": 367,
+          "agent-error": 364,
           "canary-error": 9,
           "canary-pass": 86,
           "completed": 429,
@@ -166,23 +166,23 @@
         }
       },
       "turns": {
-        "observed_runs": 908,
+        "observed_runs": 905,
         "total": 5070,
-        "avg": 5.583700440528634,
+        "avg": 5.602209944751381,
         "p50": 1,
         "p95": 29
       },
       "model_requests": {
-        "observed_runs": 360,
+        "observed_runs": 357,
         "total": 0,
         "avg": 0,
         "p50": 0,
         "p95": 0
       },
       "tools": {
-        "observed_runs": 462,
+        "observed_runs": 459,
         "total": 207,
-        "avg": 0.44805194805194803,
+        "avg": 0.45098039215686275,
         "p50": 0,
         "p95": 2,
         "by_name": {
@@ -213,15 +213,15 @@
           "total": null
         },
         "total": {
-          "observed_runs": 887,
+          "observed_runs": 884,
           "total": 121684803
         }
       },
       "duration_ms": {
-        "observed_runs": 915,
-        "total": 40063269,
-        "avg": 43784.99344262295,
-        "p50": 11026,
+        "observed_runs": 912,
+        "total": 40060134,
+        "avg": 43925.58552631579,
+        "p50": 11151,
         "p95": 181993
       },
       "cost_usd": {

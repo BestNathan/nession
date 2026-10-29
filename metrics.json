@@ -2,56 +2,56 @@
   "schema_version": 2,
   "repository_name": "BestNathan/nession",
   "branch": "main",
-  "commit_sha": "c64adf51ef0b8c032b12b060c1c1ac876945c8ee",
-  "generated_at": "2026-10-29T05:50:58.878Z",
+  "commit_sha": "7c816a909d1d748cf8c36cec934421b090a1309c",
+  "generated_at": "2026-10-29T15:22:15.501Z",
   "repository": {
     "source": {
-      "loc": 330256,
-      "files": 1837
+      "loc": 337419,
+      "files": 1895
     },
     "tests": {
       "unit": {
-        "total": 3007,
-        "rust": 1517,
-        "web": 1490
+        "total": 3044,
+        "rust": 1518,
+        "web": 1526
       },
       "integration": {
-        "total": 1744,
+        "total": 1761,
         "rust": 255,
-        "web": 1489
+        "web": 1506
       },
       "e2e": {
-        "total": 268,
-        "playwright": 268
+        "total": 275,
+        "playwright": 275
       },
-      "total": 5019
+      "total": 5080
     },
     "execution": {
       "unit": {
-        "passed": 3007,
+        "passed": 3044,
         "failed": 0,
         "skipped": 0,
         "pass_rate": 1
       },
       "integration": {
-        "passed": 1744,
+        "passed": 1761,
         "failed": 0,
         "skipped": 0,
         "pass_rate": 1
       },
       "e2e": {
-        "passed": 267,
+        "passed": 274,
         "failed": 1,
         "skipped": 0,
-        "pass_rate": 0.996268656716418
+        "pass_rate": 0.9963636363636363
       }
     },
     "coverage": {
       "rust": {
         "lines": {
-          "covered": 31630,
-          "total": 36196,
-          "rate": 0.8738534644712123
+          "covered": 31645,
+          "total": 36210,
+          "rate": 0.8739298536315935
         },
         "crates": {
           "nession-common": {
@@ -64,9 +64,9 @@
           },
           "nession-agent": {
             "lines": {
-              "covered": 13374,
-              "total": 14758,
-              "rate": 0.9062203550616614
+              "covered": 13389,
+              "total": 14772,
+              "rate": 0.9063769293257514
             },
             "threshold": 0.79
           },
@@ -130,9 +130,9 @@
       },
       "web": {
         "lines": {
-          "covered": 10368,
-          "total": 11807,
-          "rate": 0.8781231472855086
+          "covered": 10806,
+          "total": 12355,
+          "rate": 0.8746256576284905
         }
       }
     },
@@ -158,43 +158,43 @@
   },
   "efficiency": {
     "window": "7d",
-    "window_start": "2026-10-22T05:50:58.878Z",
-    "window_30d_start": "2026-09-29T05:50:58.878Z",
+    "window_start": "2026-10-22T15:22:15.501Z",
+    "window_30d_start": "2026-09-29T15:22:15.501Z",
     "source_churn": {
-      "additions": 46986,
-      "deletions": 9993,
-      "baseline": "bbd3d6f6c66e61bbba42ea21ba72816113ede1d1"
+      "additions": 51767,
+      "deletions": 10192,
+      "baseline": "f92bc84ef35d55693ab882b6a0c1d23b4938d9e0"
     },
     "source_churn_30d": {
-      "additions": 174642,
-      "deletions": 30184,
-      "baseline": "3e4fc8f4b36e63f342d77274b8bb12104fe4b6b6"
+      "additions": 177910,
+      "deletions": 30944,
+      "baseline": "913d910da6186947ce9d9b9aafff22b97848db97"
     },
     "commits": {
-      "total": 7460,
-      "last_7d": 908,
-      "last_30d": 4432
+      "total": 7527,
+      "last_7d": 923,
+      "last_30d": 4429
     },
     "issues": {
-      "total": 588,
-      "open": 28,
-      "created_7d": 94,
-      "closed_7d": 110,
-      "created_30d": 340,
-      "closed_30d": 335
+      "total": 598,
+      "open": 27,
+      "created_7d": 97,
+      "closed_7d": 102,
+      "created_30d": 336,
+      "closed_30d": 340
     },
     "pull_requests": {
-      "total": 2015,
+      "total": 2032,
       "open": 2,
-      "created_7d": 305,
-      "merged_7d": 301,
-      "created_30d": 1034,
-      "merged_30d": 969
+      "created_7d": 310,
+      "merged_7d": 304,
+      "created_30d": 1026,
+      "merged_30d": 963
     },
     "workflow_runs": {
-      "total": 60646,
-      "last_7d": 23594,
-      "last_30d": 57273
+      "total": 61818,
+      "last_7d": 23248,
+      "last_30d": 58298
     }
   }
 }
