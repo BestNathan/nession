@@ -5,8 +5,8 @@ topic: terminal
 categories: ["architecture","ownership","terminal","web"]
 status: verified
 created_at: 2026-10-28T17:46:56Z
-updated_at: 2026-10-29T14:52:00Z
-sources: ["https://github.com/BestNathan/nession/blob/df39f65fec7825903d1f9f0f87c6c63dffb03e1d/docs/architecture/terminal-engine.md","https://github.com/BestNathan/nession/blob/d4dd4d4e3dbbbe8473fa3277eb38d02ba3799249/docs/architecture/terminal-engine.md","https://github.com/BestNathan/nession/blob/7c816a909d1d748cf8c36cec934421b090a1309c/docs/design/design-system/patterns/terminal-surface.md","https://github.com/BestNathan/nession/issues/2598","https://github.com/BestNathan/nession/issues/2621","https://github.com/BestNathan/nession/pull/2583"]
+updated_at: 2026-10-29T19:22:00Z
+sources: ["https://github.com/BestNathan/nession/blob/df39f65fec7825903d1f9f0f87c6c63dffb03e1d/docs/architecture/terminal-engine.md","https://github.com/BestNathan/nession/blob/d4dd4d4e3dbbbe8473fa3277eb38d02ba3799249/docs/architecture/terminal-engine.md","https://github.com/BestNathan/nession/blob/bccd9928983ab2818a34e36cdd16d015966f7100/docs/design/terminal/interaction-semantics.md","https://github.com/BestNathan/nession/blob/7c816a909d1d748cf8c36cec934421b090a1309c/docs/design/design-system/patterns/terminal-surface.md","https://github.com/BestNathan/nession/issues/2598","https://github.com/BestNathan/nession/issues/2614","https://github.com/BestNathan/nession/issues/2621","https://github.com/BestNathan/nession/pull/2583"]
 ---
 
 # Web terminal emulator engine and component ownership
@@ -63,6 +63,22 @@ measured #1307 rule that status is never painted under the opaque bottom
 capsule: a `pointer-events-none` layer with compact `pointer-events-auto`
 content-width pills at the top end.
 
+The clipboard paths split by origin capability, not by protocol
+([#2614](https://github.com/BestNathan/nession/issues/2614)). The deployed
+staging origin is plain HTTP, where browsers do not expose the async Clipboard
+API. Automatic OSC 52/5522 **writes** therefore cannot complete there and the
+protocol answers truthfully (`EPERM`); the notice's Copy action decides the
+capability synchronously and, without the async API, runs
+`document.execCommand('copy')` with a scoped `copy` listener inside the click —
+never an awaited `navigator.clipboard` call, which would spend the activation
+before the DOM copy could run. If the command is refused, the notice offers a
+bounded read-only selectable surface and says the copy was not automatic.
+Native text paste and OSC 5522 image ingress are **not** secure-context gated:
+they enter through the browser's `paste` event (`ClipboardEvent.clipboardData`,
+`File.arrayBuffer()`), never `navigator.clipboard.read()`. HTTPS is therefore a
+prerequisite for *programmatic* clipboard access only, not for clipboard
+usability.
+
 ## Context and evidence
 
 - Requirement: [#2581](https://github.com/BestNathan/nession/issues/2581);
@@ -106,6 +122,17 @@ content-width pills at the top end.
   Staging Acceptance recorded Pass for SC-01/SC-02/SC-03 at
   `176fa0ec92509227fd413c70f6f625d5d4d90307` (run 40892078393) and SC-04 at
   `04e62467d1255121cda8ddd96e9a25147fb49828`.
+- HTTP clipboard capability merged at
+  `bccd9928983ab2818a34e36cdd16d015966f7100`; the canonical matrix is the
+  “Ordinary HTTP is not a secure context” section in
+  `docs/design/terminal/interaction-semantics.md`. Proof: the browser Cases
+  serve the exact-SHA build from a real non-loopback HTTP origin
+  (`isSecureContext=false`, no `navigator.clipboard`). SC-01/SC-03/SC-04 Pass
+  at staging `5166e9e588f84103a28cd5d89fa437a3667d8ede` (run 40936550084);
+  SC-02/SC-05 Pass at `f255256741e0dc488d830ede98a8caf1933e76b0` against the
+  authenticated staging deployment attestation (runs 40934579327, 40934973435),
+  including a 5522 image SHA-256 match with zero secure-context API use and a
+  DOM copy event carrying the exact text.
 
 ## Related knowledge
 
@@ -121,6 +148,11 @@ content-width pills at the top end.
   text or images. OSC 52 reads stay disabled by default; file transfer,
   FilesPlugin coupling and app-specific (Claude/Codex) adapters are explicitly
   out of scope — revisit only through a new owner decision.
+- On plain HTTP only user gestures can write the clipboard: do not add a
+  programmatic fallback (Chrome flags, hidden iframes, permission prompts) and
+  do not mark the copy successful without the browser's own confirmation. The
+  manual-copy surface is bounded (64 KiB); a larger payload is refused honestly
+  rather than truncated.
 - Revisit if xterm's private render-service shape changes (the negative fixture
   and `XtermMetrics` are the compatibility point), if a second raw xterm
   consumer appears outside the engine, or if Addon/link ownership moves.

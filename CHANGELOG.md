@@ -85,3 +85,10 @@
 - Categories: architecture, ownership, terminal, web
 - Reason: Record the non-reserving Terminal status overlay after #2621: one root-owned absolute layer outside the capsule host, zero flex height for all four notices, measured App/Web grid invariance, and the #1307 occlusion rule it preserves
 - Source: https://github.com/BestNathan/nession/issues/2621
+
+## 2026-10-29T19:22:00Z | update | Web terminal emulator engine and component ownership
+- Path: topics/terminal/web-terminal-emulator-engine-and-component-ownership.md
+- Topic: terminal
+- Categories: architecture, ownership, terminal, web
+- Reason: Record the HTTP clipboard capability matrix after #2614: DOM copy-event gesture fallback without a dead async retry, native paste/OSC 5522 image ingress that is not secure-context gated, bounded manual-copy limits, and the deployed staging evidence
+- Source: https://github.com/BestNathan/nession/issues/2614
