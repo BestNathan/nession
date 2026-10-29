@@ -55,7 +55,9 @@ test('SC-02: normal and bracketed text paste stay exact-once in fixture and live
 
   // Live Session over the real Relay transport: the pasted value is delivered
   // once and executes once.
-  await createAndAttach(page, expect, runtime, 'clipboard-paste', 'Relay');
+  // No prompt-pattern wait: the shell prompt belongs to the runtime, and the
+  // GOT marker below proves both liveness and exact-once delivery.
+  await createAndAttach(page, expect, runtime, 'clipboard-paste', 'Relay', null);
   const marker = 'clipboard-paste-marker-' + Date.now();
   await command(page, 'IFS= read -r pasted; printf "GOT:%s\\n" "$pasted"');
   await page.waitForTimeout(500);

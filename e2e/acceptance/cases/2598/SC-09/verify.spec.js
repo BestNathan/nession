@@ -36,8 +36,10 @@ test('SC-09: two clients and two transports route clipboard effects to the Contr
   test.setTimeout(300_000);
   const { sha, runtime } = verifiedRuntime('SC-09');
 
-  // Client A creates and attaches the Session over P2P.
-  const { name } = await createAndAttach(page, expect, runtime, 'clipboard-lease', 'P2P');
+  // Client A creates and attaches the Session over P2P. No prompt-pattern wait:
+  // the shell prompt is the runtime's (bash in CI, the host shell locally), and
+  // the commands below prove the shell is live regardless of its glyphs.
+  const { name } = await createAndAttach(page, expect, runtime, 'clipboard-lease', 'P2P', null);
   await recordWrites(page);
 
   // Client B is a separate browser with its own clipboard, attached over Relay.
@@ -46,7 +48,7 @@ test('SC-09: two clients and two transports route clipboard effects to the Contr
   });
   const pageB = await contextB.newPage();
   try {
-    await attachExisting(pageB, expect, runtime, name, 'Relay');
+    await attachExisting(pageB, expect, runtime, name, 'Relay', null);
     await recordWrites(pageB);
 
     // B's attach activates it: B is the Controller, A now observes.

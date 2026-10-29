@@ -34,7 +34,7 @@ run(({ evidence }) => {
     'accepts a 64 MiB clipboard write at the protocol bound',
     'applies multiple MIME types and aliases as one clipboard write',
     'serves a one-time read only with the paste password',
-    'replies the paste-event mode truthfully through DECRQM',
+    'reports the paste-event mode truthfully through DECRQM',
     'replies EBUSY while another write is in flight',
   ]) {
     if (!tests.includes(needle)) {
