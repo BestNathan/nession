@@ -9,6 +9,7 @@ import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {runCursorSession} from '../providers/cursor.mjs';
+import {cursorModel} from '../providers/model-selection.mjs';
 import {assertControlledContinuation,assertCurrentDevelopmentCapabilities,developmentHarnessDigest,
   CONTROLLED_V2_CONTINUATION} from './development-resume.mjs';
 import {failedDeveloperRetryActionId,nativeResumeSuccessorId} from './outbox.mjs';
@@ -124,8 +125,7 @@ async function main(){
   if(!/^[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?$/.test(sdkPkg.version??'')||
       sdkPkg.version!==process.env.CURSOR_SDK_VERSION)
     fail('Cursor SDK digest/version differs from pinned Environment version');
-  const model={id:process.env.CURSOR_MODEL||'composer-2.5',
-    fast:(process.env.CURSOR_MODEL_FAST||'true')!=='false'};
+  const model=cursorModel(process.env);
   // Do not let the SDK index its native Agent under a new random cwd/store
   // on each Slice. This root is private to one unprivileged Docker run and
   // must be absent; never merge another action's local native state.

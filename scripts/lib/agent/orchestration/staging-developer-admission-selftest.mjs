@@ -33,7 +33,7 @@ assert.equal(out.status,'provenance_validated_only');
 assert.equal(out.signed_store_dispatch_verified,false);
 assert.equal(out.can_execute_staging_source,false);
 assert.equal(out.acceptance_result,'Pending');
-assert.equal(out.selected_environment,'dev-claude-qwen-staging');
+assert.equal(out.selected_environment,'dev-claude-qwen');
 assert.ok(!JSON.stringify(out).includes(context.ANTHROPIC_AUTH_TOKEN));
 assert.deepEqual(verify(),out);
 for(const [change,error] of [

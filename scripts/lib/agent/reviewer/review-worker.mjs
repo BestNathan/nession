@@ -13,6 +13,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { loadCursorSdk, runCursorSession } from '../providers/cursor.mjs';
 import { normalizeClaudeUsage } from '../providers/claude-code.mjs';
+import { cursorModel, claudeGatewayModel } from '../providers/model-selection.mjs';
 import { parseNativeEvents, toolUseNames } from '../providers/claude-stream.mjs';
 import { claudeCliToolPolicy } from '../harness/native.mjs';
 import { promptTelemetry } from '../telemetry/prompt.mjs';
@@ -231,18 +232,16 @@ async function main() {
         fail('Cursor SDK version differs from pinned Environment version');
       runner = createCursorReviewRunner({
         apiKey: process.env.CURSOR_API_KEY,
-        model: {
-          id: process.env.CURSOR_MODEL || 'composer-2.5',
-          fast: (process.env.CURSOR_MODEL_FAST || 'true') !== 'false',
-        },
+        model: cursorModel(process.env),
         workspace, storePath,
       });
     } else if (provider === 'claude-code') {
       if (!process.env.ANTHROPIC_BASE_URL ||
           (!process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_AUTH_TOKEN))
         fail('missing Claude gateway credentials');
-      const model = process.env.ANTHROPIC_MODEL || process.env.ACCEPTANCE_CLAUDE_MODEL;
-      if (!/^qwen[a-z0-9._-]*$/i.test(model ?? '')) fail('Qwen model must be explicit');
+      const model = claudeGatewayModel(
+        process.env.ANTHROPIC_MODEL || process.env.ACCEPTANCE_CLAUDE_MODEL,
+        {provider: 'qwen', variable: 'ANTHROPIC_MODEL or ACCEPTANCE_CLAUDE_MODEL'});
       runner = createClaudeReviewRunner({ model, workspace, env: process.env });
     } else fail('unsupported reviewer Provider');
     const slice = await runReviewSlice({ admission, runner, taskId, runId, runAttempt, provider });

@@ -308,6 +308,46 @@ function compareSource(run,body,result) {
     reject('run created outside ticket dispatch window');
   }
 }
+// A dispatch receipt that points at a Run the owner-only guard skipped may be
+// re-bound exactly once. Both the skipped Run and the successful replacement
+// must be the same trusted main-owned workflow, and the existing receipt must
+// still point at the skipped Run. The result artifact and Metrics witness are
+// authenticated separately by the ingester.
+const REBINDING_FIELDS=['schema_version','kind','action_id','issue','role',
+  'skipped_run_id','replacement_run_id','verified_main_sha'];
+export async function attestSkippedDispatchRebinding({
+  state,action_id,skipped_run_id,replacement_run_id,reader,verified_main_sha,
+}) {
+  validateDevelopmentState(state);
+  if(!HEX40.test(verified_main_sha??'')||!positive(skipped_run_id)||
+      !positive(replacement_run_id)||skipped_run_id===replacement_run_id)
+    reject('invalid skipped dispatch rebinding request');
+  const pending=state.outbox.find(x=>x.id===action_id&&x.status==='dispatched');
+  const role=pending?.task?.role;
+  if(!pending||!PROVIDERS[role]||
+      pending.receipt?.status!=='verified'||
+      pending.receipt.dispatch_id!==action_id||
+      pending.receipt.source_run_id!==skipped_run_id)
+    reject('no verified receipt for the skipped Run');
+  const spec=PROVIDERS[role];
+  const inspect=async(id,expected)=>{
+    const run=await reader.getRun(id);
+    if(run?.id!==id||run.path!==spec.path||run.name!==spec.name||
+        run.event!=='workflow_dispatch'||run.head_branch!=='main'||
+        run.head_sha!==verified_main_sha||run.run_attempt!==1||
+        run.repository?.full_name!==REPOSITORY||
+        run.status!=='completed'||run.conclusion!==expected)
+      reject(expected==='skipped'
+        ? 'skipped Run is not an authenticated skipped dispatch'
+        : 'replacement Run is not an authenticated successful dispatch');
+    return run;
+  };
+  await inspect(skipped_run_id,'skipped');
+  await inspect(replacement_run_id,'success');
+  return Object.freeze({schema_version:1,kind:'skipped_dispatch_rebinding',
+    action_id,issue:state.issue,role,skipped_run_id,replacement_run_id,
+    verified_main_sha});
+}
 // GitHub Get Workflow Run does not reliably expose workflow_dispatch inputs.
 // Provenance instead binds the authenticated dispatch response's run ID to
 // this Outbox action BEFORE the worker's result can be consumed.

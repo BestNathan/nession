@@ -7,6 +7,7 @@ import { auditIssue } from './issue-contract.mjs';
 import { readVerificationTier } from './verification-tier-policy.mjs';
 import { fetchGitHubIssue as fetchIssue } from './lib/agent/tools/gh/issue/read.mjs';
 import { normalizeClaudeUsage, runClaudeCli, buildClaudeCliArgs } from './lib/agent/providers/claude-code.mjs';
+import { claudeGatewayModel } from './lib/agent/providers/model-selection.mjs';
 import { renderIssueAuditPrompt, applyIssueAuditProposal } from './lib/agent/tasks/issue-audit.mjs';
 import { promptTelemetry } from './lib/agent/telemetry/prompt.mjs';
 import { buildAgentWorkflowTelemetry, writeAgentWorkflowTelemetry } from './agent-workflow-telemetry.mjs';
@@ -162,11 +163,9 @@ function writeRecord(outDir, record) {
 }
 
 function claudeRequestModel() {
-  const selected=process.env.ISSUE_AUDIT_CLAUDE_MODEL ||
-    (auditBackend() === 'qwen' ? process.env.ANTHROPIC_MODEL : 'claude-sonnet-5');
-  if(auditBackend() === 'qwen' && !/^qwen[a-z0-9._-]*$/i.test(selected || ''))
-    throw Error('Qwen Issue Audit requires an explicit Qwen model in its GitHub Environment');
-  return selected;
+  return claudeGatewayModel(
+    process.env.ISSUE_AUDIT_CLAUDE_MODEL || process.env.ANTHROPIC_MODEL,
+    {provider: auditBackend(), variable: 'ISSUE_AUDIT_CLAUDE_MODEL or ANTHROPIC_MODEL'});
 }
 
 function runAgent(issue) {
@@ -215,7 +214,15 @@ async function selfTest() {
   assert.equal(telemetryProvider(),'claude-code');
   assert.equal(backendMapping(),'qwen-configured-gateway');
   process.env.ISSUE_AUDIT_CLAUDE_MODEL='claude-sonnet-5';
-  assert.throws(()=>claudeRequestModel(),/explicit Qwen model/);
+  assert.throws(()=>claudeRequestModel(),/Qwen model/);
+  const previousGateway=process.env.ANTHROPIC_MODEL;
+  delete process.env.ANTHROPIC_MODEL;
+  process.env.ISSUE_AUDIT_CLAUDE_MODEL='';
+  assert.throws(()=>claudeRequestModel(),/missing ISSUE_AUDIT_CLAUDE_MODEL/);
+  process.env.ISSUE_AUDIT_PROVIDER='deepseek';
+  assert.throws(()=>claudeRequestModel(),/missing ISSUE_AUDIT_CLAUDE_MODEL/);
+  if(previousGateway==null)delete process.env.ANTHROPIC_MODEL;
+  else process.env.ANTHROPIC_MODEL=previousGateway;
   if(previousBackend==null)delete process.env.ISSUE_AUDIT_PROVIDER;
   else process.env.ISSUE_AUDIT_PROVIDER=previousBackend;
 

@@ -33,6 +33,7 @@ export const CATALOG = [
   ['agent-claude-resume-verify', 'agent-claude-resume-verify.yml', 'Agent / Claude Resume Verify', 'agent-claude-resume-verify.yml', 'Agent / Claude Resume Verify', 'agent'],
   ['acceptance-agent-controller', 'acceptance-agent-controller.yml', 'Acceptance / Agent Controller', 'acceptance-agent-controller.yml', 'Acceptance / Agent Controller', 'acceptance'],
   ['acceptance-staging-developer-admission', 'acceptance-staging-developer-admission.yml', 'Acceptance / Staging Developer Admission', 'acceptance-staging-developer-admission.yml', 'Acceptance / Staging Developer Admission', 'acceptance'],
+  ['acceptance-staging-developer-dispatch', 'acceptance-staging-developer-dispatch.yml', 'Acceptance / Staging Developer Dispatch', 'acceptance-staging-developer-dispatch.yml', 'Acceptance / Staging Developer Dispatch', 'acceptance'],
   ['store-agent-controller-ingest', 'store-agent-controller-ingest.yml', 'Store / Agent Controller Ingest', 'store-agent-controller-ingest.yml', 'Store / Agent Controller Ingest', 'store'],
   ['acceptance-orchestrator', 'requirement-acceptance.yml', 'Requirement Acceptance', 'acceptance-orchestrator.yml', 'Acceptance / Orchestrator', 'acceptance'],
   ['acceptance-postrun-waker', 'acceptance-postrun-waker.yml', 'Acceptance / Post-Run Waker', 'acceptance-postrun-waker.yml', 'Acceptance / Post-Run Waker', 'acceptance'],

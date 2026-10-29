@@ -4,10 +4,12 @@ import {deflateRawSync} from 'node:zlib';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {startDevelopment,recordDispatch,acceptTaskResult,reconcileOutbox} from './outbox.mjs';
-import {issueDispatchTicket} from './github-dispatch.mjs';
+import {startDevelopment,recordDispatch,recordReboundDispatch,acceptTaskResult,
+  reconcileOutbox} from './outbox.mjs';
+import {issueDispatchTicket,attestSkippedDispatchRebinding} from './github-dispatch.mjs';
 import {decodeResultZip,parseAgentResult,createGitHubResultArtifactReader,
-  ingestAgentResult,appendAuthenticatedResult,validateAuthenticatedAgentReceipt} from './result-artifact.mjs';
+  ingestAgentResult,appendAuthenticatedResult,validateAuthenticatedAgentReceipt,
+  assertMetricsAgreement} from './result-artifact.mjs';
 
 const sha=data=>createHash('sha256').update(data).digest('hex');
 function crc32(data){
@@ -56,6 +58,7 @@ const action=reconcileOutbox(state).pending[0];
 const key=Buffer.alloc(32,0x76),keyring={'key-v1':key};
 const {ticket}=issueDispatchTicket(state,action.id,registry,{
   key,key_id:'key-v1',issuer_run_id:222,now,ttl_ms:600000});
+const beforeDispatch=state;
 state=recordDispatch(state,state.version,action.id,{
   status:'verified',dispatch_id:action.id,source_run_id:333});
 const result={kind:'developer',issue,run_id:333,run_attempt:1,
@@ -108,8 +111,17 @@ const artifactReader={
     artifacts:[artifact,...extra]}),
   downloadZip:async()=>archive,
 };
+// The canonical Metrics record is an independent witness of the same Run.
+const metrics={schema_version:1,kind:'agent_workflow_run',
+  identity:{workflow_id:'agent-develop',github_workflow:'Agent / Development',
+    github_run_id:333,github_run_attempt:1,repository:repo},
+  task:{type:'development',issue,action_id:action.id,target_ref:outputSha},
+  agent:{provider:'cursor',id:'dev-cursor-01',role:'developer',
+    model:{id:'composer-2.5'},status:'finished'},
+  result:{status:'native-checkpoint-proposed'}};
 const options={state,action_id:action.id,reader,artifactReader,registry,keyring,
-  dispatch_ticket:ticket,pr_number:43,verified_main_sha:main,now:now+30000};
+  dispatch_ticket:ticket,pr_number:43,verified_main_sha:main,metrics,
+  now:now+30000};
 const evidence=await ingestAgentResult(options);
 assert.equal(evidence.kind,'authenticated_agent_task_result');
 assert.equal(evidence.schema_version,2);
@@ -123,6 +135,39 @@ assert.equal(validateAuthenticatedAgentReceipt(evidence),evidence);
 const legacy={...evidence,schema_version:1};
 delete legacy.implementing_pr;
 assert.equal(validateAuthenticatedAgentReceipt(legacy),legacy);
+// Reviewer agreement: the artifact outcome, reviewed PR and Metrics record
+// must describe one exact Run.
+const reviewAction='e'.repeat(64);
+const reviewArgs={metrics:{schema_version:1,kind:'agent_workflow_run',
+    identity:{workflow_id:'agent-review',github_workflow:'Agent / Review',
+      github_run_id:444,github_run_attempt:1,repository:repo},
+    task:{type:'review',issue,action_id:reviewAction,target_ref:outputSha,pr:43},
+    agent:{provider:'cursor',id:'review-cursor-01',role:'reviewer',
+      model:{id:'composer-2.5'},status:'finished'},
+    result:{status:'review-approved'}},
+  run:{id:444,run_attempt:1},
+  pending:{task:{role:'reviewer',agent_id:'review-cursor-01'}},
+  result:{kind:'reviewer',outcome:'approved',target_sha:outputSha},
+  pr_number:43,registry,action_id:reviewAction,state};
+assert.equal(assertMetricsAgreement(reviewArgs).result.status,'review-approved');
+for(const [change,regex] of [
+  [{metrics:null},/Metrics record/],
+  [{metrics:{...reviewArgs.metrics,identity:{...reviewArgs.metrics.identity,
+    github_run_id:445}}},/Metrics record/],
+  [{metrics:{...reviewArgs.metrics,task:{...reviewArgs.metrics.task,
+    action_id:'f'.repeat(64)}}},/Metrics record/],
+  [{metrics:{...reviewArgs.metrics,task:{...reviewArgs.metrics.task,
+    target_ref:'d'.repeat(40)}}},/Metrics record/],
+  [{metrics:{...reviewArgs.metrics,agent:{...reviewArgs.metrics.agent,
+    id:'review-qwen-01'}}},/Metrics record/],
+  [{metrics:{...reviewArgs.metrics,agent:{...reviewArgs.metrics.agent,
+    status:'error'}}},/Metrics record/],
+  [{metrics:{...reviewArgs.metrics,result:{status:'review-changes_requested'}}},
+    /reviewed PR\/outcome/],
+  [{metrics:{...reviewArgs.metrics,task:{...reviewArgs.metrics.task,pr:44}}},
+    /reviewed PR\/outcome/],
+]) assert.throws(()=>assertMetricsAgreement({...reviewArgs,...change}),regex);
+
 const negativeReceipts=[
   {...legacy,implementing_pr:evidence.implementing_pr},
   {...evidence,schema_version:1},
@@ -150,6 +195,39 @@ try{
   assert.equal(appendAuthenticatedResult(root,evidence).changed,true);
   // Historical v1 result records remain valid and lack any inferred PR edge.
   assert.equal(validateAuthenticatedAgentReceipt(legacy),legacy);
+// Reviewer agreement: the artifact outcome, reviewed PR and Metrics record
+// must describe one exact Run.
+const reviewAction='e'.repeat(64);
+const reviewArgs={metrics:{schema_version:1,kind:'agent_workflow_run',
+    identity:{workflow_id:'agent-review',github_workflow:'Agent / Review',
+      github_run_id:444,github_run_attempt:1,repository:repo},
+    task:{type:'review',issue,action_id:reviewAction,target_ref:outputSha,pr:43},
+    agent:{provider:'cursor',id:'review-cursor-01',role:'reviewer',
+      model:{id:'composer-2.5'},status:'finished'},
+    result:{status:'review-approved'}},
+  run:{id:444,run_attempt:1},
+  pending:{task:{role:'reviewer',agent_id:'review-cursor-01'}},
+  result:{kind:'reviewer',outcome:'approved',target_sha:outputSha},
+  pr_number:43,registry,action_id:reviewAction,state};
+assert.equal(assertMetricsAgreement(reviewArgs).result.status,'review-approved');
+for(const [change,regex] of [
+  [{metrics:null},/Metrics record/],
+  [{metrics:{...reviewArgs.metrics,identity:{...reviewArgs.metrics.identity,
+    github_run_id:445}}},/Metrics record/],
+  [{metrics:{...reviewArgs.metrics,task:{...reviewArgs.metrics.task,
+    action_id:'f'.repeat(64)}}},/Metrics record/],
+  [{metrics:{...reviewArgs.metrics,task:{...reviewArgs.metrics.task,
+    target_ref:'d'.repeat(40)}}},/Metrics record/],
+  [{metrics:{...reviewArgs.metrics,agent:{...reviewArgs.metrics.agent,
+    id:'review-qwen-01'}}},/Metrics record/],
+  [{metrics:{...reviewArgs.metrics,agent:{...reviewArgs.metrics.agent,
+    status:'error'}}},/Metrics record/],
+  [{metrics:{...reviewArgs.metrics,result:{status:'review-changes_requested'}}},
+    /reviewed PR\/outcome/],
+  [{metrics:{...reviewArgs.metrics,task:{...reviewArgs.metrics.task,pr:44}}},
+    /reviewed PR\/outcome/],
+]) assert.throws(()=>assertMetricsAgreement({...reviewArgs,...change}),regex);
+
   assert.equal(appendAuthenticatedResult(root,evidence).changed,false);
   assert.throws(()=>appendAuthenticatedResult(root,{...evidence,artifact:{
     ...evidence.artifact,digest:'sha256:'+'f'.repeat(64)}}),/collision/);
@@ -212,4 +290,60 @@ const tooLarge=createGitHubResultArtifactReader('ghReadOnlyToken1234',{
 await assert.rejects(()=>tooLarge.downloadZip(999),/bounded archive/);
 assert.ok(fetched.every(x=>x.opts.method==='GET'));
 assert.throws(()=>createGitHubResultArtifactReader(''),/read-only token/);
+// The producer workflow must publish exactly the artifact name the trusted
+// ingest consumes, bound to the Outbox action ID.
+const reviewWorkflow=fs.readFileSync('.github/workflows/agent-review.yml','utf8');
+assert.match(reviewWorkflow,
+  /name: agent-result-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}-\$\{\{ inputs\.action_id \}\}/);
+assert.match(reviewWorkflow,
+  /path: \$\{\{ runner\.temp \}\}\/review-output\/agent-result\.json/);
+// A skipped owner-guard Run may be re-bound exactly once to the successful
+// replacement, retaining the skipped Run for audit.
+const skippedRun=structuredClone(worker);
+Object.assign(skippedRun,{id:334,conclusion:'skipped'});
+const rebindRuns=new Map([[222,issuer],[333,worker],[334,skippedRun]]);
+const rebindReader={getRun:async id=>structuredClone(rebindRuns.get(id))};
+const skippedState=recordDispatch(beforeDispatch,beforeDispatch.version,action.id,{
+  status:'verified',dispatch_id:action.id,source_run_id:334});
+const attestation=await attestSkippedDispatchRebinding({state:skippedState,
+  action_id:action.id,skipped_run_id:334,replacement_run_id:333,
+  reader:rebindReader,verified_main_sha:main});
+const rebound=recordReboundDispatch(skippedState,skippedState.version,
+  action.id,attestation);
+assert.equal(rebound.version,skippedState.version+1);
+assert.deepEqual(rebound.outbox.find(x=>x.id===action.id).receipt,{
+  status:'verified',dispatch_id:action.id,source_run_id:333,
+  rebound_from_run_id:334});
+assert.equal(recordReboundDispatch(rebound,rebound.version,action.id,attestation),
+  rebound);
+assert.equal((await ingestAgentResult({...options,state:rebound})).result.run_id,333);
+for(const [change,regex] of [
+  [{state:skippedState,skipped_run_id:333,replacement_run_id:334},
+    /no verified receipt/],
+  [{state:skippedState,skipped_run_id:334,replacement_run_id:334},
+    /invalid skipped dispatch rebinding request/],
+  [{state:skippedState,skipped_run_id:334,replacement_run_id:999},
+    /replacement Run is not an authenticated successful dispatch/],
+]) await assert.rejects(()=>attestSkippedDispatchRebinding({action_id:action.id,
+  reader:rebindReader,verified_main_sha:main,...change}),regex);
+const notSkipped=new Map(rebindRuns);
+notSkipped.set(334,{...skippedRun,conclusion:'success'});
+await assert.rejects(()=>attestSkippedDispatchRebinding({state:skippedState,
+  action_id:action.id,skipped_run_id:334,replacement_run_id:333,
+  reader:{getRun:async id=>structuredClone(notSkipped.get(id))},
+  verified_main_sha:main}),/skipped Run is not an authenticated skipped dispatch/);
+const wrongMain=new Map(rebindRuns);
+wrongMain.set(333,{...worker,head_sha:'d'.repeat(40)});
+await assert.rejects(()=>attestSkippedDispatchRebinding({state:skippedState,
+  action_id:action.id,skipped_run_id:334,replacement_run_id:333,
+  reader:{getRun:async id=>structuredClone(wrongMain.get(id))},
+  verified_main_sha:main}),/replacement Run/);
+assert.throws(()=>recordReboundDispatch(skippedState,skippedState.version,
+  action.id,{...attestation,kind:'other'}),/invalid skipped dispatch rebinding/);
+assert.throws(()=>recordReboundDispatch(rebound,rebound.version,action.id,
+  {...attestation,replacement_run_id:335,build:true}),/invalid skipped dispatch rebinding/);
+assert.throws(()=>recordReboundDispatch(rebound,rebound.version,action.id,
+  {...attestation,replacement_run_id:335}),/does not point at the skipped Run/);
+assert.throws(()=>recordReboundDispatch(skippedState,skippedState.version,
+  action.id,{...attestation,role:'reviewer'}),/rebinding action/);
 console.log('Agent Artifact Ingest verified single-file ZIP, GitHub digest, run/Issue binding and replay fixtures passed');

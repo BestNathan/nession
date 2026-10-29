@@ -38,7 +38,7 @@ const entry={schema_version:1,kind:'staging_developer_readonly_admission',
   target_branch:'staging',target_sha:target,
   source_run_id:id,source_run_attempt:1,
   provider_identity:'dev-qwen-01',
-  selected_environment:'dev-claude-qwen-staging',
+  selected_environment:'dev-claude-qwen',
   status:'provenance_validated_only',can_execute_staging_source:false,
   signed_store_dispatch_verified:false,acceptance_result:'Pending'};
 const name='staging-development-admission-'+id+'-1';
@@ -69,7 +69,7 @@ for(const patch of [
   {signed_store_dispatch_verified:true},
   {can_execute_staging_source:true},
   {acceptance_result:'Pass'},
-  {selected_environment:'dev-claude-qwen'},
+  {selected_environment:'dev-claude-qwen-staging'},
 ]){
   const bad=input({...entry,...patch});
   if(patch.target_sha&&patch.target_sha.length===40){
