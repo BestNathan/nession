@@ -23,6 +23,33 @@ function job(name) {
   return end < 0 ? rest : rest.slice(0, end);
 }
 
+// #2031: PR-head events must not expand unrelated Main/Issue/provider jobs.
+// The exact-attempt replay jobs must retain their existing check identities.
+const background = job('background');
+assert.match(background, /github\.event_name == 'issues'/);
+assert.match(background, /github\.event_name == 'push'/);
+assert.match(background, /github\.event\.action == 'nession-agent-telemetry-ingested'/);
+assert.match(background, /acceptance-orchestrator-background\.yml@main/,
+  'non-PR jobs must use main-owned trusted tooling');
+const backgroundSource = fs.readFileSync(
+  path.join(root, '.github/workflows/acceptance-orchestrator-background.yml'), 'utf8');
+assert.match(backgroundSource, /\n  workflow_call:/);
+for (const name of [
+  'acceptance-close-guard', 'prepare-merged-agent', 'merged-agent-acceptance',
+  'prepare-post-merge-provider-evidence', 'post-merge-provider-evidence-acceptance',
+]) {
+  assert.doesNotMatch(source, new RegExp(`^  ${name}:`, 'm'),
+    `${name} must not expand on every PR event`);
+  assert.match(backgroundSource, new RegExp(`^  ${name}:`, 'm'),
+    `${name} must remain available in the trusted non-PR workflow`);
+}
+for (const name of ['prepare-pre-merge', 'defer-pre-merge',
+  'pre-merge-acceptance', 'pre-merge-gate', 'acceptance-pr-gate',
+  'reconcile-issue-e2e', 'reconcile-completed-quality-e2e']) {
+  assert.doesNotMatch(backgroundSource, new RegExp(`^  ${name}:`, 'm'),
+    `${name} must retain its original caller-run check identity`);
+}
+
 const prepare = job('prepare-pre-merge');
 assert.match(prepare, /id: barrier/, 'prepare must classify the source barrier');
 assert.match(prepare, /acceptance-source-applicability\.mjs classify/,
