@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_projection_receipt",
+  "outcome": "applied",
+  "issue": 2594,
+  "run_id": 40803798247,
+  "run_attempt": 1,
+  "target_sha": "c326e1ec8aeecf2ca318ed6b4e2fbf7c9ce70cf8",
+  "plan_digest": "d7c089673c9d5b63274fbe9f88c1866aa24e0d4201b8318dd9097770382a212e",
+  "artifact_digest": "sha256:9220e51822b7b5592425820f9cc153d9c84d3360e2eebc0ce498b18dce9c8279",
+  "ingest_run_id": 40804247539,
+  "ingest_attempt": 1,
+  "declaration_digest": "bdd164529832b5617453d457228a1879a7f3b896dd4dfb678d387a6696091039",
+  "before_body_sha256": "7e4dd4c8f1c149bcd30aef9b38b56e2f92f1bca14a532774117bba3645d2fffb",
+  "body_sha256": "c227269a1ed8ca75db67c74aa69ccbf8da565d3bbf384d01e2988532e4f10adf",
+  "readback_body": "## Problem\n\n`E2E / Full Regression` on `main` (run [40801551641](https://github.com/BestNathan/nession/actions/runs/40801551641), SHA `1f58bec37`) failed only in the canonical fixture screenshot suites after the #2581 release brought the 96-column terminal configuration (from staging #2557) to `main`:\n\n- `fixture-visual`: 3 failed\n- `fixture-visual-app`: 7 failed\n- `fixture-visual-web-compact`: 1 failed\n\nThe baselines were captured with the previous 80-column rendering; the release changes the terminal grid/font fit, so every terminal-bearing fixture screenshot drifts by a small ratio (e.g. app-terminal: 3779 px, 0.02). The #2591 verifier fix is what allowed the Full suite to execute at all, which is why the stale baselines surfaced now.\n\n## Expected behavior\n\nThe canonical visual baselines match the shipped 96-column rendering, the pinned `baseline_png_blobs` manifest agrees with the PNG bytes, and the three visual suites pass at the exact PR head.\n\n## Success Criteria\n\n- [ ] SC-01 Regenerate the canonical visual baselines with `--update-snapshots=all` on the release rendering, update `e2e/tests/browser/migration-parity.json` blob hashes, and prove `fixture-visual`, `fixture-visual-app` and `fixture-visual-web-compact` pass at the PR head.\n\n## Acceptance Plan\n\n```yaml\nacceptance:\n  SC-01:\n    when: pr\n    method: agent\n```\n\n## Acceptance Report\n\n| Criterion | Result | Evidence |\n|---|---|---|\n| SC-01 | Pending | Awaiting PR-head visual suite execution |\n\n## E2E Verification\n\n### New\n- none: this restores the existing canonical baselines; no new browser behavior.\n\n### Regression\n- fixture-visual\n- fixture-visual-app\n- fixture-visual-web-compact\n\n## E2E Report\n\n| ID | Type | Result | Evidence |\n|---|---|---|---|\n| fixture-visual | Regression | Pass | run 40803798247/1, SHA c326e1ec8aeecf2ca318ed6b4e2fbf7c9ce70cf8, contract bdd164529832b5617453d457228a1879a7f3b896dd4dfb678d387a6696091039, plan d7c089673c9d5b63274fbe9f88c1866aa24e0d4201b8318dd9097770382a212e, tests 12/12 (https://github.com/BestNathan/nession/actions/runs/40803798247) |\n| fixture-visual-app | Regression | Pass | run 40803798247/1, SHA c326e1ec8aeecf2ca318ed6b4e2fbf7c9ce70cf8, contract bdd164529832b5617453d457228a1879a7f3b896dd4dfb678d387a6696091039, plan d7c089673c9d5b63274fbe9f88c1866aa24e0d4201b8318dd9097770382a212e, tests 20/20 (https://github.com/BestNathan/nession/actions/runs/40803798247) |\n| fixture-visual-web-compact | Regression | Pass | run 40803798247/1, SHA c326e1ec8aeecf2ca318ed6b4e2fbf7c9ce70cf8, contract bdd164529832b5617453d457228a1879a7f3b896dd4dfb678d387a6696091039, plan d7c089673c9d5b63274fbe9f88c1866aa24e0d4201b8318dd9097770382a212e, tests 2/2 (https://github.com/BestNathan/nession/actions/runs/40803798247) |\n\n## Knowledge Impact\n- Decision: None\n- Reason: baseline maintenance for an already-recorded terminal release; no new durable concept.\n",
+  "patch_updated_at": "2026-10-29T02:05:30Z",
+  "readback_updated_at": "2026-10-29T02:05:30Z",
+  "rows": [
+    {
+      "id": "fixture-visual",
+      "result": "Pass",
+      "evidence": "run 40803798247/1, SHA c326e1ec8aeecf2ca318ed6b4e2fbf7c9ce70cf8, contract bdd164529832b5617453d457228a1879a7f3b896dd4dfb678d387a6696091039, plan d7c089673c9d5b63274fbe9f88c1866aa24e0d4201b8318dd9097770382a212e, tests 12/12 (https://github.com/BestNathan/nession/actions/runs/40803798247)"
+    },
+    {
+      "id": "fixture-visual-app",
+      "result": "Pass",
+      "evidence": "run 40803798247/1, SHA c326e1ec8aeecf2ca318ed6b4e2fbf7c9ce70cf8, contract bdd164529832b5617453d457228a1879a7f3b896dd4dfb678d387a6696091039, plan d7c089673c9d5b63274fbe9f88c1866aa24e0d4201b8318dd9097770382a212e, tests 20/20 (https://github.com/BestNathan/nession/actions/runs/40803798247)"
+    },
+    {
+      "id": "fixture-visual-web-compact",
+      "result": "Pass",
+      "evidence": "run 40803798247/1, SHA c326e1ec8aeecf2ca318ed6b4e2fbf7c9ce70cf8, contract bdd164529832b5617453d457228a1879a7f3b896dd4dfb678d387a6696091039, plan d7c089673c9d5b63274fbe9f88c1866aa24e0d4201b8318dd9097770382a212e, tests 2/2 (https://github.com/BestNathan/nession/actions/runs/40803798247)"
+    }
+  ]
+}
