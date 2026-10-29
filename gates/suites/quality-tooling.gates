@@ -16,6 +16,7 @@ acceptance-quota-recovery-selftest
 acceptance-event-relay-selftest
 acceptance-event-consumer-selftest
 acceptance-event-publisher-selftest
+acceptance-webhook-recovery-selftest
 acceptance-admission-selftest
 trusted-case-discovery-selftest
 e2e-run-ingest-selftest

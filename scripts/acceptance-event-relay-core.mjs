@@ -70,6 +70,11 @@ export class DurableInbox{
       ['next_at','INTEGER'],['lease_until','INTEGER'],['last_error','TEXT'],
     ])if(!columns.has(field))this.db.exec('ALTER TABLE deliveries ADD COLUMN '+field+' '+definition);
     this.db.exec("CREATE INDEX IF NOT EXISTS delivery_due ON deliveries(state,next_at)");
+    this.db.exec(
+      "CREATE TABLE IF NOT EXISTS webhook_redelivery("+
+      "guid TEXT PRIMARY KEY,attempts INTEGER NOT NULL,due_at INTEGER NOT NULL,"+
+      "last_delivery_id INTEGER NOT NULL,last_result TEXT NOT NULL);");
+
     const taskColumns=new Set(this.db.prepare('PRAGMA table_info(tasks)').all().map(x=>x.name));
     for(const [name,type] of [
       ['dispatch_run_id','INTEGER'],['suppression_reason','TEXT'],
@@ -315,6 +320,41 @@ export class DurableInbox{
     return this.db.prepare(
       "UPDATE tasks SET status='pending',due_at=?,lease_until=NULL "+
       "WHERE id=? AND status='uncertain' AND attempts<3").run(dueAt,id).changes===1;
+  }
+  // A webhook redelivery is an independently authenticated GitHub App POST.
+  // Reserve before sending; 202 means accepted for delivery, not that our
+  // HTTPS endpoint received it. Timeout/crash stays reserved until next due.
+  reserveWebhookRedelivery(guid,deliveryId,now=Date.now(),delay=3600000){
+    if(!/^[0-9a-f-]{36}$/i.test(guid??'')||
+      !positive(deliveryId)||!Number.isSafeInteger(now)||
+      !Number.isSafeInteger(delay)||delay<60000||delay>86400000)
+      fail('invalid webhook reservation');
+    return this.tx(()=>{
+      const row=this.db.prepare(
+        'SELECT * FROM webhook_redelivery WHERE guid=?').get(guid);
+      if(row&&(row.due_at>now||row.attempts>=5))return false;
+      if(row){
+        this.db.prepare(
+          "UPDATE webhook_redelivery SET attempts=attempts+1,due_at=?,"+
+          "last_delivery_id=?,last_result='reserved' WHERE guid=?")
+          .run(now+delay,deliveryId,guid);
+      }else{
+        this.db.prepare(
+          "INSERT INTO webhook_redelivery(guid,attempts,due_at,last_delivery_id,last_result) "+
+          "VALUES(?,1,?,?,'reserved')").run(guid,now+delay,deliveryId);
+      }
+      return true;
+    });
+  }
+  getWebhookRedelivery(guid){
+    return this.db.prepare('SELECT * FROM webhook_redelivery WHERE guid=?').get(guid);
+  }
+  recordWebhookRedeliveryOutcome(guid,result){
+    if(!['accepted','uncertain','read-failed'].includes(result))
+      fail('invalid webhook redelivery outcome');
+    return this.db.prepare(
+      'UPDATE webhook_redelivery SET last_result=? WHERE guid=?')
+      .run(result,guid).changes===1;
   }
   get(id){return this.db.prepare('SELECT * FROM tasks WHERE id=?').get(id)}
   count(){return this.db.prepare('SELECT COUNT(*) n FROM tasks').get().n}
