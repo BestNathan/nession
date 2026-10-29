@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "6a2802467c942596439c1eeb1d370ad78743309921900ae3a9d0b9b3d989d2d2",
+  "run_id": 40797057656,
+  "run_attempt": 1,
+  "issue": 2581,
+  "criterion": "SC-07",
+  "criterion_text": "Desktop keyboard, Mobile IME, semantic keys, paste, mouse and applicable binary input produce exactly one ordered PTY-bound input with correct VT mode semantics through attach, detach and transport rewire; no byte corruption.",
+  "stage": "post-merge",
+  "target_sha": "e3c6549717f2820a5a02832e107e5468a373cac6",
+  "contract_sha256": "ca741a6d154b40a5e29b30d2efacd6f31258b43d2dd695dcc8afdd470ab68da5",
+  "case_revision": "e3c6549717f2820a5a02832e107e5468a373cac6",
+  "case_tree_sha": "037c035af59a616811b9df1fe698ad0d7f05b0e5",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-29T00:56:44.494Z",
+  "finished_at": "2026-10-29T00:56:54.188Z",
+  "duration_ms": 9694,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Desktop keyboard, mobile IME, semantic keys and paste produce exactly one ordered PTY-bound input with the terminal mode deciding the bytes",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA e3c6549717f2820a5a02832e107e5468a373cac6: semantic keys, paste, committed IME text and Ctrl+D each reach the PTY once through one encoder; application cursor mode changes the arrow bytes"
+        },
+        {
+          "type": "input",
+          "value": "the interaction owner consumes the emulator port and binds one disposable onData subscription per activation"
+        }
+      ],
+      "duration_ms": 3845,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40797057656,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "e3c6549717f2820a5a02832e107e5468a373cac6",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40797057656",
+    "record_path": "runs/2026-10-29/40797057656-1/2581/SC-07.json",
+    "source_result_sha256": "8c4b04dc99843acd9c5dd4d310ba2dd43003fcc51452f31cce0fb3cda5c8ad5f"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40797057656-1",
+    "sha256": "8c4b04dc99843acd9c5dd4d310ba2dd43003fcc51452f31cce0fb3cda5c8ad5f",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40797057656",
+    "durability": "time-limited; object archival not configured"
+  }
+}

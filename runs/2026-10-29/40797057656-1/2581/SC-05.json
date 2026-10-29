@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "ad74eed0fe3c8c0ecdc2b47345a6fab173500220e09e4200d1a908cfc0a94aba",
+  "run_id": 40797057656,
+  "run_attempt": 1,
+  "issue": 2581,
+  "criterion": "SC-05",
+  "criterion_text": "Product Workspace Links are installed through an emulator port (not `controller.terminal`); link activation and cell coordinates are correct for supported ASCII, wide-character/combining text and wrapped-line cases, with explicit safe behavior for unsupported matches.",
+  "stage": "post-merge",
+  "target_sha": "e3c6549717f2820a5a02832e107e5468a373cac6",
+  "contract_sha256": "ca741a6d154b40a5e29b30d2efacd6f31258b43d2dd695dcc8afdd470ab68da5",
+  "case_revision": "e3c6549717f2820a5a02832e107e5468a373cac6",
+  "case_tree_sha": "291cdbb5d4048138ec7927fa147daaea92c4cfed",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-29T00:56:25.585Z",
+  "finished_at": "2026-10-29T00:56:34.171Z",
+  "duration_ms": 8586,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Workspace Links are installed through the emulator port and underline the cells xterm drew for ASCII, wide, combining and wrapped text",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA e3c6549717f2820a5a02832e107e5468a373cac6: offset-to-cell mapping is correct for ASCII, wide (two-cell) characters, combining sequences, wrapped continuations, and drops out-of-range matches"
+        },
+        {
+          "type": "product",
+          "value": "Workspace link recognition/activation stays in Product; the viewport registers a matcher through the controller and holds no raw terminal reference"
+        }
+      ],
+      "duration_ms": 2736,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40797057656,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "e3c6549717f2820a5a02832e107e5468a373cac6",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40797057656",
+    "record_path": "runs/2026-10-29/40797057656-1/2581/SC-05.json",
+    "source_result_sha256": "7037c7a8f9f25ef5c09d6598409765952f4f339b8b8e9a6cf83da62d5bee996a"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40797057656-1",
+    "sha256": "7037c7a8f9f25ef5c09d6598409765952f4f339b8b8e9a6cf83da62d5bee996a",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40797057656",
+    "durability": "time-limited; object archival not configured"
+  }
+}

@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "58bb9624cee4983b33a608999acae2b7a0de558596855b1c5e770ed8a651d9f0",
+  "run_id": 40797057656,
+  "run_attempt": 1,
+  "issue": 2581,
+  "criterion": "SC-04",
+  "criterion_text": "WebGL/Canvas initialization, renderer failure fallback and addon install/dispose preserve a usable terminal with no stale callbacks; deterministic failure-injection checks exercise the fallback and reinstallation path.",
+  "stage": "post-merge",
+  "target_sha": "e3c6549717f2820a5a02832e107e5468a373cac6",
+  "contract_sha256": "ca741a6d154b40a5e29b30d2efacd6f31258b43d2dd695dcc8afdd470ab68da5",
+  "case_revision": "e3c6549717f2820a5a02832e107e5468a373cac6",
+  "case_tree_sha": "8edc6c2635a27ca2b3c0214cf0b11b335f89b3f3",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-29T00:56:18.583Z",
+  "finished_at": "2026-10-29T00:56:25.585Z",
+  "duration_ms": 7002,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "WebGL initialization, context-loss fallback and addon disposal keep a usable terminal, and stale renderer callbacks cannot act after teardown",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA e3c6549717f2820a5a02832e107e5468a373cac6: an injected WebGL context loss disposes the WebGL addon and installs Canvas on the same terminal; a loss delivered after dispose is ignored"
+        },
+        {
+          "type": "failure-injection",
+          "value": "the renderer test supplies a fake WebGL addon through RendererHooks and drives the real fallback path deterministically"
+        }
+      ],
+      "duration_ms": 1149,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40797057656,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "e3c6549717f2820a5a02832e107e5468a373cac6",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40797057656",
+    "record_path": "runs/2026-10-29/40797057656-1/2581/SC-04.json",
+    "source_result_sha256": "0ad63fa05fd3ca0d14c8be8ba68734252c3cfcba09d3a7da59cda04948ebb324"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40797057656-1",
+    "sha256": "0ad63fa05fd3ca0d14c8be8ba68734252c3cfcba09d3a7da59cda04948ebb324",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40797057656",
+    "durability": "time-limited; object archival not configured"
+  }
+}

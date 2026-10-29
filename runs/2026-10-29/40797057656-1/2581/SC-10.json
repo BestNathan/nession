@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "43c5b6a430b976a804b1e4b13e491fb1344df1a73009adfc4a45a5cc01476942",
+  "run_id": 40797057656,
+  "run_attempt": 1,
+  "issue": 2581,
+  "criterion": "SC-10",
+  "criterion_text": "Fixture and production terminal construction consume the same emulator/renderer/metrics rules where behavior overlaps; lint, unit, integration and scoped browser regressions are source-aligned and run on the exact PR revision; final architecture docs and knowledge-impact decision are updated with verifiable evidence.",
+  "stage": "post-merge",
+  "target_sha": "e3c6549717f2820a5a02832e107e5468a373cac6",
+  "contract_sha256": "ca741a6d154b40a5e29b30d2efacd6f31258b43d2dd695dcc8afdd470ab68da5",
+  "case_revision": "e3c6549717f2820a5a02832e107e5468a373cac6",
+  "case_tree_sha": "05d69947db64518dc0079f10f17aa1ce9f8fdda9",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-29T00:57:17.877Z",
+  "finished_at": "2026-10-29T00:57:26.469Z",
+  "duration_ms": 8592,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Fixture and production terminal construction share the engine rules; architecture docs and the executable vocabulary contract are updated with evidence",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA e3c6549717f2820a5a02832e107e5468a373cac6: the canonical fixture constructs through the public engine barrel and shares the renderer/theme/metrics rules; no app/product file imports @xterm"
+        },
+        {
+          "type": "docs",
+          "value": "docs/architecture/terminal-engine.md records the writable owners, final graph, machine-checked boundary and test owners; the visual-vocabulary source contract passes with the controller as the registered content-width producer"
+        }
+      ],
+      "duration_ms": 2739,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40797057656,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "e3c6549717f2820a5a02832e107e5468a373cac6",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40797057656",
+    "record_path": "runs/2026-10-29/40797057656-1/2581/SC-10.json",
+    "source_result_sha256": "115ce3ea57749d8db9658191ccb40b39d72749add55c4b762b09b000703b4a86"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40797057656-1",
+    "sha256": "115ce3ea57749d8db9658191ccb40b39d72749add55c4b762b09b000703b4a86",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40797057656",
+    "durability": "time-limited; object archival not configured"
+  }
+}

@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "4e02a5d0a859cf0a156fbd5421ddadb5cee3380a8a8cd8b2cb01de49a1077ef8",
+  "run_id": 40797057656,
+  "run_attempt": 1,
+  "issue": 2581,
+  "criterion": "SC-03",
+  "criterion_text": "One emulator instance survives viewport detach/reparent/reattach and React StrictMode replay without duplicate input/listener/addon subscriptions or lost scrollback; disposal releases all owned resources exactly once.",
+  "stage": "post-merge",
+  "target_sha": "e3c6549717f2820a5a02832e107e5468a373cac6",
+  "contract_sha256": "ca741a6d154b40a5e29b30d2efacd6f31258b43d2dd695dcc8afdd470ab68da5",
+  "case_revision": "e3c6549717f2820a5a02832e107e5468a373cac6",
+  "case_tree_sha": "c6605b4e94da45b947bb892fc3e3829d1260eb59",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-29T00:56:08.546Z",
+  "finished_at": "2026-10-29T00:56:18.582Z",
+  "duration_ms": 10036,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "One emulator instance survives viewport detach, reparenting and React StrictMode replay without duplicate input/listener subscriptions, and disposal releases it once",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA e3c6549717f2820a5a02832e107e5468a373cac6: one emulator keeps its buffer across detach/reparent; five attach/detach cycles and StrictMode replay produce one keystroke per key, not one per leaked subscription"
+        },
+        {
+          "type": "lifecycle",
+          "value": "the emulator installs mount/unmount/dispose on one terminal and disposes that terminal exactly once; no second instance is constructed during attach/detach"
+        }
+      ],
+      "duration_ms": 4194,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40797057656,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "e3c6549717f2820a5a02832e107e5468a373cac6",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40797057656",
+    "record_path": "runs/2026-10-29/40797057656-1/2581/SC-03.json",
+    "source_result_sha256": "23ef0fa3e40e7502511570e94e970676533e66cf8df2a6456bc66e773a775e04"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40797057656-1",
+    "sha256": "23ef0fa3e40e7502511570e94e970676533e66cf8df2a6456bc66e773a775e04",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40797057656",
+    "durability": "time-limited; object archival not configured"
+  }
+}

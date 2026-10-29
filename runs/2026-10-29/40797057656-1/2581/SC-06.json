@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "4bd7d827aa053932177c69b01c0d1a7f5c687980f75da0387016f031aafd7138",
+  "run_id": 40797057656,
+  "run_attempt": 1,
+  "issue": 2581,
+  "criterion": "SC-06",
+  "criterion_text": "Fixed Session columns remain unchanged across viewport width/height, capsule occlusion, font fit, and active-device transitions; height-only events do not re-run width-fit and unchanged geometry generates no redundant local mutation or remote resize.",
+  "stage": "post-merge",
+  "target_sha": "e3c6549717f2820a5a02832e107e5468a373cac6",
+  "contract_sha256": "ca741a6d154b40a5e29b30d2efacd6f31258b43d2dd695dcc8afdd470ab68da5",
+  "case_revision": "e3c6549717f2820a5a02832e107e5468a373cac6",
+  "case_tree_sha": "460fbae3795c53e957347a2158c35f96ddc04dd8",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-29T00:56:34.171Z",
+  "finished_at": "2026-10-29T00:56:44.494Z",
+  "duration_ms": 10323,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Session columns stay fixed across viewport/font/lease changes; height-only events do not refit the width, and an unchanged grid generates no redundant local mutation or remote resize",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA e3c6549717f2820a5a02832e107e5468a373cac6: a height-only observation reuses the measured cell and recomputes rows; a width change refits the font; unchanged geometry reports and mutates nothing"
+        },
+        {
+          "type": "stream",
+          "value": "the ordered writer keeps a deduped resize in FIFO position, so its parser-completed callback cannot overtake an earlier write"
+        }
+      ],
+      "duration_ms": 4473,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40797057656,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "e3c6549717f2820a5a02832e107e5468a373cac6",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40797057656",
+    "record_path": "runs/2026-10-29/40797057656-1/2581/SC-06.json",
+    "source_result_sha256": "91c4f231b389c817435527569911fcb4a3f937fbe3dae6eb94716adb18dc31a3"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40797057656-1",
+    "sha256": "91c4f231b389c817435527569911fcb4a3f937fbe3dae6eb94716adb18dc31a3",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40797057656",
+    "durability": "time-limited; object archival not configured"
+  }
+}

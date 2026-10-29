@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "1018e828242586f0300f08fc7d3eac39a4b797b96b0e67c9658d6b572ed9f613",
+  "run_id": 40797057656,
+  "run_attempt": 1,
+  "issue": 2581,
+  "criterion": "SC-08",
+  "criterion_text": "Output/bootstrap/resize still use the existing bounded FIFO; callbacks are parser-completed before applied-cursor ACK eligibility, and stale transport/renderer callbacks cannot mark the new generation synchronized. Overflow/repair and incomplete bootstrap retain fail-closed behavior.",
+  "stage": "post-merge",
+  "target_sha": "e3c6549717f2820a5a02832e107e5468a373cac6",
+  "contract_sha256": "ca741a6d154b40a5e29b30d2efacd6f31258b43d2dd695dcc8afdd470ab68da5",
+  "case_revision": "e3c6549717f2820a5a02832e107e5468a373cac6",
+  "case_tree_sha": "11a4ec828f6e2e788f6c2d7022039427195a602e",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-29T00:56:54.188Z",
+  "finished_at": "2026-10-29T00:57:05.568Z",
+  "duration_ms": 11380,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Output/bootstrap/resize keep the bounded FIFO and fail-closed recovery; parser completion, stale-generation rejection and ACK eligibility are unchanged",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA e3c6549717f2820a5a02832e107e5468a373cac6: output, bootstrap and resize stay in one bounded FIFO; callbacks are parser-completed; overflow and parser stalls halt the writer and replace the renderer"
+        },
+        {
+          "type": "stream",
+          "value": "the controller suite proves late callbacks from a replaced transport/renderer cannot vouch for the current generation"
+        }
+      ],
+      "duration_ms": 5536,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40797057656,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "e3c6549717f2820a5a02832e107e5468a373cac6",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40797057656",
+    "record_path": "runs/2026-10-29/40797057656-1/2581/SC-08.json",
+    "source_result_sha256": "619c5286fb6c637211803cd13f89d605206a92476f5f6a64a41c5eb5f66447ac"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40797057656-1",
+    "sha256": "619c5286fb6c637211803cd13f89d605206a92476f5f6a64a41c5eb5f66447ac",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40797057656",
+    "durability": "time-limited; object archival not configured"
+  }
+}

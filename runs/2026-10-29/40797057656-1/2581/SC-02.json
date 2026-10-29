@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "751be3b9e481de0df6ef8f806c4f74957ffcb1d0babeda359848112ba87d966e",
+  "run_id": 40797057656,
+  "run_attempt": 1,
+  "issue": 2581,
+  "criterion": "SC-02",
+  "criterion_text": "A machine-checked architectural rule rejects production Product/UI direct `@xterm/xterm` imports, xterm `_core` access outside the single compatibility adapter, and direct bypass of the ordered writer; negative fixture proves each rejected case while legitimate adapter access is allowed.",
+  "stage": "post-merge",
+  "target_sha": "e3c6549717f2820a5a02832e107e5468a373cac6",
+  "contract_sha256": "ca741a6d154b40a5e29b30d2efacd6f31258b43d2dd695dcc8afdd470ab68da5",
+  "case_revision": "e3c6549717f2820a5a02832e107e5468a373cac6",
+  "case_tree_sha": "3433af17938b4a868ecb9d3f0e7e70ba256157ac",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-29T00:56:01.414Z",
+  "finished_at": "2026-10-29T00:56:08.545Z",
+  "duration_ms": 7131,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "One machine-checked rule rejects Product/UI xterm imports, engine-module access and private _core reads, with negative fixtures and a clean production lint",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA e3c6549717f2820a5a02832e107e5468a373cac6: the no-direct-xterm fixtures reject Product/UI @xterm imports, engine-module imports and _core access outside the single adapter"
+        },
+        {
+          "type": "lint",
+          "value": "production Product/engine paths pass eslint with nession/no-direct-xterm at error; TerminalViewport registers links through the controller and has no raw-terminal or @xterm reference"
+        }
+      ],
+      "duration_ms": 1245,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40797057656,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "e3c6549717f2820a5a02832e107e5468a373cac6",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40797057656",
+    "record_path": "runs/2026-10-29/40797057656-1/2581/SC-02.json",
+    "source_result_sha256": "345c6b6112b01f86af92579c130d41544ee97b071942f54deda1a5b2c37abc7e"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40797057656-1",
+    "sha256": "345c6b6112b01f86af92579c130d41544ee97b071942f54deda1a5b2c37abc7e",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40797057656",
+    "durability": "time-limited; object archival not configured"
+  }
+}
