@@ -222,7 +222,10 @@ jobs:
             *) echo "Unsupported Acceptance provider: ${ACCEPTANCE_PROVIDER}" >&2; exit 1 ;;
           esac
 
+      # PR SCs inspect source directly; CI/E2E is a separate PR merge gate.
+      # Merged-stage SCs may reference authenticated source-run evidence.
       - name: Collect trusted GitHub Actions evidence
+        if: inputs.stage != 'pre-merge'
         working-directory: trusted
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -242,7 +245,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          node scripts/acceptance-executor.mjs prepare             "${ISSUE_NUMBER}" "${ACCEPTANCE_STAGE}" "${TARGET_REF}"             "${RUNNER_TEMP}/acceptance-context.json" "${DEPLOYMENT}"             "${RUNNER_TEMP}/acceptance-ci-evidence.json"
+          ci_evidence_file="-"
+          if [[ "${ACCEPTANCE_STAGE}" != "pre-merge" ]]; then
+            ci_evidence_file="${RUNNER_TEMP}/acceptance-ci-evidence.json"
+          fi
+          node scripts/acceptance-executor.mjs prepare \
+            "${ISSUE_NUMBER}" "${ACCEPTANCE_STAGE}" "${TARGET_REF}" \
+            "${RUNNER_TEMP}/acceptance-context.json" "${DEPLOYMENT}" "${ci_evidence_file}"
           count="$(jq '.criteria | length' "${RUNNER_TEMP}/acceptance-context.json")"
           echo "criteria_count=${count}" >> "${GITHUB_OUTPUT}"
           echo "has_criteria=$([[ "${count}" -gt 0 ]] && echo true || echo false)" >> "${GITHUB_OUTPUT}"

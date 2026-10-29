@@ -48,9 +48,7 @@ const required = [
   [
     wf('acceptance-orchestrator'),
     [
-      "./gates/run --suite acceptance-tooling",
-      "./gates/run requirement-acceptance-pre-merge",
-      "./gates/run requirement-acceptance-pr"
+      "./gates/run --suite acceptance-tooling"
     ]
   ],
   [
