@@ -31,6 +31,8 @@ assert.match(background, /github\.event_name == 'push'/);
 assert.match(background, /github\.event\.action == 'nession-agent-telemetry-ingested'/);
 assert.match(background, /acceptance-orchestrator-background\.yml@main/,
   'non-PR jobs must use main-owned trusted tooling');
+assert.doesNotMatch(background, /pull_request_target|workflow_run|nession-issue-e2e-projected/,
+  'PR and exact-source reconciliation events must not expand background jobs');
 const backgroundSource = fs.readFileSync(
   path.join(root, '.github/workflows/acceptance-orchestrator-background.yml'), 'utf8');
 assert.match(backgroundSource, /\n  workflow_call:/);
