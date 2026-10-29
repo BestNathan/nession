@@ -71,3 +71,10 @@
 - Categories: agents, instructions, knowledge, skills
 - Reason: Add a related-knowledge link to the terminal engine ownership article, providing its incoming cross-link
 - Source: https://github.com/BestNathan/nession/issues/2581
+
+## 2026-10-29T10:10:11Z | update | Web terminal emulator engine and component ownership
+- Path: topics/terminal/web-terminal-emulator-engine-and-component-ownership.md
+- Topic: terminal
+- Categories: architecture, ownership, terminal, web
+- Reason: Record the OSC 52/OSC 5522 clipboard protocol ownership, ordered-writer provenance, controller authority, tmux reachability settings and the deliberate absence of any Files/upload path after #2598 merged
+- Source: https://github.com/BestNathan/nession/issues/2598
