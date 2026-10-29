@@ -153,8 +153,8 @@ function clipboardNoticeText(notice: ClipboardNotice): string {
 
 /** The only status chrome: compact, accessible and never a flex row (#2621). */
 const terminalNoticeClass = cn(
-  'pointer-events-auto flex w-fit max-w-full items-center gap-2 rounded-md',
-  'border border-border/70 bg-background/95 px-2.5 py-1 text-muted-foreground shadow-sm backdrop-blur-sm',
+  'pointer-events-auto flex w-fit max-w-full items-center gap-2 rounded-[var(--nession-radius-control)]',
+  'border border-border/70 bg-background/95 px-2.5 py-1 text-muted-foreground shadow-[var(--nession-elevation-floating)] backdrop-blur-sm',
   chromeSansRole('secondary'),
 );
 
@@ -212,6 +212,99 @@ function TerminalClipboardNoticeStrip({
         <Button type="button" variant="secondary" size="sm" className="h-7 px-2" onClick={() => copy()}>
           Copy
         </Button>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The one root-owned, absolute status layer (#2621).
+ *
+ * It is deliberately a sibling of — never a child of — the capsule host, and
+ * it is absolutely positioned, so no notice participates in flex layout. The
+ * host stays the sole flex-filling region and xterm's rows never change when a
+ * notice appears, is replaced or expires. `pointer-events-none` on the
+ * container with `pointer-events-auto` only on the notices keeps the terminal's
+ * pointer/IME surface intact everywhere else.
+ */
+function TerminalStatusOverlay({
+  historyDegraded,
+  inputDrop,
+  clipboardNotice,
+  controller,
+  terminalControl,
+  onDismissInputDrop,
+  onDismissClipboardNotice,
+  onTakeControl,
+}: {
+  historyDegraded: boolean;
+  inputDrop: InputDrop | null;
+  clipboardNotice: ClipboardNoticeState | null;
+  controller: TerminalController | null;
+  terminalControl?: TerminalControlState;
+  onDismissInputDrop?: () => void;
+  onDismissClipboardNotice?: () => void;
+  onTakeControl?: () => void;
+}) {
+  if (!(historyDegraded || inputDrop || clipboardNotice || terminalControl?.role === 'observer')) {
+    return null;
+  }
+  return (
+    <div
+      data-testid="terminal-status-overlay"
+      className="pointer-events-none absolute inset-x-2 top-2 z-40 flex max-h-[40%] flex-col items-end gap-1.5 overflow-y-auto"
+    >
+      {historyDegraded ? (
+        <div
+          className={terminalNoticeClass}
+          data-testid="terminal-history-degraded"
+          role="status"
+        >
+          <span>History may be incomplete — some output was lost while disconnected.</span>
+        </div>
+      ) : null}
+      {inputDrop ? (
+        <div
+          className={terminalNoticeClass}
+          data-testid="terminal-input-drop"
+          role="status"
+        >
+          <span>{inputDropNotice(inputDrop)}</span>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="h-7 shrink-0 px-2"
+            onClick={() => onDismissInputDrop?.()}
+          >
+            Dismiss
+          </Button>
+        </div>
+      ) : null}
+      {clipboardNotice ? (
+        <TerminalClipboardNoticeStrip
+          state={clipboardNotice}
+          controller={controller}
+          onDismiss={onDismissClipboardNotice}
+        />
+      ) : null}
+      {terminalControl?.role === 'observer' ? (
+        <div
+          className={terminalNoticeClass}
+          data-testid="terminal-observer-bar"
+          role="status"
+        >
+          <span>View only — another client is controlling this session.</span>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="h-7 shrink-0 px-2"
+            onClick={() => onTakeControl?.()}
+          >
+            Take control
+          </Button>
+        </div>
       ) : null}
     </div>
   );
@@ -295,65 +388,16 @@ export function TerminalSurface({
           workContext={workContext}
         />
       </div>
-      {(historyDegraded || inputDrop || clipboardNotice || terminalControl?.role === 'observer') ? (
-        <div
-          data-testid="terminal-status-overlay"
-          className="pointer-events-none absolute inset-x-2 top-2 z-40 flex max-h-[40%] flex-col items-end gap-1.5 overflow-y-auto"
-        >
-          {historyDegraded ? (
-            <div
-              className={terminalNoticeClass}
-              data-testid="terminal-history-degraded"
-              role="status"
-            >
-              <span>History may be incomplete — some output was lost while disconnected.</span>
-            </div>
-          ) : null}
-          {inputDrop ? (
-            <div
-              className={terminalNoticeClass}
-              data-testid="terminal-input-drop"
-              role="status"
-            >
-              <span>{inputDropNotice(inputDrop)}</span>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                className="h-7 shrink-0 px-2"
-                onClick={() => onDismissInputDrop?.()}
-              >
-                Dismiss
-              </Button>
-            </div>
-          ) : null}
-          {clipboardNotice ? (
-            <TerminalClipboardNoticeStrip
-              state={clipboardNotice}
-              controller={controller}
-              onDismiss={onDismissClipboardNotice}
-            />
-          ) : null}
-          {terminalControl?.role === 'observer' ? (
-            <div
-              className={terminalNoticeClass}
-              data-testid="terminal-observer-bar"
-              role="status"
-            >
-              <span>View only — another client is controlling this session.</span>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                className="h-7 shrink-0 px-2"
-                onClick={() => onTakeControl?.()}
-              >
-                Take control
-              </Button>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
+      <TerminalStatusOverlay
+        historyDegraded={historyDegraded}
+        inputDrop={inputDrop}
+        clipboardNotice={clipboardNotice}
+        controller={controller}
+        terminalControl={terminalControl}
+        onDismissInputDrop={onDismissInputDrop}
+        onDismissClipboardNotice={onDismissClipboardNotice}
+        onTakeControl={onTakeControl}
+      />
     </div>
   );
 }
