@@ -31,12 +31,27 @@ export function validateRunIndex(raw){
   }
   const target=source.head_sha??source.target_sha;
   assert.match(target,hex40);
-  if(raw.target_sha!==undefined)assert.equal(raw.target_sha,target,'index source SHA disagrees');
+  // Deployed acceptance proof is bound by the deployment attestation instead
+  // of the dispatched run's head: a workflow_dispatch reports the ref tip,
+  // which is not the deployed source SHA (#2614).
+  const deployedAcceptance = raw.mode === 'acceptance' && raw.deployment !== undefined;
+  if (!deployedAcceptance && raw.target_sha !== undefined) {
+    assert.equal(raw.target_sha,target,'index source SHA disagrees');
+  }
   if(raw.mode==='acceptance'){
     assert.ok(scalar(raw.issue));
     assert.match(raw.criterion,/^SC-\d{2,}$/);
     assert.ok(['staging','post-merge'].includes(raw.stage));
     assert.equal(source.head_branch,raw.stage==='staging'?'staging':'main');
+    if (deployedAcceptance) {
+      const deployment = raw.deployment;
+      assert.ok(deployment && typeof deployment === 'object', 'deployed acceptance index requires a deployment binding');
+      assert.match(deployment.source_sha,hex40,'deployed acceptance index source SHA is invalid');
+      assert.equal(deployment.source_sha,raw.target_sha,'deployed acceptance index source SHA disagrees');
+      assert.match(deployment.gitops_revision,hex40,'deployed acceptance index GitOps revision is invalid');
+      assert.match(deployment.environment_id,/^[a-z][a-z0-9-]{0,62}$/,'deployed acceptance index environment is invalid');
+      assert.match(deployment.attestation_execution_id,hex64,'deployed acceptance index attestation is invalid');
+    }
     assert.match(raw.case_tree_sha,hex40);
     assert.match(raw.contract_sha256,hex64);
     assert.ok(raw.record.endsWith('/'+raw.issue+'/'+raw.criterion+'.json'));
@@ -92,6 +107,30 @@ export function selfTest(){
   assert.throws(()=>makeRunIndex({...deploy,gitops_revision:'short'}),/GitOps revision/);
   assert.throws(()=>makeRunIndex({...deploy,record:'runs/2026-10-09/100-2/deployment/staging.json'}),
     /deployment record path/);
+
+  // A deployed acceptance record is dispatched from main, so the run head is
+  // the ref tip; the deployment attestation binds the target SHA instead
+  // (#2614). The binding fields are mandatory and must agree with the record.
+  const deployedAcceptance={...accept,stage:'post-merge',
+    source:{...caseSource,head_sha:'e'.repeat(40),head_branch:'main'},
+    target_sha:'b'.repeat(40),
+    deployment:{environment_id:'staging',source_sha:'b'.repeat(40),
+      gitops_revision:'f'.repeat(40),attestation_execution_id:'1'.repeat(64)}};
+  const deployedIndex=makeRunIndex(deployedAcceptance);
+  assert.equal(deployedIndex.target_sha,'b'.repeat(40));
+  assert.notEqual(deployedIndex.source.head_sha,deployedIndex.target_sha);
+  assert.throws(()=>makeRunIndex({...deployedAcceptance,deployment:{
+    ...deployedAcceptance.deployment,source_sha:'a'.repeat(40)}}),/source SHA disagrees/);
+  assert.throws(()=>makeRunIndex({...deployedAcceptance,deployment:{
+    ...deployedAcceptance.deployment,gitops_revision:'short'}}),/GitOps revision/);
+  assert.throws(()=>makeRunIndex({...deployedAcceptance,deployment:{
+    ...deployedAcceptance.deployment,environment_id:'Staging_01'}}),/environment is invalid/);
+  assert.throws(()=>makeRunIndex({...deployedAcceptance,deployment:{
+    ...deployedAcceptance.deployment,attestation_execution_id:'short'}}),/attestation is invalid/);
+  // Without the binding, the branch-head equality still applies.
+  const {deployment: _binding, ...unbound}=deployedAcceptance;
+  void _binding;
+  assert.throws(()=>makeRunIndex(unbound),/source SHA disagrees/);
   console.log('shared Run index v1: acceptance/scenario/test/benchmark/deployment fixtures passed');
 }
 if(process.argv[1]?.endsWith('run-record-index-contract.mjs')&&process.argv[2]==='self-test')selfTest();

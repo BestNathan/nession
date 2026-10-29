@@ -371,13 +371,17 @@ export function caseIndexPath(record) {
   return 'indexes/by-sha/' + item.target_sha + '/acceptance/' +
     item.run_id + '-' + item.run_attempt + '-' + item.issue + '-' + item.criterion + '.json';
 }
-export function caseIndexRecord(record) {
+export function caseIndexRecord(record, { deploymentRecords = null } = {}) {
   const item = validateCaseRecord(record);
   const source = item.provenance?.verified_source;
   if (!source || typeof source !== 'object') {
     throw new Error('Case index requires authenticated source workflow identity');
   }
-  assertSourceBoundRecord(item, source);
+  if (item.deployment) {
+    assertDeployedSourceRecord(item, source, deploymentRecords);
+  } else {
+    assertSourceBoundRecord(item, source);
+  }
   const durable = recordPath(item);
   if (item.provenance.record_path !== durable) {
     throw new Error('Case index record path differs from immutable persisted record');
@@ -394,6 +398,16 @@ export function caseIndexRecord(record) {
     stage: item.stage,
     case_tree_sha: item.case_tree_sha,
     contract_sha256: item.contract_sha256,
+    // A deployed record's source is bound by the attested deployment, not by
+    // the dispatch ref tip (#2614).
+    ...(item.deployment ? {
+      deployment: {
+        environment_id: item.deployment.environment_id,
+        source_sha: item.target_sha,
+        gitops_revision: item.deployment.gitops_revision,
+        attestation_execution_id: item.deployment.attestation_execution_id,
+      },
+    } : {}),
   });
 }
 
@@ -1063,6 +1077,20 @@ async function selfTest() {
     deployedSource, deployedRecords), /execution_id/);
   assert.throws(() => assertSourceBoundRecord(boundDeployed, deployedSource),
     /not the authenticated source workflow head/);
+
+  // The SHA index carries the deployment binding instead of the branch head.
+  const deployedEnriched = enrichCaseRecord(boundDeployed, {
+    workflowUrl: 'https://github.com/BestNathan/nession/actions/runs/100',
+    recordPath: recordPath(boundDeployed), source: deployedSource,
+  });
+  const deployedIndex = caseIndexRecord(deployedEnriched, { deploymentRecords: deployedRecords });
+  assert.equal(deployedIndex.target_sha, deployedRecord.target_sha);
+  assert.equal(deployedIndex.deployment.environment_id, 'staging-01');
+  assert.equal(deployedIndex.deployment.source_sha, deployedRecord.target_sha);
+  assert.notEqual(deployedIndex.source.head_sha, deployedIndex.target_sha);
+  assert.throws(() => caseIndexRecord(deployedEnriched), /requires trusted deployment records/);
+  assert.throws(() => caseIndexRecord(deployedEnriched, { deploymentRecords: [] }),
+    /missing or ambiguous/);
   console.log('acceptance Case ingest self-test: provenance, deployment binding and record validation passed');
 }
 
@@ -1091,7 +1119,7 @@ async function main() {
     const record = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
     const output = process.argv[4];
     if (!output) throw new Error('index RECORD OUTPUT required');
-    const entry = caseIndexRecord(record);
+    const entry = caseIndexRecord(record, { deploymentRecords: deploymentRecordsFromEnv() });
     fs.writeFileSync(output, JSON.stringify(entry, null, 2) + '\n');
     process.stdout.write(caseIndexPath(record) + '\n');
     return;
