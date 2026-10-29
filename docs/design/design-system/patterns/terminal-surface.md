@@ -171,13 +171,13 @@ Do not duplicate capsule interaction rules here. See [terminal-capsule.md](termi
 
 ## Clipboard protocol states
 
-Native text selection, copy and paste are the baseline; there is no paste/upload toolbar. Clipboard protocol states appear only while they matter, as a transient status strip laid out beside the well — never over the grid, never focus-stealing, and dismissed on its own:
+Native text selection, copy and paste are the baseline; there is no paste/upload toolbar. Clipboard protocol states appear only while they matter, as a compact, content-width **floating notice** at the Terminal's top end, outside the bottom capsule/occlusion region. They are accessible, do not steal focus, and dismiss on their own:
 
 - A remote OSC 52 write the browser blocks offers an explicit **Copy** action for that text. That button is the user gesture the Clipboard API requires; the strip states the request, not a completed copy.
 - A refused OSC 5522 clipboard write states that the browser blocked it.
 - An image-only paste into a TUI that has not enabled OSC 5522 states `Image clipboard protocol not supported by this TUI`, sends nothing, creates no file and inserts no path.
 
-The strip follows the existing status-strip geometry (sibling of the capsule host), so it cannot cover the capsule or the terminal grid.
+**No Terminal height reservation (#2621).** Clipboard, observer/controller, input-drop and degraded-history notices share one root-owned absolute overlay, **outside** `[data-terminal-capsule-host]` (to preserve #1307's earlier capsule-occlusion fix). The host remains the only flex-filling child, so a notice appearing or disappearing must not change xterm's viewport height or terminal row count. Use bounded content width, quiet typography and minimal buttons; the overlay may cover a small part of the upper-right screen temporarily, but never a full-width bottom band. The overlay wrapper passes through pointer events, except for its interactive notice contents. No placeholder is rendered in healthy states.
 
 ## What this pattern must not do
 
@@ -190,6 +190,7 @@ The strip follows the existing status-strip geometry (sibling of the capsule hos
 - Shrink the terminal grid with large fixed padding to reserve hypothetical UI.
 - Let extension-specific UI redefine the global Terminal shell.
 - Turn a transient clipboard/permission state into a permanent toolbar, or inject image data a TUI has not negotiated.
+- Reserve flex height for transient Terminal status strips, or move status overlays under the opaque bottom capsule.
 
 ## Executable-contract migration
 
