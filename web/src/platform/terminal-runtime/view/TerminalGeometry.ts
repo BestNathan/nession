@@ -1,5 +1,4 @@
-import { detectProfile, PROFILES } from '../DeviceProfile';
-import { MIN_TERMINAL_FIT_FONT_SIZE, fitFontToColumns, rowsForHeight } from '../sizing';
+import { fitFontToColumns, rowsForHeight } from '../sizing';
 import { readTerminalClientConfig } from '../terminalConfig';
 import type { Grid } from '../grid';
 import type { TerminalCellSize } from '../emulator';
@@ -35,11 +34,12 @@ export interface TerminalGeometryHost {
  * The column count is canonical — read once from the build configuration — and
  * is **never** derived from the container width. What adapts:
  *
- * - **font**: the largest size, up to the Web maximum or the App token, whose
- *   measured cell lets exactly `cols` fit the content box. A wide Web window
- *   keeps the maximum and caps/centres the terminal; a narrower one shrinks the
- *   glyphs rather than the grid; a phone uses the same columns at a smaller
- *   measured font.
+ * - **font**: the largest size, up to the release maximum, whose measured cell
+ *   lets exactly `cols` fit the content box. A wide window keeps the maximum
+ *   and caps/centres the terminal; a narrower one shrinks the glyphs rather
+ *   than the grid. App/mobile has no application-imposed minimum size: the
+ *   fitted font may go below 6 px when the fixed columns require it, and a
+ *   positive measured cell is the only intrinsic lower bound.
  * - **rows**: `floor(usable height / measured cell height)`.
  *
  * Geometry is applied through the parser writer so it cannot cross an
@@ -75,7 +75,7 @@ export class TerminalGeometry {
    * Session's authoritative width (#2487).
    */
   private cols: number;
-  /** The Web terminal's preferred/maximum CSS font size. */
+  /** The release's maximum CSS font size; the fit ceiling for both experiences. */
   private readonly webMaxFontSize: number;
   private lastReported: { cols: number; rows: number } | null = null;
   /** The width the current font was fitted for; `null` forces a fit. */
@@ -206,22 +206,20 @@ export class TerminalGeometry {
     const height = this.usableHeight();
     if (width <= 0 || height === null) { return null; }
 
-    const profile = detectProfile(width);
-    const maxFont = profile === 'mobile'
-      ? PROFILES.mobile.fontSize
-      : this.webMaxFontSize;
-
     let cell: { width: number; height: number };
     let contentWidth: number;
     let fits: boolean;
     // A fit for this width is already installed: re-running it would only
     // measure the same cells again (SC-06).
     if (fitFont && this.fittedWidth !== width) {
+      // The release maximum is the fit ceiling for both experiences; the
+      // device profile's font only seeds the initial render. App/mobile has no
+      // Nession-defined minimum font size: a narrow width at the Session's
+      // fixed columns is allowed to choose a size below 6 px (#2592).
       const fit = fitFontToColumns({
         cols: this.cols,
         availableWidth: width,
-        minFontSize: MIN_TERMINAL_FIT_FONT_SIZE,
-        maxFontSize: Math.max(MIN_TERMINAL_FIT_FONT_SIZE, maxFont),
+        maxFontSize: this.webMaxFontSize,
         measureCell: (fontSize) => this.controller.measureFont(fontSize),
       });
       if (fit === null) { return null; }

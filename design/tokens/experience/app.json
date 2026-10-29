@@ -170,13 +170,14 @@
   },
   "terminal": {
     "$owner": "pattern.terminal-surface",
-    "$description": "The App work surface's own typography and inset — the counterpart of `experience.web.terminal`, so the same leaf names exist on both sides and neither resolves to nothing outside its own experience. The mockup's `.phone-term` draws `font-size: 11.5px; line-height: 1.7; padding: 14px 14px 96px`: a step smaller and a step looser than Web, because the App terminal is read at arm's length on a smaller surface. The 96px bottom is the App capsule's box plus safe area and is therefore measured (`--terminal-content-bottom-inset`), not frozen here — see the same note in `experience/web.json`.",
+    "$description": "The App work surface's own typography and inset — the counterpart of `experience.web.terminal`, so the same leaf names exist on both sides and neither resolves to nothing outside its own experience. The mockup's `.phone-term` draws `font-size: 11.5px; line-height: 1.7; padding: 14px 14px 96px`. `fontSize` is the App's initial/measurement size, not a fit ceiling: since #2592 the App terminal's final font is measured from the actual content width and the Session's fixed columns, with no application minimum (it may go below 6px), capped only by the release maximum. The 96px bottom is the App capsule's box plus safe area and is therefore measured (`--terminal-content-bottom-inset`), not frozen here — see the same note in `experience/web.json`.",
     "fontSize": {
+      "$description": "Initial/measurement font for the App terminal. The measured fixed-column fit replaces it from the real content width; this value does not cap that fit.",
       "value": "11.5px"
     },
     "lineHeight": {
-      "$description": "Converted, not transcribed — same unit difference as `experience.web.terminal.lineHeight`, same method. The mockup's `.phone-term` CSS `line-height: 1.7` multiplies the font size: 11.5px × 1.7 = a 19.55px line box. xterm multiplies the font's measured box instead, 1.30em = 14.95px at 11.5px. The number that reproduces the mockup's leading is therefore 19.55 ÷ 14.95 = 1.31; the mockup's raw `1.7` would draw a 25px row, 28% looser.",
-      "value": 1.31
+      "$description": "Converted from the mockup's CSS `line-height: 1.7` to xterm's unit — xterm multiplies the font's measured box, not the CSS font size. The old 1.31 reproduced the mockup's 19.55px line box at 11.5px, but the owner's 2026-10-29 review found App rows too far apart. Candidates 1.10/1.14/1.18 were measured on the real App xterm (375/390/393/430/440): at the fitted 6-7px sizes the quantized row pitch falls from 10/11px at 1.31 to 9/10px at 1.14, and CJK, box-drawing and cursor glyphs render without clipping. 1.10 was rejected as the tightest candidate whose cell height (8px at the smallest widths) still clears the font's content box; 1.18 quantizes to the same rows at these sizes while giving back compactness at larger fits. Web's 1.19 is unchanged.",
+      "value": 1.14
     },
     "padX": {
       "value": "14px"

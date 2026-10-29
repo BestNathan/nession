@@ -135,8 +135,11 @@ Terminal implementation still needs reliable fit/resize behavior:
 
 - The Session has a **fixed canonical column count** (#2487); a container,
   device or window resize changes the **font size**, the **content-width cap**
-  and the **rows**, never the columns. Canonical rules, compatibility and the
-  release configuration pipeline live in
+  and the **rows**, never the columns. The App font is measured from the actual
+  content width and columns with **no application minimum** (#2592), may go
+  below 6 CSS px, and the measured grid is centred inside the owned symmetric
+  inset; the manual-zoom floor is separate. Canonical rules, compatibility and
+  the release configuration pipeline live in
   [terminal-sizing.md](../../terminal/terminal-sizing.md).
 - container resize updates the local font fit and the remote PTY **rows**
   through the existing debounced policy; only the active Controller may state

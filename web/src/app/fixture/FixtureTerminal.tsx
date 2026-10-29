@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { PixelSize } from '@/platform/terminal-runtime/grid';
-import { fitFontToColumns, rowsForHeight, MIN_TERMINAL_FIT_FONT_SIZE } from '@/platform/terminal-runtime/sizing';
+import { fitFontToColumns, rowsForHeight } from '@/platform/terminal-runtime/sizing';
 import { readTerminalClientConfig } from '@/platform/terminal-runtime/terminalConfig';
 import {
   DEFAULT_FONT,
@@ -118,7 +118,10 @@ export function FixtureTerminal({
     const config = readTerminalClientConfig();
     const profile = detectProfile(host.clientWidth || window.innerWidth);
     const metrics = PROFILES[profile];
-    const maxFont = profile === 'mobile' ? metrics.fontSize : config.webMaxFontSize;
+    // The release maximum is the fit ceiling for both experiences. The
+    // profile's font seeds the initial render; it is not the App's fit
+    // ceiling, and App/mobile has no application minimum font size (#2592).
+    const maxFont = config.webMaxFontSize;
 
     // Opened only once the face this terminal renders with is loaded. xterm
     // measures one cell when it opens and every glyph afterwards is laid out
@@ -217,12 +220,13 @@ function startFixtureTerminal(
   // well instead of the surface the product actually shows, and the visual gate
   // was protecting a screen no user sees.
   //
-  // Sized the way the product sizes it (#2487): the column count is the
+  // Sized the way the product sizes it (#2487, #2592): the column count is the
   // build-config canonical value and never derived from the well's width; the
-  // font is the largest measured size that fits it. The arithmetic is shared
-  // with `TerminalGeometry` rather than reimplemented, so the fixture and the
-  // product cannot drift again; only the *observation* differs, because a
-  // static fixture has no transport to publish cols/rows to and nothing to
+  // font is the largest measured size that fits it, down to whatever the
+  // measured cells require — there is no application minimum. The arithmetic
+  // is shared with `TerminalGeometry` rather than reimplemented, so the fixture
+  // and the product cannot drift again; only the *observation* differs, because
+  // a static fixture has no transport to publish cols/rows to and nothing to
   // debounce.
   emulator.mount(host);
 
@@ -239,8 +243,7 @@ function startFixtureTerminal(
     const fit = fitFontToColumns({
       cols: fixed.cols,
       availableWidth: size.width,
-      minFontSize: MIN_TERMINAL_FIT_FONT_SIZE,
-      maxFontSize: Math.max(MIN_TERMINAL_FIT_FONT_SIZE, fixed.maxFont),
+      maxFontSize: fixed.maxFont,
       measureCell: (fontSize) => {
         emulator.setFontSize(fontSize);
         return emulator.measureCell();

@@ -4,11 +4,28 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { discover, verifyDiscoveredFiles } = require('./test-catalog.cjs');
 
-const filename = process.argv[2];
-if (!filename) throw Error('Usage: node verify-playwright-list.cjs PLAYWRIGHT_LIST_FILE');
-const text = fs.readFileSync(filename, 'utf8');
-const files = [...text.matchAll(/(?:^|[\\/])([a-z0-9]+(?:-[a-z0-9]+)*)\.spec\.ts:[0-9]+/gm)]
-  .map(match => 'tests/browser/' + match[1] + '.spec.ts');
+/**
+ * A Playwright `--list` file reference.
+ *
+ * Playwright prints the file relative to `testDir` when it is set — this
+ * repository's config uses `testDir: './tests/browser'`, so Playwright 1.52
+ * prints `foo.spec.ts:12:3`, not `tests/browser/foo.spec.ts:12:3`. A project
+ * prefix (`[chromium] › …`) and an older path-prefixed shape are also valid.
+ * The file reference is the first `.spec.ts:<line>` on the line: a test title
+ * follows it, never precedes it.
+ */
+const SPEC_REFERENCE = /([a-z0-9]+(?:-[a-z0-9]+)*)\.spec\.ts:(\d+)(?::\d+)?/;
+
+/** The canonical catalog paths named by a Playwright `--list` output. */
+function parseSpecFiles(text) {
+  const files = [];
+  for (const line of String(text).split(/\r?\n/)) {
+    const match = SPEC_REFERENCE.exec(line);
+    if (!match) { continue; }
+    files.push('tests/browser/' + match[1] + '.spec.ts');
+  }
+  return files;
+}
 
 // #2323: this step intermittently observed an empty discovery with no way to
 // tell an empty/miswritten list file from a Playwright version or cwd change.
@@ -23,9 +40,19 @@ function summarizeList(value) {
     ' sample=' + JSON.stringify(lines.slice(0, 8).join('\n').slice(0, 1600));
 }
 
-if (files.length === 0) {
-  throw new Error('Playwright list contained no spec paths (' + summarizeList(text) + ')');
+function main() {
+  const filename = process.argv[2];
+  if (!filename) throw Error('Usage: node verify-playwright-list.cjs PLAYWRIGHT_LIST_FILE');
+  const text = fs.readFileSync(filename, 'utf8');
+  const files = parseSpecFiles(text);
+  if (files.length === 0) {
+    throw new Error('Playwright list contained no spec paths (' + summarizeList(text) + ')');
+  }
+  const expected = discover(path.resolve(__dirname, '..', 'tests'));
+  const count = verifyDiscoveredFiles(expected, files);
+  console.log('Playwright discovery parity: ' + count + ' stable E2E IDs');
 }
-const expected = discover(path.resolve(__dirname, '..', 'tests'));
-const count = verifyDiscoveredFiles(expected, files);
-console.log('Playwright discovery parity: ' + count + ' stable E2E IDs');
+
+if (require.main === module) main();
+
+module.exports = { parseSpecFiles };
