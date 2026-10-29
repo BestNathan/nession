@@ -24,7 +24,7 @@ function verify(config){
   assert.match(config,/read_only: true/);
   assert.match(config,/no-new-privileges:true/);
   assert.match(config.split('\nservices:\n')[0],/acceptance-sqlite:\/state/);
-  assert.match(config,/\.\.\/\.\.\/\:/repo:ro/);
+  assert.ok(config.includes('../../:/repo:ro'),'trusted repo must mount read-only');
   assert.match(config,/127\.0\.0\.1:[^\n]*:8080/);
   assert.match(config,/ACCEPTANCE_RELAY_MODE: shadow/);
   assert.match(config,/ACCEPTANCE_RELAY_DB: \/state\/acceptance\.sqlite/);
