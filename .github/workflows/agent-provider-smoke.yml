@@ -34,6 +34,7 @@ on:
       # exercise the full producer -> durable Metrics -> Acceptance wake chain.
       - .github/workflows/metrics-agent-telemetry.yml
       - .github/workflows/acceptance-orchestrator.yml
+      - .github/workflows/acceptance-orchestrator-background.yml
       - scripts/agent-evidence-waker.mjs
       - scripts/agent-telemetry-ingest.mjs
       # Changes to the read-only CI evidence collector must produce a new
