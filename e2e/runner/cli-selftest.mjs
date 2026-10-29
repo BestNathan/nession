@@ -31,6 +31,8 @@ assert.equal(new Set(declaredTests.map(item => item.id)).size, declaredTests.len
 assert.ok(declaredTests.some(item => item.id === 'terminal-io'));
 const catalogFixtures = spawnSync(process.execPath, [path.join(repo, 'e2e/runner/test-catalog-selftest.cjs')], { cwd: repo, encoding: 'utf8', timeout: 10000 });
 assert.equal(catalogFixtures.status, 0, catalogFixtures.stderr);
+const listFixtures = spawnSync(process.execPath, [path.join(repo, 'e2e/runner/verify-playwright-list-selftest.cjs')], { cwd: repo, encoding: 'utf8', timeout: 10000 });
+assert.equal(listFixtures.status, 0, listFixtures.stderr);
 const listed = call('--list');
 assert.equal(listed.code, 0);
 const catalog = JSON.parse(listed.stdout);
