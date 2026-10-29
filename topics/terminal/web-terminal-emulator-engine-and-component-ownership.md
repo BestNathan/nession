@@ -1,12 +1,12 @@
 ---
 title: "Web terminal emulator engine and component ownership"
-description: "One Xterm Engine owns the raw @xterm/xterm instance and OSC 52/5522 clipboard parsing; Product/UI consumes a narrow emulator port"
+description: "One Xterm Engine owns the raw @xterm/xterm instance, OSC 52/5522 clipboard parsing and the non-reserving status overlay; Product/UI consumes a narrow emulator port"
 topic: terminal
 categories: ["architecture","ownership","terminal","web"]
 status: verified
 created_at: 2026-10-28T17:46:56Z
-updated_at: 2026-10-29T10:10:11Z
-sources: ["https://github.com/BestNathan/nession/blob/df39f65fec7825903d1f9f0f87c6c63dffb03e1d/docs/architecture/terminal-engine.md","https://github.com/BestNathan/nession/blob/d4dd4d4e3dbbbe8473fa3277eb38d02ba3799249/docs/architecture/terminal-engine.md","https://github.com/BestNathan/nession/issues/2598","https://github.com/BestNathan/nession/pull/2583"]
+updated_at: 2026-10-29T14:52:00Z
+sources: ["https://github.com/BestNathan/nession/blob/df39f65fec7825903d1f9f0f87c6c63dffb03e1d/docs/architecture/terminal-engine.md","https://github.com/BestNathan/nession/blob/d4dd4d4e3dbbbe8473fa3277eb38d02ba3799249/docs/architecture/terminal-engine.md","https://github.com/BestNathan/nession/blob/7c816a909d1d748cf8c36cec934421b090a1309c/docs/design/design-system/patterns/terminal-surface.md","https://github.com/BestNathan/nession/issues/2598","https://github.com/BestNathan/nession/issues/2621","https://github.com/BestNathan/nession/pull/2583"]
 ---
 
 # Web terminal emulator engine and component ownership
@@ -51,6 +51,18 @@ data travels only through the negotiated in-band protocol: there is no
 FilesPlugin, upload, remote-file or path conversion, and an unnegotiated
 image-only paste becomes an honest status-strip message instead.
 
+The Terminal Surface's status chrome is part of the same boundary
+([#2621](https://github.com/BestNathan/nession/issues/2621)). History-degraded,
+input-drop, clipboard and observer notices all render in one root-owned,
+absolute overlay (`TerminalStatusOverlay` in
+`product/terminal/patterns/TerminalSurface.tsx`) that is a sibling of — never a
+child of, and never a flex participant with — `[data-terminal-capsule-host]`.
+The host stays the only flex-filling region, so the xterm grid and viewport are
+identical when a notice appears, is replaced or expires. The overlay keeps the
+measured #1307 rule that status is never painted under the opaque bottom
+capsule: a `pointer-events-none` layer with compact `pointer-events-auto`
+content-width pills at the top end.
+
 ## Context and evidence
 
 - Requirement: [#2581](https://github.com/BestNathan/nession/issues/2581);
@@ -84,6 +96,16 @@ image-only paste becomes an honest status-strip message instead.
   terminal-io E2E. Staging Acceptance recorded Pass for SC-01..SC-11 at
   `1de6185df91526b6561fed6dce048c59eeb6abe7` (runs 40852433372 and
   40853260244).
+- Status overlays merged at `7c816a909d1d748cf8c36cec934421b090a1309c`; the
+  canonical rule is the “No Terminal height reservation” paragraph in
+  `docs/design/design-system/patterns/terminal-surface.md`. The four inputs
+  are reachable from `/fixture/app` and `/fixture/clipboard` (`?history=`,
+  `?drop=`, `?role=`, `?clipboard=`). Measured App 390x844 and Web 1280x800:
+  rows, columns, capsule host, viewport and surface boxes are unchanged for
+  each notice and for all four at once, and after the clipboard notice expires.
+  Staging Acceptance recorded Pass for SC-01/SC-02/SC-03 at
+  `176fa0ec92509227fd413c70f6f625d5d4d90307` (run 40892078393) and SC-04 at
+  `04e62467d1255121cda8ddd96e9a25147fb49828`.
 
 ## Related knowledge
 
@@ -102,5 +124,10 @@ image-only paste becomes an honest status-strip message instead.
 - Revisit if xterm's private render-service shape changes (the negative fixture
   and `XtermMetrics` are the compatibility point), if a second raw xterm
   consumer appears outside the engine, or if Addon/link ownership moves.
+- A new Terminal status type must reuse the same root-owned overlay; a second
+  footer or any full-width in-flow status band re-opens #2621 (and a
+  capsule-band placement re-opens #1307). Status chrome is presentation only:
+  protocol, authority and provenance rules stay with the clipboard protocol,
+  `SerializedTerminalWriter` and `TerminalController` owners.
 - The engine is internal to `platform/terminal-runtime/xterm/`; there is no npm
   package extraction decision.

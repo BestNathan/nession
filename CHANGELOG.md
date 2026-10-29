@@ -78,3 +78,10 @@
 - Categories: architecture, ownership, terminal, web
 - Reason: Record the OSC 52/OSC 5522 clipboard protocol ownership, ordered-writer provenance, controller authority, tmux reachability settings and the deliberate absence of any Files/upload path after #2598 merged
 - Source: https://github.com/BestNathan/nession/issues/2598
+
+## 2026-10-29T14:52:00Z | update | Web terminal emulator engine and component ownership
+- Path: topics/terminal/web-terminal-emulator-engine-and-component-ownership.md
+- Topic: terminal
+- Categories: architecture, ownership, terminal, web
+- Reason: Record the non-reserving Terminal status overlay after #2621: one root-owned absolute layer outside the capsule host, zero flex height for all four notices, measured App/Web grid invariance, and the #1307 occlusion rule it preserves
+- Source: https://github.com/BestNathan/nession/issues/2621
