@@ -50,9 +50,12 @@ const required = [
     [
       "./gates/run --suite acceptance-tooling",
       "./gates/run requirement-acceptance-pre-merge",
-      "./gates/run requirement-acceptance-pr",
-      "./gates/run requirement-acceptance-close"
+      "./gates/run requirement-acceptance-pr"
     ]
+  ],
+  [
+    wf('acceptance-orchestrator-background'),
+    ["./gates/run requirement-acceptance-close"]
   ],
   [
     wf('agent-sc-acceptance'),
