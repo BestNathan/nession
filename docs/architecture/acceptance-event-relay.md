@@ -45,6 +45,16 @@ A known-unsent task may be explicitly requeued with a bounded attempt budget,
 but a 5xx, timeout or ambiguous 204 is *not* proof of non-delivery. The shadow
 service does not call these dispatch/ack methods.
 
+For an operator-owned, opt-in deployment template use
+[deploy/acceptance-relay/README.md](../../deploy/acceptance-relay/README.md)
+and its Compose profiles. A shadow start exposes only a localhost HTTP
+port (external TLS proxy required), uses the canonical Node 24 code in a
+trusted read-only checkout, and persists signed receipts in a named SQLite
+WAL volume. The separately authorized Actions:write publisher and App
+failed-delivery audit require an explicit live profile and separate secret
+files **outside** the repository. These templates are not live deployment
+evidence and do not authorize removal of the existing safety workflows.
+
 ## Set up a safe shadow deployment
 
 Provision an HTTPS endpoint, persistent writable volume and backup for the

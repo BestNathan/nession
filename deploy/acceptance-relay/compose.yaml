@@ -1,0 +1,95 @@
+# Explicit operator compose stack; never starts from CI or a PR.
+# Usage: ACCEPTANCE_SECRETS_DIR=/etc/nession/acceptance docker compose
+#        -f deploy/acceptance-relay/compose.yaml --profile shadow up -d
+# Do not select --profile live before main-owned consumer and real App IDs
+# are configured and a source-to-Updater shadow audit is complete.
+x-relay-base: &relay-base
+  image: node:24-bookworm-slim
+  working_dir: /repo
+  user: "1000:1000"
+  init: true
+  restart: unless-stopped
+  read_only: true
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+  tmpfs:
+    - /tmp:rw,nosuid,nodev,size=16m
+  volumes:
+    # Trusted, pinned main-only checkout. Credentials are deliberately
+    # outside this read-only tree; every process sees only its own env_file.
+    - ../../:/repo:ro
+    - acceptance-sqlite:/state
+
+services:
+  state-init:
+    profiles: [shadow, live]
+    image: node:24-bookworm-slim
+    user: root
+    restart: "no"
+    network_mode: none
+    volumes:
+      - acceptance-sqlite:/state
+    command:
+      - sh
+      - -ec
+      - chown -R 1000:1000 /state && chmod 0700 /state
+
+  ingress:
+    <<: *relay-base
+    profiles: [shadow, live]
+    command: ["node", "scripts/acceptance-event-relay.mjs"]
+    depends_on:
+      state-init:
+        condition: service_completed_successfully
+    # TLS must terminate in a separately managed authenticated reverse proxy.
+    # Direct public HTTP exposure is explicitly forbidden.
+    ports:
+      - "127.0.0.1:${ACCEPTANCE_RELAY_PORT:-19091}:8080"
+    env_file:
+      - "${ACCEPTANCE_SECRETS_DIR:?set external secret directory}/relay.env"
+    environment:
+      ACCEPTANCE_RELAY_MODE: shadow
+      ACCEPTANCE_RELAY_DB: /state/acceptance.sqlite
+      PORT: "8080"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('node:http').get('http://127.0.0.1:8080/healthz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  publisher:
+    <<: *relay-base
+    profiles: [live]
+    command: ["node", "scripts/acceptance-event-publisher.mjs"]
+    depends_on:
+      state-init:
+        condition: service_completed_successfully
+      ingress:
+        condition: service_healthy
+    env_file:
+      - "${ACCEPTANCE_SECRETS_DIR:?set external secret directory}/publisher.env"
+    environment:
+      ACCEPTANCE_PUBLISHER_MODE: live
+      ACCEPTANCE_RELAY_DB: /state/acceptance.sqlite
+
+  webhook-recovery:
+    <<: *relay-base
+    profiles: [live]
+    command: ["node", "scripts/acceptance-webhook-recovery.mjs"]
+    depends_on:
+      state-init:
+        condition: service_completed_successfully
+      ingress:
+        condition: service_healthy
+    env_file:
+      - "${ACCEPTANCE_SECRETS_DIR:?set external secret directory}/recovery.env"
+    environment:
+      ACCEPTANCE_WEBHOOK_RECOVERY_MODE: enabled
+      ACCEPTANCE_RELAY_DB: /state/acceptance.sqlite
+
+volumes:
+  acceptance-sqlite:
+    # Not ephemeral. Removing this named volume loses signed receipts and
+    # quota timers. Backup/restore and alerting are operator responsibilities.
