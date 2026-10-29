@@ -43,29 +43,15 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: ${{ github.event.workflow_run.id }}
 
-      - name: Validate and prepare immutable records
-        id: records
-        env:
-          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
-          SOURCE_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
-          SOURCE_WORKFLOW_URL: ${{ github.event.workflow_run.html_url }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Count source Case results
+        id: incoming
         run: |
           set -euo pipefail
-          : > "${RUNNER_TEMP}/persisted-records.txt"
-          : > "${RUNNER_TEMP}/records-to-ingest.tsv"
-          count=0
-          while IFS= read -r file; do
-            # Never create a persistent path until the GitHub-owned source run
-            # identity and immutable source Case tree have been attested.
-            durable_path="$(node trusted/scripts/acceptance-case-ingest.mjs attest "${file}" "${GITHUB_EVENT_PATH}")"
-            echo "${file}"$'\t'"${durable_path}" >> "${RUNNER_TEMP}/records-to-ingest.tsv"
-            count=$((count + 1))
-          done < <(find incoming -type f -name '*.case.json' -print | sort)
+          count="$(find incoming -type f -name '*.case.json' -print | wc -l | tr -d ' ')"
           echo "count=${count}" >> "${GITHUB_OUTPUT}"
 
       - name: Mint scoped App token for orphan Run Store updates
-        if: (vars.RUN_STORE_WRITER_MODE == '' || vars.RUN_STORE_WRITER_MODE == 'app') && steps.records.outputs.count != '0'
+        if: (vars.RUN_STORE_WRITER_MODE == '' || vars.RUN_STORE_WRITER_MODE == 'app') && steps.incoming.outputs.count != '0'
         id: store_app
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
         with:
@@ -74,7 +60,7 @@ jobs:
           repositories: nession
           permission-contents: write
       - name: Reject unrecognized writer mode or unavailable App token
-        if: steps.records.outputs.count != '0'
+        if: steps.incoming.outputs.count != '0'
         env:
           WRITER_MODE: ${{ vars.RUN_STORE_WRITER_MODE }}
           APP_TOKEN: ${{ steps.store_app.outputs.token }}
@@ -87,7 +73,7 @@ jobs:
           esac
 
       - name: Initialize append-only results branch
-        if: steps.records.outputs.count != '0'
+        if: steps.incoming.outputs.count != '0'
         env:
           GH_TOKEN: ${{ vars.RUN_STORE_WRITER_MODE == 'legacy' && secrets.GITHUB_TOKEN || steps.store_app.outputs.token }}
         run: |
@@ -112,6 +98,35 @@ jobs:
           Files under `runs/` are append-only. Never rewrite or force-push this branch.
           EOF
           fi
+
+      - name: Collect trusted deployment records
+        if: steps.incoming.outputs.count != '0'
+        run: |
+          set -euo pipefail
+          node trusted/scripts/deployment-binding-lookup.mjs collect \
+            results-repo "${RUNNER_TEMP}/deployment-records.json"
+          echo "DEPLOYMENT_RECORDS_JSON=${RUNNER_TEMP}/deployment-records.json" >> "$GITHUB_ENV"
+
+      - name: Validate and prepare immutable records
+        id: records
+        env:
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+          SOURCE_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          SOURCE_WORKFLOW_URL: ${{ github.event.workflow_run.html_url }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          : > "${RUNNER_TEMP}/persisted-records.txt"
+          : > "${RUNNER_TEMP}/records-to-ingest.tsv"
+          count=0
+          while IFS= read -r file; do
+            # Never create a persistent path until the GitHub-owned source run
+            # identity and immutable source Case tree have been attested.
+            durable_path="$(node trusted/scripts/acceptance-case-ingest.mjs attest "${file}" "${GITHUB_EVENT_PATH}")"
+            echo "${file}"$'\t'"${durable_path}" >> "${RUNNER_TEMP}/records-to-ingest.tsv"
+            count=$((count + 1))
+          done < <(find incoming -type f -name '*.case.json' -print | sort)
+          echo "count=${count}" >> "${GITHUB_OUTPUT}"
 
       - name: Append compact immutable records and SHA indexes
         if: steps.records.outputs.count != '0'
@@ -184,14 +199,6 @@ jobs:
           path: ${{ runner.temp }}/run-store-receipts
           if-no-files-found: ignore
           retention-days: 14
-
-      - name: Collect trusted deployment records
-        if: steps.records.outputs.count != '0'
-        run: |
-          set -euo pipefail
-          node trusted/scripts/deployment-binding-lookup.mjs collect \
-            results-repo "${RUNNER_TEMP}/deployment-records.json"
-          echo "DEPLOYMENT_RECORDS_JSON=${RUNNER_TEMP}/deployment-records.json" >> "$GITHUB_ENV"
 
       - name: Project only currently eligible results
         if: steps.records.outputs.count != '0'
