@@ -1,10 +1,12 @@
 #!/usr/bin/env node
-// Trusted main, bounded scheduled replay of stranded Acceptance failed jobs
-// and of deferred initial PR runs whose ready-transition wake was missed.
+// Trusted main, bounded recovery of failed PR Acceptance preparation.
+// New PR evaluations never wait for CI/E2E. Historical pre-migration runs
+// deliberately cancelled by the source barrier retain exact-source proof.
 import assert from 'node:assert/strict';
 const REPO='BestNathan/nession',SHA=/^[a-f0-9]{40}$/,MAX=4,MAX_ATTEMPTS=3,MAX_REQUESTS=26;
 const ACCEPT='.github/workflows/acceptance-orchestrator.yml';
-const SOURCES=[['ci-quality.yml','CI / Quality Gate'],['e2e-tests.yml','E2E / Tests']];
+// Only historical, source-barrier-deferred attempts require these sources.
+const LEGACY_DEFERRED_SOURCES=[['ci-quality.yml','CI / Quality Gate'],['e2e-tests.yml','E2E / Tests']];
 function ok(v,m){if(!v)throw Error('acceptance quota recovery: '+m)}
 function id(v){return Number.isSafeInteger(v)&&v>0}
 function source(r){return r&&id(r.id)&&id(r.run_attempt)&&SHA.test(r.head_sha??'')&&
@@ -110,14 +112,21 @@ export async function reconcile(request,log=()=>{}){
       log('Skip non-preparation, stale or non-deferred evidence for PR #'+pr.number);
       continue;
     }
-    let valid=true;
-    for(const [file,name] of SOURCES){
-      const data=await bounded(root+'actions/workflows/'+file+'/runs?event=pull_request&head_sha='+
-        run.head_sha+'&per_page=15');
-      ok(data&&Array.isArray(data.workflow_runs),'missing exact-head proof');
-      if(!proof(data.workflow_runs,file,name,run.head_sha,pr.number,pr.head.ref)){valid=false;break}
+    // New PR-event preparation has no CI/E2E prerequisite. Only historical
+    // source-barrier cancellations retain the full-run replay proof.
+    if(replayMode==='all'){
+      let valid=true;
+      for(const [file,name] of LEGACY_DEFERRED_SOURCES){
+        const data=await bounded(root+'actions/workflows/'+file+'/runs?event=pull_request&head_sha='+
+          run.head_sha+'&per_page=15');
+        ok(data&&Array.isArray(data.workflow_runs),'missing exact-head proof');
+        if(!proof(data.workflow_runs,file,name,run.head_sha,pr.number,pr.head.ref)){
+          valid=false;
+          break;
+        }
+      }
+      if(!valid)continue;
     }
-    if(!valid)continue;
     // Re-read both authoritative objects after the list queries. No queued,
     // superseded, stale, successful, forged or wrong-attempt run may be replayed.
     const prLive=await bounded(root+'pulls/'+pr.number);
@@ -187,7 +196,7 @@ async function selfTest(){
     status:'queued',conclusion:null})],[pull()]).length,0);
   assert.equal(candidates([run({run_attempt:3})],[pull()]).length,0);
   assert.equal(candidates([run({run_attempt:4})],[pull()]).length,0);
-  for(const [file,name] of SOURCES){
+  for(const [file,name] of LEGACY_DEFERRED_SOURCES){
     assert.equal(proof([check(file,name)],file,name,'a'.repeat(40),7,'fix/a'),true);
     assert.equal(proof([check(file,name,{pull_requests:[]})],file,name,'a'.repeat(40),7,'fix/a'),true);
     assert.equal(proof([check(file,name,{pull_requests:[],head_branch:'fork/other'})],file,name,'a'.repeat(40),7,'fix/a'),false);
@@ -211,7 +220,7 @@ async function selfTest(){
       if(path.endsWith('pulls/7'))return freshPR;
       if(path.endsWith('actions/runs/9'))return live;
       if(path.includes('/actions/runs/9/attempts/1/jobs?'))return jobs;
-      const found=SOURCES.find(([f])=>path.includes('/'+f+'/runs?'));
+      const found=LEGACY_DEFERRED_SOURCES.find(([f])=>path.includes('/'+f+'/runs?'));
       if(found)return {workflow_runs:[check(...found,badProof?{conclusion:'failure'}:{})]};
       throw Error('unexpected mock path '+path);
     };
@@ -219,12 +228,27 @@ async function selfTest(){
   assert.equal((await reconcile(mocked())).retried,1);
   assert.equal(seen.filter(x=>x.startsWith('POST ')).length,1);
   assert.ok(seen.length<=MAX_REQUESTS);
-  assert.equal((await reconcile(mocked())).api_calls,8);
+  assert.equal((await reconcile(mocked())).api_calls,6,
+    'failed prepare must not query unrelated Quality or E2E');
+  assert.ok(!seen.some(x=>/ci-quality\.yml|e2e-tests\.yml/.test(x)),
+    'a PR prepare retry must not collect external CI/E2E source runs');
   seen.length=0;
   assert.equal((await reconcile(mocked({live:run({run_attempt:2})}))).retried,0);
   assert.equal((await reconcile(mocked({live:run({run_attempt:3})}))).retried,0);
   assert.equal(seen.filter(x=>x.startsWith('POST ')).length,0);
-  assert.equal((await reconcile(mocked({badProof:true}))).retried,0);
+  seen.length=0;
+  assert.equal((await reconcile(mocked({badProof:true}))).retried,1,
+    'failed PR preparation can be retried without Quality/E2E success');
+  assert.ok(!seen.some(x=>/ci-quality\.yml|e2e-tests\.yml/.test(x)),
+    'failed prepare recovery cannot consult CI/E2E state');
+  seen.length=0;
+  const unavailableSources=await reconcile(async(path,method='GET')=>{
+    if(path.includes('/ci-quality.yml/runs?')||path.includes('/e2e-tests.yml/runs?'))
+      throw Error('PR recovery unexpectedly queried CI/E2E');
+    return mocked()(path,method);
+  });
+  assert.equal(unavailableSources.retried,1,
+    'no CI/E2E workflow runs are required for new PR recovery');
   assert.equal(recoverablePrepareJobs({jobs:[job()],total_count:1},run()),true);
   const deferredPrepare={id:77,run_id:9,run_attempt:1,name:'prepare-pre-merge',
     status:'completed',conclusion:'success',
@@ -249,6 +273,14 @@ async function selfTest(){
   assert.equal(seen.filter(x=>x==='POST repos/'+REPO+'/actions/runs/9/rerun').length,1,
     'deferred runs replay all jobs');
   assert.equal(seen.filter(x=>x.includes('rerun-failed-jobs')).length,0);
+  assert.equal(deferredResult.api_calls,8,
+    'historical deferrals retain authenticated Quality/E2E evidence');
+  seen.length=0;
+  assert.equal((await reconcile(mocked({
+    live:cancelledRun,runs:[cancelledRun],jobs:deferredJobs,badProof:true,
+  }))).retried,0,'legacy deferred replay still needs its exact source proof');
+  assert.ok(seen.some(x=>/ci-quality\.yml|e2e-tests\.yml/.test(x)),
+    'old cancelled runs still revalidate the source barrier');
   seen.length=0;
   assert.equal((await reconcile(mocked({live:cancelledRun}))).retried,0,
     'cancelled run without deferral evidence is not replayed');
@@ -345,7 +377,7 @@ async function selfTest(){
   const quota=new RateLimited('HTTP 403 rate limit');
   await assert.rejects(()=>authorizeInvocation(sourceEnv,async()=>{throw quota}),RateLimited);
   console.log('Acceptance quota recovery: main-only source-attested event wake, 403 fail-closed and no-loop fixtures passed');
-  console.log('Acceptance quota recovery: exact SHA, stale attempt, failed-prepare-only replay, finite API request budget, capped retry budget, exhausted quota, wrong proof, idempotency and bounded bursts passed');
+  console.log('Acceptance quota recovery: PR prepare retry independent of CI/E2E, historical deferred-source proof, exact SHA, stale attempt, failed-prepare-only replay, finite API request budget, capped retry budget, exhausted quota, wrong proof, idempotency and bounded bursts passed');
 }
 export async function authorizeInvocation(env,request){
   // Runs always execute trusted default-branch code. A workflow_run payload
