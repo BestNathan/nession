@@ -54,6 +54,8 @@ export function TerminalRegion({
     onTerminalGesture,
     inputDrop,
     dismissInputDrop,
+    clipboardNotice,
+    dismissClipboardNotice,
   } = useTerminalOrchestration({ onError, foreground: !hidden });
 
   // A real gesture **inside the terminal grid** is a request to work here, and
@@ -97,6 +99,8 @@ export function TerminalRegion({
           }}
           inputDrop={inputDrop}
           onDismissInputDrop={dismissInputDrop}
+          clipboardNotice={clipboardNotice}
+          onDismissClipboardNotice={dismissClipboardNotice}
           workContext={workContext}
         >
           <TerminalPane

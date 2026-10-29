@@ -169,6 +169,16 @@ Presentation may differ; capability/session semantics do not.
 
 Do not duplicate capsule interaction rules here. See [terminal-capsule.md](terminal-capsule.md).
 
+## Clipboard protocol states
+
+Native text selection, copy and paste are the baseline; there is no paste/upload toolbar. Clipboard protocol states appear only while they matter, as a transient status strip laid out beside the well — never over the grid, never focus-stealing, and dismissed on its own:
+
+- A remote OSC 52 write the browser blocks offers an explicit **Copy** action for that text. That button is the user gesture the Clipboard API requires; the strip states the request, not a completed copy.
+- A refused OSC 5522 clipboard write states that the browser blocked it.
+- An image-only paste into a TUI that has not enabled OSC 5522 states `Image clipboard protocol not supported by this TUI`, sends nothing, creates no file and inserts no path.
+
+The strip follows the existing status-strip geometry (sibling of the capsule host), so it cannot cover the capsule or the terminal grid.
+
 ## What this pattern must not do
 
 - Replace xterm with a chat transcript for ordinary terminal workloads.
@@ -179,6 +189,7 @@ Do not duplicate capsule interaction rules here. See [terminal-capsule.md](termi
 - Force Files or Workspace into a permanent Terminal split.
 - Shrink the terminal grid with large fixed padding to reserve hypothetical UI.
 - Let extension-specific UI redefine the global Terminal shell.
+- Turn a transient clipboard/permission state into a permanent toolbar, or inject image data a TUI has not negotiated.
 
 ## Executable-contract migration
 

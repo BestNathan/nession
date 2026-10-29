@@ -17,4 +17,14 @@ Under `AttachMode::plain` — still selectable, and the only mode this section's
 
 **The deterministic fixture** (`e2e/fixtures/pty-probe.sh`) is the correctness gate: it enters a terminal mode with real DECSET and echoes the exact bytes it receives, so a browser test reads `ESC O A` as `^[OA` and `ESC [ A` as `^[[A`. Real applications are smoke tests, not the specification. Four of its six modes — `altscreen`, `bracketed-paste`, `mouse-vt200`, `mouse-sgr` — **cannot discriminate under `plain`** for the reason above; their truth lives on the tmux side there, so a browser assertion over them would pass for the wrong reason. Under `control` they do discriminate, which is what the browser coverage for them exercises.
 
+## Clipboard protocols: OSC 52 and OSC 5522 (#2598)
+
+Text paste stays exactly as above: it enters through `terminal.paste`, and xterm's bracketed-paste mode decides the wrapper. **Protocol clipboard is a separate path**, owned by `platform/terminal-runtime/clipboard/`. `XtermEmulator` registers the parser handlers and forwards OSC 52, OSC 5522 and private mode 5522 together with the ordered write's provenance; `ClipboardProtocol` owns the state machine and writes protocol replies through the PTY input channel.
+
+- **OSC 52** writes text to the browser clipboard. A read (`?`) is never answered: remote output cannot read the local clipboard.
+- **OSC 5522** is the Kitty MIME-aware protocol. `CSI ? 5522 h/l` enables/disables paste-event mode, `CSI ? 5522 $ p` is answered truthfully (1 set / 2 reset), and a user paste announces the offered MIME types with a one-time password. A TUI `type=read` that echoes that password receives `status=OK`, ≤4096-byte `DATA` packets and `DONE`; `type=write`/`wdata`/`walias` replace one clipboard item carrying every representation. Invalid base64/padding, packet ordering, size or concurrency produce the protocol's documented `EINVAL`/`EFBIG`/`EBUSY`/`EPERM`/`EIO` replies, and an errored write stays discarded until a new `type=write`.
+- **Provenance is the ordered writer's, not React's.** `SerializedTerminalWriter` carries `{source: live|replay, streamEpoch}`; bootstrap/replay writes and frames from a superseded epoch never cause a clipboard effect or paste announcement.
+- **Authority is the Controller lease, not attach.** Only an authorized, foreground (visible) client may perform an effect; an observer performs none and sends no protocol replies. A read requires the one-time password minted by that client's own user paste.
+- **No upload fallback.** Image bytes travel only as OSC 5522 MIME data through the PTY. A TUI that has not enabled 5522 gets no image data; an image-only paste is not sent, and the surface states that the protocol is unsupported.
+
 **Out of scope here:** multi-client resize authority (#1095), durable replay (#1094), and the attach bootstrap and local scrollback sourcing ([#321](https://github.com/BestNathan/nession/issues/321)).

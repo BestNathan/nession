@@ -72,7 +72,20 @@ fn server_config_path(socket: &Path) -> PathBuf {
 /// - `-f <this file>` on the invocation that starts the server → works, and is
 ///   what tmux is designed for.
 pub fn server_config_contents() -> String {
-    format!("set -g history-limit {HISTORY_LIMIT_LINES}\n")
+    format!(
+        "set -g history-limit {HISTORY_LIMIT_LINES}\n\
+         # Terminal clipboard protocols (#2598).\n\
+         #\n\
+         # Control mode already carries the pane's raw bytes, OSC 52 and 5522\n\
+         # included, in `%output`; the browser terminal is the protocol end.\n\
+         # A plain `tmux attach` instead has an outer terminal, and these keep\n\
+         # tmux from consuming the protocol before it gets there: `external`\n\
+         # forwards an application's OSC 52 rather than only storing it in a\n\
+         # tmux buffer, and the `clipboard` terminal feature supplies the `Ms`\n\
+         # capability whatever TERM the outer client states.\n\
+         set -g set-clipboard external\n\
+         set -as terminal-features ',*:clipboard'\n"
+    )
 }
 
 /// Write the server configuration beside `socket`, creating nothing else —
@@ -283,11 +296,35 @@ mod tests {
 
     #[test]
     fn the_server_config_carries_the_history_depth() {
-        // The one setting, and it is the value the bootstrap asks for later —
-        // two spellings of it would be two answers to one question.
+        // The history depth is the value the bootstrap asks for later — two
+        // spellings of it would be two answers to one question.
+        let config = server_config_contents();
+        assert!(
+            config.starts_with(&format!("set -g history-limit {HISTORY_LIMIT_LINES}\n")),
+            "missing history depth: {config}"
+        );
+    }
+
+    #[test]
+    fn the_server_config_keeps_clipboard_protocols_reaching_the_terminal() {
+        // #2598: a plain attach has an outer terminal that must receive the
+        // pane's OSC 52/5522 rather than tmux consuming them; control mode
+        // needs none of this, but one server config serves both paths.
+        let config = server_config_contents();
+        for expected in [
+            "set -g set-clipboard external\n",
+            "set -as terminal-features ',*:clipboard'\n",
+        ] {
+            assert!(config.contains(expected), "missing {expected:?}: {config}");
+        }
+        // Clipboard policy must not be installed after the first window; tmux
+        // reads this file only when it starts the server.
         assert_eq!(
-            server_config_contents(),
-            format!("set -g history-limit {HISTORY_LIMIT_LINES}\n")
+            config
+                .lines()
+                .filter(|line| !line.trim_start().starts_with('#'))
+                .count(),
+            3
         );
     }
 

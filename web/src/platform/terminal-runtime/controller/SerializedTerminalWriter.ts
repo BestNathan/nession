@@ -9,13 +9,22 @@
  * Those remain separate work under #1924: no cursor can be inferred from the
  * fact that a caller entered write() or from this queue's position.
  */
+import type { TerminalWriteOrigin } from '../emulator';
+
 export interface TerminalWriteTarget {
-  write(data: string | Uint8Array, callback: () => void): void;
+  write(data: string | Uint8Array, callback: () => void, origin: TerminalWriteOrigin): void;
   resize(cols: number, rows: number): void;
 }
 
 type TerminalWriteOperation =
-  | { kind: 'write'; data: string | Uint8Array; onParsed?: () => void; bytes: number }
+  | {
+    kind: 'write';
+    data: string | Uint8Array;
+    onParsed?: () => void;
+    /** Live vs replay provenance for parser side effects (#2598). */
+    origin: TerminalWriteOrigin;
+    bytes: number;
+  }
   | { kind: 'resize'; cols: number; rows: number; onApplied?: () => void; bytes: number };
 
 export interface TerminalWriterLimits {
@@ -91,8 +100,12 @@ export class SerializedTerminalWriter {
     };
   }
 
-  write(data: string | Uint8Array, onParsed?: () => void): void {
-    this.enqueue({ kind: 'write', data, onParsed, bytes: writeBytes(data) });
+  write(
+    data: string | Uint8Array,
+    onParsed?: () => void,
+    origin: TerminalWriteOrigin = { source: 'live' },
+  ): void {
+    this.enqueue({ kind: 'write', data, onParsed, origin, bytes: writeBytes(data) });
   }
 
   resize(cols: number, rows: number, onApplied?: () => void): void {
@@ -177,7 +190,7 @@ export class SerializedTerminalWriter {
             // loop handles them. Async callbacks restart it.
             this.drain();
           }
-        });
+        }, item.origin);
       }
     } finally {
       this.draining = false;

@@ -1,7 +1,11 @@
 import { getDefaultStore } from 'jotai';
 import type { TerminalControllerEvents } from '@/platform/terminal-runtime/controller/TerminalController';
 import { inputModeAtomFamily } from '../state/input';
+import { clipboardNoticeAtomFamily } from '../state/ui';
 import type { SessionRuntime } from '@/platform/session-runtime/SessionRuntime';
+
+/** Distinguishes repeated identical notices for one Session surface. */
+let clipboardNoticeSequence = 0;
 
 /**
  * Mirrors imperative TerminalController events to their owners: viewport facts
@@ -53,6 +57,15 @@ export function createTerminalRuntimeAdapter(runtime: SessionRuntime): TerminalC
     },
     onResize: (_sid, cols, rows) => {
       runtime.updateViewportSize({ cols, rows });
+    },
+    // A transient clipboard state is UI, so it belongs in the Session's own
+    // atom rather than in the imperative controller (#2598).
+    onClipboardNotice: (notice) => {
+      clipboardNoticeSequence += 1;
+      store.set(clipboardNoticeAtomFamily(runtime.sessionId), {
+        id: clipboardNoticeSequence,
+        notice,
+      });
     },
   };
 }

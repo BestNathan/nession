@@ -28,6 +28,7 @@ import {
   inputDropAtomFamily,
   type ReconnectBanner,
 } from '@/product/terminal/state/ui';
+import { useClipboardNotice } from '@/product/terminal/hooks/useClipboardNotice';
 import { useTerminalControlBridge } from '@/product/terminal/hooks/useTerminalControlBridge';
 import { useTerminalActivation } from '@/product/terminal/hooks/useTerminalActivation';
 
@@ -206,6 +207,7 @@ export function useTerminalOrchestration({
 
   useSessionEnvSourcing({ envRefs, sessionId, effectiveMode, agentTerminalApi, connectionState });
   const [inputDrop, setInputDrop] = useAtom(inputDropAtomFamily(sessionId));
+  const { clipboardNotice, dismissClipboardNotice } = useClipboardNotice(sessionId);
   const [deviceProfile] = useState(() => detectProfile(window.innerWidth));
   const controller = useTerminal({
     sessionId,
@@ -321,5 +323,8 @@ export function useTerminalOrchestration({
      */
     inputDrop,
     dismissInputDrop: () => setInputDrop(null),
+    /** A transient OSC 52/5522 clipboard state for the surface (#2598). */
+    clipboardNotice,
+    dismissClipboardNotice,
   };
 }

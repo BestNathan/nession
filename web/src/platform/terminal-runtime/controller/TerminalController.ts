@@ -29,7 +29,16 @@ import type { FontSizeManager } from '../xterm/FontSizeManager';
 import type {
   TerminalDisposable,
   TerminalLinkMatcher,
+  TerminalWriteOrigin,
 } from '../emulator';
+import {
+  TerminalClipboardProtocol,
+  type ClipboardEffectPort,
+  type ClipboardNotice,
+  type ClipboardProtocolLimits,
+} from '../clipboard/ClipboardProtocol';
+import { BrowserClipboardEffects } from '../clipboard/browserClipboard';
+import { isImageClipboardMime } from '../clipboard/osc';
 
 /** The raw xterm handle type, obtained without importing xterm here (#2581). */
 type RawTerminal = XtermEmulator['terminal'];
@@ -95,6 +104,12 @@ export interface TerminalControllerEvents {
   onInputModeChange?: (sessionId: string, mode: InputMode) => void;
   onResize?: (sessionId: string, cols: number, rows: number) => void;
   onTitleChange?: (sessionId: string, title: string) => void;
+  /**
+   * A transient clipboard state the surface may state truthfully: a blocked
+   * OSC 52 copy that a user gesture can complete, a refused write, or an
+   * image-only paste the TUI has not negotiated (#2598).
+   */
+  onClipboardNotice?: (notice: ClipboardNotice) => void;
 }
 
 /**
@@ -144,6 +159,12 @@ export interface TerminalControllerOptions {
    * overflow repair deterministically.
    */
   writerLimits?: Partial<TerminalWriterLimits>;
+  /**
+   * Clipboard effect adapter. Defaults to the browser Clipboard API; tests
+   * inject a fake to observe OSC 52/5522 effects without a real clipboard.
+   */
+  clipboardEffects?: ClipboardEffectPort;
+  clipboardLimits?: Partial<ClipboardProtocolLimits>;
 }
 
 /**
@@ -193,6 +214,11 @@ export class TerminalController {
   private mobileIme: MobileImeInput | null = null;
   private interaction: TerminalInteractionController | null = null;
   private capsuleOcclusionScroll: CapsuleOcclusionScroll | null = null;
+  /** OSC 52/5522 protocol state for this viewport (#2598). */
+  private clipboardProtocol: TerminalClipboardProtocol | null = null;
+  private clipboardHost: TerminalDisposable | null = null;
+  private clipboardEffects: ClipboardEffectPort | null = null;
+  private hostPasteCleanup: (() => void) | null = null;
   private titleUnsub: (() => void) | null = null;
   private transportBindingUnsub: (() => void) | null = null;
   private useMobileIme: boolean;
@@ -260,6 +286,7 @@ export class TerminalController {
     this.instance = new XtermEmulator(options);
     this.writer = this.createWriter();
     this._terminal = this.instance.terminal;
+    this.installClipboardProtocol();
     this.inputSourceManager = new InputSourceManager();
     this.useMobileIme = shouldUseMobileIme(options.deviceProfile);
     this.scrollbackMode = options.scrollbackMode ?? 'legacy';
@@ -284,6 +311,116 @@ export class TerminalController {
       () => this.handleWriterDegraded(),
       this.options.writerLimits,
     );
+  }
+
+  /**
+   * Bind the OSC 52/5522 protocol to the current emulator (#2598).
+   *
+   * The protocol object is per controller, not per attach: an offer captured
+   * from a user paste or a pending write belongs to this viewport, and the
+   * controller survives transport rewires. A renderer replacement allocates a
+   * new parser, so the whole binding is rebuilt there and the old offer is
+   * dropped with the buffer it described.
+   */
+  private installClipboardProtocol(): void {
+    this.clipboardHost?.dispose();
+    this.clipboardHost = null;
+    this.clipboardProtocol?.dispose();
+    this.clipboardEffects = this.options.clipboardEffects ?? new BrowserClipboardEffects({
+      notice: (notice) => this.events?.onClipboardNotice?.(notice),
+    });
+    this.clipboardProtocol = new TerminalClipboardProtocol({
+      sendToPty: (data) => { this.sendProtocolBytes(data); },
+      effects: this.clipboardEffects,
+      isAuthorized: () => this.canEffectClipboard(),
+      limits: this.options.clipboardLimits,
+    });
+    this.clipboardHost = this.instance.registerClipboardHost(this.clipboardProtocol);
+  }
+
+  /**
+   * Effects need an authorized, foreground Controller: never an observer, a
+   * detached viewport, or a hidden tab (the Clipboard API is not usable there,
+   * and a remote process must not act while the user cannot see the result).
+   */
+  private canEffectClipboard(): boolean {
+    return !this.disposed
+      && this.attached
+      && !this.observerReadOnly
+      && this.transport !== null
+      && (typeof document === 'undefined' || document.visibilityState === 'visible');
+  }
+
+  /**
+   * Protocol replies are PTY input. They never come from a user key, so they
+   * do not change the active input mode, and an observer never sends them —
+   * an observer holds no ControlLease and must not write into the pane.
+   */
+  private sendProtocolBytes(data: string): void {
+    if (this.disposed || this.observerReadOnly) { return; }
+    this.transport?.send(data);
+  }
+
+  /**
+   * Inspect one paste before xterm/mobile-IME text handling (#2598).
+   *
+   * Text keeps the existing contract: it pastes through the normal path, with
+   * bracketed-paste encoding decided by xterm. Image data is captured here as
+   * a one-time OSC 5522 offer; an image-only paste is not text, so it is
+   * prevented from reaching either text handler. This is a capture listener on
+   * the viewport so it covers the desktop helper textarea and the mobile IME
+   * anchor with one owner.
+   */
+  private handleHostPaste(event: ClipboardEvent): void {
+    const data = event.clipboardData;
+    const protocol = this.clipboardProtocol;
+    if (!data || !protocol) { return; }
+    const text = data.getData('text/plain');
+    const files: File[] = [];
+    for (const item of Array.from(data.items ?? [])) {
+      if (item.kind !== 'file' || !item.type.startsWith('image/')) { continue; }
+      const file = item.getAsFile();
+      if (file) { files.push(file); }
+    }
+    if (files.length === 0) { return; }
+    if (text.length === 0) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+    void this.readClipboardImages(files).then((images) => {
+      protocol.userPasted({ text: text.length > 0 ? text : undefined, images });
+    });
+  }
+
+  private async readClipboardImages(
+    files: readonly File[],
+  ): Promise<{ mime: string; bytes: Uint8Array }[]> {
+    const images: { mime: string; bytes: Uint8Array }[] = [];
+    for (const file of files) {
+      if (!isImageClipboardMime(file.type)) { continue; }
+      try {
+        images.push({ mime: file.type, bytes: new Uint8Array(await file.arrayBuffer()) });
+      } catch {
+        // An unreadable item is not a clipboard protocol error: the remaining
+        // MIME types are still offered truthfully.
+      }
+    }
+    return images;
+  }
+
+  /**
+   * Complete a blocked OSC 52 copy from an explicit user gesture (the "Copy"
+   * action in the surface notice). Returns whether the browser accepted it.
+   */
+  async copyClipboardText(text: string): Promise<boolean> {
+    const effects = this.clipboardEffects;
+    if (!effects) { return false; }
+    try {
+      await effects.writeText(text);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -338,6 +475,9 @@ export class TerminalController {
     this.instance = new XtermEmulator(this.options);
     this.writer = this.createWriter();
     this._terminal = this.instance.terminal;
+    // A new parser needs the protocol handlers re-bound; the offer and any
+    // in-flight write described the old buffer and are dropped with it.
+    this.installClipboardProtocol();
     // The replacement holds nothing of the session's yet; an attach that
     // reads this flag must ask for the history the old buffer had.
     this._hasSessionOutput = false;
@@ -432,6 +572,9 @@ export class TerminalController {
   /** Swap ConnectionManager after P2P reconnect without tearing down xterm. */
   private rewireTransport(terminal: RawTerminal): void {
     this.teardownTransport();
+    // A new transport generation may restart the Agent stream epoch; stale
+    // epoch checks are relative to the stream this transport will deliver.
+    this.clipboardProtocol?.resetStreamEpoch();
     const transport = this.transportFactory();
     this.transport = transport;
     transport.onOutput = (data: Uint8Array, bootstrap?: TerminalBootstrap, position?: TerminalStreamPosition) => {
@@ -489,9 +632,12 @@ export class TerminalController {
         this.adoptSessionCols(bootstrap.paneCols);
         this.writer.resize(bootstrap.paneCols, bootstrap.paneRows);
       }
+      const origin: TerminalWriteOrigin = bootstrap
+        ? { source: 'replay' }
+        : { source: 'live', streamEpoch: position?.streamEpoch };
       if (bootstrap) {
         this.writer.write(replayReplacesBuffer
-          ? BOOTSTRAP_BUFFER_RESET : BOOTSTRAP_SCREEN_RESET);
+          ? BOOTSTRAP_BUFFER_RESET : BOOTSTRAP_SCREEN_RESET, undefined, origin);
       }
       const follow = this.capsuleOcclusionScroll?.snapshotFollowing() ?? false;
       // A snapshot is this buffer's *history*, and handing it to xterm is not
@@ -540,7 +686,7 @@ export class TerminalController {
         if (follow) {
           this.capsuleOcclusionScroll?.afterOutputWhileFollowing();
         }
-      });
+      }, origin);
       if (bootstrapSeq === null) { this.markSessionOutput(); }
     };
     transport.onResize = (cols: number, rows: number, position?: TerminalStreamPosition) => {
@@ -640,6 +786,10 @@ export class TerminalController {
     router.register(terminalHandler);
     terminalHandler.activate();
 
+    const onPaste = (event: Event) => { this.handleHostPaste(event as ClipboardEvent); };
+    element.addEventListener('paste', onPaste, true);
+    this.hostPasteCleanup = () => element.removeEventListener('paste', onPaste, true);
+
     const imeHost = this.instance.element;
     if (this.useMobileIme && imeHost) {
       this.mobileIme = new MobileImeInput(this.instance, imeHost, {
@@ -712,6 +862,9 @@ export class TerminalController {
    * (#1096). Converging them is the point, not a tidy-up.
    */
   private teardownTerminalUi(): void {
+    this.hostPasteCleanup?.();
+    this.hostPasteCleanup = null;
+
     this.geometry?.dispose();
     this.geometry = null;
 
@@ -755,6 +908,10 @@ export class TerminalController {
     this.transportBindingUnsub?.();
     this.transportBindingUnsub = null;
     this.detach();
+    this.clipboardHost?.dispose();
+    this.clipboardHost = null;
+    this.clipboardProtocol?.dispose();
+    this.clipboardProtocol = null;
     this.writer.dispose();
     this.instance.dispose();
   }
@@ -775,7 +932,7 @@ export class TerminalController {
       if (follow) {
         this.capsuleOcclusionScroll?.afterOutputWhileFollowing();
       }
-    });
+    }, { source: 'replay' });
   }
 
   /**

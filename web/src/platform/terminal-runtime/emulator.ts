@@ -20,6 +20,36 @@ export interface TerminalDisposable {
   dispose(): void;
 }
 
+/**
+ * Where one ordered write came from (#2598).
+ *
+ * `replay` is session history — a bootstrap capture or an explicit display
+ * write — and must never produce side effects (clipboard writes, paste
+ * announcements). `live` is current session output; `streamEpoch` lets the
+ * clipboard protocol refuse frames from a superseded stream epoch.
+ */
+export interface TerminalWriteOrigin {
+  readonly source: 'live' | 'replay';
+  readonly streamEpoch?: number;
+}
+
+/**
+ * The parser-level clipboard protocol host (#2598).
+ *
+ * The emulator owns the only xterm parser; it forwards parsed OSC 52/5522 data
+ * and private-mode 5522 sequences here with the write's provenance. This port
+ * keeps VT parsing in the engine and the protocol state machine in the
+ * clipboard owner.
+ */
+export interface TerminalClipboardHost {
+  handleOsc52(payload: string, origin: TerminalWriteOrigin): boolean;
+  handleOsc5522(payload: string, origin: TerminalWriteOrigin): boolean;
+  /** `CSI ? 5522 $ p`: reply with the truthful DECRPM. */
+  reportModeQuery(): void;
+  /** `CSI ? 5522 h/l`. */
+  setPasteEventMode(enabled: boolean, origin: TerminalWriteOrigin): void;
+}
+
 /** The active buffer's stable read model at one moment. */
 export interface TerminalBufferSnapshot {
   readonly type: 'normal' | 'alternate';
@@ -79,7 +109,7 @@ export interface TerminalEmulator {
   dispose(): void;
 
   /** Ordered writer target — callers must be the serialized writer. */
-  write(data: string | Uint8Array, onParsed?: () => void): void;
+  write(data: string | Uint8Array, onParsed?: () => void, origin?: TerminalWriteOrigin): void;
   /** Ordered writer target — callers must be the serialized writer. */
   resize(cols: number, rows: number): void;
 
@@ -102,6 +132,12 @@ export interface TerminalEmulator {
    * matcher owns recognition and activation only.
    */
   registerLinkMatcher(matcher: TerminalLinkMatcher): TerminalDisposable;
+
+  /**
+   * Install the OSC 52/5522 parser handlers. One host per emulator; disposing
+   * the returned handle releases all of them exactly once.
+   */
+  registerClipboardHost(host: TerminalClipboardHost): TerminalDisposable;
 
   input(data: string, wasUserInput?: boolean): void;
   paste(text: string): void;
