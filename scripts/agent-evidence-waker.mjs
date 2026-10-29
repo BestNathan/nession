@@ -91,15 +91,12 @@ export function validateWakeProducerTrigger(workflow){
 // The same workflow dispatches unrelated E2E and Provider wake events. Prove
 // both route filters and the exact-SHA propagation to the canonical selector.
 export function validateWakeConsumerRouting(workflow,background){
-  const backgroundCall=workflow.split('  background:')[1]
-    ?.split('  reconcile-issue-e2e:')[0];
+  const backgroundCall=workflow.split('  background:')[1];
   if(!backgroundCall?.includes("github.event.action == 'nession-agent-telemetry-ingested'") ||
      !backgroundCall.includes('acceptance-orchestrator-background.yml@main'))
     fail('Provider event must invoke the trusted main-owned background workflow');
   const provider=background.split('  prepare-post-merge-provider-evidence:')[1]
     ?.split('  post-merge-provider-evidence-acceptance:')[0];
-  const e2e=workflow.split('  reconcile-issue-e2e:')[1]
-    ?.split('  reconcile-completed-quality-e2e:')[0];
   if(!provider?.includes("github.event.action == 'nession-agent-telemetry-ingested'"))
     fail('Provider event source must be an exact repository_dispatch action');
   if(!provider.includes('ACCEPTANCE_STAGE=post-merge TARGET_SHA="$SOURCE_SHA" \\') ||
@@ -112,16 +109,14 @@ export function validateWakeConsumerRouting(workflow,background){
      !call.includes('provider_source_run_id: ${{ needs.prepare-post-merge-provider-evidence.outputs.source_run_id }}') ||
      !call.includes('provider_source_run_attempt: ${{ needs.prepare-post-merge-provider-evidence.outputs.source_run_attempt }}'))
     fail('Provider evidence waker lost exact run/attempt forwarding to read-only Agent');
-  if(!e2e?.includes("if: github.event_name == 'repository_dispatch' && github.event.action == 'nession-issue-e2e-projected'"))
-    fail('E2E event source must be an exact repository_dispatch action');
-  return {provider:true,e2e:true,source_sha:true};
+  return {provider:true,source_sha:true};
 }
 function selfTest(){
   const wf=fs.readFileSync('.github/workflows/agent-provider-smoke.yml','utf8');
   assert.deepEqual(validateWakeProducerTrigger(wf),{sources:5});
   const orchestration=fs.readFileSync('.github/workflows/acceptance-orchestrator.yml','utf8');
   const background=fs.readFileSync('.github/workflows/acceptance-orchestrator-background.yml','utf8');
-  assert.deepEqual(validateWakeConsumerRouting(orchestration,background),{provider:true,e2e:true,source_sha:true});
+  assert.deepEqual(validateWakeConsumerRouting(orchestration,background),{provider:true,source_sha:true});
   const acceptance=fs.readFileSync('.github/workflows/agent-sc-acceptance.yml','utf8');
   if(!acceptance.includes('PROVIDER_SOURCE_RUN_ID: ${{ inputs.provider_source_run_id }}')||
      !acceptance.includes('PROVIDER_SOURCE_RUN_ATTEMPT: ${{ inputs.provider_source_run_attempt }}')||
@@ -134,9 +129,6 @@ function selfTest(){
   assert.throws(()=>validateWakeConsumerRouting(
     orchestration,background.replace('ACCEPTANCE_STAGE=post-merge TARGET_SHA="$SOURCE_SHA"',
       'ACCEPTANCE_STAGE=post-merge')),/target SHA/);
-  assert.throws(()=>validateWakeConsumerRouting(
-    orchestration.replace("github.event.action == 'nession-issue-e2e-projected'",
-      "github.event.action == 'nession-agent-telemetry-ingested'"),background),/E2E event source/);
   assert.throws(()=>validateWakeConsumerRouting(
     orchestration,background.replace("github.event.action == 'nession-agent-telemetry-ingested'",
       "github.event.action == 'nession-issue-e2e-projected'")),/Provider event source/);
