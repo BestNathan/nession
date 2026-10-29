@@ -70,6 +70,11 @@ export class DurableInbox{
       ['next_at','INTEGER'],['lease_until','INTEGER'],['last_error','TEXT'],
     ])if(!columns.has(field))this.db.exec('ALTER TABLE deliveries ADD COLUMN '+field+' '+definition);
     this.db.exec("CREATE INDEX IF NOT EXISTS delivery_due ON deliveries(state,next_at)");
+    const taskColumns=new Set(this.db.prepare('PRAGMA table_info(tasks)').all().map(x=>x.name));
+    for(const [name,type] of [
+      ['dispatch_run_id','INTEGER'],['suppression_reason','TEXT'],
+    ])if(!taskColumns.has(name))
+      this.db.exec('ALTER TABLE tasks ADD COLUMN '+name+' '+type);
   }
   close(){this.db.close()}
   tx(fn){
@@ -209,8 +214,9 @@ export class DurableInbox{
       lease<10000||lease>300000)fail('invalid lease');
     return this.tx(()=>{
       this.db.prepare(
-        "UPDATE tasks SET status='uncertain',last_error='dispatch lease expired' "+
-        "WHERE status='dispatching' AND lease_until<=?").run(now);
+        "UPDATE tasks SET status='uncertain',due_at=?,lease_until=NULL,"+
+        "last_error='dispatch lease expired' "+
+        "WHERE status='dispatching' AND lease_until<=?").run(now+30000,now);
       const row=this.db.prepare(
         "SELECT * FROM tasks WHERE status='pending' AND due_at<=? ORDER BY due_at,id LIMIT 1").get(now);
       if(!row)return null;
@@ -220,15 +226,87 @@ export class DurableInbox{
       return {...row,status:'dispatching',attempts:row.attempts+1};
     });
   }
-  uncertain(id,reason){
+  uncertain(id,reason,now=Date.now()){
+    if(!Number.isSafeInteger(now))fail('invalid uncertain transition time');
     return this.db.prepare(
-      "UPDATE tasks SET status='uncertain',last_error=?,lease_until=NULL WHERE id=? AND status='dispatching'")
-      .run(String(reason).slice(0,200),id).changes===1;
+      "UPDATE tasks SET status='uncertain',last_error=?,lease_until=NULL,due_at=? "+
+      "WHERE id=? AND status='dispatching'")
+      .run(String(reason).slice(0,200),now+30000,id).changes===1;
   }
   confirm(id,now=Date.now()){
     return this.db.prepare(
       "UPDATE tasks SET status='confirmed',confirmed_at=?,lease_until=NULL "+
       "WHERE id=? AND status IN ('dispatching','uncertain')").run(now,id).changes===1;
+  }
+  // `confirmed` means a task has a *known terminal routing outcome*.
+  // An actual dispatch additionally has a positive immutable dispatch_run_id.
+  // Suppression keeps a reason and a null Run ID; it is NOT an SC Pass.
+  suppress(id,reason='current-contract-ineligible',now=Date.now()){
+    if(!Number.isSafeInteger(now)||!reason)fail('invalid suppression');
+    return this.db.prepare(
+      "UPDATE tasks SET status='confirmed',suppression_reason=?,confirmed_at=?,lease_until=NULL "+
+      "WHERE id=? AND status='dispatching' AND dispatch_run_id IS NULL")
+      .run(String(reason).slice(0,200),now,id).changes===1;
+  }
+  acknowledgeDispatch(id,runId,now=Date.now()){
+    if(!positive(runId)||!Number.isSafeInteger(now))fail('invalid dispatch receipt');
+    return this.tx(()=>{
+      const row=this.db.prepare(
+        "SELECT status,dispatch_run_id FROM tasks WHERE id=?").get(id);
+      if(row?.status==='confirmed')
+        return row.dispatch_run_id===runId;
+      if(!row||!['dispatching','uncertain'].includes(row.status)||
+        row.dispatch_run_id!==null)return false;
+      this.db.prepare(
+        "UPDATE tasks SET status='confirmed',dispatch_run_id=?,confirmed_at=?,"+
+        "lease_until=NULL,suppression_reason=NULL,last_error=NULL WHERE id=?")
+        .run(runId,now,id);
+      return true;
+    });
+  }
+  // A definitive HTTP 403/429 response rejected the API POST. No Workflow
+  // Run was created; reschedule the same singleflight task at its durable due.
+  deferRejectedDispatch(id,dueAt,httpStatus){
+    if(!Number.isSafeInteger(dueAt)||![403,429].includes(httpStatus))
+      fail('not a definitive quota rejection');
+    return this.db.prepare(
+      "UPDATE tasks SET status=CASE WHEN attempts<3 THEN 'pending' ELSE 'uncertain' END,"+
+      "due_at=?,lease_until=NULL,last_error=? "+
+      "WHERE id=? AND status='dispatching' AND dispatch_run_id IS NULL")
+      .run(dueAt,'rejected-http-'+httpStatus,id).changes===1;
+  }
+  // All preflight operations are read-only. A failure before POST cannot have
+  // created a run; its retry is safe but still bounded by the task budget.
+  deferPreflight(id,dueAt){
+    if(!Number.isSafeInteger(dueAt))fail('invalid preflight due');
+    return this.db.prepare(
+      "UPDATE tasks SET status=CASE WHEN attempts<3 THEN 'pending' ELSE 'uncertain' END,"+
+      "due_at=?,lease_until=NULL,last_error='preflight-read-failed' "+
+      "WHERE id=? AND status='dispatching' AND dispatch_run_id IS NULL")
+      .run(dueAt,id).changes===1;
+  }
+  // Reconciliation is *read-only*. It can safely repeat but never turns an
+  // absent GitHub API listing into evidence that the original POST failed.
+  claimUncertain(now=Date.now(),delay=60000){
+    if(!Number.isSafeInteger(now)||!Number.isSafeInteger(delay)||
+      delay<10000||delay>86400000)fail('invalid reconciliation schedule');
+    return this.tx(()=>{
+      const row=this.db.prepare(
+        "SELECT * FROM tasks WHERE status='uncertain' AND due_at<=? "+
+        "ORDER BY due_at,id LIMIT 1").get(now);
+      if(!row)return null;
+      this.db.prepare(
+        "UPDATE tasks SET due_at=? WHERE id=? AND status='uncertain'")
+        .run(now+delay,row.id);
+      return row;
+    });
+  }
+  nextTaskDue(){
+    const row=this.db.prepare(
+      "SELECT MIN(t) AS due FROM ("+
+      "SELECT due_at AS t FROM tasks WHERE status IN ('pending','uncertain') "+
+      "UNION ALL SELECT lease_until AS t FROM tasks WHERE status='dispatching')").get();
+    return row?.due??null;
   }
   // Only call after independent proof the original POST was never delivered;
   // 403/429/5xx/timeouts are not themselves such evidence.
