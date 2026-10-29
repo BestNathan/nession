@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "556a688963796f3feb232b49f288b26697dc9f713fe94122bb4f1a754f1d5ebc",
+  "run_id": 40851308726,
+  "run_attempt": 1,
+  "issue": 2598,
+  "criterion": "SC-01",
+  "criterion_text": "A real private-socket tmux/Nession Agent comparison for plain PTY and `-C` proves or explicitly isolates each OSC 52/5522 direction, including DECRQM/DECRPM, mode enable, MIME event, read/write reply and `id`, with exact settings/bytes and no unverified `-C` parity claims.",
+  "stage": "staging",
+  "target_sha": "3cde8bf37e9be2174032255bc5c720a01975d4b7",
+  "contract_sha256": "56f7b141959cd4f1706de498003c69b3a74d2e0bfcf12891300a7c951d9fb138",
+  "case_revision": "3cde8bf37e9be2174032255bc5c720a01975d4b7",
+  "case_tree_sha": "98811402d7562773361dff10194fcb94471a6c03",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-29T09:40:46.197Z",
+  "finished_at": "2026-10-29T09:41:07.307Z",
+  "duration_ms": 21110,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "tmux control mode carries OSC 52/5522 in both directions and plain attach forwards both with the shipped clipboard settings",
+      "evidence": [
+        {
+          "type": "tmux",
+          "value": "tmux -C %output carried OSC 52 and OSC 5522 byte-exactly (ESC ]52;c;Zm9vYmFy ESC \\ and ESC ]5522;type=read;Lg== ESC \\)"
+        },
+        {
+          "type": "tmux",
+          "value": "tmux -C send-keys -H delivered OSC 5522 reply bytes to a raw pane reader: 1b5d353532323b747970653d726561643b51513d"
+        },
+        {
+          "type": "tmux",
+          "value": "plain tmux attach (script PTY, TERM pinned as process.rs does) forwarded OSC 52 and OSC 5522 to the outer terminal with the shipped set-clipboard external + clipboard terminal feature"
+        },
+        {
+          "type": "source",
+          "value": "exact SHA 3cde8bf37e9be2174032255bc5c720a01975d4b7: server config sets set-clipboard external and terminal-features ',*:clipboard'; tmux 3.4"
+        }
+      ],
+      "duration_ms": 15198,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40851308726,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "3cde8bf37e9be2174032255bc5c720a01975d4b7",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40851308726",
+    "record_path": "runs/2026-10-29/40851308726-1/2598/SC-01.json",
+    "source_result_sha256": "5787ed479c003133349fcdd4d6c7ba9128f8e0f067b33d664fedc93911b6c589"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40851308726-1",
+    "sha256": "5787ed479c003133349fcdd4d6c7ba9128f8e0f067b33d664fedc93911b6c589",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40851308726",
+    "durability": "time-limited; object archival not configured"
+  }
+}

@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "cd8963437ad2174264c2d953dc2e0709e78683440a730a03d0370c764b8fad9d",
+  "run_id": 40851308726,
+  "run_attempt": 1,
+  "issue": 2598,
+  "criterion": "SC-03",
+  "criterion_text": "OSC 52 text and OSC 5522 MIME write from a live TUI update the authorized foreground client's browser clipboard exactly once with a truthful acknowledgement; malformed, oversized or unauthorized output is rejected without parser stall.",
+  "stage": "staging",
+  "target_sha": "3cde8bf37e9be2174032255bc5c720a01975d4b7",
+  "contract_sha256": "56f7b141959cd4f1706de498003c69b3a74d2e0bfcf12891300a7c951d9fb138",
+  "case_revision": "3cde8bf37e9be2174032255bc5c720a01975d4b7",
+  "case_tree_sha": "a87ba3ade27d380ace104c0dbd9d0a8f132fc2fa",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-29T09:41:29.045Z",
+  "finished_at": "2026-10-29T09:41:49.715Z",
+  "duration_ms": 20670,
+  "verifiers": [
+    {
+      "type": "browser",
+      "entry": "verify.spec.js",
+      "result": "Pass",
+      "summary": "Playwright JSON confirms executed passing tests and assertions with no skips",
+      "evidence": [
+        {
+          "type": "browser",
+          "value": "Playwright discovered=1 passed=1 skipped=0 assertions=12"
+        }
+      ],
+      "execution": {
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 12
+      },
+      "duration_ms": 3333,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "The OSC 52/5522 write state machine is proven by its exact unit suite",
+      "evidence": [
+        {
+          "type": "test",
+          "value": "exact SHA 3cde8bf37e9be2174032255bc5c720a01975d4b7: 31 protocol unit tests passed (strict base64, write chunking/aliases, EINVAL/EFBIG/EBUSY/EPERM/EIO replies, ids, one-time reads, 64 MiB streamed write)"
+        }
+      ],
+      "duration_ms": 11491,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40851308726,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "3cde8bf37e9be2174032255bc5c720a01975d4b7",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40851308726",
+    "record_path": "runs/2026-10-29/40851308726-1/2598/SC-03.json",
+    "source_result_sha256": "f26ab897b17cb91d2b1c71d7891341f885e713cdf1ce98cb531326ddc357c086"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40851308726-1",
+    "sha256": "f26ab897b17cb91d2b1c71d7891341f885e713cdf1ce98cb531326ddc357c086",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40851308726",
+    "durability": "time-limited; object archival not configured"
+  }
+}
