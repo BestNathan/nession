@@ -59,10 +59,18 @@ export type ClipboardNotice =
  * `writeClipboard` receives every representation of one clipboard write —
  * the requested MIME types plus their aliases — because they belong to a single
  * clipboard item; writing them one at a time would replace the previous one.
+ *
+ * The two gesture members are optional because not every port has a browser
+ * to ask (#2614): a test double may implement only the async writes. The
+ * surface asks them through `TerminalController`, never directly.
  */
 export interface ClipboardEffectPort {
   writeText(text: string): Promise<void>;
   writeClipboard(variants: ReadonlyMap<string, Uint8Array>): Promise<void>;
+  /** Whether `writeText` can act on this origin without a user gesture. */
+  writeTextIsProgrammatic?(): boolean;
+  /** Synchronous user-gesture text write; whether the browser accepted it. */
+  writeTextFromGesture?(text: string): boolean;
   notice(notice: ClipboardNotice): void;
 }
 
