@@ -379,7 +379,10 @@ function prepareCommand(issueNumber, stage, targetRef, outFile, deployment, ciEv
   // from the original run, while this trusted harness is checked out from main.
   // Recover the same evidence from the already checked-out target workspace so
   // historical re-runs cannot silently degrade to ci_evidence=null.
-  const evidencePath = ciEvidenceFile || implicitCiEvidenceFile(outFile);
+  // An explicit '-' suppresses the old implicit collector for PR-stage proof.
+  // An omitted argument still preserves historical rerun compatibility.
+  const evidencePath = ciEvidenceFile === '-' ? null :
+    (ciEvidenceFile || implicitCiEvidenceFile(outFile));
   const ciEvidence = evidencePath
     ? JSON.parse(fs.readFileSync(evidencePath, 'utf8'))
     : null;
