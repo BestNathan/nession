@@ -118,13 +118,11 @@ export interface TerminalSurfaceProps {
  *   35 061 bytes) whether the route named a drop or not, while the DOM differed
  *   by this whole band. Adding the notice changed no pixel.
  *
- * The observer bar has the same geometry and had the same problem, and it
- * **predates this notice** — the whole band, not this change, sat under the
- * composer. Both are fixed the same way: `data-terminal-capsule-host` is the
- * well *and* the capsule, so a strip the surface owns is laid out as its
- * sibling rather than inside it. Nothing about the strip itself moved, which is
- * why the two look identical to the byte at rest: with no strip rendered the
- * host fills the surface exactly as the root used to.
+ * The first repair kept notices outside the capsule host, which prevented
+ * occlusion but made each full-width flex sibling reserve terminal height.
+ * #2621 preserves that host boundary and instead places all notices in a
+ * compact root-owned absolute overlay near the top, leaving the full grid
+ * height unchanged when an observer takes control or a notice is dismissed.
  */
 function inputDropNotice(drop: InputDrop): string {
   switch (drop.reason) {
