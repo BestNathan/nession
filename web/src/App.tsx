@@ -8,6 +8,7 @@ import { LoginPage } from './app/LoginPage';
 import { WebSocketContext } from '@/shared/hooks/useWebSocket';
 import { useAppConnection } from './app/useAppConnection';
 import { FixtureApp } from './app/fixture/FixtureApp';
+import { FixtureClipboard } from './app/fixture/FixtureClipboard';
 import { FixtureShell } from './app/fixture/FixtureShell';
 import { FixtureWorkspace } from './app/fixture/FixtureWorkspace';
 import { Shell } from './app/Shell';
@@ -20,6 +21,7 @@ import { chromeSansRole } from '@/shared/typography/chromeRoles';
 const fixtureRoute = { path: '/fixture', element: <FixtureShell /> };
 const fixtureWorkspaceRoute = { path: '/fixture/workspace', element: <FixtureWorkspace /> };
 const fixtureAppRoute = { path: '/fixture/app', element: <FixtureApp /> };
+const fixtureClipboardRoute = { path: '/fixture/clipboard', element: <FixtureClipboard /> };
 
 function ReconnectingShell() {
   return (
@@ -72,6 +74,7 @@ function App() {
     () => createHashRouter([
       fixtureAppRoute,
       fixtureWorkspaceRoute,
+      fixtureClipboardRoute,
       fixtureRoute,
       {
         path: '*',
@@ -95,6 +98,7 @@ function App() {
     () => createHashRouter([
       fixtureAppRoute,
       fixtureWorkspaceRoute,
+      fixtureClipboardRoute,
       fixtureRoute,
       {
         path: '/',
