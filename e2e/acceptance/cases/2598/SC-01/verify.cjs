@@ -41,6 +41,10 @@ function serverScript(dir, name, body) {
   const config = path.join(dir, name + '.conf');
   fs.writeFileSync(config, 'set -g history-limit 5000\n' + CONFIG_SETTINGS.join('\n') + '\n');
   return `set -e
+# The product pins the tmux client's terminal (crates/nession-tmux/src/process.rs):
+# a CI runner inherits TERM=dumb or nothing, and the client then dies with
+# "terminal does not support clear" before any protocol byte can be observed.
+export TERM=xterm-256color
 sock=${JSON.stringify(socket)}
 conf=${JSON.stringify(config)}
 ${body}
@@ -141,8 +145,8 @@ tmux -S "$sock" -f "$conf" new-session -d -s probe sh
   const { output } = shell(script);
   const captured = fs.readFileSync(out, 'utf8');
   if (!captured.includes(']52;c;Zm9vYmFy')) {
-    throw new Error('plain attach did not forward OSC 52 to the outer terminal; probe output: ' +
-      output.slice(-1200));
+    throw new Error('plain attach did not forward OSC 52 to the outer terminal; ' +
+      'probe output: ' + output.slice(-600) + '; outer terminal: ' + captured.slice(-600));
   }
   if (!captured.includes(']5522;type=read;Lg==')) {
     throw new Error('plain attach did not forward OSC 5522 to the outer terminal: ' +
@@ -150,8 +154,9 @@ tmux -S "$sock" -f "$conf" new-session -d -s probe sh
   }
   evidence.push({
     type: 'tmux',
-    value: 'plain tmux attach (script PTY) forwarded OSC 52 and OSC 5522 to the outer terminal ' +
-      'with the shipped set-clipboard external + clipboard terminal feature',
+    value: 'plain tmux attach (script PTY, TERM pinned as process.rs does) forwarded OSC 52 and ' +
+      'OSC 5522 to the outer terminal with the shipped set-clipboard external + clipboard ' +
+      'terminal feature',
   });
 }
 
@@ -165,6 +170,13 @@ run(({ evidence }) => {
     if (!source.includes(setting)) {
       throw new Error('the shipped tmux server config is missing ' + setting);
     }
+  }
+  const processSource = fs.readFileSync(
+    path.join(__dirname, '../../../../../crates/nession-tmux/src/process.rs'),
+    'utf8',
+  );
+  if (!processSource.includes('cmd.env("TERM", "xterm-256color")')) {
+    throw new Error('the tmux client no longer pins TERM for plain PTY attach');
   }
   const version = String(spawnSync('tmux', ['-V'], { encoding: 'utf8' }).stdout).trim();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nession-clipboard-'));
