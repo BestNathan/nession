@@ -72,6 +72,7 @@ try{
   assert.equal(uncertain.kind,'uncertain');
   let pending=inbox.get(uncertain.task_id);
   assert.equal(pending.status,'uncertain');
+  assert.equal(pending.due_at,row.due_at+100+30000);
   const due=pending.due_at+1;
   let calls=0;
   const lookup={...good,lookup:async t=>{
@@ -92,6 +93,7 @@ try{
   assert.equal(ambiguous.kind,'uncertain');
   const absent=inbox.get(ambiguous.task_id);
   assert.equal(absent.status,'uncertain');
+  assert.equal(absent.due_at,due+10+30000);
   const checked=await publishDueTask(inbox,{...good,lookup:async()=>[]},{
     now:()=>absent.due_at+10});
   assert.equal(checked.kind,'uncertain',

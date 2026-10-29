@@ -141,12 +141,12 @@ export async function publishDueTask(inbox,github,{
       inbox.deferRejectedDispatch(task.id,due,outcome.httpStatus);
       return {kind:'quota-retry',task_id:task.id,due_at:due};
     }
-    inbox.uncertain(task.id,'ambiguous-dispatch-reply');
+    inbox.uncertain(task.id,'ambiguous-dispatch-reply',now());
     return {kind:'uncertain',task_id:task.id};
   }catch(err){
     // Fail closed. If a POST might have reached GitHub, this preserves
     // the task's uncertain outcome rather than repeating a side effect.
-    inbox.uncertain(task.id,'unhandled-publisher-error');
+    inbox.uncertain(task.id,'unhandled-publisher-error',now());
     onError({phase:'publish',kind:'internal-error'});
     return {kind:'uncertain',task_id:task.id};
   }

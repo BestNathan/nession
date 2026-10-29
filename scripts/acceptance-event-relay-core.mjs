@@ -226,11 +226,12 @@ export class DurableInbox{
       return {...row,status:'dispatching',attempts:row.attempts+1};
     });
   }
-  uncertain(id,reason){
+  uncertain(id,reason,now=Date.now()){
+    if(!Number.isSafeInteger(now))fail('invalid uncertain transition time');
     return this.db.prepare(
       "UPDATE tasks SET status='uncertain',last_error=?,lease_until=NULL,due_at=? "+
       "WHERE id=? AND status='dispatching'")
-      .run(String(reason).slice(0,200),Date.now()+30000,id).changes===1;
+      .run(String(reason).slice(0,200),now+30000,id).changes===1;
   }
   confirm(id,now=Date.now()){
     return this.db.prepare(
