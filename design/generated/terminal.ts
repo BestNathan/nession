@@ -36,7 +36,7 @@ export const TERMINAL_METRICS = {
   },
   app: {
     fontSize: 11.5,
-    lineHeight: 1.31,
+    lineHeight: 1.14,
     padX: 14,
     padY: 14,
   },

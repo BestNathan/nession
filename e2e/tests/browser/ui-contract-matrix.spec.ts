@@ -377,40 +377,32 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       const advance = measured;
       const boxesMessage = `xterm ${boxes.cell.left}..${boxes.cell.right}, screen ${boxes.screen.left}..${boxes.screen.right}, column ${advance}`;
       expect(boxes.screen.left, boxesMessage).toBeGreaterThanOrEqual(boxes.cell.left - advance);
-      // #2557: the new 96-column default exceeds some narrow phone content
-      // boxes at xterm's 6px font floor. The sanctioned fallback preserves all
-      // 96 columns and makes them horizontally scrollable; it must not silently
-      // squeeze the terminal into a narrower PTY grid or clip unreachable text.
+      // #2592: the App fit has no application minimum font size, so the fixed
+      // 96 columns must fit the actual content box by shrinking the measured
+      // cell — including below 6px. There is no horizontal-scroll fallback:
+      // every matrix viewport must publish a fitted grid with no horizontal
+      // overflow. A renderer that cannot measure a positive cell is a testable
+      // limitation, not a product mode.
       const viewport = page.locator('[data-terminal-viewport]').first();
       const fit = await viewport.getAttribute('data-terminal-cols-fit');
-      expect(['true', 'false'], 'the fitted/overflow mode must be published').toContain(fit);
-      if (fit === 'false') {
-        const geometry = await viewport.evaluate((element) => {
-          const el = element as HTMLElement;
-          const before = el.scrollLeft;
-          el.scrollLeft = el.scrollWidth;
-          const reached = el.scrollLeft;
-          el.scrollLeft = before;
-          return {
-            overflowX: getComputedStyle(el).overflowX,
-            clientWidth: el.clientWidth,
-            scrollWidth: el.scrollWidth,
-            reached,
-          };
-        });
-        expect(geometry.overflowX).toBe('auto');
-        expect(geometry.scrollWidth, boxesMessage).toBeGreaterThan(geometry.clientWidth + advance);
-        expect(geometry.reached, 'the 96-column overhang must remain scroll-reachable').toBeGreaterThan(0);
-        const screenWidth = boxes.screen.right - boxes.screen.left;
-        expect(screenWidth, boxesMessage).toBeGreaterThanOrEqual(96 * advance - advance);
-        expect(screenWidth, boxesMessage).toBeLessThanOrEqual(96 * advance + advance);
-        expect(boxes.screen.right, boxesMessage).toBeGreaterThan(boxes.cell.right + advance);
-      } else {
-        // With a fitted grid, maintain the original strict one-cell tolerance
-        // against the inset content box rather than accepting any overhang.
-        expect(boxes.screen.right, boxesMessage).toBeLessThanOrEqual(boxes.cell.right + advance);
-        expect(boxes.screen.right, boxesMessage).toBeGreaterThanOrEqual(boxes.cell.right - advance);
-      }
+      expect(fit, 'the App grid must fit at every matrix viewport (#2592)').toBe('true');
+      const geometry = await viewport.evaluate((element) => {
+        const el = element as HTMLElement;
+        return {
+          overflowX: getComputedStyle(el).overflowX,
+          clientWidth: el.clientWidth,
+          scrollWidth: el.scrollWidth,
+          scrollLeft: el.scrollLeft,
+        };
+      });
+      expect(geometry.overflowX, 'no horizontal-scroll fallback').not.toBe('auto');
+      expect(geometry.scrollWidth, 'no horizontal overflow: ' + boxesMessage)
+        .toBeLessThanOrEqual(geometry.clientWidth + 1);
+      expect(geometry.scrollLeft).toBe(0);
+      // With a fitted grid, keep the strict one-cell tolerance against the
+      // inset content box rather than accepting any overhang.
+      expect(boxes.screen.right, boxesMessage).toBeLessThanOrEqual(boxes.cell.right + advance);
+      expect(boxes.screen.right, boxesMessage).toBeGreaterThanOrEqual(boxes.cell.right - advance);
 
       // Non-vacuity: a screen that "fits" by collapsing to a couple of columns
       // would satisfy the lines above, and so would a terminal whose buffer was
@@ -575,19 +567,24 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       await expect(layerRoot).toHaveAttribute('data-layer', 'terminal');
 
       const shell = await layerRoot.boundingBox();
-      const surface = await page.locator('.xterm').first().boundingBox();
+      const viewport = page.locator('[data-terminal-viewport]').first();
+      const surface = await viewport.boundingBox();
       if (!shell || !surface) {
-        throw new Error('the App shell and its terminal surface must both be laid out');
+        throw new Error('the App shell and its terminal viewport must both be laid out');
       }
       const y = shell.y + shell.height / 2;
 
-      // The probe is 4px inside the *surface's own* left edge rather than a
+      // The probe is 4px past the terminal's padding gutter rather than a
       // fixed 4px from the shell: what has to hold is that the band reaches
-      // past the terminal's padding gutter and onto the surface, and the
-      // gutter is `--terminal-pad-x`. Narrow the band below `surface.x + 4`
-      // and this fails — which is right, because the band would then add
-      // nothing the gate did not already allow.
-      await swipeHorizontally(page, { y, fromX: surface.x + 4, toX: surface.x + 144 });
+      // past the gutter and onto the surface. The surface's owned edge and
+      // inset live on `[data-terminal-viewport]`; the painted `.xterm` grid is
+      // centred inside it (#2592), so it is not the surface edge. Narrow the
+      // band below `surface.x + padX` and this fails — which is right, because
+      // the band would then add nothing the gate did not already allow.
+      const padX = await viewport.evaluate((element) =>
+        Number.parseFloat(getComputedStyle(element).paddingLeft));
+      const probe = surface.x + padX + 4;
+      await swipeHorizontally(page, { y, fromX: probe, toX: probe + 140 });
 
       await expect(page.getByTestId('app-layer-sessions')).toBeVisible();
     });
@@ -598,9 +595,10 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       await expect(layerRoot).toHaveAttribute('data-layer', 'terminal');
 
       const shell = await layerRoot.boundingBox();
-      const surface = await page.locator('.xterm').first().boundingBox();
+      const viewport = page.locator('[data-terminal-viewport]').first();
+      const surface = await viewport.boundingBox();
       if (!shell || !surface) {
-        throw new Error('the App shell and its terminal surface must both be laid out');
+        throw new Error('the App shell and its terminal viewport must both be laid out');
       }
       const y = shell.y + shell.height / 2;
 
@@ -618,8 +616,12 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
 
       // …and the same swipe from the shell edge then opens it, which is what
       // makes the silence above evidence rather than timing. Without this, a
-      // build where the pager was simply never wired up would pass.
-      const shellEdge = Math.round(surface.x + 4);
+      // build where the pager was simply never wired up would pass. The probe
+      // is past the owned inset, not a fixed offset into the centred grid
+      // (#2592).
+      const padX = await viewport.evaluate((element) =>
+        Number.parseFloat(getComputedStyle(element).paddingLeft));
+      const shellEdge = Math.round(surface.x + padX + 4);
       await swipeHorizontally(page, { y, fromX: shellEdge, toX: shellEdge + 140 });
       await expect(page.getByTestId('app-layer-sessions')).toBeVisible();
     });

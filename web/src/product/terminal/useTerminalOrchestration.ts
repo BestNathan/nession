@@ -214,9 +214,11 @@ export function useTerminalOrchestration({
     // Canvas avoids WebGL context exhaustion when the viewport remounts during
     // address-plan resolution / StrictMode — lost GL contexts render blank.
     rendererType,
-    // Type size, leading and scrollback all come from the device profile, which
-    // resolves the first two from the Experience tokens rather than authoring
-    // them (terminal-surface.md §Resize and typography).
+    // The profile seeds the initial type size and owns leading and scrollback.
+    // The first two resolve from the Experience tokens rather than being
+    // authored here (terminal-surface.md §Resize and typography). Since #2592
+    // the font size is only the initial render: the measured fixed-column fit
+    // derives the final size from width and columns, with no App minimum.
     fontSize: PROFILES[deviceProfile].fontSize,
     lineHeight: PROFILES[deviceProfile].lineHeight,
     scrollback: PROFILES[deviceProfile].scrollback,

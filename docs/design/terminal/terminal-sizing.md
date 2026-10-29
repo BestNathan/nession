@@ -23,18 +23,22 @@ For one live Session:
   active Controller's usable height (capsule band and safe-area padding
   excluded). Only rows are sent with the Session's columns in an authorized
   resize.
-- **Font size** is the largest size, up to the Web maximum (or the App/device
-  token for mobile), whose **measured xterm cell** lets exactly the canonical
-  columns fit the terminal content box. A narrower viewport shrinks the glyphs;
-  it does not drop columns or stretch glyphs. There is no CSS
-  `transform: scale()`: cell coordinates, selection and touch mapping must stay
-  those of the rendered grid.
-- **Content width** is `cols × measured cell width`. On a wide Web window
-  (≥1024px) the terminal is capped and centred at that width; unused space is
-  padding, not a wider grid. Below that breakpoint the capped grid is left
-  aligned at the owned inset, so the shell's edge-swipe band still reaches the
-  surface (#1081) instead of being pushed inward by centring. Owned horizontal
-  insets remain part of the terminal host.
+- **Font size** is the largest size, up to the release maximum, whose
+  **measured xterm cell** lets exactly the canonical columns fit the terminal
+  content box. A narrower viewport shrinks the glyphs; it does not drop columns
+  or stretch glyphs. **App/mobile has no Nession-imposed minimum font size**
+  (#2592): the fit may choose below 6 CSS px when the fixed columns and the
+  actual width require it, and the App/device token only seeds the initial
+  measurement. The only intrinsic bound is a positive measured cell; a
+  renderer that cannot measure one cannot carry the grid and is reported as a
+  limitation, not passed as a fit. There is no CSS `transform: scale()`: cell
+  coordinates, selection and touch mapping must stay those of the rendered grid.
+- **Content width** is `cols × measured cell width`. The grid is capped and
+  **centred inside the owned symmetric inset at every width**; residual space
+  from measurement rounding is shared evenly, and unused space is padding, not
+  a wider grid. Centring does not move the surface edge or the inset, so the
+  shell's 28px edge-swipe bands still reach the surface (#1081). Owned
+  horizontal insets remain part of the terminal host.
 
 The measured cell comes from xterm's own renderer (including DPR and the
 finally-loaded JetBrains Mono face), never from `fontSize × 0.6`. A late font
@@ -140,10 +144,12 @@ phone. The product owner superseded that default with **96 columns** on
 all columns into the narrowest screen. This changes the release default, not
 the fixed-width Session authority or font-fitting algorithm.
 
-- At a 375 px viewport with 347 px of terminal content width, xterm's measured
-  cell at the 6 CSS px fit floor can quantize to 4 px. 96 columns then need
-  384 px and **cannot all fit**; the defined `overflow-x: auto` fallback applies.
-  The earlier 80-column choice needed only 320 px under the same conditions.
+- At a 375 px viewport the content box is about 347 px. The fit now measures
+  the actual cell at candidate sizes rather than assuming a floor: the
+  Chromium 144 probe in #2592 measured about 3.6 CSS px per cell at the fitted
+  size, so 96 columns fit. Do not assume that 6 CSS px fits or overflows on a
+  new renderer/DPR — the measured result is the contract, and the font may go
+  below 6 px when required.
 - Desktop at the default 14 CSS px and an approximately 8.4 px measured cell
   needs around 806 px for 96 columns. The real width comes from xterm cell
   measurements, not that approximation.
@@ -155,13 +161,15 @@ not a per-client setting and does not rewrite an existing Session.
 
 ## Rendering and accessibility
 
-- The fit floor is **6 CSS px**; the ordinary manual-zoom floor remains 8 px.
-  A very narrow content box may therefore show the canonical columns at a
-  small font. The terminal is not silently reduced to fewer columns.
-- When even the floor cannot fit the columns, the viewport scrolls
-  horizontally (`overflow-x: auto`) and the grid publishes
-  `data-terminal-cols-fit="false"`. This is the explicit fallback: readable
-  cells over a clipped grid, never a different Session width.
+- There is **no app-level fit floor** (#2592). The measured fit chooses
+  whatever size the content box and fixed columns require, including values
+  below 6 CSS px; the ordinary **manual zoom** floor remains 8 px, and that
+  user command is the only place a floor applies. The terminal is not silently
+  reduced to fewer columns.
+- A candidate whose xterm cell is nonpositive or unmeasurable is not a fit.
+  Device-pixel quantization can make tiny fonts unusable; that is an intrinsic
+  renderer limitation, reported as such, not a reason to restore an
+  application minimum, scroll horizontally, clip the grid, or change columns.
 - The release's canonical column count is a product decision. Lowering it (for
   readability on small devices) is done by changing the release parameter and
   rebuilding, not by a per-client setting.
