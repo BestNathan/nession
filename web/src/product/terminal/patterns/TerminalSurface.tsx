@@ -12,11 +12,12 @@ import type { TerminalControlState } from '@/product/terminal/state/terminalCont
 import type { InputDrop } from '@/platform/terminal-runtime/inputQueue';
 import type { TerminalStreamState } from '@/platform/session-runtime/SessionRuntime';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import type { ResolvedWorkContext } from '@/product/terminal/capsule/workAwareness';
 import type { ClipboardNoticeState } from '@/product/terminal/state/ui';
 import type { ClipboardNotice } from '@/platform/terminal-runtime/clipboard/ClipboardProtocol';
 import { cn } from '@/shared/lib/utils';
-import { chromeSansRole } from '@/shared/typography/chromeRoles';
+import { chromeSansRole, chromeMonoRole } from '@/shared/typography/chromeRoles';
 
 export interface TerminalSurfaceProps {
   /** xterm mount tree (TerminalPane). */
@@ -159,13 +160,27 @@ const terminalNoticeClass = cn(
 );
 
 /**
- * The compact clipboard notice (#2598, #2621).
+ * The compact clipboard notice (#2598, #2621, #2614).
  *
  * A blocked OSC 52 write keeps its text only until the user acts or the
  * notice expires. The parent status overlay is positioned outside the capsule
  * host, so this notice neither reserves a Terminal row nor hides behind the
  * bottom composer. A repeated notice re-arms through `state.id`.
+ *
+ * ## The action has to work on ordinary HTTP too (#2614)
+ *
+ * The deployed staging origin is plain HTTP, where browsers do **not** expose
+ * the async Clipboard API. The notice's Copy action therefore reads the
+ * origin's capability *synchronously*: a secure origin keeps the async write,
+ * while an insecure one spends the click on the DOM copy command
+ * (`execCommand('copy')` with a scoped listener). Awaiting a call that cannot
+ * exist would burn the user activation the DOM path needs, which is exactly
+ * how the previous action became a dead end. If neither path can act, the
+ * notice presents a bounded selectable surface and says so — it never claims
+ * a copy that did not happen.
  */
+const MAX_SELECTABLE_COPY_TEXT = 64 * 1024;
+
 function TerminalClipboardNoticeStrip({
   state,
   controller,
@@ -175,43 +190,71 @@ function TerminalClipboardNoticeStrip({
   controller: TerminalController | null;
   onDismiss?: () => void;
 }) {
-  const [copyFailed, setCopyFailed] = useState(false);
+  const [manualCopy, setManualCopy] = useState(false);
   const notice = state.notice;
   useEffect(() => {
-    setCopyFailed(false);
-    const timer = setTimeout(
-      () => onDismiss?.(),
-      notice.kind === 'copy-required' ? 10_000 : 5_000,
-    );
+    setManualCopy(false);
+  }, [state.id]);
+  useEffect(() => {
+    // A manual copy needs time to select and press the shortcut; the payload
+    // still expires, just not while the user is mid-gesture.
+    const lifetime = manualCopy ? 30_000 : notice.kind === 'copy-required' ? 10_000 : 5_000;
+    const timer = setTimeout(() => onDismiss?.(), lifetime);
     return () => clearTimeout(timer);
-  }, [state.id, notice.kind, onDismiss]);
+  }, [state.id, notice.kind, manualCopy, onDismiss]);
   const copy = () => {
     if (notice.kind !== 'copy-required') { return; }
-    void controller?.copyClipboardText(notice.text).then((copied) => {
-      if (copied) {
-        onDismiss?.();
-        return;
-      }
-      setCopyFailed(true);
-    });
+    const active = controller;
+    if (active?.canWriteClipboardProgrammatically()) {
+      void active.copyClipboardText(notice.text).then((copied) => {
+        if (copied || active.copyClipboardTextFromGesture(notice.text)) {
+          onDismiss?.();
+          return;
+        }
+        setManualCopy(true);
+      });
+      return;
+    }
+    if (active?.copyClipboardTextFromGesture(notice.text)) {
+      onDismiss?.();
+      return;
+    }
+    setManualCopy(true);
   };
+  const exactText = notice.kind === 'copy-required' ? notice.text : '';
+  const tooLarge = exactText.length > MAX_SELECTABLE_COPY_TEXT;
   return (
     <div
-      className={terminalNoticeClass}
+      className={cn(terminalNoticeClass, manualCopy && 'w-full flex-col items-stretch')}
       data-testid="terminal-clipboard-notice"
       data-clipboard-notice={notice.kind}
       role="status"
       aria-live="polite"
     >
-      <span>
-        {copyFailed
-          ? 'Clipboard unavailable — the copy could not be completed.'
-          : clipboardNoticeText(notice)}
-      </span>
-      {notice.kind === 'copy-required' && !copyFailed ? (
-        <Button type="button" variant="secondary" size="sm" className="h-7 px-2" onClick={() => copy()}>
-          Copy
-        </Button>
+      <div className="flex min-w-0 items-center gap-2">
+        <span>
+          {manualCopy
+            ? tooLarge
+              ? 'This clipboard text is too large to copy here.'
+              : 'The copy could not be completed automatically — select the text below and press Ctrl/Cmd+C.'
+            : clipboardNoticeText(notice)}
+        </span>
+        {notice.kind === 'copy-required' && !manualCopy ? (
+          <Button type="button" variant="secondary" size="sm" className="h-7 px-2" onClick={() => copy()}>
+            Copy
+          </Button>
+        ) : null}
+      </div>
+      {manualCopy && !tooLarge ? (
+        <Textarea
+          readOnly
+          rows={2}
+          aria-label="Clipboard text to copy"
+          data-testid="terminal-clipboard-manual"
+          className={cn('mt-1 h-16 min-h-0 resize-none', chromeMonoRole('code'))}
+          value={exactText}
+          onFocus={(event) => event.currentTarget.select()}
+        />
       ) : null}
     </div>
   );

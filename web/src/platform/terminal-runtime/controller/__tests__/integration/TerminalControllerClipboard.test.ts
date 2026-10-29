@@ -191,3 +191,55 @@ describe('TerminalController clipboard wiring (#2598)', () => {
     expect(effects.notice).toHaveBeenCalledWith({ kind: 'unsupported-image-paste' });
   });
 });
+
+describe('TerminalController HTTP copy capability (#2614)', () => {
+  const hosts: HTMLDivElement[] = [];
+
+  afterEach(() => {
+    for (const host of hosts) { host.remove(); }
+    hosts.length = 0;
+  });
+
+  function harness(effects: Partial<ClipboardEffectPort>) {
+    const transport = makeTransport();
+    const port: ClipboardEffectPort = {
+      writeText: vi.fn<(text: string) => Promise<void>>(async () => {}),
+      writeClipboard: vi.fn<ClipboardEffectPort['writeClipboard']>(async () => {}),
+      notice: vi.fn<(notice: ClipboardNotice) => void>(),
+      ...effects,
+    };
+    const controller = new TerminalController(makeSession(), () => transport, {
+      rendererType: 'canvas',
+      clipboardEffects: port,
+    });
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    hosts.push(host);
+    controller.attach(host);
+    return { controller, port };
+  }
+
+  it('reports the origin capability and delegates the synchronous gesture write', () => {
+    const fromGesture = vi.fn<(text: string) => boolean>(() => true);
+    const { controller } = harness({
+      writeTextIsProgrammatic: () => false,
+      writeTextFromGesture: fromGesture,
+    });
+    expect(controller.canWriteClipboardProgrammatically()).toBe(false);
+    expect(controller.copyClipboardTextFromGesture('http text')).toBe(true);
+    expect(fromGesture).toHaveBeenCalledWith('http text');
+  });
+
+  it('never claims a gesture copy that the port does not support', async () => {
+    const { controller, port } = harness({});
+    expect(controller.canWriteClipboardProgrammatically()).toBe(false);
+    expect(controller.copyClipboardTextFromGesture('http text')).toBe(false);
+    expect(await controller.copyClipboardText('http text')).toBe(true);
+    expect(port.writeText).toHaveBeenCalledWith('http text');
+  });
+
+  it('reports a programmatic origin when the async API exists', () => {
+    const { controller } = harness({ writeTextIsProgrammatic: () => true });
+    expect(controller.canWriteClipboardProgrammatically()).toBe(true);
+  });
+});
