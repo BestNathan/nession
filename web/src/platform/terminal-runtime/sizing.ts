@@ -15,30 +15,34 @@ import type { PixelSize } from './grid';
  * `fontSize × 0.6` approximation is not production truth).
  */
 
-/**
- * The smallest font the fixed-column fit may choose (#2487).
- *
- * This is below the manual zoom floor (8 px): a phone must be able to show the
- * canonical columns in its content box. At the 375 px class the measured cell
- * quantizes to 4 px, which is why the release default is 80 columns — 88 would
- * need 352 px inside a 347 px content box even at this floor. The prototype
- * exposes the readability trade-off rather than hiding it; the canonical count
- * can be changed at build time when a device class cannot meet the policy.
- */
-export const MIN_TERMINAL_FIT_FONT_SIZE = 6;
-
 /** xterm's floor: below 2x2 it renders nothing useful. */
 const MIN_TERMINAL_ROWS = 2;
 const MIN_TERMINAL_COLS = 2;
-const FONT_STEP = 0.1;
-const MAX_PROBES = 4;
+/**
+ * The numerical lower bound of the font-size search, **not** a readability or
+ * product minimum (#2592).
+ *
+ * There is no Nession-defined minimum font size on App/mobile: the chosen size
+ * is whatever the measured cell needs for the fixed columns to fit the actual
+ * content box, including values below 6 px. A positive bound only keeps the
+ * bisection well-defined; a renderer that cannot measure a positive cell at a
+ * candidate reports it as unusable rather than being counted as a fit.
+ */
+const FIT_SEARCH_FLOOR = 0.1;
+/** Font-size resolution of the fit. Device-pixel quantization is coarser. */
+const FIT_PRECISION = 0.05;
+const MAX_PROBES = 16;
 
 export interface FontFit {
   fontSize: number;
   cell: PixelSize;
   /** `cols × cell.width` — the terminal's content width at this font. */
   contentWidth: number;
-  /** False when even the minimum font is wider than the available width. */
+  /**
+   * Whether the measured grid fits the content box. `false` is an honest
+   * renderer-limitation answer, never a different column count or a fabricated
+   * minimum-size pass.
+   */
   fits: boolean;
 }
 
@@ -46,7 +50,7 @@ export interface FitFontOptions {
   cols: number;
   /** The content box available to the terminal, in CSS pixels. */
   availableWidth: number;
-  minFontSize: number;
+  /** The largest candidate, and the first probe. */
   maxFontSize: number;
   /**
    * Measure the current cell after xterm has been asked to render at
@@ -63,85 +67,104 @@ function contentWidth(cols: number, cell: PixelSize): number {
   return cols * cell.width;
 }
 
-function roundDownFont(value: number): number {
-  return Math.max(0, Math.floor(value / FONT_STEP) * FONT_STEP);
+function roundedFont(value: number): number {
+  return Math.round(value / FIT_PRECISION) * FIT_PRECISION;
+}
+
+function measured(measureCell: FitFontOptions['measureCell'], fontSize: number): PixelSize | null {
+  const cell = measureCell(fontSize);
+  return usable(cell) ? cell : null;
 }
 
 /**
- * The largest font, at or below `maxFontSize`, whose `cols` fit in
+ * The largest font, at or below `maxFontSize`, whose measured `cols` fit
  * `availableWidth`.
  *
- * Returns `null` only while the renderer cannot measure a cell at all. When
- * even `minFontSize` does not fit, the fit still returns the minimum font with
- * `fits: false`: the caller keeps the canonical columns and owns the explicit
- * overflow/accessibility fallback rather than silently dropping columns.
+ * There is **no application-level minimum font size** (#2592): the search runs
+ * below 6 px whenever the content box and the fixed columns require it. The
+ * only lower bound is the numerical `FIT_SEARCH_FLOOR`; a candidate whose cell
+ * cannot be measured positive is unusable, not a fit.
  *
- * The first probe is the maximum font, which is the common desktop answer. A
- * narrower viewport is solved from the same measurement by scaling the font
- * linearly — cell width scales with the font for a fixed family — and then
- * confirmed against a second real measurement. At most four probes run.
+ * The first probe is the maximum font, which is the common desktop answer.
+ * Otherwise the font is found by bisection over real measurements: device-pixel
+ * quantization makes the cell width a step function of the font size, so a
+ * linear `fontSize × constant` guess (or a single linear probe) can land on the
+ * wrong side of a step. The final chosen size is measured once more, so the
+ * renderer is left drawing the returned grid.
+ *
+ * Returns `null` only while the renderer cannot measure a cell at all. When no
+ * tested size fits, the smallest **measured** cell is returned with
+ * `fits: false`; a zero or invalid cell is never reported as a fit.
  */
 export function fitFontToColumns(options: FitFontOptions): FontFit | null {
-  const { cols, availableWidth, minFontSize, maxFontSize, measureCell } = options;
-  if (cols < MIN_TERMINAL_COLS || availableWidth <= 0) {
+  const { cols, availableWidth, maxFontSize, measureCell } = options;
+  if (!Number.isFinite(cols) || cols < MIN_TERMINAL_COLS
+    || !Number.isFinite(availableWidth) || availableWidth <= 0) {
     return null;
   }
-  if (!Number.isFinite(minFontSize) || !Number.isFinite(maxFontSize)
-    || minFontSize <= 0 || maxFontSize < minFontSize) {
+  if (!Number.isFinite(maxFontSize) || maxFontSize <= 0) {
     return null;
   }
 
-  let fontSize = maxFontSize;
-  let cell = measureCell(fontSize);
-  if (!usable(cell)) {
+  const atMax = measured(measureCell, maxFontSize);
+  if (atMax === null) {
     return null;
   }
-  if (contentWidth(cols, cell) <= availableWidth) {
-    return {
-      fontSize,
-      cell,
-      contentWidth: contentWidth(cols, cell),
-      fits: true,
-    };
+  const maxWidth = contentWidth(cols, atMax);
+  if (maxWidth <= availableWidth) {
+    return { fontSize: maxFontSize, cell: atMax, contentWidth: maxWidth, fits: true };
   }
 
-  for (let probe = 0; probe < MAX_PROBES; probe += 1) {
-    const width = contentWidth(cols, cell);
-    const scaled = roundDownFont(fontSize * (availableWidth / width));
-    const next = Math.max(minFontSize, Math.min(maxFontSize, scaled));
-    if (Math.abs(next - fontSize) < FONT_STEP / 2) {
+  // Bisect between a not-fitting upper bound and a fitting lower bound.
+  let low = FIT_SEARCH_FLOOR;
+  let high = maxFontSize;
+  let best: FontFit | null = null;
+  let smallest: FontFit | null = null;
+  for (let probe = 0; probe < MAX_PROBES && high - low > FIT_PRECISION; probe += 1) {
+    const size = roundedFont((low + high) / 2);
+    if (size <= low || size >= high) {
       break;
     }
-    fontSize = next;
-    cell = measureCell(fontSize);
-    if (!usable(cell)) {
-      return null;
+    const cell = measured(measureCell, size);
+    if (cell === null) {
+      // Not a usable grid at this size: keep searching above it.
+      high = size;
+      continue;
     }
-    if (contentWidth(cols, cell) <= availableWidth) {
-      return {
-        fontSize,
-        cell,
-        contentWidth: contentWidth(cols, cell),
-        fits: true,
-      };
+    const width = contentWidth(cols, cell);
+    const candidate: FontFit = {
+      fontSize: size,
+      cell,
+      contentWidth: width,
+      fits: width <= availableWidth,
+    };
+    if (smallest === null || size < smallest.fontSize) {
+      smallest = candidate;
+    }
+    if (candidate.fits) {
+      low = size;
+      best = candidate;
+    } else {
+      high = size;
     }
   }
 
-  // The minimum font is the lower bound. Even when it is too wide, the caller
-  // gets the honest answer instead of a different column count.
-  if (fontSize > minFontSize) {
-    fontSize = minFontSize;
-    cell = measureCell(fontSize);
-    if (!usable(cell)) {
-      return null;
-    }
+  const chosen = best ?? smallest;
+  if (chosen === null) {
+    return null;
   }
-  const width = contentWidth(cols, cell);
+  // Leave the renderer at the size being returned, and report that size's
+  // actual cell — the bisection's last probe is not necessarily the answer.
+  const finalCell = measured(measureCell, chosen.fontSize);
+  if (finalCell === null) {
+    return null;
+  }
+  const finalWidth = contentWidth(cols, finalCell);
   return {
-    fontSize,
-    cell,
-    contentWidth: width,
-    fits: width <= availableWidth,
+    fontSize: chosen.fontSize,
+    cell: finalCell,
+    contentWidth: finalWidth,
+    fits: finalWidth <= availableWidth,
   };
 }
 

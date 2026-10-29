@@ -14,6 +14,11 @@ import type { DeviceProfile, DeviceProfileConfig } from './types';
  * author them, so changing the terminal's type means editing the token source,
  * not this file.
  *
+ * `fontSize` seeds the **initial** render and the pre-fit measurement. It is
+ * not the App's final size or a fit ceiling: since #2592 the measured
+ * fixed-column fit derives the final font from the actual content width and the
+ * Session's columns, with no application minimum.
+ *
  * `scrollback` stays a device decision on purpose: it is an xterm buffer budget
  * (how much history a phone can hold) rather than a presentation value, and no
  * token owns it.

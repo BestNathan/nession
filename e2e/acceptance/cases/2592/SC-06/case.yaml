@@ -1,0 +1,11 @@
+schema_version: 1
+issue: 2592
+criterion: SC-06
+stage: pre-merge
+runtime: full-stack-local
+verifiers:
+  - type: browser
+    entry: verify.spec.js
+  - type: runtime
+    entry: verify.cjs
+result_policy: all-pass
