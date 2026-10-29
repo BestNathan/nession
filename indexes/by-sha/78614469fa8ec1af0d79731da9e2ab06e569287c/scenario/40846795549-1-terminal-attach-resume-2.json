@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 40846795549,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/2598-osc-clipboard",
+    "target_sha": "78614469fa8ec1af0d79731da9e2ab06e569287c",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/40846795549",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "47d59bc28e306e589cf2750d0dafd6268cfca4db3e3aaa69b46c19b64f1361d9"
+  },
+  "record": "runs/2026-10-29/40846795549-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "486ce0eecc883a2edfbdddc91a4e57ed4b6355863489ee0bc9e50aa5c1c42523"
+}
