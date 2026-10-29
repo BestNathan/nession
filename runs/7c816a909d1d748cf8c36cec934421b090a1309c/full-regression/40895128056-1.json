@@ -1,0 +1,379 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_full_failure_observation",
+  "trust": "authenticated_github_run_and_artifact_digest",
+  "evaluation": "NOT_EVALUATED",
+  "agent_dispatch": "NOT_AUTHORIZED",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_path": ".github/workflows/e2e-full-regression.yml",
+    "workflow_id": 391374339,
+    "event": "push",
+    "branch": "main",
+    "run_id": 40895128056,
+    "run_attempt": 1,
+    "source_sha": "7c816a909d1d748cf8c36cec934421b090a1309c",
+    "conclusion": "failure",
+    "completed_at": "2026-10-29T14:58:38Z",
+    "run_url": "https://github.com/BestNathan/nession/actions/runs/40895128056"
+  },
+  "artifact": {
+    "id": 12907437337,
+    "name": "full-regression-40895128056-1",
+    "digest": "sha256:fc068b6ad0362728010561ca95ad2316e441b0d3ce984127f353966a16fd8b52",
+    "size_bytes": 4424950,
+    "expires_at": "2026-11-12T14:58:33Z",
+    "retention": "GitHub Actions artifact; time-limited"
+  },
+  "candidate": {
+    "status": "NON_PASS_OR_UNKNOWN_OBSERVED",
+    "observed_tests": 275,
+    "unknown_files": 0,
+    "results": [
+      {
+        "id": "attach-critical-path",
+        "total": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 1,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "conversation-disclosure-app",
+        "total": 3,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 3,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "conversation-disclosure-narrow",
+        "total": 4,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 4,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "conversation-disclosure-web",
+        "total": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 1,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "conversation-list-state",
+        "total": 2,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 2,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "conversation-live-scroll",
+        "total": 2,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 2,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "conversation-motion",
+        "total": 2,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 2,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "conversation-scroll",
+        "total": 2,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 2,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "conversation-thread-state",
+        "total": 4,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 4,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "design-renderer-boundary",
+        "total": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 1,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "fixture-app",
+        "total": 6,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 6,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "fixture-canonical",
+        "total": 2,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 2,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "fixture-env",
+        "total": 10,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 10,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "fixture-git",
+        "total": 7,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 7,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "fixture-matrix",
+        "total": 3,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 3,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "fixture-visual",
+        "total": 12,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 12,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "fixture-visual-app",
+        "total": 20,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 20,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "fixture-visual-app-compact",
+        "total": 4,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 4,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "fixture-visual-app-landscape",
+        "total": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 1,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "fixture-visual-web-compact",
+        "total": 2,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 2,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "fixture-workspace",
+        "total": 3,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 3,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "jsonl-preview-geometry",
+        "total": 7,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 7,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "login",
+        "total": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 1,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "pages-evidence",
+        "total": 3,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 3,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "pages-overview",
+        "total": 4,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 4,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "pages-workflows",
+        "total": 3,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 3,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "session-lifecycle",
+        "total": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 1,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "terminal-attach-bootstrap",
+        "total": 3,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 3,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "terminal-consistency-faults",
+        "total": 15,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 1,
+        "expected": 14,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "terminal-io",
+        "total": 23,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 23,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "transcript-geometry",
+        "total": 2,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 2,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "ui-contract-assertions",
+        "total": 19,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 19,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "ui-contract-matrix",
+        "total": 72,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 72,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "ui-contract-web",
+        "total": 30,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 30,
+        "other": 0,
+        "failures": []
+      }
+    ]
+  },
+  "evidence": {
+    "archive_sha256": "fc068b6ad0362728010561ca95ad2316e441b0d3ce984127f353966a16fd8b52",
+    "candidate_sha256": "e64550c164b849fa8c585856c9ec5f649506255a7d46c21c39f5c8e47ddb5884"
+  }
+}
