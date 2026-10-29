@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "d98d7bc0ba3f0cee5683cfaa5284439a7d5b5ec9",
+  "run_id": 40889031376,
+  "run_attempt": 1,
+  "plan_digest": "861704f4f19084b7f9c76b83a0b50096e062c4da2ae4938ac2de31985c0686c2",
+  "artifact_digest": "sha256:82a1c830bdcf5b87999752e375316da3d2390f8be14caa34755756dc338a22b7",
+  "results": [
+    {
+      "id": "fixture-app",
+      "result": "Pass",
+      "discovered": 6,
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 66
+    },
+    {
+      "id": "terminal-io",
+      "result": "Pass",
+      "discovered": 23,
+      "passed": 23,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 540
+    },
+    {
+      "id": "ui-contract-matrix",
+      "result": "Pass",
+      "discovered": 72,
+      "passed": 72,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 656
+    }
+  ]
+}
