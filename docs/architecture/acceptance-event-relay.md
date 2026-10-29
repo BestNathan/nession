@@ -96,18 +96,52 @@ before invoking the existing `agent-sc-acceptance.yml@main` Agent and
 deterministic Issue updater. Invalid or stale input never authorizes Agent
 execution.
 
-Future live publisher needs a separate GitHub App credential with
-**Actions:write** permission scoped to this repository. That credential must
-not be available to untrusted PR-head code. The shadow receiver's own
-read-only App need not have Actions:write. A successful HTTP 204 from
-workflow_dispatch does not return an Actions run ID: the sender must keep its
-task in an explicit uncertain/reconciling state until independently
-authenticated run/evaluation evidence exists. Concurrency guards simultaneous
-same-task execution but are not an exactly-once delivery guarantee.
+A separate, **opt-in live publisher** (scripts/acceptance-event-publisher.mjs)
+uses an independently scoped GitHub App credential with **Actions:write**,
+Actions:read, Issues:read and Pull requests:read for this repository. The
+publisher must not be available to untrusted PR-head code. The read-only
+webhook receiver does not require Actions:write.
 
-This new workflow has no automatic trigger from the shadow service. It does
-not replace the legacy Waker until live source→task→consumer→Updater
-receipts, crash tests, and missed-webhook recovery have been verified.
+GitHub introduced `return_run_details: true` for workflow_dispatch in
+February 2026. An explicit HTTP 200 with exact `workflow_run_id`,
+`run_url` and `html_url` is persisted in SQLite as a Run receipt, with no
+roundtrip guessing. The legacy 204, malformed 200, timeout or 5xx is
+**uncertain** and must not cause a blind second POST. The publisher attempts
+read-only reconciliation against `Acceptance / Event Consumer` Run details:
+exact task ID in display_title, workflow path, name, event, repository and
+main branch; an absent match in a bounded listing is NOT proof of non-delivery.
+Definitive 403/429 refusals are scheduled at a bounded Retry-After/reset
+due time and survive process restart. Expired dispatch leases become uncertain,
+not pending. Source and current SC are re-validated before making a POST;
+an invalid/stale contract becomes a terminal suppressed task with no Run ID.
+A terminal confirmed task has a non-null `dispatch_run_id` only when an
+actual Actions Run was accepted. The existing Issue Updater remains the
+sole authority for SC Pass.
+
+Run the publisher as a **different process/security principal** sharing
+only the persistent SQLite WAL directory with the webhook receiver:
+`ACCEPTANCE_PUBLISHER_MODE=live`,
+`ACCEPTANCE_RELAY_DB=/durable/acceptance-relay.sqlite`,
+`GITHUB_PUBLISHER_APP_ID`,
+`GITHUB_PUBLISHER_INSTALLATION_ID`,
+`GITHUB_PUBLISHER_PRIVATE_KEY` (PEM, encrypted deployment secret).
+Start using `node scripts/acceptance-event-publisher.mjs`. If
+`ACCEPTANCE_PUBLISHER_MODE` is absent or not exactly `live`,
+the publisher refuses to start. Install/configure the separate App explicitly.
+The publisher uses durable due times and low-cost local SQLite wake checks;
+it creates **no recurring GitHub Actions Runs**. A running publisher,
+configured credential, and live webhook ingress are required before any
+task can be actually dispatched. Concurrency and run-name correlation are not
+an exactly-once guarantee: an ambiguous dispatch remains blocked for
+operator reconciliation unless a unique trusted consumer Run is observed.
+
+GitHub documentation: https://github.blog/changelog/2026-02-19-workflow-dispatch-api-now-returns-run-ids/
+
+The separate sender can only operate when explicitly configured. The
+shadow receiver never imports its Actions:write identity. Do **not** disable
+the legacy Waker or Quota Recovery until production live source→task→
+consumer→Updater receipts, missed-webhook backfill, and fault injection
+are proven, and verify the browser/Issue close boundaries remain intact.
 
 ## Requirements before turning off legacy receivers
 
@@ -124,7 +158,7 @@ receipts, crash tests, and missed-webhook recovery have been verified.
    measured no-op Run reduction. Only then disable old workflow_run receivers
    and the 15-minute cron. No shortcut via job-level if or skipped Gates.
 
-Verification: ./gates/run acceptance-event-relay-selftest. This is the
+Verification: ./gates/run acceptance-event-relay-selftest and ./gates/run acceptance-event-publisher-selftest. This is the
 canonical deterministic owner for webhook HMAC, live run attestation, SQLite
 receipt-before-ACK, due-time async selection, deduplication, crash/restart,
 429 recovery, lease uncertainty and malformed/fork source fixtures.
