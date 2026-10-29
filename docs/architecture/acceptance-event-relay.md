@@ -82,6 +82,39 @@ verified live endpoint remain required before removing legacy Waker/Quota
 Recovery. A successful health check alone is not delivery proof.
 Reference: https://docs.github.com/en/webhooks/using-webhooks/handling-failed-webhook-deliveries
 
+## GitHub App webhook failure audit and redelivery (opt-in)
+
+GitHub does not retry failed App webhooks automatically, and only the
+previous **three days** can be redelivered. An independently supervised
+`acceptance-webhook-recovery.mjs` process (default disabled) audits the
+App owner's `GET /app/hook/deliveries` with short-lived **App JWT**, using
+bounded cursor pagination. It verifies the trusted repository ID (fetched
+using the App's installation token), installation ID, event
+`workflow_run.completed`, delivery GUID, timestamp and status. A GUID
+with any successful attempt is never resent. Failed attempts belonging to
+unrelated repos/installations/events are never redelivered.
+
+Before calling `POST /app/hook/deliveries/{delivery_id}/attempts`, the
+recovery process reserves the GUID in SQLite with a durable delay and a
+bounded attempt count; an unexpected timeout/503 or process restart cannot
+cause an immediate second POST. HTTP 202 only says GitHub scheduled another
+delivery: it is NOT an Acceptance evidence receipt. The next audit checks
+the complete GUID attempt history again. A three-day outage exceeds
+GitHub's retention horizon and requires manual external recovery; live
+operations must alert before that threshold.
+
+Run on a durable host/volume with `ACCEPTANCE_WEBHOOK_RECOVERY_MODE=enabled`,
+`ACCEPTANCE_RELAY_DB=/durable/acceptance-relay.sqlite`,
+`GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`,
+`GITHUB_APP_PRIVATE_KEY`. Start using
+`node scripts/acceptance-webhook-recovery.mjs`. The local App delivery
+audit occurs every ten minutes; **it creates no GitHub Actions Runs** and
+never attempts direct Issue updates. This mode is opt-in and not enabled by
+the existing shadow receiver. The App owner JWT must be protected.
+
+Source: https://docs.github.com/en/rest/apps/webhooks and
+https://docs.github.com/en/webhooks/using-webhooks/handling-failed-webhook-deliveries
+
 ## Trusted event-consumer workflow contract (not enabled by shadow)
 
 The repository includes a main-owned `Acceptance / Event Consumer` workflow
