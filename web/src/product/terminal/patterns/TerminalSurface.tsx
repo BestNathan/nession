@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Loader2 } from 'lucide-react';
 import { TerminalCapsule } from '@/product/terminal/capsule/TerminalCapsule';
 import type {
@@ -13,6 +13,8 @@ import type { InputDrop } from '@/platform/terminal-runtime/inputQueue';
 import type { TerminalStreamState } from '@/platform/session-runtime/SessionRuntime';
 import { Button } from '@/components/ui/button';
 import type { ResolvedWorkContext } from '@/product/terminal/capsule/workAwareness';
+import type { ClipboardNoticeState } from '@/product/terminal/state/ui';
+import type { ClipboardNotice } from '@/platform/terminal-runtime/clipboard/ClipboardProtocol';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 
@@ -64,6 +66,13 @@ export interface TerminalSurfaceProps {
   /** Input this Session lost rather than delivered (#1307 SC-09), if any. */
   inputDrop?: InputDrop | null;
   onDismissInputDrop?: () => void;
+  /**
+   * A transient OSC 52/5522 clipboard state (#2598): a blocked copy a user
+   * gesture can still complete, a refused write, or an image-only paste the
+   * TUI has not negotiated. It is a status strip, never a toolbar.
+   */
+  clipboardNotice?: ClipboardNoticeState | null;
+  onDismissClipboardNotice?: () => void;
   /**
    * The shell's surface-navigation action beside the capsule — on Web, "Open
    * Workspace" (#1204). The surface owns no navigation; it hands the node to
@@ -130,6 +139,79 @@ function inputDropNotice(drop: InputDrop): string {
   }
 }
 
+/** One sentence per truthful clipboard state; no capability claims beyond it. */
+function clipboardNoticeText(notice: ClipboardNotice): string {
+  switch (notice.kind) {
+    case 'copy-required':
+      return 'The terminal wants to copy to your clipboard.';
+    case 'write-denied':
+      return 'Clipboard write was blocked by the browser.';
+    case 'unsupported-image-paste':
+      return 'Image clipboard protocol not supported by this TUI';
+    case 'image-too-large':
+      return 'Clipboard image is too large to transfer through this terminal.';
+  }
+}
+
+/**
+ * The transient clipboard strip (#2598).
+ *
+ * A blocked OSC 52 write keeps its text only until this user gesture completes
+ * it or the notice expires; the Copy button is the gesture the Clipboard API
+ * requires. It is a status line beside the terminal, never a toolbar, and it
+ * does not take focus. A second identical notice re-arms it through `state.id`.
+ */
+function TerminalClipboardNoticeStrip({
+  state,
+  controller,
+  onDismiss,
+}: {
+  state: ClipboardNoticeState;
+  controller: TerminalController | null;
+  onDismiss?: () => void;
+}) {
+  const [copyFailed, setCopyFailed] = useState(false);
+  const notice = state.notice;
+  useEffect(() => {
+    setCopyFailed(false);
+    const timer = setTimeout(
+      () => onDismiss?.(),
+      notice.kind === 'copy-required' ? 10_000 : 5_000,
+    );
+    return () => clearTimeout(timer);
+  }, [state.id, notice.kind, onDismiss]);
+  const copy = () => {
+    if (notice.kind !== 'copy-required') { return; }
+    void controller?.copyClipboardText(notice.text).then((copied) => {
+      if (copied) {
+        onDismiss?.();
+        return;
+      }
+      setCopyFailed(true);
+    });
+  };
+  return (
+    <div
+      className={cn('flex shrink-0 items-center justify-between gap-3 border-t border-border bg-muted/40 px-3 py-2 text-muted-foreground', chromeSansRole('body'))}
+      data-testid="terminal-clipboard-notice"
+      data-clipboard-notice={notice.kind}
+      role="status"
+      aria-live="polite"
+    >
+      <span>
+        {copyFailed
+          ? 'Clipboard unavailable — the copy could not be completed.'
+          : clipboardNoticeText(notice)}
+      </span>
+      {notice.kind === 'copy-required' && !copyFailed ? (
+        <Button type="button" variant="secondary" size="sm" onClick={() => copy()}>
+          Copy
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
 /**
  * Session-first terminal surface: well host + floating capsule.
  * Does not import legacy TerminalLayout / MobileTerminalLayout / BottomBar.
@@ -148,6 +230,8 @@ export function TerminalSurface({
   historyDegraded = false,
   streamState = 'unavailable',
   onDismissInputDrop,
+  clipboardNotice = null,
+  onDismissClipboardNotice,
   surfaceAction,
   workContext,
 }: TerminalSurfaceProps) {
@@ -235,6 +319,13 @@ export function TerminalSurface({
             Dismiss
           </Button>
         </div>
+      ) : null}
+      {clipboardNotice ? (
+        <TerminalClipboardNoticeStrip
+          state={clipboardNotice}
+          controller={controller}
+          onDismiss={onDismissClipboardNotice}
+        />
       ) : null}
       {terminalControl?.role === 'observer' ? (
         <div

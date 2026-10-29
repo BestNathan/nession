@@ -25,6 +25,9 @@ never imports xterm, the raw adapter module, or xterm's private `_core`.
 | PTY-bound input semantics (keyboard, semantic keys, paste, IME text) | `interaction/TerminalInteractionController.ts` | input handlers, capsule, mobile IME |
 | Workspace file-link recognition and navigation action | `product/terminal/workspaceFileLinks.ts` | `TerminalViewport` → emulator matcher |
 | Link cell mapping, buffer-line wrap joining | `xterm/LineLinks.ts` + `XtermMetrics.ts` | the engine |
+| OSC 52 / OSC 5522 parser registration and private mode 5522 | `xterm/XtermEmulator.registerClipboardHost` (parser only) | `clipboard/ClipboardProtocol` |
+| Clipboard protocol state, bounds, PTY replies, one-time paste offer | `clipboard/ClipboardProtocol.ts` | `TerminalController` (binds the effect port and authority) |
+| Browser clipboard effects and permission outcomes | `clipboard/browserClipboard.ts` | the protocol only |
 
 The mutable engine surface (`write`/`resize`) is reachable only through the
 adapter module. Product/UI cannot import that module, so it cannot bypass the

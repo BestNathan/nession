@@ -740,3 +740,218 @@ test.describe('Terminal I/O', () => {
     await stopPtyProbe(page);
   });
 });
+
+/**
+ * Clipboard protocols (#2598).
+ *
+ * `/fixture/clipboard` mounts the production `TerminalController`, ordered
+ * writer, xterm parser and OSC 52/5522 protocol over a harness transport, so
+ * bytes injected here take the same path live output does. The browser
+ * clipboard is real: these tests grant the permissions and read the value back.
+ */
+test.describe('Terminal clipboard protocols', () => {
+  test.use({ permissions: ['clipboard-read', 'clipboard-write'] });
+
+  interface Harness {
+    emit(text: string, options?: { bootstrap?: { requestedLines: number; truncated: boolean } }): void;
+    setObserver(readOnly: boolean): void;
+    sent: string[];
+  }
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto('about:blank');
+    await page.goto('/#/fixture/clipboard');
+    await page.getByTestId('fixture-clipboard').waitFor();
+    await page.waitForFunction(() => Boolean(
+      (window as unknown as { clipboardHarness?: unknown }).clipboardHarness,
+    ));
+    await page.waitForFunction(() => Boolean(
+      document.querySelector('[data-testid="fixture-clipboard-host"] .xterm-screen'),
+    ));
+  });
+
+  test('OSC 52 writes the real clipboard exactly once', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const harness = (window as unknown as { clipboardHarness: Harness }).clipboardHarness;
+      const clipboard = navigator.clipboard;
+      const writes: string[] = [];
+      const original = clipboard.writeText.bind(clipboard);
+      clipboard.writeText = async (text: string) => {
+        writes.push(text);
+        return original(text);
+      };
+      harness.emit('\x1b]52;c;' + btoa('OSC 52 payload') + '\x1b\\');
+      await new Promise((resolve) => { setTimeout(resolve, 250); });
+      const read = await clipboard.readText();
+      return { writes, read };
+    });
+    expect(result.writes).toEqual(['OSC 52 payload']);
+    expect(result.read).toBe('OSC 52 payload');
+  });
+
+  test('a bootstrap replay cannot touch the clipboard', async ({ page }) => {
+    const writes = await page.evaluate(async () => {
+      const harness = (window as unknown as { clipboardHarness: Harness }).clipboardHarness;
+      const clipboard = navigator.clipboard;
+      const seen: string[] = [];
+      const original = clipboard.writeText.bind(clipboard);
+      clipboard.writeText = async (text: string) => {
+        seen.push(text);
+        return original(text);
+      };
+      harness.emit('\x1b]52;c;' + btoa('historic output') + '\x1b\\', {
+        bootstrap: { requestedLines: 10, truncated: false },
+      });
+      await new Promise((resolve) => { setTimeout(resolve, 300); });
+      return seen;
+    });
+    expect(writes).toEqual([]);
+  });
+
+  test('an observer neither writes the clipboard nor replies to the pane', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const harness = (window as unknown as { clipboardHarness: Harness }).clipboardHarness;
+      const clipboard = navigator.clipboard;
+      const writes: string[] = [];
+      const original = clipboard.writeText.bind(clipboard);
+      clipboard.writeText = async (text: string) => {
+        writes.push(text);
+        return original(text);
+      };
+      harness.setObserver(true);
+      harness.sent.length = 0;
+      harness.emit('\x1b]52;c;' + btoa('observer text') + '\x1b\\\x1b[?5522$p');
+      await new Promise((resolve) => { setTimeout(resolve, 300); });
+      const observer = { writes: [...writes], sent: [...harness.sent] };
+      harness.setObserver(false);
+      harness.sent.length = 0;
+      harness.emit('\x1b]52;c;' + btoa('controller text') + '\x1b\\');
+      await new Promise((resolve) => { setTimeout(resolve, 300); });
+      return { observer, controller: { writes: [...writes] } };
+    });
+    expect(result.observer).toEqual({ writes: [], sent: [] });
+    expect(result.controller.writes).toEqual(['controller text']);
+  });
+
+  test('text paste keeps bracketed-paste semantics', async ({ page }) => {
+    const sent = await page.evaluate(async () => {
+      const harness = (window as unknown as { clipboardHarness: Harness }).clipboardHarness;
+      harness.sent.length = 0;
+      harness.emit('\x1b[?2004h');
+      await new Promise((resolve) => { setTimeout(resolve, 150); });
+      const target = document.querySelector('.xterm-helper-textarea')!;
+      (target as HTMLElement).focus();
+      const data = new DataTransfer();
+      data.setData('text/plain', 'pasted text');
+      target.dispatchEvent(new ClipboardEvent('paste', {
+        clipboardData: data, bubbles: true, cancelable: true,
+      }));
+      await new Promise((resolve) => { setTimeout(resolve, 250); });
+      return harness.sent.slice();
+    });
+    expect(sent).toEqual(['\x1b[200~pasted text\x1b[201~']);
+  });
+
+  test('image-only paste reaches a negotiated TUI byte-identically and creates no file', async ({ page }) => {
+    const requests: string[] = [];
+    page.on('request', (request) => {
+      if (request.method() !== 'GET') { requests.push(request.method() + ' ' + request.url()); }
+    });
+    const result = await page.evaluate(async () => {
+      const harness = (window as unknown as { clipboardHarness: Harness }).clipboardHarness;
+      const bytes = Uint8Array.from({ length: 5000 }, (_, index) => (index * 31) % 256);
+      harness.emit('\x1b[?5522h');
+      await new Promise((resolve) => { setTimeout(resolve, 150); });
+      harness.sent.length = 0;
+      const data = new DataTransfer();
+      data.items.add(new File([bytes], 'clipboard.png', { type: 'image/png' }));
+      const target = document.querySelector('.xterm-helper-textarea')!;
+      const event = new ClipboardEvent('paste', {
+        clipboardData: data, bubbles: true, cancelable: true,
+      });
+      const delivered = !target.dispatchEvent(event);
+      await new Promise((resolve) => { setTimeout(resolve, 300); });
+      const announcement = harness.sent.find((frame) => frame.includes('pw=')) ?? '';
+      const match = /pw=([^:;]+)/.exec(announcement);
+      if (!match) { return { delivered, announcement: false, sha: '' }; }
+      harness.sent.length = 0;
+      harness.emit('\x1b]5522;type=read:pw=' + match[1] + ';' + btoa('image/png') + '\x1b\\');
+      await new Promise((resolve) => { setTimeout(resolve, 300); });
+      const received: number[] = [];
+      for (const frame of harness.sent) {
+        if (!frame.includes('status=DATA')) { continue; }
+        const payload = frame.slice(frame.lastIndexOf(';') + 1, -2);
+        const binary = atob(payload);
+        for (const char of binary) { received.push(char.charCodeAt(0)); }
+      }
+      const digest = await crypto.subtle.digest('SHA-256', Uint8Array.from(received));
+      const sha = Array.from(new Uint8Array(digest))
+        .map((byte) => byte.toString(16).padStart(2, '0')).join('');
+      const expected = await crypto.subtle.digest('SHA-256', bytes);
+      const expectedSha = Array.from(new Uint8Array(expected))
+        .map((byte) => byte.toString(16).padStart(2, '0')).join('');
+      return { delivered, announcement: true, sha, expectedSha, received: received.length };
+    });
+    expect(result.delivered).toBe(true);
+    expect(result.announcement).toBe(true);
+    expect(result.received).toBe(5000);
+    expect(result.sha).toBe(result.expectedSha);
+    expect(requests).toEqual([]);
+  });
+
+  test('unnegotiated image-only paste is not sent and says so', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const harness = (window as unknown as { clipboardHarness: Harness }).clipboardHarness;
+      harness.emit('\x1b[?5522l');
+      await new Promise((resolve) => { setTimeout(resolve, 150); });
+      harness.sent.length = 0;
+      const data = new DataTransfer();
+      data.items.add(new File([Uint8Array.from([1, 2, 3])], 'x.png', { type: 'image/png' }));
+      const target = document.querySelector('.xterm-helper-textarea')!;
+      const event = new ClipboardEvent('paste', {
+        clipboardData: data, bubbles: true, cancelable: true,
+      });
+      const delivered = !target.dispatchEvent(event);
+      await new Promise((resolve) => { setTimeout(resolve, 300); });
+      const notice = document.querySelector('[data-testid="terminal-clipboard-notice"]');
+      return {
+        delivered,
+        sent: harness.sent.slice(),
+        noticeText: notice?.textContent ?? null,
+        noticeKind: notice?.getAttribute('data-clipboard-notice') ?? null,
+      };
+    });
+    expect(result.delivered).toBe(true);
+    expect(result.sent).toEqual([]);
+    expect(result.noticeKind).toBe('unsupported-image-paste');
+    expect(result.noticeText).toContain('Image clipboard protocol not supported by this TUI');
+  });
+
+  test('a blocked OSC 52 write completes through an explicit Copy click', async ({ page }) => {
+    await page.evaluate(async () => {
+      const harness = (window as unknown as { clipboardHarness: Harness }).clipboardHarness;
+      const clipboard = navigator.clipboard;
+      const original = clipboard.writeText.bind(clipboard);
+      (window as unknown as { restoreWriteText: () => void }).restoreWriteText = () => {
+        clipboard.writeText = original;
+      };
+      clipboard.writeText = async () => {
+        throw new DOMException('denied', 'NotAllowedError');
+      };
+      harness.emit('\x1b]52;c;' + btoa('gesture payload') + '\x1b\\');
+      await new Promise((resolve) => { setTimeout(resolve, 300); });
+    });
+    await expect(page.getByTestId('terminal-clipboard-notice'))
+      .toHaveAttribute('data-clipboard-notice', 'copy-required');
+
+    // Restore the real API: the click is the user gesture the blocked remote
+    // write did not have.
+    await page.evaluate(() => {
+      (window as unknown as { restoreWriteText: () => void }).restoreWriteText();
+    });
+    await page.getByRole('button', { name: 'Copy' }).click();
+    await expect(page.getByTestId('terminal-clipboard-notice')).toHaveCount(0);
+    const read = await page.evaluate(() => navigator.clipboard.readText());
+    expect(read).toBe('gesture payload');
+  });
+});

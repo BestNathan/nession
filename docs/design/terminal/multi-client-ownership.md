@@ -55,3 +55,12 @@ Nession is one interactive Session used **sequentially** across devices (PC → 
 - Stream ordering is unchanged: resize events consume a sequence number and stay in the same per-subscriber FIFO as output. The **handoff** resize is discrete and is applied through the parser writer, so it cannot cross an unfinished `terminal.write`; the continuous drag path's immediate local fit and the reported content-fidelity defect remain owned by #2283. tmux/PTY remains the source of actual geometry.
 
 Protocol direction (names not frozen): `terminal.control.acquire`, `terminal.control.release`, `terminal.control.changed` — Session-scoped, reconnect-safe, identical on P2P and relay.
+
+## Clipboard authority (#2598)
+
+Clipboard effects follow the **Controller role**, not attach:
+
+- An Observer never performs an OSC 52/5522 clipboard effect and never sends a protocol reply to the pane. Its xterm still parses the output; the clipboard protocol refuses the effect before it reaches `navigator.clipboard`.
+- Only a foreground, visible, authorized Controller performs effects. A hidden tab or a detached viewport cannot complete a Clipboard API operation, so it must not claim one happened.
+- A TUI read is served only from a **one-time offer** created by that Controller's own user paste, and only when the request echoes the unguessable password minted with the announcement. A spontaneous read has no path and receives `EPERM`.
+- The effect gate is evaluated when the effect is requested (per frame), not at attach time, so a role handoff takes effect immediately in both directions.

@@ -32,7 +32,7 @@ function renderSurface(
   props: Partial<
     Pick<
       TerminalSurfaceProps,
-      'inputDrop' | 'onDismissInputDrop' | 'terminalControl' | 'onTakeControl' | 'historyDegraded' | 'streamState'
+      'inputDrop' | 'onDismissInputDrop' | 'terminalControl' | 'onTakeControl' | 'historyDegraded' | 'streamState' | 'clipboardNotice' | 'onDismissClipboardNotice' | 'controller'
     >
   > = {},
 ) {
@@ -241,5 +241,43 @@ describe('explicit stream state (#1926 SC-08)', () => {
     const view = renderSurface('web');
     expect(view.getByTestId('terminal-surface'))
       .toHaveAttribute('data-terminal-stream-state', 'unavailable');
+  });
+});
+
+describe('transient clipboard state (#2598)', () => {
+  it('states an unsupported image paste without inventing a capability', () => {
+    const view = renderSurface('web', {
+      clipboardNotice: { id: 1, notice: { kind: 'unsupported-image-paste' } },
+    });
+    const notice = view.getByTestId('terminal-clipboard-notice');
+    expect(notice).toHaveTextContent('Image clipboard protocol not supported by this TUI');
+    // A status strip outside the capsule host, like every other quiet notice.
+    const host = view.getByTestId('terminal-surface')
+      .querySelector('[data-terminal-capsule-host]');
+    expect(host?.contains(notice)).toBe(false);
+    expect(notice).not.toHaveAttribute('tabindex');
+  });
+
+  it('completes a blocked copy through an explicit user gesture', async () => {
+    const copyClipboardText = vi.fn<(text: string) => Promise<boolean>>(async () => true);
+    const onDismissClipboardNotice = vi.fn();
+    const view = renderSurface('web', {
+      controller: { copyClipboardText } as unknown as TerminalSurfaceProps['controller'],
+      clipboardNotice: { id: 1, notice: { kind: 'copy-required', text: 'remote text' } },
+      onDismissClipboardNotice,
+    });
+    await userEvent.click(view.getByRole('button', { name: 'Copy' }));
+    expect(copyClipboardText).toHaveBeenCalledWith('remote text');
+    await Promise.resolve();
+    expect(onDismissClipboardNotice).toHaveBeenCalled();
+  });
+
+  it('keeps a refused write truthful instead of claiming a copy', () => {
+    const view = renderSurface('app', {
+      clipboardNotice: { id: 1, notice: { kind: 'write-denied' } },
+    });
+    expect(view.getByTestId('terminal-clipboard-notice'))
+      .toHaveTextContent('Clipboard write was blocked by the browser.');
+    expect(view.queryByRole('button', { name: 'Copy' })).toBeNull();
   });
 });

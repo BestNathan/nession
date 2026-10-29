@@ -2,6 +2,7 @@
 import { atom } from 'jotai';
 import { atomFamily } from 'jotai/utils';
 import type { InputDrop } from '@/platform/terminal-runtime/inputQueue';
+import type { ClipboardNotice } from '@/platform/terminal-runtime/clipboard/ClipboardProtocol';
 
 export type { ReconnectBanner } from '@/platform/terminal-runtime/types';
 
@@ -24,4 +25,23 @@ export type { ReconnectBanner } from '@/platform/terminal-runtime/types';
 export const inputDropAtomFamily = atomFamily((_sessionId: string) => {
   void _sessionId;
   return atom<InputDrop | null>(null);
+});
+
+/**
+ * A transient clipboard state for this Session's surface (#2598).
+ *
+ * `id` lets an identical notice be presented again (a second refused copy is a
+ * second event, not a stale render). The notice never carries clipboard bytes
+ * beyond the text a **user gesture** can still complete: a remote OSC 52 write
+ * blocked by browser permission is held until the user clicks Copy or the
+ * notice expires, and it is dropped with the Session's surface.
+ */
+export interface ClipboardNoticeState {
+  readonly id: number;
+  readonly notice: ClipboardNotice;
+}
+
+export const clipboardNoticeAtomFamily = atomFamily((_sessionId: string) => {
+  void _sessionId;
+  return atom<ClipboardNoticeState | null>(null);
 });

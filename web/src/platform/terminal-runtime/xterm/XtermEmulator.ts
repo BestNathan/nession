@@ -11,10 +11,12 @@ import type { PixelSize } from '../grid';
 import type {
   TerminalBufferSnapshot,
   TerminalCellSize,
+  TerminalClipboardHost,
   TerminalDisposable,
   TerminalEmulator,
   TerminalLinkMatcher,
   TerminalModeSnapshot,
+  TerminalWriteOrigin,
 } from '../emulator';
 
 /**
@@ -97,6 +99,13 @@ export class XtermEmulator implements TerminalEmulator {
   private readonly renderer: XtermRenderer;
   private disposed = false;
   private fontSizeCallback: (reason: CellSizeChangeReason) => void = () => {};
+  /**
+   * Provenance of the write xterm is parsing right now (#2598). The ordered
+   * writer serializes writes, so exactly one origin is active at a time; the
+   * clipboard host reads it from each parser callback.
+   */
+  private writeOrigin: TerminalWriteOrigin = { source: 'live' };
+  private clipboardDisposable: TerminalDisposable | null = null;
 
   constructor(options: XtermEmulatorOptions) {
     const initialFontSize = options.fontSize ?? BASELINE_METRICS.fontSize;
@@ -221,12 +230,17 @@ export class XtermEmulator implements TerminalEmulator {
 
   // ── Port: ordered mutation ──────────────────────────────────────────────
 
-  write(data: string | Uint8Array, onParsed?: () => void): void {
-    if (onParsed) {
-      this.terminal.write(data, onParsed);
-      return;
-    }
-    this.terminal.write(data);
+  write(
+    data: string | Uint8Array,
+    onParsed?: () => void,
+    origin: TerminalWriteOrigin = { source: 'live' },
+  ): void {
+    this.writeOrigin = origin;
+    this.terminal.write(data, () => {
+      // Parsing of this write is complete; anything after it is a new origin.
+      this.writeOrigin = { source: 'live' };
+      onParsed?.();
+    });
   }
 
   resize(cols: number, rows: number): void {
@@ -305,6 +319,45 @@ export class XtermEmulator implements TerminalEmulator {
         callback(links.length > 0 ? links : undefined);
       },
     });
+  }
+
+  /**
+   * Install the OSC 52 / OSC 5522 parser handlers (#2598).
+   *
+   * Private mode 5522 is intercepted ahead of xterm's DECSET/DECRST fallback —
+   * the handler returns `false` afterwards so every other mode in the same
+   * sequence is still applied. DECRQM is answered here for 5522 only, because
+   * xterm would otherwise answer "not recognized" for a mode it does not own.
+   */
+  registerClipboardHost(host: TerminalClipboardHost): TerminalDisposable {
+    this.clipboardDisposable?.dispose();
+    const parser = this.terminal.parser;
+    const origin = (): TerminalWriteOrigin => this.writeOrigin;
+    const applyMode = (params: (number | number[])[], enabled: boolean): boolean => {
+      if (params.some((param) => param === 5522)) {
+        host.setPasteEventMode(enabled, origin());
+      }
+      return false;
+    };
+    const disposables: { dispose(): void }[] = [
+      parser.registerOscHandler(52, (data) => host.handleOsc52(data, origin())),
+      parser.registerOscHandler(5522, (data) => host.handleOsc5522(data, origin())),
+      parser.registerCsiHandler({ prefix: '?', final: 'h' }, (params) => applyMode(params, true)),
+      parser.registerCsiHandler({ prefix: '?', final: 'l' }, (params) => applyMode(params, false)),
+      parser.registerCsiHandler({ prefix: '?', intermediates: '$', final: 'p' }, (params) => {
+        if (params[0] !== 5522) { return false; }
+        host.reportModeQuery();
+        return true;
+      }),
+    ];
+    const disposable: TerminalDisposable = {
+      dispose: () => {
+        for (const item of disposables) { item.dispose(); }
+        if (this.clipboardDisposable === disposable) { this.clipboardDisposable = null; }
+      },
+    };
+    this.clipboardDisposable = disposable;
+    return disposable;
   }
 
   // ── Port: interaction and bounded configuration ─────────────────────────
