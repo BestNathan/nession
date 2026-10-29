@@ -53,6 +53,37 @@ test('SC-03: unbounded-below measured fit at fixed columns, no horizontal scroll
     evidence.push(width + 'px font ' + m.fontSize + ' (<6) fit ' + m.fit);
   }
 
+  // The chosen size is the largest fit, not merely a fit: a font one step
+  // larger (beyond the fit's 0.05px resolution) must overflow the content
+  // box. Device-pixel cell quantization can leave visible slack, but it may
+  // not leave a larger fitting font on the table.
+  await openAppFixture(page, 390, 844);
+  const maximal = await page.evaluate(async () => {
+    const host = document.querySelector('[data-testid="fixture-terminal"]');
+    const term = host.xtermInstance;
+    const style = getComputedStyle(host);
+    const content = host.clientWidth - Number.parseFloat(style.paddingLeft)
+      - Number.parseFloat(style.paddingRight);
+    const cell = () => term._core._renderService.dimensions.css.cell;
+    const chosen = term.options.fontSize;
+    const chosenCell = cell().width;
+    term.options.fontSize = chosen + 0.25;
+    term.refresh(0, Math.max(0, term.rows - 1));
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    const largerCell = cell().width;
+    return {
+      chosen,
+      chosenGrid: chosenCell * term.cols,
+      largerCell,
+      largerGrid: largerCell * term.cols,
+      content,
+    };
+  });
+  expect(maximal.chosenGrid, 'the chosen grid fits: ' + JSON.stringify(maximal))
+    .toBeLessThanOrEqual(maximal.content + 0.5);
+  expect(maximal.largerGrid, 'a larger font must not also fit: ' + JSON.stringify(maximal))
+    .toBeGreaterThan(maximal.content);
+
   // A width change refits; a height-only change keeps the chosen font and only
   // changes rows.
   await openAppFixture(page, 430, 932);
