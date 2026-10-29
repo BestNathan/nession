@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "7959beca1b9fff3572292b1d7d4689389a352f2aa761ad6803e6327eb67febed",
+  "run_id": 40828165608,
+  "run_attempt": 1,
+  "issue": 2592,
+  "criterion": "SC-06",
+  "criterion_text": "Fixture and live terminal use the same measured unbounded-below mobile fit, symmetric insets and no-horizontal-scroll presentation, with exact-staging-SHA browser geometry/visual evidence; App Experience token sources/generated artifacts and canonical docs reflect the approved policy without unrelated Web metric changes.",
+  "stage": "staging",
+  "target_sha": "f740a6b8ce7852cfa883eb0467a9a0c9dd6b3722",
+  "contract_sha256": "378f967bf29cfe4c894a5968365d1802860253cf9b9502d7f62d8ad115a528d5",
+  "case_revision": "f740a6b8ce7852cfa883eb0467a9a0c9dd6b3722",
+  "case_tree_sha": "53c2e398aadc5ba91e16507db52f9042919cc38a",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-10-29T06:17:57.569Z",
+  "finished_at": "2026-10-29T06:18:06.179Z",
+  "duration_ms": 8610,
+  "verifiers": [
+    {
+      "type": "browser",
+      "entry": "verify.spec.js",
+      "result": "Pass",
+      "summary": "Playwright JSON confirms executed passing tests and assertions with no skips",
+      "evidence": [
+        {
+          "type": "browser",
+          "value": "Playwright discovered=1 passed=1 skipped=0 assertions=18"
+        }
+      ],
+      "execution": {
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 18
+      },
+      "duration_ms": 1833,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Fixture and live terminal share one measured fit, one inset/centring rule and the approved App token",
+      "evidence": [
+        {
+          "type": "source",
+          "value": "exact SHA f740a6b8ce7852cfa883eb0467a9a0c9dd6b3722: TerminalGeometry and FixtureTerminal both consume fitFontToColumns with only the release maximum; no minFontSize path exists"
+        },
+        {
+          "type": "source",
+          "value": "App token lineHeight 1.14 generated into terminal.ts, Web 1.19 unchanged; terminal-sizing.md records the no-minimum, measured, centred policy"
+        },
+        {
+          "type": "test",
+          "value": "4 shared TerminalGeometry tests passed"
+        }
+      ],
+      "duration_ms": 929,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40828165608,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "f740a6b8ce7852cfa883eb0467a9a0c9dd6b3722",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40828165608",
+    "record_path": "runs/2026-10-29/40828165608-1/2592/SC-06.json",
+    "source_result_sha256": "233420a0f9c04c9ffa8ab8dc58cf6b4053908377cb088bd3cdb9d5f219e4654f"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-40828165608-1",
+    "sha256": "233420a0f9c04c9ffa8ab8dc58cf6b4053908377cb088bd3cdb9d5f219e4654f",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/40828165608",
+    "durability": "time-limited; object archival not configured"
+  }
+}
