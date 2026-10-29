@@ -16,6 +16,8 @@ import { TerminalSurface } from '@/product/terminal/patterns/TerminalSurface';
 import type { CapsuleExperience } from '@/product/terminal/capsule/types';
 import type { TerminalChrome } from '@/app/ShellMain';
 import type { InputDrop } from '@/platform/terminal-runtime/inputQueue';
+import type { TerminalControlState } from '@/product/terminal/state/terminalControl';
+import type { ClipboardNoticeState } from '@/product/terminal/state/ui';
 
 /**
  * How many frames to keep re-deriving the grid for, after each change to the
@@ -88,6 +90,9 @@ export function FixtureTerminal({
   chrome,
   experience,
   inputDrop = null,
+  historyDegraded = false,
+  terminalControl,
+  clipboardNotice = null,
 }: {
   chrome?: TerminalChrome;
   /** Which experience's capsule to render — the same prop the real shell passes. */
@@ -104,6 +109,15 @@ export function FixtureTerminal({
    * not run flows.
    */
   inputDrop?: InputDrop | null;
+  /**
+   * The observed history gap (#2155), the control lease answer (#1095) and the
+   * clipboard protocol event (#2598), all from the route (#2621). Forwarded
+   * unchanged for the same reason as `inputDrop`; the dismiss/take-control
+   * handlers stay unset so the fixture keeps rendering states, not flows.
+   */
+  historyDegraded?: boolean;
+  terminalControl?: TerminalControlState;
+  clipboardNotice?: ClipboardNoticeState | null;
 }) {
   const ref = useRef<HTMLDivElement>(null);
 
@@ -178,6 +192,9 @@ export function FixtureTerminal({
       inputDisabled={false}
       controller={null}
       inputDrop={inputDrop}
+      historyDegraded={historyDegraded}
+      terminalControl={terminalControl}
+      clipboardNotice={clipboardNotice}
       capsuleCapabilities={chrome?.capsuleCapabilities}
       capsuleProjection={chrome?.capsuleProjection}
       surfaceAction={chrome?.surfaceAction}

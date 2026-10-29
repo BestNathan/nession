@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import type { TerminalTransport } from '@/platform/terminal-runtime/transport/TerminalTransport';
 import type { TerminalBootstrap } from '@/platform/terminal-runtime/bootstrap';
 import type { TerminalStreamPosition } from '@/platform/terminal-runtime/streamApply';
+import type { InputDrop } from '@/platform/terminal-runtime/inputQueue';
 import {
   TerminalController,
   type TerminalControllerEvents,
@@ -10,6 +12,8 @@ import { TerminalSurface } from '@/product/terminal/patterns/TerminalSurface';
 import type { ClipboardNoticeState } from '@/product/terminal/state/ui';
 import type { ClipboardNotice } from '@/platform/terminal-runtime/clipboard/ClipboardProtocol';
 import type { TerminalSession } from '@/product/terminal/state/session';
+import { fixtureInputDrop } from './fixtureInputDrop';
+import { fixtureStatusInputs } from './fixtureStatusNotices';
 
 /** What the browser Cases drive (#2598). The fixture owns no product logic. */
 export interface ClipboardHarness {
@@ -70,8 +74,15 @@ function createHarnessTransport() {
  * a test-only reproduction.
  */
 export function FixtureClipboard() {
+  const search = useLocation().search;
   const hostRef = useRef<HTMLDivElement>(null);
-  const [notice, setNotice] = useState<ClipboardNoticeState | null>(null);
+  // The route can hand the surface any one of the four status inputs (#2621).
+  // They are *initial* states: a notice the fixture then receives from the real
+  // controller replaces the clipboard one, and Dismiss really dismisses.
+  const initialStatus = useMemo(() => fixtureStatusInputs(search), [search]);
+  const [notice, setNotice] = useState<ClipboardNoticeState | null>(initialStatus.clipboardNotice);
+  const [inputDrop, setInputDrop] = useState<InputDrop | null>(() => fixtureInputDrop(search));
+  const { historyDegraded, terminalControl } = initialStatus;
   const [controller, setController] = useState<TerminalController | null>(null);
 
   useEffect(() => {
@@ -117,6 +128,10 @@ export function FixtureClipboard() {
         experience="web"
         inputDisabled={false}
         controller={controller}
+        historyDegraded={historyDegraded}
+        inputDrop={inputDrop}
+        onDismissInputDrop={() => setInputDrop(null)}
+        terminalControl={terminalControl}
         clipboardNotice={notice}
         onDismissClipboardNotice={() => setNotice(null)}
       >
