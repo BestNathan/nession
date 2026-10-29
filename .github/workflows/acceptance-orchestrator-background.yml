@@ -197,6 +197,3 @@ jobs:
       provider_source_run_attempt: ${{ needs.prepare-post-merge-provider-evidence.outputs.source_run_attempt }}
       deployment: ''
     secrets: inherit
-
-  # The privileged E2E ingest has already authenticated and projected the
-  # completed run. A dispatch, unlike GITHUB_TOKEN PR edits, can wake Actions.
