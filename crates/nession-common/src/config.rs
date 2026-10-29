@@ -10,7 +10,7 @@ use crate::logging::LoggingConfig;
 /// ordinary resize. A release embeds the same selected value into the Web
 /// bundle and the Server/Agent runtime configuration (see
 /// `docs/design/terminal/terminal-sizing.md`).
-pub const DEFAULT_TERMINAL_COLS: u16 = 80;
+pub const DEFAULT_TERMINAL_COLS: u16 = 96;
 
 /// The smallest accepted fixed column count. Below this a terminal is no
 /// longer a usable text surface (20 columns fits a command name and a path).
@@ -371,6 +371,7 @@ mod tests {
 
     #[test]
     fn terminal_sizing_defaults_and_toml_round_trip() {
+        assert_eq!(DEFAULT_TERMINAL_COLS, 96);
         let default = ServerConfig::default();
         assert_eq!(default.terminal_cols, DEFAULT_TERMINAL_COLS);
         assert_eq!(

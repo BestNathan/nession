@@ -1,4 +1,4 @@
-import type { Terminal } from '@xterm/xterm';
+import type { TerminalDisposable } from '../emulator';
 
 /** Semantic key intents — presentation must not own escape sequences (#1096). */
 export type TerminalSemanticKey =
@@ -71,12 +71,25 @@ const FIXED_KEY_SEQUENCES: Record<Exclude<TerminalSemanticKey, CursorKey>, strin
 };
 
 /**
+ * The terminal surface this encoder may use: committed input, paste, the one
+ * mode that changes a key's bytes, and the disposable `onData` stream. It is a
+ * structural subset of {@link TerminalEmulator}, so the interaction owner never
+ * imports xterm (#2581).
+ */
+export interface TerminalInteractionPort {
+  input(data: string, wasUserInput?: boolean): void;
+  paste(text: string): void;
+  readModes(): { readonly applicationCursorKeysMode: boolean };
+  onData(listener: (data: string) => void): TerminalDisposable;
+}
+
+/**
  * Single authority for PTY-bound bytes: keyboard semantics, paste, and committed
  * text. UI adapters call this instead of hand-writing ANSI (#1096).
  */
 export class TerminalInteractionController {
   constructor(
-    private readonly terminal: Terminal,
+    private readonly terminal: TerminalInteractionPort,
     private readonly sendToPty: (data: string) => void,
   ) {}
 
@@ -109,13 +122,13 @@ export class TerminalInteractionController {
    * built from KeyboardEventInit carries `keyCode` 0, xterm's key evaluator is
    * keyCode-driven, so it matched nothing and emitted nothing — silently, since
    * an unrecognised key is indistinguishable from a key that was never pressed.
-   * The mode comes from xterm's own proposed `modes` API, and the bytes go back
-   * through `input()` so they take the same onData path — and the same
+   * The mode comes from the terminal's own proposed `modes` API, and the bytes
+   * go back through `input()` so they take the same onData path — and the same
    * `disableStdin` gate — as real typing.
    */
   sendSemanticKey(key: TerminalSemanticKey): void {
     const bytes = isCursorKey(key)
-      ? `\x1b${this.terminal.modes.applicationCursorKeysMode ? 'O' : '['}${CURSOR_KEY_FINAL[key]}`
+      ? `\x1b${this.terminal.readModes().applicationCursorKeysMode ? 'O' : '['}${CURSOR_KEY_FINAL[key]}`
       : FIXED_KEY_SEQUENCES[key];
     this.terminal.input(bytes, true);
   }
@@ -128,7 +141,7 @@ export class TerminalInteractionController {
     return true;
   }
 
-  /** Wire xterm onData → PTY once; idempotent per controller instance. */
+  /** Wire terminal onData → PTY once; idempotent per controller instance. */
   bindXtermOnData(): () => void {
     const disposable = this.terminal.onData((data) => {
       this.sendToPty(data);

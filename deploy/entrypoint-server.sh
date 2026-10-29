@@ -19,7 +19,7 @@ export NESSION_TERMINAL_COLS NESSION_TERMINAL_WEB_FONT_SIZE
 # or a GitOps env patch may override them, and the Server validates the
 # effective values at startup. They are written into config.toml below, which
 # is the Server's canonical configuration reader.
-NESSION_TERMINAL_COLS="${NESSION_TERMINAL_COLS:-80}"
+NESSION_TERMINAL_COLS="${NESSION_TERMINAL_COLS:-96}"
 NESSION_TERMINAL_WEB_FONT_SIZE="${NESSION_TERMINAL_WEB_FONT_SIZE:-14}"
 # Configuration directory. Overridable so the entrypoint can be exercised
 # without writing /etc (the acceptance Case does exactly that).

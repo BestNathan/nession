@@ -4,7 +4,9 @@ import {
   isFollowingMarginBottom,
   marginLinesFromOcclusion,
   targetViewportY,
+  type CapsuleScrollTerminalPort,
 } from '@/platform/terminal-runtime/capsule/occlusionScroll';
+import type { TerminalMouseTrackingMode } from '@/platform/terminal-runtime/emulator';
 
 describe('occlusionScroll helpers', () => {
   it('converts occlusion px to whole-line margin', () => {
@@ -31,36 +33,44 @@ describe('occlusionScroll helpers', () => {
     expect(isFollowingMarginBottom(15, 40, 24, 0)).toBe(false);
   });
 
-  it('returns to the real xterm bottom when layout already reserves capsule space', () => {
-    const terminal = {
-      buffer: { active: { viewportY: 16, length: 40 } },
+  /** The emulator port the occlusion needs (#2581), over a live buffer. */
+  function makePort(options: {
+    type?: 'normal' | 'alternate';
+    viewportY?: number;
+    length?: number;
+    mouseTrackingMode?: TerminalMouseTrackingMode;
+  } = {}): { port: CapsuleScrollTerminalPort; buffer: { viewportY: number } } {
+    const buffer = {
+      type: options.type ?? 'normal',
+      viewportY: options.viewportY ?? 16,
+      length: options.length ?? 40,
+    };
+    const port: CapsuleScrollTerminalPort = {
+      element: null,
       rows: 24,
+      readBuffer: () => ({ ...buffer, cursorX: 0, cursorY: 0 }),
+      readModes: () => ({
+        applicationCursorKeysMode: false,
+        bracketedPasteMode: false,
+        mouseTrackingMode: options.mouseTrackingMode ?? 'none',
+        alternateBuffer: buffer.type === 'alternate',
+      }),
+      onScroll: () => ({ dispose: () => {} }),
+      onResize: () => ({ dispose: () => {} }),
+      attachCustomWheelHandler: vi.fn(),
       scrollToBottom: vi.fn(),
-      scrollLines: vi.fn(),
-    } as unknown as import('@xterm/xterm').Terminal;
-    const host = {
-      style: {
-        getPropertyValue: () => '48px',
-        setProperty: vi.fn(),
-      },
-      dataset: {} as DOMStringMap,
-    } as unknown as HTMLElement;
+      scrollLines: vi.fn((lines: number) => {
+        buffer.viewportY = Math.max(0, buffer.viewportY + lines);
+      }),
+      scrollPages: vi.fn((pages: number) => {
+        buffer.viewportY = Math.max(0, buffer.viewportY + pages * 24);
+      }),
+    };
+    return { port, buffer };
+  }
 
-    const occlusion = new CapsuleOcclusionScroll(terminal, host, () => 16);
-    occlusion.scrollToMarginBottom();
-
-    expect(terminal.scrollToBottom).toHaveBeenCalledTimes(1);
-    expect(terminal.scrollLines).not.toHaveBeenCalled();
-  });
-
-  it('switches the local terminal between following and history layout modes', () => {
+  function makeHost(): { host: HTMLElement; styleValues: Map<string, string> } {
     const styleValues = new Map<string, string>();
-    const terminal = {
-      buffer: { active: { viewportY: 16, length: 40 } },
-      rows: 24,
-      scrollToBottom: vi.fn(),
-      scrollLines: vi.fn(),
-    } as unknown as import('@xterm/xterm').Terminal;
     const host = {
       style: {
         getPropertyValue: (name: string) => styleValues.get(name) ?? '48px',
@@ -68,8 +78,25 @@ describe('occlusionScroll helpers', () => {
       },
       dataset: {} as DOMStringMap,
     } as unknown as HTMLElement;
+    return { host, styleValues };
+  }
 
-    const occlusion = new CapsuleOcclusionScroll(terminal, host, () => 16);
+  it('returns to the real xterm bottom when layout already reserves capsule space', () => {
+    const { port } = makePort();
+    const { host } = makeHost();
+
+    const occlusion = new CapsuleOcclusionScroll(port, host, () => 16);
+    occlusion.scrollToMarginBottom();
+
+    expect(port.scrollToBottom).toHaveBeenCalledTimes(1);
+    expect(port.scrollLines).not.toHaveBeenCalled();
+  });
+
+  it('switches the local terminal between following and history layout modes', () => {
+    const { port } = makePort();
+    const { host, styleValues } = makeHost();
+
+    const occlusion = new CapsuleOcclusionScroll(port, host, () => 16);
 
     expect(occlusion.mode()).toBe('following');
     occlusion.enterHistory();
@@ -85,21 +112,9 @@ describe('occlusionScroll helpers', () => {
   });
 
   it('handles vertical wheel input with xterm local scrollback', () => {
-    const activeBuffer = { type: 'normal' as const, viewportY: 16, length: 40 };
-    const terminal = {
-      buffer: { active: activeBuffer },
-      rows: 24,
-      modes: { mouseTrackingMode: 'none' },
-      scrollToBottom: vi.fn(),
-      scrollLines: vi.fn((lines: number) => {
-        activeBuffer.viewportY = Math.max(0, activeBuffer.viewportY + lines);
-      }),
-    } as unknown as import('@xterm/xterm').Terminal;
-    const host = {
-      style: { setProperty: vi.fn(), getPropertyValue: () => '48px' },
-      dataset: {} as DOMStringMap,
-    } as unknown as HTMLElement;
-    const occlusion = new CapsuleOcclusionScroll(terminal, host, () => 16);
+    const { port } = makePort({ viewportY: 16, length: 40 });
+    const { host } = makeHost();
+    const occlusion = new CapsuleOcclusionScroll(port, host, () => 16);
     const event = {
       deltaY: -32,
       deltaMode: 0,
@@ -109,25 +124,16 @@ describe('occlusionScroll helpers', () => {
 
     occlusion.handleWheel(event);
 
-    expect(terminal.scrollLines).toHaveBeenCalledWith(-2);
+    expect(port.scrollLines).toHaveBeenCalledWith(-2);
     expect(event.preventDefault).toHaveBeenCalledTimes(1);
     expect(event.stopPropagation).toHaveBeenCalledTimes(1);
     expect(occlusion.mode()).toBe('history');
   });
 
   it('does not swallow wheel input when the active buffer has no local scrollback', () => {
-    const terminal = {
-      buffer: { active: { type: 'alternate', viewportY: 0, length: 24 } },
-      rows: 24,
-      modes: { mouseTrackingMode: 'none' },
-      scrollToBottom: vi.fn(),
-      scrollLines: vi.fn(),
-    } as unknown as import('@xterm/xterm').Terminal;
-    const host = {
-      style: { setProperty: vi.fn(), getPropertyValue: () => '48px' },
-      dataset: {} as DOMStringMap,
-    } as unknown as HTMLElement;
-    const occlusion = new CapsuleOcclusionScroll(terminal, host, () => 16);
+    const { port } = makePort({ type: 'alternate', viewportY: 0, length: 24 });
+    const { host } = makeHost();
+    const occlusion = new CapsuleOcclusionScroll(port, host, () => 16);
     const event = {
       deltaY: -32,
       deltaMode: 0,
@@ -136,7 +142,7 @@ describe('occlusionScroll helpers', () => {
     } as unknown as WheelEvent;
 
     expect(occlusion.handleWheel(event)).toBe(true);
-    expect(terminal.scrollLines).not.toHaveBeenCalled();
+    expect(port.scrollLines).not.toHaveBeenCalled();
     expect(event.preventDefault).not.toHaveBeenCalled();
     expect(event.stopPropagation).not.toHaveBeenCalled();
   });
@@ -145,19 +151,10 @@ describe('occlusionScroll helpers', () => {
     // htop, `less`, vim with `set mouse=a` and Claude Code read the wheel
     // themselves. Taking it for local history silently breaks them — and the
     // buffer type cannot say whether they asked for mouse input, which is why
-    // this came from `terminal.modes` rather than from the proxy.
-    const terminal = {
-      buffer: { active: { type: 'normal', viewportY: 16, length: 40 } },
-      rows: 24,
-      modes: { mouseTrackingMode: 'vt200' },
-      scrollToBottom: vi.fn(),
-      scrollLines: vi.fn(),
-    } as unknown as import('@xterm/xterm').Terminal;
-    const host = {
-      style: { setProperty: vi.fn(), getPropertyValue: () => '48px' },
-      dataset: {} as DOMStringMap,
-    } as unknown as HTMLElement;
-    const occlusion = new CapsuleOcclusionScroll(terminal, host, () => 16);
+    // this came from the terminal mode rather than from the proxy.
+    const { port } = makePort({ viewportY: 16, length: 40, mouseTrackingMode: 'vt200' });
+    const { host } = makeHost();
+    const occlusion = new CapsuleOcclusionScroll(port, host, () => 16);
     const event = {
       deltaY: -32,
       deltaMode: 0,
@@ -168,7 +165,7 @@ describe('occlusionScroll helpers', () => {
     // `true` is "not handled" — the event continues to xterm, which reports it
     // to the application.
     expect(occlusion.handleWheel(event)).toBe(true);
-    expect(terminal.scrollLines).not.toHaveBeenCalled();
+    expect(port.scrollLines).not.toHaveBeenCalled();
     expect(event.preventDefault).not.toHaveBeenCalled();
     expect(event.stopPropagation).not.toHaveBeenCalled();
   });
@@ -177,18 +174,9 @@ describe('occlusionScroll helpers', () => {
     // The same buffer shape as the test above, only the mouse mode differs —
     // which is the whole point: buffer type alone would treat these two
     // identically.
-    const terminal = {
-      buffer: { active: { type: 'normal', viewportY: 16, length: 40 } },
-      rows: 24,
-      modes: { mouseTrackingMode: 'none' },
-      scrollToBottom: vi.fn(),
-      scrollLines: vi.fn(),
-    } as unknown as import('@xterm/xterm').Terminal;
-    const host = {
-      style: { setProperty: vi.fn(), getPropertyValue: () => '48px' },
-      dataset: {} as DOMStringMap,
-    } as unknown as HTMLElement;
-    const occlusion = new CapsuleOcclusionScroll(terminal, host, () => 16);
+    const { port } = makePort({ viewportY: 16, length: 40, mouseTrackingMode: 'none' });
+    const { host } = makeHost();
+    const occlusion = new CapsuleOcclusionScroll(port, host, () => 16);
     const event = {
       deltaY: -32,
       deltaMode: 0,
@@ -197,44 +185,24 @@ describe('occlusionScroll helpers', () => {
     } as unknown as WheelEvent;
 
     expect(occlusion.handleWheel(event)).toBe(false);
-    expect(terminal.scrollLines).toHaveBeenCalled();
+    expect(port.scrollLines).toHaveBeenCalled();
   });
 
   it('routes page scrolling through the same local history state machine', () => {
-    const activeBuffer = { viewportY: 16, length: 40 };
-    const terminal = {
-      buffer: { active: activeBuffer },
-      rows: 24,
-      scrollToBottom: vi.fn(),
-      scrollLines: vi.fn(),
-      scrollPages: vi.fn((pages: number) => {
-        activeBuffer.viewportY = Math.max(0, activeBuffer.viewportY + pages * 24);
-      }),
-    } as unknown as import('@xterm/xterm').Terminal;
-    const host = {
-      style: { setProperty: vi.fn(), getPropertyValue: () => '48px' },
-      dataset: {} as DOMStringMap,
-    } as unknown as HTMLElement;
-    const occlusion = new CapsuleOcclusionScroll(terminal, host, () => 16);
+    const { port } = makePort({ viewportY: 16, length: 40 });
+    const { host } = makeHost();
+    const occlusion = new CapsuleOcclusionScroll(port, host, () => 16);
 
     occlusion.scrollPages(-1);
 
-    expect(terminal.scrollPages).toHaveBeenCalledWith(-1);
+    expect(port.scrollPages).toHaveBeenCalledWith(-1);
     expect(occlusion.mode()).toBe('history');
   });
 
   it('does not snapshot history as a live-following output stream', () => {
-    const terminal = {
-      buffer: { active: { viewportY: 16, length: 40 } },
-      rows: 24,
-      scrollToBottom: vi.fn(),
-      scrollLines: vi.fn(),
-    } as unknown as import('@xterm/xterm').Terminal;
-    const host = {
-      style: { setProperty: vi.fn(), getPropertyValue: () => '48px' },
-      dataset: {} as DOMStringMap,
-    } as unknown as HTMLElement;
-    const occlusion = new CapsuleOcclusionScroll(terminal, host, () => 16);
+    const { port } = makePort({ viewportY: 16, length: 40 });
+    const { host } = makeHost();
+    const occlusion = new CapsuleOcclusionScroll(port, host, () => 16);
     occlusion.enterHistory();
 
     expect(occlusion.snapshotFollowing()).toBe(false);

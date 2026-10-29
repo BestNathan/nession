@@ -47,7 +47,7 @@ function writeBytes(data: string | Uint8Array): number {
 }
 
 /**
- * The writer is tied to the TerminalInstance, not to its (replaceable) socket.
+ * The writer is tied to the emulator instance, not to its (replaceable) socket.
  * Reattaching a transport does not make old parser work disappear from xterm.
  * Dispose only when the actual xterm instance is destroyed.
  */
@@ -62,6 +62,14 @@ export class SerializedTerminalWriter {
   /** Tracks bytes held by an uncancellable xterm parser callback. */
   private activeBytes = 0;
   private deadline: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * The last grid this FIFO applied (#2581 SC-06). Two identical resize
+   * operations in a row mutate nothing, so the second is not handed to xterm;
+   * the operation still keeps its place in FIFO order, so its parser-completed
+   * callback cannot overtake an earlier write. Every production resize goes
+   * through this queue, so the record cannot go stale behind a raw resize.
+   */
+  private lastResize: { cols: number; rows: number } | null = null;
 
   constructor(
     private readonly terminal: TerminalWriteTarget,
@@ -137,7 +145,10 @@ export class SerializedTerminalWriter {
         const item = this.operations.shift()!;
         if (item.kind === 'resize') {
           this.pendingBytes -= item.bytes;
-          this.terminal.resize(item.cols, item.rows);
+          if (this.lastResize?.cols !== item.cols || this.lastResize.rows !== item.rows) {
+            this.terminal.resize(item.cols, item.rows);
+            this.lastResize = { cols: item.cols, rows: item.rows };
+          }
           // Resize is synchronous but cannot overtake the prior parser write.
           item.onApplied?.();
           continue;

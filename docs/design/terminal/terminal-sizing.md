@@ -99,9 +99,9 @@ GitHub Variables (or approved defaults)
 
 | Knob | Scope | Default | Meaning |
 |---|---|---|---|
-| `NESSION_TERMINAL_COLS` | Release / Server / Agent | `80` | Fixed columns for new Sessions |
+| `NESSION_TERMINAL_COLS` | Release / Server / Agent | `96` | Fixed columns for new Sessions |
 | `NESSION_TERMINAL_WEB_FONT_SIZE` | Release / Web / Server diagnostics | `14` | Web preferred maximum CSS font size; never a PTY parameter |
-| `VITE_NESSION_TERMINAL_COLS` | Web/App bundle | `80` | Inlined canonical columns |
+| `VITE_NESSION_TERMINAL_COLS` | Web/App bundle | `96` | Inlined canonical columns |
 | `VITE_NESSION_TERMINAL_WEB_FONT_SIZE` | Web bundle | `14` | Inlined Web maximum font |
 
 Rules:
@@ -121,29 +121,34 @@ Rules:
 - `server.info` exposes the effective `terminal_cols` and
   `terminal_web_font_size`; a relay attach response states the same values.
   Comparing them with the build line is how a mixed release is detected.
-- Staging and production keep distinct release scopes: the workflow reads
-  their scope-specific Variables before falling back to the shared/default
-  values, so promoting a release does not inherit the other environment's
-  last override.
+- Staging and production resolve the same GitHub repository Actions Variables
+  (`NESSION_TERMINAL_COLS`, `NESSION_TERMINAL_WEB_FONT_SIZE`) as the single
+  release configuration source. They share the same approved defaults when
+  either variable is absent; the selected values are snapshotted in each
+  release artifact and provenance record.
 - `deploy/docker-compose.yml` states both variables for local stacks. The
   Server and Agent images carry them as `ENV` set from build arguments, so the
   running container's environment — not only a temporary CI job — holds the
   selected value. GitOps advances the image tag; the image identity is the
   configuration carrier.
 
-### Why 80 is the shipped default
+### Why 96 is the shipped default
 
-The candidate range is 70–120. Device evidence selected **80**:
+The original #2487 device review selected 80 columns for the narrowest 375 px
+phone. The product owner superseded that default with **96 columns** on
+2026-10-28 (#2557), prioritizing the selected canonical width over fitting
+all columns into the narrowest screen. This changes the release default, not
+the fixed-width Session authority or font-fitting algorithm.
 
-- At the 375×812 class the terminal content box is 347 px wide (375 minus the
-  owned insets). The measured JetBrains Mono cell at the 6 px fit floor
-  quantizes to 4 px, so 80 columns need 320 px and fit inside the inset.
-- 88 columns need 352 px in that same box. Rendering them would either break
-  the surface inset (#1092's contract) or require a font below the fit floor;
-  the prototype exposes that trade-off rather than hiding it.
-- Desktop keeps the Web maximum font (14 px by default) because
-  `80 × 8.4 = 672 px` fits the capped content width; wider windows add padding,
-  not columns.
+- At a 375 px viewport with 347 px of terminal content width, xterm's measured
+  cell at the 6 CSS px fit floor can quantize to 4 px. 96 columns then need
+  384 px and **cannot all fit**; the defined `overflow-x: auto` fallback applies.
+  The earlier 80-column choice needed only 320 px under the same conditions.
+- Desktop at the default 14 CSS px and an approximately 8.4 px measured cell
+  needs around 806 px for 96 columns. The real width comes from xterm cell
+  measurements, not that approximation.
+- The release can change the default again only by changing the GitHub
+  Variable and rebuilding; existing tmux Sessions retain their own widths.
 
 Changing the default is the build/release parameter described below; it is
 not a per-client setting and does not rewrite an existing Session.
@@ -184,7 +189,9 @@ not a per-client setting and does not rewrite an existing Session.
   [terminal-surface.md](../design-system/patterns/terminal-surface.md).
 - Lease, generations, ordered resize: [multi-client-ownership.md](multi-client-ownership.md).
 - Web implementation: `web/src/platform/terminal-runtime/terminalConfig.ts`,
-  `sizing.ts`, `controller/TerminalController.ts`.
+  `sizing.ts`, `view/TerminalGeometry.ts` (the sizing policy owner) and
+  `controller/TerminalController.ts` (composition). The xterm instance and its
+  measured cell are owned by `xterm/` (#2581).
 - Server/Agent configuration: `crates/nession-common/src/config.rs`,
   `crates/nession-agent/src/config.rs`,
   `crates/nession-agent/src/session/registry.rs`.

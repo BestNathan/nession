@@ -21,7 +21,7 @@
  */
 
 /** The single fixed column count shared by Web and App. */
-export const DEFAULT_TERMINAL_COLS = 80;
+export const DEFAULT_TERMINAL_COLS = 96;
 /** The Web terminal's preferred/maximum CSS font size. */
 export const DEFAULT_TERMINAL_WEB_FONT_SIZE = 14;
 

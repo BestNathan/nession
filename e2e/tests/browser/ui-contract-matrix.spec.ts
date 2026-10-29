@@ -377,10 +377,40 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       const advance = measured;
       const boxesMessage = `xterm ${boxes.cell.left}..${boxes.cell.right}, screen ${boxes.screen.left}..${boxes.screen.right}, column ${advance}`;
       expect(boxes.screen.left, boxesMessage).toBeGreaterThanOrEqual(boxes.cell.left - advance);
-      expect(boxes.screen.right, boxesMessage).toBeLessThanOrEqual(boxes.cell.right + advance);
-      // …and the fit is tight: a grid that fitted by a column too few is as
-      // wrong as one that fitted by a column too many.
-      expect(boxes.screen.right, boxesMessage).toBeGreaterThanOrEqual(boxes.cell.right - advance);
+      // #2557: the new 96-column default exceeds some narrow phone content
+      // boxes at xterm's 6px font floor. The sanctioned fallback preserves all
+      // 96 columns and makes them horizontally scrollable; it must not silently
+      // squeeze the terminal into a narrower PTY grid or clip unreachable text.
+      const viewport = page.locator('[data-terminal-viewport]').first();
+      const fit = await viewport.getAttribute('data-terminal-cols-fit');
+      expect(['true', 'false'], 'the fitted/overflow mode must be published').toContain(fit);
+      if (fit === 'false') {
+        const geometry = await viewport.evaluate((element) => {
+          const el = element as HTMLElement;
+          const before = el.scrollLeft;
+          el.scrollLeft = el.scrollWidth;
+          const reached = el.scrollLeft;
+          el.scrollLeft = before;
+          return {
+            overflowX: getComputedStyle(el).overflowX,
+            clientWidth: el.clientWidth,
+            scrollWidth: el.scrollWidth,
+            reached,
+          };
+        });
+        expect(geometry.overflowX).toBe('auto');
+        expect(geometry.scrollWidth, boxesMessage).toBeGreaterThan(geometry.clientWidth + advance);
+        expect(geometry.reached, 'the 96-column overhang must remain scroll-reachable').toBeGreaterThan(0);
+        const screenWidth = boxes.screen.right - boxes.screen.left;
+        expect(screenWidth, boxesMessage).toBeGreaterThanOrEqual(96 * advance - advance);
+        expect(screenWidth, boxesMessage).toBeLessThanOrEqual(96 * advance + advance);
+        expect(boxes.screen.right, boxesMessage).toBeGreaterThan(boxes.cell.right + advance);
+      } else {
+        // With a fitted grid, maintain the original strict one-cell tolerance
+        // against the inset content box rather than accepting any overhang.
+        expect(boxes.screen.right, boxesMessage).toBeLessThanOrEqual(boxes.cell.right + advance);
+        expect(boxes.screen.right, boxesMessage).toBeGreaterThanOrEqual(boxes.cell.right - advance);
+      }
 
       // Non-vacuity: a screen that "fits" by collapsing to a couple of columns
       // would satisfy the lines above, and so would a terminal whose buffer was

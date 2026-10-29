@@ -1,16 +1,18 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest';
 import { TerminalInputHandler } from '@/platform/terminal-runtime/input/TerminalInputHandler';
-import { TerminalInteractionController } from '@/platform/terminal-runtime/interaction/TerminalInteractionController';
-import type { Terminal } from '@xterm/xterm';
+import {
+  TerminalInteractionController,
+  type TerminalInteractionPort,
+} from '@/platform/terminal-runtime/interaction/TerminalInteractionController';
 
-function fakeTerminal(): Terminal {
+function fakeTerminal(): TerminalInteractionPort {
   return {
     onData: vi.fn(() => ({ dispose: vi.fn() })),
     input: vi.fn(),
     paste: vi.fn(),
-    element: document.createElement('div'),
-  } as unknown as Terminal;
+    readModes: vi.fn(() => ({ applicationCursorKeysMode: false })),
+  };
 }
 
 describe('TerminalInputHandler', () => {

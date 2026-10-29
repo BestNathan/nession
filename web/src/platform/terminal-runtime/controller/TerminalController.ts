@@ -1,5 +1,4 @@
 // web/src/terminal/controller/TerminalController.ts
-import { Terminal } from '@xterm/xterm';
 import type {
   DeviceProfile,
   InputMode,
@@ -18,18 +17,22 @@ import { SearchInputHandler } from '../input/SearchInputHandler';
 import { AIInputHandler } from '../input/AIInputHandler';
 import { CustomInputHandler } from '../input/CustomInputHandler';
 import { CapsuleOcclusionScroll } from '../capsule/occlusionScroll';
-import { TerminalInstance } from '../instance/TerminalInstance';
+import { XtermEmulator } from '../xterm/XtermEmulator';
 import { SerializedTerminalWriter, type TerminalWriterLimits } from './SerializedTerminalWriter';
 import { MobileImeInput } from '../input/MobileImeInput';
 import {
   TerminalInteractionController,
   type TerminalSemanticKey,
 } from '../interaction/TerminalInteractionController';
-import type { Grid } from '../grid';
-import { detectProfile, PROFILES } from '../DeviceProfile';
-import { MIN_TERMINAL_FIT_FONT_SIZE, fitFontToColumns, rowsForHeight } from '../sizing';
-import { readTerminalClientConfig } from '../terminalConfig';
-import type { FontSizeManager } from '../FontSizeManager';
+import { TerminalGeometry } from '../view/TerminalGeometry';
+import type { FontSizeManager } from '../xterm/FontSizeManager';
+import type {
+  TerminalDisposable,
+  TerminalLinkMatcher,
+} from '../emulator';
+
+/** The raw xterm handle type, obtained without importing xterm here (#2581). */
+type RawTerminal = XtermEmulator['terminal'];
 
 /**
  * What replaces a buffer when a **complete** bootstrap arrives (#321): erase
@@ -164,10 +167,10 @@ function shouldUseMobileIme(profile: DeviceProfile | undefined): boolean {
 export class TerminalController {
   readonly session: TerminalSession;
 
-  private _terminal: Terminal | null = null;
-  private instance: TerminalInstance;
+  private _terminal: RawTerminal | null = null;
+  private instance: XtermEmulator;
   /**
-   * FIFO parser ordering survives a transport rewire along with TerminalInstance.
+   * FIFO parser ordering survives a transport rewire along with the emulator.
    *
    * It does NOT survive a halted writer (#2196): a queue that refused work is
    * replaced together with the xterm it serializes, never reset in place.
@@ -179,7 +182,10 @@ export class TerminalController {
   private disposed = false;
   private transportFactory: () => TerminalTransport;
   private transport: TerminalTransport | null = null;
-  private resizeController: ResizeController | null = null;
+  private geometry: TerminalGeometry | null = null;
+  /** Link matchers survive a renderer replacement (SC-03). */
+  private readonly linkMatchers: TerminalLinkMatcher[] = [];
+  private linkDisposables: TerminalDisposable[] = [];
   /** The Session's stated fixed columns, when a caller or the Agent stated one. */
   private sessionCols: number | null;
   private inputRouter: InputRouter | null = null;
@@ -251,7 +257,7 @@ export class TerminalController {
     this.session = session;
     this.transportFactory = transportFactory;
     this.options = options;
-    this.instance = new TerminalInstance(options);
+    this.instance = new XtermEmulator(options);
     this.writer = this.createWriter();
     this._terminal = this.instance.terminal;
     this.inputSourceManager = new InputSourceManager();
@@ -271,8 +277,10 @@ export class TerminalController {
   }
 
   private createWriter(): SerializedTerminalWriter {
+    // The engine port is the writer target: `write`/`resize` are the ordered
+    // mutation surface, and nothing else in this class calls them.
     return new SerializedTerminalWriter(
-      this.instance.terminal,
+      this.instance,
       () => this.handleWriterDegraded(),
       this.options.writerLimits,
     );
@@ -324,22 +332,23 @@ export class TerminalController {
     // `hasSessionOutput` on the replacement.
     this.bootstrapSequence += 1;
     this.writer.dispose();
-    this.instance.detach();
+    this.instance.unmount();
     this.instance.dispose();
 
-    this.instance = new TerminalInstance(this.options);
+    this.instance = new XtermEmulator(this.options);
     this.writer = this.createWriter();
     this._terminal = this.instance.terminal;
     // The replacement holds nothing of the session's yet; an attach that
     // reads this flag must ask for the history the old buffer had.
     this._hasSessionOutput = false;
     if (element) {
-      this.instance.attach(element);
+      this.instance.mount(element);
       // Retires the transport that was bound to the disposed xterm and binds a
       // fresh one; the runtime advances its generation and re-attaches with a
       // bootstrap when it hears about the replacement.
       this.rewireTransport(this._terminal);
-      this.wireTerminalUi(element, this._terminal);
+      this.wireTerminalUi(element);
+      this.rewireLinkMatchers();
     }
     this.events?.onRendererReplaced?.();
   }
@@ -360,8 +369,14 @@ export class TerminalController {
     return router;
   }
 
-  /** xterm instance while attached; null after detach(). */
-  get terminal(): Terminal | null {
+  /**
+   * The raw xterm handle while attached; null after detach().
+   *
+   * Platform/tests only. Product/UI consumes the emulator port through this
+   * controller and `nession/no-direct-xterm` rejects importing the engine's raw
+   * module from those layers (#2581).
+   */
+  get terminal(): RawTerminal | null {
     return this._terminal;
   }
 
@@ -378,7 +393,6 @@ export class TerminalController {
 
   /** Create xterm, mount on `element`, and wire the transport to it. */
   attach(element: HTMLElement): void {
-    const terminal = this.instance.terminal;
     if (this.instance.isDisposed || this.disposed) {
       return;
     }
@@ -387,35 +401,36 @@ export class TerminalController {
     this.mountElement = element;
 
     // Same container — transport-only rewire (P2P socket / route changed).
-    if (this.attached && terminal.element?.parentElement === element) {
-      this.rewireTransport(terminal);
+    if (this.attached && this.instance.element?.parentElement === element) {
+      this.rewireTransport(this.instance.terminal);
       return;
     }
 
     // Reparent to a new viewport container (React remount). Same teardown as a
     // full detach, minus dropping the instance — see `teardownTerminalUi`.
-    if (this.attached && terminal.element?.parentElement !== element) {
+    if (this.attached && this.instance.element?.parentElement !== element) {
       this.teardownTerminalUi();
       this.teardownTransport();
-      this.instance.detach();
+      this.instance.unmount();
       this.attached = false;
     }
     if (this.attached) { return; }
 
-    this.instance.attach(element);
-    if (!terminal.element) {
+    this.instance.mount(element);
+    if (!this.instance.element) {
       this.teardownTransport();
       return;
     }
 
     this.attached = true;
-    this._terminal = terminal;
-    this.rewireTransport(terminal);
-    this.wireTerminalUi(element, terminal);
+    this._terminal = this.instance.terminal;
+    this.rewireTransport(this._terminal);
+    this.wireTerminalUi(element);
+    this.rewireLinkMatchers();
   }
 
   /** Swap ConnectionManager after P2P reconnect without tearing down xterm. */
-  private rewireTransport(terminal: Terminal): void {
+  private rewireTransport(terminal: RawTerminal): void {
     this.teardownTransport();
     const transport = this.transportFactory();
     this.transport = transport;
@@ -585,17 +600,17 @@ export class TerminalController {
     }
   }
 
-  private wireTerminalUi(element: HTMLElement, terminal: Terminal): void {
+  private wireTerminalUi(element: HTMLElement): void {
     this.instance.onCellSizeChange = (reason) => {
       // A webfont landing changes the cell the fit was based on, so re-fit.
       // A user zoom is an explicit font choice: keep it and recompute rows.
-      this.resizeController?.remeasure({ fitFont: reason === 'font-load' });
+      this.geometry?.remeasure({ fitFont: reason === 'font-load' });
     };
 
     const capsuleHost = element.closest('[data-terminal-capsule-host]');
     if (this.scrollbackMode === 'local-buffer' && capsuleHost instanceof HTMLElement) {
       this.capsuleOcclusionScroll = new CapsuleOcclusionScroll(
-        terminal,
+        this.instance,
         capsuleHost,
         () => this.cellDimensions.height,
       );
@@ -605,10 +620,10 @@ export class TerminalController {
       });
     }
 
-    // Retained, not fire-and-forget: a persistent TerminalInstance survives
-    // every attach, so an un-disposed title listener accumulates one per
-    // attach and is never released (#1096).
-    const titleSub = terminal.onTitleChange((title: string) => {
+    // Retained, not fire-and-forget: a persistent emulator survives every
+    // attach, so an un-disposed title listener accumulates one per attach and
+    // is never released (#1096).
+    const titleSub = this.instance.onTitleChange((title: string) => {
       this.onTitleChange?.(title);
     });
     this.titleUnsub = () => titleSub.dispose();
@@ -617,7 +632,7 @@ export class TerminalController {
     if (!transport) { return; }
 
     const router = this.inputRouter ?? this.initInputRouter();
-    this.interaction = new TerminalInteractionController(terminal, (data) => {
+    this.interaction = new TerminalInteractionController(this.instance, (data) => {
       this.inputSourceManager.setActiveSource('keyboard');
       this.transport?.send(data);
     });
@@ -625,8 +640,9 @@ export class TerminalController {
     router.register(terminalHandler);
     terminalHandler.activate();
 
-    if (this.useMobileIme && terminal.element) {
-      this.mobileIme = new MobileImeInput(terminal, terminal.element, {
+    const imeHost = this.instance.element;
+    if (this.useMobileIme && imeHost) {
+      this.mobileIme = new MobileImeInput(this.instance, imeHost, {
         onCommitText: (text) => this.interaction?.sendText(text),
         onPaste: (text) => this.interaction?.paste(text),
         onSemanticKey: (key) => {
@@ -635,12 +651,53 @@ export class TerminalController {
       });
     }
 
-    this.resizeController = new ResizeController(this);
+    this.geometry = new TerminalGeometry(this);
     requestAnimationFrame(() => {
       if (!this.attached) { return; }
       const dims = this.cellDimensions;
-      this.resizeController?.observe(element, dims.width, dims.height);
+      this.geometry?.observe(element, dims.width, dims.height);
     });
+  }
+
+  /**
+   * Register a link matcher over logical buffer lines (#2581 SC-05).
+   *
+   * Product/UI supplies recognition and the navigation action; the engine owns
+   * line reading, wrap joining and cell mapping. The matcher survives a
+   * renderer replacement, and disposing once releases it for good.
+   */
+  registerLinkMatcher(matcher: TerminalLinkMatcher): TerminalDisposable | null {
+    if (this.disposed) { return null; }
+    if (!this.linkMatchers.includes(matcher)) {
+      this.linkMatchers.push(matcher);
+    }
+    const disposable = this.instance.registerLinkMatcher(matcher);
+    this.linkDisposables.push(disposable);
+    let active = true;
+    return {
+      dispose: () => {
+        if (!active) { return; }
+        active = false;
+        const index = this.linkMatchers.indexOf(matcher);
+        if (index >= 0) { this.linkMatchers.splice(index, 1); }
+        disposable.dispose();
+        this.linkDisposables = this.linkDisposables.filter((entry) => entry !== disposable);
+      },
+    };
+  }
+
+  /**
+   * Re-install every active link matcher on the current emulator. A halted
+   * writer replaces the xterm instance (#2196); the matcher registry is the
+   * controller's, so the replacement gets the same links without a React
+   * effect replay.
+   */
+  private rewireLinkMatchers(): void {
+    for (const disposable of this.linkDisposables) {
+      disposable.dispose();
+    }
+    this.linkDisposables = this.linkMatchers.map((matcher) =>
+      this.instance.registerLinkMatcher(matcher));
   }
 
   /**
@@ -655,8 +712,8 @@ export class TerminalController {
    * (#1096). Converging them is the point, not a tidy-up.
    */
   private teardownTerminalUi(): void {
-    this.resizeController?.dispose();
-    this.resizeController = null;
+    this.geometry?.dispose();
+    this.geometry = null;
 
     this.mobileIme?.dispose();
     this.mobileIme = null;
@@ -688,7 +745,7 @@ export class TerminalController {
     this.teardownTerminalUi();
     this.teardownTransport();
 
-    this.instance.detach();
+    this.instance.unmount();
     this._terminal = null;
   }
 
@@ -768,9 +825,7 @@ export class TerminalController {
 
   /** Gate keyboard / IME → PTY when this client is an observer (#1095). */
   setRemoteInputEnabled(enabled: boolean): void {
-    if (this._terminal) {
-      this._terminal.options.disableStdin = !enabled;
-    }
+    this.instance.setInputEnabled(enabled);
     this.mobileIme?.setEnabled(enabled);
   }
 
@@ -814,7 +869,7 @@ export class TerminalController {
    * geometry; clear any debounce captured under an older Controller lease. */
   setObserverReadOnly(value: boolean): void {
     this.observerReadOnly = value;
-    if (value) { this.resizeController?.cancelPending(); }
+    if (value) { this.geometry?.cancelPending(); }
   }
 
   get isObserverReadOnly(): boolean {
@@ -871,7 +926,7 @@ export class TerminalController {
     // handoff is discrete, so there is no flicker argument for mutating the
     // buffer synchronously here — it must not cross an unfinished parse
     // (#2286 SC-04). The continuous drag path keeps its immediate fit.
-    this.resizeController?.remeasure({ ordered: true });
+    this.geometry?.remeasure({ ordered: true });
   }
 
   /**
@@ -893,15 +948,15 @@ export class TerminalController {
       this.mobileIme.focus();
       return;
     }
-    this._terminal?.focus();
+    this.instance.focus();
   }
 
   clear(): void {
-    this._terminal?.clear();
+    this.instance.clear();
   }
 
   paste(text: string): void {
-    this._terminal?.paste(text);
+    this.instance.paste(text);
   }
 
   // ── Scroll / font-size / cell dimensions ─────────────────────────────────
@@ -938,7 +993,7 @@ export class TerminalController {
 
   /** Current cell pixel dimensions; 8×16 fallback. */
   get cellDimensions(): { width: number; height: number } {
-    return this.instance?.cellDimensions ?? { width: 8, height: 16 };
+    return this.instance?.cellDimensions() ?? { width: 8, height: 16 };
   }
 
   /**
@@ -950,6 +1005,22 @@ export class TerminalController {
   measureFont(fontSize: number): { width: number; height: number } {
     return this.instance.setFontSize(fontSize);
   }
+
+  /**
+   * Publish the measured terminal content width to the viewport stylesheet.
+   *
+   * `TerminalGeometry` owns the value; this class owns the DOM write, which is
+   * why the registered producer of `--nession-local-terminal-content-width`
+   * remains the controller (#2581 SC-06).
+   */
+  applyContentWidth(container: HTMLElement, contentWidth: number, fits: boolean): void {
+    container.style.setProperty(
+      '--nession-local-terminal-content-width',
+      `${contentWidth}px`,
+    );
+    container.dataset.terminalColsFit = fits ? 'true' : 'false';
+  }
+
 
   // ── Input mode ───────────────────────────────────────────────────────────
 
@@ -979,314 +1050,11 @@ export class TerminalController {
   adoptSessionCols(cols: number): void {
     if (!Number.isFinite(cols) || cols <= 0) { return; }
     this.sessionCols = cols;
-    this.resizeController?.adoptSessionCols(cols);
+    this.geometry?.adoptSessionCols(cols);
   }
 
   /** The Session's stated fixed columns, or null while nobody stated them. */
   get statedTerminalCols(): number | null {
     return this.sessionCols;
-  }
-
-}
-
-/**
- * Fixed-column terminal sizing (#2487).
- *
- * The column count is canonical — read once from the build configuration — and
- * is **never** derived from the container width. What adapts:
- *
- * - **font**: the largest size, up to the Web maximum or the App token, whose
- *   measured cell lets exactly `cols` fit the content box. A wide Web window
- *   keeps the maximum and caps/centres the terminal; a narrower one shrinks the
- *   glyphs rather than the grid; a phone uses the same columns at a smaller
- *   measured font.
- * - **rows**: `floor(usable height / measured cell height)`.
- *
- * Geometry is applied through the parser writer so it cannot cross an
- * unfinished ANSI parse (#2283). Only the PTY notification is debounced
- * (200 ms); the first fire, a font-load correction and an explicit takeover
- * report immediately. Repeated identical sizes are not resent.
- *
- * Exported so consumers can type/instantiate the resize controller when
- * composing the terminal at the boundary.
- */
-export class ResizeController {
-  private controller: TerminalController;
-  private observer: ResizeObserver | null = null;
-  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
-  private isFirstFire = true;
-  private lastContainer = { width: 0, height: 0 };
-  /** The element being observed — held for the content/capsule geometry. */
-  private container: HTMLElement | null = null;
-  /**
-   * Whether the cell box has already been through the font-load correction
-   * (#1490). Until it has, a provisional status means the grid is still the
-   * fallback's and the correction will report the final one. After it has,
-   * the box is final: `document.fonts.status` can flip back to `loading` for
-   * a lazy face the renderer requested, and treating that as provisional
-   * would swallow a real container resize with no correction left to report
-   * it (#2132).
-   */
-  private fontMetricsSettled = false;
-  /**
-   * The fixed column count to render. Starts at the stated Session value or
-   * this build's embedded value, and changes only when the Agent states the
-   * Session's authoritative width (#2487).
-   */
-  private cols: number;
-  /** The Web terminal's preferred/maximum CSS font size. */
-  private readonly webMaxFontSize: number;
-  private lastReported: { cols: number; rows: number } | null = null;
-
-  constructor(controller: TerminalController) {
-    this.controller = controller;
-    const config = readTerminalClientConfig();
-    this.cols = controller.statedTerminalCols ?? config.cols;
-    this.webMaxFontSize = config.webMaxFontSize;
-  }
-
-  /**
-   * Render the Session's authoritative width instead of this client's build
-   * value (#2487). Used when the attach reply or the Agent's resize fan-out
-   * states a different width; the local fit is recomputed so exactly that many
-   * columns are visible.
-   */
-  adoptSessionCols(cols: number): void {
-    if (!Number.isFinite(cols) || cols <= 0 || cols === this.cols) { return; }
-    this.cols = cols;
-    this.lastReported = null;
-    if (this.lastContainer.width > 0 && this.lastContainer.height > 0) {
-      this.remeasure({ ordered: true, fitFont: true });
-    }
-  }
-
-  observe(container: HTMLElement, cellWidth: number, cellHeight: number): void {
-    if (cellWidth <= 0 || cellHeight <= 0) { return; }
-    this.dispose();
-    // Held for the geometry read: the inset is applied to this element's
-    // padding, so reading it back is what tells the grid what the content box
-    // left out.
-    this.container = container;
-    this.isFirstFire = true;
-    this.lastContainer = { width: 0, height: 0 };
-    this.lastReported = null;
-
-    this.observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const size = entry.contentRect;
-        this.lastContainer = { width: size.width, height: size.height };
-        // Fit the font first, then apply the fixed-column grid. The content
-        // box, not the border box: `contentRect` excludes the container's
-        // padding, which is the whole of `--terminal-pad-x` (#1092).
-        const grid = this.applyGeometry({ fitFont: true, ordered: false });
-        if (grid === null) { continue; }
-
-        // Only the Controller owns the pane's geometry. An observer's
-        // container can resize independently; fitting its own font is local,
-        // but its grid follows the authoritative session size. We still
-        // publish the measurement for a future explicit takeover.
-        if (this.isFirstFire) {
-          this.isFirstFire = false;
-          if (!this.metricsAreProvisional()) { this.report(grid, { force: true }); }
-          continue;
-        }
-        if (this.metricsAreProvisional()) { continue; }
-        if (this.controller.isObserverReadOnly) {
-          this.controller.publishViewportResize(grid.cols, grid.rows);
-          continue;
-        }
-        this.report(grid, { force: false });
-      }
-    });
-    this.observer.observe(container);
-  }
-
-  /**
-   * Recompute the geometry from the last observed container size.
-   *
-   * `fitFont` is false for a user zoom: the chosen font is kept and only rows
-   * are recomputed. It is true after a webfont settles (the first fit used the
-   * fallback's cell) and on takeover.
-   *
-   * `ordered` applies the grid through the parser writer — the adoption path,
-   * where correctness is worth a deferred frame (#2286 SC-04).
-   */
-  remeasure({ ordered = false, fitFont = true }: { ordered?: boolean; fitFont?: boolean } = {}): void {
-    this.fontMetricsSettled = true;
-    if (this.lastContainer.width <= 0 || this.lastContainer.height <= 0) { return; }
-    const grid = this.applyGeometry({ fitFont, ordered });
-    if (grid === null) { return; }
-    if (this.controller.isObserverReadOnly) {
-      this.controller.publishViewportResize(grid.cols, grid.rows);
-      return;
-    }
-    this.report(grid, { force: true });
-  }
-
-  /**
-   * Fit (or keep) the font, cap the content width, and return the fixed-cols
-   * grid. The local xterm mutation happens here, before any report.
-   */
-  private applyGeometry(options: { fitFont: boolean; ordered: boolean }): Grid | null {
-    const layout = this.measureLayout(options.fitFont);
-    if (layout === null) { return null; }
-    if (this.container !== null) {
-      // The terminal's own content width, used by the stylesheet to cap and
-      // centre the xterm. At the minimum font a very narrow box may be smaller
-      // than this; the viewport scrolls horizontally rather than dropping a
-      // column.
-      this.container.style.setProperty(
-        '--nession-local-terminal-content-width',
-        `${layout.contentWidth}px`,
-      );
-      this.container.dataset.terminalColsFit = layout.fits ? 'true' : 'false';
-    }
-    const grid = { cols: this.cols, rows: layout.rows };
-    if (this.controller.isObserverReadOnly) { return grid; }
-    if (options.ordered) {
-      this.controller.resizeLocalOrdered(grid.cols, grid.rows);
-    } else {
-      this.controller.resizeLocal(grid.cols, grid.rows);
-    }
-    return grid;
-  }
-
-  private measureLayout(fitFont: boolean): {
-    cell: { width: number; height: number };
-    contentWidth: number;
-    fits: boolean;
-    rows: number;
-  } | null {
-    const width = this.lastContainer.width;
-    const height = this.usableHeight();
-    if (width <= 0 || height === null) { return null; }
-
-    const profile = detectProfile(width);
-    const maxFont = profile === 'mobile'
-      ? PROFILES.mobile.fontSize
-      : this.webMaxFontSize;
-
-    let cell: { width: number; height: number };
-    let contentWidth: number;
-    let fits: boolean;
-    if (fitFont) {
-      const fit = fitFontToColumns({
-        cols: this.cols,
-        availableWidth: width,
-        minFontSize: MIN_TERMINAL_FIT_FONT_SIZE,
-        maxFontSize: Math.max(MIN_TERMINAL_FIT_FONT_SIZE, maxFont),
-        measureCell: (fontSize) => this.controller.measureFont(fontSize),
-      });
-      if (fit === null) { return null; }
-      cell = fit.cell;
-      contentWidth = fit.contentWidth;
-      fits = fit.fits;
-    } else {
-      cell = this.controller.cellDimensions;
-      if (cell.width <= 0 || cell.height <= 0) { return null; }
-      contentWidth = this.cols * cell.width;
-      fits = contentWidth <= width;
-    }
-
-    const rows = rowsForHeight(height, cell.height);
-    if (rows === null) { return null; }
-    return { cell, contentWidth, fits, rows };
-  }
-
-  /**
-   * The usable height: the content box plus the capsule band this mode
-   * reserves, minus the band itself (#1503). The grid must never draw rows the
-   * well is not showing, and the band is chrome drawn over it in both modes.
-   */
-  private usableHeight(): number | null {
-    const container = this.container;
-    if (container === null) { return null; }
-    const style = getComputedStyle(container);
-    const number = (value: string): number => {
-      const parsed = Number.parseFloat(value);
-      return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-    };
-    const reserved = number(style.paddingBottom);
-    const band = number(
-      style.getPropertyValue('--nession-local-terminal-capsule-occlusion'),
-    );
-    return this.lastContainer.height + reserved - band;
-  }
-
-  /**
-   * Publish and send one geometry, unless it is the duplicate of the last one.
-   *
-   * `force` is for the paths that must state the size even when nothing moved:
-   * a takeover (the transport forgot its last send) and the font-load
-   * correction. The drag path leaves it false, so a resize that does not
-   * change the grid sends nothing to tmux.
-   */
-  private report(
-    grid: Grid,
-    { force }: { force: boolean },
-  ): void {
-    if (!force
-      && this.lastReported?.cols === grid.cols
-      && this.lastReported.rows === grid.rows) {
-      return;
-    }
-    this.lastReported = { cols: grid.cols, rows: grid.rows };
-    this.controller.publishViewportResize(grid.cols, grid.rows);
-    if (this.controller.isObserverReadOnly) { return; }
-    if (this.debounceTimer) { clearTimeout(this.debounceTimer); }
-    this.debounceTimer = null;
-    if (force) {
-      this.controller.sendResize(grid.cols, grid.rows);
-      return;
-    }
-    this.debounceTimer = setTimeout(() => {
-      if (!this.controller.isObserverReadOnly) {
-        this.controller.sendResize(grid.cols, grid.rows);
-      }
-    }, 200);
-  }
-
-  /**
-   * Whether the cell box xterm reports right now is the terminal's **final**
-   * one — false while a webfont is still loading.
-   *
-   * xterm measures one cell at `open()` and caches it; a face that lands after
-   * that leaves the cached cell as the *fallback's*. `TerminalInstance` already
-   * treats this as a real state — `remeasureOnFontLoad` waits for
-   * `document.fonts.ready` and corrects the grid — but the size that leaves
-   * this client had no such guard, and the consequence is not a mis-drawn
-   * glyph (#1490): on a reload, `142x37` was published and sent from the
-   * fallback's cell, then the font-load correction sent `142x32` 52 ms later.
-   * Both are real resizes of the **shared** window (`window-size latest`), so
-   * the pane moved twice, the kernel delivered two SIGWINCHes to it, and an
-   * inline-drawing application repainted into the scrollback on each.
-   *
-   * The report that lands in the provisional case is the font-load correction
-   * itself: `TerminalInstance.remeasureOnFontLoad` waits on the same `ready`
-   * and calls back through `onCellSizeChange`, which is this controller's
-   * `remeasure()`. Reporting from both would send the same size twice.
-   * `document.fonts.ready` resolves when the loading finishes *or fails*, so
-   * a face that never arrives still releases the report.
-   */
-  private metricsAreProvisional(): boolean {
-    // Only before the correction: a later `loading` status is some other face
-    // the renderer asked for, not a measurement this grid was computed from.
-    if (this.fontMetricsSettled) { return false; }
-    const fonts = typeof document === 'undefined' ? undefined : document.fonts;
-    return fonts?.status === 'loading';
-  }
-
-  /** Cancel a resize captured under a lease that this client has lost. */
-  cancelPending(): void {
-    if (this.debounceTimer) { clearTimeout(this.debounceTimer); }
-    this.debounceTimer = null;
-  }
-
-  dispose(): void {
-    this.observer?.disconnect();
-    this.observer = null;
-    this.container = null;
-    if (this.debounceTimer) { clearTimeout(this.debounceTimer); }
-    this.debounceTimer = null;
   }
 }
