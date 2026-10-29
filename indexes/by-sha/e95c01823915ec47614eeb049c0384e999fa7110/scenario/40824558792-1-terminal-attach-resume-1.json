@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 40824558792,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/2592-app-terminal-density",
+    "target_sha": "e95c01823915ec47614eeb049c0384e999fa7110",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/40824558792",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "52e94c88a52c1f5d0f79f350316eec4a9669c46917aa867d3a55cd2d3a11df52"
+  },
+  "record": "runs/2026-10-29/40824558792-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "2e905300e2ab504e4146302d24e0789babff19b31fca9c9e79213de6e4b26143"
+}
