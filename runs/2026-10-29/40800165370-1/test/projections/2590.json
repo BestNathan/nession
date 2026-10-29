@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_projection_receipt",
+  "outcome": "applied",
+  "issue": 2590,
+  "run_id": 40800165370,
+  "run_attempt": 1,
+  "target_sha": "cca3ac1405441446d36caf909fe68387b43d6dc8",
+  "plan_digest": "29465b82aa5693b002e9c65adb29b9a444e2eef1e66492787b01a4670bc107cf",
+  "artifact_digest": "sha256:aa3000088373df467d41619aabef8dc2472aef93b642af95ffd2b9aa42bc1e64",
+  "ingest_run_id": 40800493196,
+  "ingest_attempt": 1,
+  "declaration_digest": "61d8630db6395e5cc878711244b995e27c4c703309047d745481577e12526dcb",
+  "before_body_sha256": "053523155040180780ea5618e1e2eacbf69ddb4fcfd93be5175912d84b57f9bb",
+  "body_sha256": "7155ae70f399984bb72210cc04d6d6d56e9bda694f5ae064fcb5397b39b08ac6",
+  "readback_body": "## Current behavior\n\n`E2E / Full Regression` on `main` (run [40797057651](https://github.com/BestNathan/nession/actions/runs/40797057651), SHA `e3c654971`) fails at the `e2e-playwright` Gate before any test runs:\n\n```\nPlaywright list contained no spec paths (bytes=33472 lines=271 has_listing=true has_no_tests=false\nsample=\"Listing tests:\\n  attach-critical-path.spec.ts:148:7 › …\")\n```\n\n`e2e/runner/verify-playwright-list.cjs` only accepts a path-prefixed reference (`tests/browser/foo.spec.ts:12`). Playwright 1.52, with this repository's `testDir: './tests/browser'`, prints the file relative to `testDir` (`  foo.spec.ts:12:3 › …`), so every real Full run parses zero spec paths. The defect was masked because the `full` job was skipped on recently sampled main runs.\n\n## Expected behavior\n\nThe verifier accepts Playwright's current testDir-relative listing, keeps accepting path-prefixed and project-prefixed shapes, and still fails closed on an empty listing or catalog drift.\n\n## Success Criteria\n\n- [ ] SC-01 `verify-playwright-list.cjs` parses basename, path-prefixed and project-prefixed Playwright listings into canonical catalog paths; a fixture suite proves all three shapes and the empty-list failure, and a synthetic list of all 34 registered specs reaches discovery parity.\n\n## Acceptance Plan\n\n```yaml\nacceptance:\n  SC-01:\n    when: pr\n    method: agent\n```\n\n## Acceptance Report\n\n| Criterion | Result | Evidence |\n|---|---|---|\n| SC-01 | Pending | Awaiting PR-head parser fixtures and catalog parity |\n\n## E2E Verification\n\n### New\n- none: this is a test-runner verifier fix; its proof is the `e2e-cli-selftest` Gate plus parser/catalog fixtures, not a new browser scenario.\n\n### Regression\n- ui-contract-matrix\n\n## E2E Report\n\n| ID | Type | Result | Evidence |\n|---|---|---|---|\n| ui-contract-matrix | Regression | Pass | run 40800165370/1, SHA cca3ac1405441446d36caf909fe68387b43d6dc8, contract 61d8630db6395e5cc878711244b995e27c4c703309047d745481577e12526dcb, plan 29465b82aa5693b002e9c65adb29b9a444e2eef1e66492787b01a4670bc107cf, tests 72/72 (https://github.com/BestNathan/nession/actions/runs/40800165370) |\n",
+  "patch_updated_at": "2026-10-29T01:27:21Z",
+  "readback_updated_at": "2026-10-29T01:27:21Z",
+  "rows": [
+    {
+      "id": "ui-contract-matrix",
+      "result": "Pass",
+      "evidence": "run 40800165370/1, SHA cca3ac1405441446d36caf909fe68387b43d6dc8, contract 61d8630db6395e5cc878711244b995e27c4c703309047d745481577e12526dcb, plan 29465b82aa5693b002e9c65adb29b9a444e2eef1e66492787b01a4670bc107cf, tests 72/72 (https://github.com/BestNathan/nession/actions/runs/40800165370)"
+    }
+  ]
+}
