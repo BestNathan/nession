@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "kind": "nession_deployment_attestation",
+  "status": "Attested",
+  "environment_id": "staging",
+  "namespace": "nession",
+  "cluster_context": "ci",
+  "gitops_revision": "2d7e854bc5bf75b0b6ee4a4153e931146c9d5a3e",
+  "observed_at": "2026-10-29T18:24:30.000Z",
+  "source_sha": "f255256741e0dc488d830ede98a8caf1933e76b0",
+  "images": [
+    {
+      "role": "agent",
+      "repository": "crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession",
+      "declared_repository": "crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession",
+      "tag": "agent-f255256",
+      "digest": "sha256:365b74516a3238b16db29b769471e8633dc39ae03ee34442fcd232f878b52c46"
+    },
+    {
+      "role": "server",
+      "repository": "crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession",
+      "declared_repository": "crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession",
+      "tag": "server-f255256",
+      "digest": "sha256:205a0a01ded681d25718fdbe2648c2a5fa306546f40dcabb270c74ea00140c2c"
+    },
+    {
+      "role": "ui",
+      "repository": "crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession",
+      "declared_repository": "crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession",
+      "tag": "ui-f255256",
+      "digest": "sha256:37601aa723998fc320f5b6532a4c54a600ca52f95123963edbf9c7ee0ff5a8c2"
+    }
+  ],
+  "workloads": [
+    {
+      "role": "agent",
+      "name": "nession-agent-staging",
+      "namespace": "nession",
+      "uid": "174d2b8e-4f21-4073-9cff-14cc64cd4957",
+      "generation": 1260,
+      "observed_generation": 1260,
+      "ready": true,
+      "image": "crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession:agent-f255256",
+      "image_id": "crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession@sha256:365b74516a3238b16db29b769471e8633dc39ae03ee34442fcd232f878b52c46",
+      "declared_repository": "crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession",
+      "repository": "crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession",
+      "digest": "sha256:365b74516a3238b16db29b769471e8633dc39ae03ee34442fcd232f878b52c46"
+    },
+    {
+      "role": "server",
+      "name": "nession-server-staging",
+      "namespace": "nession",
+      "uid": "8184f763-44eb-4c32-9581-7646575371ea",
+      "generation": 1255,
+      "observed_generation": 1255,
+      "ready": true,
+      "image": "crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession:server-f255256",
+      "image_id": "crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession@sha256:205a0a01ded681d25718fdbe2648c2a5fa306546f40dcabb270c74ea00140c2c",
+      "declared_repository": "crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession",
+      "repository": "crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession",
+      "digest": "sha256:205a0a01ded681d25718fdbe2648c2a5fa306546f40dcabb270c74ea00140c2c"
+    },
+    {
+      "role": "ui",
+      "name": "nession-ui-staging",
+      "namespace": "nession",
+      "uid": "277efca1-748c-40c6-acd2-affd581c2e2e",
+      "generation": 1266,
+      "observed_generation": 1266,
+      "ready": true,
+      "image": "crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession:ui-f255256",
+      "image_id": "crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession@sha256:37601aa723998fc320f5b6532a4c54a600ca52f95123963edbf9c7ee0ff5a8c2",
+      "declared_repository": "crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession",
+      "repository": "crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession",
+      "digest": "sha256:37601aa723998fc320f5b6532a4c54a600ca52f95123963edbf9c7ee0ff5a8c2"
+    }
+  ],
+  "execution_id": "66b66a480a685e33b8e356c3349ce0f61e2cc7c0e82fe5915cb2338fc094ccef",
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 40930430306,
+      "run_attempt": 1,
+      "workflow_id": 395306893,
+      "event": "workflow_dispatch",
+      "head_sha": "7c816a909d1d748cf8c36cec934421b090a1309c",
+      "head_branch": "main"
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/40930430306",
+    "record_path": "runs/2026-10-29/40930430306-1/deployment/staging.json",
+    "source_record_sha256": "bf1448813e4fc9689de9a911bef9ac5c06815b564462c4c212e48a6e641d8201"
+  }
+}
