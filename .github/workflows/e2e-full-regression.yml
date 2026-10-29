@@ -209,87 +209,24 @@ jobs:
         with:
           path: ${{ github.workspace }}/.cache/ms-playwright
           key: playwright-chromium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('e2e/package-lock.json') }}
-      # The Playwright font-provisioning apt packages must retain Ubuntu
-      # signature/checksum verification. Archive cache is not a trust root.
-      - name: Bind apt archives to runner image
-        id: apt-image
-        run: |
-          set -euo pipefail
-          image="${ImageVersion:-}"
-          [[ "$image" =~ ^[A-Za-z0-9._-]+$ ]] || {
-            echo "::error::Missing trusted runner ImageVersion"
-            exit 1
-          }
-          echo "version=$image" >> "$GITHUB_OUTPUT"
-      - name: Restore Playwright apt archives
-        id: apt-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: ${{ github.workspace }}/.cache/playwright-apt
-          key: playwright-apt-ubuntu24-${{ runner.os }}-${{ runner.arch }}-${{ steps.apt-image.outputs.version }}-${{ hashFiles('e2e/package-lock.json') }}-v1
-      - name: Configure apt archive retention
-        run: |
-          set -euo pipefail
-          archives="$GITHUB_WORKSPACE/.cache/playwright-apt/archives"
-          mkdir -p "$archives/partial"
-          chmod 755 "$archives"
-          sudo chown _apt:root "$archives/partial"
-          sudo tee /etc/apt/apt.conf.d/99-nession-playwright-archives >/dev/null <<EOF_APT
-          Dir::Cache::archives "$archives";
-          APT::Keep-Downloaded-Packages "true";
-          Binary::apt-get::APT::Keep-Downloaded-Packages "true";
-          EOF_APT
-          apt-config dump | grep -F "$archives"
       - name: Build Web and prepare E2E npm runtime
         run: |
           (cd web && npm ci && npm run build)
           (cd e2e && npm ci)
-      - name: Prepare Full Chromium and system fonts
+      # One browser environment for every visual comparison. `E2E / Tests`
+      # produces the committed baselines and runs the selected suites on this
+      # pinned runner image without Playwright's `--with-deps` package set
+      # (#2525). Installing that set here made the release verifier render a
+      # font-fallback-sensitive transcript one pixel away from the baseline the
+      # same SHA produces under `E2E / Tests` (#2596). The image supplies the
+      # launch libraries and this probe proves them; do not reintroduce apt.
+      - name: Prepare Full Chromium
         id: browser-setup
         run: |
           set -euo pipefail
-          started="$(date +%s)"
           cd e2e
-          # Keep Full visual baseline parity. Apt checks cached .deb hashes
-          # against signed Ubuntu metadata, fetching cold/mismatched packages.
-          npx playwright install chromium --with-deps
+          npx playwright install chromium
           node -e 'const { chromium } = require("@playwright/test"); chromium.launch({ timeout: 30000 }).then(browser => browser.close()).catch(error => { console.error(error); process.exitCode = 1; })'
-          archives="$GITHUB_WORKSPACE/.cache/playwright-apt/archives"
-          count="$(find "$archives" -maxdepth 1 -type f -name '*.deb' | wc -l | tr -d ' ')"
-          elapsed="$(($(date +%s) - started))"
-          echo "deb_count=$count" >> "$GITHUB_OUTPUT"
-          echo "PLAYWRIGHT_APT_CACHE_V1 image=$ImageVersion hit=${{ steps.apt-cache.outputs.cache-hit }} debs=$count seconds=$elapsed sha=${{ steps.pin.outputs.target_sha }}"
-          {
-            echo "## Full Playwright system dependencies"
-            echo "Image: $ImageVersion"
-            echo "Apt cache hit: ${{ steps.apt-cache.outputs.cache-hit }}"
-            echo "Debian archives retained: $count"
-            echo "Browser + OS dependency setup: $elapsed seconds"
-          } >> "$GITHUB_STEP_SUMMARY"
-      # apt owns lock/partial files as root. actions/cache uses the runner
-      # user, so leaving these files in the archive makes its save action warn
-      # "Cache save failed" while misleadingly reporting step success (#2525).
-      # Only remove transient apt runtime state AFTER successful --with-deps
-      # and the Chromium launch probe; preserve all signed .deb archives.
-      - name: Verify apt archive is readable before cache upload
-        if: steps.browser-setup.outcome == 'success' && steps.apt-cache.outputs.cache-hit != 'true' && steps.browser-setup.outputs.deb_count != '0'
-        run: |
-          set -euo pipefail
-          archives="$GITHUB_WORKSPACE/.cache/playwright-apt/archives"
-          sudo rm -f "$archives/lock"
-          sudo rm -rf "$archives/partial"
-          count="$(find "$archives" -maxdepth 1 -type f -name '*.deb' | wc -l | tr -d ' ')"
-          [[ "$count" -gt 0 ]] || { echo "::error::No apt archives to cache"; exit 1; }
-          # A real tar read is the same privilege boundary as actions/cache:
-          # a permission regression fails the Full job, never a false hit.
-          tar -cf /dev/null -C "$GITHUB_WORKSPACE" .cache/playwright-apt
-          echo "PLAYWRIGHT_APT_CACHE_ARCHIVE_V1 debs=$count readable=true"
-      - name: Save verified apt archives before Full test execution
-        if: steps.browser-setup.outcome == 'success' && steps.apt-cache.outputs.cache-hit != 'true' && steps.browser-setup.outputs.deb_count != '0'
-        uses: actions/cache/save@v4
-        with:
-          path: ${{ github.workspace }}/.cache/playwright-apt
-          key: playwright-apt-ubuntu24-${{ runner.os }}-${{ runner.arch }}-${{ steps.apt-image.outputs.version }}-${{ hashFiles('e2e/package-lock.json') }}-v1
       - name: Build Rust binaries
         run: cargo build -p nession-server -p nession-agent
       - name: Run full canonical Playwright suite at pinned SHA
