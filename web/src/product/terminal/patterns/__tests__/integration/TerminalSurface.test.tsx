@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
   TerminalSurface,
@@ -314,11 +314,15 @@ describe('transient clipboard state (#2598)', () => {
     expect(notice).not.toHaveAttribute('tabindex');
   });
 
-  it('completes a blocked copy through an explicit user gesture', async () => {
+  it('completes a blocked copy through an explicit user gesture on a secure origin', async () => {
     const copyClipboardText = vi.fn<(text: string) => Promise<boolean>>(async () => true);
     const onDismissClipboardNotice = vi.fn();
     const view = renderSurface('web', {
-      controller: { copyClipboardText } as unknown as TerminalSurfaceProps['controller'],
+      controller: {
+        canWriteClipboardProgrammatically: () => true,
+        copyClipboardText,
+        copyClipboardTextFromGesture: () => false,
+      } as unknown as TerminalSurfaceProps['controller'],
       clipboardNotice: { id: 1, notice: { kind: 'copy-required', text: 'remote text' } },
       onDismissClipboardNotice,
     });
@@ -326,6 +330,67 @@ describe('transient clipboard state (#2598)', () => {
     expect(copyClipboardText).toHaveBeenCalledWith('remote text');
     await Promise.resolve();
     expect(onDismissClipboardNotice).toHaveBeenCalled();
+  });
+
+  it('uses the synchronous DOM copy on an HTTP origin instead of the absent async API (#2614)', () => {
+    // The capability is false exactly when the browser would expose no
+    // navigator.clipboard (plain HTTP): the click must not start an async call
+    // that can only fail after the user activation is spent.
+    const copyClipboardText = vi.fn<(text: string) => Promise<boolean>>(async () => false);
+    const copyClipboardTextFromGesture = vi.fn<(text: string) => boolean>(() => true);
+    const onDismissClipboardNotice = vi.fn();
+    const view = renderSurface('web', {
+      controller: {
+        canWriteClipboardProgrammatically: () => false,
+        copyClipboardText,
+        copyClipboardTextFromGesture,
+      } as unknown as TerminalSurfaceProps['controller'],
+      clipboardNotice: { id: 1, notice: { kind: 'copy-required', text: 'remote text' } },
+      onDismissClipboardNotice,
+    });
+    fireEvent.click(view.getByRole('button', { name: 'Copy' }));
+    // Synchronous within the gesture: no await happened before the DOM copy.
+    expect(copyClipboardTextFromGesture).toHaveBeenCalledWith('remote text');
+    expect(copyClipboardText).not.toHaveBeenCalled();
+    expect(onDismissClipboardNotice).toHaveBeenCalled();
+  });
+
+  it('offers the exact text for manual copy when no gesture path can act (#2614)', async () => {
+    const onDismissClipboardNotice = vi.fn();
+    const view = renderSurface('web', {
+      controller: {
+        canWriteClipboardProgrammatically: () => false,
+        copyClipboardText: async () => false,
+        copyClipboardTextFromGesture: () => false,
+      } as unknown as TerminalSurfaceProps['controller'],
+      clipboardNotice: { id: 1, notice: { kind: 'copy-required', text: 'remote text' } },
+      onDismissClipboardNotice,
+    });
+    await userEvent.click(view.getByRole('button', { name: 'Copy' }));
+    expect(view.getByTestId('terminal-clipboard-notice')).toHaveTextContent(
+      'select the text below and press Ctrl/Cmd+C',
+    );
+    const manual = view.getByTestId('terminal-clipboard-manual');
+    expect(manual).toHaveValue('remote text');
+    // A read-only payload the user selects; it must not grab focus itself.
+    expect(manual).toHaveAttribute('readonly');
+    expect(document.activeElement).not.toBe(manual);
+    expect(onDismissClipboardNotice).not.toHaveBeenCalled();
+  });
+
+  it('never presents a truncated payload as copyable (#2614)', async () => {
+    const view = renderSurface('web', {
+      controller: {
+        canWriteClipboardProgrammatically: () => false,
+        copyClipboardText: async () => false,
+        copyClipboardTextFromGesture: () => false,
+      } as unknown as TerminalSurfaceProps['controller'],
+      clipboardNotice: { id: 1, notice: { kind: 'copy-required', text: 'x'.repeat(64 * 1024 + 1) } },
+    });
+    await userEvent.click(view.getByRole('button', { name: 'Copy' }));
+    expect(view.getByTestId('terminal-clipboard-notice'))
+      .toHaveTextContent('too large to copy here');
+    expect(view.queryByTestId('terminal-clipboard-manual')).toBeNull();
   });
 
   it('keeps a refused write truthful instead of claiming a copy', () => {

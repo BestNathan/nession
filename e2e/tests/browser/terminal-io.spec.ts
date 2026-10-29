@@ -789,6 +789,64 @@ test.describe('Terminal clipboard protocols', () => {
     expect(result.read).toBe('OSC 52 payload');
   });
 
+  /**
+   * #2614: on an ordinary HTTP origin there is no `navigator.clipboard`, so a
+   * blocked OSC 52 copy must complete through the DOM copy command instead of
+   * retrying the absent async API. The API is removed in-page to reproduce the
+   * capability state (the acceptance Case runs on a real insecure origin); the
+   * real clipboard object is kept only to verify the result afterwards.
+   */
+  test('an insecure-origin copy completes through the DOM copy command (#2614)', async ({ page }) => {
+    await page.evaluate(() => {
+      const host = window as unknown as {
+        __realClipboard: Clipboard;
+        __copyProbe: { texts: string[]; executed: boolean | null; commands: number };
+      };
+      host.__realClipboard = navigator.clipboard;
+      host.__copyProbe = { texts: [], executed: null, commands: 0 };
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
+      const original = document.execCommand.bind(document);
+      document.execCommand = (command, showUI, value) => {
+        if (command !== 'copy') { return original(command, showUI, value); }
+        host.__copyProbe.commands += 1;
+        const snoop = (event: Event) => {
+          const data = (event as ClipboardEvent).clipboardData;
+          host.__copyProbe.texts.push(data ? data.getData('text/plain') : '');
+        };
+        document.addEventListener('copy', snoop, true);
+        try {
+          const result = original(command, showUI, value);
+          host.__copyProbe.executed = result;
+          return result;
+        } finally {
+          document.removeEventListener('copy', snoop, true);
+        }
+      };
+      const harness = (window as unknown as { clipboardHarness: Harness }).clipboardHarness;
+      harness.emit('\x1b]52;c;' + btoa('http copy payload') + '\x1b\\');
+    });
+    const notice = page.getByTestId('terminal-clipboard-notice');
+    await expect(notice).toHaveAttribute('data-clipboard-notice', 'copy-required');
+    await notice.getByRole('button', { name: 'Copy' }).click();
+    const result = await page.evaluate(async () => {
+      const host = window as unknown as {
+        __realClipboard: Clipboard;
+        __copyProbe: { texts: string[]; executed: boolean | null; commands: number };
+      };
+      const read = await host.__realClipboard.readText();
+      return {
+        probe: host.__copyProbe,
+        read,
+        dismissed: document.querySelector('[data-testid="terminal-clipboard-notice"]') === null,
+      };
+    });
+    expect(result.probe.texts).toEqual(['http copy payload']);
+    expect(result.probe.executed).toBe(true);
+    expect(result.probe.commands).toBe(1);
+    expect(result.read).toBe('http copy payload');
+    expect(result.dismissed).toBe(true);
+  });
+
   test('a bootstrap replay cannot touch the clipboard', async ({ page }) => {
     const writes = await page.evaluate(async () => {
       const harness = (window as unknown as { clipboardHarness: Harness }).clipboardHarness;

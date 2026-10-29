@@ -20,6 +20,20 @@ export function acceptancePlanSection(body) {
   return lines.slice(start + 1, end).join('\n').trim();
 }
 
+/**
+ * The parsed `## Acceptance Plan` entries by criterion, or null when the
+ * Issue has no plan. Throws on a malformed block: selection must not treat an
+ * unreadable plan as "no deployed criteria".
+ */
+export function acceptancePlan(body) {
+  const section = acceptancePlanSection(body);
+  if (section === null) return null;
+  const errors = [];
+  const plan = parseContractYaml(section, errors);
+  if (errors.length > 0) throw new Error('Acceptance Plan is invalid: ' + errors.join('; '));
+  return plan;
+}
+
 function parseContractYaml(section, errors) {
   const block = section.match(/^\x60{3}ya?ml\s*\n([\s\S]*?)\n\x60{3}\s*$/);
   if (!block) {

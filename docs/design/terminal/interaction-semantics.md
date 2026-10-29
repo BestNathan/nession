@@ -27,4 +27,13 @@ Text paste stays exactly as above: it enters through `terminal.paste`, and xterm
 - **Authority is the Controller lease, not attach.** Only an authorized, foreground (visible) client may perform an effect; an observer performs none and sends no protocol replies. A read requires the one-time password minted by that client's own user paste.
 - **No upload fallback.** Image bytes travel only as OSC 5522 MIME data through the PTY. A TUI that has not enabled 5522 gets no image data; an image-only paste is not sent, and the surface states that the protocol is unsupported.
 
+### Ordinary HTTP is not a secure context (#2614)
+
+The deployed staging origin is plain HTTP, where browsers do **not** expose the async Clipboard API. The protocol stays truthful there: an automatic OSC 52 or OSC 5522 **write** cannot complete, and the protocol answers `EPERM` rather than pretending an effect happened (an OSC 52 frame produces the actionable copy state instead of a silent write). The supported paths on HTTP are the user's own gestures:
+
+- The copy notice's action runs `document.execCommand('copy')` with a scoped `copy` listener **inside the click**. It must not await `navigator.clipboard` first: on HTTP that call cannot exist, and on a secure origin the await would spend the activation the DOM copy needs. If the browser refuses the command, the notice presents a bounded, read-only, selectable surface and states that the copy was not automatic — never a false success.
+- Text paste and OSC 5522 image ingress enter through the browser's native `paste` event and `ClipboardEvent.clipboardData` (`DataTransfer.items`, `File.arrayBuffer()`), which are not secure-context gated. `navigator.clipboard.read()` is never used.
+
+So HTTPS is not a prerequisite for clipboard usability: it is a prerequisite only for **programmatic** clipboard access. The matrix is: on HTTP, native text paste, image ingress to a 5522-negotiated TUI and user-gesture text copy work; automatic remote OSC 52/5522 writes and OS image writes do not.
+
 **Out of scope here:** multi-client resize authority (#1095), durable replay (#1094), and the attach bootstrap and local scrollback sourcing ([#321](https://github.com/BestNathan/nession/issues/321)).

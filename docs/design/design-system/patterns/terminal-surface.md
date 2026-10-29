@@ -174,6 +174,7 @@ Do not duplicate capsule interaction rules here. See [terminal-capsule.md](termi
 Native text selection, copy and paste are the baseline; there is no paste/upload toolbar. Clipboard protocol states appear only while they matter, as a compact, content-width **floating notice** at the Terminal's top end, outside the bottom capsule/occlusion region. They are accessible, do not steal focus, and dismiss on their own:
 
 - A remote OSC 52 write the browser blocks offers an explicit **Copy** action for that text. That button is the user gesture the Clipboard API requires; the strip states the request, not a completed copy.
+- On an origin without the async Clipboard API (ordinary HTTP, #2614) the same Copy action completes through the DOM copy command inside the click. If the browser refuses that too, the notice states the copy was not automatic and offers a bounded read-only selectable surface for Ctrl/Cmd+C/⌘C; it is not a file, an upload or a path.
 - A refused OSC 5522 clipboard write states that the browser blocked it.
 - An image-only paste into a TUI that has not enabled OSC 5522 states `Image clipboard protocol not supported by this TUI`, sends nothing, creates no file and inserts no path.
 
