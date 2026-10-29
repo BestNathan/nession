@@ -1,0 +1,202 @@
+name: Acceptance / Orchestrator Background
+
+# Trusted main-owned reusable workflow for non-PR coordination. The caller
+# remains the canonical Workflow Run identity for all downstream evidence.
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  acceptance-close-guard:
+    if: github.event_name == 'issues'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Guard completed requirement closure
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./gates/run requirement-acceptance-close
+
+  # The push target is already merged; only explicit method=agent SCs may
+  # invoke a model. The Case runner remains an independently authenticated
+  # evidence producer and uses the same trusted SC plan in acceptance-executor.
+  prepare-merged-agent:
+    if: github.event_name == 'push' && (github.ref_name == 'staging' || github.ref_name == 'main')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    outputs:
+      stage: ${{ steps.select.outputs.stage }}
+      agent_issues: ${{ steps.select.outputs.agent_issues }}
+      has_agents: ${{ steps.select.outputs.has_agents }}
+    steps:
+      - name: Checkout trusted main Acceptance planner
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Select merged-stage Agent SCs at exact source SHA
+        id: select
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_SHA: ${{ github.sha }}
+          BRANCH_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          case "${BRANCH_NAME}" in
+            staging) stage=staging ;;
+            main) stage=post-merge ;;
+            *) echo "unsupported merged Agent branch" >&2; exit 1 ;;
+          esac
+          echo "stage=${stage}" >> "${GITHUB_OUTPUT}"
+          issue_numbers="$(node scripts/requirement-acceptance.mjs discover-ref "${TARGET_SHA}")"
+          echo "ISSUE_NUMBERS=${issue_numbers}" >> "${GITHUB_ENV}"
+          echo "ACCEPTANCE_STAGE=${stage}" >> "${GITHUB_ENV}"
+          mkdir -p "${RUNNER_TEMP}/agent-issue-contracts"
+          jq -r '.[]' <<< "${issue_numbers}" | while read -r issue; do
+            gh api "repos/${GITHUB_REPOSITORY}/issues/${issue}" > "${RUNNER_TEMP}/agent-issue-contracts/${issue}.json"
+          done
+          agent_issues="$(ISSUE_NUMBERS="${issue_numbers}" ACCEPTANCE_STAGE="${stage}" \
+            node scripts/select-merged-agents.mjs select "${RUNNER_TEMP}/agent-issue-contracts")"
+          echo "agent_issues=${agent_issues}" >> "${GITHUB_OUTPUT}"
+          if [[ "$(jq 'length' <<< "${agent_issues}")" -gt 0 ]]; then
+            echo 'has_agents=true' >> "${GITHUB_OUTPUT}"
+          else
+            echo 'has_agents=false' >> "${GITHUB_OUTPUT}"
+          fi
+          echo "Merged Agent SC Issue selection: ${agent_issues} at ${TARGET_SHA} (${stage})"
+
+  merged-agent-acceptance:
+    needs: prepare-merged-agent
+    if: needs.prepare-merged-agent.outputs.has_agents == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        issue_number: ${{ fromJSON(needs.prepare-merged-agent.outputs.agent_issues) }}
+    # Use main-owned reusable workflow even for a staging push: staging content
+    # must not redefine a write-capable trusted Issue projector.
+    uses: BestNathan/nession/.github/workflows/agent-sc-acceptance.yml@main
+    with:
+      issue_number: ${{ matrix.issue_number }}
+      stage: ${{ needs.prepare-merged-agent.outputs.stage }}
+      provider: ${{ vars.AGENT_DEFAULT_ACCEPTOR || vars.ACCEPTANCE_PROVIDER || '' }}
+      target_ref: ${{ github.sha }}
+      deployment: ''
+    secrets: inherit
+
+
+  # Metrics emits this event ONLY after committing trusted main Provider
+  # Smoke telemetry. Independently verify the GitHub run and durable record.
+  # This wakes the existing Agent SC evaluator; it never projects a verdict.
+  prepare-post-merge-provider-evidence:
+    if: github.event_name == 'repository_dispatch' && github.event.action == 'nession-agent-telemetry-ingested'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+      issues: read
+      pull-requests: read
+    outputs:
+      target_sha: ${{ steps.select.outputs.target_sha }}
+      source_run_id: ${{ steps.select.outputs.source_run_id }}
+      source_run_attempt: ${{ steps.select.outputs.source_run_attempt }}
+      agent_issues: ${{ steps.select.outputs.agent_issues }}
+      has_agents: ${{ steps.select.outputs.has_agents }}
+    steps:
+      - name: Checkout trusted Acceptance planner
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: trusted
+          persist-credentials: false
+      - name: Checkout immutable Agent Metrics evidence
+        uses: actions/checkout@v4
+        with:
+          ref: metrics
+          path: metrics-store
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify main Provider run, exact SHA and persisted evidence
+        id: select
+        working-directory: trusted
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE_RUN_ID: ${{ github.event.client_payload.source_run_id }}
+          SOURCE_RUN_ATTEMPT: ${{ github.event.client_payload.source_run_attempt }}
+          SOURCE_SHA: ${{ github.event.client_payload.target_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]] || exit 1
+          [[ "$SOURCE_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]] || exit 1
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID" > "$RUNNER_TEMP/provider-source.json"
+          jq -n --argjson id "$SOURCE_RUN_ID" --argjson attempt "$SOURCE_RUN_ATTEMPT" \
+            --arg sha "$SOURCE_SHA" \
+            '{source_run_id:$id,source_run_attempt:$attempt,target_sha:$sha}' \
+            > "$RUNNER_TEMP/telemetry-wake.json"
+          node scripts/agent-evidence-waker.mjs verify \
+            "$RUNNER_TEMP/telemetry-wake.json" "$RUNNER_TEMP/provider-source.json" \
+            "$GITHUB_WORKSPACE/metrics-store"
+          echo "target_sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
+          echo "source_run_id=$SOURCE_RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "source_run_attempt=$SOURCE_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+
+          # Reuse the canonical merged-stage association/method selector.
+          issue_numbers="$(node scripts/requirement-acceptance.mjs discover-ref "$SOURCE_SHA")"
+          mkdir -p "$RUNNER_TEMP/agent-issue-contracts"
+          jq -r '.[]' <<< "$issue_numbers" | while read -r issue; do
+            [[ "$issue" =~ ^[1-9][0-9]*$ ]] || exit 1
+            gh api "repos/$GITHUB_REPOSITORY/issues/$issue" \
+              > "$RUNNER_TEMP/agent-issue-contracts/$issue.json"
+          done
+          agent_issues="$(ISSUE_NUMBERS="$issue_numbers" ACCEPTANCE_STAGE=post-merge TARGET_SHA="$SOURCE_SHA" \
+            node scripts/select-merged-agents.mjs select "$RUNNER_TEMP/agent-issue-contracts")"
+          echo "agent_issues=$agent_issues" >> "$GITHUB_OUTPUT"
+          if [[ "$(jq length <<< "$agent_issues")" -gt 0 ]]; then
+            echo "has_agents=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_agents=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  post-merge-provider-evidence-acceptance:
+    needs: prepare-post-merge-provider-evidence
+    if: needs.prepare-post-merge-provider-evidence.outputs.has_agents == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        issue_number: ${{ fromJSON(needs.prepare-post-merge-provider-evidence.outputs.agent_issues) }}
+    uses: BestNathan/nession/.github/workflows/agent-sc-acceptance.yml@main
+    with:
+      issue_number: ${{ matrix.issue_number }}
+      stage: post-merge
+      provider: ${{ vars.AGENT_DEFAULT_ACCEPTOR || vars.ACCEPTANCE_PROVIDER || '' }}
+      target_ref: ${{ needs.prepare-post-merge-provider-evidence.outputs.target_sha }}
+      provider_source_run_id: ${{ needs.prepare-post-merge-provider-evidence.outputs.source_run_id }}
+      provider_source_run_attempt: ${{ needs.prepare-post-merge-provider-evidence.outputs.source_run_attempt }}
+      deployment: ''
+    secrets: inherit
+
+  # The privileged E2E ingest has already authenticated and projected the
+  # completed run. A dispatch, unlike GITHUB_TOKEN PR edits, can wake Actions.
