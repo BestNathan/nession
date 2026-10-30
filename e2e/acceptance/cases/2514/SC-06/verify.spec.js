@@ -9,7 +9,7 @@ const {
   inspectRoot,
   mobileLayout,
   openAgentProcesses,
-  terminalContinuity,
+  returnToTerminalAndBack,
 } = require('../../../shared/process-discovery-browser.js');
 
 test.use({ viewport: { width: 1440, height: 900 } });
@@ -45,9 +45,7 @@ test('SC-06: Agent Workspace drills into Sessions and Panes without permanent ch
   expect(inspector.headings[0]).toBe('Executed command');
 
   // Returning to Terminal and back does not lose the Session focus.
-  await terminalContinuity(page, expect);
-  await page.getByTestId('surface-action-open-workspace').click();
-  await expect(selectedSession).toHaveAttribute('aria-pressed', 'true');
+  await returnToTerminalAndBack(page, expect, opened.sessionName);
 
   const mobile = await mobileLayout(page, expect);
   expect(mobile.visible, 'command and resource blocks stay readable on mobile').toBe(true);

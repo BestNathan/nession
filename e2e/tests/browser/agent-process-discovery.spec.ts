@@ -48,10 +48,17 @@ test.describe('Agent process discovery', () => {
     await page.getByTestId('workspace-tool-agent').click();
     await expect(page.getByTestId('agent-processes')).toBeVisible({ timeout: 30_000 });
 
-    // The Workspace keeps the Session it was opened from selected.
-    await expect(
-      page.getByTestId('agent-process-session-selector').getByRole('button', { name: sessionName }),
-    ).toHaveAttribute('aria-pressed', 'true');
+    // The Workspace keeps the Session it was opened from selected. State it
+    // explicitly: CI runs this spec in a shared process with other Sessions in
+    // the list, and the wrong selection is indistinguishable from a wrong tree.
+    const sessionButton = page
+      .getByTestId('agent-process-session-selector')
+      .getByRole('button', { name: sessionName });
+    await expect(sessionButton).toBeVisible({ timeout: 30_000 });
+    if ((await sessionButton.getAttribute('aria-pressed')) !== 'true') {
+      await sessionButton.click();
+    }
+    await expect(sessionButton).toHaveAttribute('aria-pressed', 'true');
 
     // No permanent process chrome appeared in the capability row.
     await expect(page.getByTestId('workspace-tool-process')).toHaveCount(0);
@@ -65,7 +72,7 @@ test.describe('Agent process discovery', () => {
       .poll(
         async () => {
           const text = await pane.innerText();
-          if (text.includes('sh -c')) {
+          if (text.includes('--token')) {
             return true;
           }
           if (await refresh.isEnabled()) {
@@ -73,7 +80,7 @@ test.describe('Agent process discovery', () => {
           }
           return false;
         },
-        { timeout: 90_000, intervals: [1_500] },
+        { timeout: 45_000, intervals: [1_000] },
       )
       .toBe(true);
 
@@ -84,11 +91,24 @@ test.describe('Agent process discovery', () => {
     );
     await expect(pane).toContainText(/Partial|Complete/);
 
-    // Select the credential-bearing process: command first, raw secret absent.
-    await pane.getByRole('button', { name: /sh -c/ }).first().click();
+    // Select the credential-bearing process by its displayed command, not by
+    // an accessible-name regex: the row also carries badges and a PID.
+    const rows = pane.getByRole('button');
+    const rowCount = await rows.count();
+    let selectedCredentialRow = false;
+    for (let index = 0; index < rowCount; index += 1) {
+      const text = (await rows.nth(index).textContent()) ?? '';
+      if (text.includes('--token')) {
+        await rows.nth(index).click();
+        selectedCredentialRow = true;
+        break;
+      }
+    }
+    expect(selectedCredentialRow, 'a credential-bearing process row exists').toBe(true);
     const inspector = page.getByTestId('process-inspector');
     await expect(inspector).toBeVisible();
     const command = page.getByTestId('process-command');
+    await expect(command).toContainText('--token');
     await expect(command).toContainText('--token [REDACTED]');
     await expect(inspector).not.toContainText(secret);
     await expect(page.getByTestId('agent-processes')).not.toContainText(secret);

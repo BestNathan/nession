@@ -48,7 +48,7 @@ test('SC-08: command-first inspector, sanitized copy and mobile-readable metrics
   expect(copied).toContain('--token [REDACTED]');
   expect(copied).not.toContain(SECRET);
 
-  const mobile = await mobileLayout(page, expect, { rowText: 'sh -c' });
+  const mobile = await mobileLayout(page, expect, { rowText: '--token' });
   expect(mobile.visible, 'the command block stays visible at 390px').toBe(true);
   expect(mobile.commandText).toContain('[REDACTED]');
   expect(mobile.commandWidth).toBeLessThanOrEqual(mobile.viewportWidth);
