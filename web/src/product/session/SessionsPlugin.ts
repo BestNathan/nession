@@ -1,5 +1,9 @@
 import { WIRE as SESSION_ATTACH_WIRE } from '@/generated/protocol/core/server-session-attach/v1';
 import { WIRE as SESSION_CAPTURE_PREVIEW_WIRE } from '@/generated/protocol/core/server-session-capture-preview/v1';
+import {
+  WIRE as SESSION_PROCESSES_WIRE,
+  type ProcessSnapshot,
+} from '@/generated/protocol/core/server-session-processes/v1';
 import { WIRE as SESSION_CREATE_WIRE } from '@/generated/protocol/core/server-session-create/v1';
 import { WIRE as SESSION_KILL_WIRE } from '@/generated/protocol/core/server-session-kill/v1';
 import { WIRE as SESSION_LIST_WIRE } from '@/generated/protocol/core/server-session-list/v1';
@@ -196,6 +200,25 @@ export class SessionsPlugin implements TransportPlugin {
       cols: response.cols,
       rows: response.rows,
     };
+  }
+
+  /**
+   * Fetch one Session's read-only process snapshot (`#2514`).
+   *
+   * The snapshot is an observation, not a live subscription: every call asks
+   * the Agent again, and a refusal carries the Agent's own reason. `sessionId`
+   * is `"agentId:sessionName"`, the same key the Session list uses.
+   */
+  async fetchProcessSnapshot(sessionId: string): Promise<ProcessSnapshot> {
+    const response = await this.requireConnection().request<{
+      snapshot?: ProcessSnapshot;
+      status?: string;
+      message?: string;
+    }>(SESSION_PROCESSES_WIRE, { session_id: sessionId }, { timeoutMs: 20_000 });
+    if (response.snapshot) {
+      return response.snapshot;
+    }
+    throw new Error(response.message || 'Process snapshot unavailable');
   }
 
   /** Subscribe to session list changes (server push or list response). */

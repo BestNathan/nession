@@ -14,6 +14,16 @@ vi.mock('@/extensions/registry', async (importOriginal) => {
   };
 });
 
+// AgentDetail now owns the Sessions & Processes section (#2514); these tests are
+// about the surrounding detail view, so the transport read is a quiet empty
+// list rather than an unconfigured-socket error.
+vi.mock('@/product/session', () => ({
+  sessionsApi: {
+    listSessions: vi.fn().mockResolvedValue([]),
+    fetchProcessSnapshot: vi.fn(),
+  },
+}));
+
 const state: DomainState = {
   agent: { channel: 'online', copy: null },
   session: { channel: 'active', copy: null },

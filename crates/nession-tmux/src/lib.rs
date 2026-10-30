@@ -34,6 +34,6 @@ pub use client::{
     ClientChild, ClientIo, ControlCommand, ControlTransport, EventIngressLimits, TmuxClient,
     TmuxClientError, TmuxEvent,
 };
-pub use ops::{NewSession, NewSessionOutcome, PaneModeFlags, SessionSummary, TmuxOps};
+pub use ops::{NewSession, NewSessionOutcome, PaneModeFlags, PaneSummary, SessionSummary, TmuxOps};
 pub use parser::{parse_control_line, parse_control_line_bytes, ControlMessage};
 pub use process::{heal_stale_socket, TmuxCommand};

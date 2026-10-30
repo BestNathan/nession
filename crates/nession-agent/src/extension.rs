@@ -899,9 +899,10 @@ mod tests {
         let registry = compose_with_core(Vec::new(), served).unwrap();
         let manifest = registry.manifest();
 
-        // 10 core units and 21 peer-to-peer ones, sharing three ids between
-        // them (`session.create`, `session.kill`, `session.capture-preview`) —
-        // so the union is 28, not 31.
+        // The core and peer-to-peer lists share three ids
+        // (`session.create`, `session.kill`, `session.capture-preview`), so the
+        // union is one entry per id — the derived assertion below states that
+        // relation.
         //
         // Spelled as a number on purpose: adding a unit should make someone read
         // this line, and the failure of a relaxed assertion is indistinguishable
@@ -934,9 +935,14 @@ mod tests {
         // authority it carries is the reason it had to be declared rather than
         // squeezed in: a credential the manifest does not describe is a
         // credential the composition cannot be checked against.
+        //
+        // Up again for `agent.session.processes` (#2514): a read-only,
+        // Session-scoped observation the Server asks this Agent for on behalf of
+        // a browser. It is not a new capability surface — it is the Agent
+        // answering a question only it can answer.
         assert_eq!(
             manifest.protocols.len(),
-            32,
+            33,
             "the surface is {:?}",
             manifest.protocols.keys().collect::<Vec<_>>()
         );
