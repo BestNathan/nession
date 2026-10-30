@@ -41,6 +41,7 @@ function wrapper(initialEntry: string) {
 describe('useDeepLink', () => {
   const confirmAttach = vi.fn();
   const onRestoreSession = vi.fn();
+  const onSyncSessionSelection = vi.fn();
   const requestAttach = vi.fn();
 
   beforeEach(() => {
@@ -55,6 +56,7 @@ describe('useDeepLink', () => {
         loadingSessions: false,
         confirmAttach,
         onRestoreSession,
+        onSyncSessionSelection,
         requestAttach,
       }),
       { wrapper: wrapper('/terminal/a1%3As1') },
@@ -72,6 +74,7 @@ describe('useDeepLink', () => {
         loadingSessions: false,
         confirmAttach,
         onRestoreSession,
+        onSyncSessionSelection,
         requestAttach,
       }),
       { wrapper: wrapper('/terminal/a1%3As1') },
@@ -106,14 +109,64 @@ describe('useDeepLink', () => {
         loadingSessions: false,
         confirmAttach,
         onRestoreSession,
+        onSyncSessionSelection,
         requestAttach,
       }),
       { wrapper: SyncWrapper },
     );
 
     await waitFor(() => {
-      expect(onRestoreSession).toHaveBeenCalledWith(makeSession());
+      expect(onSyncSessionSelection).toHaveBeenCalledWith(makeSession());
     });
+    // Selection sync must not go through the restore path: that one also
+    // resets the surface, and this branch runs on every Sessions push.
+    expect(onRestoreSession).not.toHaveBeenCalled();
+  });
+
+  it('keeps syncing selection on Sessions pushes without restoring the surface', async () => {
+    const store = createStore();
+    store.set(sessionIdAtom, 'a1:s1');
+
+    function SyncWrapper({ children }: { children: ReactNode }) {
+      return (
+        <Provider store={store}>
+          <MemoryRouter initialEntries={['/terminal/a1%3As1']}>
+            {children}
+          </MemoryRouter>
+        </Provider>
+      );
+    }
+
+    const { rerender } = renderHook(
+      ({ sessions }: { sessions: Session[] }) => useDeepLink({
+        sessions,
+        sessionsLoaded: true,
+        loadingSessions: false,
+        confirmAttach,
+        onRestoreSession,
+        onSyncSessionSelection,
+        requestAttach,
+      }),
+      {
+        wrapper: SyncWrapper,
+        initialProps: { sessions: [makeSession()] },
+      },
+    );
+
+    await waitFor(() => {
+      expect(onSyncSessionSelection).toHaveBeenCalledTimes(1);
+    });
+
+    // A foreground-command/attached-clients push delivers a new projection
+    // while the user stays on the same Session.
+    rerender({
+      sessions: [{ ...makeSession(), attached_clients: 1, foreground_command: 'sh' }],
+    });
+
+    await waitFor(() => {
+      expect(onSyncSessionSelection).toHaveBeenCalledTimes(2);
+    });
+    expect(onRestoreSession).not.toHaveBeenCalled();
   });
 
   it('switches to URL session when already attached to a different session', async () => {
@@ -139,6 +192,7 @@ describe('useDeepLink', () => {
         loadingSessions: false,
         confirmAttach,
         onRestoreSession,
+        onSyncSessionSelection,
         requestAttach,
       }),
       { wrapper: SyncWrapper },
@@ -196,6 +250,7 @@ describe('useDeepLink', () => {
         loadingSessions: false,
         confirmAttach,
         onRestoreSession,
+        onSyncSessionSelection,
         requestAttach,
       }),
       { wrapper: SwitchWrapper },
@@ -205,9 +260,11 @@ describe('useDeepLink', () => {
       doAttach();
     });
 
-    // The switch converges on s2 (URL caught up → selection syncs)…
+    // The switch converges on s2 (URL caught up → selection syncs). The
+    // surface was already moved by the attach that started this navigation,
+    // so the catch-up is a sync, not another restore.
     await waitFor(() => {
-      expect(onRestoreSession).toHaveBeenCalledWith(session2);
+      expect(onSyncSessionSelection).toHaveBeenCalledWith(session2);
     });
     // …and never treats the propagation window as "URL wants s1".
     expect(requestAttach).not.toHaveBeenCalled();
