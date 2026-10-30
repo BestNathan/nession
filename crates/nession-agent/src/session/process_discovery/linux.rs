@@ -314,17 +314,28 @@ fn boot_time_ms(proc_root: &Path) -> i64 {
             }
         }
     }
-    let uptime = fs::read_to_string(proc_root.join("uptime"))
+    let uptime_ms = fs::read_to_string(proc_root.join("uptime"))
         .ok()
-        .and_then(|contents| {
-            contents
-                .split_whitespace()
-                .next()
-                .and_then(|seconds| seconds.parse::<f64>().ok())
-        })
-        .unwrap_or(0.0);
+        .and_then(|contents| parse_uptime_ms(&contents))
+        .unwrap_or(0);
     let now_ms = chrono::Utc::now().timestamp_millis();
-    now_ms.saturating_sub(i64::try_from(uptime * 1000.0).unwrap_or(0))
+    now_ms.saturating_sub(i64::try_from(uptime_ms).unwrap_or(i64::MAX))
+}
+
+/// Parse `/proc/uptime`'s first field into milliseconds without a float cast.
+///
+/// The file is `"<seconds>.<centiseconds> <idle>…"`; only the first field
+/// matters. A missing or malformed fraction is zero rather than a guess.
+fn parse_uptime_ms(contents: &str) -> Option<u64> {
+    let field = contents.split_whitespace().next()?;
+    let (seconds, fraction) = field.split_once('.').unwrap_or((field, ""));
+    let seconds: u64 = seconds.parse().ok()?;
+    let mut millis = 0u64;
+    for (index, digit) in fraction.chars().take(3).enumerate() {
+        let value = digit.to_digit(10)?;
+        millis += u64::from(value) * 10u64.pow(2 - u32::try_from(index).ok()?);
+    }
+    Some(seconds.saturating_mul(1000).saturating_add(millis))
 }
 
 /// Render a Linux tty device number the way a user would name it.
@@ -483,5 +494,14 @@ mod tests {
     fn a_pty_tty_is_named_the_way_a_user_reads_it() {
         assert_eq!(tty_name((136 << 8) | 12), Some("/dev/pts/12".to_string()));
         assert_eq!(tty_name(0), None);
+    }
+
+    #[test]
+    fn uptime_is_parsed_without_a_float_cast() {
+        assert_eq!(parse_uptime_ms("123.45 678.90\n"), Some(123_450));
+        assert_eq!(parse_uptime_ms("1"), Some(1_000));
+        assert_eq!(parse_uptime_ms("1.5"), Some(1_500));
+        assert_eq!(parse_uptime_ms("1.2349"), Some(1_234));
+        assert_eq!(parse_uptime_ms("not-a-number"), None);
     }
 }
