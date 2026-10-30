@@ -56,6 +56,7 @@
 //!
 //! [`TmuxCommand`]: crate::process::TmuxCommand
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -571,6 +572,69 @@ fn new_session_args(request: &NewSession) -> Vec<String> {
         "-c".to_string(),
         request.working_dir.clone(),
     ]
+}
+
+/// One `list-panes -a` row, in tmux's own terms.
+///
+/// A **linked Window** appears once per Session that links it, with the same
+/// `pane_id` and `pane_pid`. That is tmux's answer, not duplication: the row
+/// names one Session→Window membership, and the Pane itself is one resource.
+/// A consumer that wants panes must group by `pane_id`; a consumer that wants
+/// memberships must keep the rows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaneSummary {
+    pub session_id: String,
+    pub session_name: String,
+    pub window_id: String,
+    pub window_index: i32,
+    pub window_name: String,
+    pub pane_id: String,
+    pub pane_index: i32,
+    /// The Pane's root process, as tmux reports it at query time.
+    pub pane_pid: Option<u32>,
+    pub pane_tty: Option<String>,
+    /// Whether the Window is linked into more than one Session.
+    pub window_linked: bool,
+}
+
+/// The `list-panes -a` format `list_panes` parses.
+///
+/// `|` is the delimiter because tmux converts tab characters in format strings
+/// to underscores. `window_name` is last and the split is capped, so a `|`
+/// inside it stays part of the name instead of shifting the row. Session names
+/// are resolved by id through [`SESSION_ID_FORMAT`] for the same reason.
+const PANE_LIST_FORMAT: &str = "#{session_id}|#{window_id}|#{window_index}|#{pane_id}|#{pane_index}|#{pane_pid}|#{pane_tty}|#{window_linked}|#{window_name}";
+
+/// The `list-sessions` format that maps a stable Session id to its name.
+const SESSION_ID_FORMAT: &str = "#{session_id}|#{session_name}";
+
+/// Parse one [`PANE_LIST_FORMAT`] row.
+fn pane_summary_from_line(
+    line: &str,
+    session_names: &HashMap<String, String>,
+) -> Option<PaneSummary> {
+    let parts: Vec<&str> = line.splitn(9, '|').collect();
+    if parts.len() != 9 {
+        return None;
+    }
+    let session_id = parts.first().copied().unwrap_or_default().to_string();
+    let pane_pid = parts.get(5).and_then(|s| s.parse().ok());
+    let pane_tty = parts.get(6).copied().unwrap_or_default();
+    Some(PaneSummary {
+        session_name: session_names
+            .get(&session_id)
+            .cloned()
+            .unwrap_or_else(|| session_id.clone()),
+        session_id,
+        window_id: parts.get(1).copied().unwrap_or_default().to_string(),
+        window_index: parts.get(2).and_then(|s| s.parse().ok())?,
+        pane_id: parts.get(3).copied().unwrap_or_default().to_string(),
+        pane_index: parts.get(4).and_then(|s| s.parse().ok())?,
+        pane_pid,
+        pane_tty: (!pane_tty.is_empty()).then(|| pane_tty.to_string()),
+        window_linked: parts.get(7).copied() == Some("1"),
+        window_name: parts.get(8).copied().unwrap_or_default().to_string(),
+    })
 }
 
 impl TmuxOps {
@@ -1096,6 +1160,75 @@ impl TmuxOps {
             .collect())
     }
 
+    /// Every Pane the server knows, one row per Session→Window membership.
+    ///
+    /// This is the identity half of process discovery (#2514): stable Session,
+    /// Window and Pane ids plus the Pane's root PID and TTY, read fresh on
+    /// every call. A linked Window produces one row per Session that links it;
+    /// group by `pane_id` to get Pane resources, keep the rows to get
+    /// membership. A server with no sessions is an empty list, matching
+    /// [`TmuxOps::list_sessions`]; any other failure is returned because a
+    /// snapshot that cannot read Pane identity must say so rather than claim
+    /// an empty Session.
+    pub async fn list_panes(&self) -> Result<Vec<PaneSummary>> {
+        let session_names = self.session_names_by_id().await?;
+        let output = tokio::time::timeout(
+            self.list_timeout,
+            self.command
+                .output(&["list-panes", "-a", "-F", PANE_LIST_FORMAT]),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("tmux command timed out after {:?}", self.list_timeout))??;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stderr = stderr.trim();
+            if is_no_sessions_stderr(stderr) {
+                tracing::debug!("tmux list-panes: {stderr} (no tmux server running)");
+                return Ok(Vec::new());
+            }
+            anyhow::bail!("tmux list-panes failed: {stderr}");
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        Ok(stdout
+            .lines()
+            .filter_map(|line| pane_summary_from_line(line, &session_names))
+            .collect())
+    }
+
+    /// Stable Session id → Session name, for [`PaneSummary`]'s display name.
+    async fn session_names_by_id(&self) -> Result<HashMap<String, String>> {
+        let output = tokio::time::timeout(
+            self.list_timeout,
+            self.command
+                .output(&["list-sessions", "-F", SESSION_ID_FORMAT]),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("tmux command timed out after {:?}", self.list_timeout))??;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if is_no_sessions_stderr(stderr.trim()) {
+                return Ok(HashMap::new());
+            }
+            tracing::warn!(
+                "tmux list-sessions for pane identity failed: {}",
+                stderr.trim()
+            );
+            return Ok(HashMap::new());
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        Ok(stdout
+            .lines()
+            .filter_map(|line| {
+                let (id, name) = line.split_once('|')?;
+                (!id.is_empty()).then(|| (id.to_string(), name.to_string()))
+            })
+            .collect())
+    }
+
     /// `tmux display-message -p -t <session> -F <format>`, trimmed.
     pub async fn display_message(&self, session: &str, format: &str) -> Result<String> {
         let output = tokio::time::timeout(
@@ -1185,6 +1318,64 @@ impl TmuxOps {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn names(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(id, name)| ((*id).to_string(), (*name).to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn pane_rows_keep_membership_for_a_linked_window() {
+        // tmux 3.6b prints the linked window once per session with one pane id
+        // and one pane pid. Both rows must survive as memberships; a consumer
+        // groups by pane_id so the process is not counted twice.
+        let session_names = names(&[("$0", "alpha"), ("$1", "beta")]);
+        let rows: Vec<PaneSummary> = [
+            "$0|@1|1|%1|0|35225|/dev/ttys016|1|win2",
+            "$1|@1|1|%1|0|35225|/dev/ttys016|1|win2",
+        ]
+        .into_iter()
+        .filter_map(|line| pane_summary_from_line(line, &session_names))
+        .collect();
+
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|row| row.pane_id == "%1"));
+        assert!(rows.iter().all(|row| row.pane_pid == Some(35225)));
+        assert!(rows.iter().all(|row| row.window_linked));
+        assert_eq!(rows[0].session_name, "alpha");
+        assert_eq!(rows[1].session_name, "beta");
+    }
+
+    #[test]
+    fn pane_rows_tolerate_a_delimiter_in_the_window_name() {
+        // window_name is last and the split is capped, so a `|` in it stays in
+        // the name rather than shifting the fields before it.
+        let row = pane_summary_from_line(
+            "$0|@0|0|%0|0|123|/dev/ttys001|0|a|b|c",
+            &names(&[("$0", "s")]),
+        )
+        .expect("a well-formed row");
+        assert_eq!(row.window_name, "a|b|c");
+        assert_eq!(row.pane_pid, Some(123));
+    }
+
+    #[test]
+    fn pane_rows_survive_a_missing_root_pid_and_tty() {
+        let row = pane_summary_from_line("$0|@0|0|%0|0|||0|shell", &names(&[("$0", "s")]))
+            .expect("a pane without a live root is still a pane");
+        assert_eq!(row.pane_pid, None);
+        assert_eq!(row.pane_tty, None);
+    }
+
+    #[test]
+    fn pane_rows_fall_back_to_the_session_id_when_the_name_query_raced() {
+        let row = pane_summary_from_line("$7|@0|0|%0|0|1|/dev/pts/1|0|shell", &HashMap::new())
+            .expect("the pane row is still usable");
+        assert_eq!(row.session_id, "$7");
+        assert_eq!(row.session_name, "$7");
+    }
 
     #[test]
     fn set_environment_argv_splits_name_from_value() {

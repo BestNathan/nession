@@ -26,6 +26,14 @@ export function useDeepLink(opts: {
     attachOpts?: { persistProfile?: boolean },
   ) => void;
   onRestoreSession: (session: Session) => void;
+  /**
+   * Keep the shell's selection in step with the already-attached URL Session.
+   *
+   * This fires whenever the Sessions projection changes, not only on a
+   * navigation, so it must leave the user's surface alone — restoring the same
+   * selection is not a route change.
+   */
+  onSyncSessionSelection: (session: Session) => void;
   requestAttach: (session: Session) => void;
 }) {
   const {
@@ -34,6 +42,7 @@ export function useDeepLink(opts: {
     loadingSessions,
     confirmAttach,
     onRestoreSession,
+    onSyncSessionSelection,
     requestAttach,
   } = opts;
 
@@ -104,12 +113,13 @@ export function useDeepLink(opts: {
       handledUrlRef.current = null;
       return;
     }
-    // Already attached to the URL session - just sync UI selection
+    // Already attached to the URL session - just sync UI selection. This runs
+    // on every Sessions projection change, so it must not reset the surface.
     if (sessionId === sessionIdFromUrl) {
       handledUrlRef.current = sessionIdFromUrl;
       const session = sessions.find((s) => s.session_id === sessionIdFromUrl);
       if (session) {
-        onRestoreSession(session);
+        onSyncSessionSelection(session);
       }
       return;
     }
@@ -124,7 +134,7 @@ export function useDeepLink(opts: {
         requestAttach(session);
       }
     }
-  }, [sessionIdFromUrl, sessionId, sessions, onRestoreSession, requestAttach]);
+  }, [sessionIdFromUrl, sessionId, sessions, onRestoreSession, onSyncSessionSelection, requestAttach]);
 
   // While the config dialog is open (stale profile), do not sit on the
   // restore spinner behind it — the user must resolve the dialog first.

@@ -30,8 +30,9 @@ use nession_protocol::contracts::session::v1::{
     AgentTerminalResizePayload, ClientRelayBeginPayload, ClientSessionCapturePreviewPayload,
     ClientSessionCreatePayload, ClientSessionCreateResponsePayload, ClientSessionEnvActivePayload,
     ClientSessionEnvApplyPayload, ClientSessionEnvQueryPayload, ClientSessionEnvResponsePayload,
-    ClientSessionEnvUnsetPayload, ClientSessionKillPayload, ServerSessionListPayload,
-    ServerSessionListReply, SessionEnvActiveResponse, SessionEnvQueryResponse, SessionRefusal,
+    ClientSessionEnvUnsetPayload, ClientSessionKillPayload, ClientSessionProcessesPayload,
+    ProcessSnapshot, ServerSessionListPayload, ServerSessionListReply, ServerSessionProcessesReply,
+    SessionEnvActiveResponse, SessionEnvQueryResponse, SessionProcessesResponse, SessionRefusal,
     WebSessionInfo, WebSessionKillResponse, WebSessionsListResponse,
 };
 use nession_protocol::ProtocolMessage;
@@ -1083,6 +1084,7 @@ mod server_session_env_query_v1;
 mod server_session_env_unset_v1;
 mod server_session_kill_v1;
 mod server_session_list_v1;
+mod server_session_processes_v1;
 mod server_session_relay_begin_v1;
 #[cfg(test)]
 mod tests;

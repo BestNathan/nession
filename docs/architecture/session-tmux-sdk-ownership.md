@@ -15,6 +15,9 @@ Related owners:
 - [`agent-tmux-control-transport.md`](agent-tmux-control-transport.md) — the
   Control Mode `-C`/`-CC` protocol and transport contract. It stays the
   protocol owner; this document does not restate its measured wire rules.
+- [`agent-process-discovery.md`](agent-process-discovery.md) — the read-only
+  Session process-membership contract that consumes `TmuxOps::list_panes`;
+  it owns the discovery methods, coverage/fallback truth and redaction.
 - [`../../crates/nession-agent/AGENTS.md`](../../crates/nession-agent/AGENTS.md)
   — the executable tmux chokepoint rule for the Agent subtree.
 - [`../design/terminal/ahp-inspired-terminal-consistency.md`](../design/terminal/ahp-inspired-terminal-consistency.md)

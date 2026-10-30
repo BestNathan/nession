@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { Provider, createStore } from 'jotai';
@@ -153,6 +153,8 @@ const deepLink = vi.hoisted(() => ({
   isRestoringDeepLink: false,
   sessionIdFromUrl: null as string | null,
   restored: new Set<string>(),
+  /** The shell's selection-sync callback, as the real hook receives it. */
+  sync: null as ((session: Session) => void) | null,
 }));
 
 // Faithful to the real hook: a sessionIdFromUrl restores that session's
@@ -161,7 +163,14 @@ vi.mock('@/app/useDeepLink', () => ({
   useDeepLink: (opts: {
     sessions: Session[];
     onRestoreSession: (session: Session) => void;
+    onSyncSessionSelection?: (session: Session) => void;
   }) => {
+    // Faithful to the real hook's "already attached to the URL Session"
+    // branch: sync selection when the shell exposes that operation, and fall
+    // back to the restore callback when it does not (the pre-#2514 wiring).
+    // The fallback is what lets the regression test fail if the separation is
+    // ever undone.
+    deepLink.sync = opts.onSyncSessionSelection ?? opts.onRestoreSession;
     if (
       deepLink.sessionIdFromUrl &&
       !deepLink.restored.has(deepLink.sessionIdFromUrl)
@@ -216,6 +225,7 @@ describe('Shell', () => {
     deepLink.isRestoringDeepLink = false;
     deepLink.sessionIdFromUrl = null;
     deepLink.restored.clear();
+    deepLink.sync = null;
     mobileNav.showList = true;
     mobileNav.showDetail = true;
     mobileNav.isWide = true;
@@ -301,6 +311,27 @@ describe('Shell', () => {
     // Capsule V2: no disclosure menu in Workspace — discoverable capabilities
     // are accessed through Work Overview in Terminal form.
     expect(screen.queryByTestId('workspace-capability-more')).not.toBeInTheDocument();
+  });
+
+  it('keeps the Workspace open when the Sessions projection refreshes', async () => {
+    deepLink.sessionIdFromUrl = sess.session_id;
+    renderShell();
+    await userEvent.click(screen.getByTestId('session-item-a1:fix'));
+    await userEvent.click(screen.getByRole('button', { name: 'Open Workspace' }));
+
+    const workspaceRegion = screen
+      .getByTestId('surface-action-open-terminal')
+      .closest('[role="region"]');
+    expect(workspaceRegion).not.toHaveClass('hidden');
+
+    // The real hook re-syncs selection on every Sessions projection change
+    // (foreground command, attached clients, another Session). Syncing the
+    // already-selected Session must not move the user back to Terminal.
+    act(() => {
+      deepLink.sync?.(sess);
+    });
+
+    expect(workspaceRegion).not.toHaveClass('hidden');
   });
 
   it('shows empty copy when there are no sessions', () => {

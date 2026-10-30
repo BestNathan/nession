@@ -98,6 +98,9 @@ server_routes!(handler, msg, payload;
     "server.auth" => "server.auth" => 1 => Ordered => handler.handle_client_auth(msg).await,
     "server.agent.list" => "server.agent.list" => 1 => Query => handler.handle_client_agents_list(msg).await,
     "server.session.list" => "server.session.list" => 1 => Query => handler.handle_client_sessions_list(msg).await,
+    // Read-only and Agent-scoped (#2514): it observes the Panes of one
+    // Session on that Session's Agent and never enumerates the host.
+    "server.session.processes" => "server.session.processes" => 1 => Query => handler.handle_client_session_processes(msg).await,
     "server.session.attach" => "server.session.attach" => 1 => Ordered => handler.handle_client_session_attach(msg).await,
     "server.session.relay.begin" => "server.session.relay.begin" => 1 => Ordered => handler.handle_client_session_relay_begin(msg).await,
     // `server.session.relay.end` is intercepted by the relay function
