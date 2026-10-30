@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "759dfcd6601095a0f8468cfba275d407065e6658",
+  "run_id": 41108449241,
+  "run_attempt": 1,
+  "plan_digest": "dde4493c241b9fff520d9072aab10c473d2383e6fa2656c93b265d2a52565733",
+  "artifact_digest": "sha256:2b11eb9553929900c6e598865c7a8e725b07f46189562e96dc0978243a6a5588",
+  "results": [
+    {
+      "id": "agent-process-discovery",
+      "result": "Pass",
+      "discovered": 1,
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 61
+    },
+    {
+      "id": "session-lifecycle",
+      "result": "Pass",
+      "discovered": 1,
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 18
+    }
+  ]
+}
