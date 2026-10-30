@@ -77,8 +77,11 @@ test.describe('Agent process discovery', () => {
       )
       .toBe(true);
 
-    // Pane coverage is stated, not implied.
-    await expect(pane).toContainText(/Process tree|Dedicated cgroup/);
+    // Pane coverage is stated, not implied. The method label lives in the
+    // snapshot header; the Pane section carries its coverage and reasons.
+    await expect(page.getByTestId('agent-processes')).toContainText(
+      /Process tree|Dedicated cgroup/,
+    );
     await expect(pane).toContainText(/Partial|Complete/);
 
     // Select the credential-bearing process: command first, raw secret absent.
