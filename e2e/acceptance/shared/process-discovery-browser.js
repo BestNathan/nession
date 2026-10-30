@@ -150,11 +150,11 @@ async function subtreeScope(page, expect) {
   return {
     processes: Number(count[1]),
     selectedPid: Number(count[2]),
-    cpu: await page.getByTestId('process-metric-cpu').innerText(),
-    rss: await page.getByTestId('process-metric-rss').innerText(),
-    read: await page.getByTestId('process-metric-read').innerText(),
-    elapsed: await page.getByTestId('process-metric-elapsed').innerText(),
-    command: await page.getByTestId('process-command').innerText(),
+    cpu: await page.getByTestId('process-metric-cpu').textContent(),
+    rss: await page.getByTestId('process-metric-rss').textContent(),
+    read: await page.getByTestId('process-metric-read').textContent(),
+    elapsed: await page.getByTestId('process-metric-elapsed').textContent(),
+    command: await page.getByTestId('process-command').textContent(),
   };
 }
 

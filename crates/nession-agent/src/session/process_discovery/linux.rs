@@ -21,6 +21,7 @@ pub(super) struct CgroupScope {
 }
 
 /// The PIDs found in one cgroup tree.
+#[derive(Debug, PartialEq, Eq)]
 pub(super) struct CgroupMembers {
     pub procs: Vec<u32>,
     pub truncated: bool,
@@ -255,15 +256,15 @@ fn read_stat(path: &Path) -> Option<Stat> {
         return None;
     }
     Some(Stat {
-        ppid: fields[1].parse().ok()?,
-        pgid: fields[2].parse().ok()?,
-        sid: fields[3].parse().ok()?,
-        tty_nr: fields[4].parse().ok()?,
-        utime_ticks: fields[11].parse().ok()?,
-        stime_ticks: fields[12].parse().ok()?,
-        threads: fields[17].parse().ok()?,
-        start_ticks: fields[19].parse().ok()?,
-        rss_pages: fields[21].parse().ok()?,
+        ppid: fields.get(1)?.parse().ok()?,
+        pgid: fields.get(2)?.parse().ok()?,
+        sid: fields.get(3)?.parse().ok()?,
+        tty_nr: fields.get(4)?.parse().ok()?,
+        utime_ticks: fields.get(11)?.parse().ok()?,
+        stime_ticks: fields.get(12)?.parse().ok()?,
+        threads: fields.get(17)?.parse().ok()?,
+        start_ticks: fields.get(19)?.parse().ok()?,
+        rss_pages: fields.get(21)?.parse().ok()?,
     })
 }
 
@@ -281,7 +282,7 @@ fn clock_ticks() -> u64 {
         // The POSIX default; every Linux libc reports the real value.
         100
     } else {
-        ticks as u64
+        u64::try_from(ticks).unwrap_or(100)
     }
 }
 
@@ -291,7 +292,7 @@ fn page_size() -> u64 {
     if size <= 0 {
         4096
     } else {
-        size as u64
+        u64::try_from(size).unwrap_or(4096)
     }
 }
 
@@ -323,7 +324,7 @@ fn boot_time_ms(proc_root: &Path) -> i64 {
         })
         .unwrap_or(0.0);
     let now_ms = chrono::Utc::now().timestamp_millis();
-    now_ms.saturating_sub((uptime * 1000.0) as i64)
+    now_ms.saturating_sub(i64::try_from(uptime * 1000.0).unwrap_or(0))
 }
 
 /// Render a Linux tty device number the way a user would name it.

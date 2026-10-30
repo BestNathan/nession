@@ -33,7 +33,10 @@ test('SC-06: Agent Workspace drills into Sessions and Panes without permanent ch
 
   // Pane drill-down states a method and an honest coverage; a Linux runner
   // without a systemd tmux scope shows the process-tree fallback reason.
-  await expect(opened.pane).toContainText(/Process tree|Dedicated cgroup/);
+  // The method label belongs to the snapshot header, not the Pane section.
+  await expect(page.getByTestId('agent-processes')).toContainText(
+    /Process tree|Dedicated cgroup/,
+  );
   await expect(opened.pane).toContainText(/Partial|Complete|Unavailable/);
   await expect(page.getByTestId('agent-process-diagnostics')).toContainText('Limits');
 
