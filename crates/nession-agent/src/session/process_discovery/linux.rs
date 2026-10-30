@@ -15,6 +15,7 @@ const CGROUP_ROOT: &str = "/sys/fs/cgroup";
 const MAX_CGROUP_PROC_BYTES: u64 = 1024 * 1024;
 
 /// A cgroup that looks like a dedicated per-Pane tmux scope.
+#[derive(Debug, PartialEq, Eq)]
 pub(super) struct CgroupScope {
     pub path: String,
     pub dir: PathBuf,
