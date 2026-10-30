@@ -3,6 +3,7 @@ issue: 2514
 criterion: SC-08
 stage: pre-merge
 runtime: full-stack-local
+isolation: shared
 verifiers:
   - type: browser
     entry: verify.spec.js

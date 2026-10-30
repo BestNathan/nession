@@ -3,6 +3,7 @@ issue: 2514
 criterion: SC-04
 stage: pre-merge
 runtime: full-stack-local
+isolation: shared
 verifiers:
   - type: runtime
     entry: verify.cjs
