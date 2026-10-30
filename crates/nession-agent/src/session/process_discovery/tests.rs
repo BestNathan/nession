@@ -272,6 +272,41 @@ fn an_unreadable_command_is_not_an_empty_command() {
 }
 
 #[test]
+fn a_fallback_pane_carries_sid_tty_evidence() {
+    // A Pane with no dedicated cgroup (a PID outside /proc, or any macOS Pane)
+    // falls back to the process tree and states the lower-confidence evidence
+    // it used. The PID is synthetic and outside any real process table.
+    let root_pid = u32::MAX - 1;
+    let table: HashMap<u32, ProcessFacts> = [(root_pid, facts(1))].into_iter().collect();
+    let panes = resolve_memberships(
+        vec![PaneMembership {
+            session_ids: vec!["$0".to_string()],
+            session_names: vec!["s".to_string()],
+            window_id: "@0".to_string(),
+            window_index: 0,
+            window_name: "w".to_string(),
+            pane_id: "%0".to_string(),
+            pane_index: 0,
+            pane_pid: Some(root_pid),
+            pane_tty: Some("/dev/pts/1".to_string()),
+            method: ProcessDiscoveryMethod::Unavailable,
+            coverage: ProcessCoverage::Unavailable,
+            reason_codes: Vec::new(),
+            pids: Vec::new(),
+            truncated: false,
+        }],
+        Some(&table),
+    );
+    assert_eq!(panes[0].method, ProcessDiscoveryMethod::ProcessTree);
+    assert_eq!(panes[0].coverage, ProcessCoverage::Partial);
+    assert!(panes[0]
+        .reason_codes
+        .iter()
+        .any(|code| code == "sid_tty_association"));
+    assert_eq!(panes[0].pids, vec![root_pid]);
+}
+
+#[test]
 fn a_process_that_exited_during_the_window_is_stale_not_zero() {
     let table: HashMap<u32, ProcessFacts> = [(42, facts(1))].into_iter().collect();
     let first = HashMap::from([(
@@ -368,16 +403,34 @@ fn a_real_isolated_session_reports_its_pane_and_descendants() {
     assert_eq!(result.session_name, name);
     assert_eq!(result.panes.len(), 1);
     let pane = &result.panes[0];
-    assert_eq!(pane.method, ProcessDiscoveryMethod::ProcessTree);
-    assert_eq!(pane.coverage, ProcessCoverage::Partial);
-    assert!(pane
-        .reason_codes
-        .iter()
-        .any(|code| code == "platform_without_dedicated_cgroup" || code == "no_dedicated_cgroup"));
-    assert!(pane
-        .reason_codes
-        .iter()
-        .any(|code| code == "sid_tty_association"));
+    // The method is an environment fact, not a test fixture: a tmux built and
+    // running with systemd scopes gives a verified dedicated cgroup, while a
+    // plain or containerised tmux falls back to the process tree. Both must
+    // report the same Pane and descendants; only the coverage claim differs.
+    match pane.method {
+        ProcessDiscoveryMethod::Cgroup => {
+            assert!(matches!(
+                pane.coverage,
+                ProcessCoverage::Complete | ProcessCoverage::Partial
+            ));
+        }
+        ProcessDiscoveryMethod::ProcessTree => {
+            assert_eq!(pane.coverage, ProcessCoverage::Partial);
+            assert!(pane.reason_codes.iter().any(|code| {
+                code == "platform_without_dedicated_cgroup" || code == "no_dedicated_cgroup"
+            }));
+            assert!(pane
+                .reason_codes
+                .iter()
+                .any(|code| code == "sid_tty_association"));
+        }
+        ProcessDiscoveryMethod::Unavailable => {
+            panic!(
+                "a live Session's Pane must not be unavailable: {:?}",
+                pane.reason_codes
+            );
+        }
+    }
     assert!(pane.pane_pid.is_some());
 
     let root = result

@@ -12,9 +12,10 @@
 //   - enumeration is bounded by process and depth limits;
 //   - a real isolated tmux Session reports its Pane root and descendants.
 //
-// The runner's own tmux may not be systemd-integrated, so the dedicated-scope
-// fixture is the executable proof of the discovery contract; the real Session
-// proves the same snapshot projection end to end.
+// The runner's tmux may or may not expose a real per-Pane systemd scope. The
+// fixtures prove the dedicated-scope contract; the real isolated Session proves
+// the same snapshot projection under whichever method the runner actually has.
+// (The Linux Quality/coverage runner has been observed selecting Cgroup.)
 const os = require('node:os');
 const {
   run, targetSha, checked,
@@ -55,7 +56,7 @@ run(({ evidence }) => {
     {
       type: 'runtime',
       value:
-        'a real isolated tmux server reported its Pane root and descendants through the same snapshot projection',
+        'a real isolated tmux server reported its Pane root and descendants through the same snapshot projection, under the discovery method the runner actually exposes',
     },
   );
   return 'Linux dedicated per-Pane cgroup discovery is verified, including recursive membership, shared-scope rejection, linked-Window deduplication and bounded enumeration';

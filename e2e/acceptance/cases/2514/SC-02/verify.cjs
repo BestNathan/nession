@@ -5,7 +5,8 @@
 // The executable proof is the same discovery path used in production: each
 // rejected scope reason is produced by `dedicated_cgroup_at` (ordinary/shared
 // cgroup, cgroup v1), the Pane falls back to `process_tree` with `partial`
-// coverage, and the real isolated Session snapshot says so on the wire shape.
+// coverage, and the real isolated Session test passes under whichever method
+// the runner actually exposes rather than assuming a systemd tmux.
 const os = require('node:os');
 const {
   run, targetSha, checked,
@@ -36,7 +37,7 @@ run(({ evidence }) => {
     {
       type: 'runtime',
       value:
-        'the fallback Pane reported method=process_tree and coverage=partial; the real isolated tmux Session produced the same honest result when no dedicated scope was available',
+        'the negative cgroup fixtures produced each fallback reason; a rejected scope never claimed dedicated coverage, and the fallback Pane reported method=process_tree with coverage=partial',
     },
     {
       type: 'runtime',

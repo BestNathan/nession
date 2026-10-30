@@ -21,6 +21,7 @@ run(({ evidence }) => {
   const isDarwin = os.platform() === 'darwin';
 
   runProcessDiscoveryTests([
+    'a_fallback_pane_carries_sid_tty_evidence',
     'a_real_isolated_session_reports_its_pane_and_descendants',
     'a_process_that_exited_during_the_window_is_stale_not_zero',
     'an_unreadable_command_is_not_an_empty_command',
