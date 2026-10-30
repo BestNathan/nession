@@ -187,7 +187,7 @@ pub(super) fn cgroup_members(
     while let Some((dir, depth)) = stack.pop() {
         let contents =
             fs::read_to_string(dir.join("cgroup.procs")).map_err(|_| "cgroup_unreadable")?;
-        if contents.len() as u64 > MAX_CGROUP_PROC_BYTES {
+        if u64::try_from(contents.len()).unwrap_or(u64::MAX) > MAX_CGROUP_PROC_BYTES {
             return Err("cgroup_unreadable");
         }
         for line in contents.lines() {
