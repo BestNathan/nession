@@ -8,7 +8,7 @@
 // wire path rather than asserted from a fixture.
 
 const SECRET = 'nession-e2e-2514-secret';
-const TYPED_COMMAND = "sh -c 'sleep 30' --token " + SECRET + ' &';
+const TYPED_COMMAND = "sh -c 'sleep 120; :' --token " + SECRET + ' &';
 
 async function openAgentProcesses(page, expect, runtime, targetSha) {
   if (!/^[a-f0-9]{40}$/i.test(targetSha || '')) {
@@ -77,7 +77,7 @@ async function openAgentProcesses(page, expect, runtime, targetSha) {
   const refresh = page.getByRole('button', { name: 'Refresh process snapshot' });
   await expect.poll(async () => {
     const text = await pane.innerText();
-    if (text.includes('sleep 30')) {
+    if (text.includes('sh -c')) {
       return true;
     }
     if (await refresh.isEnabled()) {
@@ -173,9 +173,46 @@ async function copySanitizedCommand(page, expect) {
 }
 
 /** Command-first detail and resource semantics at a phone width. */
-async function mobileLayout(page, expect) {
+async function mobileLayout(page, expect, options = {}) {
   await page.setViewportSize({ width: 390, height: 844 });
+
+  // A narrow viewport is the App experience, which starts on Terminal. Enter
+  // its Workspace layer and re-establish the same selected process before
+  // measuring the layout.
+  if ((await page.getByTestId('agent-processes').count()) === 0) {
+    await page.getByTestId('app-header-workspace').click();
+    // Wait for the App Workspace capability row before asking for Agent.
+    await expect(page.getByTestId('workspace-tool-agent')).toBeVisible({ timeout: 30_000 });
+    if ((await page.getByTestId('agent-processes').count()) === 0) {
+      await page.getByTestId('workspace-tool-agent').click();
+    }
+    await expect(page.getByTestId('agent-processes')).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator('[data-testid^="process-pane-"]').first()).toBeVisible({
+      timeout: 60_000,
+    });
+  }
+  if ((await page.getByTestId('process-inspector').count()) === 0) {
+    const pane = page.locator('[data-testid^="process-pane-"]').first();
+    const refresh = page.getByRole('button', { name: 'Refresh process snapshot' });
+    if (options.rowText) {
+      await expect.poll(async () => {
+        const text = await pane.innerText();
+        if (text.includes(options.rowText)) {
+          return true;
+        }
+        if (await refresh.isEnabled()) {
+          await refresh.click();
+        }
+        return false;
+      }, { timeout: 90_000, intervals: [1_500] }).toBe(true);
+    }
+    const row = options.rowText
+      ? pane.getByRole('button', { name: new RegExp(options.rowText) }).first()
+      : pane.getByRole('button').first();
+    await row.click();
+  }
   await expect(page.getByTestId('process-inspector')).toBeVisible({ timeout: 15_000 });
+  await page.getByTestId('process-inspector').scrollIntoViewIfNeeded();
   return page.evaluate(() => {
     const command = document.querySelector('[data-testid="process-command"]');
     const inspector = document.querySelector('[data-testid="process-inspector"]');

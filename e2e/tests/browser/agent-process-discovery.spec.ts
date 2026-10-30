@@ -39,8 +39,9 @@ test.describe('Agent process discovery', () => {
     await waitForInteractiveShell(page);
 
     // A real child with a credential-shaped flag: sanitization must happen
-    // before the browser ever holds the string.
-    await submitTerminalCommand(page, `sh -c 'sleep 30' --token ${secret} &`);
+    // before the browser ever holds the string. The compound command keeps the
+    // `sh` process alive so its argv is still observable while `sleep` runs.
+    await submitTerminalCommand(page, `sh -c 'sleep 120; :' --token ${secret} &`);
 
     await page.getByTestId('surface-action-open-workspace').click();
     await expect(page.getByTestId('workspace-shell')).toBeVisible();
@@ -64,7 +65,7 @@ test.describe('Agent process discovery', () => {
       .poll(
         async () => {
           const text = await pane.innerText();
-          if (text.includes('sleep 30')) {
+          if (text.includes('sh -c')) {
             return true;
           }
           if (await refresh.isEnabled()) {
@@ -113,9 +114,33 @@ test.describe('Agent process discovery', () => {
     await expect(inspector).toContainText(/includes PID \d+/);
     await expect(page.getByTestId('process-metric-elapsed')).toContainText('Elapsed (selected process)');
 
-    // Mobile: command and resources stay inside the viewport.
+    // Discovery is read-only: Terminal input still reaches the Pane.
+    await page.getByTestId('surface-action-open-terminal').click();
+    await expect(page.locator('.xterm')).toBeVisible();
+    await submitTerminalCommand(page, 'echo nession-2514-terminal-continuity');
+    await expect
+      .poll(async () => readTerminalBuffer(page), { timeout: 20_000 })
+      .toContain('nession-2514-terminal-continuity');
+
+    // Mobile: the same command block and resources stay inside the viewport.
+    // A narrow viewport is the App experience, which starts on Terminal; enter
+    // its Workspace layer and re-select the Pane root before measuring.
     await page.setViewportSize({ width: 390, height: 844 });
+    if ((await page.getByTestId('agent-processes').count()) === 0) {
+      await page.getByTestId('app-header-workspace').click();
+      await expect(page.getByTestId('workspace-tool-agent')).toBeVisible({ timeout: 30_000 });
+      if ((await page.getByTestId('agent-processes').count()) === 0) {
+        await page.getByTestId('workspace-tool-agent').click();
+      }
+      await expect(page.getByTestId('agent-processes')).toBeVisible({ timeout: 30_000 });
+    }
+    const narrowPane = page.locator('[data-testid^="process-pane-"]').first();
+    await expect(narrowPane).toBeVisible({ timeout: 60_000 });
+    if ((await page.getByTestId('process-inspector').count()) === 0) {
+      await narrowPane.getByRole('button').first().click();
+    }
     await expect(inspector).toBeVisible();
+    await inspector.scrollIntoViewIfNeeded();
     const layout = await page.evaluate(() => {
       const commandBlock = document.querySelector('[data-testid="process-command"]');
       const box = commandBlock ? commandBlock.getBoundingClientRect() : null;
@@ -128,13 +153,5 @@ test.describe('Agent process discovery', () => {
     expect(layout.commandWidth).toBeGreaterThan(0);
     expect(layout.commandWidth).toBeLessThanOrEqual(layout.viewport);
     expect(layout.scrollWidth).toBeLessThanOrEqual(layout.viewport + 1);
-
-    // Discovery is read-only: Terminal input still reaches the Pane.
-    await page.getByTestId('surface-action-open-terminal').click();
-    await expect(page.locator('.xterm')).toBeVisible();
-    await submitTerminalCommand(page, 'echo nession-2514-terminal-continuity');
-    await expect
-      .poll(async () => readTerminalBuffer(page), { timeout: 20_000 })
-      .toContain('nession-2514-terminal-continuity');
   });
 });
