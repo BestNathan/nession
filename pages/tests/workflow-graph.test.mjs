@@ -30,7 +30,11 @@ test('edges require declarative workflow_run or workflow_call, never shared trig
   assert.ok(edge('acceptance-cases','acceptance-case-ingest'));
   assert.ok(edge('agent-develop','store-agent-dispatch-reconcile'));
   assert.ok(edge('agent-develop','store-agent-development-ingest'));
-  assert.ok(edge('ci-quality','acceptance-orchestrator'));
+  // PR Acceptance is dispatched directly by `pull_request_target`
+  // (`refactor(acceptance): dispatch PR SCs without CI waiting or merge
+  // gates`, 4c0985c84), so no declarative Quality→router edge exists. The
+  // projection may not invent one to keep an old topology picture.
+  assert.equal(edge('ci-quality','acceptance-orchestrator'), false);
   assert.ok(edge('deploy-pages','acceptance-postrun-waker'));
   // These can run because of the same GitHub event, but are not
   // explicit workflow-to-workflow dependencies.
