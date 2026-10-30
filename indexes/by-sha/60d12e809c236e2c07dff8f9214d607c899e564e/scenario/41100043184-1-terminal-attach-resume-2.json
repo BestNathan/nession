@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 41100043184,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/2514-process-discovery",
+    "target_sha": "60d12e809c236e2c07dff8f9214d607c899e564e",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/41100043184",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "e51b73e7f1be870cfc74496c0f8f05a777b55993ee44db3e7e1f8091779452bf"
+  },
+  "record": "runs/2026-10-30/41100043184-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "1f36bb1b8cd86cbf273b9702f4a2a13ae7807530574e99e948c2411c7a03080b"
+}
