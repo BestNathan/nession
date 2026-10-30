@@ -47,7 +47,7 @@ test('SC-06: Agent Workspace drills into Sessions and Panes without permanent ch
   // Returning to Terminal and back does not lose the Session focus.
   await returnToTerminalAndBack(page, expect, opened.sessionName);
 
-  const mobile = await mobileLayout(page, expect);
+  const mobile = await mobileLayout(page, expect, { sessionName: opened.sessionName });
   expect(mobile.visible, 'command and resource blocks stay readable on mobile').toBe(true);
   expect(mobile.documentScrollWidth).toBeLessThanOrEqual(mobile.viewportWidth + 1);
   expect(mobile.commandWidth).toBeLessThanOrEqual(mobile.viewportWidth);

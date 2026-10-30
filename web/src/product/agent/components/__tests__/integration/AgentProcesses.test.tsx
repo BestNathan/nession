@@ -1,13 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { Agent, Session } from '@/types';
 import type { DiscoveredProcess, ProcessMetric, ProcessSnapshot } from '@/product/agent/types';
 import type { DomainState } from '@/product/session/model/domainState';
 
-const api = vi.hoisted(() => ({
-  listSessions: vi.fn(),
-  fetchProcessSnapshot: vi.fn(),
-}));
+const api = vi.hoisted(() => {
+  const state: { listener: (() => void) | null } = { listener: null };
+  return {
+    listSessions: vi.fn(),
+    fetchProcessSnapshot: vi.fn(),
+    connectionRevision: vi.fn(() => 1),
+    onConnectionChange: vi.fn((listener: () => void) => {
+      state.listener = listener;
+      return () => {
+        state.listener = null;
+      };
+    }),
+    state,
+  };
+});
 
 vi.mock('@/product/session', () => ({ sessionsApi: api }));
 
@@ -107,6 +118,23 @@ describe('Agent Processes workspace', () => {
   beforeEach(() => {
     api.listSessions.mockReset().mockResolvedValue([session]);
     api.fetchProcessSnapshot.mockReset().mockResolvedValue(snapshot);
+    api.connectionRevision.mockReset().mockReturnValue(1);
+    api.onConnectionChange.mockClear();
+    api.state.listener = null;
+  });
+
+  it('re-asks the Agent after the transport is replaced', async () => {
+    render(<AgentDetail agent={agent} state={state} />);
+    await screen.findByTestId('process-pane-%0');
+    expect(api.fetchProcessSnapshot).toHaveBeenCalledTimes(1);
+
+    api.connectionRevision.mockReturnValue(2);
+    act(() => {
+      api.state.listener?.();
+    });
+
+    await waitFor(() => expect(api.fetchProcessSnapshot).toHaveBeenCalledTimes(2));
+    expect(api.state.listener).not.toBeNull();
   });
 
   it('drills down from the Agent to Panes and a command-first inspector', async () => {

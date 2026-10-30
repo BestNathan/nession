@@ -31,7 +31,11 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function useAgentSessions(agentId: string, currentSessionId?: string | null) {
+function useAgentSessions(
+  agentId: string,
+  currentSessionId: string | null | undefined,
+  connectionRevision: number,
+) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -65,7 +69,7 @@ function useAgentSessions(agentId: string, currentSessionId?: string | null) {
           setLoading(false);
         }
       });
-  }, [agentId]);
+  }, [agentId, connectionRevision]);
 
   // Keep a valid selection as the list changes. Prefer the Session the
   // Workspace was opened from, so returning to this view keeps focus.
@@ -88,7 +92,23 @@ function useAgentSessions(agentId: string, currentSessionId?: string | null) {
   return { sessions, loading, error, selectedSessionId, setSelectedSessionId };
 }
 
-function useSnapshot(agent: Agent, selectedSessionId: string | null) {
+function useConnectionRevision(): number {
+  const [revision, setRevision] = useState(() => sessionsApi.connectionRevision());
+  useEffect(
+    () =>
+      sessionsApi.onConnectionChange(() => {
+        setRevision(sessionsApi.connectionRevision());
+      }),
+    [],
+  );
+  return revision;
+}
+
+function useSnapshot(
+  agent: Agent,
+  selectedSessionId: string | null,
+  connectionRevision: number,
+) {
   const [snapshot, setSnapshot] = useState<ProcessSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -138,7 +158,7 @@ function useSnapshot(agent: Agent, selectedSessionId: string | null) {
           setLoading(false);
         }
       });
-  }, [selectedSessionId, refreshNonce, agent.status]);
+  }, [selectedSessionId, refreshNonce, agent.status, connectionRevision]);
 
   const refresh = useCallback(() => {
     setRefreshNonce((nonce) => nonce + 1);
@@ -151,8 +171,9 @@ export function useAgentProcesses(
   agent: Agent,
   currentSessionId?: string | null,
 ): AgentProcessesState {
-  const sessions = useAgentSessions(agent.agent_id, currentSessionId);
-  const snapshot = useSnapshot(agent, sessions.selectedSessionId);
+  const connectionRevision = useConnectionRevision();
+  const sessions = useAgentSessions(agent.agent_id, currentSessionId, connectionRevision);
+  const snapshot = useSnapshot(agent, sessions.selectedSessionId, connectionRevision);
 
   return {
     sessions: sessions.sessions,

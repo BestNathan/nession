@@ -70,10 +70,21 @@ impl ConnectionHandler {
             Ok(response)
                 if response.get("success").and_then(serde_json::Value::as_bool) == Some(true) =>
             {
-                let snapshot = response
-                    .get("snapshot")
-                    .cloned()
-                    .and_then(|value| serde_json::from_value::<ProcessSnapshot>(value).ok());
+                let snapshot = match response.get("snapshot").cloned() {
+                    Some(value) => match serde_json::from_value::<ProcessSnapshot>(value) {
+                        Ok(snapshot) => Some(snapshot),
+                        Err(error) => {
+                            // A provider whose payload does not match the
+                            // contract is a real defect, not an empty answer.
+                            warn!("Agent returned an unreadable process snapshot: {error}");
+                            None
+                        }
+                    },
+                    None => {
+                        warn!("Agent process response carried no snapshot");
+                        None
+                    }
+                };
                 match snapshot {
                     Some(snapshot) => Ok(reply_json(
                         &msg.id,

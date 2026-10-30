@@ -21,6 +21,8 @@ vi.mock('@/product/session', () => ({
   sessionsApi: {
     listSessions: vi.fn().mockResolvedValue([]),
     fetchProcessSnapshot: vi.fn(),
+    connectionRevision: () => 1,
+    onConnectionChange: () => () => {},
   },
 }));
 

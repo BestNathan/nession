@@ -110,6 +110,10 @@ async function openAgentProcesses(page, expect, runtime, targetSha) {
   // observation until it is present; a hidden refresh is not a hidden wait.
   const refresh = page.getByRole('button', { name: 'Refresh process snapshot' });
   await expect.poll(async () => {
+    const errorState = page.getByTestId('agent-processes-error');
+    if ((await errorState.count()) > 0) {
+      throw new Error('process snapshot failed: ' + (await errorState.innerText()));
+    }
     if ((await pane.count()) === 0) {
       return false;
     }
@@ -254,15 +258,33 @@ async function mobileLayout(page, expect, options = {}) {
       await page.getByTestId('workspace-tool-agent').click();
     }
     await expect(page.getByTestId('agent-processes')).toBeVisible({ timeout: 20_000 });
-    await expect(page.locator('[data-testid^="process-pane-"]').first()).toBeVisible({
-      timeout: 30_000,
-    });
   }
+  if (options.sessionName) {
+    const button = page
+      .getByTestId('agent-process-session-selector')
+      .getByRole('button', { name: options.sessionName });
+    await expect(button).toBeVisible({ timeout: 15_000 });
+    if ((await button.getAttribute('aria-pressed')) !== 'true') {
+      await button.click();
+    }
+    await expect(button).toHaveAttribute('aria-pressed', 'true');
+  }
+  await expect.poll(async () => {
+    const errorState = page.getByTestId('agent-processes-error');
+    if ((await errorState.count()) > 0) {
+      throw new Error('process snapshot failed: ' + (await errorState.innerText()));
+    }
+    return page.locator('[data-testid^="process-pane-"]').count();
+  }, { timeout: 30_000, intervals: [500] }).toBeGreaterThan(0);
   const pane = page.locator('[data-testid^="process-pane-"]').first();
   if (!(await visible('process-inspector'))) {
     if (options.rowText) {
       const refresh = page.getByRole('button', { name: 'Refresh process snapshot' });
       await expect.poll(async () => {
+        const errorState = page.getByTestId('agent-processes-error');
+        if ((await errorState.count()) > 0) {
+          throw new Error('process snapshot failed: ' + (await errorState.innerText()));
+        }
         if ((await pane.count()) === 0) {
           return false;
         }

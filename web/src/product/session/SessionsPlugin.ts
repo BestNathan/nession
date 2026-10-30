@@ -37,6 +37,7 @@ export class SessionsPlugin implements TransportPlugin {
   private connection: PluginSurface | null = null;
   private generation = 0;
   private callbacks = new Set<GenerationEntry<SessionsCallback>>();
+  private connectionListeners = new Set<() => void>();
 
   /**
    * Bind the plugin to a connection. A later install replaces an earlier
@@ -77,6 +78,13 @@ export class SessionsPlugin implements TransportPlugin {
       }),
     ];
 
+    // A (re)installed surface is a new transport generation. Views that hold
+    // an on-demand snapshot — not a subscription — use this to re-ask after a
+    // reconnect instead of rendering a request that died with the old socket.
+    for (const listener of this.connectionListeners) {
+      listener();
+    }
+
     return () => {
       for (const unsub of unsubs) {
         unsub();
@@ -86,11 +94,32 @@ export class SessionsPlugin implements TransportPlugin {
         // Current release — no newer binding exists, so every remaining
         // registration belongs to this release. Drop them all.
         this.callbacks.clear();
+        for (const listener of this.connectionListeners) {
+          listener();
+        }
       } else {
         // Stale release — a newer binding is active. Drop only the
         // registrations this release created; never touch newer ones.
         this.dropGeneration(generation);
       }
+    };
+  }
+
+  /**
+   * Opaque identity of the installed transport, `0` when unbound.
+   *
+   * It changes on every install, so a consumer can tell "the request I sent
+   * belonged to the previous socket" from "the server answered this socket".
+   */
+  connectionRevision(): number {
+    return this.connection ? this.generation : 0;
+  }
+
+  /** Subscribe to transport install/teardown; returns the unsubscribe. */
+  onConnectionChange(listener: () => void): () => void {
+    this.connectionListeners.add(listener);
+    return () => {
+      this.connectionListeners.delete(listener);
     };
   }
 

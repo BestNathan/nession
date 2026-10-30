@@ -64,7 +64,20 @@ test.describe('Agent process discovery', () => {
     await expect(page.getByTestId('workspace-tool-process')).toHaveCount(0);
 
     const pane = page.locator('[data-testid^="process-pane-"]').first();
-    await expect(pane).toBeVisible({ timeout: 60_000 });
+    // Surface a snapshot refusal instead of waiting out the pane timeout with
+    // no diagnosis.
+    await expect
+      .poll(
+        async () => {
+          const errorState = page.getByTestId('agent-processes-error');
+          if ((await errorState.count()) > 0) {
+            throw new Error('process snapshot failed: ' + (await errorState.innerText()));
+          }
+          return page.locator('[data-testid^="process-pane-"]').count();
+        },
+        { timeout: 60_000, intervals: [500] },
+      )
+      .toBeGreaterThan(0);
     // The child starts after the first snapshot; refresh the read-only
     // observation until it is present.
     const refresh = page.getByRole('button', { name: 'Refresh process snapshot' });
@@ -147,19 +160,45 @@ test.describe('Agent process discovery', () => {
 
     // Mobile: the same command block and resources stay inside the viewport.
     // A narrow viewport is the App experience, which starts on Terminal; enter
-    // its Workspace layer and re-select the Pane root before measuring.
+    // its Workspace layer and re-select the Session/Pane before measuring.
     await page.setViewportSize({ width: 390, height: 844 });
-    if ((await page.getByTestId('agent-processes').count()) === 0) {
+    const processesVisible = await page
+      .getByTestId('agent-processes')
+      .isVisible()
+      .catch(() => false);
+    if (!processesVisible) {
       await page.getByTestId('app-header-workspace').click();
       await expect(page.getByTestId('workspace-tool-agent')).toBeVisible({ timeout: 30_000 });
-      if ((await page.getByTestId('agent-processes').count()) === 0) {
+      const agentVisible = await page
+        .getByTestId('agent-processes')
+        .isVisible()
+        .catch(() => false);
+      if (!agentVisible) {
         await page.getByTestId('workspace-tool-agent').click();
       }
       await expect(page.getByTestId('agent-processes')).toBeVisible({ timeout: 30_000 });
     }
+    const narrowSession = page
+      .getByTestId('agent-process-session-selector')
+      .getByRole('button', { name: sessionName });
+    await expect(narrowSession).toBeVisible({ timeout: 15_000 });
+    if ((await narrowSession.getAttribute('aria-pressed')) !== 'true') {
+      await narrowSession.click();
+    }
+    await expect
+      .poll(
+        async () => {
+          const errorState = page.getByTestId('agent-processes-error');
+          if ((await errorState.count()) > 0) {
+            throw new Error('mobile process snapshot failed: ' + (await errorState.innerText()));
+          }
+          return page.locator('[data-testid^="process-pane-"]').count();
+        },
+        { timeout: 30_000, intervals: [500] },
+      )
+      .toBeGreaterThan(0);
     const narrowPane = page.locator('[data-testid^="process-pane-"]').first();
-    await expect(narrowPane).toBeVisible({ timeout: 60_000 });
-    if ((await page.getByTestId('process-inspector').count()) === 0) {
+    if (!(await page.getByTestId('process-inspector').isVisible().catch(() => false))) {
       await narrowPane.getByRole('button').first().click();
     }
     await expect(inspector).toBeVisible();
