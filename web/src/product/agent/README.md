@@ -14,8 +14,13 @@ was deleted under #655. The shared `Agent` type remains in `@/types`.
 | `patterns/AgentDetail.tsx` | Workspace Agent details and extension contribution slot |
 | `patterns/AgentContext.tsx` | Session-header Agent context / status |
 | `hooks/useAgentData.ts` | Per-mount list, refresh, dedupe and bounded heartbeat history |
+| `hooks/useAgentProcesses.ts` | Per-Agent Session list plus on-demand read-only process snapshots (#2514) |
 | `hooks/useAgentProbe.ts` | Credentialed, attach-context address probes |
 | `state/probe.ts` | Agent-keyed cached browser probe results |
+| `components/AgentProcesses.tsx` | Contextual Sessions & Processes section inside AgentDetail (#2514) |
+| `components/ProcessTree.tsx` | Pane-grouped PPID process tree with linked-Window memberships |
+| `components/ProcessInspector.tsx` | Command-first process detail and per-PID/subtree resource scope |
+| `model/processSnapshot.ts` | Pure tree, descendant-subtree and metric helpers |
 
 ## State and dependencies
 
@@ -31,6 +36,18 @@ was deleted under #655. The shared `Agent` type remains in `@/types`.
   domain (`@/product/session/model/domainState`). Agent patterns may consume
   that public Session model instead of defining a duplicate status contract.
 - `AgentsPlugin` uses generation-aware binding/teardown on reconnect.
+
+## Process discovery ownership (#2514)
+
+Session process discovery **deepens the existing Agent capability**; it does
+not add a Process capability, a permanent tab, or a second navigation owner.
+`AgentDetail` keeps node identity/connectivity first, then renders the
+`AgentProcesses` section: Session list → Pane → process tree → command-first
+inspector → per-PID/subtree resources → diagnostics. The snapshot is read-only
+and on demand; the browser never probes the OS, and the sanitized command is the
+only command string that exists here. The truth contract (methods, coverage,
+metric states, redaction) is owned by
+[docs/architecture/agent-process-discovery.md](../../../docs/architecture/agent-process-discovery.md).
 
 The live shell imports Agent patterns from `@/product/agent/...`.
 The old `@/features/agents` path and `components/AgentDetail.tsx` /
